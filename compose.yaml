@@ -1,0 +1,26 @@
+services:
+  gateway:
+    image: ${AGENTOS_GATEWAY_IMAGE:-agentos:local}
+    environment:
+      AGENTOS_LISTEN: "0.0.0.0"
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      TZ: ${TZ:-UTC}
+    volumes:
+      # Config, state, logs, and workspace persist in a Docker-managed
+      # named volume mounted at the image's AGENTOS_STATE_DIR. The
+      # image pre-creates that path owned by the non-root container user,
+      # so persistence works consistently on Linux, macOS, Windows, and WSL2.
+      - agentos-state:/var/lib/agentos
+    ports:
+      - "127.0.0.1:18791:18791"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent --show-error http://127.0.0.1:18791/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  agentos-state:

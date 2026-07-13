@@ -1,0 +1,92 @@
+"""Sandbox backend implementations and selection helper.
+
+Three backends ship today:
+
+* :class:`~agentos.sandbox.backend.bubblewrap.BubblewrapBackend` — the Linux
+  primary path; uses the ``bwrap`` binary for namespace isolation.
+* :class:`~agentos.sandbox.backend.seatbelt.SeatbeltBackend` — macOS
+  primary path; uses ``sandbox-exec`` with a generated SBPL profile.
+* :class:`~agentos.sandbox.backend.noop.NoopBackend` — used when the sandbox
+  feature switch is off; runs the command through the existing rlimit
+  wrapper and emits a warning on every invocation so the bypass is visible
+  in logs.
+
+:func:`select_backend` picks one based on the settings + host capabilities.
+"""
+
+from __future__ import annotations
+
+import logging
+import sys
+
+from agentos.sandbox.backend.base import Backend
+from agentos.sandbox.backend.bubblewrap import BubblewrapBackend
+from agentos.sandbox.backend.noop import NoopBackend
+from agentos.sandbox.backend.seatbelt import SeatbeltBackend
+from agentos.sandbox.config import SandboxSettings
+from agentos.sandbox.types import SandboxBackendError
+
+log = logging.getLogger(__name__)
+
+
+def _auto_backend() -> Backend:
+    """Pick the strongest available backend for the current host."""
+    if sys.platform.startswith("linux"):
+        bwrap = BubblewrapBackend()
+        if bwrap.available():
+            return bwrap
+    if sys.platform == "darwin":
+        seatbelt = SeatbeltBackend()
+        if seatbelt.available():
+            return seatbelt
+    return NoopBackend()
+
+
+def select_backend(settings: SandboxSettings) -> Backend:
+    """Return the backend matching ``settings.backend``.
+
+    ``"auto"`` defers to :func:`_auto_backend`. Explicit choices are honoured
+    even when the backend is unavailable — the caller will see an honest
+    ``available() is False`` and can decide whether to degrade or abort.
+    Selection is logged so operators can correlate runtime behaviour with
+    config.
+    """
+    choice = settings.backend
+    backend: Backend
+    if not settings.sandbox:
+        backend = NoopBackend()
+    elif choice == "auto":
+        backend = _auto_backend()
+    elif choice == "bubblewrap":
+        backend = BubblewrapBackend()
+    elif choice == "seatbelt":
+        backend = SeatbeltBackend()
+    elif choice == "noop":
+        backend = NoopBackend()
+    else:  # pragma: no cover — pydantic Literal constrains this upstream
+        raise ValueError(f"unknown sandbox backend: {choice!r}")
+
+    log.info(
+        "sandbox.backend_selected: choice=%s resolved=%s available=%s",
+        choice,
+        backend.name,
+        backend.available(),
+    )
+    if settings.sandbox and choice == "auto" and isinstance(backend, NoopBackend):
+        raise SandboxBackendError(
+            "sandbox=true but no real sandbox backend is available for backend=auto"
+        )
+    if settings.sandbox and choice != "noop" and not backend.available():
+        raise SandboxBackendError(
+            f"sandbox backend {backend.name!r} is unavailable while sandbox=true"
+        )
+    return backend
+
+
+__all__ = [
+    "Backend",
+    "BubblewrapBackend",
+    "NoopBackend",
+    "SeatbeltBackend",
+    "select_backend",
+]

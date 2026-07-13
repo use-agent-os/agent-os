@@ -1,0 +1,36 @@
+# AgentOS Linux systemd --user unit — user-scope only.
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp service-units/systemd/agentos.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now agentos.service
+#
+# Safety contract — DO NOT REMOVE:
+#   AGENTOS_LISTEN=127.0.0.1 binds the gateway to loopback only. Network
+#   exposure is an explicit operator opt-in. To expose the gateway on the
+#   network, create a drop-in override at
+#     ~/.config/systemd/user/agentos.service.d/override.conf
+#   with:
+#     [Service]
+#     Environment="AGENTOS_LISTEN=0.0.0.0"
+#   then re-run `systemctl --user daemon-reload` + `systemctl --user restart
+#   agentos.service`. Only run with AGENTOS_LISTEN=0.0.0.0 behind a trusted
+#   reverse proxy or VPN — agentos's first-class auth assumes loopback scope
+#   by default. The S19 boot WARNING (gateway.bind.public) will fire whenever
+#   the unit is configured for wildcard bind.
+
+[Unit]
+Description=AgentOS agent runtime gateway (loopback default)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/agentos gateway run
+Environment="AGENTOS_LISTEN=127.0.0.1"
+Environment="AGENTOS_GATEWAY_PORT=18791"
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target

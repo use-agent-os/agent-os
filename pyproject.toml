@@ -1,0 +1,211 @@
+[project]
+name = "agentos"
+version = "2026.7.15"
+description = "AgentOS — microkernel Python agent runtime with MCP-native tools and multi-channel messaging"
+license = "MIT"
+readme = "README.md"
+authors = [
+    { name = "AgentOS contributors" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+keywords = ["agent", "llm", "mcp", "gateway", "router", "chatbot"]
+requires-python = ">=3.12"
+dependencies = [
+    "starlette>=0.40",
+    "python-multipart>=0.0.20",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "sqlmodel>=0.0.20",
+    "anyio>=4.0",
+    "httpx>=0.27",
+    "brotli>=1.1",
+    "jinja2>=3.1",
+    "structlog>=24.0",
+    "typer>=0.12",
+    "rich>=13.0",
+    "websockets>=13.0",
+    "aiosqlite>=0.20",
+    "apscheduler>=3.10",
+    "pyyaml>=6.0",
+    "sqlite-vec>=0.1",
+    "html2text>=2024.2",
+    "readability-lxml>=0.8",
+    "beautifulsoup4>=4.12",
+    "cachetools>=5.3",
+    "pdfplumber>=0.11",
+    "pillow>=10.0",
+    "croniter>=2.0",
+    "tomli-w>=1.0",
+    "yoyo-migrations>=8.2",
+    "prompt-toolkit>=3.0",
+    "questionary>=2.0",
+    "python-docx>=1.1.0",
+    "python-pptx>=1.0.0",
+    "openpyxl>=3.1.0",
+    "pypdf>=4.0.0",
+    "reportlab>=4.0.0",
+    "python-telegram-bot>=20.0",
+    "dingtalk-stream>=0.24.3,<0.25",
+    "qq-botpy>=1.2.1,<1.3",
+    "cryptography>=42",
+]
+
+[project.urls]
+Homepage = "https://github.com/use-agent-os/agent-os"
+Repository = "https://github.com/use-agent-os/agent-os"
+Issues = "https://github.com/use-agent-os/agent-os/issues"
+Changelog = "https://github.com/use-agent-os/agent-os/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "mypy>=1.10",
+    "ruff>=0.5",
+]
+mcp = ["mcp>=1.2.0"]
+memory = [
+    "tiktoken>=0.5",
+    "jieba>=0.42",
+]
+recommended = [
+    "tiktoken>=0.5",
+    "jieba>=0.42",
+    "numpy>=1.26",
+    "onnxruntime>=1.17",
+    "tokenizers>=0.15",
+    # Local ML router (strategy="v4_phase3", the default). The ~75MB model
+    # bundle ships out-of-git; these libs run its inference core.
+    "lightgbm>=4.0",
+    "joblib>=1.3",
+    "scikit-learn>=1.8,<1.9",
+]
+# Just the local ML router deps, for installs that want v4_phase3 without the
+# rest of `recommended`. numpy/onnxruntime come transitively via recommended or
+# can be added alongside this extra.
+ml-router = [
+    "numpy>=1.26",
+    "onnxruntime>=1.17",
+    "lightgbm>=4.0",
+    "joblib>=1.3",
+    "scikit-learn>=1.8,<1.9",
+]
+matrix = ["matrix-nio>=0.25,<0.26", "markdown>=3.0"]
+matrix-e2e = ["matrix-nio[e2e]>=0.25,<0.26", "markdown>=3.0"]
+document-extras = [
+    "weasyprint>=60.0",
+]
+
+[project.scripts]
+agentos = "agentos.cli.main:app"
+gateway = "agentos.cli.main:gateway_app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentos"]
+exclude = [
+    "src/agentos/scheduler/templates/*.md",
+    "src/agentos/skills/bundled/**/THIRD_PARTY_NOTICES.md",
+    "src/agentos/skills/bundled/**/references/*.md",
+    "src/agentos/skills/exp/**",
+]
+
+[tool.hatch.build.targets.wheel.force-include]
+"migrations/" = "agentos/_migrations/"
+"src/agentos/skills/bundled/pptx/references/pptxgenjs.md" = "agentos/skills/bundled/pptx/references/pptxgenjs.md"
+"src/agentos/skills/bundled/pptx/references/python_pptx.md" = "agentos/skills/bundled/pptx/references/python_pptx.md"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+norecursedirs = ["tests/_private", "tests/fixtures", ".omx", ".codex", ".claude"]
+markers = [
+    "llm: marks tests that make real external model/provider API calls (deselect with '-m \"not llm\"')",
+    "llm_smoke: low-cost live LLM smoke tests",
+    "llm_costly: slower or more expensive live model/provider tests",
+    "llm_tools: live model tests that exercise tool calling",
+    "llm_embedding: live embedding/vector-provider tests",
+    "llm_reasoning: live reasoning-capable model tests",
+    "llm_gateway: live gateway/end-to-end runtime tests",
+    "llm_image: live image-generation model API tests",
+    "llm_router_acc: live multi-model routing accuracy tests",
+    "agent_context_boundary: agent context budget and compaction boundary tests",
+    "local_golden: local opt-in synthetic complex-task golden tests",
+    "webui_browser: real browser Web UI tests driven by Playwright",
+    "live_channel: marks tests that hit a real channel platform (deselect with '-m \"not live_channel\"')",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# Media subprocess scripts: long lines hold argv arrays, ffmpeg filter
+# graphs, Chinese error strings, and OpenRouter payload field comments
+# meant to stay readable as one unit.
+"src/agentos/skills/bundled/ai-video-script/scripts/*.py" = ["E501"]
+"src/agentos/skills/bundled/nano-banana-pro/scripts/*.py" = ["E501"]
+"src/agentos/skills/bundled/seedance-2-prompt/scripts/*.py" = ["E501"]
+"src/agentos/skills/bundled/srt-from-script/scripts/*.py" = ["E501"]
+"src/agentos/skills/bundled/subtitle-burner/scripts/*.py" = ["E501"]
+"src/agentos/skills/bundled/text-file-read/scripts/*.py" = ["E501"]
+"src/agentos/skills/bundled/title-card-image/scripts/*.py" = ["E501"]
+"src/agentos/skills/bundled/video-merger/scripts/*.py" = ["E501"]
+# video-merger src/ is vendored from upstream MIT-0 clawhub package; keep
+# its Chinese docstrings + ffmpeg argv lines unwrapped.
+"src/agentos/skills/bundled/video-merger/src/*.py" = ["E501", "F401"]
+"src/agentos/skills/bundled/video-still-animator/scripts/*.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+exclude = [
+    "^src/agentos/memory/models/",
+    # V4 phase3 ML router bundle: git-ignored vendored inference core.
+    "^src/agentos/agentos_router/models/",
+    "^src/agentos/skills/bundled/.*/scripts/",
+    # video-merger ships an upstream MIT-0 library under src/; same
+    # treatment as the per-skill scripts/ trees.
+    "^src/agentos/skills/bundled/video-merger/src/",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "botbuilder.*",
+    "botpy.*",
+    "cachetools.*",
+    "dingtalk_stream.*",
+    "jieba",
+    "nio.*",
+    "numpy.*",
+    "onnxruntime.*",
+    "readability.*",
+    # v4_phase3 loads its inference core dynamically from the git-ignored
+    # bundle's runtime_src (added to sys.path at runtime); mypy can't resolve it.
+    "src.router.*",
+    "tiktoken.*",
+    "tokenizers.*",
+    "websockets.*",
+    "yaml.*",
+    "yoyo.*",
+]
+ignore_missing_imports = true
+
+[dependency-groups]
+dev = [
+    "laboratory>=1.0.2",
+    "syrupy>=5.1.0",
+]

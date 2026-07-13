@@ -1,0 +1,182 @@
+"""Tests for the provider catalog."""
+
+from __future__ import annotations
+
+import pytest
+
+from agentos.provider.registry import get_provider_spec
+
+
+def test_provider_spec_requires_api_key_for_openrouter():
+    spec = get_provider_spec("openrouter")
+    assert spec.requires_api_key() is True
+
+
+def test_provider_spec_does_not_require_api_key_for_ollama():
+    spec = get_provider_spec("ollama")
+    assert spec.requires_api_key() is False
+
+
+def test_provider_spec_does_not_require_api_key_for_lm_studio():
+    spec = get_provider_spec("lm_studio")
+    assert spec.requires_api_key() is False
+
+
+def test_provider_spec_does_not_require_api_key_for_ovms():
+    spec = get_provider_spec("ovms")
+    assert spec.requires_api_key() is False
+
+
+def test_provider_spec_requires_base_url_for_azure():
+    spec = get_provider_spec("azure")
+    assert spec.requires_base_url() is True
+
+
+def test_provider_spec_requires_api_key_for_azure():
+    # Azure OpenAI requires a deployment-level API key at runtime.
+    spec = get_provider_spec("azure")
+    assert spec.requires_api_key() is True
+
+
+def test_provider_spec_requires_base_url_for_vllm():
+    spec = get_provider_spec("vllm")
+    assert spec.requires_base_url() is True
+
+
+def test_provider_spec_does_not_require_base_url_for_openrouter():
+    spec = get_provider_spec("openrouter")
+    assert spec.requires_base_url() is False
+
+
+# --------------- ProviderSetupSpec catalog ---------------
+
+from agentos.onboarding.provider_specs import (  # noqa: E402
+    ProviderSetupSpec,
+    get_provider_setup_spec,
+    list_provider_setup_specs,
+    provider_catalog_payload,
+)
+
+EXPECTED_SUPPORTED = {
+    "bankr", "openrouter", "openai", "anthropic", "ollama", "deepseek",
+    "gemini", "dashscope", "moonshot", "zhipu", "qianfan",
+    "volcengine",
+}
+EXPECTED_DISABLED = {
+    "azure", "bailian_coding", "minimax", "minimax_openai", "minimax_cn",
+    "minimax_global", "mistral", "groq", "aihubmix", "byteplus", "vllm",
+    "lm_studio", "siliconflow", "ovms",
+    "volcengine_coding_plan", "byteplus_coding_plan",
+    "openai_codex", "github_copilot",
+}
+
+
+def test_catalog_includes_all_supported_providers():
+    ids = {s.provider_id for s in list_provider_setup_specs() if s.runtime_supported}
+    assert ids == EXPECTED_SUPPORTED
+
+
+def test_catalog_marks_unverified_and_unsupported_providers_disabled():
+    specs = {s.provider_id: s for s in list_provider_setup_specs()}
+    for pid in EXPECTED_DISABLED:
+        assert pid in specs
+        assert specs[pid].runtime_supported is False
+
+
+def test_catalog_prioritizes_openrouter_then_sorts_remaining_providers():
+    specs = list_provider_setup_specs()
+    assert specs[0].provider_id == "openrouter"
+    assert [(s.label.lower(), s.provider_id) for s in specs[1:]] == sorted(
+        (s.label.lower(), s.provider_id) for s in specs[1:]
+    )
+
+
+@pytest.mark.parametrize("provider_id", sorted(EXPECTED_SUPPORTED))
+def test_supported_providers_have_label_and_backend(provider_id: str):
+    spec = get_provider_setup_spec(provider_id)
+    assert isinstance(spec, ProviderSetupSpec)
+    assert spec.backend
+    assert spec.provider_kind
+
+
+def test_openrouter_has_correct_default_base_url():
+    spec = get_provider_setup_spec("openrouter")
+    assert spec.default_base_url == "https://openrouter.ai/api/v1"
+
+
+def test_ollama_does_not_require_api_key_in_setup_spec():
+    spec = get_provider_setup_spec("ollama")
+    assert spec.requires_api_key is False
+    api_field = next(f for f in spec.fields if f.name == "api_key")
+    assert api_field.required is False
+    assert all(f.name != "api_key_env" for f in spec.fields)
+
+
+def test_api_key_providers_expose_env_key_field_in_setup_spec():
+    spec = get_provider_setup_spec("openrouter")
+    env_field = next(f for f in spec.fields if f.name == "api_key_env")
+
+    assert env_field.label == "API key env"
+    assert env_field.default == "OPENROUTER_API_KEY"
+    assert env_field.required is False
+    assert env_field.secret is False
+
+
+def test_non_router_providers_explain_required_model_in_setup_spec():
+    for provider_id in ("anthropic", "ollama", "qianfan"):
+        spec = get_provider_setup_spec(provider_id)
+        model_field = next(f for f in spec.fields if f.name == "model")
+
+        assert spec.router_supported is False
+        assert model_field.required is True
+        assert "Required" in model_field.description
+        assert "router" not in model_field.description.lower()
+        assert any("model" in item.lower() for item in spec.what_you_need)
+
+
+def test_azure_requires_base_url_in_setup_spec():
+    spec = get_provider_setup_spec("azure")
+    assert spec.requires_base_url is True
+    base_field = next(f for f in spec.fields if f.name == "base_url")
+    assert base_field.required is True
+
+
+def test_vllm_requires_base_url_in_setup_spec():
+    spec = get_provider_setup_spec("vllm")
+    assert spec.requires_base_url is True
+
+
+def test_unknown_provider_raises():
+    with pytest.raises(KeyError):
+        get_provider_setup_spec("does-not-exist")
+
+
+def test_payload_has_redaction_safe_shape():
+    payload = provider_catalog_payload()
+    assert isinstance(payload, list)
+    assert payload
+    sample = payload[0]
+    assert "providerId" in sample
+    assert "fields" in sample
+    for f in sample["fields"]:
+        assert "default" in f
+        if f.get("secret"):
+            assert f.get("default") in (None, "", False)
+
+
+def test_payload_exposes_only_verified_runtime_supported_providers():
+    payload = provider_catalog_payload()
+
+    assert {row["providerId"] for row in payload} == EXPECTED_SUPPORTED
+    assert all(row["runtimeSupported"] is True for row in payload)
+
+
+def test_provider_payload_exposes_readiness_metadata_for_every_provider():
+    payload = provider_catalog_payload()
+
+    for row in payload:
+        assert row["blocking"] is True
+        assert row["deployment"] in {"cloud", "local", "custom", "oauth"}
+        assert row["canProbe"] is False
+        assert row["readmeScenarios"]
+        assert row["whatYouNeed"]

@@ -1,0 +1,65 @@
+name: Bug report
+description: Report a reproducible AgentOS defect
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, provider tokens, account identifiers, local paths, or vulnerability details. Use SECURITY.md for suspected vulnerabilities.
+  - type: input
+    id: version
+    attributes:
+      label: AgentOS version or commit
+      description: Use the release version or commit hash where the issue occurs.
+      placeholder: "0.0.1 or commit hash"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - CLI
+        - Gateway
+        - Web UI
+        - Provider integration
+        - Channel integration
+        - Memory
+        - Scheduler
+        - Tools
+        - Packaging or install
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Provide the smallest public reproduction you can share.
+      placeholder: |
+        1. Run ...
+        2. Configure ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Paste minimal sanitized output if it helps.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: "Windows 11, Python 3.12+, uv version"
+    validations:
+      required: true

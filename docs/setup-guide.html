@@ -1,0 +1,874 @@
+<!doctype html>
+<html lang="en" class="scroll-smooth">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AgentOS Setup Guide - Install & Run the Token-Efficient AI Agent</title>
+<meta name="description" content="Set up AgentOS in four steps: install it, connect a model provider, start the gateway, and open the console. A token-efficient microkernel AI agent for your CLI, Web UI, and chat channels." />
+<meta name="robots" content="index, follow, max-image-preview:large" />
+<meta name="theme-color" content="#CCFF00" />
+<link rel="canonical" href="https://useagentos.dev/setup-guide.html" />
+
+<!-- Open Graph (Facebook, LinkedIn, Discord, Slack, etc.) -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="AgentOS" />
+<meta property="og:title" content="AgentOS Setup Guide - Install & Run the Token-Efficient AI Agent" />
+<meta property="og:description" content="Stop overpaying for AI. Let the router cook. Set up AgentOS in four steps - install, connect a provider, start the gateway, open the console." />
+<meta property="og:url" content="https://useagentos.dev/setup-guide.html" />
+<meta property="og:image" content="https://useagentos.dev/agentos-hero-banner.png" />
+<meta property="og:image:alt" content="AgentOS - The Open Agent Operating System" />
+<meta property="og:locale" content="en_US" />
+
+<!-- Twitter / X Card -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:site" content="@useAgentOS" />
+<meta name="twitter:creator" content="@useAgentOS" />
+<meta name="twitter:title" content="AgentOS Setup Guide - Install & Run the Token-Efficient AI Agent" />
+<meta name="twitter:description" content="Stop overpaying for AI. Let the router cook. Set up AgentOS in four steps - install, connect a provider, start the gateway, open the console." />
+<meta name="twitter:image" content="https://useagentos.dev/agentos-hero-banner.png" />
+<meta name="twitter:image:alt" content="AgentOS - The Open Agent Operating System" />
+
+<!-- Structured data for rich results -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "AgentOS",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "macOS, Linux, Windows",
+  "description": "A token-efficient microkernel AI agent for your CLI, Web UI, and chat channels. A local model router picks the cheapest model that can do each job.",
+  "url": "https://useagentos.dev/",
+  "image": "https://useagentos.dev/agentos-hero-banner.png",
+  "softwareVersion": "0.0.1",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "author": {
+    "@type": "Organization",
+    "name": "AgentOS",
+    "url": "https://useagentos.dev/",
+    "sameAs": ["https://x.com/useAgentOS"]
+  }
+}
+</script>
+
+<!-- Tailwind via Play CDN (single-file guide, no build step) -->
+<script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+
+<!-- Self-hosted-style font load via @font-face from a CDN with display:swap; JetBrains Mono for all commands. -->
+<link rel="preconnect" href="https://fonts.bunny.net" crossorigin />
+<style>
+  /* Fonts: Space Grotesk (display/UI) + JetBrains Mono (commands). Loaded with font-display: swap. */
+  @font-face{font-family:'Space Grotesk';font-style:normal;font-weight:300 700;font-display:swap;src:url(https://fonts.bunny.net/space-grotesk/files/space-grotesk-latin-variable-wght-normal.woff2) format('woff2-variations')}
+  @font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:400 700;font-display:swap;src:url(https://fonts.bunny.net/jetbrains-mono/files/jetbrains-mono-latin-variable-wght-normal.woff2) format('woff2-variations')}
+
+  :root{
+    /* Single locked dark theme. Off-black neutral base, one accent: AgentOS lime. */
+    --bg:#0b0b0e;          /* off-black, never #000 */
+    --bg-2:#111116;        /* elevated surface */
+    --bg-3:#16161d;        /* code wells */
+    --line:#26262f;        /* hairlines */
+    --line-2:#33333f;
+    --text:#ECECF1;        /* primary */
+    --text-dim:#A6A6B4;    /* secondary, WCAG-AA on --bg */
+    --text-faint:#71717f;  /* tertiary labels */
+    --accent:#CCFF00;      /* AgentOS lime */
+    --accent-soft:#ccff001a;
+    --accent-line:#ccff0040;
+    --ok:#3DDC97;
+  }
+
+  html{font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;background:var(--bg);color:var(--text)}
+  body{background:var(--bg)}
+  code,kbd,pre,.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+
+  /* Sharp tactical corners everywhere (matches the AgentOS control UI). */
+  *{border-radius:0 !important}
+
+  /* Fixed grain layer - pointer-events-none, never on a scrolling container. */
+  .grain{position:fixed;inset:0;z-index:60;pointer-events:none;opacity:.035;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+
+  .rule-x{background:repeating-linear-gradient(90deg,var(--line) 0 1px,transparent 1px 7px)}
+
+  /* Reveal - only fires above MOTION_INTENSITY 3 equivalent; honors reduced-motion below. */
+  .reveal{opacity:0;transform:translateY(14px);transition:opacity .6s cubic-bezier(.16,1,.3,1),transform .6s cubic-bezier(.16,1,.3,1)}
+  .reveal.in{opacity:1;transform:none}
+
+  .anchor-link{opacity:0;transition:opacity .15s}
+  h2:hover .anchor-link,h3:hover .anchor-link{opacity:1}
+
+  .nav-link{border-left:2px solid transparent;transition:color .15s,border-color .15s,background .15s}
+  .nav-link:hover{color:var(--text)}
+  .nav-link.active{color:var(--accent);border-left-color:var(--accent);background:var(--accent-soft)}
+
+  .copy-btn{transition:transform .12s,color .15s,border-color .15s}
+  .copy-btn:active{transform:scale(.94)}
+
+  /* Scrollbar */
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:var(--line-2)}
+  ::-webkit-scrollbar-track{background:var(--bg)}
+
+  /* Selection */
+  ::selection{background:var(--accent);color:#0b0b0e}
+
+  @media (prefers-reduced-motion: reduce){
+    html{scroll-behavior:auto}
+    .reveal{opacity:1 !important;transform:none !important;transition:none !important}
+    *{animation:none !important}
+  }
+</style>
+</head>
+
+<body class="min-h-[100dvh] antialiased selection:bg-[var(--accent)]">
+<div class="grain" aria-hidden="true"></div>
+
+<!-- ============ TOP BAR ============ -->
+<header class="sticky top-0 z-50 border-b border-[var(--line)] bg-[var(--bg)]/85 backdrop-blur-md">
+  <div class="mx-auto flex h-16 max-w-[1400px] items-center gap-4 px-5 lg:px-8">
+    <a href="#top" class="group flex items-center gap-2.5">
+      <span class="inline-grid h-7 w-7 place-items-center border border-[var(--accent-line)] bg-[var(--accent-soft)]">
+        <span class="block h-2.5 w-2.5 bg-[var(--accent)]"></span>
+      </span>
+      <span class="text-[15px] font-semibold tracking-tight">AgentOS</span>
+      <span class="hidden text-[11px] uppercase tracking-[0.2em] text-[var(--text-faint)] sm:inline">Setup Guide</span>
+    </a>
+    <div class="ml-auto flex items-center gap-2 text-[12px] text-[var(--text-dim)]">
+      <span class="mono hidden border border-[var(--line)] px-2 py-1 md:inline">v0.0.1</span>
+      <span class="mono hidden border border-[var(--line)] px-2 py-1 lg:inline">Python ≥ 3.12</span>
+      <a href="#install" class="border border-[var(--accent-line)] bg-[var(--accent-soft)] px-3 py-1.5 font-medium text-[var(--accent)] transition hover:bg-[var(--accent)] hover:text-[#0b0b0e]">Install</a>
+    </div>
+  </div>
+  <!-- scroll progress -->
+  <div id="progress" class="h-px w-0 bg-[var(--accent)]" style="transition:width .1s linear"></div>
+</header>
+
+<div id="top" class="mx-auto flex max-w-[1400px] gap-10 px-5 lg:px-8">
+
+  <!-- ============ SIDEBAR NAV ============ -->
+  <aside class="sticky top-16 hidden h-[calc(100dvh-4rem)] w-60 shrink-0 overflow-y-auto py-10 lg:block">
+    <p class="mb-3 px-3 text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--text-faint)]">Contents</p>
+    <nav id="toc" class="flex flex-col text-[13.5px] text-[var(--text-dim)]">
+      <a class="nav-link px-3 py-1.5" href="#what">What is AgentOS</a>
+      <a class="nav-link px-3 py-1.5" href="#prereqs">Prerequisites</a>
+      <a class="nav-link px-3 py-1.5" href="#install">1 · Install</a>
+      <a class="nav-link px-3 py-1.5" href="#onboard">2 · Onboard</a>
+      <a class="nav-link px-3 py-1.5" href="#providers">3 · Pick a provider</a>
+      <a class="nav-link px-3 py-1.5" href="#run">4 · Run the gateway</a>
+      <a class="nav-link px-3 py-1.5" href="#webui">5 · The Web UI</a>
+      <a class="nav-link px-3 py-1.5" href="#config">6 · Configuration</a>
+      <a class="nav-link px-3 py-1.5" href="#commands">Command reference</a>
+      <a class="nav-link px-3 py-1.5" href="#trouble">Troubleshooting</a>
+    </nav>
+    <div class="mt-8 border-t border-[var(--line)] px-3 pt-5 text-[12px] leading-relaxed text-[var(--text-faint)]">
+      Loopback by default.<br>Gateway binds <span class="mono text-[var(--text-dim)]">127.0.0.1:18791</span>.
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <main class="min-w-0 flex-1 py-12 lg:py-16">
+
+    <!-- HERO -->
+    <section class="reveal">
+      <div class="flex items-center gap-3 text-[12px] uppercase tracking-[0.22em] text-[var(--accent)]">
+        <span class="h-px w-8 bg-[var(--accent)]"></span> Getting started
+      </div>
+      <h1 class="mt-5 max-w-3xl text-4xl font-semibold leading-[1.05] tracking-tight md:text-6xl">
+        Set up AgentOS in<br><span class="text-[var(--accent)]">four steps</span>.
+      </h1>
+      <p class="mt-6 max-w-[60ch] text-[17px] leading-relaxed text-[var(--text-dim)]">
+        <span class="font-semibold text-[var(--text)]">Stop overpaying for AI. Let the router cook.</span>
+        A token-efficient, microkernel AI agent for your CLI, Web UI, and chat channels.
+        Install it, connect a model provider, start the gateway, open the console. This guide covers all of it.
+      </p>
+      <div class="mt-8 flex flex-wrap gap-3">
+        <a href="#install" class="group inline-flex items-center gap-2 border border-[var(--accent-line)] bg-[var(--accent)] px-5 py-3 text-[14px] font-semibold text-[#0b0b0e] transition active:translate-y-px">
+          Start installing
+          <svg class="h-4 w-4 transition group-hover:translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <a href="#what" class="inline-flex items-center gap-2 border border-[var(--line-2)] px-5 py-3 text-[14px] font-medium text-[var(--text-dim)] transition hover:border-[var(--text-dim)] hover:text-[var(--text)] active:translate-y-px">
+          What is this?
+        </a>
+      </div>
+
+      <!-- quick stats strip -->
+      <dl class="mt-12 grid grid-cols-2 gap-px border border-[var(--line)] bg-[var(--line)] sm:grid-cols-4">
+        <div class="bg-[var(--bg)] p-5">
+          <dt class="text-[11px] uppercase tracking-[0.18em] text-[var(--text-faint)]">Default port</dt>
+          <dd class="mono mt-2 text-xl text-[var(--text)]">18791</dd>
+        </div>
+        <div class="bg-[var(--bg)] p-5">
+          <dt class="text-[11px] uppercase tracking-[0.18em] text-[var(--text-faint)]">Web console</dt>
+          <dd class="mono mt-2 text-xl text-[var(--text)]">/control/</dd>
+        </div>
+        <div class="bg-[var(--bg)] p-5">
+          <dt class="text-[11px] uppercase tracking-[0.18em] text-[var(--text-faint)]">Providers</dt>
+          <dd class="mono mt-2 text-xl text-[var(--text)]">20+</dd>
+        </div>
+        <div class="bg-[var(--bg)] p-5">
+          <dt class="text-[11px] uppercase tracking-[0.18em] text-[var(--text-faint)]">Python</dt>
+          <dd class="mono mt-2 text-xl text-[var(--text)]">3.12+</dd>
+        </div>
+      </dl>
+    </section>
+
+    <!-- ============ WHAT ============ -->
+    <section id="what" class="reveal mt-24 scroll-mt-24">
+      <h2 class="group flex items-center gap-3 text-2xl font-semibold tracking-tight md:text-3xl">
+        What is AgentOS?
+        <a href="#what" class="anchor-link text-[var(--accent)]">#</a>
+      </h2>
+      <p class="mt-5 max-w-[68ch] text-[16px] leading-relaxed text-[var(--text-dim)]">
+        AgentOS is a microkernel Python agent runtime. A local model router (AgentOS Router) sends each turn to the
+        cheapest model that can handle it, while persistent memory, a layered sandbox, built-in web search, and
+        on-device embeddings round out a single shared turn loop. Every entry point (Web UI, CLI, and chat
+        channels) runs through that same loop.
+      </p>
+
+      <div class="mt-8 grid gap-px border border-[var(--line)] bg-[var(--line)] md:grid-cols-3">
+        <div class="bg-[var(--bg-2)] p-6">
+          <div class="mb-3 text-[var(--accent)]">
+            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+          </div>
+          <h3 class="text-[15px] font-semibold">AgentOS Router</h3>
+          <p class="mt-2 text-[13.5px] leading-relaxed text-[var(--text-dim)]">An on-device router scores each turn and routes it across tiers c0 to c3, so an easy turn never pays for a frontier model.</p>
+        </div>
+        <div class="bg-[var(--bg-2)] p-6">
+          <div class="mb-3 text-[var(--accent)]">
+            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="18" height="18"/><path d="M3 9h18M9 21V9"/></svg>
+          </div>
+          <h3 class="text-[15px] font-semibold">Unified gateway</h3>
+          <p class="mt-2 text-[13.5px] leading-relaxed text-[var(--text-dim)]">One ASGI server with a WebSocket RPC transport and an embedded control console. CLI, browser, and channels share its turn loop.</p>
+        </div>
+        <div class="bg-[var(--bg-2)] p-6">
+          <div class="mb-3 text-[var(--accent)]">
+            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v18M3 12h18" /><circle cx="12" cy="12" r="9"/></svg>
+          </div>
+          <h3 class="text-[15px] font-semibold">Pluggable providers</h3>
+          <p class="mt-2 text-[13.5px] leading-relaxed text-[var(--text-dim)]">Speaks to OpenRouter, Bankr, OpenAI, Anthropic, Ollama, DeepSeek, Gemini, DashScope and more behind one config.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ PREREQS ============ -->
+    <section id="prereqs" class="reveal mt-24 scroll-mt-24">
+      <h2 class="group flex items-center gap-3 text-2xl font-semibold tracking-tight md:text-3xl">
+        Prerequisites
+        <a href="#prereqs" class="anchor-link text-[var(--accent)]">#</a>
+      </h2>
+      <p class="mt-5 max-w-[68ch] text-[16px] leading-relaxed text-[var(--text-dim)]">
+        Before you start, make sure your machine has the following. The install scripts handle the Python
+        toolchain for you, but you will need these baseline pieces.
+      </p>
+      <ul class="mt-8 divide-y divide-[var(--line)] border-y border-[var(--line)]">
+        <li class="flex items-start gap-4 py-4">
+          <span class="mono mt-0.5 text-[var(--accent)]">01</span>
+          <div>
+            <p class="font-medium">Python 3.12 or newer</p>
+            <p class="mt-1 text-[13.5px] text-[var(--text-dim)]">AgentOS targets <span class="mono text-[var(--text)]">requires-python = "&gt;=3.12"</span>. The Windows portable build bundles its own CPython, so you can skip this there.</p>
+          </div>
+        </li>
+        <li class="flex items-start gap-4 py-4">
+          <span class="mono mt-0.5 text-[var(--accent)]">02</span>
+          <div>
+            <p class="font-medium">An API key for one model provider</p>
+            <p class="mt-1 text-[13.5px] text-[var(--text-dim)]">Cloud providers need a key. Local providers (Ollama, LM Studio) need no key, just a running model server. See <a href="#providers" class="text-[var(--accent)] underline-offset-2 hover:underline">step 3</a>.</p>
+          </div>
+        </li>
+        <li class="flex items-start gap-4 py-4">
+          <span class="mono mt-0.5 text-[var(--accent)]">03</span>
+          <div>
+            <p class="font-medium">Git with LFS (source install only)</p>
+            <p class="mt-1 text-[13.5px] text-[var(--text-dim)]">The AgentOS Router model files ship via Git LFS. Run <span class="mono text-[var(--text)]">git lfs install</span> before cloning if you build from source.</p>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <!-- ============ 1 · INSTALL ============ -->
+    <section id="install" class="reveal mt-24 scroll-mt-24">
+      <div class="mb-2 flex items-center gap-3 text-[12px] uppercase tracking-[0.22em] text-[var(--accent)]">
+        <span class="mono text-[var(--text-faint)]">Step 01</span>
+      </div>
+      <h2 class="group flex items-center gap-3 text-2xl font-semibold tracking-tight md:text-3xl">
+        Install AgentOS
+        <a href="#install" class="anchor-link text-[var(--accent)]">#</a>
+      </h2>
+      <p class="mt-5 max-w-[68ch] text-[16px] leading-relaxed text-[var(--text-dim)]">
+        Three supported paths. The <span class="text-[var(--text)]">uv tool install</span> route is recommended for
+        most people. Pick the tab that matches your situation.
+      </p>
+
+      <!-- Tabs -->
+      <div class="mt-8 border border-[var(--line)]" data-tabs>
+        <div role="tablist" class="flex flex-wrap border-b border-[var(--line)] bg-[var(--bg-2)] text-[13px]">
+          <button role="tab" data-tab="recommended" class="tab-btn px-4 py-3 font-medium">Recommended (uv)</button>
+          <button role="tab" data-tab="source" class="tab-btn px-4 py-3 font-medium">From source</button>
+          <button role="tab" data-tab="windows" class="tab-btn px-4 py-3 font-medium">Windows portable</button>
+          <button role="tab" data-tab="docker" class="tab-btn px-4 py-3 font-medium">Docker</button>
+        </div>
+
+        <!-- recommended -->
+        <div data-panel="recommended" class="p-6">
+          <p class="mb-4 text-[14px] text-[var(--text-dim)]">Install <span class="mono text-[var(--text)]">uv</span> if you do not have it, then install the AgentOS release wheel as a tool.</p>
+          <div data-code>
+<pre data-lang="bash"># 1 - install uv (macOS / Linux)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2 - install AgentOS with the recommended extras (AgentOS Router)
+uv tool install --python 3.12 \
+  "agentos[recommended] @ https://github.com/use-agent-os/agent-os/releases/download/v0.0.1/agentos-0.0.1-py3-none-any.whl"
+
+# 3 - verify
+agentos --help</pre>
+          </div>
+          <p class="mt-4 text-[13px] text-[var(--text-faint)]">The <span class="mono">recommended</span> extra pulls in the local memory embedding stack (onnxruntime, numpy, tokenizers). For a leaner footprint, drop it and install the bare <span class="mono">agentos</span> wheel.</p>
+        </div>
+
+        <!-- source -->
+        <div data-panel="source" class="hidden p-6">
+          <p class="mb-4 text-[14px] text-[var(--text-dim)]">Clone the repo, pull the LFS model files, then run the install script for your OS.</p>
+          <div data-code>
+<pre data-lang="bash">git lfs install
+git clone https://github.com/use-agent-os/agent-os.git
+cd agent-os
+git lfs pull --include="src/agentos/memory/models/**"
+
+# macOS / Linux
+bash scripts/install_source.sh
+
+# Windows (PowerShell)
+# powershell -ExecutionPolicy Bypass -File ./scripts/install_source.ps1</pre>
+          </div>
+          <p class="mt-4 text-[13px] text-[var(--text-faint)]">Developing on AgentOS? Use <span class="mono text-[var(--text-dim)]">uv sync --extra recommended --extra dev</span> then <span class="mono text-[var(--text-dim)]">uv run agentos --help</span>.</p>
+        </div>
+
+        <!-- windows -->
+        <div data-panel="windows" class="hidden p-6">
+          <p class="mb-4 text-[14px] text-[var(--text-dim)]">No Python install required. The portable build bundles its own CPython.</p>
+          <ol class="space-y-3 text-[14px] text-[var(--text-dim)]">
+            <li class="flex gap-3"><span class="mono text-[var(--accent)]">1.</span> Download <span class="mono text-[var(--text)]">AgentOS-windows-x64-portable.zip</span> from the GitHub releases page.</li>
+            <li class="flex gap-3"><span class="mono text-[var(--accent)]">2.</span> Extract it anywhere on your drive.</li>
+            <li class="flex gap-3"><span class="mono text-[var(--accent)]">3.</span> Right-click <span class="mono text-[var(--text)]">Start AgentOS.cmd</span> and run it as administrator.</li>
+          </ol>
+        </div>
+
+        <!-- docker -->
+        <div data-panel="docker" class="hidden p-6">
+          <p class="mb-4 text-[14px] text-[var(--text-dim)]">Build the image yourself, then bring the stack up with the helper script.</p>
+          <div data-code>
+<pre data-lang="bash">docker build -t agentos:local .
+
+# macOS / Linux
+./start.sh
+# Windows
+# ./start.ps1   →  runs: docker compose up -d</pre>
+          </div>
+          <p class="mt-4 text-[13px] text-[var(--text-faint)]">There is no published image yet; you build <span class="mono">agentos:local</span> from the included Dockerfile.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 2 · ONBOARD ============ -->
+    <section id="onboard" class="reveal mt-24 scroll-mt-24">
+      <div class="mb-2 flex items-center gap-3 text-[12px] uppercase tracking-[0.22em] text-[var(--accent)]">
+        <span class="mono text-[var(--text-faint)]">Step 02</span>
+      </div>
+      <h2 class="group flex items-center gap-3 text-2xl font-semibold tracking-tight md:text-3xl">
+        Run the onboarding wizard
+        <a href="#onboard" class="anchor-link text-[var(--accent)]">#</a>
+      </h2>
+      <p class="mt-5 max-w-[68ch] text-[16px] leading-relaxed text-[var(--text-dim)]">
+        The interactive wizard walks you through six sections in order. Provider and Router are the fast path;
+        the rest are skippable and can be configured later from the Web UI.
+      </p>
+
+      <div data-code class="mt-7">
+<pre data-lang="bash"># full interactive wizard
+agentos onboard
+
+# provider only - skip channels, search, image-gen
+agentos onboard --minimal
+
+# inspect every section without writing anything
+agentos onboard status</pre>
+      </div>
+
+      <!-- section order -->
+      <div class="mt-9 grid gap-px border border-[var(--line)] bg-[var(--line)] sm:grid-cols-2 lg:grid-cols-3">
+        <div class="bg-[var(--bg-2)] p-5">
+          <div class="flex items-center gap-2"><span class="mono text-[12px] text-[var(--accent)]">01</span><span class="text-[14px] font-semibold">Provider</span><span class="ml-auto mono text-[10px] uppercase tracking-wider text-[var(--accent)]">required</span></div>
+          <p class="mt-2 text-[13px] text-[var(--text-dim)]">Choose the LLM provider and paste a key.</p>
+        </div>
+        <div class="bg-[var(--bg-2)] p-5">
+          <div class="flex items-center gap-2"><span class="mono text-[12px] text-[var(--accent)]">02</span><span class="text-[14px] font-semibold">Router</span><span class="ml-auto mono text-[10px] uppercase tracking-wider text-[var(--accent)]">required</span></div>
+          <p class="mt-2 text-[13px] text-[var(--text-dim)]">AgentOS Router on, or direct single-model.</p>
+        </div>
+        <div class="bg-[var(--bg-2)] p-5">
+          <div class="flex items-center gap-2"><span class="mono text-[12px] text-[var(--text-faint)]">03</span><span class="text-[14px] font-semibold">Channels</span><span class="ml-auto mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">optional</span></div>
+          <p class="mt-2 text-[13px] text-[var(--text-dim)]">Slack, Telegram, Discord, Matrix.</p>
+        </div>
+        <div class="bg-[var(--bg-2)] p-5">
+          <div class="flex items-center gap-2"><span class="mono text-[12px] text-[var(--text-faint)]">04</span><span class="text-[14px] font-semibold">Search</span><span class="ml-auto mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">optional</span></div>
+          <p class="mt-2 text-[13px] text-[var(--text-dim)]">DuckDuckGo or Brave web search.</p>
+        </div>
+        <div class="bg-[var(--bg-2)] p-5">
+          <div class="flex items-center gap-2"><span class="mono text-[12px] text-[var(--text-faint)]">05</span><span class="text-[14px] font-semibold">Image generation</span><span class="ml-auto mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">optional</span></div>
+          <p class="mt-2 text-[13px] text-[var(--text-dim)]">Wire an image model tier.</p>
+        </div>
+        <div class="bg-[var(--bg-2)] p-5">
+          <div class="flex items-center gap-2"><span class="mono text-[12px] text-[var(--text-faint)]">06</span><span class="text-[14px] font-semibold">Memory embedding</span><span class="ml-auto mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">optional</span></div>
+          <p class="mt-2 text-[13px] text-[var(--text-dim)]">On-device or hosted embeddings.</p>
+        </div>
+      </div>
+
+      <!-- non-interactive callout -->
+      <div class="mt-9 border-l-2 border-[var(--accent)] bg-[var(--accent-soft)] p-5">
+        <p class="text-[13px] font-semibold uppercase tracking-[0.16em] text-[var(--accent)]">Scripted setup</p>
+        <p class="mt-2 max-w-[64ch] text-[14px] text-[var(--text-dim)]">For CI or unattended installs, pass flags instead of using the prompts. Use <span class="mono text-[var(--text)]">--if-needed</span> to make it idempotent.</p>
+        <div data-code class="mt-4">
+<pre data-lang="bash">export OPENROUTER_API_KEY="sk-..."
+agentos onboard --provider openrouter --api-key-env OPENROUTER_API_KEY
+agentos onboard --if-needed   # safe to re-run</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 3 · PROVIDERS ============ -->
+    <section id="providers" class="reveal mt-24 scroll-mt-24">
+      <div class="mb-2 flex items-center gap-3 text-[12px] uppercase tracking-[0.22em] text-[var(--accent)]">
+        <span class="mono text-[var(--text-faint)]">Step 03</span>
+      </div>
+      <h2 class="group flex items-center gap-3 text-2xl font-semibold tracking-tight md:text-3xl">
+        Pick a model provider
+        <a href="#providers" class="anchor-link text-[var(--accent)]">#</a>
+      </h2>
+      <p class="mt-5 max-w-[68ch] text-[16px] leading-relaxed text-[var(--text-dim)]">
+        These twelve providers appear in the first-run wizard. <span class="text-[var(--text)]">OpenRouter</span>
+        is the default and sorts first. Each cloud provider reads its key from the listed environment variable;
+        local providers need no key at all.
+      </p>
+
+      <!-- provider table -->
+      <div class="mt-8 overflow-x-auto border border-[var(--line)]">
+        <table class="w-full min-w-[640px] text-left text-[13.5px]">
+          <thead>
+            <tr class="border-b border-[var(--line)] bg-[var(--bg-2)] text-[11px] uppercase tracking-[0.14em] text-[var(--text-faint)]">
+              <th class="px-4 py-3 font-medium">Provider</th>
+              <th class="px-4 py-3 font-medium">Env var / key</th>
+              <th class="px-4 py-3 font-medium">Default base URL</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-[var(--line)]">
+            <tr class="bg-[var(--accent-soft)]">
+              <td class="px-4 py-3"><span class="font-semibold text-[var(--text)]">OpenRouter</span> <span class="mono ml-1 text-[11px] text-[var(--accent)]">default</span></td>
+              <td class="px-4 py-3 mono text-[var(--text-dim)]">OPENROUTER_API_KEY</td>
+              <td class="px-4 py-3 mono text-[var(--text-dim)]">openrouter.ai/api/v1</td>
+            </tr>
+            <tr><td class="px-4 py-3 font-medium">Bankr LLM Gateway</td><td class="px-4 py-3 mono text-[var(--text-dim)]">BANKR_API_KEY</td><td class="px-4 py-3 mono text-[var(--text-dim)]">llm.bankr.bot/v1</td></tr>
+            <tr><td class="px-4 py-3 font-medium">OpenAI</td><td class="px-4 py-3 mono text-[var(--text-dim)]">OPENAI_API_KEY</td><td class="px-4 py-3 mono text-[var(--text-dim)]">api.openai.com/v1</td></tr>
+            <tr><td class="px-4 py-3 font-medium">Anthropic</td><td class="px-4 py-3 mono text-[var(--text-dim)]">ANTHROPIC_API_KEY</td><td class="px-4 py-3 mono text-[var(--text-dim)]">api.anthropic.com</td></tr>
+            <tr><td class="px-4 py-3 font-medium">Ollama <span class="text-[11px] text-[var(--ok)]">local</span></td><td class="px-4 py-3 mono text-[var(--text-faint)]">no key</td><td class="px-4 py-3 mono text-[var(--text-dim)]">localhost:11434</td></tr>
+            <tr><td class="px-4 py-3 font-medium">DeepSeek</td><td class="px-4 py-3 mono text-[var(--text-dim)]">DEEPSEEK_API_KEY</td><td class="px-4 py-3 mono text-[var(--text-dim)]">api.deepseek.com</td></tr>
+            <tr><td class="px-4 py-3 font-medium">Google Gemini</td><td class="px-4 py-3 mono text-[var(--text-dim)]">GEMINI_API_KEY</td><td class="px-4 py-3 mono text-[var(--text-dim)]">generativelanguage.googleapis.com</td></tr>
+            <tr><td class="px-4 py-3 font-medium">Aliyun DashScope</td><td class="px-4 py-3 mono text-[var(--text-dim)]">DASHSCOPE_API_KEY</td><td class="px-4 py-3 mono text-[var(--text-dim)]">dashscope.aliyuncs.com</td></tr>
+            <tr><td class="px-4 py-3 font-medium">Moonshot AI</td><td class="px-4 py-3 mono text-[var(--text-dim)]">MOONSHOT_API_KEY</td><td class="px-4 py-3 mono text-[var(--text-dim)]">api.moonshot.ai/v1</td></tr>
+            <tr><td class="px-4 py-3 font-medium">Zhipu (Z.AI)</td><td class="px-4 py-3 mono text-[var(--text-dim)]">ZAI_API_KEY</td><td class="px-4 py-3 mono text-[var(--text-dim)]">open.bigmodel.cn/api/paas/v4</td></tr>
+            <tr><td class="px-4 py-3 font-medium">Baidu Qianfan</td><td class="px-4 py-3 mono text-[var(--text-dim)]">QIANFAN_API_KEY</td><td class="px-4 py-3 mono text-[var(--text-dim)]">qianfan.baidubce.com/v2</td></tr>
+            <tr><td class="px-4 py-3 font-medium">Volcengine Ark</td><td class="px-4 py-3 mono text-[var(--text-dim)]">VOLCENGINE_API_KEY</td><td class="px-4 py-3 mono text-[var(--text-dim)]">ark.cn-beijing.volces.com/api/v3</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="mt-4 text-[13px] text-[var(--text-faint)]">
+        Beyond these twelve, the registry also knows Mistral, Groq, SiliconFlow, MiniMax, Azure OpenAI, LM Studio, vLLM and more. Set any of them by hand with <span class="mono text-[var(--text-dim)]">agentos configure provider</span>.
+      </p>
+    </section>
+
+    <!-- ============ 4 · RUN ============ -->
+    <section id="run" class="reveal mt-24 scroll-mt-24">
+      <div class="mb-2 flex items-center gap-3 text-[12px] uppercase tracking-[0.22em] text-[var(--accent)]">
+        <span class="mono text-[var(--text-faint)]">Step 04</span>
+      </div>
+      <h2 class="group flex items-center gap-3 text-2xl font-semibold tracking-tight md:text-3xl">
+        Run the gateway
+        <a href="#run" class="anchor-link text-[var(--accent)]">#</a>
+      </h2>
+      <p class="mt-5 max-w-[68ch] text-[16px] leading-relaxed text-[var(--text-dim)]">
+        The gateway is the heart of AgentOS. By default it binds to loopback only -
+        <span class="mono text-[var(--text)]">127.0.0.1:18791</span> - so nothing is exposed to your network.
+      </p>
+
+      <div class="mt-8 grid gap-6 md:grid-cols-2">
+        <div class="border border-[var(--line)] p-6">
+          <h3 class="text-[15px] font-semibold">Foreground</h3>
+          <p class="mt-2 text-[13.5px] text-[var(--text-dim)]">Runs in your terminal. Stop with <kbd class="mono border border-[var(--line-2)] px-1.5 py-0.5 text-[12px]">Ctrl + C</kbd>.</p>
+          <div data-code class="mt-4"><pre data-lang="bash">agentos gateway run</pre></div>
+        </div>
+        <div class="border border-[var(--line)] p-6">
+          <h3 class="text-[15px] font-semibold">Background</h3>
+          <p class="mt-2 text-[13.5px] text-[var(--text-dim)]">Detaches and waits for a healthy readiness signal.</p>
+          <div data-code class="mt-4"><pre data-lang="bash">agentos gateway start --json
+agentos gateway status</pre></div>
+        </div>
+      </div>
+
+      <p class="mt-7 text-[14px] text-[var(--text-dim)]">Once it reports ready, open the console in your browser:</p>
+      <div data-code class="mt-4">
+<pre data-lang="text">http://127.0.0.1:18791/control/</pre>
+      </div>
+
+      <div class="mt-8 border-l-2 border-[var(--accent)] bg-[var(--accent-soft)] p-5">
+        <p class="text-[13px] font-semibold uppercase tracking-[0.16em] text-[var(--accent)]">Binding beyond localhost</p>
+        <p class="mt-2 max-w-[64ch] text-[14px] text-[var(--text-dim)]">
+          To reach the gateway from another machine, bind a public interface. Only do this behind a firewall and with auth enabled (see <a href="#config" class="text-[var(--accent)] underline-offset-2 hover:underline">configuration</a>).
+        </p>
+        <div data-code class="mt-4"><pre data-lang="bash">agentos gateway run --listen 0.0.0.0 --port 18791</pre></div>
+      </div>
+
+      <p class="mt-8 text-[14px] text-[var(--text-dim)]">Prefer the terminal? Two no-browser entry points share the same loop:</p>
+      <div data-code class="mt-4">
+<pre data-lang="bash"># interactive REPL
+agentos chat
+
+# one-shot, scriptable
+agentos agent -m "summarize today's commits"</pre>
+      </div>
+    </section>
+
+    <!-- ============ 5 · WEB UI ============ -->
+    <section id="webui" class="reveal mt-24 scroll-mt-24">
+      <div class="mb-2 flex items-center gap-3 text-[12px] uppercase tracking-[0.22em] text-[var(--accent)]">
+        <span class="mono text-[var(--text-faint)]">Step 05</span>
+      </div>
+      <h2 class="group flex items-center gap-3 text-2xl font-semibold tracking-tight md:text-3xl">
+        Inside the Web console
+        <a href="#webui" class="anchor-link text-[var(--accent)]">#</a>
+      </h2>
+      <p class="mt-5 max-w-[68ch] text-[16px] leading-relaxed text-[var(--text-dim)]">
+        The console at <span class="mono text-[var(--text)]">/control/</span> is a single-page app. The views below are
+        client-side routes. For example <span class="mono text-[var(--text)]">/control/setup</span> and
+        <span class="mono text-[var(--text)]">/control/chat</span>.
+      </p>
+
+      <div class="mt-8 grid gap-px border border-[var(--line)] bg-[var(--line)] sm:grid-cols-2 lg:grid-cols-3">
+        <!-- each cell varies tint via accent rail to satisfy density without monotony -->
+        <div class="bg-[var(--bg-2)] p-5">
+          <div class="mb-2 h-0.5 w-8 bg-[var(--accent)]"></div>
+          <h3 class="mono text-[13px] text-[var(--text)]">/control/chat</h3>
+          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Run and resume sessions with streaming output, tool-call cards, and per-turn usage and savings.</p>
+        </div>
+        <div class="bg-[var(--bg-2)] p-5">
+          <div class="mb-2 h-0.5 w-8 bg-[var(--line-2)]"></div>
+          <h3 class="mono text-[13px] text-[var(--text)]">/control/setup</h3>
+          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">First-run catalog. Provider and Router are the fast path; everything else lives in the Capability Center.</p>
+        </div>
+        <div class="bg-[var(--bg-2)] p-5">
+          <div class="mb-2 h-0.5 w-8 bg-[var(--line-2)]"></div>
+          <h3 class="mono text-[13px] text-[var(--text)]">/control/approvals</h3>
+          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Durable human-in-the-loop queue for approving or denying sensitive tool calls.</p>
+        </div>
+        <div class="bg-[var(--bg-2)] p-5">
+          <div class="mb-2 h-0.5 w-8 bg-[var(--line-2)]"></div>
+          <h3 class="mono text-[13px] text-[var(--text)]">/control/health</h3>
+          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Readiness at a glance: provider state, memory, sandbox posture, and recovery hints.</p>
+        </div>
+        <div class="bg-[var(--bg-2)] p-5">
+          <div class="mb-2 h-0.5 w-8 bg-[var(--line-2)]"></div>
+          <h3 class="mono text-[13px] text-[var(--text)]">/control/cron</h3>
+          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">View and manage scheduled runs driven by the SchedulerEngine.</p>
+        </div>
+        <div class="bg-[var(--bg-2)] p-5">
+          <div class="mb-2 h-0.5 w-8 bg-[var(--line-2)]"></div>
+          <h3 class="mono text-[13px] text-[var(--text)]">/control/logs</h3>
+          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Inspect runtime logs and diagnostics output.</p>
+        </div>
+        <div class="bg-[var(--bg-2)] p-5">
+          <div class="mb-2 h-0.5 w-8 bg-[var(--line-2)]"></div>
+          <h3 class="mono text-[13px] text-[var(--text)]">/control/channels</h3>
+          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Check channel adapter status and jump to guided setup.</p>
+        </div>
+        <div class="bg-[var(--bg-2)] p-5">
+          <div class="mb-2 h-0.5 w-8 bg-[var(--line-2)]"></div>
+          <h3 class="mono text-[13px] text-[var(--text)]">/control/usage</h3>
+          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Token and estimated-cost rollups across sessions.</p>
+        </div>
+        <div class="bg-[var(--bg-2)] p-5">
+          <div class="mb-2 h-0.5 w-8 bg-[var(--line-2)]"></div>
+          <h3 class="mono text-[13px] text-[var(--text)]">/control/skills</h3>
+          <p class="mt-2 text-[13px] leading-relaxed text-[var(--text-dim)]">Browse available skills.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 6 · CONFIG ============ -->
+    <section id="config" class="reveal mt-24 scroll-mt-24">
+      <div class="mb-2 flex items-center gap-3 text-[12px] uppercase tracking-[0.22em] text-[var(--accent)]">
+        <span class="mono text-[var(--text-faint)]">Step 06</span>
+      </div>
+      <h2 class="group flex items-center gap-3 text-2xl font-semibold tracking-tight md:text-3xl">
+        Configuration
+        <a href="#config" class="anchor-link text-[var(--accent)]">#</a>
+      </h2>
+      <p class="mt-5 max-w-[68ch] text-[16px] leading-relaxed text-[var(--text-dim)]">
+        Config is TOML. AgentOS resolves it in this order. Environment variables for individual secrets always win
+        over file values.
+      </p>
+
+      <ol class="mt-8 space-y-px border border-[var(--line)] bg-[var(--line)]">
+        <li class="flex items-center gap-4 bg-[var(--bg-2)] px-5 py-4"><span class="mono text-[var(--accent)]">1</span><span class="mono text-[13.5px] text-[var(--text)]">AGENTOS_GATEWAY_CONFIG_PATH</span><span class="text-[13px] text-[var(--text-dim)]">explicit path</span></li>
+        <li class="flex items-center gap-4 bg-[var(--bg-2)] px-5 py-4"><span class="mono text-[var(--accent)]">2</span><span class="mono text-[13.5px] text-[var(--text)]">./agentos.toml</span><span class="text-[13px] text-[var(--text-dim)]">current directory</span></li>
+        <li class="flex items-center gap-4 bg-[var(--bg-2)] px-5 py-4"><span class="mono text-[var(--accent)]">3</span><span class="mono text-[13.5px] text-[var(--text)]">~/.agentos/config.toml</span><span class="text-[13px] text-[var(--text-dim)]">global user config</span></li>
+        <li class="flex items-center gap-4 bg-[var(--bg-2)] px-5 py-4"><span class="mono text-[var(--accent)]">4</span><span class="text-[13.5px] text-[var(--text)]">built-in defaults</span></li>
+      </ol>
+
+      <p class="mt-9 text-[14px] text-[var(--text-dim)]">A minimal <span class="mono text-[var(--text)]">agentos.toml</span> looks like this:</p>
+      <div data-code class="mt-4">
+<pre data-lang="toml">[llm]
+provider  = "openrouter"
+model     = "deepseek/deepseek-v4-flash"
+base_url  = "https://openrouter.ai/api/v1"
+# api_key is read from OPENROUTER_API_KEY
+
+[agentos_router]
+enabled        = true
+auto_thinking  = true
+default_tier   = "c1"
+
+[agentos_router.tiers.c1]
+provider = "openrouter"
+model    = "deepseek/deepseek-v4-pro"
+
+[memory]
+source = "workspace"        # MEMORY.md + memory/*.md under the workspace
+
+[permissions]
+default_mode = "bypass"     # off | on | bypass | full
+
+# [auth]
+# mode  = "token"           # none | token | password - enable before binding 0.0.0.0
+# token = "your-long-random-token"</pre>
+      </div>
+
+      <div class="mt-8 grid gap-6 md:grid-cols-2">
+        <div class="border border-[var(--line)] p-6">
+          <h3 class="text-[15px] font-semibold">Where state lives</h3>
+          <ul class="mt-3 space-y-2 text-[13px] text-[var(--text-dim)]">
+            <li class="flex justify-between gap-3"><span>Home</span><span class="mono text-[var(--text)]">~/.agentos</span></li>
+            <li class="flex justify-between gap-3"><span>State</span><span class="mono text-[var(--text)]">~/.agentos/state</span></li>
+            <li class="flex justify-between gap-3"><span>Workspace</span><span class="mono text-[var(--text)]">~/.agentos/workspace</span></li>
+            <li class="flex justify-between gap-3"><span>Media</span><span class="mono text-[var(--text)]">~/.agentos/media</span></li>
+          </ul>
+          <p class="mt-3 text-[12px] text-[var(--text-faint)]">Relocate the whole tree with <span class="mono text-[var(--text-dim)]">AGENTOS_HOME</span>.</p>
+        </div>
+        <div class="border border-[var(--line)] p-6">
+          <h3 class="text-[15px] font-semibold">Reconfigure a section</h3>
+          <p class="mt-3 text-[13px] text-[var(--text-dim)]">Change one part of the setup without re-running the whole wizard:</p>
+          <div data-code class="mt-3"><pre data-lang="bash">agentos configure provider
+agentos configure router
+agentos configure channels
+agentos configure search</pre></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ COMMAND REFERENCE ============ -->
+    <section id="commands" class="reveal mt-24 scroll-mt-24">
+      <h2 class="group flex items-center gap-3 text-2xl font-semibold tracking-tight md:text-3xl">
+        Command reference
+        <a href="#commands" class="anchor-link text-[var(--accent)]">#</a>
+      </h2>
+      <p class="mt-5 max-w-[68ch] text-[16px] leading-relaxed text-[var(--text-dim)]">
+        The commands you will reach for most. Run <span class="mono text-[var(--text)]">agentos --help</span> for the full set.
+      </p>
+      <div class="mt-8 overflow-x-auto border border-[var(--line)]">
+        <table class="w-full min-w-[560px] text-left text-[13.5px]">
+          <tbody class="divide-y divide-[var(--line)]">
+            <tr><td class="px-4 py-3 mono text-[var(--accent)]">agentos onboard</td><td class="px-4 py-3 text-[var(--text-dim)]">Interactive first-run wizard.</td></tr>
+            <tr><td class="px-4 py-3 mono text-[var(--accent)]">agentos doctor</td><td class="px-4 py-3 text-[var(--text-dim)]">Readiness check across provider, memory, sandbox.</td></tr>
+            <tr><td class="px-4 py-3 mono text-[var(--accent)]">agentos gateway run</td><td class="px-4 py-3 text-[var(--text-dim)]">Start the gateway in the foreground.</td></tr>
+            <tr><td class="px-4 py-3 mono text-[var(--accent)]">agentos gateway start</td><td class="px-4 py-3 text-[var(--text-dim)]">Start in the background and wait for ready.</td></tr>
+            <tr><td class="px-4 py-3 mono text-[var(--accent)]">agentos gateway stop</td><td class="px-4 py-3 text-[var(--text-dim)]">Stop the background gateway.</td></tr>
+            <tr><td class="px-4 py-3 mono text-[var(--accent)]">agentos chat</td><td class="px-4 py-3 text-[var(--text-dim)]">Interactive terminal REPL.</td></tr>
+            <tr><td class="px-4 py-3 mono text-[var(--accent)]">agentos agent -m "..."</td><td class="px-4 py-3 text-[var(--text-dim)]">One-shot, scriptable run.</td></tr>
+            <tr><td class="px-4 py-3 mono text-[var(--accent)]">agentos providers</td><td class="px-4 py-3 text-[var(--text-dim)]">List and inspect configured providers.</td></tr>
+            <tr><td class="px-4 py-3 mono text-[var(--accent)]">agentos configure ...</td><td class="px-4 py-3 text-[var(--text-dim)]">Reconfigure a single setup section.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============ TROUBLESHOOTING ============ -->
+    <section id="trouble" class="reveal mt-24 scroll-mt-24">
+      <h2 class="group flex items-center gap-3 text-2xl font-semibold tracking-tight md:text-3xl">
+        Troubleshooting
+        <a href="#trouble" class="anchor-link text-[var(--accent)]">#</a>
+      </h2>
+      <div class="mt-8 divide-y divide-[var(--line)] border-y border-[var(--line)]" data-accordion>
+        <details class="group py-1">
+          <summary class="flex cursor-pointer list-none items-center justify-between gap-4 py-4 text-[15px] font-medium">
+            The gateway starts but the console is blank.
+            <span class="text-[var(--accent)] transition group-open:rotate-45">+</span>
+          </summary>
+          <p class="pb-5 text-[14px] leading-relaxed text-[var(--text-dim)]">Make sure you opened the trailing-slash path: <span class="mono text-[var(--text)]">http://127.0.0.1:18791/control/</span>. The console is a single-page app served from that mount; hitting <span class="mono">/control</span> without the slash can land you on a fallback.</p>
+        </details>
+        <details class="group py-1">
+          <summary class="flex cursor-pointer list-none items-center justify-between gap-4 py-4 text-[15px] font-medium">
+            <span><span class="mono text-[var(--text)]">agentos</span> is not found after install.</span>
+            <span class="text-[var(--accent)] transition group-open:rotate-45">+</span>
+          </summary>
+          <p class="pb-5 text-[14px] leading-relaxed text-[var(--text-dim)]">If you installed via <span class="mono text-[var(--text)]">uv tool install</span>, ensure uv's tool bin directory is on your <span class="mono">PATH</span> - run <span class="mono text-[var(--text)]">uv tool update-shell</span> and reopen your terminal.</p>
+        </details>
+        <details class="group py-1">
+          <summary class="flex cursor-pointer list-none items-center justify-between gap-4 py-4 text-[15px] font-medium">
+            The provider rejects my key.
+            <span class="text-[var(--accent)] transition group-open:rotate-45">+</span>
+          </summary>
+          <p class="pb-5 text-[14px] leading-relaxed text-[var(--text-dim)]">Confirm the environment variable name matches the one in the <a href="#providers" class="text-[var(--accent)] underline-offset-2 hover:underline">provider table</a> exactly. Then run <span class="mono text-[var(--text)]">agentos doctor</span> to surface which section is failing and why.</p>
+        </details>
+        <details class="group py-1">
+          <summary class="flex cursor-pointer list-none items-center justify-between gap-4 py-4 text-[15px] font-medium">
+            Local memory embedding is missing.
+            <span class="text-[var(--accent)] transition group-open:rotate-45">+</span>
+          </summary>
+          <p class="pb-5 text-[14px] leading-relaxed text-[var(--text-dim)]">On-device memory embedding needs the recommended extras. Reinstall with the <span class="mono text-[var(--text)]">agentos[recommended]</span> wheel, and if you built from source, pull the LFS model files with <span class="mono text-[var(--text)]">git lfs pull --include="src/agentos/memory/models/**"</span>.</p>
+        </details>
+      </div>
+
+      <!-- final CTA -->
+      <div class="mt-14 border border-[var(--accent-line)] bg-[var(--accent-soft)] p-8 text-center">
+        <h3 class="text-xl font-semibold tracking-tight">You are set up.</h3>
+        <p class="mx-auto mt-3 max-w-[52ch] text-[14px] text-[var(--text-dim)]">Start the gateway, open the console, and send your first turn. Run a readiness check any time things feel off.</p>
+        <div class="mt-6 flex flex-wrap justify-center gap-3">
+          <a href="#run" class="border border-[var(--accent-line)] bg-[var(--accent)] px-5 py-3 text-[14px] font-semibold text-[#0b0b0e] transition active:translate-y-px">Back to running it</a>
+          <a href="#top" class="border border-[var(--line-2)] px-5 py-3 text-[14px] font-medium text-[var(--text-dim)] transition hover:border-[var(--text-dim)] hover:text-[var(--text)] active:translate-y-px">Back to top</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="mt-20 border-t border-[var(--line)] pt-8 text-[13px] text-[var(--text-faint)]">
+      <div class="flex flex-wrap items-center justify-between gap-4">
+        <p>AgentOS v0.0.1 · MIT · <a href="https://useagentos.dev/" class="hover:text-[var(--accent)]">useagentos.dev</a> · <a href="https://x.com/useAgentOS" class="hover:text-[var(--accent)]">@useAgentOS</a></p>
+        <p class="mono">127.0.0.1:18791/control/</p>
+      </div>
+    </footer>
+
+  </main>
+</div>
+
+<!-- ============ SCRIPTS ============ -->
+<script>
+(function(){
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---- Scroll progress + active nav (IntersectionObserver, no scroll listener) ----
+  var progress = document.getElementById('progress');
+  var ticking = false;
+  function updateProgress(){
+    var h = document.documentElement;
+    var max = h.scrollHeight - h.clientHeight;
+    var pct = max > 0 ? (h.scrollTop / max) * 100 : 0;
+    progress.style.width = pct + '%';
+    ticking = false;
+  }
+  // progress bar is the one place we read scroll; throttle via rAF, never touch React/state
+  document.addEventListener('scroll', function(){
+    if(!ticking){ requestAnimationFrame(updateProgress); ticking = true; }
+  }, {passive:true});
+  updateProgress();
+
+  // ---- Active section highlight ----
+  var links = Array.prototype.slice.call(document.querySelectorAll('#toc .nav-link'));
+  var map = {};
+  links.forEach(function(l){ map[l.getAttribute('href').slice(1)] = l; });
+  var spy = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if(e.isIntersecting){
+        links.forEach(function(l){ l.classList.remove('active'); });
+        var active = map[e.target.id];
+        if(active) active.classList.add('active');
+      }
+    });
+  }, {rootMargin:'-20% 0px -70% 0px', threshold:0});
+  document.querySelectorAll('section[id]').forEach(function(s){ spy.observe(s); });
+
+  // ---- Reveal on scroll ----
+  if(reduce){
+    document.querySelectorAll('.reveal').forEach(function(el){ el.classList.add('in'); });
+  } else {
+    var revealObs = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting){ e.target.classList.add('in'); revealObs.unobserve(e.target); }
+      });
+    }, {threshold:0.08, rootMargin:'0px 0px -8% 0px'});
+    document.querySelectorAll('.reveal').forEach(function(el){ revealObs.observe(el); });
+  }
+
+  // ---- Tabs ----
+  document.querySelectorAll('[data-tabs]').forEach(function(group){
+    var btns = group.querySelectorAll('.tab-btn');
+    var panels = group.querySelectorAll('[data-panel]');
+    function activate(name){
+      btns.forEach(function(b){
+        var on = b.getAttribute('data-tab') === name;
+        b.classList.toggle('text-[var(--accent)]', on);
+        b.classList.toggle('bg-[var(--bg-3)]', on);
+        b.classList.toggle('text-[var(--text-dim)]', !on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      panels.forEach(function(p){
+        p.classList.toggle('hidden', p.getAttribute('data-panel') !== name);
+      });
+    }
+    btns.forEach(function(b){
+      b.addEventListener('click', function(){ activate(b.getAttribute('data-tab')); });
+    });
+    activate(btns[0].getAttribute('data-tab'));
+  });
+
+  // ---- Code blocks: style + copy button ----
+  document.querySelectorAll('[data-code]').forEach(function(wrap){
+    wrap.classList.add('relative','group','border','border-[var(--line)]','bg-[var(--bg-3)]');
+    var pre = wrap.querySelector('pre');
+    if(!pre) return;
+    var lang = pre.getAttribute('data-lang') || 'sh';
+
+    // header bar
+    var bar = document.createElement('div');
+    bar.className = 'flex items-center justify-between border-b border-[var(--line)] bg-[var(--bg-2)] px-4 py-2';
+    var label = document.createElement('span');
+    label.className = 'mono text-[11px] uppercase tracking-[0.18em] text-[var(--text-faint)]';
+    label.textContent = lang;
+    var btn = document.createElement('button');
+    btn.className = 'copy-btn mono inline-flex items-center gap-1.5 border border-[var(--line-2)] px-2 py-1 text-[11px] text-[var(--text-dim)] hover:border-[var(--accent-line)] hover:text-[var(--accent)]';
+    btn.innerHTML = '<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg> copy';
+    bar.appendChild(label); bar.appendChild(btn);
+    wrap.insertBefore(bar, pre);
+
+    pre.classList.add('overflow-x-auto','px-4','py-4','text-[13px]','leading-relaxed','text-[var(--text)]');
+
+    btn.addEventListener('click', function(){
+      var text = pre.innerText;
+      navigator.clipboard.writeText(text).then(function(){
+        btn.innerHTML = '<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg> copied';
+        btn.classList.add('text-[var(--ok)]','border-[var(--ok)]');
+        setTimeout(function(){
+          btn.innerHTML = '<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg> copy';
+          btn.classList.remove('text-[var(--ok)]','border-[var(--ok)]');
+        }, 1600);
+      });
+    });
+  });
+
+  // ---- Accordion: close siblings ----
+  document.querySelectorAll('[data-accordion]').forEach(function(group){
+    var items = group.querySelectorAll('details');
+    items.forEach(function(d){
+      d.addEventListener('toggle', function(){
+        if(d.open){ items.forEach(function(o){ if(o!==d) o.open=false; }); }
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>

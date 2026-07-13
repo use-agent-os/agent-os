@@ -1,0 +1,5680 @@
+"""TurnRunner: shared agent orchestration layer.
+
+Single convergence point for all entry points (Web UI, CLI, Channel).
+Extracted from gateway/rpc_sessions.py:_run_agent_turn() closure.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import binascii
+import contextlib
+import contextvars
+import copy
+import hashlib
+import inspect
+import json
+import os
+import platform
+import time
+import uuid
+from collections.abc import AsyncIterator, Callable, Hashable, Mapping, Sequence
+from dataclasses import asdict, dataclass, field, replace
+from datetime import UTC, datetime
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, Final, Literal, SupportsInt, TypeGuard, cast
+
+import structlog
+
+from agentos.artifacts import artifact_marker
+from agentos.attachment_refs import (
+    is_attachment_ref,
+    read_attachment_ref_bytes,
+    transcript_material_path,
+)
+from agentos.bootstrap_types import BootstrapFileReport
+from agentos.contracts.attachments import (
+    ALLOWED_MEDIA_TYPES as _ALLOWED_ENGINE_MEDIA_TYPES,
+)
+from agentos.contracts.attachments import (
+    MAX_ATTACHMENTS as _MAX_ATTACHMENT_COUNT,
+)
+from agentos.contracts.attachments import (
+    TEXT_ATTACHMENT_MIMES as _ENGINE_TEXT_FAMILY_MIMES,
+)
+from agentos.contracts.attachments import (
+    attachment_size_limit_for_mime as _attachment_size_limit_for_mime,
+)
+from agentos.engine.agent import Agent, ToolHandler
+from agentos.engine.cache_break_monitor import notify_compaction
+from agentos.engine.hooks import (
+    CompactionHook,
+    DefaultTraceEmitterHook,
+    TurnEvent,
+    TurnHook,
+    TurnHookContext,
+)
+from agentos.engine.outcome import outcome_from_error, turn_outcome_details
+from agentos.engine.pipeline import TurnContext
+from agentos.engine.pricing import PriceEntry, lookup_price
+from agentos.engine.router_decision import build_router_decision_event
+from agentos.engine.turn_policy import resolve_turn_policy
+from agentos.engine.turn_runner import (
+    AgentBootstrapStage,
+    AgentBootstrapStageInput,
+    AttachmentStage,
+    AttachmentStageInput,
+    CompactionAndHistoryStage,
+    CompactionAndHistoryStageInput,
+    InputStage,
+    InputStageInput,
+    PromptAssemblerStage,
+    PromptAssemblerStageInput,
+    ProviderAndToolsStage,
+    ProviderAndToolsStageInput,
+    StreamConsumerStage,
+    StreamConsumerStageInput,
+    TurnFinalizerStage,
+    TurnFinalizerStageInput,
+)
+from agentos.engine.turn_runner.harness import (
+    _PromptReportBuilderAdapter,
+    _RequestContextPrependAdapter,
+    _TurnRunnerAgentConfigBuilderAdapter,
+    _TurnRunnerAgentFactoryAdapter,
+    _TurnRunnerAgentRunAdapter,
+    _TurnRunnerAttachmentMessageBuilderAdapter,
+    _TurnRunnerCompactionPersistAdapter,
+    _TurnRunnerExtraContextAdapter,
+    _TurnRunnerHistoryLoaderAdapter,
+    _TurnRunnerMemoryFingerprintAdapter,
+    _TurnRunnerMemorySnapshotAdapter,
+    _TurnRunnerMemorySnapshotRefreshAdapter,
+    _TurnRunnerMemorySyncNotifyAdapter,
+    _TurnRunnerModelCatalogAdapter,
+    _TurnRunnerPipelineExecutionAdapter,
+    _TurnRunnerPreflightCompactionAdapter,
+    _TurnRunnerPromptAssemblerAdapter,
+    _TurnRunnerPromptConfigResolverAdapter,
+    _TurnRunnerProviderResolverAdapter,
+    _TurnRunnerRouterContextAdapter,
+    _TurnRunnerSessionIdResolverAdapter,
+    _TurnRunnerSessionTotalsAdapter,
+    _TurnRunnerSystemPromptRefreshAdapter,
+    _TurnRunnerT3UpgradeCompactionAdapter,
+    _TurnRunnerTimeoutBudgetAdapter,
+    _TurnRunnerToolBuilderAdapter,
+    _TurnRunnerTranscriptAppendAdapter,
+    _TurnRunnerTurnErrorPersistAdapter,
+    _TurnRunnerTurnMemoryCaptureAdapter,
+)
+from agentos.engine.turn_runner.stream_consumer_stage import _StreamState
+from agentos.engine.types import (
+    AgentConfig,
+    AgentEvent,
+    DoneEvent,
+    ErrorEvent,
+    RouterControlReplayEvent,
+    ThinkingLevel,
+    ToolResultEvent,
+    WarningEvent,
+)
+from agentos.execution_status import (
+    mark_execution_status_truncated,
+    normalize_execution_status,
+)
+from agentos.memory.session_flush import SessionFlushService
+from agentos.observability.decision_log import (
+    DecisionEntry,
+    PipelineStepRecord,
+    SavingsTelemetry,
+    build_intent_summary,
+    compute_hashes,
+    write_decision_entry,
+)
+from agentos.observability.prompt_report import PromptReport, build_prompt_report
+from agentos.observability.trace import TraceContext, TraceEvent, write_trace_event
+from agentos.observability.turn_call_log import TurnCallLogger, is_turn_call_log_enabled
+from agentos.paths import media_root_from_config
+from agentos.provider import (
+    ErrorEvent as ProviderErrorEvent,
+)
+from agentos.provider import (
+    ProviderRecoveryAction,
+    classify_provider_error,
+    decide_recovery_action,
+)
+from agentos.router_control import (
+    RouterControlHoldStore,
+    render_router_control_prompt_block,
+)
+from agentos.router_tiers import HIGHEST_TEXT_TIER, normalize_text_tier, tier_index
+from agentos.safety import injection_guard, permission_matrix, sandbox, tool_tiers
+from agentos.session.compaction_lifecycle import (
+    COMPACTION_CHUNK_SUMMARIZED_EVENT,
+    COMPACTION_PERSISTED_EVENT,
+    COMPACTION_REPLAYED_EVENT,
+    COMPACTION_SUMMARY_VERIFIED_EVENT,
+    COMPACTION_TRIGGERED_EVENT,
+    compaction_effect_payload,
+    compaction_lifecycle_payload,
+    compaction_memory_status,
+    compaction_result_payload,
+    durable_receipt_allows_destructive_compaction,
+    flush_receipt_allows_destructive_compaction,
+    flush_receipt_is_successful_flush,
+    flush_receipt_status_for_compaction,
+    mark_compaction_flush_status_with_retry,
+    new_compaction_id,
+    pre_compaction_flush_requires_safe_receipt,
+)
+from agentos.session.context_view import (
+    build_compaction_context_records,
+    build_provider_compaction_context,
+)
+from agentos.session.cost_rollup import (
+    normalize_event_cost_source,
+)
+from agentos.session.keys import (
+    allows_private_memory_prompt_injection,
+    canonicalize_session_key,
+    is_subagent_key,
+    normalize_agent_id,
+)
+from agentos.session.terminal_reply import build_terminal_reply, sanitize_agent_error
+from agentos.tools.types import CallerKind, ToolContext
+
+# Stable user-facing envelope for LLM timeouts.
+_LLM_TIMEOUT_ENVELOPE: dict[str, Any] = {
+    "status": "error",
+    "error_class": "llm_timeout",
+    "user_message": "The model took too long to respond. Please try again.",
+    "retry_allowed": True,
+}
+_DEFAULT_AGENT_RUNTIME_TIMEOUT_SECONDS: float = 48 * 60 * 60
+_DEFAULT_LLM_REQUEST_TIMEOUT_SECONDS: float = 120.0
+_DEFAULT_LLM_TIMEOUT_SECONDS: float = _DEFAULT_LLM_REQUEST_TIMEOUT_SECONDS
+_ROUTER_PREV_ASSISTANT_MAX_CHARS: Final[int] = 8000
+_ROUTER_HISTORY_USER_MAX_CHARS: Final[int] = 8000
+_ROUTER_HISTORY_USER_MAX_TURNS: Final[int] = 4
+_CONTEXT_SUMMARY_MARKER: Final[str] = "[Context Summary]"
+_COMPACTION_SUMMARY_CONTEXT_HEADER: Final[str] = "[Compacted Session Summaries]"
+_COMPACTION_SUMMARY_CONTEXT_MAX_CHARS: Final[int] = 16_000
+_DEFAULT_PREFLIGHT_COMPACT_RATIO: Final[float] = 0.85
+_COMPACTION_FAILURE_LIMIT: Final[int] = 3
+_COMPACTION_CIRCUIT_COOLDOWN_SECONDS: Final[float] = 300.0
+_T3_NOT_APPLICABLE: Final[str] = "not_applicable"
+_T3_HANDLED: Final[str] = "handled"
+_T3_FLUSH_FAILED: Final[str] = "flush_failed"
+_T3_COMPACT_FAILED: Final[str] = "compact_failed"
+_IMAGE_GENERATION_TOOL_NAMES: Final[frozenset[str]] = frozenset({"image_generate"})
+_ARTIFACT_DELIVERY_FAILURE_MARKER: Final[str] = "File delivery failed:"
+_ARTIFACT_DELIVERY_TOOL_NAME: Final[str] = "publish_artifact"
+_ARTIFACT_DELIVERY_FAILURE_MAX_CHARS: Final[int] = 360
+
+_HOOKS_FEATURE_ENV: Final[str] = "AGENTOS_HOOKS"
+
+
+def collect_invoked_skills(
+    turn_segments: list[dict],
+    *,
+    extra_first: list[str] | None = None,
+) -> list[str]:
+    """Collect skill names from skill_view tool segments."""
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for name in extra_first or []:
+        if isinstance(name, str) and name and name not in seen:
+            seen.add(name)
+            result.append(name)
+    for segment in turn_segments:
+        tool_name = segment.get("name")
+        if tool_name not in {"skill_view"}:
+            continue
+        skill_name = (segment.get("input") or {}).get("name")
+        if not isinstance(skill_name, str) or not skill_name or skill_name in seen:
+            continue
+        seen.add(skill_name)
+        result.append(skill_name)
+    return result
+
+
+def _hooks_mode_from_env() -> str:
+    """Resolve the active hook mode from the ``AGENTOS_HOOKS`` env var.
+
+    Returns ``"legacy"`` only when explicitly set to ``legacy``
+    (case-insensitive); any other value (including unset) returns ``"new"``.
+    The default flipped to ``new`` after the equivalence harness showed zero
+    divergence between legacy and hook paths across the engine and tools test
+    suites. ``AGENTOS_HOOKS=legacy`` remains as an escape hatch for one
+    release cycle so any unforeseen drift can be diagnosed without rolling
+    back code.
+    """
+
+    raw = os.environ.get(_HOOKS_FEATURE_ENV, "").strip().lower()
+    return "legacy" if raw == "legacy" else "new"
+
+
+def _is_deepseek_model_id(model: str) -> bool:
+    normalized = model.strip().lower()
+    return normalized.startswith("deepseek") or "/deepseek" in normalized
+
+
+# Tools that are safe to run concurrently within a single LLM turn.
+# Any tool name absent from this set is treated as mutex (serial dispatch).
+_SAFE_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        "agents_list",
+        "git_diff",
+        "git_log",
+        "git_status",
+        "glob_search",
+        "grep_search",
+        "image",
+        "list_dir",
+        "memory_get",
+        "memory_search",
+        "pdf",
+        "read_file",
+        "read_spreadsheet",
+        "session_search",
+        "session_status",
+        "sessions_history",
+        "sessions_list",
+        "skill_list",
+        "skill_search_community",
+        "skill_view",
+        "tts",
+        "web_fetch",
+        "web_search",
+    }
+)
+
+_ToolConcurrencyMode = Literal["mutex", "concurrent", "keyed", "predicate"]
+
+
+@dataclass(frozen=True)
+class _ToolConcurrencyPolicy:
+    mode: _ToolConcurrencyMode
+    key: Hashable | None = None
+    max_inflight: int | None = None
+    limit_key: Hashable | None = None
+
+
+_MUTEX_TOOL_POLICY = _ToolConcurrencyPolicy(mode="mutex")
+_CONCURRENT_TOOL_POLICY = _ToolConcurrencyPolicy(mode="concurrent")
+
+
+def _get_tool_concurrency_policy(
+    tool_name: str,
+    arguments: Mapping[str, Any] | None = None,
+    *,
+    parent_session_key: str | None = None,
+) -> _ToolConcurrencyPolicy:
+    if tool_name in _SAFE_TOOL_NAMES:
+        return _CONCURRENT_TOOL_POLICY
+    if tool_name == "sessions_send":
+        session_key = (arguments or {}).get("session_key")
+        if isinstance(session_key, str) and session_key.strip():
+            return _ToolConcurrencyPolicy(
+                mode="keyed",
+                key=("sessions_send", session_key.strip()),
+            )
+        return _MUTEX_TOOL_POLICY
+    if tool_name == "sessions_spawn":
+        from agentos.tools.types import current_tool_context  # noqa: PLC0415
+
+        ctx = current_tool_context.get()
+        parent_key = parent_session_key or (ctx.session_key if ctx is not None else None)
+        if parent_key:
+            return _ToolConcurrencyPolicy(
+                mode="keyed",
+                key=("sessions_spawn", parent_key),
+            )
+        return _MUTEX_TOOL_POLICY
+    return _MUTEX_TOOL_POLICY
+
+
+# Per-call-chain owner tracking for session-lock re-entry detection.
+# A ContextVar is copied into child asyncio Tasks created while a turn is
+# running, which matters for stream wrappers such as heartbeat_stream. Treating
+# the lock id as the ownership token lets those child tasks enter without
+# self-deadlocking while unrelated tasks still see their own context values.
+_SESSION_LOCK_OWNER: contextvars.ContextVar[dict[int, asyncio.Task[Any]]] = contextvars.ContextVar(
+    "_session_lock_owner"
+)
+_SESSION_LOCK_BYPASS_ONLY: contextvars.ContextVar[set[int] | None] = contextvars.ContextVar(
+    "_session_lock_bypass_only",
+    default=None,
+)
+
+
+def _compute_route_input_savings_usd(
+    max_price_per_m: float,
+    routed_price_per_m: float,
+    input_tokens: int,
+) -> float:
+    """49b7e08 agentos-router savings formula: input-price delta times input tokens."""
+    return round(max(0.0, (max_price_per_m - routed_price_per_m) * input_tokens / 1_000_000), 6)
+
+
+@dataclass(frozen=True)
+class _SavingsBaseline:
+    model: str = ""
+    price: PriceEntry = field(default_factory=lambda: PriceEntry(0.0, 0.0))
+    cost_usd: float = 0.0
+
+
+@dataclass(frozen=True)
+class _ComprehensiveTurnSavings:
+    pct: float = 0.0
+    usd: float = 0.0
+    baseline_model: str = ""
+    baseline_cost_usd: float = 0.0
+    actual_cost_usd: float = 0.0
+
+
+@dataclass
+class _CompactionFailureState:
+    count: int = 0
+    opened_at: float | None = None
+
+
+@dataclass
+class _EmergencyCompactionOverride:
+    summary: str
+    kept_entries: list[Any]
+    reason: str
+    compaction_id: str
+
+
+def _non_negative_int(value: object) -> int:
+    if value is None:
+        return 0
+    if not isinstance(value, str | bytes | bytearray | SupportsInt):
+        return 0
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _token_cost_usd(input_tokens: float, output_tokens: float, price: PriceEntry) -> float:
+    return (
+        max(0.0, float(input_tokens)) * price.input_per_m / 1_000_000
+        + max(0.0, float(output_tokens)) * price.output_per_m / 1_000_000
+    )
+
+
+def _tier_value(tier: object, key: str, default: object = None) -> object:
+    if isinstance(tier, Mapping):
+        return tier.get(key, default)
+    return getattr(tier, key, default)
+
+
+def _iter_text_tier_models(tiers: object) -> list[str]:
+    if not isinstance(tiers, Mapping):
+        return []
+    models: list[str] = []
+    for tier in tiers.values():
+        if bool(_tier_value(tier, "image_only", False)):
+            continue
+        model = str(_tier_value(tier, "model", "") or "").strip()
+        if model:
+            models.append(model)
+    return models
+
+
+def _select_savings_baseline_model(
+    tiers: object,
+    baseline_input_tokens: float,
+    baseline_output_tokens: float,
+) -> _SavingsBaseline:
+    best = _SavingsBaseline(cost_usd=-1.0)
+    for model in _iter_text_tier_models(tiers):
+        price = lookup_price(model)
+        cost_usd = _token_cost_usd(baseline_input_tokens, baseline_output_tokens, price)
+        if cost_usd > best.cost_usd:
+            best = _SavingsBaseline(model=model, price=price, cost_usd=cost_usd)
+    if best.cost_usd < 0:
+        return _SavingsBaseline()
+    return best
+
+
+def _short_output_savings_rate(metadata: Mapping[str, Any], estimated_pct: float) -> float:
+    prompt_policy = str(metadata.get("prompt_policy") or "").strip().upper()
+    active = prompt_policy == "P0" or bool(metadata.get("short_reply_active"))
+    if not active:
+        return 0.0
+    try:
+        rate = float(estimated_pct)
+    except (TypeError, ValueError):
+        return 0.0
+    if rate <= 0.0 or rate >= 1.0:
+        return 0.0
+    return rate
+
+
+def _restored_output_side_tokens(
+    actual_output_side_tokens: int,
+    metadata: Mapping[str, Any],
+    estimated_output_savings_pct: float,
+) -> float:
+    rate = _short_output_savings_rate(metadata, estimated_output_savings_pct)
+    if rate <= 0.0 or actual_output_side_tokens <= 0:
+        return float(actual_output_side_tokens)
+    return actual_output_side_tokens / (1.0 - rate)
+
+
+def _compute_comprehensive_turn_savings(
+    event: DoneEvent,
+    metadata: Mapping[str, Any],
+    tiers: object,
+    routed_model: str,
+    *,
+    estimated_output_savings_pct: float = 0.03,
+) -> _ComprehensiveTurnSavings:
+    """Estimate per-turn savings from token counts and model prices only."""
+    actual_input_tokens = _non_negative_int(event.input_tokens)
+    actual_output_side_tokens = _non_negative_int(event.output_tokens) + _non_negative_int(
+        event.reasoning_tokens
+    )
+    tool_tokens_saved = _non_negative_int(metadata.get("tool_projection_tokens_saved"))
+    baseline_input_tokens = actual_input_tokens + tool_tokens_saved
+    baseline_output_tokens = _restored_output_side_tokens(
+        actual_output_side_tokens,
+        metadata,
+        estimated_output_savings_pct,
+    )
+
+    baseline = _select_savings_baseline_model(
+        tiers,
+        baseline_input_tokens,
+        baseline_output_tokens,
+    )
+    routed_price = lookup_price(routed_model or event.model)
+    actual_cost_usd = _token_cost_usd(
+        actual_input_tokens,
+        actual_output_side_tokens,
+        routed_price,
+    )
+
+    if baseline.cost_usd <= 0.0:
+        return _ComprehensiveTurnSavings(
+            baseline_model=baseline.model,
+            baseline_cost_usd=max(0.0, baseline.cost_usd),
+            actual_cost_usd=actual_cost_usd,
+        )
+
+    savings_usd = round(max(0.0, baseline.cost_usd - actual_cost_usd), 6)
+    savings_pct = 0.0
+    if savings_usd > 0.0:
+        savings_pct = round(max(0.0, min(99.9, (savings_usd / baseline.cost_usd) * 100)), 1)
+
+    return _ComprehensiveTurnSavings(
+        pct=savings_pct,
+        usd=savings_usd,
+        baseline_model=baseline.model,
+        baseline_cost_usd=baseline.cost_usd,
+        actual_cost_usd=actual_cost_usd,
+    )
+
+
+def _normalize_capture_kind(value: str) -> str:
+    return value.strip().lower().replace("-", "_").replace(".", "_").replace(":", "_")
+
+
+# Boot-path initialization of the safety baseline. All four submodules
+# are imported here so tool dispatch and ingress guards can consult them
+# without late imports.
+#
+# The tuple pins the imports to module scope so the linter does not drop them
+# as "unused" — dispatch paths reach these modules via attribute lookup at
+# call time, not through named references in this file. Keeping the reference
+# explicit makes the load-time invariant legible to readers.
+_SAFETY_MODULES: Final[tuple[Any, ...]] = (
+    injection_guard,
+    tool_tiers,
+    permission_matrix,
+    sandbox,
+)
+
+log = structlog.get_logger(__name__)
+
+
+def _accepts_keyword_arg(callable_obj: Any, name: str) -> bool:
+    """Return True when callable accepts `name` explicitly or via `**kwargs`."""
+    params = inspect.signature(callable_obj).parameters
+    if name in params:
+        return True
+    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+
+def _strip_context_summary_marker(content: str) -> str:
+    """Return summary text from a legacy transcript summary marker."""
+    if content.startswith(_CONTEXT_SUMMARY_MARKER):
+        return content[len(_CONTEXT_SUMMARY_MARKER) :].lstrip("\r\n")
+    return content
+
+
+def _format_compaction_summary_context(summary_texts: list[str]) -> str | None:
+    """Render durable summaries as request-scoped context, newest context preserved."""
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for raw in summary_texts:
+        text = raw.strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        deduped.append(text)
+    if not deduped:
+        return None
+
+    blocks = [f"[Summary {idx}]\n{text}" for idx, text in enumerate(deduped, start=1)]
+    rendered = f"{_COMPACTION_SUMMARY_CONTEXT_HEADER}\n" + "\n\n".join(blocks)
+    if len(rendered) <= _COMPACTION_SUMMARY_CONTEXT_MAX_CHARS:
+        return rendered
+    tail_budget = (
+        _COMPACTION_SUMMARY_CONTEXT_MAX_CHARS - len(_COMPACTION_SUMMARY_CONTEXT_HEADER) - 80
+    )
+    tail_budget = max(1000, tail_budget)
+    return (
+        f"{_COMPACTION_SUMMARY_CONTEXT_HEADER}\n"
+        "[Earlier compaction summary context truncated to fit request budget.]\n"
+        f"{rendered[-tail_budget:]}"
+    )
+
+
+def _prepend_request_context_prompt(
+    existing_request_context: str | None,
+    prepended_context: str | None,
+) -> str | None:
+    """Place session summary context before volatile per-turn context."""
+    if not prepended_context or not prepended_context.strip():
+        return existing_request_context
+    if not existing_request_context or not existing_request_context.strip():
+        return prepended_context.strip()
+    return f"{prepended_context.strip()}\n\n{existing_request_context.strip()}"
+
+
+_MAX_TOOL_RESULT_CHARS = 2000
+_MAX_TOOL_RESULT_METADATA_VALUE_CHARS = 256
+_MAX_PERSISTED_TOOL_ARGUMENT_FIELD_CHARS = 4096
+_PERSISTED_TOOL_ARGUMENT_PREVIEW_CHARS = 512
+_PERSISTED_TOOL_ARGUMENT_PROJECTION_PREFIX = "[historical_tool_argument_omitted]\n"
+_TOOL_ARGUMENT_PAYLOAD_FIELDS: Final[dict[str, frozenset[str]]] = {
+    "write_file": frozenset({"content"}),
+    "edit_file": frozenset({"old_text", "new_text"}),
+}
+_TOOL_RESULT_METADATA_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "provider",
+        "query",
+        "fallback_from",
+        "error",
+        "error_class",
+        "error_kind",
+    }
+)
+_SENTINELS: Final[frozenset[str]] = frozenset({"NO_REPLY", "HEARTBEAT_OK"})
+_HEARTBEAT_ACK_TOKEN: Final[str] = "HEARTBEAT_OK"
+_THINKING_ALIASES: Final[dict[str, str]] = {
+    "x-high": "xhigh",
+    "x_high": "xhigh",
+    "extra-high": "xhigh",
+    "extra_high": "xhigh",
+    "extra high": "xhigh",
+    "highest": "high",
+    "max": "high",
+    "on": "low",
+    "true": "medium",
+    "none": "off",
+    "false": "off",
+}
+
+
+def _truncate_json_string(value: str, max_chars: int) -> str:
+    if max_chars <= 0 or len(value) <= max_chars:
+        return value
+    if max_chars == 1:
+        return "…"
+    return value[: max_chars - 1] + "…"
+
+
+def _compact_json_for_tool_result_preview(
+    value: Any,
+    *,
+    max_string_chars: int,
+    max_list_items: int,
+) -> Any:
+    """Return a JSON-serializable preview that keeps structure bounded."""
+
+    if isinstance(value, str):
+        return _truncate_json_string(value, max_string_chars)
+    if isinstance(value, list):
+        return [
+            _compact_json_for_tool_result_preview(
+                item,
+                max_string_chars=max_string_chars,
+                max_list_items=max_list_items,
+            )
+            for item in value[:max_list_items]
+        ]
+    if isinstance(value, dict):
+        return {
+            str(key): _compact_json_for_tool_result_preview(
+                item,
+                max_string_chars=max_string_chars,
+                max_list_items=max_list_items,
+            )
+            for key, item in value.items()
+        }
+    return value
+
+
+def _bounded_tool_result_metadata(
+    parsed: Mapping[str, Any],
+) -> dict[str, str | int | float | bool | None]:
+    """Return bounded scalar metadata safe to store beside capped result text."""
+
+    metadata: dict[str, str | int | float | bool | None] = {}
+    for key in _TOOL_RESULT_METADATA_KEYS:
+        if key not in parsed:
+            continue
+        value = parsed[key]
+        if isinstance(value, str):
+            metadata[key] = _truncate_json_string(
+                value,
+                _MAX_TOOL_RESULT_METADATA_VALUE_CHARS,
+            )
+        elif isinstance(value, int | float | bool) or value is None:
+            metadata[key] = value
+    return metadata
+
+
+def _json_tool_result_preview(parsed: Any, original_chars: int, max_chars: int) -> str:
+    """Build a bounded, valid-JSON preview for persisted transcript display.
+
+    Tool results are often structured JSON consumed by the web UI. A plain
+    prefix slice can turn them into invalid JSON and hide top-level metadata
+    such as the active search provider. This helper prefers a valid JSON
+    preview with explicit truncation metadata while keeping the historical
+    transcript size cap.
+    """
+
+    if isinstance(parsed, dict):
+        base: dict[str, Any] = dict(parsed)
+    else:
+        base = {"value": parsed}
+    base["result_truncated"] = True
+    base["result_original_chars"] = original_chars
+
+    for max_list_items in (5, 3, 2, 1, 0):
+        for max_string_chars in (512, 256, 128, 64, 32, 16):
+            compacted = _compact_json_for_tool_result_preview(
+                base,
+                max_string_chars=max_string_chars,
+                max_list_items=max_list_items,
+            )
+            rendered = json.dumps(compacted, ensure_ascii=False, indent=2)
+            if len(rendered) <= max_chars:
+                return rendered
+
+    fallback: dict[str, Any] = {
+        "result_truncated": True,
+        "result_original_chars": original_chars,
+    }
+    if isinstance(parsed, dict):
+        fallback.update(_bounded_tool_result_metadata(parsed))
+    rendered = json.dumps(fallback, ensure_ascii=False, indent=2)
+    if len(rendered) <= max_chars:
+        return rendered
+    return json.dumps({"result_truncated": True}, ensure_ascii=False)
+
+
+def _tool_argument_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _persisted_tool_argument_projection(
+    *,
+    tool_name: str,
+    tool_use_id: str,
+    field: str,
+    value_text: str,
+    path_hint: Any,
+) -> str:
+    lines = [
+        _PERSISTED_TOOL_ARGUMENT_PROJECTION_PREFIX.rstrip("\n"),
+        f"tool: {tool_name}",
+        f"tool_use_id: {tool_use_id}",
+        f"field: {field}",
+        f"original_chars: {len(value_text)}",
+        f"sha256: {hashlib.sha256(value_text.encode('utf-8')).hexdigest()}",
+    ]
+    if isinstance(path_hint, str) and path_hint.strip():
+        lines.append(f"path: {path_hint.strip()}")
+    lines.extend(
+        [
+            "head:",
+            value_text[:_PERSISTED_TOOL_ARGUMENT_PREVIEW_CHARS],
+            "tail:",
+            value_text[-_PERSISTED_TOOL_ARGUMENT_PREVIEW_CHARS:],
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _persisted_tool_use_input(
+    tool_name: str,
+    tool_use_id: str,
+    arguments: dict[str, Any],
+    *,
+    max_field_chars: int = _MAX_PERSISTED_TOOL_ARGUMENT_FIELD_CHARS,
+) -> dict[str, Any]:
+    """Create the transcript-safe input for persisted file-writing tool calls."""
+
+    payload_fields = _TOOL_ARGUMENT_PAYLOAD_FIELDS.get(tool_name)
+    if not payload_fields:
+        return arguments
+
+    projected = dict(arguments)
+    changed = False
+    path_hint = projected.get("path")
+    for argument_name in payload_fields:
+        if argument_name not in projected:
+            continue
+        value_text = _tool_argument_text(projected[argument_name])
+        if len(value_text) <= max_field_chars:
+            continue
+        projected[argument_name] = _persisted_tool_argument_projection(
+            tool_name=tool_name,
+            tool_use_id=tool_use_id,
+            field=argument_name,
+            value_text=value_text,
+            path_hint=path_hint,
+        )
+        changed = True
+
+    return projected if changed else arguments
+
+
+def _persisted_tool_result_segment(
+    event: ToolResultEvent,
+    *,
+    max_chars: int = _MAX_TOOL_RESULT_CHARS,
+) -> dict[str, Any]:
+    """Create the transcript `tool_result` segment for a streamed event."""
+
+    result = event.result
+    segment: dict[str, Any] = {
+        "type": "tool_result",
+        "tool_use_id": event.tool_use_id,
+        "name": event.tool_name,
+        "result": result,
+        "is_error": event.is_error,
+    }
+    if event.execution_status is not None:
+        segment["execution_status"] = normalize_execution_status(event.execution_status)
+    if len(result) <= max_chars:
+        return segment
+
+    segment["result_truncated"] = True
+    segment["result_original_chars"] = len(result)
+    if "execution_status" in segment:
+        segment["execution_status"] = mark_execution_status_truncated(segment["execution_status"])
+    try:
+        parsed = json.loads(result)
+    except (json.JSONDecodeError, TypeError):
+        segment["result"] = result[:max_chars]
+        return segment
+
+    if isinstance(parsed, dict):
+        segment.update(_bounded_tool_result_metadata(parsed))
+    segment["result"] = _json_tool_result_preview(parsed, len(result), max_chars)
+    return segment
+
+
+def _artifact_delivery_failure_summary(event: ToolResultEvent) -> str | None:
+    if event.tool_name != _ARTIFACT_DELIVERY_TOOL_NAME or not event.is_error:
+        return None
+    raw = event.result.strip()
+    summary = raw
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        parsed = None
+    if isinstance(parsed, dict):
+        candidate = (
+            parsed.get("user_message")
+            or parsed.get("message")
+            or parsed.get("error")
+            or parsed.get("error_class")
+        )
+        if isinstance(candidate, str) and candidate.strip():
+            summary = candidate.strip()
+    summary = " ".join(summary.split())
+    if len(summary) > _ARTIFACT_DELIVERY_FAILURE_MAX_CHARS:
+        summary = summary[: _ARTIFACT_DELIVERY_FAILURE_MAX_CHARS - 3].rstrip() + "..."
+    return summary or "publish_artifact failed"
+
+
+def _artifact_delivery_failure_notice(*, partial: bool = False) -> str:
+    if partial:
+        return (
+            f"{_ARTIFACT_DELIVERY_FAILURE_MARKER} some generated files were attached, "
+            "but at least one file could not be attached. Ask me to resend the "
+            "missing file after I correct the generated file path."
+        )
+    return (
+        f"{_ARTIFACT_DELIVERY_FAILURE_MARKER} no downloadable file was attached "
+        "to this response. Ask me to resend the file after I correct the generated "
+        "file path."
+    )
+
+
+def _cancelled_partial_response_text(
+    partial_text: str,
+    artifacts: list[dict[str, Any]],
+) -> str:
+    partial_text = partial_text.rstrip()
+    if artifacts:
+        names = [
+            str(item.get("name") or item.get("filename") or "").strip()
+            for item in artifacts
+            if isinstance(item, dict)
+        ]
+        named = [name for name in names if name]
+        delivered = (
+            "The generated file was delivered: " + ", ".join(named) + "."
+            if named
+            else "The generated file was delivered."
+        )
+        return f"{partial_text}\n\n{delivered}" if partial_text else delivered
+    return f"{partial_text}\n\n[interrupted]" if partial_text else "[interrupted]"
+
+
+def _should_add_artifact_delivery_failure_notice(
+    *,
+    failure_summaries: list[str],
+    turn_artifacts: list[dict[str, Any]],
+    final_text: str,
+) -> bool:
+    if not failure_summaries:
+        return False
+    return _ARTIFACT_DELIVERY_FAILURE_MARKER not in final_text
+
+
+_SUBAGENT_TASK_PROTOCOL: Final[str] = (
+    "You are a spawned subagent. Execute only the delegated task and return "
+    "a compact result for the parent agent to use. Prefer a direct answer; "
+    "call tools only when the task explicitly requires external state, files, "
+    "network data, or tool output. If the delegated task asks you to reply with "
+    "an exact phrase, only reply, output a sentinel token, or avoid explanation, "
+    "Do not call tools and return exactly that requested text. Do not treat "
+    "uppercase sentinel-like strings as shell commands, filenames, or config keys."
+)
+
+
+def _should_use_selector_fallback(provider_name: str, event: ProviderErrorEvent) -> bool:
+    kind = classify_provider_error(
+        provider_name=provider_name,
+        status_code=int(event.code) if str(event.code).isdigit() else None,
+        raw_code=event.code,
+        message=event.message,
+    )
+    return decide_recovery_action(kind) in {
+        ProviderRecoveryAction.FALLBACK_PROVIDER,
+        ProviderRecoveryAction.RETRY_THEN_FALLBACK,
+    }
+
+
+def _normalize_heartbeat_text(
+    text: str,
+    *,
+    run_kind: str,
+    heartbeat_ack_max_chars: int,
+) -> str:
+    stripped = text.strip()
+    if stripped in _SENTINELS:
+        log.debug("turn_runner.sentinel_suppressed", sentinel=stripped)
+        return ""
+    if run_kind != "heartbeat":
+        return text
+
+    def _suppressed(payload: str) -> bool:
+        return len(payload.strip()) <= heartbeat_ack_max_chars
+
+    if stripped.startswith(_HEARTBEAT_ACK_TOKEN):
+        remainder = stripped[len(_HEARTBEAT_ACK_TOKEN) :].strip()
+        if _suppressed(remainder):
+            return ""
+
+    if stripped.endswith(_HEARTBEAT_ACK_TOKEN):
+        remainder = stripped[: -len(_HEARTBEAT_ACK_TOKEN)].strip()
+        if _suppressed(remainder):
+            return ""
+
+    return text
+
+
+def _drop_unpaired_tool_use_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    paired_ids = {
+        segment.get("tool_use_id")
+        for segment in segments
+        if isinstance(segment, dict) and segment.get("type") == "tool_result"
+    }
+    return [
+        segment
+        for segment in segments
+        if not (
+            isinstance(segment, dict)
+            and segment.get("type") == "tool_use"
+            and segment.get("tool_use_id") not in paired_ids
+        )
+    ]
+
+
+class _SelectorFallbackProvider:
+    """Provider wrapper that switches to selector fallback on pre-content errors."""
+
+    def __init__(self, provider: Any, selector: Any) -> None:
+        self._provider = provider
+        self._selector = selector
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._provider, name)
+
+    @property
+    def provider_name(self) -> str:
+        return getattr(self._provider, "provider_name", "")
+
+    def fallback_after_invalid_response(self, reason: str) -> bool:
+        try:
+            self._provider = self._selector.next_fallback_after_failure(RuntimeError(reason))
+        except Exception:
+            return False
+        return True
+
+    def chat(
+        self,
+        messages: list[Any],
+        tools: Any = None,
+        config: Any = None,
+    ) -> AsyncIterator[Any]:
+        return self._chat(messages, tools=tools, config=config)
+
+    async def _chat(
+        self,
+        messages: list[Any],
+        tools: Any = None,
+        config: Any = None,
+    ) -> AsyncIterator[Any]:
+        emitted_user_visible_content = False
+        pre_text_buffer: list[Any] = []
+
+        def drain_pre_text_buffer() -> list[Any]:
+            drained = list(pre_text_buffer)
+            pre_text_buffer.clear()
+            return drained
+
+        async for event in self._provider.chat(messages, tools=tools, config=config):
+            if emitted_user_visible_content:
+                yield event
+                continue
+
+            if isinstance(event, ProviderErrorEvent) and _should_use_selector_fallback(
+                self.provider_name, event
+            ):
+                try:
+                    self._provider = self._selector.next_fallback_after_failure(
+                        RuntimeError(event.message)
+                    )
+                except Exception:
+                    for buffered_event in drain_pre_text_buffer():
+                        yield buffered_event
+                    yield event
+                    return
+                async for fallback_event in self._provider.chat(
+                    messages,
+                    tools=tools,
+                    config=config,
+                ):
+                    yield fallback_event
+                return
+
+            if _is_non_empty_provider_text_delta(event):
+                for buffered_event in drain_pre_text_buffer():
+                    yield buffered_event
+                emitted_user_visible_content = True
+                yield event
+                continue
+
+            if getattr(event, "kind", "") == "done":
+                for buffered_event in drain_pre_text_buffer():
+                    yield buffered_event
+                yield event
+                continue
+
+            if isinstance(event, ProviderErrorEvent):
+                for buffered_event in drain_pre_text_buffer():
+                    yield buffered_event
+                yield event
+                continue
+
+            pre_text_buffer.append(event)
+
+        for buffered_event in drain_pre_text_buffer():
+            yield buffered_event
+
+    async def list_models(self) -> list[Any]:
+        return list(await self._provider.list_models())
+
+
+def _is_non_empty_provider_text_delta(event: Any) -> bool:
+    """Return True only once a provider event carries user-visible text."""
+    return getattr(event, "kind", "") == "text_delta" and bool(getattr(event, "text", ""))
+
+
+@dataclass
+class MemorySnapshot:
+    """Frozen memory content for stable system prompt prefixes."""
+
+    memory_md: str | None = None
+    daily_notes: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class BootstrapSnapshot:
+    """Frozen workspace bootstrap files for stable per-session prompt prefixes."""
+
+    workspace_files: dict[str, str] = field(default_factory=dict)
+    report: list[BootstrapFileReport] = field(default_factory=list)
+
+
+_PDF_ATTACHMENT_TEXT_LIMIT = 200_000
+_TEXT_ATTACHMENT_TEXT_LIMIT = 200_000
+_PREVIEW_ONLY_TEXT_ATTACHMENT_CHARS = 4_000
+_PREVIEW_ONLY_TEXT_ATTACHMENT_LINES = 80
+
+_XML_ATTR_ESCAPES = {
+    "<": "&lt;",
+    ">": "&gt;",
+    "&": "&amp;",
+    '"': "&quot;",
+    "'": "&apos;",
+}
+
+
+def _xml_escape_attr(value: str) -> str:
+    """XML-escape characters that would break an HTML/XML attribute value.
+
+    Matches the file-context wrapper escaping contract.
+    """
+
+    return "".join(_XML_ATTR_ESCAPES.get(ch, ch) for ch in value)
+
+
+def _sanitize_attachment_filename(value: Any, fallback: str = "attachment") -> str:
+    """Strip newlines/tabs and trim; fall back if the result is empty."""
+
+    if not isinstance(value, str):
+        return fallback
+    cleaned = value.replace("\r", " ").replace("\n", " ").replace("\t", " ").strip()
+    return cleaned or fallback
+
+
+def _escape_file_block_content(value: str) -> str:
+    """Escape literal ``</file>`` and ``<file `` substrings inside payloads.
+
+    Without this, a user-supplied CSV / markdown body containing the wrapper
+    sentinel could be mis-parsed by the model as the boundary of a *different*
+    attachment, enabling prompt-injection. The replacement is XML-entity
+    style so the payload remains human-readable in the prompt.
+    """
+
+    import re as _re
+
+    # Order matters: do the close-tag pattern first so we don't double-escape
+    # the prefix it shares with the open-tag pattern.
+    out = _re.sub(r"<\s*/\s*file\s*>", "&lt;/file&gt;", value, flags=_re.IGNORECASE)
+    out = _re.sub(r"<\s*file\b", "&lt;file", out, flags=_re.IGNORECASE)
+    return out
+
+
+def _render_file_context_block(filename: str, mime: str, content: str) -> str:
+    """Render a ``<file name="…" mime="…">\\n<content>\\n</file>`` envelope."""
+
+    safe_name = _xml_escape_attr(_sanitize_attachment_filename(filename))
+    safe_mime = _xml_escape_attr(mime)
+    safe_content = _escape_file_block_content(content)
+    return f'<file name="{safe_name}" mime="{safe_mime}">\n{safe_content}\n</file>'
+
+
+def _truncate_attachment_text(text: str, *, limit: int = _PDF_ATTACHMENT_TEXT_LIMIT) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n\n[attachment text truncated: {len(text)} chars total]"
+
+
+def _preview_attachment_text(
+    text: str,
+    *,
+    char_limit: int = _PREVIEW_ONLY_TEXT_ATTACHMENT_CHARS,
+    line_limit: int = _PREVIEW_ONLY_TEXT_ATTACHMENT_LINES,
+) -> tuple[str, bool]:
+    lines = text.splitlines(keepends=True)
+    preview = "".join(lines[:line_limit])
+    truncated = len(lines) > line_limit
+    if len(preview) > char_limit:
+        preview = preview[:char_limit]
+        truncated = True
+    elif len(text) > len(preview):
+        truncated = True
+    return preview, truncated
+
+
+def _attachment_ref_material_path(
+    attachment: dict[str, Any],
+    *,
+    media_root: Path | None,
+) -> str | None:
+    path = attachment.get("_material_path")
+    if isinstance(path, str) and path:
+        return path
+    if media_root is None or not is_attachment_ref(attachment):
+        return None
+    scope = attachment.get("scope")
+    sha = attachment.get("sha256") or attachment.get("material_id")
+    if not isinstance(scope, str) or not isinstance(sha, str):
+        return None
+    try:
+        return str(transcript_material_path(media_root, scope, sha))
+    except ValueError:
+        return None
+
+
+def _render_preview_only_attachment_text(
+    attachment: dict[str, Any],
+    *,
+    filename: str,
+    mime: str,
+    raw_bytes: bytes,
+    media_root: Path | None,
+) -> str:
+    try:
+        decoded = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return "[attachment unavailable: declared text content is not valid UTF-8]"
+
+    preview, truncated = _preview_attachment_text(decoded)
+    material_path = _attachment_ref_material_path(attachment, media_root=media_root)
+    estimated_tokens = attachment.get("_material_estimated_tokens")
+    estimated_line = (
+        f"estimated_tokens: {estimated_tokens}"
+        if isinstance(estimated_tokens, int)
+        else "estimated_tokens: unknown"
+    )
+    path_line = f"path: {material_path}" if material_path else "path: unavailable"
+    read_hint = (
+        f'read_full: use read_file(path="{material_path}", offset=1, limit=200) '
+        "and adjust offset/limit as needed."
+        if material_path
+        else "read_full: material path unavailable."
+    )
+    truncation = (
+        f"\n\n[attachment preview truncated: {len(decoded)} chars total]"
+        if truncated
+        else ""
+    )
+    return (
+        "[large text attachment materialized]\n"
+        f"name: {filename}\n"
+        f"mime: {mime}\n"
+        f"size_bytes: {len(raw_bytes)}\n"
+        f"{estimated_line}\n"
+        f"{path_line}\n"
+        f"{read_hint}\n\n"
+        "preview:\n"
+        f"{preview}"
+        f"{truncation}"
+    )
+
+
+def _extract_pdf_attachment_text(raw_bytes: bytes, filename: str) -> str:
+    """Extract text from a PDF attachment before it reaches any provider.
+
+    PDFs are converted into plain text context so provider-specific document
+    block handling cannot silently drop files that an adapter does not know how
+    to encode.
+    """
+
+    import io
+
+    try:
+        import pdfplumber
+    except ImportError as exc:  # pragma: no cover - dependency is declared
+        raise ValueError("PDF text extraction requires pdfplumber") from exc
+
+    try:
+        page_texts: list[str] = []
+        with pdfplumber.open(io.BytesIO(raw_bytes)) as doc:
+            for index, page in enumerate(doc.pages, start=1):
+                page_text = page.extract_text() or ""
+                if page_text.strip():
+                    page_texts.append(f"--- Page {index} ---\n{page_text}")
+    except Exception as exc:  # noqa: BLE001 - pdfplumber raises several parser errors
+        raise ValueError(f"PDF attachment {filename!r} could not be read: {exc}") from exc
+
+    extracted = "\n\n".join(page_texts).strip()
+    if not extracted:
+        raise ValueError(f"PDF attachment {filename!r} has no extractable text")
+    return _truncate_attachment_text(extracted)
+
+
+# Strong past-tense / perfect-aspect phrases that signal the model is claiming
+# to have produced an image. Only checked when ``image_generate`` is available
+# and was not invoked. Future-tense ("I'll draw…", "给你画…") is intentionally
+# excluded — those express intent and are often followed by an actual tool call
+# in the same or next iteration; flagging them is noisy.
+_IMAGE_CLAIM_PATTERNS = (
+    # Chinese: perfect aspect / demonstrative past
+    "已生成图片",
+    "生成了图片",
+    "画了一张",
+    "这是生成的图",
+    "已为您生成",
+    "已经画好",
+    "绘制好了",
+    # English: past / perfect tense
+    "generated an image",
+    "i have created the image",
+    "i've created the image",
+    "i have generated the image",
+    "i've generated the image",
+    # Specific "here is/here's the image I …" — require the "I" pronoun to
+    # avoid matching "here's the image you uploaded".
+    "here is the image i",
+    "here's the image i",
+    # Markdown embed of a fake generated asset.
+    "![generated",
+)
+
+
+def _claims_image_without_tool_use(
+    final_text: str,
+    tool_defs: list[Any],
+    turn_segments: list[dict],
+) -> bool:
+    """Detect: model claimed image generation but never called image_generate.
+
+    Returns True only when the tool was *available* (so we know the model had
+    the option) and *not called* in this turn yet the final text matches a claim
+    pattern. Used to surface a non-persistent UI warning; never writes to transcript.
+    """
+    tool_names = {getattr(td, "name", "") for td in tool_defs}
+    if "image_generate" not in tool_names:
+        return False
+    had_image_call = any(
+        isinstance(seg, dict)
+        and seg.get("type") == "tool_use"
+        and seg.get("name") == "image_generate"
+        for seg in turn_segments
+    )
+    if had_image_call:
+        return False
+    if not final_text:
+        return False
+    lowered = final_text.lower()
+    return any(p.lower() in lowered for p in _IMAGE_CLAIM_PATTERNS)
+
+
+class TurnRunner:
+    """Orchestrates a complete agent turn: provider → tools → prompt → pipeline → Agent.
+
+    Uses supplied per-session locking and owns transcript persistence.
+    All entry points (Web RPC, CLI, Channel) converge here.
+
+    Lock ordering invariant:
+        TurnRunner no longer owns an internal lock dict.
+        Per-session locks are supplied by an external ``session_lock_provider``
+        (``Callable[[str], asyncio.Lock]``) injected at construction time.
+
+        Gateway path: provider = ``TaskRuntime._get_session_lock_for_turn``.
+        It returns the short write lock used for transcript/session state
+        mutation. TaskRuntime owns a separate execution lock and marks the
+        call chain so ``TurnRunner.run()`` skips its legacy coarse acquire while
+        append adapters still acquire the write lock.
+
+        CLI / standalone path: provider = ``_standalone_lock_provider`` from
+        ``build_turn_runner_from_services``, which maintains its own dict.
+
+        The old model/approval-wide write lock is eliminated on the gateway
+        path. External I/O must stay outside the write lock.
+    """
+
+    def __init__(
+        self,
+        provider_selector: Any,
+        tool_registry: Any | None = None,
+        session_manager: Any | None = None,
+        skill_loader: Any | None = None,
+        usage_tracker: Any | None = None,
+        config: Any | None = None,
+        memory_sync_managers: dict[str, Any] | None = None,
+        model_catalog: Any | None = None,
+        memory_retrievers: dict[str, Any] | None = None,
+        turn_capture_services: dict[str, Any] | None = None,
+        session_flush_service: SessionFlushService | None = None,
+        session_lock_provider: Callable[[str], asyncio.Lock] | None = None,
+        diagnostics_state: Any | None = None,
+        turn_hooks: Sequence[TurnHook] | None = None,
+        compaction_hooks: Sequence[CompactionHook] | None = None,
+    ) -> None:
+        self._provider_selector = provider_selector
+        self._tool_registry = tool_registry
+        self._session_manager = session_manager
+        self._skill_loader = skill_loader
+        self._usage_tracker = usage_tracker
+        self._config = config
+        self._last_agent_max_iterations_source = "AgentConfig default"
+        self._memory_sync_managers = memory_sync_managers
+        self._model_catalog = model_catalog
+        self._memory_retrievers = memory_retrievers
+        self._turn_capture_services = turn_capture_services
+        self._session_flush_service = session_flush_service
+        self._diagnostics_state = diagnostics_state
+        self._router_control_hold_store = RouterControlHoldStore()
+        # TurnHook surface. The default trace hook reproduces the inline trace
+        # event behavior while keeping the event sink replaceable at construction.
+        if turn_hooks is None:
+            self._turn_hooks: tuple[TurnHook, ...] = (DefaultTraceEmitterHook(),)
+        else:
+            self._turn_hooks = tuple(turn_hooks)
+        # CompactionHook surface. CompactionAndHistoryStage fans
+        # before/after-compact events out through these hooks. Empty tuple by
+        # default means compaction runs with no hook fan-out.
+        self._compaction_hooks: tuple[CompactionHook, ...] = (
+            tuple(compaction_hooks) if compaction_hooks else ()
+        )
+        # Per-session lock provider.
+        # Gateway path: task_runtime._get_session_lock_for_turn (wired in boot.py).
+        # CLI/standalone path: _standalone_lock_provider from build_turn_runner_from_services.
+        # Test/direct-construction path: fallback dict created here inside a closure.
+        # TurnRunner no longer owns a named per-session lock dict as an instance attribute.
+        # The lock dict lives entirely in the provider closure.
+        if session_lock_provider is None:
+            _fallback_locks: dict[str, asyncio.Lock] = {}
+
+            def _fallback_provider(key: str) -> asyncio.Lock:
+                return _fallback_locks.setdefault(key, asyncio.Lock())
+
+            session_lock_provider = _fallback_provider
+        self._session_lock_provider = session_lock_provider
+        # Frozen memory snapshots keyed by (agent_id, session_key).
+        # Captured at session start, refreshed on write/compaction.
+        self._memory_snapshots: dict[tuple[str, str], MemorySnapshot] = {}
+        # Frozen bootstrap snapshots keyed by (agent_id, session_key, context_mode).
+        # Captured on first prompt assembly so bootstrap-source edits do not
+        # churn the cacheable prefix mid-session.
+        self._bootstrap_snapshots: dict[tuple[str, str, str], BootstrapSnapshot] = {}
+        self._compaction_failures: dict[str, _CompactionFailureState] = {}
+        self._turn_compaction_attempted_sessions: set[str] = set()
+        self._turn_compacted_sessions: set[str] = set()
+        self._active_pre_compaction_flush_tasks: dict[str, asyncio.Task] = {}
+        self._emergency_compaction_overrides: dict[str, _EmergencyCompactionOverride] = {}
+        # TurnRunner stage decomposition InputStage instance. Holds no per-turn state;
+        # constructed once. Active unconditionally as of.
+        self._input_stage = InputStage(extra_ctx=_TurnRunnerExtraContextAdapter())
+        # TurnRunner stage decomposition ProviderAndToolsStage instance. Holds no
+        # per-turn state. Active unconditionally as of.
+        self._provider_and_tools_stage = ProviderAndToolsStage(
+            provider_resolver=_TurnRunnerProviderResolverAdapter(self),
+            tool_builder=_TurnRunnerToolBuilderAdapter(self),
+        )
+        # TurnRunner stage decomposition PromptAssemblerStage instance. Holds no
+        # per-turn state. Active unconditionally as of.
+        self._prompt_assembler_stage = PromptAssemblerStage(
+            prompt_assembler=_TurnRunnerPromptAssemblerAdapter(self),
+            pipeline_executor=_TurnRunnerPipelineExecutionAdapter(self),
+            router_context=_TurnRunnerRouterContextAdapter(self),
+            prompt_config_resolver=_TurnRunnerPromptConfigResolverAdapter(self),
+            prompt_report_builder=_PromptReportBuilderAdapter(),
+            session_id_resolver=_TurnRunnerSessionIdResolverAdapter(self),
+            memory_fingerprint=_TurnRunnerMemoryFingerprintAdapter(self),
+        )
+        # TurnRunner stage decomposition AgentBootstrapStage instance. Holds no
+        # per-turn state. Active unconditionally as of.
+        self._agent_bootstrap_stage = AgentBootstrapStage(
+            timeout_budget=_TurnRunnerTimeoutBudgetAdapter(self),
+            model_catalog=_TurnRunnerModelCatalogAdapter(self),
+            agent_config_builder=_TurnRunnerAgentConfigBuilderAdapter(self),
+            memory_snapshot=_TurnRunnerMemorySnapshotAdapter(self),
+            agent_factory=_TurnRunnerAgentFactoryAdapter(self),
+        )
+        # TurnRunner stage decomposition CompactionAndHistoryStage instance. Holds no
+        # per-turn state. Active unconditionally as of.
+        self._compaction_and_history_stage = CompactionAndHistoryStage(
+            t3_upgrade=_TurnRunnerT3UpgradeCompactionAdapter(self),
+            preflight=_TurnRunnerPreflightCompactionAdapter(self),
+            history_loader=_TurnRunnerHistoryLoaderAdapter(self),
+            request_context_prepender=_RequestContextPrependAdapter(),
+            compaction_hooks=self._compaction_hooks,
+        )
+        # TurnRunner stage decomposition AttachmentStage instance. Holds no per-turn
+        # state. Active unconditionally as of.
+        self._attachment_stage = AttachmentStage(
+            builder=_TurnRunnerAttachmentMessageBuilderAdapter(self),
+        )
+        # TurnRunner stage decomposition StreamConsumerStage instance. Holds no
+        # per-turn state. Active unconditionally as of. The
+        # warning transformer binds ``self._handle_runtime_warning`` as
+        # a one-method callable; the recording-fake discipline applies
+        # identically to a Protocol-shaped port.
+        self._stream_consumer_stage = StreamConsumerStage(
+            agent_run=_TurnRunnerAgentRunAdapter(),
+            compaction_persist=_TurnRunnerCompactionPersistAdapter(self),
+            memory_snapshot_refresh=_TurnRunnerMemorySnapshotRefreshAdapter(self),
+            system_prompt_refresh=_TurnRunnerSystemPromptRefreshAdapter(self),
+            memory_sync_notify=_TurnRunnerMemorySyncNotifyAdapter(),
+            warning_transformer=self._handle_runtime_warning,
+            compaction_hooks=self._compaction_hooks,
+        )
+        # TurnRunner stage decomposition TurnFinalizerStage instance. Holds no
+        # per-turn state. Active unconditionally as of. Adapter
+        # contracts:
+        #   * TranscriptAppendPort folds the ``token_count`` introspect
+        #     and the ``session_manager is None`` guard.
+        #   * TurnMemoryCapturePort forwards verbatim; the stage owns
+        #     the log-and-continue try/except.
+        #   * SessionTotalsPort inlines the post-DoneEvent cost rollup
+        #     bit-identically to the legacy slice.
+        #   * TurnErrorPersistPort forwards verbatim; the helper owns
+        #     its own try/except + None guards.
+        self._turn_finalizer_stage = TurnFinalizerStage(
+            transcript_append=_TurnRunnerTranscriptAppendAdapter(self),
+            turn_memory_capture=_TurnRunnerTurnMemoryCaptureAdapter(self),
+            session_totals=_TurnRunnerSessionTotalsAdapter(self),
+            turn_error_persist=_TurnRunnerTurnErrorPersistAdapter(self),
+        )
+
+    @property
+    def router_control_hold_store(self) -> RouterControlHoldStore:
+        """Session-scoped router holds, shared by the router_control tool and
+        the user-facing /c0-/c3 slash commands (gateway ``router.hold.*`` RPC)."""
+        return self._router_control_hold_store
+
+    @property
+    def router_control_config(self) -> Any:
+        """Active AgentOS Router config section, or None when not configured."""
+        return getattr(self._config, "agentos_router", None)
+
+    def has_compacted_this_turn(self, session_key: str) -> bool:
+        return session_key in self._turn_compacted_sessions
+
+    def mark_compacted_this_turn(self, session_key: str) -> None:
+        self._turn_compacted_sessions.add(session_key)
+
+    def has_attempted_compaction_this_turn(self, session_key: str) -> bool:
+        return session_key in self._turn_compaction_attempted_sessions
+
+    def mark_compaction_attempted_this_turn(self, session_key: str) -> None:
+        self._turn_compaction_attempted_sessions.add(session_key)
+
+    def clear_compacted_this_turn(self, session_key: str) -> None:
+        self._turn_compacted_sessions.discard(session_key)
+
+    def clear_compaction_turn_state(self, session_key: str) -> None:
+        self._turn_compaction_attempted_sessions.discard(session_key)
+        self._turn_compacted_sessions.discard(session_key)
+
+    def refresh_memory_snapshot(self, agent_id: str) -> None:
+        """Refresh frozen snapshots for all sessions of the given agent.
+
+        Called by the on_memory_write callback when agent writes to
+        MEMORY.md or daily notes via memory_save.
+        """
+        ws = self._resolve_memory_source_dir(agent_id)
+        new_snap = MemorySnapshot(
+            memory_md=self._load_memory_md(ws),
+            daily_notes=self._load_daily_notes(ws),
+        )
+        for key in list(self._memory_snapshots):
+            if key[0] == agent_id:
+                self._memory_snapshots[key] = new_snap
+
+    def _handle_memory_source_write(self, agent_id: str, path: str) -> None:
+        """Refresh memory index/snapshots after a source Markdown file write."""
+        sync_manager = (
+            self._memory_sync_managers.get(agent_id) if self._memory_sync_managers else None
+        )
+        mark_dirty = getattr(sync_manager, "mark_dirty", None)
+        if callable(mark_dirty):
+            mark_dirty()
+        self.refresh_memory_snapshot(agent_id)
+
+    def _handle_bootstrap_source_write(self, agent_id: str, path: str) -> None:
+        """Drop frozen bootstrap snapshots after a bootstrap workspace file write."""
+        for key in list(self._bootstrap_snapshots):
+            if key[0] == agent_id:
+                del self._bootstrap_snapshots[key]
+
+    def _with_runtime_write_callbacks(
+        self, tool_context: ToolContext, agent_id: str
+    ) -> ToolContext:
+        """Attach runtime snapshot refresh callbacks without discarding caller hooks."""
+        if not tool_context.memory_source_dir:
+            try:
+                tool_context = replace(
+                    tool_context,
+                    memory_source_dir=str(self._resolve_memory_source_dir(agent_id)),
+                )
+            except Exception:  # noqa: BLE001 - memory path should not block tool setup
+                pass
+
+        previous_memory_write = tool_context.on_memory_source_write
+        if previous_memory_write is None:
+            tool_context = replace(
+                tool_context,
+                on_memory_source_write=self._handle_memory_source_write,
+            )
+        else:
+
+            def _on_memory_source_write(agent_id: str, path: str) -> None:
+                previous_memory_write(agent_id, path)
+                self._handle_memory_source_write(agent_id, path)
+
+            tool_context = replace(
+                tool_context,
+                on_memory_source_write=_on_memory_source_write,
+            )
+
+        previous_bootstrap_write = tool_context.on_bootstrap_source_write
+        if previous_bootstrap_write is None:
+            return replace(
+                tool_context,
+                on_bootstrap_source_write=self._handle_bootstrap_source_write,
+            )
+
+        def _on_bootstrap_source_write(agent_id: str, path: str) -> None:
+            previous_bootstrap_write(agent_id, path)
+            self._handle_bootstrap_source_write(agent_id, path)
+
+        return replace(
+            tool_context,
+            on_bootstrap_source_write=_on_bootstrap_source_write,
+        )
+
+    async def _with_artifact_context(
+        self,
+        tool_context: ToolContext,
+        session_key: str,
+    ) -> ToolContext:
+        attachments_cfg = getattr(self._config, "attachments", None)
+        media_root = self._attachment_media_root()
+        session_id = await self._resolve_session_id_for_log(session_key)
+        if not session_id:
+            session_id = session_key.split(":")[-1] or session_key
+        return replace(
+            tool_context,
+            session_key=session_key,
+            artifact_media_root=str(media_root),
+            artifact_session_id=session_id,
+            workspace_file_writes=[],
+            artifact_max_bytes=getattr(attachments_cfg, "artifact_max_bytes", None),
+            artifact_disk_budget_bytes=getattr(
+                attachments_cfg,
+                "artifact_disk_budget_bytes",
+                None,
+            ),
+        )
+
+    async def _capture_turn_memory(
+        self,
+        *,
+        agent_id: str,
+        session_key: str,
+        runtime_message: str,
+        final_text: str,
+        input_mode: str,
+        tool_context: ToolContext | None,
+        input_provenance: dict[str, Any] | None,
+        run_kind: str = "default",
+        no_memory_capture: bool = False,
+    ) -> None:
+        memory_cfg = getattr(self._config, "memory", None)
+        if not self._turn_memory_capture_allowed(
+            no_memory_capture=no_memory_capture,
+            input_mode=input_mode,
+            run_kind=run_kind,
+            input_provenance=input_provenance,
+            memory_config=memory_cfg,
+        ):
+            return
+        if self._session_manager is None or not self._turn_capture_services:
+            return
+        capture_service = self._turn_capture_services.get(
+            agent_id
+        ) or self._turn_capture_services.get("main")
+        if capture_service is None:
+            return
+        session = await self._session_manager.get_session(session_key)
+        if session is None:
+            return
+        await capture_service.capture_turn(
+            session_key=session_key,
+            session_id=getattr(session, "session_id", ""),
+            user_text=runtime_message,
+            assistant_text=final_text,
+            source=self._build_turn_call_source(
+                tool_context,
+                input_provenance,
+                run_kind=run_kind,
+            ),
+            captured_at=datetime.now(tz=UTC),
+            no_memory_capture=no_memory_capture,
+        )
+
+    @staticmethod
+    def _capture_filter_matches(value: str | None, excluded_values: Any) -> bool:
+        if not value:
+            return False
+        if isinstance(excluded_values, str):
+            raw_patterns = [excluded_values]
+        else:
+            raw_patterns = list(excluded_values or [])
+        normalized_value = _normalize_capture_kind(value)
+        value_parts = {part for part in normalized_value.split("_") if part}
+        for pattern in raw_patterns:
+            if pattern is None:
+                continue
+            normalized_pattern = _normalize_capture_kind(str(pattern))
+            if not normalized_pattern:
+                continue
+            if normalized_value == normalized_pattern or normalized_pattern in value_parts:
+                return True
+        return False
+
+    @staticmethod
+    def _input_provenance_kind(input_provenance: dict[str, Any] | None) -> str | None:
+        if not isinstance(input_provenance, dict):
+            return None
+        kind = input_provenance.get("kind")
+        return str(kind) if kind is not None and str(kind) else None
+
+    @classmethod
+    def _turn_memory_capture_allowed(
+        cls,
+        *,
+        no_memory_capture: bool,
+        input_mode: str,
+        run_kind: str | None,
+        input_provenance: dict[str, Any] | None,
+        memory_config: Any | None,
+    ) -> bool:
+        if no_memory_capture or input_mode != "user":
+            return False
+        if memory_config is None:
+            return True
+        if cls._capture_filter_matches(
+            run_kind,
+            getattr(memory_config, "capture_excluded_run_kinds", []),
+        ):
+            return False
+        provenance_kind = cls._input_provenance_kind(input_provenance)
+        if cls._capture_filter_matches(
+            provenance_kind,
+            getattr(memory_config, "capture_excluded_provenance_kinds", []),
+        ):
+            return False
+        return True
+
+    def _get_session_lock(self, session_key: str) -> asyncio.Lock:
+        """Return the per-session lock for *session_key* from the external provider.
+
+        TurnRunner no longer owns an internal lock dict.  All per-session
+        locks are managed by the provider supplied at construction
+        (TaskRuntime._get_session_lock_for_turn for the gateway path, or the
+        standalone provider for CLI paths).
+
+        External callers (rpc_sessions.py, channel_dispatch.py) that call this
+        directly receive the short write lock used for transcript/session state
+        mutation. Gateway TaskRuntime uses a separate execution lock for the
+        long-running turn lifecycle.
+        """
+        return self._session_lock_provider(session_key)
+
+    def get_session_lock(self, session_key: str) -> asyncio.Lock:
+        """Public lock-provider seam for RPC/session services."""
+        return self._get_session_lock(session_key)
+
+    def set_session_lock_provider(self, provider: Callable[[str], asyncio.Lock]) -> None:
+        """Replace the lock provider at the gateway composition root."""
+        self._session_lock_provider = provider
+
+    @contextlib.asynccontextmanager
+    async def _session_write_context(self, session_key: str) -> AsyncIterator[None]:
+        lock = self.get_session_lock(session_key)
+        bypass_only = _SESSION_LOCK_BYPASS_ONLY.get(None)
+        if bypass_only is not None and id(lock) in bypass_only:
+            async with lock:
+                yield
+            return
+        yield
+
+    def _session_write_context_factory(
+        self,
+        session_key: str,
+    ) -> Callable[[], contextlib.AbstractAsyncContextManager[None]]:
+        return lambda: self._session_write_context(session_key)
+
+    async def _append_session_message(self, session_key: str, **append_kwargs: Any) -> Any:
+        if self._session_manager is None:
+            return None
+        async with self._session_write_context(session_key):
+            return await self._session_manager.append_message(
+                session_key,
+                **append_kwargs,
+            )
+
+    async def run(
+        self,
+        message: str,
+        session_key: str,
+        tool_context: ToolContext,
+        agent_id: str = "main",
+        model: str | None = None,
+        attachments: list[dict] | None = None,
+        timeout: float | None = None,
+        max_iterations: int | None = None,
+        iteration_timeout: float | None = None,
+        tool_timeout: float | None = None,
+        request_timeout: float | None = None,
+        max_provider_retries: int | None = None,
+        length_capped_continuations: int | None = None,
+        input_mode: str = "user",
+        persist_input: bool = False,
+        input_provenance: dict[str, Any] | None = None,
+        history_has_persisted_user: bool = True,
+        fresh_user_session: bool | None = None,
+        session_intent: str | None = None,
+        semantic_message: str | None = None,
+        run_kind: str = "default",
+        heartbeat_ack_max_chars: int = 300,
+        bootstrap_context_mode: str | None = None,
+        no_memory_capture: bool = False,
+        ingress_pipeline_steps: list[PipelineStepRecord] | None = None,
+        router_control_replay_depth: int = 0,
+    ) -> AsyncIterator[AgentEvent]:
+        """Run one agent turn with full orchestration.
+
+        Acquires per-session lock, then:
+        1. Resolve provider (cloned selector — no shared state mutation)
+        2. Build tools + handler from registry (filtered by tool_context)
+        3. Assemble identity system prompt
+        4. Run pre-turn pipeline (model routing, AgentOS Router, skills, prompt cache)
+        5. Load session history
+        6. Construct and run Agent
+        7. Persist assistant response to transcript
+        """
+        session_key = canonicalize_session_key(session_key)
+        agent_id = normalize_agent_id(agent_id)
+        lock = self.get_session_lock(session_key)
+        effective_tool_context = replace(
+            tool_context,
+            session_key=session_key,
+            tool_run_budget_key=f"{session_key}:{uuid.uuid4().hex}",
+            router_control_config=getattr(self._config, "agentos_router", None),
+            router_control_hold_store=self._router_control_hold_store,
+            router_control_replay_depth=router_control_replay_depth,
+            router_control_turn_hold_applied=False,
+        )
+        # Re-entry detection: check whether this call chain already serializes
+        # the turn lifecycle. On the gateway path TaskRuntime marks ownership
+        # while holding its execution lock, so TurnRunner skips the legacy
+        # coarse lock. lock.locked() is intentionally NOT used because it cannot
+        # distinguish owners under concurrent turns.
+        current_task = asyncio.current_task()
+        owner_map = _SESSION_LOCK_OWNER.get(None)
+        _caller_holds_lock = owner_map is not None and id(lock) in owner_map
+        if _caller_holds_lock:
+            # Same call chain already serializes this turn.
+            try:
+                async for event in self._run_turn(
+                    message,
+                    session_key,
+                    agent_id,
+                    model,
+                    attachments or [],
+                    effective_tool_context,
+                    timeout=timeout,
+                    max_iterations=max_iterations,
+                    iteration_timeout=iteration_timeout,
+                    tool_timeout=tool_timeout,
+                    request_timeout=request_timeout,
+                    max_provider_retries=max_provider_retries,
+                    length_capped_continuations=length_capped_continuations,
+                    input_mode=input_mode,
+                    persist_input=persist_input,
+                    input_provenance=input_provenance,
+                    history_has_persisted_user=history_has_persisted_user,
+                    fresh_user_session=fresh_user_session,
+                    session_intent=session_intent,
+                    semantic_message=semantic_message,
+                    run_kind=run_kind,
+                    heartbeat_ack_max_chars=heartbeat_ack_max_chars,
+                    bootstrap_context_mode=bootstrap_context_mode,
+                    no_memory_capture=no_memory_capture,
+                    ingress_pipeline_steps=ingress_pipeline_steps,
+                    router_control_replay_depth=router_control_replay_depth,
+                ):
+                    yield event
+            finally:
+                self.clear_compaction_turn_state(session_key)
+        else:
+            async with lock:
+                # Record this Task as the lock owner in the ContextVar so that
+                # any nested call to run() within the same Task can detect re-entry.
+                _map: dict[int, asyncio.Task[Any]] = dict(owner_map or {})
+                if current_task is not None:
+                    _map[id(lock)] = current_task
+                _token = _SESSION_LOCK_OWNER.set(_map)
+                try:
+                    async for event in self._run_turn(
+                        message,
+                        session_key,
+                        agent_id,
+                        model,
+                        attachments or [],
+                        effective_tool_context,
+                        timeout=timeout,
+                        max_iterations=max_iterations,
+                        iteration_timeout=iteration_timeout,
+                        tool_timeout=tool_timeout,
+                        request_timeout=request_timeout,
+                        max_provider_retries=max_provider_retries,
+                        length_capped_continuations=length_capped_continuations,
+                        input_mode=input_mode,
+                        persist_input=persist_input,
+                        input_provenance=input_provenance,
+                        history_has_persisted_user=history_has_persisted_user,
+                        fresh_user_session=fresh_user_session,
+                        session_intent=session_intent,
+                        semantic_message=semantic_message,
+                        run_kind=run_kind,
+                        heartbeat_ack_max_chars=heartbeat_ack_max_chars,
+                        bootstrap_context_mode=bootstrap_context_mode,
+                        no_memory_capture=no_memory_capture,
+                        ingress_pipeline_steps=ingress_pipeline_steps,
+                        router_control_replay_depth=router_control_replay_depth,
+                    ):
+                        yield event
+                finally:
+                    self.clear_compaction_turn_state(session_key)
+                    _SESSION_LOCK_OWNER.reset(_token)
+
+    async def _run_turn(
+        self,
+        message: str,
+        session_key: str,
+        agent_id: str,
+        model: str | None,
+        attachments: list[dict],
+        tool_context: ToolContext | None = None,
+        timeout: float | None = None,
+        max_iterations: int | None = None,
+        iteration_timeout: float | None = None,
+        tool_timeout: float | None = None,
+        request_timeout: float | None = None,
+        max_provider_retries: int | None = None,
+        length_capped_continuations: int | None = None,
+        input_mode: str = "user",
+        persist_input: bool = False,
+        input_provenance: dict[str, Any] | None = None,
+        history_has_persisted_user: bool = True,
+        fresh_user_session: bool | None = None,
+        session_intent: str | None = None,
+        semantic_message: str | None = None,
+        run_kind: str = "default",
+        heartbeat_ack_max_chars: int = 300,
+        bootstrap_context_mode: str | None = None,
+        no_memory_capture: bool = False,
+        ingress_pipeline_steps: list[PipelineStepRecord] | None = None,
+        router_control_replay_depth: int = 0,
+    ) -> AsyncIterator[AgentEvent]:
+        # Observability: bracket turn setup + stream loop with monotonic clock
+        # so latency_ms reflects the full turn.
+        turn_started_at = time.monotonic()
+        turn_id = uuid.uuid4().hex
+        resolved_model = ""
+        final_prompt_str = ""
+        turn_obj: Any | None = None
+        tool_defs_for_log: list[Any] = []
+        provider_for_log: Any | None = None
+        turn_call_logger: TurnCallLogger | None = None
+        trace_context = TraceContext.new(
+            session_key=session_key,
+            turn_id=turn_id,
+            agent_id=agent_id,
+        )
+        session_id_for_log: str | None = None
+        prompt_report_for_log: PromptReport | None = None
+        # Declared up-front so the CancelledError handler below can always
+        # access them, even if cancellation fires before the stream loop.
+        final_text_parts: list[str] = []
+        turn_segments: list[dict] = []
+        turn_artifacts: list[dict[str, Any]] = []
+        artifact_delivery_failures: list[str] = []
+        self._emit_turn_event(
+            "turn_start",
+            trace_context,
+            session_key=session_key,
+            agent_id=agent_id,
+            turn_id=turn_id,
+            run_kind=run_kind,
+            input_mode=input_mode,
+            seq=1,
+            attrs={"input_mode": input_mode, "run_kind": run_kind},
+            payload={
+                "message_chars": len(message),
+                "attachment_count": len(attachments),
+            },
+        )
+        try:
+            input_out = await self._input_stage.run(
+                InputStageInput(
+                    message=message,
+                    semantic_message=semantic_message,
+                    input_mode=input_mode,
+                    persist_input=persist_input,
+                    input_provenance=input_provenance,
+                    session_key=session_key,
+                    tool_context=tool_context,
+                    session_append=self._session_manager,
+                )
+            )
+            runtime_message = input_out.runtime_message
+            semantic_input = input_out.semantic_input
+            extra_prompt_context = input_out.extra_prompt_context
+            normalization_metadata = input_out.normalization_metadata
+
+            pt_outcome = await self._provider_and_tools_stage.run(
+                ProviderAndToolsStageInput(
+                    session_key=session_key,
+                    agent_id=agent_id,
+                    tool_context=tool_context,
+                    run_kind=run_kind,
+                    input_mode=input_mode,
+                )
+            )
+            if pt_outcome.terminate:
+                # Harness performs the legacy observability + persist +
+                # yield sequence in the legacy ORDER (trace-emit, persist,
+                # yield, return).
+                provider_error_event = cast(ErrorEvent, pt_outcome.require_early_yield())
+                log.error("turn_runner.no_provider", session_key=session_key)
+                self._emit_turn_event(
+                    "turn_error",
+                    trace_context,
+                    session_key=session_key,
+                    agent_id=agent_id,
+                    turn_id=turn_id,
+                    run_kind=run_kind,
+                    input_mode=input_mode,
+                    seq=2,
+                    payload={
+                        "error_type": "ProviderResolutionError",
+                        "error_code": provider_error_event.code,
+                        "error_chars": len(provider_error_event.message),
+                    },
+                )
+                await self._persist_turn_error(session_key, provider_error_event)
+                yield provider_error_event
+                return
+            pt_out = pt_outcome.require_output()
+            provider = pt_out.provider
+            cloned_selector = pt_out.cloned_selector
+            tool_defs = pt_out.tool_defs
+            tool_handler = pt_out.tool_handler
+            tool_context = pt_out.effective_tool_context
+            tool_metadata = pt_out.tool_metadata
+
+            pa_outcome = await self._prompt_assembler_stage.run(
+                PromptAssemblerStageInput(
+                    runtime_message=runtime_message,
+                    semantic_input=semantic_input,
+                    extra_prompt_context=extra_prompt_context,
+                    provider=provider,
+                    cloned_selector=cloned_selector,
+                    tool_defs=tool_defs,
+                    effective_tool_context=tool_context,
+                    tool_metadata=tool_metadata,
+                    session_key=session_key,
+                    agent_id=agent_id,
+                    turn_id=turn_id,
+                    attachments=attachments,
+                    bootstrap_context_mode=bootstrap_context_mode,
+                    model=model,
+                    history_has_persisted_user=history_has_persisted_user,
+                    persist_input=persist_input,
+                    fresh_user_session=(
+                        fresh_user_session
+                        if fresh_user_session is not None
+                        else input_mode == "user"
+                        and run_kind == "default"
+                        and not history_has_persisted_user
+                    ),
+                    ingress_pipeline_steps=ingress_pipeline_steps,
+                    normalization_metadata=normalization_metadata,
+                )
+            )
+            pa_out = pa_outcome.require_output()
+            provider = pa_out.provider
+            turn = pa_out.turn
+            turn_obj = turn
+            tool_defs_for_log = turn.tool_defs
+            provider_for_log = provider
+            effective_runtime_message = pa_out.effective_runtime_message
+            final_prompt = pa_out.final_prompt
+            final_prompt_str = final_prompt
+            cache_breakpoints = pa_out.cache_breakpoints
+            request_context_prompt = pa_out.request_context_prompt
+            resolved_model = pa_out.resolved_model
+            provider_name = pa_out.provider_name
+            session_id_for_log = pa_out.session_id_for_log
+            prompt_report_for_log = pa_out.prompt_report
+            selector_model = pa_out.selector_model
+            trace_context = replace(
+                trace_context,
+                session_id=pa_out.trace_context_session_id,
+            )
+            if is_turn_call_log_enabled(self._diagnostics_state):
+                turn_call_logger = TurnCallLogger(
+                    trace_id=trace_context.trace_id,
+                    turn_id=turn_id,
+                    session_key=session_key,
+                    session_id=session_id_for_log,
+                    session_intent=session_intent,
+                    agent_id=agent_id,
+                    provider=provider_name,
+                    model=resolved_model,
+                    source=self._build_turn_call_source(
+                        tool_context,
+                        input_provenance,
+                        run_kind=run_kind,
+                    ),
+                )
+                turn_call_logger.write(
+                    "prompt_report",
+                    asdict(prompt_report_for_log),
+                )
+                turn_call_logger.write(
+                    "turn_start",
+                    {
+                        "input_mode": input_mode,
+                        "message": effective_runtime_message,
+                        "attachment_count": len(attachments),
+                        "tool_names": [getattr(td, "name", "") for td in turn.tool_defs],
+                    },
+                )
+            log.debug(
+                "turn_runner.model_resolved",
+                explicit_model=model,
+                pipeline_model=turn.model,
+                selector_model=selector_model,
+                resolved=resolved_model,
+                agentos_router_tier=pa_out.agentos_router_tier,
+            )
+            if tool_context is not None:
+                tool_context.router_control_config = getattr(
+                    self._config, "agentos_router", None
+                )
+                tool_context.router_control_hold_store = self._router_control_hold_store
+                tool_context.router_control_replay_depth = router_control_replay_depth
+                tool_context.router_control_turn_hold_applied = bool(
+                    turn.metadata.get("router_control_hold_applied")
+                )
+            router_event = build_router_decision_event(turn)
+            if router_event is not None:
+                yield router_event
+            ab_outcome = await self._agent_bootstrap_stage.run(
+                AgentBootstrapStageInput(
+                    provider=provider,
+                    cloned_selector=cloned_selector,
+                    turn=turn,
+                    final_prompt=final_prompt,
+                    cache_breakpoints=cache_breakpoints,
+                    request_context_prompt=request_context_prompt,
+                    resolved_model=resolved_model,
+                    session_id_for_log=session_id_for_log,
+                    tool_handler=tool_handler,
+                    turn_call_logger=turn_call_logger,
+                    tool_context=tool_context,
+                    session_key=session_key,
+                    agent_id=agent_id,
+                    timeout=timeout,
+                    max_iterations=max_iterations,
+                    iteration_timeout=iteration_timeout,
+                    tool_timeout=tool_timeout,
+                    request_timeout=request_timeout,
+                    max_provider_retries=max_provider_retries,
+                    length_capped_continuations=length_capped_continuations,
+                )
+            )
+            ab_out = ab_outcome.require_output()
+            agent = ab_out.agent
+            agent_config = ab_out.agent_config
+            # These locals are read by the test_agent_bootstrap_stage_snapshot
+            # frame-walking probe. Do not remove.
+            effective_runtime_timeout = ab_out.effective_runtime_timeout  # noqa: F841
+            effective_max_iterations = ab_out.effective_max_iterations  # noqa: F841
+            effective_max_iterations_source = ab_out.effective_max_iterations_source  # noqa: F841
+            effective_iteration_timeout = ab_out.effective_iteration_timeout  # noqa: F841
+            effective_tool_timeout = ab_out.effective_tool_timeout  # noqa: F841
+            effective_agent_request_timeout = ab_out.effective_request_timeout  # noqa: F841
+            effective_max_provider_retries = ab_out.effective_max_provider_retries  # noqa: F841
+            model_caps = ab_out.model_capabilities  # noqa: F841
+            private_memory_allowed = ab_out.private_memory_allowed
+            sync_manager = ab_out.sync_manager
+            if turn_call_logger is not None:
+                turn_call_logger.write(
+                    "agent_runtime_budget",
+                    {
+                        "max_iterations": effective_max_iterations,
+                        "max_iterations_source": effective_max_iterations_source,
+                    },
+                )
+
+            # 6. Compaction (t3 + preflight) + history load + request-context
+            # prepend. CompactionAndHistoryStage owns the four-call sequence
+            # (t3_upgrade → preflight → load_history → prepend_request_context_prompt).
+            ch_outcome = await self._compaction_and_history_stage.run(
+                CompactionAndHistoryStageInput(
+                    agent=agent,
+                    context_window_tokens=agent_config.context_window_tokens,
+                    provider=provider,
+                    resolved_model=resolved_model,
+                    turn=turn,
+                    session_key=session_key,
+                    agent_id=agent_id,
+                    history_has_persisted_user=history_has_persisted_user,
+                )
+            )
+            ch_out = ch_outcome.require_output()
+            agent.config.request_context_prompt = ch_out.final_request_context_prompt
+
+            # 8. Build extra messages for attachments + turn_input rebind.
+            # AttachmentStage owns the slice.
+            att_outcome = await self._attachment_stage.run(
+                AttachmentStageInput(
+                    effective_runtime_message=effective_runtime_message,
+                    attachments=attachments,
+                )
+            )
+            att_out = att_outcome.require_output()
+            extra_msgs = att_out.extra_messages
+
+            # 9. Stream events (final_text_parts/turn_segments are declared
+            # up-front above so the CancelledError handler can read them).
+            # StreamConsumerStage owns the slice. The four pre-stream
+            # accumulators (final_text_parts, turn_segments, turn_artifacts,
+            # artifact_delivery_failures) stay declared in this scope and
+            # are PASSED BY REFERENCE into _StreamState so the
+            # CancelledError handler below still sees them.
+            current_text_parts: list[str] = []
+            error_message: str | None = None
+            pending_error_event: ErrorEvent | None = None
+            done_event: DoneEvent | None = None
+            turn_input = att_out.turn_input
+
+            stream_state = _StreamState(
+                current_text_parts=current_text_parts,
+                final_text_parts=final_text_parts,
+                turn_segments=turn_segments,
+                turn_artifacts=turn_artifacts,
+                artifact_delivery_failures=artifact_delivery_failures,
+            )
+            stream_inp = StreamConsumerStageInput(
+                agent=agent,
+                agent_id=agent_id,
+                sync_manager=sync_manager,
+                private_memory_allowed=private_memory_allowed,
+                turn=turn,
+                tool_defs=tool_defs,
+                turn_input=turn_input,
+                extra_messages=extra_msgs,
+                semantic_input=semantic_input,
+                effective_runtime_message=effective_runtime_message,
+                input_provenance=input_provenance,
+                session_key=session_key,
+                run_kind=run_kind,
+                heartbeat_ack_max_chars=heartbeat_ack_max_chars,
+                bootstrap_context_mode=bootstrap_context_mode,
+                router_cfg=getattr(self._config, "agentos_router", None),
+                session_manager_present=self._session_manager is not None,
+                state=stream_state,
+                tool_context=tool_context,
+            )
+            router_control_replay_event: RouterControlReplayEvent | None = None
+            async for event in self._stream_consumer_stage.run(stream_inp):
+                if isinstance(event, RouterControlReplayEvent):
+                    router_control_replay_event = event
+                    yield event
+                    break
+                yield event
+            if router_control_replay_event is not None:
+                async for replayed_event in self._run_turn(
+                    message,
+                    session_key,
+                    agent_id,
+                    model,
+                    attachments,
+                    tool_context,
+                    timeout=timeout,
+                    max_iterations=max_iterations,
+                    iteration_timeout=iteration_timeout,
+                    tool_timeout=tool_timeout,
+                    request_timeout=request_timeout,
+                    max_provider_retries=max_provider_retries,
+                    length_capped_continuations=length_capped_continuations,
+                    input_mode=input_mode,
+                    persist_input=False,
+                    input_provenance=input_provenance,
+                    history_has_persisted_user=True,
+                    fresh_user_session=False,
+                    session_intent=session_intent,
+                    semantic_message=semantic_message,
+                    run_kind=run_kind,
+                    heartbeat_ack_max_chars=heartbeat_ack_max_chars,
+                    bootstrap_context_mode=bootstrap_context_mode,
+                    no_memory_capture=no_memory_capture,
+                    ingress_pipeline_steps=ingress_pipeline_steps,
+                    router_control_replay_depth=router_control_replay_depth + 1,
+                ):
+                    yield replayed_event
+                return
+            # Read terminal state off the shared _StreamState. The
+            # four pass-by-reference lists were mutated in place, so
+            # this preserves the harness's read-after-stream
+            # contract; only the four owned fields need explicit
+            # writeback.
+            current_text_parts = stream_state.current_text_parts
+            error_message = stream_state.error_message
+            pending_error_event = stream_state.pending_error_event
+            done_event = stream_state.done_event
+            # Post-stage edge owned by the harness: flush remaining
+            # text segment. The stage's post-stream notify already
+            # fired (it is the last action of the stage body).
+            if current_text_parts:
+                turn_segments.append({"type": "text", "text": "".join(current_text_parts)})
+
+            # 10. Persist assistant response (filter sentinel tokens).
+            # TurnFinalizerStage owns the slice. The four side effects
+            # fire in legacy order: heartbeat normalize -> transcript
+            # append -> memory capture (try/except) -> error persist ->
+            # session totals rollup (try/except).
+            fin_outcome = await self._turn_finalizer_stage.run(
+                TurnFinalizerStageInput(
+                    final_text_parts=final_text_parts,
+                    turn_segments=turn_segments,
+                    turn_artifacts=turn_artifacts,
+                    error_message=error_message,
+                    pending_error_event=pending_error_event,
+                    done_event=done_event,
+                    runtime_message=runtime_message,
+                    input_mode=input_mode,
+                    input_provenance=input_provenance,
+                    resolved_model=resolved_model,
+                    agent_id=agent_id,
+                    session_key=session_key,
+                    tool_context=tool_context,
+                    run_kind=run_kind,
+                    heartbeat_ack_max_chars=heartbeat_ack_max_chars,
+                    no_memory_capture=no_memory_capture,
+                )
+            )
+            fin_out = fin_outcome.require_output()
+            final_text = fin_out.final_text
+            turn_segments = fin_out.turn_segments
+
+            if turn_call_logger is not None:
+                turn_call_logger.write(
+                    "turn_end",
+                    {
+                        "final_text": final_text,
+                        "segments": turn_segments,
+                        "error": error_message,
+                    },
+                )
+            if trace_context is not None:
+                self._emit_turn_event(
+                    "turn_end",
+                    trace_context,
+                    session_key=session_key,
+                    agent_id=agent_id,
+                    turn_id=turn_id,
+                    run_kind=run_kind,
+                    input_mode=input_mode,
+                    seq=2,
+                    attrs={"provider": provider_name, "model": resolved_model},
+                    payload={
+                        "final_text_chars": len(final_text),
+                        "segment_count": len(turn_segments),
+                        "artifact_count": len(turn_artifacts),
+                        "error": bool(error_message),
+                        "tool_projection_applied": bool(
+                            turn.metadata.get("tool_projection_applied", False)
+                        ),
+                        "tool_projection_calls": int(
+                            turn.metadata.get("tool_projection_calls", 0) or 0
+                        ),
+                        "tool_projection_tokens_saved": int(
+                            turn.metadata.get("tool_projection_tokens_saved", 0) or 0
+                        ),
+                        "tool_result_store_writes": int(
+                            turn.metadata.get("tool_result_store_writes", 0) or 0
+                        ),
+                        "tool_result_store_skips": int(
+                            turn.metadata.get("tool_result_store_skips", 0) or 0
+                        ),
+                    },
+                )
+
+            # 11. Observability: best-effort DecisionEntry for this turn.
+            #     Must never break turn execution — wrap in try/except.
+            turn.metadata.update(
+                self._collect_session_flush_metadata(agent_id, session_key=session_key)
+            )
+            prompt_report_for_decision = build_prompt_report(
+                turn_id=turn_id,
+                session_key=session_key,
+                session_id=session_id_for_log,
+                agent_id=agent_id,
+                system_prompt=final_prompt_str,
+                tool_defs=turn.tool_defs,
+                metadata=turn.metadata,
+                tool_profile=turn.metadata.get("tool_profile"),
+            )
+            self._emit_decision_entry(
+                turn_id=turn_id,
+                session_key=session_key,
+                session_id=session_id_for_log,
+                message=message,
+                final_prompt=final_prompt_str,
+                tool_defs=tool_defs_for_log,
+                turn_obj=turn_obj,
+                provider=provider_for_log,
+                resolved_model=resolved_model,
+                turn_started_at=turn_started_at,
+                prompt_report=prompt_report_for_decision,
+                session_intent=session_intent,
+                done_event=done_event,
+                trace_id=trace_context.trace_id if trace_context is not None else None,
+                skills_invoked=collect_invoked_skills(turn_segments),
+            )
+            if pending_error_event is not None:
+                yield pending_error_event
+
+        except asyncio.CancelledError:
+            # Bug 2 partial-persistence: preserve whatever assistant text has
+            # already streamed back so a cancelled turn does not leave the
+            # transcript with an orphan user message. Marker `[interrupted]`
+            # lets future turns (and users reading history) recognise the
+            # response is incomplete.
+            partial_text = "".join(final_text_parts).rstrip()
+            if (
+                partial_text or turn_segments or turn_artifacts
+            ) and self._session_manager is not None:
+                try:
+                    body = _cancelled_partial_response_text(partial_text, turn_artifacts)
+                    if turn_artifacts:
+                        body = json.dumps(
+                            {"text": body, "artifacts": turn_artifacts},
+                            ensure_ascii=False,
+                        )
+                    await self._append_session_message(
+                        session_key,
+                        role="assistant",
+                        content=body,
+                        tool_calls=turn_segments if turn_segments else None,
+                    )
+                    log.info(
+                        "turn_runner.cancelled_partial_persisted",
+                        session_key=session_key,
+                        text_chars=len(partial_text),
+                        segment_count=len(turn_segments),
+                    )
+                except Exception:  # pragma: no cover — defensive: don't swallow the cancel
+                    log.warning(
+                        "turn_runner.cancelled_persist_failed",
+                        session_key=session_key,
+                        exc_info=True,
+                    )
+            if turn_call_logger is not None:
+                try:
+                    turn_call_logger.write(
+                        "turn_cancelled",
+                        {"partial_text_chars": len(partial_text)},
+                    )
+                except Exception:
+                    pass
+            if trace_context is not None:
+                self._emit_turn_event(
+                    "turn_cancelled",
+                    trace_context,
+                    session_key=session_key,
+                    agent_id=agent_id,
+                    turn_id=turn_id,
+                    run_kind=run_kind,
+                    input_mode=input_mode,
+                    seq=2,
+                    payload={"partial_text_chars": len(partial_text)},
+                )
+            raise
+
+        except Exception as exc:
+            error_code, error_message = sanitize_agent_error(
+                {
+                    "status": "failed",
+                    "terminal_reason": "error",
+                    "error_class": type(exc).__name__,
+                    "error_message": str(exc),
+                },
+                fallback_error_class="agent_error",
+                fallback_error_message=str(exc) or "Agent error",
+            )
+            event_code = (
+                error_code
+                if error_code in {"provider_request_too_large", "provider_output_truncated"}
+                else "agent_error"
+            )
+            log.error(
+                "turn_runner.failed",
+                session_key=session_key,
+                error=str(exc),
+                exc_info=True,
+            )
+            if self._session_manager is not None:
+                if event_code == "provider_output_truncated":
+                    transcript_message = build_terminal_reply(
+                        {
+                            "status": "failed",
+                            "terminal_reason": "output_truncated",
+                            "error_class": event_code,
+                            "error_message": error_message,
+                        }
+                    )
+                else:
+                    transcript_message = f"Error: {error_message}"
+                await self._append_session_message(
+                    session_key, role="system", content=transcript_message
+                )
+            if turn_call_logger is not None:
+                turn_call_logger.write(
+                    "turn_error",
+                    {
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                )
+            if trace_context is not None:
+                self._emit_turn_event(
+                    "turn_error",
+                    trace_context,
+                    session_key=session_key,
+                    agent_id=agent_id,
+                    turn_id=turn_id,
+                    run_kind=run_kind,
+                    input_mode=input_mode,
+                    seq=2,
+                    payload={
+                        "error_type": type(exc).__name__,
+                        "error_chars": len(str(exc)),
+                    },
+                )
+            yield ErrorEvent(message=error_message, code=event_code)
+
+    @staticmethod
+    def _write_trace_event(
+        kind: str,
+        context: TraceContext,
+        *,
+        seq: int | None = None,
+        attrs: dict[str, Any] | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        try:
+            write_trace_event(
+                TraceEvent(
+                    kind=kind,
+                    context=context,
+                    privacy="operational",
+                    seq=seq,
+                    attrs=attrs or {},
+                    payload=payload or {},
+                )
+            )
+        except Exception as exc:  # pragma: no cover - observability must not break turns
+            log.debug("trace_event.write_failed", kind=kind, error=str(exc))
+
+    def _emit_turn_event(
+        self,
+        kind: str,
+        context: TraceContext | None,
+        *,
+        session_key: str,
+        agent_id: str,
+        turn_id: str | None = None,
+        run_kind: str | None = None,
+        input_mode: str | None = None,
+        seq: int | None = None,
+        attrs: dict[str, Any] | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        """Fan a turn event out through the registered ``TurnHook`` chain.
+
+        ``AGENTOS_HOOKS=legacy`` is honored as an escape hatch and routes
+        through the static :meth:`_write_trace_event` directly so any
+        unforeseen production drift can be confined to the hook fan-out
+        without rolling back the call sites.
+        """
+
+        if context is None:
+            return
+        if _hooks_mode_from_env() == "legacy":
+            self._write_trace_event(
+                kind,
+                context,
+                seq=seq,
+                attrs=attrs,
+                payload=payload,
+            )
+            return
+        hook_ctx = TurnHookContext(
+            session_key=session_key,
+            agent_id=agent_id,
+            turn_id=turn_id,
+            run_kind=run_kind,
+            input_mode=input_mode,
+            trace_context=context,
+        )
+        event = TurnEvent(
+            kind=kind,
+            seq=seq,
+            attrs=dict(attrs or {}),
+            payload=dict(payload or {}),
+        )
+        for hook in self._turn_hooks:
+            try:
+                hook.on_event(hook_ctx, event)
+            except Exception as exc:  # noqa: BLE001 - hooks must not break turns
+                log.warning(
+                    "turn_hook.on_event_failed",
+                    hook=getattr(hook, "name", type(hook).__name__),
+                    kind=kind,
+                    error=str(exc),
+                )
+
+    @staticmethod
+    def _build_turn_call_source(
+        tool_context: ToolContext | None,
+        input_provenance: dict[str, Any] | None,
+        *,
+        run_kind: str | None = None,
+    ) -> dict[str, Any]:
+        """Build stable source metadata for raw call-log filtering."""
+
+        source: dict[str, Any] = {}
+        if tool_context is not None:
+            source.update(
+                {
+                    "caller_kind": str(tool_context.caller_kind),
+                    "channel_kind": tool_context.channel_kind,
+                    "channel_id": tool_context.channel_id,
+                    "sender_id": tool_context.sender_id,
+                    "source_kind": tool_context.source_kind,
+                    "source_name": tool_context.source_name,
+                }
+            )
+        if run_kind:
+            source["run_kind"] = run_kind
+        if input_provenance:
+            source["input_provenance"] = input_provenance
+            provenance_kind = TurnRunner._input_provenance_kind(input_provenance)
+            if provenance_kind:
+                source["input_provenance_kind"] = provenance_kind
+        return source
+
+    async def _resolve_session_id_for_log(self, session_key: str) -> str | None:
+        """Best-effort lookup of the transcript identity for observability."""
+
+        if self._session_manager is None:
+            return None
+        try:
+            if hasattr(self._session_manager, "get_session"):
+                node = await self._session_manager.get_session(session_key)
+            else:
+                from agentos.gateway.session_services import get_session_storage
+
+                storage = get_session_storage(self._session_manager)
+                node = await storage.get_session(session_key) if storage is not None else None
+        except Exception:
+            return None
+        session_id = getattr(node, "session_id", None)
+        return session_id if isinstance(session_id, str) and session_id else None
+
+    def _resolve_provider(self) -> tuple[Any | None, Any | None]:
+        """Clone the selector and resolve provider (no shared state mutation)."""
+        if self._provider_selector is None:
+            return None, None
+        cloned = self._provider_selector.clone()
+        return cloned.resolve(), cloned
+
+    def _handle_runtime_warning(self, event: WarningEvent) -> WarningEvent:
+        return event
+
+    async def _persist_turn_error(
+        self,
+        session_key: str,
+        event: ErrorEvent | None,
+    ) -> None:
+        """Best-effort durable transcript record for terminal turn errors."""
+        if self._session_manager is None or event is None:
+            return
+        error_code, message = sanitize_agent_error(
+            {
+                "status": "failed",
+                "terminal_reason": event.code,
+                "error_class": event.code,
+                "error_message": event.message,
+            },
+            fallback_error_class=event.code,
+            fallback_error_message=event.message or "Unknown error",
+        )
+        event_code = (
+            error_code
+            if error_code in {"provider_request_too_large", "provider_output_truncated"}
+            else event.code
+        )
+        outcome_details = turn_outcome_details(
+            outcome_from_error(
+                code=event_code,
+                message=message,
+                error_class=event_code,
+            )
+        )
+        if event_code == "provider_output_truncated":
+            transcript_message = build_terminal_reply(
+                {
+                    "status": "failed",
+                    "terminal_reason": "output_truncated",
+                    "error_class": event_code,
+                    "error_message": message,
+                }
+            )
+        else:
+            transcript_message = f"Error: {message}"
+        try:
+            if event_code == "current_turn_context_exhausted":
+                compact = getattr(self._session_manager, "compact", None)
+                if callable(compact):
+                    budget = int(
+                        getattr(self._config, "context_budget_tokens", None)
+                        or getattr(self._config, "context_window_tokens", None)
+                        or 100_000
+                    )
+                    try:
+                        maybe_summary = compact(session_key, budget)
+                        if inspect.isawaitable(maybe_summary):
+                            await maybe_summary
+                    except Exception as exc:  # noqa: BLE001 - error append must still run
+                        log.warning(
+                            "turn_runner.error_compaction_failed",
+                            session_key=session_key,
+                            code=event_code,
+                            error=str(exc),
+                        )
+            await self._append_session_message(
+                session_key,
+                role="system",
+                content=transcript_message,
+            )
+            log.info(
+                "turn_runner.error_persisted",
+                session_key=session_key,
+                code=event_code,
+                **outcome_details,
+            )
+        except Exception as exc:  # noqa: BLE001 - persistence must not mask the original error
+            log.warning(
+                "turn_runner.error_persist_failed",
+                session_key=session_key,
+                code=event_code,
+                **outcome_details,
+                error=str(exc),
+            )
+
+    @staticmethod
+    def _non_bool_number(value: Any) -> TypeGuard[int | float]:
+        return not isinstance(value, bool) and isinstance(value, int | float)
+
+    @staticmethod
+    def _non_bool_int(value: Any) -> TypeGuard[int]:
+        return not isinstance(value, bool) and isinstance(value, int)
+
+    def _resolve_agent_runtime_timeout(self, session_key: str) -> float:
+        """Resolve whole-turn runtime timeout.
+
+        ``0`` is intentional and disables the runtime budget. The old
+        ``llm_timeout_seconds`` setting remains a legacy runtime alias.
+        """
+
+        sm = self._session_manager
+        if sm is not None and hasattr(sm, "get_session_config"):
+            try:
+                session_cfg = sm.get_session_config(session_key)
+                if session_cfg is not None:
+                    for attr in ("agent_runtime_timeout_seconds", "llm_timeout_seconds"):
+                        value = getattr(session_cfg, attr, None)
+                        if self._non_bool_number(value) and value >= 0:
+                            return float(value)
+            except Exception:  # noqa: BLE001
+                pass
+
+        env_timeout = os.environ.get("AGENTOS_TURN_TIMEOUT")
+        if env_timeout is not None and env_timeout.strip():
+            raw = env_timeout.strip()
+            try:
+                value = float(raw)
+            except ValueError:
+                log.warning("turn_runner.invalid_runtime_timeout", raw=raw)
+            else:
+                if value >= 0:
+                    return value
+                log.warning("turn_runner.negative_runtime_timeout", value=value)
+
+        for attr in ("agent_runtime_timeout_seconds", "llm_timeout_seconds"):
+            value = getattr(self._config, attr, None)
+            if self._non_bool_number(value) and value >= 0:
+                return float(value)
+
+        return _DEFAULT_AGENT_RUNTIME_TIMEOUT_SECONDS
+
+    def _resolve_agent_max_iterations(
+        self,
+        session_key: str,
+        explicit: int | None = None,
+    ) -> int:
+        """Resolve model/tool loop budget for this turn."""
+
+        if explicit is not None:
+            if self._non_bool_int(explicit) and explicit >= 0:
+                self._last_agent_max_iterations_source = "explicit argument"
+                return int(explicit)
+            raise ValueError("max_iterations must be an integer >= 0")
+
+        sm = self._session_manager
+        session_value = None
+        if sm is not None and hasattr(sm, "get_session_config"):
+            try:
+                session_cfg = sm.get_session_config(session_key)
+                if session_cfg is not None:
+                    session_value = getattr(session_cfg, "agent_max_iterations", None)
+                    if session_value is not None and not (
+                        self._non_bool_int(session_value) and session_value >= 0
+                    ):
+                        log.warning(
+                            "turn_runner.invalid_agent_max_iterations",
+                            source="session",
+                            value=session_value,
+                        )
+            except Exception:  # noqa: BLE001
+                pass
+
+        env_value = os.environ.get("AGENTOS_AGENT_MAX_ITERATIONS")
+        if env_value is not None and env_value.strip():
+            raw = env_value.strip()
+            try:
+                parsed_env = int(raw)
+            except ValueError:
+                log.warning("turn_runner.invalid_agent_max_iterations", source="env", raw=raw)
+            else:
+                if parsed_env < 0:
+                    log.warning(
+                        "turn_runner.invalid_agent_max_iterations",
+                        source="env",
+                        value=parsed_env,
+                    )
+
+        config_value = getattr(self._config, "agent_max_iterations", None)
+        if config_value is not None and not (
+            self._non_bool_int(config_value) and config_value >= 0
+        ):
+            log.warning(
+                "turn_runner.invalid_agent_max_iterations",
+                source="config",
+                value=config_value,
+            )
+
+        policy = resolve_turn_policy(
+            session_key=session_key,
+            explicit_max_iterations=explicit,
+            session_manager=self._session_manager,
+            gateway_config=self._config,
+            env=os.environ,
+        )
+        self._last_agent_max_iterations_source = policy.max_iterations_source
+        return policy.max_iterations
+
+    def _resolve_agent_iteration_timeout(
+        self,
+        session_key: str,
+        explicit: float | None = None,
+    ) -> float:
+        """Resolve per-iteration timeout for this turn.
+
+        Precedence: explicit arg > session config > env > gateway config > default.
+        """
+
+        if explicit is not None:
+            if self._non_bool_number(explicit) and explicit >= 0:
+                return float(explicit)
+            raise ValueError("iteration_timeout must be a non-negative number")
+
+        sm = self._session_manager
+        if sm is not None and hasattr(sm, "get_session_config"):
+            try:
+                session_cfg = sm.get_session_config(session_key)
+                if session_cfg is not None:
+                    value = getattr(session_cfg, "agent_iteration_timeout_seconds", None)
+                    if self._non_bool_number(value) and value >= 0:
+                        return float(value)
+                    if value is not None:
+                        log.warning(
+                            "turn_runner.invalid_agent_iteration_timeout",
+                            source="session",
+                            value=value,
+                        )
+            except Exception:  # noqa: BLE001
+                pass
+
+        env_value = os.environ.get("AGENTOS_AGENT_ITERATION_TIMEOUT")
+        if env_value is not None and env_value.strip():
+            raw = env_value.strip()
+            try:
+                value = float(raw)
+            except ValueError:
+                log.warning("turn_runner.invalid_agent_iteration_timeout", source="env", raw=raw)
+            else:
+                if value >= 0:
+                    return value
+                log.warning(
+                    "turn_runner.invalid_agent_iteration_timeout", source="env", value=value
+                )
+
+        value = getattr(self._config, "agent_iteration_timeout_seconds", None)
+        if self._non_bool_number(value) and value >= 0:
+            return float(value)
+        if value is not None:
+            log.warning(
+                "turn_runner.invalid_agent_iteration_timeout",
+                source="config",
+                value=value,
+            )
+
+        return AgentConfig().iteration_timeout
+
+    def _resolve_agent_tool_timeout(
+        self,
+        session_key: str,
+        explicit: float | None = None,
+    ) -> float:
+        """Resolve per-tool execution timeout for this turn."""
+
+        if explicit is not None:
+            if self._non_bool_number(explicit) and explicit >= 0:
+                return float(explicit)
+            raise ValueError("tool_timeout must be a non-negative number")
+
+        sm = self._session_manager
+        if sm is not None and hasattr(sm, "get_session_config"):
+            try:
+                session_cfg = sm.get_session_config(session_key)
+                if session_cfg is not None:
+                    value = getattr(session_cfg, "agent_tool_timeout_seconds", None)
+                    if self._non_bool_number(value) and value >= 0:
+                        return float(value)
+                    if value is not None:
+                        log.warning(
+                            "turn_runner.invalid_agent_tool_timeout",
+                            source="session",
+                            value=value,
+                        )
+            except Exception:  # noqa: BLE001
+                pass
+
+        env_value = os.environ.get("AGENTOS_AGENT_TOOL_TIMEOUT")
+        if env_value is not None and env_value.strip():
+            raw = env_value.strip()
+            try:
+                value = float(raw)
+            except ValueError:
+                log.warning("turn_runner.invalid_agent_tool_timeout", source="env", raw=raw)
+            else:
+                if value >= 0:
+                    return value
+                log.warning("turn_runner.invalid_agent_tool_timeout", source="env", value=value)
+
+        value = getattr(self._config, "agent_tool_timeout_seconds", None)
+        if self._non_bool_number(value) and value >= 0:
+            return float(value)
+        if value is not None:
+            log.warning(
+                "turn_runner.invalid_agent_tool_timeout",
+                source="config",
+                value=value,
+            )
+
+        return AgentConfig().tool_timeout
+
+    def _resolve_agent_request_timeout(
+        self,
+        session_key: str,
+        explicit: float | None = None,
+    ) -> float:
+        """Resolve single LLM request timeout for this turn (agent-runtime path)."""
+
+        if explicit is not None:
+            if self._non_bool_number(explicit) and explicit > 0:
+                return float(explicit)
+            raise ValueError("request_timeout must be a positive number")
+
+        sm = self._session_manager
+        if sm is not None and hasattr(sm, "get_session_config"):
+            try:
+                session_cfg = sm.get_session_config(session_key)
+                if session_cfg is not None:
+                    value = getattr(session_cfg, "agent_request_timeout_seconds", None)
+                    if self._non_bool_number(value) and value > 0:
+                        return float(value)
+                    if value is not None:
+                        log.warning(
+                            "turn_runner.invalid_agent_request_timeout",
+                            source="session",
+                            value=value,
+                        )
+            except Exception:  # noqa: BLE001
+                pass
+
+        env_value = os.environ.get("AGENTOS_AGENT_REQUEST_TIMEOUT")
+        if env_value is not None and env_value.strip():
+            raw = env_value.strip()
+            try:
+                value = float(raw)
+            except ValueError:
+                log.warning("turn_runner.invalid_agent_request_timeout", source="env", raw=raw)
+            else:
+                if value > 0:
+                    return value
+                log.warning("turn_runner.invalid_agent_request_timeout", source="env", value=value)
+
+        value = getattr(self._config, "agent_request_timeout_seconds", None)
+        if self._non_bool_number(value) and value > 0:
+            return float(value)
+        if value is not None:
+            log.warning(
+                "turn_runner.invalid_agent_request_timeout",
+                source="config",
+                value=value,
+            )
+
+        return self._resolve_llm_timeout(session_key)
+
+    def _resolve_agent_max_provider_retries(
+        self,
+        session_key: str,
+        explicit: int | None = None,
+    ) -> int:
+        """Resolve max provider retries for this turn."""
+
+        if explicit is not None:
+            if self._non_bool_int(explicit) and explicit >= 0:
+                return int(explicit)
+            raise ValueError("max_provider_retries must be an integer >= 0")
+
+        sm = self._session_manager
+        if sm is not None and hasattr(sm, "get_session_config"):
+            try:
+                session_cfg = sm.get_session_config(session_key)
+                if session_cfg is not None:
+                    value = getattr(session_cfg, "agent_max_provider_retries", None)
+                    if self._non_bool_int(value) and value >= 0:
+                        return int(value)
+                    if value is not None:
+                        log.warning(
+                            "turn_runner.invalid_agent_max_provider_retries",
+                            source="session",
+                            value=value,
+                        )
+            except Exception:  # noqa: BLE001
+                pass
+
+        env_value = os.environ.get("AGENTOS_AGENT_MAX_PROVIDER_RETRIES")
+        if env_value is not None and env_value.strip():
+            raw = env_value.strip()
+            try:
+                value = int(raw)
+            except ValueError:
+                log.warning("turn_runner.invalid_agent_max_provider_retries", source="env", raw=raw)
+            else:
+                if value >= 0:
+                    return value
+                log.warning(
+                    "turn_runner.invalid_agent_max_provider_retries", source="env", value=value
+                )
+
+        value = getattr(self._config, "agent_max_provider_retries", None)
+        if self._non_bool_int(value) and value >= 0:
+            return int(value)
+        if value is not None:
+            log.warning(
+                "turn_runner.invalid_agent_max_provider_retries",
+                source="config",
+                value=value,
+            )
+
+        return AgentConfig().max_provider_retries
+
+    def _resolve_turn_thinking(self, turn: Any) -> bool | ThinkingLevel:
+        """Resolve explicit config thinking before agentos-router suggestions."""
+
+        llm_cfg = getattr(self._config, "llm", None) if self._config else None
+        explicit = getattr(llm_cfg, "thinking", None)
+        parsed = self._parse_thinking_level(
+            explicit,
+            source="config",
+        )
+        if parsed is not None:
+            return parsed
+        if explicit is not None and str(explicit).strip():
+            return False
+
+        metadata = getattr(turn, "metadata", {}) or {}
+        if not metadata.get("thinking_requested"):
+            return False
+
+        parsed = self._parse_thinking_level(
+            metadata.get("thinking_level", "medium"),
+            source="agentos_router",
+        )
+        return parsed if parsed is not None else False
+
+    @staticmethod
+    def _parse_thinking_level(value: Any, *, source: str) -> bool | ThinkingLevel | None:
+        if value is None:
+            return None
+        if isinstance(value, ThinkingLevel):
+            return value
+        if isinstance(value, bool):
+            return value
+
+        raw = str(value).strip().lower()
+        if not raw:
+            return None
+        normalized = _THINKING_ALIASES.get(raw.replace("_", "-"), raw)
+        try:
+            return ThinkingLevel(normalized)
+        except ValueError:
+            log.warning("turn_runner.invalid_thinking_level", source=source, value=value)
+            return None
+
+    def _resolve_llm_timeout(self, session_key: str) -> float:
+        """Resolve single provider-request timeout for this turn."""
+
+        sm = self._session_manager
+        if sm is not None and hasattr(sm, "get_session_config"):
+            try:
+                session_cfg = sm.get_session_config(session_key)
+                if session_cfg is not None:
+                    per_session = getattr(session_cfg, "llm_request_timeout_seconds", None)
+                    if isinstance(per_session, int | float) and per_session > 0:
+                        return float(per_session)
+            except Exception:  # noqa: BLE001
+                pass
+
+        gw_timeout = getattr(self._config, "llm_request_timeout_seconds", None)
+        if isinstance(gw_timeout, int | float) and gw_timeout > 0:
+            return float(gw_timeout)
+        return _DEFAULT_LLM_REQUEST_TIMEOUT_SECONDS
+
+    def _build_tools(
+        self,
+        ctx: ToolContext | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> tuple[list, ToolHandler | None]:
+        """Build tool definitions and handler from registry, filtered by ToolContext."""
+        if self._tool_registry is None:
+            return [], None
+        from agentos.tools.dispatch import build_tool_handler
+        from agentos.tools.policy import apply_tool_policy_from_config
+        from agentos.tools.registry import filter_by_profile, resolve_profile
+
+        loaded_skills: list[Any] = []
+        if self._skill_loader is not None:
+            try:
+                loaded_skills = list(self._skill_loader.load_all())
+            except Exception:
+                loaded_skills = []
+
+        if ctx is not None:
+            ctx = apply_tool_policy_from_config(
+                ctx,
+                available_tools=self._tool_registry.list_names(),
+                config=self._config,
+            )
+            if ctx.tool_policy:
+                from agentos.tools.policy import apply_tool_policy_layer
+
+                ctx = apply_tool_policy_layer(
+                    ctx,
+                    ctx.tool_policy,
+                    available_tools=self._tool_registry.list_names(),
+                    hard_denied=None,
+                )
+            ctx = self._apply_runtime_capability_denies(ctx)
+            log.debug(
+                "tool_policy.policy_pre",
+                allowed_tool_count=len(self._tool_registry.to_tool_definitions(ctx)),
+                denied_count=len(ctx.denied_tools),
+                profile=resolve_profile(ctx).value,
+            )
+        log.info(
+            "tool_context_created",
+            caller_kind=ctx.caller_kind if ctx else "none",
+            denied_count=len(ctx.denied_tools) if ctx else 0,
+        )
+        tool_defs = self._tool_registry.to_tool_definitions(ctx)
+        profile = resolve_profile(ctx)
+        tool_defs = filter_by_profile(tool_defs, profile, ctx)
+        # layered intentionally — policy first, profile second.
+        log.debug(
+            "tool_policy.profile_post",
+            allowed_tool_count=len(tool_defs),
+            denied_count=len(ctx.denied_tools) if ctx else 0,
+            profile=profile.value,
+        )
+        if metadata is not None:
+            metadata["tool_profile"] = profile.value
+        known_skill_names = {
+            skill.name
+            for skill in loaded_skills
+            if not getattr(skill, "disable_model_invocation", False)
+        }
+        tool_handler = build_tool_handler(
+            self._tool_registry,
+            ctx,
+            known_skill_names=known_skill_names,
+        )
+        return tool_defs, tool_handler
+
+    def _filter_tool_defs_by_capability(self, tool_defs: list) -> list:
+        """Compatibility shim; runtime capability filtering is resolved in ToolContext."""
+        return tool_defs
+
+    def _apply_runtime_capability_denies(self, ctx: ToolContext) -> ToolContext:
+        from agentos.tools.policy import (
+            ToolSurfaceCapabilities,
+            detect_runtime_tool_surface_capabilities,
+            resolve_runtime_tool_surface,
+        )
+
+        detected = detect_runtime_tool_surface_capabilities(
+            channel_backing=(
+                ctx.caller_kind in {CallerKind.CHANNEL, CallerKind.WEB} and bool(ctx.channel_id)
+            )
+        )
+        capabilities = ToolSurfaceCapabilities(
+            session_manager=getattr(self, "_session_manager", None) is not None,
+            task_runtime=detected.task_runtime,
+            scheduler=detected.scheduler,
+            gateway_config=getattr(self, "_config", None) is not None,
+            channel_backing=detected.channel_backing,
+            image_generation=detected.image_generation,
+        )
+        return resolve_runtime_tool_surface(ctx, capabilities=capabilities)
+
+    @staticmethod
+    def _extra_context_for_tool_context(ctx: ToolContext | None) -> dict[str, str]:
+        if ctx is None or ctx.caller_kind is not CallerKind.SUBAGENT:
+            return {}
+        return {"Subagent Task Protocol": _SUBAGENT_TASK_PROTOCOL}
+
+    @staticmethod
+    def _merge_extra_prompt_context(
+        base: dict[str, str] | None,
+        extra: dict[str, str],
+    ) -> dict[str, str] | None:
+        if not extra:
+            return base
+        if base is None:
+            return dict(extra)
+        merged = dict(base)
+        merged.update(extra)
+        return merged
+
+    @staticmethod
+    def _render_volatile_block(
+        daily_notes: dict[str, str] | None,
+        workspace_files: dict[str, str] | None,
+        extra_context: dict[str, str] | None,
+        prompt_mode: str = "full",
+        wrap_untrusted_workspace: bool = True,
+    ) -> str:
+        """Render per-turn / per-day volatile content as the dynamic suffix.
+
+        Replaces three previously-cacheable blocks once carried by
+        the prior ``identity/templates/system_prompt.j2`` template:
+
+        1. ``## Recent Notes`` (daily_notes) — gated on prompt_mode != minimal.
+        2. ``## Workspace Files (injected)`` — gated on prompt_mode != minimal,
+           with SOUL.md / IDENTITY.md filtered out (parsed elsewhere into
+           AgentProfile.identity).
+        3. ``## <key>`` blocks for each ``extra_context`` entry (no gating).
+
+        Each section's bytes match what the prior Jinja render produced for
+        the same inputs.
+        Sections are joined directly with no separator — adjacent ``\\n\\n``
+        terminators in each section already provide the visual break, the
+        same way the prior template rendered them inline. The final result
+        is right-stripped of newlines so it slots cleanly into the dynamic
+        suffix (``base + "\\n\\n" + suffix`` is reassembled downstream).
+        """
+        sections: list[str] = []
+
+        # 1. ## Recent Notes (daily_notes), suppressed in minimal mode.
+        if daily_notes and prompt_mode != "minimal":
+            buf = "## Recent Notes\n\n"
+            for filename, content in daily_notes.items():
+                buf += f"### {filename}\n\n{content}\n\n"
+            sections.append(buf)
+
+        # 2. ## Workspace Files (injected), suppressed in minimal mode.
+        # SOUL.md / IDENTITY.md are filtered (parsed elsewhere into
+        # AgentProfile.identity); if every entry is filtered out, no header
+        # is emitted at all so the volatile suffix doesn't carry a stranded
+        # bare heading whose tuple-return would later trip downstream
+        # consumers (empty-suffix invariant).
+        if workspace_files and prompt_mode != "minimal":
+            visible = {
+                filename: content
+                for filename, content in workspace_files.items()
+                if filename not in ("SOUL.md", "IDENTITY.md")
+            }
+            if visible:
+                buf = "## Workspace Files (injected)\n\n"
+                # Filenames are masked as ``### Workspace Context N`` so the
+                # template surface mirrors pilot's filename-non-exposure
+                # convention (commit 93dfb8a). BOOTSTRAP.md is the exception:
+                # it gets a named heading so the model recognizes it as a
+                # one-shot setup ritual and removes the file on completion
+                # (see identity/templates/bootstrap/BOOTSTRAP.md).
+                context_index = 0
+                for filename, content in visible.items():
+                    if filename == "BOOTSTRAP.md":
+                        buf += f"### One-Shot Workspace Bootstrap\n\n{content}\n\n"
+                        continue
+                    context_index += 1
+                    rendered_content = (
+                        injection_guard.wrap_untrusted(content, source=f"workspace:{filename}")
+                        if wrap_untrusted_workspace
+                        else content
+                    )
+                    buf += f"### Workspace Context {context_index}\n\n{rendered_content}\n\n"
+                sections.append(buf)
+
+        # 3. extra_context — emitted as ## <key> blocks regardless of mode.
+        if extra_context:
+            buf = ""
+            for key, value in extra_context.items():
+                buf += f"## {key}\n\n{value}\n\n"
+            if buf:
+                sections.append(buf)
+
+        if not sections:
+            return ""
+        return "".join(sections).rstrip("\n")
+
+    def _assemble_prompt(
+        self,
+        agent_id: str,
+        tool_defs: list,
+        session_key: str | None = None,
+        semantic_message: str | None = None,
+        extra_context: dict[str, str] | None = None,
+        prompt_metadata: dict[str, Any] | None = None,
+        bootstrap_context_mode: str | None = None,
+        fresh_user_session: bool = False,
+    ) -> str | tuple[str, str]:
+        """Assemble identity system prompt via Jinja2 template.
+
+        Uses frozen snapshot when available (keyed by agent_id + session_key),
+        falls back to live disk reads for backwards compatibility.
+
+        Returns ``str`` for the prompt-cache-stable case; returns
+        ``(base, dynamic_context)`` only when daily notes, workspace files, or
+        tool-context blocks need to stay outside the cacheable prefix.
+        """
+        from agentos.identity.parser import parse_agents, parse_identity, parse_soul
+        from agentos.identity.prompt import assemble_system_prompt
+        from agentos.identity.types import AgentIdentity, AgentProfile
+        from agentos.identity.workspace import (
+            filter_workspace_filenames_for_session,
+            filter_workspace_files_for_session,
+            load_workspace_files_budgeted_with_report,
+        )
+
+        configured_agent_name = getattr(self._config, "agent_name", None) if self._config else None
+        agent_name = (
+            configured_agent_name.strip()
+            if isinstance(configured_agent_name, str) and configured_agent_name.strip()
+            else None
+        )
+        bootstrap_workspace_dir = self._resolve_bootstrap_workspace_dir(agent_id)
+        bootstrap_context_key = bootstrap_context_mode or "full"
+        bootstrap_snap_key = (agent_id, session_key, bootstrap_context_key) if session_key else None
+        bootstrap_snap = (
+            self._bootstrap_snapshots.get(bootstrap_snap_key)
+            if bootstrap_snap_key is not None
+            else None
+        )
+        if bootstrap_snap is not None:
+            workspace_files = dict(bootstrap_snap.workspace_files)
+            visible_bootstrap_report = list(bootstrap_snap.report)
+        else:
+            safety_cfg = getattr(self._config, "safety", None) if self._config else None
+            bootstrap_filenames = (
+                ("HEARTBEAT.md",)
+                if bootstrap_context_mode == "heartbeat_light"
+                else filter_workspace_filenames_for_session(None, session_key)
+            )
+            if bootstrap_context_mode == "unattended":
+                bootstrap_filenames = tuple(
+                    name for name in bootstrap_filenames if name != "BOOTSTRAP.md"
+                )
+            elif bootstrap_context_mode == "stateless":
+                bootstrap_filenames = tuple(
+                    name for name in bootstrap_filenames if name == "TOOLS.md"
+                )
+            elif bootstrap_context_mode == "stateless_keep_project_rules":
+                bootstrap_filenames = tuple(
+                    name for name in bootstrap_filenames if name in {"AGENTS.md", "TOOLS.md"}
+                )
+            loaded_workspace_files, bootstrap_report = load_workspace_files_budgeted_with_report(
+                str(bootstrap_workspace_dir),
+                per_file_max_chars=self._resolve_bootstrap_max_chars(),
+                total_max_chars=self._resolve_bootstrap_total_max_chars(),
+                filenames=bootstrap_filenames,
+                injection_scan_mode=getattr(safety_cfg, "injection_scan_mode", "report"),
+            )
+            workspace_files = filter_workspace_files_for_session(
+                loaded_workspace_files,
+                session_key,
+            )
+            subagents_cfg = getattr(self._config, "subagents", None) if self._config else None
+            if (
+                session_key
+                and is_subagent_key(session_key)
+                and getattr(subagents_cfg, "prompt_compact", False)
+            ):
+                workspace_files = {
+                    name: content
+                    for name, content in workspace_files.items()
+                    if name in {"AGENTS.md", "TOOLS.md"}
+                }
+            visible_bootstrap_report = [
+                report for report in bootstrap_report if report.filename in workspace_files
+            ]
+            if bootstrap_snap_key is not None:
+                self._bootstrap_snapshots[bootstrap_snap_key] = BootstrapSnapshot(
+                    workspace_files=dict(workspace_files),
+                    report=list(visible_bootstrap_report),
+                )
+        memory_source_dir = self._resolve_memory_source_dir(agent_id)
+        stateless_prompt = bootstrap_context_mode in {
+            "stateless",
+            "stateless_keep_project_rules",
+        }
+        private_memory_allowed = (
+            False if stateless_prompt else allows_private_memory_prompt_injection(session_key)
+        )
+
+        # Use frozen snapshot if available, otherwise read from disk
+        snap_key = (agent_id, session_key) if session_key else None
+        snap = self._memory_snapshots.get(snap_key) if snap_key else None
+        if not private_memory_allowed:
+            memory_text = None
+            daily = {}
+        elif snap is not None:
+            memory_text = snap.memory_md
+            daily = snap.daily_notes
+        else:
+            daily = self._load_daily_notes(memory_source_dir)
+            memory_text = self._load_memory_md(memory_source_dir)
+        daily_notes_count_before_omit = len(daily)
+        daily_notes_omitted = daily_notes_count_before_omit > 0
+        if daily_notes_omitted:
+            daily = {}
+        if prompt_metadata is not None:
+            prompt_metadata["daily_notes_omitted"] = daily_notes_omitted
+            prompt_metadata["daily_notes_count_before_omit"] = daily_notes_count_before_omit
+            if daily_notes_omitted:
+                prompt_metadata["daily_notes_policy_reason"] = "auto_injection_disabled"
+            if fresh_user_session:
+                prompt_metadata["daily_notes_fresh_session_omitted"] = True
+            prompt_metadata["memory_md_present"] = memory_text is not None
+            prompt_metadata["injected_workspace_files_count"] = len(workspace_files)
+            prompt_metadata["bootstrap_files"] = visible_bootstrap_report
+            if not private_memory_allowed:
+                prompt_metadata["memory_prompt_injection_skipped"] = (
+                    "stateless" if stateless_prompt else "session-scope"
+                )
+            retrieval_metadata = self._effective_memory_retrieval_metadata(agent_id)
+            prompt_metadata["retrieval_mode"] = retrieval_metadata.get("retrieval_mode")
+            prompt_metadata["embedding_requested_provider"] = retrieval_metadata.get(
+                "embedding_requested_provider"
+            )
+            prompt_metadata["embedding_effective_provider"] = retrieval_metadata.get(
+                "embedding_effective_provider"
+            )
+            prompt_metadata["embedding_model"] = retrieval_metadata.get("embedding_model")
+            prompt_metadata["memory_retrieval_vector_weight"] = retrieval_metadata.get(
+                "vector_weight"
+            )
+            prompt_metadata["memory_retrieval_text_weight"] = retrieval_metadata.get("text_weight")
+            prompt_metadata["memory_mode_fingerprint"] = retrieval_metadata
+
+        soul_doc = parse_soul(workspace_files["SOUL.md"]) if "SOUL.md" in workspace_files else None
+        identity_fields = (
+            parse_identity(workspace_files["IDENTITY.md"])
+            if "IDENTITY.md" in workspace_files
+            else None
+        )
+        agents_doc = (
+            parse_agents(workspace_files["AGENTS.md"]) if "AGENTS.md" in workspace_files else None
+        )
+        if agent_name is None and identity_fields is not None:
+            agent_name = identity_fields.name
+        prompt_mode = "full"
+        tools_cfg = getattr(self._config, "tools", None)
+        if getattr(tools_cfg, "profile", None) == "memory_only":
+            prompt_mode = "minimal"
+
+        agent_profile = AgentProfile(
+            agent_id=agent_id,
+            identity=AgentIdentity(
+                name=agent_name,
+                emoji=identity_fields.emoji if identity_fields else None,
+                theme=identity_fields.theme if identity_fields else None,
+                avatar=identity_fields.avatar if identity_fields else None,
+                soul=soul_doc,
+                identity_fields=identity_fields,
+            ),
+            agents_doc=agents_doc,
+            workspace_files=workspace_files,
+            prompt_mode=prompt_mode,
+        )
+        os_name = os.uname().sysname if hasattr(os, "uname") else platform.system()
+        runtime_info = {
+            "os": os_name,
+            "shell": os.environ.get("SHELL", ""),
+            "workspace_dir": str(bootstrap_workspace_dir),
+        }
+        base_prompt = assemble_system_prompt(
+            agent_profile,
+            tools=[td.name for td in tool_defs] if tool_defs else None,
+            memory=memory_text,
+            runtime_info=runtime_info,
+            docs_path=self._resolve_docs_path(),
+            heartbeat_prompt=getattr(self._config, "heartbeat_prompt", None),
+        )
+        # daily_notes, workspace_files, and extra_context are per-turn /
+        # per-day volatile content. Keeping them in the cacheable base
+        # invalidates the prompt-cache prefix every time any of them
+        # changes (every day for daily_notes, every workspace edit for
+        # workspace_files, every tool_context shift for extra_context).
+        # Render them into the dynamic suffix instead so the base hash
+        # stays stable across those rotations.
+        dynamic_blocks: list[str] = []
+        volatile_block = self._render_volatile_block(
+            daily_notes=daily,
+            workspace_files=workspace_files,
+            extra_context=extra_context,
+            prompt_mode=prompt_mode,
+            wrap_untrusted_workspace=getattr(
+                getattr(self._config, "safety", None),
+                "wrap_untrusted_workspace",
+                True,
+            ),
+        )
+        if volatile_block:
+            dynamic_blocks.append(volatile_block)
+        if tool_defs and any(getattr(td, "name", "") == "router_control" for td in tool_defs):
+            router_block = render_router_control_prompt_block(
+                getattr(self._config, "agentos_router", None)
+            )
+            if router_block:
+                dynamic_blocks.append(f"## Router Control\n\n{router_block}")
+
+        if dynamic_blocks:
+            return base_prompt, "\n\n".join(dynamic_blocks)
+        return base_prompt
+
+    @staticmethod
+    def _resolve_docs_path() -> str | None:
+        return None
+
+    def _resolve_memory_source_dir(self, agent_id: str):
+        from agentos.agents.scope import resolve_agent_memory_source_dir
+
+        source = getattr(getattr(self._config, "memory", None), "source", "state")
+        return resolve_agent_memory_source_dir(agent_id, self._config, source=source)
+
+    def _effective_memory_retrieval_metadata(self, agent_id: str) -> dict[str, str]:
+        retrievers = self._memory_retrievers or {}
+        for key in (agent_id, "main"):
+            retriever = retrievers.get(key)
+            metadata_fn = getattr(retriever, "effective_retrieval_metadata", None)
+            if callable(metadata_fn):
+                try:
+                    metadata = metadata_fn()
+                except Exception:
+                    continue
+                if isinstance(metadata, dict):
+                    return {str(k): str(v) for k, v in metadata.items()}
+
+        memory_cfg = getattr(self._config, "memory", None)
+        configured_mode = str(getattr(memory_cfg, "retrieval_mode", "hybrid"))
+        effective_mode = "fts_only" if configured_mode == "fts_only" else configured_mode
+        return {
+            "configured_retrieval_mode": configured_mode,
+            "retrieval_mode": effective_mode,
+            "embedding_requested_provider": "",
+            "embedding_effective_provider": "",
+            "embedding_model": "",
+            "vector_weight": str(getattr(memory_cfg, "vector_weight", "")),
+            "text_weight": str(getattr(memory_cfg, "text_weight", "")),
+        }
+
+    def _resolve_bootstrap_workspace_dir(self, agent_id: str):
+        from agentos.agents.scope import resolve_agent_workspace_dir
+
+        return resolve_agent_workspace_dir(agent_id, self._config)
+
+    def _resolve_bootstrap_max_chars(self) -> int:
+        value = getattr(self._config, "bootstrap_max_chars", None) if self._config else None
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return int(value)
+        return 20_000
+
+    def _resolve_bootstrap_total_max_chars(self) -> int:
+        value = getattr(self._config, "bootstrap_total_max_chars", None) if self._config else None
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return int(value)
+        return 50_000
+
+    def _load_memory_md(self, workspace_dir: Any, max_chars: int | None = None) -> str | None:
+        """Load MEMORY.md from agent workspace for system prompt injection."""
+        from pathlib import Path
+
+        if max_chars is None:
+            max_chars = getattr(getattr(self._config, "memory", None), "inject_limit", 4000)
+        root = Path(workspace_dir)
+        memory_file = root / "MEMORY.md"
+        if not memory_file.is_file():
+            memory_file = root / "memory.md"
+        if not memory_file.is_file():
+            return None
+        try:
+            content = memory_file.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            return None
+        if not content:
+            return None
+        if len(content) > max_chars:
+            return content[:max_chars] + "\n..."
+        return content
+
+    def _load_daily_notes(self, workspace_dir: Any) -> dict[str, str]:
+        from agentos.identity.workspace import load_daily_notes
+
+        memory_cfg = getattr(self._config, "memory", None)
+        return load_daily_notes(
+            str(workspace_dir),
+            per_note_max_chars=getattr(memory_cfg, "daily_note_max_chars", 4000),
+            total_max_chars=getattr(memory_cfg, "daily_notes_total_max_chars", 8000),
+        )
+
+    async def _run_pipeline(
+        self,
+        message: str,
+        session_key: str,
+        provider: Any,
+        cloned_selector: Any,
+        tool_defs: list,
+        base_prompt: str | tuple[str, str],
+        attachments: list[dict],
+        semantic_message: str | None = None,
+        ingress_pipeline_steps: list[PipelineStepRecord] | None = None,
+        prev_assistant_text: str | None = None,
+        prev_assistant_usage: dict[str, Any] | None = None,
+        history_user_texts: list[str] | None = None,
+        flags_text_override: str | None = None,
+        tool_context: ToolContext | None = None,
+        normalization_metadata: dict[str, Any] | None = None,
+    ) -> tuple[Any, Any]:
+        """Run the pre-turn pipeline and re-resolve provider if model changed.
+
+        Pre-seeds ``turn.metadata['pipeline_steps']`` with any
+        ``ingress_pipeline_steps`` recorded by the turn-ingress helper
+        (under DecisionLog ownership). The engine pipeline's
+        ``setdefault`` then appends step records to the same list, so
+        ``DecisionEntry`` ends up with ingress records first followed by
+        engine pipeline records.
+        """
+        from agentos.agentos_router.llm_judge import DEFAULT_ROUTING_TIMEOUT_SECONDS
+        from agentos.engine.pipeline import TurnContext, run_pipeline
+        from agentos.engine.steps import (
+            apply_agentos_router,
+            apply_prompt_cache,
+            filter_skills,
+            inject_platform_hint,
+            inject_subagent_grounding,
+            observe_reasoning_hint,
+            resolve_model,
+        )
+        from agentos.engine.steps.agentos_router import (
+            commit_deferred_router_history,
+        )
+
+        router_cfg = getattr(self._config, "agentos_router", None)
+        router_timeout = float(
+            getattr(router_cfg, "routing_timeout_seconds", None)
+            or DEFAULT_ROUTING_TIMEOUT_SECONDS
+        )
+
+        def _copy_router_turn(turn: TurnContext) -> TurnContext:
+            metadata: dict[str, Any] = {}
+            for key, value in turn.metadata.items():
+                try:
+                    metadata[key] = copy.deepcopy(value)
+                except Exception:
+                    metadata[key] = value
+            pipeline_steps = metadata.get("pipeline_steps")
+            if isinstance(pipeline_steps, list):
+                metadata["pipeline_steps"] = list(pipeline_steps)
+            metadata["_defer_agentos_router_history"] = True
+            return replace(
+                turn,
+                tool_defs=list(turn.tool_defs),
+                attachments=list(turn.attachments),
+                metadata=metadata,
+            )
+
+        async def _bounded_apply_agentos_router(turn: TurnContext) -> TurnContext:
+            async def _run_router_step() -> TurnContext:
+                return await apply_agentos_router(_copy_router_turn(turn))
+
+            try:
+                routed = await asyncio.wait_for(
+                    asyncio.to_thread(lambda: asyncio.run(_run_router_step())),
+                    timeout=router_timeout,
+                )
+                return commit_deferred_router_history(routed)
+            except TimeoutError as exc:
+                raise TimeoutError(f"AgentOS Router timed out after {router_timeout:g}s") from exc
+
+        _bounded_apply_agentos_router.__name__ = "apply_agentos_router"
+
+        initial_metadata: dict[str, Any] = {
+            "skill_loader": self._skill_loader,
+            "router_control_hold_store": self._router_control_hold_store,
+            # Surface the resolved per-agent workspace so tools that run
+            # exec_command find it without falling through to
+            # default_workspace_dir(). Prefer tool_context.workspace_dir
+            # (already resolved with the gateway config in rpc_sessions /
+            # channel_dispatch / scheduler); fall back to resolving from
+            # agent_id on the tool_context, then to an empty string.
+            "bootstrap_workspace_dir": (
+                getattr(tool_context, "workspace_dir", None)
+                or (
+                    str(
+                        self._resolve_bootstrap_workspace_dir(
+                            getattr(tool_context, "agent_id", "main") or "main"
+                        )
+                    )
+                    if tool_context is not None
+                    else ""
+                )
+            ),
+        }
+        if normalization_metadata is not None:
+            initial_metadata["input_normalization"] = dict(normalization_metadata)
+            material_tokens = normalization_metadata.get("material_estimated_tokens")
+            if type(material_tokens) is int and material_tokens > 0:
+                initial_metadata["material_estimated_tokens"] = material_tokens
+        if ingress_pipeline_steps:
+            initial_metadata["pipeline_steps"] = list(ingress_pipeline_steps)
+        if prev_assistant_text:
+            initial_metadata["router_prev_assistant_text"] = prev_assistant_text
+        if prev_assistant_usage:
+            initial_metadata["router_prev_assistant_usage"] = dict(prev_assistant_usage)
+        if history_user_texts:
+            initial_metadata["router_history_user_texts"] = list(history_user_texts)
+        if flags_text_override:
+            initial_metadata["router_flags_text_override"] = flags_text_override
+        if tool_context is not None:
+            initial_metadata["channel_kind"] = tool_context.channel_kind
+            initial_metadata["channel_id"] = tool_context.channel_id
+
+        turn = TurnContext(
+            message=message,
+            session_key=session_key,
+            config=self._config,
+            provider=provider,
+            model="",
+            tool_defs=tool_defs,
+            system_prompt=base_prompt,
+            attachments=attachments,
+            metadata=initial_metadata,
+            raw_message=semantic_message,
+        )
+        turn = await run_pipeline(
+            turn,
+            [
+                resolve_model,
+                _bounded_apply_agentos_router,
+                observe_reasoning_hint,
+                filter_skills,
+                inject_subagent_grounding,
+                inject_platform_hint,
+                apply_prompt_cache,
+            ],
+        )
+
+        # Apply routed model back to cloned selector (local, not shared)
+        if turn.model and cloned_selector is not None:
+            cloned_selector.override_model(turn.model)
+            provider = cloned_selector.resolve()
+
+        return turn, provider
+
+    async def _router_previous_assistant_context(
+        self,
+        session_key: str,
+        *,
+        exclude_last_user: bool = False,
+    ) -> dict[str, Any]:
+        """Return transcript context for the V4 router, excluding the current user turn."""
+        if self._session_manager is None:
+            return {}
+        get_transcript = getattr(self._session_manager, "get_transcript", None)
+        if not callable(get_transcript):
+            return {}
+        try:
+            transcript = get_transcript(session_key)
+            if inspect.isawaitable(transcript):
+                transcript = await transcript
+        except Exception:  # noqa: BLE001 - router context must never block a turn
+            log.debug("turn_runner.router_context_failed", session_key=session_key)
+            return {}
+        entries = list(transcript or [])
+        user_texts: list[str] = []
+        for index, entry in enumerate(entries):
+            if getattr(entry, "role", None) != "user":
+                continue
+            if exclude_last_user and index == len(entries) - 1:
+                continue
+            content = getattr(entry, "content", None)
+            if not isinstance(content, str) or not content.strip():
+                continue
+            unpacked = self._maybe_unpack_attachments(content)
+            text = unpacked.strip() if isinstance(unpacked, str) else content.strip()
+            if len(text) > _ROUTER_HISTORY_USER_MAX_CHARS:
+                text = text[-_ROUTER_HISTORY_USER_MAX_CHARS:]
+            user_texts.append(text)
+
+        context: dict[str, Any] = {}
+        if user_texts:
+            context["history_user_texts"] = user_texts[-_ROUTER_HISTORY_USER_MAX_TURNS:]
+
+        for entry in reversed(entries):
+            if getattr(entry, "role", None) != "assistant":
+                continue
+            content = getattr(entry, "content", None)
+            if not isinstance(content, str) or not content.strip():
+                continue
+            text = content.strip()
+            if len(text) > _ROUTER_PREV_ASSISTANT_MAX_CHARS:
+                text = text[-_ROUTER_PREV_ASSISTANT_MAX_CHARS:]
+            context["prev_assistant_text"] = text
+            token_count = getattr(entry, "token_count", None)
+            if (
+                isinstance(token_count, int)
+                and not isinstance(token_count, bool)
+                and token_count > 0
+            ):
+                context["prev_assistant_usage"] = {"output_tokens": token_count}
+            return context
+        return context
+
+    def _resolve_prompt_config(self, turn: Any) -> tuple[str, list | None, str | None]:
+        """Resolve final system prompt and cache breakpoints from pipeline output."""
+        final_prompt = turn.system_prompt
+        cache_breakpoints = None
+        request_context_prompt = None
+
+        if turn.metadata.get("cache_enabled") and isinstance(final_prompt, tuple):
+            base, dynamic = final_prompt
+            cache_breakpoints = [{"text": base, "cache": "true"}]
+            final_prompt = base
+            request_context_prompt = dynamic
+        elif turn.metadata.get("cache_enabled") and isinstance(final_prompt, str):
+            base = turn.metadata.get("cache_base_prompt") or final_prompt
+            if isinstance(base, str) and base:
+                cache_breakpoints = [{"text": base, "cache": "true"}]
+        elif isinstance(final_prompt, tuple):
+            final_prompt = "\n\n".join(final_prompt)
+
+        return final_prompt, cache_breakpoints, request_context_prompt
+
+    def _collect_session_flush_metadata(
+        self,
+        agent_id: str,
+        *,
+        session_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Collect last SessionFlush extraction attribution for decision logs."""
+
+        svc = self._session_flush_service
+        get_stats = getattr(svc, "last_extraction_stats", None)
+        if not callable(get_stats):
+            return {}
+        try:
+            try:
+                stats = get_stats(agent_id, session_key) if session_key is not None else get_stats()
+            except TypeError:
+                stats = get_stats()
+        except Exception:
+            return {}
+        if not isinstance(stats, dict) or not stats:
+            return {}
+        stat_agent = stats.get("agent_id")
+        if stat_agent and str(stat_agent) != agent_id:
+            return {}
+        stat_session_key = stats.get("session_key")
+        if session_key and stat_session_key and str(stat_session_key) != session_key:
+            return {}
+        fallback_reason = str(stats.get("fallback_reason") or "")
+        return {
+            "session_flush_extraction_model": str(stats.get("extraction_model") or ""),
+            "session_flush_fallback_used": bool(fallback_reason),
+            "session_flush_fallback_reason": fallback_reason,
+        }
+
+    async def _record_checkpoint_before_compaction(
+        self,
+        session_key: str,
+        transcript: Sequence[Any],
+        *,
+        turn_id: str,
+        source: str,
+    ) -> bool:
+        if self._session_manager is None:
+            return False
+        method = getattr(type(self._session_manager), "record_memory_checkpoint", None)
+        if method is None:
+            method = getattr(
+                getattr(self._session_manager, "__dict__", {}),
+                "get",
+                lambda *_: None,
+            )("record_memory_checkpoint")
+        if not callable(method):
+            return False
+        async with self._session_write_context(session_key):
+            receipt = await self._session_manager.record_memory_checkpoint(
+                session_key,
+                list(transcript),
+                turn_id=turn_id,
+                source=source,
+            )
+        return durable_receipt_allows_destructive_compaction(receipt)
+
+    def _emit_decision_entry(
+        self,
+        *,
+        turn_id: str,
+        session_key: str,
+        session_id: str | None = None,
+        message: str,
+        final_prompt: str,
+        tool_defs: list[Any],
+        turn_obj: Any | None,
+        provider: Any | None,
+        resolved_model: str,
+        turn_started_at: float,
+        prompt_report: PromptReport | None = None,
+        session_intent: str | None = None,
+        done_event: DoneEvent | None = None,
+        trace_id: str | None = None,
+        skills_invoked: list[str] | None = None,
+    ) -> None:
+        """Write one DecisionEntry for this turn (best-effort, never raises).
+
+        Pipeline steps are read off ``turn_obj.metadata['pipeline_steps']``
+        (populated by :func:`pipeline.run_pipeline`). Token counts are pulled
+        from ``usage_tracker`` when available; otherwise default to 0.
+        """
+
+        try:
+            tool_names = [getattr(td, "name", "") for td in tool_defs]
+            prompt_hash, system_prompt_hash, tool_list_hash = compute_hashes(
+                message, final_prompt, [n for n in tool_names if n]
+            )
+
+            pipeline_steps: list[PipelineStepRecord] = []
+            if turn_obj is not None:
+                pipeline_steps = list(turn_obj.metadata.get("pipeline_steps", []))
+
+            # Per-turn token counts come from the final DoneEvent (which carries
+            # cumulative input_tokens / output_tokens for the whole turn). The
+            # legacy code looked up `usage_tracker.last_input_tokens`, but
+            # UsageTracker exposes only per-session aggregates and never had
+            # `last_input_tokens` / `last_output_tokens` attributes — the
+            # getattr defaults silently produced zero on every turn. See
+            # engine/usage.py for the actual UsageTracker surface.
+            if done_event is not None:
+                tokens_input = int(done_event.input_tokens or 0)
+                tokens_output = int(done_event.output_tokens or 0)
+            else:
+                tokens_input = 0
+                tokens_output = 0
+
+            latency_ms = int((time.monotonic() - turn_started_at) * 1000)
+            ts = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            tool_choice = "auto" if tool_defs else "none"
+            provider_name = type(provider).__name__ if provider is not None else ""
+
+            # Populate SavingsTelemetry
+            savings_telemetry = SavingsTelemetry()
+            if turn_obj is not None:
+                metadata = turn_obj.metadata
+                router_cfg = getattr(self._config, "agentos_router", None)
+                agentos_router_tiers = getattr(router_cfg, "tiers", {})
+
+                # AgentOS Router
+                savings_telemetry.routed_model = metadata.get("routed_model")
+                savings_telemetry.baseline_model = metadata.get("baseline_model")
+                savings_telemetry.routing_confidence = metadata.get("routing_confidence")
+                savings_telemetry.routing_savings_pct = metadata.get("savings_pct")
+
+                _max_p = float(metadata.get("savings_max_price_per_m") or 0.0)
+                _rte_p = float(metadata.get("savings_routed_price_per_m") or 0.0)
+                if done_event is not None:
+                    savings_telemetry.routing_savings_usd_estimated_vs_baseline = (
+                        _compute_route_input_savings_usd(
+                            _max_p,
+                            _rte_p,
+                            done_event.input_tokens,
+                        )
+                    )
+
+                # Tool-result projection (values will be set in agent.py)
+                savings_telemetry.tool_projection_applied = metadata.get(
+                    "tool_projection_applied",
+                    False,
+                )
+                savings_telemetry.tool_projection_calls = metadata.get("tool_projection_calls", 0)
+                savings_telemetry.tool_projection_tokens_before = metadata.get(
+                    "tool_projection_tokens_before",
+                    0,
+                )
+                savings_telemetry.tool_projection_tokens_after = metadata.get(
+                    "tool_projection_tokens_after",
+                    0,
+                )
+                savings_telemetry.tool_projection_tokens_saved = metadata.get(
+                    "tool_projection_tokens_saved",
+                    0,
+                )
+                savings_telemetry.tool_result_store_writes = metadata.get(
+                    "tool_result_store_writes",
+                    0,
+                )
+                savings_telemetry.tool_result_store_skips = metadata.get(
+                    "tool_result_store_skips",
+                    0,
+                )
+
+                # Thinking mode
+                savings_telemetry.thinking_mode = metadata.get("thinking_mode")
+
+                # Short-reply prompt enforcement
+                savings_telemetry.short_reply_active = metadata.get("prompt_policy") == "P0"
+                if savings_telemetry.short_reply_active and done_event is not None:
+                    estimated_output_savings_pct = getattr(
+                        router_cfg,
+                        "estimated_output_savings_pct",
+                        0.03,
+                    )
+                    output_side_tokens = _non_negative_int(
+                        done_event.output_tokens
+                    ) + _non_negative_int(done_event.reasoning_tokens)
+                    restored_output_tokens = _restored_output_side_tokens(
+                        output_side_tokens,
+                        metadata,
+                        estimated_output_savings_pct,
+                    )
+                    savings_telemetry.short_reply_savings_tokens_estimated = round(
+                        max(0.0, restored_output_tokens - output_side_tokens)
+                    )
+                    baseline = _select_savings_baseline_model(
+                        agentos_router_tiers,
+                        _non_negative_int(done_event.input_tokens)
+                        + _non_negative_int(
+                            metadata.get("tool_projection_tokens_saved"),
+                        ),
+                        restored_output_tokens,
+                    )
+                    if baseline.price.output_per_m > 0:
+                        savings_telemetry.short_reply_savings_usd_estimated_vs_baseline = round(
+                            (savings_telemetry.short_reply_savings_tokens_estimated / 1_000_000)
+                            * baseline.price.output_per_m,
+                            6,
+                        )
+
+                # Cache Hit — fires when EITHER AgentOS's prompt-cache split
+                # infra reports a hit OR the upstream provider returns
+                # `cached_tokens > 0` (OpenRouter prompt-cache passthrough).
+                # Without the OR, provider-side cache hits were silently
+                # losing the active flag while still recording tokens_saved.
+                provider_cache_hit = done_event is not None and (done_event.cached_tokens or 0) > 0
+                agentos_cache_hit = metadata.get("cache_mode") == "hit"
+                event_cache_hit = bool(getattr(done_event, "cache_hit_active", False))
+                savings_telemetry.cache_hit_active = (
+                    event_cache_hit or provider_cache_hit or agentos_cache_hit
+                )
+                if done_event is not None:
+                    savings_telemetry.cache_hit_tokens_saved = done_event.cached_tokens
+                    if savings_telemetry.cache_hit_tokens_saved > 0 and _max_p > 0:
+                        savings_telemetry.cache_hit_usd_estimated_vs_baseline = round(
+                            (savings_telemetry.cache_hit_tokens_saved / 1_000_000) * _max_p, 6
+                        )
+
+                savings_telemetry.billed_cost_usd = (
+                    done_event.billed_cost if done_event is not None else None
+                )
+                savings_telemetry.cost_usd = done_event.cost_usd if done_event is not None else None
+                savings_telemetry.cost_source = (
+                    normalize_event_cost_source(
+                        done_event.cost_source,
+                        input_tokens=done_event.input_tokens,
+                        output_tokens=done_event.output_tokens,
+                        cache_read_tokens=done_event.cached_tokens,
+                        cache_write_tokens=done_event.cache_write_tokens,
+                        cost_usd=done_event.cost_usd,
+                        billed_cost_usd=done_event.billed_cost,
+                    )
+                    if done_event is not None
+                    else None
+                )
+
+                # Total savings is the comprehensive per-turn estimate used by
+                # the popup. It intentionally excludes billed-cost and cache-hit
+                # effects so it remains a token/price estimate.
+                if done_event is not None:
+                    savings_telemetry.total_savings_pct = done_event.total_savings_pct
+                    savings_telemetry.total_savings_usd = done_event.total_savings_usd
+
+            entry = DecisionEntry(
+                turn_id=turn_id,
+                session_key=session_key,
+                session_id=session_id,
+                session_intent=session_intent,
+                intent_summary=build_intent_summary(message),
+                trace_id=trace_id or turn_id,
+                tool_profile=prompt_report.tool_profile if prompt_report else None,
+                prompt_hash=prompt_hash,
+                system_prompt_hash=system_prompt_hash,
+                tool_list_hash=tool_list_hash,
+                tool_choice=tool_choice,
+                tokens_input=tokens_input,
+                tokens_output=tokens_output,
+                model=resolved_model,
+                provider=provider_name,
+                latency_ms=latency_ms,
+                ts=ts,
+                skills_invoked=skills_invoked if skills_invoked is not None else [],
+                pipeline_steps=pipeline_steps,
+                savings=savings_telemetry,
+                system_chars=prompt_report.system_chars if prompt_report else 0,
+                tool_count=prompt_report.tool_count if prompt_report else 0,
+                tools_schema_chars=prompt_report.tools_schema_chars if prompt_report else 0,
+                skill_count=prompt_report.skill_count if prompt_report else 0,
+                skills_prompt_chars=prompt_report.skills_prompt_chars if prompt_report else 0,
+                memory_md_present=prompt_report.memory_md_present if prompt_report else False,
+                daily_notes_omitted=(
+                    prompt_report.daily_notes_omitted if prompt_report else False
+                ),
+                daily_notes_count_before_omit=(
+                    prompt_report.daily_notes_count_before_omit if prompt_report else 0
+                ),
+                daily_notes_policy_reason=(
+                    prompt_report.daily_notes_policy_reason if prompt_report else None
+                ),
+                injected_workspace_files_count=(
+                    prompt_report.injected_workspace_files_count if prompt_report else 0
+                ),
+                bootstrap_files=prompt_report.bootstrap_files if prompt_report else [],
+                memory_mode_fingerprint=(
+                    prompt_report.memory_mode_fingerprint if prompt_report else {}
+                ),
+                retrieval_mode=prompt_report.retrieval_mode if prompt_report else None,
+                cache_mode=prompt_report.cache_mode if prompt_report else None,
+                cache_base_hash=prompt_report.cache_base_hash if prompt_report else None,
+                cache_dynamic_hash=(prompt_report.cache_dynamic_hash if prompt_report else None),
+                cache_read_input_tokens=(
+                    int(done_event.cached_tokens or 0) if done_event is not None else 0
+                ),
+                cache_creation_input_tokens=(
+                    int(done_event.cache_write_tokens or 0) if done_event is not None else 0
+                ),
+                resolved_model=(prompt_report.resolved_model if prompt_report else None)
+                or resolved_model,
+                alias_resolution_chain=(
+                    prompt_report.alias_resolution_chain
+                    if prompt_report and prompt_report.alias_resolution_chain
+                    else ([resolved_model] if resolved_model else [])
+                ),
+                provider_after_rewrite=(
+                    prompt_report.provider_after_rewrite if prompt_report else None
+                )
+                or provider_name,
+                cache_legacy_hash=prompt_report.cache_legacy_hash if prompt_report else None,
+                cache_shadow_final_hash=(
+                    prompt_report.cache_shadow_final_hash if prompt_report else None
+                ),
+                cache_key_collision=(prompt_report.cache_key_collision if prompt_report else False),
+                reasoning_hint_resolved=(
+                    prompt_report.reasoning_hint_resolved if prompt_report else None
+                ),
+                cache_base_chars=prompt_report.cache_base_chars if prompt_report else 0,
+                cache_dynamic_chars=prompt_report.cache_dynamic_chars if prompt_report else 0,
+                runtime_context_hash=(
+                    done_event.runtime_context_hash if done_event is not None else None
+                ),
+                runtime_context_chars=(
+                    done_event.runtime_context_chars if done_event is not None else 0
+                ),
+                session_flush_extraction_model=(
+                    prompt_report.session_flush_extraction_model if prompt_report else None
+                ),
+                session_flush_fallback_used=(
+                    prompt_report.session_flush_fallback_used if prompt_report else False
+                ),
+                session_flush_fallback_reason=(
+                    prompt_report.session_flush_fallback_reason if prompt_report else None
+                ),
+            )
+            write_decision_entry(entry)
+        except Exception as exc:  # pragma: no cover — observability must not break turns
+            log.warning("decision_log.write_failed", error=str(exc))
+
+    async def _maybe_compact_on_t3_upgrade(
+        self,
+        session_key: str,
+        turn: TurnContext,
+        context_window_tokens: int,
+        *,
+        compaction_provider: Any | None = None,
+        compaction_model: str | None = None,
+    ) -> str:
+        """Flush memory and compact transcript when the router upgrades into t3.
+
+        Returns a status string so the caller can distinguish non-applicable
+        routes, flush failures that may still fall back to generic preflight,
+        and compact failures that should trip the circuit without retrying.
+        """
+        router_cfg = getattr(self._config, "agentos_router", None)
+        upgrade_compaction_enabled = getattr(
+            router_cfg,
+            "upgrade_to_c3_compaction_enabled",
+            getattr(router_cfg, "upgrade_to_t3_compaction_enabled", False),
+        )
+        if not upgrade_compaction_enabled:
+            return _T3_NOT_APPLICABLE
+
+        routed_tier = normalize_text_tier(turn.metadata.get("routed_tier"))
+        if routed_tier != HIGHEST_TEXT_TIER:
+            return _T3_NOT_APPLICABLE
+
+        if not turn.metadata.get("routing_applied", False):
+            return _T3_NOT_APPLICABLE
+
+        routing_extra = turn.metadata.get("routing_extra", {})
+        previous = normalize_text_tier(routing_extra.get("previous_tier"))
+        if previous is None:
+            final = normalize_text_tier(routing_extra.get("final_tier"))
+            base = normalize_text_tier(routing_extra.get("base_tier"))
+            if final == HIGHEST_TEXT_TIER and tier_index(base) in {0, 1, 2}:
+                previous = base
+            else:
+                return _T3_NOT_APPLICABLE
+
+        if tier_index(previous) not in {0, 1, 2}:
+            return _T3_NOT_APPLICABLE
+
+        if session_key.startswith(("cron:", "subagent:")):
+            return _T3_NOT_APPLICABLE
+
+        if self._session_manager is None:
+            return _T3_NOT_APPLICABLE
+
+        if self.has_compacted_this_turn(session_key):
+            log.info(
+                "t3_upgrade_compaction.skipped",
+                session_key=session_key,
+                reason="already_compacted_this_turn",
+            )
+            return _T3_HANDLED
+        if self.has_attempted_compaction_this_turn(session_key):
+            log.info(
+                "t3_upgrade_compaction.skipped",
+                session_key=session_key,
+                reason="already_attempted_this_turn",
+            )
+            return _T3_HANDLED
+
+        try:
+            transcript = await self._session_manager.get_transcript(session_key)
+        except KeyError:
+            return _T3_HANDLED
+        if not transcript:
+            return _T3_HANDLED
+
+        compaction_config = None
+        if compaction_provider is not None or compaction_model:
+            from agentos.session.compaction import build_compaction_config_from_provider
+
+            compaction_config = build_compaction_config_from_provider(
+                compaction_provider,
+                model_override=compaction_model,
+                compaction_config=getattr(getattr(self, "_config", None), "compaction", None),
+            )
+
+        from agentos.session.compaction import CompactionConfig, estimate_entry_replay_tokens
+
+        total_tokens = sum(estimate_entry_replay_tokens(e) for e in transcript)
+        safety_margin = float(
+            getattr(compaction_config or CompactionConfig(), "safety_margin", 1.2) or 1.2
+        )
+        if total_tokens * safety_margin <= context_window_tokens:
+            log.info(
+                "t3_upgrade_compaction.skipped",
+                session_key=session_key,
+                reason="within_budget",
+                total_tokens=total_tokens,
+                context_window_tokens=context_window_tokens,
+                safety_margin=safety_margin,
+            )
+            return _T3_HANDLED
+        if self._compaction_circuit_open(session_key):
+            self.mark_compaction_attempted_this_turn(session_key)
+            await self._record_emergency_ephemeral_compaction(
+                session_key,
+                transcript,
+                context_window_tokens,
+                compaction_id=new_compaction_id(),
+                phase="t3_upgrade",
+                reason="durable_compaction_circuit_open",
+            )
+            return _T3_HANDLED
+
+        log.info(
+            "t3_upgrade_compaction.triggered",
+            session_key=session_key,
+            previous_tier=previous,
+            final_tier=HIGHEST_TEXT_TIER,
+            context_window_tokens=context_window_tokens,
+        )
+        self.mark_compaction_attempted_this_turn(session_key)
+        compaction_id = new_compaction_id()
+        notify_compaction(
+            session_key,
+            source="automatic",
+            phase="t3_upgrade",
+            status="started",
+            previous_tier=previous,
+            context_window_tokens=context_window_tokens,
+            **compaction_effect_payload(status="started"),
+            **compaction_lifecycle_payload(compaction_id, COMPACTION_TRIGGERED_EVENT),
+        )
+
+        checkpoint_saved = await self._record_checkpoint_before_compaction(
+            session_key,
+            transcript,
+            turn_id=compaction_id,
+            source="t3_upgrade_compaction",
+        )
+        flush_receipt = None
+        flush_receipt_status = "not_required"
+        requires_safe_receipt = self._pre_compaction_flush_requires_safe_receipt()
+        if self._pre_compaction_flush_enabled():
+            flush_receipt = await self._await_pre_compaction_flush_grace(
+                transcript,
+                session_key,
+                event_prefix="t3_upgrade_compaction",
+                wait_for_receipt=requires_safe_receipt,
+                turn_id=compaction_id,
+                checkpoint_exists=checkpoint_saved,
+            )
+            flush_receipt_status = flush_receipt_status_for_compaction(
+                flush_receipt,
+                self._config,
+            )
+            memory_status = compaction_memory_status(
+                flush_receipt,
+                deterministic_receipt_safe=checkpoint_saved and not requires_safe_receipt,
+                required=self._pre_compaction_flush_enabled(),
+            )
+            if (
+                requires_safe_receipt
+                and not memory_status.allows_destructive_compaction
+            ):
+                log.warning(
+                    "t3_upgrade_compaction.skipped",
+                    session_key=session_key,
+                    reason="unsafe_flush_receipt",
+                )
+                notify_compaction(
+                    session_key,
+                    source="automatic",
+                    phase="t3_upgrade",
+                    status="skipped",
+                    reason="unsafe_flush_receipt",
+                    context_window_tokens=context_window_tokens,
+                    flush_receipt_status=flush_receipt_status,
+                    memory_safety_status=memory_status.safety_status,
+                    semantic_memory_status=memory_status.semantic_status,
+                    **compaction_effect_payload(
+                        status="skipped",
+                        reason="unsafe_flush_receipt",
+                    ),
+                    **compaction_lifecycle_payload(
+                        compaction_id,
+                        COMPACTION_TRIGGERED_EVENT,
+                    ),
+                )
+                return _T3_HANDLED
+
+        try:
+            from agentos.session.compaction import call_compact_with_optional_config
+
+            compaction_result = None
+            compact_with_result = getattr(type(self._session_manager), "compact_with_result", None)
+            if callable(compact_with_result):
+                compact_method = self._session_manager.compact_with_result
+                compact_kwargs: dict[str, Any] = {}
+                if _accepts_keyword_arg(compact_method, "compaction_id"):
+                    compact_kwargs["compaction_id"] = compaction_id
+                if _accepts_keyword_arg(compact_method, "trigger_reason"):
+                    compact_kwargs["trigger_reason"] = "t3_upgrade"
+                if _accepts_keyword_arg(compact_method, "flush_receipt_status"):
+                    compact_kwargs["flush_receipt_status"] = flush_receipt_status
+                if _accepts_keyword_arg(compact_method, "mutation_context"):
+                    compact_kwargs["mutation_context"] = self._session_write_context_factory(
+                        session_key
+                    )
+                compaction_result = await self._session_manager.compact_with_result(
+                    session_key,
+                    context_window_tokens,
+                    compaction_config,
+                    **compact_kwargs,
+                )
+                result = getattr(compaction_result, "summary", "") or ""
+            else:
+                result = await call_compact_with_optional_config(
+                    self._session_manager.compact,
+                    session_key,
+                    context_window_tokens,
+                    compaction_config,
+                )
+            if (
+                compaction_result is not None
+                and int(getattr(compaction_result, "removed_count", 0) or 0) > 0
+                and bool(getattr(compaction_result, "summary", "") or "")
+            ):
+                for event in (
+                    COMPACTION_CHUNK_SUMMARIZED_EVENT,
+                    COMPACTION_SUMMARY_VERIFIED_EVENT,
+                ):
+                    observed_payload = compaction_lifecycle_payload(compaction_id, event)
+                    observed_payload.update(compaction_result_payload(compaction_result))
+                    notify_compaction(
+                        session_key,
+                        source="automatic",
+                        phase="t3_upgrade",
+                        status="observed",
+                        context_window_tokens=context_window_tokens,
+                        flush_receipt_status=flush_receipt_status,
+                        **compaction_effect_payload(status="observed"),
+                        **observed_payload,
+                    )
+            if result:
+                self.mark_compacted_this_turn(session_key)
+                self._record_compaction_success(session_key)
+                completed_payload = {"summary_len": len(result)}
+                if compaction_result is not None:
+                    completed_payload.update(compaction_result_payload(compaction_result))
+                notify_compaction(
+                    session_key,
+                    source="automatic",
+                    phase="t3_upgrade",
+                    status="completed",
+                    context_window_tokens=context_window_tokens,
+                    flush_receipt_status=flush_receipt_status,
+                    **compaction_effect_payload(status="completed"),
+                    **completed_payload,
+                    **compaction_lifecycle_payload(compaction_id, COMPACTION_PERSISTED_EVENT),
+                )
+            else:
+                skip_reason = str(
+                    getattr(compaction_result, "skip_reason", None) or "empty_summary"
+                )
+                if skip_reason != "stale_preimage":
+                    emergency_applied = await self._record_emergency_ephemeral_compaction(
+                        session_key,
+                        transcript,
+                        context_window_tokens,
+                        compaction_id=compaction_id,
+                        phase="t3_upgrade",
+                        reason=skip_reason,
+                    )
+                    if emergency_applied:
+                        return _T3_HANDLED
+                notify_compaction(
+                    session_key,
+                    source="automatic",
+                    phase="t3_upgrade",
+                    status="skipped",
+                    reason=skip_reason,
+                    context_window_tokens=context_window_tokens,
+                    flush_receipt_status=flush_receipt_status,
+                    **compaction_effect_payload(
+                        status="skipped",
+                        reason=skip_reason,
+                    ),
+                    **compaction_lifecycle_payload(
+                        compaction_id,
+                        COMPACTION_TRIGGERED_EVENT,
+                    ),
+                )
+            log.info(
+                "t3_upgrade_compaction.compact_done",
+                session_key=session_key,
+                summary_produced=bool(result),
+                summary_length=len(result) if result else 0,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "t3_upgrade_compaction.compact_failed",
+                session_key=session_key,
+                error=str(exc),
+            )
+            self._record_compaction_failure(session_key)
+            emergency_applied = await self._record_emergency_ephemeral_compaction(
+                session_key,
+                transcript,
+                context_window_tokens,
+                compaction_id=compaction_id,
+                phase="t3_upgrade",
+                reason="compact_failed",
+            )
+            if emergency_applied:
+                return _T3_COMPACT_FAILED
+            notify_compaction(
+                session_key,
+                source="automatic",
+                phase="t3_upgrade",
+                status="failed",
+                message=str(exc),
+                context_window_tokens=context_window_tokens,
+                flush_receipt_status=flush_receipt_status,
+                **compaction_effect_payload(status="failed"),
+                **compaction_lifecycle_payload(
+                    compaction_id,
+                    COMPACTION_TRIGGERED_EVENT,
+                ),
+            )
+            return _T3_COMPACT_FAILED
+
+        return _T3_HANDLED
+
+    async def _maybe_preflight_compact(
+        self,
+        session_key: str,
+        context_window_tokens: int,
+        *,
+        compaction_provider: Any | None = None,
+        compaction_model: str | None = None,
+    ) -> None:
+        """Compact proactively if session history exceeds token budget.
+
+        Called before _load_history(). Uses SessionManager.compact() directly
+        because no Agent state exists yet — the DB is the sole source of truth.
+        Safe to re-compact from DB at this point (no double-compaction risk).
+        """
+        if self._session_manager is None:
+            return
+        # Skip ephemeral sessions
+        if session_key.startswith(("cron:", "subagent:")):
+            return
+        if self.has_compacted_this_turn(session_key):
+            log.info(
+                "preflight_compaction.skipped",
+                session_key=session_key,
+                reason="already_compacted_this_turn",
+            )
+            return
+        if self.has_attempted_compaction_this_turn(session_key):
+            log.info(
+                "preflight_compaction.skipped",
+                session_key=session_key,
+                reason="already_attempted_this_turn",
+            )
+            return
+        try:
+            transcript = await self._session_manager.get_transcript(session_key)
+        except KeyError:
+            return  # session doesn't exist yet
+        if not transcript:
+            return
+
+        from agentos.session.compaction import estimate_entry_model_replay_tokens
+
+        total_tokens = sum(estimate_entry_model_replay_tokens(e) for e in transcript)
+        ratio = self._preflight_compact_ratio()
+        threshold = int(context_window_tokens * ratio)
+        if total_tokens <= threshold:
+            return
+        if self._compaction_circuit_open(session_key):
+            self.mark_compaction_attempted_this_turn(session_key)
+            await self._record_emergency_ephemeral_compaction(
+                session_key,
+                transcript,
+                context_window_tokens,
+                compaction_id=new_compaction_id(),
+                phase="preflight",
+                reason="durable_compaction_circuit_open",
+            )
+            return
+
+        log.info(
+            "preflight_compaction.triggered",
+            session_key=session_key,
+            total_tokens=total_tokens,
+            threshold=threshold,
+            ratio=ratio,
+        )
+        self.mark_compaction_attempted_this_turn(session_key)
+        compaction_id = new_compaction_id()
+        notify_compaction(
+            session_key,
+            source="automatic",
+            phase="preflight",
+            status="started",
+            tokens_before=total_tokens,
+            context_window_tokens=context_window_tokens,
+            **compaction_effect_payload(status="started"),
+            **compaction_lifecycle_payload(compaction_id, COMPACTION_TRIGGERED_EVENT),
+        )
+        checkpoint_saved = await self._record_checkpoint_before_compaction(
+            session_key,
+            transcript,
+            turn_id=compaction_id,
+            source="preflight_compaction",
+        )
+        flush_receipt = None
+        flush_receipt_status = "not_required"
+        requires_safe_receipt = self._pre_compaction_flush_requires_safe_receipt()
+        if self._pre_compaction_flush_enabled():
+            flush_receipt = await self._await_pre_compaction_flush_grace(
+                transcript,
+                session_key,
+                event_prefix="preflight_compaction",
+                wait_for_receipt=requires_safe_receipt,
+                turn_id=compaction_id,
+                checkpoint_exists=checkpoint_saved,
+            )
+            flush_receipt_status = flush_receipt_status_for_compaction(
+                flush_receipt,
+                self._config,
+            )
+            memory_status = compaction_memory_status(
+                flush_receipt,
+                deterministic_receipt_safe=checkpoint_saved and not requires_safe_receipt,
+                required=self._pre_compaction_flush_enabled(),
+            )
+            if (
+                requires_safe_receipt
+                and not memory_status.allows_destructive_compaction
+            ):
+                log.warning(
+                    "preflight_compaction.skipped",
+                    session_key=session_key,
+                    reason="unsafe_flush_receipt",
+                )
+                notify_compaction(
+                    session_key,
+                    source="automatic",
+                    phase="preflight",
+                    status="skipped",
+                    reason="unsafe_flush_receipt",
+                    tokens_before=total_tokens,
+                    context_window_tokens=context_window_tokens,
+                    flush_receipt_status=flush_receipt_status,
+                    memory_safety_status=memory_status.safety_status,
+                    semantic_memory_status=memory_status.semantic_status,
+                    **compaction_effect_payload(
+                        status="skipped",
+                        reason="unsafe_flush_receipt",
+                    ),
+                    **compaction_lifecycle_payload(
+                        compaction_id,
+                        COMPACTION_TRIGGERED_EVENT,
+                    ),
+                )
+                return
+        compaction_config = None
+        skip_reason = "empty_summary"
+        if compaction_provider is not None or compaction_model:
+            from agentos.session.compaction import build_compaction_config_from_provider
+
+            compaction_config = build_compaction_config_from_provider(
+                compaction_provider,
+                model_override=compaction_model,
+                compaction_config=getattr(getattr(self, "_config", None), "compaction", None),
+            )
+        from agentos.session.compaction import call_compact_with_optional_config
+
+        try:
+            compaction_result = None
+            compact_with_result = getattr(type(self._session_manager), "compact_with_result", None)
+            if callable(compact_with_result):
+                compact_method = self._session_manager.compact_with_result
+                compact_kwargs: dict[str, Any] = {}
+                if _accepts_keyword_arg(compact_method, "compaction_id"):
+                    compact_kwargs["compaction_id"] = compaction_id
+                if _accepts_keyword_arg(compact_method, "trigger_reason"):
+                    compact_kwargs["trigger_reason"] = "preflight"
+                if _accepts_keyword_arg(compact_method, "flush_receipt_status"):
+                    compact_kwargs["flush_receipt_status"] = flush_receipt_status
+                if _accepts_keyword_arg(compact_method, "mutation_context"):
+                    compact_kwargs["mutation_context"] = self._session_write_context_factory(
+                        session_key
+                    )
+                compaction_result = await self._session_manager.compact_with_result(
+                    session_key,
+                    context_window_tokens,
+                    compaction_config,
+                    **compact_kwargs,
+                )
+                result = getattr(compaction_result, "summary", "") or ""
+            else:
+                result = await call_compact_with_optional_config(
+                    self._session_manager.compact,
+                    session_key,
+                    context_window_tokens,
+                    compaction_config,
+                )
+            if (
+                compaction_result is not None
+                and int(getattr(compaction_result, "removed_count", 0) or 0) > 0
+                and bool(getattr(compaction_result, "summary", "") or "")
+            ):
+                for event in (
+                    COMPACTION_CHUNK_SUMMARIZED_EVENT,
+                    COMPACTION_SUMMARY_VERIFIED_EVENT,
+                ):
+                    observed_payload = compaction_lifecycle_payload(compaction_id, event)
+                    observed_payload.update(
+                        compaction_result_payload(
+                            compaction_result,
+                            tokens_before=total_tokens,
+                        )
+                    )
+                    notify_compaction(
+                        session_key,
+                        source="automatic",
+                        phase="preflight",
+                        status="observed",
+                        context_window_tokens=context_window_tokens,
+                        flush_receipt_status=flush_receipt_status,
+                        **compaction_effect_payload(status="observed"),
+                        **observed_payload,
+                    )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "preflight_compaction.compact_failed",
+                session_key=session_key,
+                error=str(exc),
+            )
+            self._record_compaction_failure(session_key)
+            emergency_applied = await self._record_emergency_ephemeral_compaction(
+                session_key,
+                transcript,
+                context_window_tokens,
+                compaction_id=compaction_id,
+                phase="preflight",
+                reason="compact_failed",
+            )
+            if emergency_applied:
+                return
+            notify_compaction(
+                session_key,
+                source="automatic",
+                phase="preflight",
+                status="failed",
+                message=str(exc),
+                tokens_before=total_tokens,
+                context_window_tokens=context_window_tokens,
+                flush_receipt_status=flush_receipt_status,
+                **compaction_effect_payload(status="failed"),
+                **compaction_lifecycle_payload(
+                    compaction_id,
+                    COMPACTION_TRIGGERED_EVENT,
+                ),
+            )
+            return
+        if not result:
+            skip_reason = str(
+                getattr(compaction_result, "skip_reason", None) or "empty_summary"
+            )
+            if skip_reason == "stale_preimage":
+                notify_compaction(
+                    session_key,
+                    source="automatic",
+                    phase="preflight",
+                    status="skipped",
+                    reason=skip_reason,
+                    tokens_before=total_tokens,
+                    context_window_tokens=context_window_tokens,
+                    flush_receipt_status=flush_receipt_status,
+                    **compaction_effect_payload(
+                        status="skipped",
+                        reason=skip_reason,
+                    ),
+                    **compaction_lifecycle_payload(
+                        compaction_id,
+                        COMPACTION_TRIGGERED_EVENT,
+                    ),
+                )
+                return
+            emergency_applied = await self._record_emergency_ephemeral_compaction(
+                session_key,
+                transcript,
+                context_window_tokens,
+                compaction_id=compaction_id,
+                phase="preflight",
+                reason=skip_reason,
+            )
+            if emergency_applied:
+                return
+        if result:
+            self.mark_compacted_this_turn(session_key)
+            self._record_compaction_success(session_key)
+            completed_payload = {"tokens_before": total_tokens}
+            if compaction_result is not None:
+                completed_payload.update(
+                    compaction_result_payload(
+                        compaction_result,
+                        tokens_before=total_tokens,
+                    )
+                )
+            notify_compaction(
+                session_key,
+                source="automatic",
+                phase="preflight",
+                status="completed",
+                context_window_tokens=context_window_tokens,
+                flush_receipt_status=flush_receipt_status,
+                **compaction_effect_payload(status="completed"),
+                **completed_payload,
+                **compaction_lifecycle_payload(compaction_id, COMPACTION_PERSISTED_EVENT),
+            )
+        else:
+            notify_compaction(
+                session_key,
+                source="automatic",
+                phase="preflight",
+                status="skipped",
+                reason=skip_reason,
+                tokens_before=total_tokens,
+                context_window_tokens=context_window_tokens,
+                flush_receipt_status=flush_receipt_status,
+                **compaction_effect_payload(
+                    status="skipped",
+                    reason=skip_reason,
+                ),
+                **compaction_lifecycle_payload(
+                    compaction_id,
+                    COMPACTION_TRIGGERED_EVENT,
+                ),
+            )
+
+    def _pre_compaction_flush_enabled(self) -> bool:
+        from agentos.memory.flush_config import is_session_flush_enabled
+
+        if not is_session_flush_enabled():
+            return False
+
+        memory_cfg = getattr(self._config, "memory", None)
+        if memory_cfg is None:
+            return False
+
+        raw_enabled = getattr(memory_cfg, "flush_enabled", False)
+        if isinstance(raw_enabled, str):
+            return raw_enabled.strip().lower() not in {"0", "false", "no", "off"}
+        return bool(raw_enabled)
+
+    def _pre_compaction_flush_requires_safe_receipt(self) -> bool:
+        return pre_compaction_flush_requires_safe_receipt(self._config)
+
+    def _pre_compaction_flush_timeout_seconds(self) -> float:
+        memory_cfg = getattr(self._config, "memory", None)
+        raw_timeout = getattr(memory_cfg, "flush_timeout_seconds", 15.0)
+        try:
+            timeout = float(raw_timeout)
+        except (TypeError, ValueError):
+            return 15.0
+        return max(timeout, 0.0)
+
+    def _pre_compaction_flush_background_timeout_seconds(self) -> float:
+        memory_cfg = getattr(self._config, "memory", None)
+        raw_timeout = getattr(memory_cfg, "flush_background_timeout_seconds", 120.0)
+        try:
+            timeout = float(raw_timeout)
+        except (TypeError, ValueError):
+            return 120.0
+        return max(timeout, 0.0)
+
+    async def _await_pre_compaction_flush_grace(
+        self,
+        transcript: list[Any],
+        session_key: str,
+        *,
+        event_prefix: str,
+        wait_for_receipt: bool | None = None,
+        turn_id: str | None = None,
+        checkpoint_exists: bool | None = None,
+    ) -> Any | None:
+        if self._session_flush_service is None:
+            log.warning(
+                f"{event_prefix}.flush_unavailable",
+                session_key=session_key,
+                error="flush_service_unavailable",
+            )
+            return None
+
+        should_wait = (
+            self._pre_compaction_flush_requires_safe_receipt()
+            if wait_for_receipt is None
+            else bool(wait_for_receipt)
+        )
+        background_timeout = self._pre_compaction_flush_background_timeout_seconds()
+        task = self._active_pre_compaction_flush_tasks.get(session_key)
+        if task is not None:
+            if task.done():
+                try:
+                    receipt = task.result()
+                except asyncio.CancelledError:
+                    log.debug(f"{event_prefix}.flush_cancelled", session_key=session_key)
+                    return None
+                except Exception as exc:  # noqa: BLE001
+                    log.warning(
+                        f"{event_prefix}.flush_failed",
+                        session_key=session_key,
+                        error=str(exc),
+                    )
+                    return None
+                self._consume_pre_compaction_flush_task(session_key, task, event_prefix)
+                return receipt
+            log.debug(
+                f"{event_prefix}.flush_skipped",
+                session_key=session_key,
+                reason="already_running",
+                waiting=should_wait,
+            )
+            if not should_wait:
+                return None
+
+        else:
+            from agentos.session.keys import parse_agent_id
+
+            task = asyncio.create_task(
+                self._session_flush_service.execute(
+                    transcript,
+                    session_key,
+                    agent_id=parse_agent_id(session_key),
+                    message_window=0,
+                    segment_mode="auto",
+                    timeout=background_timeout,
+                    raw_capture_policy="required",
+                    turn_id=turn_id,
+                    checkpoint_exists=checkpoint_exists,
+                )
+            )
+            self._active_pre_compaction_flush_tasks[session_key] = task
+            task.add_done_callback(
+                lambda completed: self._consume_pre_compaction_flush_task(
+                    session_key,
+                    completed,
+                    event_prefix,
+                    background=True,
+                    compaction_id=turn_id,
+                )
+            )
+            if not should_wait:
+                log.info(
+                    f"{event_prefix}.flush_background_started",
+                    session_key=session_key,
+                    background_timeout_seconds=background_timeout,
+                )
+                return None
+
+        grace_timeout = self._pre_compaction_flush_timeout_seconds()
+        flush_t0 = time.monotonic()
+        try:
+            receipt = await asyncio.wait_for(asyncio.shield(task), timeout=grace_timeout)
+        except TimeoutError:
+            log.warning(
+                f"{event_prefix}.flush_timed_out",
+                session_key=session_key,
+                timeout_seconds=grace_timeout,
+                background_timeout_seconds=background_timeout,
+            )
+            return None
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            if self._active_pre_compaction_flush_tasks.get(session_key) is task:
+                self._active_pre_compaction_flush_tasks.pop(session_key, None)
+            log.warning(
+                f"{event_prefix}.flush_failed",
+                session_key=session_key,
+                error=str(exc),
+            )
+            return None
+
+        if self._active_pre_compaction_flush_tasks.get(session_key) is task:
+            self._active_pre_compaction_flush_tasks.pop(session_key, None)
+        self._log_pre_compaction_flush_receipt(
+            event_prefix,
+            session_key,
+            receipt,
+            duration_ms=int((time.monotonic() - flush_t0) * 1000),
+            background=False,
+        )
+        return receipt
+
+    def _consume_pre_compaction_flush_task(
+        self,
+        session_key: str,
+        task: asyncio.Task,
+        event_prefix: str,
+        *,
+        background: bool = False,
+        compaction_id: str | None = None,
+    ) -> None:
+        if self._active_pre_compaction_flush_tasks.get(session_key) is not task:
+            return
+        self._active_pre_compaction_flush_tasks.pop(session_key, None)
+        try:
+            receipt = task.result()
+        except asyncio.CancelledError:
+            log.debug(f"{event_prefix}.flush_cancelled", session_key=session_key)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                f"{event_prefix}.flush_failed",
+                session_key=session_key,
+                error=str(exc),
+                background=background,
+            )
+            if background and compaction_id:
+                self._schedule_pre_compaction_flush_status_update(
+                    session_key,
+                    compaction_id,
+                    "failed_retryable",
+                    event_prefix,
+                )
+        else:
+            self._log_pre_compaction_flush_receipt(
+                event_prefix,
+                session_key,
+                receipt,
+                duration_ms=getattr(receipt, "duration_ms", 0),
+                background=background,
+            )
+            if background and compaction_id:
+                self._schedule_pre_compaction_flush_status_update(
+                    session_key,
+                    compaction_id,
+                    flush_receipt_status_for_compaction(receipt, self._config),
+                    event_prefix,
+                )
+
+    def _schedule_pre_compaction_flush_status_update(
+        self,
+        session_key: str,
+        compaction_id: str,
+        status: str,
+        event_prefix: str,
+    ) -> None:
+        if self._session_manager is None:
+            return
+        mark_status = getattr(self._session_manager, "mark_compaction_flush_receipt_status", None)
+        if not callable(mark_status):
+            return
+        asyncio.create_task(
+            mark_compaction_flush_status_with_retry(
+                mark_status,
+                session_key=session_key,
+                compaction_id=compaction_id,
+                status=status,
+                log=log,
+                failed_event=f"{event_prefix}.flush_status_update_failed",
+                updated_event=f"{event_prefix}.flush_status_updated",
+                skipped_event=f"{event_prefix}.flush_status_update_skipped",
+            )
+        )
+
+    def _log_pre_compaction_flush_receipt(
+        self,
+        event_prefix: str,
+        session_key: str,
+        receipt: Any,
+        *,
+        duration_ms: int,
+        background: bool,
+    ) -> None:
+        result_status = getattr(receipt, "result_status", None)
+        if flush_receipt_is_successful_flush(receipt):
+            log.info(
+                f"{event_prefix}.flush_done",
+                session_key=session_key,
+                mode=getattr(receipt, "mode", "unknown"),
+                result_status=result_status,
+                message_count=getattr(receipt, "message_count", 0),
+                duration_ms=duration_ms,
+                background=background,
+            )
+            return
+
+        log.warning(
+            f"{event_prefix}.flush_degraded",
+            session_key=session_key,
+            error=getattr(receipt, "error", None) or "degraded_flush_receipt",
+            mode=getattr(receipt, "mode", "unknown"),
+            result_status=result_status,
+            integrity_status=getattr(receipt, "integrity_status", None),
+            indexed_chunk_count=getattr(receipt, "indexed_chunk_count", None),
+            output_coverage_status=getattr(receipt, "output_coverage_status", None),
+            invalid_candidate_count=getattr(receipt, "invalid_candidate_count", None),
+            candidate_missing_ids=getattr(receipt, "candidate_missing_ids", None),
+            obligation_status=getattr(receipt, "obligation_status", None),
+            obligation_missing_ids=getattr(receipt, "obligation_missing_ids", None),
+            background=background,
+        )
+
+    @staticmethod
+    def _receipt_value(receipt: Any, name: str, default: Any) -> Any:
+        if isinstance(receipt, Mapping):
+            return receipt.get(name, default)
+        return getattr(receipt, name, default)
+
+    @staticmethod
+    def _receipt_int(value: Any) -> int:
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _flush_receipt_allows_destructive_compaction(self, receipt: Any) -> bool:
+        return flush_receipt_allows_destructive_compaction(receipt)
+
+    def _compaction_circuit_open(self, session_key: str) -> bool:
+        state = getattr(self, "_compaction_failures", {}).get(session_key)
+        if state is None or state.count < _COMPACTION_FAILURE_LIMIT:
+            return False
+        opened_at = state.opened_at if state.opened_at is not None else time.monotonic()
+        cooldown_elapsed = time.monotonic() - opened_at
+        if cooldown_elapsed >= _COMPACTION_CIRCUIT_COOLDOWN_SECONDS:
+            log.info(
+                "compaction_circuit.half_open",
+                session_key=session_key,
+                consecutive_failures=state.count,
+                cooldown_elapsed_s=round(cooldown_elapsed, 1),
+            )
+            return False
+        log.warning(
+            "compaction_circuit.open",
+            session_key=session_key,
+            consecutive_failures=state.count,
+            cooldown_remaining_s=round(
+                _COMPACTION_CIRCUIT_COOLDOWN_SECONDS - cooldown_elapsed,
+                1,
+            ),
+        )
+        return True
+
+    def _record_compaction_failure(self, session_key: str) -> None:
+        if not hasattr(self, "_compaction_failures"):
+            self._compaction_failures = {}
+        state = self._compaction_failures.setdefault(session_key, _CompactionFailureState())
+        state.count += 1
+        state.opened_at = time.monotonic() if state.count >= _COMPACTION_FAILURE_LIMIT else None
+
+    def _record_compaction_success(self, session_key: str) -> None:
+        if not hasattr(self, "_compaction_failures"):
+            self._compaction_failures = {}
+        self._compaction_failures.pop(session_key, None)
+
+    @staticmethod
+    def _entry_for_emergency_compaction(entry: Any) -> dict[str, Any]:
+        return {
+            "role": getattr(entry, "role", "user"),
+            "content": getattr(entry, "content", "") or "",
+            "token_count": getattr(entry, "token_count", None),
+            "tool_calls": getattr(entry, "tool_calls", None),
+            "tool_call_id": getattr(entry, "tool_call_id", None),
+            "reasoning_content": getattr(entry, "reasoning_content", None),
+            "turn_usage": getattr(entry, "turn_usage", None),
+        }
+
+    @staticmethod
+    def _emergency_replay_entry(raw: Mapping[str, Any]) -> Any:
+        return SimpleNamespace(
+            role=str(raw.get("role") or "user"),
+            content=str(raw.get("content") or ""),
+            token_count=raw.get("token_count"),
+            tool_calls=raw.get("tool_calls"),
+            tool_call_id=raw.get("tool_call_id"),
+            reasoning_content=raw.get("reasoning_content"),
+            turn_usage=raw.get("turn_usage"),
+        )
+
+    async def _record_emergency_ephemeral_compaction(
+        self,
+        session_key: str,
+        transcript: Sequence[Any],
+        context_window_tokens: int,
+        *,
+        compaction_id: str,
+        phase: str,
+        reason: str,
+    ) -> bool:
+        if not transcript:
+            return False
+        try:
+            from agentos.session.compaction import (
+                CompactionConfig,
+                CompactionRequest,
+                compact_context,
+            )
+
+            raw_entries = [self._entry_for_emergency_compaction(entry) for entry in transcript]
+            session_id = str(getattr(transcript[0], "session_id", "") or session_key)
+            result = await compact_context(
+                CompactionRequest(
+                    session_id=session_id,
+                    entries=raw_entries,
+                    context_window_tokens=context_window_tokens,
+                    config=CompactionConfig(model=None, api_key=""),
+                )
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "compaction.emergency_ephemeral_failed",
+                session_key=session_key,
+                phase=phase,
+                error=str(exc),
+            )
+            return False
+
+        if not result.summary or result.removed_count <= 0:
+            return False
+        kept_entries = [self._emergency_replay_entry(raw) for raw in result.kept_entries]
+        if not kept_entries or len(kept_entries) >= len(transcript):
+            return False
+        summary = (
+            "Emergency request-scoped compaction\n"
+            f"Reason: {reason}\n\n"
+            f"{result.summary}"
+        )
+        self._emergency_compaction_overrides[session_key] = _EmergencyCompactionOverride(
+            summary=summary,
+            kept_entries=kept_entries,
+            reason=reason,
+            compaction_id=compaction_id,
+        )
+        self.mark_compacted_this_turn(session_key)
+        notify_compaction(
+            session_key,
+            source="automatic",
+            phase=phase,
+            status="emergency_ephemeral",
+            reason=reason,
+            removed_count=result.removed_count,
+            kept_count=len(kept_entries),
+            tokens_before=result.tokens_before,
+            tokens_after=result.tokens_after,
+            flush_receipt_status="emergency_ephemeral",
+            **compaction_effect_payload(
+                status="emergency_ephemeral",
+                reason=reason,
+            ),
+            **compaction_lifecycle_payload(compaction_id, COMPACTION_TRIGGERED_EVENT),
+        )
+        return True
+
+    def _preflight_compact_ratio(self) -> float:
+        raw_ratio = getattr(self._config, "preflight_compact_ratio", None)
+        if raw_ratio is None:
+            return _DEFAULT_PREFLIGHT_COMPACT_RATIO
+        try:
+            ratio = float(raw_ratio)
+        except (TypeError, ValueError):
+            return _DEFAULT_PREFLIGHT_COMPACT_RATIO
+        if ratio <= 0.0 or ratio > 1.0:
+            return _DEFAULT_PREFLIGHT_COMPACT_RATIO
+        return ratio
+
+    async def _load_history(
+        self,
+        agent: Agent,
+        session_key: str,
+        *,
+        trim_last_user: bool = True,
+    ) -> str | None:
+        """Load existing transcript as agent history."""
+        if self._session_manager is None:
+            return None
+
+        transcript = await self._session_manager.get_transcript(session_key)
+
+        from agentos.engine.history import reconstruct_messages_from_entry
+        from agentos.provider import Message
+
+        history: list[Message] = []
+        summary_markers: list[str] = []
+        emergency_override = getattr(self, "_emergency_compaction_overrides", {}).pop(
+            session_key,
+            None,
+        )
+        if emergency_override is not None:
+            transcript = list(emergency_override.kept_entries)
+            summary_markers.append(emergency_override.summary)
+        last_entry_was_user = False
+        for entry in transcript:
+            if (
+                entry.role == "system"
+                and entry.content
+                and entry.content.startswith(_CONTEXT_SUMMARY_MARKER)
+            ):
+                summary_markers.append(_strip_context_summary_marker(entry.content))
+                continue
+            if entry.role not in ("user", "assistant"):
+                continue
+            raw_content = entry.content or ""
+            # User messages may carry attachment envelopes; assistant messages
+            # may carry artifact metadata. Both become text-only safe markers
+            # for model-context replay.
+            if raw_content and entry.role == "user":
+                content: Any = self._maybe_unpack_attachments(raw_content)
+            elif raw_content and entry.role == "assistant":
+                content = self._maybe_unpack_assistant_artifacts(raw_content)
+            else:
+                content = raw_content
+            history.extend(
+                reconstruct_messages_from_entry(
+                    entry.role,
+                    content,
+                    entry.tool_calls,
+                    getattr(entry, "reasoning_content", None),
+                )
+            )
+            last_entry_was_user = entry.role == "user"
+        # Strip the caller-appended user turn only when the transcript really
+        # ended on a user entry; an assistant entry that reconstructs into
+        # assistant + user(tool_result) must keep its tool_result tail.
+        if trim_last_user and last_entry_was_user and history and history[-1].role == "user":
+            history.pop()
+        context_states = await self._load_context_states(session_key)
+        provider = getattr(agent, "provider", None)
+        provider_context = build_provider_compaction_context(
+            context_states=context_states,
+            provider_kind=str(getattr(provider, "provider_name", "")),
+        )
+        if provider_context.messages:
+            history = provider_context.messages + history
+        if history:
+            agent.set_history(history)
+        return await self._compaction_summary_context(
+            session_key,
+            summary_markers,
+            context_states=context_states,
+            skip_covered_through_ids=provider_context.covered_through_ids,
+        )
+
+    async def _load_context_states(self, session_key: str) -> list[Any]:
+        context_states: list[Any] = []
+        get_context_states = getattr(self._session_manager, "get_context_states", None)
+        if callable(get_context_states):
+            try:
+                context_states = await get_context_states(session_key)
+            except KeyError:
+                context_states = []
+            except Exception as exc:  # pragma: no cover - context state is best-effort
+                log.warning(
+                    "compaction_context_state.load_failed",
+                    session_key=session_key,
+                    error=str(exc),
+                )
+                context_states = []
+        return context_states
+
+    async def _compaction_summary_context(
+        self,
+        session_key: str,
+        legacy_summary_markers: list[str],
+        *,
+        context_states: list[Any] | None = None,
+        skip_covered_through_ids: set[int] | None = None,
+    ) -> str | None:
+        """Return durable compaction summaries as request-scoped context."""
+        summaries: list[Any] = []
+        get_summaries = getattr(self._session_manager, "get_summaries", None)
+        if callable(get_summaries):
+            try:
+                summaries = await get_summaries(session_key)
+            except KeyError:
+                summaries = []
+            except Exception as exc:  # pragma: no cover - summary context is best-effort
+                log.warning(
+                    "compaction_summary_context.load_failed",
+                    session_key=session_key,
+                    error=str(exc),
+                )
+                summaries = []
+        loaded_context_states = (
+            await self._load_context_states(session_key)
+            if context_states is None
+            else context_states
+        )
+        context_records = build_compaction_context_records(
+            context_states=loaded_context_states,
+            summaries=summaries,
+            legacy_summary_markers=legacy_summary_markers,
+            skip_covered_through_ids=skip_covered_through_ids,
+        )
+        context_items = [record.text for record in context_records]
+        if context_items:
+            replayed_compaction_ids = list(
+                dict.fromkeys(
+                    record.compaction_id
+                    for record in context_records
+                    if record.compaction_id is not None
+                )
+            )
+            replay_compaction_id = (
+                replayed_compaction_ids[0]
+                if replayed_compaction_ids
+                else new_compaction_id()
+            )
+            notify_compaction(
+                session_key,
+                source="automatic",
+                phase="summary_replay",
+                status="replayed",
+                summary_count=len(context_items),
+                summary_len=sum(len(text) for text in context_items),
+                context_state_count=len(loaded_context_states),
+                replayed_compaction_ids=replayed_compaction_ids,
+                **compaction_lifecycle_payload(
+                    replay_compaction_id,
+                    COMPACTION_REPLAYED_EVENT,
+                ),
+            )
+        return _format_compaction_summary_context(context_items)
+
+    @staticmethod
+    def _maybe_unpack_attachments(content: str) -> Any:
+        """Reduce persisted attachment envelopes to text-only history.
+
+        User messages with attachments are persisted as a JSON envelope
+        ``{"text": "...", "attachments": [{"type": "image/png", "data": "<b64>"}...]}``
+        in ``transcript_entries.content`` (see rpc_sessions._persist_user_message).
+        Historical images must not be sent again on later turns: OpenRouter can
+        route a text follow-up to a text model, and replaying an old image block
+        then fails with "No endpoints found that support image input". Keep the
+        original text and a compact non-image marker so the model knows an
+        attachment existed without receiving its bytes.
+
+        Returns the original string for non-envelope content so non-attachment
+        history (assistant text, tool results) is unaffected. On any parse error,
+        missing key, or invalid attachment entry, fall back to the original string
+        to keep history loading crash-proof.
+        """
+        if not content or not content.lstrip().startswith("{"):
+            return content
+        try:
+            parsed = json.loads(content)
+        except (json.JSONDecodeError, ValueError):
+            return content
+        if not isinstance(parsed, dict) or "text" not in parsed:
+            return content
+        text = parsed.get("text")
+        if not isinstance(text, str):
+            return content
+        atts = parsed.get("attachments") or []
+        if not isinstance(atts, list) or not atts:
+            return text
+
+        omitted: list[str] = []
+        for att in atts:
+            if not isinstance(att, dict):
+                continue
+            media_type = att.get("type") or att.get("mime") or att.get("media_type")
+            if not (isinstance(media_type, str) and media_type in _ALLOWED_ENGINE_MEDIA_TYPES):
+                continue
+            # Persisted attachment envelope: ``sha256_ref`` indicates the bytes live on
+            # disk under media/transcripts/<session>/<sha>; for replay we
+            # emit a marker (the engine never re-sends the bytes anyway).
+            data = att.get("data")
+            sha_ref = att.get("sha256_ref")
+            missing_reason = att.get("missing_reason")
+            if not (
+                (isinstance(data, str) and data)
+                or (isinstance(sha_ref, str) and sha_ref)
+                or (isinstance(missing_reason, str) and missing_reason)
+            ):
+                continue
+            name = att.get("name")
+            fallback = "image" if media_type.startswith("image/") else "attachment"
+            label = name if isinstance(name, str) and name.strip() else fallback
+            omitted.append(f"[historical attachment omitted: {label} ({media_type})]")
+        if not omitted:
+            return text
+        return "\n".join([text, *omitted]).strip()
+
+    @staticmethod
+    def _maybe_unpack_assistant_artifacts(content: str) -> str:
+        if not content or not content.lstrip().startswith("{"):
+            return content
+        try:
+            parsed = json.loads(content)
+        except (json.JSONDecodeError, ValueError):
+            return content
+        if not isinstance(parsed, dict) or "artifacts" not in parsed:
+            return content
+        text = parsed.get("text")
+        artifacts = parsed.get("artifacts")
+        if not isinstance(text, str) or not isinstance(artifacts, list):
+            return content
+        markers = [
+            artifact_marker(artifact) for artifact in artifacts if isinstance(artifact, dict)
+        ]
+        if not markers:
+            return text
+        return "\n".join([text, *markers]).strip()
+
+    @staticmethod
+    def _attachment_media_root_from_config(config: Any | None) -> Path:
+        return media_root_from_config(config)
+
+    def _attachment_media_root(self) -> Path:
+        return self._attachment_media_root_from_config(self._config)
+
+    @staticmethod
+    def _build_attachment_messages(
+        message: str,
+        attachments: list[dict],
+        *,
+        media_root: Path | None = None,
+    ) -> list | None:
+        """Build a multimodal user message that carries the attachments.
+
+        The engine sees one normalised attachment shape. Provider
+        conversion is deliberately narrow:
+
+          * ``image/*``           -> ``ContentBlockImage``
+          * ``application/pdf``   -> local text extraction, then ``ContentBlockText``
+          * text-family / json    -> ``ContentBlockText`` wrapped in an
+                                     ``<file name="…" mime="…">…</file>``
+                                     envelope with escaped filename and content
+                                     boundaries.
+        """
+
+        if not attachments:
+            return None
+        if len(attachments) > _MAX_ATTACHMENT_COUNT:
+            raise ValueError(f"attachments supports at most {_MAX_ATTACHMENT_COUNT} items")
+
+        from agentos.provider.types import (
+            ContentBlockImage,
+            ContentBlockText,
+            Message,
+        )
+
+        prompt_block = ContentBlockText(text=message)
+        attachment_blocks: list[Any] = []
+        for index, att in enumerate(attachments, start=1):
+            att_type = att.get("type")
+            media_type: str | None = att_type if isinstance(att_type, str) else None
+            if media_type is None or media_type not in _ALLOWED_ENGINE_MEDIA_TYPES:
+                mime = att.get("mime") or att.get("media_type")
+                if isinstance(mime, str) and mime in _ALLOWED_ENGINE_MEDIA_TYPES:
+                    media_type = mime
+            if media_type is None or media_type not in _ALLOWED_ENGINE_MEDIA_TYPES:
+                raise ValueError(f"attachments[{index}] media type {att_type!r} is not allowed")
+            if is_attachment_ref(att):
+                missing_ref_marker = ""
+                if media_root is None:
+                    raise ValueError(f"attachments[{index}] media_root is required")
+                try:
+                    raw_bytes = read_attachment_ref_bytes(att, media_root=media_root)
+                except FileNotFoundError:
+                    raw_bytes = b""
+                    missing_ref_marker = "[attachment unavailable: material file is missing]"
+                except ValueError as exc:
+                    raw_bytes = b""
+                    missing_ref_marker = f"[attachment unavailable: {exc}]"
+                data = base64.b64encode(raw_bytes).decode("ascii") if raw_bytes else ""
+            else:
+                missing_ref_marker = ""
+                data_raw = att.get("data")
+                if not isinstance(data_raw, str) or not data_raw:
+                    raise ValueError(f"attachments[{index}].data is required")
+                data = data_raw
+                try:
+                    raw_bytes = base64.b64decode(data, validate=True)
+                except (binascii.Error, ValueError) as exc:
+                    raise ValueError(f"attachments[{index}].data must be valid base64") from exc
+            max_bytes = _attachment_size_limit_for_mime(
+                media_type,
+                staged=media_type == "application/pdf" and att.get("_was_staged") is True,
+            )
+            if len(raw_bytes) > max_bytes:
+                raise ValueError(f"attachments[{index}] exceeds the {max_bytes} byte limit")
+
+            name_raw = att.get("name")
+            filename = _sanitize_attachment_filename(name_raw)
+            if missing_ref_marker:
+                wrapped = _render_file_context_block(filename, media_type, missing_ref_marker)
+                attachment_blocks.append(ContentBlockText(text=wrapped))
+                continue
+
+            if media_type.startswith("image/"):
+                attachment_blocks.append(ContentBlockImage(media_type=media_type, data=data))
+            elif media_type == "application/pdf":
+                try:
+                    extracted_pdf_text = _extract_pdf_attachment_text(raw_bytes, filename)
+                except ValueError as exc:
+                    extracted_pdf_text = (
+                        f"[attachment unavailable: PDF text could not be extracted: {exc}]"
+                    )
+                wrapped = _render_file_context_block(filename, media_type, extracted_pdf_text)
+                attachment_blocks.append(ContentBlockText(text=wrapped))
+            elif media_type in _ENGINE_TEXT_FAMILY_MIMES:
+                if (
+                    is_attachment_ref(att)
+                    and att.get("_provider_inline_policy") == "preview_only"
+                ):
+                    decoded_text = _render_preview_only_attachment_text(
+                        att,
+                        filename=filename,
+                        mime=media_type,
+                        raw_bytes=raw_bytes,
+                        media_root=media_root,
+                    )
+                else:
+                    try:
+                        decoded_text = _truncate_attachment_text(
+                            raw_bytes.decode("utf-8"),
+                            limit=_TEXT_ATTACHMENT_TEXT_LIMIT,
+                        )
+                    except UnicodeDecodeError:
+                        decoded_text = (
+                            "[attachment unavailable: declared text content is not valid UTF-8]"
+                        )
+                wrapped = _render_file_context_block(filename, media_type, decoded_text)
+                attachment_blocks.append(ContentBlockText(text=wrapped))
+            else:  # pragma: no cover - guarded by allow-list above
+                raise ValueError(f"attachments[{index}] media type {media_type!r} is not handled")
+
+        return [
+            Message(
+                role="user",
+                content=[prompt_block] + attachment_blocks,  # type: ignore[arg-type]
+            )
+        ]

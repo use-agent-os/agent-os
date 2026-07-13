@@ -1,0 +1,80 @@
+"""Scheduler handler bridge: run Dream for a given agent.
+
+The scheduler's `HandlerFn` signature is ``async def (job) -> HandlerResult``.
+Dependencies (provider, workspace, memory config) are injected via a
+``build_dream_fn(agent_id)`` factory so this module stays decoupled from
+gateway wiring.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+from agentos.scheduler.payloads import payload_agent_id
+from agentos.scheduler.types import CronJob, HandlerResult
+
+logger = logging.getLogger(__name__)
+
+BuildDreamFn = Callable[[str], Any]
+DreamGuardFn = Callable[[], str | None]
+
+
+PostDreamHookFn = Callable[[str, str], Awaitable[None]]
+
+
+def make_memory_dream_handler(
+    build_dream: BuildDreamFn,
+    should_skip: DreamGuardFn | None = None,
+    post_dream_hook: PostDreamHookFn | None = None,
+) -> Callable[[CronJob], Awaitable[HandlerResult]]:
+    """Factory: returns an async cron handler that runs Dream per agent.
+
+    When ``post_dream_hook`` is provided it is invoked after the Dream
+    completes successfully, with the same ``agent_id`` plus the Dream
+    summary. Hook exceptions are logged but never poison the dream
+    HandlerResult — observability must not turn a successful dream into a
+    failed one.
+    """
+
+    async def handle_memory_dream(job: CronJob) -> HandlerResult:
+        agent_id = payload_agent_id(job.payload) or "main"
+        reason = "kill_switch" if os.getenv("AGENTOS_MEMORY_DREAM_DISABLED") == "1" else None
+        if reason is None and should_skip is not None:
+            reason = should_skip()
+        if reason:
+            summary = f"dream skipped: {reason}"
+            logger.info(
+                "dream.run.skipped",
+                extra={"agent_id": agent_id, "job_id": job.id, "reason": reason},
+            )
+            return HandlerResult(summary=summary, delivery_status="skipped")
+        try:
+            dream = build_dream(agent_id)
+            result = await dream.run()
+            summary = (
+                f"dream agent={agent_id} "
+                f"processed={result.files_processed} "
+                f"evidence={result.evidence_status} "
+                f"apply={result.apply_status}"
+            )
+            logger.info(
+                "dream.run.complete",
+                extra={"agent_id": agent_id, "summary": summary},
+            )
+            if post_dream_hook is not None:
+                try:
+                    await post_dream_hook(agent_id, summary)
+                except Exception:
+                    logger.exception(
+                        "dream.post_hook.failed",
+                        extra={"agent_id": agent_id},
+                    )
+            return HandlerResult(summary=summary)
+        except Exception as exc:
+            logger.exception("dream.run.failed", extra={"agent_id": agent_id})
+            return HandlerResult(summary=f"dream failed: {exc}")
+
+    return handle_memory_dream

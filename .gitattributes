@@ -1,0 +1,7 @@
+*.sh text eol=lf
+
+# Bundled BGE ONNX export for memory local embedding (relocated from the
+# removed agentos_router v4 bundle).
+src/agentos/memory/models/bge_onnx/*.onnx filter=lfs diff=lfs merge=lfs -text
+src/agentos/memory/models/bge_onnx/*.json text eol=lf
+src/agentos/memory/models/bge_onnx/*.txt text eol=lf

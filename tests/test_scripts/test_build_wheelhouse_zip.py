@@ -1,0 +1,852 @@
+from __future__ import annotations
+
+import importlib.util
+import os
+import stat
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+from zipfile import ZipFile
+
+import pytest
+
+SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "build_wheelhouse_zip.py"
+REPO_ROOT = SCRIPT_PATH.parents[1]
+WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "wheelhouse-release.yml"
+INTERNAL_RELEASE_MARKERS = (
+    "INTERNAL_ORG_NAME",
+    "github.com/internal-org/agentos",
+    ".internal/evidence",
+    "INTERNAL_RELEASE_NOTE.md",
+    "LOCAL_AGENT_NOTES.md",
+)
+
+
+def assert_executable_on_posix(path: Path) -> None:
+    if os.name != "nt":
+        assert path.stat().st_mode & stat.S_IXUSR
+
+
+def load_script():
+    spec = importlib.util.spec_from_file_location("build_wheelhouse_zip", SCRIPT_PATH)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_build_wheel_retries_once_after_transient_uv_failure(monkeypatch, tmp_path: Path) -> None:
+    module = load_script()
+    wheel_path = tmp_path / "wheels" / "agentos-0.1.0-py3-none-any.whl"
+    calls = []
+
+    def fake_run(args, *, cwd, env):
+        calls.append((args, cwd, env))
+        if len(calls) == 1:
+            raise subprocess.CalledProcessError(4294967295, args)
+
+    monkeypatch.setattr(module, "run", fake_run)
+    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(module, "find_built_wheel", lambda wheel_dir: wheel_path)
+
+    assert (
+        module.build_wheel(tmp_path, tmp_path / "wheels", {"UV_CACHE_DIR": "cache"})
+        == wheel_path
+    )
+    assert len(calls) == 2
+
+
+def test_release_name_records_platform_python_profile() -> None:
+    module = load_script()
+
+    wheelhouse_name = module.release_name(
+        app_version="0.1.0",
+        platform_tag="macos-arm64",
+        python_major=3,
+        python_minor=12,
+        profile="recommended",
+        portable=False,
+    )
+    portable_name = module.release_name(
+        app_version="0.1.0",
+        platform_tag="macos-arm64",
+        python_major=3,
+        python_minor=12,
+        profile="recommended",
+        portable=True,
+    )
+
+    assert wheelhouse_name == "AgentOS-0.1.0-macos-arm64-py312-recommended-wheelhouse"
+    assert portable_name == "AgentOS-0.1.0-macos-arm64-py312-recommended-portable"
+
+
+def test_python_runtime_asset_name_uses_platform_triple() -> None:
+    module = load_script()
+
+    macos = module.python_runtime_asset_name(
+        python_version="3.12.13",
+        runtime_release="20260414",
+        platform_tag="macos-arm64",
+    )
+    windows = module.python_runtime_asset_name(
+        python_version="3.12.13",
+        runtime_release="20260414",
+        platform_tag="windows-x64",
+    )
+
+    assert macos == (
+        "cpython-3.12.13+20260414-aarch64-apple-darwin-install_only_stripped.tar.gz"
+    )
+    assert windows == (
+        "cpython-3.12.13+20260414-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"
+    )
+
+
+def test_cross_platform_wheelhouse_requires_target_host(tmp_path: Path) -> None:
+    module = load_script()
+    module.platform_tag = lambda: "linux-x64"
+    wheel_path = tmp_path / "agentos-0.1.0-py3-none-any.whl"
+    package_dir = tmp_path / "packages"
+
+    with pytest.raises(SystemExit, match="must run on the target platform"):
+        module.build_wheelhouse_command(
+            package_dir,
+            wheel_path,
+            "recommended",
+            target_platform_tag="windows-x64",
+            python_major=3,
+            python_minor=12,
+        )
+
+
+def test_portable_recommended_wheelhouse_uses_recommended_extra_only(tmp_path: Path) -> None:
+    module = load_script()
+    module.platform_tag = lambda: "windows-x64"
+    wheel_path = tmp_path / "agentos-0.1.0-py3-none-any.whl"
+    package_dir = tmp_path / "packages"
+
+    command = module.build_wheelhouse_command(
+        package_dir,
+        wheel_path,
+        "recommended",
+        target_platform_tag="windows-x64",
+        python_major=3,
+        python_minor=12,
+    )
+
+    assert str(wheel_path) + "[recommended]" in command
+    assert str(wheel_path) + "[recommended,feishu]" not in command
+
+def test_release_wheel_allows_tokenjuice_provenance_markdown() -> None:
+    module = load_script()
+    tokenjuice_provenance = module.TOKENJUICE_PROVENANCE_WHEEL_PATH
+    pptx_reference = "agentos/skills/bundled/pptx/references/python_pptx.md"
+    unrelated_skill_reference = (
+        "agentos/skills/bundled/example/references/private-notes.md"
+    )
+    unrelated_doc = "agentos/memory/models/bge_onnx/README.md"
+
+    violations = module.forbidden_release_wheel_entries(
+        (
+            tokenjuice_provenance,
+            unrelated_doc,
+            "agentos/skills/bundled/example/SKILL.md",
+            pptx_reference,
+            unrelated_skill_reference,
+        )
+    )
+
+    assert tokenjuice_provenance not in violations
+    assert "agentos/skills/bundled/example/SKILL.md" not in violations
+    assert pptx_reference not in violations
+    assert unrelated_doc in violations
+    assert unrelated_skill_reference in violations
+
+
+def test_pyproject_release_wheel_config_excludes_forbidden_skill_resources() -> None:
+    module = load_script()
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    wheel_config = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]
+    excludes = set(wheel_config.get("exclude", []))
+    force_includes = wheel_config.get("force-include", {})
+
+    assert "src/agentos/skills/bundled/**/THIRD_PARTY_NOTICES.md" in excludes
+    assert "src/agentos/skills/bundled/**/references/*.md" in excludes
+    assert "src/agentos/skills/exp/**" in excludes
+    assert module.forbidden_release_wheel_entries(tuple(force_includes.values())) == []
+
+
+def test_required_embedding_assets_cover_onnx_and_tokenizer() -> None:
+    module = load_script()
+
+    assert "bge_onnx/model.onnx" in module.EMBEDDING_ASSET_RELS
+    assert "bge_onnx/tokenizer.json" in module.EMBEDDING_ASSET_RELS
+    assert "bge_onnx/vocab.txt" in module.EMBEDDING_ASSET_RELS
+
+
+def test_project_release_metadata_avoids_internal_repository_markers() -> None:
+    for rel_path in ("pyproject.toml", "README.release.md", "LICENSE"):
+        text = (REPO_ROOT / rel_path).read_text(encoding="utf-8")
+        for marker in INTERNAL_RELEASE_MARKERS:
+            assert marker not in text
+
+
+def test_public_release_docs_avoid_private_kol_language() -> None:
+    for rel_path in ("README.md",):
+        text = (REPO_ROOT / rel_path).read_text(encoding="utf-8").lower()
+        assert "kol" not in text
+        assert "private" not in text
+
+
+def test_release_wheel_content_scanner_flags_internal_markers(tmp_path: Path) -> None:
+    module = load_script()
+    wheel_path = tmp_path / "agentos-0.1.0-py3-none-any.whl"
+
+    with ZipFile(wheel_path, "w") as archive:
+        archive.writestr("agentos/__init__.py", "__version__ = '0.1.0'\n")
+        archive.writestr(
+            "agentos-0.1.0.dist-info/METADATA",
+            "\n".join(
+                [
+                    "Author: INTERNAL_ORG_NAME",
+                    "Project-URL: Repository, https://github.com/internal-org/agentos",
+                    "",
+                ]
+            ),
+        )
+
+    assert module.forbidden_release_text_hits(wheel_path) == [
+        "agentos-0.1.0.dist-info/METADATA: INTERNAL_ORG_NAME",
+        "agentos-0.1.0.dist-info/METADATA: github.com/internal-org/agentos",
+    ]
+
+
+def test_install_scripts_install_from_local_wheelhouse_and_run_onboarding() -> None:
+    module = load_script()
+
+    sh_script = module.render_install_sh(
+        wheel_name="agentos-0.1.0-py3-none-any.whl",
+        profile="recommended",
+        python_major=3,
+        python_minor=12,
+    )
+    ps_script = module.render_install_ps1(
+        wheel_name="agentos-0.1.0-py3-none-any.whl",
+        profile="recommended",
+        python_major=3,
+        python_minor=12,
+    )
+
+    assert 'PACKAGE_DIR="${SCRIPT_DIR}/packages"' in sh_script
+    assert 'REQUIRED_PYTHON_MINOR=12' in sh_script
+    assert "uv tool install" in sh_script
+    assert '--find-links "${PACKAGE_DIR}"' in sh_script
+    assert '"${PACKAGE_DIR}/agentos-0.1.0-py3-none-any.whl[recommended]"' in sh_script
+    assert '"${AGENTOS_BIN}" onboard' in sh_script
+    assert '"${AGENTOS_BIN}" onboard --if-needed' in sh_script
+    assert "agentos gateway run" in sh_script
+
+    assert "$PackageDir = Join-Path $ScriptDir 'packages'" in ps_script
+    assert "$RequiredPythonMinor = 12" in ps_script
+    assert "uv tool install" in ps_script
+    assert "--find-links" in ps_script
+    assert "agentos-0.1.0-py3-none-any.whl[recommended]" in ps_script
+    assert "& $AgentOSBin onboard --if-needed" in ps_script
+    assert 'throw "AgentOS installation failed with exit code $LASTEXITCODE."' in ps_script
+    assert 'throw "AgentOS onboarding failed with exit code $LASTEXITCODE."' in ps_script
+    assert "agentos gateway run" in ps_script
+
+
+def test_start_scripts_use_bundled_python_runtime() -> None:
+    module = load_script()
+
+    sh_script = module.render_start_sh()
+    ps_script = module.render_start_ps1()
+    cmd_script = module.render_start_cmd()
+
+    assert sh_script.startswith('#!/bin/sh\nif [ -z "${BASH_VERSION:-}" ]; then')
+    assert 'exec /usr/bin/env bash "$0" "$@"' in sh_script
+    assert 'PYTHON_BIN="${SCRIPT_DIR}/runtime/python/bin/python3"' in sh_script
+    assert "AGENTOS_WHEEL=" in sh_script
+    assert "WHEEL_HASH=" in sh_script
+    assert 'VENV_DIR="${SCRIPT_DIR}/.venv-${WHEEL_HASH}"' in sh_script
+    assert "--without-pip" in sh_script
+    assert (
+        'export PATH="${SCRIPT_DIR}:${VENV_DIR}/bin:${SCRIPT_DIR}/runtime/python/bin:${PATH}"'
+        in sh_script
+    )
+    assert (
+        'PORTABLE_DATA_DIR="${AGENTOS_PORTABLE_HOME:-${DATA_BASE}/AgentOS/'
+        'portable/${RELEASE_ID}}"' in sh_script
+    )
+    assert 'if [[ -z "${AGENTOS_GATEWAY_CONFIG_PATH:-}" ]]; then' in sh_script
+    assert (
+        'export AGENTOS_GATEWAY_CONFIG_PATH="${PORTABLE_DATA_DIR}/config.toml"'
+        in sh_script
+    )
+    assert (
+        'if [[ -z "${AGENTOS_LLM_API_KEY:-}" && -n "${OPENROUTER_API_KEY:-}" ]]; then'
+        in sh_script
+    )
+    assert 'export AGENTOS_STATE_DIR="${PORTABLE_DATA_DIR}"' in sh_script
+    assert (
+        'export AGENTOS_GATEWAY_STATE_DIR="${AGENTOS_STATE_DIR}/state"'
+        in sh_script
+    )
+    assert (
+        'export AGENTOS_GATEWAY_WORKSPACE_DIR="${AGENTOS_STATE_DIR}/workspace"'
+        in sh_script
+    )
+    assert 'mkdir -p "${AGENTOS_STATE_DIR}"' in sh_script
+    assert '"${PYTHON_BIN}" -m venv --without-pip "${VENV_DIR}"' in sh_script
+    assert "-m pip install" not in sh_script
+    assert "Installing AgentOS from bundled wheels..." in sh_script
+    assert 'AGENTOS_MODULE=( "-m" "agentos.cli.main" )' in sh_script
+    assert (
+        'if [[ ! -f "${AGENTOS_GATEWAY_CONFIG_PATH}" && '
+        '-n "${OPENROUTER_API_KEY:-}" ]]; then' in sh_script
+    )
+    assert (
+        '"${AGENTOS_BIN}" "${AGENTOS_MODULE[@]}" onboard \\\n'
+        "    --provider openrouter" in sh_script
+    )
+    assert "--api-key-env OPENROUTER_API_KEY" in sh_script
+    assert "--minimal" in sh_script
+    assert '"${AGENTOS_BIN}" "${AGENTOS_MODULE[@]}" onboard' in sh_script
+    assert '"${AGENTOS_BIN}" onboard --if-needed' not in sh_script
+    assert "if [[ -t 1 ]]; then" in sh_script
+    assert 'exec "${AGENTOS_BIN}" "${AGENTOS_MODULE[@]}" gateway run' in sh_script
+    assert "else" in sh_script
+    assert 'CONSOLE_LOG="${AGENTOS_STATE_DIR}/logs/gateway-console.log"' in sh_script
+    assert 'tee -a "${CONSOLE_LOG}"' in sh_script
+    assert sh_script.index("if [[ -t 1 ]]; then") < sh_script.index(
+        'tee -a "${CONSOLE_LOG}"'
+    )
+    assert sh_script.index(
+        'export AGENTOS_GATEWAY_CONFIG_PATH="${PORTABLE_DATA_DIR}/config.toml"'
+    ) < sh_script.index('"${AGENTOS_BIN}" "${AGENTOS_MODULE[@]}" onboard')
+
+    assert "$PythonBin = Join-Path $ScriptDir 'runtime\\python\\python.exe'" in ps_script
+    assert "$AgentOSWheel = Get-ChildItem -Path $PackageDir" in ps_script
+    assert "$WheelHashFull = -join" in ps_script
+    assert "$WheelHash = $WheelHashFull.Substring(0, 12).ToLowerInvariant()" in ps_script
+    assert "Get-FileHash" not in ps_script
+    assert "[System.IO.File]::OpenRead($AgentOSWheel.FullName)" in ps_script
+    assert "$Sha256.ComputeHash($WheelStream)" in ps_script
+    assert "$VenvDir = Join-Path $VenvRoot $ReleaseId" in ps_script
+    assert '$env:PATH = "$VenvDir\\Scripts;$env:PATH"' in ps_script
+    assert 'Join-Path $VenvBase "AgentOS\\portable\\$ReleaseId"' in ps_script
+    assert (
+        "$env:AGENTOS_GATEWAY_CONFIG_PATH = Join-Path $PortableDataDir 'config.toml'"
+        in ps_script
+    )
+    assert "$env:AGENTOS_LLM_API_KEY = $env:OPENROUTER_API_KEY" in ps_script
+    assert "$env:AGENTOS_STATE_DIR = $PortableDataDir" in ps_script
+    assert (
+        "$env:AGENTOS_GATEWAY_STATE_DIR = Join-Path "
+        "$env:AGENTOS_STATE_DIR 'state'" in ps_script
+    )
+    assert (
+        "$env:AGENTOS_GATEWAY_WORKSPACE_DIR = Join-Path "
+        "$env:AGENTOS_STATE_DIR 'workspace'" in ps_script
+    )
+    assert "New-Item -ItemType Directory -Path $env:AGENTOS_STATE_DIR -Force" in ps_script
+    assert "& $PythonBin -m venv --without-pip $VenvDir" in ps_script
+    assert "-m pip install" not in ps_script
+    assert "-c $WheelInstallScript" not in ps_script
+    assert "$WheelInstallScript | & $PythonBin - $PackageDir $SitePackages" in ps_script
+    assert "Installing AgentOS from bundled wheels..." in ps_script
+    assert '$AgentOSArgs = @("-m", "agentos.cli.main")' in ps_script
+    assert (
+        "if ((-not (Test-Path $env:AGENTOS_GATEWAY_CONFIG_PATH)) "
+        "-and $env:OPENROUTER_API_KEY) {" in ps_script
+    )
+    assert "& $VenvPython @AgentOSArgs onboard `" in ps_script
+    assert "--provider openrouter `" in ps_script
+    assert "--api-key-env OPENROUTER_API_KEY `" in ps_script
+    assert "& $VenvPython @AgentOSArgs onboard" in ps_script
+    assert "& $AgentOSBin onboard --if-needed" not in ps_script
+    assert "AgentOS environment creation failed" in ps_script
+    assert "AgentOS installation failed" not in ps_script
+    assert 'throw "AgentOS onboarding failed with exit code $LASTEXITCODE."' in ps_script
+    assert "$OutputRedirected = [Console]::IsOutputRedirected" in ps_script
+    assert "if (-not $OutputRedirected) {" in ps_script
+    assert "& $VenvPython @AgentOSArgs gateway run" in ps_script
+    assert "$ConsoleLog = Join-Path $LogDir 'gateway-console.log'" in ps_script
+    assert "$PreviousErrorActionPreference = $ErrorActionPreference" in ps_script
+    assert "$ErrorActionPreference = \"Continue\"" in ps_script
+    assert "$_ -is [System.Management.Automation.ErrorRecord]" in ps_script
+    assert "Tee-Object -FilePath $ConsoleLog -Append" in ps_script
+    assert ps_script.index("if (-not $OutputRedirected) {") < ps_script.index(
+        "Tee-Object -FilePath $ConsoleLog -Append"
+    )
+    assert ps_script.index(
+        "$env:AGENTOS_GATEWAY_CONFIG_PATH = Join-Path $PortableDataDir 'config.toml'"
+    ) < ps_script.index("& $VenvPython @AgentOSArgs onboard")
+    assert ps_script.index(
+        "$env:AGENTOS_GATEWAY_STATE_DIR = Join-Path "
+        "$env:AGENTOS_STATE_DIR 'state'"
+    ) < ps_script.index("& $VenvPython @AgentOSArgs onboard")
+
+    assert cmd_script == (
+        "@echo off\r\n"
+        "title AgentOS Gateway\r\n"
+        'cd /d "%~dp0"\r\n'
+        'set "OSQ_POWERSHELL=powershell.exe"\r\n'
+        'where pwsh.exe >nul 2>nul && set "OSQ_POWERSHELL=pwsh.exe"\r\n'
+        '"%OSQ_POWERSHELL%" -NoLogo -NoExit -NoProfile -ExecutionPolicy Bypass '
+        '-File "%~dp0start.ps1"\r\n'
+    )
+
+
+def test_install_script_reexecs_under_bash_before_pipefail() -> None:
+    module = load_script()
+
+    script = module.render_install_sh(
+        wheel_name="agentos-0.1.0-py3-none-any.whl",
+        profile="recommended",
+        python_major=3,
+        python_minor=12,
+    )
+
+    assert script.startswith('#!/bin/sh\nif [ -z "${BASH_VERSION:-}" ]; then')
+    assert 'exec /usr/bin/env bash "$0" "$@"' in script
+    assert script.index('exec /usr/bin/env bash "$0" "$@"') < script.index(
+        "set -euo pipefail"
+    )
+
+
+def test_render_readme_is_platform_specific_for_windows_portable() -> None:
+    module = load_script()
+
+    readme = module.render_readme(
+        app_version="0.1.0",
+        profile="recommended",
+        platform_tag="windows-x64",
+        python_major=3,
+        python_minor=12,
+        portable=True,
+    )
+
+    assert "## Windows" in readme
+    assert "# AgentOS 0.1.0 Portable Release" in readme
+    assert "Wheelhouse Release" not in readme
+    assert "Right-click `Start AgentOS.cmd`" in readme
+    assert "Run as administrator" in readme
+    assert "Smart App Control" in readme
+    assert ".\\start.ps1" in readme
+    assert "## macOS / Linux" not in readme
+    assert "bash start.sh" not in readme
+    assert "Python is bundled in this zip." in readme
+    assert "Complete onboarding." in readme
+    assert "Feishu" not in readme
+    assert "Advanced portable usage" in readme
+    assert "OPENROUTER_API_KEY" in readme
+    assert "writes an OpenRouter env-reference config" in readme
+    assert "supported portable launch\n  path is administrator launch" in readme
+    assert "Microsoft documents that SmartScreen checks downloaded apps" in readme
+    assert "skip setup when it is complete" not in readme
+    assert "does not install a global `agentos` command" in readme
+    assert (
+        "Config, workspace, logs, memory, and runtime state use the normal "
+        "user-level AgentOS directory." in readme
+    )
+
+
+def test_render_readme_is_platform_specific_for_macos_portable() -> None:
+    module = load_script()
+
+    readme = module.render_readme(
+        app_version="0.1.0",
+        profile="recommended",
+        platform_tag="macos-arm64",
+        python_major=3,
+        python_minor=12,
+        portable=True,
+    )
+
+    assert "## macOS / Linux" in readme
+    assert "# AgentOS 0.1.0 Portable Release" in readme
+    assert "Wheelhouse Release" not in readme
+    assert "bash start.sh" in readme
+    assert "## Windows PowerShell" not in readme
+    assert ".\\start.ps1" not in readme
+    assert "Python is bundled in this zip." in readme
+    assert "Complete onboarding." in readme
+    assert "Feishu" not in readme
+    assert "later starts let you review or change the config" in readme
+    assert "skip setup when it is complete" not in readme
+    assert "does not install a global `agentos` command" not in readme
+    assert (
+        "Config, workspace, logs, memory, and runtime state use the normal "
+        "user-level AgentOS directory." in readme
+    )
+    assert ".agentos/config.toml" not in readme
+
+
+def test_prepare_release_tree_writes_user_surface_and_manifest(tmp_path: Path) -> None:
+    module = load_script()
+    release_root = tmp_path / "AgentOS-0.1.0-macos-arm64-py312-recommended-wheelhouse"
+    wheel_path = tmp_path / "agentos-0.1.0-py3-none-any.whl"
+    wheel_path.write_bytes(b"wheel")
+
+    bundled_wheel = module.prepare_release_tree(
+        release_root,
+        wheel_path,
+        app_version="0.1.0",
+        profile="recommended",
+        platform_tag="macos-arm64",
+        python_major=3,
+        python_minor=12,
+        include_embedding_assets=True,
+        portable=False,
+        runtime_release="",
+        runtime_asset="",
+    )
+
+    assert bundled_wheel == release_root / "packages" / wheel_path.name
+    assert bundled_wheel.read_bytes() == b"wheel"
+    assert (release_root / "README.md").is_file()
+    assert (release_root / "install.sh").is_file()
+    assert (release_root / "install.ps1").is_file()
+    assert (release_root / "LICENSE").is_file()
+    assert (release_root / "THIRD_PARTY_NOTICES.md").is_file()
+    assert not (release_root / "runtime").exists()
+    assert not (release_root / "start.sh").exists()
+    assert not (release_root / "start.ps1").exists()
+    assert (release_root / "manifest.json").is_file()
+    assert_executable_on_posix(release_root / "install.sh")
+    readme = (release_root / "README.md").read_text(encoding="utf-8")
+    manifest = (release_root / "manifest.json").read_text(encoding="utf-8")
+    assert "bash install.sh" in readme
+    assert ".\\install.ps1" not in readme
+    assert "Build target:" in readme
+    assert "Configuration" not in readme
+    assert "Notes" not in readme
+    assert "Git repository" not in readme
+    assert '"platform_tag": "macos-arm64"' in manifest
+    assert '"profile": "recommended"' in manifest
+    assert '"include_embedding_assets": true' in manifest
+
+
+def test_prepare_portable_release_tree_includes_runtime_and_start_scripts(tmp_path: Path) -> None:
+    module = load_script()
+    release_root = tmp_path / "AgentOS-0.1.0-macos-arm64-py312-recommended-portable"
+    wheel_path = tmp_path / "agentos-0.1.0-py3-none-any.whl"
+    runtime_root = tmp_path / "runtime"
+    (runtime_root / "bin").mkdir(parents=True)
+    (runtime_root / "bin" / "python3").write_text("python", encoding="utf-8")
+    (runtime_root / "Lib" / "__pycache__").mkdir(parents=True)
+    (runtime_root / "Lib" / "module.py").write_text("print('ok')\n", encoding="utf-8")
+    (runtime_root / "Lib" / "__pycache__" / "module.cpython-312.pyc").write_bytes(b"cache")
+    wheel_path.write_bytes(b"wheel")
+
+    module.prepare_release_tree(
+        release_root,
+        wheel_path,
+        app_version="0.1.0",
+        profile="recommended",
+        platform_tag="macos-arm64",
+        python_major=3,
+        python_minor=12,
+        include_embedding_assets=True,
+        portable=True,
+        runtime_release="20260414",
+        runtime_asset="cpython-3.12.13+20260414-aarch64-apple-darwin-install_only_stripped.tar.gz",
+        runtime_root=runtime_root,
+    )
+
+    assert (release_root / "runtime" / "python" / "bin" / "python3").is_file()
+    assert (release_root / "runtime" / "python" / "Lib" / "module.py").is_file()
+    assert not (release_root / "runtime" / "python" / "Lib" / "__pycache__").exists()
+    assert (release_root / "start.sh").is_file()
+    assert (release_root / "start.ps1").is_file()
+    assert "agentos.cli.main" in (release_root / "start.sh").read_text(encoding="utf-8")
+    assert "agentos.cli.main" in (release_root / "start.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert not (release_root / "Start AgentOS.cmd").exists()
+    assert (release_root / "LICENSE").is_file()
+    assert (release_root / "THIRD_PARTY_NOTICES.md").is_file()
+    assert not (release_root / "install.sh").exists()
+    assert not (release_root / "install.ps1").exists()
+    assert_executable_on_posix(release_root / "start.sh")
+    manifest = (release_root / "manifest.json").read_text(encoding="utf-8")
+    assert '"portable": true' in manifest
+    assert '"runtime_release": "20260414"' in manifest
+    assert "install_only_stripped.tar.gz" in manifest
+
+
+def test_prune_portable_runtime_removes_packaging_tools_and_bytecode(
+    tmp_path: Path,
+) -> None:
+    module = load_script()
+    runtime_root = tmp_path / "runtime"
+    site_packages = runtime_root / "Lib" / "site-packages"
+    long_license_path = (
+        site_packages
+        / "pip-26.0.1.dist-info"
+        / "licenses"
+        / "src"
+        / "pip"
+        / "_vendor"
+        / "dependency_groups"
+    )
+    long_license_path.mkdir(parents=True)
+    (long_license_path / "LICENSE.txt").write_text("license\n", encoding="utf-8")
+    for name in ("pip", "setuptools", "wheel", "_distutils_hack", "pkg_resources"):
+        package = site_packages / name
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("", encoding="utf-8")
+    for name in ("setuptools-80.0.0.dist-info", "wheel-0.45.0.dist-info"):
+        dist_info = site_packages / name
+        dist_info.mkdir(parents=True)
+        (dist_info / "METADATA").write_text("Name: test\n", encoding="utf-8")
+    (site_packages / "agentos_runtime_dep").mkdir(parents=True)
+    (site_packages / "agentos_runtime_dep" / "__init__.py").write_text(
+        "VALUE = 1\n",
+        encoding="utf-8",
+    )
+    pycache = runtime_root / "Lib" / "__pycache__"
+    pycache.mkdir(parents=True)
+    (pycache / "module.cpython-312.pyc").write_bytes(b"cache")
+
+    module.prune_portable_runtime(runtime_root)
+
+    assert not (site_packages / "pip").exists()
+    assert not (site_packages / "pip-26.0.1.dist-info").exists()
+    assert not (site_packages / "setuptools").exists()
+    assert not (site_packages / "setuptools-80.0.0.dist-info").exists()
+    assert not (site_packages / "wheel").exists()
+    assert not (site_packages / "wheel-0.45.0.dist-info").exists()
+    assert not (site_packages / "_distutils_hack").exists()
+    assert not (site_packages / "pkg_resources").exists()
+    assert not pycache.exists()
+    assert (site_packages / "agentos_runtime_dep" / "__init__.py").is_file()
+
+
+def test_prepare_windows_portable_release_tree_includes_double_click_launcher(
+    tmp_path: Path,
+) -> None:
+    module = load_script()
+    release_root = tmp_path / "AgentOS-0.1.0-windows-x64-py312-recommended-portable"
+    wheel_path = tmp_path / "agentos-0.1.0-py3-none-any.whl"
+    runtime_root = tmp_path / "runtime"
+    runtime_root.mkdir()
+    (runtime_root / "python.exe").write_text("python", encoding="utf-8")
+    wheel_path.write_bytes(b"wheel")
+
+    module.prepare_release_tree(
+        release_root,
+        wheel_path,
+        app_version="0.1.0",
+        profile="recommended",
+        platform_tag="windows-x64",
+        python_major=3,
+        python_minor=12,
+        include_embedding_assets=True,
+        portable=True,
+        runtime_release="20260414",
+        runtime_asset="cpython-3.12.13+20260414-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+        runtime_root=runtime_root,
+    )
+
+    launcher = release_root / "Start AgentOS.cmd"
+    assert launcher.is_file()
+    assert launcher.read_bytes() == module.render_start_cmd().encode("utf-8")
+    cli = release_root / "agentos.cmd"
+    assert cli.is_file()
+    cli_text = cli.read_text(encoding="utf-8")
+    assert "start.ps1\" -Cli %*" in cli_text
+    shell = release_root / "AgentOS Shell.cmd"
+    assert shell.is_file()
+    shell_text = shell.read_text(encoding="utf-8")
+    assert "function global:agentos" in shell_text
+    assert "agentos.cmd" in shell_text
+    readme = (release_root / "README.md").read_text(encoding="utf-8")
+    assert "Right-click `Start AgentOS.cmd`" in readme
+    assert "Run as administrator" in readme
+    assert "Smart App Control" in readme
+    assert "run\n`AgentOS Shell.cmd`" in readme
+    assert ".\\agentos.cmd onboard" in readme
+    assert "Closing it stops the gateway." in readme
+    assert "Advanced portable usage" in readme
+    start_ps1 = (release_root / "start.ps1").read_text(encoding="utf-8")
+    assert "Test-WindowsVCRedistInstalled" in start_ps1
+    assert "RuntimeInformation]::IsOSPlatform" in start_ps1
+    assert "$RequiresOnnxRuntime = $true" in start_ps1
+    assert '"agentos[recommended,feishu]" -notmatch' not in start_ps1
+    assert "AGENTOS_SKIP_VC_REDIST" in start_ps1
+    assert "Microsoft.VCRedist.2015+.x64" in start_ps1
+    assert "https://aka.ms/vs/17/release/vc_redist.x64.exe" in start_ps1
+    assert "safe embedding fallback" in start_ps1
+    assert "If automatic installation fails, install it manually" in start_ps1
+    assert "After installing, reopen PowerShell and restart AgentOS" in start_ps1
+
+
+def test_install_portable_wheelhouse_preinstalls_into_bundled_python(
+    tmp_path: Path,
+) -> None:
+    module = load_script()
+    release_root = tmp_path / "release"
+    package_dir = release_root / "packages"
+    site_packages = release_root / "runtime" / "python" / "Lib" / "site-packages"
+    package_dir.mkdir(parents=True)
+    site_packages.mkdir(parents=True)
+    wheel_path = package_dir / "demo-0.1.0-py3-none-any.whl"
+    with ZipFile(wheel_path, "w") as wheel:
+        wheel.writestr("demo_pkg/__init__.py", "VALUE = 1\n")
+        wheel.writestr("demo-0.1.0.dist-info/METADATA", "Name: demo\n")
+        wheel.writestr("demo-0.1.0.data/purelib/demo_extra.py", "EXTRA = 2\n")
+        wheel.writestr("demo-0.1.0.data/scripts/demo-script.py", "print('skip')\n")
+
+    module.install_portable_wheelhouse(release_root)
+
+    assert (site_packages / "demo_pkg" / "__init__.py").read_text(encoding="utf-8") == (
+        "VALUE = 1\n"
+    )
+    assert (site_packages / "demo_extra.py").read_text(encoding="utf-8") == "EXTRA = 2\n"
+    assert not (site_packages / "demo-script.py").exists()
+
+
+def test_create_zip_contains_release_directory_and_preserves_install_mode(tmp_path: Path) -> None:
+    module = load_script()
+    release_root = tmp_path / "AgentOS-0.1.0-macos-arm64-py312-recommended-wheelhouse"
+    packages = release_root / "packages"
+    packages.mkdir(parents=True)
+    (packages / "agentos-0.1.0-py3-none-any.whl").write_bytes(b"wheel")
+    install_script = release_root / "install.sh"
+    install_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    install_script.chmod(0o755)
+    (release_root / "install.ps1").write_text("Write-Host ok\n", encoding="utf-8")
+    (release_root / "README.md").write_text("readme\n", encoding="utf-8")
+    (release_root / "manifest.json").write_text("{}\n", encoding="utf-8")
+    zip_path = tmp_path / "release.zip"
+
+    module.create_zip(release_root, zip_path)
+
+    with ZipFile(zip_path) as archive:
+        names = set(archive.namelist())
+        install_info = archive.getinfo(
+            "AgentOS-0.1.0-macos-arm64-py312-recommended-wheelhouse/install.sh"
+        )
+
+    assert names == {
+        "AgentOS-0.1.0-macos-arm64-py312-recommended-wheelhouse/README.md",
+        "AgentOS-0.1.0-macos-arm64-py312-recommended-wheelhouse/install.ps1",
+        "AgentOS-0.1.0-macos-arm64-py312-recommended-wheelhouse/install.sh",
+        "AgentOS-0.1.0-macos-arm64-py312-recommended-wheelhouse/manifest.json",
+        "AgentOS-0.1.0-macos-arm64-py312-recommended-wheelhouse/packages/agentos-0.1.0-py3-none-any.whl",
+    }
+    assert stat.S_IMODE(install_info.external_attr >> 16) & stat.S_IXUSR
+
+
+def test_create_zip_preserves_runtime_executable_mode(tmp_path: Path) -> None:
+    module = load_script()
+    release_root = tmp_path / "AgentOS-0.1.0-macos-arm64-py312-recommended-portable"
+    python_bin = release_root / "runtime" / "python" / "bin" / "python3"
+    python_bin.parent.mkdir(parents=True)
+    python_bin.write_bytes(b"python")
+    python_bin.chmod(0o755)
+    (release_root / "start.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    (release_root / "manifest.json").write_text("{}\n", encoding="utf-8")
+    zip_path = tmp_path / "release.zip"
+
+    module.create_zip(release_root, zip_path)
+
+    with ZipFile(zip_path) as archive:
+        python_info = archive.getinfo(
+            "AgentOS-0.1.0-macos-arm64-py312-recommended-portable/"
+            "runtime/python/bin/python3"
+        )
+
+    assert stat.S_IMODE(python_info.external_attr >> 16) & stat.S_IXUSR
+
+
+def test_create_zip_can_use_short_archive_root(tmp_path: Path) -> None:
+    module = load_script()
+    release_root = tmp_path / "AgentOS-0.1.0-windows-x64-py312-recommended-portable"
+    (release_root / "runtime" / "python").mkdir(parents=True)
+    (release_root / "runtime" / "python" / "python.exe").write_bytes(b"python")
+    zip_path = tmp_path / "release.zip"
+
+    module.create_zip(release_root, zip_path, archive_root="AgentOS-0.1.0")
+
+    with ZipFile(zip_path) as archive:
+        assert archive.namelist() == ["AgentOS-0.1.0/runtime/python/python.exe"]
+
+
+def test_write_sha256s_records_all_release_zips(tmp_path: Path) -> None:
+    module = load_script()
+    first = tmp_path / "AgentOS-0.1.0-linux-x64-py312-recommended-portable.zip"
+    second = tmp_path / "AgentOS-0.1.0-linux-x64-py312-recommended-wheelhouse.zip"
+    first.write_bytes(b"portable")
+    second.write_bytes(b"wheelhouse")
+
+    checksum_path = module.write_sha256s((second, first), tmp_path / "SHA256SUMS")
+
+    expected = [
+        f"{module.sha256_digest(first)}  {first.name}",
+        f"{module.sha256_digest(second)}  {second.name}",
+    ]
+    assert checksum_path == tmp_path / "SHA256SUMS"
+    assert checksum_path.read_text(encoding="utf-8").splitlines() == expected
+
+
+def test_release_workflow_publishes_windows_portable_zip_and_wheel() -> None:
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert "concurrency:" in workflow
+    assert "windows-release-assets-${{" in workflow
+    assert "cancel-in-progress: false" in workflow
+    assert "timeout-minutes: 90" in workflow
+    assert "timeout-minutes: 20" in workflow
+    assert "Validate workflow inputs" in workflow
+    assert "python_runtime_release must be a YYYYMMDD" in workflow
+    assert "python_runtime_version must be a CPython 3.12 patch version" in workflow
+    assert "persist-credentials: false" in workflow
+    assert "bundle_python_runtime:" not in workflow
+    assert "--platform-tag windows-x64" in workflow
+    assert "platform_tag: macos-arm64" not in workflow
+    assert "platform_tag: linux-x64" not in workflow
+    assert "for mode in portable wheelhouse" not in workflow
+    assert "--bundle-python-runtime" in workflow
+    assert "expected one versioned portable zip" in workflow
+    assert "expected one versioned wheel" in workflow
+    assert "manifest[\"portable\"] is True" in workflow
+    assert "SHA256SUMS" in workflow
+    assert "manifest.version" in workflow
+    assert "GH_REPO: ${{ github.repository }}" in workflow
+    assert "is_prerelease = bool(re.search" in workflow
+    assert "if not is_prerelease:" in workflow
+    assert "AgentOS-windows-x64-portable.zip" in workflow
+    assert "agentos-latest-py3-none-any.whl" not in workflow
+    assert "dist/*.zip dist/*.whl dist/SHA256SUMS" in workflow
+    assert "dist/*.zip dist/*.zip.sha256 dist/SHA256SUMS" not in workflow
+    assert "Git LFS pointer leaked into wheel" in workflow
+    assert "Verify GitHub Release assets" in workflow
+    assert "release\", \"delete-asset\", tag, name, \"--yes\"" in workflow
+    assert "name.endswith(\".sha256\")" in workflow
+    assert '["gh", "release", "view", tag, "--json", "assets"]' in workflow
+    assert "Unexpected GitHub Release assets" in workflow
+    assert "\"unexpected\": unexpected" in workflow
+    assert "zip_path.stem" not in workflow
+    assert "archive_roots =" in workflow
+    assert "root = archive_roots[0] + \"/\"" in workflow
+
+
+def test_release_workflow_publishes_from_version_tags() -> None:
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert "tags:" in workflow
+    assert '- "v*"' in workflow
+    assert "contents: write" in workflow
+    assert "RELEASE_TAG:" in workflow
+    assert "RELEASE_PROFILE:" in workflow
+    assert "github.ref_name" in workflow
+    assert "github.event.inputs.tag" in workflow
+    assert "github.event_name == 'push' || github.event.inputs.tag != ''" in workflow
+    assert "TAG: ${{ env.RELEASE_TAG }}" in workflow

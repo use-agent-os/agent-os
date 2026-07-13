@@ -1,0 +1,267 @@
+"""Single execution-status finalisation point.
+
+:func:`finalize` is the only place the new pipeline mints execution status
+for a tool result. It branches on the four mutually exclusive outcomes from
+the orchestrator — exception, approval-pending on an unsupported surface,
+denial payload, and success — and always routes through
+:func:`normalize_execution_status` exactly once.
+
+The function preserves the budget-bypass behaviour: when
+artifacts were published the raw content is returned unchanged; otherwise
+the result is normalised through the budget tracker.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+import structlog
+
+from agentos.execution_status import (
+    derive_is_error,
+    execution_status_for_tool_result,
+    mark_execution_status_truncated,
+    normalize_execution_status,
+)
+from agentos.result_budget import (
+    ToolResultBudgetTracker,
+    ToolRunBudgetExceededError,
+    resolve_budget_class,
+)
+from agentos.router_control import router_control_payload_terminates_turn
+from agentos.tool_boundary import ToolCall, ToolResult
+from agentos.tools.envelope import build_tool_failure_envelope, is_denial_payload
+from agentos.tools.types import InteractionMode, ToolContext
+
+log = structlog.get_logger("agentos.tools.dispatch")
+
+_PENDING_APPROVAL_STATUSES: frozenset[str] = frozenset(
+    {"approval_required", "approval_pending"}
+)
+
+def _extract_pending_approval(content: Any) -> dict[str, Any] | None:
+    """Return the payload when ``content`` carries a pending-approval status."""
+    if isinstance(content, dict):
+        payload = content
+    elif isinstance(content, str):
+        try:
+            payload = json.loads(content)
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+    else:
+        return None
+    return payload if payload.get("status") in _PENDING_APPROVAL_STATUSES else None
+
+def _denial_reason(content: Any) -> str:
+    payload: Any = content
+    if isinstance(content, str):
+        try:
+            payload = json.loads(content)
+        except (TypeError, ValueError):
+            return "denied"
+    if isinstance(payload, dict) and payload.get("status") == "approval_denied":
+        return "approval_denied"
+    return "denied"
+
+def _has_live_approval_surface(ctx: ToolContext | None) -> bool:
+    return ctx is None or ctx.interaction_mode is InteractionMode.INTERACTIVE
+
+async def finalize(
+    call: ToolCall,
+    ctx: ToolContext | None,
+    raw_result: Any,
+    exception: BaseException | None,
+    artifact_start: int,
+    budget_tracker: ToolResultBudgetTracker,
+    registered: Any,
+) -> ToolResult:
+    """Build the canonical :class:`ToolResult` for one dispatched call.
+
+    Branches on the orchestrator-provided outcome state. ``exception``
+    takes precedence — when set, ``raw_result`` is ignored and a runtime
+    error envelope is returned. With no exception, an
+    ``approval_required`` payload returned to an unattended surface
+    short-circuits to the approval-pending envelope. Otherwise the result
+    flows through the budget tracker (unless artifacts were published)
+    and execution-status pipeline.
+    """
+    # ---------------- Exception branch ----------------
+    if exception is not None:
+        if isinstance(exception, ToolRunBudgetExceededError):
+            payload = {
+                "status": "control",
+                "tool": call.tool_name,
+                "reason": "tool_run_budget_exhausted",
+                "user_message": (
+                    "The tool was skipped by a runtime resource guard. Continue with "
+                    "available evidence or choose a smaller request."
+                ),
+                "retry_allowed": False,
+            }
+            status = {
+                "version": 1,
+                "status": "unknown",
+                "exit_code": None,
+                "timed_out": False,
+                "truncated": False,
+                "reason": "tool_run_budget_exhausted",
+                "source": "tool_runtime",
+                "preservation_class": "ephemeral",
+            }
+            return ToolResult(
+                tool_use_id=call.tool_use_id,
+                tool_name=call.tool_name,
+                content=json.dumps(payload),
+                is_error=False,
+                execution_status=normalize_execution_status(status),
+            )
+
+        envelope = build_tool_failure_envelope(exception, call.tool_name)
+        log.warning(
+            "dispatch.tool_failed",
+            tool=call.tool_name,
+            tool_use_id=call.tool_use_id,
+            agent_id=ctx.agent_id if ctx else None,
+            session_key=ctx.session_key if ctx else None,
+            error_class=envelope["error_class"],
+            retry_allowed=envelope["retry_allowed"],
+        )
+        status = {
+            "version": 1,
+            "status": "error",
+            "exit_code": None,
+            "timed_out": False,
+            "truncated": False,
+            "reason": "runtime_error",
+            "source": "tool_runtime",
+            "preservation_class": "diagnostic",
+        }
+        return ToolResult(
+            tool_use_id=call.tool_use_id,
+            tool_name=call.tool_name,
+            content=json.dumps(envelope),
+            is_error=True,
+            execution_status=normalize_execution_status(status),
+        )
+
+    result = raw_result
+
+    # ---------------- Approval-on-unsupported-surface branch ----------------
+    if not _has_live_approval_surface(ctx):
+        pending = _extract_pending_approval(result)
+        if pending is not None:
+            surface = ctx.caller_kind.value if ctx else "unknown"
+            log.warning(
+                "dispatch.approval_required_unsupported_surface",
+                tool=call.tool_name,
+                surface=surface,
+                approval_id=pending.get("approval_id"),
+                tool_use_id=call.tool_use_id,
+                agent_id=ctx.agent_id if ctx else None,
+                session_key=ctx.session_key if ctx else None,
+            )
+            user_message = (
+                f"Tool '{call.tool_name}' requires human approval, but the {surface} "
+                "surface has no interactive approval path. Re-run with --interactive "
+                "or from an interactive operator surface."
+            )
+            envelope = build_tool_failure_envelope(
+                ValueError("approval required"),
+                call.tool_name,
+                policy_denial=True,
+                error_class_override="UnsupportedSurface",
+                user_message_override=user_message,
+            )
+            status = {
+                "version": 1,
+                "status": "unknown",
+                "exit_code": None,
+                "timed_out": False,
+                "truncated": False,
+                "reason": "approval_pending",
+                "source": "tool_runtime",
+                "preservation_class": "ephemeral",
+            }
+            return ToolResult(
+                tool_use_id=call.tool_use_id,
+                tool_name=call.tool_name,
+                content=json.dumps(envelope),
+                is_error=False,
+                execution_status=normalize_execution_status(status),
+            )
+
+    # ---------------- Standard branch (success or denial payload) ----------------
+    denial = is_denial_payload(result)
+    execution_status = execution_status_for_tool_result(call.tool_name, result)
+    if execution_status is None:
+        pending = _extract_pending_approval(result)
+        if pending is not None:
+            execution_status = {
+                "version": 1,
+                "status": "unknown",
+                "exit_code": None,
+                "timed_out": False,
+                "truncated": False,
+                "reason": "approval_pending",
+                "source": "tool_runtime",
+                "preservation_class": "ephemeral",
+            }
+    if execution_status is None and denial:
+        denial_reason = _denial_reason(result)
+        execution_status = {
+            "version": 1,
+            "status": "error",
+            "exit_code": None,
+            "timed_out": False,
+            "truncated": False,
+            "reason": denial_reason,
+            "source": "tool_runtime",
+            "preservation_class": "diagnostic",
+        }
+    if execution_status is not None:
+        execution_status = normalize_execution_status(execution_status)
+        log.debug(
+            "tool.execution_status_normalized",
+            tool=call.tool_name,
+            status=execution_status["status"],
+            reason=execution_status["reason"],
+            source=execution_status["source"],
+        )
+
+    status_is_error = derive_is_error(execution_status) if execution_status else False
+    is_error = denial or status_is_error
+
+    artifacts = (
+        list(ctx.published_artifacts[artifact_start:]) if ctx is not None else []
+    )
+    if artifacts:
+        content = result
+    else:
+        budget_class = resolve_budget_class(
+            call.tool_name,
+            registered.spec.result_budget_class,
+        )
+        budgeted = await budget_tracker.normalize(
+            tool_name=call.tool_name,
+            content=result,
+            budget_class=budget_class,
+            is_error=is_error,
+        )
+        content = budgeted.content
+        if budgeted.changed and execution_status is not None:
+            execution_status = mark_execution_status_truncated(execution_status)
+    return ToolResult(
+        tool_use_id=call.tool_use_id,
+        tool_name=call.tool_name,
+        content=content,
+        is_error=is_error,
+        artifacts=artifacts,
+        execution_status=execution_status,
+        terminates_turn=(
+            call.tool_name == "router_control"
+            and router_control_payload_terminates_turn(content)
+        ),
+    )

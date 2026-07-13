@@ -1,0 +1,537 @@
+"""RPC handlers for the chat domain — wired to sessions engine bridge."""
+
+from __future__ import annotations
+
+from typing import Any, cast
+from urllib.parse import quote
+
+import structlog
+
+from agentos.chat.conversation import ChatSendRequest, sessions_send_params
+from agentos.chat.history import transcript_entries_to_chat_messages
+from agentos.chat.source import chat_source_metadata
+from agentos.gateway.config import GatewayConfig
+from agentos.gateway.context_overflow import apply_context_overflow_policy
+from agentos.gateway.rpc import RpcContext, RpcUnavailableError, get_dispatcher
+from agentos.session.compaction import build_compaction_config_from_provider
+from agentos.session.keys import build_webchat_key, canonicalize_session_key, parse_agent_id
+
+_d = get_dispatcher()
+log = structlog.get_logger(__name__)
+
+_WEBCHAT_SESSION_KEY = build_webchat_key()
+_CHAT_HISTORY_DEFAULT_LIMIT = 50
+_CHAT_HISTORY_MAX_LIMIT = 200
+
+
+def _canonical_webchat_session_key(value: object = None) -> str:
+    """Map legacy WebChat defaults onto the canonical WebChat session."""
+    raw = str(value or "").strip()
+    if not raw or raw in {"default", "webchat:default", "unknown"}:
+        return _WEBCHAT_SESSION_KEY
+    if raw.startswith("sess-"):
+        return f"agent:main:webchat:{raw[len('sess-') :]}"
+    return canonicalize_session_key(raw)
+
+
+def _require_chat_session_manager(ctx: RpcContext):
+    if ctx.session_manager is None:
+        raise RpcUnavailableError("Chat session manager not available")
+    return ctx.session_manager
+
+
+def _normalize_chat_history_limit(value: object) -> int:
+    try:
+        if isinstance(value, int):
+            limit = value
+        elif isinstance(value, str):
+            limit = int(value)
+        else:
+            limit = _CHAT_HISTORY_DEFAULT_LIMIT
+    except (TypeError, ValueError):
+        limit = _CHAT_HISTORY_DEFAULT_LIMIT
+    return max(1, min(limit, _CHAT_HISTORY_MAX_LIMIT))
+
+
+def _is_webchat_session_key(key: str) -> bool:
+    parts = str(key or "").split(":")
+    return (
+        len(parts) == 4
+        and parts[0] == "agent"
+        and bool(parts[1])
+        and parts[2] == "webchat"
+        and bool(parts[3])
+    )
+
+
+def _empty_chat_history_payload(limit: int) -> dict[str, Any]:
+    return {
+        "messages": [],
+        "has_more": False,
+        "oldest_cursor": None,
+        "newest_cursor": None,
+        "history_scope": "complete",
+        "loaded_count": 0,
+        "page_size": limit,
+        "canonical_available": False,
+        "compaction_summaries": [],
+    }
+
+
+def _chat_history_bool(value: object, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off"}
+    return bool(value)
+
+
+def _chat_history_cursor(entry: object | None) -> str | None:
+    if entry is None:
+        return None
+    created_at = getattr(entry, "created_at", "")
+    stable_id = getattr(entry, "id", None) or getattr(entry, "message_id", "")
+    if created_at in {None, ""} or stable_id in {None, ""}:
+        return None
+    return f"{created_at}|{stable_id}"
+
+
+def _chat_history_cursor_index(entries: list[object], cursor: object) -> int | None:
+    raw = str(cursor or "").strip()
+    if not raw:
+        return None
+    for idx, entry in enumerate(entries):
+        if _chat_history_cursor(entry) == raw:
+            return idx
+    return None
+
+
+def _chat_history_page(
+    entries: list[object],
+    *,
+    limit: int,
+    before: object = None,
+    after: object = None,
+) -> tuple[list[object], bool]:
+    if not entries:
+        return [], False
+    before_idx = _chat_history_cursor_index(entries, before)
+    if before_idx is not None:
+        end = before_idx
+        start = max(0, end - limit)
+        return entries[start:end], start > 0
+
+    after_idx = _chat_history_cursor_index(entries, after)
+    if after_idx is not None:
+        start = min(len(entries), after_idx + 1)
+        end = min(len(entries), start + limit)
+        return entries[start:end], end < len(entries)
+
+    if len(entries) <= limit:
+        return entries, False
+    return entries[-limit:], True
+
+
+def _session_summary_to_chat_payload(summary: object) -> dict[str, Any]:
+    return {
+        "id": getattr(summary, "id", None),
+        "compaction_id": getattr(summary, "compaction_id", None),
+        "compaction_index": getattr(summary, "compaction_index", None),
+        "trigger_reason": getattr(summary, "trigger_reason", None),
+        "summary_text": getattr(summary, "summary_text", "") or "",
+        "summary_format": getattr(summary, "summary_format", "") or "",
+        "coverage_status": getattr(summary, "coverage_status", "") or "",
+        "removed_count": getattr(summary, "removed_count", None),
+        "kept_count": getattr(summary, "kept_count", None),
+        "covered_through_id": getattr(summary, "covered_through_id", None),
+        "created_at": getattr(summary, "created_at", None),
+    }
+
+
+def _annotate_transcript_attachment_downloads(
+    messages: list[dict[str, Any]],
+    *,
+    session_key: str,
+) -> list[dict[str, Any]]:
+    session_qs = quote(session_key, safe="")
+    for msg in messages:
+        attachments = msg.get("attachments")
+        if not isinstance(attachments, list):
+            continue
+        for attachment in attachments:
+            if not isinstance(attachment, dict):
+                continue
+            sha = attachment.get("sha256_ref")
+            if not isinstance(sha, str) or not sha:
+                continue
+            if attachment.get("download_url"):
+                continue
+            name = str(attachment.get("name") or "attachment")
+            mime = str(attachment.get("mime") or attachment.get("type") or "")
+            attachment["download_url"] = (
+                f"/api/v1/attachments/{quote(sha, safe='')}?sessionKey={session_qs}"
+                f"&name={quote(name, safe='')}&mime={quote(mime, safe='')}"
+            )
+    return messages
+
+
+async def _chat_history_transcript(
+    mgr: object,
+    session_key: str,
+    *,
+    include_canonical: bool,
+) -> tuple[list[object], bool]:
+    if include_canonical:
+        getter = getattr(mgr, "get_canonical_transcript", None)
+        if callable(getter):
+            try:
+                return list(await getter(session_key)), True
+            except Exception:  # noqa: BLE001 - fall back to active transcript
+                pass
+    transcript_getter = getattr(mgr, "get_transcript", None)
+    if not callable(transcript_getter):
+        return [], False
+    transcript = await transcript_getter(session_key)
+    return list(transcript or []), False
+
+
+async def _chat_history_summaries(
+    mgr: object,
+    session_key: str,
+    *,
+    include_summaries: bool,
+) -> list[dict[str, Any]]:
+    if not include_summaries:
+        return []
+    getter = getattr(mgr, "get_summaries", None)
+    if not callable(getter):
+        return []
+    try:
+        summaries = await getter(session_key)
+    except Exception:  # noqa: BLE001 - summaries are optional display metadata
+        return []
+    return [_session_summary_to_chat_payload(summary) for summary in summaries or []]
+
+
+def _effective_compaction_model(session: object | None) -> str | None:
+    if session is None:
+        return None
+    return getattr(session, "model_override", None) or getattr(session, "model", None)
+
+
+def _resolve_compaction_provider(ctx: RpcContext, session: object | None) -> object | None:
+    selector = getattr(ctx, "provider_selector", None)
+    if selector is None:
+        return None
+
+    resolved_selector = selector
+    clone = getattr(selector, "clone", None)
+    if callable(clone):
+        try:
+            resolved_selector = clone()
+        except Exception:  # noqa: BLE001
+            resolved_selector = selector
+
+    model = _effective_compaction_model(session)
+    if model and resolved_selector is not selector:
+        override = getattr(resolved_selector, "override_model", None)
+        if callable(override):
+            try:
+                override(model)
+            except Exception:  # noqa: BLE001
+                pass
+
+    resolver = getattr(resolved_selector, "resolve", None)
+    if not callable(resolver):
+        return None
+    try:
+        return cast(object | None, resolver())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+async def _build_context_overflow_compaction_config(ctx: RpcContext, session_key: str):
+    session = None
+    storage = getattr(getattr(ctx, "session_manager", None), "_storage", None)
+    if storage is not None:
+        try:
+            session = await storage.get_session(session_key)
+        except Exception:  # noqa: BLE001
+            session = None
+    return build_compaction_config_from_provider(
+        _resolve_compaction_provider(ctx, session),
+        model_override=_effective_compaction_model(session),
+        compaction_config=getattr(getattr(ctx, "config", None), "compaction", None),
+    )
+
+
+async def _enforce_context_overflow(
+    ctx: RpcContext,
+    session_key: str,
+    message: str,
+) -> dict | None:
+    """Apply the configured context-overflow policy before a turn runs.
+
+    Returns a stable error envelope when the policy is REFUSE and the
+    payload exceeds the budget; returns ``None`` for every other path
+    (policy consults pass, HARD_TRUNCATE dropped some history in place,
+    AUTO_SUMMARIZE kicked off a compaction). The caller short-circuits
+    on a non-None return.
+    """
+
+    config = ctx.config if isinstance(ctx.config, GatewayConfig) else GatewayConfig()
+
+    transcript: list = []
+    if ctx.session_manager is not None:
+        try:
+            transcript = list(await ctx.session_manager.get_transcript(session_key))
+        except Exception:  # noqa: BLE001 — missing transcript just means "no history"
+            transcript = []
+
+    # Per-session context-budget overrides are independent from runtime/request
+    # timeout resolution, which happens in TurnRunner.
+    # A session-scoped context_budget_tokens override is supported via
+    # ctx.session_manager.get_config(session_key) if present.
+    budget_override = None
+    policy_override = None
+    if ctx.session_manager is not None and hasattr(ctx.session_manager, "get_session_config"):
+        try:
+            session_cfg = await ctx.session_manager.get_session_config(session_key)
+            if session_cfg is not None:
+                budget_override = getattr(session_cfg, "context_budget_tokens", None)
+                policy_override = getattr(session_cfg, "context_overflow_policy", None)
+        except Exception:  # noqa: BLE001
+            pass
+
+    outcome = await apply_context_overflow_policy(
+        config=config,
+        message=message,
+        transcript=transcript,
+        session_key=session_key,
+        session_manager=ctx.session_manager,
+        compaction_config=await _build_context_overflow_compaction_config(ctx, session_key),
+        flush_service=getattr(ctx, "flush_service", None),
+        compaction_marker=getattr(ctx, "turn_runner", None),
+        policy_override=policy_override,
+        budget_override=budget_override,
+    )
+
+    if outcome.refusal is not None:
+        log.warning(
+            "chat_send.context_overflow_refused",
+            session_key=session_key,
+            estimated_tokens=outcome.estimated_tokens,
+            budget_tokens=outcome.budget_tokens,
+        )
+        return outcome.refusal
+
+    if outcome.compacted_this_turn:
+        marker = getattr(ctx, "turn_runner", None)
+        mark = getattr(marker, "mark_compacted_this_turn", None)
+        if callable(mark):
+            mark(session_key)
+
+    return None
+
+
+@_d.method("chat.send", scope="operator.write")
+async def _handle_chat_send(params: dict | None, ctx: RpcContext) -> dict:
+    if not isinstance(params, dict) or "message" not in params:
+        raise ValueError("params.message is required")
+
+    message = params["message"]
+    session_key = _canonical_webchat_session_key(params.get("sessionKey"))
+    agent_id = parse_agent_id(session_key)
+
+    # Fresh-WebUI / smoke path: when no session manager is wired (webui
+    # simulator, dispatcher-only boot), instant-accept without kicking off a
+    # turn. This matches the roundtrip the WebUI observes on first paint
+    # before the sessions engine is attached.
+    if ctx.session_manager is None:
+        return {"ok": True, "sessionKey": session_key, "instant_accept": True}
+
+    mgr = _require_chat_session_manager(ctx)
+    intent = params.get("intent")
+
+    # WebChat must accept the turn even when existing history is oversized.
+    # Context shaping happens inside TurnRunner so it can produce a request-scoped
+    # sendable view instead of making the RPC layer a terminal overflow gate.
+
+    try:
+        if intent != "new_chat":
+            # Ensure session exists — auto-create if needed
+            try:
+                await mgr.get_or_create(
+                    session_key=session_key,
+                    agent_id=agent_id,
+                    display_name="WebChat",
+                )
+            except Exception as exc:
+                raise RpcUnavailableError(
+                    f"Failed to initialize chat session: {exc}"
+                ) from exc
+
+        from agentos.gateway.rpc_sessions import _handle_sessions_send
+
+        incoming_source = params.get("_source")
+        if not isinstance(incoming_source, dict):
+            incoming_source = {}
+
+        elevated_hint = incoming_source.get("elevated")
+        attachments = params.get("attachments")
+        extra: dict = {}
+        for source_key, target_key in (
+            ("noMemoryCapture", "noMemoryCapture"),
+            ("no_memory_capture", "no_memory_capture"),
+            ("inputProvenance", "inputProvenance"),
+            ("input_provenance", "input_provenance"),
+            ("inputProvenanceKind", "inputProvenanceKind"),
+            ("input_provenance_kind", "input_provenance_kind"),
+            ("provenance_kind", "provenance_kind"),
+            ("runKind", "runKind"),
+            ("run_kind", "run_kind"),
+        ):
+            if source_key in params:
+                extra[target_key] = params[source_key]
+        send_params = sessions_send_params(
+            ChatSendRequest(
+                session_key=session_key,
+                message=message,
+                attachments=attachments if isinstance(attachments, list) else [],
+                display_text=params.get("displayText")
+                if attachments and "displayText" in params
+                else None,
+                intent=cast(str, intent) if intent is not None else None,
+                extra=extra,
+            ),
+            chat_source_metadata(
+                caller_kind="web",
+                channel_kind="webchat",
+                channel_id=f"webchat:{session_key}",
+                sender_id=ctx.principal.role,
+                source_kind="webui",
+                source_name="WebChat",
+                elevated=elevated_hint if isinstance(elevated_hint, str) else None,
+            ),
+        )
+        result = await _handle_sessions_send(send_params, ctx)
+        return {"ok": True, "sessionKey": session_key, **result}
+    except Exception:
+        marker = getattr(ctx, "turn_runner", None)
+        clear = getattr(marker, "clear_compacted_this_turn", None)
+        if callable(clear):
+            clear(session_key)
+        raise
+
+
+@_d.method("chat.abort", scope="operator.write")
+async def _handle_chat_abort(params: dict | None, ctx: RpcContext) -> dict:
+    raw_params = params or {}
+    session_key = _canonical_webchat_session_key(raw_params.get("sessionKey"))
+    # Fresh-WebUI / smoke path: abort always returns an ok envelope keyed by
+    # sessionKey, regardless of whether a live task exists to cancel.
+    if ctx.session_manager is None:
+        return {"ok": True, "sessionKey": session_key, "aborted": False}
+    _require_chat_session_manager(ctx)
+    from agentos.gateway.rpc_sessions import _handle_sessions_abort
+
+    result = await _handle_sessions_abort(
+        {
+            "key": session_key,
+            "source": raw_params.get("source") or "webui_abort",
+        },
+        ctx,
+    )
+    return {"sessionKey": session_key, **result}
+
+
+@_d.method("chat.history", scope="operator.read")
+async def _handle_chat_history(params: dict | None, ctx: RpcContext) -> dict:
+    raw_params = params or {}
+    session_key = _canonical_webchat_session_key(raw_params.get("sessionKey"))
+    limit = _normalize_chat_history_limit(raw_params.get("limit"))
+    before = raw_params.get("before")
+    after = raw_params.get("after")
+    include_canonical = _chat_history_bool(
+        raw_params.get("includeCanonical"),
+        default=True,
+    )
+    include_summaries = _chat_history_bool(
+        raw_params.get("includeSummaries"),
+        default=True,
+    )
+
+    mgr = _require_chat_session_manager(ctx)
+
+    try:
+        transcript, canonical_available = await _chat_history_transcript(
+            mgr,
+            session_key,
+            include_canonical=include_canonical,
+        )
+    except KeyError:
+        if _is_webchat_session_key(session_key):
+            return _empty_chat_history_payload(limit)
+        raise
+    page_entries, has_more = _chat_history_page(
+        transcript,
+        limit=limit,
+        before=before,
+        after=after,
+    )
+    summaries = await _chat_history_summaries(
+        mgr,
+        session_key,
+        include_summaries=include_summaries,
+    )
+    if summaries:
+        history_scope = "compacted"
+    elif has_more:
+        history_scope = "latest_window"
+    else:
+        history_scope = "complete"
+
+    messages = transcript_entries_to_chat_messages(page_entries, limit=None)
+    return {
+        "messages": _annotate_transcript_attachment_downloads(
+            messages,
+            session_key=session_key,
+        ),
+        "has_more": has_more,
+        "oldest_cursor": _chat_history_cursor(page_entries[0]) if page_entries else None,
+        "newest_cursor": _chat_history_cursor(page_entries[-1]) if page_entries else None,
+        "history_scope": history_scope,
+        "loaded_count": len(page_entries),
+        "page_size": limit,
+        "canonical_available": canonical_available,
+        "compaction_summaries": summaries,
+    }
+
+
+@_d.method("chat.inject", scope="operator.admin")
+async def _handle_chat_inject(params: dict | None, ctx: RpcContext) -> dict:
+    if not isinstance(params, dict):
+        raise ValueError("params required: sessionKey, role, content")
+    for field in ("sessionKey", "role", "content"):
+        if field not in params:
+            raise ValueError(f"params.{field} is required")
+
+    role = params["role"]
+    if role not in ("user", "assistant", "system"):
+        raise ValueError(f"Invalid role: {role}")
+
+    session_key = _canonical_webchat_session_key(params["sessionKey"])
+
+    if ctx.session_manager is None:
+        raise KeyError("No session manager available")
+
+    storage = getattr(ctx.session_manager, "_storage", None)
+    if storage is not None:
+        existing = await storage.get_session(session_key)
+        if existing is None:
+            raise KeyError(f"Session not found: {session_key}")
+
+    await ctx.session_manager.append_message(session_key, role=role, content=params["content"])
+    return {"ok": True, "sessionKey": session_key}

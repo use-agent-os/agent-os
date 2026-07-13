@@ -1,0 +1,421 @@
+name: Windows Release Assets
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Optional existing tag to upload artifacts to
+        required: false
+        default: ""
+      python_runtime_release:
+        description: python-build-standalone release tag
+        required: true
+        default: "20260414"
+      python_runtime_version:
+        description: Full CPython runtime version from python-build-standalone
+        required: true
+        default: "3.12.13"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-release-assets-${{ github.event_name == 'push' && github.ref_name || github.event.inputs.tag || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_PROFILE: recommended
+  RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || github.event.inputs.tag }}
+  PYTHON_RUNTIME_RELEASE: ${{ github.event.inputs.python_runtime_release || '20260414' }}
+  PYTHON_RUNTIME_VERSION: ${{ github.event.inputs.python_runtime_version || '3.12.13' }}
+
+jobs:
+  build-release-assets:
+    name: Build Windows release assets
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Validate workflow inputs
+        shell: bash
+        run: |
+          if [[ -n "${RELEASE_TAG}" && ! "${RELEASE_TAG}" =~ ^v[0-9]+[.][0-9]+[.][0-9]+.*$ ]]; then
+            echo "Release tag must look like v0.0.1rc1 or v0.0.1: ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+          if [[ ! "${PYTHON_RUNTIME_RELEASE}" =~ ^[0-9]{8}$ ]]; then
+            echo "python_runtime_release must be a YYYYMMDD python-build-standalone release tag." >&2
+            exit 1
+          fi
+          if [[ ! "${PYTHON_RUNTIME_VERSION}" =~ ^3[.]12[.][0-9]+$ ]]; then
+            echo "python_runtime_version must be a CPython 3.12 patch version." >&2
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          persist-credentials: false
+          ref: ${{ env.RELEASE_TAG != '' && env.RELEASE_TAG || github.ref }}
+
+      - name: Hydrate embedding assets
+        shell: bash
+        run: git lfs pull --include="src/agentos/memory/models/**"
+
+      - name: Verify embedding assets are hydrated
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          root = Path("src/agentos/memory/models/bge_onnx")
+          required = [
+              root / "config.json",
+              root / "model.onnx",
+              root / "special_tokens_map.json",
+              root / "tokenizer.json",
+              root / "tokenizer_config.json",
+              root / "vocab.txt",
+          ]
+          for path in required:
+              assert path.is_file(), f"missing embedding asset: {path}"
+              prefix = path.read_bytes()[:80]
+              assert not prefix.startswith(b"version https://git-lfs.github.com/spec/v1"), (
+                  f"Git LFS pointer file is not hydrated: {path}"
+              )
+          PY
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: python -m pip install uv
+
+      - name: Check tag version
+        if: ${{ github.event_name == 'push' || github.event.inputs.tag != '' }}
+        shell: bash
+        run: |
+          version="$(python - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          print(pyproject["project"]["version"])
+          PY
+          )"
+          tag="${RELEASE_TAG}"
+          tag_version="${tag#v}"
+          if [[ "${tag_version}" != "${version}" ]]; then
+            echo "Tag ${tag} does not match project version ${version}" >&2
+            exit 1
+          fi
+
+      - name: Test release builder
+        run: uv run --extra dev pytest tests/test_scripts/test_build_wheelhouse_zip.py
+
+      - name: Build versioned portable zip
+        shell: bash
+        run: |
+          rm -rf dist build/wheelhouse-zip
+          python scripts/build_wheelhouse_zip.py \
+            --profile "${RELEASE_PROFILE}" \
+            --platform-tag windows-x64 \
+            --python-runtime-release "${PYTHON_RUNTIME_RELEASE}" \
+            --python-runtime-version "${PYTHON_RUNTIME_VERSION}" \
+            --bundle-python-runtime
+
+      - name: Collect versioned wheel
+        shell: bash
+        run: |
+          python - <<'PY'
+          import shutil
+          from pathlib import Path
+
+          wheels = sorted(Path("build/wheelhouse-zip/wheels").glob("agentos-*.whl"))
+          assert len(wheels) == 1, f"expected one built wheel, got {len(wheels)}"
+          shutil.copy2(wheels[0], Path("dist") / wheels[0].name)
+          PY
+
+      - name: Smoke versioned release artifacts
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import tomllib
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          version = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+          zips = sorted(
+              path for path in Path("dist").glob("AgentOS-*.zip")
+              if path.name != "AgentOS-windows-x64-portable.zip"
+          )
+          wheels = sorted(
+              path for path in Path("dist").glob("agentos-*.whl")
+          )
+          assert len(zips) == 1, f"expected one versioned portable zip, got {len(zips)}"
+          assert len(wheels) == 1, f"expected one versioned wheel, got {len(wheels)}"
+          assert zips[0].name == (
+              f"AgentOS-{version}-windows-x64-py312-recommended-portable.zip"
+          )
+          assert wheels[0].name == f"agentos-{version}-py3-none-any.whl"
+
+          with ZipFile(zips[0]) as archive:
+              names = set(archive.namelist())
+              archive_roots = sorted({name.split("/", 1)[0] for name in names if "/" in name})
+              assert len(archive_roots) == 1, f"expected one archive root: {archive_roots}"
+              root = archive_roots[0] + "/"
+              manifest = json.loads(archive.read(root + "manifest.json"))
+              assert manifest["version"] == version, "manifest.version must match project version"
+              assert manifest["platform_tag"] == "windows-x64"
+              assert root + "LICENSE" in names
+              assert root + "THIRD_PARTY_NOTICES.md" in names
+              assert root + "README.md" in names
+              assert root + "packages/" + manifest["wheel_name"] in names
+              assert manifest["portable"] is True
+              assert root + "start.sh" in names
+              assert root + "start.ps1" in names
+              assert root + "Start AgentOS.cmd" in names
+              assert root + "install.sh" not in names
+              assert root + "install.ps1" not in names
+              assert any(name.startswith(root + "runtime/python/") for name in names)
+
+          with ZipFile(wheels[0]) as archive:
+              for info in archive.infolist():
+                  if not info.filename.endswith(".onnx"):
+                      continue
+                  prefix = archive.read(info)[:80]
+                  assert not prefix.startswith(b"version https://git-lfs.github.com/spec/v1"), (
+                      f"Git LFS pointer leaked into wheel: {info.filename}"
+                  )
+          PY
+
+      - name: Create release assets
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          import re
+          import shutil
+          import tomllib
+          from pathlib import Path
+
+          dist = Path("dist")
+          project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          version = project["project"]["version"]
+          is_prerelease = bool(re.search(r"(?:a|b|rc)[0-9]+$", version))
+          zips = sorted(
+              path for path in dist.glob("AgentOS-*.zip")
+              if path.name != "AgentOS-windows-x64-portable.zip"
+          )
+          wheels = sorted(
+              path for path in dist.glob("agentos-*.whl")
+          )
+          assert len(zips) == 1, f"expected one versioned portable zip, got {len(zips)}"
+          assert len(wheels) == 1, f"expected one versioned wheel, got {len(wheels)}"
+          assets = [zips[0], wheels[0]]
+          if not is_prerelease:
+              stable_zip = dist / "AgentOS-windows-x64-portable.zip"
+              shutil.copy2(zips[0], stable_zip)
+              assets = [zips[0], stable_zip, wheels[0]]
+          lines = [
+              f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}"
+              for path in assets
+          ]
+          (dist / "SHA256SUMS").write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentos-release-assets-windows-x64-${{ env.RELEASE_PROFILE }}
+          path: |
+            dist/*.zip
+            dist/*.whl
+            dist/SHA256SUMS
+
+  publish-release:
+    name: Publish release assets
+    needs: build-release-assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: agentos-release-assets-windows-x64-${{ env.RELEASE_PROFILE }}
+          path: dist
+          merge-multiple: true
+
+      - name: Verify release asset set
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          import os
+          import re
+          from pathlib import Path
+
+          dist = Path("dist")
+          version = os.environ["RELEASE_TAG"].removeprefix("v")
+          is_prerelease = bool(re.search(r"(?:a|b|rc)[0-9]+$", version))
+          versioned_zips = sorted(
+              path for path in dist.glob("AgentOS-*.zip")
+              if path.name != "AgentOS-windows-x64-portable.zip"
+          )
+          versioned_wheels = sorted(
+              path for path in dist.glob("agentos-*.whl")
+          )
+          stable_zip = dist / "AgentOS-windows-x64-portable.zip"
+          sha256s = dist / "SHA256SUMS"
+          assert len(versioned_zips) == 1, f"expected one versioned portable zip, got {len(versioned_zips)}"
+          assert len(versioned_wheels) == 1, f"expected one versioned wheel, got {len(versioned_wheels)}"
+          assert sha256s.is_file(), "missing SHA256SUMS"
+          assets = [versioned_zips[0], versioned_wheels[0]]
+          if not is_prerelease:
+              assert stable_zip.is_file(), "missing stable portable zip"
+              assets = [versioned_zips[0], stable_zip, versioned_wheels[0]]
+          expected = [
+              f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}"
+              for path in assets
+          ]
+          assert sha256s.read_text(encoding="utf-8").splitlines() == expected
+          PY
+
+      - name: Upload aggregate workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentos-release-assets-${{ env.RELEASE_PROFILE }}
+          path: |
+            dist/*.zip
+            dist/*.whl
+            dist/SHA256SUMS
+
+      - name: Upload to GitHub Release
+        if: ${{ github.event_name == 'push' || github.event.inputs.tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ env.RELEASE_TAG }}
+        shell: bash
+        run: |
+          IS_PRERELEASE="$(python - <<'PY'
+          import os
+          import re
+
+          tag = os.environ["TAG"]
+          print("true" if re.search(r"(?:a|b|rc)[0-9]+$", tag) else "false")
+          PY
+          )"
+          TITLE="AgentOS ${TAG#v}"
+          create_args=("${TAG}" --draft --verify-tag)
+          if [[ "${IS_PRERELEASE}" == "true" ]]; then
+            TITLE="$(python - <<'PY'
+          import os
+          import re
+
+          version = os.environ["TAG"].removeprefix("v")
+          match = re.fullmatch(r"([0-9]+[.][0-9]+[.][0-9]+)(?:a|b|rc)([0-9]+)", version)
+          if match:
+              print(f"AgentOS {match.group(1)} Preview {match.group(2)}")
+          else:
+              print(f"AgentOS {version} Preview")
+          PY
+          )"
+            create_args+=(--prerelease)
+          fi
+          create_args+=(--title "${TITLE}")
+          gh release view "${TAG}" >/dev/null 2>&1 || \
+            gh release create "${create_args[@]}"
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+
+          tag = os.environ["TAG"]
+          raw = subprocess.check_output(
+              ["gh", "release", "view", tag, "--json", "assets"],
+              text=True,
+          )
+          data = json.loads(raw)
+          for asset in data.get("assets", []):
+              name = asset["name"]
+              managed = (
+                  name == "SHA256SUMS"
+                  or name.startswith("AgentOS-")
+                  or name.startswith("agentos-")
+                  or name.endswith(".sha256")
+              )
+              if managed:
+                  subprocess.run(
+                      ["gh", "release", "delete-asset", tag, name, "--yes"],
+                      check=True,
+                  )
+          PY
+          gh release upload "${TAG}" dist/*.zip dist/*.whl dist/SHA256SUMS --clobber
+
+      - name: Verify GitHub Release assets
+        if: ${{ github.event_name == 'push' || github.event.inputs.tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ env.RELEASE_TAG }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+
+          tag = os.environ["TAG"]
+          is_prerelease = bool(re.search(r"(?:a|b|rc)[0-9]+$", tag))
+          expected = {"SHA256SUMS"}
+          if not is_prerelease:
+              expected.add("AgentOS-windows-x64-portable.zip")
+          raw = subprocess.check_output(
+              ["gh", "release", "view", tag, "--json", "assets"],
+              text=True,
+          )
+          data = json.loads(raw)
+          names = {asset["name"] for asset in data.get("assets", [])}
+          missing = sorted(expected - names)
+          versioned_zip = [
+              name for name in names
+              if name.startswith("AgentOS-")
+              and name.endswith("-windows-x64-py312-recommended-portable.zip")
+          ]
+          versioned_wheel = [
+              name for name in names
+              if name.startswith("agentos-")
+              and name.endswith("-py3-none-any.whl")
+          ]
+          allowed = expected | set(versioned_zip) | set(versioned_wheel)
+          unexpected = sorted(names - allowed)
+          if (
+              missing
+              or len(versioned_zip) != 1
+              or len(versioned_wheel) != 1
+              or unexpected
+          ):
+              print(
+                  "Unexpected GitHub Release assets:",
+                  {
+                      "missing": missing,
+                      "versioned_zip_count": len(versioned_zip),
+                      "versioned_wheel_count": len(versioned_wheel),
+                      "unexpected": unexpected,
+                      "names": sorted(names),
+                  },
+                  file=sys.stderr,
+              )
+              raise SystemExit(1)
+          PY

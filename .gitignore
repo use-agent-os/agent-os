@@ -1,0 +1,113 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+/dist/
+/build/
+.venv/
+.env
+.env.test
+agentos.toml
+.gateway.log
+.gateway-test.html
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.DS_Store
+.*/
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
+data/
+# Checked-in router eval dataset used by the test suite.
+!tests/data/
+# V4 Phase 3 ML router bundle (~75MB: lgbm/onnx/features). Kept OUT of git so the
+# public repo stays lean; it is not distributed with the repo or wheel yet.
+# Restore it locally to run strategy="v4_phase3".
+/src/agentos/agentos_router/models/
+.agentos/
+benchmarks/
+specs/
+# Local agent/editor instructions and runtime state.
+# Root AGENTS.md / CLAUDE.md are tracked (project agent instructions); other
+# agent/editor files below stay local.
+GEMINI.md
+.codex
+.codex/
+.claude/
+.omc/
+.omx/
+
+# One-off planning artifacts kept local, not published.
+/PLAN.md
+/SPEC.md
+/prd.json
+/progress.txt
+/plans/
+/docs/superpowers/
+*.png
+# Brand assets are intentionally tracked: top-level assets/ for branding,
+# and the WebUI static asset path so the gateway page renders the mark.
+!/assets/*.png
+!/src/agentos/gateway/static/img/*.png
+site/
+/plugins/
+crontab-*
+~/
+/reference-*
+/reference-mem
+/bench-mem
+.omx/
+tests/functional/reports/
+
+# Local-only release-hygiene tests that reference legacy artifact names
+# kept off the public tree.
+/tests/_private/
+
+# Maintainer-local design / planning artifacts kept beside the repo but
+# not part of the published source. Move into /docs/proposals/ if/when
+# they are ready for public consumption.
+/meta-skills.pptx
+/kb-index.xlsx
+
+# Generated local outputs from document/meta-skill smoke runs.
+/texput.log
+/src/agentos/skills/bundled/multi-search-engine/Tokyo_5日出差行程.docx
+
+# Local-only fetcher for the clawhub skills imported into bundled/.
+# The bundled copies are tracked; the raw zip downloads and the fetch
+# helper stay out of the published tree.
+/_clawhub_skills/
+/scripts/_fetch_clawhub_skills.py
+
+# Local AI-tool configs (per-machine MCP / opencode setup).
+/.mcp.json
+/opencode.jsonc
+
+# Defensive junk patterns — no such files are tracked today; these keep
+# future local scratch/editor/test-run artifacts from being committed by
+# accident once the repo is public. Add to this list, don't remove from it.
+*.log
+*.tmp
+*.bak
+*.orig
+*.rej
+*.swp
+*~
+Thumbs.db
+# Coverage / test-run outputs.
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.ipynb_checkpoints/
+# Stray JS deps if any tooling ever pulls them in.
+node_modules/
+# Editable diagram sources (Excalidraw). Publish rendered PNG/SVG under
+# docs/diagrams/ instead; keep the editable source local.
+*.excalidraw
