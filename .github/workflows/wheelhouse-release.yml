@@ -419,3 +419,12 @@ jobs:
               )
               raise SystemExit(1)
           PY
+
+      - name: Publish release (remove draft)
+        if: ${{ github.event_name == 'push' || github.event.inputs.tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ env.RELEASE_TAG }}
+        shell: bash
+        run: gh release edit "${TAG}" --draft=false
