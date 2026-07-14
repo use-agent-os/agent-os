@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.7.14.post1] - 2026-07-14
+
 ### Changed
 
 - The Python distribution is now published to PyPI as **`use-agent-os`**

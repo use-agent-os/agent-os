@@ -12,7 +12,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$defaultVersion = 'v2026.7.14'
+$defaultVersion = 'v2026.7.14.post1'
 $repoSlug = if ($env:AGENTOS_REPOSITORY) { $env:AGENTOS_REPOSITORY } else { 'use-agent-os/agent-os' }
 $pythonVersion = if ($env:AGENTOS_PYTHON_VERSION) { $env:AGENTOS_PYTHON_VERSION } else { '3.12' }
 $originalPath = if ($env:Path) { $env:Path } else { '' }
@@ -90,7 +90,7 @@ $packageName = if ($targetExtras.Count -gt 0) {
 
 function Test-ReleaseVersion {
     param([string]$Value)
-    return $Value -match '^v?\d+\.\d+\.\d+((a|b|rc)\d+)?$'
+    return $Value -match '^v?\d+\.\d+\.\d+((a|b|rc)\d+)?(\.post\d+)?$'
 }
 
 if ($Version -notin @('latest', 'stable') -and -not (Test-ReleaseVersion $Version)) {

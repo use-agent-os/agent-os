@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-default_version="v2026.7.14"
+default_version="v2026.7.14.post1"
 repo_slug="${AGENTOS_REPOSITORY:-use-agent-os/agent-os}"
 python_version="${AGENTOS_PYTHON_VERSION:-3.12}"
 original_path="${PATH:-}"
@@ -71,7 +71,7 @@ profile="${cli_profile:-${AGENTOS_INSTALL_PROFILE:-recommended}}"
 dry_run="${AGENTOS_INSTALL_DRY_RUN:-0}"
 
 is_release_version() {
-    [[ "$1" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?$ ]]
+    [[ "$1" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?(\.post[0-9]+)?$ ]]
 }
 
 valid_extras=" matrix matrix-e2e document-extras "
