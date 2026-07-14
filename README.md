@@ -202,10 +202,10 @@ $env:Path = "$env:USERPROFILE\.local\bin;" + $env:Path
 **2. Install AgentOS.** This command is the same on every system.
 
 ```sh
-uv tool install --python 3.12 "agentos[recommended] @ https://github.com/use-agent-os/agent-os/releases/download/v2026.7.14/agentos-2026.7.14-py3-none-any.whl"
+uv tool install --python 3.12 "use-agent-os[recommended]"
 ```
 
-This installs the AgentOS file from the link above. Then `uv`
+This installs the latest AgentOS release from PyPI. Then `uv`
 downloads whatever else that install needs. The default
 `recommended` extra brings in local memory embedding's tools, like ONNX
 Runtime, NumPy, and tokenizers. So the first install needs internet
@@ -222,13 +222,15 @@ agentos gateway run
 > If `agentos` is not found right after installing with `uv`, open a
 > new terminal window. Or run the PATH command from step 1 again.
 
-For an install pinned to one exact version, use this full link:
-`https://github.com/use-agent-os/agent-os/releases/download/v2026.7.15/agentos-2026.7.15-py3-none-any.whl`.
+For an install pinned to one exact version, add `==<version>` — for
+example `uv tool install --python 3.12 "use-agent-os[recommended]==2026.7.15"` —
+or use the GitHub release wheel link directly:
+`https://github.com/use-agent-os/agent-os/releases/download/v2026.7.14/use_agent_os-2026.7.14-py3-none-any.whl`.
 
 > [!NOTE]
 > Release install commands use published GitHub release assets.
 > Python wheel installs use versioned wheel filenames — for example
-> `agentos-2026.7.15-py3-none-any.whl` — because the installers validate the
+> `use_agent_os-2026.7.15-py3-none-any.whl` — because the installers validate the
 > version segment inside the wheel filename, so there is no `latest`
 > wheel alias. Only the Windows portable zip has a version-independent
 > `releases/latest/download/` alias.
@@ -544,7 +546,7 @@ settings are all in `agentos.toml.example`.
 | **Token-efficient routing** | `AgentOS Router` defaults to `v4_phase3`, a small local AI model (BGE embeddings + LightGBM; the `recommended` extra installs its runtime dependencies) that looks at each message — its length, language, code, keywords, and meaning — and picks one of four levels (c0–c3), then routes it to the cheapest model that can still do the job well. This check runs on your own device, so your message never has to leave your computer just to make this choice. The ~75MB model bundle is not distributed yet; without it the router falls back to a single tier, so pick the `llm_judge` strategy instead (a small LLM call, optionally a local Ollama/LM Studio endpoint) for per-turn routing with no local model files. Choose either in onboarding. |
 | **Adaptive reasoning and prompts** | AgentOS only asks for deep, extended thinking when the router sees the message is hard. The system instructions also grow to match: short and simple for easy messages, full and detailed for hard ones. |
 | **20+ LLM providers** | AgentOS can talk to 20+ AI providers — OpenRouter (used by default), the Bankr LLM Gateway, OpenAI, Anthropic, Ollama, DeepSeek, Gemini, DashScope/Qwen, Moonshot, Mistral, Groq, Zhipu, SiliconFlow, vLLM, LM Studio, and more. It picks a main provider first, with backups ready if needed. The first-time setup shows you the providers that are fully tested. |
-| **On-demand skills and MCP** | AgentOS comes with 37 built-in skills (coding, GitHub, cron jobs, pptx/docx/xlsx/pdf files, summaries, tmux, weather, and more). Each skill only loads when a task actually needs it. AgentOS can use other MCP tools, and can also act as an MCP tool for others — `agentos mcp-server run` needs the `mcp` extra (install with `agentos[recommended,mcp]`). You can write, install, and share your own skills from the CLI. |
+| **On-demand skills and MCP** | AgentOS comes with 37 built-in skills (coding, GitHub, cron jobs, pptx/docx/xlsx/pdf files, summaries, tmux, weather, and more). Each skill only loads when a task actually needs it. AgentOS can use other MCP tools, and can also act as an MCP tool for others — `agentos mcp-server run` needs the `mcp` extra (install with `use-agent-os[recommended,mcp]`). You can write, install, and share your own skills from the CLI. |
 | **Persistent local memory** | AgentOS remembers things between sessions, using a main `MEMORY.md` file plus dated notes in Markdown. You can search this memory two ways: by keyword (SQLite full-text search) or by meaning (`sqlite-vec`). The meaning search runs on your device using a built-in ONNX model, or you can switch to OpenAI or Ollama instead. There are optional extra features too: old memories can slowly fade, and a "dream" mode can clean up and merge memories (you must turn this on yourself). |
 | **Layered security sandbox** | There are three safety levels: Standard, Strict, and Locked. Each one controls what tools are allowed to do. On Linux, Bubblewrap keeps code running in its own safe space. On macOS, this job is done by `sandbox-exec` (Apple's Seatbelt). Windows does not have this sandbox yet. If AgentOS is denied the same action too many times in a row, it pauses itself automatically and does not keep trying. Any blocked output is deleted right away. Skill details and tool results are also cleaned (escaped) so they can't trick the AI into doing something unsafe. |
 | **Built-in tools** | AgentOS can read, write, and edit files; run shell commands and background tasks; use git; search the web (with Brave or DuckDuckGo) and fetch pages safely (blocking unsafe internal network requests); create spreadsheets, PPTX, and PDF files; generate images; and turn text into speech. |

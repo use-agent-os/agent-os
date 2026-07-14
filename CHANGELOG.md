@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- The Python distribution is now published to PyPI as **`use-agent-os`**
+  (`uv tool install "use-agent-os[recommended]"`). The import package
+  (`import agentos`) and the `agentos` CLI are unchanged. PyPI's project-name
+  similarity rules reject `agentos`/`agent-os` variants (the bare name is held
+  by an unrelated, abandoned 2022 project), hence the org-matching name.
+- Built wheels are named `use_agent_os-<version>-py3-none-any.whl` (PEP 427
+  normalization). Install scripts, the wheelhouse builder, the release
+  workflow, and the README now reference the new filename; the README's
+  primary terminal install is the PyPI command instead of a pinned wheel URL.
+
 ## [2026.7.14] - 2026-07-14
 
 ### Changed

@@ -40,7 +40,7 @@ def load_script():
 
 def test_build_wheel_retries_once_after_transient_uv_failure(monkeypatch, tmp_path: Path) -> None:
     module = load_script()
-    wheel_path = tmp_path / "wheels" / "agentos-0.1.0-py3-none-any.whl"
+    wheel_path = tmp_path / "wheels" / "use_agent_os-0.1.0-py3-none-any.whl"
     calls = []
 
     def fake_run(args, *, cwd, env):
@@ -108,7 +108,7 @@ def test_python_runtime_asset_name_uses_platform_triple() -> None:
 def test_cross_platform_wheelhouse_requires_target_host(tmp_path: Path) -> None:
     module = load_script()
     module.platform_tag = lambda: "linux-x64"
-    wheel_path = tmp_path / "agentos-0.1.0-py3-none-any.whl"
+    wheel_path = tmp_path / "use_agent_os-0.1.0-py3-none-any.whl"
     package_dir = tmp_path / "packages"
 
     with pytest.raises(SystemExit, match="must run on the target platform"):
@@ -125,7 +125,7 @@ def test_cross_platform_wheelhouse_requires_target_host(tmp_path: Path) -> None:
 def test_portable_recommended_wheelhouse_uses_recommended_extra_only(tmp_path: Path) -> None:
     module = load_script()
     module.platform_tag = lambda: "windows-x64"
-    wheel_path = tmp_path / "agentos-0.1.0-py3-none-any.whl"
+    wheel_path = tmp_path / "use_agent_os-0.1.0-py3-none-any.whl"
     package_dir = tmp_path / "packages"
 
     command = module.build_wheelhouse_command(
@@ -203,12 +203,12 @@ def test_public_release_docs_avoid_private_kol_language() -> None:
 
 def test_release_wheel_content_scanner_flags_internal_markers(tmp_path: Path) -> None:
     module = load_script()
-    wheel_path = tmp_path / "agentos-0.1.0-py3-none-any.whl"
+    wheel_path = tmp_path / "use_agent_os-0.1.0-py3-none-any.whl"
 
     with ZipFile(wheel_path, "w") as archive:
         archive.writestr("agentos/__init__.py", "__version__ = '0.1.0'\n")
         archive.writestr(
-            "agentos-0.1.0.dist-info/METADATA",
+            "use_agent_os-0.1.0.dist-info/METADATA",
             "\n".join(
                 [
                     "Author: INTERNAL_ORG_NAME",
@@ -219,8 +219,8 @@ def test_release_wheel_content_scanner_flags_internal_markers(tmp_path: Path) ->
         )
 
     assert module.forbidden_release_text_hits(wheel_path) == [
-        "agentos-0.1.0.dist-info/METADATA: INTERNAL_ORG_NAME",
-        "agentos-0.1.0.dist-info/METADATA: github.com/internal-org/agentos",
+        "use_agent_os-0.1.0.dist-info/METADATA: INTERNAL_ORG_NAME",
+        "use_agent_os-0.1.0.dist-info/METADATA: github.com/internal-org/agentos",
     ]
 
 
@@ -228,13 +228,13 @@ def test_install_scripts_install_from_local_wheelhouse_and_run_onboarding() -> N
     module = load_script()
 
     sh_script = module.render_install_sh(
-        wheel_name="agentos-0.1.0-py3-none-any.whl",
+        wheel_name="use_agent_os-0.1.0-py3-none-any.whl",
         profile="recommended",
         python_major=3,
         python_minor=12,
     )
     ps_script = module.render_install_ps1(
-        wheel_name="agentos-0.1.0-py3-none-any.whl",
+        wheel_name="use_agent_os-0.1.0-py3-none-any.whl",
         profile="recommended",
         python_major=3,
         python_minor=12,
@@ -244,7 +244,7 @@ def test_install_scripts_install_from_local_wheelhouse_and_run_onboarding() -> N
     assert 'REQUIRED_PYTHON_MINOR=12' in sh_script
     assert "uv tool install" in sh_script
     assert '--find-links "${PACKAGE_DIR}"' in sh_script
-    assert '"${PACKAGE_DIR}/agentos-0.1.0-py3-none-any.whl[recommended]"' in sh_script
+    assert '"${PACKAGE_DIR}/use_agent_os-0.1.0-py3-none-any.whl[recommended]"' in sh_script
     assert '"${AGENTOS_BIN}" onboard' in sh_script
     assert '"${AGENTOS_BIN}" onboard --if-needed' in sh_script
     assert "agentos gateway run" in sh_script
@@ -253,7 +253,7 @@ def test_install_scripts_install_from_local_wheelhouse_and_run_onboarding() -> N
     assert "$RequiredPythonMinor = 12" in ps_script
     assert "uv tool install" in ps_script
     assert "--find-links" in ps_script
-    assert "agentos-0.1.0-py3-none-any.whl[recommended]" in ps_script
+    assert "use_agent_os-0.1.0-py3-none-any.whl[recommended]" in ps_script
     assert "& $AgentOSBin onboard --if-needed" in ps_script
     assert 'throw "AgentOS installation failed with exit code $LASTEXITCODE."' in ps_script
     assert 'throw "AgentOS onboarding failed with exit code $LASTEXITCODE."' in ps_script
@@ -406,7 +406,7 @@ def test_install_script_reexecs_under_bash_before_pipefail() -> None:
     module = load_script()
 
     script = module.render_install_sh(
-        wheel_name="agentos-0.1.0-py3-none-any.whl",
+        wheel_name="use_agent_os-0.1.0-py3-none-any.whl",
         profile="recommended",
         python_major=3,
         python_minor=12,
@@ -490,7 +490,7 @@ def test_render_readme_is_platform_specific_for_macos_portable() -> None:
 def test_prepare_release_tree_writes_user_surface_and_manifest(tmp_path: Path) -> None:
     module = load_script()
     release_root = tmp_path / "AgentOS-0.1.0-macos-arm64-py312-recommended-wheelhouse"
-    wheel_path = tmp_path / "agentos-0.1.0-py3-none-any.whl"
+    wheel_path = tmp_path / "use_agent_os-0.1.0-py3-none-any.whl"
     wheel_path.write_bytes(b"wheel")
 
     bundled_wheel = module.prepare_release_tree(
@@ -535,7 +535,7 @@ def test_prepare_release_tree_writes_user_surface_and_manifest(tmp_path: Path) -
 def test_prepare_portable_release_tree_includes_runtime_and_start_scripts(tmp_path: Path) -> None:
     module = load_script()
     release_root = tmp_path / "AgentOS-0.1.0-macos-arm64-py312-recommended-portable"
-    wheel_path = tmp_path / "agentos-0.1.0-py3-none-any.whl"
+    wheel_path = tmp_path / "use_agent_os-0.1.0-py3-none-any.whl"
     runtime_root = tmp_path / "runtime"
     (runtime_root / "bin").mkdir(parents=True)
     (runtime_root / "bin" / "python3").write_text("python", encoding="utf-8")
@@ -633,7 +633,7 @@ def test_prepare_windows_portable_release_tree_includes_double_click_launcher(
 ) -> None:
     module = load_script()
     release_root = tmp_path / "AgentOS-0.1.0-windows-x64-py312-recommended-portable"
-    wheel_path = tmp_path / "agentos-0.1.0-py3-none-any.whl"
+    wheel_path = tmp_path / "use_agent_os-0.1.0-py3-none-any.whl"
     runtime_root = tmp_path / "runtime"
     runtime_root.mkdir()
     (runtime_root / "python.exe").write_text("python", encoding="utf-8")
@@ -717,7 +717,7 @@ def test_create_zip_contains_release_directory_and_preserves_install_mode(tmp_pa
     release_root = tmp_path / "AgentOS-0.1.0-macos-arm64-py312-recommended-wheelhouse"
     packages = release_root / "packages"
     packages.mkdir(parents=True)
-    (packages / "agentos-0.1.0-py3-none-any.whl").write_bytes(b"wheel")
+    (packages / "use_agent_os-0.1.0-py3-none-any.whl").write_bytes(b"wheel")
     install_script = release_root / "install.sh"
     install_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
     install_script.chmod(0o755)
@@ -739,7 +739,7 @@ def test_create_zip_contains_release_directory_and_preserves_install_mode(tmp_pa
         "AgentOS-0.1.0-macos-arm64-py312-recommended-wheelhouse/install.ps1",
         "AgentOS-0.1.0-macos-arm64-py312-recommended-wheelhouse/install.sh",
         "AgentOS-0.1.0-macos-arm64-py312-recommended-wheelhouse/manifest.json",
-        "AgentOS-0.1.0-macos-arm64-py312-recommended-wheelhouse/packages/agentos-0.1.0-py3-none-any.whl",
+        "AgentOS-0.1.0-macos-arm64-py312-recommended-wheelhouse/packages/use_agent_os-0.1.0-py3-none-any.whl",
     }
     assert stat.S_IMODE(install_info.external_attr >> 16) & stat.S_IXUSR
 
@@ -823,7 +823,7 @@ def test_release_workflow_publishes_windows_portable_zip_and_wheel() -> None:
     assert "is_prerelease = bool(re.search" in workflow
     assert "if not is_prerelease:" in workflow
     assert "AgentOS-windows-x64-portable.zip" in workflow
-    assert "agentos-latest-py3-none-any.whl" not in workflow
+    assert "use_agent_os-latest-py3-none-any.whl" not in workflow
     assert "dist/*.zip dist/*.whl dist/SHA256SUMS" in workflow
     assert "dist/*.zip dist/*.zip.sha256 dist/SHA256SUMS" not in workflow
     assert "Git LFS pointer leaked into wheel" in workflow

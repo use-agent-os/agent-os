@@ -8,13 +8,13 @@
 
 Versions follow CalVer (`YYYY.M.D`). PEP 440 normalizes wheel filenames and drops
 leading zeros, so tags must use the same non-padded form — tag `v2026.7.15`, not
-`v2026.07.15`, or the wheel filename (`agentos-2026.7.15-py3-none-any.whl`) will
+`v2026.07.15`, or the wheel filename (`use_agent_os-2026.7.15-py3-none-any.whl`) will
 not match the tag and the release smoke check fails.
 
 Preview releases publish only versioned assets:
 
 - `AgentOS-<version>-windows-x64-py312-recommended-portable.zip`
-- `agentos-<version>-py3-none-any.whl`
+- `use_agent_os-<version>-py3-none-any.whl`
 - `SHA256SUMS`
 
 Non-preview releases additionally publish a version-independent alias for the
@@ -34,7 +34,7 @@ Preview releases are GitHub pre-releases. Their README install commands must
 use tag-pinned URLs such as:
 
 - `https://github.com/use-agent-os/agent-os/releases/download/v0.0.1rc1/AgentOS-0.0.1rc1-windows-x64-py312-recommended-portable.zip`
-- `https://github.com/use-agent-os/agent-os/releases/download/v0.0.1rc1/agentos-0.0.1rc1-py3-none-any.whl`
+- `https://github.com/use-agent-os/agent-os/releases/download/v0.0.1rc1/use_agent_os-0.0.1rc1-py3-none-any.whl`
 
 0.0.1 install commands use versioned wheel URLs because Python installers
 validate wheel filenames. The Windows portable zip may use the
@@ -42,7 +42,7 @@ validate wheel filenames. The Windows portable zip may use the
 exists. Fully pinned URLs remain available:
 
 - `https://github.com/use-agent-os/agent-os/releases/download/v0.0.1/AgentOS-0.0.1-windows-x64-py312-recommended-portable.zip`
-- `https://github.com/use-agent-os/agent-os/releases/download/v0.0.1/agentos-0.0.1-py3-none-any.whl`
+- `https://github.com/use-agent-os/agent-os/releases/download/v0.0.1/use_agent_os-0.0.1-py3-none-any.whl`
 
 ## Release SOP
 
@@ -60,7 +60,7 @@ exists. Fully pinned URLs remain available:
 
    ```sh
    curl --fail --head --location https://github.com/use-agent-os/agent-os/releases/download/v0.0.1/AgentOS-0.0.1-windows-x64-py312-recommended-portable.zip
-   curl --fail --head --location https://github.com/use-agent-os/agent-os/releases/download/v0.0.1/agentos-0.0.1-py3-none-any.whl
+   curl --fail --head --location https://github.com/use-agent-os/agent-os/releases/download/v0.0.1/use_agent_os-0.0.1-py3-none-any.whl
    ```
 
 9. Run the post-publish latest URL check:

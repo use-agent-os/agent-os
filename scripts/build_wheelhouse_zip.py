@@ -272,7 +272,7 @@ def missing_required_runtime_modules_in_wheel(wheel_path: Path) -> list[str]:
 
 
 def find_built_wheel(wheel_dir: Path) -> Path:
-    wheels = sorted(wheel_dir.glob("agentos-*.whl"))
+    wheels = sorted(wheel_dir.glob("use_agent_os-*.whl"))
     if len(wheels) != 1:
         raise SystemExit(f"Expected one AgentOS wheel in {wheel_dir}, found {len(wheels)}")
     return wheels[0]
@@ -737,7 +737,7 @@ if [[ ! -d "${PACKAGE_DIR}" ]]; then
   exit 1
 fi
 AGENTOS_WHEEL="$(
-  find "${PACKAGE_DIR}" -maxdepth 1 -type f -name 'agentos-*.whl' |
+  find "${PACKAGE_DIR}" -maxdepth 1 -type f -name 'use_agent_os-*.whl' |
     sort |
     head -n 1
 )"
@@ -1116,7 +1116,7 @@ function Repair-WindowsVCRedistForOnnxIfNeeded {
 if (-not (Test-Path $VenvRoot)) {
     New-Item -ItemType Directory -Path $VenvRoot -Force | Out-Null
 }
-$AgentOSWheel = Get-ChildItem -Path $PackageDir -Filter 'agentos-*.whl' |
+$AgentOSWheel = Get-ChildItem -Path $PackageDir -Filter 'use_agent_os-*.whl' |
     Sort-Object Name |
     Select-Object -First 1
 if (-not $AgentOSWheel) {

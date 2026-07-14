@@ -1,6 +1,6 @@
 ---
 name: html-to-pdf
-description: "Render HTML (with CSS) to a PDF file. Trigger when the user wants to export a styled report, invoice, label, or any HTML/Jinja-rendered page to PDF. Uses WeasyPrint, which supports a meaningful subset of CSS Paged Media (page size, margins, headers/footers, page-break-before/after). Optional dependency — install via `pip install agentos[document-extras]` or `uv add weasyprint` because WeasyPrint pulls in native libraries (Pango, Cairo, fontconfig) that need OS-level packages."
+description: "Render HTML (with CSS) to a PDF file. Trigger when the user wants to export a styled report, invoice, label, or any HTML/Jinja-rendered page to PDF. Uses WeasyPrint, which supports a meaningful subset of CSS Paged Media (page size, margins, headers/footers, page-break-before/after). Optional dependency — install via `pip install 'use-agent-os[document-extras]'` or `uv add weasyprint` because WeasyPrint pulls in native libraries (Pango, Cairo, fontconfig) that need OS-level packages."
 homepage: https://weasyprint.org/
 provenance:
   origin: clawhub-mit0

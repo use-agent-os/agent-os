@@ -34,7 +34,7 @@ entrypoint:
 A unified CLI for querying several web search engines in parallel and
 returning a normalized result list. Built on `httpx` and `beautifulsoup4`
 (both already in AgentOS default dependencies, so no extra install
-beyond `pip install agentos`).
+beyond `pip install use-agent-os`).
 
 ## Use cases
 

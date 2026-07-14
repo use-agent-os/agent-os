@@ -83,9 +83,9 @@ switch ($profileName) {
 
 $targetExtras += $installExtras
 $packageName = if ($targetExtras.Count -gt 0) {
-    "agentos[$($targetExtras -join ',')]"
+    "use-agent-os[$($targetExtras -join ',')]"
 } else {
-    'agentos'
+    'use-agent-os'
 }
 
 function Test-ReleaseVersion {
@@ -112,20 +112,20 @@ switch -Regex ($Version) {
             exit 1
         }
         $releaseVersion = if ($releaseTag.StartsWith('v')) { $releaseTag.Substring(1) } else { $releaseTag }
-        $wheelUrl = "https://github.com/$repoSlug/releases/download/$releaseTag/agentos-$releaseVersion-py3-none-any.whl"
+        $wheelUrl = "https://github.com/$repoSlug/releases/download/$releaseTag/use_agent_os-$releaseVersion-py3-none-any.whl"
         $displayVersion = $releaseTag
         break
     }
     '^v' {
         $releaseVersion = $Version.Substring(1)
-        $wheelUrl = "https://github.com/$repoSlug/releases/download/$Version/agentos-$releaseVersion-py3-none-any.whl"
+        $wheelUrl = "https://github.com/$repoSlug/releases/download/$Version/use_agent_os-$releaseVersion-py3-none-any.whl"
         $displayVersion = $Version
         break
     }
     default {
         $releaseVersion = $Version
         $releaseTag = "v$releaseVersion"
-        $wheelUrl = "https://github.com/$repoSlug/releases/download/$releaseTag/agentos-$releaseVersion-py3-none-any.whl"
+        $wheelUrl = "https://github.com/$repoSlug/releases/download/$releaseTag/use_agent_os-$releaseVersion-py3-none-any.whl"
         $displayVersion = $releaseTag
     }
 }
@@ -226,7 +226,7 @@ function Install-WindowsVCRedistIfNeeded {
 
 if ($dryRun) {
     Write-Host "install.ps1: dry-run - would install AgentOS $displayVersion"
-    Write-Host "install.ps1: dry-run - would run: uv tool install --python $pythonVersion --force --reinstall-package agentos `"$installSpec`""
+    Write-Host "install.ps1: dry-run - would run: uv tool install --python $pythonVersion --force --reinstall-package use-agent-os `"$installSpec`""
     exit 0
 }
 
@@ -244,7 +244,7 @@ if (-not $uvBin) {
 Install-WindowsVCRedistIfNeeded
 
 Write-Host "install.ps1: installing AgentOS $displayVersion ($profileName)"
-& $uvBin tool install --python $pythonVersion --force --reinstall-package agentos $installSpec
+& $uvBin tool install --python $pythonVersion --force --reinstall-package use-agent-os $installSpec
 if ($LASTEXITCODE -ne 0) {
     Write-Error "install.ps1: install command failed with exit code $LASTEXITCODE."
     exit $LASTEXITCODE

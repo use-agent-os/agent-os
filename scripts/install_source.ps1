@@ -227,7 +227,7 @@ $installArgs = @()
 
 if (Get-Command uv -ErrorAction SilentlyContinue) {
     $installer = 'uv'
-    $installArgs = @('tool', 'install', '--force', '--reinstall-package', 'agentos', $installTarget)
+    $installArgs = @('tool', 'install', '--force', '--reinstall-package', 'use-agent-os', $installTarget)
 } elseif (Get-Command python -ErrorAction SilentlyContinue) {
     $installer = 'pip'
     $installArgs = @('-m', 'pip', 'install', '--user', $installTarget)

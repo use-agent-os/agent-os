@@ -126,9 +126,9 @@ if (( ${#install_extras[@]} > 0 )); then
 fi
 
 if (( ${#target_extras[@]} > 0 )); then
-    package_name="agentos[$(IFS=,; echo "${target_extras[*]}")]"
+    package_name="use-agent-os[$(IFS=,; echo "${target_extras[*]}")]"
 else
-    package_name="agentos"
+    package_name="use-agent-os"
 fi
 
 if [[ "${release_selector}" != "latest" && "${release_selector}" != "stable" ]] && ! is_release_version "${release_selector}"; then
@@ -162,18 +162,18 @@ case "${release_selector}" in
             exit 1
         fi
         release_version="${latest_tag#v}"
-        wheel_url="https://github.com/${repo_slug}/releases/download/${latest_tag}/agentos-${release_version}-py3-none-any.whl"
+        wheel_url="https://github.com/${repo_slug}/releases/download/${latest_tag}/use_agent_os-${release_version}-py3-none-any.whl"
         display_version="${latest_tag}"
         ;;
     v*)
         release_version="${release_selector#v}"
-        wheel_url="https://github.com/${repo_slug}/releases/download/${release_selector}/agentos-${release_version}-py3-none-any.whl"
+        wheel_url="https://github.com/${repo_slug}/releases/download/${release_selector}/use_agent_os-${release_version}-py3-none-any.whl"
         display_version="${release_selector}"
         ;;
     *)
         release_version="${release_selector}"
         release_tag="v${release_version}"
-        wheel_url="https://github.com/${repo_slug}/releases/download/${release_tag}/agentos-${release_version}-py3-none-any.whl"
+        wheel_url="https://github.com/${repo_slug}/releases/download/${release_tag}/use_agent_os-${release_version}-py3-none-any.whl"
         display_version="${release_tag}"
         ;;
 esac
@@ -210,7 +210,7 @@ resolve_uv() {
 
 if [[ "${dry_run}" == "1" ]]; then
     echo "install.sh: dry-run - would install AgentOS ${display_version}"
-    echo "install.sh: dry-run - would run: uv tool install --python ${python_version} --force --reinstall-package agentos \"${install_spec}\""
+    echo "install.sh: dry-run - would run: uv tool install --python ${python_version} --force --reinstall-package use-agent-os \"${install_spec}\""
     exit 0
 fi
 
@@ -228,7 +228,7 @@ if [[ -z "${uv_bin}" ]]; then
 fi
 
 echo "install.sh: installing AgentOS ${display_version} (${profile})"
-"${uv_bin}" tool install --python "${python_version}" --force --reinstall-package agentos "${install_spec}"
+"${uv_bin}" tool install --python "${python_version}" --force --reinstall-package use-agent-os "${install_spec}"
 
 tool_bin_dir="$("${uv_bin}" tool dir --bin 2>/dev/null || true)"
 

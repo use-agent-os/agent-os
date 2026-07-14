@@ -191,7 +191,7 @@ def test_release_sop_documents_github_only_validation_boundary() -> None:
 def test_readme_documents_quick_and_manual_terminal_install_commands() -> None:
     text = Path("README.md").read_text(encoding="utf-8")
 
-    assert 'uv tool install --python 3.12 "agentos[recommended] @ https://github.com' in text
+    assert 'uv tool install --python 3.12 "use-agent-os[recommended]"' in text
     assert "curl -LsSf https://astral.sh/uv/install.sh | sh" in text
     assert '. "$HOME/.local/bin/env"' in text
     assert 'powershell -c "irm https://astral.sh/uv/install.ps1 | iex"' in text

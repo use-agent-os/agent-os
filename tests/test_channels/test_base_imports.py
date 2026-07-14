@@ -2,7 +2,7 @@
 
 After 0.1.0's refactor each vendor SDK (lark-oapi / python-telegram-bot /
 dingtalk-stream / qq-botpy / cryptography) lives in base ``dependencies``
-rather than in an opt-in extra. A bare ``pip install agentos`` must
+rather than in an opt-in extra. A bare ``pip install use-agent-os`` must
 therefore be enough to ``import`` any of the in-tree channel adapters
 without raising ``ImportError``.
 

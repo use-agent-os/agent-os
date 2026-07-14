@@ -136,7 +136,7 @@ jobs:
           import shutil
           from pathlib import Path
 
-          wheels = sorted(Path("build/wheelhouse-zip/wheels").glob("agentos-*.whl"))
+          wheels = sorted(Path("build/wheelhouse-zip/wheels").glob("use_agent_os-*.whl"))
           assert len(wheels) == 1, f"expected one built wheel, got {len(wheels)}"
           shutil.copy2(wheels[0], Path("dist") / wheels[0].name)
           PY
@@ -156,14 +156,14 @@ jobs:
               if path.name != "AgentOS-windows-x64-portable.zip"
           )
           wheels = sorted(
-              path for path in Path("dist").glob("agentos-*.whl")
+              path for path in Path("dist").glob("use_agent_os-*.whl")
           )
           assert len(zips) == 1, f"expected one versioned portable zip, got {len(zips)}"
           assert len(wheels) == 1, f"expected one versioned wheel, got {len(wheels)}"
           assert zips[0].name == (
               f"AgentOS-{version}-windows-x64-py312-recommended-portable.zip"
           )
-          assert wheels[0].name == f"agentos-{version}-py3-none-any.whl"
+          assert wheels[0].name == f"use_agent_os-{version}-py3-none-any.whl"
 
           with ZipFile(zips[0]) as archive:
               names = set(archive.namelist())
@@ -214,7 +214,7 @@ jobs:
               if path.name != "AgentOS-windows-x64-portable.zip"
           )
           wheels = sorted(
-              path for path in dist.glob("agentos-*.whl")
+              path for path in dist.glob("use_agent_os-*.whl")
           )
           assert len(zips) == 1, f"expected one versioned portable zip, got {len(zips)}"
           assert len(wheels) == 1, f"expected one versioned wheel, got {len(wheels)}"
@@ -271,7 +271,7 @@ jobs:
               if path.name != "AgentOS-windows-x64-portable.zip"
           )
           versioned_wheels = sorted(
-              path for path in dist.glob("agentos-*.whl")
+              path for path in dist.glob("use_agent_os-*.whl")
           )
           stable_zip = dist / "AgentOS-windows-x64-portable.zip"
           sha256s = dist / "SHA256SUMS"
@@ -350,7 +350,7 @@ jobs:
               managed = (
                   name == "SHA256SUMS"
                   or name.startswith("AgentOS-")
-                  or name.startswith("agentos-")
+                  or name.startswith("use_agent_os-")
                   or name.endswith(".sha256")
               )
               if managed:
@@ -395,7 +395,7 @@ jobs:
           ]
           versioned_wheel = [
               name for name in names
-              if name.startswith("agentos-")
+              if name.startswith("use_agent_os-")
               and name.endswith("-py3-none-any.whl")
           ]
           allowed = expected | set(versioned_zip) | set(versioned_wheel)

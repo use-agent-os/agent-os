@@ -20,7 +20,7 @@ def create_mcp_server(
             from mcp.server.fastmcp import FastMCP  # type: ignore[import-not-found]
         except ImportError as exc:  # pragma: no cover - exercised through CLI behavior.
             raise RuntimeError(
-                "The MCP server requires the optional dependency: install agentos[mcp]."
+                "The MCP server requires the optional dependency: install 'use-agent-os[mcp]'."
             ) from exc
         fastmcp_cls = FastMCP
 
