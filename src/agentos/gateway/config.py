@@ -625,7 +625,7 @@ def _openrouter_tiers() -> dict:
         },
         "c1": {
             "provider": "openrouter",
-            "model": "deepseek/deepseek-v4-pro",
+            "model": "minimax/minimax-m3",
             "description": (
                 "default balanced text model for normal agent work, coding assistance, "
                 "debugging, and moderate analysis"
@@ -635,7 +635,7 @@ def _openrouter_tiers() -> dict:
         },
         "c2": {
             "provider": "openrouter",
-            "model": "z-ai/glm-5.1",
+            "model": "z-ai/glm-5.2",
             "description": (
                 "stronger text model for multi-step coding, structured reasoning, "
                 "larger context synthesis, and harder analysis"
@@ -645,7 +645,7 @@ def _openrouter_tiers() -> dict:
         },
         "c3": {
             "provider": "openrouter",
-            "model": "anthropic/claude-opus-4.7",
+            "model": "anthropic/claude-opus-4.8",
             "description": (
                 "Highest-quality text reasoning model for difficult planning, "
                 "deep review, complex debugging, and high-stakes synthesis"
@@ -655,7 +655,7 @@ def _openrouter_tiers() -> dict:
         },
         "image_model": {
             "provider": "openrouter",
-            "model": "moonshotai/kimi-k2.6",
+            "model": "minimax/minimax-m3",
             "description": (
                 "Image model: vision-capable route for user-supplied image attachments, "
                 "screenshots, diagrams, and visual question answering"
@@ -713,33 +713,33 @@ def _router_tier_profile_defaults(profile: str | None) -> dict:
         "openai": {
             "c0": {
                 "provider": "openai",
-                "model": "gpt-5.4-nano",
+                "model": "gpt-5.6-luna",
                 "description": (
-                    "OpenAI fast route: GPT-5.4 Nano for fast, high-throughput simple work."
+                    "OpenAI fast route: GPT-5.6 Luna for fast, high-throughput simple work."
                 ),
                 "supports_image": False,
                 "thinking_level": "none",
             },
             "c1": {
                 "provider": "openai",
-                "model": "gpt-5.4-mini",
-                "description": "OpenAI balanced route: GPT-5.4 Mini for normal agent work.",
+                "model": "gpt-5.6-terra",
+                "description": "OpenAI balanced route: GPT-5.6 Terra for normal agent work.",
                 "supports_image": False,
                 "thinking_level": "low",
             },
             "c2": {
                 "provider": "openai",
-                "model": "gpt-5.5",
-                "description": "OpenAI strong route: GPT-5.5 for complex text tasks.",
+                "model": "gpt-5.6-sol",
+                "description": "OpenAI strong route: GPT-5.6 Sol for complex text tasks.",
                 "supports_image": False,
                 "thinking_level": "medium",
             },
             "c3": {
                 "provider": "openai",
-                "model": "gpt-5.5",
+                "model": "gpt-5.6-sol",
                 "description": (
-                    "OpenAI highest route: GPT-5.5 with high reasoning; GPT-5.5 Pro is "
-                    "excluded because it is not streaming-compatible."
+                    "OpenAI highest route: GPT-5.6 Sol with high reasoning; the Pro "
+                    "variant is excluded because it is not streaming-compatible."
                 ),
                 "supports_image": False,
                 "thinking_level": "high",
@@ -757,24 +757,24 @@ def _router_tier_profile_defaults(profile: str | None) -> dict:
             },
             "c1": {
                 "provider": "dashscope",
-                "model": "qwen3.6-plus",
+                "model": "qwen3.7-plus",
                 "description": (
-                    "DashScope balanced route: Qwen3.6 Plus for normal agent and "
+                    "DashScope balanced route: Qwen3.7 Plus for normal agent and "
                     "coding work; pending live smoke."
                 ),
                 "supports_image": False,
             },
             "c2": {
                 "provider": "dashscope",
-                "model": "qwen3-max",
-                "description": "DashScope strong route: Qwen3 Max for complex text tasks.",
+                "model": "qwen3.7-max",
+                "description": "DashScope strong route: Qwen3.7 Max for complex text tasks.",
                 "supports_image": False,
             },
             "c3": {
                 "provider": "dashscope",
-                "model": "qwen3-max",
+                "model": "qwen3.7-max",
                 "description": (
-                    "DashScope highest route: Qwen3 Max; higher-thinking behavior "
+                    "DashScope highest route: Qwen3.7 Max; higher-thinking behavior "
                     "requires future payload support."
                 ),
                 "supports_image": False,
@@ -825,21 +825,24 @@ def _router_tier_profile_defaults(profile: str | None) -> dict:
         "gemini": {
             "c0": {
                 "provider": "gemini",
-                "model": "gemini-2.5-flash-lite",
-                "description": "Gemini fast route: 2.5 Flash-Lite for low-latency tasks.",
+                "model": "gemini-3.1-flash-lite",
+                "description": "Gemini fast route: 3.1 Flash-Lite for low-latency tasks.",
                 "supports_image": False,
             },
             "c1": {
                 "provider": "gemini",
-                "model": "gemini-2.5-flash",
-                "description": "Gemini balanced route: 2.5 Flash for normal agent work.",
+                "model": "gemini-3.5-flash",
+                "description": "Gemini balanced route: 3.5 Flash for normal agent work.",
                 "supports_image": False,
                 "thinking_level": "low",
             },
             "c2": {
                 "provider": "gemini",
                 "model": "gemini-2.5-pro",
-                "description": "Gemini strong route: 2.5 Pro for complex coding and reasoning.",
+                "description": (
+                    "Gemini strong route: 2.5 Pro for complex coding and reasoning; "
+                    "3.x Pro remains preview-only."
+                ),
                 "supports_image": False,
                 "thinking_level": "medium",
             },
@@ -847,7 +850,7 @@ def _router_tier_profile_defaults(profile: str | None) -> dict:
                 "provider": "gemini",
                 "model": "gemini-2.5-pro",
                 "description": (
-                    "Gemini highest route: 2.5 Pro with high thinking; 3.1 preview "
+                    "Gemini highest route: 2.5 Pro with high thinking; 3.1 Pro preview "
                     "remains opt-in."
                 ),
                 "supports_image": False,
@@ -873,15 +876,15 @@ def _router_tier_profile_defaults(profile: str | None) -> dict:
             },
             "c2": {
                 "provider": "zhipu",
-                "model": "glm-5.1",
-                "description": "Zhipu strong route: GLM-5.1 for complex text tasks.",
+                "model": "glm-5.2",
+                "description": "Zhipu strong route: GLM-5.2 for complex text tasks.",
                 "supports_image": False,
                 "thinking_level": "medium",
             },
             "c3": {
                 "provider": "zhipu",
-                "model": "glm-5.1",
-                "description": "Zhipu highest route: GLM-5.1 with high reasoning effort.",
+                "model": "glm-5.2",
+                "description": "Zhipu highest route: GLM-5.2 with high reasoning effort.",
                 "supports_image": False,
                 "thinking_level": "high",
             },

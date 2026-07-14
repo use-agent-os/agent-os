@@ -98,9 +98,9 @@ base_url = "https://openrouter.ai/api/v1"
 # (only applies when provider = "openrouter").
 # [llm.provider_routing]
 # "deepseek/deepseek-v4-flash" = "deepseek"
-# "z-ai/glm-5.1" = "z-ai"
-# "anthropic/claude-opus-4.7" = "anthropic"
-# "moonshotai/kimi-k2.6" = "moonshotai"
+# "minimax/minimax-m3" = "minimax"
+# "z-ai/glm-5.2" = "z-ai"
+# "anthropic/claude-opus-4.8" = "anthropic"
 
 [memory]
 # "workspace" stores MEMORY.md and memory/*.md under workspace_dir.
@@ -211,28 +211,28 @@ thinking_level = "high"
 
 [agentos_router.tiers.c1]
 provider = "openrouter"
-model = "deepseek/deepseek-v4-pro"
+model = "minimax/minimax-m3"
 description = "Default balanced text route for normal agent work, coding assistance, debugging, and moderate analysis"
 supports_image = false
 thinking_level = "high"
 
 [agentos_router.tiers.c2]
 provider = "openrouter"
-model = "z-ai/glm-5.1"
+model = "z-ai/glm-5.2"
 description = "Stronger text route for multi-step coding, structured reasoning, larger context synthesis, and harder analysis"
 supports_image = false
 thinking_level = "high"
 
 [agentos_router.tiers.c3]
 provider = "openrouter"
-model = "anthropic/claude-opus-4.7"
+model = "anthropic/claude-opus-4.8"
 description = "Highest-quality text reasoning route for difficult planning, deep review, complex debugging, and high-stakes synthesis"
 supports_image = false
 thinking_level = "high"
 
 [agentos_router.tiers.image_model]
 provider = "openrouter"
-model = "moonshotai/kimi-k2.6"
+model = "minimax/minimax-m3"
 description = "Image model: vision-capable route for user-supplied image attachments, screenshots, diagrams, and visual question answering"
 supports_image = true
 image_only = true

@@ -143,11 +143,11 @@ async def test_full_rollout_applies_routed_model_thinking_and_p0_prompt(
 
     routed = await apply_agentos_router(ctx)
 
-    assert routed.model == "deepseek/deepseek-v4-pro"
+    assert routed.model == "minimax/minimax-m3"
     assert routed.metadata["routed_tier"] == "c1"
-    assert routed.metadata["routed_model"] == "deepseek/deepseek-v4-pro"
+    assert routed.metadata["routed_model"] == "minimax/minimax-m3"
     assert routed.metadata["routing_applied"] is True
-    assert routed.metadata["applied_model"] == "deepseek/deepseek-v4-pro"
+    assert routed.metadata["applied_model"] == "minimax/minimax-m3"
     assert routed.metadata["baseline_model"] == baseline_model
     assert routed.metadata["routing_confidence"] == 0.91
     assert routed.metadata["routing_source"] == "llm_judge"
@@ -195,7 +195,7 @@ async def test_router_reports_provider_state_loss_without_changing_route(
 
     routed = await apply_agentos_router(ctx)
 
-    assert routed.model == "deepseek/deepseek-v4-pro"
+    assert routed.model == "minimax/minimax-m3"
     diagnostic = routed.metadata["provider_state_continuity"]
     assert diagnostic["decision"] == "use_portable_fallback"
     assert diagnostic["provider_state_loss_risk"] is True
@@ -265,7 +265,7 @@ async def test_p2_prompt_hint_is_recorded_but_not_injected(
 
     routed = await apply_agentos_router(ctx)
 
-    assert routed.model == "anthropic/claude-opus-4.7"
+    assert routed.model == "anthropic/claude-opus-4.8"
     assert routed.metadata["routed_tier"] == "c3"
     assert routed.metadata["thinking_level"] == "high"
     assert routed.metadata["prompt_policy"] == "P2"
@@ -317,7 +317,7 @@ async def test_confidence_gate_promotes_low_confidence_t0_to_default_t1_and_reco
     extra = routed.metadata["routing_extra"]
 
     assert routed.metadata["routed_tier"] == "c1"
-    assert routed.model == "deepseek/deepseek-v4-pro"
+    assert routed.model == "minimax/minimax-m3"
     assert extra["confidence_gate_applied"] is True
     assert extra["base_tier"] == "c0"
     assert extra["final_tier"] == "c1"
@@ -346,7 +346,7 @@ async def test_confidence_gate_falls_back_low_confidence_non_default_text_tier(
     extra = routed.metadata["routing_extra"]
 
     assert routed.metadata["routed_tier"] == "c1"
-    assert routed.model == "deepseek/deepseek-v4-pro"
+    assert routed.model == "minimax/minimax-m3"
     assert extra["confidence_gate_applied"] is True
     assert extra["pre_confidence_tier"] == "c2"
     assert extra["final_tier"] == "c1"
@@ -427,7 +427,7 @@ async def test_anti_downgrade_keeps_recent_higher_tier_despite_confidence_gate(
     extra = routed2.metadata["routing_extra"]
 
     assert routed2.metadata["routed_tier"] == "c2"
-    assert routed2.model == "z-ai/glm-5.1"
+    assert routed2.model == "z-ai/glm-5.2"
     assert extra["confidence_gate_applied"] is True
     assert extra["pre_confidence_tier"] == "c0"
     assert extra["final_tier"] == "c2"
@@ -450,7 +450,7 @@ async def test_anti_downgrade_keeps_recent_higher_tier_despite_confidence_gate(
     extra3 = routed3.metadata["routing_extra"]
 
     assert routed3.metadata["routed_tier"] == "c2"
-    assert routed3.model == "z-ai/glm-5.1"
+    assert routed3.model == "z-ai/glm-5.2"
     assert extra3["confidence_gate_applied"] is False
     assert extra3["anti_downgrade_applied"] is True
     assert extra3["previous_tier"] == "c2"
@@ -504,7 +504,7 @@ async def test_anti_downgrade_uses_previous_turn_not_window_highest(
     extra3 = routed3.metadata["routing_extra"]
 
     assert routed3.metadata["routed_tier"] == "c2"
-    assert routed3.model == "z-ai/glm-5.1"
+    assert routed3.model == "z-ai/glm-5.2"
     assert extra3["anti_downgrade_applied"] is True
     assert extra3["previous_tier"] == "c2"
 
@@ -545,7 +545,7 @@ async def test_anti_downgrade_keeps_previous_high_tier_without_margin_gate(
     extra = routed2.metadata["routing_extra"]
 
     assert routed2.metadata["routed_tier"] == "c3"
-    assert routed2.model == "anthropic/claude-opus-4.7"
+    assert routed2.model == "anthropic/claude-opus-4.8"
     assert extra["anti_downgrade_applied"] is True
     assert extra["previous_tier"] == "c3"
     assert extra["kv_cache_window_seconds"] == 600
@@ -571,7 +571,7 @@ async def test_complaint_upgrade_promotes_tier_thinking_and_blocks_compressed_pr
     extra = routed.metadata["routing_extra"]
 
     assert routed.metadata["routed_tier"] == "c2"
-    assert routed.model == "z-ai/glm-5.1"
+    assert routed.model == "z-ai/glm-5.2"
     assert extra["complaint_detected"] is True
     assert extra["complaint_upgrade_applied"] is True
     assert routed.metadata["thinking_mode"] == "T2"
@@ -614,7 +614,7 @@ async def test_complaint_upgrade_starts_from_previous_experienced_tier(
     extra = routed2.metadata["routing_extra"]
 
     assert routed2.metadata["routed_tier"] == "c3"
-    assert routed2.model == "anthropic/claude-opus-4.7"
+    assert routed2.model == "anthropic/claude-opus-4.8"
     assert extra["previous_tier"] == "c2"
     assert extra["complaint_detected"] is True
     assert extra["complaint_upgrade_applied"] is True
@@ -725,9 +725,9 @@ async def test_image_input_routes_directly_to_vision_model_without_prompt_inject
 
     routed = await apply_agentos_router(ctx)
 
-    assert routed.model == "moonshotai/kimi-k2.6"
+    assert routed.model == "minimax/minimax-m3"
     assert routed.metadata["routed_tier"] == "image_model"
-    assert routed.metadata["routed_model"] == "moonshotai/kimi-k2.6"
+    assert routed.metadata["routed_model"] == "minimax/minimax-m3"
     assert routed.metadata["routing_applied"] is True
     assert routed.metadata["routing_confidence"] == 1.0
     assert routed.metadata["routing_source"] == "image_route"
@@ -809,7 +809,7 @@ async def test_observe_rollout_records_decisions_without_applying_model_or_promp
 
     assert routed.model == baseline_model
     assert routed.metadata["routed_tier"] == "c2"
-    assert routed.metadata["routed_model"] == "z-ai/glm-5.1"
+    assert routed.metadata["routed_model"] == "z-ai/glm-5.2"
     assert routed.metadata["routing_applied"] is False
     assert routed.metadata["thinking_mode"] == "T2"
     assert routed.metadata["thinking_level"] == "medium"
