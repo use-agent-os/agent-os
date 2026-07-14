@@ -26,6 +26,7 @@ _STATIC_FALLBACK: dict[str, tuple[int, int]] = {
     "gpt-5.4-mini": (128_000, 400_000),
     "gpt-5.5": (128_000, 1_000_000),
     "minimax/minimax-m2.7": (8192, 196_608),
+    "minimax/minimax-m3": (131_072, 1_048_576),
     "stepfun/step-3.5-flash": (16_384, 256_000),
     "z-ai/glm-4.5-air": (98_304, 131_072),
     "minimax/minimax-m2.5": (65_536, 196_608),
@@ -39,6 +40,7 @@ _STATIC_FALLBACK: dict[str, tuple[int, int]] = {
     "glm-5.1": (128_000, 200_000),
     "z-ai/glm-5": (80_000, 80_000),
     "z-ai/glm-5.1": (202_752, 202_752),
+    "z-ai/glm-5.2": (131_072, 1_048_576),
     "moonshot-v1-8k": (8192, 8192),
     "moonshot-v1-32k": (32_768, 32_768),
     "moonshot-v1-128k": (131_072, 131_072),
@@ -55,11 +57,13 @@ _STATIC_FALLBACK: dict[str, tuple[int, int]] = {
     "glm-5.2": (131_072, 1_048_576),
     "minimax-m3": (131_072, 1_048_576),
     "qwen3.7-max": (32_768, 256_000),
+    "qwen3.7-plus": (32_768, 256_000),
     "claude-opus-4.8": (128_000, 1_000_000),
     "claude-sonnet-5": (64_000, 1_000_000),
     "claude-sonnet-4.6": (64_000, 1_000_000),
     "claude-fable-5": (128_000, 1_000_000),
     "claude-haiku-4.5": (64_000, 200_000),
+    "gemini-3.1-flash-lite": (65_536, 1_000_000),
     "gemini-3.5-flash": (65_536, 1_000_000),
     "gemini-3.1-pro-preview": (32_768, 1_000_000),
     "grok-4.3": (128_000, 1_000_000),
@@ -205,7 +209,7 @@ class ModelCatalog:
                 reasoning_format="deepseek",
             )
         if provider_spec and provider_spec.reasoning_shape == "gemini":
-            supports_reasoning = model_l.startswith("gemini-2.5")
+            supports_reasoning = model_l.startswith(("gemini-2.5", "gemini-3"))
             return ModelCapabilities(
                 supports_reasoning=supports_reasoning,
                 supports_tools=True,

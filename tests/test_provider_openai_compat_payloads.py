@@ -799,6 +799,57 @@ def test_gemini_25_flash_lite_non_thinking_uses_reasoning_effort_none(
     assert "thinking" not in captured["payload"]
 
 
+def test_gemini_31_flash_lite_non_thinking_uses_reasoning_effort_none(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured)
+    provider = OpenAIProvider(
+        api_key="test",
+        model="gemini-3.1-flash-lite",
+        base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+        provider_kind="gemini",
+    )
+    cfg = ChatConfig(
+        thinking=False,
+        model_capabilities=ModelCapabilities(
+            supports_reasoning=True,
+            supports_tools=True,
+            reasoning_format="gemini",
+        ),
+    )
+
+    _collect(provider, cfg)
+
+    assert captured["payload"]["reasoning_effort"] == "none"
+    assert "thinking" not in captured["payload"]
+
+
+def test_openrouter_glm_5_2_non_thinking_disables_reasoning_by_default(
+    monkeypatch: Any,
+) -> None:
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured)
+    provider = OpenAIProvider(
+        api_key="test",
+        model="z-ai/glm-5.2",
+        base_url="https://openrouter.ai/api/v1",
+        provider_kind="openrouter",
+    )
+    cfg = ChatConfig(
+        thinking=False,
+        model_capabilities=ModelCapabilities(
+            supports_reasoning=True,
+            supports_tools=True,
+            reasoning_format="openrouter",
+        ),
+    )
+
+    _collect(provider, cfg)
+
+    assert captured["payload"]["reasoning"] == {"enabled": False}
+
+
 def test_zai_thinking_uses_provider_thinking_object(monkeypatch: Any) -> None:
     captured: dict[str, Any] = {}
     _patch_transport(monkeypatch, captured)

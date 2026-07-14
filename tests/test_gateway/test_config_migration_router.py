@@ -110,3 +110,60 @@ def test_clamped_confidence_threshold_boots_the_router_config() -> None:
     )
     cfg = AgentOSRouterConfig(**result.payload["agentos_router"])
     assert cfg.confidence_threshold == 1.0
+
+
+def test_legacy_openrouter_default_models_are_migrated_forward() -> None:
+    result = migrate_config_payload(
+        {
+            "llm": {"provider": "openrouter", "model": "deepseek/deepseek-v4-pro"},
+            "agentos_router": {
+                "enabled": True,
+                "tiers": {
+                    "c1": {"provider": "openrouter", "model": "deepseek/deepseek-v4-pro"},
+                    "c2": {"provider": "openrouter", "model": "z-ai/glm-5.1"},
+                    "c3": {"provider": "openrouter", "model": "anthropic/claude-opus-4.7"},
+                    "image_model": {
+                        "provider": "openrouter",
+                        "model": "moonshotai/kimi-k2.6",
+                    },
+                },
+            },
+        }
+    )
+
+    assert result.changed is True
+    assert result.payload["llm"]["model"] == "minimax/minimax-m3"
+    tiers = result.payload["agentos_router"]["tiers"]
+    assert tiers["c1"]["model"] == "minimax/minimax-m3"
+    assert tiers["c2"]["model"] == "z-ai/glm-5.2"
+    assert tiers["c3"]["model"] == "anthropic/claude-opus-4.8"
+    assert tiers["image_model"]["model"] == "minimax/minimax-m3"
+
+
+def test_non_default_openrouter_models_are_left_untouched() -> None:
+    result = migrate_config_payload(
+        {
+            "llm": {"provider": "openrouter", "model": "qwen/qwen3.7-max"},
+            "agentos_router": {
+                "enabled": True,
+                "tiers": {
+                    "c2": {"provider": "openrouter", "model": "mistralai/mistral-large"},
+                },
+            },
+        }
+    )
+
+    assert result.changed is False
+    assert result.payload["llm"]["model"] == "qwen/qwen3.7-max"
+    tiers = result.payload["agentos_router"]["tiers"]
+    assert tiers["c2"]["model"] == "mistralai/mistral-large"
+
+
+def test_legacy_openrouter_models_untouched_for_other_providers() -> None:
+    # The same id string under a non-openrouter provider must not be rewritten.
+    result = migrate_config_payload(
+        {"llm": {"provider": "anthropic", "model": "anthropic/claude-opus-4.7"}}
+    )
+
+    assert result.changed is False
+    assert result.payload["llm"]["model"] == "anthropic/claude-opus-4.7"

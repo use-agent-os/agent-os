@@ -154,7 +154,7 @@ def _resolve_deepseek_reasoning_effort(level: ThinkingLevel | None) -> str:
 def _gemini_supports_reasoning_none(model: str) -> bool:
     """Return True for Gemini OpenAI-compatible models with documented off control."""
     model_name = model.rsplit("/", 1)[-1].strip().lower()
-    return model_name.startswith("gemini-2.5-flash")
+    return model_name.startswith(("gemini-2.5-flash", "gemini-3.1-flash", "gemini-3.5-flash"))
 
 
 def _extract_think_tags(text: str) -> str:
@@ -182,6 +182,7 @@ def _should_disable_openrouter_reasoning_by_default(model: str) -> bool:
         "z-ai/glm-4.5-air",
         "z-ai/glm-5",
         "z-ai/glm-5.1",
+        "z-ai/glm-5.2",
     }
 
 
@@ -221,7 +222,7 @@ def _should_send_temperature(
         and bool(caps and caps.supports_reasoning)
     ):
         model_name = model.rsplit("/", 1)[-1].strip().lower()
-        if model_name.startswith(("gpt-5.4", "gpt-5.5")):
+        if model_name.startswith(("gpt-5.4", "gpt-5.5", "gpt-5.6")):
             return False
     return True
 

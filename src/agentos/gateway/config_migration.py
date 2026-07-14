@@ -66,6 +66,19 @@ LEGACY_GATEWAY_MODEL_IDS: dict[str, str] = {
     "virtuals/kimi-k2.6": "minimax-m3",
 }
 
+# Prior OpenRouter tier defaults, mapped to the defaults that replaced them.
+# Unlike the "virtuals/" ids these still resolve upstream, so the rewrite only
+# refreshes configs that carried an old *default* forward — the same treatment
+# "virtuals/kimi-k2.6" got when minimax-m3 replaced it as the gateway default.
+LEGACY_OPENROUTER_MODEL_IDS: dict[str, str] = {
+    "deepseek/deepseek-v4-pro": "minimax/minimax-m3",
+    "z-ai/glm-5.1": "z-ai/glm-5.2",
+    "anthropic/claude-opus-4.7": "anthropic/claude-opus-4.8",
+    "moonshotai/kimi-k2.6": "minimax/minimax-m3",
+}
+
+OPENROUTER_PROVIDER_ID = "openrouter"
+
 GATEWAY_PROVIDER_ID = "bankr"
 # The retired ``opencap`` gateway provider (and its own predecessors,
 # "capgateway" / "opencap-gateway") is intentionally NOT migrated forward: on-disk
@@ -288,6 +301,16 @@ def migrate_config_payload(data: dict[str, Any]) -> ConfigMigrationResult:
             llm["model"] = new_model
             builder.changes.append(f"llm.model: {old_model} -> {new_model}")
 
+    def _is_openrouter_provider(provider: object) -> bool:
+        return str(provider or "").strip().lower() == OPENROUTER_PROVIDER_ID
+
+    if isinstance(llm, dict) and _is_openrouter_provider(llm.get("provider")):
+        old_model = str(llm.get("model") or "").strip()
+        new_model = LEGACY_OPENROUTER_MODEL_IDS.get(old_model)
+        if new_model:
+            llm["model"] = new_model
+            builder.changes.append(f"llm.model: {old_model} -> {new_model}")
+
     agentos_router = builder.payload.get("agentos_router")
     if isinstance(agentos_router, dict):
         # v4_phase3 (local ML router) is the default strategy again — do NOT
@@ -314,7 +337,18 @@ def migrate_config_payload(data: dict[str, Any]) -> ConfigMigrationResult:
     tiers = agentos_router.get("tiers") if isinstance(agentos_router, dict) else None
     if isinstance(tiers, dict):
         for tier_name, tier in tiers.items():
-            if not isinstance(tier, dict) or not _is_gateway_provider(tier.get("provider")):
+            if not isinstance(tier, dict):
+                continue
+            if _is_openrouter_provider(tier.get("provider")):
+                old_model = str(tier.get("model") or "").strip()
+                new_model = LEGACY_OPENROUTER_MODEL_IDS.get(old_model)
+                if new_model:
+                    tier["model"] = new_model
+                    builder.changes.append(
+                        f"agentos_router.tiers.{tier_name}.model: {old_model} -> {new_model}"
+                    )
+                continue
+            if not _is_gateway_provider(tier.get("provider")):
                 continue
             _rename_gateway_provider(
                 tier, "provider", f"agentos_router.tiers.{tier_name}.provider"

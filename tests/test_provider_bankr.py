@@ -63,9 +63,9 @@ def test_default_tiers_route_through_openrouter() -> None:
     assert tiers == _openrouter_tiers()
     assert tiers["c0"]["provider"] == "openrouter"
     assert tiers["c0"]["model"] == "deepseek/deepseek-v4-flash"
-    assert tiers["c1"]["model"] == "deepseek/deepseek-v4-pro"
-    assert tiers["c2"]["model"] == "z-ai/glm-5.1"
-    assert tiers["c3"]["model"] == "anthropic/claude-opus-4.7"
+    assert tiers["c1"]["model"] == "minimax/minimax-m3"
+    assert tiers["c2"]["model"] == "z-ai/glm-5.2"
+    assert tiers["c3"]["model"] == "anthropic/claude-opus-4.8"
     assert tiers["image_model"]["supports_image"] is True
 
 

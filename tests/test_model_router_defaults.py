@@ -59,13 +59,13 @@ def test_agentos_router_defaults_match_runtime_router_config() -> None:
 
     assert cfg.tiers["c0"]["model"] == "deepseek/deepseek-v4-flash"
     assert cfg.tiers["c0"]["thinking_level"] == "high"
-    assert cfg.tiers["c1"]["model"] == "deepseek/deepseek-v4-pro"
+    assert cfg.tiers["c1"]["model"] == "minimax/minimax-m3"
     assert cfg.tiers["c1"]["thinking_level"] == "high"
-    assert cfg.tiers["c2"]["model"] == "z-ai/glm-5.1"
+    assert cfg.tiers["c2"]["model"] == "z-ai/glm-5.2"
     assert cfg.tiers["c2"]["thinking_level"] == "high"
-    assert cfg.tiers["c3"]["model"] == "anthropic/claude-opus-4.7"
+    assert cfg.tiers["c3"]["model"] == "anthropic/claude-opus-4.8"
     assert cfg.tiers["c3"]["thinking_level"] == "high"
-    assert cfg.tiers["image_model"]["model"] == "moonshotai/kimi-k2.6"
+    assert cfg.tiers["image_model"]["model"] == "minimax/minimax-m3"
     assert cfg.tiers["image_model"]["supports_image"] is True
     assert cfg.tiers["image_model"]["image_only"] is True
 
@@ -313,25 +313,25 @@ def test_openai_profile_uses_streaming_compatible_models() -> None:
 
     cfg = agentos_router_config_cls(tier_profile="openai")
 
-    assert cfg.tiers["c0"]["model"] == "gpt-5.4-nano"
-    assert cfg.tiers["c1"]["model"] == "gpt-5.4-mini"
-    assert cfg.tiers["c2"]["model"] == "gpt-5.5"
-    assert cfg.tiers["c3"]["model"] == "gpt-5.5"
+    assert cfg.tiers["c0"]["model"] == "gpt-5.6-luna"
+    assert cfg.tiers["c1"]["model"] == "gpt-5.6-terra"
+    assert cfg.tiers["c2"]["model"] == "gpt-5.6-sol"
+    assert cfg.tiers["c3"]["model"] == "gpt-5.6-sol"
     assert cfg.tiers["c3"]["thinking_level"] == "high"
     assert all(
-        cfg.tiers[tier]["model"] != "gpt-5.5-pro" for tier in ("c0", "c1", "c2", "c3")
+        cfg.tiers[tier]["model"] != "gpt-5.6-sol-pro" for tier in ("c0", "c1", "c2", "c3")
     )
 
 
-def test_zhipu_profile_uses_glm_5_1_for_strong_tiers() -> None:
+def test_zhipu_profile_uses_glm_5_2_for_strong_tiers() -> None:
     agentos_router_config_cls = _agentos_router_config_cls()
 
     cfg = agentos_router_config_cls(tier_profile="zhipu")
 
     assert cfg.tiers["c0"]["model"] == "glm-4.7-flashx"
     assert cfg.tiers["c1"]["model"] == "glm-5"
-    assert cfg.tiers["c2"]["model"] == "glm-5.1"
-    assert cfg.tiers["c3"]["model"] == "glm-5.1"
+    assert cfg.tiers["c2"]["model"] == "glm-5.2"
+    assert cfg.tiers["c3"]["model"] == "glm-5.2"
     assert cfg.tiers["c3"]["thinking_level"] == "high"
 
 
@@ -440,13 +440,13 @@ def test_example_toml_enables_runtime_router_defaults() -> None:
     tiers = agentos_router["tiers"]
     assert tiers["c0"]["model"] == "deepseek/deepseek-v4-flash"
     assert tiers["c0"]["thinking_level"] == "high"
-    assert tiers["c1"]["model"] == "deepseek/deepseek-v4-pro"
+    assert tiers["c1"]["model"] == "minimax/minimax-m3"
     assert tiers["c1"]["thinking_level"] == "high"
-    assert tiers["c2"]["model"] == "z-ai/glm-5.1"
+    assert tiers["c2"]["model"] == "z-ai/glm-5.2"
     assert tiers["c2"]["thinking_level"] == "high"
-    assert tiers["c3"]["model"] == "anthropic/claude-opus-4.7"
+    assert tiers["c3"]["model"] == "anthropic/claude-opus-4.8"
     assert tiers["c3"]["thinking_level"] == "high"
-    assert tiers["image_model"]["model"] == "moonshotai/kimi-k2.6"
+    assert tiers["image_model"]["model"] == "minimax/minimax-m3"
     assert tiers["image_model"]["supports_image"] is True
     assert tiers["image_model"]["image_only"] is True
 

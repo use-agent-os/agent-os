@@ -62,6 +62,9 @@ def test_openrouter_runtime_uses_default_provider_routing() -> None:
 
     assert runtime.provider_routing == {
         "deepseek/deepseek-v4-flash": "deepseek",
+        "minimax/minimax-m3": "minimax",
+        "z-ai/glm-5.2": "z-ai",
+        "anthropic/claude-opus-4.8": "anthropic",
         "z-ai/glm-5.1": "z-ai",
         "anthropic/claude-opus-4.7": "anthropic",
         "moonshotai/kimi-k2.6": "moonshotai",
@@ -83,6 +86,9 @@ def test_openrouter_runtime_provider_routing_overrides_default() -> None:
 
     assert runtime.provider_routing["deepseek/deepseek-v4-flash"] == "deepseek"
     assert runtime.provider_routing["z-ai/glm-5.1"] == "z-ai/fp8"
+    assert runtime.provider_routing["minimax/minimax-m3"] == "minimax"
+    assert runtime.provider_routing["z-ai/glm-5.2"] == "z-ai"
+    assert runtime.provider_routing["anthropic/claude-opus-4.8"] == "anthropic"
     assert runtime.provider_routing["anthropic/claude-opus-4.7"] == "anthropic"
     assert runtime.provider_routing["moonshotai/kimi-k2.6"] == "moonshotai"
     assert runtime.provider_routing["custom/model"] == "custom-provider"

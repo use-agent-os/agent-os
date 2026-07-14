@@ -22,8 +22,9 @@ def test_init_uses_direct_deepseek_model_default() -> None:
     assert _default_model_for_provider("deepseek") == "deepseek-v4-flash"
 
 
-def test_init_keeps_openrouter_model_default() -> None:
-    assert _default_model_for_provider("openrouter") == "deepseek/deepseek-v4-pro"
+def test_init_matches_openrouter_router_c1_default() -> None:
+    # Must stay in sync with the c1 tier default in _openrouter_tiers().
+    assert _default_model_for_provider("openrouter") == "minimax/minimax-m3"
 
 
 def test_init_unknown_provider_falls_back_to_openai() -> None:
