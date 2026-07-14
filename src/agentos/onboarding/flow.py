@@ -950,10 +950,9 @@ _IMAGE_TIER_LABEL = "Image model"
 _DONE_LABEL = "Done"
 
 
-_ROUTER_LOCAL_ML_LABEL = "AgentOS Router (Local ML)"
-_ROUTER_LLM_JUDGE_LABEL = "AgentOS Router (LLM Judge)"
-_ROUTER_MODE_LABEL = _ROUTER_LOCAL_ML_LABEL  # back-compat alias
-_ROUTER_DISABLED_LABEL = "Disabled"
+_ROUTER_LOCAL_ML_LABEL = "Smart routing (on-device)"
+_ROUTER_LLM_JUDGE_LABEL = "Smart routing (LLM-based)"
+_ROUTER_DISABLED_LABEL = "Off"
 _JUDGE_AUTO_LABEL = "Auto (recommended)"
 _JUDGE_MANUAL_LABEL = "Pick a specific model"
 _JUDGE_LOCAL_LABEL = "Local endpoint (Ollama / LM Studio)"

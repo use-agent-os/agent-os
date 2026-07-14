@@ -154,9 +154,9 @@ strategy = "v4_phase3"   # or "llm_judge"
 ```
 
 Both strategies are also selectable from the Mode dropdown in onboarding
-(Web UI wizard and CLI): **AgentOS Router (Local ML)**, **AgentOS Router (LLM
-Judge)**, or **Disabled**. The "Judge model" field only appears for the LLM
-Judge strategy.
+(Web UI wizard and CLI): **Smart routing (on-device)** (`v4_phase3`), **Smart
+routing (LLM-based)** (`llm_judge`), or **Off**. The "Judge model" field only
+appears for the LLM-based strategy.
 
 ### Local judge (Ollama / LM Studio)
 

@@ -514,9 +514,9 @@ const SetupView = (() => {
         <div class="setup-router-toolbar">
           <label><span>Mode</span>
             <select id="setup-router-mode" name="setup_router_mode" data-router-mode${routerDisabled}>
-              <option value="v4_phase3"${mode === 'v4_phase3' ? ' selected' : ''}>AgentOS Router (Local ML)</option>
-              <option value="llm_judge"${mode === 'llm_judge' ? ' selected' : ''}>AgentOS Router (LLM Judge)</option>
-              <option value="disabled"${mode === 'disabled' ? ' selected' : ''}>Disabled</option>
+              <option value="v4_phase3"${mode === 'v4_phase3' ? ' selected' : ''}>Smart routing (on-device)</option>
+              <option value="llm_judge"${mode === 'llm_judge' ? ' selected' : ''}>Smart routing (LLM-based)</option>
+              <option value="disabled"${mode === 'disabled' ? ' selected' : ''}>Off</option>
             </select>
           </label>
           <label><span>Default text model</span>
@@ -1184,8 +1184,8 @@ const SetupView = (() => {
     _el.querySelector('[data-image-enabled]')?.addEventListener('change', _syncImageProviderDefaults);
     _el.querySelector('[data-audio-provider]')?.addEventListener('change', _syncAudioProviderDefaults);
     _el.querySelector('[data-audio-enabled]')?.addEventListener('change', _syncAudioProviderDefaults);
-    // Router Mode drives the Judge model field visibility: only the LLM Judge
-    // strategy uses a judge model, so hide it for Local ML / Disabled.
+    // Router Mode drives the Judge model field visibility: only the llm_judge
+    // strategy uses a judge model, so hide it for v4_phase3 / disabled.
     _el.querySelector('[data-router-mode]')?.addEventListener('change', (e) => {
       const field = _el.querySelector('[data-judge-model-field]');
       const judge = _el.querySelector('[data-judge-model]');

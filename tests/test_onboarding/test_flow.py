@@ -321,12 +321,12 @@ def test_interactive_onboard_prompts_router_defaults_before_persist(tmp_path, mo
                 return _Answer("Use environment variable OPENROUTER_API_KEY")
             if message == "Router mode":
                 assert kwargs.get("choices") == [
-                    "AgentOS Router (Local ML)",
-                    "AgentOS Router (LLM Judge)",
-                    "Disabled",
+                    "Smart routing (on-device)",
+                    "Smart routing (LLM-based)",
+                    "Off",
                 ]
-                assert kwargs.get("default") == "AgentOS Router (Local ML)"
-                return _Answer("AgentOS Router (Local ML)")
+                assert kwargs.get("default") == "Smart routing (on-device)"
+                return _Answer("Smart routing (on-device)")
             if message == "Default text model":
                 assert kwargs.get("choices") == [
                     "Route c0",
@@ -2033,7 +2033,7 @@ def test_interactive_configure_router_persists(tmp_path, monkeypatch):
     class _Questionary(types.SimpleNamespace):
         def select(self, message: str, **kwargs):
             if message == "Router mode":
-                return _Answer("Disabled")
+                return _Answer("Off")
             raise AssertionError(f"unexpected select prompt: {message}")
 
         def text(self, message: str, **_kwargs):

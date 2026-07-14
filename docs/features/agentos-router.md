@@ -26,14 +26,14 @@ AgentOS Router has two selectable strategies, set via
 
 | Strategy | Mode label | How it decides |
 | --- | --- | --- |
-| `v4_phase3` (default) | AgentOS Router (Local ML) | An on-device ML ensemble (BGE embeddings + LightGBM) scores each turn locally — no LLM call, nothing leaves your machine. The ~75MB model bundle is **not** distributed with the repo or the wheel yet, and the installers do not fetch it. When it is missing, the router logs a warning at boot and pins every turn to the default tier (c1) instead of failing the turn. To enable per-turn routing, restore the bundle into `src/agentos/agentos_router/models/v4.2_phase3_inference/`, or switch to `llm_judge` (which needs no local model files). |
-| `llm_judge` | AgentOS Router (LLM Judge) | A small "judge" model classifies each turn (R0–R3) via a forced tool call. The judge can be a cloud model (default: the cheapest tier of your active provider) or a local OpenAI-compatible endpoint (Ollama, LM Studio, llama.cpp, vLLM) configured with `judge_model` / `judge_base_url`. |
+| `v4_phase3` (default) | Smart routing (on-device) | An on-device ML ensemble (BGE embeddings + LightGBM) scores each turn locally — no LLM call, nothing leaves your machine. The ~75MB model bundle is **not** distributed with the repo or the wheel yet, and the installers do not fetch it. When it is missing, the router logs a warning at boot and pins every turn to the default tier (c1) instead of failing the turn. To enable per-turn routing, restore the bundle into `src/agentos/agentos_router/models/v4.2_phase3_inference/`, or switch to `llm_judge` (which needs no local model files). |
+| `llm_judge` | Smart routing (LLM-based) | A small "judge" model classifies each turn (R0–R3) via a forced tool call. The judge can be a cloud model (default: the cheapest tier of your active provider) or a local OpenAI-compatible endpoint (Ollama, LM Studio, llama.cpp, vLLM) configured with `judge_model` / `judge_base_url`. |
 
 Both the Web UI setup wizard and the CLI (`agentos onboard`,
 `agentos configure router`) offer a Mode dropdown with three options:
-**AgentOS Router (Local ML)**, **AgentOS Router (LLM Judge)**, and
-**Disabled**. The "Judge model" field only appears when LLM Judge is
-selected — it is irrelevant to the local ML strategy.
+**Smart routing (on-device)**, **Smart routing (LLM-based)**, and
+**Off**. The "Judge model" field only appears when the LLM-based strategy is
+selected — it is irrelevant to the on-device strategy.
 
 ## Enable Routing
 
