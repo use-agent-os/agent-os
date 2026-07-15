@@ -641,6 +641,7 @@ const ChatView = (() => {
   let _attachPreview = null;
   let _slashEl = null;
   let _ctxWarn = null;
+  let _sessionPaletteKeyHandler = null;
   let _fileInput = null;
   let _toolbar = null;
   let _elevatedPill = null;
@@ -1280,6 +1281,7 @@ const ChatView = (() => {
               </div>
             </div>
             <div class="chat-input-wrap">
+              <span class="chat-input-glyph" aria-hidden="true">&gt;</span>
               <textarea class="chat-textarea" id="chat-textarea" rows="1"
                         placeholder="Send a message..." maxlength="100000"
                         aria-label="Message to send"></textarea>
@@ -2072,6 +2074,18 @@ const ChatView = (() => {
       });
       search.focus();
     });
+
+    _sessionPaletteKeyHandler = (e) => {
+      const isPaletteKey = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k';
+      if (!isPaletteKey) return;
+      const chip = document.getElementById('chat-session-chip');
+      if (!chip) return;
+      e.preventDefault();
+      if (!chip.classList.contains('is-active')) chip.click();
+      const search = document.querySelector('.chat-session-popover-search');
+      if (search) search.focus();
+    };
+    document.addEventListener('keydown', _sessionPaletteKeyHandler);
   }
 
   /* ── Composer Toolbar Popover (gear button) ────────────────────────── */
@@ -8785,6 +8799,10 @@ const ChatView = (() => {
     _stopRequestedByUser = false;
     _messages = [];
     _clearContextStatus();
+    if (_sessionPaletteKeyHandler) {
+      document.removeEventListener('keydown', _sessionPaletteKeyHandler);
+      _sessionPaletteKeyHandler = null;
+    }
     _lastHeaderRole = '';
     _lastHeaderDay = '';
     _composing = false;

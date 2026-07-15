@@ -2364,6 +2364,23 @@
 .chat-input-wrap {
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-1);
+}
+
+.chat-input-glyph {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--text-dim);
+  padding-top: var(--sp-2);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.chat-composer:focus-within .chat-input-glyph {
+  color: var(--accent);
 }
 
 .chat-textarea {

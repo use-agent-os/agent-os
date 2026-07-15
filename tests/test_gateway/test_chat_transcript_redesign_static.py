@@ -121,3 +121,16 @@ def test_streaming_caret_blinks_at_insertion_point() -> None:
 def test_ctx_warn_renders_hairline_gauge() -> None:
     assert "--ctx-pct" in _css()
     assert "setProperty('--ctx-pct'" in _js()
+
+
+def test_composer_has_prompt_glyph() -> None:
+    js = _js()
+    assert 'class="chat-input-glyph"' in js
+    assert ".chat-input-glyph" in _css()
+
+
+def test_cmd_k_opens_session_palette_and_is_torn_down() -> None:
+    js = _js()
+    assert "_sessionPaletteKeyHandler" in js
+    assert js.count("_sessionPaletteKeyHandler") >= 3  # declare, add, remove
+    assert "e.key.toLowerCase() === 'k'" in js
