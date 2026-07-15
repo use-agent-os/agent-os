@@ -1074,6 +1074,11 @@
   color: var(--danger);
 }
 
+.chat-tools-collapse--unknown > .chat-tools-summary .chat-tools-status::before {
+  content: '\2013';           /* – */
+  color: var(--warn);
+}
+
 .chat-tools-collapse--running > .chat-tools-summary .chat-tools-status::before {
   content: '';
   width: 10px;

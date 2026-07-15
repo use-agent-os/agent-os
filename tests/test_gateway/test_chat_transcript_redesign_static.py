@@ -103,6 +103,10 @@ def test_tool_state_glyphs_come_from_css_state_classes() -> None:
         ".chat-tools-collapse--error > .chat-tools-summary .chat-tools-status::before"
         in css
     )
+    assert (
+        ".chat-tools-collapse--unknown > .chat-tools-summary .chat-tools-status::before"
+        in css
+    )
 
 
 def test_turn_meta_is_mono_voice() -> None:
@@ -197,3 +201,9 @@ def test_input_pill_has_accent_glow() -> None:
     focus_start = css.index(".chat-input-bar:focus-within")
     focus_block = css[focus_start : css.index("}", focus_start)]
     assert "var(--accent)" in focus_block
+
+    # The resting halo is an accent-tinted box-shadow layer, not just the border.
+    assert "color-mix(in srgb, var(--accent)" in block
+    assert block.count("color-mix(in srgb, var(--accent)") >= 2  # border + shadow layer(s)
+    focus_shadow = focus_block
+    assert "color-mix(in srgb, var(--accent)" in focus_shadow

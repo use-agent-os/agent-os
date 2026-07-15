@@ -7113,7 +7113,7 @@ const ChatView = (() => {
   }
 
   function _visibleToolSummaryStatus(status, durationMs) {
-    if (status === 'running') return '';           // spinner is CSS-drawn
+    // running renders no text (spinner is CSS-drawn); only settled rows show a duration.
     if (status === 'success' || status === 'error') return _fmtToolDuration(durationMs);
     return '';
   }
