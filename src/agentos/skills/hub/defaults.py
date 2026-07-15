@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 from agentos.paths import default_agentos_home
+from agentos.skills.hub.bankr import BankrSource
 from agentos.skills.hub.clawhub import ClawHubSource
 from agentos.skills.hub.github import GitHubSource
 from agentos.skills.hub.installer import SkillInstaller
@@ -23,6 +24,11 @@ def get_default_skill_router() -> SourceRouter:
     if _default_router is None:
         sources: list[SkillSource] = [
             ClawHubSource(token=os.environ.get("CLAWHUB_TOKEN")),
+            # Bankr before GitHub: the router dedups merged results by name
+            # (first source wins), and GitHub code search can surface the same
+            # BankrBot/skills directories as bare, unenriched rows that would
+            # otherwise shadow the Bankr rows carrying category/logo/setup.
+            BankrSource(token=os.environ.get("GITHUB_TOKEN")),
             GitHubSource(token=os.environ.get("GITHUB_TOKEN")),
         ]
         _default_router = SourceRouter(sources)

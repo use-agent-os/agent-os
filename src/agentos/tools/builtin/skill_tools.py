@@ -155,6 +155,9 @@ def _community_result_to_dict(row: Any, installed: set[str]) -> dict[str, Any]:
         "source": getattr(row, "source_id", ""),
         "trust_level": getattr(row, "trust_level", ""),
         "identifier": identifier,
+        "provider": getattr(row, "provider", ""),
+        "category": getattr(row, "category", ""),
+        "homepage": getattr(row, "homepage", ""),
         "installed": identifier in installed or name in installed,
     }
 

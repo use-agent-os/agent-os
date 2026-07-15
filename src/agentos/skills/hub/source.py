@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -21,6 +22,11 @@ class SkillMeta:
     license: str = ""
     tags: list[str] = field(default_factory=list)
     platforms: list[str] = field(default_factory=list)
+    provider: str = ""  # publisher/brand (e.g. Bankr catalog "provider")
+    logo: str = ""  # raw URL to a logo asset, or "" for an initials fallback
+    category: str = ""  # coarse grouping for browse filters (e.g. "defi")
+    setup: list[str] = field(default_factory=list)  # ordered setup steps, if any
+    demo: dict[str, Any] = field(default_factory=dict)  # {title, language, code}
 
 
 @dataclass

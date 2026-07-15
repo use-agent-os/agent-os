@@ -37,6 +37,7 @@ DEFAULTS = {
     "nano-pdf",
     "pdf-toolkit",
     "pptx",
+    "robinhood-rwa-addresses",
     "seedance-2-prompt",
     "srt-from-script",
     "sub-agent",

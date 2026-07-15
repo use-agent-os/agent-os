@@ -115,6 +115,7 @@ are released under AgentOS's repository license (Apache-2.0; see `LICENSE`):
 - `nano-pdf`
 - `pdf-toolkit`
 - `pptx`
+- `robinhood-rwa-addresses`
 - `stack-trace-generic-probe`
 - `stack-trace-go-probe`
 - `stack-trace-js-probe`

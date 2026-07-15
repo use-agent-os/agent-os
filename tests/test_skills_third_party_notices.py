@@ -23,6 +23,7 @@ ORIGINALS = {
     "nano-pdf",
     "pdf-toolkit",
     "pptx",
+    "robinhood-rwa-addresses",
     "stack-trace-generic-probe",
     "stack-trace-go-probe",
     "stack-trace-js-probe",
