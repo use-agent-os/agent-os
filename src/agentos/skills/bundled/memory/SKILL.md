@@ -53,11 +53,14 @@ from curated `MEMORY.md` and `memory/**/*.md` files only.
 - For profile facts, edit `USER.md` with visible filesystem tools.
 - For daily or session notes, write to `memory/YYYY-MM-DD.md` or another
   appropriate `memory/**/*.md` source.
-- For curated long-term facts in `MEMORY.md`, read the current file first and
-  write the full updated content. If `memory_save` is available, use
-  `mode='replace'` for `MEMORY.md`; do not append to it.
-- If `memory_save` is available, use it only for `MEMORY.md` or
-  `memory/**/*.md`, never for `USER.md`.
+- For curated long-term facts, use the `memory` tool when it is visible:
+  `memory(action=add|replace|remove, target=memory|user, content=..., old_text=...)`.
+  Use `target=memory` for durable non-profile facts and `target=user` for
+  profile facts. Make all related changes in one call via `operations` when
+  batching adds/replaces/removes together.
+- `memory_save` never accepts `MEMORY.md` -- it always rejects that path. Use
+  it only for `memory/**/*.md` notes (daily or named), never for `MEMORY.md`
+  or `USER.md`.
 - If `memory_save` is not available but filesystem tools are visible, edit or
   create the same source files directly.
 

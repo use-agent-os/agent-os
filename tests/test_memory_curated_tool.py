@@ -121,6 +121,14 @@ async def test_memory_save_rejects_memory_md(memory_tools_fixture):
         await tools["memory_save"](path="MEMORY.md", content="x", mode="replace")
 
 
+async def test_memory_save_rejects_memory_md_path_variants(memory_tools_fixture):
+    tools = memory_tools_fixture
+    # "./MEMORY.md" normalizes to the same target as "MEMORY.md" and must be
+    # rejected identically -- not silently accepted via path spelling.
+    with pytest.raises(ToolError, match="managed by the `memory` tool"):
+        await tools["memory_save"](path="./MEMORY.md", content="x", mode="append")
+
+
 async def test_memory_save_still_accepts_memory_notes(memory_tools_fixture, tmp_path):
     tools = memory_tools_fixture
     result = await tools["memory_save"](path="memory/notes.md", content="daily note")

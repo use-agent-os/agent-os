@@ -31,8 +31,9 @@ def test_memory_skill_documents_usable_write_and_forget_paths() -> None:
     assert "origin: agentos-original" in text
     assert "Use only tools that are visible in the current tool list" in text
     assert "memory_save" in text
-    assert "if `memory_save` is available" in lower
-    assert "`MEMORY.md`" in text and "mode='replace'" in text
+    assert "if `memory_save` is not available" in lower
+    assert "memory(action=add|replace|remove, target=memory|user" in text
+    assert "`memory_save` never accepts `MEMORY.md`" in text
     assert "memory/**/*.md" in text
     assert "memory_delete" in text
     assert "If no write or delete tool is available" in text

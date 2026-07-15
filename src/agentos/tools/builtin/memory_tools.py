@@ -446,7 +446,7 @@ def create_memory_tools(
     def _validate_memory_save_target(path: str, mode: str) -> None:
         if not _is_memory_save_path(path):
             raise ToolError(f"invalid memory path. {_MEMORY_SOURCE_PATH_HINT}")
-        if path == "MEMORY.md":
+        if Path(path).parts == ("MEMORY.md",):
             raise ToolError(
                 "MEMORY.md is managed by the `memory` tool now. Use "
                 "memory(action=add, ...) for durable facts; memory_save is for "
