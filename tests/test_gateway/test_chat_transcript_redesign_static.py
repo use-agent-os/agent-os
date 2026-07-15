@@ -40,3 +40,17 @@ def test_user_role_label_and_time_are_not_right_aligned() -> None:
     css = _css()
     assert ".msg.user .role-label { text-align: right; }" not in css
     assert ".msg.user .msg-time { text-align: right; }" not in css
+
+
+def test_assistant_turn_is_bare_prose() -> None:
+    css = _css()
+    start = css.index(".chat-msg--assistant .chat-msg-text,")
+    end = css.index("/* Tool / system */", start)
+    block = css[start:end]
+
+    assert "background: none;" in block
+    assert "box-shadow: none;" in block
+    assert "font-size: var(--fs-md);" in block
+    assert "line-height: 1.7;" in block
+    assert "max-width: 100%;" in block
+    assert "background: var(--bg-surface);" not in block

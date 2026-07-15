@@ -388,9 +388,9 @@ def test_chat_streaming_indicator_uses_delayed_bottom_dock() -> None:
     # Mark is corner-aligned to the content-left edge and centered in the
     # reserved footer band, so the orbiting ring clears the tool card above
     # and the bubble's bottom edge — no overlap, no rightward-inset orphan.
-    assert "left: var(--sp-4);" in css
+    assert "left: 2px;" in css
     assert "bottom: var(--sp-2);" in css
-    assert "left: calc(var(--sp-4) - 4px);" in css
+    assert "left: -2px;" in css
     assert "bottom: calc(var(--sp-2) - 4px);" in css
     assert "left: calc(var(--sp-4) + 16px);" not in css
     assert "background-image: url('../../img/agentos-mark.png');" in css

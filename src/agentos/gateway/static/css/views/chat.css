@@ -517,14 +517,16 @@
 
 .chat-msg--assistant .chat-msg-text,
 .msg.assistant .msg-body {
-  background: var(--bg-surface);
-  border-radius: var(--radius-md);
-  padding: var(--sp-2) var(--sp-4);
-  box-shadow: var(--shadow-sm);
-  font-size: var(--fs-sm);
+  /* Bare prose on the page background: the transcript's reading voice.
+     One size up from machine lines so prose and mono chrome separate. */
+  background: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0 var(--sp-1);
+  font-size: var(--fs-md);
   line-height: 1.7;
   word-break: break-word;
-  max-width: 88%;
+  max-width: 100%;
   min-width: 56px;
   min-height: 32px;
 }
@@ -641,7 +643,7 @@
   content: '';
   display: block;
   position: absolute;
-  left: var(--sp-4);
+  left: 2px;
   bottom: var(--sp-2);
   width: 16px;
   height: 16px;
@@ -665,7 +667,7 @@
   content: '';
   display: block;
   position: absolute;
-  left: calc(var(--sp-4) - 4px);
+  left: -2px;
   bottom: calc(var(--sp-2) - 4px);
   width: 24px;
   height: 24px;
