@@ -76,6 +76,7 @@ def test_tool_status_shows_duration_from_js() -> None:
     assert "function _fmtToolDuration(ms)" in js
     assert "details.dataset.startedAt" in js
     assert "_setToolSummaryStatus(details, " in js
+    assert "_setToolSummaryStatus(details, isError ? 'error' : 'done')" not in js
 
 
 def test_tool_state_glyphs_come_from_css_state_classes() -> None:

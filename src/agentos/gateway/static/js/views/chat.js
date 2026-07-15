@@ -7169,7 +7169,9 @@ const ChatView = (() => {
     toolName = toolName || details.getAttribute('data-tool-name') || '';
     details.classList.remove('chat-tools-collapse--running');
     details.classList.add(_toolResultStateClass(payload));
-    _setToolSummaryStatus(details, isError ? 'error' : 'done');
+    const startedAt = Number(details.dataset.startedAt || 0);
+    const elapsedMs = startedAt ? Date.now() - startedAt : 0;
+    _setToolSummaryStatus(details, isError ? 'error' : 'success', elapsedMs);
     const summary = details.querySelector('.chat-tools-summary');
     if (summary) summary.removeAttribute('aria-disabled');
     return details;
