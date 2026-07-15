@@ -73,7 +73,8 @@ class CuratedMemoryStore:
     # -- public state -----------------------------------------------------
 
     def entries_for(self, target: str) -> list[str]:
-        return self.user_entries if target == "user" else self.memory_entries
+        # Return a copy to prevent callers from mutating internal state
+        return list(self.user_entries if target == "user" else self.memory_entries)
 
     # -- mutations --------------------------------------------------------
 
@@ -102,7 +103,7 @@ class CuratedMemoryStore:
                         f"use 'replace' to merge overlapping entries or 'remove' stale "
                         f"ones (see current_entries), then retry — all in this turn."
                     ),
-                    "current_entries": entries,
+                    "current_entries": list(entries),
                     "usage": f"{current:,}/{limit:,}",
                 })
             entries.append(content)
@@ -135,7 +136,7 @@ class CuratedMemoryStore:
                         f"No entry matched '{old_text}'. Check current_entries and retry "
                         f"with the exact text of the entry you want to replace."
                     ),
-                    "current_entries": entries,
+                    "current_entries": list(entries),
                 })
             if len({e for _, e in matches}) > 1:
                 return {
@@ -157,7 +158,7 @@ class CuratedMemoryStore:
                         f"Shorten the new content or 'remove' stale entries first, then "
                         f"retry — all in this turn."
                     ),
-                    "current_entries": entries,
+                    "current_entries": list(entries),
                     "usage": f"{current:,}/{limit:,}",
                 })
             entries[idx] = new_content
@@ -180,7 +181,7 @@ class CuratedMemoryStore:
                         f"No entry matched '{old_text}'. Check current_entries and retry "
                         f"with the exact text of the entry you want to remove."
                     ),
-                    "current_entries": entries,
+                    "current_entries": list(entries),
                 })
             if len({e for _, e in matches}) > 1:
                 return {
@@ -245,6 +246,7 @@ class CuratedMemoryStore:
             "target": target,
             "usage": f"{pct}% — {current:,}/{limit:,} chars",
             "entry_count": len(entries),
+            "current_entries": list(entries),
         }
         if message:
             resp["message"] = message
