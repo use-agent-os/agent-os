@@ -166,6 +166,21 @@ def test_release_wheel_allows_tokenjuice_provenance_markdown() -> None:
     assert unrelated_skill_reference in violations
 
 
+def test_release_wheel_allows_dist_info_license_files() -> None:
+    module = load_script()
+    license_md = "use_agent_os-2026.7.15.dist-info/licenses/THIRD_PARTY_NOTICES.md"
+    license_plain = "use_agent_os-2026.7.15.dist-info/licenses/NOTICE"
+    stray_md = "use_agent_os-2026.7.15.dist-info/STRAY.md"
+
+    violations = module.forbidden_release_wheel_entries(
+        (license_md, license_plain, stray_md)
+    )
+
+    assert license_md not in violations
+    assert license_plain not in violations
+    assert stray_md in violations
+
+
 def test_pyproject_release_wheel_config_excludes_forbidden_skill_resources() -> None:
     module = load_script()
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))

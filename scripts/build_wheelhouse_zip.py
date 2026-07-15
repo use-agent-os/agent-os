@@ -208,8 +208,16 @@ def _contains_forbidden_release_segment(path: str) -> bool:
     return any(part in FORBIDDEN_RELEASE_SEGMENTS for part in _release_name(path).split("/"))
 
 
+def _is_dist_info_license_file(name: str) -> bool:
+    """Wheel metadata license files (PEP 639): <dist>.dist-info/licenses/**."""
+    parts = name.split("/")
+    return len(parts) >= 3 and parts[0].endswith(".dist-info") and parts[1] == "licenses"
+
+
 def _is_allowed_runtime_markdown(path: str) -> bool:
     name = _release_name(path)
+    if _is_dist_info_license_file(name):
+        return True
     if name == TOKENJUICE_PROVENANCE_WHEEL_PATH:
         return True
     if name in ALLOWED_SKILL_REFERENCE_WHEEL_PATHS:

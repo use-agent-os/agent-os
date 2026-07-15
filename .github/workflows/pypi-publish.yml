@@ -93,3 +93,7 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Tolerate re-pushed tags: files already on PyPI are skipped
+          # instead of failing the whole run.
+          skip-existing: true
