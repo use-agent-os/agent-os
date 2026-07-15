@@ -1,8 +1,10 @@
 # Third Party Notices
 
-This file records third-party attribution for assets bundled with AgentOS.
-It covers:
+This file records third-party attribution for code and assets bundled with
+AgentOS. It covers:
 
+- Core runtime modules derived from OpenSquilla (Apache-2.0); see the
+  first section below.
 - The bundled skill descriptors under `src/agentos/skills/bundled/`, which
   include OpenClaw-derived MIT descriptors and AgentOS-original descriptors.
 - The bundled pptx skill references the python-pptx and PptxGenJS libraries;
@@ -18,6 +20,35 @@ It covers:
 - The vendored front-end JavaScript libraries served from
   `src/agentos/gateway/static/vendor/` for the Web UI console (Markdown
   rendering, HTML sanitization, and code-block syntax highlighting).
+
+## OpenSquilla-derived core modules
+
+- Component: core runtime modules under `src/agentos/`.
+- Upstream project: https://github.com/opensquilla/opensquilla
+- License: Apache License 2.0
+- Copyright notice: OpenSquilla contributors (the upstream project ships
+  the stock Apache-2.0 text without a filled-in copyright line and no
+  NOTICE file).
+
+AgentOS is built on OpenSquilla. Parts of the AgentOS core were copied
+from and then substantially modified relative to the upstream project.
+The highest-overlap modules include:
+
+- `src/agentos/application/approval_queue.py` and
+  `src/agentos/gateway/approval_queue.py` — approval queue handling
+- `src/agentos/cli/agent_cmd.py` — agent CLI command surface
+- `src/agentos/channels/command_registry.py` — channel slash-command dispatch
+- `src/agentos/gateway_client.py` and
+  `src/agentos/cli/gateway_client.py` — gateway client plumbing
+- `src/agentos/agentos_router/v4_phase3.py` — router phase logic
+
+Other modules across the runtime may also contain OpenSquilla-derived
+code in modified form. In accordance with Section 4(b) of the Apache
+License 2.0, this notice records that the derived files have been
+modified by the AgentOS contributors. The entire AgentOS repository is
+licensed under the Apache License 2.0 (see `LICENSE`), so the upstream
+license terms apply uniformly; the full license text is included in the
+`LICENSE` file at the repository root.
 
 ## OpenClaw-derived bundled skill descriptors
 
@@ -69,7 +100,7 @@ SOFTWARE.
 ## AgentOS-original bundled skills
 
 These bundled skill descriptors are authored and maintained by AgentOS and
-are released under AgentOS's repository license (MIT; see `LICENSE`):
+are released under AgentOS's repository license (Apache-2.0; see `LICENSE`):
 
 - `cron`
 - `deep-research`

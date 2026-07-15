@@ -6,7 +6,9 @@ router, durable memory, a layered sandbox, and multi-channel messaging
 
 - **Language / runtime:** Python **3.12+** only.
 - **Package manager:** **uv** (not pip/poetry). Never edit lockfiles by hand.
-- **License:** MIT. Default LLM provider: **OpenRouter** (Bankr selectable).
+- **License:** Apache-2.0 (see `LICENSE` + `NOTICE`; core derived from
+  OpenSquilla — attribution in `THIRD_PARTY_NOTICES.md`). Default LLM
+  provider: **OpenRouter** (Bankr selectable).
 - **PRs target `main`.** Keep them small, focused, and test-covered.
 
 ## Setup

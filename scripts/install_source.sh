@@ -178,7 +178,7 @@ installer=""
 install_args=()
 if command -v uv >/dev/null 2>&1; then
     installer="uv"
-    install_args=(uv tool install --force --reinstall-package agentos "${install_target}")
+    install_args=(uv tool install --force --reinstall-package use-agent-os "${install_target}")
 elif command -v python3 >/dev/null 2>&1; then
     installer="pip"
     install_args=(python3 -m pip install --user "${install_target}")

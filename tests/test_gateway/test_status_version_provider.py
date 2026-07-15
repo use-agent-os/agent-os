@@ -36,7 +36,7 @@ def _openrouter_selector() -> ModelSelector:
 
 
 def test_package_version_tracks_metadata_not_stale_literal() -> None:
-    assert agentos.__version__ == _pkg_version("agentos")
+    assert agentos.__version__ == _pkg_version("use-agent-os")
     assert agentos.__version__ != "0.1.0"
 
 

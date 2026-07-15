@@ -1,0 +1,99 @@
+name: Publish to PyPI
+
+# Publishes the use-agent-os distribution to PyPI via Trusted Publishing (OIDC).
+# One-time setup on pypi.org before the first run: add a (pending) trusted
+# publisher for project "use-agent-os" pointing at this repository, workflow file
+# "pypi-publish.yml", and environment "pypi".
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pypi-publish-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build sdist and wheel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Hydrate LFS embedding model assets
+        run: git lfs pull --include="src/agentos/memory/models/**"
+
+      - name: Verify LFS assets are hydrated
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          for path in Path("src/agentos/memory/models").rglob("*"):
+              if not path.is_file():
+                  continue
+              prefix = path.read_bytes()[:64]
+              assert not prefix.startswith(b"version https://git-lfs.github.com/spec/v1"), (
+                  f"LFS pointer not hydrated: {path}"
+              )
+          PY
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Check tag matches package version
+        run: |
+          python3 - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+
+          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          tag = os.environ["GITHUB_REF_NAME"]
+          assert tag == f"v{version}", (
+              f"tag {tag!r} does not match pyproject version {version!r}"
+          )
+          PY
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: pypi-dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # Trusted Publishing exchanges this OIDC token for a short-lived
+      # PyPI upload token — no stored API token or secret is involved.
+      id-token: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: pypi-dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Tolerate re-pushed tags: files already on PyPI are skipped
+          # instead of failing the whole run.
+          skip-existing: true

@@ -6,16 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.7.15] - 2026-07-15
+
+### Changed
+
+- Relicensed the repository from MIT to **Apache-2.0** and added a root
+  `NOTICE` file. Core modules derived from
+  [OpenSquilla](https://github.com/opensquilla/opensquilla) (Apache-2.0)
+  are now credited in `THIRD_PARTY_NOTICES.md`; the README credits
+  OpenSquilla (built on) plus OpenClaw and Hermes Agent (influences).
+  Wheels now ship `LICENSE`, `NOTICE`, and `THIRD_PARTY_NOTICES.md` in
+  their dist-info license files.
+
+## [2026.7.14.post1] - 2026-07-14
+
+### Changed
+
+- The Python distribution is now published to PyPI as **`use-agent-os`**
+  (`uv tool install "use-agent-os[recommended]"`). The import package
+  (`import agentos`) and the `agentos` CLI are unchanged. PyPI's project-name
+  similarity rules reject `agentos`/`agent-os` variants (the bare name is held
+  by an unrelated, abandoned 2022 project), hence the org-matching name.
+- Built wheels are named `use_agent_os-<version>-py3-none-any.whl` (PEP 427
+  normalization). Install scripts, the wheelhouse builder, the release
+  workflow, and the README now reference the new filename; the README's
+  primary terminal install is the PyPI command instead of a pinned wheel URL.
+
 ## [2026.7.14] - 2026-07-14
 
 ### Changed
 
 - Re-release aligning the current version tag to 2026.7.14.
-
-## [2026.7.15] - 2026-07-14
-
-### Changed
-
 - Adopted CalVer versioning (`YYYY.M.D`). Because PEP 440 normalizes the version
   segment in wheel filenames (leading zeros dropped), tags use the same
   non-padded form, e.g. `v2026.7.15`.

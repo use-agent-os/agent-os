@@ -98,9 +98,15 @@ _FALLBACK_PYTHON_REQUIRES = ">=3.12"
 def _read_package_metadata() -> tuple[str, str]:
     """Return (version, python_requires) from installed agentos metadata."""
 
-    try:
-        meta = _pkg_metadata("agentos")
-    except PackageNotFoundError:
+    # The distribution is published as "use-agent-os" (PyPI); "agentos" covers
+    # environments installed before the rename.
+    for dist_name in ("use-agent-os", "agentos"):
+        try:
+            meta = _pkg_metadata(dist_name)
+            break
+        except PackageNotFoundError:
+            continue
+    else:
         return _FALLBACK_VERSION, _FALLBACK_PYTHON_REQUIRES
     version = meta["Version"] or _FALLBACK_VERSION
     python_requires = meta.get("Requires-Python") or _FALLBACK_PYTHON_REQUIRES

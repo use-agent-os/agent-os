@@ -3,7 +3,7 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
-CURRENT_VERSION = "2026.7.14"
+CURRENT_VERSION = "2026.7.15"
 CURRENT_TAG = f"v{CURRENT_VERSION}"
 PREVIEW_VERSION = "0.0.1rc1"
 PREVIEW_TAG = f"v{PREVIEW_VERSION}"
@@ -19,7 +19,7 @@ def test_pyproject_version_matches_current_release() -> None:
 
 def test_lockfile_version_matches_current_release() -> None:
     lock = tomllib.loads(Path("uv.lock").read_text(encoding="utf-8"))
-    package = next(item for item in lock["package"] if item["name"] == "agentos")
+    package = next(item for item in lock["package"] if item["name"] == "use-agent-os")
 
     assert package["version"] == CURRENT_VERSION
 
@@ -110,10 +110,10 @@ def test_readme_release_install_uses_latest_assets_and_pinned_alternative() -> N
         in readme
     )
     assert (
-        f"releases/download/{CURRENT_TAG}/agentos-{CURRENT_VERSION}-py3-none-any.whl"
+        f"releases/download/{CURRENT_TAG}/use_agent_os-{CURRENT_VERSION}-py3-none-any.whl"
         in readme
     )
-    assert "agentos-latest-py3-none-any.whl" not in readme
+    assert "use_agent_os-latest-py3-none-any.whl" not in readme
     assert "Python wheel installs use versioned wheel filenames" in readme
     assert "Release install commands use published GitHub release assets" in readme
 
@@ -122,10 +122,10 @@ def test_release_installers_default_to_current_tag() -> None:
     for path in [Path("install.sh"), Path("install.ps1")]:
         text = path.read_text(encoding="utf-8")
         assert CURRENT_TAG in text
-        assert "agentos-$releaseVersion-py3-none-any.whl" in text or (
-            "agentos-${release_version}-py3-none-any.whl" in text
+        assert "use_agent_os-$releaseVersion-py3-none-any.whl" in text or (
+            "use_agent_os-${release_version}-py3-none-any.whl" in text
         )
-        assert "agentos-latest-py3-none-any.whl" not in text
+        assert "use_agent_os-latest-py3-none-any.whl" not in text
 
 
 def test_release_workflow_marks_preview_tags_as_prereleases() -> None:
@@ -137,4 +137,4 @@ def test_release_workflow_marks_preview_tags_as_prereleases() -> None:
     assert "is_prerelease = bool(re.search" in workflow
     assert "if not is_prerelease:" in workflow
     assert "expected.add(\"AgentOS-windows-x64-portable.zip\")" in workflow
-    assert "agentos-latest-py3-none-any.whl" not in workflow
+    assert "use_agent_os-latest-py3-none-any.whl" not in workflow

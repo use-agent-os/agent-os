@@ -261,7 +261,7 @@ function Repair-WindowsVCRedistForOnnxIfNeeded {
 if (-not (Test-Path $VenvRoot)) {
     New-Item -ItemType Directory -Path $VenvRoot -Force | Out-Null
 }
-$AgentOSWheel = Get-ChildItem -Path $PackageDir -Filter 'agentos-*.whl' |
+$AgentOSWheel = Get-ChildItem -Path $PackageDir -Filter 'use_agent_os-*.whl' |
     Sort-Object Name |
     Select-Object -First 1
 if (-not $AgentOSWheel) {

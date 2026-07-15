@@ -1,8 +1,9 @@
 [project]
-name = "agentos"
-version = "2026.7.14"
+name = "use-agent-os"
+version = "2026.7.15"
 description = "AgentOS — microkernel Python agent runtime with MCP-native tools and multi-channel messaging"
-license = "MIT"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]
 readme = "README.md"
 authors = [
     { name = "AgentOS contributors" },
@@ -10,7 +11,7 @@ authors = [
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
 ]
 keywords = ["agent", "llm", "mcp", "gateway", "router", "chatbot"]

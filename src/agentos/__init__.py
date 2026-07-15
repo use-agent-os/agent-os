@@ -5,9 +5,15 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _resolve_version
 
-try:
-    __version__ = _resolve_version("agentos")
-except PackageNotFoundError:  # pragma: no cover - source tree without dist metadata
+# The distribution is published as "use-agent-os" (PyPI); "agentos" covers
+# environments installed before the rename.
+for _dist_name in ("use-agent-os", "agentos"):
+    try:
+        __version__ = _resolve_version(_dist_name)
+        break
+    except PackageNotFoundError:
+        continue
+else:  # pragma: no cover - source tree without dist metadata
     # Editable/source checkouts without installed distribution metadata fall
     # back to a sentinel rather than a hardcoded semver that silently goes
     # stale (the bug this module exists to prevent).

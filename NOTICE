@@ -1,0 +1,12 @@
+AgentOS
+Copyright 2026 AgentOS contributors
+
+This product includes software derived from OpenSquilla
+(https://github.com/opensquilla/opensquilla), licensed under the
+Apache License, Version 2.0. The derived files have been modified by
+the AgentOS contributors; see THIRD_PARTY_NOTICES.md for the list of
+affected modules.
+
+Additional third-party attributions (bundled skills, models, vendored
+web assets, and adapted tooling) are recorded in
+THIRD_PARTY_NOTICES.md.

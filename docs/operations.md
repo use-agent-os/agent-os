@@ -174,8 +174,8 @@ agentos mcp-server run
 ```
 
 Install by following the [Installation](../README.md#installation) section of
-the README, adding the `mcp` extra — use `agentos[recommended,mcp]` in place of
-`agentos[recommended]`.
+the README, adding the `mcp` extra — use `use-agent-os[recommended,mcp]` in place of
+`use-agent-os[recommended]`.
 
 Use this when another MCP-capable client should access AgentOS-managed tools
 or runtime surfaces.

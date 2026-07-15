@@ -7,15 +7,15 @@ RELEASE_PS1 = ROOT / "install.ps1"
 RELEASE_SH = ROOT / "install.sh"
 SOURCE_PS1 = ROOT / "scripts" / "install_source.ps1"
 SOURCE_SH = ROOT / "scripts" / "install_source.sh"
-CURRENT_RELEASE_TAG = "v2026.7.14"
+CURRENT_RELEASE_TAG = "v2026.7.15"
 
 
 def test_source_install_scripts_force_refresh_local_uv_tool_package() -> None:
     ps1 = SOURCE_PS1.read_text(encoding="utf-8")
     sh = SOURCE_SH.read_text(encoding="utf-8")
 
-    assert "'--force', '--reinstall-package', 'agentos'" in ps1
-    assert "--force --reinstall-package agentos" in sh
+    assert "'--force', '--reinstall-package', 'use-agent-os'" in ps1
+    assert "--force --reinstall-package use-agent-os" in sh
 
 
 def test_install_scripts_do_not_run_onboarding_or_gateway() -> None:
@@ -40,10 +40,10 @@ def test_release_installers_install_version_pinned_wheel_with_uv() -> None:
 
     for script in (ps1, sh):
         assert CURRENT_RELEASE_TAG in script
-        assert "agentos-$releaseVersion-py3-none-any.whl" in script or (
-            "agentos-${release_version}-py3-none-any.whl" in script
+        assert "use_agent_os-$releaseVersion-py3-none-any.whl" in script or (
+            "use_agent_os-${release_version}-py3-none-any.whl" in script
         )
-        assert "agentos-latest-py3-none-any.whl" not in script
+        assert "use_agent_os-latest-py3-none-any.whl" not in script
         assert "releases/latest/download" not in script
         assert "--python" in script
         assert "--force" in script

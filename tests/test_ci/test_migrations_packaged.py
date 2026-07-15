@@ -30,7 +30,7 @@ def test_wheel_contains_migration(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, f"uv build failed: {result.stderr}"
 
-    wheels = list(tmp_path.glob("agentos-*.whl"))
+    wheels = list(tmp_path.glob("use_agent_os-*.whl"))
     assert len(wheels) == 1, f"Expected 1 wheel, got {wheels}"
 
     with zipfile.ZipFile(wheels[0]) as wheel:
@@ -57,7 +57,7 @@ def test_installed_wheel_resolves_migrations(tmp_path: Path) -> None:
         capture_output=True,
         timeout=180,
     )
-    wheels = list(wheel_dir.glob("agentos-*.whl"))
+    wheels = list(wheel_dir.glob("use_agent_os-*.whl"))
     # 120s was tight enough that Windows CI runners began timing out as
     # the base dependency list grew (each transitive wheel adds I/O the
     # Defender real-time scanner has to walk through). Ubuntu still

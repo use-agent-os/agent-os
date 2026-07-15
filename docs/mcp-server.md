@@ -11,8 +11,8 @@ UI, CLI, channels, and gateway control console.
 
 Install AgentOS with the `mcp` extra when you need this bridge. Follow the
 [Installation](../README.md#installation) section of the README, and add `mcp`
-to the extras list — use `agentos[recommended,mcp]` in place of
-`agentos[recommended]`.
+to the extras list — use `use-agent-os[recommended,mcp]` in place of
+`use-agent-os[recommended]`.
 
 Start the AgentOS gateway:
 

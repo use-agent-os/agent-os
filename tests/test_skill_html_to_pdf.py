@@ -49,7 +49,7 @@ def test_eligibility_with_python(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_render_html_to_pdf(tmp_path: Path) -> None:
     pytest.importorskip(
         "weasyprint",
-        reason="weasyprint is opt-in via agentos[document-extras]; skip when absent",
+        reason="weasyprint is opt-in via use-agent-os[document-extras]; skip when absent",
     )
     sys.path.insert(0, str(SCRIPTS))
     try:

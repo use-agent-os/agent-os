@@ -25,7 +25,7 @@ def render(html_spec: str, out_path: Path, page_size: str | None) -> None:
         from weasyprint import CSS, HTML
     except ImportError as exc:  # pragma: no cover - covered by --help path
         print(
-            "error: weasyprint is not installed — `pip install agentos[document-extras]`",
+            "error: weasyprint is not installed — `pip install 'use-agent-os[document-extras]'`",
             file=sys.stderr,
         )
         raise SystemExit(2) from exc

@@ -25,7 +25,7 @@ def project_table() -> dict:
 @pytest.fixture(scope="module")
 def lock_package() -> dict:
     data = tomllib.loads(UV_LOCK.read_text(encoding="utf-8"))
-    return next(package for package in data["package"] if package["name"] == "agentos")
+    return next(package for package in data["package"] if package["name"] == "use-agent-os")
 
 
 def _dep_names(specs: list[str]) -> set[str]:
