@@ -166,3 +166,16 @@ def test_add_skips_drift_guard(store: CuratedMemoryStore, tmp_path: Path):
     mem.write_text(mem.read_text() + "\n\nfree text appended externally")
     result = store.add("memory", "entry two")
     assert result["success"] is True  # append-only add never clobbers
+
+
+def test_roundtrip_mismatch_drift_blocks_replace(store: CuratedMemoryStore, tmp_path: Path):
+    store.add("memory", "entry one")
+    mem = tmp_path / "MEMORY.md"
+    # Embedded empty segment: parses to one entry but does not re-serialize
+    # byte-identically (signal 1 — round-trip mismatch), while staying far
+    # under the char limit so signal 2 cannot be the trigger.
+    mem.write_text("entry one" + ENTRY_DELIMITER + ENTRY_DELIMITER + "entry two")
+    result = store.replace("memory", "entry one", "updated")
+    assert result["success"] is False
+    assert "drift_backup" in result
+    assert list(tmp_path.glob("MEMORY.md.bak.*"))
