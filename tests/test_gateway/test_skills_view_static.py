@@ -96,19 +96,13 @@ def test_skill_card_variable_copy_wraps_inside_mobile_cards() -> None:
         assert "overflow-wrap: anywhere" in rule, selector
 
 
-def test_skills_mobile_stats_keep_list_visible_in_first_viewport() -> None:
+def test_skills_mobile_metrics_stay_compact_in_first_viewport() -> None:
     css = SKILLS_CSS.read_text(encoding="utf-8")
     mobile_start = css.index("@media (max-width: 720px)")
     mobile_rule = css[mobile_start:]
 
-    assert (
-        ".sk-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); "
-        "gap: var(--sp-2); }"
-        in mobile_rule
-    )
-    assert (
-        ".sk-stat { min-height: 86px; "
-        "padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-4); }"
-        in mobile_rule
-    )
-    assert ".sk-stat__value { font-size: 1.35rem; }" in mobile_rule
+    # The header collapses and the inline metrics strip tightens on mobile so
+    # the skill list stays visible in the first viewport.
+    assert ".sk-hero__top { flex-direction: column; align-items: stretch; }" in mobile_rule
+    assert ".sk-metrics { gap: 6px; }" in mobile_rule
+    assert ".sk-metric__sep { display: none; }" in mobile_rule

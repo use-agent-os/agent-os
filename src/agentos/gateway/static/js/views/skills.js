@@ -64,24 +64,25 @@ const SkillsView = (() => {
 
     _el.innerHTML = `
       <div class="sk-stage">
-        <header class="sk-stage__header">
-          <div class="sk-stage__title-block">
-            <span class="sk-stage__eyebrow">Control · Skills</span>
-            <h2 class="sk-stage__title">Skills</h2>
-            <p class="sk-stage__subtitle">Composable agent capabilities — bundled packs, the Bankr partner catalog, and the wider community.</p>
-          </div>
-          <div class="sk-stage__actions">
-            <div class="sk-search-wrap" id="sk-search-wrap">
-              <span class="sk-search-icon">${icons.search()}</span>
-              <input class="sk-search-input" type="search" id="skills-filter" placeholder="Filter installed…" autocomplete="off" />
+        <header class="sk-hero">
+          <div class="sk-hero__top">
+            <div class="sk-hero__intro">
+              <span class="sk-hero__eyebrow">${icons.skills()}<span>Control · Skills</span></span>
+              <h2 class="sk-hero__title">Skills</h2>
+              <p class="sk-hero__subtitle">Composable agent capabilities — bundled packs, the Bankr partner catalog, and the wider community.</p>
             </div>
-            <button class="btn btn--ghost" id="skills-refresh" title="Refresh">
-              ${icons.refresh()}<span>Refresh</span>
-            </button>
+            <div class="sk-hero__actions">
+              <div class="sk-search-wrap" id="sk-search-wrap">
+                <span class="sk-search-icon">${icons.search()}</span>
+                <input class="sk-search-input" type="search" id="skills-filter" placeholder="Filter installed…" autocomplete="off" />
+              </div>
+              <button class="sk-iconbtn" id="skills-refresh" title="Refresh" aria-label="Refresh">
+                ${icons.refresh()}
+              </button>
+            </div>
           </div>
+          <div class="sk-metrics" id="sk-stats"></div>
         </header>
-
-        <section class="sk-stats" id="sk-stats"></section>
 
         <div class="sk-tabs" role="group" aria-label="Skill source">
           <button class="sk-tab is-active" data-tab="installed" aria-pressed="true">${icons.skills()}<span>Installed</span></button>
@@ -95,7 +96,7 @@ const SkillsView = (() => {
 
         <div id="skills-tab-bankr" class="sk-panel" hidden>
           <div class="sk-partner">
-            <div class="sk-partner__mark">${_bankrGlyph(22)}</div>
+            <div class="sk-partner__mark">${_bankrGlyph(48)}</div>
             <div class="sk-partner__text">
               <div class="sk-partner__name">Bankr partner catalog</div>
               <p class="sk-partner__desc">Plug-and-play on-chain skills — trading, wallets, DeFi, markets, and more — installed straight from <span class="sk-mono">BankrBot/skills</span>.</p>
@@ -281,23 +282,21 @@ const SkillsView = (() => {
     const ready = _allSkills.filter(s => s.status === 'ready').length;
     const needs = _allSkills.filter(s => s.status === 'needs_setup').length;
     const notDeclared = _allSkills.filter(s => s.status === 'not_declared').length;
-    const layers = new Set();
-    _allSkills.forEach(s => { if (s.layer) layers.add(s.layer); });
 
-    const tile = (key, label, value, hint, mods = '') => {
+    const pill = (key, label, value, tone = '') => {
       const active = _statusFilter === key;
-      return `<button class="sk-stat ${mods}${active ? ' is-active' : ''}" data-status-filter="${key}" type="button">
-        <div class="sk-stat__label">${label}</div>
-        <div class="sk-stat__value">${value}</div>
-        <div class="sk-stat__hint">${hint}</div>
+      return `<button class="sk-metric${tone ? ' sk-metric--' + tone : ''}${active ? ' is-active' : ''}" data-status-filter="${key}" type="button" title="Filter: ${label}">
+        <span class="sk-metric__value">${value}</span>
+        <span class="sk-metric__label">${label}</span>
       </button>`;
     };
 
     wrap.innerHTML = `
-      ${tile('all', 'All skills', total, `${layers.size} layer${layers.size === 1 ? '' : 's'}`, 'sk-stat--accent')}
-      ${tile('ready', 'Ready', `<span class="sk-stat__ok">${ready}</span>`, ready ? 'install-ready' : 'none ready')}
-      ${tile('needs-setup', 'Needs setup', `<span class="sk-stat__warn">${needs}</span>`, needs ? 'awaiting deps' : 'all set')}
-      ${tile('not-declared', 'Not declared', notDeclared, 'no manifest')}
+      ${pill('all', 'All', total, 'accent')}
+      <span class="sk-metric__sep"></span>
+      ${pill('ready', 'Ready', ready, 'ok')}
+      ${pill('needs-setup', 'Needs setup', needs, 'warn')}
+      ${pill('not-declared', 'No manifest', notDeclared)}
     `;
   }
 
@@ -799,9 +798,20 @@ const SkillsView = (() => {
     return (words[0][0] + (words[1] ? words[1][0] : '')).toUpperCase();
   }
 
-  function _bankrGlyph(size = 16) {
-    // Simple square "B" mark that reads as a partner badge in the app's accent.
+  function _basePath() {
+    return document.getElementById('agentos-data')?.dataset.basePath || '';
+  }
+
+  function _bankrFallbackGlyph(size) {
+    // Drawn "B" mark, used if the brand SVG asset fails to load.
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M9 8h4a2 2 0 0 1 0 4H9zm0 4h4.5a2 2 0 0 1 0 4H9z"/></svg>`;
+  }
+
+  function _bankrGlyph(size = 16) {
+    // Official Bankr brand mark (served locally); falls back to a drawn glyph.
+    const src = `${_basePath()}/static/img/bankr-symbol.svg`;
+    const fallback = _bankrFallbackGlyph(size).replace(/"/g, '&quot;');
+    return `<img class="sk-bankr-logo" src="${src}" alt="Bankr" width="${size}" height="${size}" onerror="this.outerHTML='${fallback}'" />`;
   }
 
   function _esc(s) {
