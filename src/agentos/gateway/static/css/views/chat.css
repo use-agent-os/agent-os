@@ -928,22 +928,24 @@
   white-space: nowrap;
 }
 
-/* Tool collapse group -- hairline-bordered tile over flat field */
+/* Tool row group -- 1px left rail, no card chrome. The rail carries the
+   aggregate state color; each summary line is one tool call. */
 .chat-tools-collapse {
-  margin-top: var(--sp-2);
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  margin-top: var(--sp-1);
+  background: none;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
   overflow: hidden;
   transition: border-color var(--transition);
 }
 
 .chat-tools-summary {
-  padding: var(--sp-2) var(--sp-3);
+  padding: 2px var(--sp-3);
   font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: var(--track-wide);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: 0;
   color: var(--text-muted);
   cursor: pointer;
   user-select: none;
@@ -964,7 +966,7 @@
   border-right: 1.5px solid currentColor;
   border-bottom: 1.5px solid currentColor;
   transform: rotate(-45deg);
-  margin-left: auto;
+  margin-left: 0;
   opacity: 0.5;
   transition: transform 180ms ease, opacity var(--transition);
 }
@@ -977,6 +979,8 @@
 .chat-tools-body {
   padding: 0 var(--sp-3) var(--sp-2);
   animation: expandIn 200ms ease;
+  max-height: 40vh;
+  overflow: auto;
 }
 @keyframes expandIn {
   from { opacity: 0; transform: translateY(-4px); }
@@ -999,9 +1003,7 @@
 }
 
 /* Tool collapse states: running → success → error */
-.chat-tools-collapse--running {
-  border-left: 3px solid var(--accent);
-}
+.chat-tools-collapse--running { border-left-color: var(--accent); }
 /* Running tool: suppress click-to-expand affordance */
 .chat-tools-collapse--running > .chat-tools-summary,
 .chat-tools-summary[aria-disabled="true"] { cursor: progress; }
@@ -1010,16 +1012,46 @@
 .chat-tools-collapse--running > .chat-tools-summary::after,
 .chat-tools-summary[aria-disabled="true"]::after { opacity: 0.2; }
 
-.chat-tools-collapse--success {
-  border-left: 3px solid var(--ok);
+.chat-tools-collapse--success { border-left-color: var(--border); }
+.chat-tools-collapse--error   { border-left-color: var(--danger); }
+.chat-tools-collapse--unknown { border-left-color: var(--warn); }
+
+/* Status cell: right-aligned. Glyph from state class, duration text from JS. */
+.chat-tools-status {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
 }
 
-.chat-tools-collapse--error {
-  border-left: 3px solid var(--danger);
+.chat-tools-collapse--success > .chat-tools-summary .chat-tools-status::before {
+  content: '\2713';           /* ✓ */
+  color: var(--ok);
 }
 
-.chat-tools-collapse--unknown {
-  border-left: 3px solid var(--warn);
+.chat-tools-collapse--error > .chat-tools-summary .chat-tools-status::before {
+  content: '\2717';           /* ✗ */
+  color: var(--danger);
+}
+
+.chat-tools-collapse--running > .chat-tools-summary .chat-tools-status::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-top-color: var(--accent);
+  animation: cap-activity-spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-tools-collapse--running > .chat-tools-summary .chat-tools-status::before {
+    animation: none;
+    border-top-color: color-mix(in srgb, var(--accent) 35%, transparent);
+    border-left-color: var(--accent);
+  }
 }
 
 .chat-tool-result--warn {

@@ -2455,9 +2455,9 @@ def test_savings_popup_does_not_fire_for_replayed_done_frames() -> None:
 
 def test_tool_summary_exposes_visible_running_status() -> None:
     source = CHAT_JS.read_text(encoding="utf-8")
-    assert "function _setToolSummaryStatus(details, status)" in source
-    assert "function _visibleToolSummaryStatus(status)" in source
-    assert "return status === 'running' ? 'running' : '';" in source
+    assert "function _visibleToolSummaryStatus(status, durationMs)" in source
+    assert "statusSpan.hidden = false;" in source
+    assert "return _fmtToolDuration(durationMs);" in source
     build_start = source.index("function _buildToolCallDOM(")
     build_end = source.index("function _retitleToolCallDOM", build_start)
     build_body = source[build_start:build_end]
@@ -2469,8 +2469,10 @@ def test_tool_summary_exposes_visible_running_status() -> None:
         result_start,
     )
     result_body = source[result_start:result_end]
-    assert "_setToolSummaryStatus(details, isError ? 'error' : 'done');" in result_body
-    assert "statusSpan.hidden = !visibleStatus;" in source
+    assert (
+        "_setToolSummaryStatus(details, isError ? 'error' : 'success', elapsedMs);"
+        in result_body
+    )
 
 
 def test_router_fx_settles_but_preserves_winner_animation_when_output_begins() -> None:

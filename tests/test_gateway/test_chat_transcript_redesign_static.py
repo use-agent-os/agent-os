@@ -59,3 +59,32 @@ def test_assistant_turn_is_bare_prose() -> None:
 def test_tool_sidebar_is_fully_removed() -> None:
     assert "chat-sidebar" not in _css()
     assert "chat-sidebar" not in _js()
+
+
+def test_tool_rows_have_left_rail_and_mono_row_styling() -> None:
+    css = _css()
+    start = css.index(".chat-tools-collapse {")
+    end = css.index(".chat-tools-summary {", start)
+    block = css[start:end]
+    assert "border-left: 1px solid var(--border);" in block
+    assert "border-radius: 0;" in block
+    assert "background: none;" in block
+
+
+def test_tool_status_shows_duration_from_js() -> None:
+    js = _js()
+    assert "function _fmtToolDuration(ms)" in js
+    assert "details.dataset.startedAt" in js
+    assert "_setToolSummaryStatus(details, " in js
+
+
+def test_tool_state_glyphs_come_from_css_state_classes() -> None:
+    css = _css()
+    assert (
+        ".chat-tools-collapse--success > .chat-tools-summary .chat-tools-status::before"
+        in css
+    )
+    assert (
+        ".chat-tools-collapse--error > .chat-tools-summary .chat-tools-status::before"
+        in css
+    )

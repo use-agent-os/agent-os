@@ -7048,6 +7048,7 @@ const ChatView = (() => {
     details.className = 'chat-tools-collapse' + (isRunning ? ' chat-tools-collapse--running' : '');
     if (toolId) details.setAttribute('data-tool-id', toolId);
     details.setAttribute('data-tool-name', name || 'tool');
+    if (isRunning) details.dataset.startedAt = String(Date.now());
 
     const summary = document.createElement('summary');
     summary.className = 'chat-tools-summary';
@@ -7082,18 +7083,30 @@ const ChatView = (() => {
     return details;
   }
 
-  function _visibleToolSummaryStatus(status) {
-    return status === 'running' ? 'running' : '';
+  function _fmtToolDuration(ms) {
+    if (!ms || ms < 0) return '';
+    const s = ms / 1000;
+    if (s < 10) return `${s.toFixed(1)}s`;
+    if (s < 60) return `${Math.round(s)}s`;
+    return `${Math.floor(s / 60)}m${Math.round(s % 60)}s`;
   }
 
-  function _applyToolSummaryStatus(statusSpan, status) {
-    const visibleStatus = _visibleToolSummaryStatus(status || '');
+  function _visibleToolSummaryStatus(status, durationMs) {
+    if (status === 'running') return '';           // spinner is CSS-drawn
+    if (status === 'success' || status === 'error') return _fmtToolDuration(durationMs);
+    return '';
+  }
+
+  function _applyToolSummaryStatus(statusSpan, status, durationMs) {
+    const visibleStatus = _visibleToolSummaryStatus(status || '', durationMs | 0);
     statusSpan.dataset.status = status || '';
     statusSpan.textContent = visibleStatus;
-    statusSpan.hidden = !visibleStatus;
+    // The span stays in the DOM even when empty: the state glyph (::before)
+    // and the running spinner are CSS-drawn from data-status / parent class.
+    statusSpan.hidden = false;
   }
 
-  function _setToolSummaryStatus(details, status) {
+  function _setToolSummaryStatus(details, status, durationMs) {
     if (!details) return;
     const summary = details.querySelector('.chat-tools-summary');
     if (!summary) return;
@@ -7103,7 +7116,7 @@ const ChatView = (() => {
       statusSpan.className = 'chat-tools-status';
       summary.appendChild(statusSpan);
     }
-    _applyToolSummaryStatus(statusSpan, status || '');
+    _applyToolSummaryStatus(statusSpan, status || '', durationMs | 0);
   }
 
   function _retitleToolCallDOM(details, name, input) {
@@ -7358,7 +7371,9 @@ const ChatView = (() => {
         toolName = toolName || details.getAttribute('data-tool-name') || '';
         details.classList.remove('chat-tools-collapse--running');
         details.classList.add(_toolResultStateClass(payload));
-        _setToolSummaryStatus(details, isError ? 'error' : 'done');
+        const startedAt = Number(details.dataset.startedAt || 0);
+        const elapsedMs = startedAt ? Date.now() - startedAt : 0;
+        _setToolSummaryStatus(details, isError ? 'error' : 'success', elapsedMs);
         const summary = details.querySelector('.chat-tools-summary');
         if (summary) summary.removeAttribute('aria-disabled');
         const toolsBody = details.querySelector('.chat-tools-body');
