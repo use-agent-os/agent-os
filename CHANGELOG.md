@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.7.15.post1] - 2026-07-15
+
+### Added
+
+- Partner-catalog skills system with a Bankr skills hub, and a
+  Robinhood RWA address lookup skill (`robinhood-rwa-addresses`).
+
 ## [2026.7.15] - 2026-07-15
 
 ### Changed
