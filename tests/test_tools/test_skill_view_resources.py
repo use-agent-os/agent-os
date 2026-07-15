@@ -145,6 +145,9 @@ async def test_skill_search_community_returns_hub_results_with_installed_flag(
             "source": "clawhub",
             "trust_level": "community",
             "identifier": "plotter",
+            "provider": "",
+            "category": "",
+            "homepage": "",
             "installed": True,
         }
     ]

@@ -45,7 +45,13 @@ def _norm(text: str) -> str:
 
 
 def _score(query: str, token: dict[str, Any]) -> int:
-    """Rank a token against the query. Higher is better; 0 = no match."""
+    """Rank a token against the query. Higher is better; 0 = no match.
+
+    The query may be a bare name/ticker ("Apple", "AAPL") or a full sentence —
+    the skill entrypoint defaults ``--query`` to the raw user message (e.g.
+    "what is Apple's ticker?", "mã cổ phiếu Apple là gì") — so matching must
+    also find the company name or ticker *inside* the query.
+    """
     q = _norm(query)
     if not q:
         return 0
@@ -56,7 +62,15 @@ def _score(query: str, token: dict[str, Any]) -> int:
         return 100
     if q == name:
         return 90
-    # Word-boundary match on the company name (e.g. "apple" in "apple").
+    # Company name appears as a whole phrase inside a longer query
+    # ("apple" in "what is apple s ticker").
+    if name and re.search(rf"\b{re.escape(name)}\b", q):
+        return 80
+    # Ticker appears as a standalone word inside the query ("aapl" in
+    # "gia aapl bao nhieu"). Require len >= 2 to avoid single-letter noise.
+    if len(symbol) >= 2 and re.search(rf"\b{re.escape(symbol)}\b", q):
+        return 75
+    # Query is a word inside the company name ("beauty" → "e l f beauty").
     if re.search(rf"\b{re.escape(q)}\b", name):
         return 70
     if q in name:

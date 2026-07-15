@@ -10,11 +10,23 @@ const SkillsView = (() => {
   let _statusFilter = 'all';
   let _activeTab = 'installed';
 
-  // Community/Bankr browse state.
-  let _registryCache = { bankr: null, community: null }; // source group → results[]
+  // Community/Bankr browse state. _registryCache holds the empty-query
+  // snapshot per group (array | null); fetch failures live in _registryError
+  // so a failed load never poisons the cache — a null cache means "retry on
+  // next tab entry".
+  let _registryCache = { bankr: null, community: null };
+  let _registryError = { bankr: '', community: '' };
   let _registryLoading = { bankr: false, community: false };
   let _catFilter = { bankr: 'all', community: 'all' };
   let _registryQuery = { bankr: '', community: '' };
+  // Server-side results for the current non-empty community query (the
+  // community snapshot only covers each source's first page, so typed queries
+  // must reach the server). _communitySeq drops stale async responses.
+  let _communityResults = null;
+  let _communitySeq = 0;
+  // Identifiers armed for force-install after a security-scan block. Kept in
+  // view state (not on the button) so re-renders don't disarm the override.
+  const _forceArmed = new Set();
 
   const _LAYER_ORDER = ['workspace', 'bundled', 'managed', 'personal', 'project', 'extra'];
   const _LAYER_LABEL = {
@@ -43,11 +55,10 @@ const SkillsView = (() => {
   function _ensureCss() {
     if (document.querySelector('link[data-view-css="skills"]')) return;
     const data = document.getElementById('agentos-data');
-    const base = data?.dataset.basePath || '';
     const cssVersion = data?.dataset.version || '';
     const link = document.createElement('link');
     link.rel = 'stylesheet';
-    link.href = `${base}/static/css/views/skills.css${cssVersion ? '?v=' + encodeURIComponent(cssVersion) : ''}`;
+    link.href = `${_basePath()}/static/css/views/skills.css${cssVersion ? '?v=' + encodeURIComponent(cssVersion) : ''}`;
     link.dataset.viewCss = 'skills';
     document.head.appendChild(link);
   }
@@ -56,9 +67,13 @@ const SkillsView = (() => {
     _el = el;
     _rpc = App.getRpc();
     _registryCache = { bankr: null, community: null };
+    _registryError = { bankr: '', community: '' };
     _registryLoading = { bankr: false, community: false };
     _catFilter = { bankr: 'all', community: 'all' };
     _registryQuery = { bankr: '', community: '' };
+    _communityResults = null;
+    _communitySeq++;
+    _forceArmed.clear();
     _activeTab = 'installed';
     _ensureCss();
 
@@ -167,9 +182,16 @@ const SkillsView = (() => {
     });
 
     _el.querySelector('#skills-refresh').addEventListener('click', () => {
-      if (_activeTab === 'installed') { _loadData(); return; }
-      _registryCache[_activeTab] = null;
-      _browse(_activeTab, _registryQuery[_activeTab]);
+      if (_activeTab === 'bankr' || _activeTab === 'community') {
+        // Always refresh the full snapshot; the typed query is re-applied at
+        // render time, so a query-scoped fetch never poisons the cache.
+        _registryCache[_activeTab] = null;
+        _registryError[_activeTab] = '';
+        _browse(_activeTab);
+        return;
+      }
+      // Installed and Robinhood tabs both render from skills.list data.
+      _loadData();
     });
 
     _filterInput.addEventListener('input', () => {
@@ -182,8 +204,14 @@ const SkillsView = (() => {
       const group = input.dataset.registrySearch;
       input.addEventListener('input', _debounce(() => {
         _registryQuery[group] = input.value;
-        _renderRegistry(group);
-      }, 160));
+        if (group === 'community') {
+          const q = input.value.trim();
+          if (q) { _searchCommunity(q); return; }
+          _communityResults = null;
+          _communitySeq++; // drop any in-flight search response
+        }
+        _renderRegistryResults(group);
+      }, 250));
     });
 
     const githubBtn = _el.querySelector('#skills-github-install');
@@ -196,6 +224,14 @@ const SkillsView = (() => {
         if (e.key === 'Enter' && githubInput.value.trim()) _installSkill(githubInput.value.trim(), 'github', githubBtn);
       });
     }
+
+    // Keyboard activation for registry cards (role="button" divs).
+    _el.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (e.target.closest('button, a, input')) return; // native elements handle themselves
+      const card = e.target.closest('[data-registry-card]');
+      if (card) { e.preventDefault(); card.click(); }
+    });
 
     // Delegated clicks.
     _el.addEventListener('click', (e) => {
@@ -232,8 +268,9 @@ const SkillsView = (() => {
       const regCard = e.target.closest('[data-registry-card]');
       if (regCard) {
         const group = regCard.dataset.group;
-        const list = _registryCache[group] || [];
-        const item = list.find(r => (r.identifier || r.name) === regCard.dataset.registryCard);
+        const item = _registryItems(group).find(
+          r => (r.identifier || r.name) === regCard.dataset.registryCard
+        );
         if (item) _openRegistryDialog(item);
         return;
       }
@@ -258,8 +295,9 @@ const SkillsView = (() => {
     const panel = _el.querySelector('#skills-tab-' + tab);
     if (panel) panel.hidden = false;
     if (searchWrap) searchWrap.style.visibility = tab === 'installed' ? '' : 'hidden';
+    // A failed load leaves the cache null, so re-entering the tab retries.
     if ((tab === 'bankr' || tab === 'community') && _registryCache[tab] === null && !_registryLoading[tab]) {
-      _browse(tab, '');
+      _browse(tab);
     }
   }
 
@@ -418,6 +456,10 @@ const SkillsView = (() => {
   // ── Robinhood tab (installed Robinhood-family skills) ──────────────────
 
   function _isRobinhoodSkill(skill) {
+    // Partner grouping is a brand surface, not just a filter — restrict it to
+    // bundled skills so a user-installed community skill can't wear the
+    // partner banner by naming itself robinhood-* or claiming the homepage.
+    if (skill.layer !== 'bundled') return false;
     const name = (skill.name || '').toLowerCase();
     const home = (skill.homepage || '').toLowerCase();
     return name.startsWith('robinhood') || home.includes('robinhood.com');
@@ -446,23 +488,57 @@ const SkillsView = (() => {
   // ── Community / Bankr browse ───────────────────────────────────────────
   // A "group" is bankr (source=bankr) or community (all non-bankr sources).
 
-  async function _browse(group, query) {
+  async function _browse(group) {
     if (!_el) return;
     _registryLoading[group] = true;
+    _registryError[group] = '';
     _renderRegistry(group); // shows loading
     try {
-      const params = { query: (query || '').trim(), limit: 200 };
+      const params = { query: '', limit: 500 };
       if (group === 'bankr') params.source = 'bankr';
       const data = await _rpc.call('skills.search', params);
       let results = data.results || [];
       if (group === 'community') results = results.filter(r => r.source !== 'bankr');
       _registryCache[group] = results;
     } catch (err) {
-      _registryCache[group] = { error: err.message };
+      // Leave the cache null so the next tab entry retries automatically.
+      _registryError[group] = err.message;
     } finally {
       _registryLoading[group] = false;
       _renderRegistry(group);
     }
+  }
+
+  async function _searchCommunity(query) {
+    if (!_el || !_rpc) return;
+    const seq = ++_communitySeq;
+    const wrap = _el.querySelector('[data-results="community"]');
+    if (wrap) {
+      wrap.innerHTML = `<div class="sk-registry__loading"><span class="sk-spinner"></span> Searching community skills…</div>`;
+    }
+    let results = [];
+    try {
+      const data = await _rpc.call('skills.search', { query, limit: 100 });
+      results = (data.results || []).filter(r => r.source !== 'bankr');
+    } catch (err) {
+      results = [];
+    }
+    if (seq !== _communitySeq) return; // a newer query superseded this one
+    _communityResults = results;
+    _renderRegistryResults('community');
+  }
+
+  /** The base item list a group renders from (before category/text filters). */
+  function _registryItems(group) {
+    if (
+      group === 'community' &&
+      (_registryQuery.community || '').trim() &&
+      Array.isArray(_communityResults)
+    ) {
+      return _communityResults;
+    }
+    const cache = _registryCache[group];
+    return Array.isArray(cache) ? cache : [];
   }
 
   function _categoriesFor(list) {
@@ -471,47 +547,53 @@ const SkillsView = (() => {
     return counts;
   }
 
+  /** Chips derive from the full snapshot only — they never change on keystrokes. */
+  function _renderChips(group) {
+    if (!_el) return;
+    const chipsWrap = _el.querySelector(`[data-chips="${group}"]`);
+    if (!chipsWrap) return;
+
+    const cache = _registryCache[group];
+    const all = Array.isArray(cache) ? cache : [];
+    const counts = _categoriesFor(all);
+    const hasCats = Object.keys(counts).some(c => c && c !== 'other') || Object.keys(counts).length > 1;
+    if (!hasCats || !all.length) {
+      chipsWrap.innerHTML = '';
+      return;
+    }
+    const cats = ['all', ...Object.keys(counts).sort((a, b) => counts[b] - counts[a])];
+    chipsWrap.innerHTML = cats.map(c => {
+      const active = _catFilter[group] === c;
+      const label = _CAT_LABEL[c] || c;
+      const count = c === 'all' ? all.length : counts[c];
+      return `<button type="button" class="sk-chip-btn${active ? ' is-active' : ''}" data-cat-chip="${_esc(c)}" data-group="${group}">${_esc(label)} <span class="sk-chip-btn__count">${count}</span></button>`;
+    }).join('');
+  }
+
   function _renderRegistry(group) {
+    _renderChips(group);
+    _renderRegistryResults(group);
+  }
+
+  function _renderRegistryResults(group) {
     if (!_el) return;
     const wrap = _el.querySelector(`[data-results="${group}"]`);
-    const chipsWrap = _el.querySelector(`[data-chips="${group}"]`);
     if (!wrap) return;
 
     if (_registryLoading[group]) {
-      if (chipsWrap) chipsWrap.innerHTML = '';
       wrap.innerHTML = `<div class="sk-registry__loading"><span class="sk-spinner"></span> ${group === 'bankr' ? 'Loading Bankr catalog…' : 'Loading community catalog…'}</div>`;
       return;
     }
 
-    const cache = _registryCache[group];
-    if (cache && cache.error) {
-      if (chipsWrap) chipsWrap.innerHTML = '';
-      wrap.innerHTML = `<div class="sk-error">Failed to load: ${_esc(cache.error)}</div>`;
+    if (_registryError[group]) {
+      wrap.innerHTML = `<div class="sk-error">Failed to load: ${_esc(_registryError[group])}<br><span class="sk-dim">Re-open the tab or press Refresh to retry.</span></div>`;
       return;
-    }
-    const all = Array.isArray(cache) ? cache : [];
-
-    // Category chips (only when categories are meaningful — Bankr provides them).
-    if (chipsWrap) {
-      const counts = _categoriesFor(all);
-      const hasCats = Object.keys(counts).some(c => c && c !== 'other') || Object.keys(counts).length > 1;
-      if (hasCats && all.length) {
-        const cats = ['all', ...Object.keys(counts).sort((a, b) => counts[b] - counts[a])];
-        chipsWrap.innerHTML = cats.map(c => {
-          const active = _catFilter[group] === c;
-          const label = _CAT_LABEL[c] || c;
-          const count = c === 'all' ? all.length : counts[c];
-          return `<button type="button" class="sk-chip-btn${active ? ' is-active' : ''}" data-cat-chip="${_esc(c)}" data-group="${group}">${_esc(label)} <span class="sk-chip-btn__count">${count}</span></button>`;
-        }).join('');
-      } else {
-        chipsWrap.innerHTML = '';
-      }
     }
 
     // Apply text + category filters.
     const q = (_registryQuery[group] || '').trim().toLowerCase();
     const cat = _catFilter[group] || 'all';
-    let items = all;
+    let items = _registryItems(group);
     if (cat !== 'all') items = items.filter(r => (r.category || 'other') === cat);
     if (q) {
       items = items.filter(r =>
@@ -532,17 +614,31 @@ const SkillsView = (() => {
     wrap.innerHTML = `<div class="sk-grid sk-grid--registry">${items.map(r => _renderRegistryCard(r, group)).join('')}</div>`;
   }
 
+  function _installAction(r, { small = true } = {}) {
+    if (r.installed) return `<span class="sk-chip sk-chip--ok">✓ Installed</span>`;
+    const key = r.identifier || r.name;
+    const sm = small ? ' btn--sm' : '';
+    if (_forceArmed.has(key)) {
+      return `<button class="btn btn--danger${sm}" data-install="${_esc(key)}" data-source="${_esc(r.source || 'clawhub')}" data-force="1">⚠ Force install</button>`;
+    }
+    return `<button class="btn btn--primary${sm}" data-install="${_esc(key)}" data-source="${_esc(r.source || 'clawhub')}">${small ? 'Install' : 'Install skill'}</button>`;
+  }
+
+  function _logoBadge(r, cls) {
+    // The initials fallback is rendered as a hidden sibling and revealed by a
+    // static onerror handler — never interpolate data into inline JS.
+    const initials = _esc(_initials(r.provider || r.name));
+    const logoUrl = _safeUrl(r.logo);
+    if (!logoUrl) return `<span class="${cls} ${cls}--initials">${initials}</span>`;
+    return `<img class="${cls}" src="${_esc(logoUrl)}" alt="" loading="lazy" onerror="this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='inline-flex'" /><span class="${cls} ${cls}--initials" style="display:none">${initials}</span>`;
+  }
+
   function _renderRegistryCard(r, group) {
-    const badge = r.logo
-      ? `<img class="sk-rcard__logo" src="${_esc(r.logo)}" alt="" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'sk-rcard__logo sk-rcard__logo--initials',textContent:'${_esc(_initials(r.provider || r.name))}'}))" />`
-      : `<span class="sk-rcard__logo sk-rcard__logo--initials">${_esc(_initials(r.provider || r.name))}</span>`;
+    const badge = _logoBadge(r, 'sk-rcard__logo');
     const cat = r.category && r.category !== 'other'
       ? `<span class="sk-rcard__cat">${_esc(_CAT_LABEL[r.category] || r.category)}</span>` : '';
     const desc = r.description || '';
     const key = r.identifier || r.name;
-    const action = r.installed
-      ? `<span class="sk-chip sk-chip--ok">✓ Installed</span>`
-      : `<button class="btn btn--primary btn--sm" data-install="${_esc(key)}" data-source="${_esc(r.source || 'clawhub')}">Install</button>`;
     return `<div class="sk-rcard" data-registry-card="${_esc(key)}" data-group="${group}" role="button" tabindex="0">
       <div class="sk-rcard__head">
         ${badge}
@@ -555,19 +651,13 @@ const SkillsView = (() => {
       <p class="sk-rcard__desc">${_esc(desc || 'View details →')}</p>
       <div class="sk-rcard__foot">
         <span class="sk-rcard__src sk-mono">${_esc(r.source || '')}</span>
-        ${action}
+        ${_installAction(r)}
       </div>
     </div>`;
   }
 
   function _openRegistryDialog(r) {
-    const dlg = _el.querySelector('#skill-detail-dialog');
-    const body = _el.querySelector('#skill-detail-body');
-    if (!dlg || !body) return;
-
-    const badge = r.logo
-      ? `<img class="sk-dialog__logo" src="${_esc(r.logo)}" alt="" onerror="this.remove()" />`
-      : `<span class="sk-dialog__logo sk-dialog__logo--initials">${_esc(_initials(r.provider || r.name))}</span>`;
+    const badge = _logoBadge(r, 'sk-dialog__logo');
     const trustCls = r.trust_level === 'trusted' ? 'sk-chip--ok' : 'sk-chip--warn';
     const chips = [
       `<span class="sk-chip ${trustCls}">${_esc(r.trust_level || 'community')}</span>`,
@@ -597,15 +687,13 @@ const SkillsView = (() => {
       </div>`;
     }
 
-    const homepage = r.homepage
-      ? `<a href="${_esc(r.homepage)}" target="_blank" rel="noopener" class="sk-dialog__link">Source ↗</a>`
+    const homepageUrl = _safeUrl(r.homepage);
+    const homepage = homepageUrl
+      ? `<a href="${_esc(homepageUrl)}" target="_blank" rel="noopener" class="sk-dialog__link">Source ↗</a>`
       : '';
     const key = r.identifier || r.name;
-    const actionBtn = r.installed
-      ? `<span class="sk-chip sk-chip--ok">✓ Installed</span>`
-      : `<button class="btn btn--primary" data-install="${_esc(key)}" data-source="${_esc(r.source || 'clawhub')}">Install skill</button>`;
 
-    body.innerHTML = `
+    _openDialog(`
       <header class="sk-dialog__head">
         <div class="sk-dialog__head-left">
           ${badge}
@@ -625,14 +713,8 @@ const SkillsView = (() => {
       </section>
       <footer class="sk-dialog__foot">
         <small class="sk-dim sk-mono sk-dialog__path">${_esc(key)}</small>
-        ${actionBtn}
-      </footer>`;
-
-    const closeBtn = body.querySelector('#skill-dialog-close');
-    if (closeBtn) closeBtn.addEventListener('click', () => dlg.close(), { once: true });
-    if (dlg.open) dlg.close();
-    if (typeof dlg.showModal === 'function') dlg.showModal();
-    else dlg.setAttribute('open', '');
+        ${_installAction(r, { small: false })}
+      </footer>`);
   }
 
   // ── Installed skill detail dialog ──────────────────────────────────────
@@ -674,10 +756,6 @@ const SkillsView = (() => {
   }
 
   function _openSkillDialog(skill) {
-    const dlg = _el.querySelector('#skill-detail-dialog');
-    const body = _el.querySelector('#skill-detail-body');
-    if (!dlg || !body) return;
-
     const statusDetail = skill.status_detail || '';
     const status = skill.status || (skill.eligible ? 'ready' : 'needs_setup');
     let statusChip;
@@ -723,8 +801,9 @@ const SkillsView = (() => {
       </div>`;
     }
 
-    const homepage = skill.homepage
-      ? `<a href="${_esc(skill.homepage)}" target="_blank" rel="noopener" class="sk-dialog__link">Homepage ↗</a>`
+    const homepageUrl = _safeUrl(skill.homepage);
+    const homepage = homepageUrl
+      ? `<a href="${_esc(homepageUrl)}" target="_blank" rel="noopener" class="sk-dialog__link">Homepage ↗</a>`
       : '';
 
     const footer = skill.file_path
@@ -735,7 +814,7 @@ const SkillsView = (() => {
       ? `<button class="btn btn--sm" data-uninstall="${_esc(skill.name)}">Remove</button>`
       : '';
 
-    body.innerHTML = `
+    _openDialog(`
       <header class="sk-dialog__head">
         <div class="sk-dialog__head-left">
           ${skill.emoji ? `<span class="sk-dialog__emoji">${_esc(skill.emoji)}</span>` : ''}
@@ -754,11 +833,17 @@ const SkillsView = (() => {
       <footer class="sk-dialog__foot">
         ${footer}
         ${removeBtn}
-      </footer>`;
+      </footer>`);
+  }
 
+  /** Fill the shared detail dialog, wire its close button, and show it. */
+  function _openDialog(html) {
+    const dlg = _el.querySelector('#skill-detail-dialog');
+    const body = _el.querySelector('#skill-detail-body');
+    if (!dlg || !body) return;
+    body.innerHTML = html;
     const closeBtn = body.querySelector('#skill-dialog-close');
     if (closeBtn) closeBtn.addEventListener('click', () => dlg.close(), { once: true });
-
     if (dlg.open) dlg.close();
     if (typeof dlg.showModal === 'function') dlg.showModal();
     else dlg.setAttribute('open', '');
@@ -795,6 +880,22 @@ const SkillsView = (() => {
     }
   }
 
+  /** Flip `installed` on cached registry rows matching by identifier or name. */
+  function _markInstalled(identifier, name, installed) {
+    const flip = (list) => {
+      if (!Array.isArray(list)) return;
+      list.forEach(r => {
+        const key = r.identifier || r.name;
+        if ((identifier && key === identifier) || (name && r.name === name)) {
+          r.installed = installed;
+        }
+      });
+    };
+    flip(_registryCache.bankr);
+    flip(_registryCache.community);
+    flip(_communityResults);
+  }
+
   async function _installSkill(identifier, source, btn, force = false) {
     if (!_rpc) return;
     const originalText = btn.textContent;
@@ -806,27 +907,22 @@ const SkillsView = (() => {
         btn.textContent = '✓ Installed';
         btn.classList.remove('btn--primary');
         btn.classList.remove('btn--danger');
-        // Mark the item installed in-place across both cached lists so the
-        // badge flips without discarding the browsed catalog (a full refetch
-        // would blank the grid until it completes).
-        ['bankr', 'community'].forEach(g => {
-          const list = _registryCache[g];
-          if (Array.isArray(list)) {
-            list.forEach(r => {
-              if ((r.identifier || r.name) === identifier) r.installed = true;
-            });
-          }
-        });
+        _forceArmed.delete(identifier);
+        // Mark the item installed in-place so the badge flips without
+        // discarding the browsed catalog.
+        _markInstalled(identifier, res.name, true);
         _loadData();
         return;
       }
 
       // A "dangerous" security verdict is a deliberate block, not a crash.
-      // Explain it and offer an explicit override on the button.
+      // Explain it and arm an explicit force-install override. The armed
+      // state lives in _forceArmed so re-renders keep the button armed.
       const blocked = res.scan_verdict === 'dangerous';
       const n = (res.scan_findings || []).length;
       btn.disabled = false;
       if (blocked && !force) {
+        _forceArmed.add(identifier);
         btn.textContent = '⚠ Force install';
         btn.classList.add('btn--danger');
         btn.classList.remove('btn--primary');
@@ -852,8 +948,11 @@ const SkillsView = (() => {
     btn.textContent = 'Removing…';
     try {
       const res = await _rpc.call('skills.uninstall', { name });
-      if (res.success) { _registryCache = { bankr: null, community: null }; _loadData(); }
-      else { btn.textContent = 'Failed'; UI.toast(res.message || 'Uninstall failed', 'err'); }
+      if (res.success) {
+        // Flip the badge in-place; the browsed catalogs stay valid.
+        _markInstalled('', name, false);
+        _loadData();
+      } else { btn.textContent = 'Failed'; UI.toast(res.message || 'Uninstall failed', 'err'); }
     } catch (err) { btn.textContent = 'Error'; UI.toast(err.message, 'err'); }
   }
 
@@ -874,32 +973,45 @@ const SkillsView = (() => {
     return document.getElementById('agentos-data')?.dataset.basePath || '';
   }
 
-  function _bankrFallbackGlyph(size) {
-    // Drawn "B" mark, used if the brand SVG asset fails to load.
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M9 8h4a2 2 0 0 1 0 4H9zm0 4h4.5a2 2 0 0 1 0 4H9z"/></svg>`;
+  /** Allow only http(s) URLs from remote catalogs — never javascript: etc. */
+  function _safeUrl(url) {
+    const u = String(url || '').trim();
+    return /^https?:\/\//i.test(u) ? u : '';
   }
 
-  function _bankrGlyph(size = 16) {
-    // Official Bankr brand mark (served locally); falls back to a drawn glyph.
-    const src = `${_basePath()}/static/img/bankr-symbol.svg`;
-    const fallback = _bankrFallbackGlyph(size).replace(/"/g, '&quot;');
-    return `<img class="sk-bankr-logo" src="${src}" alt="Bankr" width="${size}" height="${size}" onerror="this.outerHTML='${fallback}'" />`;
+  // Partner brand marks: local asset with a drawn-glyph fallback. Fallback
+  // SVGs are static strings — no data is interpolated into the inline JS.
+  const _BRANDS = {
+    bankr: {
+      asset: 'bankr-symbol.svg',
+      alt: 'Bankr',
+      cls: 'sk-bankr-logo',
+      fallback: (s) => `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M9 8h4a2 2 0 0 1 0 4H9zm0 4h4.5a2 2 0 0 1 0 4H9z"/></svg>`,
+    },
+    robinhood: {
+      asset: 'robinhood-symbol.png',
+      alt: 'Robinhood',
+      cls: 'sk-robinhood-logo',
+      fallback: (s) => `<svg xmlns="http://www.w3.org/2000/svg" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4C10 5 6 12 6 20"/><path d="M6 20l4-4"/><path d="M18 6c-3 0-7 2-8 6"/></svg>`,
+    },
+  };
+
+  function _brandGlyph(brand, size = 16) {
+    const b = _BRANDS[brand];
+    const fallback = b.fallback(size).replace(/"/g, '&quot;');
+    return `<img class="${b.cls}" src="${_basePath()}/static/img/${b.asset}" alt="${b.alt}" width="${size}" height="${size}" onerror="this.outerHTML='${fallback}'" />`;
   }
 
-  function _robinhoodFallbackGlyph(size) {
-    // Drawn feather mark, used if the brand PNG asset fails to load.
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4C10 5 6 12 6 20"/><path d="M6 20l4-4"/><path d="M18 6c-3 0-7 2-8 6"/></svg>`;
-  }
-
-  function _robinhoodGlyph(size = 16) {
-    // Official Robinhood brand mark (served locally); falls back to a drawn glyph.
-    const src = `${_basePath()}/static/img/robinhood-symbol.png`;
-    const fallback = _robinhoodFallbackGlyph(size).replace(/"/g, '&quot;');
-    return `<img class="sk-robinhood-logo" src="${src}" alt="Robinhood" width="${size}" height="${size}" onerror="this.outerHTML='${fallback}'" />`;
-  }
+  const _bankrGlyph = (size = 16) => _brandGlyph('bankr', size);
+  const _robinhoodGlyph = (size = 16) => _brandGlyph('robinhood', size);
 
   function _esc(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   function _layerLabel(layer) {

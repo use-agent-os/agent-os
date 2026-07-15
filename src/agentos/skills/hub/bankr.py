@@ -17,8 +17,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
-from dataclasses import dataclass
 
 import structlog
 
@@ -28,27 +28,16 @@ from agentos.skills.hub.source import SkillBundle, SkillMeta, SkillSource
 
 log = structlog.get_logger(__name__)
 
-_REPO = "BankrBot/skills"
-_REF = "main"
-_TREE_URL = f"https://api.github.com/repos/{_REPO}/git/trees/{_REF}?recursive=1"
-_RAW_BASE = f"https://raw.githubusercontent.com/{_REPO}/{_REF}"
+_DEFAULT_REPO = "BankrBot/skills"
+_DEFAULT_REF = "main"
 _CATALOG_TTL_SECONDS = 15 * 60
+# After a failed catalog fetch, don't retry for this long — the router fans
+# every search out to all sources, so an un-throttled retry would add the full
+# HTTP timeout to every search for the duration of a GitHub outage.
+_FAILURE_RETRY_SECONDS = 60
 _CATALOG_CONCURRENCY = 16
 
-
-def _tree_url(slug: str) -> str:
-    return f"https://github.com/{_REPO}/tree/{_REF}/{slug}"
-
-
-@dataclass
-class _CatalogCache:
-    """In-memory cache of the parsed Bankr catalog listing."""
-
-    metas: list[SkillMeta]
-    fetched_at: float  # time.monotonic() timestamp
-
-    def is_fresh(self, ttl: float) -> bool:
-        return (time.monotonic() - self.fetched_at) < ttl
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
 def _catalog_slugs(tree: dict) -> list[str]:
@@ -66,81 +55,71 @@ def _catalog_slugs(tree: dict) -> list[str]:
 
 
 # Coarse category buckets inferred from the slug/provider so the browse UI can
-# offer meaningful filter chips. Ordered by specificity — first keyword hit wins.
-_CATEGORY_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
-    ("trading", ("trade", "trading", "swap", "uniswap", "dex", "perp", "hyperliquid")),
-    ("defi", ("defi", "aave", "lend", "yield", "vault", "stake", "liquidity", "token")),
-    ("wallet", ("wallet", "account", "erc4337", "erc-4337", "signer", "sign", "custody", "vault")),
-    ("markets", ("polymarket", "kalshi", "prediction", "bet", "market", "odds")),
-    ("social", ("farcaster", "twitter", "x-", "neynar", "social", "community", "chat", "message")),
-    ("data", ("alchemy", "zerion", "data", "monitor", "analytics", "index", "scan", "research")),
-    ("nft", ("nft", "collectible", "mint", "opensea")),
-    ("dev", ("foundry", "contract", "audit", "gas", "deploy", "sdk", "dev", "skill", "eval")),
-    ("infra", ("ens", "rpc", "node", "infra", "gateway", "x402", "webhook")),
+# offer meaningful filter chips. Keywords match whole slug/provider tokens
+# (split on non-alphanumerics), not substrings — so "design" does not become
+# "sign" and "alphabet" does not become "bet". Ordered by specificity — first
+# keyword hit wins.
+_CATEGORY_KEYWORDS: list[tuple[str, frozenset[str]]] = [
+    ("trading", frozenset({"trade", "trading", "swap", "uniswap", "dex", "perp", "hyperliquid"})),
+    ("defi", frozenset({"defi", "aave", "lend", "yield", "vault", "stake", "liquidity", "token"})),
+    ("wallet", frozenset({"wallet", "account", "erc4337", "signer", "sign", "custody"})),
+    ("markets", frozenset({"polymarket", "kalshi", "prediction", "bet", "market", "odds"})),
+    (
+        "social",
+        frozenset({"farcaster", "twitter", "neynar", "social", "community", "chat", "message"}),
+    ),
+    (
+        "data",
+        frozenset(
+            {"alchemy", "zerion", "data", "monitor", "analytics", "index", "scan", "research"}
+        ),
+    ),
+    ("nft", frozenset({"nft", "collectible", "mint", "opensea"})),
+    (
+        "dev",
+        frozenset({"foundry", "contract", "audit", "gas", "deploy", "sdk", "dev", "skill", "eval"}),
+    ),
+    ("infra", frozenset({"ens", "rpc", "node", "infra", "gateway", "x402", "webhook"})),
 ]
 
 
 def _infer_category(slug: str, provider: str) -> str:
-    """Return a coarse category for browse filters, or "" when unknown."""
-    hay = f"{slug} {provider}".lower()
+    """Return a coarse category for browse filters, or "other" when unknown."""
+    tokens = set(_TOKEN_RE.findall(f"{slug} {provider}".lower()))
     for category, keywords in _CATEGORY_KEYWORDS:
-        if any(kw in hay for kw in keywords):
+        if tokens & keywords:
             return category
     return "other"
-
-
-def _meta_from_catalog(slug: str, catalog: dict) -> SkillMeta | None:
-    """Build a browse-time SkillMeta from a parsed catalog.json.
-
-    Returns ``None`` when the skill is not a directly-installable ``bankr``
-    skill (e.g. an ``external`` install), so callers can skip it. The
-    human-readable description lives in ``SKILL.md`` frontmatter (``catalog.json``
-    has none); it is filled in at ``fetch()`` time to keep browsing fast, so the
-    browse card shows slug + provider + catalog demo/setup, but no description.
-    """
-    install = catalog.get("install")
-    if not isinstance(install, dict) or install.get("type") != "bankr":
-        return None
-
-    provider = str(catalog.get("provider") or "")
-    logo_name = catalog.get("logo")
-    logo = f"{_RAW_BASE}/{slug}/{logo_name}" if isinstance(logo_name, str) and logo_name else ""
-
-    setup_raw = catalog.get("setup")
-    setup = [str(s) for s in setup_raw] if isinstance(setup_raw, list) else []
-    demo_raw = catalog.get("demo")
-    demo = demo_raw if isinstance(demo_raw, dict) else {}
-
-    return SkillMeta(
-        name=slug,
-        description="",
-        source_id="bankr",
-        trust_level="community",
-        identifier=_tree_url(slug),
-        homepage=str(catalog.get("providerUrl") or _tree_url(slug)),
-        provider=provider,
-        logo=logo,
-        category=_infer_category(slug, provider),
-        setup=setup,
-        demo=demo,
-    )
 
 
 def _matches(meta: SkillMeta, query: str) -> bool:
     q = query.strip().lower()
     if not q:
         return True
-    haystack = " ".join([meta.name, meta.provider, meta.description, *meta.tags]).lower()
+    haystack = " ".join(
+        [meta.name, meta.provider, meta.category, meta.description, *meta.tags]
+    ).lower()
     return q in haystack
 
 
 class BankrSource(SkillSource):
     """Skill source backed by the BankrBot/skills GitHub catalog."""
 
-    def __init__(self, token: str | None = None) -> None:
-        self._token = token
+    def __init__(
+        self,
+        token: str | None = None,
+        *,
+        repo: str = _DEFAULT_REPO,
+        ref: str = _DEFAULT_REF,
+    ) -> None:
         self._github = GitHubSource(token=token)
-        self._cache: _CatalogCache | None = None
+        self._repo = repo
+        self._ref = ref
+        self._tree_api_url = f"https://api.github.com/repos/{repo}/git/trees/{ref}?recursive=1"
+        self._raw_base = f"https://raw.githubusercontent.com/{repo}/{ref}"
+        self._cache_metas: list[SkillMeta] | None = None
+        self._cache_at = 0.0
+        self._last_failure_at = 0.0
         self._lock = asyncio.Lock()
 
     @property
@@ -151,11 +130,8 @@ class BankrSource(SkillSource):
     def trust_level(self) -> str:
         return "community"
 
-    def _headers(self) -> dict[str, str]:
-        h: dict[str, str] = {"Accept": "application/vnd.github.v3+json"}
-        if self._token:
-            h["Authorization"] = f"token {self._token}"
-        return h
+    def _skill_url(self, slug: str) -> str:
+        return f"https://github.com/{self._repo}/tree/{self._ref}/{slug}"
 
     async def search(self, query: str, limit: int = 200) -> list[SkillMeta]:
         """List Bankr skills (all when query is empty; filtered otherwise)."""
@@ -170,23 +146,22 @@ class BankrSource(SkillSource):
         return await self._github.fetch(identifier)
 
     async def _load_catalog(self) -> list[SkillMeta]:
-        cache = self._cache
-        if cache is not None and cache.is_fresh(_CATALOG_TTL_SECONDS):
-            return cache.metas
-
         async with self._lock:
-            # Re-check after acquiring the lock — another coroutine may have
-            # populated the cache while we waited.
-            cache = self._cache
-            if cache is not None and cache.is_fresh(_CATALOG_TTL_SECONDS):
-                return cache.metas
+            now = time.monotonic()
+            if self._cache_metas is not None and (now - self._cache_at) < _CATALOG_TTL_SECONDS:
+                return self._cache_metas
+            # Negative cache: after a failed fetch, serve what we have (stale
+            # list or empty) without hammering GitHub on every search.
+            if (now - self._last_failure_at) < _FAILURE_RETRY_SECONDS:
+                return self._cache_metas or []
 
             metas = await self._fetch_catalog()
             if metas is None:
-                # Fetch failed: serve stale cache if we have one, else empty.
-                return self._cache.metas if self._cache is not None else []
+                self._last_failure_at = time.monotonic()
+                return self._cache_metas or []
 
-            self._cache = _CatalogCache(metas=metas, fetched_at=time.monotonic())
+            self._cache_metas = metas
+            self._cache_at = time.monotonic()
             return metas
 
     async def _fetch_catalog(self) -> list[SkillMeta] | None:
@@ -195,7 +170,7 @@ class BankrSource(SkillSource):
 
         try:
             async with httpx.AsyncClient(timeout=15, trust_env=_trust_env()) as client:
-                tree_resp = await client.get(_TREE_URL, headers=self._headers())
+                tree_resp = await client.get(self._tree_api_url, headers=self._github._headers())
                 tree_resp.raise_for_status()
                 tree = tree_resp.json()
                 if tree.get("truncated"):
@@ -227,9 +202,9 @@ class BankrSource(SkillSource):
         Only catalog.json is fetched (one request per skill) to keep browsing
         fast; the description is filled in later at fetch()/install time.
         """
-        url = f"{_RAW_BASE}/{slug}/catalog.json"
+        url = f"{self._raw_base}/{slug}/catalog.json"
         try:
-            resp = await client.get(url, headers=self._headers())
+            resp = await client.get(url, headers=self._github._headers())
             resp.raise_for_status()
             catalog = json.loads(resp.content)
         except Exception as exc:
@@ -237,4 +212,45 @@ class BankrSource(SkillSource):
             return None
         if not isinstance(catalog, dict):
             return None
-        return _meta_from_catalog(slug, catalog)
+        return self._meta_from_catalog(slug, catalog)
+
+    def _meta_from_catalog(self, slug: str, catalog: dict) -> SkillMeta | None:
+        """Build a browse-time SkillMeta from a parsed catalog.json.
+
+        Returns ``None`` when the skill is not a directly-installable ``bankr``
+        skill (e.g. an ``external`` install), so callers can skip it. The
+        human-readable description lives in ``SKILL.md`` frontmatter
+        (``catalog.json`` has none); it is filled in at ``fetch()`` time to keep
+        browsing fast, so the browse card shows slug + provider + catalog
+        demo/setup, but no description.
+        """
+        install = catalog.get("install")
+        if not isinstance(install, dict) or install.get("type") != "bankr":
+            return None
+
+        provider = str(catalog.get("provider") or "")
+        logo_name = catalog.get("logo")
+        logo = (
+            f"{self._raw_base}/{slug}/{logo_name}"
+            if isinstance(logo_name, str) and logo_name
+            else ""
+        )
+
+        setup_raw = catalog.get("setup")
+        setup = [str(s) for s in setup_raw] if isinstance(setup_raw, list) else []
+        demo_raw = catalog.get("demo")
+        demo = demo_raw if isinstance(demo_raw, dict) else {}
+
+        return SkillMeta(
+            name=slug,
+            description="",
+            source_id="bankr",
+            trust_level="community",
+            identifier=self._skill_url(slug),
+            homepage=str(catalog.get("providerUrl") or self._skill_url(slug)),
+            provider=provider,
+            logo=logo,
+            category=_infer_category(slug, provider),
+            setup=setup,
+            demo=demo,
+        )

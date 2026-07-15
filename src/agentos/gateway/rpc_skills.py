@@ -341,7 +341,10 @@ async def _handle_skills_search(params: dict | None, ctx: RpcContext) -> dict[st
 
     query = params["query"]
     try:
-        limit = min(int(params.get("limit", 20)), 100)
+        # The browse gallery requests whole catalogs (Bankr alone is ~100
+        # skills), so the cap must comfortably exceed catalog sizes — a cap
+        # sized for paged search results silently truncates browse.
+        limit = min(int(params.get("limit", 20)), 500)
     except (TypeError, ValueError):
         limit = 20
     source_id = params.get("source")

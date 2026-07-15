@@ -323,14 +323,11 @@
 
 /* ─── Registry tab ───────────────────────────────────────────────────── */
 
-.sk-registry { padding: 0; display: flex; flex-direction: column; gap: var(--sp-4); }
-.sk-registry__head { display: flex; gap: var(--sp-2); align-items: center; }
 .sk-github-install {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
 }
-.sk-registry__results { display: flex; flex-direction: column; }
 .sk-registry__hint {
   display: flex;
   flex-direction: column;
@@ -353,11 +350,6 @@
   border-radius: var(--radius-sm);
   margin: 0 2px;
 }
-.sk-registry__hint-icon {
-  width: 36px; height: 36px;
-  color: var(--text-dim);
-}
-.sk-registry__hint-icon svg { width: 36px; height: 36px; }
 .sk-registry__loading {
   display: flex; align-items: center; justify-content: center; gap: 8px;
   padding: var(--sp-6);
@@ -408,7 +400,6 @@
 .sk-tab--bankr.is-active { background: var(--accent); color: var(--accent-foreground); }
 .sk-tab--bankr:not(.is-active) { color: var(--accent); }
 .sk-bankr-logo { display: inline-block; object-fit: contain; vertical-align: middle; border-radius: 3px; }
-.sk-tab .sk-bankr-logo { border-radius: 3px; }
 
 .sk-partner {
   display: flex; align-items: center; gap: var(--sp-4);
@@ -426,7 +417,8 @@
   border-radius: var(--radius-md);
   overflow: hidden;
 }
-.sk-partner__mark .sk-bankr-logo { width: 48px; height: 48px; border-radius: var(--radius-md); }
+/* One rule sizes any brand mark inside the banner — new partners inherit it. */
+.sk-partner__mark > img { width: 48px; height: 48px; border-radius: var(--radius-md); }
 .sk-partner__text { min-width: 0; flex: 1; }
 .sk-partner__name {
   font-family: var(--font-display);
@@ -434,7 +426,6 @@
 }
 .sk-partner__desc { margin: 4px 0 0; font-size: var(--fs-sm); color: var(--text-muted); max-width: 68ch; }
 .sk-partner__link { color: var(--accent); font-weight: 600; font-size: var(--fs-sm); white-space: nowrap; }
-.sk-partner__mark .sk-robinhood-logo { width: 48px; height: 48px; border-radius: var(--radius-md); }
 
 /* ─── Robinhood partner tab ──────────────────────────────────────────── */
 
@@ -460,7 +451,7 @@
   overflow: hidden;
   opacity: 0.9;
 }
-.sk-empty__mark .sk-robinhood-logo { width: 56px; height: 56px; border-radius: var(--radius-md); }
+.sk-empty__mark > img { width: 56px; height: 56px; border-radius: var(--radius-md); }
 .sk-empty__title {
   margin: 0;
   font-family: var(--font-display);

@@ -12,7 +12,7 @@ metadata:
       {
         "emoji": "🪶",
         "homepage": "https://robinhood.com",
-        "requires": { "bins": ["python3"] },
+        "requires": { "anyBins": ["python3", "python"] },
       },
   }
 entrypoint:
