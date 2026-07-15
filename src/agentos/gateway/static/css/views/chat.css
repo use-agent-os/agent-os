@@ -478,23 +478,23 @@
   margin-top: calc(-1 * var(--sp-5) + 6px);
 }
 
-/* User  -  header and body align right */
+/* User  -  transcript row: left-aligned, accent bar, no bubble fill */
 .chat-msg--user,
 .msg.user {
-  align-items: flex-end;
+  align-items: flex-start;
 }
 
 .chat-msg--user .chat-msg-text,
 .msg.user .msg-body {
-  /* Low-tint surface, not a saturated-orange fill: keeps the accent as signal
-     and clears WCAG AA (>7:1 in both themes via color-mix) where #fff on a
-     solid accent fill would fall short. */
-  background: color-mix(in srgb, var(--accent) 12%, var(--bg-surface));
-  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+  /* Transcript language: the 2px accent bar is the speaker signal; no fill,
+     no radius, no shadow. Text keeps the reading measure of the column. */
+  background: none;
+  border: 0;
+  border-left: 2px solid var(--accent);
+  border-radius: 0;
+  box-shadow: none;
   color: var(--text);
-  border-radius: var(--radius-md);
-  padding: var(--sp-2) var(--sp-4);
-  box-shadow: var(--shadow-sm);
+  padding: var(--sp-1) var(--sp-4);
   font-size: var(--fs-sm);
   line-height: 1.6;
   display: flex;
@@ -504,10 +504,9 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
-  max-width: 78%;
+  max-width: 100%;
   min-width: 56px;
-  min-height: 32px;
-  margin-left: auto;
+  min-height: 24px;
 }
 
 /* Assistant  -  bubble aligns left naturally */
@@ -760,8 +759,6 @@
 .chat-msg-avatar svg,
 .role-label svg { width: 14px; height: 14px; opacity: 0.5; }
 
-.msg.user .role-label { text-align: right; }
-
 .msg-header {
   display: flex;
   align-items: center;
@@ -801,8 +798,6 @@
   opacity: 0.6;
   padding: 0 var(--sp-1);
 }
-.chat-msg--user .chat-msg-time,
-.msg.user .msg-time { text-align: right; }
 
 /* ─── Per-turn metadata footer (model + session tokens + combo) ─────── */
 .msg-meta {
@@ -1496,7 +1491,7 @@
 }
 
 .msg.user .msg-body.msg-body--has-attachments {
-  align-items: flex-end;
+  align-items: flex-start;
   background: transparent;
   border: 0;
   border-radius: 0;
@@ -1505,21 +1500,22 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-  max-width: min(360px, 78%);
+  max-width: min(520px, 100%);
   padding: 0;
 }
 
 .msg.user .msg-body--has-attachments .msg-attachment-text {
-  align-self: flex-end;
-  background: var(--accent);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
-  color: #fff;
+  align-self: flex-start;
+  background: none;
+  border-left: 2px solid var(--accent);
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--text);
   line-height: 1.6;
-  max-width: min(360px, 100%);
-  min-height: 32px;
+  max-width: 100%;
+  min-height: 24px;
   min-width: 56px;
-  padding: var(--sp-2) var(--sp-4);
+  padding: var(--sp-1) var(--sp-4);
   text-align: start;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1527,7 +1523,7 @@
 }
 
 .msg.user .msg-body--has-attachments .msg-attachments {
-  justify-content: flex-end;
+  justify-content: flex-start;
   max-width: 100%;
   margin: 0;
   user-select: text;

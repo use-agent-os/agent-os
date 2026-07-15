@@ -112,10 +112,11 @@ def test_chat_sent_attachment_images_render_as_separate_thumbnail_attachments() 
     thumb_end = css.index("/* ─── Pending Queue", thumb_start)
     thumb_block = css[thumb_start:thumb_end]
 
-    assert "max-width: min(360px, 78%);" in body_block
+    assert "max-width: min(520px, 100%);" in body_block
     assert "border: 0;" in body_block
     assert "background: transparent;" in body_block
-    assert "max-width: min(360px, 100%);" in text_block
+    assert "max-width: 100%;" in text_block
+    assert "border-left: 2px solid var(--accent);" in text_block
     assert "max-width: 100%;" in attachments_block
     assert "user-select: text;" in attachments_block
     assert "width: min(260px, 42vw);" in thumb_block
