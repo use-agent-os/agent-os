@@ -112,11 +112,11 @@ def test_chat_sent_attachment_images_render_as_separate_thumbnail_attachments() 
     thumb_end = css.index("/* ─── Pending Queue", thumb_start)
     thumb_block = css[thumb_start:thumb_end]
 
-    assert "max-width: min(520px, 100%);" in body_block
+    assert "max-width: min(520px, 78%);" in body_block
     assert "border: 0;" in body_block
     assert "background: transparent;" in body_block
     assert "max-width: 100%;" in text_block
-    assert "border-left: 2px solid var(--accent);" in text_block
+    assert "border-radius: var(--radius-md);" in text_block
     assert "max-width: 100%;" in attachments_block
     assert "user-select: text;" in attachments_block
     assert "width: min(260px, 42vw);" in thumb_block
@@ -3224,16 +3224,20 @@ def test_chat_thread_does_not_duplicate_composer_bottom_clearance() -> None:
 
 def test_chat_input_bar_tightens_desktop_bottom_padding_but_keeps_mobile_safe_area() -> None:
     css = CHAT_CSS.read_text(encoding="utf-8")
-    desktop_padding = "padding: var(--sp-2) var(--sp-4) var(--sp-1);"
+    # The floating pill uses a symmetric base padding; the exact desktop value
+    # is pinned inside the .chat-input-bar block below.
+    bar_start = css.index(".chat-input-bar {")
+    bar_block = css[bar_start : css.index("}", bar_start)]
+    desktop_padding = "padding: var(--sp-2) var(--sp-3);"
     mobile_safe_area = (
         "padding-bottom: calc(var(--sp-2) + env(safe-area-inset-bottom, 0px));"
     )
 
     assert ".content:has(> .chat)" in css
     assert "padding-bottom: 0;" in css
-    assert desktop_padding in css
+    assert desktop_padding in bar_block
     assert mobile_safe_area in css
-    assert css.rfind(mobile_safe_area) > css.index(desktop_padding)
+    assert css.rfind(mobile_safe_area) > bar_start
 
 
 def test_chat_task_lifecycle_events_are_session_scoped() -> None:
