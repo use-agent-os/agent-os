@@ -112,10 +112,11 @@ def test_chat_sent_attachment_images_render_as_separate_thumbnail_attachments() 
     thumb_end = css.index("/* ─── Pending Queue", thumb_start)
     thumb_block = css[thumb_start:thumb_end]
 
-    assert "max-width: min(360px, 78%);" in body_block
+    assert "max-width: min(520px, 78%);" in body_block
     assert "border: 0;" in body_block
     assert "background: transparent;" in body_block
-    assert "max-width: min(360px, 100%);" in text_block
+    assert "max-width: 100%;" in text_block
+    assert "border-radius: var(--radius-md);" in text_block
     assert "max-width: 100%;" in attachments_block
     assert "user-select: text;" in attachments_block
     assert "width: min(260px, 42vw);" in thumb_block
@@ -387,9 +388,9 @@ def test_chat_streaming_indicator_uses_delayed_bottom_dock() -> None:
     # Mark is corner-aligned to the content-left edge and centered in the
     # reserved footer band, so the orbiting ring clears the tool card above
     # and the bubble's bottom edge — no overlap, no rightward-inset orphan.
-    assert "left: var(--sp-4);" in css
+    assert "left: 2px;" in css
     assert "bottom: var(--sp-2);" in css
-    assert "left: calc(var(--sp-4) - 4px);" in css
+    assert "left: -2px;" in css
     assert "bottom: calc(var(--sp-2) - 4px);" in css
     assert "left: calc(var(--sp-4) + 16px);" not in css
     assert "background-image: url('../../img/agentos-mark.png');" in css
@@ -2454,9 +2455,9 @@ def test_savings_popup_does_not_fire_for_replayed_done_frames() -> None:
 
 def test_tool_summary_exposes_visible_running_status() -> None:
     source = CHAT_JS.read_text(encoding="utf-8")
-    assert "function _setToolSummaryStatus(details, status)" in source
-    assert "function _visibleToolSummaryStatus(status)" in source
-    assert "return status === 'running' ? 'running' : '';" in source
+    assert "function _visibleToolSummaryStatus(status, durationMs)" in source
+    assert "statusSpan.hidden = false;" in source
+    assert "return _fmtToolDuration(durationMs);" in source
     build_start = source.index("function _buildToolCallDOM(")
     build_end = source.index("function _retitleToolCallDOM", build_start)
     build_body = source[build_start:build_end]
@@ -2468,8 +2469,10 @@ def test_tool_summary_exposes_visible_running_status() -> None:
         result_start,
     )
     result_body = source[result_start:result_end]
-    assert "_setToolSummaryStatus(details, isError ? 'error' : 'done');" in result_body
-    assert "statusSpan.hidden = !visibleStatus;" in source
+    assert (
+        "_setToolSummaryStatus(details, isError ? 'error' : 'success', elapsedMs);"
+        in result_body
+    )
 
 
 def test_router_fx_settles_but_preserves_winner_animation_when_output_begins() -> None:
@@ -3221,16 +3224,20 @@ def test_chat_thread_does_not_duplicate_composer_bottom_clearance() -> None:
 
 def test_chat_input_bar_tightens_desktop_bottom_padding_but_keeps_mobile_safe_area() -> None:
     css = CHAT_CSS.read_text(encoding="utf-8")
-    desktop_padding = "padding: var(--sp-2) var(--sp-4) var(--sp-1);"
+    # The floating pill uses a symmetric base padding; the exact desktop value
+    # is pinned inside the .chat-input-bar block below.
+    bar_start = css.index(".chat-input-bar {")
+    bar_block = css[bar_start : css.index("}", bar_start)]
+    desktop_padding = "padding: var(--sp-2) var(--sp-3);"
     mobile_safe_area = (
         "padding-bottom: calc(var(--sp-2) + env(safe-area-inset-bottom, 0px));"
     )
 
     assert ".content:has(> .chat)" in css
     assert "padding-bottom: 0;" in css
-    assert desktop_padding in css
+    assert desktop_padding in bar_block
     assert mobile_safe_area in css
-    assert css.rfind(mobile_safe_area) > css.index(desktop_padding)
+    assert css.rfind(mobile_safe_area) > bar_start
 
 
 def test_chat_task_lifecycle_events_are_session_scoped() -> None:

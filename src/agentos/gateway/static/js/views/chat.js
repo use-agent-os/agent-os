@@ -641,6 +641,7 @@ const ChatView = (() => {
   let _attachPreview = null;
   let _slashEl = null;
   let _ctxWarn = null;
+  let _sessionPaletteKeyHandler = null;
   let _fileInput = null;
   let _toolbar = null;
   let _elevatedPill = null;
@@ -1009,7 +1010,7 @@ const ChatView = (() => {
     return model ? `${model}|${u?.routed_tier || ''}` : '';
   }
 
-  function _attachTurnMeta(bubble, model, totalIn, totalOut, turnUsage) {
+  function _attachTurnMeta(bubble, model, totalIn, totalOut, turnUsage, opts = {}) {
     if (!bubble) return;
     bubble.querySelectorAll(':scope > .msg-meta').forEach((el) => el.remove());
     const hasModel = model && model.trim();
@@ -1089,6 +1090,12 @@ const ChatView = (() => {
         : (turnSavedPct > 0 ? `Saved ~${Math.round(turnSavedPct)}%` : 'Cost optimized');
       span.appendChild(label);
       meta.appendChild(span);
+      if (opts.flash && turnSavedPct >= 20) {
+        span.classList.add('msg-meta__saved--flash');
+        span.addEventListener('animationend', () => {
+          span.classList.remove('msg-meta__saved--flash');
+        }, { once: true });
+      }
     }
     if (hasCombo) {
       const span = document.createElement('span');
@@ -1217,6 +1224,7 @@ const ChatView = (() => {
           <span class="chat-session-chip-caret" aria-hidden="true">${_iconChevronDown()}</span>
         </button>
         <button class="chat-session-copy-btn" id="chat-session-copy" title="Copy session key" aria-label="Copy session key">${icons.copy()}</button>
+        <button class="btn btn--icon btn--ghost chat-topbar-export" id="chat-btn-export" title="Export as Markdown" aria-label="Export as Markdown">${icons.download()}</button>
         <span class="chip" id="chat-run-status" title="Idle">Idle</span>
         <span class="chat-ctx-warn hidden" id="chat-ctx-warn">Request ctx</span>`;
       topbarCenter.classList.remove('hidden');
@@ -1237,7 +1245,6 @@ const ChatView = (() => {
           <div class="chat-attachments hidden" id="chat-attach-preview"></div>
           <div class="chat-slash hidden" id="chat-slash"></div>
           <div class="chat-input-bar">
-            <button class="btn btn--icon btn--ghost" id="chat-btn-attach" title="Attach files: PNG, JPEG, GIF, WEBP, PDF, TXT, MD, HTML, CSV, JSON" aria-label="Attach files">${icons.paperclip()}</button>
             <div class="chat-toolbar-wrap">
               <button type="button" class="btn btn--icon btn--ghost chat-toolbar-trigger" id="chat-toolbar-trigger"
                       title="Run modes — execution, router"
@@ -1273,14 +1280,15 @@ const ChatView = (() => {
                 </div>
               </div>
             </div>
+            <button class="btn btn--icon btn--ghost" id="chat-btn-attach" title="Attach files: PNG, JPEG, GIF, WEBP, PDF, TXT, MD, HTML, CSV, JSON" aria-label="Attach files">${icons.paperclip()}</button>
             <div class="chat-input-wrap">
+              <span class="chat-input-glyph" aria-hidden="true">&gt;</span>
               <textarea class="chat-textarea" id="chat-textarea" rows="1"
                         placeholder="Send a message..." maxlength="100000"
                         aria-label="Message to send"></textarea>
             </div>
             <button class="btn btn--icon btn--ghost" id="chat-btn-mic" title="Record voice input" aria-label="Record voice input">${icons.microphone ? icons.microphone() : icons.chat()}</button>
             <button class="btn btn--icon btn--ghost" id="chat-btn-new" title="New chat session in the current agent" aria-label="New chat session in the current agent">${icons.plus()}</button>
-            <button class="btn btn--icon btn--ghost" id="chat-btn-export" title="Export as Markdown" aria-label="Export as Markdown">${icons.download()}</button>
             <button class="btn btn--icon btn--primary" id="chat-btn-send" title="Send (queues while streaming)" aria-label="Send message">${icons.send()}</button>
             <button class="btn btn--icon btn--danger hidden" id="chat-btn-stop" title="Stop current response (Esc)" aria-label="Stop current response">${icons.stop()}</button>
           </div>
@@ -2066,6 +2074,18 @@ const ChatView = (() => {
       });
       search.focus();
     });
+
+    _sessionPaletteKeyHandler = (e) => {
+      const isPaletteKey = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k';
+      if (!isPaletteKey) return;
+      const chip = document.getElementById('chat-session-chip');
+      if (!chip) return;
+      e.preventDefault();
+      if (!chip.classList.contains('is-active')) chip.click();
+      const search = document.querySelector('.chat-session-popover-search');
+      if (search) search.focus();
+    };
+    document.addEventListener('keydown', _sessionPaletteKeyHandler);
   }
 
   /* ── Composer Toolbar Popover (gear button) ────────────────────────── */
@@ -2327,7 +2347,7 @@ const ChatView = (() => {
   function _bindEvents() {
     const attachBtn = _el.querySelector('#chat-btn-attach');
     const newBtn    = _el.querySelector('#chat-btn-new');
-    const exportBtn = _el.querySelector('#chat-btn-export');
+    const exportBtn = document.getElementById('chat-btn-export');
 
     // Send
     _sendBtn.addEventListener('click', _onSend);
@@ -2363,7 +2383,7 @@ const ChatView = (() => {
     });
 
     // Export
-    exportBtn.addEventListener('click', _exportMarkdown);
+    if (exportBtn) exportBtn.addEventListener('click', _exportMarkdown);
 
     // File picker
     attachBtn.addEventListener('click', () => _fileInput.click());
@@ -5078,7 +5098,7 @@ const ChatView = (() => {
         _maybeFireSavingsPopup(_finishedBubble, u, { animate: !isReplayedFrame });
 
         // Attach model + session token footer below the assistant bubble
-        _attachTurnMeta(_finishedBubble, _usageModel, u.input_tokens | 0, u.output_tokens | 0, u);
+        _attachTurnMeta(_finishedBubble, _usageModel, u.input_tokens | 0, u.output_tokens | 0, u, { flash: !isReplayedFrame });
         const _metaIdx = _messages.filter(m => m.role === 'assistant').length - 1;
         if (_metaIdx >= 0) {
           _storeTurnMeta(_sessionKey, _metaIdx, _usageModel, u.input_tokens | 0, u.output_tokens | 0, {
@@ -5261,6 +5281,7 @@ const ChatView = (() => {
     }
     _ctxWarn.classList.remove('hidden');
     _ctxWarn.textContent = `Request ctx ${Math.round(pressure * 100)}% (~${Math.round(tokens / 1000)}k/${Math.round(windowTokens / 1000)}k)`;
+    _ctxWarn.style.setProperty('--ctx-pct', `${Math.min(100, Math.round(pressure * 100))}%`);
   }
 
   /* ── Chat History ───────────────────────────────────────────────────── */
@@ -7048,6 +7069,7 @@ const ChatView = (() => {
     details.className = 'chat-tools-collapse' + (isRunning ? ' chat-tools-collapse--running' : '');
     if (toolId) details.setAttribute('data-tool-id', toolId);
     details.setAttribute('data-tool-name', name || 'tool');
+    if (isRunning) details.dataset.startedAt = String(Date.now());
 
     const summary = document.createElement('summary');
     summary.className = 'chat-tools-summary';
@@ -7082,18 +7104,30 @@ const ChatView = (() => {
     return details;
   }
 
-  function _visibleToolSummaryStatus(status) {
-    return status === 'running' ? 'running' : '';
+  function _fmtToolDuration(ms) {
+    if (!ms || ms < 0) return '';
+    const s = ms / 1000;
+    if (s < 10) return `${s.toFixed(1)}s`;
+    if (s < 60) return `${Math.round(s)}s`;
+    return `${Math.floor(s / 60)}m${Math.round(s % 60)}s`;
   }
 
-  function _applyToolSummaryStatus(statusSpan, status) {
-    const visibleStatus = _visibleToolSummaryStatus(status || '');
+  function _visibleToolSummaryStatus(status, durationMs) {
+    // running renders no text (spinner is CSS-drawn); only settled rows show a duration.
+    if (status === 'success' || status === 'error') return _fmtToolDuration(durationMs);
+    return '';
+  }
+
+  function _applyToolSummaryStatus(statusSpan, status, durationMs) {
+    const visibleStatus = _visibleToolSummaryStatus(status || '', durationMs | 0);
     statusSpan.dataset.status = status || '';
     statusSpan.textContent = visibleStatus;
-    statusSpan.hidden = !visibleStatus;
+    // The span stays in the DOM even when empty: the state glyph (::before)
+    // and the running spinner are CSS-drawn from data-status / parent class.
+    statusSpan.hidden = false;
   }
 
-  function _setToolSummaryStatus(details, status) {
+  function _setToolSummaryStatus(details, status, durationMs) {
     if (!details) return;
     const summary = details.querySelector('.chat-tools-summary');
     if (!summary) return;
@@ -7103,7 +7137,7 @@ const ChatView = (() => {
       statusSpan.className = 'chat-tools-status';
       summary.appendChild(statusSpan);
     }
-    _applyToolSummaryStatus(statusSpan, status || '');
+    _applyToolSummaryStatus(statusSpan, status || '', durationMs | 0);
   }
 
   function _retitleToolCallDOM(details, name, input) {
@@ -7156,7 +7190,9 @@ const ChatView = (() => {
     toolName = toolName || details.getAttribute('data-tool-name') || '';
     details.classList.remove('chat-tools-collapse--running');
     details.classList.add(_toolResultStateClass(payload));
-    _setToolSummaryStatus(details, isError ? 'error' : 'done');
+    const startedAt = Number(details.dataset.startedAt || 0);
+    const elapsedMs = startedAt ? Date.now() - startedAt : 0;
+    _setToolSummaryStatus(details, isError ? 'error' : 'success', elapsedMs);
     const summary = details.querySelector('.chat-tools-summary');
     if (summary) summary.removeAttribute('aria-disabled');
     return details;
@@ -7358,7 +7394,9 @@ const ChatView = (() => {
         toolName = toolName || details.getAttribute('data-tool-name') || '';
         details.classList.remove('chat-tools-collapse--running');
         details.classList.add(_toolResultStateClass(payload));
-        _setToolSummaryStatus(details, isError ? 'error' : 'done');
+        const startedAt = Number(details.dataset.startedAt || 0);
+        const elapsedMs = startedAt ? Date.now() - startedAt : 0;
+        _setToolSummaryStatus(details, isError ? 'error' : 'success', elapsedMs);
         const summary = details.querySelector('.chat-tools-summary');
         if (summary) summary.removeAttribute('aria-disabled');
         const toolsBody = details.querySelector('.chat-tools-body');
@@ -8761,6 +8799,10 @@ const ChatView = (() => {
     _stopRequestedByUser = false;
     _messages = [];
     _clearContextStatus();
+    if (_sessionPaletteKeyHandler) {
+      document.removeEventListener('keydown', _sessionPaletteKeyHandler);
+      _sessionPaletteKeyHandler = null;
+    }
     _lastHeaderRole = '';
     _lastHeaderDay = '';
     _composing = false;
