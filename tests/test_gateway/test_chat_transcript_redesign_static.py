@@ -89,3 +89,22 @@ def test_tool_state_glyphs_come_from_css_state_classes() -> None:
         ".chat-tools-collapse--error > .chat-tools-summary .chat-tools-status::before"
         in css
     )
+
+
+def test_turn_meta_is_mono_voice() -> None:
+    css = _css()
+    start = css.index(".msg-meta {")
+    block = css[start : css.index("}", start)]
+    assert "font-family: var(--font-mono);" in block
+
+
+def test_saved_chip_flashes_once_on_live_turns_only() -> None:
+    js = _js()
+    assert "function _attachTurnMeta(bubble, model, totalIn, totalOut, turnUsage, opts" in js
+    assert "msg-meta__saved--flash" in js
+    assert "{ flash: !isReplayedFrame }" in js
+    css = _css()
+    assert ".msg-meta__saved--flash" in css
+    idx = css.index(".msg-meta__saved--flash")
+    reduced = css.index("prefers-reduced-motion", idx)
+    assert reduced > idx  # a reduced-motion override follows the flash rule

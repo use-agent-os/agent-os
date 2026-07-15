@@ -1009,7 +1009,7 @@ const ChatView = (() => {
     return model ? `${model}|${u?.routed_tier || ''}` : '';
   }
 
-  function _attachTurnMeta(bubble, model, totalIn, totalOut, turnUsage) {
+  function _attachTurnMeta(bubble, model, totalIn, totalOut, turnUsage, opts = {}) {
     if (!bubble) return;
     bubble.querySelectorAll(':scope > .msg-meta').forEach((el) => el.remove());
     const hasModel = model && model.trim();
@@ -1089,6 +1089,12 @@ const ChatView = (() => {
         : (turnSavedPct > 0 ? `Saved ~${Math.round(turnSavedPct)}%` : 'Cost optimized');
       span.appendChild(label);
       meta.appendChild(span);
+      if (opts.flash && turnSavedPct >= 20) {
+        span.classList.add('msg-meta__saved--flash');
+        span.addEventListener('animationend', () => {
+          span.classList.remove('msg-meta__saved--flash');
+        }, { once: true });
+      }
     }
     if (hasCombo) {
       const span = document.createElement('span');
@@ -5078,7 +5084,7 @@ const ChatView = (() => {
         _maybeFireSavingsPopup(_finishedBubble, u, { animate: !isReplayedFrame });
 
         // Attach model + session token footer below the assistant bubble
-        _attachTurnMeta(_finishedBubble, _usageModel, u.input_tokens | 0, u.output_tokens | 0, u);
+        _attachTurnMeta(_finishedBubble, _usageModel, u.input_tokens | 0, u.output_tokens | 0, u, { flash: !isReplayedFrame });
         const _metaIdx = _messages.filter(m => m.role === 'assistant').length - 1;
         if (_metaIdx >= 0) {
           _storeTurnMeta(_sessionKey, _metaIdx, _usageModel, u.input_tokens | 0, u.output_tokens | 0, {

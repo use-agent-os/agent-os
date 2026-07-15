@@ -757,6 +757,7 @@
   flex-wrap: wrap;
   gap: 4px 8px;
   font-size: var(--fs-xs);
+  font-family: var(--font-mono);
   /* --text-dim directly (4.98:1 dark / 5.69:1 light) instead of muted@0.75,
      which dropped light theme to ~4.39:1 and forced calc(1/0.75) lift hacks. */
   color: var(--text-dim);
@@ -2499,6 +2500,33 @@
 
 .msg-meta__saved-label {
   letter-spacing: 0.01em;
+}
+
+/* One-shot shimmer when a live turn lands significant routed savings.
+   Runs once (animation-iteration-count 1), then the chip rests. */
+.msg-meta__saved--flash .msg-meta__saved-label {
+  color: transparent;
+  background: linear-gradient(
+    100deg,
+    var(--accent) 0%,
+    var(--accent) 38%,
+    color-mix(in srgb, var(--accent) 30%, var(--text)) 50%,
+    var(--accent) 62%,
+    var(--accent) 100%
+  );
+  background-size: 220% 100%;
+  background-position: 140% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: contextSeparatorShimmer 1.4s ease-out 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msg-meta__saved--flash .msg-meta__saved-label {
+    animation: none;
+    color: var(--accent);
+    background: none;
+  }
 }
 
 /* ─── "Saved ~X%" floating label  -  viewport-centered, headline weight ── */
