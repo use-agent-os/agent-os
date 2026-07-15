@@ -5267,6 +5267,7 @@ const ChatView = (() => {
     }
     _ctxWarn.classList.remove('hidden');
     _ctxWarn.textContent = `Request ctx ${Math.round(pressure * 100)}% (~${Math.round(tokens / 1000)}k/${Math.round(windowTokens / 1000)}k)`;
+    _ctxWarn.style.setProperty('--ctx-pct', `${Math.min(100, Math.round(pressure * 100))}%`);
   }
 
   /* ── Chat History ───────────────────────────────────────────────────── */

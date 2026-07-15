@@ -108,3 +108,16 @@ def test_saved_chip_flashes_once_on_live_turns_only() -> None:
     idx = css.index(".msg-meta__saved--flash")
     reduced = css.index("prefers-reduced-motion", idx)
     assert reduced > idx  # a reduced-motion override follows the flash rule
+
+
+def test_streaming_caret_blinks_at_insertion_point() -> None:
+    css = _css()
+    assert ".msg.streaming .msg-body .msg-text-seg:last-of-type::after" in css
+    idx = css.index(".msg.streaming .msg-body .msg-text-seg:last-of-type::after")
+    block = css[idx : css.index("}", idx)]
+    assert "'\\258d'" in block.lower() or "'▍'" in block  # ▍
+
+
+def test_ctx_warn_renders_hairline_gauge() -> None:
+    assert "--ctx-pct" in _css()
+    assert "setProperty('--ctx-pct'" in _js()
