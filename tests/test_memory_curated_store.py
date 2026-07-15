@@ -107,3 +107,62 @@ def test_entries_for_and_error_payloads_return_copies(store: CuratedMemoryStore)
     external = store.entries_for("memory")
     external.append("also mutated")
     assert store.entries_for("memory") == ["x" * 150]
+
+
+def test_batch_frees_space_and_adds_in_one_call(tmp_path: Path):
+    s = CuratedMemoryStore(memory_dir=tmp_path, memory_char_limit=60, user_char_limit=100)
+    s.load_from_disk()
+    s.add("memory", "a" * 50)
+    # A lone add would overflow; batch removes then adds — checked on final state.
+    result = s.apply_batch("memory", [
+        {"action": "remove", "old_text": "aaa"},
+        {"action": "add", "content": "b" * 50},
+    ])
+    assert result["success"] is True
+    assert s.entries_for("memory") == ["b" * 50]
+
+
+def test_batch_is_all_or_nothing_on_bad_op(store: CuratedMemoryStore):
+    store.add("memory", "keep me")
+    result = store.apply_batch("memory", [
+        {"action": "remove", "old_text": "keep me"},
+        {"action": "frobnicate"},
+    ])
+    assert result["success"] is False
+    assert store.entries_for("memory") == ["keep me"]  # nothing applied
+
+
+def test_batch_final_budget_overflow_rejects_whole_batch(tmp_path: Path):
+    s = CuratedMemoryStore(memory_dir=tmp_path, memory_char_limit=60, user_char_limit=100)
+    s.load_from_disk()
+    result = s.apply_batch("memory", [
+        {"action": "add", "content": "x" * 40},
+        {"action": "add", "content": "y" * 40},
+    ])
+    assert result["success"] is False
+    assert s.entries_for("memory") == []
+
+
+def test_external_drift_blocks_replace_and_writes_backup(store: CuratedMemoryStore, tmp_path: Path):
+    store.add("memory", "tool-written entry")
+    # External writer appends free-form content that won't round-trip. Padded
+    # past the fixture's 200-char memory limit so the single collapsed entry
+    # trips the drift guard's entry-size-overflow signal (store fixture uses
+    # memory_char_limit=200; a short append round-trips cleanly and would not
+    # be detected as drift).
+    mem = tmp_path / "MEMORY.md"
+    mem.write_text(
+        mem.read_text() + "\n\n## Manually added section\n" + "free text " * 30
+    )
+    result = store.replace("memory", "tool-written", "updated")
+    assert result["success"] is False
+    assert "drift_backup" in result
+    assert list(tmp_path.glob("MEMORY.md.bak.*")), "backup snapshot must exist"
+
+
+def test_add_skips_drift_guard(store: CuratedMemoryStore, tmp_path: Path):
+    store.add("memory", "entry one")
+    mem = tmp_path / "MEMORY.md"
+    mem.write_text(mem.read_text() + "\n\nfree text appended externally")
+    result = store.add("memory", "entry two")
+    assert result["success"] is True  # append-only add never clobbers

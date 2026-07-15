@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -87,7 +88,7 @@ class CuratedMemoryStore:
             return {"success": False, "error": scan_error}
 
         with self._file_lock(self._path_for(target)):
-            self._reload_target(target)
+            self._reload_target(target, skip_drift=True)
             entries = self.entries_for(target)
             limit = self._char_limit(target)
             if content in entries:
@@ -126,7 +127,9 @@ class CuratedMemoryStore:
             return {"success": False, "error": scan_error}
 
         with self._file_lock(self._path_for(target)):
-            self._reload_target(target)
+            bak = self._reload_target(target, skip_drift=False)
+            if bak:
+                return self._drift_error(self._path_for(target), bak)
             entries = self.entries_for(target)
             matches = [(i, e) for i, e in enumerate(entries) if old_text in e]
             if not matches:
@@ -171,7 +174,9 @@ class CuratedMemoryStore:
         if not old_text:
             return {"success": False, "error": "old_text cannot be empty."}
         with self._file_lock(self._path_for(target)):
-            self._reload_target(target)
+            bak = self._reload_target(target, skip_drift=False)
+            if bak:
+                return self._drift_error(self._path_for(target), bak)
             entries = self.entries_for(target)
             matches = [(i, e) for i, e in enumerate(entries) if old_text in e]
             if not matches:
@@ -194,6 +199,130 @@ class CuratedMemoryStore:
             self._save(target)
         return self._success(target, "Entry removed.")
 
+    def apply_batch(self, target: str, operations: list[dict[str, Any]]) -> dict[str, Any]:
+        """Apply a sequence of add/replace/remove ops to one target atomically.
+
+        All operations are validated and applied against the FINAL budget --
+        intermediate overflow is irrelevant. This lets the model free space
+        (remove/replace) and add new entries in a SINGLE call instead of the
+        multi-turn consolidate-then-retry dance that re-sends the whole
+        conversation context several times.
+
+        Semantics: all-or-nothing. If any op is malformed, doesn't match, or
+        the net result would exceed the char limit, NOTHING is written and an
+        error is returned describing the first failure plus the live state.
+        """
+        if not operations:
+            return {"success": False, "error": "operations list is empty."}
+
+        # Scan every add/replace content for injection/exfil BEFORE touching
+        # disk -- a single poisoned op rejects the whole batch.
+        for i, op in enumerate(operations):
+            act = (op or {}).get("action")
+            new_content = (op or {}).get("content")
+            if act in {"add", "replace"} and new_content:
+                scan_error = _scan(new_content)
+                if scan_error:
+                    return {"success": False, "error": f"Operation {i + 1}: {scan_error}"}
+
+        with self._file_lock(self._path_for(target)):
+            bak = self._reload_target(target, skip_drift=False)
+            if bak:
+                return self._drift_error(self._path_for(target), bak)
+
+            # Work on a copy; only commit if the whole batch validates.
+            working: list[str] = self.entries_for(target)
+            limit = self._char_limit(target)
+
+            for i, op in enumerate(operations):
+                op = op or {}
+                act = op.get("action")
+                content = (op.get("content") or "").strip()
+                old_text = (op.get("old_text") or "").strip()
+                pos = f"Operation {i + 1} ({act or 'unknown'})"
+
+                if act == "add":
+                    if not content:
+                        return self._batch_error(target, f"{pos}: content is required.")
+                    if content in working:
+                        continue  # idempotent -- skip duplicate, don't fail the batch
+                    working.append(content)
+
+                elif act == "replace":
+                    if not old_text:
+                        return self._batch_error(target, f"{pos}: old_text is required.")
+                    if not content:
+                        return self._batch_error(
+                            target,
+                            f"{pos}: content is required (use action='remove' to delete).",
+                        )
+                    matches = [j for j, e in enumerate(working) if old_text in e]
+                    if not matches:
+                        return self._batch_error(
+                            target, f"{pos}: no entry matched '{old_text}'."
+                        )
+                    if len({working[j] for j in matches}) > 1:
+                        return self._batch_error(
+                            target,
+                            f"{pos}: '{old_text}' matched multiple distinct entries -- "
+                            f"be more specific.",
+                        )
+                    working[matches[0]] = content
+
+                elif act == "remove":
+                    if not old_text:
+                        return self._batch_error(target, f"{pos}: old_text is required.")
+                    matches = [j for j, e in enumerate(working) if old_text in e]
+                    if not matches:
+                        return self._batch_error(
+                            target, f"{pos}: no entry matched '{old_text}'."
+                        )
+                    if len({working[j] for j in matches}) > 1:
+                        return self._batch_error(
+                            target,
+                            f"{pos}: '{old_text}' matched multiple distinct entries -- "
+                            f"be more specific.",
+                        )
+                    working.pop(matches[0])
+
+                else:
+                    return self._batch_error(
+                        target, f"{pos}: unknown action. Use add, replace, or remove."
+                    )
+
+            # Budget check against the FINAL state only.
+            new_total = len(ENTRY_DELIMITER.join(working)) if working else 0
+            if new_total > limit:
+                current = self._char_count(target)
+                return self._consolidation_failure({
+                    "success": False,
+                    "error": (
+                        f"After applying all {len(operations)} operations, memory would be "
+                        f"at {new_total:,}/{limit:,} chars -- over the limit. Remove or "
+                        f"shorten more entries in the same batch (see current_entries "
+                        f"below), then retry."
+                    ),
+                    "current_entries": list(self.entries_for(target)),
+                    "usage": f"{current:,}/{limit:,}",
+                })
+
+            # Commit.
+            self._set_entries(target, working)
+            self._save(target)
+
+        return self._success(target, f"Applied {len(operations)} operation(s).")
+
+    def _batch_error(self, target: str, message: str) -> dict[str, Any]:
+        """Build a batch-abort error that reports live (uncommitted) state."""
+        current = self._char_count(target)
+        limit = self._char_limit(target)
+        return self._consolidation_failure({
+            "success": False,
+            "error": message + " No operations were applied (batch is all-or-nothing).",
+            "current_entries": list(self.entries_for(target)),
+            "usage": f"{current:,}/{limit:,}",
+        })
+
     # -- internals ---------------------------------------------------------
 
     def _path_for(self, target: str) -> Path:
@@ -212,13 +341,111 @@ class CuratedMemoryStore:
     def _char_limit(self, target: str) -> int:
         return self.user_char_limit if target == "user" else self.memory_char_limit
 
-    def _reload_target(self, target: str) -> None:
+    def _reload_target(self, target: str, skip_drift: bool = True) -> str | None:
+        """Re-read entries from disk into in-memory state.
+
+        Called under the file lock to get the latest state before mutating.
+        Returns the backup path if external drift was detected (the on-disk
+        file contains content that wouldn't round-trip through our
+        parser/serializer, OR an entry larger than the store's char limit).
+        When drift is detected the caller must abort the mutation — flushing
+        would discard the un-roundtrippable content. Returns None on clean
+        reload.
+
+        When *skip_drift* is True the round-trip / entry-size check is
+        bypassed. Used by ``add``, which appends without rewriting, so
+        existing content is never clobbered.
+        """
+        bak = None if skip_drift else self._detect_external_drift(target)
         fresh = list(dict.fromkeys(self._read_file(self._path_for(target))))
         self._set_entries(target, fresh)
+        return bak
+
+    def _detect_external_drift(self, target: str) -> str | None:
+        """Return a backup-path string if on-disk content shows external drift.
+
+        The memory file is supposed to be a list of small entries the store
+        wrote, joined by §. Detect drift via two signals:
+
+        1. Round-trip mismatch — re-parsing and re-serializing the file
+           doesn't produce identical bytes (rare; would catch oddly-encoded
+           delimiters).
+        2. Entry-size overflow — any single parsed entry exceeds the store's
+           whole-file char limit. The store budgets the ENTIRE file against
+           that limit; no single tool-written entry can exceed it. When we
+           see one entry larger than the limit, an external writer (patch
+           tool, shell append, manual edit, sister session) appended
+           free-form content into what the store will treat as one entry.
+           Flushing would then truncate that entry to the model's new
+           content, discarding the appended bytes.
+
+        Returns the absolute path of the .bak file when drift was found and
+        backed up; returns None when the file looks tool-shaped.
+        """
+        path = self._path_for(target)
+        if not path.exists():
+            return None
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        if not raw.strip():
+            return None
+
+        parsed = [e.strip() for e in raw.split(ENTRY_DELIMITER) if e.strip()]
+        roundtrip = ENTRY_DELIMITER.join(parsed)
+
+        char_limit = self._char_limit(target)
+        max_entry_len = max((len(e) for e in parsed), default=0)
+
+        drift_detected = (raw.strip() != roundtrip) or (max_entry_len > char_limit)
+        if not drift_detected:
+            return None
+
+        # Drift confirmed — snapshot the file so the operator can recover
+        # whatever the external writer added, then return the .bak path so
+        # the caller can refuse the mutation.
+        ts = int(time.time())
+        bak_path = path.with_suffix(path.suffix + f".bak.{ts}")
+        try:
+            bak_path.write_text(raw, encoding="utf-8")
+        except OSError:
+            return str(bak_path) + " (BACKUP FAILED — file unchanged on disk)"
+        return str(bak_path)
 
     def _save(self, target: str) -> None:
         self._memory_dir.mkdir(parents=True, exist_ok=True)
         self._write_file(self._path_for(target), self.entries_for(target))
+
+    @staticmethod
+    def _drift_error(path: Path, bak_path: str) -> dict[str, Any]:
+        """Build the error dict returned when external drift is detected.
+
+        The on-disk memory file contains content that wouldn't round-trip
+        through the store's parser/serializer — flushing would discard the
+        appended/edited content from a patch tool, shell append, manual
+        edit, or sister-session write. We refuse the mutation, point the
+        operator at the .bak.<ts> snapshot we took, and tell them what to do
+        next.
+        """
+        return {
+            "success": False,
+            "error": (
+                f"Refusing to write {path.name}: file on disk has content that "
+                f"wouldn't round-trip through the memory tool (likely added by "
+                f"the patch tool, a shell append, a manual edit, or a "
+                f"concurrent session). A snapshot was saved to {bak_path}. "
+                f"Resolve the drift first — either rewrite the file as a clean "
+                f"§-delimited list of entries, or move the extra content out — "
+                f"then retry."
+            ),
+            "drift_backup": bak_path,
+            "remediation": (
+                "Open the .bak file, integrate the missing entries into memory "
+                "one at a time via add, then remove or rewrite the original "
+                "file to a clean state."
+            ),
+        }
 
     def _consolidation_failure(self, response: dict[str, Any]) -> dict[str, Any]:
         self._consolidation_failures += 1
