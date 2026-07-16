@@ -658,6 +658,40 @@ async def test_doctor_memory_status_health_is_agent_scoped(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_doctor_memory_status_includes_curated_section(tmp_path):
+    manager = FakeMemoryManager(
+        workspace_dir=tmp_path,
+        status_payload={
+            "agent_id": "main",
+            "file_count": 0,
+            "chunk_count": 0,
+            "total_size_bytes": 0,
+            "source_counts": {},
+            "vec_available": False,
+            "fts_available": True,
+            "degraded": [],
+            "curated": {
+                "memory": {"entries": 2, "usage": "48/4,000"},
+                "user": {"entries": 1, "usage": "11/2,000"},
+            },
+        },
+    )
+
+    res = await get_dispatcher().dispatch(
+        "memory-status-curated",
+        "doctor.memory.status",
+        {"agentId": "main"},
+        _ctx(memory_managers={"main": manager}),
+    )
+
+    assert res.error is None, res.error
+    assert res.payload["curated"] == {
+        "memory": {"entries": 2, "usage": "48/4,000"},
+        "user": {"entries": 1, "usage": "11/2,000"},
+    }
+
+
+@pytest.mark.asyncio
 async def test_doctor_memory_status_warns_for_oldest_pending_repair_age(tmp_path):
     storage = await SessionStorage.open(tmp_path / "sessions.db")
     old_ms = int(datetime.now(UTC).timestamp() * 1000) - (25 * 60 * 60 * 1000)

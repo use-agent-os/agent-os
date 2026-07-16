@@ -322,6 +322,7 @@ async def _handle_doctor_memory_status(params: dict | None, ctx: RpcContext) -> 
         "ftsAvailable": bool(manager_status.get("fts_available", False)),
         "sourceCounts": manager_status.get("source_counts", {}),
         "degraded": degraded_rows,
+        "curated": manager_status.get("curated") or {},
     }
     payload.update(
         await memory_health_from_durable_ledger(

@@ -152,6 +152,23 @@ def memory_status_cmd(
     )
     console.print(table)
 
+    curated = payload.get("curated") or {}
+    if curated:
+        curated_table = Table(title="Curated memory (MEMORY.md / USER.md)", show_header=True)
+        curated_table.add_column("Store")
+        curated_table.add_column("Entries", justify="right")
+        curated_table.add_column("Usage")
+        for store_name in ("memory", "user"):
+            store_status = curated.get(store_name) or {}
+            if not store_status:
+                continue
+            curated_table.add_row(
+                "MEMORY.md" if store_name == "memory" else "USER.md",
+                str(store_status.get("entries", "")),
+                str(store_status.get("usage", "")),
+            )
+        console.print(curated_table)
+
 
 @memory_app.command("index")
 def memory_index_cmd(

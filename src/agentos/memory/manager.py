@@ -373,7 +373,34 @@ class MemoryManager:
         status.update(memory_config_diagnostics(self.memory_config))
         status.update(self.effective_retrieval_metadata())
         status["degraded"] = [d.as_dict() for d in self.degraded]
+        curated = await metric("curated", "status", self._curated_status, None)
+        if curated:
+            status["curated"] = curated
         return status
+
+    async def _curated_status(self) -> dict[str, Any] | None:
+        if self.memory_dir is None:
+            return None
+        from .curated import CuratedMemoryStore
+
+        memory_limit = getattr(self.memory_config, "curated_memory_char_limit", 4000)
+        user_limit = getattr(self.memory_config, "curated_user_char_limit", 2000)
+        store = CuratedMemoryStore(
+            memory_dir=self.memory_dir,
+            memory_char_limit=memory_limit,
+            user_char_limit=user_limit,
+        )
+        store.load_from_disk()
+        return {
+            "memory": {
+                "entries": len(store.entries_for("memory")),
+                "usage": store.usage_for("memory"),
+            },
+            "user": {
+                "entries": len(store.entries_for("user")),
+                "usage": store.usage_for("user"),
+            },
+        }
 
     def effective_retrieval_metadata(self) -> dict[str, str]:
         return effective_retrieval_metadata(
