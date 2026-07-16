@@ -47,27 +47,44 @@ def test_downloaded_model_dir_unknown_model_returns_none(tmp_path, monkeypatch) 
     assert md.downloaded_model_dir("nope/none") is None
 
 
+_CDN_HOST = "https://cdn.example-xet.invalid/signed/"
+
+
 def _mock_transport(fetched: list[str]) -> httpx.MockTransport:
+    """Mirror Hugging Face: ``resolve/`` 302s to a signed CDN URL.
+
+    ``fetched`` records only the origin (pre-redirect) requests, so callers can
+    still count one entry per manifest file.
+    """
+
     def handler(request: httpx.Request) -> httpx.Response:
-        fetched.append(str(request.url))
-        name = str(request.url).rsplit("/", 1)[-1]
-        return httpx.Response(200, content=f"data-{name}".encode())
+        url = str(request.url)
+        name = url.rsplit("/", 1)[-1]
+        if url.startswith(_CDN_HOST):
+            return httpx.Response(200, content=f"data-{name}".encode())
+        fetched.append(url)
+        return httpx.Response(302, headers={"location": f"{_CDN_HOST}{name}"})
 
     return httpx.MockTransport(handler)
 
 
-@pytest.mark.asyncio
-async def test_download_streams_flattens_and_skips_existing(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(md, "user_models_dir", lambda: tmp_path)
-    fetched: list[str] = []
+def _patch_transport(monkeypatch, transport: httpx.MockTransport) -> None:
+    """Route the downloader's AsyncClient through ``transport``, keeping kwargs."""
+
     real_async_client = httpx.AsyncClient
-    transport = _mock_transport(fetched)
 
     def patched_async_client(*args, **kwargs):
         kwargs["transport"] = transport
         return real_async_client(*args, **kwargs)
 
     monkeypatch.setattr(md.httpx, "AsyncClient", patched_async_client)
+
+
+@pytest.mark.asyncio
+async def test_download_streams_flattens_and_skips_existing(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(md, "user_models_dir", lambda: tmp_path)
+    fetched: list[str] = []
+    _patch_transport(monkeypatch, _mock_transport(fetched))
 
     path = await md.download_embedding_model("google/embeddinggemma-300m")
 
@@ -87,6 +104,32 @@ async def test_download_streams_flattens_and_skips_existing(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_download_follows_hf_cdn_redirect(tmp_path, monkeypatch) -> None:
+    """Hugging Face 302s every ``resolve/`` URL to a signed CDN URL.
+
+    httpx does not follow redirects by default, so raise_for_status() saw the
+    302 as an error and the download aborted before writing a byte.
+    """
+
+    monkeypatch.setattr(md, "user_models_dir", lambda: tmp_path)
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        seen.append(url)
+        if url.startswith(_CDN_HOST):
+            return httpx.Response(200, content=b"weights")
+        return httpx.Response(302, headers={"location": f"{_CDN_HOST}model_quantized.onnx"})
+
+    _patch_transport(monkeypatch, httpx.MockTransport(handler))
+
+    path = await md.download_embedding_model("google/embeddinggemma-300m")
+
+    assert any(url.startswith(_CDN_HOST) for url in seen), "redirect was not followed"
+    assert (path / "model_quantized.onnx").read_bytes() == b"weights"
+
+
+@pytest.mark.asyncio
 async def test_download_unknown_model_raises() -> None:
     with pytest.raises(ValueError):
         await md.download_embedding_model("nope/none")
@@ -96,14 +139,7 @@ async def test_download_unknown_model_raises() -> None:
 async def test_download_reports_progress(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(md, "user_models_dir", lambda: tmp_path)
     fetched: list[str] = []
-    real_async_client = httpx.AsyncClient
-    transport = _mock_transport(fetched)
-
-    def patched_async_client(*args, **kwargs):
-        kwargs["transport"] = transport
-        return real_async_client(*args, **kwargs)
-
-    monkeypatch.setattr(md.httpx, "AsyncClient", patched_async_client)
+    _patch_transport(monkeypatch, _mock_transport(fetched))
 
     progress_calls: list[tuple[str, int, int | None]] = []
 

@@ -10,6 +10,9 @@ Remote Hugging Face paths use an ``onnx/`` subdirectory (e.g.
 root so the resulting layout matches what :mod:`agentos.memory.embedding`'s
 bundled-ONNX loader expects (``*.onnx`` glob at the top level, with the
 external-weights ``.onnx_data`` file sitting next to it).
+
+Fetches follow redirects: Hugging Face serves ``resolve/`` URLs as a 302 to a
+signed, short-lived CDN URL.
 """
 
 from __future__ import annotations
@@ -123,7 +126,15 @@ async def download_embedding_model(
     target_dir = user_models_dir() / manifest.target_dirname
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    async with httpx.AsyncClient(trust_env=_trust_env(), timeout=_DOWNLOAD_TIMEOUT_S) as client:
+    # follow_redirects: Hugging Face answers every ``resolve/`` URL with a 302 to
+    # a signed CDN URL, so redirects must be followed. Safe here because the URL
+    # comes from a hardcoded manifest, never from user input (unlike the
+    # deliberately non-following clients in agentos.tools.builtin).
+    async with httpx.AsyncClient(
+        trust_env=_trust_env(),
+        timeout=_DOWNLOAD_TIMEOUT_S,
+        follow_redirects=True,
+    ) as client:
         for remote_path in manifest.files:
             name = _flattened_name(remote_path)
             final_path = target_dir / name
