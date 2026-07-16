@@ -123,6 +123,49 @@ def test_user_block_dropped_when_over_inject_limit(tmp_path):
     assert metadata["memory_md_present"] is True
 
 
+def test_default_inject_limit_keeps_full_memory_and_user_blocks_untruncated(tmp_path):
+    """At default char budgets (4000 memory + 2000 user), the default
+    inject_limit must have enough headroom for both full blocks plus header
+    overhead -- the block-boundary truncation (drop-whole-block) path must
+    stay unreachable at defaults so a full user profile never starves out.
+    """
+    (tmp_path / "AGENTS.md").write_text("agents\n", encoding="utf-8")
+    # Build entries that fill each store close to its default char limit
+    # (4000 for memory, 2000 for user) without exceeding it.
+    memory_entries = [f"Memory fact number {i:03d} about the project setup" for i in range(60)]
+    user_entries = [f"User preference number {i:03d} noted during onboarding" for i in range(30)]
+
+    memory_content = ENTRY_DELIMITER.join(memory_entries)
+    while len(memory_content) < 3800:
+        memory_entries.append("Additional filler memory entry to approach the char budget")
+        memory_content = ENTRY_DELIMITER.join(memory_entries)
+    assert len(memory_content) <= 4000
+
+    user_content = ENTRY_DELIMITER.join(user_entries)
+    while len(user_content) < 1800:
+        user_entries.append("Additional filler user entry to approach the char budget")
+        user_content = ENTRY_DELIMITER.join(user_entries)
+    assert len(user_content) <= 2000
+
+    (tmp_path / "MEMORY.md").write_text(memory_content, encoding="utf-8")
+    (tmp_path / "USER.md").write_text(user_content, encoding="utf-8")
+
+    # No inject_limit override at all -- exercise the real fallback default
+    # (SimpleNamespace has no inject_limit attribute, so runtime.py's
+    # ``getattr(..., "inject_limit", 4000)``-style fallback applies).
+    runner = _runner(tmp_path)
+
+    memory_md = runner._load_memory_md(tmp_path)
+
+    assert memory_md is not None
+    assert "MEMORY (your personal notes)" in memory_md
+    assert "USER PROFILE (who the user is)" in memory_md
+    assert memory_entries[0] in memory_md
+    assert user_entries[0] in memory_md
+    # Never sliced mid-block.
+    assert "..." not in memory_md
+
+
 def test_oversized_memory_block_falls_back_to_slice(tmp_path, caplog):
     (tmp_path / "AGENTS.md").write_text("agents\n", encoding="utf-8")
     (tmp_path / "MEMORY.md").write_text(

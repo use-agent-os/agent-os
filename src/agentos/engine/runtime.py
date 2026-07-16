@@ -3649,7 +3649,7 @@ class TurnRunner:
         from pathlib import Path
 
         if max_chars is None:
-            max_chars = getattr(getattr(self._config, "memory", None), "inject_limit", 4000)
+            max_chars = getattr(getattr(self._config, "memory", None), "inject_limit", 6200)
         root = Path(workspace_dir)
 
         curated = self._load_curated_memory_block(root, max_chars=max_chars)
