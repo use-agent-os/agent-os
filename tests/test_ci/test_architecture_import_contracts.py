@@ -52,6 +52,11 @@ APPROVED_PACKAGE_IMPORTS: frozenset[tuple[str, str]] = frozenset({
     # self-contained provider client, and gateway boot/doctor + onboarding
     # resolve the judge target for observability and setup.
     ("agentos_router", "provider"),
+    # The v4 bundle's BGE channel reuses the single BGE ONNX export shipped
+    # under memory/models/bge_onnx (~23MB) instead of carrying a second copy,
+    # and resolves it via LocalEmbeddingProvider.resolve_onnx_dir rather than
+    # duplicating the path convention.
+    ("agentos_router", "memory"),
     ("gateway", "agentos_router"),
     ("onboarding", "agentos_router"),
     ("gateway", "agents"),

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from agentos.gateway.config import ROUTER_TIER_PROFILE_IDS
+from agentos.router_tiers import DEFAULT_ROUTER_STRATEGY
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 # openrouter is the baked-in default tier set, so it never auto-selects a
@@ -420,7 +421,10 @@ def test_example_toml_enables_runtime_router_defaults() -> None:
     assert agentos_router["enabled"] is True
     assert agentos_router["auto_thinking"] is True
     assert agentos_router["rollout_phase"] == "full"
-    assert agentos_router["strategy"] == "llm_judge"
+    # Must match AgentOSRouterSettings.strategy: copying the example over a
+    # fresh config previously flipped the router to a different strategy than
+    # an unset config would pick.
+    assert agentos_router["strategy"] == DEFAULT_ROUTER_STRATEGY
     assert "judge_model" not in agentos_router  # unset = AUTO judge resolution
     assert agentos_router["judge_input_max_chars"] == 4000
     assert agentos_router["judge_short_circuit_enabled"] is True

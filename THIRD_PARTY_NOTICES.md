@@ -5,13 +5,18 @@ AgentOS. It covers:
 
 - Core runtime modules derived from OpenSquilla (Apache-2.0); see the
   first section below.
+- The V4 Phase 3 local ML router bundle under
+  `src/agentos/agentos_router/models/v4.2_phase3_inference/` — trained model
+  weights and inference code originating from OpenSquilla (Apache-2.0); see the
+  first section below.
 - The bundled skill descriptors under `src/agentos/skills/bundled/`, which
   include OpenClaw-derived MIT descriptors and AgentOS-original descriptors.
 - The bundled pptx skill references the python-pptx and PptxGenJS libraries;
   AgentOS does not vendor those libraries, but the skill instructs the
   agent runtime to invoke them and is documented here for transparency.
-- The bundled BGE (bge-small-zh-v1.5) ONNX export used for local memory
-  embedding under `src/agentos/memory/models/bge_onnx/`.
+- The bundled BGE (bge-small-zh-v1.5) ONNX export under
+  `src/agentos/memory/models/bge_onnx/`, shared by local memory embedding and
+  the V4 Phase 3 router's BGE feature channel.
 - The built-in tokenjuice tool-result projection backend and bundled
   reduction rules under `src/agentos/plugins/tokenjuice/`.
 - The cron prompt-injection scanner was reviewed against Hermes Agent
@@ -23,7 +28,9 @@ AgentOS. It covers:
 
 ## OpenSquilla-derived core modules
 
-- Component: core runtime modules under `src/agentos/`.
+- Component: core runtime modules under `src/agentos/`, and the V4 Phase 3
+  local ML router bundle (trained model weights and inference code) under
+  `src/agentos/agentos_router/models/v4.2_phase3_inference/`.
 - Upstream project: https://github.com/opensquilla/opensquilla
 - License: Apache License 2.0
 - Copyright notice: OpenSquilla contributors (the upstream project ships
@@ -41,6 +48,37 @@ The highest-overlap modules include:
 - `src/agentos/gateway_client.py` and
   `src/agentos/cli/gateway_client.py` — gateway client plumbing
 - `src/agentos/agentos_router/v4_phase3.py` — router phase logic
+
+### V4 Phase 3 router bundle (model weights and inference code)
+
+The local ML router bundle under
+`src/agentos/agentos_router/models/v4.2_phase3_inference/` is OpenSquilla's,
+carried over from upstream
+`src/opensquilla/squilla_router/models/v4.2_phase3_inference/`. It is **not**
+trained or authored by the AgentOS contributors. This covers:
+
+- `lgbm_main.bin` and `lgbm_aux.bin` — LightGBM boosters for the router heads.
+- `mlp/model.onnx` and `mlp/scaler.joblib` — the PyTorch-exported MLP head and
+  its scaler.
+- `features/tfidf.pkl`, `features/svd.pkl`, `features/config.pkl`, and
+  `features/bge_pca.joblib` — fitted scikit-learn/joblib feature artifacts.
+- `runtime_src/src/router/**` — the inference core the router loads at runtime.
+- `router.runtime.yaml`, `version.json`, `inference_manifest.json` — runtime
+  configuration and inference metadata.
+
+The weights are used byte-for-byte unmodified: `lgbm_main.bin` carries the same
+Git LFS object as upstream
+(`sha256:5f312db09577bbaf30f87358941974eef6edce7f1424d0e9de21cbd38a646d53`,
+39684725 bytes). Modifications made by the AgentOS contributors are limited to
+namespace/branding renames, and to `runtime_src/.../inference/artifacts.py`,
+which resolves the BGE export from the shared
+`src/agentos/memory/models/bge_onnx/` location so it ships once instead of
+twice. `src/agentos/agentos_router/models/v4.2_phase3_inference/PROVENANCE.md`
+records the per-file detail.
+
+Note that only the BGE embedding channel is third-party relative to
+OpenSquilla (MIT; see the BAAI section below). The routing decision itself
+comes from OpenSquilla's own trained LightGBM and MLP heads.
 
 Other modules across the runtime may also contain OpenSquilla-derived
 code in modified form. In accordance with Section 4(b) of the Apache

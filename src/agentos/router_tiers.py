@@ -10,6 +10,11 @@ DEFAULT_TEXT_TIER = "c1"
 HIGHEST_TEXT_TIER = "c3"
 IMAGE_TIER = "image_model"
 
+# Canonical router strategy default. Config, boot preflight, boot preload, and
+# the engine dispatch step all resolve it from here; they previously carried
+# four independent literals that had drifted apart.
+DEFAULT_ROUTER_STRATEGY = "v4_phase3"
+
 LEGACY_TEXT_TIER_ALIASES: dict[str, str] = {
     "t0": "c0",
     "t1": "c1",

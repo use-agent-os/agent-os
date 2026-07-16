@@ -47,8 +47,15 @@ RUN python - <<'PY'
 from pathlib import Path
 
 root = Path("src/agentos/memory/models/bge_onnx")
+bundle = Path("src/agentos/agentos_router/models/v4.2_phase3_inference")
 required = [
     root / "model.onnx",
+    # v4_phase3 router bundle: without these every turn silently degrades to
+    # the default tier.
+    bundle / "lgbm_main.bin",
+    bundle / "mlp" / "model.onnx",
+    bundle / "features" / "tfidf.pkl",
+    bundle / "router.runtime.yaml",
 ]
 pointer = "version https://git-lfs.github.com/spec/v1"
 missing = [str(path) for path in required if not path.is_file()]
@@ -61,8 +68,9 @@ for path in required:
         pointers.append(str(path))
 if missing or pointers:
     raise SystemExit(
-        "Bundled BGE embedding assets are unavailable in this build context. "
-        'Run `git lfs pull --include="src/agentos/memory/models/**"` '
+        "Bundled BGE embedding or v4_phase3 router assets are unavailable in this "
+        'build context. Run `git lfs pull --include="src/agentos/memory/models/**"` '
+        'and `git lfs pull --include="src/agentos/agentos_router/models/**"` '
         f"before docker build. Missing={missing} Pointers={pointers}"
     )
 PY

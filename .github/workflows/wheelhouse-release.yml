@@ -61,17 +61,20 @@ jobs:
           persist-credentials: false
           ref: ${{ env.RELEASE_TAG != '' && env.RELEASE_TAG || github.ref }}
 
-      - name: Hydrate embedding assets
+      - name: Hydrate embedding and router assets
         shell: bash
-        run: git lfs pull --include="src/agentos/memory/models/**"
+        run: |
+          git lfs pull --include="src/agentos/memory/models/**"
+          git lfs pull --include="src/agentos/agentos_router/models/**"
 
-      - name: Verify embedding assets are hydrated
+      - name: Verify embedding and router assets are hydrated
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
 
           root = Path("src/agentos/memory/models/bge_onnx")
+          bundle = Path("src/agentos/agentos_router/models/v4.2_phase3_inference")
           required = [
               root / "config.json",
               root / "model.onnx",
@@ -79,6 +82,17 @@ jobs:
               root / "tokenizer.json",
               root / "tokenizer_config.json",
               root / "vocab.txt",
+              # v4_phase3 router bundle. It shares the bge_onnx export above
+              # rather than carrying a second copy.
+              bundle / "lgbm_main.bin",
+              bundle / "lgbm_aux.bin",
+              bundle / "mlp/model.onnx",
+              bundle / "mlp/scaler.joblib",
+              bundle / "features/tfidf.pkl",
+              bundle / "features/svd.pkl",
+              bundle / "features/bge_pca.joblib",
+              bundle / "router.runtime.yaml",
+              bundle / "runtime_src/src/router/inference/core.py",
           ]
           for path in required:
               assert path.is_file(), f"missing embedding asset: {path}"
@@ -186,13 +200,18 @@ jobs:
               assert any(name.startswith(root + "runtime/python/") for name in names)
 
           with ZipFile(wheels[0]) as archive:
+              names = set(archive.namelist())
               for info in archive.infolist():
-                  if not info.filename.endswith(".onnx"):
+                  if not info.filename.endswith((".onnx", ".bin", ".pkl", ".joblib")):
                       continue
                   prefix = archive.read(info)[:80]
                   assert not prefix.startswith(b"version https://git-lfs.github.com/spec/v1"), (
                       f"Git LFS pointer leaked into wheel: {info.filename}"
                   )
+
+              bundle = "agentos/agentos_router/models/v4.2_phase3_inference/"
+              for name in ("lgbm_main.bin", "router.runtime.yaml", "features/tfidf.pkl"):
+                  assert bundle + name in names, f"router bundle missing from wheel: {name}"
           PY
 
       - name: Create release assets

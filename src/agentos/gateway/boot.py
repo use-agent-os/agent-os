@@ -50,6 +50,7 @@ from agentos.gateway.session_streams import get_session_streams
 from agentos.gateway.websocket import get_registry
 from agentos.paths import default_agentos_home
 from agentos.permissions import configured_default_elevated
+from agentos.router_tiers import DEFAULT_ROUTER_STRATEGY
 from agentos.session.terminal_reply import build_terminal_reply, sanitize_agent_error
 
 log = structlog.get_logger(__name__)
@@ -1356,7 +1357,9 @@ def validate_agentos_router_runtime(config: GatewayConfig) -> None:
     if router_cfg is None or not getattr(router_cfg, "enabled", False):
         return
 
-    strategy = str(getattr(router_cfg, "strategy", "v4_phase3") or "v4_phase3").strip()
+    strategy = str(
+        getattr(router_cfg, "strategy", DEFAULT_ROUTER_STRATEGY) or DEFAULT_ROUTER_STRATEGY
+    ).strip()
     if strategy == "v4_phase3":
         bundle_dir = _agentos_router_bundle_dir(router_cfg)
         required = ("runtime_src", "router.runtime.yaml")
@@ -1387,7 +1390,9 @@ async def preload_agentos_router_runtime(config: GatewayConfig) -> None:
     if router_cfg is None or not getattr(router_cfg, "enabled", False):
         return
 
-    strategy_name = str(getattr(router_cfg, "strategy", "llm_judge") or "llm_judge").strip()
+    strategy_name = str(
+        getattr(router_cfg, "strategy", DEFAULT_ROUTER_STRATEGY) or DEFAULT_ROUTER_STRATEGY
+    ).strip()
     try:
         log.info("gateway.agentos_router_preload_started", strategy=strategy_name)
         await asyncio.to_thread(

@@ -23,10 +23,6 @@ agentos.toml
 data/
 # Checked-in router eval dataset used by the test suite.
 !tests/data/
-# V4 Phase 3 ML router bundle (~75MB: lgbm/onnx/features). Kept OUT of git so the
-# public repo stays lean; it is not distributed with the repo or wheel yet.
-# Restore it locally to run strategy="v4_phase3".
-/src/agentos/agentos_router/models/
 .agentos/
 benchmarks/
 specs/

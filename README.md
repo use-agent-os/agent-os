@@ -102,14 +102,15 @@ file name.
 
 The default `recommended` profile installs **AgentOS Router** — AgentOS's
 own on-device model router (strategy `v4_phase3`) — along with the Python
-dependencies it needs (ONNX Runtime, LightGBM, scikit-learn). Its ~75MB
-model bundle is **not** distributed with the repo or the wheel yet, and the
-installers do not fetch it. When the bundle is absent, the router degrades
-gracefully at boot: it logs a warning and pins every turn to the default
-tier (c1) instead of crashing. To get per-turn routing today, either restore
-the bundle into `src/agentos/agentos_router/models/v4.2_phase3_inference/`
-or switch to the `llm_judge` strategy, which needs no local model files —
-pick it during onboarding or set `agentos_router.strategy = "llm_judge"`.
+dependencies it needs (ONNX Runtime, LightGBM, scikit-learn). Its model
+bundle ships inside the wheel, so routing works offline with no extra
+download. If you install from a source checkout, run
+`git lfs pull` first; without it the bundle is only pointer stubs, and the
+router degrades gracefully — it logs a warning at boot and pins every turn to
+the default tier (c1) rather than crashing. The `llm_judge` strategy needs no
+local model files at all (it routes via a small LLM call, optionally against a
+local Ollama/LM Studio endpoint) — pick it during onboarding or set
+`agentos_router.strategy = "llm_judge"`.
 Set `AGENTOS_INSTALL_PROFILE=core` to skip the router dependencies, or use
 the `--router disabled` flag during first-time setup to keep them installed
 but turn the router off.
@@ -543,7 +544,7 @@ settings are all in `agentos.toml.example`.
 
 | Capability | What it does |
 | --- | --- |
-| **Token-efficient routing** | `AgentOS Router` defaults to `v4_phase3`, a small local AI model (BGE embeddings + LightGBM; the `recommended` extra installs its runtime dependencies) that looks at each message — its length, language, code, keywords, and meaning — and picks one of four levels (c0–c3), then routes it to the cheapest model that can still do the job well. This check runs on your own device, so your message never has to leave your computer just to make this choice. The ~75MB model bundle is not distributed yet; without it the router falls back to a single tier, so pick the `llm_judge` strategy instead (a small LLM call, optionally a local Ollama/LM Studio endpoint) for per-turn routing with no local model files. Choose either in onboarding. |
+| **Token-efficient routing** | `AgentOS Router` defaults to `v4_phase3`, a small local AI model (BGE embeddings + LightGBM; the `recommended` extra installs its runtime dependencies) that looks at each message — its length, language, code, keywords, and meaning — and picks one of four levels (c0–c3), then routes it to the cheapest model that can still do the job well. This check runs on your own device, so your message never has to leave your computer just to make this choice. The model bundle ships inside the wheel, so this works offline out of the box. Prefer no local model files at all? Pick the `llm_judge` strategy instead (a small LLM call, optionally a local Ollama/LM Studio endpoint). Choose either in onboarding. |
 | **Adaptive reasoning and prompts** | AgentOS only asks for deep, extended thinking when the router sees the message is hard. The system instructions also grow to match: short and simple for easy messages, full and detailed for hard ones. |
 | **20+ LLM providers** | AgentOS can talk to 20+ AI providers — OpenRouter (used by default), the Bankr LLM Gateway, OpenAI, Anthropic, Ollama, DeepSeek, Gemini, DashScope/Qwen, Moonshot, Mistral, Groq, Zhipu, SiliconFlow, vLLM, LM Studio, and more. It picks a main provider first, with backups ready if needed. The first-time setup shows you the providers that are fully tested. |
 | **On-demand skills and MCP** | AgentOS comes with 37 built-in skills (coding, GitHub, cron jobs, pptx/docx/xlsx/pdf files, summaries, tmux, weather, and more). Each skill only loads when a task actually needs it. AgentOS can use other MCP tools, and can also act as an MCP tool for others — `agentos mcp-server run` needs the `mcp` extra (install with `use-agent-os[recommended,mcp]`). You can write, install, and share your own skills from the CLI. |
