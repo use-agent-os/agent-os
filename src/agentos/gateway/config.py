@@ -28,6 +28,7 @@ from agentos.gateway.config_migration import (
 )
 from agentos.paths import default_agentos_home
 from agentos.router_tiers import (
+    DEFAULT_ROUTER_STRATEGY,
     DEFAULT_TEXT_TIER,
     normalize_text_tier,
     normalize_tier_mapping,
@@ -1037,10 +1038,10 @@ class AgentOSRouterConfig(BaseSettings):
     auto_thinking: bool = True
     rollout_phase: str = "full"  # "observe" | "prompt_only" | "full"
     # "v4_phase3" (default: local ML router — BGE+LightGBM bundle, no LLM call)
-    # | "llm_judge" (routes via a small LLM judge call). The v4 bundle lives
-    # out-of-git under agentos_router/models/; a missing bundle degrades to the
+    # | "llm_judge" (routes via a small LLM judge call). The v4 bundle ships in
+    # the wheel under agentos_router/models/; a missing bundle degrades to the
     # default tier unless require_router_runtime is set.
-    strategy: str = "v4_phase3"
+    strategy: str = DEFAULT_ROUTER_STRATEGY
     tier_profile: str | None = None
     tiers: dict = Field(default_factory=_default_tiers)
     default_tier: str = DEFAULT_TEXT_TIER
@@ -1075,8 +1076,9 @@ class AgentOSRouterConfig(BaseSettings):
     v4_bundle_dir: str | None = None  # V4 Phase 3 bundle root; defaults to bundled assets
     v4_use_aux_head: bool | None = True  # override router.runtime.yaml aux head when set
     # When True, a missing/broken v4 bundle raises at boot instead of degrading
-    # to the default tier. Defaults False (pre-removal was True): the ~75MB bundle
-    # is git-ignored, so a strict default would crash any machine lacking it.
+    # to the default tier. Defaults False: the bundle ships in the wheel, but a
+    # source checkout without `git lfs pull` still has only pointer stubs, and a
+    # strict default would turn that into a hard boot failure.
     require_router_runtime: bool = False
     routing_timeout_seconds: float = Field(default=10.0, gt=0.0)
     kv_cache_anti_downgrade_enabled: bool = True

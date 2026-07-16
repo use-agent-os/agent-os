@@ -219,7 +219,7 @@ max_pending_per_session = 64
 enabled = true           # auto tier router
 auto_thinking = true
 rollout_phase = "full"
-strategy = "llm_judge"   # "llm_judge" (default; "v4_phase3" is removed but still accepted)
+strategy = "v4_phase3"   # "v4_phase3" (default; local ML bundle, no LLM call) | "llm_judge"
 # LLM judge (strategy = "llm_judge"): leave judge_model unset for Auto — the
 # judge follows the tier profile's cheapest text tier (c0 first), so profile
 # switches auto-update it. judge_provider must match [llm].provider.

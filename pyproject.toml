@@ -200,8 +200,8 @@ module = [
     "numpy.*",
     "onnxruntime.*",
     "readability.*",
-    # v4_phase3 loads its inference core dynamically from the git-ignored
-    # bundle's runtime_src (added to sys.path at runtime); mypy can't resolve it.
+    # v4_phase3 loads its inference core dynamically from the bundle's
+    # runtime_src (added to sys.path at runtime); mypy can't resolve it.
     "src.router.*",
     "tiktoken.*",
     "tokenizers.*",

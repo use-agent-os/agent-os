@@ -21,6 +21,7 @@ from agentos.engine.steps.agentos_router import (
     apply_agentos_router,
 )
 from agentos.gateway.config import GatewayConfig
+from agentos.router_tiers import DEFAULT_ROUTER_STRATEGY
 
 # The D3 stable extra shape both judge-unavailable paths must emit: the
 # LLMJudgeStrategy runtime path (pinned by test_llm_judge_strategy.py) and the
@@ -190,12 +191,21 @@ async def test_unavailable_judge_extra_matches_d3_contract() -> None:
     assert extra["difficulty"] is None
 
 
-def test_strategy_name_dispatches_and_defaults_to_llm_judge() -> None:
+def test_strategy_name_dispatches_and_defaults_to_the_canonical_strategy() -> None:
+    """Unset/None/unknown all resolve to DEFAULT_ROUTER_STRATEGY. These used to
+    fall back to llm_judge while AgentOSRouterSettings.strategy defaulted to
+    v4_phase3, so the effective default depended on which code path asked."""
     assert agentos_router_step._strategy_name(SimpleNamespace(strategy="llm_judge")) == "llm_judge"
     assert agentos_router_step._strategy_name(SimpleNamespace(strategy="v4_phase3")) == "v4_phase3"
-    assert agentos_router_step._strategy_name(SimpleNamespace(strategy=None)) == "llm_judge"
-    assert agentos_router_step._strategy_name(SimpleNamespace(strategy="bogus")) == "llm_judge"
-    assert agentos_router_step._strategy_name(SimpleNamespace()) == "llm_judge"
+    assert (
+        agentos_router_step._strategy_name(SimpleNamespace(strategy=None))
+        == DEFAULT_ROUTER_STRATEGY
+    )
+    assert (
+        agentos_router_step._strategy_name(SimpleNamespace(strategy="bogus"))
+        == DEFAULT_ROUTER_STRATEGY
+    )
+    assert agentos_router_step._strategy_name(SimpleNamespace()) == DEFAULT_ROUTER_STRATEGY
 
 
 @pytest.mark.asyncio

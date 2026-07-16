@@ -27,21 +27,42 @@ jobs:
         with:
           lfs: true
 
-      - name: Hydrate LFS embedding model assets
-        run: git lfs pull --include="src/agentos/memory/models/**"
+      - name: Hydrate LFS embedding and router model assets
+        run: |
+          git lfs pull --include="src/agentos/memory/models/**"
+          git lfs pull --include="src/agentos/agentos_router/models/**"
 
       - name: Verify LFS assets are hydrated
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          for path in Path("src/agentos/memory/models").rglob("*"):
-              if not path.is_file():
-                  continue
-              prefix = path.read_bytes()[:64]
-              assert not prefix.startswith(b"version https://git-lfs.github.com/spec/v1"), (
-                  f"LFS pointer not hydrated: {path}"
-              )
+          roots = [
+              Path("src/agentos/memory/models"),
+              Path("src/agentos/agentos_router/models"),
+          ]
+          for root in roots:
+              for path in root.rglob("*"):
+                  if not path.is_file():
+                      continue
+                  prefix = path.read_bytes()[:64]
+                  assert not prefix.startswith(b"version https://git-lfs.github.com/spec/v1"), (
+                      f"LFS pointer not hydrated: {path}"
+                  )
+
+          # The v4_phase3 router bundle is the wheel's routing brain; a missing
+          # weight silently degrades every turn to the default tier.
+          bundle = Path("src/agentos/agentos_router/models/v4.2_phase3_inference")
+          for name in (
+              "lgbm_main.bin",
+              "lgbm_aux.bin",
+              "mlp/model.onnx",
+              "features/tfidf.pkl",
+              "features/svd.pkl",
+              "router.runtime.yaml",
+              "runtime_src/src/router/inference/core.py",
+          ):
+              assert (bundle / name).is_file(), f"missing router asset: {name}"
           PY
 
       - name: Set up Python

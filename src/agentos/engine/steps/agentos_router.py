@@ -30,6 +30,7 @@ from agentos.engine.pricing import lookup_price
 from agentos.provider.context_capabilities import provider_state_continuity_diagnostic
 from agentos.router_control import RouterControlHoldStore
 from agentos.router_tiers import (
+    DEFAULT_ROUTER_STRATEGY,
     DEFAULT_TEXT_TIER,
     HIGHEST_TEXT_TIER,
     ROUTE_CLASS_TO_TIER,
@@ -509,15 +510,17 @@ _KNOWN_STRATEGIES = frozenset({"llm_judge", "v4_phase3"})
 
 
 def _strategy_name(config: object) -> str:
-    configured = str(getattr(config, "strategy", "llm_judge") or "llm_judge").strip()
+    configured = str(
+        getattr(config, "strategy", DEFAULT_ROUTER_STRATEGY) or DEFAULT_ROUTER_STRATEGY
+    ).strip()
     if configured in _KNOWN_STRATEGIES:
         return configured
     log.warning(
         "agentos_router.unknown_strategy_ignored",
         strategy=configured,
-        using="llm_judge",
+        using=DEFAULT_ROUTER_STRATEGY,
     )
-    return "llm_judge"
+    return DEFAULT_ROUTER_STRATEGY
 
 
 def _requires_history(strategy: object) -> bool:

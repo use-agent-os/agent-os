@@ -1,7 +1,17 @@
 *.sh text eol=lf
 
-# Bundled BGE ONNX export for memory local embedding (relocated from the
-# removed agentos_router v4 bundle).
+# Bundled BGE ONNX export. Shared by memory's local embedder and the
+# agentos_router v4 bundle, which no longer carries its own copy.
 src/agentos/memory/models/bge_onnx/*.onnx filter=lfs diff=lfs merge=lfs -text
 src/agentos/memory/models/bge_onnx/*.json text eol=lf
 src/agentos/memory/models/bge_onnx/*.txt text eol=lf
+
+# V4 Phase 3 ML router bundle: LightGBM heads, MLP ONNX, and the sklearn/joblib
+# feature artifacts.
+src/agentos/agentos_router/models/v4.2_phase3_inference/*.bin filter=lfs diff=lfs merge=lfs -text
+src/agentos/agentos_router/models/v4.2_phase3_inference/**/*.onnx filter=lfs diff=lfs merge=lfs -text
+src/agentos/agentos_router/models/v4.2_phase3_inference/**/*.pkl filter=lfs diff=lfs merge=lfs -text
+src/agentos/agentos_router/models/v4.2_phase3_inference/**/*.joblib filter=lfs diff=lfs merge=lfs -text
+src/agentos/agentos_router/models/v4.2_phase3_inference/*.json text eol=lf
+src/agentos/agentos_router/models/v4.2_phase3_inference/*.yaml text eol=lf
+src/agentos/agentos_router/models/v4.2_phase3_inference/**/*.json text eol=lf

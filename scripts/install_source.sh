@@ -134,9 +134,16 @@ check_embedding_assets() {
     fi
 
     local model_root="src/agentos/memory/models/bge_onnx"
+    local router_root="src/agentos/agentos_router/models/v4.2_phase3_inference"
     local pointer_line="version https://git-lfs.github.com/spec/v1"
+    # The router bundle is checked here too: strategy="v4_phase3" is the default,
+    # and an unhydrated bundle degrades every turn to the default tier with only
+    # a boot warning rather than failing.
     local required=(
         "${model_root}/model.onnx"
+        "${router_root}/lgbm_main.bin"
+        "${router_root}/mlp/model.onnx"
+        "${router_root}/features/tfidf.pkl"
     )
     local missing=()
     local pointers=()
@@ -152,9 +159,9 @@ check_embedding_assets() {
     done
     if (( ${#missing[@]} > 0 || ${#pointers[@]} > 0 )); then
         if [[ "${mode}" == "warn" ]]; then
-            echo "install_source.sh: dry-run note — real recommended install would fail until the bundled BGE embedding assets are available in this checkout." >&2
+            echo "install_source.sh: dry-run note — real recommended install would fail until the bundled BGE embedding and v4 router assets are available in this checkout." >&2
         else
-            echo "install_source.sh: bundled BGE embedding assets are unavailable in this checkout." >&2
+            echo "install_source.sh: bundled BGE embedding or v4 router assets are unavailable in this checkout." >&2
         fi
         if (( ${#missing[@]} > 0 )); then
             echo "install_source.sh: missing assets: ${missing[*]}" >&2
@@ -164,6 +171,7 @@ check_embedding_assets() {
         fi
         echo 'install_source.sh: run `git lfs install` once, then:' >&2
         echo 'install_source.sh:   git lfs pull --include="src/agentos/memory/models/**"' >&2
+        echo 'install_source.sh:   git lfs pull --include="src/agentos/agentos_router/models/**"' >&2
         echo 'install_source.sh: or retry with AGENTOS_INSTALL_PROFILE=core for the minimal runtime.' >&2
         if [[ "${mode}" == "warn" ]]; then
             return 0

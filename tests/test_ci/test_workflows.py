@@ -324,9 +324,29 @@ def test_wheelhouse_release_hydrates_current_embedding_bundle() -> None:
     assert 'root / "model.onnx"' in text
     assert 'root / "tokenizer.json"' in text
     assert 'root / "vocab.txt"' in text
-    # The deleted v4 ML bundle assets must not linger in the verify list.
-    assert "v4.2_phase3_inference" not in text
-    assert "lgbm_main.bin" not in text
-    assert "tfidf.pkl" not in text
-    assert "router.runtime.yaml" not in text
+    # The retired E3b router bundle must not linger in the verify list.
     assert "intent_head.joblib" not in text
+
+
+def test_wheelhouse_release_hydrates_v4_router_bundle() -> None:
+    """strategy="v4_phase3" is the default; a bundle that fails to hydrate
+    degrades every turn to the default tier with only a boot warning, so the
+    release must fail loudly instead."""
+    text = (WORKFLOW_DIR / "wheelhouse-release.yml").read_text(encoding="utf-8")
+
+    assert 'git lfs pull --include="src/agentos/agentos_router/models/**"' in text
+    assert "v4.2_phase3_inference" in text
+    assert 'bundle / "lgbm_main.bin"' in text
+    assert 'bundle / "features/tfidf.pkl"' in text
+    assert 'bundle / "router.runtime.yaml"' in text
+    # The bundle shares memory's bge_onnx export rather than carrying a copy.
+    assert "v4.2_phase3_inference/bge_onnx" not in text
+
+
+def test_pypi_publish_hydrates_v4_router_bundle() -> None:
+    text = (WORKFLOW_DIR / "pypi-publish.yml").read_text(encoding="utf-8")
+
+    assert 'git lfs pull --include="src/agentos/memory/models/**"' in text
+    assert 'git lfs pull --include="src/agentos/agentos_router/models/**"' in text
+    assert "v4.2_phase3_inference" in text
+    assert "lgbm_main.bin" in text
