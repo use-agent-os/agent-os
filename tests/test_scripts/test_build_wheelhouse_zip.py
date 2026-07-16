@@ -166,6 +166,46 @@ def test_release_wheel_allows_tokenjuice_provenance_markdown() -> None:
     assert unrelated_skill_reference in violations
 
 
+def test_release_wheel_allows_router_bundle_provenance_markdown() -> None:
+    module = load_script()
+    bundle_provenance = (
+        "agentos/agentos_router/models/v4.2_phase3_inference/PROVENANCE.md"
+    )
+    other_bundle_doc = (
+        "agentos/agentos_router/models/v4.2_phase3_inference/NOTES.md"
+    )
+
+    violations = module.forbidden_release_wheel_entries(
+        (bundle_provenance, other_bundle_doc)
+    )
+
+    # The weights are OpenSquilla-derived (Apache-2.0), so their attribution
+    # ships with them; unrelated bundle markdown stays forbidden.
+    assert bundle_provenance not in violations
+    assert other_bundle_doc in violations
+
+
+def test_real_router_bundle_markdown_passes_release_guard() -> None:
+    """Guard the real bundle tree, not just synthetic names.
+
+    The wheel-path guard otherwise only runs against a built wheel during the
+    tagged release job, so a new .md dropped into the bundle passes PR CI and
+    only fails after the tag is pushed.
+    """
+
+    module = load_script()
+    models_root = REPO_ROOT / "src" / "agentos" / "agentos_router" / "models"
+    if not models_root.is_dir():
+        pytest.skip("router model bundle not present in this checkout")
+
+    wheel_names = tuple(
+        f"agentos/agentos_router/models/{path.relative_to(models_root).as_posix()}"
+        for path in sorted(models_root.rglob("*.md"))
+    )
+
+    assert module.forbidden_release_wheel_entries(wheel_names) == []
+
+
 def test_release_wheel_allows_dist_info_license_files() -> None:
     module = load_script()
     license_md = "use_agent_os-2026.7.15.dist-info/licenses/THIRD_PARTY_NOTICES.md"

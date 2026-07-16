@@ -34,6 +34,7 @@ LFS_POINTER_LINE = "version https://git-lfs.github.com/spec/v1"
 RELEASE_NOTICE_RELS = ("LICENSE", "THIRD_PARTY_NOTICES.md")
 WHEEL_EMBEDDING_PREFIX = "agentos/memory/models"
 TOKENJUICE_PROVENANCE_WHEEL_PATH = "agentos/plugins/tokenjuice/PROVENANCE.md"
+ROUTER_MODEL_WHEEL_PREFIX = "agentos/agentos_router/models/"
 ALLOWED_SKILL_REFERENCE_WHEEL_PATHS = frozenset(
     {
         "agentos/skills/bundled/pptx/references/pptxgenjs.md",
@@ -223,6 +224,11 @@ def _is_allowed_runtime_markdown(path: str) -> bool:
     if name in ALLOWED_SKILL_REFERENCE_WHEEL_PATHS:
         return True
     if name.startswith("agentos/skills/bundled/") and name.endswith("/SKILL.md"):
+        return True
+    # Router model bundles ship their PROVENANCE.md: the weights are derived
+    # from OpenSquilla (Apache-2.0), so their attribution must travel with them
+    # in the wheel rather than stay behind in the repo.
+    if name.startswith(ROUTER_MODEL_WHEEL_PREFIX) and name.endswith("/PROVENANCE.md"):
         return True
     return name.startswith("agentos/identity/templates/bootstrap/") and name.endswith(".md")
 
