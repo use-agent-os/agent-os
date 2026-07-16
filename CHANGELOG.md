@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.7.17.post1] - 2026-07-17
+
+### Fixed
+
+- The `session_status` tool no longer fails on every call in a running
+  gateway. It called `SessionManager.get_current_session()`, a method that
+  exists only on test fakes and never on the production `SessionManager`, so
+  the attribute access raised `AttributeError` and surfaced as
+  `ToolError: Session manager not available`. It now resolves the calling
+  session from the tool context — the same source the surrounding session
+  tools already prefer — and loads it via `SessionManager.get_session()`.
+
 ## [2026.7.17] - 2026-07-17
 
 ### Added

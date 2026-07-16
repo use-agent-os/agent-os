@@ -751,7 +751,13 @@ async def sessions_yield(
 async def session_status() -> str:
     try:
         mgr = _get_session_manager()
-        current = await mgr.get_current_session()
+        # The gateway serves many concurrent sessions, so there is no global
+        # "current" one — the calling session is the ContextVar's.
+        ctx = current_tool_context.get()
+        session_key = ctx.session_key if ctx is not None else None
+        if not session_key:
+            raise ToolError("No active session")
+        current = await mgr.get_session(session_key)
         if current is None:
             raise ToolError("No active session")
         # Convert session object to dict
