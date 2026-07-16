@@ -594,6 +594,56 @@ async def test_config_patch_resetting_memory_provider_to_null_reports_restart_re
 
 
 @pytest.mark.asyncio
+async def test_config_patch_dotted_leaf_preserves_sibling_keys(tmp_path):
+    """The Form view flattens nested config into dotted leaves and saves each
+    touched leaf as one dot-path patch. Setting a single leaf must not wipe its
+    siblings under the same parent object.
+    """
+    cfg = GatewayConfig(
+        config_path=str(tmp_path / "c.toml"),
+        memory={"curated_memory_char_limit": 4000, "curated_user_char_limit": 1500},
+    )
+    res = await get_dispatcher().dispatch(
+        "r1",
+        "config.patch",
+        {"patches": {"memory.provider.name": "mem0"}},
+        _admin_ctx(cfg),
+    )
+
+    assert res.error is None, res.error
+    assert cfg.memory.provider.name == "mem0"
+    # Sibling scalars under memory survive the single-leaf patch.
+    assert cfg.memory.curated_memory_char_limit == 4000
+    assert cfg.memory.curated_user_char_limit == 1500
+
+
+@pytest.mark.asyncio
+async def test_config_patch_nested_dict_deep_merges_without_wiping_siblings(tmp_path):
+    """A nested single-leaf merge patch {"memory": {"provider": {"name": "mem0"}}}
+    must deep-merge, leaving unrelated memory/provider fields intact.
+    """
+    cfg = GatewayConfig(
+        config_path=str(tmp_path / "c.toml"),
+        memory={
+            "curated_memory_char_limit": 4000,
+            "provider": {"mem0": {"llm_model": "qwen3:8b"}},
+        },
+    )
+    res = await get_dispatcher().dispatch(
+        "r1",
+        "config.patch",
+        {"patch": {"memory": {"provider": {"name": "mem0"}}}},
+        _admin_ctx(cfg),
+    )
+
+    assert res.error is None, res.error
+    assert cfg.memory.provider.name == "mem0"
+    # Deep merge keeps the sibling scalar and the nested mem0 sub-object.
+    assert cfg.memory.curated_memory_char_limit == 4000
+    assert cfg.memory.provider.mem0.llm_model == "qwen3:8b"
+
+
+@pytest.mark.asyncio
 async def test_config_patch_retuning_mem0_settings_reports_restart_required(tmp_path):
     cfg = GatewayConfig(config_path=str(tmp_path / "c.toml"))
     res = await get_dispatcher().dispatch(

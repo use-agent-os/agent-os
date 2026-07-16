@@ -242,6 +242,46 @@ def test_config_memory_help_text_documents_external_provider_keys() -> None:
     assert "restart" in provider_help.lower()
 
 
+def test_config_form_flattens_nested_objects_into_dotted_leaf_fields() -> None:
+    source = CONFIG_JS.read_text(encoding="utf-8")
+
+    # A flattening helper exists and feeds the per-tab entry list.
+    assert "function _flattenEntries(" in source
+    assert "_flattenEntries(topLevel)" in source
+    # Depth-limited recursion: memory.embedding.local.model (depth 3) must render
+    # as a leaf field, so the limit is 3 and recursion is gated on depth < limit.
+    assert "_FLATTEN_MAX_DEPTH = 3" in source
+    assert "depth < _FLATTEN_MAX_DEPTH" in source
+    # Arrays and null are leaves (not descended into).
+    assert "!Array.isArray(value)" in source
+    # Top-level entries start at depth 0 so three descents reach the depth-3
+    # leaf memory.embedding.local.model rather than blobbing memory.embedding.local.
+    assert "walk(k, v, 0)" in source
+
+
+def test_config_form_labels_strip_group_prefix_but_keep_full_key_for_save() -> None:
+    source = CONFIG_JS.read_text(encoding="utf-8")
+
+    # Visible label strips the group prefix (provider.name), full dotted key
+    # stays in data-cfg-key so save + sensitive masking use the real path.
+    assert "function _fieldLabel(" in source
+    assert "k.slice(groupId.length + 1)" in source
+    assert 'data-cfg-key="${ek}"' in source
+    # Sensitive masking regex tests the FULL key, not the stripped label.
+    label_block = source.split("function _fieldHtml(", 1)[1].split("function ", 1)[0]
+    sensitive_line = [ln for ln in label_block.splitlines() if "isSensitive =" in ln][0]
+    assert "test(k)" in sensitive_line
+
+
+def test_config_form_reads_dirty_baseline_via_dotted_path_getter() -> None:
+    source = CONFIG_JS.read_text(encoding="utf-8")
+
+    # Dirty detection must resolve the baseline through a dotted-path getter,
+    # not a flat _configData[key] lookup (which would be undefined for leaves).
+    assert "function _configValueAt(" in source
+    assert "const oldVal = _configValueAt(key);" in source
+
+
 def test_config_field_labels_wrap_long_keys_on_phone_widths() -> None:
     css = CONFIG_CSS.read_text(encoding="utf-8")
     mobile = css.split("@media (max-width: 640px)", 1)[1]
