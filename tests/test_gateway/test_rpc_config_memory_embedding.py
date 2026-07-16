@@ -565,6 +565,35 @@ async def test_config_patch_selecting_memory_provider_reports_restart_required(t
 
 
 @pytest.mark.asyncio
+async def test_config_patch_resetting_memory_provider_to_null_reports_restart_required(
+    tmp_path,
+):
+    """Round-trip: selecting a provider then patching name back to null (disabled)
+    must also succeed and require a restart, same as selecting one in the first place.
+    """
+    cfg = GatewayConfig(config_path=str(tmp_path / "c.toml"))
+    selected = await get_dispatcher().dispatch(
+        "r1",
+        "config.patch",
+        {"patches": {"memory.provider.name": "mem0"}},
+        _admin_ctx(cfg),
+    )
+    assert selected.error is None, selected.error
+    assert cfg.memory.provider.name == "mem0"
+
+    res = await get_dispatcher().dispatch(
+        "r2",
+        "config.patch",
+        {"patches": {"memory.provider.name": None}},
+        _admin_ctx(cfg),
+    )
+
+    assert res.error is None, res.error
+    assert res.payload["restartRequired"] is True
+    assert cfg.memory.provider.name is None
+
+
+@pytest.mark.asyncio
 async def test_config_patch_retuning_mem0_settings_reports_restart_required(tmp_path):
     cfg = GatewayConfig(config_path=str(tmp_path / "c.toml"))
     res = await get_dispatcher().dispatch(

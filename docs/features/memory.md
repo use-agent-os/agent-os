@@ -246,8 +246,9 @@ When a provider is active it hooks four points:
 - **Per-turn sync** — after each turn the user/assistant exchange is handed to
   the provider (serialized through one background queue per manager) so it can
   extract and store durable memories.
-- **Write mirror** — curated `memory` tool writes are mirrored to the provider
-  so both stores stay consistent.
+- **Write mirror** — curated `memory` tool **ADDs** are mirrored to the
+  provider so it picks up new facts too; replace/remove are not propagated
+  in v1, so the provider's copy can drift from edited or deleted notes.
 
 ### mem0 (fully local by default)
 
