@@ -326,6 +326,10 @@ class ServiceContainer:
     memory_watchers: list[MemoryFileWatcher] = field(default_factory=list)
     memory_retrievers: dict[str, Any] = field(default_factory=dict)
     turn_capture_services: dict[str, Any] = field(default_factory=dict)
+    # External memory provider managers (Plan B), keyed by agent_id. Empty
+    # unless a provider is configured AND available at boot — a derived view
+    # over `memory_managers` (each manager's `.provider_manager`).
+    memory_provider_managers: dict[str, Any] = field(default_factory=dict)
     flush_service: Any = None  # SessionFlushService | None (gated by AGENTOS_SESSION_FLUSH)
     memory_repair_service: Any = None
     task_runtime: Any = None
@@ -1640,6 +1644,7 @@ async def build_services(
     memory_retrievers: dict[str, Any] = {}
     memory_sync_managers: dict[str, Any] = {}
     turn_capture_services: dict[str, Any] = {}
+    memory_provider_managers: dict[str, Any] = {}
     memory_watchers: list[Any] = []
     _turn_runner_ref: list = []
     try:
@@ -1647,10 +1652,15 @@ async def build_services(
         from agentos.tools.builtin.memory_tools import create_memory_tools
 
         agent_ids = _configured_agent_ids(config, extra_agent_ids)
+        # Provider tools that collide with a live builtin tool name are skipped
+        # (resolves TODO(B4) in memory/manager.py): the tool registry's names
+        # are only known here, so pass them into the provider-manager build.
+        reserved_tool_names = set(tool_registry.list_names()) if tool_registry else set()
         memory_managers = await build_memory_managers(
             config,
             agent_ids,
             session_storage=session_storage,
+            reserved_tool_names=reserved_tool_names,
         )
 
         # Derive legacy per-tier views from the managers. These remain in
@@ -1660,6 +1670,13 @@ async def build_services(
         memory_retrievers = {aid: m.retriever for aid, m in memory_managers.items()}
         memory_sync_managers = {aid: m.sync_manager for aid, m in memory_managers.items()}
         turn_capture_services = {aid: m.turn_capture for aid, m in memory_managers.items()}
+        # External memory provider managers (Plan B) — only agents whose
+        # provider was configured AND available at boot appear here.
+        memory_provider_managers = {
+            aid: m.provider_manager
+            for aid, m in memory_managers.items()
+            if m.provider_manager is not None
+        }
         memory_watchers = [m.sync_manager for m in memory_managers.values()]
 
         # Deferred callback: TurnRunner doesn't exist yet, so we capture a
@@ -1681,8 +1698,26 @@ async def build_services(
                 workspace_base=config.workspace_dir
                 if getattr(config.memory, "source", "state") == "workspace"
                 else None,
+                provider_managers=memory_provider_managers or None,
             )
             log.info("build_services.memory_tools_registered", agents=list(memory_stores))
+            # TODO(B4/B5): expose provider-routed tools. Every configured
+            # provider manager already computes its exposable schemas
+            # (``get_tool_schemas()`` / ``handle_tool_call``) with reserved
+            # builtin names skipped. Registering them into ``tool_registry``
+            # needs a per-agent routing handler (the registry is global; the
+            # active agent is resolved from ``current_tool_context``, as the
+            # builtin memory tools do). Deferred as an additive step — no
+            # in-tree provider ships tools yet (mem0 arrives in B5). Left
+            # unexposed with this marker rather than forcing invasive
+            # per-agent tool plumbing now.
+            for _agent_id, _pm in (memory_provider_managers or {}).items():
+                if _pm.get_tool_schemas():
+                    log.info(
+                        "build_services.memory_provider_tools_unexposed",
+                        agent_id=_agent_id,
+                        tool_count=len(_pm.get_tool_schemas()),
+                    )
     except Exception as e:
         log.warning("build_services.memory_tools_failed", error=str(e))
 
@@ -1891,6 +1926,7 @@ async def build_services(
         memory_watchers=memory_watchers,
         memory_retrievers=memory_retrievers,
         turn_capture_services=turn_capture_services,
+        memory_provider_managers=memory_provider_managers,
         flush_service=flush_service,
         memory_repair_service=memory_repair_service,
     )
@@ -1936,6 +1972,7 @@ def build_turn_runner_from_services(
         model_catalog=getattr(svc, "model_catalog", None),
         memory_retrievers=getattr(svc, "memory_retrievers", None) or None,
         turn_capture_services=getattr(svc, "turn_capture_services", None) or None,
+        memory_provider_managers=getattr(svc, "memory_provider_managers", None) or None,
         session_flush_service=getattr(svc, "flush_service", None),
         session_lock_provider=_standalone_lock_provider,
         diagnostics_state=diagnostics_state,

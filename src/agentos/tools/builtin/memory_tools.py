@@ -67,6 +67,72 @@ _MEMORY_THREAT_PATTERNS: tuple[re.Pattern[str], ...] = (
 
 _INVISIBLE_CHARS = re.compile(r"[\u200b\u200c\u200d\ufeff\u202a-\u202e]")
 
+# Actions that mirror to an external memory provider. Read-only or unknown
+# actions never reach a provider \u2014 ported from hermes-agent's
+# ``notify_memory_tool_write`` gating (MIT).
+_MIRRORED_MEMORY_ACTIONS: Final[frozenset[str]] = frozenset({"add", "replace", "remove"})
+
+
+def _memory_write_committed(result: Any) -> bool:
+    """True only when the curated ``memory`` tool actually committed a write.
+
+    Fails closed: a non-JSON string, a non-dict payload, a missing ``success``,
+    or a write staged for approval (``staged is True``) all return False so an
+    external provider is never told about a write that did not land.
+    """
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except Exception:  # noqa: BLE001
+            return False
+    if not isinstance(result, dict):
+        return False
+    return result.get("success") is True and result.get("staged") is not True
+
+
+def _mirror_memory_write(
+    provider_manager: Any | None,
+    *,
+    tool_result: Any,
+    target: str,
+    action: str | None,
+    content: str | None,
+    old_text: str | None,
+    operations: list[dict[str, Any]] | None,
+) -> None:
+    """Mirror a successful curated ``memory`` write to the external provider.
+
+    Ports the hermes ``notify_memory_tool_write`` semantics: gate on a
+    committed (non-staged, successful) write, expand the single-op and batched
+    ``operations`` shapes, keep only add/replace/remove, and forward
+    ``old_text`` as provenance metadata. No-op when no provider is configured.
+    """
+    if provider_manager is None:
+        return
+    if not _memory_write_committed(tool_result):
+        return
+    if operations:
+        raw_ops: list[dict[str, Any]] = [op for op in operations if isinstance(op, dict)]
+    else:
+        raw_ops = [{"action": action, "content": content, "old_text": old_text}]
+    for op in raw_ops:
+        op_action = str(op.get("action") or "")
+        if op_action not in _MIRRORED_MEMORY_ACTIONS:
+            continue
+        metadata: dict[str, Any] = {}
+        op_old_text = op.get("old_text")
+        if op_old_text:
+            metadata["old_text"] = str(op_old_text)
+        try:
+            provider_manager.notify_memory_write(
+                op_action,
+                target,
+                str(op.get("content") or ""),
+                metadata,
+            )
+        except Exception as exc:  # noqa: BLE001 \u2014 mirror must never break the tool
+            logger.debug("memory_tool.provider_mirror_failed", action=op_action, error=str(exc))
+
 
 def _scan_memory_content(content: str) -> str | None:
     """Lightweight check for injection/exfiltration in memory content.
@@ -333,6 +399,7 @@ def create_memory_tools(
     memory_source: str = "state",
     workspace_base: str | None = None,
     config_root: Any | None = None,
+    provider_managers: dict[str, Any] | None = None,
 ) -> None:
     """Register memory tools. Accepts either a single store or a dict keyed by agent_id.
 
@@ -346,12 +413,34 @@ def create_memory_tools(
     the root, not ``memory_config`` alone. Falls back to the (possibly
     stale-after-patch) ``memory_config`` sub-object when omitted, so
     existing callers/tests that only pass ``memory_config`` keep working.
+
+    ``provider_managers`` (optional): per-agent ``MemoryProviderManager``
+    instances (Plan B). When present, a SUCCESSFUL curated ``memory`` write is
+    mirrored to the active agent's provider via ``notify_memory_write`` (see
+    ``_mirror_memory_write`` for the success-only, add/replace/remove gating).
+    None/empty means no mirroring — zero cost on the disabled default path.
     """
     # Normalize to dict form
     if not isinstance(stores, dict):
         stores = {"main": stores}
     if not isinstance(retrievers, dict):
         retrievers = {"main": retrievers}
+
+    def _provider_manager_for_current_agent() -> Any | None:
+        """Resolve the external memory provider manager for the active agent.
+
+        Zero-cost when no provider is configured (``provider_managers`` is
+        None/empty). Mirrors ``_resolve``'s agent_id resolution + ``main``
+        fallback so the write mirror targets the same per-agent provider the
+        boot wiring attached.
+        """
+        if not provider_managers:
+            return None
+        from agentos.session.keys import normalize_agent_id
+
+        ctx = current_tool_context.get()
+        agent_id = normalize_agent_id((ctx.agent_id if ctx else None) or "main")
+        return provider_managers.get(agent_id) or provider_managers.get("main")
 
     class ResolvedAgent(NamedTuple):
         store: LongTermMemoryStore
@@ -936,6 +1025,15 @@ def create_memory_tools(
                     ensure_ascii=False,
                 )
             result = await asyncio.to_thread(store.apply_batch, target, operations)
+            _mirror_memory_write(
+                _provider_manager_for_current_agent(),
+                tool_result=result,
+                target=target,
+                action=None,
+                content=None,
+                old_text=None,
+                operations=operations,
+            )
             return json.dumps(result, ensure_ascii=False)
 
         # --- Single-op path --------------------------------------------------
@@ -969,6 +1067,15 @@ def create_memory_tools(
                 ensure_ascii=False,
             )
 
+        _mirror_memory_write(
+            _provider_manager_for_current_agent(),
+            tool_result=result,
+            target=target,
+            action=action,
+            content=content,
+            old_text=old_text,
+            operations=None,
+        )
         return json.dumps(result, ensure_ascii=False)
 
     @tool(

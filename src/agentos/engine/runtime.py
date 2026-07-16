@@ -1370,6 +1370,7 @@ class TurnRunner:
         model_catalog: Any | None = None,
         memory_retrievers: dict[str, Any] | None = None,
         turn_capture_services: dict[str, Any] | None = None,
+        memory_provider_managers: dict[str, Any] | None = None,
         session_flush_service: SessionFlushService | None = None,
         session_lock_provider: Callable[[str], asyncio.Lock] | None = None,
         diagnostics_state: Any | None = None,
@@ -1387,6 +1388,11 @@ class TurnRunner:
         self._model_catalog = model_catalog
         self._memory_retrievers = memory_retrievers
         self._turn_capture_services = turn_capture_services
+        # External memory provider managers (Plan B), keyed by agent_id. Empty /
+        # None unless a provider is configured AND available at boot. Every
+        # provider wiring site is a single ``None``/empty-dict check so the
+        # disabled default path adds zero awaits/imports to the hot path.
+        self._memory_provider_managers = memory_provider_managers
         self._session_flush_service = session_flush_service
         self._diagnostics_state = diagnostics_state
         self._router_control_hold_store = RouterControlHoldStore()
@@ -1634,6 +1640,75 @@ class TurnRunner:
             ),
         )
 
+    def _provider_manager_for(self, agent_id: str) -> Any | None:
+        """Resolve the external memory provider manager for an agent, or None.
+
+        Zero-cost when no provider is configured: the dict is None/empty on the
+        disabled default path, so this returns ``None`` after a single lookup.
+        Falls back to the ``main`` agent's manager, mirroring how the other
+        per-agent memory tiers resolve.
+        """
+        managers = self._memory_provider_managers
+        if not managers:
+            return None
+        return managers.get(agent_id) or managers.get("main")
+
+    async def _resolve_session_id_for_prefetch(self, session_key: str) -> str:
+        """Best-effort provider recall scoping key. Empty string on any miss."""
+        if self._session_manager is None:
+            return ""
+        try:
+            session = await self._session_manager.get_session(session_key)
+        except Exception:  # noqa: BLE001 — recall scoping is best-effort
+            return ""
+        return str(getattr(session, "session_id", "") or "")
+
+    async def _augment_extra_context_with_prefetch(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        message: str,
+        extra_context: dict[str, str] | None,
+        timeout: float = 3.0,
+    ) -> dict[str, str] | None:
+        """Return ``extra_context`` with the provider's fenced recall injected.
+
+        The prefetched block is per-turn volatile content, so it rides in
+        ``extra_context`` (rendered as a ``## <key>`` block in the dynamic
+        suffix) rather than the cacheable base prompt. Best-effort and bounded:
+        a slow provider cannot stall the turn — on timeout or error we log and
+        inject nothing, returning the context unchanged. No-op (returns the
+        input object) when no provider is configured.
+        """
+        manager = self._provider_manager_for(agent_id)
+        if manager is None or not message:
+            return extra_context
+        try:
+            block = await asyncio.wait_for(
+                manager.prefetch_all(message, session_id=session_id),
+                timeout=timeout,
+            )
+        except TimeoutError:
+            log.warning(
+                "turn_runner.memory_prefetch_timeout",
+                agent_id=agent_id,
+                timeout_seconds=timeout,
+            )
+            return extra_context
+        except Exception as exc:  # noqa: BLE001 — recall is best-effort
+            log.warning(
+                "turn_runner.memory_prefetch_failed",
+                agent_id=agent_id,
+                error=str(exc),
+            )
+            return extra_context
+        if not block:
+            return extra_context
+        merged = dict(extra_context) if extra_context else {}
+        merged["Memory Context"] = block
+        return merged
+
     async def _capture_turn_memory(
         self,
         *,
@@ -1679,6 +1754,23 @@ class TurnRunner:
             captured_at=datetime.now(tz=UTC),
             no_memory_capture=no_memory_capture,
         )
+
+        # Mirror the completed turn to the external provider (Plan B). Both
+        # calls are non-blocking background enqueues that no-op when no
+        # provider is configured — the turn path never awaits provider I/O.
+        provider_manager = self._provider_manager_for(agent_id)
+        if provider_manager is not None:
+            session_id = getattr(session, "session_id", "")
+            provider_manager.sync_all(
+                runtime_message,
+                final_text,
+                session_id=session_id,
+                messages=[
+                    {"role": "user", "content": runtime_message},
+                    {"role": "assistant", "content": final_text},
+                ],
+            )
+            provider_manager.queue_prefetch_all(runtime_message, session_id=session_id)
 
     @staticmethod
     def _capture_filter_matches(value: str | None, excluded_values: Any) -> bool:
@@ -2002,6 +2094,18 @@ class TurnRunner:
             semantic_input = input_out.semantic_input
             extra_prompt_context = input_out.extra_prompt_context
             normalization_metadata = input_out.normalization_metadata
+
+            # External memory provider PREFETCH (Plan B): inject this turn's
+            # recalled context as a per-turn volatile block. Gated on provider
+            # presence first so the disabled default adds only a dict lookup;
+            # bounded by a modest timeout so a slow provider cannot stall turns.
+            if self._provider_manager_for(agent_id) is not None:
+                extra_prompt_context = await self._augment_extra_context_with_prefetch(
+                    agent_id=agent_id,
+                    session_id=await self._resolve_session_id_for_prefetch(session_key),
+                    message=runtime_message,
+                    extra_context=extra_prompt_context,
+                )
 
             pt_outcome = await self._provider_and_tools_stage.run(
                 ProviderAndToolsStageInput(
@@ -3485,6 +3589,19 @@ class TurnRunner:
             workspace_files.pop("MEMORY.md", None)
         if private_memory_allowed:
             workspace_files.pop("USER.md", None)
+        # External memory provider STATIC block (Plan B). Joins the curated
+        # memory blocks in the cacheable base prompt (provider identity /
+        # capability text is stable across turns). No-op when no provider is
+        # configured or the provider yields no block. Gated by private-memory
+        # policy alongside the curated blocks so stateless prompts stay clean.
+        if private_memory_allowed:
+            provider_manager = self._provider_manager_for(agent_id)
+            if provider_manager is not None:
+                static_block = provider_manager.build_system_prompt()
+                if static_block:
+                    memory_text = (
+                        f"{memory_text}\n\n{static_block}" if memory_text else static_block
+                    )
         daily_notes_count_before_omit = len(daily)
         daily_notes_omitted = daily_notes_count_before_omit > 0
         if daily_notes_omitted:

@@ -456,6 +456,7 @@ async def _build_provider_manager(
     memory_config: Any,
     agent_state_dir: Path,
     agent_id: str,
+    reserved_tool_names: set[str] | None = None,
 ) -> Any | None:
     """Build + initialize a ``MemoryProviderManager`` for one agent, or ``None``.
 
@@ -464,10 +465,10 @@ async def _build_provider_manager(
     the gateway boots regardless. The providers package is imported here
     (function-local) so the disabled default path never touches it.
 
-    TODO(B4): ``reserved_tool_names`` is passed empty. The runtime tool
-    registry (``ToolRegistry.list_names()``) is not reachable at this layer —
-    B4 owns wiring the live registry names through so provider tools that
-    collide with builtins are skipped.
+    ``reserved_tool_names`` is the set of live runtime tool names (the gateway
+    passes ``ToolRegistry.list_names()`` from ``build_services``). Provider
+    tools whose names collide with a builtin are skipped so a provider can
+    never shadow a core tool.
     """
     try:
         from agentos.memory.providers.manager import MemoryProviderManager
@@ -481,8 +482,9 @@ async def _build_provider_manager(
         if provider is None or not provider.is_available():
             return None
 
-        # TODO(B4): populate reserved_tool_names from the runtime ToolRegistry.
-        provider_manager = MemoryProviderManager(reserved_tool_names=set())
+        provider_manager = MemoryProviderManager(
+            reserved_tool_names=set(reserved_tool_names or set())
+        )
         if not provider_manager.add_provider(provider):
             return None
 
@@ -513,6 +515,7 @@ async def build_memory_managers(
     agent_ids: list[str],
     *,
     session_storage: Any | None = None,
+    reserved_tool_names: set[str] | None = None,
 ) -> dict[str, MemoryManager]:
     """Construct per-agent ``MemoryManager`` instances from gateway config.
 
@@ -716,6 +719,7 @@ async def build_memory_managers(
                     memory_config=cfg,
                     agent_state_dir=agent_data_dir,
                     agent_id=agent_id,
+                    reserved_tool_names=reserved_tool_names,
                 )
 
             managers[agent_id] = manager

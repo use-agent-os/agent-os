@@ -1486,6 +1486,55 @@ async def _handle_sessions_patch(params: dict | None, ctx: RpcContext) -> dict:
     return {"key": key, "updated": updated_fields}
 
 
+def _transcript_to_provider_messages(transcript: list[Any]) -> list[dict[str, Any]]:
+    """Convert transcript entries to the role/content dicts providers expect.
+
+    Only user/assistant string turns are forwarded; system/tool entries and
+    non-string content are dropped. Best-effort — mirrors the shape the
+    provider's ``on_session_end`` extraction consumes.
+    """
+    messages: list[dict[str, Any]] = []
+    for entry in transcript:
+        role = getattr(entry, "role", None)
+        content = getattr(entry, "content", None)
+        if role in ("user", "assistant") and isinstance(content, str):
+            messages.append({"role": role, "content": content})
+    return messages
+
+
+async def _notify_provider_session_boundary(
+    ctx: RpcContext,
+    *,
+    agent_id: str,
+    transcript: list[Any],
+    new_session_id: str,
+) -> None:
+    """Notify the external memory provider of a session end + id rotation.
+
+    Best-effort and fully guarded: no-op when no provider is configured for
+    the agent (the common case). Called after the flush + ``apply_intent``
+    rotation so the provider sees end-of-session before the switch, matching
+    the hermes lifecycle. Failures are logged, never raised — a provider must
+    not be able to fail a session reset.
+    """
+    turn_runner = getattr(ctx, "turn_runner", None)
+    resolver = getattr(turn_runner, "_provider_manager_for", None)
+    if not callable(resolver):
+        return
+    provider_manager = resolver(agent_id)
+    if provider_manager is None:
+        return
+    try:
+        await provider_manager.on_session_end(_transcript_to_provider_messages(transcript))
+    except Exception as exc:  # noqa: BLE001 — provider must not fail reset
+        log.warning("sessions.reset.provider_session_end_failed", error=str(exc))
+    if new_session_id:
+        try:
+            await provider_manager.on_session_switch(new_session_id)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("sessions.reset.provider_session_switch_failed", error=str(exc))
+
+
 @_d.method("sessions.reset", scope="operator.write")
 async def _handle_sessions_reset(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     """Synchronous session reset with FlushReceipt.
@@ -1592,6 +1641,12 @@ async def _handle_sessions_reset(params: dict | None, ctx: RpcContext) -> dict[s
                 SessionIntent.RESET_SAME_KEY,
             )
             new_epoch = await _increment_and_emit_epoch(ctx, storage, key)
+            await _notify_provider_session_boundary(
+                ctx,
+                agent_id=agent_id,
+                transcript=transcript,
+                new_session_id=updated.session_id,
+            )
             return {
                 "key": key,
                 "reset": True,
@@ -1606,6 +1661,12 @@ async def _handle_sessions_reset(params: dict | None, ctx: RpcContext) -> dict[s
                 key, SessionIntent.RESET_SAME_KEY
             )
             new_epoch = await _increment_and_emit_epoch(ctx, storage, key)
+            await _notify_provider_session_boundary(
+                ctx,
+                agent_id=agent_id,
+                transcript=transcript,
+                new_session_id=updated.session_id,
+            )
             receipt = FlushReceipt(
                 mode="skipped",
                 flushed_paths=[],
@@ -1687,6 +1748,12 @@ async def _handle_sessions_reset(params: dict | None, ctx: RpcContext) -> dict[s
 
         updated, rotated = await ctx.session_manager.apply_intent(key, SessionIntent.RESET_SAME_KEY)
         new_epoch = await _increment_and_emit_epoch(ctx, storage, key)
+        await _notify_provider_session_boundary(
+            ctx,
+            agent_id=agent_id,
+            transcript=transcript,
+            new_session_id=updated.session_id,
+        )
         return _reset_response(
             key,
             rotated,
