@@ -351,14 +351,36 @@ class LocalEmbeddingProvider:
     _BUNDLED_ONNX_DIR = Path(__file__).resolve().parent / "models" / "bge_onnx"
 
     @classmethod
-    def _bundled_onnx_dir(cls, model_name: str) -> Path | None:
-        """Resolve the bundled ONNX dir for the given model. Returns None
-        when no bundled export is available."""
+    def resolve_onnx_dir(cls, model_name: str) -> Path | None:
+        """Resolve the ONNX dir for the given model.
+
+        Resolution order:
+          1. The bundled-export convention (unchanged for BGE; also covers
+             any model shipped under ``models/embeddings/{short}-int8``).
+          2. A previously downloaded model dir under the user's AgentOS home
+             (``agentos.memory.model_download.downloaded_model_dir``).
+
+        Returns ``None`` when neither source has the model.
+        """
         if model_name == cls.DEFAULT_MODEL and cls._BUNDLED_ONNX_DIR.is_dir():
             return cls._BUNDLED_ONNX_DIR
         short = model_name.split("/")[-1]
         candidate = cls._BUNDLED_ONNX_DIR.parent / "embeddings" / f"{short}-int8"
-        return candidate if candidate.is_dir() else None
+        if candidate.is_dir():
+            return candidate
+        # Lazy import: model_download pulls in httpx-based download plumbing
+        # that has no business being an import-time dependency of the
+        # embedding module, and would risk a cycle if that ever changed.
+        from agentos.memory import model_download
+
+        return model_download.downloaded_model_dir(model_name)
+
+    @classmethod
+    def _bundled_onnx_dir(cls, model_name: str) -> Path | None:
+        """Deprecated alias for :meth:`resolve_onnx_dir`, kept for external
+        callers (``embedding_resolver.local_bge_available``,
+        ``gateway.boot``) and existing test monkeypatches."""
+        return cls.resolve_onnx_dir(model_name)
 
     def __init__(
         self,
@@ -375,7 +397,7 @@ class LocalEmbeddingProvider:
         # ``None`` is rejected explicitly: the previous semantics
         # (force sentence-transformers fallback) no longer exists.
         if onnx_dir == "auto":
-            self._onnx_dir: Path | None = self._bundled_onnx_dir(self._model_name)
+            self._onnx_dir: Path | None = self.resolve_onnx_dir(self._model_name)
         elif onnx_dir is None:
             raise ValueError(
                 "onnx_dir=None is no longer supported; the sentence-transformers "
@@ -458,13 +480,14 @@ class LocalEmbeddingProvider:
                 f"LocalEmbeddingProvider found onnx_dir={self._onnx_dir} but "
                 "it contains no *.onnx files."
             )
+        spec = model_spec(self._model_name)
         try:
             session = ort.InferenceSession(str(onnx_files[0]), providers=["CPUExecutionProvider"])
             tokenizer_path = self._onnx_dir / "tokenizer.json"
             if not tokenizer_path.is_file():
                 raise RuntimeError(f"tokenizer.json not found in {self._onnx_dir}")
             tokenizer = Tokenizer.from_file(str(tokenizer_path))
-            tokenizer.enable_truncation(max_length=512)
+            tokenizer.enable_truncation(max_length=spec.max_tokens)
             tokenizer.enable_padding()
             input_names = [inp.name for inp in session.get_inputs()]
             # Warm-up + dim discovery via a dummy encode.
@@ -472,7 +495,7 @@ class LocalEmbeddingProvider:
             feed = self._tokenize_onnx(["warmup"], input_names)
             out = session.run(None, feed)[0]
             if out.ndim == 3:
-                out = out[:, 0, :]  # CLS pooling for BGE-style models
+                out = self._pool(out, feed, spec.pooling)
         except Exception as exc:
             logger.warning("local_embedding.onnx_load_failed", error=str(exc))
             raise RuntimeError(
@@ -499,13 +522,47 @@ class LocalEmbeddingProvider:
         }
         return {name: value for name, value in arrays.items() if name in input_names}
 
+    @staticmethod
+    def _pool(outputs: Any, feed: dict[str, Any], pooling: str) -> Any:
+        """Reduce an ndim==3 ``last_hidden_state``-shaped output to
+        ``(batch, dim)``.
+
+        ``"cls"`` takes the first-token vector (BGE-style models). ``"mean"``
+        computes an attention-mask-weighted mean over the sequence axis
+        (EmbeddingGemma and other mean-pooling models): positions where the
+        mask is 0 (padding) don't contribute to the sum, and the divisor is
+        clamped to at least 1 to avoid dividing by zero for an all-masked
+        (empty) sequence.
+        """
+        import numpy as np
+
+        if pooling == "mean":
+            mask = feed["attention_mask"].astype(np.float32)  # (batch, seq)
+            mask_expanded = mask[..., None]  # (batch, seq, 1)
+            summed = np.sum(outputs * mask_expanded, axis=1)  # (batch, dim)
+            counts = np.clip(np.sum(mask, axis=1, keepdims=True), a_min=1.0, a_max=None)
+            return (summed / counts).astype(np.float32)
+        return outputs[:, 0, :]  # CLS pooling
+
     def encode_sync(
         self,
         texts: list[str],
         *,
         batch_size: int = 32,
         show_progress_bar: bool = False,  # accepted for API compat; unused
+        role: str | None = None,
     ) -> np.ndarray:  # noqa: F821
+        """Encode ``texts`` to embedding vectors.
+
+        ``role`` is ``None`` by default, meaning texts are encoded as-is
+        (raw) — this is the path used by skills' ``SemanticIndex``, which
+        must not change behavior this task. ``embed_query``/``embed_batch``
+        pre-format their text with the model's prompt prefix (if any)
+        before calling this method, so ``role`` itself is currently
+        informational only; it exists for future callers that want the
+        provider to apply prefixes on their behalf.
+        """
+        del role  # reserved for future use; formatting happens in embed_*
         self._ensure_loaded()
         return self._encode_onnx(list(texts), batch_size=batch_size)
 
@@ -517,26 +574,29 @@ class LocalEmbeddingProvider:
         if not texts:
             dim = self._dim or 0
             return np.zeros((0, dim), dtype=np.float32)
+        pooling = model_spec(self._model_name).pooling
         chunks: list[np.ndarray] = []
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
             feed = self._tokenize_onnx(batch, self._onnx_input_names)
             outputs = self._onnx_session.run(None, feed)[0]  # type: ignore[union-attr]
             if outputs.ndim == 3:
-                outputs = outputs[:, 0, :]  # CLS pooling
+                outputs = self._pool(outputs, feed, pooling)
             chunks.append(np.asarray(outputs, dtype=np.float32))
         return np.concatenate(chunks, axis=0)
 
     async def embed_query(self, text: str) -> list[float]:
         import asyncio
 
-        arr = await asyncio.to_thread(self.encode_sync, [text])
+        formatted = format_query_text(self._model_name, text)
+        arr = await asyncio.to_thread(self.encode_sync, [formatted])
         return cast(list[float], arr[0].tolist())
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         import asyncio
 
-        arr = await asyncio.to_thread(self.encode_sync, list(texts))
+        formatted = [format_document_text(self._model_name, text) for text in texts]
+        arr = await asyncio.to_thread(self.encode_sync, formatted)
         return [row.tolist() for row in arr]
 
     async def probe(self) -> tuple[bool, str | None]:
