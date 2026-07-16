@@ -113,7 +113,8 @@ source = "workspace"
 # used for memory embeddings unless explicitly configured below.
 #
 # Upgrade the local model with:
-#   agentos memory embedding-download google/embeddinggemma-300m
+#   agentos memory embedding-download
+# Use --model <id> to select a different model (default: google/embeddinggemma-300m).
 # Auto mode then prefers it automatically. Switching the local model changes the
 # embedding fingerprint and triggers a full reindex on next start.
 # retrieval_mode = "hybrid"  # "hybrid" | "fts_only"

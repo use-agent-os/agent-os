@@ -111,11 +111,12 @@ The bundled BGE model works offline with no setup. To upgrade to EmbeddingGemma,
 download its ONNX export once:
 
 ```sh
-agentos memory embedding-download google/embeddinggemma-300m
+agentos memory embedding-download
 ```
 
-The files land under `~/.agentos/models/embeddings/`. Auto mode then prefers the
-downloaded model automatically — no config change required. To pin a specific
+The files land under `~/.agentos/models/embeddings/`. Use `--model <id>` to select
+a different model; the default is `google/embeddinggemma-300m`. Auto mode then
+prefers the downloaded model automatically — no config change required. To pin a specific
 local model instead of relying on auto, set `[memory.embedding.local]`:
 
 ```toml

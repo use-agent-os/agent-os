@@ -181,7 +181,7 @@ def resolve_memory_embedding(
             raise ValueError(
                 f"memory.embedding.provider='local' selected model {local_model!r} "
                 "but no ONNX export was found (not bundled, not downloaded). "
-                f"Run `agentos memory embedding-download {local_model}` to fetch it, "
+                f"Run `agentos memory embedding-download --model {local_model}` to fetch it, "
                 "set memory.embedding.local.onnx_dir to an existing export, or omit "
                 "the model to use the bundled BGE default."
             )
