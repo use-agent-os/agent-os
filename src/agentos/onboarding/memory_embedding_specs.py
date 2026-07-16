@@ -25,22 +25,26 @@ class MemoryEmbeddingProviderSetupSpec:
 
 _MEMORY_EMBEDDING_PROVIDER_DATA: dict[str, dict[str, Any]] = {
     "auto": {
-        "label": "Auto (local BGE first)",
+        "label": "Auto (local first — EmbeddingGemma when downloaded, bundled BGE fallback)",
         "deployment": "auto",
         "requires_api_key": False,
         "requires_base_url": False,
         "what_you_need": (
-            "Bundled local embeddings for the default path.",
+            "Bundled BGE ONNX runs offline for the default path.",
+            "Optional `agentos memory embedding-download` fetches EmbeddingGemma "
+            "for higher-quality local vectors.",
             "Optional remote fallback credentials if configured.",
         ),
     },
     "local": {
-        "label": "Bundled BGE-small",
+        "label": "Local ONNX (EmbeddingGemma / bundled BGE)",
         "deployment": "local",
         "requires_api_key": False,
         "requires_base_url": False,
         "what_you_need": (
-            "Local ONNX embedding assets from the recommended install.",
+            "Bundled BGE ONNX assets ship with the recommended install.",
+            "Optional `agentos memory embedding-download` for the EmbeddingGemma "
+            "upgrade (switching models triggers a full reindex).",
             "Optional ONNX directory override for custom local assets.",
         ),
     },

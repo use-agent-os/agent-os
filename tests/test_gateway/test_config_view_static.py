@@ -228,6 +228,7 @@ def test_config_memory_help_text_documents_curated_memory_keys() -> None:
     assert "'memory.curated_memory_char_limit':" in source
     assert "'memory.curated_user_char_limit':" in source
     assert "'memory.inject_limit':" in source
+    assert "'memory.embedding.local.model':" in source
 
 
 def test_config_field_labels_wrap_long_keys_on_phone_widths() -> None:

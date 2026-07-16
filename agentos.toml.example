@@ -106,17 +106,25 @@ base_url = "https://openrouter.ai/api/v1"
 # "workspace" stores MEMORY.md and memory/*.md under workspace_dir.
 # SQLite indexes still live under state_dir.
 source = "workspace"
-# Long-term memory vector indexing defaults to provider="auto": it tries the
-# bundled local BGE-small ONNX model first, then a memory-specific remote key
-# if one is configured, then FTS-only. Chat LLM/OpenRouter credentials are not
+# Long-term memory vector indexing defaults to provider="auto". Auto order:
+# a downloaded EmbeddingGemma model first (higher quality), then the bundled
+# BGE-small ONNX model (offline fallback), then a memory-specific remote key if
+# one is configured, then FTS-only. Chat LLM/OpenRouter credentials are not
 # used for memory embeddings unless explicitly configured below.
+#
+# Upgrade the local model with:
+#   agentos memory embedding-download google/embeddinggemma-300m
+# Auto mode then prefers it automatically. Switching the local model changes the
+# embedding fingerprint and triggers a full reindex on next start.
 # retrieval_mode = "hybrid"  # "hybrid" | "fts_only"
 #
 # [memory.embedding]
 # provider = "auto" # "auto" | "none" | "local" | "openai" | "openai-compatible" | "ollama"
 #
 # [memory.embedding.local]
-# onnx_dir = "" # optional; empty uses bundled BGE; supports absolute, ~, or process-relative paths
+# model = "" # optional; empty = auto (downloaded EmbeddingGemma else bundled BGE);
+#            # pin to "google/embeddinggemma-300m" or "BAAI/bge-small-zh-v1.5"
+# onnx_dir = "" # optional; empty uses the resolved model's export; supports absolute, ~, or process-relative paths
 #
 # [memory.embedding.remote]
 # api_key = ""
@@ -173,7 +181,8 @@ max_skills_prompt_chars = 8000
 # filter_lexical_top_n = 20
 # filter_semantic_top_n = 20
 # filter_rrf_k = 60
-# filter_embedding_model = "BAAI/bge-small-zh-v1.5"
+# filter_embedding_model = "BAAI/bge-small-zh-v1.5"  # bundled BGE default;
+#   set "google/embeddinggemma-300m" to reuse a downloaded EmbeddingGemma export
 
 [task_runtime]
 # Server-side agent turn queue. Same-session tasks are serialized;

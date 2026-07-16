@@ -69,15 +69,17 @@ const ConfigView = (() => {
     'agentos_router.judge_short_circuit_allowlist':
       'Extra exact greeting/ack phrases (case-insensitive) that skip the judge. These are ADDED to the built-in default allowlist (en/vi/zh), not a replacement — leave empty to use just the defaults.',
     'memory.embedding':
-      'Long-term memory embedding provider. Defaults to local bundled BGE in auto mode when available; remote embeddings require explicit memory embedding configuration.',
+      'Long-term memory embedding provider. Auto mode prefers a downloaded EmbeddingGemma model, then the bundled BGE ONNX, then a configured remote key, then FTS-only. Run `agentos memory embedding-download` to fetch the EmbeddingGemma upgrade; switching the local model triggers a full reindex. Remote embeddings require explicit memory embedding configuration.',
     'memory.embedding.provider':
       'Canonical memory embedding provider: auto, none, local, openai/openai-compatible, or ollama. This is independent from the chat LLM provider.',
     'memory.embedding.remote.api_key':
       'API key for the memory embedding endpoint. This does not inherit the chat/OpenRouter key in auto mode.',
     'memory.embedding.remote.base_url':
       'OpenAI-compatible API root for memory indexing, for example https://api.openai.com/v1. The provider appends /embeddings.',
+    'memory.embedding.local.model':
+      'Optional local embedding model id to pin. Leave empty for auto (a downloaded EmbeddingGemma export when present, otherwise the bundled BGE-small). Set "google/embeddinggemma-300m" or "BAAI/bge-small-zh-v1.5" to force one. Changing this triggers a full reindex.',
     'memory.embedding.local.onnx_dir':
-      'Optional ONNX directory for a custom local embedding model. Leave empty to use the bundled BGE-small model.',
+      'Optional ONNX directory for a custom local embedding model. Leave empty to use the resolved model’s export (downloaded EmbeddingGemma or bundled BGE-small).',
     'memory.retrieval_mode':
       'Memory retrieval mode. "hybrid" uses vectors when an embedding provider is available; "fts_only" disables vectors.',
     'memory.curated_memory_char_limit':

@@ -92,6 +92,50 @@ agentos sessions export <session-key>
 
 Memory is for useful recall. Session export is for exact records.
 
+## Embeddings and semantic search
+
+Hybrid retrieval (the default) blends keyword (FTS) search with vector search.
+Vectors come from an embedding provider selected by `[memory.embedding]`. In the
+default `provider = "auto"` mode AgentOS picks the first available option in this
+order:
+
+1. A downloaded **EmbeddingGemma** model (higher quality, 768-dim).
+2. The **bundled BGE-small** ONNX export (offline, ships with the recommended
+   install).
+3. A memory-specific **remote** embedding key, if one is configured.
+4. **FTS-only** (keyword search) when nothing else is available.
+
+### Upgrading the local model
+
+The bundled BGE model works offline with no setup. To upgrade to EmbeddingGemma,
+download its ONNX export once:
+
+```sh
+agentos memory embedding-download google/embeddinggemma-300m
+```
+
+The files land under `~/.agentos/models/embeddings/`. Auto mode then prefers the
+downloaded model automatically — no config change required. To pin a specific
+local model instead of relying on auto, set `[memory.embedding.local]`:
+
+```toml
+[memory.embedding.local]
+model = "google/embeddinggemma-300m"  # or "BAAI/bge-small-zh-v1.5"
+```
+
+### Reindex on model switch
+
+The active provider, model id, and ONNX directory are hashed into an embedding
+**fingerprint**. Switching the local model (for example, after downloading
+EmbeddingGemma or changing `[memory.embedding.local].model`) changes that
+fingerprint and triggers a full reindex on the next gateway start, so existing
+vectors are never mixed across incompatible models. You can force it immediately
+with:
+
+```sh
+agentos memory index --force
+```
+
 ## Curated memory (MEMORY.md / USER.md)
 
 Two small, bounded files are injected into every system prompt so the agent

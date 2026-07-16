@@ -1290,14 +1290,18 @@ def test_channels_view_remains_status_only_but_links_guided_setup():
     assert "channels.restart" not in txt
 
 
-def test_example_config_does_not_advertise_local_embedding_model_override():
+def test_example_config_documents_local_embedding_model_override():
     txt = (ROOT.parents[2] / "agentos.toml.example").read_text(encoding="utf-8")
     local_section = txt.split("# [memory.embedding.local]", 1)[1].split(
         "# [memory.embedding.remote]",
         1,
     )[0]
-    assert "model =" not in local_section
+    # C5: the local block now advertises the commented model override (empty =
+    # auto) alongside onnx_dir, and names both documented model ids.
+    assert "model =" in local_section
     assert "onnx_dir" in local_section
+    assert "google/embeddinggemma-300m" in local_section
+    assert "BAAI/bge-small-zh-v1.5" in local_section
 
 
 def test_setup_view_has_memory_settings_card_with_user_facing_labels():
