@@ -36,7 +36,12 @@ specs/
 GEMINI.md
 .codex
 .codex/
-.claude/
+# Track the pump-version release skill; keep the rest of .claude/ local.
+!.claude/
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/pump-version/
 .omc/
 .omx/
 
