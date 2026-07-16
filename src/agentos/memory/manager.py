@@ -379,14 +379,25 @@ class MemoryManager:
         return status
 
     async def _curated_status(self) -> dict[str, Any] | None:
-        if self.memory_dir is None:
+        # The curated store's ``memory_dir`` is the *workspace root* -- the
+        # same directory the ``memory`` tool and runtime injection resolve
+        # MEMORY.md/USER.md against (see ``_curated_store_for`` in
+        # ``tools/builtin/memory_tools.py`` and ``_load_curated_memory_block``
+        # in ``engine/runtime.py``), NOT ``self.memory_dir`` -- which is the
+        # ``<workspace>/memory/`` subfolder used for daily notes and turn
+        # capture. Reading from ``self.memory_dir`` would always report 0
+        # curated entries in production.
+        curated_root = self.workspace_dir
+        if curated_root is None:
+            curated_root = getattr(self.turn_capture, "_workspace_dir", None)
+        if curated_root is None:
             return None
         from .curated import CuratedMemoryStore
 
         memory_limit = getattr(self.memory_config, "curated_memory_char_limit", 4000)
         user_limit = getattr(self.memory_config, "curated_user_char_limit", 2000)
         store = CuratedMemoryStore(
-            memory_dir=self.memory_dir,
+            memory_dir=Path(curated_root),
             memory_char_limit=memory_limit,
             user_char_limit=user_limit,
         )

@@ -145,7 +145,7 @@ source = "workspace"
 # above curated_memory_char_limit + curated_user_char_limit + header
 # overhead so a full MEMORY.md and a full USER.md both fit without either
 # block being dropped whole at the injection boundary.
-# inject_limit = 6200
+# inject_limit = 6400
 
 [memory.dream]
 # Dream consolidation is safety-first by default. Background scheduling and

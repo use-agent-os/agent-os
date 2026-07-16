@@ -23,7 +23,7 @@ def test_inject_limit_default_has_headroom_over_curated_budgets() -> None:
     ``_load_curated_memory_block`` never drops the user block by default.
     """
     cfg = GatewayConfig()
-    assert cfg.memory.inject_limit == 6200
+    assert cfg.memory.inject_limit == 6400
     assert cfg.memory.inject_limit > (
         cfg.memory.curated_memory_char_limit + cfg.memory.curated_user_char_limit
     )

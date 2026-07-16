@@ -481,12 +481,13 @@ class MemoryConfig(BaseSettings):
     session_source_enabled: bool = False
 
     # Passive injection
-    # 6200 gives headroom for the default curated budgets (4000 memory +
+    # 6400 gives headroom for the default curated budgets (4000 memory +
     # 2000 user = 6000 chars of entry content) plus header/separator
-    # overhead, so a full memory block + full user block both fit at
-    # defaults and the block-boundary truncation (drop-whole-block) path
-    # is unreachable unless a store is configured with a larger limit.
-    inject_limit: int = 6200  # max chars for passive memory injection into system prompt
+    # overhead (304 chars at full budgets), so a full memory block + full
+    # user block both fit at defaults and the block-boundary truncation
+    # (drop-whole-block) path is unreachable unless a store is configured
+    # with a larger limit.
+    inject_limit: int = 6400  # max chars for passive memory injection into system prompt
 
     # Size limits (0 = disabled)
     max_file_size_kb: int = 1024  # 1 MB per file

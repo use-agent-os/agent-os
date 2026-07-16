@@ -3466,15 +3466,25 @@ class TurnRunner:
             daily = self._load_daily_notes(memory_source_dir)
             memory_text = self._load_memory_md(memory_source_dir)
         # The curated store now owns MEMORY.md / USER.md injection via the
-        # ``## Memory`` block (usage header + sanitization). Drop the raw copies
-        # from the volatile "Workspace Files" block so they are not injected
-        # twice. ``memory_text`` carries the curated headers only when the
-        # corresponding store actually produced a block.
-        if memory_text:
-            if "MEMORY (your personal notes)" in memory_text:
-                workspace_files.pop("MEMORY.md", None)
-            if "USER PROFILE (who the user is)" in memory_text:
-                workspace_files.pop("USER.md", None)
+        # ``## Memory`` block (usage header + sanitization). Drop the raw
+        # copies from the volatile "Workspace Files" block so they are not
+        # injected twice.
+        #
+        # IMPORTANT: this pop must NOT be gated on the rendered header being
+        # present in ``memory_text``. When the curated user block gets
+        # dropped whole by the inject_limit budget (see
+        # ``_load_curated_memory_block``), ``memory_text`` no longer
+        # contains "USER PROFILE (who the user is)" even though the curated
+        # store still manages USER.md -- gating on that string would let the
+        # RAW, UNSANITIZED USER.md re-enter the prompt via the
+        # workspace-files block. Sanitization must not depend on injection
+        # success, so pop unconditionally whenever the curated path was used
+        # at all (i.e. private memory injection is allowed for this
+        # session), independent of which blocks survived the budget.
+        if memory_text and "MEMORY (your personal notes)" in memory_text:
+            workspace_files.pop("MEMORY.md", None)
+        if private_memory_allowed:
+            workspace_files.pop("USER.md", None)
         daily_notes_count_before_omit = len(daily)
         daily_notes_omitted = daily_notes_count_before_omit > 0
         if daily_notes_omitted:
@@ -3649,7 +3659,7 @@ class TurnRunner:
         from pathlib import Path
 
         if max_chars is None:
-            max_chars = getattr(getattr(self._config, "memory", None), "inject_limit", 6200)
+            max_chars = getattr(getattr(self._config, "memory", None), "inject_limit", 6400)
         root = Path(workspace_dir)
 
         curated = self._load_curated_memory_block(root, max_chars=max_chars)

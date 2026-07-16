@@ -108,7 +108,7 @@ line- or entry-limited:
 
 - `memory.curated_memory_char_limit` (default `4000`) bounds `MEMORY.md`.
 - `memory.curated_user_char_limit` (default `2000`) bounds `USER.md`.
-- `memory.inject_limit` (default `6200`) bounds the combined text actually
+- `memory.inject_limit` (default `6400`) bounds the combined text actually
   injected into the system prompt. It is kept comfortably above the sum of
   the two budgets plus header overhead so a full `MEMORY.md` and a full
   `USER.md` both fit without either block being dropped. If a block would

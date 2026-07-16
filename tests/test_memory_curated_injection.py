@@ -4,7 +4,7 @@ import logging
 from types import SimpleNamespace
 
 from agentos.engine.runtime import TurnRunner
-from agentos.memory.curated import ENTRY_DELIMITER
+from agentos.memory.curated import ENTRY_DELIMITER, CuratedMemoryStore
 
 
 def _runner(tmp_path, **memory_kwargs):
@@ -164,6 +164,104 @@ def test_default_inject_limit_keeps_full_memory_and_user_blocks_untruncated(tmp_
     assert user_entries[0] in memory_md
     # Never sliced mid-block.
     assert "..." not in memory_md
+
+
+def _fill_to_exact_budget(store: CuratedMemoryStore, target: str, filler: str) -> None:
+    """Add entries via the store API until the next one would overflow.
+
+    Builds the target store's on-disk content to sit as close as possible to
+    (but never over) its char budget, so tests exercise the true worst case
+    the production default must tolerate -- not an approximation with slack.
+    """
+    i = 0
+    while True:
+        candidate = f"{filler} {i:04d}"
+        entries = store.entries_for(target)
+        prospective = len(ENTRY_DELIMITER.join([*entries, candidate]))
+        if prospective > store._char_limit(target):
+            break
+        result = store.add(target, candidate)
+        assert result["success"], result
+        i += 1
+
+
+def test_default_inject_limit_fits_both_blocks_at_exact_default_budgets(tmp_path):
+    """Both curated stores filled to their EXACT default char budgets (4000
+    memory / 2000 user) must both still fit under the default inject_limit.
+
+    Regression test for a shortfall where the joined block (content +
+    header/separator overhead for both blocks) came out to 6304 chars at
+    full default budgets while inject_limit defaulted to 6200 -- silently
+    dropping the USER PROFILE block at default config with no override
+    needed to trigger it.
+    """
+    (tmp_path / "AGENTS.md").write_text("agents\n", encoding="utf-8")
+
+    builder = CuratedMemoryStore(
+        memory_dir=tmp_path, memory_char_limit=4000, user_char_limit=2000
+    )
+    builder.load_from_disk()
+    _fill_to_exact_budget(builder, "memory", "Memory fact about the project setup")
+    _fill_to_exact_budget(builder, "user", "User preference noted during onboarding")
+
+    assert builder._char_count("memory") <= 4000
+    assert builder._char_count("user") <= 2000
+    # Sanity: we actually got close to the budget, not just a token amount.
+    assert builder._char_count("memory") > 3900
+    assert builder._char_count("user") > 1900
+
+    # No inject_limit override -- exercise the real default from GatewayConfig
+    # (runtime.py's ``getattr(..., "inject_limit", 6400)`` fallback).
+    runner = _runner(tmp_path)
+
+    memory_md = runner._load_memory_md(tmp_path)
+    assert memory_md is not None
+    assert "MEMORY (your personal notes)" in memory_md
+    assert "USER PROFILE (who the user is)" in memory_md
+    assert "..." not in memory_md
+
+    metadata: dict[str, object] = {}
+    assembled = runner._assemble_prompt(
+        "main", [], session_key="agent:main:auto", prompt_metadata=metadata
+    )
+    prompt = _prompt_text(assembled)
+    assert "MEMORY (your personal notes)" in prompt
+    assert "USER PROFILE (who the user is)" in prompt
+
+
+def test_dropped_user_block_never_leaks_raw_user_md_via_workspace_files(tmp_path):
+    """When a tiny inject_limit forces the curated user block to drop, the
+    raw unsanitized USER.md must not re-enter the prompt through the
+    workspace-files block either.
+
+    Regression test for a security hole: popping USER.md out of
+    ``workspace_files`` was gated on the rendered curated header being
+    present in ``memory_text``. When the user block gets budget-dropped,
+    that condition is false, so the raw file used to leak back in
+    unsanitized via the workspace-files ("Workspace Files") block.
+    """
+    (tmp_path / "AGENTS.md").write_text("agents\n", encoding="utf-8")
+    (tmp_path / "MEMORY.md").write_text(
+        "User deploys with make deploy", encoding="utf-8"
+    )
+    raw_user_secret = "Name is Ada Lovelace; SSN 000-11-2222; hates being called Ada"
+    (tmp_path / "USER.md").write_text(raw_user_secret, encoding="utf-8")
+
+    # Small enough that the memory block fits but the user block is dropped
+    # whole at the injection boundary (see test_user_block_dropped_when_over_inject_limit).
+    runner = _runner(tmp_path, inject_limit=200)
+    metadata: dict[str, object] = {}
+
+    assembled = runner._assemble_prompt(
+        "main", [], session_key="agent:main:auto", prompt_metadata=metadata
+    )
+    prompt = _prompt_text(assembled)
+
+    assert "USER PROFILE (who the user is)" not in prompt
+    # The raw file content must not leak in anywhere -- not via the curated
+    # block, and not via a raw workspace-files re-entry of USER.md.
+    assert raw_user_secret not in prompt
+    assert "Ada Lovelace" not in prompt
 
 
 def test_oversized_memory_block_falls_back_to_slice(tmp_path, caplog):
