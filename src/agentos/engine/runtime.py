@@ -3652,10 +3652,8 @@ class TurnRunner:
             max_chars = getattr(getattr(self._config, "memory", None), "inject_limit", 4000)
         root = Path(workspace_dir)
 
-        curated = self._load_curated_memory_block(root)
+        curated = self._load_curated_memory_block(root, max_chars=max_chars)
         if curated is not None:
-            if len(curated) > max_chars:
-                return curated[:max_chars] + "\n..."
             return curated
 
         # Legacy fallback: lowercase memory.md, or any file the curated store
@@ -3675,12 +3673,22 @@ class TurnRunner:
             return content[:max_chars] + "\n..."
         return content
 
-    def _load_curated_memory_block(self, memory_dir: Any) -> str | None:
+    def _load_curated_memory_block(
+        self, memory_dir: Any, *, max_chars: int | None = None
+    ) -> str | None:
         """Return the joined curated MEMORY.md + USER.md snapshot block, or None.
 
         Migrates a pre-curated free-form MEMORY.md before the first load, then
         renders the store's frozen snapshot blocks. Returns None when neither
         store has any entries so the caller can apply its legacy fallback.
+
+        Blocks are included whole, in priority order (memory block first, then
+        user block): a block that would push the joined result past
+        ``max_chars`` is dropped entirely rather than sliced mid-block, so the
+        usage header inside a kept block always matches what was injected. The
+        one exception is a pathological memory block that alone exceeds
+        ``max_chars`` — that block is still sliced (legacy behavior) so a
+        broken store still injects something, with a warning logged.
         """
         from pathlib import Path
 
@@ -3703,14 +3711,46 @@ class TurnRunner:
             user_char_limit=user_limit,
         )
         store.load_from_disk()
-        blocks = [
-            block
-            for block in (store.snapshot_block("memory"), store.snapshot_block("user"))
+        named_blocks = [
+            (name, block)
+            for name, block in (
+                ("memory", store.snapshot_block("memory")),
+                ("user", store.snapshot_block("user")),
+            )
             if block
         ]
-        if not blocks:
+        if not named_blocks:
             return None
-        return "\n\n".join(blocks)
+
+        if max_chars is None:
+            return "\n\n".join(block for _, block in named_blocks)
+
+        first_name, first_block = named_blocks[0]
+        if len(first_block) > max_chars:
+            # Pathological case: even the highest-priority block alone
+            # overflows the limit. Fall back to a raw slice of that block
+            # only, so the caller still gets something injected, rather than
+            # dropping memory injection entirely.
+            log.warning(
+                "curated_memory.inject_truncated",
+                block=first_name,
+                block_chars=len(first_block),
+                max_chars=max_chars,
+            )
+            return first_block[:max_chars] + "\n..."
+
+        included: list[str] = [first_block]
+        joined_len = len(first_block)
+        for name, block in named_blocks[1:]:
+            candidate_len = joined_len + len("\n\n") + len(block)
+            if candidate_len > max_chars:
+                # Drop this (and, implicitly, any lower-priority) block whole
+                # rather than slicing mid-block.
+                continue
+            included.append(block)
+            joined_len = candidate_len
+
+        return "\n\n".join(included)
 
     def _load_daily_notes(self, workspace_dir: Any) -> dict[str, str]:
         from agentos.identity.workspace import load_daily_notes
