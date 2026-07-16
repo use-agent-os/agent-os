@@ -310,6 +310,64 @@ def memory_show_cmd(
         console.print("[dim]... truncated[/dim]")
 
 
+@memory_app.command("embedding-download")
+def memory_embedding_download_cmd(
+    model: str = typer.Option(
+        "google/embeddinggemma-300m",
+        "--model",
+        help="Embedding model id to download",
+    ),
+) -> None:
+    """Download a local embedding model's ONNX export to the models dir.
+
+    This is a local filesystem operation (no running gateway required): it
+    fetches the model files directly from Hugging Face into
+    ``~/.agentos/models/embeddings/<target-dir>``.
+    """
+
+    import asyncio
+
+    from agentos.cli.ui import console
+    from agentos.memory.model_download import (
+        EMBEDDING_MODEL_MANIFESTS,
+        download_embedding_model,
+    )
+
+    if model not in EMBEDDING_MODEL_MANIFESTS:
+        console.print(f"[red]Unknown embedding model id: {model}[/red]")
+        raise typer.Exit(code=1)
+
+    manifest = EMBEDDING_MODEL_MANIFESTS[model]
+    target_dir = None
+
+    def _progress(name: str, done: int, total: int | None) -> None:
+        if total:
+            pct = 100 * done // total
+            console.print(f"  {name}: {done}/{total} bytes ({pct}%)")
+        else:
+            console.print(f"  {name}: {done} bytes")
+
+    console.print(
+        f"Downloading {model} (~{manifest.approx_total_mb} MB) to "
+        f"{manifest.target_dirname}/"
+    )
+
+    async def _run() -> Path:
+        return await download_embedding_model(model, progress=_progress)
+
+    try:
+        target_dir = asyncio.run(_run())
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    console.print(f"[green]Downloaded to {target_dir}[/green]")
+    console.print(
+        "Restart the gateway (or run `agentos memory index --force`) to reindex "
+        "with the new model."
+    )
+
+
 @raw_fallbacks_app.command("list")
 def memory_raw_fallbacks_list_cmd(
     agent_id: str = typer.Option("main", "--agent", help="Agent id (default: main)"),
