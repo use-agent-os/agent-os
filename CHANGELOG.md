@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.7.17] - 2026-07-17
+
+### Added
+
+- Curated memory stores, embedding refresh, and a pluggable memory
+  provider layer (mem0). (#17)
+- Restored the missing v4_phase3 local ML router bundle so the default
+  router runs on-device instead of pinning to a single class, and
+  corrected its attribution to OpenSquilla upstream. (#19)
+
+### Changed
+
+- Redesigned the Web UI chat transcript. (#15)
+
+### Fixed
+
+- `agentos memory embedding-download` now follows Hugging Face's CDN
+  redirects. Every `resolve/main/...` URL answers with a 302 to a signed
+  Xet CDN URL, but `httpx` does not follow redirects by default, so the
+  download aborted with an `HTTPStatusError` before writing any data and
+  the command never worked against the live API. (#20)
+
 ## [2026.7.15.post1] - 2026-07-15
 
 ### Added

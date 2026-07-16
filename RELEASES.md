@@ -2,6 +2,7 @@
 
 | Version | Tag | Date | Notes |
 |---|---|---|---|
+| 2026.7.17 | v2026.7.17 | 2026-07-17 | Memory provider layer (mem0) + curated stores; v4_phase3 router bundle restored; Web UI transcript redesign; embedding-download redirect fix |
 | 2026.7.15.post1 | v2026.7.15.post1 | 2026-07-15 | Partner-catalog skills system + Robinhood RWA address lookup skill (Bankr hub) |
 | 2026.7.15 | v2026.7.15 | 2026-07-15 | Relicense to Apache-2.0 with `NOTICE` + OpenSquilla attribution; wheels ship license files |
 | 2026.7.14.post1 | v2026.7.14.post1 | 2026-07-14 | PyPI distribution rename to `use-agent-os`; first PyPI release |
