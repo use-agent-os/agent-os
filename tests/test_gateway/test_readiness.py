@@ -11,7 +11,10 @@ def test_ready_endpoint_reports_starting_until_gateway_marks_ready() -> None:
     app = create_gateway_app(GatewayConfig())
     app.state.gateway_ready = False
 
-    with TestClient(app) as client:
+    # base_url uses a loopback Host so TrustedHostMiddleware (DNS-rebinding
+    # guard) admits the request — the default "testserver" Host is rejected,
+    # matching how a real browser can only reach the loopback gateway.
+    with TestClient(app, base_url="http://localhost") as client:
         starting = client.get("/ready")
         assert starting.status_code == 503
         assert starting.json()["ready"] is False

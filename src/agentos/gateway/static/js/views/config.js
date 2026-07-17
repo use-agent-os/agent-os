@@ -118,6 +118,10 @@ const ConfigView = (() => {
       '"auto_summarize" compacts older history via a small LLM; "hard_truncate" drops oldest turns; "refuse" rejects the turn with a stable error.',
     'auth_mode':
       'Gateway auth scheme. "token" requires a static bearer token; "none" is open (loopback only); other modes per deployment.',
+    'auth.allow_unauthenticated_public':
+      'Break-glass opt-in. By default the gateway refuses to start with auth.mode "none" on a non-loopback bind; enabling this serves anyway, giving every peer that can reach the port full operator access. Only enable behind a reverse proxy with auth, VPN, or firewall.',
+    'control_ui.allowed_origins':
+      'Extra browser origins allowed to open the Control UI WebSocket, call the HTTP API, and send Host headers, beyond loopback (which is always allowed). Add your reverse-proxy origin here (e.g. https://agent.example.com) when serving the UI off another host; default ports 80/443 are normalized. Cross-origin requests are otherwise rejected to block cross-site WebSocket hijacking and DNS rebinding.',
   };
 
   function _helpFor(key) {

@@ -166,6 +166,70 @@ async def test_config_apply_memory_retrieval_mode_reports_restart_required(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_config_patch_auth_mode_reports_restart_required(tmp_path):
+    """auth.mode is applied to AuthMiddleware live, but the startup guard and
+    the captured bind posture only re-evaluate on restart — so a hot change
+    must be flagged restart-required so the operator isn't misled."""
+    cfg = GatewayConfig(config_path=str(tmp_path / "c.toml"))  # mode defaults to "none"
+    res = await get_dispatcher().dispatch(
+        "r1",
+        "config.patch",
+        {"patches": {"auth.mode": "token"}},
+        _admin_ctx(cfg),
+    )
+
+    assert res.error is None, res.error
+    assert res.payload["restartRequired"] is True
+
+
+@pytest.mark.asyncio
+async def test_config_patch_host_reports_restart_required(tmp_path):
+    """host changes do NOT rebind the live socket, so hot-applying host must be
+    flagged restart-required (the process still listens on the old address)."""
+    cfg = GatewayConfig(config_path=str(tmp_path / "c.toml"))  # host defaults to 127.0.0.1
+    res = await get_dispatcher().dispatch(
+        "r1",
+        "config.patch",
+        {"patches": {"host": "0.0.0.0"}},
+        _admin_ctx(cfg),
+    )
+
+    assert res.error is None, res.error
+    assert res.payload["restartRequired"] is True
+
+
+@pytest.mark.asyncio
+async def test_config_patch_same_auth_and_host_does_not_report_restart_required(tmp_path):
+    cfg = GatewayConfig(config_path=str(tmp_path / "c.toml"))
+    res = await get_dispatcher().dispatch(
+        "r1",
+        "config.patch",
+        {"patches": {"prompt_cache.mode": "auto"}},  # unrelated, non-restart change
+        _admin_ctx(cfg),
+    )
+
+    assert res.error is None, res.error
+    assert res.payload["restartRequired"] is False
+
+
+@pytest.mark.asyncio
+async def test_config_apply_auth_mode_reports_restart_required(tmp_path):
+    cfg = GatewayConfig(config_path=str(tmp_path / "c.toml"))
+    payload = cfg.model_dump(mode="python")
+    payload["auth"]["mode"] = "token"
+
+    res = await get_dispatcher().dispatch(
+        "r1",
+        "config.apply",
+        {"config": payload},
+        _admin_ctx(cfg),
+    )
+
+    assert res.error is None, res.error
+    assert res.payload["restartRequired"] is True
+
+
+@pytest.mark.asyncio
 async def test_config_get_redacts_memory_remote_api_key(tmp_path):
     cfg = GatewayConfig(
         config_path=str(tmp_path / "c.toml"),

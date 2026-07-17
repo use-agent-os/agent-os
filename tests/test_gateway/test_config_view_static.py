@@ -242,6 +242,23 @@ def test_config_memory_help_text_documents_external_provider_keys() -> None:
     assert "restart" in provider_help.lower()
 
 
+def test_config_auth_help_text_documents_public_bind_opt_in() -> None:
+    source = CONFIG_JS.read_text(encoding="utf-8")
+
+    assert "'auth.allow_unauthenticated_public':" in source
+    # The help must convey this is a break-glass override of the startup guard.
+    opt_in_help = source.split("'auth.allow_unauthenticated_public':", 1)[1].split("',", 1)[0]
+    assert "refuse" in opt_in_help.lower()
+
+
+def test_config_control_ui_help_documents_ws_origin_allowlist() -> None:
+    source = CONFIG_JS.read_text(encoding="utf-8")
+
+    assert "'control_ui.allowed_origins':" in source
+    help_text = source.split("'control_ui.allowed_origins':", 1)[1].split("',", 1)[0]
+    assert "loopback" in help_text.lower()
+
+
 def test_config_form_flattens_nested_objects_into_dotted_leaf_fields() -> None:
     source = CONFIG_JS.read_text(encoding="utf-8")
 

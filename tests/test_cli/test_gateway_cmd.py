@@ -136,6 +136,49 @@ def test_gateway_run_turns_missing_onboarding_env_into_recovery_hint(
     assert "Traceback" not in output
 
 
+def test_gateway_run_refuses_wildcard_bind_without_auth(tmp_path, monkeypatch) -> None:
+    """auth.mode="none" + non-loopback bind fails closed at startup (issue #18, V3)."""
+    target = tmp_path / "agentos.toml"
+    target.write_text("", encoding="utf-8")
+    monkeypatch.setenv("AGENTOS_STATE_DIR", str(tmp_path / "home"))
+    monkeypatch.delenv("AGENTOS_AUTH_ALLOW_UNAUTHENTICATED_PUBLIC", raising=False)
+    monkeypatch.delenv("AGENTOS_AUTH_MODE", raising=False)
+
+    result = runner.invoke(
+        app, ["gateway", "run", "--config", str(target), "--listen", "0.0.0.0"]
+    )
+
+    assert result.exit_code == 1
+    output = result.stdout + (result.stderr or "")
+    assert "Gateway could not start" in output
+    assert "allow_unauthenticated_public" in output
+    # The "LAN-open" warning implies the server will serve — contradictory
+    # noise right before a refusal. It belongs to the opt-in path only.
+    assert "LAN-open" not in output
+
+
+def test_gateway_run_warns_lan_open_when_opt_in_set(tmp_path, monkeypatch) -> None:
+    target = tmp_path / "agentos.toml"
+    target.write_text(
+        "[auth]\nallow_unauthenticated_public = true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENTOS_STATE_DIR", str(tmp_path / "home"))
+    monkeypatch.delenv("AGENTOS_AUTH_MODE", raising=False)
+
+    async def fake_start_gateway_server(**_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(gateway_cmd, "start_gateway_server", fake_start_gateway_server)
+
+    result = runner.invoke(
+        app, ["gateway", "run", "--config", str(target), "--listen", "0.0.0.0"]
+    )
+
+    output = result.stdout + (result.stderr or "")
+    assert "LAN-open" in output
+
+
 def test_gateway_lifecycle_paths_use_state_root(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("AGENTOS_STATE_DIR", str(tmp_path / "home"))
 

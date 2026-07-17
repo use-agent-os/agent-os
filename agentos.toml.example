@@ -341,6 +341,20 @@ default_mode = "bypass"                 # off | on | bypass | full
 # [auth]
 # mode = "none"         # none | token | password
 # token = ""
+# Startup guard: with mode = "none" the gateway refuses to bind a non-loopback
+# host (0.0.0.0, a LAN IP, ...). Enable auth, keep the loopback bind, or — only
+# behind an external auth layer (reverse proxy auth, VPN, firewall) — opt in:
+# allow_unauthenticated_public = false
+
+# [control_ui]
+# On a loopback bind the WebSocket handshake, cross-origin HTTP requests, and
+# the HTTP Host header are pinned to loopback origins to block cross-site
+# WebSocket hijacking, drive-by API calls, and DNS rebinding from a page in
+# the operator's browser. When serving the Control UI through a reverse proxy
+# on another host, add that browser origin here (scheme + host [+ port];
+# default ports 80/443 are normalized, so "https://agent.example.com" and
+# "https://agent.example.com:443" are equivalent):
+# allowed_origins = ["https://agent.example.com"]
 
 # [channels]
 # [[channels.channels]]

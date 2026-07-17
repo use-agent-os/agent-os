@@ -216,18 +216,44 @@ def _sandbox_posture_restart_fingerprint(config: Any) -> dict[str, Any]:
     }
 
 
+def _bind_restart_fingerprint(config: Any) -> dict[str, Any]:
+    """Fingerprint the bind posture (host) and auth mode.
+
+    Neither takes full effect on a hot apply: ``host`` does not rebind the
+    live uvicorn socket, and while ``auth.mode`` is read live by
+    AuthMiddleware, the startup guard and the captured loopback posture only
+    re-evaluate on restart. Flagging these restart-required keeps the operator
+    from believing a host/auth change is fully live when it is not.
+    """
+    if config is None or not hasattr(config, "model_dump"):
+        return {}
+    data = config.model_dump(mode="python")
+    if not isinstance(data, dict):
+        return {}
+    auth = data.get("auth")
+    return {
+        "host": data.get("host"),
+        "auth_mode": auth.get("mode") if isinstance(auth, dict) else None,
+    }
+
+
 def _restart_required(
     *,
     old_memory_fingerprint: dict[str, Any],
     old_channels_fingerprint: Any,
     old_sandbox_posture_fingerprint: dict[str, Any],
     new_config: Any,
+    old_bind_fingerprint: dict[str, Any] | None = None,
 ) -> bool:
     return (
         old_memory_fingerprint != _memory_restart_fingerprint(new_config)
         or old_channels_fingerprint != _channels_restart_fingerprint(new_config)
         or old_sandbox_posture_fingerprint
         != _sandbox_posture_restart_fingerprint(new_config)
+        or (
+            old_bind_fingerprint is not None
+            and old_bind_fingerprint != _bind_restart_fingerprint(new_config)
+        )
     )
 
 
@@ -347,6 +373,7 @@ async def _handle_config_set(params: dict | None, ctx: RpcContext) -> dict[str, 
     old_memory_fingerprint = _memory_restart_fingerprint(ctx.config)
     old_channels_fingerprint = _channels_restart_fingerprint(ctx.config)
     old_sandbox_posture_fingerprint = _sandbox_posture_restart_fingerprint(ctx.config)
+    old_bind_fingerprint = _bind_restart_fingerprint(ctx.config)
     cfg_dict = ctx.config.model_dump() if hasattr(ctx.config, "model_dump") else {}
     # Validate path exists
     source_value = _resolve_path(cfg_dict, path)
@@ -377,6 +404,7 @@ async def _handle_config_set(params: dict | None, ctx: RpcContext) -> dict[str, 
             old_memory_fingerprint=old_memory_fingerprint,
             old_channels_fingerprint=old_channels_fingerprint,
             old_sandbox_posture_fingerprint=old_sandbox_posture_fingerprint,
+            old_bind_fingerprint=old_bind_fingerprint,
             new_config=new_config,
         )
     }
@@ -400,6 +428,7 @@ async def _handle_config_patch(params: dict | None, ctx: RpcContext) -> dict[str
     old_memory_fingerprint = _memory_restart_fingerprint(ctx.config)
     old_channels_fingerprint = _channels_restart_fingerprint(ctx.config)
     old_sandbox_posture_fingerprint = _sandbox_posture_restart_fingerprint(ctx.config)
+    old_bind_fingerprint = _bind_restart_fingerprint(ctx.config)
     cfg_dict = ctx.config.model_dump() if hasattr(ctx.config, "model_dump") else {}
     source_cfg_dict = copy.deepcopy(cfg_dict) if isinstance(cfg_dict, dict) else {}
     redacted_paths: set[str] = set()
@@ -452,6 +481,7 @@ async def _handle_config_patch(params: dict | None, ctx: RpcContext) -> dict[str
             old_memory_fingerprint=old_memory_fingerprint,
             old_channels_fingerprint=old_channels_fingerprint,
             old_sandbox_posture_fingerprint=old_sandbox_posture_fingerprint,
+            old_bind_fingerprint=old_bind_fingerprint,
             new_config=new_config,
         ),
     }
@@ -499,6 +529,7 @@ async def _handle_config_apply(params: dict | None, ctx: RpcContext) -> dict[str
     old_memory_fingerprint = _memory_restart_fingerprint(ctx.config)
     old_channels_fingerprint = _channels_restart_fingerprint(ctx.config)
     old_sandbox_posture_fingerprint = _sandbox_posture_restart_fingerprint(ctx.config)
+    old_bind_fingerprint = _bind_restart_fingerprint(ctx.config)
     old_payload = (
         ctx.config.model_dump(mode="python")
         if ctx.config is not None and hasattr(ctx.config, "model_dump")
@@ -521,6 +552,7 @@ async def _handle_config_apply(params: dict | None, ctx: RpcContext) -> dict[str
             old_memory_fingerprint=old_memory_fingerprint,
             old_channels_fingerprint=old_channels_fingerprint,
             old_sandbox_posture_fingerprint=old_sandbox_posture_fingerprint,
+            old_bind_fingerprint=old_bind_fingerprint,
             new_config=new_config,
         )
     }

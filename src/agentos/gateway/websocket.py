@@ -32,6 +32,105 @@ from agentos.gateway.rpc import RpcContext, RpcDispatcher
 log = structlog.get_logger(__name__)
 
 
+_ORIGIN_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _origin_key(value: str) -> tuple[str, str, int | None] | None:
+    """Parse an origin string into a comparable ``(scheme, host, port)`` key.
+
+    Browsers send ``Origin`` in canonical form (lowercase host, default port
+    omitted); operators type whatever variant comes to mind. Normalizing both
+    sides — lowercase, brackets/trailing dot stripped, scheme default port
+    applied — makes semantically equal origins compare equal:
+    ``https://agent.example.com:443`` == ``https://agent.example.com`` ==
+    ``https://agent.example.com.``. Returns ``None`` for values that do not
+    parse as ``scheme://host[:port]`` (they can never match anything).
+    """
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(value.strip())
+        host = (parts.hostname or "").rstrip(".")  # lowercased, brackets stripped
+        port = parts.port
+    except ValueError:
+        return None
+    scheme = parts.scheme.lower()
+    scheme = {"ws": "http", "wss": "https"}.get(scheme, scheme)
+    if not scheme or not host:
+        return None
+    if port is None:
+        port = _ORIGIN_DEFAULT_PORTS.get(scheme)
+    return (scheme, host, port)
+
+
+def origin_in_allowlist(origin: str, allowed: list[str]) -> bool:
+    """True if ``origin`` matches an ``allowed`` entry, normalized per
+    ``_origin_key`` (unparseable entries or origins never match)."""
+    key = _origin_key(origin)
+    if key is None:
+        return False
+    return any(_origin_key(entry) == key for entry in allowed)
+
+
+def is_allowed_ws_origin(
+    origin: str | None,
+    config: GatewayConfig,
+    *,
+    bind_is_loopback: bool | None = None,
+) -> bool:
+    """Return True if a WebSocket handshake ``Origin`` may be accepted.
+
+    The WS upgrade skips ``AuthMiddleware`` and a loopback peer is
+    auto-upgraded to operator scopes by ``peer_ip`` alone, so a malicious
+    page in the victim's browser could otherwise open a socket to the local
+    gateway and drive the admin RPC surface (Cross-Site WebSocket Hijacking;
+    the CVE-2026-53869 class). Browsers always send ``Origin`` on WS
+    handshakes and page JS cannot forge it, so it is the correct gate.
+
+    Allow when:
+
+    * No ``Origin`` header — non-browser clients (CLI, node peers) never send
+      one; browsers always do. Rejecting here would break the CLI.
+    * The gateway is on a **non-loopback bind**. It only starts there past
+      ``enforce_public_bind_auth_guard`` (auth on, or explicit opt-in), the
+      socket is authenticated after ``accept()`` via ``connect.challenge`` /
+      ``resolve_auth``, and the loopback auto-admin upgrade is off. A remote
+      browser's ``Origin`` names whatever host it navigated to (a LAN IP, a
+      DNS name) — never the bind address (``0.0.0.0``/``::``) — so gating
+      here would reject every legitimate browser without adding security.
+    * The origin's host is loopback (``127.0.0.0/8``, ``::1``, ``localhost``)
+      on any port — the same-origin Control UI and local tools.
+    * The origin matches an entry in ``control_ui.allowed_origins`` (opt-in
+      for a reverse-proxied UI on another host), compared normalized —
+      scheme/host case, default ports, trailing dot/slash.
+
+    Anything else — a cross-site page, a rebound hostname — is rejected. A
+    malformed, unparseable ``Origin`` fails closed (rejected).
+    """
+    if not origin:
+        return True
+
+    from agentos.gateway.scopes import is_loopback_address, is_loopback_bind
+
+    # Prefer the bind posture captured when the app was built: config.host is
+    # mutated in place by config.apply without rebinding the live socket, so
+    # reading it here would let a runtime host change silently disable the
+    # guard while the process still listens on loopback (P2).
+    on_loopback = (
+        bind_is_loopback if bind_is_loopback is not None else is_loopback_bind(config.host)
+    )
+    if not on_loopback:
+        return True
+
+    if origin_in_allowlist(origin, config.control_ui.allowed_origins):
+        return True
+
+    key = _origin_key(origin)
+    if key is None:
+        return False
+    return is_loopback_address(key[1])
+
+
 # ---------------------------------------------------------------------------
 # Outbound writer queue primitives
 # ---------------------------------------------------------------------------
@@ -541,11 +640,24 @@ async def handle_ws_connection(
     memory_managers: dict[str, Any] | None = None,
     memory_stores: dict[str, Any] | None = None,
     memory_retrievers: dict[str, Any] | None = None,
+    bind_is_loopback: bool | None = None,
 ) -> None:
     """Main WebSocket connection handler."""
     conn_id = str(uuid.uuid4())
     conn = WsConnection(conn_id=conn_id, ws=ws)
     registry = get_registry()
+
+    # CSWSH / DNS-rebinding guard (loopback binds): reject a browser handshake
+    # whose Origin is neither loopback nor an explicitly allowed UI origin,
+    # before accept(). A cross-site page cannot forge Origin, so this stops it
+    # from opening a socket to the loopback gateway and inheriting operator
+    # scopes. Starlette Headers.get is case-insensitive. bind_is_loopback is
+    # the posture captured at app-build time (P2) — see is_allowed_ws_origin.
+    origin = ws.headers.get("origin")
+    if not is_allowed_ws_origin(origin, config, bind_is_loopback=bind_is_loopback):
+        log.warning("ws.origin_rejected", conn_id=conn_id, origin=origin)
+        await ws.close(code=1008)  # policy violation
+        return
 
     await ws.accept()
     log.info("ws.connected", conn_id=conn_id, remote=str(ws.client))

@@ -15,6 +15,7 @@ class _DisconnectingChallengeWebSocket:
 
     def __init__(self) -> None:
         self.accepted = False
+        self.headers: dict[str, str] = {}
 
     async def accept(self) -> None:
         self.accepted = True

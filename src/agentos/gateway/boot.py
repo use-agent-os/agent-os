@@ -36,7 +36,11 @@ from agentos.agents.scope import resolve_agent_model, resolve_agent_workspace_di
 from agentos.asyncio_utils import create_background_task
 from agentos.engine.usage import UsageTracker as _UsageTracker
 from agentos.gateway.app import create_gateway_app
-from agentos.gateway.config import GatewayConfig, is_public_bind
+from agentos.gateway.config import (
+    GatewayConfig,
+    enforce_public_bind_auth_guard,
+    is_public_bind,
+)
 from agentos.gateway.llm_runtime import resolve_llm_runtime_config
 from agentos.gateway.rpc import get_dispatcher
 from agentos.gateway.session_events import build_sessions_changed_payload
@@ -2016,6 +2020,11 @@ async def start_gateway_server(
     # Apply runtime port override
     if port is not None:
         config = config.model_copy(update={"port": port})
+
+    # Fail closed on auth.mode="none" + non-loopback bind (issue #18, V3).
+    # Runs before any side effect (file logging, PID lock, services) so a
+    # refused start leaves no partial state.
+    enforce_public_bind_auth_guard(config)
 
     _setup_file_logging(config)
     if config.config_path:

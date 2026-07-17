@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Browser-threat hardening for the gateway (#24). A loopback bind is not a
+  boundary against a page in the operator's browser, so four fail-closed
+  guards were added: a startup guard that refuses `auth.mode="none"` on a
+  non-loopback bind (opt out with `auth.allow_unauthenticated_public=true`),
+  WebSocket-handshake Origin validation (CSWSH), a `Host`-header allowlist
+  (DNS rebinding), and an HTTP cross-origin guard on `/api/*`. Runtime
+  `config.apply`/`config.patch` of `host` or `auth.mode` now reports
+  `restartRequired: true`, since a host change does not rebind the live
+  socket.
+
+### Changed
+
+- **BREAKING (opt-in deployments only):** the gateway now refuses to start
+  when `auth.mode="none"` is combined with a non-loopback bind
+  (`0.0.0.0`, a LAN IP, ...). If you deliberately run an unauthenticated
+  gateway behind a reverse proxy / VPN / firewall, set
+  `auth.allow_unauthenticated_public = true` (or
+  `AGENTOS_AUTH_ALLOW_UNAUTHENTICATED_PUBLIC=true`). Default loopback
+  deployments are unaffected. (#24)
+- **BREAKING (opt-in deployments only):** `auth.mode="trusted-proxy"` no
+  longer satisfies the public-bind guard. It only string-matched the
+  client-suppliable `X-Forwarded-For` header (spoofable) and has no
+  end-to-end resolver, so it did not actually authenticate. Use
+  `auth.mode="token"` on public binds until real peer-IP validation ships.
+  (#24)
+- Reaching a loopback gateway through a custom hostname (e.g. an
+  `/etc/hosts` alias to `127.0.0.1`) or a reverse-proxied Control UI now
+  requires adding that origin to `control_ui.allowed_origins`; otherwise the
+  `Host`/Origin guards reject it. The rejection message names the config key.
+  (#24)
+
 ## [2026.7.17.post1] - 2026-07-17
 
 ### Fixed

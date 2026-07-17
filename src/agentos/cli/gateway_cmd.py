@@ -77,9 +77,13 @@ def run_gateway(
             "[yellow]WARNING: gateway is bound to a wildcard address - "
             "reachable from every interface.[/yellow]"
         )
-        if config.auth.mode == "none":
+        if config.auth.mode == "none" and config.auth.allow_unauthenticated_public:
+            # Without the opt-in, start_gateway_server refuses this combination
+            # outright (enforce_public_bind_auth_guard) — no point warning that
+            # the network is open right before the refusal explains itself.
             console.print(
-                "[yellow]  auth.mode=none + wildcard bind = LAN-open. "
+                "[yellow]  auth.mode=none + wildcard bind + "
+                "allow_unauthenticated_public = LAN-open. "
                 "Anyone reachable on this network can use the chat, sessions, "
                 "and config surfaces with your provider credentials.[/yellow]"
             )

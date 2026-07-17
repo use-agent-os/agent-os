@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import time
 from typing import Any
+from urllib.parse import urlsplit
 
+import structlog
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
@@ -20,6 +22,8 @@ from agentos.gateway.control_ui import create_control_ui_routes
 from agentos.gateway.middleware import (
     AuthMiddleware,
     ErrorHandlingMiddleware,
+    LoopbackHostMiddleware,
+    LoopbackOriginMiddleware,
     RateLimitMiddleware,
     SecurityHeadersMiddleware,
 )
@@ -27,6 +31,52 @@ from agentos.gateway.rpc import RpcContext, get_dispatcher
 from agentos.gateway.websocket import handle_ws_connection
 
 _start_time = time.time()
+
+log = structlog.get_logger(__name__)
+
+
+def resolve_trusted_hosts(config: GatewayConfig) -> list[str]:
+    """Return the ``LoopbackHostMiddleware`` allowlist for the current bind.
+
+    On a loopback bind the middleware itself admits every literal loopback
+    ``Host`` via the shared ``scopes.is_loopback_address`` predicate — the
+    same one the startup guard and the WS-origin guard use, so any bind the
+    gateway blesses as loopback (all of ``127.0.0.0/8``, ``::1``,
+    ``localhost``, IPv4-mapped forms) is reachable at its own address. This
+    list only carries the extra hostnames from ``control_ui.allowed_origins``
+    (a reverse-proxied UI on another name). A DNS-rebinding page can use none
+    of them: its request carries the attacker's foreign hostname in ``Host``
+    (CVE-2026-53869 class).
+
+    On a non-loopback bind the gateway only starts past
+    ``enforce_public_bind_auth_guard`` — auth is enabled or the operator
+    explicitly opted in — and the operator deliberately serves other names,
+    so we do not constrain ``Host`` (``["*"]``).
+    """
+    from agentos.gateway.scopes import is_loopback_bind
+
+    if not is_loopback_bind(config.host):
+        return ["*"]
+
+    hosts: list[str] = []
+    for origin in config.control_ui.allowed_origins:
+        try:
+            hostname = urlsplit(origin).hostname
+        except ValueError:
+            hostname = None
+        if not hostname:
+            # A dead entry would silently match nothing here AND in the
+            # WS-origin guard — tell the operator at startup instead.
+            log.warning(
+                "gateway.allowed_origin_unparseable",
+                origin=origin,
+                hint="control_ui.allowed_origins entries must be full origins: "
+                "scheme://host[:port], e.g. https://agent.example.com",
+            )
+            continue
+        if hostname not in hosts:
+            hosts.append(hostname)
+    return hosts
 
 
 def create_gateway_app(
@@ -431,6 +481,13 @@ def create_gateway_app(
             status_code=_rpc_status_code(result),
         )
 
+    # Capture the bind posture once, at app-build time. config.apply mutates
+    # config.host in place without rebinding the live socket, so the guards
+    # must not re-read it per request (P2).
+    from agentos.gateway.scopes import is_loopback_bind
+
+    bind_is_loopback = is_loopback_bind(config.host)
+
     async def ws_endpoint(ws: WebSocket) -> None:
         await handle_ws_connection(
             ws,
@@ -454,6 +511,7 @@ def create_gateway_app(
             memory_managers=memory_managers,
             memory_stores=memory_stores,
             memory_retrievers=memory_retrievers,
+            bind_is_loopback=bind_is_loopback,
         )
 
     # ── Routes ───────────────────────────────────────────────────────────────
@@ -492,6 +550,18 @@ def create_gateway_app(
 
     middleware = [
         Middleware(ErrorHandlingMiddleware),
+        # DNS-rebinding guard: reject foreign Host headers on a loopback bind
+        # (no-op ["*"] on a public bind, which is already auth-gated).
+        Middleware(LoopbackHostMiddleware, allowed_hosts=resolve_trusted_hosts(config)),
+        # Cross-site browser guard for the HTTP surface: reject foreign page
+        # Origins before CORS can reflect them (same predicate as the WS
+        # handshake guard). No-op without an Origin header, and on
+        # non-loopback (auth-gated) binds.
+        Middleware(
+            LoopbackOriginMiddleware,
+            config=config,
+            bind_is_loopback=bind_is_loopback,
+        ),
         Middleware(
             CORSMiddleware,
             allow_origins=config.cors.allowed_origins,
