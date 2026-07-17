@@ -53,6 +53,41 @@ def test_loopback_bind_is_unchanged_and_silent(tmp_path) -> None:
     assert emitted == []
 
 
+def test_lan_bind_prompts_like_any_non_loopback(tmp_path) -> None:
+    """[P1 #2] A specific LAN IP is non-loopback, so the guard rejects it —
+    the prompt must fire for it too, not only for wildcard 0.0.0.0 / ::.
+    Uses the same is_loopback_bind predicate as the startup guard."""
+    config = _config(tmp_path, host="192.168.1.50")
+    prompted: list[bool] = []
+
+    def _prompt(_msg: str) -> str:
+        prompted.append(True)
+        return "3"  # cancel — we only assert the prompt fired
+
+    outcome, _ = provision_public_bind_auth(
+        config, interactive=True, prompt=_prompt, emit=lambda _m: None
+    )
+
+    assert prompted == [True]
+    assert outcome is AuthProvisionOutcome.CANCEL
+
+
+def test_break_glass_forces_mode_none_for_unsupported_modes(tmp_path) -> None:
+    """[P2] The prompt fires for password/trusted-proxy/typo (only token is
+    enforced). Break-glass [2] must set mode="none" so the gateway actually
+    serves openly — otherwise the guard starts it but resolve_auth has no
+    resolver for the mode, so the WS/chat surface rejects everyone."""
+    config = _config(tmp_path, auth=AuthConfig(mode="password"))
+
+    outcome, result = provision_public_bind_auth(
+        config, interactive=True, prompt=lambda _m: "2", emit=lambda _m: None
+    )
+
+    assert outcome is AuthProvisionOutcome.PROCEED
+    assert result.auth.mode == "none"
+    assert result.auth.allow_unauthenticated_public is True
+
+
 def test_public_bind_with_token_mode_is_unchanged(tmp_path) -> None:
     config = _config(tmp_path, auth=AuthConfig(mode="token", token="secret"))
 

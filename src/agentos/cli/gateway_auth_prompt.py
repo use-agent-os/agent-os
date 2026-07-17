@@ -16,9 +16,9 @@ from enum import Enum
 from agentos.gateway.config import (
     GatewayConfig,
     _mode_protects_public_bind,
-    is_public_bind,
 )
 from agentos.gateway.config_persist import persist_config
+from agentos.gateway.scopes import is_loopback_bind
 
 
 class AuthProvisionOutcome(Enum):
@@ -60,7 +60,11 @@ def provision_public_bind_auth(
     and already-protected/opted-in public binds return ``UNCHANGED``; so do
     non-interactive runs, which fall through to the startup guard unchanged.
     """
-    if not is_public_bind(config.host):
+    # Use the SAME predicate as enforce_public_bind_auth_guard: any non-loopback
+    # bind (a wildcard 0.0.0.0/:: OR a specific LAN IP like 192.168.1.50) needs
+    # auth. is_public_bind only catches wildcards, so a LAN bind would otherwise
+    # skip the prompt and hit the raw startup ValueError (PR #25 review, P1 #2).
+    if is_loopback_bind(config.host):
         return (AuthProvisionOutcome.UNCHANGED, config)
 
     emit(_WILDCARD_WARNING)
@@ -96,8 +100,19 @@ def provision_public_bind_auth(
         return (AuthProvisionOutcome.CANCEL, config)
 
     if choice == "2":
+        # Break-glass means "serve openly", so force auth.mode="none" too — not
+        # just the opt-in flag. Leaving an unsupported mode (password /
+        # trusted-proxy / typo) in place would let the guard start the gateway
+        # while resolve_auth has no resolver for it, so the WS/chat surface
+        # still rejects everyone — the operator's "serve without auth" intent
+        # would silently not hold (PR #25 review, P2). None is session-only;
+        # nothing is persisted (host/mode/opt-in are all runtime-only here).
         new_config = config.model_copy(
-            update={"auth": config.auth.model_copy(update={"allow_unauthenticated_public": True})}
+            update={
+                "auth": config.auth.model_copy(
+                    update={"mode": "none", "allow_unauthenticated_public": True}
+                )
+            }
         )
         emit(_LAN_OPEN_WARNING)
         emit("[yellow]  Break-glass is session-only; nothing was written to the config.[/yellow]")
@@ -108,34 +123,17 @@ def provision_public_bind_auth(
     new_config = config.model_copy(
         update={"auth": config.auth.model_copy(update={"mode": "token", "token": token})}
     )
-    _persist_auth_only(new_config, emit)
-    emit(f"[bold]Gateway token:[/bold] {token}")
-    emit("[dim]Clients authenticate with: Authorization: Bearer <token>[/dim]")
-    return (AuthProvisionOutcome.PROCEED, new_config)
-
-
-def _persist_auth_only(new_config: GatewayConfig, emit: Callable[[str], None]) -> None:
-    """Persist ONLY the auth change, not the one-off CLI overrides.
-
-    ``run_gateway`` injects ``host``/``port``/``debug`` from CLI flags into the
-    in-memory config before this prompt runs, so writing ``new_config`` wholesale
-    would freeze a one-off ``--listen 0.0.0.0 --debug`` into the config file. We
-    instead reload the on-disk config and apply only the new auth, so a plain
-    ``agentos gateway run`` next time is unaffected.
-    """
-    config_path = new_config.config_path
+    # persist_config writes only the auth change: host/port/debug are runtime-
+    # only and are never frozen from the in-memory config (see config_persist).
     try:
-        to_write = (
-            GatewayConfig.load(config_path) if config_path else new_config.model_copy(deep=True)
-        )
-        to_write = to_write.model_copy(update={"auth": new_config.auth})
-        if config_path and not to_write.config_path:
-            to_write.config_path = config_path
-        persist_config(to_write)
+        persist_config(new_config)
     except OSError as exc:
         emit(
             f"[yellow]WARNING: could not persist the token to the config file ({exc}). "
             "It stays active for this session only.[/yellow]"
         )
     else:
-        emit(f"[green]auth.mode=token enabled; token saved to {config_path}[/green]")
+        emit(f"[green]auth.mode=token enabled; token saved to {new_config.config_path}[/green]")
+    emit(f"[bold]Gateway token:[/bold] {token}")
+    emit("[dim]Clients authenticate with: Authorization: Bearer <token>[/dim]")
+    return (AuthProvisionOutcome.PROCEED, new_config)
