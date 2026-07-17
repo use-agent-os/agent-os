@@ -314,6 +314,20 @@
   width: 140px;
 }
 
+/* Display-only value (CLI-managed keys like host/port) */
+.cfg-readonly-value {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 var(--sp-3);
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-muted);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+}
+
 .cfg-input-json {
   width: 100%;
   min-height: 88px;

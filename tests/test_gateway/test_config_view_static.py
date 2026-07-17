@@ -259,6 +259,36 @@ def test_config_control_ui_help_documents_ws_origin_allowlist() -> None:
     assert "loopback" in help_text.lower()
 
 
+def test_config_host_and_port_render_read_only() -> None:
+    source = CONFIG_JS.read_text(encoding="utf-8")
+
+    # Bind posture is CLI-only: host/port render display-only, no editable input.
+    assert "_READONLY_KEYS" in source
+    readonly_decl = source.split("_READONLY_KEYS = new Set(", 1)[1].split(")", 1)[0]
+    assert "'host'" in readonly_decl
+    assert "'port'" in readonly_decl
+    field_block = source.split("function _fieldHtml(", 1)[1].split("function ", 1)[0]
+    assert "_READONLY_KEYS.has(k)" in field_block
+    assert "cfg-readonly-value" in field_block
+
+
+def test_config_readonly_value_has_display_styling() -> None:
+    css = CONFIG_CSS.read_text(encoding="utf-8")
+
+    assert ".cfg-readonly-value {" in css
+
+
+def test_config_host_port_help_text_names_the_cli_flags() -> None:
+    source = CONFIG_JS.read_text(encoding="utf-8")
+
+    host_help = source.split("'host':", 1)[1].split("',", 1)[0]
+    assert "--bind" in host_help
+    assert "cli" in host_help.lower()
+    port_help = source.split("'port':", 1)[1].split("',", 1)[0]
+    assert "--port" in port_help
+    assert "cli" in port_help.lower()
+
+
 def test_config_form_flattens_nested_objects_into_dotted_leaf_fields() -> None:
     source = CONFIG_JS.read_text(encoding="utf-8")
 

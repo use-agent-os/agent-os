@@ -31,9 +31,9 @@ const ConfigView = (() => {
   // Per-field help, keyed by config path. Falls back to a generic message.
   const _HELP = {
     'host':
-      'Network interface the gateway binds to. Defaults to 127.0.0.1 (loopback). Use 0.0.0.0 to expose on all interfaces — opt-in only, never on an untrusted network.',
+      'Network interface the gateway binds to. Read-only here — set via agentos gateway run --bind (CLI only). Defaults to 127.0.0.1 (loopback); 0.0.0.0 exposes on all interfaces and requires auth.',
     'port':
-      'TCP port for the ASGI gateway. Default 18791. Pick a free port; the WebSocket and REST endpoints share it.',
+      'TCP port for the ASGI gateway. Read-only here — set via agentos gateway run --port (CLI only). Default 18791; the WebSocket and REST endpoints share it.',
     'debug':
       'Security-sensitive developer mode. Auth scope expansion can take effect immediately for new connections; Starlette debug, uvicorn log level, and some startup wiring need a gateway restart. Keep it off in shared deployments.',
     'diagnostics_enabled':
@@ -509,6 +509,10 @@ const ConfigView = (() => {
     return k;
   }
 
+  // Bind posture is CLI-only (agentos gateway run --bind / --port): these keys
+  // render display-only — no editable input, and the RPC rejects writes anyway.
+  const _READONLY_KEYS = new Set(['host', 'port']);
+
   function _fieldHtml(k, v, groupId) {
     // Sensitive-key masking tests the FULL dotted key, so a nested leaf like
     // memory.embedding.remote.api_key is still masked after flattening.
@@ -524,7 +528,12 @@ const ConfigView = (() => {
     const inputId = `cfg-input-${_safeId(k)}`;
 
     let inputHtml;
-    if (typeof v === 'boolean') {
+    if (_READONLY_KEYS.has(k)) {
+      // No data-cfg-key: save/dirty tracking never sees read-only fields.
+      inputHtml = `<div class="cfg-input-row">
+        <span id="${inputId}" class="cfg-readonly-value" data-cfg-readonly="${ek}">${_esc(String(curVal ?? ''))}</span>
+      </div>`;
+    } else if (typeof v === 'boolean') {
       inputHtml = `<label class="cfg-switch">
         <input id="${inputId}" type="checkbox" data-cfg-key="${ek}" data-cfg-type="boolean"${curVal ? ' checked' : ''} aria-label="${ek}">
         <span class="cfg-switch-track" aria-hidden="true"><span class="cfg-switch-thumb"></span></span>

@@ -183,9 +183,11 @@ async def test_config_patch_auth_mode_reports_restart_required(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_config_patch_host_reports_restart_required(tmp_path):
-    """host changes do NOT rebind the live socket, so hot-applying host must be
-    flagged restart-required (the process still listens on the old address)."""
+async def test_config_patch_host_is_skipped_and_reports_no_restart(tmp_path):
+    """Bind posture is CLI-only: host is a read-only path, so patching it is
+    skipped entirely — nothing changed, so no restart is required either.
+    (Previously host was patchable and flagged restart-required; Part B of the
+    auth-provisioning design removed that door.)"""
     cfg = GatewayConfig(config_path=str(tmp_path / "c.toml"))  # host defaults to 127.0.0.1
     res = await get_dispatcher().dispatch(
         "r1",
@@ -195,7 +197,8 @@ async def test_config_patch_host_reports_restart_required(tmp_path):
     )
 
     assert res.error is None, res.error
-    assert res.payload["restartRequired"] is True
+    assert cfg.host == "127.0.0.1"
+    assert res.payload["restartRequired"] is False
 
 
 @pytest.mark.asyncio
