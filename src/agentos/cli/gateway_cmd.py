@@ -21,6 +21,7 @@ from agentos.cli.gateway_lifecycle import (
 from agentos.cli.ui import ACCENT_MARKUP, console
 from agentos.gateway.boot import start_gateway_server
 from agentos.gateway.config import GatewayConfig, is_public_bind, resolve_listen_address
+from agentos.gateway.config_persist import set_runtime_overrides
 from agentos.paths import default_agentos_home
 
 
@@ -70,6 +71,19 @@ def run_gateway(
     explicit_flag: str | None = listen or (bind if bind and bind != "127.0.0.1" else None)
     host = resolve_listen_address(explicit_flag, default=config.host or "127.0.0.1")
     resolved_port = port if port is not None else config.port
+    # Record the on-disk values BEFORE overriding them in memory, in the
+    # process-global runtime-override map that every config writer consults. A
+    # one-off --listen/--port/--debug (or a later break-glass mode=none) must
+    # never be frozen into config.toml by ANY config write; each key maps to its
+    # pre-override on-disk value so persist restores it unless a writer marks
+    # that exact field explicitly changed.
+    set_runtime_overrides(
+        {
+            "host": config.host,
+            "port": config.port,
+            "debug": config.debug,
+        }
+    )
     config = config.model_copy(update={"host": host, "port": resolved_port, "debug": debug})
 
     # Public-bind auth provisioning: the helper owns all public-bind warning
@@ -78,7 +92,9 @@ def run_gateway(
     # runs never prompt — enforce_public_bind_auth_guard still refuses the
     # unsafe combination downstream, exactly as before.
     outcome, config = provision_public_bind_auth(
-        config, interactive=_stdin_isatty(), emit=console.print
+        config,
+        interactive=_stdin_isatty(),
+        emit=console.print,
     )
     if outcome is AuthProvisionOutcome.CANCEL:
         console.print("[yellow]Gateway start cancelled.[/yellow]")

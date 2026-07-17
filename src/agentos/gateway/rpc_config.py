@@ -397,7 +397,7 @@ async def _handle_config_set(params: dict | None, ctx: RpcContext) -> dict[str, 
     _sync_provider_selector(ctx, new_config)
     _update_config_in_place(ctx.config, new_config)
     _sync_image_generation(new_config)
-    _persist_config(ctx.config)
+    _persist_config(ctx.config, explicit_paths=explicit_paths)
     return {
         "restartRequired": _restart_required(
             old_memory_fingerprint=old_memory_fingerprint,
@@ -476,7 +476,7 @@ async def _handle_config_patch(params: dict | None, ctx: RpcContext) -> dict[str
     _update_config_in_place(ctx.config, new_config)
     _sync_image_generation(new_config)
 
-    _persist_config(ctx.config)
+    _persist_config(ctx.config, explicit_paths=explicit_paths)
     return {
         "patched": list(dot_patches.keys()) + (["(merge)"] if patch_data else []),
         "restartRequired": _restart_required(
@@ -525,6 +525,17 @@ async def _handle_config_apply(params: dict | None, ctx: RpcContext) -> dict[str
         raise ValueError("params.config is required")
 
     config_payload = dict(config_payload)
+    # YAML-mode Save seeds the payload from the RUNNING config (config.get), so
+    # every CLI/break-glass override it carries (host/port/debug/auth.mode/
+    # opt-in) is echoed back verbatim and would otherwise count as an explicit
+    # edit. Subtract the full runtime-override key set — mirroring
+    # rpc_onboarding._onboarding_explicit_paths — so persist_config restores
+    # their on-disk originals instead of freezing the transient posture. (A
+    # genuine edit still persists: form-mode config.patch sends only the dirty
+    # keys, which are not in the override map.)
+    from agentos.gateway.config_persist import get_runtime_overrides
+
+    explicit_paths = _collect_paths(config_payload) - set(get_runtime_overrides())
     if ctx.config is not None and not config_payload.get("config_path"):
         config_payload["config_path"] = getattr(ctx.config, "config_path", None)
     # Full replace preserves the RUNNING bind posture (host/port are CLI-only).
@@ -550,7 +561,10 @@ async def _handle_config_apply(params: dict | None, ctx: RpcContext) -> dict[str
     if ctx.config is not None:
         _update_config_in_place(ctx.config, new_config)
     _sync_image_generation(new_config)
-    _persist_config(ctx.config if ctx.config is not None else new_config)
+    _persist_config(
+        ctx.config if ctx.config is not None else new_config,
+        explicit_paths=explicit_paths,
+    )
     return {
         "restartRequired": _restart_required(
             old_memory_fingerprint=old_memory_fingerprint,

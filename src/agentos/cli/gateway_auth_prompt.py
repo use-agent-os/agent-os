@@ -16,8 +16,13 @@ from enum import Enum
 from agentos.gateway.config import (
     GatewayConfig,
     _mode_protects_public_bind,
+    is_public_bind,
 )
-from agentos.gateway.config_persist import persist_config
+from agentos.gateway.config_persist import (
+    get_runtime_overrides,
+    persist_config,
+    set_runtime_overrides,
+)
 from agentos.gateway.scopes import is_loopback_bind
 
 
@@ -30,10 +35,23 @@ class AuthProvisionOutcome(Enum):
 # ASCII-only glyphs so the warnings still print on Windows consoles configured
 # for legacy GBK code pages (where U+26A0 / em-dash crash Rich's legacy
 # renderer with UnicodeEncodeError).
-_WILDCARD_WARNING = (
-    "[yellow]WARNING: gateway is bound to a wildcard address - "
-    "reachable from every interface.[/yellow]"
-)
+def _bind_warning(host: str) -> str:
+    """Accurate for BOTH a wildcard (0.0.0.0 / ::) AND a specific LAN IP.
+
+    The prompt fires for any non-loopback bind, so the message must name the
+    actual host rather than always claiming a wildcard 'every interface' bind.
+    """
+    if is_public_bind(host):
+        return (
+            f"[yellow]WARNING: gateway is bound to the wildcard address {host} - "
+            "reachable from every interface.[/yellow]"
+        )
+    return (
+        f"[yellow]WARNING: gateway is bound to a non-loopback address {host} - "
+        "reachable beyond this machine.[/yellow]"
+    )
+
+
 _LAN_OPEN_WARNING = (
     "[yellow]  auth.mode=none + wildcard bind + "
     "allow_unauthenticated_public = LAN-open. "
@@ -59,6 +77,15 @@ def provision_public_bind_auth(
     Returns the outcome plus the (possibly updated) config. Loopback binds
     and already-protected/opted-in public binds return ``UNCHANGED``; so do
     non-interactive runs, which fall through to the startup guard unchanged.
+
+    Bind provenance is handled by the process-global runtime-override map
+    (``config_persist.set_runtime_overrides``), recorded by ``run_gateway``
+    before it injects ``--bind``/``--port``/``--debug`` in memory. When choice
+    [1] persists a token, that map restores those fields so a one-off
+    ``--listen`` / ``--debug`` is never frozen into ``config.toml``. When choice
+    [2] forces ``auth.mode=none`` for the session, this function augments the
+    map with the on-disk auth originals so a later RPC write cannot freeze the
+    break-glass posture either.
     """
     # Use the SAME predicate as enforce_public_bind_auth_guard: any non-loopback
     # bind (a wildcard 0.0.0.0/:: OR a specific LAN IP like 192.168.1.50) needs
@@ -67,7 +94,7 @@ def provision_public_bind_auth(
     if is_loopback_bind(config.host):
         return (AuthProvisionOutcome.UNCHANGED, config)
 
-    emit(_WILDCARD_WARNING)
+    emit(_bind_warning(config.host))
     if config.auth.mode == "none" and config.auth.allow_unauthenticated_public:
         # Without the opt-in, start_gateway_server refuses the unauthenticated
         # combination outright (enforce_public_bind_auth_guard) — no point
@@ -107,6 +134,16 @@ def provision_public_bind_auth(
         # still rejects everyone — the operator's "serve without auth" intent
         # would silently not hold (PR #25 review, P2). None is session-only;
         # nothing is persisted (host/mode/opt-in are all runtime-only here).
+        # Record the ON-DISK auth posture in the runtime-override map BEFORE we
+        # flip it in memory, so a later config.patch (which persists ctx.config)
+        # restores the original auth.mode / opt-in instead of freezing the
+        # session-only break-glass posture into config.toml (PR #25 review, P1).
+        overrides = get_runtime_overrides()
+        overrides["auth.mode"] = config.auth.mode
+        overrides["auth.allow_unauthenticated_public"] = (
+            config.auth.allow_unauthenticated_public
+        )
+        set_runtime_overrides(overrides)
         new_config = config.model_copy(
             update={
                 "auth": config.auth.model_copy(
@@ -123,8 +160,10 @@ def provision_public_bind_auth(
     new_config = config.model_copy(
         update={"auth": config.auth.model_copy(update={"mode": "token", "token": token})}
     )
-    # persist_config writes only the auth change: host/port/debug are runtime-
-    # only and are never frozen from the in-memory config (see config_persist).
+    # Persist the token. The process-global runtime-override map restores the
+    # CLI bind overrides (host/port/debug) to their on-disk values, so a one-off
+    # --listen / --port / --debug is not frozen in. ``auth`` is NOT in the map,
+    # so the new token persists.
     try:
         persist_config(new_config)
     except OSError as exc:

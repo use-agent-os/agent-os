@@ -111,8 +111,37 @@ def _sync_search_provider(config: Any) -> None:
     )
 
 
+def _onboarding_explicit_paths(new_cfg: Any) -> set[str]:
+    """Every dotted path the onboarding write carries EXCEPT the fields the CLI
+    runtime-override map owns (host/port/debug/auth bind posture).
+
+    Onboarding mutations persist the whole config, like ``config.apply``. To
+    avoid freezing a one-off ``--listen``/``--debug`` (or break-glass
+    ``auth.mode=none``) that ``run_gateway`` injected into ``ctx.config``, we
+    hand ``persist_config`` an explicit-paths set that includes everything the
+    onboarding change touches but deliberately omits the runtime-override keys,
+    so those restore to their on-disk originals.
+    """
+    from agentos.gateway.config_persist import get_runtime_overrides
+
+    override_keys = set(get_runtime_overrides())
+    toml = new_cfg.to_toml_dict() if hasattr(new_cfg, "to_toml_dict") else {}
+    return _all_dotted_paths(toml) - override_keys
+
+
+def _all_dotted_paths(payload: Any, prefix: str = "") -> set[str]:
+    paths: set[str] = set()
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            current = f"{prefix}.{key}" if prefix else key
+            paths.add(current)
+            paths.update(_all_dotted_paths(value, current))
+    return paths
+
+
 def _persist(ctx: RpcContext, new_cfg: Any, *, restart_required: bool) -> str:
-    from agentos.onboarding.config_store import persist_config
+    from agentos.gateway.config_persist import persist_config as _shared_persist
+    from agentos.onboarding.config_store import resolve_config_path
 
     if (
         ctx.config is not None
@@ -121,18 +150,23 @@ def _persist(ctx: RpcContext, new_cfg: Any, *, restart_required: bool) -> str:
     ):
         new_cfg.inherit_runtime_secrets(ctx.config)
     path = _config_path_for(ctx, new_cfg) or _config_path_for(ctx, ctx.config)
-    persist = persist_config(new_cfg, path=path, restart_required=restart_required)
+    # Route through the shared gateway writer so the runtime-override map is
+    # honoured (a CLI --listen/--debug or break-glass mode=none is never frozen
+    # by an onboarding save). Ensure ``config_path`` is set so the shared writer
+    # targets the same file the onboarding writer would have resolved.
+    resolved_path = str(path) if path else str(resolve_config_path(None)[0])
+    if not getattr(new_cfg, "config_path", None):
+        new_cfg.config_path = resolved_path
+    _shared_persist(new_cfg, explicit_paths=_onboarding_explicit_paths(new_cfg))
     # Preserve the resolved path on the running config so subsequent saves
     # round-trip to the same file.
-    if hasattr(new_cfg, "config_path") and not getattr(new_cfg, "config_path", None):
-        new_cfg.config_path = str(persist.path)
     if (
         ctx.config is not None
         and hasattr(ctx.config, "config_path")
         and not getattr(ctx.config, "config_path", None)
     ):
-        ctx.config.config_path = str(persist.path)
-    return str(persist.path)
+        ctx.config.config_path = resolved_path
+    return resolved_path
 
 
 def _status_payload(ctx: RpcContext) -> dict[str, Any]:

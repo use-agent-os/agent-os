@@ -11,6 +11,15 @@ from agentos.cli.gateway_auth_prompt import (
     provision_public_bind_auth,
 )
 from agentos.gateway.config import AuthConfig, GatewayConfig
+from agentos.gateway.config_persist import get_runtime_overrides, set_runtime_overrides
+
+
+@pytest.fixture(autouse=True)
+def _reset_runtime_overrides():
+    """The runtime-override map is process-global; isolate every test."""
+    set_runtime_overrides(None)
+    yield
+    set_runtime_overrides(None)
 
 
 @pytest.fixture(autouse=True)
@@ -70,6 +79,21 @@ def test_lan_bind_prompts_like_any_non_loopback(tmp_path) -> None:
 
     assert prompted == [True]
     assert outcome is AuthProvisionOutcome.CANCEL
+
+
+def test_warning_names_the_specific_lan_host_not_only_wildcard(tmp_path) -> None:
+    """The bind warning fires for specific LAN IPs too, so it must not claim
+    'wildcard ... every interface' — it should name the actual bound host."""
+    config = _config(tmp_path, host="192.168.1.50")
+    emitted: list[str] = []
+
+    provision_public_bind_auth(
+        config, interactive=True, prompt=lambda _m: "3", emit=emitted.append
+    )
+
+    output = "\n".join(emitted)
+    assert "192.168.1.50" in output
+    assert "non-loopback" in output
 
 
 def test_break_glass_forces_mode_none_for_unsupported_modes(tmp_path) -> None:
@@ -176,8 +200,13 @@ def test_choice_1_persists_only_auth_not_one_off_cli_flags(tmp_path) -> None:
         config_path=str(cfg_path),
     )
 
+    # run_gateway recorded the pre-override on-disk values in the global map.
+    set_runtime_overrides({"host": "127.0.0.1", "port": 18791, "debug": False})
     outcome, result = provision_public_bind_auth(
-        config, interactive=True, prompt=lambda _msg: "1", emit=lambda _m: None
+        config,
+        interactive=True,
+        prompt=lambda _msg: "1",
+        emit=lambda _m: None,
     )
 
     assert outcome is AuthProvisionOutcome.PROCEED
@@ -232,6 +261,30 @@ def test_choice_2_break_glass_is_session_only(tmp_path) -> None:
     assert not (tmp_path / "agentos.toml").exists()
 
 
+def test_choice_2_break_glass_registers_auth_overrides_in_global_map(tmp_path) -> None:
+    """Break-glass forces auth.mode=none in memory; a LATER RPC write would
+    freeze that unless the prompt records the on-disk auth originals in the
+    runtime-override map. Assert the map now carries auth.mode / opt-in."""
+    # Runtime posture is an unprotected mode (only token is enforced), so the
+    # prompt fires; break-glass [2] will flip it to none for the session.
+    config = _config(tmp_path, auth=AuthConfig(mode="password"))
+    # run_gateway already recorded the bind overrides before the prompt.
+    set_runtime_overrides({"host": "127.0.0.1", "port": 18791, "debug": False})
+
+    outcome, _ = provision_public_bind_auth(
+        config, interactive=True, prompt=lambda _msg: "2", emit=lambda _m: None
+    )
+
+    assert outcome is AuthProvisionOutcome.PROCEED
+    overrides = get_runtime_overrides()
+    # The bind overrides survive...
+    assert overrides["host"] == "127.0.0.1"
+    # ...and the on-disk auth posture is now restorable, so no later writer
+    # can freeze the break-glass mode=none / opt-in.
+    assert overrides["auth.mode"] == "password"
+    assert overrides["auth.allow_unauthenticated_public"] is False
+
+
 def test_choice_3_cancels(tmp_path) -> None:
     config = _config(tmp_path)
 
@@ -262,7 +315,7 @@ def test_prompt_interrupt_is_cancel(tmp_path, exc) -> None:
 def test_persist_failure_warns_but_still_proceeds(tmp_path, monkeypatch) -> None:
     from agentos.cli import gateway_auth_prompt
 
-    def failing_persist(_config: object) -> None:
+    def failing_persist(_config: object, **_kwargs: object) -> None:
         raise OSError("read-only file system")
 
     monkeypatch.setattr(gateway_auth_prompt, "persist_config", failing_persist)
