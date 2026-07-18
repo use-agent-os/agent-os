@@ -1025,6 +1025,15 @@ def test_setup_router_step_surfaces_pilot_safety_net_threshold():
     assert "0.5" in body
     # The coupling hint names the confidence threshold interaction.
     assert "confidence threshold" in body
+    # The input is writable (persists via the save handler), not read-only.
+    assert "readonly" not in body
+
+    # The save handler forwards the threshold to the RPC as safetyNetThreshold.
+    save_start = txt.index("async function _saveRouter()")
+    save_end = txt.index("  async function _saveChannel()", save_start)
+    save_body = txt[save_start:save_end]
+    assert "safetyNetThreshold" in save_body
+    assert "[data-pilot-threshold]" in save_body
 
 
 def test_setup_router_step_only_shows_pilot_threshold_for_pilot_strategy():

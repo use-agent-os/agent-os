@@ -441,6 +441,38 @@ def test_upsert_router_accepts_pilot_v1_strategy():
     assert res.public_payload["strategy"] == "pilot-v1"
 
 
+def test_upsert_router_persists_pilot_safety_net_threshold():
+    cfg = GatewayConfig(llm={"provider": "openrouter", "model": "deepseek/x"})
+
+    res = upsert_router(
+        cfg, mode="recommended", strategy="pilot-v1", safety_net_threshold=0.65
+    )
+
+    assert res.config.agentos_router.pilot.safety_net_threshold == 0.65
+    assert res.public_payload["pilot"]["safety_net_threshold"] == 0.65
+
+
+def test_upsert_router_omitted_threshold_preserves_existing_pilot_value():
+    cfg = GatewayConfig(
+        llm={"provider": "openrouter", "model": "deepseek/x"},
+        agentos_router={"strategy": "pilot-v1", "pilot": {"safety_net_threshold": 0.7}},
+    )
+
+    # No threshold passed => existing value preserved (optional, absent = no change).
+    res = upsert_router(cfg, mode="recommended", strategy="pilot-v1")
+
+    assert res.config.agentos_router.pilot.safety_net_threshold == 0.7
+
+
+def test_upsert_router_rejects_out_of_range_safety_net_threshold():
+    cfg = GatewayConfig(llm={"provider": "openrouter", "model": "deepseek/x"})
+
+    with pytest.raises(ValueError):
+        upsert_router(
+            cfg, mode="recommended", strategy="pilot-v1", safety_net_threshold=1.5
+        )
+
+
 def test_upsert_router_still_accepts_v4_and_judge_strategies():
     cfg = GatewayConfig(llm={"provider": "openrouter", "model": "deepseek/x"})
 

@@ -615,8 +615,8 @@ const SetupView = (() => {
             </select>
           </label>
           <label data-pilot-threshold-field${showPilot ? '' : ' hidden'}><span>Pilot safety net</span>
-            <input id="setup-router-pilot-threshold" name="setup_router_pilot_threshold" type="number" min="0" max="1" step="0.05" value="${_esc(String(pilotThreshold))}" data-pilot-threshold aria-label="Pilot safety-net threshold" readonly>
-            <small class="setup-hint">Under-routing floor (default 0.5). The effective cutoff is the max of this and the router confidence threshold, so lowering it below that threshold has no effect. Set it in <code>[agentos_router.pilot]</code> <code>safety_net_threshold</code> (agentos.toml / CLI).</small>
+            <input id="setup-router-pilot-threshold" name="setup_router_pilot_threshold" type="number" min="0" max="1" step="0.05" value="${_esc(String(pilotThreshold))}" data-pilot-threshold aria-label="Pilot safety-net threshold">
+            <small class="setup-hint">Under-routing floor (default 0.5), persisted to <code>[agentos_router.pilot]</code> <code>safety_net_threshold</code>. The effective cutoff is the max of this and the router confidence threshold, so lowering it below that threshold has no effect.</small>
           </label>
         </div>
         ${provider ? `<div class="setup-tier-table" role="table">
@@ -1788,6 +1788,15 @@ const SetupView = (() => {
     const sel = _el.querySelector('[data-router-mode]')?.value || 'v4_phase3';
     const routerMode = sel === 'disabled' ? 'disabled' : 'recommended';
     const strategy = sel === 'disabled' ? undefined : sel;
+    // Pilot safety-net threshold: forwarded only for the Pilot strategy with a
+    // parseable value, so saving under v4/judge never touches the pilot table
+    // (omitted => upsert_router preserves the persisted value). The RPC/mutation
+    // range-validates it (0.0–1.0) via PilotConfig.
+    const pilotThresholdRaw = _el.querySelector('[data-pilot-threshold]')?.value;
+    const pilotThresholdNum = Number.parseFloat(pilotThresholdRaw);
+    const safetyNetThreshold = (sel === 'pilot-v1' && Number.isFinite(pilotThresholdNum))
+      ? pilotThresholdNum
+      : undefined;
     try {
       await _rpc.call('onboarding.router.configure', {
         mode: routerMode,
@@ -1801,6 +1810,7 @@ const SetupView = (() => {
         // so clicking Save without touching the dropdown never wipes an existing
         // local endpoint (base_url/api_key) → judge_unavailable every turn.
         judgeModel: _resolveJudgeModelParam(),
+        safetyNetThreshold,
         tiers,
       });
       UI.toast('Router saved.', 'info');
