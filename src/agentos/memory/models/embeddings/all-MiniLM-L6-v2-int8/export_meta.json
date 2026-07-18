@@ -1,0 +1,27 @@
+{
+  "model_id": "sentence-transformers/all-MiniLM-L6-v2",
+  "hf_revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+  "embed_dim": 384,
+  "max_tokens": 256,
+  "pooling": "mean",
+  "l2_normalized_by": "pilot.features.build_features",
+  "quantization": {
+    "method": "onnxruntime dynamic (avx512_vnni, per_channel)",
+    "is_static": false,
+    "per_channel": true
+  },
+  "int8_vs_fp32_cosine": 0.997833,
+  "cosine_acceptance": 0.99,
+  "fp32_onnx_bytes": 90362391,
+  "int8_onnx_bytes": 22966011,
+  "model_onnx_sha256": "02def1d23618a059265eac566f16b1814cf0aea388b5b674dfd19c0b63a46daa",
+  "tokenizer_json_sha256": "da0e79933b9ed51798a3ae27893d3c5fa4a201126cef75586296df9b4d2c62a0",
+  "file_sizes": {
+    "config.json": 589,
+    "model.onnx": 22966011,
+    "special_tokens_map.json": 695,
+    "tokenizer.json": 711661,
+    "tokenizer_config.json": 1464,
+    "vocab.txt": 231508
+  }
+}
