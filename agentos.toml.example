@@ -220,6 +220,10 @@ enabled = true           # auto tier router
 auto_thinking = true
 rollout_phase = "full"
 strategy = "v4_phase3"   # "v4_phase3" (default; local ML bundle, no LLM call) | "llm_judge"
+# strategy = "pilot-v1"  # local ONNX+MiniLM router (English-optimized). Needs the
+                         # models/pilot_v1/ bundle + the bundled MiniLM embedder;
+                         # a missing bundle degrades to the default tier unless
+                         # require_router_runtime is set. See [agentos_router.pilot].
 # LLM judge (strategy = "llm_judge"): leave judge_model unset for Auto — the
 # judge follows the tier profile's cheapest text tier (c0 first), so profile
 # switches auto-update it. judge_provider must match [llm].provider.
@@ -247,6 +251,13 @@ complaint_upgrade_steps = 1
 complaint_upgrade_max_chars = 160
 estimated_output_savings_pct = 0.03
 upgrade_to_c3_compaction_enabled = true
+
+# Pilot router settings (only used when strategy = "pilot-v1"). The strategy
+# couples safety_net_threshold with confidence_threshold above into t_eff; a
+# pilot_artifact_dir override points at a Pilot bundle outside models/pilot_v1/.
+[agentos_router.pilot]
+safety_net_threshold = 0.5
+# pilot_artifact_dir = "/path/to/pilot_v1"
 
 [agentos_router.tiers.c0]
 provider = "openrouter"

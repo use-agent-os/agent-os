@@ -1037,6 +1037,22 @@ def _router_tier_profile_defaults(profile: str | None) -> dict:
     return {name: dict(value) for name, value in profiles[normalized].items()}
 
 
+class PilotConfig(BaseModel):
+    """Pilot router strategy settings (``[agentos_router.pilot]``).
+
+    Only relevant when ``agentos_router.strategy = "pilot-v1"``. The
+    strategy's ``t_eff`` coupling (max with ``router.confidence_threshold``)
+    lives in ``pilot/postprocess.py``; this model just carries the numbers.
+    ``pilot_artifact_dir`` overrides the bundled ``models/pilot_v1/`` root
+    (used by the boot/doctor asset probe and the dispatch builder).
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    safety_net_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    pilot_artifact_dir: str | None = None
+
+
 class AgentOSRouterConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="AGENTOS_ROUTER_",
@@ -1047,9 +1063,11 @@ class AgentOSRouterConfig(BaseSettings):
     auto_thinking: bool = True
     rollout_phase: str = "full"  # "observe" | "prompt_only" | "full"
     # "v4_phase3" (default: local ML router — BGE+LightGBM bundle, no LLM call)
-    # | "llm_judge" (routes via a small LLM judge call). The v4 bundle ships in
-    # the wheel under agentos_router/models/; a missing bundle degrades to the
-    # default tier unless require_router_runtime is set.
+    # | "llm_judge" (routes via a small LLM judge call) | "pilot-v1" (local
+    # ONNX+MiniLM router, English-optimized). The v4 bundle ships in the wheel
+    # under agentos_router/models/; a missing bundle degrades to the default
+    # tier unless require_router_runtime is set. Valid ids come from the router
+    # strategy registry (agentos.router_strategies).
     strategy: str = DEFAULT_ROUTER_STRATEGY
     tier_profile: str | None = None
     tiers: dict = Field(default_factory=_default_tiers)
@@ -1089,6 +1107,9 @@ class AgentOSRouterConfig(BaseSettings):
     # source checkout without `git lfs pull` still has only pointer stubs, and a
     # strict default would turn that into a hard boot failure.
     require_router_runtime: bool = False
+    # Pilot router strategy (strategy="pilot-v1"). Local ONNX+MiniLM router
+    # (English-optimized). Settings live in the [agentos_router.pilot] sub-table.
+    pilot: PilotConfig = Field(default_factory=PilotConfig)
     routing_timeout_seconds: float = Field(default=10.0, gt=0.0)
     kv_cache_anti_downgrade_enabled: bool = True
     kv_cache_anti_downgrade_window_seconds: int = 600
@@ -1101,11 +1122,13 @@ class AgentOSRouterConfig(BaseSettings):
     @field_validator("strategy")
     @classmethod
     def _validate_strategy(cls, value: str) -> str:
+        from agentos.router_strategies import is_known_strategy, known_strategy_ids
+
         normalized = str(value or "").strip()
-        if normalized not in {"llm_judge", "v4_phase3"}:
+        if not is_known_strategy(normalized):
+            allowed = ", ".join(repr(s) for s in sorted(known_strategy_ids()))
             raise ValueError(
-                "agentos_router.strategy must be 'llm_judge' or 'v4_phase3' "
-                f"(deprecated); got {value!r}"
+                f"agentos_router.strategy must be one of {allowed}; got {value!r}"
             )
         return normalized
 
@@ -1146,6 +1169,14 @@ class AgentOSRouterConfig(BaseSettings):
         next_values["tier_profile"] = normalized
         next_values["tiers"] = merged
         return next_values
+
+
+# ``from __future__ import annotations`` turns the ``pilot: PilotConfig`` field
+# into a string annotation. Resolving it lazily only happens when the whole tree
+# is built via GatewayConfig; a standalone ``AgentOSRouterConfig(...)`` (used by
+# tests and mutations) would otherwise raise "not fully defined". Rebuild now so
+# the nested PilotConfig is bound at import time.
+AgentOSRouterConfig.model_rebuild()
 
 
 class AgentTokenSavingConfig(BaseSettings):
