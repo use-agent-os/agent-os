@@ -1336,6 +1336,26 @@ def _log_resolved_judge(config: GatewayConfig, router_cfg: Any) -> None:
     )
 
 
+def _should_build_provider_selector(*, provider: str, api_key: str) -> bool:
+    """Whether boot has enough to construct a runtime ``provider_selector``.
+
+    True when an API key is present, or when the provider does not require one
+    (local providers — ollama / lm_studio / ovms). Key-requiring providers with
+    no key stay ``False`` so the turn runner surfaces ``no_provider``, the
+    correct signal for a missing credential. Unknown provider ids fall back to
+    key presence rather than raising during boot.
+    """
+    if api_key:
+        return True
+    from agentos.provider.registry import UnknownProviderError, get_provider_spec
+
+    try:
+        spec = get_provider_spec(provider)
+    except UnknownProviderError:
+        return False
+    return not spec.requires_api_key()
+
+
 def _agentos_router_bundle_dir(router_cfg: Any) -> Path:
     """Resolve the v4_phase3 bundle root, honoring the v4_bundle_dir override."""
     configured = getattr(router_cfg, "v4_bundle_dir", None)
@@ -1541,7 +1561,7 @@ async def build_services(
     resolved_base = llm_runtime.base_url
     proxy = llm_runtime.proxy
     if provider_selector is None:
-        if api_key:
+        if _should_build_provider_selector(provider=llm_runtime.provider, api_key=api_key):
             from agentos.provider.selector import (
                 ModelSelector,
                 ProviderConfig,
