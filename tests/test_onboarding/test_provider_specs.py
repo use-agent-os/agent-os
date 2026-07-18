@@ -12,7 +12,7 @@ def test_provider_spec_requires_api_key_for_openrouter():
     assert spec.requires_api_key() is True
 
 
-@pytest.mark.parametrize("provider", ["ollama", "lm_studio", "ovms"])
+@pytest.mark.parametrize("provider", ["ollama", "lm_studio", "ovms", "vllm"])
 def test_is_local_provider_true_for_self_hosted(provider):
     assert is_local_provider(provider) is True
 

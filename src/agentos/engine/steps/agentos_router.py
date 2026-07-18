@@ -1119,13 +1119,15 @@ def _degrade_model_for_local_provider(
 ) -> str:
     """Collapse a mismatched-provider tier model to the configured local model.
 
-    Local providers (ollama / lm_studio / ovms) always run through the single
-    configured ``llm.provider`` — the runtime never builds a per-tier provider
-    client. So a tier whose ``provider`` differs from the configured local
-    provider names a model the local server does not have. Pin such a route to
-    ``llm.model`` instead, and mark ``ctx.metadata['routing_degraded']``. A tier
-    whose ``provider`` matches the local provider is an intentional local
-    multi-model setup and is left untouched.
+    Local providers (ollama / lm_studio / ovms / vllm) always run through the
+    single configured ``llm.provider`` — the runtime never builds a per-tier
+    provider client. So a tier whose ``provider`` differs from the configured
+    local provider names a model the local server does not have. Pin such a
+    route to ``llm.model`` instead, and mark ``ctx.metadata['routing_degraded']``.
+    A tier whose ``provider`` matches the local provider is an intentional local
+    multi-model setup and is left untouched. When ``llm.model`` is empty there
+    is nothing safe to pin to, so the route is left as-is and the degraded flag
+    stays unset (the flag must never claim a degrade that did not happen).
     """
     from agentos.provider.registry import is_local_provider
 
@@ -1135,8 +1137,11 @@ def _degrade_model_for_local_provider(
         return routed_model
     tier_provider = str(tier_cfg.get("provider") or "").strip().lower()
     if tier_provider and tier_provider != provider:
+        fallback = str(getattr(llm_cfg, "model", "") or "")
+        if not fallback:
+            return routed_model
         ctx.metadata["routing_degraded"] = True
-        return str(getattr(llm_cfg, "model", "") or routed_model)
+        return fallback
     return routed_model
 
 
@@ -1504,5 +1509,6 @@ async def apply_agentos_router(ctx: TurnContext) -> TurnContext:
         probabilities=routing_extra.get("probabilities"),
         margin=routing_extra.get("margin"),
         provider_state_continuity=ctx.metadata.get("provider_state_continuity"),
+        routing_degraded=ctx.metadata.get("routing_degraded"),
     )
     return ctx
