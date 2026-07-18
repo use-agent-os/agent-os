@@ -69,6 +69,68 @@ def test_doctor_pilot_skips_judge_resolution(tmp_path: Path) -> None:
     assert payload["judgeBaseUrl"] is None
 
 
+def test_doctor_reports_pilot_degraded_when_bundle_missing_not_required(
+    tmp_path: Path,
+) -> None:
+    """Phase-A default state: bundle absent, require_router_runtime unset.
+
+    validate_agentos_router_runtime only warns (does not raise), so the old
+    contract left runtimeValid=True → misleading "Router ready". The registry
+    asset_probe must instead flip runtimeValid=False with a degraded reason and
+    name the missing bundle files, so doctor reports degraded routing.
+    """
+    import agentos.gateway.rpc_doctor as rpc_doctor
+
+    absent = tmp_path / "absent"
+    config = GatewayConfig(
+        agentos_router={
+            "strategy": "pilot-v1",
+            "default_tier": "balanced",
+            "pilot": {"pilot_artifact_dir": str(absent)},
+        }
+    )
+    ctx = RpcContext(conn_id="test", config=config)
+
+    payload = rpc_doctor._router_payload(ctx)
+
+    assert payload["strategy"] == "pilot-v1"
+    assert payload["runtimeValid"] is False
+    assert payload["runtimeInvalidReason"] == "assets_degraded"
+    # The missing bundle files are named in the error.
+    assert str(absent / "model.onnx") in str(payload["error"])
+    assert str(absent / "manifest.json") in str(payload["error"])
+    # The default tier that traffic degrades to is named.
+    assert "balanced" in str(payload["error"])
+    # A local-asset strategy never resolves a judge target.
+    assert payload["judgeProvider"] is None
+    assert payload["judgeModel"] is None
+
+
+def test_doctor_reports_v4_degraded_when_bundle_missing_not_required(
+    tmp_path: Path,
+) -> None:
+    """Registry-driven: v4_phase3 degrades identically when its bundle is
+    missing and require_router_runtime is unset."""
+    import agentos.gateway.rpc_doctor as rpc_doctor
+
+    absent = tmp_path / "v4_absent"
+    config = GatewayConfig(
+        agentos_router={
+            "strategy": "v4_phase3",
+            "default_tier": "balanced",
+            "v4_bundle_dir": str(absent),
+        }
+    )
+    ctx = RpcContext(conn_id="test", config=config)
+
+    payload = rpc_doctor._router_payload(ctx)
+
+    assert payload["strategy"] == "v4_phase3"
+    assert payload["runtimeValid"] is False
+    assert payload["runtimeInvalidReason"] == "assets_degraded"
+    assert str(absent / "runtime_src") in str(payload["error"])
+
+
 def test_doctor_reports_pilot_runtime_valid_with_fixture_bundle() -> None:
     import agentos.gateway.rpc_doctor as rpc_doctor
     from agentos.memory.embedding import LocalEmbeddingProvider
