@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.7.18.post1] - 2026-07-18
+
+### Fixed
+
+- Release-hygiene re-cut of 2026.7.18. The initial 2026.7.18 tag only bumped
+  `pyproject.toml`, so the repo's release-consistency guards
+  (`tests/test_release_consistency.py`, `tests/test_install_scripts.py`) failed
+  and the install docs/scripts still pointed at the prior tag. This post-release
+  propagates the version across `uv.lock`, both consistency tests, `RELEASES.md`,
+  `CHANGELOG.md`, the README install examples, and `install.sh`/`install.ps1`.
+  No runtime code changes — the distributed software is identical to 2026.7.18.
+
 ## [2026.7.18] - 2026-07-18
 
 ### Added
