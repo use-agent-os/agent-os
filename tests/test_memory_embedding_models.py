@@ -29,6 +29,17 @@ def test_bge_spec_is_unchanged_behavior():
     assert format_query_text("BAAI/bge-small-zh-v1.5", "hi") == "hi"
 
 
+def test_minilm_spec_is_explicit_mean_pool_256_no_prefix():
+    """Pilot backbone: an explicit spec (never the unknown-model default) —
+    attention-mask mean pooling, 256-token cap, no text prefix, 384 dims."""
+    spec = model_spec("sentence-transformers/all-MiniLM-L6-v2")
+    assert spec.pooling == "mean"
+    assert spec.max_tokens == 256
+    assert spec.dims == 384
+    assert format_query_text("sentence-transformers/all-MiniLM-L6-v2", "hi") == "hi"
+    assert format_document_text("sentence-transformers/all-MiniLM-L6-v2", "d") == "d"
+
+
 def test_unknown_model_gets_no_prefix_default():
     assert format_query_text("some/other-model", "x") == "x"
 
