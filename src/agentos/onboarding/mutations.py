@@ -461,8 +461,11 @@ def upsert_router(
     """Upsert router config.
 
     ``strategy`` selects the routing engine: ``"v4_phase3"`` (the local ML
-    router, the default) or ``"llm_judge"`` (classify each turn via a small LLM
-    call). ``None`` preserves the persisted strategy; any other value raises.
+    router, the default), ``"llm_judge"`` (classify each turn via a small LLM
+    call), or ``"pilot-v1"`` (local ONNX+MiniLM router, English-optimized).
+    Valid ids come from the router strategy registry
+    (``agentos.router_strategies``). ``None`` preserves the persisted strategy;
+    any unknown value raises.
     The strategy is recorded whenever it is provided — even when ``mode`` is
     ``"disabled"`` — so a later re-enable keeps the operator's choice.
 
@@ -488,11 +491,13 @@ def upsert_router(
 
     strategy_clean: str | None = None
     if strategy is not None:
+        from agentos.router_strategies import is_known_strategy, known_strategy_ids
+
         strategy_clean = str(strategy).strip()
-        if strategy_clean not in {"llm_judge", "v4_phase3"}:
+        if not is_known_strategy(strategy_clean):
+            allowed = ", ".join(repr(s) for s in sorted(known_strategy_ids()))
             raise ValueError(
-                "agentos_router.strategy must be 'llm_judge' or 'v4_phase3' "
-                f"(deprecated); got {strategy!r}"
+                f"agentos_router.strategy must be one of {allowed}; got {strategy!r}"
             )
         router_payload["strategy"] = strategy_clean
 

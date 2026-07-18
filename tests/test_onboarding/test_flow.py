@@ -8,6 +8,37 @@ from io import StringIO
 from rich.console import Console
 
 
+def test_router_mode_selector_is_four_way_with_pilot_label():
+    from agentos.onboarding import flow
+
+    choices = flow._router_mode_choices("openrouter")
+
+    # 4-way: on-device v4, Pilot, LLM-judge, off.
+    assert len(choices) == 4
+    assert flow._ROUTER_PILOT_LABEL == "Local ML — English-optimized (Pilot)"
+    assert flow._ROUTER_PILOT_LABEL in choices
+
+
+def test_router_mode_to_strategy_maps_pilot_choice():
+    from agentos.onboarding import flow
+
+    assert flow._router_mode_to_strategy(flow._ROUTER_PILOT_LABEL) == "pilot-v1"
+    assert flow._router_mode_to_strategy(flow._ROUTER_LOCAL_ML_LABEL) == "v4_phase3"
+    assert flow._router_mode_to_strategy(flow._ROUTER_LLM_JUDGE_LABEL) == "llm_judge"
+    assert flow._router_mode_to_strategy(flow._ROUTER_DISABLED_LABEL) is None
+    # A pilot choice keeps the router enabled (mode="recommended").
+    assert flow._router_mode_to_internal(flow._ROUTER_PILOT_LABEL) == "recommended"
+
+
+def test_router_mode_default_selects_pilot_for_existing_pilot_config():
+    from agentos.onboarding import flow
+
+    assert (
+        flow._router_mode_default("openrouter", "pilot-v1")
+        == flow._ROUTER_PILOT_LABEL
+    )
+
+
 def test_wait_for_setup_start_flushes_visible_prompt_before_accepting_enter(monkeypatch):
     from agentos.onboarding import flow
 
@@ -322,6 +353,7 @@ def test_interactive_onboard_prompts_router_defaults_before_persist(tmp_path, mo
             if message == "Router mode":
                 assert kwargs.get("choices") == [
                     "Smart routing (on-device)",
+                    "Local ML — English-optimized (Pilot)",
                     "Smart routing (LLM-based)",
                     "Off",
                 ]

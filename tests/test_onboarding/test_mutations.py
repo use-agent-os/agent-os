@@ -432,6 +432,37 @@ def test_upsert_router_rejects_openrouter_mix_for_direct_provider():
         upsert_router(cfg, mode="openrouter-mix")
 
 
+def test_upsert_router_accepts_pilot_v1_strategy():
+    cfg = GatewayConfig(llm={"provider": "openrouter", "model": "deepseek/x"})
+
+    res = upsert_router(cfg, mode="recommended", strategy="pilot-v1")
+
+    assert res.config.agentos_router.strategy == "pilot-v1"
+    assert res.public_payload["strategy"] == "pilot-v1"
+
+
+def test_upsert_router_still_accepts_v4_and_judge_strategies():
+    cfg = GatewayConfig(llm={"provider": "openrouter", "model": "deepseek/x"})
+
+    assert (
+        upsert_router(cfg, mode="recommended", strategy="v4_phase3")
+        .config.agentos_router.strategy
+        == "v4_phase3"
+    )
+    assert (
+        upsert_router(cfg, mode="recommended", strategy="llm_judge")
+        .config.agentos_router.strategy
+        == "llm_judge"
+    )
+
+
+def test_upsert_router_rejects_unknown_strategy():
+    cfg = GatewayConfig(llm={"provider": "openrouter", "model": "deepseek/x"})
+
+    with pytest.raises(ValueError, match="agentos_router.strategy must be one of"):
+        upsert_router(cfg, mode="recommended", strategy="made-up")
+
+
 def test_upsert_router_auto_judge_persists_nothing_and_echoes_resolution():
     cfg = GatewayConfig(llm={"provider": "deepseek", "model": "deepseek-chat"})
 
