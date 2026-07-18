@@ -79,23 +79,24 @@ def test_partition_distribution_is_roughly_70_15_15():
 
 
 def test_partition_is_frozen_against_golden():
-    # Frozen golden: if assign_split's hash/seed/boundaries ever change,
-    # existing split assignments would move and this test must fail loudly.
+    # Golden values frozen 2026-07-18; if this test fails, the partition
+    # function changed — that silently reassigns train/val/test and invalidates
+    # every existing label/split. Do NOT update these values without an
+    # owner-approved migration.
     golden = {
-        "conv-0": sc.assign_split("conv-0"),
-        "conv-1": sc.assign_split("conv-1"),
-        "conv-2": sc.assign_split("conv-2"),
+        "conv-0": "train",
+        "conv-1": "train",
+        "conv-2": "train",
+        "conv-15": "val",
+        "conv-11": "test",
+        "conv-20": "test",
+        "conv-50": "test",
     }
-    # These are computed once from the frozen implementation and pinned here.
-    expected = {
-        "conv-0": sc.assign_split("conv-0"),
-        "conv-1": sc.assign_split("conv-1"),
-        "conv-2": sc.assign_split("conv-2"),
-    }
-    assert golden == expected
-    # And an explicit pin so the function cannot silently change: recompute the
-    # bucket by hand from the documented formula and compare.
-    for cid in ["conv-0", "conv-1", "conv-2", "hello"]:
+    # Actual assignments must match frozen expectations exactly.
+    for cid, expected_split in golden.items():
+        assert sc.assign_split(cid) == expected_split
+    # Verify the partition function computation from internal bucket formula.
+    for cid in golden:
         assert sc.assign_split(cid) == sc._split_for_bucket(sc._bucket(cid))
 
 
