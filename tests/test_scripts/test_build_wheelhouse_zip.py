@@ -242,6 +242,98 @@ def test_required_embedding_assets_cover_onnx_and_tokenizer() -> None:
     assert "bge_onnx/vocab.txt" in module.EMBEDDING_ASSET_RELS
 
 
+def test_required_embedding_assets_cover_pilot_minilm_export() -> None:
+    """The Pilot router's MiniLM INT8 export (T1) ships in the wheel via the
+    same `agentos/memory/models` root as bge_onnx; the release build must
+    guard it exactly like bge_onnx so a non-hydrated LFS checkout can't
+    silently ship a ~130-byte pointer file instead of the 23 MB ONNX."""
+    module = load_script()
+
+    minilm_root = "embeddings/all-MiniLM-L6-v2-int8"
+    assert f"{minilm_root}/model.onnx" in module.EMBEDDING_ASSET_RELS
+    assert f"{minilm_root}/tokenizer.json" in module.EMBEDDING_ASSET_RELS
+    assert f"{minilm_root}/vocab.txt" in module.EMBEDDING_ASSET_RELS
+    assert f"{minilm_root}/config.json" in module.EMBEDDING_ASSET_RELS
+    assert f"{minilm_root}/special_tokens_map.json" in module.EMBEDDING_ASSET_RELS
+    assert f"{minilm_root}/tokenizer_config.json" in module.EMBEDDING_ASSET_RELS
+
+
+def test_real_minilm_export_passes_embedding_asset_check() -> None:
+    """Guard the real export tree, not just the constant list: if the T1
+    MiniLM export is present in this checkout, it must be fully hydrated
+    (no LFS pointer files) exactly like the bge_onnx guard already checks."""
+    module = load_script()
+    model_root = REPO_ROOT / "src" / "agentos" / "memory" / "models"
+    minilm_dir = model_root / "embeddings" / "all-MiniLM-L6-v2-int8"
+    if not minilm_dir.is_dir():
+        pytest.skip("MiniLM export not present in this checkout")
+
+    check = module.check_embedding_assets(model_root)
+
+    assert check.ok, f"missing={check.missing_files} pointers={check.pointer_files}"
+
+
+def test_built_wheel_packages_hydrated_minilm_onnx(tmp_path: Path) -> None:
+    """The built wheel must contain the real (hydrated) MiniLM ONNX export,
+    not an LFS pointer file. Mirrors the workflow's magic-bytes/size guard
+    against a non-hydrated LFS checkout silently shipping a pointer."""
+    module = load_script()
+    minilm_dir = (
+        REPO_ROOT / "src" / "agentos" / "memory" / "models" / "embeddings"
+        / "all-MiniLM-L6-v2-int8"
+    )
+    if not minilm_dir.is_dir():
+        pytest.skip("MiniLM export not present in this checkout")
+
+    env = module.build_subprocess_env(tmp_path)
+    wheel_path = module.build_wheel(REPO_ROOT, tmp_path / "wheels", env)
+
+    missing = module.missing_embedding_assets_in_wheel(wheel_path)
+    minilm_missing = [entry for entry in missing if "MiniLM" in entry]
+    assert minilm_missing == [], f"MiniLM export missing from wheel: {minilm_missing}"
+
+    onnx_name = f"{module.WHEEL_EMBEDDING_PREFIX}/embeddings/all-MiniLM-L6-v2-int8/model.onnx"
+    with ZipFile(wheel_path) as archive:
+        names = set(archive.namelist())
+        assert onnx_name in names, "MiniLM ONNX export missing from built wheel"
+        onnx_bytes = archive.read(onnx_name)
+
+    # A real ONNX export is multiple megabytes; an unhydrated Git LFS pointer
+    # file is ~130 bytes. A >1 MB floor is a cheap, format-agnostic guard
+    # that also mirrors the existing pointer-prefix check.
+    assert len(onnx_bytes) > 1_000_000, (
+        f"MiniLM ONNX in wheel is only {len(onnx_bytes)} bytes; looks like an "
+        "unhydrated Git LFS pointer, not a real model"
+    )
+    assert not onnx_bytes[:80].startswith(b"version https://git-lfs.github.com/spec/v1"), (
+        "Git LFS pointer leaked into wheel for the MiniLM export"
+    )
+
+
+def test_built_wheel_excludes_pilot_fixture_test_data(tmp_path: Path) -> None:
+    """tests/ is never packaged (hatchling only packages `src/agentos`), but
+    pin the pilot fixture bundle explicitly since it is the one test-data
+    directory shaped like a real model bundle (model.onnx + manifest.json)
+    and would be easy to accidentally force-include."""
+    module = load_script()
+    fixture_dir = REPO_ROOT / "tests" / "test_agentos_router" / "data" / "pilot_fixture"
+    if not fixture_dir.is_dir():
+        pytest.skip("pilot fixture bundle not present in this checkout")
+
+    env = module.build_subprocess_env(tmp_path)
+    wheel_path = module.build_wheel(REPO_ROOT, tmp_path / "wheels", env)
+
+    with ZipFile(wheel_path) as archive:
+        names = archive.namelist()
+
+    assert not any("pilot_fixture" in name for name in names), (
+        "pilot fixture test data must not be packaged in the wheel"
+    )
+    assert not any(name.startswith("tests/") for name in names), (
+        "tests/ must not be packaged in the wheel"
+    )
+
+
 def test_project_release_metadata_avoids_internal_repository_markers() -> None:
     for rel_path in ("pyproject.toml", "README.release.md", "LICENSE"):
         text = (REPO_ROOT / rel_path).read_text(encoding="utf-8")

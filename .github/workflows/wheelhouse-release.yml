@@ -74,6 +74,7 @@ jobs:
           from pathlib import Path
 
           root = Path("src/agentos/memory/models/bge_onnx")
+          minilm = Path("src/agentos/memory/models/embeddings/all-MiniLM-L6-v2-int8")
           bundle = Path("src/agentos/agentos_router/models/v4.2_phase3_inference")
           required = [
               root / "config.json",
@@ -82,6 +83,14 @@ jobs:
               root / "tokenizer.json",
               root / "tokenizer_config.json",
               root / "vocab.txt",
+              # Pilot router MiniLM INT8 export (T1). Shares the
+              # memory/models LFS root above rather than a second checkout.
+              minilm / "config.json",
+              minilm / "model.onnx",
+              minilm / "special_tokens_map.json",
+              minilm / "tokenizer.json",
+              minilm / "tokenizer_config.json",
+              minilm / "vocab.txt",
               # v4_phase3 router bundle. It shares the bge_onnx export above
               # rather than carrying a second copy.
               bundle / "lgbm_main.bin",
@@ -93,6 +102,12 @@ jobs:
               bundle / "features/bge_pca.joblib",
               bundle / "router.runtime.yaml",
               bundle / "runtime_src/src/router/inference/core.py",
+              # NOTE(T7): the Pilot production bundle
+              # (agentos_router/models/pilot_v1/{model.onnx,manifest.json})
+              # does not exist yet — it lands with T7's trained artifacts.
+              # Add its required-files entries here once T7 lands; do not
+              # add them before the files exist, or every release build
+              # fails on a missing path.
           ]
           for path in required:
               assert path.is_file(), f"missing embedding asset: {path}"

@@ -350,3 +350,37 @@ def test_pypi_publish_hydrates_v4_router_bundle() -> None:
     assert 'git lfs pull --include="src/agentos/agentos_router/models/**"' in text
     assert "v4.2_phase3_inference" in text
     assert "lgbm_main.bin" in text
+
+
+def test_wheelhouse_release_hydrates_pilot_minilm_export() -> None:
+    """T1's MiniLM INT8 export ships in the wheel already; the hydration
+    check must guard it exactly like bge_onnx so a non-hydrated LFS checkout
+    can't silently ship a ~130-byte pointer file instead of the 23 MB ONNX."""
+    text = (WORKFLOW_DIR / "wheelhouse-release.yml").read_text(encoding="utf-8")
+
+    assert "memory/models/embeddings/all-MiniLM-L6-v2-int8" in text
+    assert 'minilm / "model.onnx"' in text
+    assert 'minilm / "tokenizer.json"' in text
+    assert 'minilm / "vocab.txt"' in text
+
+
+def test_pypi_publish_hydrates_pilot_minilm_export() -> None:
+    text = (WORKFLOW_DIR / "pypi-publish.yml").read_text(encoding="utf-8")
+
+    assert "memory/models/embeddings/all-MiniLM-L6-v2-int8" in text
+    assert '"model.onnx"' in text
+    assert '"tokenizer.json"' in text
+    assert '"vocab.txt"' in text
+    assert "(minilm / name).is_file()" in text
+
+
+def test_release_hydration_checks_defer_pilot_v1_bundle_to_t7() -> None:
+    """models/pilot_v1/ does not exist until T7 trains it. A required-files
+    assertion on a missing path would fail every release build, so both
+    hydration checks must carry an explicit marker instead of the real
+    assertions until T7 lands."""
+    for name in ("wheelhouse-release.yml", "pypi-publish.yml"):
+        text = (WORKFLOW_DIR / name).read_text(encoding="utf-8")
+        assert "NOTE(T7)" in text
+        assert "pilot_v1" in text
+        assert "not exist yet" in text
