@@ -6,8 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.7.18] - 2026-07-18
+
 ### Added
 
+- Interactive authentication provisioning when the gateway binds to a public
+  interface: instead of refusing to start, `gateway start` now provisions a
+  token interactively so a public bind is authenticated by default. `host` and
+  `port` are configurable only via CLI flags (not runtime RPC). (#25)
 - Browser-threat hardening for the gateway (#24). A loopback bind is not a
   boundary against a page in the operator's browser, so four fail-closed
   guards were added: a startup guard that refuses `auth.mode="none"` on a

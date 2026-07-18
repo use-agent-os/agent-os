@@ -2,6 +2,7 @@
 
 | Version | Tag | Date | Notes |
 |---|---|---|---|
+| 2026.7.18 | v2026.7.18 | 2026-07-18 | Gateway: interactive auth provisioning on public bind, host/port CLI-only (#25); browser-threat hardening on loopback binds — CSWSH/DNS-rebinding guards (#24); rebrand to "Token-Efficient AI agent with on-device Pilot Router" |
 | 2026.7.17.post1 | v2026.7.17.post1 | 2026-07-17 | `session_status` tool fix: resolve the calling session from the tool context instead of a `SessionManager` method that never existed |
 | 2026.7.17 | v2026.7.17 | 2026-07-17 | Memory provider layer (mem0) + curated stores; v4_phase3 router bundle restored; Web UI transcript redesign; embedding-download redirect fix |
 | 2026.7.15.post1 | v2026.7.15.post1 | 2026-07-15 | Partner-catalog skills system + Robinhood RWA address lookup skill (Bankr hub) |
