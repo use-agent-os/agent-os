@@ -1421,6 +1421,7 @@ const SetupView = (() => {
     if (input.dataset.routerMode !== undefined) return 'router:mode';
     if (input.dataset.defaultTier !== undefined) return 'router:defaultTier';
     if (input.dataset.judgeModel !== undefined) return 'router:judgeModel';
+    if (input.dataset.pilotThreshold !== undefined) return 'router:pilotThreshold';
     if (input.dataset.providerSelect !== undefined) return 'provider:selected';
     if (input.dataset.channelType !== undefined) return 'channel:type';
     if (input.dataset.searchProvider !== undefined) return 'extras:search:provider';

@@ -17,6 +17,9 @@ AgentOS. It covers:
 - The bundled BGE (bge-small-zh-v1.5) ONNX export under
   `src/agentos/memory/models/bge_onnx/`, shared by local memory embedding and
   the V4 Phase 3 router's BGE feature channel.
+- The bundled all-MiniLM-L6-v2 INT8 ONNX export under
+  `src/agentos/memory/models/embeddings/all-MiniLM-L6-v2-int8/`, used by the
+  Pilot router's feature builder.
 - The built-in tokenjuice tool-result projection backend and bundled
   reduction rules under `src/agentos/plugins/tokenjuice/`.
 - The cron prompt-injection scanner was reviewed against Hermes Agent
@@ -329,6 +332,33 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## sentence-transformers/all-MiniLM-L6-v2
+
+- Component: sentence-transformers/all-MiniLM-L6-v2 embedding model and
+  tokenizer assets, bundled as an INT8 ONNX export under
+  `src/agentos/memory/models/embeddings/all-MiniLM-L6-v2-int8/`, used by the
+  Pilot router's feature builder.
+- Upstream model: https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
+- Upstream project: https://github.com/UKPLab/sentence-transformers
+- License: Apache License 2.0
+- Copyright notice: sentence-transformers contributors (the upstream model
+  card and library ship under the stock Apache-2.0 text without a
+  filled-in copyright line).
+
+The bundled export is an INT8 dynamic quantization (onnxruntime,
+avx512_vnni, per-channel) of the upstream FP32 ONNX weights, produced by
+`scripts/pilot_router/export_embedder.py`. It carries forward the exact
+upstream Hugging Face revision and tokenizer recorded in the export's own
+`export_meta.json`:
+
+- HF revision: `1110a243fdf4706b3f48f1d95db1a4f5529b4d41`
+- Tokenizer (`tokenizer.json`) sha256:
+  `da0e79933b9ed51798a3ae27893d3c5fa4a201126cef75586296df9b4d2c62a0`
+
+The entire AgentOS repository is licensed under the Apache License 2.0 (see
+`LICENSE`), so the upstream license terms apply uniformly; the full license
+text is included in the `LICENSE` file at the repository root.
 
 ## Vendored Web UI JavaScript libraries
 

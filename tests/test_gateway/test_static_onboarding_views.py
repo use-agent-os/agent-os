@@ -806,6 +806,21 @@ def test_setup_view_reconciles_search_key_state_after_restoring_draft_provider()
     assert "_syncSearchProviderKeyControls({ refreshEnv: false })" in body
 
 
+def test_setup_view_field_key_gives_pilot_threshold_a_stable_semantic_key():
+    """The pilot safety-net threshold input (data-pilot-threshold) must get
+    a stable semantic key from _fieldKey, like the other router inputs
+    (router:mode, router:defaultTier, router:judgeModel) — otherwise it
+    falls through to the positional `field:${idx}` fallback and a draft
+    edit may not survive a step-navigate-and-back redraw."""
+    txt = (VIEWS / "setup.js").read_text(encoding="utf-8")
+    start = txt.index("function _fieldKey")
+    end = txt.index("\n  }", start)
+    body = txt[start:end]
+
+    assert "input.dataset.pilotThreshold !== undefined" in body
+    assert "'router:pilotThreshold'" in body
+
+
 def test_setup_view_does_not_redraw_dirty_channel_form_during_status_poll():
     txt = (VIEWS / "setup.js").read_text(encoding="utf-8")
     assert "let _channelDirty" in txt

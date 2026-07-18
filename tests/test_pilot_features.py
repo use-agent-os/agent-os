@@ -10,7 +10,9 @@ benchmark test drives the real ONNX export.
 
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 import numpy as np
@@ -273,3 +275,42 @@ def test_pilot_encoder_protocol_requires_count_tokens_pretrunc():
             return np.zeros((len(texts), 384), dtype=np.float32)
 
     assert not isinstance(_EncodeOnly(), _CheckableEncoder)
+
+
+# --- THIRD_PARTY_NOTICES.md must cover the bundled MiniLM export ------------
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_MINILM_EXPORT_DIR = (
+    _REPO_ROOT
+    / "src"
+    / "agentos"
+    / "memory"
+    / "models"
+    / "embeddings"
+    / "all-MiniLM-L6-v2-int8"
+)
+
+
+def test_third_party_notices_cover_bundled_minilm_export():
+    """The 23MB INT8 all-MiniLM-L6-v2 export is git-tracked and ships in the
+    wheel; THIRD_PARTY_NOTICES.md must attribute it (Apache-2.0, upstream
+    sentence-transformers/Hugging Face) with the exact recorded HF revision
+    and tokenizer sha256, so provenance stays exact rather than implied."""
+    notices_text = (_REPO_ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    export_meta = json.loads(
+        (_MINILM_EXPORT_DIR / "export_meta.json").read_text(encoding="utf-8")
+    )
+
+    assert features.MINILM_MODEL_ID in notices_text
+    assert "src/agentos/memory/models/embeddings/all-MiniLM-L6-v2-int8" in notices_text
+    assert "Apache" in notices_text and "2.0" in notices_text
+    assert export_meta["hf_revision"] in notices_text
+    assert export_meta["tokenizer_json_sha256"] in notices_text
+    assert "scripts/pilot_router/export_embedder.py" in notices_text
+
+    # The section must live under its own heading (not just incidentally
+    # mentioned inside another section such as the BGE/BAAI notice).
+    assert "all-MiniLM-L6-v2" in notices_text.split("## ")[0] or any(
+        "all-MiniLM-L6-v2" in heading.splitlines()[0]
+        for heading in notices_text.split("## ")[1:]
+    )
