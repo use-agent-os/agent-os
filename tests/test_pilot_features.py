@@ -158,6 +158,20 @@ def test_no_traceback():
 # --- File / URL reference regex ---------------------------------------------
 
 
+def test_reference_regexes_pinned_to_spec_strings():
+    """The compiled pattern strings are the spec's exact strings (Rev 4 §6.5).
+
+    Behavioral positive/negative cases alone cannot catch every edit (e.g. a
+    new extension in the FILE_RE alternation); the byte-for-byte pin can.
+    """
+    assert features.URL_RE.pattern == r"(?i)\bhttps?://[^\s<>()]+"
+    assert features.FILE_RE.pattern == (
+        r"(?i)(?:\b[a-z]:[\\/]|(?:^|[\s(]))"
+        r"(?:[\w.@+-]+[\\/])*[\w.@+-]+\."
+        r"(?:py|pyi|js|jsx|ts|tsx|json|toml|ya?ml|md|txt|sh|sql|rs|go|java|c|cc|cpp|h|hpp)\b"
+    )
+
+
 @pytest.mark.parametrize(
     "text",
     [

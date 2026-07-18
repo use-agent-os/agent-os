@@ -64,6 +64,16 @@ def test_manifest_exposed(model: PilotModel) -> None:
     assert model.manifest["feature_schema"]["feature_dim"] == FEATURE_DIM
 
 
+def test_manifest_pins_reference_regexes(model: PilotModel) -> None:
+    """Spec §4.4: the URL/FILE reference regexes are pinned in the
+    feature-schema manifest — the train/serve tripwire for regex edits."""
+    from agentos.agentos_router.pilot.features import FILE_RE, URL_RE
+
+    schema = model.manifest["feature_schema"]
+    assert schema["url_regex"] == URL_RE.pattern
+    assert schema["file_regex"] == FILE_RE.pattern
+
+
 # --- Round-trip via the generator ------------------------------------------
 
 
@@ -203,6 +213,28 @@ def test_feature_schema_scalar_mismatch_unavailable(tmp_path: Path) -> None:
     d = _copy_fixture(tmp_path / "fx")
     manifest = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
     manifest["feature_schema"]["scalar_names"] = ["wrong"]
+    (d / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    m = PilotModel(d)
+    assert m.available is False
+
+
+@pytest.mark.parametrize("key", ["url_regex", "file_regex"])
+def test_feature_schema_regex_mismatch_unavailable(tmp_path: Path, key: str) -> None:
+    """An edited reference regex (train/serve skew) must fail the manifest pin."""
+    d = _copy_fixture(tmp_path / "fx")
+    manifest = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
+    manifest["feature_schema"][key] = r"(?i)\bsomething-else\b"
+    (d / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    m = PilotModel(d)
+    assert m.available is False
+    assert key in (m.unavailable_reason or "")
+
+
+@pytest.mark.parametrize("key", ["url_regex", "file_regex"])
+def test_feature_schema_regex_missing_unavailable(tmp_path: Path, key: str) -> None:
+    d = _copy_fixture(tmp_path / "fx")
+    manifest = json.loads((d / "manifest.json").read_text(encoding="utf-8"))
+    del manifest["feature_schema"][key]
     (d / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     m = PilotModel(d)
     assert m.available is False

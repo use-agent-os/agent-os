@@ -58,7 +58,9 @@
       "log1p_question_mark_count_8k",
       "has_file_or_url_reference_8k"
     ],
-    "feature_dim": 392
+    "feature_dim": 392,
+    "url_regex": "(?i)\\bhttps?://[^\\s<>()]+",
+    "file_regex": "(?i)(?:\\b[a-z]:[\\\\/]|(?:^|[\\s(]))(?:[\\w.@+-]+[\\\\/])*[\\w.@+-]+\\.(?:py|pyi|js|jsx|ts|tsx|json|toml|ya?ml|md|txt|sh|sql|rs|go|java|c|cc|cpp|h|hpp)\\b"
   },
   "training_stats": {
     "_note": "FIXTURE placeholder values \u2014 synthetic blobs, not real training.",

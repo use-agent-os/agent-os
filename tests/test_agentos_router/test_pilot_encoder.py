@@ -91,3 +91,37 @@ def test_encode_sync_returns_embed_dim_float32_rows() -> None:
     arr = np.asarray(out)
     assert arr.shape == (2, EMBED_DIM)
     assert arr.dtype == np.float32
+
+
+def test_encode_sync_right_truncates_at_256_tokens() -> None:
+    """Spec §9: the encode path applies 256-token RIGHT truncation.
+
+    Observed behaviorally in the default suite (not just as a config-value
+    pin): the base text tokenizes far past the cap AND past the model's
+    512-position limit, so if ``enable_truncation`` regressed this would
+    fault the ONNX session rather than pass. Texts differing only beyond the
+    cap must embed identically; a changed PREFIX must not (right side is the
+    truncated side).
+    """
+    pytest.importorskip("onnxruntime")
+    import numpy as np
+
+    assert _EXPORT_DIR is not None
+    if not (_EXPORT_DIR / "model.onnx").is_file():
+        pytest.skip("MiniLM model.onnx not present")
+
+    encoder = _MiniLMEncoder()
+    base = "hello " * 600  # ~600 tokens: > 256 cap and > 512 position limit
+    longer = "hello " * 700
+    suffix_changed = base + "zebra unicorn"
+    prefix_changed = "zebra unicorn " + base
+
+    out = np.asarray(
+        encoder.encode_sync([base, longer, suffix_changed, prefix_changed])
+    )
+    assert np.isfinite(out).all()
+    # Content beyond the 256-token cap is ignored → identical embeddings.
+    np.testing.assert_allclose(out[1], out[0], atol=1e-6)
+    np.testing.assert_allclose(out[2], out[0], atol=1e-6)
+    # Leading tokens survive truncation → a prefix edit must be visible.
+    assert not np.allclose(out[3], out[0], atol=1e-6)

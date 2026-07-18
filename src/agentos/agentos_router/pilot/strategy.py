@@ -146,7 +146,12 @@ class PilotStrategy:
         confidence_threshold: float = 0.5,
         require_router_runtime: bool = False,
     ) -> None:
-        self.artifact_dir = Path(artifact_dir) if artifact_dir else default_artifact_dir()
+        # expanduser: a configured "~/..." dir must resolve the same way the
+        # boot/doctor asset probe resolves it (router_strategies.py), or
+        # preflight reports ready while every turn degrades.
+        self.artifact_dir = (
+            Path(artifact_dir).expanduser() if artifact_dir else default_artifact_dir()
+        )
         self._safety_net_threshold = safety_net_threshold
         self._confidence_threshold = confidence_threshold
         self._require_router_runtime = require_router_runtime

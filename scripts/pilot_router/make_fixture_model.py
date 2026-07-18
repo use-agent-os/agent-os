@@ -35,8 +35,10 @@ import numpy as np
 
 from agentos.agentos_router.pilot.features import (
     FEATURE_DIM,
+    FILE_RE,
     MINILM_MODEL_ID,
     SCALAR_FEATURE_NAMES,
+    URL_RE,
 )
 
 # --- Binding fixture constants ----------------------------------------------
@@ -145,6 +147,10 @@ def _build_manifest(model_onnx_bytes: bytes, export_meta: dict[str, Any]) -> dic
             "version": FEATURE_SCHEMA_VERSION,
             "scalar_names": list(SCALAR_FEATURE_NAMES),
             "feature_dim": FEATURE_DIM,
+            # Spec §6.5: pin the exact reference-regex strings (inline (?i)
+            # flags included) so PilotModel can trip on train/serve drift.
+            "url_regex": URL_RE.pattern,
+            "file_regex": FILE_RE.pattern,
         },
         "training_stats": {
             "_note": "FIXTURE placeholder values — synthetic blobs, not real training.",

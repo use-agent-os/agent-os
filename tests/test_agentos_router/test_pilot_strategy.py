@@ -116,6 +116,24 @@ def _seed_vector_for_argmax(target_argmax: int) -> np.ndarray:
 # --- requires_history / plumbing ------------------------------------------
 
 
+def test_artifact_dir_tilde_is_expanded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A configured ``~/...`` artifact dir must expand at dispatch, not only in
+    the boot/doctor asset probe — otherwise preflight reports the router ready
+    while every turn degrades to ``pilot_unavailable``."""
+    import shutil
+
+    home = tmp_path / "home"
+    shutil.copytree(FIXTURE_DIR, home / "pilot_bundle")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))  # expanduser on Windows
+
+    strategy = _make_strategy(artifact_dir="~/pilot_bundle")
+    assert strategy.artifact_dir == home / "pilot_bundle"
+    assert strategy._available is True
+
+
 def test_requires_history_is_true() -> None:
     strategy = _make_strategy()
     assert strategy.requires_history is True

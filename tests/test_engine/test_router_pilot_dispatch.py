@@ -36,8 +36,13 @@ def _clear_strategy_cache() -> None:
 
 
 def test_dispatch_builds_pilot_strategy_for_pilot_v1() -> None:
+    # Non-default confidence_threshold: the builder must forward the LIVE
+    # config value (spec §4.1 t_eff coupling), not its own 0.5 fallback —
+    # otherwise a raised router.confidence_threshold silently undoes fired
+    # safety-net bumps at the engine confidence gate.
     cfg = AgentOSRouterConfig(
         strategy="pilot-v1",
+        confidence_threshold=0.7,
         pilot={"pilot_artifact_dir": str(FIXTURE_DIR), "safety_net_threshold": 0.6},
     )
 
@@ -45,6 +50,7 @@ def test_dispatch_builds_pilot_strategy_for_pilot_v1() -> None:
 
     assert isinstance(strategy, PilotStrategy)
     assert strategy._safety_net_threshold == 0.6
+    assert strategy._confidence_threshold == 0.7
     assert strategy.artifact_dir == FIXTURE_DIR
 
 

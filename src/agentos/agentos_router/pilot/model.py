@@ -19,7 +19,9 @@ Validation performed at load:
   manifest ``io_contract``;
 * ``manifest["classes"]`` is the pinned order ``["R0", "R1", "R2", "R3"]`` and
   matches the probability-tensor width;
-* ``feature_schema.scalar_names`` matches ``pilot.features.SCALAR_FEATURE_NAMES``.
+* ``feature_schema.scalar_names`` matches ``pilot.features.SCALAR_FEATURE_NAMES``;
+* ``feature_schema.url_regex`` / ``file_regex`` match the pinned
+  ``pilot.features`` reference patterns (``URL_RE`` / ``FILE_RE``).
 
 Probability post-processing applies **log-space temperature calibration**
 (part of classification, not policy)::
@@ -44,7 +46,12 @@ from typing import Any
 import numpy as np
 import structlog
 
-from agentos.agentos_router.pilot.features import FEATURE_DIM, SCALAR_FEATURE_NAMES
+from agentos.agentos_router.pilot.features import (
+    FEATURE_DIM,
+    FILE_RE,
+    SCALAR_FEATURE_NAMES,
+    URL_RE,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -273,6 +280,15 @@ class PilotModel:
                 f"feature_schema.feature_dim must be {FEATURE_DIM}, "
                 f"got {schema.get('feature_dim')!r}"
             )
+        # Reference-regex pins (spec §6.5): the manifest must carry the exact
+        # pattern strings the model was trained against; a drifted runtime
+        # regex (or a stale manifest) is train/serve skew → unavailable.
+        for key, compiled in (("url_regex", URL_RE), ("file_regex", FILE_RE)):
+            if schema.get(key) != compiled.pattern:
+                raise _ManifestError(
+                    f"feature_schema.{key} does not match the pinned "
+                    f"pilot.features pattern ({schema.get(key)!r})"
+                )
 
     def _validate_sha256(self, model_bytes: bytes, expected: str) -> None:
         actual = hashlib.sha256(model_bytes).hexdigest()
