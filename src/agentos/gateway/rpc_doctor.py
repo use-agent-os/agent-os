@@ -258,14 +258,17 @@ def _router_payload(ctx: RpcContext) -> dict[str, Any]:
     judge_base_url: str | None = None
     strategy = getattr(router, "strategy", None)
 
-    # The local ML router (strategy="v4_phase3", the default) needs no judge and
-    # no cloud credentials — its health is purely bundle presence, which
-    # validate_agentos_router_runtime already checked above (runtime_invalid_reason
-    # == "assets" when the bundle is missing). Short-circuit before the judge
-    # resolution block: resolve_judge_target ignores strategy and would otherwise
-    # resolve a phantom judge target and run credential checks that are
-    # meaningless for v4.
-    if strategy == "v4_phase3":
+    # Local ML routers (strategy="v4_phase3" default, or "pilot-v1") need no
+    # judge and no cloud credentials — their health is purely local-asset
+    # presence, which validate_agentos_router_runtime already checked above
+    # (runtime_invalid_reason == "assets" when an asset is missing). Short-
+    # circuit before the judge resolution block: resolve_judge_target ignores
+    # strategy and would otherwise resolve a phantom judge target and run
+    # credential checks that are meaningless for a local-asset strategy.
+    from agentos.router_strategies import get_strategy_info
+
+    _info = get_strategy_info(strategy)
+    if _info is not None and not _info.uses_judge:
         return {
             "enabled": bool(getattr(router, "enabled", False)),
             "rolloutPhase": getattr(router, "rollout_phase", None),
