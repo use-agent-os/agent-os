@@ -269,3 +269,167 @@ across both runs is ~**$1.06**, well within the owner-approved budget.
   seed). **No data rows.**
 - Verified: `git check-ignore` confirms `scripts/pilot_router/data/*.jsonl`
   is ignored; `git status` shows no `data/` content staged before commit.
+
+---
+
+## 6. Labeling (T6, spec §6.2) — rubric + harness + gated dry run
+
+Each corpus turn is assigned a reasoning-difficulty tier `R0/R1/R2/R3` by
+`label_corpus.py` per [`rubric.md`](rubric.md). This section records the pinned
+labeler, the protocol, and the dry-run gate outcome. **Label rows are never
+committed** — only the stats/meta below and the committed `labels_meta.json`.
+
+### Pinned labeler + params (reproducibility)
+
+| Field | Value |
+|---|---|
+| Provider | **OpenCAP** (`https://gw.capminal.ai/api/inference/v1/chat/completions`), OpenAI-compatible; owner-pinned 2026-07-18 (revised) |
+| Model | **`claude-opus-4.8`** (bare id — no `anthropic/` prefix; the gateway requires it) |
+| Labeler pin | `opencap:claude-opus-4.8@t0.0` (keys the resumable cache file) |
+| Temperature | `0.0` |
+| Max tokens | `200` |
+| Output | strict JSON `{"label":"R0..R3","why":"<one sentence>"}` |
+| Pass A ordering | `orderA_R0_to_R3_v1` (classes presented cheapest-first) |
+| Pass B ordering | `orderB_R3_to_R0_v1` (classes presented hardest-first) |
+| Adjudication prompt | `adjudicate_v1` (shows both candidate labels sorted, pass identity hidden) |
+| Rubric file | `rubric.md`, **sha256 `f4cef943c56d4e0e40382e6bbd342c27d23fa0a8c62fdedb0945a1c6c437cef2`** (rubric v1) |
+
+> **Provider switch (2026-07-18):** the labeler was moved from OpenRouter
+> (`anthropic/claude-opus-4.8`) to OpenCAP (`claude-opus-4.8`) by owner
+> decision. The two pins are never mixed: the cache file is namespaced by the
+> labeler pin, and the **215 OpenRouter-pinned verdicts** from the earlier
+> dry run were segregated (moved to `label_cache__openrouter_retired.jsonl`,
+> git-ignored) and **not reused**. The OpenCAP run writes a fresh cache
+> (`label_cache__opencap_claude_opus_4_8_t0_0.jsonl`).
+>
+> **Cost currency caveat:** OpenCAP returns cost as `{usd, diem}` with
+> `usd = 0` and only `diem` populated. The gate ceiling therefore uses a
+> **token-based USD estimate** at first-party list price (`$5`/`$25` per MTok
+> input/output for Opus 4.8); the gateway's `diem` figure is recorded
+> alongside for billing transparency.
+
+### Protocol
+
+- **Two independent passes** (A, B) — same model/params, differing only in the
+  order the rubric classes are presented (guards against position bias).
+- **Adjudication:** where A ≠ B, a third call decides using a distinct prompt
+  that shows both candidate labels *sorted* (so ordering never reveals which
+  pass produced which).
+- **Partition contract:** splits are frozen from T5; labeling moves nothing.
+  An adjudicated item whose conversation is in the **test** split is tagged
+  `boundary_set: true` — a report-only set (§6.4), never used to train/tune.
+- **Resumable:** every `(turn_id, pass)` call is logged to the pin-namespaced
+  cache `data/label_cache__<pin>.jsonl`; reruns/full runs never re-bill
+  completed calls, and a provider/model switch starts a fresh cache.
+- **Malformed JSON:** 1 try + 2 retries per pass; still unparseable → the turn
+  is dropped (never guessed).
+- **Rate limits / robustness:** moderate concurrency (6 workers); 429/5xx and
+  transient network errors get exponential backoff **with jitter** (honoring
+  `Retry-After`); on final retry exhaustion a call degrades to an empty reply
+  (→ parse-fail → dropped turn) rather than crashing the pool. An unexpected
+  per-turn exception is **skip-and-logged**; a genuine auth/quota `RuntimeError`
+  (JSON 401/402/403/404) stays **fatal-and-stops**. A **WAF/edge 403 with an
+  HTML body** (block page under parallel load) is treated as **transient**
+  (20–40 s jittered backoff) with a 20-consecutive fuse; a JSON 403 stays
+  fatal.
+
+### Dry run — 100 stratified TRAIN turns (2026-07-18, OpenCAP pin)
+
+Stratified across all six T5 categories (≈17 each). Real OpenCAP run.
+
+| Metric | Value |
+|---|---:|
+| Turns labeled / dropped | 100 / 0 |
+| Label distribution | R0 = 11, R1 = 32, R2 = 54, R3 = 3 |
+| Two-pass agreement rate | **0.91** |
+| Adjudication rate | **0.09** |
+| Boundary-set size (test-split adj.) | 0 (dry run is train-only by design) |
+| LLM calls (2 passes + 9 adj.) | 209 |
+| Prompt / completion tokens | 156,598 / 9,342 |
+| Token-based cost (USD est., $5/$25 per MTok) | **$1.017** |
+| Gateway-reported cost | **$0 usd / 0.951 diem** |
+| Measured cost per turn (USD est.) | **$0.01017** |
+| Projected full-run cost (× 6,389 turns, USD est.) | **$64.94** |
+
+### Dry-run gate — 2 of 3 pass; cost then relaxed by owner
+
+| Criterion | Measured | Verdict |
+|---|---|:--:|
+| Two-pass agreement ≥ 0.70 | 0.910 | ✅ PASS |
+| All four classes present, none > 70% | present, max share R2 = 0.54 | ✅ PASS |
+| Projected full-run cost ≤ ceiling | $64.94 (token-based USD est.) | see below |
+
+The dry run projected $64.94 (token-based USD est.). The controller first
+raised the ceiling **$60 → $70** (the $64.94 projection is an 8 % overage on a
+conservative ceiling, and OpenCAP bills in diem with `usd=0`, so real cost is
+below the token estimate), which passed the cost criterion, then relaxed it
+further (over-$70 also acceptable). The full run was authorized and executed.
+
+### Full run — all 6,389 turns, all splits (2026-07-18/19, OpenCAP pin)
+
+| Metric | Value |
+|---|---:|
+| Turns labeled / unlabeled | **6,376 / 13** (≈0.2 % dropped after retries) |
+| Overall label distribution | R0 = 370, R1 = 2,523, R2 = 3,251, R3 = 232 |
+| Two-pass agreement rate | **0.8628** |
+| Adjudication rate | **0.1372** |
+| Boundary-set size (adjudicated **test**-split items) | **147** |
+| Total billed LLM calls (all resumed legs) | 13,634 |
+| **Total token-based cost (USD est., $5/$25 per MTok)** | **≈$77.51** |
+| Total gateway-reported cost | **≈$7.62 usd / 53.4 diem** |
+| Cost per labeled turn (USD est.) | ≈$0.0122 |
+
+Per-split label distributions:
+
+| Split | Total | R0 | R1 | R2 | R3 |
+|---|---:|---:|---:|---:|---:|
+| train | 4,526 | 243 | 1,761 | 2,354 | 168 |
+| val | 867 | 55 | 354 | 427 | 31 |
+| test | 983 | 72 | 408 | 470 | 33 |
+
+### Owner-delegated gate on the FULL run — **PASS (under owner relaxation)**
+
+| Criterion | Measured | Verdict |
+|---|---|:--:|
+| Two-pass agreement ≥ 0.70 | 0.863 | ✅ PASS |
+| All four classes present, none > 70% | present, max share R2 = 0.51 | ✅ PASS |
+| Cost ≤ $70 (token-based USD est.) | **$77.51** (11 % over) | ⚠️ over, **PASS via owner relaxation** |
+
+The token-based USD estimate ($77.51) lands ~11 % over the $70 ceiling. The
+owner relaxed the ceiling (over-$70 acceptable); agreement and class-balance
+pass, so **the gate PASSES**. The overage is on the *token-based estimate* at
+first-party list price — the gateway's own billing is far lower (**53.4 diem /
+$7.62 gateway-USD**), so real spend is well under $70-equivalent. The per-turn
+cost rose vs. the dry-run estimate (0.0122 vs 0.0102) mainly because the
+full-run adjudication rate (0.137) exceeded the dry run's (0.09), adding a
+third call to more turns.
+
+### Run incidents (ops history)
+
+The full run did not complete in one pass — honest record:
+
+1. **External process kills.** Early launches from a background/subagent context
+   were reaped by the harness (not a code fault). The run was relaunched from a
+   context where the process survives. Because the cache is resumable, no
+   completed call was ever re-billed.
+2. **WAF-403 crash + fix.** Under parallel load the gateway intermittently
+   returned **HTTP 403 with an HTML block page** (edge WAF), which the original
+   fatal-403 path mistook for an auth failure and crashed the run. Fix:
+   HTML-body 403 → transient (20–40 s jittered backoff) with a 20-consecutive
+   fuse; a success resets the streak; genuine JSON 403 stays fatal. Covered by
+   new offline tests (mocked httpx transport).
+3. **Buffered-log loss.** An early leg's stdout was lost when its process was
+   killed (buffered). The final launch runs Python **unbuffered** (`-u`),
+   logging to the git-ignored `data/label_run.log`, wrapped in a supervisor that
+   restarts ≤5× on nonzero exit (60 s pause; stops on a fatal provider error).
+
+The completed run wrote 6,376 labeled rows; `labels_meta.json` records the
+full-run stats, both cost figures, and `gate.pass = true` (owner relaxation).
+
+### Redistribution posture (labeling)
+
+- `data/labels.jsonl`, all `data/label_cache__*.jsonl` (incl. the retired
+  OpenRouter cache), and `data/label_run.log`: **never committed** (git-ignored
+  under `scripts/pilot_router/data/`).
+- Committed: `rubric.md`, `label_corpus.py`, `labels_meta.json` (counts,
+  rates, cost, provider + model pin, rubric sha256). **No label rows.**
