@@ -1,7 +1,7 @@
 [project]
 name = "use-agent-os"
-version = "2026.7.17.post1"
-description = "AgentOS — microkernel Python agent runtime with MCP-native tools and multi-channel messaging"
+version = "2026.7.18"
+description = "Token-Efficient AI agent with on-device Pilot Router"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]
 readme = "README.md"

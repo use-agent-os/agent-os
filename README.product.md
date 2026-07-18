@@ -4,8 +4,8 @@
 
 # AgentOS Product Guide
 
-AgentOS is a token-efficient personal agent runtime for the terminal, a
-local Web UI, and messaging channels. It is designed for users who want one
+AgentOS is a token-efficient AI agent with on-device Pilot Router, for
+the terminal, a local Web UI, and messaging channels. It is designed for users who want one
 agent surface that can chat, use tools, remember useful context, run scheduled
 work, publish artifacts, and route work across multiple LLM providers without
 rewriting their workflow for each provider.
@@ -46,7 +46,7 @@ single-turn chat alone.
 
 | Product capability | What users get |
 | --- | --- |
-| AgentOS Router | Local, on-device routing that chooses an appropriate model tier per turn so simple tasks avoid premium-model cost. |
+| Pilot Router | Local, on-device routing that chooses an appropriate model tier per turn so simple tasks avoid premium-model cost. |
 | Tool compression | Large tool outputs stay useful without flooding the model context; raw results can be preserved while compact previews are sent to the model. |
 | Unified surfaces | CLI, Web UI, gateway RPC, and channels share the same runtime path, tools, memory, approvals, and usage accounting. |
 | Durable sessions | Conversations, transcripts, compaction summaries, artifacts, cost, and replay data are persisted for later inspection. |
@@ -68,7 +68,7 @@ single-turn chat alone.
 | Choose and inspect LLM providers/models | [`docs/providers-and-models.md`](docs/providers-and-models.md) |
 | Configure web search | [`docs/search.md`](docs/search.md) |
 | Understand the main product capabilities | [`docs/features.md`](docs/features.md) |
-| Use AgentOS Router | [`docs/features/agentos-router.md`](docs/features/agentos-router.md) |
+| Use Pilot Router | [`docs/features/agentos-router.md`](docs/features/agentos-router.md) |
 | Understand tool compression and tool-result handles | [`docs/features/tool-compression.md`](docs/features/tool-compression.md) |
 | Work with memory | [`docs/features/memory.md`](docs/features/memory.md) |
 | Work with skills | [`docs/features/skills.md`](docs/features/skills.md) |
@@ -141,9 +141,9 @@ See [`docs/configuration.md`](docs/configuration.md) for details.
 
 ## Feature Highlights
 
-### AgentOS Router
+### Pilot Router
 
-AgentOS Router is AgentOS's local routing layer. It keeps lightweight tasks
+Pilot Router is AgentOS's local routing layer. It keeps lightweight tasks
 on cheaper models and reserves stronger tiers for harder turns. Router
 decisions stay local; the user's prompt is not sent to a separate external
 classifier just to decide the model.

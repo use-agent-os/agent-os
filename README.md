@@ -1,4 +1,4 @@
-# AgentOS — Token-Efficient AI Agent
+# AgentOS — Token-Efficient AI Agent with On-Device Pilot Router
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/use-agent-os/agent-os/main/assets/agentos-hero-banner.png" alt="AgentOS — The Open Agent Operating System">
@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>Stop overpaying for AI. Let the router cook.</b><br>
-  A microkernel AI agent for your CLI, Web UI, and chat channels.
+  A token-efficient AI agent with on-device Pilot Router for your CLI, Web UI, and chat channels.
 </p>
 
 <p align="center">
@@ -23,8 +23,8 @@
 ## Overview
 
 AgentOS is an AI agent. It saves tokens, so it costs less to run.
-It has a small core (this is called "microkernel"). A local model
-router picks the cheapest model that can do each job. AgentOS also
+It has a small core. A local Pilot Router picks the cheapest model
+that can do each job. AgentOS also
 has memory that stays after you close it, a safe sandbox with many
 layers, built-in web search, and on-device embeddings.
 
@@ -51,11 +51,11 @@ For step-by-step guides, start with the
 
 Every client — the Web UI, the CLI, and the chat channels — talks to
 one local gateway. This gateway handles sessions, approvals, and
-scheduling. It sends each turn to the AgentOS Router, which picks the
+scheduling. It sends each turn to the Pilot Router, which picks the
 model. Then it runs tool calls inside the safe sandbox.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/use-agent-os/agent-os/main/assets/agentos-architecture.png" alt="AgentOS architecture: Web UI, CLI, and channels connect to the gateway (sessions, approvals, scheduler), which drives the AgentOS Router and the sandboxed tools layer">
+  <img src="https://raw.githubusercontent.com/use-agent-os/agent-os/main/assets/agentos-architecture.png" alt="AgentOS architecture: Web UI, CLI, and channels connect to the gateway (sessions, approvals, scheduler), which drives the Pilot Router and the sandboxed tools layer">
 </p>
 
 Here is what happens to one message: it comes in through a channel,
@@ -100,7 +100,7 @@ file name.
 | Git + Git LFS | — | — | required | required |
 | `uv` | — | installed if missing | recommended | required |
 
-The default `recommended` profile installs **AgentOS Router** — AgentOS's
+The default `recommended` profile installs **Pilot Router** — AgentOS's
 own on-device model router (strategy `v4_phase3`) — along with the Python
 dependencies it needs (ONNX Runtime, LightGBM, scikit-learn). Its model
 bundle ships inside the wheel, so routing works offline with no extra
@@ -115,8 +115,8 @@ Set `AGENTOS_INSTALL_PROFILE=core` to skip the router dependencies, or use
 the `--router disabled` flag during first-time setup to keep them installed
 but turn the router off.
 
-On Windows, AgentOS Router needs the Visual C++ runtime too (it comes
-with the ONNX engine inside AgentOS Router). The Windows portable
+On Windows, Pilot Router needs the Visual C++ runtime too (it comes
+with the ONNX engine inside Pilot Router). The Windows portable
 launcher and the from-source PowerShell installer install this
 runtime for you, using `winget`. The **Quick terminal install**
 (`uv tool install`) does not do this step. If you see a
@@ -267,7 +267,7 @@ you plan to change the code, use
    powershell -ExecutionPolicy Bypass -File ./scripts/install_source.ps1
    ```
 
-   This script installs `.[recommended]` (AgentOS Router + memory + local
+   This script installs `.[recommended]` (Pilot Router + memory + local
    models). It uses `uv tool install`, in its own environment. If
    `uv` is not there, it falls back to `python -m pip install
    --user`. If `agentos` is not found after install, open a new
@@ -329,7 +329,7 @@ only apply in new terminal windows.
 **Installer environment variables and PATH checks**
 
 ```sh
-AGENTOS_INSTALL_PROFILE=core   bash scripts/install_source.sh   # small install, no AgentOS Router
+AGENTOS_INSTALL_PROFILE=core   bash scripts/install_source.sh   # small install, no Pilot Router
 AGENTOS_INSTALL_DRY_RUN=1      bash scripts/install_source.sh   # just show the plan, don't install
 ```
 
@@ -354,7 +354,7 @@ uv sync --extra recommended --extra dev
 uv run agentos --help
 ```
 
-The `recommended` extra also brings AgentOS Router here. The `dev` extra
+The `recommended` extra also brings Pilot Router here. The `dev` extra
 adds the test, lint, and type-check tools. To add more extras to
 this same setup:
 
@@ -377,7 +377,7 @@ uses a different Python setup.
 `agentos onboard` is the wizard you run the first time. It writes
 your config file. It keeps provider secret keys as environment
 variables, if you pass `--api-key-env`. The router is set to
-`recommended` by default (this means AgentOS Router, on the providers it
+`recommended` by default (this means Pilot Router, on the providers it
 supports). Pass `--router disabled` if you want one single model
 with no routing.
 
@@ -544,7 +544,7 @@ settings are all in `agentos.toml.example`.
 
 | Capability | What it does |
 | --- | --- |
-| **Token-efficient routing** | `AgentOS Router` defaults to `v4_phase3`, a small local AI model (BGE embeddings + LightGBM; the `recommended` extra installs its runtime dependencies) that looks at each message — its length, language, code, keywords, and meaning — and picks one of four levels (c0–c3), then routes it to the cheapest model that can still do the job well. This check runs on your own device, so your message never has to leave your computer just to make this choice. The model bundle ships inside the wheel, so this works offline out of the box. Prefer no local model files at all? Pick the `llm_judge` strategy instead (a small LLM call, optionally a local Ollama/LM Studio endpoint). Choose either in onboarding. |
+| **Token-efficient routing** | The `Pilot Router` defaults to `v4_phase3`, a small local AI model (BGE embeddings + LightGBM; the `recommended` extra installs its runtime dependencies) that looks at each message — its length, language, code, keywords, and meaning — and picks one of four levels (c0–c3), then routes it to the cheapest model that can still do the job well. This check runs on your own device, so your message never has to leave your computer just to make this choice. The model bundle ships inside the wheel, so this works offline out of the box. Prefer no local model files at all? Pick the `llm_judge` strategy instead (a small LLM call, optionally a local Ollama/LM Studio endpoint). Choose either in onboarding. |
 | **Adaptive reasoning and prompts** | AgentOS only asks for deep, extended thinking when the router sees the message is hard. The system instructions also grow to match: short and simple for easy messages, full and detailed for hard ones. |
 | **20+ LLM providers** | AgentOS can talk to 20+ AI providers — OpenRouter (used by default), the Bankr LLM Gateway, OpenAI, Anthropic, Ollama, DeepSeek, Gemini, DashScope/Qwen, Moonshot, Mistral, Groq, Zhipu, SiliconFlow, vLLM, LM Studio, and more. It picks a main provider first, with backups ready if needed. The first-time setup shows you the providers that are fully tested. |
 | **On-demand skills and MCP** | AgentOS comes with 37 built-in skills (coding, GitHub, cron jobs, pptx/docx/xlsx/pdf files, summaries, tmux, weather, and more). Each skill only loads when a task actually needs it. AgentOS can use other MCP tools, and can also act as an MCP tool for others — `agentos mcp-server run` needs the `mcp` extra (install with `use-agent-os[recommended,mcp]`). You can write, install, and share your own skills from the CLI. |

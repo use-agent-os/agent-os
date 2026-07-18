@@ -1,8 +1,8 @@
 # AgentOS — Agent Instructions
 
-Microkernel Python agent runtime with MCP-native tools, a local model
-router, durable memory, a layered sandbox, and multi-channel messaging
-(Web UI, CLI, chat). One shared turn loop drives every client.
+Token-efficient Python agent runtime with MCP-native tools, on-device
+Pilot Router, durable memory, a layered sandbox, and multi-channel
+messaging (Web UI, CLI, chat). One shared turn loop drives every client.
 
 - **Language / runtime:** Python **3.12+** only.
 - **Package manager:** **uv** (not pip/poetry). Never edit lockfiles by hand.
