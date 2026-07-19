@@ -244,6 +244,14 @@ judge_short_circuit_enabled = true
 # Optional provider tier profile. Leave unset to preserve the built-in
 # OpenRouter defaults below. If set, it must match [llm].provider; the router
 # does not switch providers at runtime.
+#
+# INVARIANT: routing is single-provider. Tiers only select the MODEL for a
+# turn; every request still goes through the one [llm].provider client. A
+# tier whose `provider` differs from [llm].provider cannot reach that other
+# provider — on local providers (ollama / lm_studio / ovms / vllm) such a
+# tier is degraded to [llm].model at runtime (metadata: routing_degraded).
+# To get real multi-model routing, point every tier at a model that
+# [llm].provider itself serves (see the local example below).
 # tier_profile = "dashscope"  # openrouter | dashscope | deepseek | gemini | volcengine
 default_tier = "c1"
 confidence_threshold = 0.5
@@ -307,6 +315,34 @@ thinking_level = "medium"
 #
 # [agentos_router]
 # tier_profile = "dashscope"
+
+# Example: local provider (Ollama) with real multi-model routing. Local
+# providers have no tier profile — declare the tiers yourself, and point
+# every tier at a model your local server actually serves (`ollama list`).
+# Same pattern applies to lm_studio / ovms / vllm. Onboarding writes
+# self-consistent single-model tiers for local providers automatically.
+# [llm]
+# provider = "ollama"
+# model = "qwen3.5:2b"
+# base_url = "http://localhost:11434"
+#
+# [agentos_router.tiers.c0]
+# provider = "ollama"
+# model = "qwen3.5:2b"      # small + fast for trivial turns
+# [agentos_router.tiers.c1]
+# provider = "ollama"
+# model = "qwen3.5:9b"      # balanced default
+# [agentos_router.tiers.c2]
+# provider = "ollama"
+# model = "qwen3.5:9b"
+# [agentos_router.tiers.c3]
+# provider = "ollama"
+# model = "qwen3.5:latest"  # strongest local model for hard turns
+# [agentos_router.tiers.image_model]
+# provider = "ollama"
+# model = "qwen3.5:9b"      # must be a vision-capable local model
+# supports_image = true
+# image_only = true
 
 [agent_token_saving]
 # Project fresh tool results with the built-in tokenjuice reducer before they

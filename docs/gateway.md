@@ -138,6 +138,7 @@ host and port.
 
 Read next:
 
+- [`http-api.md`](http-api.md)
 - [`web-ui.md`](web-ui.md)
 - [`configuration.md`](configuration.md)
 - [`channels.md`](channels.md)

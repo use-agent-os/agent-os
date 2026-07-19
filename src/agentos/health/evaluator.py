@@ -917,6 +917,58 @@ def _router_runtime_invalid_finding(
     )
 
 
+def _router_tier_provider_mismatch_findings(
+    payload: dict[str, Any],
+) -> list[HealthFinding]:
+    """Flag enabled-router tiers that declare a provider other than llm.provider.
+
+    Routing is single-provider: the runtime builds one client from
+    ``llm.provider``; tier ``provider`` values are metadata and never build a
+    client, so a mismatched tier silently misroutes (the engine degrades such
+    routes to ``llm.model`` on local providers). Providers are compared after
+    strip/lower normalization; tiers without a provider value do not participate.
+    """
+    llm_provider = str(payload.get("llmProvider") or "").strip()
+    tier_providers = payload.get("tierProviders")
+    if not llm_provider or not isinstance(tier_providers, dict):
+        return []
+    normalized_llm = llm_provider.lower()
+    mismatched: dict[str, str] = {}
+    for tier_name, provider in tier_providers.items():
+        tier_provider = str(provider or "").strip()
+        if tier_provider and tier_provider.lower() != normalized_llm:
+            mismatched[str(tier_name)] = tier_provider
+    if not mismatched:
+        return []
+    return [
+        HealthFinding(
+            id="router.tiers.provider_mismatch",
+            severity="warn",
+            surface="router",
+            title="Router tiers point at a different provider",
+            detail=(
+                f"{len(mismatched)} router tier(s) declare a provider other than "
+                f"llm.provider ({llm_provider}). Tiers only select the model — "
+                "requests always go through llm.provider, so mismatched tiers "
+                "are silently degraded to llm.model on local providers."
+            ),
+            evidence={"llmProvider": llm_provider, "mismatchedTiers": mismatched},
+            fix_steps=[
+                FixStep(
+                    label="Align tier providers with llm.provider",
+                    detail=(
+                        "Point the mismatched tiers' provider and model at models "
+                        f"served by llm.provider ({llm_provider}), or remove the "
+                        "custom tiers to fall back to the built-in profile."
+                    ),
+                ),
+                FixStep(label="Restart gateway", command="agentos gateway restart"),
+            ],
+            restart_required=True,
+        )
+    ]
+
+
 def evaluate_router(payload: dict[str, Any]) -> list[HealthFinding]:
     if "enabled" not in payload:
         return _diagnostic_incomplete(
@@ -969,8 +1021,12 @@ def evaluate_router(payload: dict[str, Any]) -> list[HealthFinding]:
                 restart_required=True,
             )
         ]
+    # Router is enabled from here on: append the tier/provider mismatch finding
+    # (if any) to whichever primary finding applies — the mismatch is an
+    # independent config problem that must not be masked by runtime state.
+    mismatch_findings = _router_tier_provider_mismatch_findings(payload)
     if not runtime_valid:
-        return [_router_runtime_invalid_finding(payload, evidence)]
+        return [_router_runtime_invalid_finding(payload, evidence), *mismatch_findings]
     if rollout_phase not in {"full", "observe"}:
         return [
             HealthFinding(
@@ -988,7 +1044,8 @@ def evaluate_router(payload: dict[str, Any]) -> list[HealthFinding]:
                     FixStep(label="Restart gateway", command="agentos gateway restart"),
                 ],
                 restart_required=True,
-            )
+            ),
+            *mismatch_findings,
         ]
     if rollout_phase != "full":
         return [
@@ -1010,7 +1067,8 @@ def evaluate_router(payload: dict[str, Any]) -> list[HealthFinding]:
                     FixStep(label="Restart gateway", command="agentos gateway restart"),
                 ],
                 restart_required=True,
-            )
+            ),
+            *mismatch_findings,
         ]
     return [
         HealthFinding(
@@ -1020,7 +1078,8 @@ def evaluate_router(payload: dict[str, Any]) -> list[HealthFinding]:
             title="Router ready",
             detail=f"{strategy} router is active with {tier_profile} profile.",
             evidence=evidence,
-        )
+        ),
+        *mismatch_findings,
     ]
 
 

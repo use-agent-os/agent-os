@@ -77,6 +77,25 @@ degrade `v4_phase3` uses when its bundle is missing).
 `strategy = "v4_phase3"` (in `[agentos_router]`) and restart. The `v4_phase3`
 bundle still ships in the wheel, so rollback is always available.
 
+## One Router, One Provider
+
+Routing is **single-provider**: the gateway builds one provider client from
+`[llm].provider` at boot, and tiers only choose which **model** each turn
+uses. The `provider` field on a tier is descriptive metadata — it never makes
+a request reach a different provider. Configure every tier with a model that
+`[llm].provider` itself serves.
+
+Local providers (Ollama, LM Studio, OVMS, vLLM) have no built-in tier
+profile. Onboarding writes self-consistent single-model tiers for them; to
+get real multi-model routing, edit the tiers to point at other models your
+local server has pulled (see the local example in `agentos.toml.example`).
+If a tier still points at a different provider than `[llm].provider` — for
+example leftover cloud defaults on an Ollama install — the router degrades
+that route to `[llm].model` instead of sending the local server a model name
+it does not have; the turn metadata carries `routing_degraded: true`,
+`agentos doctor` reports the mismatch, and the gateway logs a one-time
+warning at boot.
+
 ## Enable Routing
 
 Recommended first-run setup:

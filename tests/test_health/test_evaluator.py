@@ -1010,6 +1010,124 @@ def test_router_evaluator_flags_ignored_local_endpoint() -> None:
     assert "judge_model" in findings[0].fix_steps[0].detail
 
 
+def test_router_evaluator_flags_tier_provider_mismatch_on_local_llm() -> None:
+    findings = evaluate_router(
+        {
+            "enabled": True,
+            "rolloutPhase": "full",
+            "strategy": "v4_phase3",
+            "tierProfile": "openrouter",
+            "runtimeValid": True,
+            "llmProvider": "ollama",
+            "tierProviders": {"c0": "openrouter", "c1": "openrouter"},
+        }
+    )
+
+    ids = [finding.id for finding in findings]
+    assert "router.ready" in ids
+    assert "router.tiers.provider_mismatch" in ids
+    mismatch = next(f for f in findings if f.id == "router.tiers.provider_mismatch")
+    assert mismatch.severity == "warn"
+    assert _impact(mismatch) == "degrades"
+    assert mismatch.restart_required is True
+    assert mismatch.evidence["llmProvider"] == "ollama"
+    assert mismatch.evidence["mismatchedTiers"] == {
+        "c0": "openrouter",
+        "c1": "openrouter",
+    }
+    # Fix steps steer the operator to align tiers with llm.provider or drop them.
+    assert "llm.provider" in mismatch.fix_steps[0].detail
+
+
+def test_router_evaluator_flags_tier_provider_mismatch_across_clouds() -> None:
+    findings = evaluate_router(
+        {
+            "enabled": True,
+            "rolloutPhase": "full",
+            "strategy": "llm_judge",
+            "tierProfile": "openrouter",
+            "runtimeValid": True,
+            "llmProvider": "deepseek",
+            "tierProviders": {"c2": "openrouter"},
+        }
+    )
+
+    ids = [finding.id for finding in findings]
+    assert "router.tiers.provider_mismatch" in ids
+
+
+def test_router_evaluator_reports_mismatch_alongside_invalid_runtime() -> None:
+    findings = evaluate_router(
+        {
+            "enabled": True,
+            "rolloutPhase": "full",
+            "strategy": "llm_judge",
+            "tierProfile": "openrouter",
+            "runtimeValid": False,
+            "error": "judge target could not be resolved",
+            "llmProvider": "ollama",
+            "tierProviders": {"c0": "openrouter"},
+        }
+    )
+
+    ids = [finding.id for finding in findings]
+    assert "router.runtime.missing" in ids
+    assert "router.tiers.provider_mismatch" in ids
+
+
+def test_router_evaluator_skips_tier_mismatch_when_disabled() -> None:
+    findings = evaluate_router(
+        {
+            "enabled": False,
+            "rolloutPhase": "full",
+            "strategy": "v4_phase3",
+            "tierProfile": "openrouter",
+            "runtimeValid": True,
+            "llmProvider": "ollama",
+            "tierProviders": {"c0": "openrouter"},
+        }
+    )
+
+    assert [finding.id for finding in findings] == ["router.disabled"]
+
+
+def test_router_evaluator_skips_tier_mismatch_when_providers_match() -> None:
+    findings = evaluate_router(
+        {
+            "enabled": True,
+            "rolloutPhase": "full",
+            "strategy": "v4_phase3",
+            "tierProfile": "openrouter",
+            "runtimeValid": True,
+            "llmProvider": "OpenRouter",
+            "tierProviders": {"c0": " openrouter "},
+        }
+    )
+
+    assert [finding.id for finding in findings] == ["router.ready"]
+
+
+def test_router_evaluator_skips_tier_mismatch_without_tier_providers() -> None:
+    payload = {
+        "enabled": True,
+        "rolloutPhase": "full",
+        "strategy": "v4_phase3",
+        "tierProfile": "openrouter",
+        "runtimeValid": True,
+        "llmProvider": "ollama",
+    }
+
+    assert [f.id for f in evaluate_router(payload)] == ["router.ready"]
+    assert [
+        f.id for f in evaluate_router({**payload, "tierProviders": {}})
+    ] == ["router.ready"]
+    # Tiers that omit the provider key are filtered by the payload builder;
+    # empty values that slip through must not fire either.
+    assert [
+        f.id for f in evaluate_router({**payload, "tierProviders": {"c0": ""}})
+    ] == ["router.ready"]
+
+
 def test_memory_embedding_evaluator_flags_explicit_remote_without_key() -> None:
     findings = evaluate_memory_embedding(
         {

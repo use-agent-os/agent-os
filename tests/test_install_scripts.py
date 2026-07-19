@@ -7,7 +7,7 @@ RELEASE_PS1 = ROOT / "install.ps1"
 RELEASE_SH = ROOT / "install.sh"
 SOURCE_PS1 = ROOT / "scripts" / "install_source.ps1"
 SOURCE_SH = ROOT / "scripts" / "install_source.sh"
-CURRENT_RELEASE_TAG = "v2026.7.17.post1"
+CURRENT_RELEASE_TAG = "v2026.7.18.post1"
 
 
 def test_source_install_scripts_force_refresh_local_uv_tool_package() -> None:

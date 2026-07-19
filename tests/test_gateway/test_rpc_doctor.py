@@ -845,6 +845,49 @@ def test_router_payload_v4_phase3_skips_judge_resolution() -> None:
     assert payload["judgeBaseUrl"] is None
 
 
+def test_router_payload_reports_tier_providers_for_v4_phase3() -> None:
+    """The payload carries llm.provider plus each tier's declared provider so
+    evaluate_router can flag tiers pointing at a provider the runtime never
+    builds a client for (routing is single-provider; tiers only pick the model).
+    """
+    import agentos.gateway.rpc_doctor as rpc_doctor
+
+    config = GatewayConfig(
+        llm={"provider": "ollama", "model": "llama3"},
+        agentos_router={"strategy": "v4_phase3"},
+    )
+    ctx = RpcContext(conn_id="test", config=config)
+
+    payload = rpc_doctor._router_payload(ctx)
+
+    assert payload["llmProvider"] == "ollama"
+    # Default tier profile is OpenRouter: every tier declares provider=openrouter.
+    assert payload["tierProviders"]["c0"] == "openrouter"
+    assert set(payload["tierProviders"]) == set(config.agentos_router.tiers)
+
+
+def test_router_payload_reports_tier_providers_for_llm_judge() -> None:
+    import agentos.gateway.rpc_doctor as rpc_doctor
+
+    config = GatewayConfig(
+        llm={"provider": "deepseek", "model": "deepseek-chat"},
+        agentos_router={"strategy": "llm_judge"},
+    )
+    ctx = RpcContext(conn_id="test", config=config)
+
+    payload = rpc_doctor._router_payload(ctx)
+
+    assert payload["llmProvider"] == "deepseek"
+    # tierProviders mirrors the resolved tier mapping's provider fields verbatim
+    # (the config layer may rewrite the tier profile for the active provider).
+    assert payload["tierProviders"] == {
+        name: tier["provider"]
+        for name, tier in config.agentos_router.tiers.items()
+        if str(tier.get("provider") or "").strip()
+    }
+    assert payload["tierProviders"]
+
+
 def test_router_payload_marks_runtime_invalid_for_cross_provider_auto_judge() -> None:
     """Findings #2/#4: in AUTO mode (no judge_model) resolve_judge_target takes a
     tier entry's own provider field. When that resolved provider differs from

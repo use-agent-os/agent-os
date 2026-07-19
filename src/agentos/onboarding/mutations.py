@@ -16,6 +16,8 @@ from agentos.gateway.config import (
     GatewayConfig,
     LlmProviderConfig,
     MemoryEmbeddingConfig,
+    _bankr_tiers,
+    _openrouter_tiers,
     _router_tier_profile_defaults,
 )
 from agentos.onboarding.audio_specs import get_audio_provider_setup_spec
@@ -32,6 +34,7 @@ from agentos.onboarding.redaction import (
     redact_search_payload,
 )
 from agentos.onboarding.search_specs import get_search_provider_setup_spec
+from agentos.provider.registry import is_local_provider
 from agentos.router_tiers import (
     DEFAULT_TEXT_TIER,
     TEXT_TIERS,
@@ -84,14 +87,103 @@ def _positive_int(value: int | str, *, label: str) -> int:
     return parsed
 
 
+# Only the routing-relevant flags survive a local-tier rewrite. thinking_level
+# and the image flags MUST be preserved so thinking tiering and image-aware
+# routing keep working; the free-text description is dropped so the rewritten
+# tiers stay minimal and round-trip cleanly.
+_LOCAL_TIER_PRESERVED_KEYS = ("thinking_level", "supports_image", "image_only")
+
+
+def _local_provider_tiers(
+    base_tiers: dict[str, Any],
+    provider_id: str,
+    model: str,
+) -> dict[str, Any]:
+    """Rewrite every base tier to point at a local provider's single model.
+
+    Local providers run one endpoint serving only locally-pulled models, so the
+    router cannot fan out across per-tier cloud model ids. Pin all tiers
+    (c0..c3 and image_model) to ``provider_id``/``model`` while preserving each
+    tier's routing flags (thinking_level, supports_image, image_only).
+    """
+    rewritten: dict[str, Any] = {}
+    for name, tier in base_tiers.items():
+        entry: dict[str, Any] = {"provider": provider_id, "model": model}
+        for key in _LOCAL_TIER_PRESERVED_KEYS:
+            if key in tier:
+                entry[key] = tier[key]
+        rewritten[name] = entry
+    return rewritten
+
+
+def _tiers_are_machine_written_defaults(
+    tiers: dict[str, Any],
+    old_provider: str,
+    old_model: str,
+) -> bool:
+    """True when ``tiers`` are safe to rewrite (not operator-customised).
+
+    Two shapes count as machine-written:
+      * the shipped default tier sets (openrouter or bankr), matched exactly,
+        exactly as :meth:`GatewayConfig._default_agentos_router_profile_for_direct_provider`
+        detects "not custom"; and
+      * tiers this reconcile already local-pinned — every entry's provider equals
+        the OLD llm provider AND every entry's model equals the OLD llm model
+        (a local→local switch, e.g. ollama→vllm, must re-pin these).
+    Anything else is treated as a custom, operator-authored tier set and left
+    untouched.
+    """
+    if tiers in (_openrouter_tiers(), _bankr_tiers()):
+        return True
+    old_provider = str(old_provider or "").strip().lower()
+    old_model = str(old_model or "").strip()
+    if not old_provider or not old_model or not is_local_provider(old_provider):
+        return False
+    if not tiers:
+        return False
+    for tier in tiers.values():
+        if not isinstance(tier, dict):
+            return False
+        if str(tier.get("provider") or "").strip().lower() != old_provider:
+            return False
+        if str(tier.get("model") or "").strip() != old_model:
+            return False
+    return True
+
+
 def _reconcile_router_profile_for_provider(
     cfg: GatewayConfig,
     provider_id: str,
+    *,
+    model: str = "",
+    old_provider: str = "",
+    old_model: str = "",
 ) -> list[str]:
     current_profile = getattr(cfg.agentos_router, "tier_profile", None)
     if not getattr(cfg.agentos_router, "enabled", True):
         return []
     if current_profile and str(current_profile).strip().lower() == provider_id:
+        return []
+    if is_local_provider(provider_id) and not current_profile:
+        # Local providers have no tier profile and build no per-tier client.
+        # When the current tiers are the untouched shipped defaults OR tiers a
+        # previous reconcile local-pinned, rewrite them to this provider+model so
+        # the persisted config is self-consistent (the runtime degrade guard then
+        # becomes a no-op).
+        if _tiers_are_machine_written_defaults(
+            cfg.agentos_router.tiers, old_provider, old_model
+        ):
+            router_payload = cfg.agentos_router.model_dump(mode="python")
+            router_payload["tier_profile"] = None
+            router_payload["tiers"] = _local_provider_tiers(
+                cfg.agentos_router.tiers, provider_id, model
+            )
+            cfg.agentos_router = AgentOSRouterConfig(**router_payload)
+            return []
+        # Operator-customised tiers: leave the router exactly as the operator
+        # authored it (enabled + custom tiers). The runtime degrade guard pins
+        # any mismatched-provider tier to llm.model per turn, so custom local
+        # tiers stay safe without being clobbered here.
         return []
     if (
         not current_profile
@@ -299,6 +391,8 @@ def upsert_llm_provider(
     if spec.requires_base_url and not effective_base_url:
         raise ValueError(f"provider {provider_id!r} requires a base_url")
 
+    old_provider = str(config.llm.provider or "")
+    old_model = str(config.llm.model or "")
     new_cfg = _clone(config)
     new_cfg.llm = LlmProviderConfig(
         provider=provider_id,
@@ -309,7 +403,13 @@ def upsert_llm_provider(
         proxy=proxy,
         provider_routing=dict(provider_routing or {}),
     )
-    reconcile_warnings = _reconcile_router_profile_for_provider(new_cfg, provider_id)
+    reconcile_warnings = _reconcile_router_profile_for_provider(
+        new_cfg,
+        provider_id,
+        model=model_clean,
+        old_provider=old_provider,
+        old_model=old_model,
+    )
     if api_key:
         new_cfg.clear_runtime_secret("llm.api_key")
 
@@ -530,6 +630,18 @@ def upsert_router(
     if router_mode == "disabled":
         router_payload["enabled"] = False
         router_payload["tier_profile"] = None
+        if is_local_provider(provider):
+            # Keep a local pin in the persisted config while the router is off:
+            # dropping the tiers here would resurrect the openrouter defaults
+            # via the config default factory, leaving a local config that lies
+            # about its providers.
+            current_tiers = {
+                name: dict(tier)
+                for name, tier in (config.agentos_router.tiers or {}).items()
+                if isinstance(tier, dict)
+            }
+            if current_tiers:
+                router_payload["tiers"] = current_tiers
         public_payload.update({"enabled": False, "tier_profile": None})
     elif router_mode == "openrouter-mix":
         if provider != "openrouter":
@@ -542,11 +654,8 @@ def upsert_router(
         )
         public_payload.update({"enabled": True, "tier_profile": None})
     else:
-        if provider not in ROUTER_TIER_PROFILE_IDS:
-            router_payload["enabled"] = False
-            router_payload["tier_profile"] = None
-            public_payload.update({"enabled": False, "tier_profile": None})
-        else:
+        llm_model = str(config.llm.model or "").strip()
+        if provider in ROUTER_TIER_PROFILE_IDS:
             router_payload["enabled"] = True
             router_payload["tier_profile"] = provider
             router_payload["tiers"] = _merge_router_tiers(
@@ -554,6 +663,35 @@ def upsert_router(
                 tiers,
             )
             public_payload.update({"enabled": True, "tier_profile": provider})
+        elif is_local_provider(provider) and llm_model:
+            # Local providers have no tier profile, but "recommended" must not
+            # disable the router and resurrect the openrouter default tiers
+            # (clobbering the local pin the provider step just wrote). Keep an
+            # operator-customised table verbatim; otherwise pin every tier to
+            # the configured local model.
+            router_payload["enabled"] = True
+            router_payload["tier_profile"] = None
+            current_tiers = {
+                name: dict(tier)
+                for name, tier in (config.agentos_router.tiers or {}).items()
+                if isinstance(tier, dict)
+            }
+            if current_tiers and not _tiers_are_machine_written_defaults(
+                current_tiers, provider, llm_model
+            ):
+                router_payload["tiers"] = _merge_router_tiers(current_tiers, tiers)
+            else:
+                router_payload["tiers"] = _merge_router_tiers(
+                    _local_provider_tiers(
+                        _router_tier_profile_defaults("openrouter"), provider, llm_model
+                    ),
+                    tiers,
+                )
+            public_payload.update({"enabled": True, "tier_profile": None})
+        else:
+            router_payload["enabled"] = False
+            router_payload["tier_profile"] = None
+            public_payload.update({"enabled": False, "tier_profile": None})
     warnings: list[str] = []
     if router_payload.get("enabled"):
         warnings.extend(

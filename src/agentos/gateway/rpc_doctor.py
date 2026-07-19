@@ -236,6 +236,21 @@ def _router_payload(ctx: RpcContext) -> dict[str, Any]:
             "runtimeValid": True,
         }
 
+    # Routing is single-provider: tiers only select the model, every request
+    # goes through llm.provider. Surface each tier's declared provider so
+    # evaluate_router can flag tiers pointing at a provider the runtime never
+    # builds a client for. Tiers without a non-empty provider are omitted.
+    llm_provider = str(getattr(getattr(config, "llm", None), "provider", "") or "")
+    raw_tiers = getattr(router, "tiers", None)
+    tier_providers: dict[str, str] = {}
+    if isinstance(raw_tiers, dict):
+        for tier_name, tier in raw_tiers.items():
+            if not isinstance(tier, dict):
+                continue
+            tier_provider = str(tier.get("provider") or "").strip()
+            if tier_provider:
+                tier_providers[str(tier_name)] = tier_provider
+
     runtime_valid = True
     error: str | None = None
     # Distinguishes WHY the router runtime is invalid so health/evaluator can
@@ -308,6 +323,8 @@ def _router_payload(ctx: RpcContext) -> dict[str, Any]:
             "judgeModel": None,
             "judgeSource": None,
             "judgeBaseUrl": None,
+            "llmProvider": llm_provider,
+            "tierProviders": tier_providers,
             "error": error,
         }
 
@@ -422,6 +439,8 @@ def _router_payload(ctx: RpcContext) -> dict[str, Any]:
         "judgeModel": judge_model,
         "judgeSource": judge_source,
         "judgeBaseUrl": judge_base_url,
+        "llmProvider": llm_provider,
+        "tierProviders": tier_providers,
         "error": error,
     }
 

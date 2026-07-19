@@ -42,7 +42,7 @@ class ProviderSpec:
     capabilities: frozenset[str] = field(default_factory=lambda: frozenset({"chat"}))
 
     _LOCAL_PROVIDERS: ClassVar[frozenset[str]] = frozenset(
-        {"ollama", "lm_studio", "ovms"}
+        {"ollama", "lm_studio", "ovms", "vllm"}
     )
 
     def requires_api_key(self) -> bool:
@@ -341,3 +341,13 @@ def get_provider_spec(provider_id: str) -> ProviderSpec:
         raise UnknownProviderError(
             f"Unknown provider '{provider_id}'. Available: {available}"
         ) from exc
+
+
+def is_local_provider(provider_id: str) -> bool:
+    """True for local, self-hosted providers (ollama / lm_studio / ovms / vllm).
+
+    Local providers run a single configured endpoint and serve only the models
+    the operator has pulled locally; the runtime never builds a per-tier
+    provider client for them. Unknown provider ids are treated as non-local.
+    """
+    return str(provider_id or "").strip().lower() in ProviderSpec._LOCAL_PROVIDERS

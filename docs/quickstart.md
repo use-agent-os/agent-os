@@ -183,6 +183,21 @@ agentos gateway stop
 agentos gateway restart
 ```
 
+## Upgrade
+
+Upgrade a `uv tool` install to the latest release, then restart the
+gateway so it runs the new code:
+
+```sh
+uv tool upgrade use-agent-os
+agentos gateway restart
+```
+
+The upgrade keeps the extras from the original install, and your
+configuration and data in `~/.agentos/` are not touched. To check
+the installed version, run `uv tool list`. For source installs, see
+the [README upgrade section](../README.md#upgrade).
+
 ## Next Steps
 
 After the first run:

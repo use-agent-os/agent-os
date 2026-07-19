@@ -1,7 +1,8 @@
 # AgentOS
 
-AgentOS is a Python agent runtime with MCP-native tools, durable sessions,
-local memory, multi-channel messaging, and a local web control UI.
+AgentOS is a token-efficient AI agent with on-device Pilot Router,
+MCP-native tools, durable sessions, local memory, multi-channel messaging,
+and a local web control UI.
 
 The package is published as part of an AgentOS release zip. Install from the
 release bundle rather than from a source checkout so the wheel, dependency

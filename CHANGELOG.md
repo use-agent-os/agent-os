@@ -6,8 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.7.18.post1] - 2026-07-18
+
+### Fixed
+
+- Release-hygiene re-cut of 2026.7.18. The initial 2026.7.18 tag only bumped
+  `pyproject.toml`, so the repo's release-consistency guards
+  (`tests/test_release_consistency.py`, `tests/test_install_scripts.py`) failed
+  and the install docs/scripts still pointed at the prior tag. This post-release
+  propagates the version across `uv.lock`, both consistency tests, `RELEASES.md`,
+  `CHANGELOG.md`, the README install examples, and `install.sh`/`install.ps1`.
+  No runtime code changes — the distributed software is identical to 2026.7.18.
+
+## [2026.7.18] - 2026-07-18
+
 ### Added
 
+- Interactive authentication provisioning when the gateway binds to a public
+  interface: instead of refusing to start, `gateway start` now provisions a
+  token interactively so a public bind is authenticated by default. `host` and
+  `port` are configurable only via CLI flags (not runtime RPC). (#25)
 - Browser-threat hardening for the gateway (#24). A loopback bind is not a
   boundary against a page in the operator's browser, so four fail-closed
   guards were added: a startup guard that refuses `auth.mode="none"` on a

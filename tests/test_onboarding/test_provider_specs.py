@@ -4,12 +4,28 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.provider.registry import get_provider_spec
+from agentos.provider.registry import get_provider_spec, is_local_provider
 
 
 def test_provider_spec_requires_api_key_for_openrouter():
     spec = get_provider_spec("openrouter")
     assert spec.requires_api_key() is True
+
+
+@pytest.mark.parametrize("provider", ["ollama", "lm_studio", "ovms", "vllm"])
+def test_is_local_provider_true_for_self_hosted(provider):
+    assert is_local_provider(provider) is True
+
+
+@pytest.mark.parametrize("provider", ["openrouter", "openai", "deepseek", "anthropic"])
+def test_is_local_provider_false_for_cloud(provider):
+    assert is_local_provider(provider) is False
+
+
+def test_is_local_provider_normalizes_and_tolerates_unknown():
+    assert is_local_provider("  Ollama  ") is True
+    assert is_local_provider("") is False
+    assert is_local_provider("totally-made-up") is False
 
 
 def test_provider_spec_does_not_require_api_key_for_ollama():

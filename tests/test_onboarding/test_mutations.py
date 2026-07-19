@@ -382,6 +382,139 @@ def test_upsert_llm_provider_recomputes_openrouter_mix_on_provider_switch():
     assert "tiers" not in res.config.to_toml_dict()["agentos_router"]
 
 
+def test_ollama_onboarding_rewrites_default_tiers_to_local_provider():
+    # A local provider has no tier profile and builds no per-tier client. The
+    # shipped openrouter default tiers name cloud model ids the local server does
+    # not have, so onboarding must rewrite every tier to provider+the configured
+    # local model. The runtime degrade guard is then a no-op.
+    cfg = GatewayConfig()
+    assert cfg.agentos_router.tier_profile is None
+
+    res = upsert_llm_provider(cfg, provider_id="ollama", model="qwen3.5:9b")
+    router = res.config.agentos_router
+
+    assert router.enabled is True
+    assert router.tier_profile is None
+    assert set(router.tiers) == {"c0", "c1", "c2", "c3", "image_model"}
+    for name in ("c0", "c1", "c2", "c3", "image_model"):
+        assert router.tiers[name]["provider"] == "ollama"
+        assert router.tiers[name]["model"] == "qwen3.5:9b"
+    # thinking_level survives so thinking tiering still works.
+    assert router.tiers["c1"]["thinking_level"] == "high"
+    # image_model keeps its role flags so image-aware routing still works.
+    assert router.tiers["image_model"]["supports_image"] is True
+    assert router.tiers["image_model"]["image_only"] is True
+
+
+def test_ollama_onboarding_round_trips_and_degrade_guard_is_noop():
+    import tomllib
+
+    import tomli_w
+
+    res = upsert_llm_provider(GatewayConfig(), provider_id="ollama", model="qwen3.5:9b")
+    reloaded = GatewayConfig(**tomllib.loads(tomli_w.dumps(res.config.to_toml_dict())))
+
+    router = reloaded.agentos_router
+    assert router.tier_profile is None
+    for tier in router.tiers.values():
+        assert tier["provider"] == "ollama"
+        assert tier["model"] == "qwen3.5:9b"
+    # Every tier's provider equals llm.provider, so the runtime degrade guard
+    # (_degrade_model_for_local_provider) leaves the route as-is.
+    from agentos.engine.steps.agentos_router import _degrade_model_for_local_provider
+
+    class _Ctx:
+        def __init__(self, cfg):
+            self.config = cfg
+            self.metadata: dict = {}
+
+    ctx = _Ctx(reloaded)
+    routed = _degrade_model_for_local_provider(
+        ctx, tier_cfg=router.tiers["c1"], routed_model="qwen3.5:9b"
+    )
+    assert routed == "qwen3.5:9b"
+    assert ctx.metadata.get("routing_degraded") is not True
+
+
+def test_ollama_onboarding_leaves_custom_tiers_untouched():
+    custom = {
+        "c0": {"provider": "ollama", "model": "hand-a", "thinking_level": "low"},
+        "c1": {"provider": "ollama", "model": "hand-b", "thinking_level": "high"},
+        "c2": {"provider": "ollama", "model": "hand-c", "thinking_level": "high"},
+        "c3": {"provider": "ollama", "model": "hand-d", "thinking_level": "high"},
+        "image_model": {
+            "provider": "ollama",
+            "model": "hand-i",
+            "supports_image": True,
+            "image_only": True,
+        },
+    }
+    cfg = GatewayConfig(
+        llm={"provider": "openrouter", "model": "x"},
+        agentos_router={"enabled": True, "tiers": custom},
+    )
+
+    res = upsert_llm_provider(cfg, provider_id="ollama", model="qwen3.5:9b")
+    router = res.config.agentos_router
+
+    # Operator-authored tiers are not the shipped defaults and are not
+    # previous-local-pinned, so they are left exactly as configured.
+    assert router.tiers["c0"]["model"] == "hand-a"
+    assert router.tiers["c0"]["thinking_level"] == "low"
+    assert router.tiers["image_model"]["model"] == "hand-i"
+
+
+def test_local_to_local_switch_repins_machine_written_tiers():
+    from agentos.onboarding.mutations import _reconcile_router_profile_for_provider
+
+    ollama = upsert_llm_provider(GatewayConfig(), provider_id="ollama", model="qwen3.5:9b").config
+
+    # vllm is not runtime-supported by the onboarding upsert path, so exercise
+    # the reconcile hook directly (ollama -> vllm). The ollama-pinned tiers are
+    # machine-written and must be re-pinned to vllm/the new model.
+    switched = ollama.model_copy(deep=True)
+    switched.llm.provider = "vllm"
+    switched.llm.model = "llama3:8b"
+    warnings = _reconcile_router_profile_for_provider(
+        switched,
+        "vllm",
+        model="llama3:8b",
+        old_provider="ollama",
+        old_model="qwen3.5:9b",
+    )
+
+    assert warnings == []
+    router = switched.agentos_router
+    assert router.tier_profile is None
+    for tier in router.tiers.values():
+        assert tier["provider"] == "vllm"
+        assert tier["model"] == "llama3:8b"
+
+
+def test_vllm_is_treated_as_local_provider():
+    from agentos.provider.registry import is_local_provider
+
+    assert is_local_provider("vllm") is True
+
+
+def test_local_to_cloud_switch_restores_tier_profile():
+    # Switching FROM a local provider back to a cloud/profile provider must
+    # restore normal profile behavior (the local-pinned tiers are dropped).
+    ollama = upsert_llm_provider(GatewayConfig(), provider_id="ollama", model="qwen3.5:9b").config
+
+    res = upsert_llm_provider(
+        ollama,
+        provider_id="deepseek",
+        model="deepseek-chat",
+        api_key_env="DEEPSEEK_API_KEY",
+    )
+    router = res.config.agentos_router
+
+    assert router.enabled is True
+    assert router.tier_profile == "deepseek"
+    assert router.tiers["c0"]["provider"] == "deepseek"
+
+
 def test_upsert_router_recommended_writes_profile_without_expanded_tiers():
     cfg = GatewayConfig(llm={"provider": "deepseek", "model": "deepseek-chat"})
 
@@ -423,6 +556,77 @@ def test_upsert_router_can_disable():
     assert res.config.agentos_router.enabled is False
     assert res.config.agentos_router.tier_profile is None
     assert res.public_payload["mode"] == "disabled"
+
+
+def test_upsert_router_recommended_keeps_local_provider_enabled_with_pinned_tiers():
+    """First-run wizard order: provider step then router step.
+
+    The router step must not clobber the local pin the provider step wrote —
+    previously it disabled the router and resurrected the openrouter default
+    tiers via the config default factory.
+    """
+    cfg = GatewayConfig()
+    provider_res = upsert_llm_provider(
+        cfg, provider_id="ollama", model="qwen3.5:2b", base_url="http://localhost:11434"
+    )
+
+    res = upsert_router(provider_res.config, mode="recommended", strategy="v4_phase3")
+    router = res.config.agentos_router
+
+    assert router.enabled is True
+    assert router.tier_profile is None
+    for name in ("c0", "c1", "c2", "c3", "image_model"):
+        assert router.tiers[name]["provider"] == "ollama", name
+        assert router.tiers[name]["model"] == "qwen3.5:2b", name
+    assert router.tiers["image_model"]["supports_image"] is True
+    assert router.tiers["image_model"]["image_only"] is True
+    assert res.public_payload["enabled"] is True
+
+
+def test_upsert_router_recommended_respects_custom_local_tiers():
+    # An operator-customised local multi-model table must survive the router step.
+    custom = {
+        "c0": {"provider": "ollama", "model": "qwen3.5:2b"},
+        "c1": {"provider": "ollama", "model": "qwen3.5:9b"},
+        "c2": {"provider": "ollama", "model": "qwen3.5:9b"},
+        "c3": {"provider": "ollama", "model": "qwen3.5:latest"},
+    }
+    cfg = GatewayConfig(
+        llm={"provider": "ollama", "model": "qwen3.5:2b", "api_key": ""},
+        agentos_router={"enabled": True, "tiers": custom},
+    )
+
+    res = upsert_router(cfg, mode="recommended", strategy="v4_phase3")
+    router = res.config.agentos_router
+
+    assert router.enabled is True
+    assert router.tiers["c1"]["model"] == "qwen3.5:9b"
+    assert router.tiers["c3"]["model"] == "qwen3.5:latest"
+
+
+def test_upsert_router_disabled_keeps_local_pinned_tiers_in_config():
+    """Choosing Off must not resurrect openrouter tiers in a local config."""
+    cfg = GatewayConfig()
+    provider_res = upsert_llm_provider(
+        cfg, provider_id="ollama", model="qwen3.5:2b", base_url="http://localhost:11434"
+    )
+
+    res = upsert_router(provider_res.config, mode="disabled")
+
+    assert res.config.agentos_router.enabled is False
+    persisted = res.config.to_toml_dict().get("agentos_router", {}).get("tiers", {})
+    assert persisted, "local pin must stay persisted while the router is off"
+    assert all(t.get("provider") == "ollama" for t in persisted.values())
+
+
+def test_upsert_router_recommended_still_disables_unknown_nonlocal_provider():
+    # Non-local providers without a tier profile keep today's disable behavior.
+    cfg = GatewayConfig(llm={"provider": "anthropic", "model": "claude-sonnet-4-6"})
+
+    res = upsert_router(cfg, mode="recommended")
+
+    assert res.config.agentos_router.enabled is False
+    assert res.config.agentos_router.tier_profile is None
 
 
 def test_upsert_router_rejects_openrouter_mix_for_direct_provider():

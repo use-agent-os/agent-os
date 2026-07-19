@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-default_version="v2026.7.17.post1"
+default_version="v2026.7.18.post1"
 repo_slug="${AGENTOS_REPOSITORY:-use-agent-os/agent-os}"
 python_version="${AGENTOS_PYTHON_VERSION:-3.12}"
 original_path="${PATH:-}"
@@ -18,10 +18,10 @@ cli_extras=""
 
 usage() {
     cat <<HELP
-Usage: bash install.sh [--version v2026.7.17.post1|latest] [--profile recommended|core] [--extras name[,name]]
+Usage: bash install.sh [--version v2026.7.18.post1|latest] [--profile recommended|core] [--extras name[,name]]
 
 Environment equivalents:
-  AGENTOS_VERSION=v2026.7.17.post1
+  AGENTOS_VERSION=v2026.7.18.post1
   AGENTOS_INSTALL_PROFILE=recommended|core
   AGENTOS_INSTALL_EXTRAS=matrix
   AGENTOS_INSTALL_DRY_RUN=1
@@ -133,7 +133,7 @@ fi
 
 if [[ "${release_selector}" != "latest" && "${release_selector}" != "stable" ]] && ! is_release_version "${release_selector}"; then
     echo "install.sh: unsupported AGENTOS_VERSION='${release_selector}'." >&2
-    echo "install.sh: the release installer only supports latest, stable, or release versions like v2026.7.17.post1." >&2
+    echo "install.sh: the release installer only supports latest, stable, or release versions like v2026.7.18.post1." >&2
     echo "install.sh: use git clone plus scripts/install_source.sh for main, dev, branch, or source installs." >&2
     exit 1
 fi
