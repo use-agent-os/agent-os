@@ -46,6 +46,8 @@ root release README with task-oriented guides.
   profiles, approval commands, workspace containment, and sandbox posture.
 - [`agents.md`](agents.md) - durable named agents and workspace defaults.
 - [`scheduling.md`](scheduling.md) - recurring and one-time scheduled work.
+- [`http-api.md`](http-api.md) - REST HTTP API and WebSocket surface for
+  external apps and automation.
 - [`mcp-server.md`](mcp-server.md) - MCP server bridge for MCP-capable clients.
 - [`usage-and-cost.md`](usage-and-cost.md) - token usage, estimated cost, and
   cost investigation workflow.
