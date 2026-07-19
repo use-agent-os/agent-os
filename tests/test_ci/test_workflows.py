@@ -350,3 +350,50 @@ def test_pypi_publish_hydrates_v4_router_bundle() -> None:
     assert 'git lfs pull --include="src/agentos/agentos_router/models/**"' in text
     assert "v4.2_phase3_inference" in text
     assert "lgbm_main.bin" in text
+
+
+def test_wheelhouse_release_hydrates_pilot_minilm_export() -> None:
+    """T1's MiniLM INT8 export ships in the wheel already; the hydration
+    check must guard it exactly like bge_onnx so a non-hydrated LFS checkout
+    can't silently ship a ~130-byte pointer file instead of the 23 MB ONNX."""
+    text = (WORKFLOW_DIR / "wheelhouse-release.yml").read_text(encoding="utf-8")
+
+    assert "memory/models/embeddings/all-MiniLM-L6-v2-int8" in text
+    assert 'minilm / "model.onnx"' in text
+    assert 'minilm / "tokenizer.json"' in text
+    assert 'minilm / "vocab.txt"' in text
+
+
+def test_pypi_publish_hydrates_pilot_minilm_export() -> None:
+    text = (WORKFLOW_DIR / "pypi-publish.yml").read_text(encoding="utf-8")
+
+    assert "memory/models/embeddings/all-MiniLM-L6-v2-int8" in text
+    assert '"model.onnx"' in text
+    assert '"tokenizer.json"' in text
+    assert '"vocab.txt"' in text
+    assert "(minilm / name).is_file()" in text
+
+
+def test_wheelhouse_release_smoke_guards_pilot_bundle_in_wheel() -> None:
+    """The versioned-wheel smoke step must assert the pilot_v1 bundle is
+    packaged AND real (size floor), mirroring the v4 bundle wheel check."""
+    text = (WORKFLOW_DIR / "wheelhouse-release.yml").read_text(encoding="utf-8")
+
+    assert 'pilot = "agentos/agentos_router/models/pilot_v1/"' in text
+    assert 'pilot + "model.onnx"' in text
+    assert "unhydrated Git LFS pointer" in text
+
+
+def test_release_hydration_checks_guard_pilot_v1_bundle() -> None:
+    """The shipped Pilot production bundle (models/pilot_v1/) is the wheel's
+    routing brain once pilot-v1 is the default strategy; a non-hydrated LFS
+    checkout that shipped a pointer file instead of model.onnx would silently
+    degrade every turn. Both release hydration checks must assert the bundle's
+    files are present, exactly like the v4/MiniLM required-files entries. (The
+    T7 deferral marker is gone now that the bundle exists.)"""
+    for name in ("wheelhouse-release.yml", "pypi-publish.yml"):
+        text = (WORKFLOW_DIR / name).read_text(encoding="utf-8")
+        assert "NOTE(T7)" not in text
+        assert "pilot_v1" in text
+        assert "model.onnx" in text
+        assert "manifest.json" in text

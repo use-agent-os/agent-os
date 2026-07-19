@@ -295,6 +295,9 @@ async def _router_configure(params: Any, ctx: RpcContext) -> dict[str, Any]:
     judge_provider = params.get("judgeProvider") if isinstance(params, dict) else None
     judge_base_url = params.get("judgeBaseUrl") if isinstance(params, dict) else None
     judge_api_key = params.get("judgeApiKey") if isinstance(params, dict) else None
+    safety_net_threshold = (
+        params.get("safetyNetThreshold") if isinstance(params, dict) else None
+    )
     verify_local_endpoint = bool(judge_base_url)
     # ``upsert_router`` is synchronous, and with ``verify_local_endpoint=True`` it
     # runs a full test classification against the local judge endpoint (up to the
@@ -315,6 +318,7 @@ async def _router_configure(params: Any, ctx: RpcContext) -> dict[str, Any]:
             judge_provider=judge_provider,
             judge_base_url=judge_base_url,
             judge_api_key=judge_api_key,
+            safety_net_threshold=safety_net_threshold,
             verify_local_endpoint=True,
         )
     else:
@@ -328,6 +332,7 @@ async def _router_configure(params: Any, ctx: RpcContext) -> dict[str, Any]:
             judge_provider=judge_provider,
             judge_base_url=judge_base_url,
             judge_api_key=judge_api_key,
+            safety_net_threshold=safety_net_threshold,
             verify_local_endpoint=False,
         )
     _apply_inplace(ctx, res.config)

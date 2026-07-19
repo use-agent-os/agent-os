@@ -952,6 +952,7 @@ _DONE_LABEL = "Done"
 
 _ROUTER_LOCAL_ML_LABEL = "Smart routing (on-device)"
 _ROUTER_LLM_JUDGE_LABEL = "Smart routing (LLM-based)"
+_ROUTER_PILOT_LABEL = "Local ML — English-optimized (Pilot)"
 _ROUTER_DISABLED_LABEL = "Off"
 _JUDGE_AUTO_LABEL = "Auto (recommended)"
 _JUDGE_MANUAL_LABEL = "Pick a specific model"
@@ -974,7 +975,12 @@ def _search_fallback_choice_to_value(choice: str | None) -> str:
 
 
 def _router_mode_choices(provider_id: str) -> list[str]:
-    return [_ROUTER_LOCAL_ML_LABEL, _ROUTER_LLM_JUDGE_LABEL, _ROUTER_DISABLED_LABEL]
+    return [
+        _ROUTER_LOCAL_ML_LABEL,
+        _ROUTER_PILOT_LABEL,
+        _ROUTER_LLM_JUDGE_LABEL,
+        _ROUTER_DISABLED_LABEL,
+    ]
 
 
 def _router_mode_default(provider_id: str, requested: str) -> str:
@@ -982,6 +988,8 @@ def _router_mode_default(provider_id: str, requested: str) -> str:
         return _ROUTER_DISABLED_LABEL
     if requested == "llm_judge":
         return _ROUTER_LLM_JUDGE_LABEL
+    if requested == "pilot-v1":
+        return _ROUTER_PILOT_LABEL
     return _ROUTER_LOCAL_ML_LABEL
 
 
@@ -998,6 +1006,8 @@ def _router_mode_to_strategy(selected: str | None) -> str | None:
         return None
     if selected == _ROUTER_LLM_JUDGE_LABEL:
         return "llm_judge"
+    if selected == _ROUTER_PILOT_LABEL:
+        return "pilot-v1"
     return "v4_phase3"
 
 
@@ -1306,6 +1316,8 @@ def run_interactive_router_configure(
         requested_mode = "disabled"
     elif cfg.agentos_router.strategy == "llm_judge":
         requested_mode = "llm_judge"
+    elif cfg.agentos_router.strategy == "pilot-v1":
+        requested_mode = "pilot-v1"
     else:
         requested_mode = "recommended"
     payload = _ask_router_fields(

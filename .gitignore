@@ -23,6 +23,18 @@ agentos.toml
 data/
 # Checked-in router eval dataset used by the test suite.
 !tests/data/
+# Checked-in Pilot fixture model artifacts (model.onnx + manifest.json).
+!tests/test_agentos_router/data/
+!tests/test_agentos_router/data/**
+# Pilot T7 training outputs: the staged pilot-v1 artifact (model.onnx +
+# manifest.json) and the on-disk feature cache are never committed. The staged
+# artifact only lands in the shipped location after the T9 eval gate; the
+# committed record is scripts/pilot_router/training_meta.json (metrics only).
+/scripts/pilot_router/artifacts/
+/scripts/pilot_router/.feature_cache/
+# Local ops metadata, not for publication (contains endpoint/cost detail).
+/scripts/pilot_router/mine_meta.json
+/scripts/pilot_router/labels_supplement_meta.json
 .agentos/
 benchmarks/
 specs/

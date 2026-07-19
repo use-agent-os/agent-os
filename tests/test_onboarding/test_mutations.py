@@ -636,6 +636,69 @@ def test_upsert_router_rejects_openrouter_mix_for_direct_provider():
         upsert_router(cfg, mode="openrouter-mix")
 
 
+def test_upsert_router_accepts_pilot_v1_strategy():
+    cfg = GatewayConfig(llm={"provider": "openrouter", "model": "deepseek/x"})
+
+    res = upsert_router(cfg, mode="recommended", strategy="pilot-v1")
+
+    assert res.config.agentos_router.strategy == "pilot-v1"
+    assert res.public_payload["strategy"] == "pilot-v1"
+
+
+def test_upsert_router_persists_pilot_safety_net_threshold():
+    cfg = GatewayConfig(llm={"provider": "openrouter", "model": "deepseek/x"})
+
+    res = upsert_router(
+        cfg, mode="recommended", strategy="pilot-v1", safety_net_threshold=0.65
+    )
+
+    assert res.config.agentos_router.pilot.safety_net_threshold == 0.65
+    assert res.public_payload["pilot"]["safety_net_threshold"] == 0.65
+
+
+def test_upsert_router_omitted_threshold_preserves_existing_pilot_value():
+    cfg = GatewayConfig(
+        llm={"provider": "openrouter", "model": "deepseek/x"},
+        agentos_router={"strategy": "pilot-v1", "pilot": {"safety_net_threshold": 0.7}},
+    )
+
+    # No threshold passed => existing value preserved (optional, absent = no change).
+    res = upsert_router(cfg, mode="recommended", strategy="pilot-v1")
+
+    assert res.config.agentos_router.pilot.safety_net_threshold == 0.7
+
+
+def test_upsert_router_rejects_out_of_range_safety_net_threshold():
+    cfg = GatewayConfig(llm={"provider": "openrouter", "model": "deepseek/x"})
+
+    with pytest.raises(ValueError):
+        upsert_router(
+            cfg, mode="recommended", strategy="pilot-v1", safety_net_threshold=1.5
+        )
+
+
+def test_upsert_router_still_accepts_v4_and_judge_strategies():
+    cfg = GatewayConfig(llm={"provider": "openrouter", "model": "deepseek/x"})
+
+    assert (
+        upsert_router(cfg, mode="recommended", strategy="v4_phase3")
+        .config.agentos_router.strategy
+        == "v4_phase3"
+    )
+    assert (
+        upsert_router(cfg, mode="recommended", strategy="llm_judge")
+        .config.agentos_router.strategy
+        == "llm_judge"
+    )
+
+
+def test_upsert_router_rejects_unknown_strategy():
+    cfg = GatewayConfig(llm={"provider": "openrouter", "model": "deepseek/x"})
+
+    with pytest.raises(ValueError, match="agentos_router.strategy must be one of"):
+        upsert_router(cfg, mode="recommended", strategy="made-up")
+
+
 def test_upsert_router_auto_judge_persists_nothing_and_echoes_resolution():
     cfg = GatewayConfig(llm={"provider": "deepseek", "model": "deepseek-chat"})
 

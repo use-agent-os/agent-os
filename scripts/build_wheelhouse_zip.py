@@ -48,6 +48,15 @@ EMBEDDING_ASSET_RELS = (
     "bge_onnx/tokenizer.json",
     "bge_onnx/tokenizer_config.json",
     "bge_onnx/vocab.txt",
+    # Pilot router MiniLM INT8 export (T1). Lives under the same
+    # agentos/memory/models root as bge_onnx, so it shares the hydration and
+    # wheel-content guards below rather than needing a second check.
+    "embeddings/all-MiniLM-L6-v2-int8/config.json",
+    "embeddings/all-MiniLM-L6-v2-int8/model.onnx",
+    "embeddings/all-MiniLM-L6-v2-int8/special_tokens_map.json",
+    "embeddings/all-MiniLM-L6-v2-int8/tokenizer.json",
+    "embeddings/all-MiniLM-L6-v2-int8/tokenizer_config.json",
+    "embeddings/all-MiniLM-L6-v2-int8/vocab.txt",
 )
 REQUIRED_RUNTIME_MODULE_RELS = (
     "agentos/cli/main.py",

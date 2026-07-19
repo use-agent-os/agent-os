@@ -145,23 +145,52 @@ classifies each turn:
 
 | Strategy | Default | Behavior |
 | --- | --- | --- |
-| `v4_phase3` | Yes | On-device ML router (BGE embeddings + LightGBM ensemble). No LLM call, nothing leaves the machine. The ~75MB model bundle is not distributed with the repo or the wheel yet, and the installers do not fetch it; when it's missing the router logs a warning at boot and pins every turn to the default tier (c1). Install its runtime dependencies with `uv sync --extra recommended` (or the `ml-router` extra), then restore the bundle into `src/agentos/agentos_router/models/v4.2_phase3_inference/` to enable per-turn routing — or use `llm_judge`, which needs no local model files. |
+| `pilot-v1` | Yes | English-optimized local ML router: an AgentOS-native, self-trained model (MiniLM embeddings + ONNX inference). Decides on-device with no LLM call and nothing leaves the machine. The bundle ships in the wheel under `src/agentos/agentos_router/models/pilot_v1/`; when it's missing (e.g. a source checkout without `git lfs pull`) the strategy tags the decision `pilot_unavailable` and routes the turn to the default tier (c1). Runtime deps are `numpy`/`onnxruntime`/`tokenizers` (in the `recommended` and `ml-router` extras); a minimal install without them degrades the same graceful way. Tunable via the `[agentos_router.pilot]` sub-table below. See [`features/agentos-router.md`](features/agentos-router.md#the-pilot-strategy) for status and rollback. |
+| `v4_phase3` | No (legacy) | The previous default: an on-device ML router (BGE embeddings + LightGBM ensemble). No LLM call, nothing leaves the machine. Fully selectable and the one-line rollback from `pilot-v1`. Its bundle ships in the wheel under `src/agentos/agentos_router/models/v4.2_phase3_inference/`; when missing the router logs a warning at boot and pins every turn to the default tier (c1). Install its runtime deps with `uv sync --extra recommended` (or the `ml-router` extra); `git lfs pull` restores the bundle in a source checkout — or use `llm_judge`, which needs no local model files. |
 | `llm_judge` | No | Each turn is classified by a small LLM judge call instead of the local ML bundle. See "Local judge" below. |
 
 ```toml
 [agentos_router]
-strategy = "v4_phase3"   # or "llm_judge"
+strategy = "pilot-v1"   # default; or "v4_phase3" (legacy) or "llm_judge"
 ```
 
-Both strategies are also selectable from the Mode dropdown in onboarding
-(Web UI wizard and CLI): **Smart routing (on-device)** (`v4_phase3`), **Smart
-routing (LLM-based)** (`llm_judge`), or **Off**. The "Judge model" field only
-appears for the LLM-based strategy.
+Router runtime dependencies (`onnxruntime`, `numpy`, `tokenizers`) stay in the
+`recommended` / `ml-router` extras rather than the core install (matching the
+`v4_phase3` precedent): a minimal install without them does not fail — the
+router degrades to the default tier and emits `pilot_unavailable` telemetry.
+
+All three strategies are also selectable from the Mode dropdown in onboarding
+(Web UI wizard and CLI), a four-option selector: **Local ML — English-optimized
+(Pilot)** (`pilot-v1`, the default), **Smart routing (on-device)** (`v4_phase3`),
+**Smart routing (LLM-based)** (`llm_judge`), or **Off**. The "Judge model" field
+only appears for the LLM-based strategy; the "Pilot safety net" field only
+appears for the Pilot strategy.
+
+#### Pilot strategy settings
+
+When `strategy = "pilot-v1"`, the optional `[agentos_router.pilot]` sub-table
+tunes the Pilot router:
+
+```toml
+[agentos_router]
+strategy = "pilot-v1"
+
+[agentos_router.pilot]
+# Under-routing safety-net floor (0.0–1.0). The effective cutoff is
+# max(safety_net_threshold, router.confidence_threshold), so a value below the
+# confidence threshold has no effect. Default 0.5.
+safety_net_threshold = 0.5
+
+# Override the Pilot artifact directory. Defaults to the bundled
+# `models/pilot_v1/` root; set this to point at a bundle elsewhere on disk.
+# pilot_artifact_dir = "~/pilot_v1"
+```
 
 ### Local judge (Ollama / LM Studio)
 
 This section applies only when `agentos_router.strategy = "llm_judge"` — the
-default `v4_phase3` strategy makes no LLM call and has no judge to configure.
+default `pilot-v1` (and legacy `v4_phase3`) local strategies make no LLM call
+and have no judge to configure.
 
 With the `llm_judge` strategy, the router classifies each text turn with a
 small LLM judge. Instead of a cloud model you can point the judge at a local

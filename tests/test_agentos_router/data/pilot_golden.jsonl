@@ -1,0 +1,78 @@
+{"_meta": "pilot_golden", "note": "T9 golden set for the Pilot router (spec §6.4, floor: Pilot final-decision accuracy >= 0.80). Rows are self-authored, rubric-anchored (scripts/pilot_router/rubric.md v1) prompts chosen to be unambiguous exemplars of each tier, including code-heavy turns (spec risk #3). No rows are drawn from the held-out test split or any labeled corpus turn. Some prompts are stylistically inspired by public WildChat-1M user turns (Zhao et al., ODC-BY 1.0, https://huggingface.co/datasets/allenai/WildChat-1M) but are original text authored for this file, not copied. Gold labels assigned per the labeling rubric; ties resolved DOWN per rule 5. The first line is this metadata header and is skipped by the CI test.", "attribution": "WildChat-1M © AllenAI, ODC-BY 1.0", "license": "ODC-BY-1.0"}
+{"id": "r0_thanks", "text": "thanks, that's perfect!", "gold_class": "R0"}
+{"id": "r0_greeting", "text": "hey there, how's it going today?", "gold_class": "R0"}
+{"id": "r0_lol", "text": "haha lol that's hilarious", "gold_class": "R0"}
+{"id": "r0_capital", "text": "what is the capital of France?", "gold_class": "R0"}
+{"id": "r0_2plus2", "text": "what's 2 + 2", "gold_class": "R0"}
+{"id": "r0_bye", "text": "ok cool, talk to you later!", "gold_class": "R0"}
+{"id": "r0_year", "text": "what year did World War 2 end?", "gold_class": "R0"}
+{"id": "r0_good_morning", "text": "good morning! hope you slept well :)", "gold_class": "R0"}
+{"id": "r0_yesno", "text": "is water wet? just yes or no", "gold_class": "R0"}
+{"id": "r0_symbol", "text": "what does the € symbol stand for?", "gold_class": "R0"}
+{"id": "r0_boiling", "text": "at what temperature does water boil in celsius at sea level?", "gold_class": "R0"}
+{"id": "r0_ack", "text": "got it, makes sense.", "gold_class": "R0"}
+{"id": "r1_regex_email", "text": "write a regex that matches a basic email address", "gold_class": "R1"}
+{"id": "r1_thankyou_note", "text": "write a two-line thank-you note to my landlord for fixing the sink", "gold_class": "R1"}
+{"id": "r1_git_stash", "text": "what does the git stash command do?", "gold_class": "R1"}
+{"id": "r1_celsius", "text": "convert 37 degrees celsius to fahrenheit", "gold_class": "R1"}
+{"id": "r1_off_by_one", "text": "fix the off-by-one bug in this loop: for i in range(len(a)+1): print(a[i])", "gold_class": "R1"}
+{"id": "r1_hashmap_def", "text": "what is a hash map?", "gold_class": "R1"}
+{"id": "r1_translate_sentence", "text": "translate this sentence to French: I would like a cup of coffee, please.", "gold_class": "R1"}
+{"id": "r1_palindrome_check", "text": "write a python function that returns True if a string is a palindrome", "gold_class": "R1"}
+{"id": "r1_haiku_rain", "text": "write a haiku about rain", "gold_class": "R1"}
+{"id": "r1_microservice_def", "text": "in one sentence, what is a microservice?", "gold_class": "R1"}
+{"id": "r1_rename_var", "text": "rename the variable `x` to `total` in this snippet: x = 0\\nfor n in nums:\\n    x += n", "gold_class": "R1"}
+{"id": "r1_capital_why_short", "text": "what is the standard SQL keyword to remove a table, and what happens to its data?", "gold_class": "R1"}
+{"id": "r1_list_planets", "text": "list the eight planets of the solar system in order from the sun", "gold_class": "R1"}
+{"id": "r1_optimistic_def", "text": "what is optimistic locking?", "gold_class": "R1"}
+{"id": "r1_json_pretty", "text": "format this into pretty-printed JSON: {\"a\":1,\"b\":[2,3]}", "gold_class": "R1"}
+{"id": "r1_short_apology", "text": "help me write a short, polite apology email for missing a meeting this morning", "gold_class": "R1"}
+{"id": "r1_curl_flag", "text": "what does the -L flag do in a curl command?", "gold_class": "R1"}
+{"id": "r2_merge_intervals", "text": "write a python function that merges a list of overlapping intervals and returns the merged list", "gold_class": "R2"}
+{"id": "r2_debug_trace", "text": "why does this raise? def f(d): return d['k']\\nprint(f({}))  # KeyError: 'k' — how should I make it return None instead and why is get() better here", "gold_class": "R2"}
+{"id": "r2_rest_vs_graphql", "text": "compare REST and GraphQL for a mobile app with flaky connectivity and recommend one with reasons", "gold_class": "R2"}
+{"id": "r2_locking_tradeoffs", "text": "explain the tradeoffs of optimistic vs pessimistic locking and when each is the right choice", "gold_class": "R2"}
+{"id": "r2_three_equations", "text": "solve this system and show each step: 2x + y - z = 8; -3x - y + 2z = -11; -2x + y + 2z = -3", "gold_class": "R2"}
+{"id": "r2_longest_palindrome", "text": "write a function to find the longest palindromic substring of a string and briefly explain the approach", "gold_class": "R2"}
+{"id": "r2_hashmap_vs_tree", "text": "when would a hash map beat a balanced binary search tree, and when would the tree win? explain the reasoning", "gold_class": "R2"}
+{"id": "r2_rate_limiter_one", "text": "implement a token-bucket rate limiter for a single service in Go, and explain the refill logic", "gold_class": "R2"}
+{"id": "r2_sql_join_debug", "text": "my LEFT JOIN is dropping rows I expect to keep; here is the query — SELECT * FROM a LEFT JOIN b ON a.id=b.a_id WHERE b.status='ok' — explain why and fix it", "gold_class": "R2"}
+{"id": "r2_refactor_pure", "text": "refactor this function to be pure and testable, and explain what made it impure: def total(cart):\\n    global TAX\\n    return sum(i.price for i in cart) * TAX", "gold_class": "R2"}
+{"id": "r2_bigo_analysis", "text": "analyze the time and space complexity of this function step by step and say whether it can be improved: def has_dup(a):\\n    for i in range(len(a)):\\n        for j in range(i+1, len(a)):\\n            if a[i]==a[j]: return True\\n    return False", "gold_class": "R2"}
+{"id": "r2_dockerfile_review", "text": "review this Dockerfile for correctness and layer-caching efficiency and suggest concrete improvements: FROM python:3.12\\nCOPY . /app\\nRUN pip install -r /app/requirements.txt\\nCMD python /app/main.py", "gold_class": "R2"}
+{"id": "r2_recursion_to_iter", "text": "convert this recursive fibonacci to an iterative version and explain why the recursive one is slow: def fib(n): return n if n<2 else fib(n-1)+fib(n-2)", "gold_class": "R2"}
+{"id": "r2_short_story", "text": "write a short story about a lighthouse keeper who discovers a message in a bottle", "gold_class": "R2"}
+{"id": "r2_translate_poem", "text": "translate this couplet into English while preserving its meter and rhyme: Le vent se lève, il faut tenter de vivre; / L'air immense ouvre et referme mon livre.", "gold_class": "R2"}
+{"id": "r2_async_bug", "text": "this async python code never prints 'done' — explain the bug and fix it: async def main():\\n    task = asyncio.sleep(1)\\n    print('done')\\nasyncio.run(main())", "gold_class": "R2"}
+{"id": "r2_index_choice", "text": "given a table orders(user_id, created_at, status) with frequent queries filtering user_id and status and sorting by created_at, which composite index would you create and why?", "gold_class": "R2"}
+{"id": "r2_unit_test", "text": "write pytest tests covering the edge cases for this function and note which cases matter most: def clamp(x, lo, hi):\\n    return max(lo, min(x, hi))", "gold_class": "R2"}
+{"id": "r2_memory_leak", "text": "this node.js service's memory grows unbounded under load; here's the handler that caches responses in a plain object keyed by url — explain the leak and propose a bounded fix", "gold_class": "R2"}
+{"id": "r2_state_machine", "text": "design a small state machine for a traffic light with a pedestrian button and write the transition table", "gold_class": "R2"}
+{"id": "r3_monolith_migration", "text": "design a migration plan to move our monolith to microservices with zero downtime, covering data ownership, dual-writes, cutover, and rollback across at least six services", "gold_class": "R3"}
+{"id": "r3_odd_sum_proof", "text": "prove that the sum of the first n odd numbers equals n squared, using induction, and state the base case and inductive step rigorously", "gold_class": "R3"}
+{"id": "r3_kv_store", "text": "architect a multi-region, strongly-consistent key-value store; justify your consistency protocol, quorum sizes, and failure-handling under network partitions", "gold_class": "R3"}
+{"id": "r3_backprop_derivation", "text": "derive the backpropagation equations for a two-layer MLP with softmax output and cross-entropy loss, showing every gradient step", "gold_class": "R3"}
+{"id": "r3_quadratic_proof", "text": "prove the quadratic formula from first principles by completing the square, justifying each algebraic manipulation", "gold_class": "R3"}
+{"id": "r3_org_rate_limit", "text": "design org-wide rate limiting across 40 services with per-tenant fairness guarantees, a shared budget, and graceful degradation, and justify the coordination mechanism", "gold_class": "R3"}
+{"id": "r3_billing_model", "text": "design the data model, sharding strategy, and a 3-year migration plan for our billing system, accounting for currency changes, proration, and audit requirements", "gold_class": "R3"}
+{"id": "r3_consensus_proof", "text": "explain why no consensus protocol can guarantee both safety and liveness in an asynchronous network with one faulty process, and sketch the core argument of the FLP result", "gold_class": "R3"}
+{"id": "r3_compiler_design", "text": "design the architecture of an optimizing compiler for a small statically-typed language: lexer, parser, type checker, IR, three optimization passes, and codegen, and justify the IR choice", "gold_class": "R3"}
+{"id": "r3_distributed_scheduler", "text": "architect a distributed job scheduler that guarantees exactly-once execution across data centers despite clock skew and network partitions, and justify how you prevent duplicate runs", "gold_class": "R3"}
+{"id": "r3_testable_monolith", "text": "propose a concrete architecture and 6-month incremental plan to make our untested 200k-line monolith testable without a big rewrite, with milestones and risk mitigation", "gold_class": "R3"}
+{"id": "r3_crdt_design", "text": "design a CRDT-based collaborative text editor supporting offline edits and concurrent cursors, and prove your merge operation is commutative, associative, and idempotent", "gold_class": "R3"}
+{"id": "r3_gc_algorithm", "text": "design a concurrent, low-pause garbage collector for a managed runtime, describe the write barrier and tri-color invariant, and argue why it never collects a live object", "gold_class": "R3"}
+{"id": "r3_ml_pipeline", "text": "architect an end-to-end ML training and serving platform for 50 teams: feature store, experiment tracking, reproducible pipelines, canary rollout, and drift detection, and justify each component boundary", "gold_class": "R3"}
+{"id": "r3_query_planner", "text": "design a cost-based SQL query planner: statistics collection, join-order search, cardinality estimation, and plan caching, and explain how you avoid catastrophic plan regressions", "gold_class": "R3"}
+{"id": "r0_weather_smalltalk", "text": "morning! any fun plans for the weekend?", "gold_class": "R0"}
+{"id": "r0_define_word", "text": "what does the word 'ephemeral' mean?", "gold_class": "R0"}
+{"id": "r1_bash_count_lines", "text": "what shell command counts the number of lines in a file called notes.txt?", "gold_class": "R1"}
+{"id": "r1_css_center", "text": "how do I horizontally center a div with flexbox? just the two CSS lines", "gold_class": "R1"}
+{"id": "r1_py_reverse_list", "text": "how do I reverse a list in python in place?", "gold_class": "R1"}
+{"id": "r2_reverse_linked_list", "text": "write a function to reverse a singly linked list and walk through how the pointers change", "gold_class": "R2"}
+{"id": "r2_concurrency_deadlock", "text": "two threads each lock A then B in different orders and my program hangs — explain the deadlock and give two distinct ways to prevent it", "gold_class": "R2"}
+{"id": "r2_api_pagination", "text": "design a cursor-based pagination scheme for a REST list endpoint and explain why it beats offset pagination for large datasets", "gold_class": "R2"}
+{"id": "r3_zero_downtime_schema", "text": "plan a zero-downtime schema migration to split a users table into users and profiles across a fleet of app servers, covering backfill, dual-reads, and the exact cutover sequence", "gold_class": "R3"}
+{"id": "r3_prove_sqrt2", "text": "prove that the square root of 2 is irrational and rigorously justify the contradiction step", "gold_class": "R3"}
+{"id": "r1_what_is_ci", "text": "what does CI stand for in software development?", "gold_class": "R1"}
+{"id": "r2_env_config", "text": "our app reads config from env vars but tests need overrides; propose a clean pattern that keeps production behavior unchanged and explain the tradeoffs", "gold_class": "R2"}
+{"id": "r0_thumbs_up", "text": "nice, thank you so much!!", "gold_class": "R0"}

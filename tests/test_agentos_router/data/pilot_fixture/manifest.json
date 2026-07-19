@@ -1,0 +1,76 @@
+{
+  "pilot_version": "fixture-0",
+  "is_fixture": true,
+  "classes": [
+    "R0",
+    "R1",
+    "R2",
+    "R3"
+  ],
+  "temperature": 1.0,
+  "embedder_id": "sentence-transformers/all-MiniLM-L6-v2",
+  "model_onnx_sha256": "108646e3383759bc0e027122bb292b949775fc998ec34874bcbc1b58cf398817",
+  "io_contract": {
+    "input": {
+      "name": "input",
+      "dtype": "float32",
+      "shape": [
+        null,
+        392
+      ]
+    },
+    "outputs": [
+      {
+        "name": "label",
+        "dtype": "int64",
+        "shape": [
+          null
+        ]
+      },
+      {
+        "name": "probabilities",
+        "dtype": "float32",
+        "shape": [
+          null,
+          4
+        ]
+      }
+    ]
+  },
+  "encoder_contract": {
+    "pooling": "mean",
+    "normalization": "l2",
+    "max_input_chars": 8192,
+    "max_tokens": 256,
+    "truncation_side": "right",
+    "model_revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+    "tokenizer_sha256": "da0e79933b9ed51798a3ae27893d3c5fa4a201126cef75586296df9b4d2c62a0"
+  },
+  "feature_schema": {
+    "version": "1",
+    "scalar_names": [
+      "log1p_char_count_full",
+      "log1p_token_count_pretrunc_8k",
+      "log1p_line_count_8k",
+      "has_code_fence_8k",
+      "log1p_code_line_count_8k",
+      "has_traceback_8k",
+      "log1p_question_mark_count_8k",
+      "has_file_or_url_reference_8k"
+    ],
+    "feature_dim": 392,
+    "url_regex": "(?i)\\bhttps?://[^\\s<>()]+",
+    "file_regex": "(?i)(?:\\b[a-z]:[\\\\/]|(?:^|[\\s(]))(?:[\\w.@+-]+[\\\\/])*[\\w.@+-]+\\.(?:py|pyi|js|jsx|ts|tsx|json|toml|ya?ml|md|txt|sh|sql|rs|go|java|c|cc|cpp|h|hpp)\\b"
+  },
+  "training_stats": {
+    "_note": "FIXTURE placeholder values \u2014 synthetic blobs, not real training.",
+    "n_train": 240,
+    "seed": 20260717,
+    "class_balance": {
+      "R0": 0.25,
+      "R1": 0.25,
+      "R2": 0.25,
+      "R3": 0.25
+    }
+  }
+}

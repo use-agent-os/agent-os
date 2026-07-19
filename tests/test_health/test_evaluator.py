@@ -964,6 +964,32 @@ def test_router_evaluator_flags_missing_runtime_as_warn() -> None:
     assert "agentos configure router --router disabled" in findings[0].fix_steps[0].command
 
 
+def test_router_evaluator_flags_degraded_local_bundle_as_warn() -> None:
+    findings = evaluate_router(
+        {
+            "enabled": True,
+            "rolloutPhase": "full",
+            "strategy": "pilot-v1",
+            "tierProfile": "custom",
+            "runtimeValid": False,
+            "runtimeInvalidReason": "assets_degraded",
+            "error": (
+                "The pilot-v1 router is selected but its local model bundle is "
+                "missing (model.onnx), so every request routes to the balanced tier."
+            ),
+        }
+    )
+
+    # A degraded-but-serving bundle is a distinct, non-blocking warning — NOT the
+    # hard "router.runtime.missing" raise state, and NOT a silent "Router ready".
+    assert findings[0].id == "router.runtime.degraded"
+    assert findings[0].title == "Router degraded"
+    assert findings[0].severity == "warn"
+    assert _impact(findings[0]) == "degrades"
+    # The recovery steers the operator to require_router_runtime / reinstall.
+    assert "require_router_runtime" in findings[0].fix_steps[0].detail
+
+
 def test_router_evaluator_flags_ignored_local_endpoint() -> None:
     findings = evaluate_router(
         {

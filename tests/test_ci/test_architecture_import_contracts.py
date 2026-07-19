@@ -99,6 +99,12 @@ APPROVED_PACKAGE_IMPORTS: frozenset[tuple[str, str]] = frozenset({
     ("persistence", "skills"),
     ("provider", "engine"),
     ("router_control.py", "engine"),
+    # The router strategy registry's asset probes lazily reach into the Pilot
+    # strategy (for its default artifact dir) and the MiniLM embedder resolver
+    # to report missing bundle files for boot/doctor preflight — mirroring the
+    # approved ("agentos_router", "memory") edge, one level up.
+    ("router_strategies.py", "agentos_router"),
+    ("router_strategies.py", "memory"),
     ("sandbox", "application"),
     ("sandbox", "gateway"),
     ("sandbox", "safety"),

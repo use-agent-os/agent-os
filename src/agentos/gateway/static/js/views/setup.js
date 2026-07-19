@@ -556,13 +556,22 @@ const SetupView = (() => {
     const profile = provider ? profiles.find(p => p.providerId === provider) || {} : {};
     const tiers = provider ? Object.assign({}, profile.tiers || {}, router.tiers || {}) : {};
     const defaultTier = router.default_tier || catalog.defaultTier || 'c1';
-    // The Mode control is a single 3-way selector encoding both enabled and
-    // strategy: 'disabled' (router off), 'llm_judge' (on, LLM-judge routing), or
-    // 'v4_phase3' (on, local ML router — the config default).
+    // The Mode control is a single 4-way selector encoding both enabled and
+    // strategy: 'disabled' (router off) or one of the enabled strategy ids the
+    // backend registry accepts — 'pilot-v1' (English-optimized local ML, the
+    // config default), 'v4_phase3' (legacy on-device ML), 'llm_judge' (LLM-judge
+    // routing). The strategy is derived by explicit id, never a judge-else-v4
+    // fallback, so a persisted 'v4_phase3' config always shows v4 selected.
+    const ROUTER_STRATEGIES = ['pilot-v1', 'v4_phase3', 'llm_judge'];
     const mode = router.enabled === false
       ? 'disabled'
-      : (router.strategy === 'llm_judge' ? 'llm_judge' : 'v4_phase3');
+      : (ROUTER_STRATEGIES.includes(router.strategy) ? router.strategy : 'pilot-v1');
     const showJudge = mode === 'llm_judge';
+    const showPilot = mode === 'pilot-v1';
+    const pilotCfg = router.pilot || {};
+    const pilotThreshold = pilotCfg.safety_net_threshold != null
+      ? pilotCfg.safety_net_threshold
+      : 0.5;
     const judgeCatalog = (catalog.judge || {});
     const judgeProfile = provider ? ((judgeCatalog.profiles || {})[provider] || {}) : {};
     const judgeAutoModel = judgeProfile.autoModel || null;
@@ -587,10 +596,12 @@ const SetupView = (() => {
         <div class="setup-router-toolbar">
           <label><span>Mode</span>
             <select id="setup-router-mode" name="setup_router_mode" data-router-mode${routerDisabled}>
+              <option value="pilot-v1"${mode === 'pilot-v1' ? ' selected' : ''}>Local ML — English-optimized (Pilot)</option>
               <option value="v4_phase3"${mode === 'v4_phase3' ? ' selected' : ''}>Smart routing (on-device)</option>
               <option value="llm_judge"${mode === 'llm_judge' ? ' selected' : ''}>Smart routing (LLM-based)</option>
               <option value="disabled"${mode === 'disabled' ? ' selected' : ''}>Off</option>
             </select>
+            <small class="setup-hint" data-pilot-desc${showPilot ? '' : ' hidden'}>English-optimized local ML router; runs offline with the self-trained AgentOS model.</small>
           </label>
           <label><span>Default text model</span>
             <select id="setup-router-default-tier" name="setup_router_default_tier" data-default-tier${routerDisabled}>
@@ -602,6 +613,10 @@ const SetupView = (() => {
               <option value=""${judgeSelected === '' ? ' selected' : ''}>${_esc(judgeAutoLabel)}</option>
               ${judgeModels.map(m => `<option value="${_esc(m)}"${m === judgeSelected ? ' selected' : ''}>${_esc(m)}</option>`).join('')}
             </select>
+          </label>
+          <label data-pilot-threshold-field${showPilot ? '' : ' hidden'}><span>Pilot safety net</span>
+            <input id="setup-router-pilot-threshold" name="setup_router_pilot_threshold" type="number" min="0" max="1" step="0.05" value="${_esc(String(pilotThreshold))}" data-pilot-threshold aria-label="Pilot safety-net threshold">
+            <small class="setup-hint">Under-routing floor (default 0.5), persisted to <code>[agentos_router.pilot]</code> <code>safety_net_threshold</code>. The effective cutoff is the max of this and the router confidence threshold, so lowering it below that threshold has no effect.</small>
           </label>
         </div>
         ${provider ? `<div class="setup-tier-table" role="table">
@@ -1298,14 +1313,20 @@ const SetupView = (() => {
     _el.querySelector('[data-image-enabled]')?.addEventListener('change', _syncImageProviderDefaults);
     _el.querySelector('[data-audio-provider]')?.addEventListener('change', _syncAudioProviderDefaults);
     _el.querySelector('[data-audio-enabled]')?.addEventListener('change', _syncAudioProviderDefaults);
-    // Router Mode drives the Judge model field visibility: only the llm_judge
-    // strategy uses a judge model, so hide it for v4_phase3 / disabled.
+    // Router Mode drives per-strategy field visibility: only llm_judge uses a
+    // judge model, and only pilot-v1 shows the Pilot description + safety-net
+    // threshold. Hide each for the strategies that do not use them.
     _el.querySelector('[data-router-mode]')?.addEventListener('change', (e) => {
       const field = _el.querySelector('[data-judge-model-field]');
       const judge = _el.querySelector('[data-judge-model]');
       const show = e.target.value === 'llm_judge';
       if (field) field.hidden = !show;
       if (judge) judge.disabled = !show;
+      const showPilot = e.target.value === 'pilot-v1';
+      const pilotDesc = _el.querySelector('[data-pilot-desc]');
+      const pilotField = _el.querySelector('[data-pilot-threshold-field]');
+      if (pilotDesc) pilotDesc.hidden = !showPilot;
+      if (pilotField) pilotField.hidden = !showPilot;
     });
     _el.querySelectorAll('[data-setup-copy-command]').forEach(btn => btn.addEventListener('click', _onSetupCommandCopy));
     _bindChannelDirtyTracking();
@@ -1400,6 +1421,7 @@ const SetupView = (() => {
     if (input.dataset.routerMode !== undefined) return 'router:mode';
     if (input.dataset.defaultTier !== undefined) return 'router:defaultTier';
     if (input.dataset.judgeModel !== undefined) return 'router:judgeModel';
+    if (input.dataset.pilotThreshold !== undefined) return 'router:pilotThreshold';
     if (input.dataset.providerSelect !== undefined) return 'provider:selected';
     if (input.dataset.channelType !== undefined) return 'channel:type';
     if (input.dataset.searchProvider !== undefined) return 'extras:search:provider';
@@ -1760,11 +1782,22 @@ const SetupView = (() => {
       }
       tiers[row.dataset.tier] = tier;
     });
-    // The Mode dropdown encodes both enabled and strategy: 'v4_phase3' /
-    // 'llm_judge' → router enabled with that strategy; 'disabled' → off.
-    const sel = _el.querySelector('[data-router-mode]')?.value || 'v4_phase3';
+    // The Mode dropdown encodes both enabled and strategy: 'pilot-v1' /
+    // 'v4_phase3' / 'llm_judge' → router enabled with that strategy id (forwarded
+    // verbatim to upsert_router, which validates it against the registry);
+    // 'disabled' → off. The option value IS the strategy id, so no remapping.
+    const sel = _el.querySelector('[data-router-mode]')?.value || 'pilot-v1';
     const routerMode = sel === 'disabled' ? 'disabled' : 'recommended';
     const strategy = sel === 'disabled' ? undefined : sel;
+    // Pilot safety-net threshold: forwarded only for the Pilot strategy with a
+    // parseable value, so saving under v4/judge never touches the pilot table
+    // (omitted => upsert_router preserves the persisted value). The RPC/mutation
+    // range-validates it (0.0–1.0) via PilotConfig.
+    const pilotThresholdRaw = _el.querySelector('[data-pilot-threshold]')?.value;
+    const pilotThresholdNum = Number.parseFloat(pilotThresholdRaw);
+    const safetyNetThreshold = (sel === 'pilot-v1' && Number.isFinite(pilotThresholdNum))
+      ? pilotThresholdNum
+      : undefined;
     try {
       await _rpc.call('onboarding.router.configure', {
         mode: routerMode,
@@ -1778,6 +1811,7 @@ const SetupView = (() => {
         // so clicking Save without touching the dropdown never wipes an existing
         // local endpoint (base_url/api_key) → judge_unavailable every turn.
         judgeModel: _resolveJudgeModelParam(),
+        safetyNetThreshold,
         tiers,
       });
       UI.toast('Router saved.', 'info');

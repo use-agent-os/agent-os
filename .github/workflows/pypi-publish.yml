@@ -63,6 +63,30 @@ jobs:
               "runtime_src/src/router/inference/core.py",
           ):
               assert (bundle / name).is_file(), f"missing router asset: {name}"
+
+          # Pilot router MiniLM INT8 export (T1). Lives under the
+          # memory/models LFS root checked above; listed explicitly so a
+          # non-hydrated LFS checkout can't silently ship a pointer file.
+          minilm = Path("src/agentos/memory/models/embeddings/all-MiniLM-L6-v2-int8")
+          for name in (
+              "config.json",
+              "model.onnx",
+              "special_tokens_map.json",
+              "tokenizer.json",
+              "tokenizer_config.json",
+              "vocab.txt",
+          ):
+              assert (minilm / name).is_file(), f"missing MiniLM asset: {name}"
+
+          # Pilot production bundle (strategy="pilot-v1", the default). A
+          # missing/non-hydrated model.onnx would silently degrade every turn
+          # to pilot_unavailable, so ship it or fail the publish loudly.
+          pilot = Path("src/agentos/agentos_router/models/pilot_v1")
+          for name in (
+              "model.onnx",
+              "manifest.json",
+          ):
+              assert (pilot / name).is_file(), f"missing pilot_v1 asset: {name}"
           PY
 
       - name: Set up Python

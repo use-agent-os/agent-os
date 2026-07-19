@@ -806,6 +806,34 @@ def _router_runtime_invalid_finding(
         command="agentos configure router --router disabled",
     )
 
+    if reason == "assets_degraded":
+        # The strategy is selected but its local model bundle is missing and
+        # require_router_runtime is unset, so routing degrades to the default
+        # tier on every turn (non-blocking: traffic still serves). Distinct from
+        # "assets" (a hard raise under require_router_runtime) so the operator
+        # sees the degraded-but-serving state, not a boot failure.
+        return HealthFinding(
+            id="router.runtime.degraded",
+            severity="warn",
+            surface="router",
+            title="Router degraded",
+            detail=detail,
+            evidence=evidence,
+            fix_steps=[
+                FixStep(
+                    label="Require the router runtime (fatal at boot if missing)",
+                    detail=(
+                        "Set agentos_router.require_router_runtime = true to fail fast "
+                        "when the local model bundle is absent, or reinstall the router "
+                        "bundle to restore local routing, then restart AgentOS."
+                    ),
+                ),
+                reconfigure,
+                restart,
+            ],
+            restart_required=True,
+        )
+
     if reason == "judge_no_credentials":
         return HealthFinding(
             id="router.judge.no_credentials",

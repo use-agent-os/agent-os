@@ -1,0 +1,139 @@
+{
+  "pilot_version": "pilot-v1",
+  "is_fixture": false,
+  "classes": [
+    "R0",
+    "R1",
+    "R2",
+    "R3"
+  ],
+  "temperature": 3.9533456563942764,
+  "embedder_id": "sentence-transformers/all-MiniLM-L6-v2",
+  "model_onnx_sha256": "1dd0d61621d7e20bd15bd712cad119ce4969300a024de5cba5879408f3c2cd70",
+  "io_contract": {
+    "input": {
+      "name": "input",
+      "dtype": "float32",
+      "shape": [
+        null,
+        392
+      ]
+    },
+    "outputs": [
+      {
+        "name": "label",
+        "dtype": "int64",
+        "shape": [
+          null
+        ]
+      },
+      {
+        "name": "probabilities",
+        "dtype": "float32",
+        "shape": [
+          null,
+          4
+        ]
+      }
+    ]
+  },
+  "encoder_contract": {
+    "pooling": "mean",
+    "normalization": "l2",
+    "max_input_chars": 8192,
+    "max_tokens": 256,
+    "truncation_side": "right",
+    "model_revision": "1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+    "tokenizer_sha256": "da0e79933b9ed51798a3ae27893d3c5fa4a201126cef75586296df9b4d2c62a0"
+  },
+  "feature_schema": {
+    "version": "1",
+    "scalar_names": [
+      "log1p_char_count_full",
+      "log1p_token_count_pretrunc_8k",
+      "log1p_line_count_8k",
+      "has_code_fence_8k",
+      "log1p_code_line_count_8k",
+      "has_traceback_8k",
+      "log1p_question_mark_count_8k",
+      "has_file_or_url_reference_8k"
+    ],
+    "feature_dim": 392,
+    "url_regex": "(?i)\\bhttps?://[^\\s<>()]+",
+    "file_regex": "(?i)(?:\\b[a-z]:[\\\\/]|(?:^|[\\s(]))(?:[\\w.@+-]+[\\\\/])*[\\w.@+-]+\\.(?:py|pyi|js|jsx|ts|tsx|json|toml|ya?ml|md|txt|sh|sql|rs|go|java|c|cc|cpp|h|hpp)\\b"
+  },
+  "training_stats": {
+    "pilot_version": "pilot-v1",
+    "pilot_round": "r3_uplift_augmented_retrain",
+    "ship_seed": 42,
+    "diagnostic_seeds": [
+      7,
+      2026
+    ],
+    "config": "baseline (round-1 selected)",
+    "set_sizes": {
+      "train": 5364,
+      "val": 867
+    },
+    "train_label_dist": {
+      "R2": 2804,
+      "R1": 1898,
+      "R0": 345,
+      "R3": 317
+    },
+    "val_metrics_seed42": {
+      "accuracy": 0.6897347174163783,
+      "per_class_recall": {
+        "R0": 0.43636363636363634,
+        "R1": 0.6779661016949152,
+        "R2": 0.7587822014051522,
+        "R3": 0.3225806451612903
+      },
+      "severity_weighted_underrouting": 0.3044982698961938,
+      "over_routing_rate": 0.17416378316032297,
+      "ece_after_calibration": 0.053711779527323186,
+      "fitted_temperature": 3.9533456563942764
+    },
+    "seed_stability": {
+      "seeds": [
+        42,
+        7,
+        2026
+      ],
+      "accuracy": {
+        "mean": 0.6843521722414456,
+        "std": 0.004740033835424046
+      },
+      "severity_weighted_underrouting": {
+        "mean": 0.3233371780084583,
+        "std": 0.02345566942355963
+      },
+      "ece_after": {
+        "mean": 0.047700904404278315,
+        "std": 0.005680544360709401
+      },
+      "temperature": {
+        "mean": 4.069688916205909,
+        "std": 0.08251920046368727
+      },
+      "per_class_recall": {
+        "R0": {
+          "mean": 0.4484848484848485,
+          "std": 0.03090314856722901
+        },
+        "R1": {
+          "mean": 0.675141242937853,
+          "std": 0.022002488598018687
+        },
+        "R2": {
+          "mean": 0.750975800156128,
+          "std": 0.023600650207386355
+        },
+        "R3": {
+          "mean": 0.29032258064516125,
+          "std": 0.045619792334615966
+        }
+      }
+    }
+  }
+}

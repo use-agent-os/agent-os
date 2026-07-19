@@ -40,7 +40,7 @@ def test_agentos_router_defaults_match_runtime_router_config() -> None:
     assert cfg.enabled is True
     assert cfg.auto_thinking is True
     assert cfg.rollout_phase == "full"
-    assert cfg.strategy == "v4_phase3"
+    assert cfg.strategy == "pilot-v1"
     assert cfg.judge_model is None
     assert cfg.judge_provider is None
     assert cfg.judge_input_max_chars == 4000

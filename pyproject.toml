@@ -93,6 +93,11 @@ recommended = [
 ml-router = [
     "numpy>=1.26",
     "onnxruntime>=1.17",
+    # Pilot router (strategy="pilot-v1") builds features with a MiniLM tokenizer
+    # via _MiniLMEncoder; all three of numpy/onnxruntime/tokenizers must ship
+    # together in the router extras (spec §4.4), else pilot-v1 degrades on an
+    # ml-router-only install.
+    "tokenizers>=0.15",
     "lightgbm>=4.0",
     "joblib>=1.3",
     "scikit-learn>=1.8,<1.9",
@@ -149,6 +154,7 @@ markers = [
     "local_golden: local opt-in synthetic complex-task golden tests",
     "webui_browser: real browser Web UI tests driven by Playwright",
     "live_channel: marks tests that hit a real channel platform (deselect with '-m \"not live_channel\"')",
+    "slow: slow benchmark/perf tests, opt-in (deselect with '-m \"not slow\"')",
 ]
 
 [tool.ruff]
@@ -215,4 +221,22 @@ ignore_missing_imports = true
 dev = [
     "laboratory>=1.0.2",
     "syrupy>=5.1.0",
+]
+# Pilot router export/training deps. Dev-time only — used by
+# scripts/pilot_router/* to download and INT8-export the locked MiniLM
+# backbone. Runtime inference deps (onnxruntime, numpy, tokenizers) stay in
+# the `recommended`/`ml-router` extras; promoting them is a later task.
+# Later Pilot tasks extend this group with labeling/training libraries.
+pilot-train = [
+    "optimum[onnxruntime]>=1.20",
+    "torch>=2.2",
+    "transformers>=4.40",
+    "scikit-learn>=1.8,<1.9",
+    "skl2onnx>=1.17",
+    # T5 corpus sampler: HF streaming, MinHash near-dup dedupe, language
+    # detection (WildChat carries language metadata; langdetect is the cheap
+    # fallback only). OpenRouter filter calls use the base-dep httpx.
+    "datasets>=2.19",
+    "datasketch>=1.6",
+    "langdetect>=1.0.9",
 ]

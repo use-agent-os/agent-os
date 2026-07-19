@@ -1418,35 +1418,43 @@ def _agentos_router_bundle_dir(router_cfg: Any) -> Path:
 def validate_agentos_router_runtime(config: GatewayConfig) -> None:
     """Validate router runtime prerequisites for the configured strategy.
 
-    ``v4_phase3`` (default) is the local ML router: verify its on-disk bundle is
-    present. A missing bundle only warns (routing degrades to the default tier)
-    unless ``require_router_runtime`` is set, in which case it raises.
-    ``llm_judge`` needs no local assets — resolve and log the judge target.
+    Registry-driven (``agentos.router_strategies``): a strategy whose
+    ``requires_local_assets`` is set runs its ``asset_probe`` and reports any
+    missing files. A missing asset only warns (routing degrades to the default
+    tier) unless ``require_router_runtime`` is set, in which case it raises —
+    identical semantics across ``v4_phase3`` and ``pilot-v1``. A ``uses_judge``
+    strategy needs no local assets: resolve and log the judge target instead.
     """
+    from agentos.router_strategies import get_strategy_info, resolve_strategy_id
+
     router_cfg = getattr(config, "agentos_router", None)
     if router_cfg is None or not getattr(router_cfg, "enabled", False):
         return
 
-    strategy = str(
-        getattr(router_cfg, "strategy", DEFAULT_ROUTER_STRATEGY) or DEFAULT_ROUTER_STRATEGY
-    ).strip()
-    if strategy == "v4_phase3":
-        bundle_dir = _agentos_router_bundle_dir(router_cfg)
-        required = ("runtime_src", "router.runtime.yaml")
-        missing = [name for name in required if not (bundle_dir / name).exists()]
+    strategy = resolve_strategy_id(getattr(router_cfg, "strategy", DEFAULT_ROUTER_STRATEGY))
+    info = get_strategy_info(strategy)
+    if info is not None and info.requires_local_assets and info.asset_probe is not None:
+        missing = info.asset_probe(router_cfg)
         if missing:
-            message = f"missing V4 bundle files in {bundle_dir}: {missing}"
+            # Keep the v4 phrasing ("V4 bundle files") stable for operators and
+            # existing runtime-check assertions; Pilot gets its own noun.
+            label = "V4 bundle files" if strategy == "v4_phase3" else f"{strategy} router assets"
+            message = f"missing {label}: {missing}"
             if getattr(router_cfg, "require_router_runtime", False):
                 raise RuntimeError(message)
             log.warning(
                 "build_services.agentos_router_bundle_missing",
-                bundle_dir=str(bundle_dir),
+                strategy=strategy,
                 missing=missing,
             )
             return
-        log.info("build_services.agentos_router_bundle_ready", bundle_dir=str(bundle_dir))
+        log.info(
+            "build_services.agentos_router_bundle_ready",
+            strategy=strategy,
+        )
         return
-    _log_resolved_judge(config, router_cfg)
+    if info is not None and info.uses_judge:
+        _log_resolved_judge(config, router_cfg)
 
 
 def _preload_agentos_router_strategy(router_cfg: Any, llm_cfg: Any = None) -> object:
@@ -1470,7 +1478,10 @@ async def preload_agentos_router_runtime(config: GatewayConfig) -> None:
             router_cfg,
             getattr(config, "llm", None),
         )
-        if strategy_name != "v4_phase3":
+        from agentos.router_strategies import get_strategy_info
+
+        info = get_strategy_info(strategy_name)
+        if info is not None and info.uses_judge:
             _log_resolved_judge(config, router_cfg)
     except Exception as exc:  # noqa: BLE001
         log.warning(

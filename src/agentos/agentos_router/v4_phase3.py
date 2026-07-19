@@ -13,7 +13,8 @@ from typing import Any
 import structlog
 import yaml
 
-from agentos.agentos_router.controller import TIER_ORDER, select_localized_prompt_hint
+from agentos.agentos_router.controller import select_localized_prompt_hint
+from agentos.agentos_router.tiers_util import _find_valid_tier
 from agentos.router_tiers import (
     DEFAULT_TEXT_TIER,
     ROUTE_CLASS_TO_TIER,
@@ -38,19 +39,6 @@ def runtime_src_import_path(bundle_dir: Path) -> Iterator[None]:
         yield
     finally:
         sys.path[:] = old_path
-
-
-def _find_valid_tier(start_tier: str, valid_tiers: list[str]) -> str:
-    if not valid_tiers:
-        return DEFAULT_TEXT_TIER
-    start_idx = TIER_ORDER.index(start_tier) if start_tier in TIER_ORDER else 1
-    for idx in range(start_idx, len(TIER_ORDER)):
-        if TIER_ORDER[idx] in valid_tiers:
-            return TIER_ORDER[idx]
-    for tier in TIER_ORDER:
-        if tier in valid_tiers:
-            return tier
-    return valid_tiers[0]
 
 
 class V4Phase3Strategy:

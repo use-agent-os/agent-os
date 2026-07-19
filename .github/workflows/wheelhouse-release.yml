@@ -74,7 +74,9 @@ jobs:
           from pathlib import Path
 
           root = Path("src/agentos/memory/models/bge_onnx")
+          minilm = Path("src/agentos/memory/models/embeddings/all-MiniLM-L6-v2-int8")
           bundle = Path("src/agentos/agentos_router/models/v4.2_phase3_inference")
+          pilot = Path("src/agentos/agentos_router/models/pilot_v1")
           required = [
               root / "config.json",
               root / "model.onnx",
@@ -82,6 +84,14 @@ jobs:
               root / "tokenizer.json",
               root / "tokenizer_config.json",
               root / "vocab.txt",
+              # Pilot router MiniLM INT8 export (T1). Shares the
+              # memory/models LFS root above rather than a second checkout.
+              minilm / "config.json",
+              minilm / "model.onnx",
+              minilm / "special_tokens_map.json",
+              minilm / "tokenizer.json",
+              minilm / "tokenizer_config.json",
+              minilm / "vocab.txt",
               # v4_phase3 router bundle. It shares the bge_onnx export above
               # rather than carrying a second copy.
               bundle / "lgbm_main.bin",
@@ -93,6 +103,12 @@ jobs:
               bundle / "features/bge_pca.joblib",
               bundle / "router.runtime.yaml",
               bundle / "runtime_src/src/router/inference/core.py",
+              # Pilot production bundle (strategy="pilot-v1", the default).
+              # A non-hydrated model.onnx pointer would silently degrade
+              # every turn to pilot_unavailable, so guard it exactly like the
+              # v4/MiniLM assets above.
+              pilot / "model.onnx",
+              pilot / "manifest.json",
           ]
           for path in required:
               assert path.is_file(), f"missing embedding asset: {path}"
@@ -212,6 +228,17 @@ jobs:
               bundle = "agentos/agentos_router/models/v4.2_phase3_inference/"
               for name in ("lgbm_main.bin", "router.runtime.yaml", "features/tfidf.pkl"):
                   assert bundle + name in names, f"router bundle missing from wheel: {name}"
+
+              # Pilot production bundle (default strategy). Assert present and
+              # real: a non-hydrated model.onnx is a ~130-byte LFS pointer.
+              pilot = "agentos/agentos_router/models/pilot_v1/"
+              for name in ("model.onnx", "manifest.json"):
+                  assert pilot + name in names, f"pilot bundle missing from wheel: {name}"
+              pilot_onnx = archive.read(pilot + "model.onnx")
+              assert len(pilot_onnx) > 100_000, (
+                  f"pilot_v1 model.onnx in wheel is only {len(pilot_onnx)} bytes; "
+                  "looks like an unhydrated Git LFS pointer, not a real model"
+              )
           PY
 
       - name: Create release assets

@@ -146,6 +146,87 @@ async def test_router_configure_recommended_profile(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_router_configure_persists_pilot_strategy_round_trip(tmp_path, monkeypatch):
+    """T10: the web setup UI persists ``strategy="pilot-v1"`` through the same
+    ``onboarding.router.configure`` → ``upsert_router`` path, and reloading the
+    config keeps the Pilot strategy (never silently re-derived to v4/judge)."""
+    monkeypatch.setenv("AGENTOS_GATEWAY_CONFIG_PATH", str(tmp_path / "c.toml"))
+    from agentos.gateway.config import GatewayConfig
+
+    ctx = _admin_ctx()
+    ctx.config = GatewayConfig(llm={"provider": "deepseek", "model": "deepseek-chat"})
+    ctx.config.config_path = str(tmp_path / "c.toml")
+
+    res = await get_dispatcher().dispatch(
+        "r1",
+        "onboarding.router.configure",
+        {"mode": "recommended", "strategy": "pilot-v1"},
+        ctx,
+    )
+
+    assert res.error is None, res.error
+    assert res.payload["entry"]["strategy"] == "pilot-v1"
+    assert ctx.config.agentos_router.enabled is True
+    assert ctx.config.agentos_router.strategy == "pilot-v1"
+    persisted = tomllib.loads((tmp_path / "c.toml").read_text())
+    assert persisted["agentos_router"]["strategy"] == "pilot-v1"
+
+    # Reload from the persisted TOML — the strategy must survive a fresh load so
+    # the setup UI shows Pilot selected, not a judge-else-v4 re-derivation.
+    reloaded = GatewayConfig.model_validate(persisted)
+    assert reloaded.agentos_router.strategy == "pilot-v1"
+
+
+@pytest.mark.asyncio
+async def test_router_configure_persists_pilot_safety_net_threshold(tmp_path, monkeypatch):
+    """T10 fix: the setup UI's Pilot safety-net input persists through
+    onboarding.router.configure -> upsert_router to
+    [agentos_router.pilot].safety_net_threshold, and survives a reload."""
+    monkeypatch.setenv("AGENTOS_GATEWAY_CONFIG_PATH", str(tmp_path / "c.toml"))
+    from agentos.gateway.config import GatewayConfig
+
+    ctx = _admin_ctx()
+    ctx.config = GatewayConfig(llm={"provider": "deepseek", "model": "deepseek-chat"})
+    ctx.config.config_path = str(tmp_path / "c.toml")
+
+    res = await get_dispatcher().dispatch(
+        "r1",
+        "onboarding.router.configure",
+        {"mode": "recommended", "strategy": "pilot-v1", "safetyNetThreshold": 0.65},
+        ctx,
+    )
+
+    assert res.error is None, res.error
+    assert ctx.config.agentos_router.pilot.safety_net_threshold == 0.65
+    persisted = tomllib.loads((tmp_path / "c.toml").read_text())
+    assert persisted["agentos_router"]["pilot"]["safety_net_threshold"] == 0.65
+
+    reloaded = GatewayConfig.model_validate(persisted)
+    assert reloaded.agentos_router.pilot.safety_net_threshold == 0.65
+
+
+@pytest.mark.asyncio
+async def test_router_configure_rejects_out_of_range_safety_net_threshold(tmp_path, monkeypatch):
+    """An out-of-range Pilot threshold is rejected (PilotConfig ge=0/le=1),
+    consistent with how other numeric router fields reject bad input."""
+    monkeypatch.setenv("AGENTOS_GATEWAY_CONFIG_PATH", str(tmp_path / "c.toml"))
+    from agentos.gateway.config import GatewayConfig
+
+    ctx = _admin_ctx()
+    ctx.config = GatewayConfig(llm={"provider": "deepseek", "model": "deepseek-chat"})
+    ctx.config.config_path = str(tmp_path / "c.toml")
+
+    res = await get_dispatcher().dispatch(
+        "r1",
+        "onboarding.router.configure",
+        {"mode": "recommended", "strategy": "pilot-v1", "safetyNetThreshold": 1.5},
+        ctx,
+    )
+
+    assert res.error is not None
+
+
+@pytest.mark.asyncio
 async def test_router_configure_forwards_explicit_judge_model(tmp_path, monkeypatch):
     """Finding #11: the web onboarding RPC must forward judgeModel/judgeProvider
     to upsert_router (like the CLI path) so a picked judge is actually

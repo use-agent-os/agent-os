@@ -40,6 +40,8 @@ RoutingSource = Literal[
     "judge_unavailable",
     "v4_phase3",
     "v4_unavailable",
+    "pilot_v1",
+    "pilot_unavailable",
     "cache",
     "image_route",
     "fts",

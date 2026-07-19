@@ -806,6 +806,21 @@ def test_setup_view_reconciles_search_key_state_after_restoring_draft_provider()
     assert "_syncSearchProviderKeyControls({ refreshEnv: false })" in body
 
 
+def test_setup_view_field_key_gives_pilot_threshold_a_stable_semantic_key():
+    """The pilot safety-net threshold input (data-pilot-threshold) must get
+    a stable semantic key from _fieldKey, like the other router inputs
+    (router:mode, router:defaultTier, router:judgeModel) — otherwise it
+    falls through to the positional `field:${idx}` fallback and a draft
+    edit may not survive a step-navigate-and-back redraw."""
+    txt = (VIEWS / "setup.js").read_text(encoding="utf-8")
+    start = txt.index("function _fieldKey")
+    end = txt.index("\n  }", start)
+    body = txt[start:end]
+
+    assert "input.dataset.pilotThreshold !== undefined" in body
+    assert "'router:pilotThreshold'" in body
+
+
 def test_setup_view_does_not_redraw_dirty_channel_form_during_status_poll():
     txt = (VIEWS / "setup.js").read_text(encoding="utf-8")
     assert "let _channelDirty" in txt
@@ -981,6 +996,75 @@ def test_setup_router_step_uses_effective_provider_without_hardcoded_fallback():
     assert "const configuredProvider = _configuredProvider();" in save_body
     assert "Choose a provider before saving router tiers." in save_body
     assert "Save the provider before saving router tiers." in save_body
+
+
+def test_setup_router_step_offers_four_way_selector_with_explicit_pilot():
+    """T10: the Mode control is a 4-way selector with explicit per-strategy
+    handling (v4_phase3 / pilot-v1 / llm_judge / disabled). The mode must be
+    derived by explicit strategy id — a persisted ``pilot-v1`` config shows
+    Pilot selected, never silently re-derived to judge or v4."""
+    txt = (VIEWS / "setup.js").read_text(encoding="utf-8")
+    start = txt.index("function _renderRouterStep()")
+    end = txt.index("  function _tierRow", start)
+    body = txt[start:end]
+
+    # Explicit strategy derivation: the render must recognise 'pilot-v1' and
+    # 'llm_judge' by id and fall back to v4_phase3, not a judge-else-v4 branch.
+    assert "router.strategy === 'llm_judge' ? 'llm_judge'" not in body
+    assert "'pilot-v1'" in body
+
+    # All four options present, each selected off the explicit `mode` value.
+    assert "<option value=\"v4_phase3\"" in body
+    assert "<option value=\"pilot-v1\"" in body
+    assert "<option value=\"llm_judge\"" in body
+    assert "<option value=\"disabled\"" in body
+
+    # The Pilot option carries the CLI-consistent label + a short description.
+    assert "Local ML — English-optimized (Pilot)" in body
+    # Judge field only shows for the judge strategy, not for pilot.
+    assert "const showJudge = mode === 'llm_judge';" in body
+
+
+def test_setup_router_step_surfaces_pilot_safety_net_threshold():
+    """T10 / standing rule: the ``[agentos_router.pilot].safety_net_threshold``
+    setting is surfaced in the setup UI with its 0.5 default and a one-line hint
+    referencing the coupling with the router confidence threshold."""
+    txt = (VIEWS / "setup.js").read_text(encoding="utf-8")
+    start = txt.index("function _renderRouterStep()")
+    end = txt.index("  function _tierRow", start)
+    body = txt[start:end]
+
+    assert "data-pilot-threshold" in body
+    # Default is 0.5, read from the persisted pilot sub-table.
+    assert "router.pilot" in body
+    assert "0.5" in body
+    # The coupling hint names the confidence threshold interaction.
+    assert "confidence threshold" in body
+    # The input is writable (persists via the save handler), not read-only.
+    assert "readonly" not in body
+
+    # The save handler forwards the threshold to the RPC as safetyNetThreshold.
+    save_start = txt.index("async function _saveRouter()")
+    save_end = txt.index("  async function _saveChannel()", save_start)
+    save_body = txt[save_start:save_end]
+    assert "safetyNetThreshold" in save_body
+    assert "[data-pilot-threshold]" in save_body
+
+
+def test_setup_router_step_only_shows_pilot_threshold_for_pilot_strategy():
+    """The Pilot threshold control is Pilot-specific: it is hidden unless the
+    Pilot strategy is selected, mirroring how the judge field is judge-only."""
+    txt = (VIEWS / "setup.js").read_text(encoding="utf-8")
+    render_start = txt.index("function _renderRouterStep()")
+    render_end = txt.index("  function _tierRow", render_start)
+    render_body = txt[render_start:render_end]
+    assert "const showPilot = mode === 'pilot-v1';" in render_body
+    assert "data-pilot-threshold-field" in render_body
+
+    # The Mode change handler toggles the Pilot threshold field visibility too.
+    change_start = txt.index("[data-router-mode]')?.addEventListener('change'")
+    change_body = txt[change_start:change_start + 800]
+    assert "data-pilot-threshold-field" in change_body
 
 
 def test_setup_router_save_preserves_untouched_judge_and_local_endpoint():

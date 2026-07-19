@@ -20,6 +20,7 @@ from agentos.gateway.boot import (
     build_task_runtime_run_kwargs,
     dispatch_task_runtime_turn,
     emit_skill_filter_banner,
+    preload_agentos_router_runtime,
     validate_agentos_router_runtime,
 )
 from agentos.gateway.config import AgentEntryConfig, GatewayConfig
@@ -1147,6 +1148,67 @@ def test_router_boot_validation_raises_on_missing_v4_bundle_when_required(
 
     with pytest.raises(RuntimeError, match="V4 bundle"):
         validate_agentos_router_runtime(config)
+
+
+@pytest.mark.asyncio
+async def test_preload_router_runtime_does_not_resolve_judge_for_pilot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Registry-driven gate: pilot-v1's ``uses_judge`` is False, so preload
+    must not resolve/log a judge target for it. Regression for the finding
+    where boot preload compared ``strategy_name != "v4_phase3"`` instead of
+    consulting the strategy registry, treating pilot-v1 as a judge strategy."""
+    infos: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "agentos.gateway.boot.log.info",
+        lambda event, **kwargs: infos.append({"event": event, **kwargs}),
+    )
+    monkeypatch.setattr(
+        "agentos.gateway.boot.log.warning",
+        lambda event, **kwargs: warnings.append({"event": event, **kwargs}),
+    )
+    monkeypatch.setattr(
+        "agentos.gateway.boot._preload_agentos_router_strategy",
+        lambda router_cfg, llm_cfg=None: object(),
+    )
+    config = GatewayConfig()
+    config.agentos_router.enabled = True
+    config.agentos_router.strategy = "pilot-v1"
+
+    await preload_agentos_router_runtime(config)
+
+    assert not any(record["event"] == "router.judge_resolved" for record in infos)
+    assert not any(
+        record["event"] in {"router.judge_unresolved", "router.judge_no_credentials"}
+        for record in warnings
+    )
+
+
+@pytest.mark.asyncio
+async def test_preload_router_runtime_still_resolves_judge_for_llm_judge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sibling case: llm_judge's ``uses_judge`` is True, so preload must still
+    resolve and log the judge target for it."""
+    infos: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "agentos.gateway.boot.log.info",
+        lambda event, **kwargs: infos.append({"event": event, **kwargs}),
+    )
+    monkeypatch.setattr(
+        "agentos.gateway.boot._preload_agentos_router_strategy",
+        lambda router_cfg, llm_cfg=None: object(),
+    )
+    config = GatewayConfig()
+    config.agentos_router.enabled = True
+    config.agentos_router.strategy = "llm_judge"
+
+    await preload_agentos_router_runtime(config)
+
+    resolved = [record for record in infos if record["event"] == "router.judge_resolved"]
+    assert resolved
+    assert resolved[0]["model"]
 
 
 def test_skill_filter_banner_accepts_tokenizers_without_transformers(

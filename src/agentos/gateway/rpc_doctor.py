@@ -273,14 +273,44 @@ def _router_payload(ctx: RpcContext) -> dict[str, Any]:
     judge_base_url: str | None = None
     strategy = getattr(router, "strategy", None)
 
-    # The local ML router (strategy="v4_phase3", the default) needs no judge and
-    # no cloud credentials — its health is purely bundle presence, which
-    # validate_agentos_router_runtime already checked above (runtime_invalid_reason
-    # == "assets" when the bundle is missing). Short-circuit before the judge
-    # resolution block: resolve_judge_target ignores strategy and would otherwise
-    # resolve a phantom judge target and run credential checks that are
-    # meaningless for v4.
-    if strategy == "v4_phase3":
+    # Local ML routers (strategy="v4_phase3" default, or "pilot-v1") need no
+    # judge and no cloud credentials — their health is purely local-asset
+    # presence, which validate_agentos_router_runtime already checked above
+    # (runtime_invalid_reason == "assets" when an asset is missing). Short-
+    # circuit before the judge resolution block: resolve_judge_target ignores
+    # strategy and would otherwise resolve a phantom judge target and run
+    # credential checks that are meaningless for a local-asset strategy.
+    from agentos.router_strategies import get_strategy_info
+
+    _info = get_strategy_info(strategy)
+
+    # A strategy that requires local assets degrades silently to the default
+    # tier when its bundle is missing but require_router_runtime is unset (the
+    # normal Phase-A state): validate_agentos_router_runtime above only warns,
+    # so runtime_valid is still True here. Run the registry asset_probe to
+    # surface that degradation as a WARNING (not "Router ready") — registry-
+    # driven, so this covers pilot-v1 and v4_phase3 alike. A raise already
+    # flipped runtime_valid=False with reason="assets"; only probe otherwise.
+    if (
+        _info is not None
+        and _info.requires_local_assets
+        and _info.asset_probe is not None
+        and runtime_valid
+    ):
+        missing_assets = _info.asset_probe(router)
+        if missing_assets:
+            runtime_valid = False
+            runtime_invalid_reason = "assets_degraded"
+            default_tier = getattr(router, "default_tier", None) or "default"
+            error = (
+                f"The {strategy} router is selected but its local model bundle is "
+                f"missing ({', '.join(missing_assets)}), so every request routes to "
+                f"the {default_tier} tier. Set agentos_router.require_router_runtime = "
+                "true to make this fatal at boot, or reinstall the router bundle to "
+                "restore local routing."
+            )
+
+    if _info is not None and not _info.uses_judge:
         return {
             "enabled": bool(getattr(router, "enabled", False)),
             "rolloutPhase": getattr(router, "rollout_phase", None),

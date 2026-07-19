@@ -556,13 +556,17 @@ def upsert_router(
     judge_provider: str | None = None,
     judge_base_url: str | None = None,
     judge_api_key: str | None = None,
+    safety_net_threshold: float | None = None,
     verify_local_endpoint: bool = False,
 ) -> MutationResult:
     """Upsert router config.
 
     ``strategy`` selects the routing engine: ``"v4_phase3"`` (the local ML
-    router, the default) or ``"llm_judge"`` (classify each turn via a small LLM
-    call). ``None`` preserves the persisted strategy; any other value raises.
+    router, the default), ``"llm_judge"`` (classify each turn via a small LLM
+    call), or ``"pilot-v1"`` (local ONNX+MiniLM router, English-optimized).
+    Valid ids come from the router strategy registry
+    (``agentos.router_strategies``). ``None`` preserves the persisted strategy;
+    any unknown value raises.
     The strategy is recorded whenever it is provided — even when ``mode`` is
     ``"disabled"`` — so a later re-enable keeps the operator's choice.
 
@@ -572,6 +576,11 @@ def upsert_router(
     switches auto-update the judge); anything else pins an explicit judge model.
     They are harmless (ignored at routing time) when the strategy is
     ``v4_phase3``.
+
+    ``safety_net_threshold`` sets ``[agentos_router.pilot].safety_net_threshold``
+    (only meaningful under ``strategy="pilot-v1"``): ``None`` preserves the
+    persisted value; any provided value is range-validated (0.0–1.0) by
+    ``PilotConfig`` and persisted.
 
     ``verify_local_endpoint`` runs a one-shot connectivity probe (spec D2) when a
     new local ``judge_base_url`` is being set, raising if it is unreachable or
@@ -588,13 +597,25 @@ def upsert_router(
 
     strategy_clean: str | None = None
     if strategy is not None:
+        from agentos.router_strategies import is_known_strategy, known_strategy_ids
+
         strategy_clean = str(strategy).strip()
-        if strategy_clean not in {"llm_judge", "v4_phase3"}:
+        if not is_known_strategy(strategy_clean):
+            allowed = ", ".join(repr(s) for s in sorted(known_strategy_ids()))
             raise ValueError(
-                "agentos_router.strategy must be 'llm_judge' or 'v4_phase3' "
-                f"(deprecated); got {strategy!r}"
+                f"agentos_router.strategy must be one of {allowed}; got {strategy!r}"
             )
         router_payload["strategy"] = strategy_clean
+
+    # Pilot safety-net threshold ([agentos_router.pilot].safety_net_threshold).
+    # Optional: ``None`` preserves the persisted value (carried through by the
+    # ``model_dump`` above); any provided value is written into the pilot
+    # sub-table and range-validated (0.0–1.0) by ``PilotConfig`` when the router
+    # payload is reconstructed below.
+    if safety_net_threshold is not None:
+        pilot_payload = dict(router_payload.get("pilot") or {})
+        pilot_payload["safety_net_threshold"] = safety_net_threshold
+        router_payload["pilot"] = pilot_payload
 
     default_tier_override = _normalize_explicit_text_tier(default_tier)
     default_tier_clean = default_tier_override or str(
@@ -694,6 +715,7 @@ def upsert_router(
     _sync_llm_model_to_router_default(new_cfg)
     public_payload["default_tier"] = new_cfg.agentos_router.default_tier
     public_payload["tiers"] = new_cfg.agentos_router.tiers
+    public_payload["pilot"] = new_cfg.agentos_router.pilot.model_dump(mode="python")
     if new_cfg.agentos_router.enabled:
         public_payload["judge"] = _router_judge_public_payload(new_cfg)
     return MutationResult(

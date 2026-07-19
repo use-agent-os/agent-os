@@ -1,0 +1,253 @@
+{
+  "pilot_version": "pilot-v1",
+  "ship_seed": 42,
+  "diagnostic_seeds": [
+    7,
+    2026
+  ],
+  "architecture": "Pipeline(StandardScaler, MLPClassifier(hidden_layer_sizes=(256, 64)))",
+  "sample_weight_policy": {
+    "R0": 1.0,
+    "R1": 1.0,
+    "R2": 2.0,
+    "R3": 3.0
+  },
+  "resample_strategy": "none",
+  "resample_note": "TRAIN not resampled; class balance carried by GOLD-class sample weights only. Validation/test kept at natural distribution (spec \u00a76.2).",
+  "set_sizes": {
+    "train": 4526,
+    "val": 867
+  },
+  "class_balance_per_split": {
+    "train": {
+      "R2": 2354,
+      "R1": 1761,
+      "R0": 243,
+      "R3": 168
+    },
+    "val": {
+      "R2": 427,
+      "R1": 354,
+      "R0": 55,
+      "R3": 31
+    }
+  },
+  "val_metrics_seed42": {
+    "accuracy": 0.671280276816609,
+    "per_class_recall": {
+      "R0": 0.41818181818181815,
+      "R1": 0.6440677966101694,
+      "R2": 0.7587822014051522,
+      "R3": 0.22580645161290322
+    },
+    "severity_weighted_underrouting": 0.33217993079584773,
+    "ece_before_calibration": 0.25907583756430336,
+    "ece_after_calibration": 0.05125629406899315,
+    "nll_before_calibration": 1.7838144302368164,
+    "nll_after_calibration": 0.7796429991722107,
+    "fitted_temperature": 4.357346773147382,
+    "confusion_gold_by_pred": [
+      [
+        23,
+        25,
+        7,
+        0
+      ],
+      [
+        11,
+        228,
+        113,
+        2
+      ],
+      [
+        1,
+        93,
+        324,
+        9
+      ],
+      [
+        0,
+        5,
+        19,
+        7
+      ]
+    ]
+  },
+  "seed_stability": {
+    "seeds": [
+      42,
+      7,
+      2026
+    ],
+    "accuracy": {
+      "mean": 0.6697424067666281,
+      "std": 0.0010874383409251011
+    },
+    "severity_weighted_underrouting": {
+      "mean": 0.33141099577085736,
+      "std": 0.007553588121641095
+    },
+    "ece_after": {
+      "mean": 0.05012874554460298,
+      "std": 0.00621105201318604
+    },
+    "temperature": {
+      "mean": 4.401154279708806,
+      "std": 0.12630230862080108
+    },
+    "per_class_recall": {
+      "R0": {
+        "mean": 0.39393939393939387,
+        "std": 0.02267671143499357
+      },
+      "R1": {
+        "mean": 0.6516007532956686,
+        "std": 0.00873222080555155
+      },
+      "R2": {
+        "mean": 0.7517564402810305,
+        "std": 0.008334955700258592
+      },
+      "R3": {
+        "mean": 0.23655913978494625,
+        "std": 0.015206597444871989
+      }
+    }
+  },
+  "labeling": {
+    "labeler_pin": "opencap:claude-opus-4.8@t0.0",
+    "label_model": "claude-opus-4.8",
+    "rubric_sha256": "f4cef943c56d4e0e40382e6bbd342c27d23fa0a8c62fdedb0945a1c6c437cef2",
+    "labels_file_sha256": "1ea5214aa3aa7a2644ec2ce65d70a8c19af01e49f61d7ce9f9170f4612330b88"
+  },
+  "git_sha": "0c0f6615f86b6c5dd2f5c86a13cc153cc5c9051e",
+  "training_scripts": [
+    "scripts/pilot_router/train.py",
+    "scripts/pilot_router/train_lib.py",
+    "scripts/pilot_router/export_model.py"
+  ],
+  "pinned_deps": [
+    "scikit-learn>=1.8,<1.9",
+    "skl2onnx>=1.17",
+    "onnxruntime>=1.17"
+  ],
+  "installed_versions": {
+    "sklearn": "1.8.0",
+    "skl2onnx": "1.20.0",
+    "onnxruntime": "1.24.4",
+    "numpy": "2.4.4"
+  },
+  "feature_fingerprint": "52cf706571f46556",
+  "hardware": "macOS-26.5.2-arm64-arm-64bit",
+  "python": "3.12.13",
+  "r3_uplift_config_grid": {
+    "amendment": "pilot-v1 R3 uplift spec amendment (owner-approved 2026-07-19)",
+    "note": "VAL-only config grid selected under the owner amendment after the T9 STOP (R3 recall 0.242 vs 0.60 floor). Test split never opened in the config-grid round. Selected artifact staged (git-ignored) in artifacts/pilot_v1_uplift_grid/; v1 staging dir untouched.",
+    "seed": 42,
+    "selection_rule": {
+      "acc_within_pp_of_best": 0.02,
+      "over_routing_slack_pp_over_baseline": 0.05,
+      "meaningful_r3_uplift_pp": 0.05
+    },
+    "config_grid": {
+      "baseline": {
+        "sample_weights": {
+          "R0": 1.0,
+          "R1": 1.0,
+          "R2": 2.0,
+          "R3": 3.0
+        },
+        "oversample_multipliers": null
+      },
+      "oversample": {
+        "sample_weights": {
+          "R0": 1.0,
+          "R1": 1.0,
+          "R2": 2.0,
+          "R3": 3.0
+        },
+        "oversample_multipliers": {
+          "R0": 2.0,
+          "R3": 3.0
+        }
+      },
+      "weights": {
+        "sample_weights": {
+          "R0": 2.0,
+          "R1": 1.0,
+          "R2": 2.0,
+          "R3": 6.0
+        },
+        "oversample_multipliers": null
+      },
+      "both": {
+        "sample_weights": {
+          "R0": 1.5,
+          "R1": 1.0,
+          "R2": 2.0,
+          "R3": 4.0
+        },
+        "oversample_multipliers": {
+          "R3": 2.0
+        }
+      }
+    },
+    "val_grid_seed42": {
+      "baseline": {
+        "accuracy": 0.671280276816609,
+        "per_class_recall": {
+          "R0": 0.41818181818181815,
+          "R1": 0.6440677966101694,
+          "R2": 0.7587822014051522,
+          "R3": 0.22580645161290322
+        },
+        "severity_weighted_underrouting": 0.33217993079584773,
+        "over_routing_rate": 0.17993079584775087,
+        "ece_after_calibration": 0.05125629406899315,
+        "fitted_temperature": 4.357346773147382
+      },
+      "oversample": {
+        "accuracy": 0.6770472895040369,
+        "per_class_recall": {
+          "R0": 0.4,
+          "R1": 0.652542372881356,
+          "R2": 0.765807962529274,
+          "R3": 0.22580645161290322
+        },
+        "severity_weighted_underrouting": 0.33679354094579006,
+        "over_routing_rate": 0.17416378316032297,
+        "ece_after_calibration": 0.03829976232269093,
+        "fitted_temperature": 4.246716737745931
+      },
+      "weights": {
+        "accuracy": 0.6562860438292965,
+        "per_class_recall": {
+          "R0": 0.41818181818181815,
+          "R1": 0.6468926553672316,
+          "R2": 0.7259953161592506,
+          "R3": 0.22580645161290322
+        },
+        "severity_weighted_underrouting": 0.3933102652825836,
+        "over_routing_rate": 0.1695501730103806,
+        "ece_after_calibration": 0.04936097900897712,
+        "fitted_temperature": 4.296800851821645
+      },
+      "both": {
+        "accuracy": 0.6758938869665513,
+        "per_class_recall": {
+          "R0": 0.38181818181818183,
+          "R1": 0.6977401129943502,
+          "R2": 0.7283372365339579,
+          "R3": 0.22580645161290322
+        },
+        "severity_weighted_underrouting": 0.370242214532872,
+        "over_routing_rate": 0.16262975778546712,
+        "ece_after_calibration": 0.047145511933539004,
+        "fitted_temperature": 4.237744092940325
+      }
+    },
+    "selected_config": "baseline",
+    "selection_rationale": "No eligible config beat baseline R3 recall by \u22650.05 (best eligible R3 uplift +0.000); KEEPING baseline. Targeted supplemental data is the real lever.",
+    "finding": "R3 recall bit-identical (7/31 = 0.22581) across all four configs; the rare-class re-weighting/oversampling levers do not move R3 recall on validation. Targeted supplemental TRAIN data is the real lever for R3."
+  }
+}

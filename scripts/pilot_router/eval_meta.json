@@ -1,0 +1,501 @@
+{
+  "git_sha": "4e39e0239b99bf3043548858e9e633e54f337c0c",
+  "generated_at": "2026-07-18T19:11:19Z",
+  "n_test_turns": 983,
+  "pilot_temperature": 4.357346773147382,
+  "pilot": {
+    "n": 983,
+    "accuracy": 0.62970498474059,
+    "under_routing_rate": 0.16581892166836215,
+    "over_routing_rate": 0.20447609359104782,
+    "severity_weighted_under_routing": 0.17395727365208546,
+    "per_class_recall": {
+      "R0": 0.20833333333333334,
+      "R1": 0.6446078431372549,
+      "R2": 0.7085106382978723,
+      "R3": 0.24242424242424243
+    },
+    "per_class_precision": {
+      "R0": 0.625,
+      "R1": 0.6059907834101382,
+      "R2": 0.6568047337278107,
+      "R3": 0.4444444444444444
+    },
+    "macro_f1": 0.4831517965164219,
+    "confusion_matrix": [
+      [
+        15,
+        37,
+        20,
+        0
+      ],
+      [
+        6,
+        263,
+        134,
+        5
+      ],
+      [
+        3,
+        129,
+        333,
+        5
+      ],
+      [
+        0,
+        5,
+        20,
+        8
+      ]
+    ],
+    "ece": 0.04509091362099439,
+    "nll": 0.8194684545641521
+  },
+  "v4": {
+    "n": 983,
+    "accuracy": 0.26042726347914547,
+    "under_routing_rate": 0.6459816887080366,
+    "over_routing_rate": 0.0935910478128179,
+    "severity_weighted_under_routing": 0.8168870803662258,
+    "per_class_recall": {
+      "R0": 0.5694444444444444,
+      "R1": 0.4411764705882353,
+      "R2": 0.06595744680851064,
+      "R3": 0.12121212121212122
+    },
+    "per_class_precision": {
+      "R0": 0.10594315245478036,
+      "R1": 0.37037037037037035,
+      "R2": 0.6326530612244898,
+      "R3": 0.06557377049180328
+    },
+    "macro_f1": 0.19647517129331765,
+    "confusion_matrix": [
+      [
+        41,
+        25,
+        3,
+        3
+      ],
+      [
+        199,
+        180,
+        7,
+        22
+      ],
+      [
+        147,
+        260,
+        31,
+        32
+      ],
+      [
+        0,
+        21,
+        8,
+        4
+      ]
+    ],
+    "ece": 0.4472686253472113,
+    "nll": 2.26490048267725
+  },
+  "bootstrap": {
+    "delta_point": 0.36927772126144454,
+    "ci_low": 0.32655137334689727,
+    "ci_high": 0.41200406917599186,
+    "n_resamples": 10000,
+    "confidence": 0.95,
+    "seed": 42
+  },
+  "boundary_set": {
+    "n": 147,
+    "pilot_accuracy": 0.47619047619047616,
+    "v4_accuracy": 0.25170068027210885
+  },
+  "gate": [
+    {
+      "metric": "Accuracy (4-class, final decision)",
+      "pilot": "0.6297",
+      "v4": "0.2604",
+      "pass": false,
+      "note": "Pilot >= v4 AND >= 0.70"
+    },
+    {
+      "metric": "Under-routing rate (pred < gold)",
+      "pilot": "0.1658",
+      "v4": "0.6460",
+      "pass": true,
+      "note": "Pilot <= v4"
+    },
+    {
+      "metric": "Severity-weighted under-routing",
+      "pilot": "0.1740",
+      "v4": "0.8169",
+      "pass": true,
+      "note": "Pilot <= v4"
+    },
+    {
+      "metric": "R2 recall (Pilot)",
+      "pilot": "0.7085",
+      "v4": "0.0660",
+      "pass": true,
+      "note": "Pilot >= 0.60 absolute"
+    },
+    {
+      "metric": "R3 recall (Pilot)",
+      "pilot": "0.2424",
+      "v4": "0.1212",
+      "pass": false,
+      "note": "Pilot >= 0.60 absolute"
+    },
+    {
+      "metric": "Over-routing rate (pred > gold)",
+      "pilot": "0.2045",
+      "v4": "0.0936",
+      "pass": false,
+      "note": "Pilot <= v4 + 5pp"
+    },
+    {
+      "metric": "Accuracy-delta 95% bootstrap CI",
+      "pilot": "delta=0.3693 CI[0.3266, 0.4120]",
+      "v4": "-",
+      "pass": true,
+      "note": "CI lower bound > -1pp"
+    }
+  ],
+  "gate_pass": false,
+  "verdict": "STOP",
+  "golden": {
+    "n": 77,
+    "accuracy": 0.5324675324675324,
+    "floor": 0.8,
+    "pass": false,
+    "per_class_recall": {
+      "R0": 0.4666666666666667,
+      "R1": 0.9523809523809523,
+      "R2": 0.5833333333333334,
+      "R3": 0.0
+    }
+  },
+  "oracle": {
+    "status": "ok",
+    "reason": "",
+    "n": 32,
+    "tier_models": {
+      "R0": "deepseek-v4-flash",
+      "R1": "minimax-m3",
+      "R2": "glm-5.2",
+      "R3": "claude-opus-4.8"
+    },
+    "substitutions": {},
+    "cheapest_acceptable_agreement": 0.21875,
+    "findings": [
+      {
+        "turn_id": "230035",
+        "gold": "R0",
+        "pilot_pred": "R0",
+        "grades": {
+          "R0": true
+        },
+        "cheapest_acceptable": "R0"
+      },
+      {
+        "turn_id": "137155",
+        "gold": "R0",
+        "pilot_pred": "R1",
+        "grades": {
+          "R0": false,
+          "R1": true
+        },
+        "cheapest_acceptable": "R1"
+      },
+      {
+        "turn_id": "173085",
+        "gold": "R0",
+        "pilot_pred": "R2",
+        "grades": {
+          "R1": false,
+          "R2": false
+        },
+        "cheapest_acceptable": null
+      },
+      {
+        "turn_id": "225652",
+        "gold": "R0",
+        "pilot_pred": "R0",
+        "grades": {
+          "R0": false
+        },
+        "cheapest_acceptable": null
+      },
+      {
+        "turn_id": "109978",
+        "gold": "R0",
+        "pilot_pred": "R0",
+        "grades": {
+          "R0": true
+        },
+        "cheapest_acceptable": "R0"
+      },
+      {
+        "turn_id": "143563",
+        "gold": "R0",
+        "pilot_pred": "R1",
+        "grades": {
+          "R0": true,
+          "R1": false
+        },
+        "cheapest_acceptable": "R0"
+      },
+      {
+        "turn_id": "130256",
+        "gold": "R0",
+        "pilot_pred": "R2",
+        "grades": {
+          "R1": true,
+          "R2": true
+        },
+        "cheapest_acceptable": "R1"
+      },
+      {
+        "turn_id": "183107",
+        "gold": "R0",
+        "pilot_pred": "R1",
+        "grades": {
+          "R0": false,
+          "R1": true
+        },
+        "cheapest_acceptable": "R1"
+      },
+      {
+        "turn_id": "160897",
+        "gold": "R1",
+        "pilot_pred": "R1",
+        "grades": {
+          "R0": true,
+          "R1": true
+        },
+        "cheapest_acceptable": "R0"
+      },
+      {
+        "turn_id": "262498",
+        "gold": "R1",
+        "pilot_pred": "R1",
+        "grades": {
+          "R0": true,
+          "R1": true
+        },
+        "cheapest_acceptable": "R0"
+      },
+      {
+        "turn_id": "114405",
+        "gold": "R1",
+        "pilot_pred": "R1",
+        "grades": {
+          "R0": true,
+          "R1": false
+        },
+        "cheapest_acceptable": "R0"
+      },
+      {
+        "turn_id": "167079",
+        "gold": "R1",
+        "pilot_pred": "R1",
+        "grades": {
+          "R0": true,
+          "R1": true
+        },
+        "cheapest_acceptable": "R0"
+      },
+      {
+        "turn_id": "117016",
+        "gold": "R1",
+        "pilot_pred": "R2",
+        "grades": {
+          "R1": true,
+          "R2": false
+        },
+        "cheapest_acceptable": "R1"
+      },
+      {
+        "turn_id": "129975",
+        "gold": "R1",
+        "pilot_pred": "R1",
+        "grades": {
+          "R0": false,
+          "R1": true
+        },
+        "cheapest_acceptable": "R1"
+      },
+      {
+        "turn_id": "228003",
+        "gold": "R1",
+        "pilot_pred": "R2",
+        "grades": {
+          "R1": false
+        },
+        "cheapest_acceptable": null
+      },
+      {
+        "turn_id": "179577",
+        "gold": "R1",
+        "pilot_pred": "R1",
+        "grades": {
+          "R0": false,
+          "R1": false
+        },
+        "cheapest_acceptable": null
+      },
+      {
+        "turn_id": "263857",
+        "gold": "R2",
+        "pilot_pred": "R2",
+        "grades": {
+          "R1": false
+        },
+        "cheapest_acceptable": null
+      },
+      {
+        "turn_id": "134458",
+        "gold": "R2",
+        "pilot_pred": "R1",
+        "grades": {
+          "R1": false
+        },
+        "cheapest_acceptable": null
+      },
+      {
+        "turn_id": "115541",
+        "gold": "R2",
+        "pilot_pred": "R2",
+        "grades": {
+          "R1": false,
+          "R2": true
+        },
+        "cheapest_acceptable": "R2"
+      },
+      {
+        "turn_id": "113704",
+        "gold": "R2",
+        "pilot_pred": "R2",
+        "grades": {
+          "R1": true
+        },
+        "cheapest_acceptable": "R1"
+      },
+      {
+        "turn_id": "228906",
+        "gold": "R2",
+        "pilot_pred": "R2",
+        "grades": {
+          "R1": false,
+          "R2": true
+        },
+        "cheapest_acceptable": "R2"
+      },
+      {
+        "turn_id": "248597",
+        "gold": "R2",
+        "pilot_pred": "R2",
+        "grades": {
+          "R1": true
+        },
+        "cheapest_acceptable": "R1"
+      },
+      {
+        "turn_id": "154348",
+        "gold": "R2",
+        "pilot_pred": "R3",
+        "grades": {
+          "R3": false
+        },
+        "cheapest_acceptable": null
+      },
+      {
+        "turn_id": "132186",
+        "gold": "R2",
+        "pilot_pred": "R1",
+        "grades": {
+          "R0": false,
+          "R1": false
+        },
+        "cheapest_acceptable": null
+      },
+      {
+        "turn_id": "164452",
+        "gold": "R3",
+        "pilot_pred": "R1",
+        "grades": {
+          "R0": false,
+          "R1": false
+        },
+        "cheapest_acceptable": null
+      },
+      {
+        "turn_id": "242484",
+        "gold": "R3",
+        "pilot_pred": "R2",
+        "grades": {
+          "R1": false
+        },
+        "cheapest_acceptable": null
+      },
+      {
+        "turn_id": "169948",
+        "gold": "R3",
+        "pilot_pred": "R2",
+        "grades": {
+          "R1": false
+        },
+        "cheapest_acceptable": null
+      },
+      {
+        "turn_id": "105707",
+        "gold": "R3",
+        "pilot_pred": "R1",
+        "grades": {
+          "R0": false,
+          "R1": false
+        },
+        "cheapest_acceptable": null
+      },
+      {
+        "turn_id": "148755",
+        "gold": "R3",
+        "pilot_pred": "R3",
+        "grades": {
+          "R3": false
+        },
+        "cheapest_acceptable": null
+      },
+      {
+        "turn_id": "185421",
+        "gold": "R3",
+        "pilot_pred": "R2",
+        "grades": {
+          "R1": false
+        },
+        "cheapest_acceptable": null
+      },
+      {
+        "turn_id": "183975",
+        "gold": "R3",
+        "pilot_pred": "R3",
+        "grades": {
+          "R3": false
+        },
+        "cheapest_acceptable": null
+      },
+      {
+        "turn_id": "101258",
+        "gold": "R3",
+        "pilot_pred": "R2",
+        "grades": {
+          "R1": false
+        },
+        "cheapest_acceptable": null
+      }
+    ],
+    "calls": 110
+  }
+}

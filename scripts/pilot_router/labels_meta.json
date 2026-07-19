@@ -1,0 +1,87 @@
+{
+  "mode": "full",
+  "label_provider": "opencap",
+  "label_model": "claude-opus-4.8",
+  "labeler_pin": "opencap:claude-opus-4.8@t0.0",
+  "label_temperature": 0.0,
+  "label_max_tokens": 200,
+  "prompt_order_a": "orderA_R0_to_R3_v1",
+  "prompt_order_b": "orderB_R3_to_R0_v1",
+  "adjudication_prompt_version": "adjudicate_v1",
+  "rubric_file": "rubric.md",
+  "rubric_sha256": "f4cef943c56d4e0e40382e6bbd342c27d23fa0a8c62fdedb0945a1c6c437cef2",
+  "seed": 42,
+  "corpus_size": 6389,
+  "stats": {
+    "labeled": 6376,
+    "label_counts": {
+      "R0": 370,
+      "R1": 2523,
+      "R2": 3251,
+      "R3": 232
+    },
+    "label_share": {
+      "R0": 0.058,
+      "R1": 0.3957,
+      "R2": 0.5099,
+      "R3": 0.0364
+    },
+    "per_split_label_counts": {
+      "test": {
+        "R0": 72,
+        "R1": 408,
+        "R2": 470,
+        "R3": 33
+      },
+      "train": {
+        "R0": 243,
+        "R1": 1761,
+        "R2": 2354,
+        "R3": 168
+      },
+      "val": {
+        "R0": 55,
+        "R1": 354,
+        "R2": 427,
+        "R3": 31
+      }
+    },
+    "agreement_rate": 0.8628,
+    "adjudication_rate": 0.1372,
+    "boundary_set_size": 147,
+    "dropped": 13,
+    "skipped_note": "~13 turns unlabeled (dropped after retries or skipped); labels.jsonl has 6376/6389"
+  },
+  "usage": {
+    "provider": "opencap",
+    "labeler_pin": "opencap:claude-opus-4.8@t0.0",
+    "note": "Full run spanned multiple resumed processes; the gateway cache holds every billed call. Cost figures are recorded in private ops notes.",
+    "total_llm_calls": 13634,
+    "final_leg_llm_calls": 4556
+  },
+  "run": "full",
+  "gate": {
+    "pass": true,
+    "criteria": [
+      {
+        "criterion": "two-pass agreement >= 0.70",
+        "measured": "0.863",
+        "pass": true
+      },
+      {
+        "criterion": "all four classes present, none > 70%",
+        "measured": "present=True, max_share=0.510 (counts={'R0': 370, 'R1': 2523, 'R2': 3251, 'R3': 232})",
+        "pass": true
+      },
+      {
+        "criterion": "projected full-run cost within owner-approved budget",
+        "measured": "recorded in private ops notes",
+        "pass": false
+      }
+    ],
+    "owner_relaxation": "The projected cost exceeded the review ceiling; the owner relaxed the ceiling after comparing the estimate to actual gateway billing. Agreement and class criteria pass, so the gate PASSES under the owner relaxation. Exact cost figures and the ceiling are recorded in private ops notes."
+  },
+  "labels_file": {
+    "labels.jsonl": "1ea5214aa3aa7a2644ec2ce65d70a8c19af01e49f61d7ce9f9170f4612330b88"
+  }
+}

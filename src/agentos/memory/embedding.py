@@ -58,6 +58,19 @@ LOCAL_MODEL_SPECS: dict[str, LocalModelSpec] = {
         max_tokens=1024,
         dims=768,
     ),
+    # Pilot router backbone (owner-locked). Attention-mask mean pooling, 256
+    # tokens, right truncation, no text prefix. Registered explicitly so the
+    # Pilot feature builder never rides on the unknown-model (CLS/no-prefix)
+    # default. L2 normalization is applied by the Pilot feature builder, not
+    # here — the provider returns raw vectors.
+    "sentence-transformers/all-MiniLM-L6-v2": LocalModelSpec(
+        model_id="sentence-transformers/all-MiniLM-L6-v2",
+        query_prefix="",
+        document_prefix="",
+        pooling="mean",
+        max_tokens=256,
+        dims=384,
+    ),
 }
 
 _DEFAULT_MODEL_SPEC = LocalModelSpec(
