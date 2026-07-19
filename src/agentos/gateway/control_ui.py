@@ -9,7 +9,7 @@ from pathlib import Path
 
 import jinja2
 from starlette.requests import Request
-from starlette.responses import HTMLResponse
+from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
@@ -99,12 +99,17 @@ def create_control_ui_routes(config: GatewayConfig) -> list[Route | Mount]:
         html = template.render(**ctx)
         return HTMLResponse(html)
 
+    async def serve_bootstrap(request: Request) -> JSONResponse:
+        ctx = _build_bootstrap_context(config, request)
+        return JSONResponse(ctx, headers={"Cache-Control": "no-store"})
+
     return [
         Mount(
             f"{base}/static",
             app=_CachedStaticFiles(directory=str(_STATIC_DIR)),
             name="control_ui_static",
         ),
+        Route(f"{base}/api/bootstrap", serve_bootstrap, methods=["GET"]),
         Route(f"{base}/{{path:path}}", serve_index, methods=["GET"]),
         Route(f"{base}/", serve_index, methods=["GET"]),
     ]

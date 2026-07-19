@@ -23,7 +23,7 @@ Row format:
 | 404 route fallback rendered as text (XSS-safe) | js/router.js:48-55 | pending | |
 | Document title per route ("<Title> - AgentOS Control") | js/router.js:68-71 | pending | |
 | Nav active state + aria-current | js/router.js:59-66 | pending | |
-| Bootstrap data: version/ws_url/auth_mode/base_path/config_path/features | control_ui.py:_build_bootstrap_context | pending | |
+| Bootstrap data: version/ws_url/auth_mode/base_path/config_path/features | control_ui.py:_build_bootstrap_context | ported | test_control_ui_bootstrap.py::test_bootstrap_returns_json_context |
 | noscript message | templates/index.html | pending | |
 | Feature flag AGENTOS_FEATURES.tokenViz (default false) | js/app.js:6-9 | pending | |
 | Custom base_path support for built assets | control_ui.py + vite base | pending | cutover-plan item |
