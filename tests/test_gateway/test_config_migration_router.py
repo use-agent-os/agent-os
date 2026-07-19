@@ -4,36 +4,85 @@ import pytest
 
 from agentos.gateway.config_migration import migrate_config_payload
 
+# ---------------------------------------------------------------------------
+# Force default-flip migration: v4_phase3 -> pilot-v1 (unconditional).
+#
+# The default strategy flipped v4_phase3 -> pilot-v1, but historical onboarding
+# persisted `strategy = "v4_phase3"` explicitly, so an upgraded install would
+# silently stay on the legacy router. This migration force-rewrites every such
+# config to pilot-v1 on load — there is no supported way to persist v4_phase3
+# (the legacy engine remains in-tree only as an evaluation baseline). The flip
+# is idempotent: once rewritten, the strategy is pilot-v1 and re-running is a
+# no-op.
+#
+# Semantics table (each case below is a test):
+#   (a) no strategy key      -> untouched (default already applies)
+#   (b) v4_phase3            -> pilot-v1, changed=True
+#   (c) pilot-v1 / llm_judge -> untouched
+#   idempotency: migrating an already-migrated payload -> changed=False
+# ---------------------------------------------------------------------------
 
-def test_v4_phase3_strategy_is_preserved_on_load() -> None:
-    # v4_phase3 (local ML router) is the default strategy again: the load-time
-    # rewrite v4_phase3 -> llm_judge was removed, so an installed TOML pinning
-    # v4_phase3 keeps it verbatim across migration.
+
+def _router(result) -> dict:
+    return result.payload["agentos_router"]
+
+
+def test_case_a_missing_strategy_key_is_untouched() -> None:
+    # (a) A config without an explicit strategy already gets the new default;
+    # do NOT touch it.
+    result = migrate_config_payload({"agentos_router": {"enabled": True}})
+
+    assert result.changed is False
+    assert "strategy" not in _router(result)
+
+    # An empty payload has no router section at all.
+    assert migrate_config_payload({}).changed is False
+
+
+def test_case_b_v4_phase3_is_force_migrated_to_pilot() -> None:
+    # (b) The core migration: a persisted v4_phase3 is unconditionally rewritten
+    # to pilot-v1 and changed=True so the loader backs up and rewrites the file.
     result = migrate_config_payload(
         {"agentos_router": {"enabled": True, "strategy": "v4_phase3"}}
     )
 
-    assert result.payload["agentos_router"]["strategy"] == "v4_phase3"
-    assert not any(
-        "strategy" in change for change in result.changes
+    assert result.changed is True
+    assert _router(result)["strategy"] == "pilot-v1"
+    assert any("strategy" in change and "pilot-v1" in change for change in result.changes)
+
+
+def test_case_c_pilot_and_judge_strategies_are_untouched() -> None:
+    # (c) A config already on pilot-v1 or llm_judge is left entirely alone.
+    for strategy in ("pilot-v1", "llm_judge"):
+        result = migrate_config_payload(
+            {"agentos_router": {"enabled": True, "strategy": strategy}}
+        )
+        assert result.changed is False
+        assert _router(result)["strategy"] == strategy
+
+
+def test_migration_is_idempotent_on_already_migrated_payload() -> None:
+    # Running the migration on its own output is a no-op: the strategy is now
+    # pilot-v1, so no further rewrite (changed=False).
+    once = migrate_config_payload(
+        {"agentos_router": {"enabled": True, "strategy": "v4_phase3"}}
     )
+    assert once.changed is True
+
+    twice = migrate_config_payload(once.payload)
+    assert twice.changed is False
+    assert _router(twice)["strategy"] == "pilot-v1"
 
 
-def test_llm_judge_strategy_is_left_untouched() -> None:
+def test_migrated_payload_boots_the_router_config() -> None:
+    # The migrated payload must construct AgentOSRouterConfig without raising.
+    from agentos.gateway.config import AgentOSRouterConfig
+
     result = migrate_config_payload(
-        {"agentos_router": {"enabled": True, "strategy": "llm_judge"}}
+        {"agentos_router": {"enabled": True, "strategy": "v4_phase3"}}
     )
-
-    assert result.changed is False
-    assert result.payload["agentos_router"]["strategy"] == "llm_judge"
-
-
-def test_missing_router_section_or_strategy_is_left_untouched() -> None:
-    assert migrate_config_payload({}).changed is False
-
-    result = migrate_config_payload({"agentos_router": {"enabled": True}})
-    assert result.changed is False
-    assert "strategy" not in result.payload["agentos_router"]
+    cfg = AgentOSRouterConfig(**_router(result))
+    assert cfg.strategy == "pilot-v1"
 
 
 @pytest.mark.parametrize(

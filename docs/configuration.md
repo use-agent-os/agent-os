@@ -146,12 +146,12 @@ classifies each turn:
 | Strategy | Default | Behavior |
 | --- | --- | --- |
 | `pilot-v1` | Yes | English-optimized local ML router: an AgentOS-native, self-trained model (MiniLM embeddings + ONNX inference). Decides on-device with no LLM call and nothing leaves the machine. The bundle ships in the wheel under `src/agentos/agentos_router/models/pilot_v1/`; when it's missing (e.g. a source checkout without `git lfs pull`) the strategy tags the decision `pilot_unavailable` and routes the turn to the default tier (c1). Runtime deps are `numpy`/`onnxruntime`/`tokenizers` (in the `recommended` and `ml-router` extras); a minimal install without them degrades the same graceful way. Tunable via the `[agentos_router.pilot]` sub-table below. See [`features/agentos-router.md`](features/agentos-router.md#the-pilot-strategy) for status and rollback. |
-| `v4_phase3` | No (legacy) | The previous default: an on-device ML router (BGE embeddings + LightGBM ensemble). No LLM call, nothing leaves the machine. Fully selectable and the one-line rollback from `pilot-v1`. Its bundle ships in the wheel under `src/agentos/agentos_router/models/v4.2_phase3_inference/`; when missing the router logs a warning at boot and pins every turn to the default tier (c1). Install its runtime deps with `uv sync --extra recommended` (or the `ml-router` extra); `git lfs pull` restores the bundle in a source checkout — or use `llm_judge`, which needs no local model files. |
+| `v4_phase3` | No (legacy) | The previous default: an on-device ML router (BGE embeddings + LightGBM ensemble). Retained in-tree only as an evaluation baseline (removed in Phase C). **Not a supported persisted strategy:** a config that still pins `v4_phase3` is automatically migrated to `pilot-v1` on the next load (see [Upgrading from v4_phase3](#upgrading-from-v4_phase3) below). |
 | `llm_judge` | No | Each turn is classified by a small LLM judge call instead of the local ML bundle. See "Local judge" below. |
 
 ```toml
 [agentos_router]
-strategy = "pilot-v1"   # default; or "v4_phase3" (legacy) or "llm_judge"
+strategy = "pilot-v1"   # default; or "llm_judge"
 ```
 
 Router runtime dependencies (`onnxruntime`, `numpy`, `tokenizers`) stay in the
@@ -165,6 +165,24 @@ All three strategies are also selectable from the Mode dropdown in onboarding
 **Smart routing (LLM-based)** (`llm_judge`), or **Off**. The "Judge model" field
 only appears for the LLM-based strategy; the "Pilot safety net" field only
 appears for the Pilot strategy.
+
+#### Upgrading from v4_phase3
+
+Historical onboarding persisted `strategy = "v4_phase3"` explicitly in
+`~/.agentos/config.toml`. The default has since flipped to `pilot-v1`, so on the
+next config load AgentOS **automatically migrates** any config still pinning
+`v4_phase3`:
+
+- the strategy is rewritten to `pilot-v1`;
+- the original file is backed up verbatim next to it as
+  `config.toml.backup.<timestamp>` (mode `0600`);
+- the flip is logged, and the rewrite is idempotent (a config already on
+  `pilot-v1` is left untouched, with no backup).
+
+There is no supported way to keep `v4_phase3` in config — the legacy engine
+remains in-tree only as an evaluation baseline until its scheduled removal
+(Phase C). Selecting **Smart routing (on-device)** in onboarding therefore
+resolves to `pilot-v1` on the next load.
 
 #### Pilot strategy settings
 

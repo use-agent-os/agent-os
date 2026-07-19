@@ -17,6 +17,7 @@ from typing import Any
 import tomli_w
 
 from agentos.paths import default_agentos_home
+from agentos.router_strategies import PILOT_STRATEGY_ID, V4_STRATEGY_ID
 
 DEPRECATED_MEMORY_FIELDS: frozenset[str] = frozenset(
     {
@@ -313,11 +314,27 @@ def migrate_config_payload(data: dict[str, Any]) -> ConfigMigrationResult:
 
     agentos_router = builder.payload.get("agentos_router")
     if isinstance(agentos_router, dict):
-        # pilot-v1 is now the default strategy (v4_phase3 remains selectable) —
-        # do NOT rewrite an explicit strategy here. An earlier release migrated
-        # v4_phase3 -> llm_judge on load; that rewrite is intentionally removed
-        # so installed TOMLs keep whatever local router they set. "pilot-v1",
-        # "v4_phase3", and "llm_judge" all pass schema validation.
+        # Force default-flip: pilot-v1 is the default strategy, but historical
+        # onboarding persisted `strategy = "v4_phase3"` explicitly, so an upgraded
+        # install would silently stay on the legacy router. Unconditionally rewrite
+        # a persisted v4_phase3 to pilot-v1 on load — there is no supported way to
+        # keep v4_phase3 in config; the legacy engine stays in-tree only as an
+        # evaluation baseline (removed in Phase C). The rewrite is idempotent:
+        # once flipped the value is pilot-v1, so re-running is a no-op. "pilot-v1"
+        # and "llm_judge" configs are left untouched, and a config with no strategy
+        # key already resolves to the default and is not rewritten here.
+        strategy = agentos_router.get("strategy")
+        if isinstance(strategy, str) and strategy.strip() == V4_STRATEGY_ID:
+            agentos_router["strategy"] = PILOT_STRATEGY_ID
+            builder.changes.append(
+                f"agentos_router.strategy: {V4_STRATEGY_ID} -> {PILOT_STRATEGY_ID} "
+                "(default flip; legacy router auto-migrated on load)"
+            )
+            logging.getLogger(__name__).info(
+                "AgentOS router strategy force-migrated %s -> %s on config load",
+                V4_STRATEGY_ID,
+                PILOT_STRATEGY_ID,
+            )
 
         # confidence_threshold gained a strict [0.0, 1.0] bound with the judge
         # migration. Under the old v4 confidence gate an out-of-range value was a

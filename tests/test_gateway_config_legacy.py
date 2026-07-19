@@ -120,6 +120,46 @@ def test_load_migrates_010_turn_capture_fields(tmp_path: Path) -> None:
     assert "prefetch_min_score" not in data
 
 
+def test_load_force_migrates_pinned_v4_strategy_to_pilot_with_backup(
+    tmp_path: Path,
+) -> None:
+    """A config explicitly pinning the legacy default (v4_phase3) is force-flipped
+    to pilot-v1 on load, the file is rewritten, and the original is backed up
+    verbatim."""
+    toml_path = tmp_path / "config.toml"
+    toml_path.write_text(
+        "\n".join(["[agentos_router]", 'strategy = "v4_phase3"', ""]),
+        encoding="utf-8",
+    )
+
+    cfg = GatewayConfig.load(toml_path)
+
+    assert cfg.agentos_router.strategy == "pilot-v1"
+
+    backups = sorted(tmp_path.glob("config.toml.backup.*"))
+    assert backups
+    backup_text = backups[-1].read_text(encoding="utf-8")
+    assert 'strategy = "v4_phase3"' in backup_text
+
+    migrated = toml_path.read_text(encoding="utf-8")
+    assert 'strategy = "pilot-v1"' in migrated
+    assert "v4_phase3" not in migrated
+
+
+def test_load_leaves_already_migrated_pilot_strategy_untouched(tmp_path: Path) -> None:
+    """A config already on pilot-v1 reloads without a rewrite or a backup."""
+    toml_path = tmp_path / "config.toml"
+    toml_path.write_text(
+        "\n".join(["[agentos_router]", 'strategy = "pilot-v1"', ""]),
+        encoding="utf-8",
+    )
+
+    cfg = GatewayConfig.load(toml_path)
+
+    assert cfg.agentos_router.strategy == "pilot-v1"
+    assert not sorted(tmp_path.glob("config.toml.backup.*"))
+
+
 def test_load_from_toml_migrates_010_turn_capture_fields(tmp_path: Path) -> None:
     toml_path = tmp_path / "config.toml"
     toml_path.write_text(
