@@ -234,6 +234,80 @@ def start_gateway(
     _emit_lifecycle_result(manager.start(), json_output=json_output)
 
 
+def gateway_handshake_version(
+    *,
+    gateway_url: str | None = None,
+    config_path: str | None = None,
+) -> str | None:
+    """Return the running gateway's version from the connect handshake.
+
+    Lightweight: the version is carried in the hello-ok ServerInfo, so no RPC
+    method call is needed. Returns ``None`` when the gateway is unreachable.
+    """
+
+    import asyncio
+
+    from agentos.cli import gateway_client as gcm
+    from agentos.cli.gateway_rpc import _target_gateway_url, default_gateway_token
+
+    async def _go() -> str | None:
+        client = gcm.GatewayClient()
+        try:
+            url = _target_gateway_url(gateway_url=gateway_url, config_path=config_path)
+            await client.connect(url, token=default_gateway_token(config_path))
+            return client.server_version
+        except SystemExit:
+            return None
+        except (ConnectionError, OSError):
+            return None
+        finally:
+            await client.close()
+
+    try:
+        return asyncio.run(_go())
+    except Exception:  # noqa: BLE001 - status must never crash on a version probe
+        return None
+
+
+def _emit_status_with_versions(
+    result: GatewayLifecycleResult,
+    *,
+    gateway_version: str | None,
+    json_output: bool,
+) -> None:
+    """Emit a status result annotated with BOTH versions + a skew diagnostic."""
+
+    from agentos import __version__
+
+    cli_version = __version__
+    mismatch = bool(
+        gateway_version and gateway_version != cli_version
+    )
+
+    if json_output:
+        payload = result.to_payload()
+        payload["cliVersion"] = cli_version
+        payload["gatewayVersion"] = gateway_version
+        payload["versionMismatch"] = mismatch
+        typer.echo(json.dumps(payload, ensure_ascii=False, default=str))
+    else:
+        if result.ok:
+            typer.echo(f"{result.state}: {result.url}")
+        else:
+            typer.echo(f"Error: {result.message or result.code or result.state}", err=True)
+        typer.echo(f"CLI version:     {cli_version}")
+        typer.echo(f"Gateway version: {gateway_version or 'unknown (not running / unreachable)'}")
+        if mismatch:
+            typer.echo(
+                "⚠ Version mismatch — the running gateway does not match the installed "
+                "CLI. Run 'agentos gateway restart' (or 'agentos upgrade') to apply it.",
+                err=True,
+            )
+
+    if result.exit_code != 0:
+        raise typer.Exit(code=result.exit_code)
+
+
 def status_gateway(
     port: int | None = typer.Option(18791, "--port", "-p", help="Port to inspect"),
     bind: str | None = typer.Option("127.0.0.1", "--bind", "-b", help="Host to inspect"),
@@ -242,14 +316,26 @@ def status_gateway(
     gateway_url: str | None = typer.Option(None, "--gateway", help="Remote gateway URL"),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
-    """Inspect the managed gateway process without mutating state."""
+    """Inspect the managed gateway process without mutating state.
+
+    Reports BOTH the installed CLI version and the running gateway's
+    RPC-reported version; a mismatch appends a restart diagnostic.
+    """
 
     if gateway_url:
-        _emit_lifecycle_result(remote_gateway_status(gateway_url), json_output=json_output)
+        result = remote_gateway_status(gateway_url)
+        version = (
+            gateway_handshake_version(gateway_url=gateway_url) if result.ok else None
+        )
+        _emit_status_with_versions(result, gateway_version=version, json_output=json_output)
         return
 
     manager = _lifecycle_manager(port=port, bind=bind, listen=listen, config_path=config_path)
-    _emit_lifecycle_result(manager.status(), json_output=json_output)
+    result = manager.status()
+    version = None
+    if result.ok and result.state in ("running", "unmanaged"):
+        version = gateway_handshake_version(config_path=config_path)
+    _emit_status_with_versions(result, gateway_version=version, json_output=json_output)
 
 
 def stop_gateway(

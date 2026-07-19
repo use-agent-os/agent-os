@@ -34,6 +34,7 @@ from agentos.cli.sandbox_cmd import sandbox_app  # noqa: E402
 from agentos.cli.search_cmd import search_app  # noqa: E402
 from agentos.cli.sessions_cmd import app as sessions_app  # noqa: E402
 from agentos.cli.skills_cmd import skills_app  # noqa: E402
+from agentos.cli.upgrade_cmd import upgrade_command  # noqa: E402
 
 app = typer.Typer(
     name="agentos",
@@ -62,6 +63,7 @@ app.add_typer(skills_app, name="skills")
 
 app.command("init")(init_command)
 app.command("doctor")(doctor_command)
+app.command("upgrade")(upgrade_command)
 app.add_typer(onboard_app, name="onboard")
 app.command("configure")(configure_command)
 
