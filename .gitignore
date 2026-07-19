@@ -119,3 +119,7 @@ node_modules/
 # Editable diagram sources (Excalidraw). Publish rendered PNG/SVG under
 # docs/diagrams/ instead; keep the editable source local.
 *.excalidraw
+
+# React frontend build output (built at release; never committed)
+src/agentos/gateway/static/dist/
+frontend/node_modules/
