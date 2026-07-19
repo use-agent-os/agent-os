@@ -263,7 +263,7 @@ def format_next_steps(config: Any, *, config_path: str | Path | None = None) -> 
     router_line = (
         "  Router: disabled"
         if not router.enabled
-        else f"  Router: AgentOS Router, default={router_default}"
+        else f"  Router: Pilot Router, default={router_default}"
     )
     config_arg = _config_cli_arg(config_path)
     key_source = status.llm_source

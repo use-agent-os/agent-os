@@ -1,6 +1,6 @@
-# AgentOS Router
+# Pilot Router
 
-AgentOS Router is AgentOS's local model-routing layer. It helps the agent
+Pilot Router is AgentOS's local model-routing layer. It helps the agent
 choose an appropriate model tier for each turn so routine work does not always
 run on the most expensive model.
 
@@ -9,7 +9,7 @@ decide whether a fixed provider/model is better for a specific run.
 
 ## Why Use It
 
-AgentOS Router is useful when you want:
+Pilot Router is useful when you want:
 
 - lower cost for simple chat, edits, summaries, and routine tool work;
 - stronger models reserved for hard reasoning, recovery, and long tasks;
@@ -21,7 +21,7 @@ It is not required. AgentOS can also run in direct single-model mode.
 
 ## Strategies
 
-AgentOS Router has three selectable strategies, set via
+Pilot Router has three selectable strategies, set via
 `agentos_router.strategy` in `agentos.toml` (or the onboarding wizard):
 
 | Strategy | Mode label | How it decides |
@@ -151,7 +151,7 @@ by the local catalog.
 
 ## What the Router Can Affect
 
-Depending on configuration, AgentOS Router may influence:
+Depending on configuration, Pilot Router may influence:
 
 - selected model tier;
 - direct model fallback;
@@ -223,7 +223,7 @@ If routing does not appear to work:
    agentos doctor
    ```
 
-3. If AgentOS Router optional ML dependencies (`lightgbm`, `joblib`,
+3. If Pilot Router optional ML dependencies (`lightgbm`, `joblib`,
    `scikit-learn`, `onnxruntime` — install via `uv sync --extra recommended`
    or the `ml-router` extra) or the local model bundle are missing, the
    `v4_phase3` strategy degrades to the default tier rather than failing the

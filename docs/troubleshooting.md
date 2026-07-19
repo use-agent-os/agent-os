@@ -87,7 +87,7 @@ agentos configure provider --provider openai --api-key-env OPENAI_API_KEY
 
 ## Router Dependency Problems
 
-If AgentOS Router cannot load, AgentOS can still run with direct model
+If Pilot Router cannot load, AgentOS can still run with direct model
 routing. To disable the router:
 
 ```sh

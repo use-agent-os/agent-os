@@ -180,9 +180,9 @@ Initial release of AgentOS.
 - Durable sessions, chat history, and replay data persisted in SQLite, with a
   per-agent workspace folder and bounded-depth subagents.
 
-### AgentOS Router
+### Pilot Router
 
-- AgentOS Router picks the cheapest capable model tier (c0–c3) for each turn.
+- Pilot Router picks the cheapest capable model tier (c0–c3) for each turn.
   The default `recommended` install ships the router; `AGENTOS_INSTALL_PROFILE=core`
   or `--router disabled` turns it off and routes every turn to one model.
 - Two selectable routing strategies. The default `v4_phase3` runs an on-device
@@ -196,7 +196,7 @@ Initial release of AgentOS.
   a local OpenAI-compatible endpoint (Ollama / LM Studio / llama.cpp / vLLM)
   set with `judge_model` / `judge_base_url` — and needs no local model files.
 - Onboarding (Web UI wizard and CLI) offers the strategy via the Mode dropdown —
-  "AgentOS Router (Local ML)", "AgentOS Router (LLM Judge)", or "Disabled". The
+  "Pilot Router (Local ML)", "Pilot Router (LLM Judge)", or "Disabled". The
   "Judge model" field applies to, and appears only for, the LLM Judge strategy.
 - `/c0`–`/c3` slash commands (web chat and messaging channels) pin the router
   to a tier for the current session; `/auto` restores automatic routing. These

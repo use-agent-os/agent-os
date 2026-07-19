@@ -849,7 +849,7 @@ def test_onboard_catalog_provider_rows_name_agentos_router_tier_support():
     result = runner.invoke(app, ["onboard", "catalog", "providers"])
 
     assert result.exit_code == 0, result.stdout
-    assert "route AgentOS Router ready" in result.stdout
+    assert "route Pilot Router ready" in result.stdout
     assert "route Direct only" in result.stdout
     openrouter_row = next(
         line for line in result.stdout.splitlines() if line.startswith("- openrouter:")
@@ -857,14 +857,14 @@ def test_onboard_catalog_provider_rows_name_agentos_router_tier_support():
     anthropic_row = next(
         line for line in result.stdout.splitlines() if line.startswith("- anthropic:")
     )
-    assert openrouter_row.index("route AgentOS Router ready") < openrouter_row.index(
+    assert openrouter_row.index("route Pilot Router ready") < openrouter_row.index(
         "key OPENROUTER_API_KEY"
     )
     assert anthropic_row.index("route Direct only") < anthropic_row.index(
         "key ANTHROPIC_API_KEY"
     )
-    assert "AgentOS Router tiers yes" not in result.stdout
-    assert "AgentOS Router tiers no" not in result.stdout
+    assert "Pilot Router tiers yes" not in result.stdout
+    assert "Pilot Router tiers no" not in result.stdout
     assert "router yes" not in result.stdout
     assert "router no" not in result.stdout
 
@@ -1226,7 +1226,7 @@ def test_onboard_status_explains_router_ready_before_provider_setup(
     assert "Router" in result.stdout
     collapsed = "".join(result.stdout.split()).replace("│", "")
     assert "Provider first" in result.stdout
-    assert "usesAgentOSRouterafter" in collapsed
+    assert "usesPilotRouterafter" in collapsed
     assert "providersetup" in collapsed
 
     json_result = runner.invoke(
@@ -1237,7 +1237,7 @@ def test_onboard_status_explains_router_ready_before_provider_setup(
     payload = _json.loads(json_result.stdout)
     assert (
         payload["sectionDetails"]["router"]["detail"]
-        == "uses AgentOS Router after provider setup"
+        == "uses Pilot Router after provider setup"
     )
 
 

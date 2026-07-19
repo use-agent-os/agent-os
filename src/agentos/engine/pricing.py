@@ -191,7 +191,7 @@ def _apply_discount_inverse(price_per_token: float, discount: float) -> float:
     """Return the non-discounted token price when OpenRouter reports a discount.
 
     OpenRouter endpoint pricing also includes cache-read rates. Those are not
-    used here: AgentOS Router savings and AgentOS estimates must use the normal
+    used here: Pilot Router savings and AgentOS estimates must use the normal
     prompt/completion price, then remove any explicit endpoint discount.
     """
     if discount <= 0:
@@ -336,7 +336,7 @@ def seed_live_price_cache_for_tests(model_id: str, price: PriceEntry) -> None:
 
 # Built-in pricing table: model_prefix → (input_per_M, output_per_M)
 _PRICING_TABLE: list[tuple[str, PriceEntry]] = [
-    # Offline fallback for AgentOS Router tier models.
+    # Offline fallback for Pilot Router tier models.
     ("stepfun/step-3.5-flash", PriceEntry(0.10, 0.30)),
     ("z-ai/glm-4.5-air", PriceEntry(0.13, 0.85)),
     ("minimax/minimax-m2.5", PriceEntry(0.118, 0.99)),

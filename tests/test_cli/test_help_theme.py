@@ -64,7 +64,7 @@ def test_onboard_help_explains_first_run_inputs() -> None:
     assert result.exit_code == 0, result.output
     output = click.unstyle(result.output)
     assert "AgentOS setup cockpit" in output
-    assert "AgentOS Router" in output
+    assert "Pilot Router" in output
     assert "Provider id to configure" in output
     assert "Model id for the provider" in output
     assert "Read the provider key from this environment" in output

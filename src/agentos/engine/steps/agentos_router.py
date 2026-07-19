@@ -1,4 +1,4 @@
-"""Step 2: AgentOS Router — classify message complexity and route to appropriate model.
+"""Step 2: Pilot Router — classify message complexity and route to appropriate model.
 
 Runs 2-level ThinkingController + PromptController on top of the routing
 output.  Rollout is gated via ``agentos_router.rollout_phase`` so existing
@@ -364,7 +364,7 @@ _RESPONSE_POLICY_OPEN = "[RESPONSE_POLICY:"
 
 @dataclass
 class RoutingDecision:
-    """Result of AgentOS Router classification."""
+    """Result of Pilot Router classification."""
 
     tier: str
     model: str
@@ -1243,7 +1243,7 @@ async def apply_agentos_router(ctx: TurnContext) -> TurnContext:
                 note="image detected but no supports_image tier",
             )
             raise RuntimeError(
-                "No image-capable AgentOS Router tier is configured for this image request. "
+                "No image-capable Pilot Router tier is configured for this image request. "
                 "Configure agentos_router.tiers.image_model with supports_image=true."
             )
         tier_name = random.choice(list(image_tiers.keys()))

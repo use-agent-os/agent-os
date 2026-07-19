@@ -253,7 +253,7 @@ _COMMANDS: tuple[CommandDef, ...] = (
         },
     ),
     # ---- Router tier holds (web + channel) --------------------------------
-    # /c0-/c3 pin the AgentOS Router to one configured tier for this session
+    # /c0-/c3 pin the Pilot Router to one configured tier for this session
     # (short-lived hold, same mechanism as the router_control tool); /auto
     # restores automatic routing. Tiers not present in the active router
     # config are rejected by the RPC with an operator-readable error.
@@ -261,7 +261,7 @@ _COMMANDS: tuple[CommandDef, ...] = (
         CommandDef(
             name=f"/{tier}",
             usage=f"/{tier}",
-            description=f"Pin the AgentOS Router to tier {tier} for this session.",
+            description=f"Pin the Pilot Router to tier {tier} for this session.",
             execution={
                 _W: _rpc("router.hold.set", _tier_hold(tier)),
                 _C: _rpc("router.hold.set", _tier_hold(tier)),
@@ -272,7 +272,7 @@ _COMMANDS: tuple[CommandDef, ...] = (
     CommandDef(
         name="/auto",
         usage="/auto",
-        description="Restore automatic AgentOS Router routing (clear tier hold).",
+        description="Restore automatic Pilot Router routing (clear tier hold).",
         execution={
             _W: _rpc("router.hold.clear", _key),
             _C: _rpc("router.hold.clear", _key),

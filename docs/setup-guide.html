@@ -218,7 +218,7 @@
         <a href="#what" class="anchor-link text-[var(--accent)]">#</a>
       </h2>
       <p class="mt-5 max-w-[68ch] text-[16px] leading-relaxed text-[var(--text-dim)]">
-        AgentOS is a microkernel Python agent runtime. A local model router (AgentOS Router) sends each turn to the
+        AgentOS is a microkernel Python agent runtime. A local model router (Pilot Router) sends each turn to the
         cheapest model that can handle it, while persistent memory, a layered sandbox, built-in web search, and
         on-device embeddings round out a single shared turn loop. Every entry point (Web UI, CLI, and chat
         channels) runs through that same loop.
@@ -229,7 +229,7 @@
           <div class="mb-3 text-[var(--accent)]">
             <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
           </div>
-          <h3 class="text-[15px] font-semibold">AgentOS Router</h3>
+          <h3 class="text-[15px] font-semibold">Pilot Router</h3>
           <p class="mt-2 text-[13.5px] leading-relaxed text-[var(--text-dim)]">An on-device router scores each turn and routes it across tiers c0 to c3, so an easy turn never pays for a frontier model.</p>
         </div>
         <div class="bg-[var(--bg-2)] p-6">
@@ -278,7 +278,7 @@
           <span class="mono mt-0.5 text-[var(--accent)]">03</span>
           <div>
             <p class="font-medium">Git with LFS (source install only)</p>
-            <p class="mt-1 text-[13.5px] text-[var(--text-dim)]">The AgentOS Router model files ship via Git LFS. Run <span class="mono text-[var(--text)]">git lfs install</span> before cloning if you build from source.</p>
+            <p class="mt-1 text-[13.5px] text-[var(--text-dim)]">The Pilot Router model files ship via Git LFS. Run <span class="mono text-[var(--text)]">git lfs install</span> before cloning if you build from source.</p>
           </div>
         </li>
       </ul>
@@ -314,7 +314,7 @@
 <pre data-lang="bash"># 1 - install uv (macOS / Linux)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 2 - install AgentOS with the recommended extras (AgentOS Router)
+# 2 - install AgentOS with the recommended extras (Pilot Router)
 uv tool install --python 3.12 \
   "use-agent-os[recommended] @ https://github.com/use-agent-os/agent-os/releases/download/v0.0.1/use_agent_os-0.0.1-py3-none-any.whl"
 
@@ -401,7 +401,7 @@ agentos onboard status</pre>
         </div>
         <div class="bg-[var(--bg-2)] p-5">
           <div class="flex items-center gap-2"><span class="mono text-[12px] text-[var(--accent)]">02</span><span class="text-[14px] font-semibold">Router</span><span class="ml-auto mono text-[10px] uppercase tracking-wider text-[var(--accent)]">required</span></div>
-          <p class="mt-2 text-[13px] text-[var(--text-dim)]">AgentOS Router on, or direct single-model.</p>
+          <p class="mt-2 text-[13px] text-[var(--text-dim)]">Pilot Router on, or direct single-model.</p>
         </div>
         <div class="bg-[var(--bg-2)] p-5">
           <div class="flex items-center gap-2"><span class="mono text-[12px] text-[var(--text-faint)]">03</span><span class="text-[14px] font-semibold">Channels</span><span class="ml-auto mono text-[10px] uppercase tracking-wider text-[var(--text-faint)]">optional</span></div>

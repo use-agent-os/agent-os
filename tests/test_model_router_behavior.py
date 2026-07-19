@@ -756,7 +756,7 @@ async def test_image_attachment_without_image_tier_fails_locally(
 
     with pytest.raises(
         RuntimeError,
-        match="No image-capable AgentOS Router tier is configured",
+        match="No image-capable Pilot Router tier is configured",
     ):
         await apply_agentos_router(ctx)
 

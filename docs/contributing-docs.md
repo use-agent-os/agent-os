@@ -61,7 +61,7 @@ Most user-facing pages should answer:
 5. Where should I go next?
 
 Independent features should stay on independent pages. For example, memory,
-skills, AgentOS Router, tool compression, compaction, channels, and
+skills, Pilot Router, tool compression, compaction, channels, and
 artifacts should not be merged into one broad mechanism page.
 
 ---

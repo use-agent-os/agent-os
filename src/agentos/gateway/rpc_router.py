@@ -1,4 +1,4 @@
-"""RPC handlers for user-directed AgentOS Router tier holds.
+"""RPC handlers for user-directed Pilot Router tier holds.
 
 Backs the /c0-/c3 and /auto slash commands: a session-scoped, short-lived
 tier hold set through the same ``RouterControlHoldStore`` the LLM-facing
@@ -42,7 +42,7 @@ def _router_state(ctx: RpcContext) -> tuple[Any, RouterControlHoldStore]:
     if cfg is None or not getattr(cfg, "enabled", False):
         raise RpcHandlerError(
             "router.disabled",
-            "AgentOS Router is disabled or unavailable",
+            "Pilot Router is disabled or unavailable",
         )
     return cfg, store
 
@@ -60,7 +60,7 @@ async def _handle_router_hold_set(params: dict | None, ctx: RpcContext) -> dict[
     except RouterControlValidationError as exc:
         raise RpcHandlerError(
             "router.unknown_tier",
-            f"Tier '{tier}' is not configured on the AgentOS Router",
+            f"Tier '{tier}' is not configured on the Pilot Router",
             details={"tier": tier},
         ) from exc
 

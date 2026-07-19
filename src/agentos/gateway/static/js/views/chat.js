@@ -541,7 +541,7 @@ const ChatView = (() => {
   // invoked on session boundaries so a fresh chat can fire on the very
   // first qualifying turn.
   const _SAVINGS_POPUP_COOLDOWN_MS = 10 * 60 * 1000;
-  // Product decision: the AgentOS Router scanning strip stays, but the celebratory
+  // Product decision: the Pilot Router scanning strip stays, but the celebratory
   // savings popup (viewport-centered particle burst + "Saved ~X%" float) is
   // disabled by default — it distracts more than it informs and the figure is a
   // vs-flagship estimate, not realized spend. Streak/combo bookkeeping and the
@@ -647,7 +647,7 @@ const ChatView = (() => {
   let _elevatedPill = null;
   let _composer = null;
   let _composerObserver = null;
-  // Router-fx dock: the auto-select (AgentOS Router) visualisation renders
+  // Router-fx dock: the auto-select (Pilot Router) visualisation renders
   // HERE, below the chat input bar where the routed model is displayed — the
   // strip never mounts inside the chat thread anymore.
   let _routerFxDock = null;
@@ -1068,7 +1068,7 @@ const ChatView = (() => {
                   : turnSavedPct >= 45 ? ' msg-meta__saved--high'
                   : '';
       span.className = 'msg-meta__saved' + tier;
-      span.title = `AgentOS Router routed this turn (~${Math.round(turnSavedPct)}% vs flagship)`;
+      span.title = `Pilot Router routed this turn (~${Math.round(turnSavedPct)}% vs flagship)`;
       const NS = 'http://www.w3.org/2000/svg';
       const flame = document.createElementNS(NS, 'svg');
       flame.setAttribute('class', 'msg-meta__saved-flame');
@@ -1103,7 +1103,7 @@ const ChatView = (() => {
                   : streak >= 3 ? ' msg-meta__combo--hot'
                   : '';
       span.className = 'msg-meta__combo' + tier;
-      span.title = 'AgentOS Router combo — ' + streak + ' consecutive savings turns';
+      span.title = 'Pilot Router combo — ' + streak + ' consecutive savings turns';
       span.setAttribute('aria-label', 'Combo ' + streak);
       // Inline SVG flame — color is owned by CSS so it always reads as red,
       // independent of the OS-rendered emoji palette.
@@ -1260,9 +1260,9 @@ const ChatView = (() => {
                             title="Approval prompts are active. Click to enable approval bypass for this browser session.">Approval prompts</button>
                   </div>
                   <div class="chat-toolbar-row">
-                    <span class="chat-toolbar-row-label">AgentOS Router</span>
-                    <div class="toggle-switch-wrap" id="pill-router-group" title="AgentOS Router">
-                      <label class="toggle-switch" aria-label="AgentOS Router">
+                    <span class="chat-toolbar-row-label">Pilot Router</span>
+                    <div class="toggle-switch-wrap" id="pill-router-group" title="Pilot Router">
+                      <label class="toggle-switch" aria-label="Pilot Router">
                         <input type="checkbox" id="toggle-router" />
                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
                       </label>
@@ -1389,7 +1389,7 @@ const ChatView = (() => {
     window.addEventListener('agentos:elevated-mode', elevatedListener);
     _unsubs.push(() => window.removeEventListener('agentos:elevated-mode', elevatedListener));
 
-    // AgentOS Router toggle switch
+    // Pilot Router toggle switch
     const routerToggle = _el.querySelector('#toggle-router');
     if (routerToggle) {
       routerToggle.addEventListener('change', async () => {
@@ -1405,7 +1405,7 @@ const ChatView = (() => {
           });
           _toolbarState.router = enabled;
           _refreshToolbarTriggerGlow();
-          UI.toast('AgentOS Router: ' + (enabled ? 'ON' : 'OFF'), 'info');
+          UI.toast('Pilot Router: ' + (enabled ? 'ON' : 'OFF'), 'info');
         } catch (e) {
           // Revert on failure
           _routerFeatureEnabled = previousRouterFeatureEnabled;
@@ -2817,7 +2817,7 @@ const ChatView = (() => {
         break;
       }
       case 'router.hold.set': {
-        // /c0-/c3 — pin the AgentOS Router to one tier for this session.
+        // /c0-/c3 — pin the Pilot Router to one tier for this session.
         const tier = (commandName || '').replace(/^\//, '').toLowerCase();
         _rpc.call('router.hold.set', { key: _sessionKey, tier })
           .then((res) => {

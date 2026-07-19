@@ -1847,7 +1847,7 @@ def _keep_imported_provider(questionary, cfg: Any) -> bool:
         console.print(f"  Provider: [{ACCENT_SOFT}]{markup_escape(provider)}[/]")
         if router_supported:
             console.print(
-                "  Model: [dim]will use AgentOS Router defaults; "
+                "  Model: [dim]will use Pilot Router defaults; "
                 "old direct model is not imported[/dim]"
             )
         elif model:
@@ -2027,7 +2027,7 @@ def run_interactive_onboard(options: OnboardOptions) -> PersistResult:
             steps=[
                 ("1 Migration", "Import existing agent data if detected", "ready"),
                 ("2 Provider", "Pick LLM credentials and model access", "required"),
-                ("3 AgentOS Router", "Route c0-c3 work to the right model tier", "required"),
+                ("3 Pilot Router", "Route c0-c3 work to the right model tier", "required"),
                 ("4 Channels", "Slack, Discord, Telegram, webhook adapters", "later"),
                 ("5 Search", "Optional web-search capability", "later"),
                 ("6 Memory", "Embeddings for long-lived context", "later"),
@@ -2274,7 +2274,7 @@ def _run_action_required_optional_sections(
 ) -> None:
     actions = {
         "router": {
-            "prompt": "Configure AgentOS Router now?",
+            "prompt": "Configure Pilot Router now?",
             "section": "router",
             "label": "router",
             "runner": run_interactive_router_configure,

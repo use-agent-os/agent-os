@@ -132,12 +132,12 @@ def _router_detail(cfg: GatewayConfig, llm_source: str) -> str:
         return "disabled"
     llm = getattr(cfg, "llm", None)
     if llm_source == "none" or not getattr(llm, "provider", ""):
-        return "uses AgentOS Router after provider setup"
+        return "uses Pilot Router after provider setup"
     profile = str(getattr(router, "tier_profile", "") or "").strip()
     if profile:
-        return f"AgentOS Router profile: {profile}"
+        return f"Pilot Router profile: {profile}"
     default_tier = str(getattr(router, "default_tier", "") or "c1").strip()
-    return f"AgentOS Router default tier: {default_tier}"
+    return f"Pilot Router default tier: {default_tier}"
 
 
 def _llm_source(cfg: GatewayConfig, status: SectionStatus) -> tuple[str, str]:

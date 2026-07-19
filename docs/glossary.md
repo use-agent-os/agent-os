@@ -100,7 +100,7 @@ that AgentOS can load when needed.
 
 Read: [`features/skills.md`](features/skills.md)
 
-## AgentOS Router
+## Pilot Router
 
 AgentOS's local routing layer for choosing an appropriate model tier per
 turn.

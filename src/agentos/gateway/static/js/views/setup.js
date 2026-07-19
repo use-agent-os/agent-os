@@ -384,7 +384,7 @@ const SetupView = (() => {
             </select>
           </label>
           <div class="setup-provider-meta" data-provider-router-support>
-            <span>AgentOS Router tiers</span>
+            <span>Pilot Router tiers</span>
             <strong class="setup-provider-meta__badge ${_esc(routerSupportTone)}" data-provider-router-support-label>${_esc(_providerRouterSupportText(selected ? spec : null))}</strong>
           </div>
           ${_renderNeedList(selected ? spec.whatYouNeed : ['Choose a provider to see required fields.'], 'Provider needs', 'data-provider-needs')}
@@ -405,7 +405,7 @@ const SetupView = (() => {
 
   function _providerRouterSupportText(spec) {
     if (!spec || !spec.providerId) return 'choose provider';
-    return spec.routerSupported === true ? 'AgentOS Router ready' : 'Direct only';
+    return spec.routerSupported === true ? 'Pilot Router ready' : 'Direct only';
   }
 
   function _providerRouterSupportTone(spec) {
@@ -624,7 +624,7 @@ const SetupView = (() => {
             <span>Tier</span><span>Provider</span><span>Model</span><span>Thinking</span><span>Image</span>
           </div>
           ${Object.entries(tiers).filter(([name]) => TEXT_TIERS.includes(name) || name === 'image_model').map(([name, tier]) => _tierRow(name, tier)).join('')}
-        </div>` : `<div class="setup-warning" data-router-provider-needed>Choose a provider first to preview and save AgentOS Router tiers.</div>`}
+        </div>` : `<div class="setup-warning" data-router-provider-needed>Choose a provider first to preview and save Pilot Router tiers.</div>`}
         ${provider && !canSaveRouter ? `<div class="setup-warning" data-router-provider-unsaved>Save the provider before saving router tiers.</div>` : ''}
         <div class="setup-actions">
           <button class="setup-btn" data-prev="provider">Back</button>
@@ -1079,10 +1079,10 @@ const SetupView = (() => {
     const configuredProvider = _configuredProvider();
     const providerSummary = configuredProvider || 'not configured';
     const modelSummary = configuredProvider
-      ? ((_config.llm || {}).model || 'AgentOS Router defaults')
+      ? ((_config.llm || {}).model || 'Pilot Router defaults')
       : 'not configured';
     const routerSummary = configuredProvider
-      ? (router.enabled === false ? 'disabled' : 'AgentOS Router')
+      ? (router.enabled === false ? 'disabled' : 'Pilot Router')
       : 'choose a provider first';
     const providerProxy = configuredProvider ? ((_config.llm || {}).proxy || '').trim() : '';
     const configArg = _configCliArg(_status.configPath);
@@ -1250,7 +1250,7 @@ const SetupView = (() => {
   function _routerNeedsProvider(detail, name) {
     return name === 'router'
       && detail.status === 'ok'
-      && detail.detail === 'uses AgentOS Router after provider setup';
+      && detail.detail === 'uses Pilot Router after provider setup';
   }
 
   function _readinessActionLabel(detail, name) {

@@ -1,4 +1,4 @@
-"""Built-in tool for LLM-directed AgentOS Router control."""
+"""Built-in tool for LLM-directed Pilot Router control."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from agentos.tools.types import current_tool_context
 @tool(
     name="router_control",
     description=(
-        "Control the AgentOS Router for this session. Use only when the user asks "
+        "Control the Pilot Router for this session. Use only when the user asks "
         "to switch to a configured route or restore automatic routing."
     ),
     params={
@@ -55,7 +55,7 @@ async def router_control(
     router_cfg = getattr(ctx, "router_control_config", None)
     if router_cfg is None or not getattr(router_cfg, "enabled", False):
         return router_control_rejection_payload(
-            reason="AgentOS Router is disabled or unavailable",
+            reason="Pilot Router is disabled or unavailable",
             evidence=evidence,
         )
     session_key = getattr(ctx, "session_key", None)

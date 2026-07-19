@@ -190,7 +190,7 @@ def test_router_detail_explains_provider_dependency_before_provider_setup():
 
     assert (
         s.section_details["router"]["detail"]
-        == "uses AgentOS Router after provider setup"
+        == "uses Pilot Router after provider setup"
     )
     assert s.section_details["router"]["actionRequired"] is False
 

@@ -757,7 +757,7 @@ const UsageView = (() => {
     if (!el) return;
     const visibleRows = _visibleSessions();
 
-    // Group by actual per-model usage when available. AgentOS Router can route
+    // Group by actual per-model usage when available. Pilot Router can route
     // different turns in the same session to different models, while row.model
     // represents only the current/latest session model.
     const map = {};

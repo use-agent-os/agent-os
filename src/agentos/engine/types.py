@@ -173,7 +173,7 @@ class DoneEvent:
 
 @dataclass
 class RouterDecisionEvent:
-    """AgentOS Router's decision for this turn, emitted once after the
+    """Pilot Router's decision for this turn, emitted once after the
     pre-turn pipeline resolves the tier/model. Frontend uses this to drive
     the router HUD (tier pill, tier-shift highlight, scanner popover).
 

@@ -779,7 +779,7 @@ def test_setup_view_preserves_selected_image_generation_provider():
 
 def test_setup_router_controls_use_user_facing_labels():
     txt = (VIEWS / "setup.js").read_text(encoding="utf-8")
-    assert "AgentOS Router" in txt
+    assert "Pilot Router" in txt
     assert "OpenRouter mix" not in txt
     assert "Route c1" in txt
     assert "Route c2" in txt
@@ -940,14 +940,14 @@ def test_setup_provider_step_surfaces_agentos_router_tier_support():
     assert "function _providerRouterSupportText" in txt
     assert "function _providerRouterSupportTone" in txt
     assert "spec.routerSupported === true" in txt
-    assert "'AgentOS Router ready'" in txt
+    assert "'Pilot Router ready'" in txt
     assert "'Direct only'" in txt
     assert "'available'" not in body
     assert "'direct model only'" not in body
     assert "data-provider-router-support" in body
     assert "data-provider-router-support-label" in body
     assert "setup-provider-meta__badge" in body
-    assert "AgentOS Router tiers" in body
+    assert "Pilot Router tiers" in body
     assert "_providerRouterSupportText(selected ? spec : null)" in body
     assert "_providerRouterSupportTone(selected ? spec : null)" in body
     assert "routerSupport.textContent = _providerRouterSupportText(spec);" in sync_body
@@ -1351,7 +1351,7 @@ def test_setup_finish_readiness_names_router_provider_prerequisite():
     txt = (VIEWS / "setup.js").read_text(encoding="utf-8")
 
     assert "function _routerNeedsProvider" in txt
-    assert "uses AgentOS Router after provider setup" in txt
+    assert "uses Pilot Router after provider setup" in txt
 
     start = txt.index("function _setupStepForSection")
     end = txt.index("  function _readinessActionLabel", start)
@@ -1382,12 +1382,12 @@ def test_setup_finish_summary_stays_neutral_before_provider_is_configured():
     assert "const providerSummary = configuredProvider || 'not configured'" in body
     assert (
         "const modelSummary = configuredProvider"
-        "\n      ? ((_config.llm || {}).model || 'AgentOS Router defaults')"
+        "\n      ? ((_config.llm || {}).model || 'Pilot Router defaults')"
         "\n      : 'not configured'"
     ) in body
     assert (
         "const routerSummary = configuredProvider"
-        "\n      ? (router.enabled === false ? 'disabled' : 'AgentOS Router')"
+        "\n      ? (router.enabled === false ? 'disabled' : 'Pilot Router')"
         "\n      : 'choose a provider first'"
     ) in body
     assert "router.tier_profile || 'openrouter-mix'" not in body

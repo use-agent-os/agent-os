@@ -2176,7 +2176,7 @@
     z-index: 2500;
   }
   /* When the run-modes popover is open, mute the toast stack so transient
-     "AgentOS Router: ON/OFF" confirmations don't cover the popover content
+     "Pilot Router: ON/OFF" confirmations don't cover the popover content
      the user is still interacting with. The toggle's own visible state is
      the canonical feedback in this moment. */
   body:has(.chat-toolbar-popover.is-open) .toast-stack {
@@ -2255,7 +2255,7 @@
   color: #fff;
 }
 
-/* ─── Toggle Switch (AgentOS Router) ──────────────────────────────────────── */
+/* ─── Toggle Switch (Pilot Router) ──────────────────────────────────────── */
 
 .toggle-switch-wrap {
   display: flex;
@@ -2357,7 +2357,7 @@
 }
 
 /* ─── Router-fx dock ──────────────────────────────────────────────────────
- * Hosts the AgentOS Router auto-select strip BELOW the chat input bar, in
+ * Hosts the Pilot Router auto-select strip BELOW the chat input bar, in
  * the slot where the routed model is displayed. One strip at a time; the
  * dock collapses to nothing while empty so the composer keeps its height. */
 .chat-routerfx-dock {
@@ -2483,7 +2483,7 @@
   50% { box-shadow: 0 0 8px 3px rgba(239, 68, 68, 0.25); }
 }
 
-/* ─── AgentOS Router & Prompt-Cache per-turn chips ────────────────────────── */
+/* ─── Pilot Router & Prompt-Cache per-turn chips ────────────────────────── */
 
 .msg-savings-bar {
   display: flex;
@@ -2512,7 +2512,7 @@
   to   { opacity: 1; transform: scale(1); }
 }
 
-/* AgentOS Router tier routing  -  amber. Token-based: color-mix(var(--warn))
+/* Pilot Router tier routing  -  amber. Token-based: color-mix(var(--warn))
    resolves per theme, so the hand-written [data-theme] twins are gone. */
 .savings-chip--tier {
   background: color-mix(in srgb, var(--warn) 14%, transparent);
@@ -2776,7 +2776,7 @@
 
 /* ──────────────────────────────────────────────────────────────────
  * Router slider  -  arcade-brutalist whac-a-mole grid that fires when
- * the AgentOS Router lands a tier.
+ * the Pilot Router lands a tier.
  *
  * The strip is a compact grid of real candidates for the current
  * request kind. A square hammer-selector hops between cells with

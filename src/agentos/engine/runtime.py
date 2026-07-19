@@ -1517,7 +1517,7 @@ class TurnRunner:
 
     @property
     def router_control_config(self) -> Any:
-        """Active AgentOS Router config section, or None when not configured."""
+        """Active Pilot Router config section, or None when not configured."""
         return getattr(self._config, "agentos_router", None)
 
     def has_compacted_this_turn(self, session_key: str) -> bool:
@@ -1909,7 +1909,7 @@ class TurnRunner:
         1. Resolve provider (cloned selector — no shared state mutation)
         2. Build tools + handler from registry (filtered by tool_context)
         3. Assemble identity system prompt
-        4. Run pre-turn pipeline (model routing, AgentOS Router, skills, prompt cache)
+        4. Run pre-turn pipeline (model routing, Pilot Router, skills, prompt cache)
         5. Load session history
         6. Construct and run Agent
         7. Persist assistant response to transcript
@@ -3966,7 +3966,7 @@ class TurnRunner:
                 )
                 return commit_deferred_router_history(routed)
             except TimeoutError as exc:
-                raise TimeoutError(f"AgentOS Router timed out after {router_timeout:g}s") from exc
+                raise TimeoutError(f"Pilot Router timed out after {router_timeout:g}s") from exc
 
         _bounded_apply_agentos_router.__name__ = "apply_agentos_router"
 
@@ -4246,7 +4246,7 @@ class TurnRunner:
                 router_cfg = getattr(self._config, "agentos_router", None)
                 agentos_router_tiers = getattr(router_cfg, "tiers", {})
 
-                # AgentOS Router
+                # Pilot Router
                 savings_telemetry.routed_model = metadata.get("routed_model")
                 savings_telemetry.baseline_model = metadata.get("baseline_model")
                 savings_telemetry.routing_confidence = metadata.get("routing_confidence")

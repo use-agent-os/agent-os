@@ -331,7 +331,7 @@ def migrate_config_payload(data: dict[str, Any]) -> ConfigMigrationResult:
                 "(default flip; legacy router auto-migrated on load)"
             )
             logging.getLogger(__name__).info(
-                "AgentOS router strategy force-migrated %s -> %s on config load",
+                "Pilot router strategy force-migrated %s -> %s on config load",
                 V4_STRATEGY_ID,
                 PILOT_STRATEGY_ID,
             )

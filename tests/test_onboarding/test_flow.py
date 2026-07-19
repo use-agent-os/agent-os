@@ -532,7 +532,7 @@ def test_interactive_onboard_migration_defaults_to_all_sources_and_keeps_importe
         def select(self, message: str, **_kwargs):
             calls.append(message)
             if message == "Router mode":
-                return _Answer("AgentOS Router")
+                return _Answer("Pilot Router")
             if message == "Default text model":
                 return _Answer(_kwargs.get("default"))
             if message == "Router judge model":
@@ -646,7 +646,7 @@ def test_interactive_onboard_imported_provider_prefers_inline_key_over_env(
         def select(self, message: str, **kwargs):
             calls.append(message)
             if message == "Router mode":
-                return _Answer("AgentOS Router")
+                return _Answer("Pilot Router")
             if message == "Default text model":
                 return _Answer(kwargs.get("default"))
             if message == "Router judge model":
@@ -768,7 +768,7 @@ def test_interactive_onboard_imported_provider_finalize_error_continues_setup(
             if message == "LLM API key source":
                 return _Answer("Use environment variable OPENROUTER_API_KEY")
             if message == "Router mode":
-                return _Answer("AgentOS Router")
+                return _Answer("Pilot Router")
             if message == "Default text model":
                 return _Answer(kwargs.get("default"))
             if message == "Router judge model":
@@ -960,7 +960,7 @@ def test_interactive_onboard_migration_preview_failure_continues_provider_setup(
             if message == "LLM API key source":
                 return _Answer("Use environment variable OPENROUTER_API_KEY")
             if message == "Router mode":
-                return _Answer("AgentOS Router")
+                return _Answer("Pilot Router")
             if message == "Default text model":
                 return _Answer(kwargs.get("default"))
             if message == "Router judge model":
@@ -1073,7 +1073,7 @@ def test_interactive_onboard_migration_prompts_for_missing_imported_provider_key
                 assert kwargs.get("default") == "Paste API key now"
                 return _Answer("Paste API key now")
             if message == "Router mode":
-                return _Answer("AgentOS Router")
+                return _Answer("Pilot Router")
             if message == "Default text model":
                 return _Answer(kwargs.get("default"))
             if message == "Router judge model":
@@ -1136,7 +1136,7 @@ def test_interactive_onboard_can_enable_image_generation(tmp_path, monkeypatch):
                 )
                 return _Answer("Use environment variable OPENROUTER_API_KEY (detected)")
             if message == "Router mode":
-                return _Answer("AgentOS Router")
+                return _Answer("Pilot Router")
             if message == "Default text model":
                 return _Answer(kwargs.get("default"))
             if message == "Router judge model":

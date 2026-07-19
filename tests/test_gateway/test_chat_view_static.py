@@ -3294,7 +3294,7 @@ def test_chat_queue_drain_preserves_draft_typed_during_stream() -> None:
 
 
 def test_savings_burst_popup_is_disabled_by_default() -> None:
-    """The AgentOS Router scanning strip stays, but the celebratory savings burst +
+    """The Pilot Router scanning strip stays, but the celebratory savings burst +
     'Saved ~X%' float is gated off. noteTurn() must still run (streak/meta
     footer), and the gate must short-circuit before SavingsFX.fire()."""
     source = CHAT_JS.read_text(encoding="utf-8")

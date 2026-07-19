@@ -33,7 +33,7 @@ estimated cost.
 agentos cost --by-model
 ```
 
-Use this when AgentOS Router is enabled and you want to see which models carried
+Use this when Pilot Router is enabled and you want to see which models carried
 the recent workload.
 
 ## Use JSON Output

@@ -39,7 +39,7 @@ agentos diagnostics off
 Use diagnostics for:
 
 - provider retries, timeouts, or empty responses;
-- AgentOS Router model decisions;
+- Pilot Router model decisions;
 - prompt-cache or cache-break investigation;
 - compaction lifecycle events;
 - large tool-result compression;

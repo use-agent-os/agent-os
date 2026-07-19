@@ -1,7 +1,7 @@
 # Providers and Models
 
 AgentOS supports multiple LLM providers through one configuration surface.
-You can run direct single-model mode or enable AgentOS Router for tiered routing.
+You can run direct single-model mode or enable Pilot Router for tiered routing.
 
 Use this page when you need to configure a provider, inspect model support, or
 choose between direct model mode and router mode.

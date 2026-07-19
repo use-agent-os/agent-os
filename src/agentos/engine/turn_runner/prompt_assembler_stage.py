@@ -244,7 +244,7 @@ class PromptAssemblerStageOutput:
       etc.). Downstream stages read ``turn.metadata`` and ``turn.tool_defs``.
     - ``effective_runtime_message``: the message string the agent loop
       should pass to the provider — may be the post-pipeline-rewritten
-      ``turn.message`` (e.g. AgentOS Router rewrites).
+      ``turn.message`` (e.g. Pilot Router rewrites).
     - ``final_prompt``: the resolved system prompt string.
     - ``cache_breakpoints``: the cache-break list for the provider call,
       or ``None``.

@@ -86,7 +86,7 @@ def _section_status_display(status: OnboardingStatus, name: str) -> str:
     if (
         name == "router"
         and state is SectionStatus.OK
-        and _section_detail(status, name) == "uses AgentOS Router after provider setup"
+        and _section_detail(status, name) == "uses Pilot Router after provider setup"
     ):
         return "Provider first"
     return _status_display(state)
@@ -372,7 +372,7 @@ def _print_optional_action_handoff(
 
 onboard_app = typer.Typer(
     help=(
-        "AgentOS setup cockpit for providers, AgentOS Router, "
+        "AgentOS setup cockpit for providers, Pilot Router, "
         "channels, search, images, and memory."
     ),
     invoke_without_command=True,
@@ -614,7 +614,7 @@ _CATALOG_SECTION_COMMANDS = {
 
 _CATALOG_TITLES = {
     "providers": "Text providers",
-    "routerProfiles": "AgentOS Router profiles",
+    "routerProfiles": "Pilot Router profiles",
     "searchProviders": "Web search providers",
     "channels": "Channel types",
     "imageGenerationProviders": "Image generation providers",
@@ -763,7 +763,7 @@ def _print_catalog_recipe_hint() -> None:
 
 
 def _catalog_provider_route(row: dict[str, object]) -> str:
-    return "AgentOS Router ready" if row.get("routerSupported") else "Direct only"
+    return "Pilot Router ready" if row.get("routerSupported") else "Direct only"
 
 
 def _print_list_catalog(
@@ -851,7 +851,7 @@ def _router_tier_summary(profile: dict[str, object]) -> str:
 def _print_router_catalog(catalog: dict[str, object], config_arg: str = "") -> None:
     modes = catalog.get("modes")
     if isinstance(modes, list):
-        console.print("[bold]AgentOS router modes[/bold]")
+        console.print("[bold]Pilot router modes[/bold]")
         for row in modes:
             if not isinstance(row, dict):
                 continue
@@ -870,7 +870,7 @@ def _print_router_catalog(catalog: dict[str, object], config_arg: str = "") -> N
                 f"- {_catalog_value(row, 'profileId')}: {_catalog_value(row, 'label')}"
                 f" | {_router_tier_summary(row)}"
             )
-    console.print("Copy a Try line to keep the default AgentOS router profile.")
+    console.print("Copy a Try line to keep the default Pilot router profile.")
     _print_catalog_line(f"  Try: {_catalog_command('routerProfiles', config_arg)}")
 
 

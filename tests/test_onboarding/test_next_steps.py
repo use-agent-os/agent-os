@@ -69,7 +69,7 @@ def test_onboarding_finish_output_uses_product_router_label():
 
     text = format_next_steps(GatewayConfig(), config_path="/tmp/agentos/custom.toml")
 
-    assert "  Router: AgentOS Router, default=c1" in text
+    assert "  Router: Pilot Router, default=c1" in text
     assert "profile=openrouter-mix" not in text
 
 

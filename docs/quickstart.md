@@ -2,7 +2,7 @@
 
 This guide gets AgentOS installed, configured, and running locally. It
 assumes you want the standard product experience: terminal commands, local Web
-UI, AgentOS Router, memory/search support, and safe local defaults.
+UI, Pilot Router, memory/search support, and safe local defaults.
 
 ## Requirements
 
@@ -18,7 +18,7 @@ Install the current release (recommended extras included) by following the
 release assets are always on the
 [Releases page](https://github.com/use-agent-os/agent-os/releases/latest).
 
-The `recommended` extra includes AgentOS Router dependencies and memory/search
+The `recommended` extra includes Pilot Router dependencies and memory/search
 support used by the default product experience.
 
 If `agentos` is not found after install, open a new shell or run:
@@ -210,7 +210,7 @@ After the first run:
    [`features/memory.md`](features/memory.md).
 4. Review tool permissions before unattended automation:
    [`tools-and-sandbox.md`](tools-and-sandbox.md).
-5. Learn AgentOS Router if you want cost-aware model routing:
+5. Learn Pilot Router if you want cost-aware model routing:
    [`features/agentos-router.md`](features/agentos-router.md).
 6. Use the glossary if product terms are unfamiliar:
    [`glossary.md`](glossary.md).

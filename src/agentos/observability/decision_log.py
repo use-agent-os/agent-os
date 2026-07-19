@@ -54,7 +54,7 @@ RoutingSource = Literal[
 class SavingsTelemetry:
     """Per-turn savings telemetry."""
 
-    # AgentOS Router (V4_phase3 ML + heuristic)
+    # Pilot Router (V4_phase3 ML + heuristic)
     routed_model: str | None = None
     baseline_model: str | None = None
     routing_confidence: float | None = None

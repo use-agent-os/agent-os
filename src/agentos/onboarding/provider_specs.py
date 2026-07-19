@@ -144,7 +144,7 @@ def _model_description(spec: ProviderSpec, *, router_supported: bool) -> str:
     if router_supported:
         return (
             "Optional direct fallback model. Leave blank to use the selected "
-            "AgentOS Router default tier."
+            "Pilot Router default tier."
         )
     if spec.provider_id in _LOCAL_PROVIDER_IDS:
         return "Required local model id. Use a model available from your local model server."

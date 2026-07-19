@@ -15,7 +15,7 @@ channels, scheduling, and reusable skills.
 
 ## Distinctive Features
 
-### AgentOS Router
+### Pilot Router
 
 Local routing for model tier selection. It is designed to keep easy turns cheap
 and reserve expensive models for work that needs them.
