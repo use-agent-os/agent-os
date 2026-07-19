@@ -101,8 +101,8 @@ file name.
 | `uv` | — | installed if missing | recommended | required |
 
 The default `recommended` profile installs **Pilot Router** — AgentOS's
-own on-device model router (strategy `v4_phase3`) — along with the Python
-dependencies it needs (ONNX Runtime, LightGBM, scikit-learn). Its model
+own on-device model router (strategy `pilot-v1`) — along with the Python
+dependencies it needs (ONNX Runtime, NumPy, Tokenizers). Its model
 bundle ships inside the wheel, so routing works offline with no extra
 download. If you install from a source checkout, run
 `git lfs pull` first; without it the bundle is only pointer stubs, and the
@@ -274,6 +274,7 @@ python -m pip install --user --upgrade "use-agent-os[recommended]"
 cd agent-os
 git pull
 git lfs pull --include="src/agentos/memory/models/**"
+git lfs pull --include="src/agentos/agentos_router/models/**"
 bash scripts/install_source.sh        # Windows: scripts/install_source.ps1
 ```
 
@@ -316,6 +317,7 @@ you plan to change the code, use
    git clone https://github.com/use-agent-os/agent-os.git
    cd agent-os
    git lfs pull --include="src/agentos/memory/models/**"
+git lfs pull --include="src/agentos/agentos_router/models/**"
    ```
 
 2. **Run the installer**

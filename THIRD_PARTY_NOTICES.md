@@ -4,7 +4,7 @@ This file records third-party attribution for code and assets bundled with
 AgentOS. It covers:
 
 - Core runtime modules derived from OpenSquilla (Apache-2.0); see the
-  first section below. Releases up to and including 2026.7.19 additionally
+  first section below. Releases up to and including the v2026.7.19 release tag additionally
   shipped the V4 Phase 3 router engine module
   (`src/agentos/agentos_router/v4_phase3.py`) and the V4 Phase 3 model bundle
   (OpenSquilla-trained weights and inference code); both have since been
@@ -36,7 +36,7 @@ AgentOS. It covers:
 ## OpenSquilla-derived core modules
 
 - Component: core runtime modules under `src/agentos/`, and (in releases up
-  to and including 2026.7.19) the V4 Phase 3 local ML router bundle (trained
+  to and including the v2026.7.19 release tag) the V4 Phase 3 local ML router bundle (trained
   model weights and inference code) under
   `src/agentos/agentos_router/models/v4.2_phase3_inference/`.
 - Upstream project: https://github.com/opensquilla/opensquilla
@@ -56,12 +56,14 @@ The highest-overlap modules include:
 - `src/agentos/gateway_client.py` and
   `src/agentos/cli/gateway_client.py` — gateway client plumbing
 - `src/agentos/agentos_router/v4_phase3.py` — router phase logic (shipped in
-  releases up to and including 2026.7.19; since removed from the tree with
-  the rest of the V4 Phase 3 router)
+  releases up to and including the v2026.7.19 release tag; since removed from
+  the tree with the rest of the V4 Phase 3 router). Its tier-resolution helper
+  survives in modified form as `src/agentos/agentos_router/tiers_util.py`,
+  which remains OpenSquilla-derived.
 
 ### V4 Phase 3 router bundle (model weights and inference code) — historical
 
-Releases up to and including 2026.7.19 bundled the local ML router assets
+Releases up to and including the v2026.7.19 release tag bundled the local ML router assets
 under `src/agentos/agentos_router/models/v4.2_phase3_inference/`. That bundle
 is OpenSquilla's, carried over from upstream
 `src/opensquilla/squilla_router/models/v4.2_phase3_inference/`. It is **not**

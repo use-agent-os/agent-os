@@ -113,8 +113,12 @@ function Test-EmbeddingAssets {
     }
 
     $modelRoot = 'src/agentos/memory/models/bge_onnx'
+    $pilotRoot = 'src/agentos/agentos_router/models/pilot_v1'
+    $miniLmRoot = 'src/agentos/memory/models/embeddings/all-MiniLM-L6-v2-int8'
     $required = @(
-        "$modelRoot/model.onnx"
+        "$modelRoot/model.onnx",
+        "$pilotRoot/model.onnx",
+        "$miniLmRoot/model.onnx"
     )
     $pointerLine = 'version https://git-lfs.github.com/spec/v1'
     $missing = New-Object System.Collections.Generic.List[string]
@@ -146,7 +150,7 @@ function Test-EmbeddingAssets {
             $message = "install_source.ps1: Git LFS pointer files detected: $($pointers -join ', ')"
             if ($WarnOnly) { Write-Host $message } else { Write-Error $message }
         }
-        $lfsMessage = 'install_source.ps1: run `git lfs install` once, then `git lfs pull --include="src/agentos/memory/models/**"`.'
+        $lfsMessage = 'install_source.ps1: run `git lfs install` once, then `git lfs pull --include="src/agentos/memory/models/**"` and `git lfs pull --include="src/agentos/agentos_router/models/**"`.'
         $coreMessage = 'install_source.ps1: or retry with `$env:AGENTOS_INSTALL_PROFILE="core"` for the minimal runtime.'
         if ($WarnOnly) {
             Write-Host $lfsMessage

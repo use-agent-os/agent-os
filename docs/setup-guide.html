@@ -332,6 +332,7 @@ agentos --help</pre>
 git clone https://github.com/use-agent-os/agent-os.git
 cd agent-os
 git lfs pull --include="src/agentos/memory/models/**"
+git lfs pull --include="src/agentos/agentos_router/models/**"
 
 # macOS / Linux
 bash scripts/install_source.sh
@@ -729,7 +730,8 @@ agentos configure search</pre></div>
             Local memory embedding is missing.
             <span class="text-[var(--accent)] transition group-open:rotate-45">+</span>
           </summary>
-          <p class="pb-5 text-[14px] leading-relaxed text-[var(--text-dim)]">On-device memory embedding needs the recommended extras. Reinstall with the <span class="mono text-[var(--text)]">agentos[recommended]</span> wheel, and if you built from source, pull the LFS model files with <span class="mono text-[var(--text)]">git lfs pull --include="src/agentos/memory/models/**"</span>.</p>
+          <p class="pb-5 text-[14px] leading-relaxed text-[var(--text-dim)]">On-device memory embedding needs the recommended extras. Reinstall with the <span class="mono text-[var(--text)]">agentos[recommended]</span> wheel, and if you built from source, pull the LFS model files with <span class="mono text-[var(--text)]">git lfs pull --include="src/agentos/memory/models/**"
+git lfs pull --include="src/agentos/agentos_router/models/**"</span>.</p>
         </details>
       </div>
 

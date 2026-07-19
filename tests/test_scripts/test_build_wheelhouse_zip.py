@@ -179,8 +179,8 @@ def test_release_wheel_allows_router_bundle_provenance_markdown() -> None:
         (bundle_provenance, other_bundle_doc)
     )
 
-    # The weights are OpenSquilla-derived (Apache-2.0), so their attribution
-    # ships with them; unrelated bundle markdown stays forbidden.
+    # Router model bundles may ship a PROVENANCE.md so attribution travels
+    # with the weights; unrelated bundle markdown stays forbidden.
     assert bundle_provenance not in violations
     assert other_bundle_doc in violations
 

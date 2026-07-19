@@ -847,7 +847,7 @@ async def test_judge_strategy_build_failure_falls_back_to_default_tier(
 
     monkeypatch.setattr(llm_judge, "LLMJudgeStrategy", ExplodingJudgeStrategy)
     ctx = make_context("Explain the setup steps.")
-    # The default strategy is now v4_phase3; select llm_judge explicitly so the
+    # The default strategy is pilot-v1; select llm_judge explicitly so the
     # judge build-failure path (ExplodingJudgeStrategy) is the one exercised.
     ctx.config.agentos_router.strategy = "llm_judge"
 
@@ -889,7 +889,7 @@ async def test_trivial_route_class_derives_p0_and_injects_hint_end_to_end(
     router injects the localized P0 hint into the display message."""
     _real_judge_strategy(monkeypatch, "R0")
     ctx = make_context("thanks, that works")
-    # Default strategy is now v4_phase3; select the judge explicitly so the real
+    # Default strategy is pilot-v1; select the judge explicitly so the real
     # LLMJudgeStrategy derivation (mocked _judge) is the path under test.
     ctx.config.agentos_router.strategy = "llm_judge"
 
@@ -911,7 +911,7 @@ async def test_trivial_chinese_route_class_injects_localized_p0_hint_end_to_end(
     Chinese (restores the deleted localized-P0 coverage)."""
     _real_judge_strategy(monkeypatch, "R0")
     ctx = make_context("谢谢，这个可以了")
-    # Default strategy is now v4_phase3; select the judge explicitly so the real
+    # Default strategy is pilot-v1; select the judge explicitly so the real
     # LLMJudgeStrategy localized-hint derivation is the path under test.
     ctx.config.agentos_router.strategy = "llm_judge"
 
@@ -932,7 +932,7 @@ async def test_complex_route_class_derives_t3_p2_without_p0_injection_end_to_end
         "Diagnose this intermittent production data-corruption bug across "
         "services and plan a safe rollback."
     )
-    # Default strategy is now v4_phase3; select the judge explicitly so the real
+    # Default strategy is pilot-v1; select the judge explicitly so the real
     # LLMJudgeStrategy derivation (mocked _judge) is the path under test.
     ctx.config.agentos_router.strategy = "llm_judge"
 

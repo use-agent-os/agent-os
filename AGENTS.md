@@ -66,7 +66,7 @@ shared **engine** loop, which calls the **router** to pick a model and executes
 |---|---|
 | `engine/` | Agent core state machine / turn loop (lazy public surface — import `agentos.engine.types` without dragging in the world). |
 | `gateway/` | ASGI gateway: WebSocket, middleware, RPC, sessions, approvals, task runtime. |
-| `agentos_router/` | Local model router — picks the cheapest capable model per turn. Default strategy `v4_phase3` (on-device ML, BGE+LightGBM, no LLM call); alternative `llm_judge` strategy tiers each turn via a small LLM call. |
+| `agentos_router/` | Local model router — picks the cheapest capable model per turn. Default strategy `pilot-v1` (on-device ML, MiniLM+ONNX, no LLM call); alternative `llm_judge` strategy tiers each turn via a small LLM call. |
 | `provider/` | Unified LLM provider abstraction (OpenRouter, Bankr, OpenAI, Anthropic, Ollama, DeepSeek, Gemini, Qwen, …). |
 | `tools/` | Tool Registry + built-in tools (`ToolContext`, `RegisteredTool`, `ToolError`). |
 | `sandbox/` | Layered sandbox & security grading. Safe to import at startup (no subprocess/FS probing). |

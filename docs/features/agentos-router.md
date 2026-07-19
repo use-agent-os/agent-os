@@ -54,8 +54,8 @@ nothing leaves your machine.
 **Status: default strategy.** `pilot-v1` is the default router strategy — a
 fresh install routes through it with no config change. It was promoted from
 opt-in after passing the owner's relative-to-incumbent ship gate (it beats the
-`v4_phase3` incumbent on 11/12 evaluation axes; see `DATA.md` /
-`eval_report.md`). The legacy `v4_phase3` engine and its ~52MB model bundle
+`v4_phase3` incumbent on 11/12 evaluation axes; see
+`scripts/pilot_router/DATA.md` / `scripts/pilot_router/eval_report.md`). The legacy `v4_phase3` engine and its ~52MB model bundle
 have been removed from the tree entirely (Phase C); a config that still pins it
 is auto-migrated to `pilot-v1` on the next load (see **Upgrading from
 v4_phase3**).

@@ -47,15 +47,15 @@ RUN python - <<'PY'
 from pathlib import Path
 
 root = Path("src/agentos/memory/models/bge_onnx")
-bundle = Path("src/agentos/agentos_router/models/v4.2_phase3_inference")
+pilot = Path("src/agentos/agentos_router/models/pilot_v1")
+minilm = Path("src/agentos/memory/models/embeddings/all-MiniLM-L6-v2-int8")
 required = [
     root / "model.onnx",
-    # v4_phase3 router bundle: without these every turn silently degrades to
-    # the default tier.
-    bundle / "lgbm_main.bin",
-    bundle / "mlp" / "model.onnx",
-    bundle / "features" / "tfidf.pkl",
-    bundle / "router.runtime.yaml",
+    # pilot-v1 router bundle + its MiniLM encoder: without these every turn
+    # silently degrades to the default tier.
+    pilot / "model.onnx",
+    pilot / "manifest.json",
+    minilm / "model.onnx",
 ]
 pointer = "version https://git-lfs.github.com/spec/v1"
 missing = [str(path) for path in required if not path.is_file()]

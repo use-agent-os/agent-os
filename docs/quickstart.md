@@ -224,6 +224,7 @@ git lfs install
 git clone https://github.com/use-agent-os/agent-os.git
 cd agent-os
 git lfs pull --include="src/agentos/memory/models/**"
+git lfs pull --include="src/agentos/agentos_router/models/**"
 bash scripts/install_source.sh
 ```
 

@@ -12,8 +12,7 @@ src/agentos/memory/models/embeddings/**/*.onnx filter=lfs diff=lfs merge=lfs -te
 src/agentos/memory/models/embeddings/**/*.json text eol=lf
 src/agentos/memory/models/embeddings/**/*.txt text eol=lf
 
-# Pilot router (Rev 4) production bundle: self-trained model.onnx + manifest.
-# Pre-staged ahead of T7 (training), which will populate the directory itself
-# and add the required-files hydration assertions in the release workflows.
+# Pilot router (Rev 4) production bundle: self-trained model.onnx + manifest,
+# guarded by required-files hydration assertions in the release workflows.
 src/agentos/agentos_router/models/pilot_v1/*.onnx filter=lfs diff=lfs merge=lfs -text
 src/agentos/agentos_router/models/pilot_v1/*.json text eol=lf

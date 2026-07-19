@@ -19,9 +19,10 @@ post-guards), mapped back to the 4-class ``R0..R3`` space.
 * Pilot strategy: the T7 staging artifact
   (``scripts/pilot_router/artifacts/pilot_v1/``), the production ``_MiniLMEncoder``,
   thresholds at the defaults (safety_net 0.5 / confidence 0.5).
-* v4 strategy: the legacy bundle, which no longer ships in the tree — point
-  ``agentos_router.v4_bundle_dir`` (or a local checkout of the pre-removal
-  revision) at ``v4.2_phase3_inference/`` to reproduce the baseline rows.
+* v4 strategy: the legacy engine and bundle were removed from the tree
+  (Phase C, including the ``v4_bundle_dir`` config key) — run this script from
+  a pre-removal checkout to reproduce the baseline rows, or reuse the
+  committed baseline report under ``tests/data/router_eval/reports/``.
 
 **Turn ordering.** Within a conversation, ``turn_id`` (WildChat's
 ``turn_identifier``, a per-turn ordinal that ascends with dialogue position) is
