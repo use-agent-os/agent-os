@@ -232,7 +232,10 @@ class GitHubSource(SkillSource):
             results.append(
                 SkillMeta(
                     name=skill_name,
-                    description=repo.get("description", ""),
+                    # `or ""` (not a .get default): GitHub's repo API sends an
+                    # explicit null description, which .get returns as None and
+                    # would break the str contract downstream.
+                    description=repo.get("description") or "",
                     source_id=self.source_id,
                     trust_level=self.trust_level,
                     identifier=f"{full_name}:{path}",

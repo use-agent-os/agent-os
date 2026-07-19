@@ -51,6 +51,7 @@ class InstallResult:
     message: str = ""
     scan: ScanResult | None = None
     path: str = ""
+    sha256: str = ""
 
 
 class SkillInstaller:
@@ -181,6 +182,7 @@ class SkillInstaller:
             message=f"Installed '{name}' from {source_id}",
             scan=scan_result,
             path=str(install_dir),
+            sha256=sha,
         )
 
     async def uninstall(self, name: str) -> InstallResult:
@@ -207,7 +209,13 @@ class SkillInstaller:
         return InstallResult(success=True, name=name, message=f"Uninstalled '{name}'")
 
     async def update(self, name: str | None = None) -> list[InstallResult]:
-        """Re-install skills from lockfile. If name is None, update all."""
+        """Re-install skills from lockfile (re-fetches the latest source code).
+
+        If ``name`` is None, update all. The message distinguishes a genuine
+        update from a no-op by comparing the content hash before and after: the
+        source identifier tracks a branch (e.g. ``.../tree/main/bankr``), so a
+        re-fetch pulls whatever the branch tip is now.
+        """
         lockfile = Lockfile.load(self._lockfile_path)
         results = []
         entries = {name: lockfile.get(name)} if name else lockfile.installed
@@ -217,6 +225,12 @@ class SkillInstaller:
                     InstallResult(success=False, name=skill_name, message="Not in lockfile")
                 )
                 continue
+            old_sha = entry.sha256
             result = await self.install(entry.identifier, entry.source, force=True)
+            if result.success:
+                if old_sha and result.sha256 == old_sha:
+                    result.message = f"'{result.name}' is already up to date"
+                else:
+                    result.message = f"Updated '{result.name}' to the latest version"
             results.append(result)
         return results

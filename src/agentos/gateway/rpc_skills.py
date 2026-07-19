@@ -17,6 +17,7 @@ from agentos.skills.eligibility import (
 from agentos.skills.hub.defaults import (
     build_default_skill_installer,
     get_default_skill_router,
+    installed_skill_identifiers,
     installed_skill_names,
 )
 from agentos.skills.hub.deps import install_deps
@@ -351,12 +352,13 @@ async def _handle_skills_search(params: dict | None, ctx: RpcContext) -> dict[st
     if source_id is not None and not isinstance(source_id, str):
         source_id = None
     results = await router.search(query, limit=limit, source_id=source_id)
-    installed = _installed_names()
-    # Lockfile keys are the installer's name — which for ClawHub is the
-    # slug (``identifier``), not the human-readable ``displayName`` a
-    # source may return as ``SkillMeta.name``. Check both so we catch
-    # either convention; a future source that matches on name directly
-    # still works.
+    # Match a browse result to a lockfile install by BOTH name and identifier.
+    # Lockfile keys are the installer's name (SKILL.md frontmatter), which may
+    # be neither the ``displayName`` a source returns as ``SkillMeta.name`` nor
+    # the catalog slug — e.g. Bankr's ``bankr-token-scam-analysis`` slug
+    # installs under the name ``token-scam-analysis``. The lockfile entry's
+    # identifier (the source URL) is the reliable join key across a reload.
+    installed = _installed_names() | installed_skill_identifiers()
     return {
         "results": [
             {
@@ -369,6 +371,7 @@ async def _handle_skills_search(params: dict | None, ctx: RpcContext) -> dict[st
                 "identifier": r.identifier,
                 "provider": r.provider,
                 "logo": r.logo,
+                "emoji": r.emoji,
                 "category": r.category,
                 "setup": r.setup,
                 "demo": r.demo,
@@ -529,6 +532,7 @@ async def _handle_skills_deps_install(params: dict | None, ctx: RpcContext) -> d
 # ---------------------------------------------------------------------------
 # Default router/installer (lazy init)
 # ---------------------------------------------------------------------------
+
 
 def _get_default_router():
     return get_default_skill_router()

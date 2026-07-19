@@ -524,6 +524,11 @@
   color: var(--text-muted);
   border: 1px solid var(--border);
 }
+.sk-rcard__logo--emoji {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 18px; line-height: 1;
+  border: 1px solid var(--border);
+}
 .sk-rcard__titles { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .sk-rcard__name {
   font-weight: 700; font-size: var(--fs-sm); color: var(--text);
@@ -690,6 +695,11 @@
   font-family: var(--font-mono);
   font-size: 14px; font-weight: 700;
   color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.sk-dialog__logo--emoji {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 22px; line-height: 1;
   border: 1px solid var(--border);
 }
 .sk-dialog__provider { font-size: var(--fs-sm); color: var(--text-dim); margin-top: 2px; }

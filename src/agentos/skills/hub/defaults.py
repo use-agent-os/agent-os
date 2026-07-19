@@ -46,3 +46,21 @@ def installed_skill_names() -> set[str]:
 
     lockfile_path = default_agentos_home() / "skills-lock.json"
     return set(Lockfile.load(lockfile_path).installed.keys())
+
+
+def installed_skill_identifiers() -> set[str]:
+    """Return the source identifiers recorded as Community installs.
+
+    The lockfile is keyed by the installed skill's *name* (from its SKILL.md
+    frontmatter), which can differ from the catalog slug a browse card carries
+    (e.g. Bankr's ``bankr-token-scam-analysis`` slug installs as
+    ``token-scam-analysis``). Matching a browse result by identifier as well as
+    by name keeps its "installed" badge correct across a page reload.
+    """
+
+    lockfile_path = default_agentos_home() / "skills-lock.json"
+    return {
+        entry.identifier
+        for entry in Lockfile.load(lockfile_path).installed.values()
+        if entry.identifier
+    }

@@ -58,7 +58,10 @@ class ClawHubSource(SkillSource):
             results.append(
                 SkillMeta(
                     name=item.get("displayName", item.get("name", item.get("slug", ""))),
-                    description=item.get("summary", item.get("description", "")),
+                    # `or ""` (not a .get default): the API may send an explicit
+                    # null, which .get returns as None and would break the str
+                    # contract downstream (e.g. CLI description slicing).
+                    description=item.get("summary") or item.get("description") or "",
                     version=item.get("version", ""),
                     author=item.get("author", ""),
                     source_id=self.source_id,
@@ -156,7 +159,7 @@ class ClawHubSource(SkillSource):
 
         return SkillMeta(
             name=item.get("name", item.get("slug", identifier)),
-            description=item.get("description", ""),
+            description=item.get("description") or "",
             version=item.get("version", ""),
             author=item.get("author", ""),
             source_id=self.source_id,

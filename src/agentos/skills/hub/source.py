@@ -24,6 +24,7 @@ class SkillMeta:
     platforms: list[str] = field(default_factory=list)
     provider: str = ""  # publisher/brand (e.g. Bankr catalog "provider")
     logo: str = ""  # raw URL to a logo asset, or "" for an initials fallback
+    emoji: str = ""  # avatar emoji shown when no logo asset is available
     category: str = ""  # coarse grouping for browse filters (e.g. "defi")
     setup: list[str] = field(default_factory=list)  # ordered setup steps, if any
     demo: dict[str, Any] = field(default_factory=dict)  # {title, language, code}

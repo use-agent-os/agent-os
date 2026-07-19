@@ -5,7 +5,12 @@ from typing import Any
 
 import pytest
 
-from agentos.skills.hub.bankr import BankrSource
+from agentos.skills.hub.bankr import _ALLOWED_SLUGS, BankrSource
+
+# The fake catalog exercises the filtering paths (installable / external /
+# malformed). We hand BankrSource this slug set via ``allowlist=`` so the source
+# fetches exactly these directly — no repo tree crawl.
+_FIXTURE_SLUGS = ("alchemy", "bankr", "extern", "broken")
 
 
 def _catalog(slug: str, *, install_type: str = "bankr", logo: str | None = None) -> bytes:
@@ -45,17 +50,12 @@ class _Response:
 
 
 class _AsyncClient:
-    """Mocks the BankrBot/skills tree + catalog.json fetches."""
+    """Mocks the per-skill BankrBot/skills catalog.json + SKILL.md fetches.
 
-    tree_entries = [
-        {"path": "alchemy/catalog.json", "type": "blob"},
-        {"path": "alchemy/SKILL.md", "type": "blob"},
-        {"path": "bankr/catalog.json", "type": "blob"},
-        {"path": "extern/catalog.json", "type": "blob"},
-        {"path": "broken/catalog.json", "type": "blob"},
-        {"path": ".github/workflows/ci.yml", "type": "blob"},
-        {"path": "nested/dir/catalog.json", "type": "blob"},  # too deep — ignored
-    ]
+    The source no longer crawls the git tree, so hitting the trees API here is a
+    regression — it raises instead.
+    """
+
     catalogs = {
         "alchemy": _catalog("alchemy", logo="alchemy.svg"),
         "bankr": _catalog("bankr", logo=None),
@@ -66,7 +66,6 @@ class _AsyncClient:
         "alchemy": b"---\nname: alchemy\ndescription: On-chain data APIs\n---\n# Alchemy\n",
         "bankr": b"---\nname: bankr\ndescription: AI-powered crypto trading agent\n---\n# Bankr\n",
     }
-    tree_calls = 0
     catalog_calls = 0
     skill_md_calls = 0
 
@@ -81,8 +80,7 @@ class _AsyncClient:
 
     async def get(self, url: str, **kwargs: Any) -> _Response:
         if "/git/trees/" in url:
-            type(self).tree_calls += 1
-            return _Response(json_data={"tree": self.tree_entries, "truncated": False})
+            raise AssertionError(f"tree API must not be called: {url}")
         marker = "raw.githubusercontent.com/BankrBot/skills/main/"
         if marker in url:
             slug = url.split(marker, 1)[1].split("/", 1)[0]
@@ -99,9 +97,12 @@ class _AsyncClient:
 
 @pytest.fixture(autouse=True)
 def _reset_client_counters() -> None:
-    _AsyncClient.tree_calls = 0
     _AsyncClient.catalog_calls = 0
     _AsyncClient.skill_md_calls = 0
+
+
+def _source() -> BankrSource:
+    return BankrSource(allowlist=_FIXTURE_SLUGS)
 
 
 @pytest.mark.asyncio
@@ -110,10 +111,10 @@ async def test_search_empty_query_lists_all_bankr_skills(monkeypatch) -> None:
 
     monkeypatch.setattr(httpx, "AsyncClient", _AsyncClient)
 
-    results = await BankrSource().search("")
+    results = await _source().search("")
 
     names = {r.name for r in results}
-    # bankr + alchemy kept; external skipped; broken JSON skipped; nested ignored.
+    # bankr + alchemy kept; external skipped; broken JSON skipped.
     assert names == {"alchemy", "bankr"}
     assert all(r.source_id == "bankr" for r in results)
     assert all(r.trust_level == "community" for r in results)
@@ -125,7 +126,7 @@ async def test_search_builds_provider_logo_and_identifier(monkeypatch) -> None:
 
     monkeypatch.setattr(httpx, "AsyncClient", _AsyncClient)
 
-    results = await BankrSource().search("")
+    results = await _source().search("")
     by_name = {r.name: r for r in results}
 
     alchemy = by_name["alchemy"]
@@ -135,8 +136,11 @@ async def test_search_builds_provider_logo_and_identifier(monkeypatch) -> None:
     )
     assert alchemy.identifier == "https://github.com/BankrBot/skills/tree/main/alchemy"
 
-    # Null logo in the catalog → empty logo (UI renders initials).
+    # Null logo in the catalog → empty logo, but the Bankr brand emoji fills in
+    # as the avatar so cards never render a bare initials box.
     assert by_name["bankr"].logo == ""
+    assert by_name["bankr"].emoji == "📺"
+    assert by_name["alchemy"].emoji == "📺"
 
 
 @pytest.mark.asyncio
@@ -145,7 +149,7 @@ async def test_search_carries_catalog_setup_demo_and_category(monkeypatch) -> No
 
     monkeypatch.setattr(httpx, "AsyncClient", _AsyncClient)
 
-    results = await BankrSource().search("")
+    results = await _source().search("")
     bankr = next(r for r in results if r.name == "bankr")
 
     assert bankr.setup == ["Install bankr", "Set env var"]
@@ -165,7 +169,7 @@ async def test_search_fills_description_from_skill_md_frontmatter(monkeypatch) -
 
     monkeypatch.setattr(httpx, "AsyncClient", _AsyncClient)
 
-    results = await BankrSource().search("")
+    results = await _source().search("")
     by_name = {r.name: r for r in results}
 
     assert by_name["bankr"].description == "AI-powered crypto trading agent"
@@ -185,7 +189,7 @@ async def test_missing_skill_md_keeps_skill_with_empty_description(monkeypatch) 
 
     monkeypatch.setattr(httpx, "AsyncClient", _MissingSkillMdClient)
 
-    results = await BankrSource().search("")
+    results = await _source().search("")
     by_name = {r.name: r for r in results}
 
     # A failed SKILL.md fetch must not drop the skill from the listing.
@@ -199,7 +203,9 @@ async def test_external_install_type_is_excluded(monkeypatch) -> None:
 
     monkeypatch.setattr(httpx, "AsyncClient", _AsyncClient)
 
-    results = await BankrSource().search("extern")
+    # "extern" is allowlisted but its catalog declares install.type == external,
+    # so it is dropped and never matches a query.
+    results = await _source().search("extern")
 
     assert results == []
 
@@ -210,7 +216,7 @@ async def test_search_filters_by_query(monkeypatch) -> None:
 
     monkeypatch.setattr(httpx, "AsyncClient", _AsyncClient)
 
-    results = await BankrSource().search("alche")
+    results = await _source().search("alche")
 
     assert [r.name for r in results] == ["alchemy"]
 
@@ -221,35 +227,66 @@ async def test_catalog_is_cached_across_searches(monkeypatch) -> None:
 
     monkeypatch.setattr(httpx, "AsyncClient", _AsyncClient)
 
-    src = BankrSource()
+    src = _source()
     await src.search("")
-    first_tree = _AsyncClient.tree_calls
     first_catalog = _AsyncClient.catalog_calls
-    assert first_tree == 1
+    # One catalog.json fetch per allowlisted slug — no tree crawl.
+    assert first_catalog == len(_FIXTURE_SLUGS)
 
     await src.search("bankr")
 
     # Second search hits the cache — no additional network calls.
-    assert _AsyncClient.tree_calls == first_tree
     assert _AsyncClient.catalog_calls == first_catalog
 
 
-class _FailingTreeClient(_AsyncClient):
+class _FailingCatalogClient(_AsyncClient):
     async def get(self, url: str, **kwargs: Any) -> _Response:
-        if "/git/trees/" in url:
+        if url.endswith("/catalog.json"):
             raise RuntimeError("boom")
         return await super().get(url, **kwargs)
 
 
 @pytest.mark.asyncio
-async def test_tree_failure_returns_empty_without_raising(monkeypatch) -> None:
+async def test_all_entries_failing_returns_empty_without_raising(monkeypatch) -> None:
     import httpx
 
-    monkeypatch.setattr(httpx, "AsyncClient", _FailingTreeClient)
+    monkeypatch.setattr(httpx, "AsyncClient", _FailingCatalogClient)
+
+    results = await _source().search("")
+
+    assert results == []
+
+
+class _DefaultAllowlistClient(_AsyncClient):
+    """Serves only the two real default slugs."""
+
+    catalogs = {
+        "bankr": _catalog("bankr", logo=None),
+        "bankr-token-scam-analysis": _catalog("bankr-token-scam-analysis", logo=None),
+    }
+    skill_mds = {
+        "bankr": b"---\nname: bankr\ndescription: Trading agent\n---\n# Bankr\n",
+        "bankr-token-scam-analysis": (
+            b"---\nname: scam\ndescription: Scans tokens for scams\n---\n# Scan\n"
+        ),
+    }
+
+
+@pytest.mark.asyncio
+async def test_default_allowlist_loads_only_two_skills(monkeypatch) -> None:
+    import httpx
+
+    monkeypatch.setattr(httpx, "AsyncClient", _DefaultAllowlistClient)
+
+    # Default (no allowlist arg) → exactly the two Bankr slugs, nothing else.
+    assert _ALLOWED_SLUGS == ("bankr", "bankr-token-scam-analysis")
 
     results = await BankrSource().search("")
 
-    assert results == []
+    assert {r.name for r in results} == {"bankr", "bankr-token-scam-analysis"}
+    # Two skills → two catalog.json + two SKILL.md fetches, and no tree crawl.
+    assert _DefaultAllowlistClient.catalog_calls == 2
+    assert _DefaultAllowlistClient.skill_md_calls == 2
 
 
 @pytest.mark.asyncio
@@ -270,7 +307,7 @@ async def test_fetch_and_inspect_delegate_to_github(monkeypatch) -> None:
     monkeypatch.setattr(GitHubSource, "inspect", _fake_inspect)
 
     src = BankrSource()
-    ident = "https://github.com/BankrBot/skills/tree/main/alchemy"
+    ident = "https://github.com/BankrBot/skills/tree/main/bankr"
     assert await src.fetch(ident) == "bundle"
     assert await src.inspect(ident) == "meta"
     assert calls == {"fetch": ident, "inspect": ident}

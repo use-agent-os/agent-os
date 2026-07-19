@@ -214,7 +214,7 @@ def skills_search(
                 escape(r.name),
                 escape(r.source_id),
                 escape(r.trust_level),
-                escape(r.description[:60]),
+                escape((r.description or "")[:60]),
             )
         console.print(table)
 
