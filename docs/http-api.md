@@ -17,7 +17,16 @@ The gateway binds to loopback by default:
 http://127.0.0.1:18791
 ```
 
-Send the gateway token on every request using any of these (checked in order):
+**On the default loopback bind, no token is required.** The gateway ships with
+`auth.mode = "none"`, and a request from a loopback peer is treated as the local
+owner — so `curl http://127.0.0.1:18791/api/...` works with no credentials.
+
+A token is only enforced when `auth.mode = "token"`. That mode is required
+before the gateway will bind to a public address (`0.0.0.0` / LAN): the startup
+guard refuses to serve an unauthenticated public bind, and a token is
+auto-generated when unset. See [`gateway.md`](gateway.md) for bind safety.
+
+When auth is enabled, send the token any one of these ways (checked in order):
 
 ```text
 Authorization: Bearer <token>
@@ -25,10 +34,8 @@ X-Agentos-Token: <token>
 ?token=<token>          # query parameter
 ```
 
-On a loopback bind with auth disabled the token is optional; on a public bind
-the gateway only starts with auth enabled (see [`gateway.md`](gateway.md) for
-bind safety). Cross-origin browser requests are governed by CORS
-configuration.
+`/health` and `/ready` never require a token. Cross-origin browser requests are
+governed by CORS configuration regardless of auth mode.
 
 ## Liveness and Readiness
 
@@ -92,19 +99,28 @@ uses this transport.
 
 ## Example
 
+On the default loopback bind these work as-is, no token needed:
+
 ```sh
-# Liveness (no auth)
+# Liveness
 curl http://127.0.0.1:18791/health
 
-# System status (with token)
-curl -H "Authorization: Bearer $AGENTOS_TOKEN" \
-  http://127.0.0.1:18791/api/system/status
+# System status
+curl http://127.0.0.1:18791/api/system/status
 
 # Send a chat turn (message is required; sessionKey is optional)
-curl -X POST -H "Authorization: Bearer $AGENTOS_TOKEN" \
+curl -X POST \
   -H "Content-Type: application/json" \
   -d '{"sessionKey": "agent:main:webchat:default", "message": "hello"}' \
   http://127.0.0.1:18791/api/chat
+```
+
+When the gateway runs with `auth.mode = "token"` (any public bind), add the
+token to each `/api/*` call:
+
+```sh
+curl -H "Authorization: Bearer $AGENTOS_TOKEN" \
+  https://gateway.example.com/api/system/status
 ```
 
 ## Source
