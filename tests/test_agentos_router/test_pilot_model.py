@@ -78,6 +78,10 @@ def test_manifest_pins_reference_regexes(model: PilotModel) -> None:
 
 
 def test_generator_round_trip(tmp_path: Path) -> None:
+    # The generator needs the dev-only ``pilot-train`` dependency group
+    # (scikit-learn + skl2onnx); CI installs only the runtime extras.
+    pytest.importorskip("skl2onnx")
+    pytest.importorskip("sklearn")
     from scripts.pilot_router.make_fixture_model import build_fixture
 
     out = tmp_path / "gen"
