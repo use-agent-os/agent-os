@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.7.19] - 2026-07-19
+
+### Added
+
+- Bundled `agentos` self-operation skill so the agent can drive its own
+  AgentOS CLI and gateway. (#37)
+
+### Changed
+
+- AgentOS Pilot (`pilot-v1`), the self-trained on-device English router, is now
+  the default router strategy. (#26)
+- Router strategy migration: persisted `v4_phase3` selections are force-migrated
+  to `pilot-v1` at gateway boot, and `v4_phase3` is dropped from the
+  human-facing onboarding and router selectors. (#36)
+- Bankr skills browse source: limited to two curated skills to avoid GitHub rate
+  limiting, filled the skill descriptions, and added a brand-glyph logo
+  fallback, a 📺 emoji avatar fallback, and an "Update" button backed by the
+  `skills.update` RPC. (#39, supersedes #35)
+
+### Fixed
+
+- Skills UI: the installed badge desynced between cards after an install and
+  reverted to "not installed" after a page refresh — installed skills are now
+  matched by both name and identifier. (#39)
+- Skill browsing crashed on an explicit JSON `null` description returned from the
+  GitHub/Clawhub search boundary; the description now defaults safely. (#39)
+- Local single-provider setups keep self-consistent router tiers, and several
+  local-provider degrade gaps were closed (vLLM handling, empty-model honesty,
+  and log visibility). (#30)
+
 ## [2026.7.18.post1] - 2026-07-18
 
 ### Fixed

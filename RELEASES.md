@@ -2,6 +2,7 @@
 
 | Version | Tag | Date | Notes |
 |---|---|---|---|
+| 2026.7.19 | v2026.7.19 | 2026-07-19 | AgentOS Pilot (`pilot-v1`) is now the default router strategy with force-migration off `v4_phase3` (#26, #36); bundled `agentos` self-operation skill (#37); Bankr browse source limited to two skills with Update button, emoji avatar, brand-glyph logo, and null-description crash fix (#39). |
 | 2026.7.18.post1 | v2026.7.18.post1 | 2026-07-18 | Release-hygiene re-cut: propagate the 2026.7.18 version across `uv.lock`, consistency/install tests, `RELEASES.md`, `CHANGELOG.md`, README install examples, and `install.sh`/`install.ps1`. No runtime code changes. |
 | 2026.7.18 | v2026.7.18 | 2026-07-18 | Gateway: interactive auth provisioning on public bind, host/port CLI-only (#25); browser-threat hardening on loopback binds — CSWSH/DNS-rebinding guards (#24); rebrand to "Token-Efficient AI agent with on-device Pilot Router" |
 | 2026.7.17.post1 | v2026.7.17.post1 | 2026-07-17 | `session_status` tool fix: resolve the calling session from the tool context instead of a `SessionManager` method that never existed |
