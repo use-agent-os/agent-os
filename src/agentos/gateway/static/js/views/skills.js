@@ -4,7 +4,7 @@ const SkillsView = (() => {
   // Show/hide the Bankr partner tab in the Skills view. Set to true to bring
   // the tab back — the BankrSource backend (browse/search/install) stays wired
   // either way, so Bankr skills remain reachable via the Community tab / CLI.
-  const _SHOW_BANKR = false;
+  const _SHOW_BANKR = true;
 
   let _el = null;
   let _rpc = null;
@@ -257,6 +257,11 @@ const SkillsView = (() => {
       const uninstallBtn = e.target.closest('[data-uninstall]');
       if (uninstallBtn) {
         _uninstallSkill(uninstallBtn.dataset.uninstall, uninstallBtn);
+        return;
+      }
+      const updateBtn = e.target.closest('[data-update]');
+      if (updateBtn) {
+        _updateSkill(updateBtn.dataset.update, updateBtn);
         return;
       }
       const statusPill = e.target.closest('[data-status-filter]');
@@ -640,7 +645,12 @@ const SkillsView = (() => {
     // static onerror handler — never interpolate data into inline JS.
     const initials = _esc(_initials(r.provider || r.name));
     const logoUrl = _safeUrl(r.logo);
-    if (!logoUrl) return `<span class="${cls} ${cls}--initials">${initials}</span>`;
+    if (!logoUrl) {
+      // No logo asset: prefer the skill's emoji avatar (like other skills),
+      // falling back to initials only when there's no emoji either.
+      if (r.emoji) return `<span class="${cls} ${cls}--emoji">${_esc(r.emoji)}</span>`;
+      return `<span class="${cls} ${cls}--initials">${initials}</span>`;
+    }
     return `<img class="${cls}" src="${_esc(logoUrl)}" alt="" loading="lazy" onerror="this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='inline-flex'" /><span class="${cls} ${cls}--initials" style="display:none">${initials}</span>`;
   }
 
@@ -821,6 +831,11 @@ const SkillsView = (() => {
       ? `<small class="sk-dim sk-dialog__path">${_esc(skill.file_path)}</small>`
       : '';
 
+    // Managed skills were installed from a source, so they can be re-pulled
+    // ("Update") and removed. Bundled/user skills have neither.
+    const updateBtn = skill.layer === 'managed'
+      ? `<button class="btn btn--sm" data-update="${_esc(skill.name)}">Update</button>`
+      : '';
     const removeBtn = skill.layer === 'managed'
       ? `<button class="btn btn--sm" data-uninstall="${_esc(skill.name)}">Remove</button>`
       : '';
@@ -843,6 +858,7 @@ const SkillsView = (() => {
       </section>
       <footer class="sk-dialog__foot">
         ${footer}
+        ${updateBtn}
         ${removeBtn}
       </footer>`);
   }
@@ -922,6 +938,13 @@ const SkillsView = (() => {
         // Mark the item installed in-place so the badge flips without
         // discarding the browsed catalog.
         _markInstalled(identifier, res.name, true);
+        // Re-render the browse grid so its card shows the same green "Installed"
+        // chip as skills installed on load. The manual button mutation above
+        // only restyles the one clicked element (e.g. the dialog button),
+        // which left grid cards looking inconsistent with each other.
+        const group = btn.closest('[data-group]')?.dataset.group
+          || (_activeTab === 'bankr' || _activeTab === 'community' ? _activeTab : null);
+        if (group) _renderRegistryResults(group);
         _loadData();
         return;
       }
@@ -965,6 +988,25 @@ const SkillsView = (() => {
         _loadData();
       } else { btn.textContent = 'Failed'; UI.toast(res.message || 'Uninstall failed', 'err'); }
     } catch (err) { btn.textContent = 'Error'; UI.toast(err.message, 'err'); }
+  }
+
+  async function _updateSkill(name, btn) {
+    if (!_rpc) return;
+    btn.disabled = true;
+    btn.textContent = 'Updating…';
+    try {
+      // Re-pulls the latest code from the skill's source and overwrites it.
+      const res = await _rpc.call('skills.update', { name });
+      const result = (res.results || [])[0] || {};
+      if (result.success) {
+        UI.toast(result.message || `Updated ${name}`, 'ok');
+        _loadData();
+      } else {
+        btn.disabled = false;
+        btn.textContent = 'Update';
+        UI.toast(result.message || res.message || 'Update failed', 'err');
+      }
+    } catch (err) { btn.disabled = false; btn.textContent = 'Update'; UI.toast(err.message, 'err'); }
   }
 
   // ── helpers ────────────────────────────────────────────────────────────

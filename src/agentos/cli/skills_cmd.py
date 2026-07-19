@@ -7,6 +7,7 @@ from dataclasses import asdict
 from typing import Any
 
 import typer
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -142,9 +143,7 @@ def _load_skill_rows() -> list[dict[str, Any]]:
                     "origin": provenance.origin if provenance else "unknown",
                     "license": provenance.license if provenance else "unknown",
                     "upstreamUrl": provenance.upstream_url if provenance else "",
-                    "maintainedBy": provenance.maintained_by
-                    if provenance
-                    else "AgentOS",
+                    "maintainedBy": provenance.maintained_by if provenance else "AgentOS",
                 },
             }
         )
@@ -169,10 +168,10 @@ def skills_list(
 
     for row in rows:
         table.add_row(
-            row["name"],
+            escape(row["name"]),
             row["layer"],
             "[green]yes[/]" if row["eligible"] else "[dim]no[/]",
-            (
+            escape(
                 row["description"][:60] + "..."
                 if len(row["description"]) > 60
                 else row["description"]
@@ -209,7 +208,14 @@ def skills_search(
         table.add_column("Description")
 
         for r in results:
-            table.add_row(r.name, r.source_id, r.trust_level, r.description[:60])
+            # Remote catalogs are community-controlled — never let their text
+            # be interpreted as rich markup.
+            table.add_row(
+                escape(r.name),
+                escape(r.source_id),
+                escape(r.trust_level),
+                escape((r.description or "")[:60]),
+            )
         console.print(table)
 
     asyncio.run(_search())
@@ -302,8 +308,7 @@ def skills_install(
         "--source",
         "-s",
         help=(
-            "Source (clawhub, github). GitHub accepts owner/repo, "
-            "owner/repo:path, or GitHub URLs."
+            "Source (clawhub, github). GitHub accepts owner/repo, owner/repo:path, or GitHub URLs."
         ),
     ),
     force: bool = typer.Option(False, "--force", "-f", help="Force install (skip security block)"),

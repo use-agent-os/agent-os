@@ -123,3 +123,71 @@ def test_default_gateway_router_exposes_github_without_token(monkeypatch) -> Non
         assert "github" in router.source_ids
     finally:
         defaults._default_router = None
+
+
+def test_frontmatter_field_reads_yaml_block_scalar() -> None:
+    from agentos.skills.hub.github import _frontmatter_field
+
+    skill_md = (
+        "---\n"
+        "name: bankr-communities\n"
+        "description: >-\n"
+        "  Manage token-gated communities\n"
+        "  across Telegram and Farcaster.\n"
+        "homepage: https://bankr.bot\n"
+        "---\n"
+        "# Body\n"
+    )
+    assert _frontmatter_field(skill_md, "name") == "bankr-communities"
+    assert (
+        _frontmatter_field(skill_md, "description")
+        == "Manage token-gated communities across Telegram and Farcaster."
+    )
+    # Literal block scalars ("|") fold the same way for one-line display.
+    assert _frontmatter_field(skill_md.replace(">-", "|-"), "description") == (
+        "Manage token-gated communities across Telegram and Farcaster."
+    )
+
+
+def test_frontmatter_block_scalar_is_bounded_and_stops_at_frontmatter_end() -> None:
+    from agentos.skills.hub.github import _frontmatter_field
+
+    # The fold must stop at the closing --- and never leak the body.
+    skill_md = (
+        "---\n"
+        "description: >-\n"
+        "  Short description.\n"
+        "---\n"
+        "  indented body line that must NOT be folded in\n"
+    )
+    assert _frontmatter_field(skill_md, "description") == "Short description."
+
+    # A hostile/unterminated block scalar cannot produce an unbounded value.
+    hostile = "---\ndescription: |\n" + ("  spam line\n" * 5000)
+    assert len(_frontmatter_field(hostile, "description")) <= 2000
+
+
+def test_frontmatter_block_scalar_indicator_variants() -> None:
+    from agentos.skills.hub.github import _frontmatter_field
+
+    for indicator in ("|2", ">+", "> # a comment", "|-2"):
+        skill_md = f"---\ndescription: {indicator}\n  Folded text here.\n---\n"
+        assert _frontmatter_field(skill_md, "description") == "Folded text here.", indicator
+
+
+def test_frontmatter_plain_value_is_length_bounded() -> None:
+    from agentos.skills.hub.github import _MAX_FOLDED_LEN, _frontmatter_field
+
+    # A very long single-line (non-block) description must not ship unbounded.
+    hostile = "---\ndescription: " + ("A" * 1_000_000) + "\n---\n"
+    assert len(_frontmatter_field(hostile, "description")) <= _MAX_FOLDED_LEN
+
+    quoted = '---\ndescription: "' + ("B" * 1_000_000) + '"\n---\n'
+    assert len(_frontmatter_field(quoted, "description")) <= _MAX_FOLDED_LEN
+
+
+def test_frontmatter_handles_crlf_line_endings() -> None:
+    from agentos.skills.hub.github import _frontmatter_field
+
+    skill_md = "---\r\ndescription: On-chain data\r\n---\r\n# Body\r\n"
+    assert _frontmatter_field(skill_md, "description") == "On-chain data"

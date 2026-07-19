@@ -27,6 +27,7 @@ async def test_skills_search_payload_carries_catalog_fields(monkeypatch) -> None
     result row — dropping any of them silently breaks the registry cards and
     the detail dialog."""
     monkeypatch.setattr(rpc_skills, "_installed_names", lambda: set())
+    monkeypatch.setattr(rpc_skills, "installed_skill_identifiers", lambda: set())
     meta = SkillMeta(
         name="alchemy",
         source_id="bankr",
@@ -55,10 +56,37 @@ async def test_skills_search_payload_carries_catalog_fields(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_skills_search_marks_installed_by_identifier(monkeypatch) -> None:
+    """A skill whose lockfile name differs from its catalog slug must still show
+    as installed. Bankr's ``bankr-token-scam-analysis`` slug installs under the
+    name ``token-scam-analysis``, so name-only matching misses it — the source
+    identifier is the reliable join key across a page reload."""
+    # Lockfile records only the installed *name*, which does not match the
+    # browse card's name; the identifier is what lines up.
+    monkeypatch.setattr(rpc_skills, "_installed_names", lambda: {"token-scam-analysis"})
+    monkeypatch.setattr(
+        rpc_skills,
+        "installed_skill_identifiers",
+        lambda: {"https://github.com/BankrBot/skills/tree/main/bankr-token-scam-analysis"},
+    )
+    meta = SkillMeta(
+        name="bankr-token-scam-analysis",
+        source_id="bankr",
+        identifier="https://github.com/BankrBot/skills/tree/main/bankr-token-scam-analysis",
+    )
+    router = _StubRouter([meta])
+
+    res = await rpc_skills._handle_skills_search({"query": "", "source": "bankr"}, _Ctx(router))
+
+    assert res["results"][0]["installed"] is True
+
+
+@pytest.mark.asyncio
 async def test_skills_search_limit_accommodates_full_catalog_browse(monkeypatch) -> None:
     """Browse requests whole catalogs (Bankr is ~100 skills); a cap sized for
     paged search results would silently truncate them."""
     monkeypatch.setattr(rpc_skills, "_installed_names", lambda: set())
+    monkeypatch.setattr(rpc_skills, "installed_skill_identifiers", lambda: set())
     metas = [SkillMeta(name=f"skill-{i:03d}", source_id="bankr") for i in range(150)]
     router = _StubRouter(metas)
 

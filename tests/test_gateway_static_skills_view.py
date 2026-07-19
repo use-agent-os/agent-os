@@ -27,19 +27,29 @@ def test_skills_view_browses_community_catalog_without_source_picker() -> None:
     assert "_communitySeq" in view
 
 
-def test_skills_view_bankr_tab_is_flag_gated_and_hidden_by_default() -> None:
+def test_skills_view_bankr_tab_is_flag_gated_and_shown() -> None:
     view = Path("src/agentos/gateway/static/js/views/skills.js").read_text(encoding="utf-8")
 
-    # The Bankr partner tab is behind a flag that is off by default (hidden
-    # from the UI) while the browse machinery stays wired for when it returns.
-    assert "const _SHOW_BANKR = false;" in view
-    assert 'data-tab="bankr"' in view  # markup preserved behind the flag
+    # The Bankr partner tab is behind a flag that is on — the source lists only
+    # a small fixed set of skills, so the dedicated tab is surfaced.
+    assert "const _SHOW_BANKR = true;" in view
+    assert 'data-tab="bankr"' in view
     assert "Bankr partner catalog" in view
     assert "params.source = 'bankr'" in view
     # Community only excludes Bankr while the Bankr tab is showing; otherwise
     # Bankr skills fall through into Community so they stay reachable.
     assert "_communityFilter" in view
     assert "_SHOW_BANKR ? results.filter(r => r.source !== 'bankr') : results" in view
+
+
+def test_skills_view_managed_skill_has_update_control() -> None:
+    view = Path("src/agentos/gateway/static/js/views/skills.js").read_text(encoding="utf-8")
+
+    # Managed skills expose an Update button that re-pulls the latest source
+    # code via the skills.update RPC.
+    assert 'data-update="${_esc(skill.name)}"' in view
+    assert "_updateSkill(updateBtn.dataset.update, updateBtn)" in view
+    assert "_rpc.call('skills.update', { name })" in view
 
 
 def test_skills_view_has_dedicated_robinhood_tab() -> None:
@@ -74,6 +84,9 @@ def test_skills_view_renders_registry_cards_with_provider_and_logo() -> None:
     # hidden sibling revealed by a static onerror (no data in inline JS).
     assert "_logoBadge" in view
     assert "${cls}--initials" in view
+    # With no logo asset, an emoji avatar is preferred over the initials box.
+    assert "${cls}--emoji" in view
+    assert "_esc(r.emoji)" in view
 
 
 def test_skills_view_registry_detail_shows_demo_and_setup() -> None:
@@ -125,4 +138,3 @@ def test_skills_view_distinguishes_bundled_from_local_layers() -> None:
     assert "Bundled skills ship with AgentOS." in view
     assert "Managed skills are locally installed into AgentOS state." in view
     assert "Personal skills are local user installs, not bundled." in view
-

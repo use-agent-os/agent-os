@@ -126,14 +126,54 @@ def _decode_file(path: str, content: bytes) -> str | bytes:
         return content
 
 
+# YAML block-scalar indicator: > or |, one optional chomping/indentation
+# modifier, optional trailing comment. Deliberately strict so a plain value
+# that merely starts with > or | is not mistaken for a block scalar.
+_BLOCK_SCALAR_RE = re.compile(r"^[>|](?:[+-]?\d?|\d[+-]?)(?:\s+#.*)?$")
+# Remote frontmatter is community-controlled — bound every returned value so a
+# hostile SKILL.md (block scalar OR one huge line) cannot inflate browse payloads.
+_MAX_FOLDED_LEN = 2000
+
+
+def _frontmatter_region(skill_md: str) -> str:
+    """Return only the leading frontmatter block, so field lookups never read
+    the markdown body. Falls back to the whole text when no closing delimiter
+    exists (legacy-lenient)."""
+    if skill_md.startswith("---"):
+        end = skill_md.find("\n---", 3)
+        if end != -1:
+            return skill_md[: end + 1]
+    return skill_md
+
+
 def _frontmatter_field(skill_md: str, field: str) -> str:
-    match = re.search(rf"^{re.escape(field)}:\s*(.+?)\s*$", skill_md, re.MULTILINE)
+    region = _frontmatter_region(skill_md)
+    match = re.search(rf"^{re.escape(field)}:\s*(.+?)\s*$", region, re.MULTILINE)
     if match is None:
         return ""
     value = match.group(1).strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-        return value[1:-1]
-    return value
+    if _BLOCK_SCALAR_RE.match(value):
+        # YAML block scalar — fold the following indented lines into one line,
+        # stopping once we have enough to fill the cap.
+        block: list[str] = []
+        total = 0
+        for line in region[match.end() :].split("\n")[1:]:
+            if not line.strip():
+                continue
+            if not line[0].isspace():
+                break
+            block.append(line.strip())
+            total += len(block[-1]) + 1
+            if total >= _MAX_FOLDED_LEN:
+                break
+        result = " ".join(block)
+    elif len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        result = value[1:-1]
+    else:
+        result = value
+    # Single choke point: every path is bounded, so no remote value ships
+    # unbounded regardless of which YAML form produced it.
+    return result[:_MAX_FOLDED_LEN]
 
 
 def _fallback_name(ref: _GitHubSkillRef) -> str:
@@ -192,7 +232,10 @@ class GitHubSource(SkillSource):
             results.append(
                 SkillMeta(
                     name=skill_name,
-                    description=repo.get("description", ""),
+                    # `or ""` (not a .get default): GitHub's repo API sends an
+                    # explicit null description, which .get returns as None and
+                    # would break the str contract downstream.
+                    description=repo.get("description") or "",
                     source_id=self.source_id,
                     trust_level=self.trust_level,
                     identifier=f"{full_name}:{path}",
