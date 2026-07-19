@@ -54,9 +54,6 @@
     "llm_calls_total_pass": 24461,
     "prompt_tokens_this_run": 4774149,
     "completion_tokens_this_run": 467613,
-    "reported_cost_this_run_usd": 0.702095,
-    "measured_cost_per_call_usd": 4.3e-05,
-    "estimated_total_cost_usd": 1.0582,
-    "note": "reported_cost_this_run_usd is OpenRouter's summed per-call cost for the 16229 calls billed in the extension run (the other 8232 of the 24461-call total pass were served from the resumable on-disk verdict cache at no cost). estimated_total_cost_usd scales the measured per-call cost across the whole pass."
+    "note": "16229 calls were billed in the extension run; the other 8232 of the 24461-call total pass were served from the resumable on-disk verdict cache. Filter spend is recorded in private ops notes."
   }
 }

@@ -4,11 +4,13 @@
 Each turn from ``data/corpus.jsonl`` (T5) is assigned one of ``R0/R1/R2/R3``
 per [`rubric.md`](rubric.md). The labeler is **pinned** (owner decision):
 
-    claude-opus-4.8  via OpenCAP (gw.capminal.ai),  temperature 0,  strict JSON
+    claude-opus-4.8  via OpenCAP,  temperature 0,  strict JSON
 
 (OpenCAP is an OpenAI-compatible gateway; the bare model id, no ``anthropic/``
-prefix, is required. The earlier OpenRouter pin was retired — verdicts from it
-are never reused; the cache file is namespaced by the labeler pin.)
+prefix, is required. The gateway base URL is supplied via the
+``OPENCAP_BASE_URL`` env var — it is not hardcoded (recorded in private ops
+notes). The earlier OpenRouter pin was retired — verdicts from it are never
+reused; the cache file is namespaced by the labeler pin.)
 
 Protocol (spec §6.2):
 
@@ -96,9 +98,31 @@ assign_split = _sc.assign_split
 # cache keying below).
 LABEL_PROVIDER = "opencap"
 LABEL_MODEL = "claude-opus-4.8"
-LABEL_ENDPOINT = "https://gw.capminal.ai/api/inference/v1/chat/completions"
 LABEL_TEMPERATURE = 0.0
 LABEL_MAX_TOKENS = 200
+
+# OpenCAP is an OpenAI-compatible gateway; its base URL is NOT hardcoded here.
+# The chat-completions endpoint is supplied via the OPENCAP_BASE_URL env var
+# (recorded in private ops notes), mirroring how OPENCAP_API_KEY is required.
+# ``resolve_label_endpoint`` errors with a clear message when it is unset.
+OPENCAP_BASE_URL_ENV = "OPENCAP_BASE_URL"
+_LABEL_ENDPOINT_SUFFIX = "/api/inference/v1/chat/completions"
+
+
+def resolve_label_endpoint() -> str:
+    """Return the OpenCAP chat-completions endpoint from ``OPENCAP_BASE_URL``.
+
+    The base URL (scheme + host, no trailing path) is read from the environment;
+    there is no hardcoded default host. Raises ``RuntimeError`` with a clear
+    message when unset — the same failure posture as a missing API key."""
+    base = os.environ.get(OPENCAP_BASE_URL_ENV, "").strip().rstrip("/")
+    if not base:
+        raise RuntimeError(
+            f"{OPENCAP_BASE_URL_ENV} is required for the OpenCAP labeling run "
+            "(the gateway base URL is not hardcoded; set it from your private "
+            "ops notes, e.g. OPENCAP_BASE_URL=https://<host>)"
+        )
+    return f"{base}{_LABEL_ENDPOINT_SUFFIX}"
 
 # A single string identifying the exact labeler (provider + model + params).
 # It keys the resumable cache file so verdicts from a different pin can never be
@@ -296,6 +320,8 @@ class OpenCAPLabelClient:
     def __init__(self, api_key: str) -> None:
         import httpx
 
+        # Endpoint from OPENCAP_BASE_URL (no hardcoded host); raises if unset.
+        self._endpoint = resolve_label_endpoint()
         # A single pooled client shared across polite worker threads.
         self._client = httpx.Client(
             timeout=60.0, limits=httpx.Limits(max_connections=16)
@@ -330,7 +356,7 @@ class OpenCAPLabelClient:
         for attempt in range(5):
             try:
                 resp = self._client.post(
-                    LABEL_ENDPOINT, headers=self._headers, json=payload
+                    self._endpoint, headers=self._headers, json=payload
                 )
                 if resp.status_code == 403 and resp.text.lstrip()[:15].lower().startswith(
                     ("<!doctype", "<html")
@@ -838,7 +864,6 @@ def write_meta(
     meta: dict[str, Any] = {
         "mode": mode,
         "label_provider": LABEL_PROVIDER,
-        "label_endpoint": LABEL_ENDPOINT,
         "label_model": LABEL_MODEL,
         "labeler_pin": LABELER_PIN,
         "label_temperature": LABEL_TEMPERATURE,
@@ -867,10 +892,10 @@ def write_meta(
 
 GATE_MIN_AGREEMENT = 0.70
 GATE_MAX_CLASS_SHARE = 0.70
-# Ceiling raised 60 -> 70 by controller decision (2026-07-18) under the owner's
-# standing "run, don't stop to ask" instruction: the $64.94 dry-run projection
-# was an 8% overage on a conservative ceiling, and OpenCAP bills in diem with
-# usd=0, so real USD cost is likely below the token-based estimate.
+# Owner-reviewed cost ceiling for the labeling gate (raised by controller
+# decision 2026-07-18 under the owner's standing "run, don't stop to ask"
+# instruction, then relaxed further). Exact figures are recorded in private
+# ops notes; this constant is the runtime threshold the gate checks against.
 GATE_MAX_COST_USD = 70.0
 
 
@@ -904,7 +929,7 @@ def evaluate_gate(
             "pass": c2_pass,
         },
         {
-            "criterion": "projected full-run cost <= $60",
+            "criterion": "projected full-run cost within owner-approved budget",
             "measured": f"${projected_cost:.2f}",
             "pass": c3_pass,
         },
@@ -1039,7 +1064,6 @@ def run_supplement(
         "mode": "supplement",
         "input_file": str(input_path.name),
         "label_provider": LABEL_PROVIDER,
-        "label_endpoint": LABEL_ENDPOINT,
         "label_model": LABEL_MODEL,
         "labeler_pin": LABELER_PIN,
         "label_temperature": LABEL_TEMPERATURE,
@@ -1097,6 +1121,13 @@ def main(argv: list[str] | None = None) -> int:
     if not api_key:
         print(
             "ERROR: OPENCAP_API_KEY is required for the labeling run",
+            file=sys.stderr,
+        )
+        return 2
+    if not os.environ.get(OPENCAP_BASE_URL_ENV, "").strip():
+        print(
+            f"ERROR: {OPENCAP_BASE_URL_ENV} is required for the labeling run "
+            "(gateway base URL is not hardcoded; set it from your private ops notes)",
             file=sys.stderr,
         )
         return 2

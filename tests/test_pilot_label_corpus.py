@@ -508,6 +508,27 @@ def test_cache_path_is_namespaced_by_labeler_pin():
     assert "opencap" in lc.CACHE_PATH.name and "claude_opus" in lc.CACHE_PATH.name
 
 
+def test_label_endpoint_read_from_env_no_hardcoded_host(monkeypatch):
+    # The OpenCAP base URL is not hardcoded: it comes from OPENCAP_BASE_URL and
+    # the module source carries no gateway host literal.
+    monkeypatch.setenv("OPENCAP_BASE_URL", "https://example-gw.test")
+    assert lc.resolve_label_endpoint() == (
+        "https://example-gw.test/api/inference/v1/chat/completions"
+    )
+    # Trailing slashes are tolerated.
+    monkeypatch.setenv("OPENCAP_BASE_URL", "https://example-gw.test/")
+    assert lc.resolve_label_endpoint().startswith("https://example-gw.test/api/")
+    # No hardcoded host string in the module source.
+    src = _MODULE_PATH.read_text(encoding="utf-8")
+    assert "capminal" not in src
+
+
+def test_label_endpoint_errors_when_env_unset(monkeypatch):
+    monkeypatch.delenv("OPENCAP_BASE_URL", raising=False)
+    with pytest.raises(RuntimeError, match="OPENCAP_BASE_URL"):
+        lc.resolve_label_endpoint()
+
+
 def test_usage_block_uses_token_based_usd_and_records_diem():
     # A stand-in OpenCAP client with only diem populated (usd=0), exercising the
     # token-count USD estimate that the gate relies on.
@@ -581,6 +602,9 @@ def _opencap_client_with_transport(handler, monkeypatch):
     monkeypatch.setattr(lc.time, "sleep", lambda *_a, **_k: None)
     monkeypatch.setattr(lc.random, "uniform", lambda *_a, **_k: 0.0)
     client = lc.OpenCAPLabelClient.__new__(lc.OpenCAPLabelClient)
+    # Endpoint host is not hardcoded (resolved from OPENCAP_BASE_URL in prod); the
+    # MockTransport intercepts regardless of URL, so any absolute URL works here.
+    client._endpoint = "https://opencap.test/api/inference/v1/chat/completions"
     client._client = httpx.Client(transport=httpx.MockTransport(handler))
     client._headers = {"Authorization": "Bearer test", "Content-Type": "application/json"}
     client._usage_lock = threading.Lock()

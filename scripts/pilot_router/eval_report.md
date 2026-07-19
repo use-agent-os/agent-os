@@ -73,7 +73,6 @@ Paired bootstrap (10000 resamples, seed 42) on `acc(Pilot) - acc(v4)`: point del
     - R1: 6/8
     - R2: 4/8
     - R3: 0/8
-- Cost: $0.4195 USD / 0.00 diem over 110 calls (≈100x under the $12 budget).
 
 ## Golden set (report-only here; CI floor >= 0.80)
 

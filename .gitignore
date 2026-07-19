@@ -32,6 +32,9 @@ data/
 # committed record is scripts/pilot_router/training_meta.json (metrics only).
 /scripts/pilot_router/artifacts/
 /scripts/pilot_router/.feature_cache/
+# Local ops metadata, not for publication (contains endpoint/cost detail).
+/scripts/pilot_router/mine_meta.json
+/scripts/pilot_router/labels_supplement_meta.json
 .agentos/
 benchmarks/
 specs/

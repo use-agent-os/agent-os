@@ -510,7 +510,25 @@ def evaluate_gate(pilot_rows: list[dict], v4_rows: list[dict]) -> dict:
 # Quality-oracle subset (report-only, network — gated behind --oracle)
 # --------------------------------------------------------------------------- #
 
-ORACLE_ENDPOINT = "https://gw.capminal.ai/api/inference/v1/chat/completions"
+# OpenCAP is an OpenAI-compatible gateway; its base URL is NOT hardcoded. The
+# oracle endpoint is derived from OPENCAP_BASE_URL (recorded in private ops
+# notes), the same env the labeler uses. ``_resolve_oracle_endpoint`` raises a
+# clear error when it is unset (mirroring the missing-key posture).
+OPENCAP_BASE_URL_ENV = "OPENCAP_BASE_URL"
+_ORACLE_ENDPOINT_SUFFIX = "/api/inference/v1/chat/completions"
+
+
+def _resolve_oracle_endpoint() -> str:
+    base = os.environ.get(OPENCAP_BASE_URL_ENV, "").strip().rstrip("/")
+    if not base:
+        raise RuntimeError(
+            f"{OPENCAP_BASE_URL_ENV} is required for the OpenCAP quality-oracle "
+            "subset (the gateway base URL is not hardcoded; set it from your "
+            "private ops notes, e.g. OPENCAP_BASE_URL=https://<host>)"
+        )
+    return f"{base}{_ORACLE_ENDPOINT_SUFFIX}"
+
+
 # OpenCAP-served model ids per tier. The openrouter-prefixed ids in
 # agentos.toml.example do not exist on OpenCAP; these bare ids match what the
 # gateway serves (the labeler used bare "claude-opus-4.8"). A tier whose id
@@ -543,6 +561,8 @@ class _OpenCAPClient:
     def __init__(self, api_key: str) -> None:
         import httpx
 
+        # Endpoint from OPENCAP_BASE_URL (no hardcoded host); raises if unset.
+        self._endpoint = _resolve_oracle_endpoint()
         self._client = httpx.Client(timeout=90.0)
         self._headers = {
             "Authorization": f"Bearer {api_key}",
@@ -568,7 +588,7 @@ class _OpenCAPClient:
         waf_streak = 0
         for attempt in range(5):
             try:
-                resp = self._client.post(ORACLE_ENDPOINT, headers=self._headers, json=payload)
+                resp = self._client.post(self._endpoint, headers=self._headers, json=payload)
                 if resp.status_code == 403 and resp.text.lstrip()[:15].lower().startswith(
                     ("<!doctype", "<html")
                 ):
@@ -644,6 +664,8 @@ def run_oracle_subset(
     key = _load_opencap_key()
     if not key:
         return {"status": "skipped", "reason": "OPENCAP_API_KEY not found"}
+    if not os.environ.get(OPENCAP_BASE_URL_ENV, "").strip():
+        return {"status": "skipped", "reason": f"{OPENCAP_BASE_URL_ENV} not set"}
 
     sample = _stratified_oracle_sample(pilot_rows, per_class)
     client = _OpenCAPClient(key)
@@ -658,11 +680,11 @@ def run_oracle_subset(
                     f"{client.calls} calls",
                     flush=True,
                 )
-            # OpenCAP frequently reports cost.usd=0 with only diem populated
-            # (labels_meta.json note), so trip the budget on EITHER the reported
-            # USD or a conservative diem→USD conversion (~7 diem ≈ $1, from the
-            # T6 labeling run: 53.38 diem ≈ $7.62). A hard call fuse backstops
-            # both in case the gateway reports neither.
+            # OpenCAP frequently reports cost.usd=0 with only the gateway's own
+            # billing unit populated, so trip the budget on EITHER the reported
+            # USD or a conservative unit→USD conversion (~7 units ≈ $1, observed
+            # on the T6 labeling run). A hard call fuse backstops both in case
+            # the gateway reports neither.
             diem_usd = client.cost_diem / 7.0
             if client.cost_usd > budget_usd or diem_usd > budget_usd or client.calls > 1200:
                 return {
@@ -903,11 +925,6 @@ def write_report(result: dict, oracle: dict | None, meta: dict, golden: dict | N
                 if cls in by_diff:
                     b = by_diff[cls]
                     lines.append(f"    - {cls}: {b['some_ok']}/{b['total']}")
-        lines.append(
-            f"- Cost: ${oracle.get('cost_usd', 0):.4f} USD / "
-            f"{oracle.get('cost_diem', 0):.2f} diem over {oracle.get('calls', 0)} calls "
-            "(≈100x under the $12 budget)."
-        )
     lines.append("")
 
     # Golden set.
