@@ -26,8 +26,8 @@ AgentOS Router has three selectable strategies, set via
 
 | Strategy | Mode label | How it decides |
 | --- | --- | --- |
-| `v4_phase3` (default) | Smart routing (on-device) | An on-device ML ensemble (BGE embeddings + LightGBM) scores each turn locally — no LLM call, nothing leaves your machine. The ~75MB model bundle is **not** distributed with the repo or the wheel yet, and the installers do not fetch it. When it is missing, the router logs a warning at boot and pins every turn to the default tier (c1) instead of failing the turn. To enable per-turn routing, restore the bundle into `src/agentos/agentos_router/models/v4.2_phase3_inference/`, or switch to `llm_judge` (which needs no local model files). |
-| `pilot-v1` | Local ML — English-optimized (Pilot) | An AgentOS-native, English-optimized local router (MiniLM embeddings + a self-trained AgentOS model, ONNX). Like `v4_phase3` it decides on-device with no LLM call, nothing leaving your machine. See [The Pilot strategy](#the-pilot-strategy) below for status, config, and rollback. |
+| `pilot-v1` (default) | Local ML — English-optimized (Pilot) | An AgentOS-native, English-optimized local router (MiniLM embeddings + a self-trained AgentOS model, ONNX). Decides on-device with no LLM call, nothing leaving your machine. The bundle ships in the wheel under `src/agentos/agentos_router/models/pilot_v1/`; a missing bundle degrades to the default tier (c1). See [The Pilot strategy](#the-pilot-strategy) below for status, config, and rollback. |
+| `v4_phase3` (legacy) | Smart routing (on-device) | The previous default: an on-device ML ensemble (BGE embeddings + LightGBM) scoring each turn locally — no LLM call. Fully selectable and the one-line rollback from `pilot-v1`. The bundle ships in the wheel under `src/agentos/agentos_router/models/v4.2_phase3_inference/`; when missing, the router logs a warning at boot and pins every turn to the default tier (c1) instead of failing. To restore it, `git lfs pull` the bundle or switch to `llm_judge` (which needs no local model files). |
 | `llm_judge` | Smart routing (LLM-based) | A small "judge" model classifies each turn (R0–R3) via a forced tool call. The judge can be a cloud model (default: the cheapest tier of your active provider) or a local OpenAI-compatible endpoint (Ollama, LM Studio, llama.cpp, vLLM) configured with `judge_model` / `judge_base_url`. |
 
 Both the Web UI setup wizard and the CLI (`agentos onboard`,
@@ -45,15 +45,17 @@ the borrowed `v4_phase3` embedding+ensemble with a self-trained AgentOS model
 (MiniLM embeddings + ONNX inference) that runs entirely offline — no LLM call,
 nothing leaves your machine.
 
-**Status (Phase A): opt-in.** `v4_phase3` remains the **default** until Pilot
-passes an explicit evaluation gate. Pilot ships behind config so you can try it
-without affecting the default install; switching is a single config line.
+**Status: default strategy.** `pilot-v1` is the default router strategy — a
+fresh install routes through it with no config change. It was promoted from
+opt-in after passing the owner's relative-to-incumbent ship gate (it beats the
+`v4_phase3` incumbent on 11/12 evaluation axes; see `DATA.md` /
+`eval_report.md`). `v4_phase3` remains fully selectable as the legacy fallback.
 
-Enable it via the strategy id:
+The default needs no config, but the Pilot safety-net floor is tunable:
 
 ```toml
 [agentos_router]
-strategy = "pilot-v1"
+# strategy = "pilot-v1"  # default — this line is optional
 
 [agentos_router.pilot]
 # Under-routing safety-net floor. The effective cutoff is
@@ -62,18 +64,18 @@ strategy = "pilot-v1"
 safety_net_threshold = 0.5
 ```
 
-or from the Web UI setup wizard / CLI by selecting the
-**Local ML — English-optimized (Pilot)** router mode.
+The Web UI setup wizard / CLI preselect the
+**Local ML — English-optimized (Pilot)** router mode by default.
 
 **Degrade behavior.** Like `v4_phase3`, Pilot never fails the turn if its
-artifacts are missing. When the Pilot model bundle is not present, the strategy
-tags the decision `pilot_unavailable` and routes the turn to the default tier
-(the same graceful degrade `v4_phase3` uses when its bundle is missing).
+artifacts are missing. When the Pilot model bundle is not present (e.g. a source
+checkout without `git lfs pull`), the strategy tags the decision
+`pilot_unavailable` and routes the turn to the default tier (the same graceful
+degrade `v4_phase3` uses when its bundle is missing).
 
-**Rollback.** Reverting to the default is one config line — set
-`strategy = "v4_phase3"` (or remove the `strategy` line) and restart. In
-Phase A the `v4_phase3` bundle is still distributed, so rollback is always
-available.
+**Rollback to v4.** Reverting to the legacy router is one config line — set
+`strategy = "v4_phase3"` (in `[agentos_router]`) and restart. The `v4_phase3`
+bundle still ships in the wheel, so rollback is always available.
 
 ## Enable Routing
 

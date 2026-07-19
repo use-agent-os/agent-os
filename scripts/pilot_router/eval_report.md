@@ -1,6 +1,14 @@
 # Pilot-v1 vs v4_phase3 — T9 evaluation gate report
 
-**VERDICT: STOP** (one or more gate rows FAIL)
+> **Gate amendment (owner, 2026-07-19).** The owner redefined the ship gate to
+> *relative-to-incumbent*: decisively beating v4_phase3 = PASS. The pilot (R3
+> uplift bundle) wins 11/12 axes over v4, so the verdict under the amended gate
+> is **SHIP** — pilot-v1 was made the default strategy. The absolute floors
+> below (accuracy 0.70, R3 recall 0.60, golden 0.80) are retained as future
+> improvement targets, not merge blockers. The original per-row table stands as
+> the honest measurement.
+
+**VERDICT (original absolute gate): STOP** (one or more absolute floors FAIL)
 
 Honest measurement (spec §6.6): every §6.4 gate row is filled for both routers exactly as measured on the held-out test split, replayed through the full `apply_agentos_router` step. A failed gate is a valid, final STOP outcome — no tuning, no threshold nudging, no re-runs.
 

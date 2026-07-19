@@ -13,7 +13,12 @@ IMAGE_TIER = "image_model"
 # Canonical router strategy default. Config, boot preflight, boot preload, and
 # the engine dispatch step all resolve it from here; they previously carried
 # four independent literals that had drifted apart.
-DEFAULT_ROUTER_STRATEGY = "v4_phase3"
+#
+# Default flipped v4_phase3 -> pilot-v1 (2026-07-19): under the owner's
+# relative-to-incumbent ship gate the pilot bundle beats v4 on 11/12 axes.
+# v4_phase3 stays fully selectable — rollback is this one line (or a config
+# `strategy = "v4_phase3"` override).
+DEFAULT_ROUTER_STRATEGY = "pilot-v1"
 
 LEGACY_TEXT_TIER_ALIASES: dict[str, str] = {
     "t0": "c0",

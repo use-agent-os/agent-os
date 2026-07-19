@@ -1062,12 +1062,13 @@ class AgentOSRouterConfig(BaseSettings):
     enabled: bool = True
     auto_thinking: bool = True
     rollout_phase: str = "full"  # "observe" | "prompt_only" | "full"
-    # "v4_phase3" (default: local ML router — BGE+LightGBM bundle, no LLM call)
-    # | "llm_judge" (routes via a small LLM judge call) | "pilot-v1" (local
-    # ONNX+MiniLM router, English-optimized). The v4 bundle ships in the wheel
-    # under agentos_router/models/; a missing bundle degrades to the default
-    # tier unless require_router_runtime is set. Valid ids come from the router
-    # strategy registry (agentos.router_strategies).
+    # "pilot-v1" (default: local ONNX+MiniLM router, English-optimized, no LLM
+    # call) | "v4_phase3" (legacy local ML router — BGE+LightGBM bundle; the
+    # one-line rollback strategy) | "llm_judge" (routes via a small LLM judge
+    # call). Both local bundles ship in the wheel under agentos_router/models/;
+    # a missing bundle degrades to the default tier unless require_router_runtime
+    # is set. Valid ids come from the router strategy registry
+    # (agentos.router_strategies).
     strategy: str = DEFAULT_ROUTER_STRATEGY
     tier_profile: str | None = None
     tiers: dict = Field(default_factory=_default_tiers)

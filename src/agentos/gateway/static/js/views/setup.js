@@ -558,14 +558,14 @@ const SetupView = (() => {
     const defaultTier = router.default_tier || catalog.defaultTier || 'c1';
     // The Mode control is a single 4-way selector encoding both enabled and
     // strategy: 'disabled' (router off) or one of the enabled strategy ids the
-    // backend registry accepts — 'v4_phase3' (on-device ML, the config default),
-    // 'pilot-v1' (English-optimized local ML), 'llm_judge' (LLM-judge routing).
-    // The strategy is derived by explicit id, never a judge-else-v4 fallback, so
-    // a persisted 'pilot-v1' config always shows Pilot selected.
-    const ROUTER_STRATEGIES = ['v4_phase3', 'pilot-v1', 'llm_judge'];
+    // backend registry accepts — 'pilot-v1' (English-optimized local ML, the
+    // config default), 'v4_phase3' (legacy on-device ML), 'llm_judge' (LLM-judge
+    // routing). The strategy is derived by explicit id, never a judge-else-v4
+    // fallback, so a persisted 'v4_phase3' config always shows v4 selected.
+    const ROUTER_STRATEGIES = ['pilot-v1', 'v4_phase3', 'llm_judge'];
     const mode = router.enabled === false
       ? 'disabled'
-      : (ROUTER_STRATEGIES.includes(router.strategy) ? router.strategy : 'v4_phase3');
+      : (ROUTER_STRATEGIES.includes(router.strategy) ? router.strategy : 'pilot-v1');
     const showJudge = mode === 'llm_judge';
     const showPilot = mode === 'pilot-v1';
     const pilotCfg = router.pilot || {};
@@ -596,8 +596,8 @@ const SetupView = (() => {
         <div class="setup-router-toolbar">
           <label><span>Mode</span>
             <select id="setup-router-mode" name="setup_router_mode" data-router-mode${routerDisabled}>
-              <option value="v4_phase3"${mode === 'v4_phase3' ? ' selected' : ''}>Smart routing (on-device)</option>
               <option value="pilot-v1"${mode === 'pilot-v1' ? ' selected' : ''}>Local ML — English-optimized (Pilot)</option>
+              <option value="v4_phase3"${mode === 'v4_phase3' ? ' selected' : ''}>Smart routing (on-device)</option>
               <option value="llm_judge"${mode === 'llm_judge' ? ' selected' : ''}>Smart routing (LLM-based)</option>
               <option value="disabled"${mode === 'disabled' ? ' selected' : ''}>Off</option>
             </select>
@@ -1782,11 +1782,11 @@ const SetupView = (() => {
       }
       tiers[row.dataset.tier] = tier;
     });
-    // The Mode dropdown encodes both enabled and strategy: 'v4_phase3' /
-    // 'pilot-v1' / 'llm_judge' → router enabled with that strategy id (forwarded
+    // The Mode dropdown encodes both enabled and strategy: 'pilot-v1' /
+    // 'v4_phase3' / 'llm_judge' → router enabled with that strategy id (forwarded
     // verbatim to upsert_router, which validates it against the registry);
     // 'disabled' → off. The option value IS the strategy id, so no remapping.
-    const sel = _el.querySelector('[data-router-mode]')?.value || 'v4_phase3';
+    const sel = _el.querySelector('[data-router-mode]')?.value || 'pilot-v1';
     const routerMode = sel === 'disabled' ? 'disabled' : 'recommended';
     const strategy = sel === 'disabled' ? undefined : sel;
     // Pilot safety-net threshold: forwarded only for the Pilot strategy with a

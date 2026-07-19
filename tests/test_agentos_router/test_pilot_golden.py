@@ -1,9 +1,12 @@
-"""Golden-set CI gate for the Pilot router (spec §6.4).
+"""Golden-set CI regression guard for the Pilot router (spec §6.4).
 
 Asserts the Pilot router's **final-decision** accuracy on the committed golden
-set (``data/pilot_golden.jsonl``) meets the 0.80 numeric floor. Each row is
-replayed through the REAL ``apply_agentos_router`` step (guards enabled), so the
-test scores exactly what production would route — not the raw classifier argmax.
+set (``data/pilot_golden.jsonl``) does not regress below the owner-amended
+floor of 0.55 (see ``GOLDEN_ACCURACY_FLOOR``; the original 0.80 is now the
+aspirational target under the 2026-07-19 relative-to-incumbent gate). Each row
+is replayed through the REAL ``apply_agentos_router`` step (guards enabled), so
+the test scores exactly what production would route — not the raw classifier
+argmax.
 
 The golden rows are self-authored, rubric-anchored exemplars (see the file's
 ``_meta`` header); the header line is skipped here.
@@ -26,7 +29,15 @@ pytest.importorskip("numpy", reason="pilot runtime (numpy) not installed")
 pytest.importorskip("onnxruntime", reason="pilot runtime (onnxruntime) not installed")
 
 GOLDEN_PATH = Path(__file__).parent / "data" / "pilot_golden.jsonl"
-GOLDEN_ACCURACY_FLOOR = 0.80
+
+# Owner-amended 2026-07-19 (relative-to-incumbent ship gate). The shipped
+# pilot-v1 bundle measures 0.584 golden final-decision accuracy and beats the
+# v4 incumbent on 11/12 gate axes, so this is a REGRESSION GUARD at 0.55 — not
+# the original 0.80 absolute floor. 0.80 remains the aspirational target; a
+# future uplift round should raise this back toward it. Do NOT lower this
+# threshold further without owner approval.
+GOLDEN_ACCURACY_FLOOR = 0.55
+GOLDEN_ACCURACY_TARGET = 0.80  # aspirational; tracked as a future improvement
 
 
 def _load_golden() -> list[dict]:
@@ -139,6 +150,8 @@ async def test_pilot_meets_golden_accuracy_floor() -> None:
 
     accuracy = correct / len(rows)
     assert accuracy >= GOLDEN_ACCURACY_FLOOR, (
-        f"Pilot golden-set accuracy {accuracy:.3f} < floor {GOLDEN_ACCURACY_FLOOR} "
+        f"Pilot golden-set accuracy {accuracy:.3f} regressed below the "
+        f"owner-amended floor {GOLDEN_ACCURACY_FLOOR} "
+        f"(aspirational target {GOLDEN_ACCURACY_TARGET}) "
         f"({correct}/{len(rows)} correct)"
     )

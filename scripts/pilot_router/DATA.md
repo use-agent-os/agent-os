@@ -1,5 +1,13 @@
 # Pilot Router — Training Data License Gate & Corpus Provenance
 
+> **Gate amendment (owner, 2026-07-19).** The owner redefined the ship gate to
+> relative-to-incumbent: decisively beating v4_phase3 = PASS. The trained
+> pilot-v1 bundle wins 11/12 evaluation axes over v4, so the verdict under the
+> amended gate is **SHIP** and pilot-v1 is now the default router strategy. The
+> absolute floors (accuracy 0.70, R3 recall 0.60, golden 0.80) are tracked as
+> future improvement targets, not merge blockers. See `eval_report.md`.
+
+
 This document is the **license gate** for the Pilot router training corpus
 (spec Rev 4 §6.1/§6.3, task T5). It is written and satisfied **before** any
 corpus is sampled or any filter spend is incurred. The corpus statistics

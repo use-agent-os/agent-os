@@ -24,8 +24,8 @@ def test_router_strategy_rejects_unknown_id() -> None:
         AgentOSRouterConfig(strategy="totally-made-up")
 
 
-def test_router_strategy_default_is_unchanged() -> None:
-    assert AgentOSRouterConfig().strategy == DEFAULT_ROUTER_STRATEGY == "v4_phase3"
+def test_router_strategy_default_is_pilot_v1() -> None:
+    assert AgentOSRouterConfig().strategy == DEFAULT_ROUTER_STRATEGY == "pilot-v1"
 
 
 def test_pilot_config_default_safety_net_threshold() -> None:

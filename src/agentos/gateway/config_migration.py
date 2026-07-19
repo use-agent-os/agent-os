@@ -313,10 +313,11 @@ def migrate_config_payload(data: dict[str, Any]) -> ConfigMigrationResult:
 
     agentos_router = builder.payload.get("agentos_router")
     if isinstance(agentos_router, dict):
-        # v4_phase3 (local ML router) is the default strategy again — do NOT
-        # rewrite it here. An earlier release migrated v4_phase3 -> llm_judge on
-        # load; that rewrite is intentionally removed so installed TOMLs keep the
-        # local ML router. Both "v4_phase3" and "llm_judge" pass schema validation.
+        # pilot-v1 is now the default strategy (v4_phase3 remains selectable) —
+        # do NOT rewrite an explicit strategy here. An earlier release migrated
+        # v4_phase3 -> llm_judge on load; that rewrite is intentionally removed
+        # so installed TOMLs keep whatever local router they set. "pilot-v1",
+        # "v4_phase3", and "llm_judge" all pass schema validation.
 
         # confidence_threshold gained a strict [0.0, 1.0] bound with the judge
         # migration. Under the old v4 confidence gate an out-of-range value was a
