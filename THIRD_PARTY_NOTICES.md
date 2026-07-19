@@ -146,6 +146,7 @@ SOFTWARE.
 These bundled skill descriptors are authored and maintained by AgentOS and
 are released under AgentOS's repository license (Apache-2.0; see `LICENSE`):
 
+- `agentos`
 - `cron`
 - `deep-research`
 - `docx`

@@ -102,6 +102,12 @@ Docs live in `docs/` (`docs/README.md` is the index); helper scripts in `scripts
 - **Third-party origin:** vendored/adapted/ported code must be declared in the PR
   with upstream URL + license, and update `THIRD_PARTY_NOTICES.md`. Permissive
   (MIT/BSD/ISC/Apache-2.0) is fine; (A/L)GPL/SSPL/unclear needs maintainer sign-off.
+- **CLI changes update the self-operation skill.** Any change to the CLI surface
+  or its contracts — commands/subcommands, flags, config keys or precedence,
+  default port, state paths — must be checked against
+  `src/agentos/skills/bundled/agentos/SKILL.md` (and `docs/cli.md`) and those
+  docs updated in the same PR so the bundled operator guide never drifts from
+  the real CLI.
 
 ## Commits & PRs
 
