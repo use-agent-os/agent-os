@@ -57,8 +57,8 @@ agentos agent -m "..."       # one-shot, automation-friendly agent turn
 
 ## CLI map
 
-Top-level: `init`, `onboard`, `configure`, `doctor`, `chat`, `agent`,
-`reset`, plus these groups (each supports `--help`):
+Top-level: `init`, `onboard`, `configure`, `doctor`, `upgrade`, `chat`,
+`agent`, `reset`, plus these groups (each supports `--help`):
 
 | Group | Subcommands |
 | --- | --- |
@@ -107,6 +107,7 @@ Main `agentos.toml` sections (full commented reference:
 | `[permissions]` | `default_mode` = `off` \| `on` \| `bypass` \| `full` (pair with `agentos sandbox …`) |
 | `[auth]` | gateway auth: `mode` (`none`/`token`/`password`), `token`, `allow_unauthenticated_public` |
 | `[control_ui]` | `allowed_origins` for reverse-proxy setups |
+| `[updates]` | `notify` (default true) — the once-per-24h "new release available" notice |
 | `[channels]` | messaging channels (`[[channels.channels]]` entries) |
 | `[compaction]`, `[agent_token_saving]`, `[task_runtime]` | context compaction, tool-result projection, concurrency |
 
@@ -131,7 +132,34 @@ agentos gateway stop
 ```
 
 Default port **18791**, loopback bind. `--listen HOST:PORT` overrides
-`--bind`/`--port` together.
+`--bind`/`--port` together. `gateway status` (and `--json`) reports **both**
+the installed CLI version (`cliVersion`) and the running gateway's version
+(`gatewayVersion`); a `versionMismatch` diagnostic means the gateway is running
+old code — restart it.
+
+**Upgrading AgentOS:**
+
+```sh
+agentos upgrade                # upgrade, then restart + verify the gateway
+agentos upgrade --check        # is a newer release available? changes nothing
+agentos upgrade --dry-run      # print the command that would run; touch nothing
+agentos upgrade --no-restart   # upgrade only; gateway keeps running OLD code
+```
+
+`agentos upgrade` is the primary path: it detects the install method and
+delegates (`uv tool upgrade` / `pipx upgrade`), then by default restarts the
+managed gateway and verifies it reports the new version before declaring
+success. For pip / editable / source installs it prints the exact manual
+command and exits non-zero (**exit 3**) rather than faking it; a failed or
+unverifiable upgrade is **exit 1**. Flags: `--timeout` (subprocess bound,
+default 600s; kills the process group on timeout), `--config`, `--json`.
+
+Commands that reach the gateway compare CLI and gateway versions: a gateway
+**older** than the CLI warns (post-upgrade, before restart); a gateway
+**newer** than the CLI is *refused* (schema-corruption risk) unless
+`AGENTOS_ALLOW_VERSION_SKEW=1`. On gateway-connected commands the CLI also
+prints a once-per-24h "new release available" notice on stderr (TTY only, not
+in CI); silence it with `updates.notify = false` or `AGENTOS_NO_UPDATE_NOTICE=1`.
 
 **Public / LAN bind (security-gated):** with `auth.mode = "none"` the
 gateway *refuses* non-loopback binds by design. The right fix is enabling

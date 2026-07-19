@@ -15,6 +15,7 @@ agentos <command> --help
 | Command | Purpose |
 | --- | --- |
 | `agentos init` | Initialize a workspace. |
+| `agentos upgrade` | Upgrade AgentOS and restart the managed gateway to match. |
 | `agentos doctor` | Diagnose readiness and print recovery steps. |
 | `agentos onboard` | Run or inspect first-run setup. |
 | `agentos configure` | Reconfigure provider, router, channels, search, image generation, or memory embedding. |
@@ -51,6 +52,12 @@ agentos gateway restart
 agentos gateway stop
 ```
 
+`agentos gateway status` (and `--json`) reports **both** the installed CLI
+version (`cliVersion`) and the running gateway's version (`gatewayVersion`);
+when they differ it sets `versionMismatch` and prints a diagnostic advising a
+restart — the normal state right after a package upgrade with `--no-restart`,
+or after a manual upgrade.
+
 Terminal chat:
 
 ```sh
@@ -86,6 +93,72 @@ Useful automation flags:
 | `--transcript-path` | Write a JSONL transcript for automation. |
 | `--usage-path` | Write usage JSON. |
 | `--session-db-path` | Persist session replay across invocations. |
+
+## Upgrade
+
+`agentos upgrade` is the primary upgrade path. It detects how AgentOS was
+installed, upgrades it, and — by default — restarts the managed gateway and
+**verifies** the running gateway reports the new version before declaring
+success (a "successful" upgrade that leaves the daemon on old code is the
+common upgrade regret).
+
+```sh
+agentos upgrade                 # upgrade, restart the gateway, verify
+agentos upgrade --check         # is a newer release available? change nothing
+agentos upgrade --dry-run       # print the exact command that would run
+agentos upgrade --no-restart    # upgrade only; leave the gateway on OLD code
+agentos upgrade --timeout 900   # bound the upgrade subprocess (default 600s)
+```
+
+| Flag | Purpose |
+| --- | --- |
+| `--check` | Query PyPI for a newer release (5s timeout); offline prints `could not check (offline)`. Changes nothing. |
+| `--dry-run` | Print the upgrade command that would run and whether the gateway would be restarted; touch nothing. |
+| `--no-restart` | Upgrade the package but do not restart the gateway. Prints an unmissable warning that it still runs the old version; run `agentos gateway restart` yourself. |
+| `--timeout` | Upgrade-subprocess timeout in seconds (default 600). On timeout the tool's process group is killed with recovery guidance — never a half-state. |
+| `--config` | Target a specific config file for the gateway restart. |
+| `--json` | Machine-readable output. |
+
+Per install method:
+
+- **uv tool / pipx** — delegated automatically (`uv tool upgrade use-agent-os`
+  / `pipx upgrade use-agent-os`), resolving the tool to an absolute path over a
+  hardened PATH.
+- **pip / editable / source checkout** — not faked: prints the exact manual
+  command (e.g. `python -m pip install --upgrade "use-agent-os"`) and exits
+  with a distinct code.
+
+Exit codes: **0** success (upgraded + verified, or `--check`/`--dry-run`);
+**3** this install method needs a manual command (printed); **1** the upgrade
+failed, timed out, or the post-restart version could not be verified.
+
+Config migrations run at gateway start and write a timestamped backup before
+rewriting any file, so `~/.agentos/` config and data are safe across upgrades.
+
+### Version skew
+
+Commands that talk to the gateway compare the CLI and gateway versions once per
+run:
+
+- **Gateway older than the CLI** (normal right after an upgrade, before a
+  restart) — prints a warning on stderr, never blocks.
+- **Gateway newer than the CLI** (you downgraded the CLI, or drive a newer
+  gateway from a stale environment) — **refused**, because a newer gateway may
+  have written config with a newer schema. Fix by upgrading the CLI or
+  restarting the gateway from this environment; override in an emergency with
+  `AGENTOS_ALLOW_VERSION_SKEW=1`.
+
+### Update notifications
+
+On gateway-connected commands the CLI checks PyPI at most once every 24h and,
+if a newer release exists, prints a one-line notice on stderr. It is suppressed
+on non-interactive runs (no TTY) and in CI. Control it with:
+
+- `updates.notify = false` in `agentos.toml` (or the setup UI's Finish step) —
+  turns the notice off entirely.
+- `AGENTOS_NO_UPDATE_NOTICE=1` — silences it for a single run.
+
+See [`configuration.md`](configuration.md#update-notifications).
 
 ## Configuration Commands
 
