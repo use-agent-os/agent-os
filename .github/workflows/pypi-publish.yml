@@ -78,12 +78,15 @@ jobs:
           ):
               assert (minilm / name).is_file(), f"missing MiniLM asset: {name}"
 
-          # NOTE(T7): the Pilot production bundle
-          # (agentos_router/models/pilot_v1/{model.onnx,manifest.json}) does
-          # not exist yet — it lands with T7's trained artifacts. Add its
-          # required-files assertions here once T7 lands; do not add them
-          # before the files exist, or every publish run fails on a missing
-          # path.
+          # Pilot production bundle (strategy="pilot-v1", the default). A
+          # missing/non-hydrated model.onnx would silently degrade every turn
+          # to pilot_unavailable, so ship it or fail the publish loudly.
+          pilot = Path("src/agentos/agentos_router/models/pilot_v1")
+          for name in (
+              "model.onnx",
+              "manifest.json",
+          ):
+              assert (pilot / name).is_file(), f"missing pilot_v1 asset: {name}"
           PY
 
       - name: Set up Python

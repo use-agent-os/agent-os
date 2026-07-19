@@ -310,6 +310,41 @@ def test_built_wheel_packages_hydrated_minilm_onnx(tmp_path: Path) -> None:
     )
 
 
+def test_built_wheel_packages_hydrated_pilot_bundle(tmp_path: Path) -> None:
+    """The built wheel must ship the real (hydrated) Pilot production bundle
+    (models/pilot_v1/{model.onnx,manifest.json}) — pilot-v1 is the default
+    strategy, so a missing or LFS-pointer model.onnx silently degrades every
+    turn to pilot_unavailable. Mirrors the MiniLM size/pointer guard."""
+    module = load_script()
+    pilot_dir = (
+        REPO_ROOT / "src" / "agentos" / "agentos_router" / "models" / "pilot_v1"
+    )
+    if not pilot_dir.is_dir():
+        pytest.skip("pilot_v1 bundle not present in this checkout")
+
+    env = module.build_subprocess_env(tmp_path)
+    wheel_path = module.build_wheel(REPO_ROOT, tmp_path / "wheels", env)
+
+    prefix = "agentos/agentos_router/models/pilot_v1"
+    onnx_name = f"{prefix}/model.onnx"
+    manifest_name = f"{prefix}/manifest.json"
+    with ZipFile(wheel_path) as archive:
+        names = set(archive.namelist())
+        assert onnx_name in names, "pilot_v1 model.onnx missing from built wheel"
+        assert manifest_name in names, "pilot_v1 manifest.json missing from built wheel"
+        onnx_bytes = archive.read(onnx_name)
+
+    # A real Pilot ONNX export is hundreds of KB; an unhydrated Git LFS pointer
+    # file is ~130 bytes. A >100 KB floor is a cheap, format-agnostic guard.
+    assert len(onnx_bytes) > 100_000, (
+        f"pilot_v1 model.onnx in wheel is only {len(onnx_bytes)} bytes; looks "
+        "like an unhydrated Git LFS pointer, not a real model"
+    )
+    assert not onnx_bytes[:80].startswith(b"version https://git-lfs.github.com/spec/v1"), (
+        "Git LFS pointer leaked into wheel for the pilot_v1 export"
+    )
+
+
 def test_built_wheel_excludes_pilot_fixture_test_data(tmp_path: Path) -> None:
     """tests/ is never packaged (hatchling only packages `src/agentos`), but
     pin the pilot fixture bundle explicitly since it is the one test-data

@@ -70,9 +70,9 @@ SOURCE_UNAVAILABLE = "pilot_unavailable"
 def default_artifact_dir() -> Path:
     """Repository default for the production Pilot artifact directory.
 
-    The production bundle (``models/pilot_v1/``) does not exist yet; the
-    strategy degrades cleanly when it is absent, exactly as v4 does for its own
-    missing bundle.
+    The production bundle (``models/pilot_v1/``) ships in the wheel; the
+    strategy still degrades cleanly when it is absent (e.g. a source checkout
+    without ``git lfs pull``), exactly as v4 does for its own missing bundle.
     """
     return Path(__file__).resolve().parent.parent / "models" / "pilot_v1"
 
