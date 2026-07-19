@@ -9,6 +9,7 @@ BUNDLED = ROOT / "src" / "agentos" / "skills" / "bundled"
 NOTICES = ROOT / "THIRD_PARTY_NOTICES.md"
 ORIGINALS = {
     "advanced-dubbing-studio",
+    "agentos",
     "cron",
     "deep-research",
     "docx",

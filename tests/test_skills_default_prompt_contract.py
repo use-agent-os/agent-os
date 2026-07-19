@@ -22,6 +22,7 @@ AUDIO_DEFAULTS = {
     "voiceover-studio",
 }
 DEFAULTS = {
+    "agentos",
     "ai-video-script",
     "cron",
     "deep-research",
@@ -106,9 +107,7 @@ def _ctx(
 
 def test_bundled_directory_only_contains_retained_default_skills() -> None:
     bundled_names = {
-        path.name
-        for path in BUNDLED.iterdir()
-        if path.is_dir() and (path / "SKILL.md").is_file()
+        path.name for path in BUNDLED.iterdir() if path.is_dir() and (path / "SKILL.md").is_file()
     }
 
     assert bundled_names == DEFAULTS | INTERNAL_HELPERS
@@ -159,7 +158,6 @@ async def test_default_prompt_only_injects_retained_bundled_skills(
     for name in INTERNAL_HELPERS:
         assert f"<name>{name}</name>" not in prompt
     assert "<name>healthcheck</name>" not in prompt
-
 
 
 @pytest.mark.asyncio
