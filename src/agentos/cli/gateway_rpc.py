@@ -108,6 +108,46 @@ def rpc_error_exit_code(code: str | None) -> int:
     return 1
 
 
+def _apply_version_skew_policy(client: Any, *, json_output: bool) -> None:
+    """Warn (gateway older) or refuse (gateway newer) on CLI/gateway skew.
+
+    Runs once per invocation off the version reported in the connect
+    handshake. A gateway-newer refusal exits non-zero with remediation; the
+    ``AGENTOS_ALLOW_VERSION_SKEW=1`` escape hatch is honoured inside the policy.
+    """
+
+    from agentos import __version__
+    from agentos.cli.version_skew import SkewReporter, VersionSkewError
+
+    gateway_version = getattr(client, "server_version", None)
+    try:
+        SkewReporter().check(cli_version=__version__, gateway_version=gateway_version)
+    except VersionSkewError as exc:
+        emit_error(str(exc), json_output=json_output, code="VERSION_SKEW")
+        raise typer.Exit(3) from exc
+
+
+def _maybe_emit_update_notice(*, config_path: str | Path | None) -> None:
+    """Best-effort passive update notice; never affects command outcome."""
+
+    try:
+        from agentos import __version__
+        from agentos.cli.update_notice import maybe_emit_update_notice
+        from agentos.gateway.config import GatewayConfig
+
+        try:
+            config = GatewayConfig.load(
+                str(config_path)
+                if config_path is not None
+                else os.environ.get("AGENTOS_GATEWAY_CONFIG_PATH") or None
+            )
+        except Exception:  # noqa: BLE001 - config-loader robustness; notice is optional
+            config = None
+        maybe_emit_update_notice(current_version=__version__, config=config)
+    except Exception:  # noqa: BLE001 - a courtesy line must never break a command
+        pass
+
+
 async def run_gateway_call(
     action: Callable[[Any], Awaitable[Any]],
     *,
@@ -123,7 +163,10 @@ async def run_gateway_call(
     try:
         target_url = _target_gateway_url(gateway_url=gateway_url, config_path=config_path)
         await client.connect(target_url, token=default_gateway_token(config_path))
-        return await action(client)
+        _apply_version_skew_policy(client, json_output=json_output)
+        result = await action(client)
+        _maybe_emit_update_notice(config_path=config_path)
+        return result
     except SystemExit as exc:
         message = str(exc)
         emit_error(message, json_output=json_output, code="GATEWAY_UNAVAILABLE")

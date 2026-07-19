@@ -1588,6 +1588,20 @@ class SubagentsGatewayConfig(BaseModel):
     """When enabled, subagent bootstrap prompts keep only AGENTS.md and TOOLS.md."""
 
 
+class UpdatesConfig(BaseModel):
+    """Update-notice preferences.
+
+    ``notify`` gates the passive, gh-style "a new release is available" line
+    the CLI prints (at most once per 24h, on gateway-connected commands only).
+    Set to ``false`` to silence it entirely; the CLI also suppresses it on
+    non-TTY / CI runs regardless of this flag.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    notify: bool = True
+
+
 class TlsConfig(BaseSettings):
     """Optional TLS termination at the gateway itself.
 
@@ -1666,6 +1680,8 @@ class GatewayConfig(BaseSettings):
     agents: list[AgentEntryConfig] = Field(default_factory=list)
     agents_defaults: AgentDefaults = Field(default_factory=AgentDefaults)
     subagents: SubagentsGatewayConfig = Field(default_factory=SubagentsGatewayConfig)
+
+    updates: UpdatesConfig = Field(default_factory=UpdatesConfig)
 
     # Component enable flags
     control_ui: ControlUiConfig = Field(default_factory=ControlUiConfig)

@@ -71,6 +71,7 @@ class GatewayClient:
         self._closing = False
         self._http_base: str | None = None
         self._auth_token: str | None = None
+        self._server_version: str | None = None
 
     async def connect(
         self,
@@ -148,6 +149,11 @@ class GatewayClient:
         hello = json.loads(raw)
         if hello.get("type") != "hello-ok":
             raise SystemExit(f"Handshake failed: {hello}")
+        # Capture the gateway's reported version from the handshake so callers
+        # can detect version skew without a second RPC round-trip.
+        server_info = hello.get("server") if isinstance(hello.get("server"), dict) else {}
+        version = server_info.get("version")
+        self._server_version = version if isinstance(version, str) and version else None
         policy = hello.get("policy") if isinstance(hello.get("policy"), dict) else {}
         self._heartbeat_interval = _heartbeat_interval_from_policy(policy)
 
@@ -165,6 +171,12 @@ class GatewayClient:
         """True when the connected gateway URL is loopback/same-machine."""
 
         return gateway_base_is_local(self._http_base)
+
+    @property
+    def server_version(self) -> str | None:
+        """Gateway version reported in the connect handshake, if any."""
+
+        return self._server_version
 
     async def upload_file(
         self,
