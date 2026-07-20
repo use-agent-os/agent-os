@@ -2,11 +2,14 @@
 
 > **Plan 1 complete — 2026-07-20.** Layer-0/1 foundation (bootstrap, WS-RPC,
 > theme, AppShell + 13 routes, health view) ported and verified: FE gate green
-> (38 unit tests, `vite build` clean), Python gate green (ruff + mypy clean,
+> (77 unit tests after this parity-fix round grew the covering suites, `vite
+> build` clean), Python gate green (ruff + mypy clean,
 > 1559 gateway/parity tests passing), legacy UI byte-identical (empty
 > `git diff` on static js/css/vendor + templates). Every cross-cutting row is
-> `ported` except four cutover-plan items (theme-flash inline script, noscript,
-> `tokenViz` feature flag, custom `base_path`); the `### health` section has
+> `ported` except two cutover-plan items (`tokenViz` feature flag, custom
+> `base_path`) — the theme-flash inline script and noscript message ride in the
+> new SPA shell `frontend/index.html` and are `ported`, with only their
+> served-page wiring folded into cutover; the `### health` section has
 > zero functional `pending` rows (one owner-sign-off `waived` delta at cutover,
 > one live-parity row folded into cutover). Remaining `pending` rows and the 12
 > unfilled view sections belong to Plan 2+.
@@ -22,7 +25,7 @@ Row format:
 | behavior | legacy source | status | evidence / reason |
 | --- | --- | --- | --- |
 | Theme persistence + system-default resolution | js/theme.js:8-38 | ported | theme.test.ts::theme store > initTheme applies stored preference; initTheme resolves the system default (dark) when nothing is stored; initTheme resolves the system default (light) when nothing is stored (both mock matchMedia '(prefers-color-scheme: dark)'); initTheme prefers a stored value over the system default; set persists and applies; toggle flips the mode; rejects invalid modes |
-| Theme flash prevention inline script | templates/index.html (head) | pending | |
+| Theme flash prevention inline script | templates/index.html (head) | ported | frontend/index.html head `<script>` (lines 13-27) runs before CSS: reads localStorage['agentos-theme'], falls back to matchMedia('(prefers-color-scheme: dark)') when unset/invalid, sets `data-theme` on documentElement, catches storage errors → 'light' — 1:1 with legacy templates/index.html:12-24. Served as the SPA shell `<head>`; wiring the built shell as the rendered page is the cutover-plan item, the inline-script behavior itself is ported |
 | Favicon links: icon + shortcut icon + apple-touch-icon → agentos-mark.png | templates/index.html (head favicon block) | ported | frontend/index.html head — three link tags reference /src/assets/agentos-mark.png (png copied from static/img); Vite fingerprints the asset and rewrites the href under base_path at build (base '/control/static/dist/'), mirroring legacy's base_path-prefixed hrefs |
 | WS handshake: connect.challenge -> connect(protocol 3) -> HelloOk+policy | js/rpc.js:87-127 | ported | ws-rpc.test.ts::handshake > answers connect.challenge with a protocol-3 connect request incl. auth token; enters connected state and stores policy on HelloOk |
 | WS req/res correlation + typed errors (code/details) | js/rpc.js:45-147 | ported | ws-rpc.test.ts::call correlation > resolves with payload on ok res, matching by id; rejects with RpcError carrying code and details; rejects immediately when not connected; rejects all pending calls when the socket closes |
@@ -47,7 +50,7 @@ Row format:
 | Connection indicator: PERSISTENT pill (never unmounts), variant ok/warn/err + compact 'Connected' ok state, capitalized label as text + title attr, role=status aria-live=polite | js/app.js:94,174-183 | ported | AppShell.tsx renders a persistent #conn-pill in topbar-left across all states (connected→ok, connecting→warn, disconnected→err; label = capitalized state; title=label); AppShell.test.tsx::shows a persistent connection pill across all states including Connected (asserts the pill STAYS mounted with the ok/'Connected' state, title, and data-variant on connect — legacy did not unmount the indicator) |
 | Sidebar version footer: 'v<semver>' from bootstrap.version with build-suffix (+NNN) stripped + safe-charset filtered (max 32 chars), suppressed entirely when empty | js/app.js:58-68 (_buildLayout version footer) | ported | AppShell.tsx sidebarVersion() (split('+')[0], /[^0-9A-Za-z.\-]/ filter, slice(0,32)) + nav-foot block reading useBootstrap().version; AppShell.test.tsx::renders the sidebar version footer with the build-suffix stripped (2026.7.19+1779915602 → v2026.7.19); suppresses the version footer when the bootstrap version is empty |
 | Sidebar information architecture: nav grouped under labels Chat / Control / Settings, Chat first, Approvals last under Settings; item order within groups matches legacy markup | js/app.js:72-88 (_buildLayout nav structure) | ported | AppShell.tsx NAV_GROUPS (Chat: chat; Control: overview,health,channels,skills,sessions,agents,usage,cron; Settings: setup,config,logs,approvals); AppShell.test.tsx::groups nav under Chat / Control / Settings with Chat first and Approvals last (asserts label order + first link Chat / last link Approvals) |
-| noscript message | templates/index.html | pending | |
+| noscript message | templates/index.html | ported | frontend/index.html body `<noscript>` (lines 30-35): "JavaScript required" heading + the "needs JavaScript to render the chat, sessions, and configuration views" sentence, mirroring legacy templates/index.html:47-52 (new drops the legacy inline light-only border/color styling, which is theme-polish deferred to the styling pass, not a behavior). Served in the SPA shell; cutover wires the built shell as the rendered page |
 | Feature flag AGENTOS_FEATURES.tokenViz (default false) | js/app.js:6-9 | pending | |
 | Custom base_path support for built assets | control_ui.py + vite base | pending | cutover-plan item |
 
@@ -75,7 +78,7 @@ Row format:
 | ^ delta: error-path Config row gated on usesDefault AND isLocalGatewayUrl (legacy gated on usesDefault only) — remote-default deployments no longer show a local configPath in the error evidence/rail; judged more-correct, revisit at cutover if strict parity required | HealthPage.tsx error branch vs health.js:88 | waived (review Task 8) | reviewer finding, owner sign-off at cutover gate; waiver covers ONLY the added isLocalGatewayUrl AND-gate — usesDefault itself follows legacy URL-equality (row above) |
 | Refresh button re-runs the report | health.js:17-24 | ported | HealthPage.test.tsx::HealthPage > refetches when Refresh is clicked (click → 2nd doctor.status call); HealthPage.tsx Refresh Button onClick=refetch |
 | _gatewayContextUrl() → localStorage['agentos.wsUrl'] \|\| bootstrap.ws_url | health.js:172-185 | ported (simplified) | Legacy read App.loadConnectionSettings().url; new impl reads localStorage['agentos.wsUrl'] ?? bootstrap.ws_url — same effective value. HealthPage.tsx gatewayUrl; exercised via mocked useBootstrap in HealthPage.test.tsx |
-| Live parity: /health vs legacy /control/health side-by-side | health.js (whole view) | RTL + manual pending | Live gateway check infeasible: running gateway on :18791 is a stale wheel (2026.7.18.post1, serves index HTML not current JSON contract) and holds the shared ~/.agentos state lock, so a fresh worktree gateway on :18999 refuses to start (pid 8228 owns state_dir); not stopped (user process). Behaviors covered by 5 RTL + 16 logic unit tests; visual parity pending a clean gateway |
+| Live parity: /health vs legacy /control/health side-by-side | health.js (whole view) | RTL + manual pending | Live gateway check infeasible: running gateway on :18791 is a stale wheel (2026.7.18.post1, serves index HTML not current JSON contract) and holds the shared ~/.agentos state lock, so a fresh worktree gateway on :18999 refuses to start (pid 8228 owns state_dir); not stopped (user process). Behaviors covered by 12 HealthPage RTL + 22 logic unit tests (grown by this round's health-parity batch — copy toasts, loading-reset, error-rail, usesDefault, evidence casing); visual parity pending a clean gateway |
 
 | Health view visual styling (health-* classes) | css/views/health.css | waived (Plan 1) | behavior-complete, style-pending: HealthPage emits semantic class names with no CSS in new app; styling deferred to shadcn/Tailwind polish pass; final-review finding, owner sign-off at cutover gate |
 ## Mechanical inventory (generated by scripts/fe_parity_inventory.py)
