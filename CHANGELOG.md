@@ -27,13 +27,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `SessionNode.derived_title` property fills the pre-existing dead
     hook, falling back `display_name → label → short opaque session id`.
   - The startup panel now renders `Session: <title> (<key>)` when a
-    friendly title is known.
+    friendly title is known (plumbed through `StartupData` and the
+    gateway welcome notice).
+  - The active input row is now framed by a top and bottom rule
+    (Claude Code style) so the typing area reads as a distinct box
+    between the transcript and the bottom toolbar. Consistent across the
+    gateway and `--standalone` surfaces.
 
 ### Changed
 
 - The bottom toolbar now leads with the session title (or short key
   fallback) instead of only the opaque key segment, and shows the model
   alias after it.
+
+### Fixed
+
+- `test_assistant_label_env_override` no longer wipes the subprocess
+  environment (`PATH=""`), which crashed Python startup on Windows CI
+  (`import _overlapped` → `WinError 10106`); it now layers the override
+  on a copy of `os.environ`.
 
 ## [2026.7.19.post1] - 2026-07-19
 

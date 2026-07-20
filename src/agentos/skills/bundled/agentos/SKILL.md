@@ -68,7 +68,8 @@ in both gateway and `--standalone` modes:
 - `/auto` — restore automatic Pilot Router routing (clear the pin).
 
 The assistant speaker label on the `◢` marker defaults to `agentos`; override
-with the `AGENTOS_ASSISTANT_LABEL` env var. The bottom toolbar renders
+with the `AGENTOS_ASSISTANT_LABEL` env var. The active input row is framed by a
+top and bottom rule so it reads as a distinct box; the bottom toolbar renders
 `title · model · [tier:cN]` while typing, with the title sourced from
 `/new <title>` or loaded on `/resume`.
 

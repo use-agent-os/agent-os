@@ -259,7 +259,7 @@ class ChatApplication:
         # Persistent left-side prompt prefix. Keep the current input row
         # identified as ``you`` even before text is typed; submitted transcript
         # rows are echoed separately by ``user_input_echo_payload``.
-        from agentos.cli.ui import ACCENT  # noqa: PLC0415
+        from agentos.cli.ui import ACCENT, ACCENT_DIM  # noqa: PLC0415
 
         def _input_prefix_fragments():  # type: ignore[no-untyped-def]
             return to_formatted_text(
@@ -287,6 +287,18 @@ class ChatApplication:
             height=Dimension.exact(1),
             style="class:bottom-toolbar",
         )
+
+        # Issue #46 §5: frame the active input row with a top and bottom rule
+        # (Claude Code style) so the typing area reads as a distinct box between
+        # the transcript and the bottom toolbar. A filled-char Window renders a
+        # full-width horizontal rule in the muted accent tone.
+        def _rule_window() -> Window:  # type: ignore[no-untyped-def]
+            return Window(
+                height=Dimension.exact(1),
+                char="─",
+                style=f"fg:{ACCENT_DIM}",
+            )
+
         children: list = []
         if input_header is not None:
             def _header_fragments():  # type: ignore[no-untyped-def]
@@ -304,7 +316,9 @@ class ChatApplication:
                     height=Dimension.exact(1),
                 )
             )
+        children.append(_rule_window())
         children.append(input_window)
+        children.append(_rule_window())
         children.append(toolbar_window)
         root = FloatContainer(
             content=HSplit(children),

@@ -189,6 +189,7 @@ def _gateway_runtime_notifier(
             render_startup_screen(
                 output_console,
                 session_key=notice.session_key,
+                session_title=notice.session_title,
                 model=notice.model,
             )
             return

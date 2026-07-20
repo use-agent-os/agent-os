@@ -62,20 +62,29 @@ class _RecordingOutput(DummyOutput):
         return None
 
 
-def _input_prefix_plain_text(chat_app: ChatApplication) -> str:
+def _input_row(chat_app: ChatApplication):  # type: ignore[no-untyped-def]
+    """Locate the input ``VSplit`` row (prefix + buffer).
+
+    The root ``HSplit`` frames the input with horizontal-rule Windows
+    (issue #46 §5), so the row is no longer at a fixed child index. Pick
+    the first child that is a container of windows (the input ``VSplit``).
+    """
     root = chat_app.application.layout.container
     body = getattr(root, "content", root)
-    input_row = body.children[0]
-    prefix_window = input_row.children[0]
+    for child in body.children:
+        if getattr(child, "children", None):
+            return child
+    raise AssertionError("no input VSplit row found in layout")
+
+
+def _input_prefix_plain_text(chat_app: ChatApplication) -> str:
+    prefix_window = _input_row(chat_app).children[0]
     fragments = to_formatted_text(prefix_window.content.text())
     return "".join(fragment[1] for fragment in fragments)
 
 
 def _input_prefix_width(chat_app: ChatApplication) -> int | None:
-    root = chat_app.application.layout.container
-    body = getattr(root, "content", root)
-    input_row = body.children[0]
-    prefix_window = input_row.children[0]
+    prefix_window = _input_row(chat_app).children[0]
     width = prefix_window.width() if callable(prefix_window.width) else prefix_window.width
     return width.preferred
 

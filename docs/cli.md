@@ -105,6 +105,17 @@ streamed reply marker, the waiting header, and the queued-turn marker.
 AGENTOS_ASSISTANT_LABEL="Hani" agentos chat
 ```
 
+The active input row is framed by a top and bottom rule, so the typing
+area reads as a distinct box between the transcript and the bottom
+toolbar:
+
+```
+────────────────────────────────────────
+ ◢ you  <your message here>
+────────────────────────────────────────
+ title · model · [tier:cN]
+```
+
 The bottom toolbar renders `title · model · [tier:cN]` while typing. The
 title comes from `/new <title>` (or is loaded from the gateway on
 `/resume`); the tier chip appears only while a Pilot Router hold is

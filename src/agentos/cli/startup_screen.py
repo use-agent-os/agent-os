@@ -114,6 +114,7 @@ class StartupData:
     model: str = "--"
     workdir: str = "--"
     session_key: str = "--"
+    session_title: str | None = None
     tool_groups: list[tuple[str, list[str]]] = field(default_factory=list)
     skill_groups: list[tuple[str, list[str]]] = field(default_factory=list)
     tool_count: int = 0
@@ -196,24 +197,29 @@ def _gather_skill_groups() -> tuple[list[tuple[str, list[str]]], int]:
 def gather_startup_data(
     *,
     session_key: str | None = None,
+    session_title: str | None = None,
     model: str | None = None,
     workdir: str | None = None,
 ) -> StartupData:
     """Collect every value the startup screen needs, never raising.
 
     Caller-provided ``session_key``/``model``/``workdir`` win over discovered
-    defaults; missing values fall back to ``"--"``.
+    defaults; missing values fall back to ``"--"``. ``session_title`` is the
+    friendly display name (set via ``/new <title>``) surfaced alongside the
+    opaque key when known.
     """
     tool_groups, tool_count = _gather_tool_groups()
     skill_groups, skill_count = _gather_skill_groups()
     resolved_model = (model or "").strip() or _gather_default_model()
     resolved_workdir = (workdir or "").strip() or _gather_workdir()
     resolved_session = (session_key or "").strip() or "--"
+    resolved_title = (session_title or "").strip() or None
     return StartupData(
         version=_gather_version(),
         model=resolved_model,
         workdir=resolved_workdir,
         session_key=resolved_session,
+        session_title=resolved_title,
         tool_groups=tool_groups,
         skill_groups=skill_groups,
         tool_count=tool_count,
@@ -233,7 +239,10 @@ def _left_column(data: StartupData) -> RenderableType:
     body.append("\n\n")
     body.append(f"{data.model}\n", style=f"bold {ACCENT_SOFT}")
     body.append(f"{data.workdir}\n", style="dim")
-    body.append(f"Session: {data.session_key}", style="dim")
+    if data.session_title and data.session_title != data.session_key:
+        body.append(f"Session: {data.session_title} ({data.session_key})", style="dim")
+    else:
+        body.append(f"Session: {data.session_key}", style="dim")
     return body
 
 
@@ -366,6 +375,7 @@ def render_startup_screen(
     console: Console,
     *,
     session_key: str | None = None,
+    session_title: str | None = None,
     model: str | None = None,
     workdir: str | None = None,
 ) -> None:
@@ -376,6 +386,7 @@ def render_startup_screen(
     """
     data = gather_startup_data(
         session_key=session_key,
+        session_title=session_title,
         model=model,
         workdir=workdir,
     )

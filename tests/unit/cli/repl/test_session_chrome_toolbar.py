@@ -12,6 +12,7 @@ Pins:
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 
@@ -76,9 +77,14 @@ def test_assistant_label_env_override() -> None:
         "from agentos.cli.tui.terminal.prompt import DEFAULT_ASSISTANT_LABEL; "
         "print(DEFAULT_ASSISTANT_LABEL)"
     )
+    # Copy the real environment and layer the override on top. A minimal env
+    # (e.g. ``{"AGENTOS_ASSISTANT_LABEL": ..., "PATH": ""}``) wipes the OS vars
+    # Python needs to boot on Windows — the interpreter fails to import
+    # ``_overlapped`` (winsock/SystemRoot gone) before our module is reached.
+    env = {**os.environ, "AGENTOS_ASSISTANT_LABEL": "Hani"}
     result = subprocess.run(
         [sys.executable, "-c", script],
-        env={"AGENTOS_ASSISTANT_LABEL": "Hani", "PATH": ""},
+        env=env,
         capture_output=True,
         text=True,
         check=True,

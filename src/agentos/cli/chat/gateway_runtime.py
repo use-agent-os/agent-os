@@ -36,6 +36,7 @@ class GatewayRuntimeNotice:
     session_key: str | None = None
     model: str | None = None
     message: str | None = None
+    session_title: str | None = None
 
 
 class GatewayClientLike(Protocol):
@@ -184,7 +185,13 @@ async def run_gateway_chat(
         session_context = GatewaySessionContext.create(state)
         active_turn_session_key: str | None = None
 
-        deps.notify(GatewayRuntimeNotice(kind="welcome"))
+        deps.notify(
+            GatewayRuntimeNotice(
+                kind="welcome",
+                session_key=session_key,
+                session_title=state.display_name,
+            )
+        )
 
         async def _dispatch_input(user_input: str) -> bool:
             nonlocal active_turn_session_key
