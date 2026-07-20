@@ -1,10 +1,11 @@
 import './agents.css'
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { MessageSquareIcon, PencilIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 import { AsciiField } from '@/components/AsciiField'
+import { ModalShell } from '@/components/ModalShell'
 import { Button } from '@/components/ui/button'
 import { useRpc } from '@/app/providers'
 import {
@@ -33,57 +34,6 @@ interface AgentsListError {
 
 function toneClass(tone: 'ok' | 'info'): string {
   return tone === 'ok' ? 'tone-ok' : 'tone-info'
-}
-
-// ── Modal shell (tokenized dialog; overlay + Escape/backdrop close) ──────────
-function ModalShell({
-  role,
-  labelledBy,
-  describedBy,
-  onClose,
-  children,
-}: {
-  role: 'dialog' | 'alertdialog'
-  labelledBy: string
-  describedBy?: string
-  onClose: () => void
-  children: React.ReactNode
-}) {
-  const panelRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    // Focus the first focusable control for keyboard users.
-    const first = panelRef.current?.querySelector<HTMLElement>(
-      'input:not([disabled]), textarea, select, button',
-    )
-    first?.focus()
-  }, [])
-
-  return (
-    <div
-      className="ag-modal__overlay"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose()
-      }}
-    >
-      <div
-        ref={panelRef}
-        className="ag-modal panel"
-        role={role}
-        aria-modal="true"
-        aria-labelledby={labelledBy}
-        aria-describedby={describedBy}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') {
-            e.stopPropagation()
-            onClose()
-          }
-        }}
-      >
-        {children}
-      </div>
-    </div>
-  )
 }
 
 // ── Create / Edit dialog ─────────────────────────────────────────────────────
@@ -144,7 +94,13 @@ function AgentDialog({
   }
 
   return (
-    <ModalShell role="dialog" labelledBy={titleId} onClose={attemptClose}>
+    <ModalShell
+      role="dialog"
+      labelledBy={titleId}
+      onClose={attemptClose}
+      overlayClassName="ag-modal__overlay"
+      className="ag-modal panel"
+    >
       <form className="ag-dialog" onSubmit={submit}>
         <header className="ag-dialog__head">
           <span className="t-label">Control · Agents</span>
@@ -307,6 +263,8 @@ function ConfirmDialog({
       labelledBy={titleId}
       describedBy={bodyId}
       onClose={busy ? () => {} : onCancel}
+      overlayClassName="ag-modal__overlay"
+      className="ag-modal panel"
     >
       <div className="ag-dialog ag-confirm">
         <header className="ag-dialog__head">

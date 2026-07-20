@@ -1,5 +1,5 @@
 import './sessions.css'
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { AsciiField } from '@/components/AsciiField'
+import { ModalShell } from '@/components/ModalShell'
 import { Button } from '@/components/ui/button'
 import { useRpc } from '@/app/providers'
 import {
@@ -50,54 +51,25 @@ interface RpcError {
 
 const PAGE_SIZES = [10, 25, 50, 100]
 
-// ── Modal shell (mirrors the agents view: overlay + Escape/backdrop close) ────
-function ModalShell({
-  role,
-  labelledBy,
-  describedBy,
-  onClose,
-  className,
-  children,
-}: {
-  role: 'dialog' | 'alertdialog'
-  labelledBy: string
-  describedBy?: string
-  onClose: () => void
-  className?: string
-  children: React.ReactNode
-}) {
-  const panelRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const first = panelRef.current?.querySelector<HTMLElement>(
-      'input:not([disabled]), textarea, select, button',
-    )
-    first?.focus()
-  }, [])
-  return (
-    <div
-      className="sess-modal__overlay"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose()
-      }}
-    >
-      <div
-        ref={panelRef}
-        className={`sess-modal panel ${className ?? ''}`}
-        role={role}
-        aria-modal="true"
-        aria-labelledby={labelledBy}
-        aria-describedby={describedBy}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') {
-            e.stopPropagation()
-            onClose()
-          }
-        }}
-      >
-        {children}
-      </div>
-    </div>
-  )
+// Copy with a non-secure-context fallback, mirroring the shared CommandLine
+// copy contract (clipboard API, else a hidden-textarea execCommand). Legacy
+// sessions used a bare navigator.clipboard call with no fallback, so this is a
+// deliberate uplift (recorded as ported(uplift) in the parity matrix) that lets
+// the copy work when the page isn't served from a secure context.
+function copyWithFallback(text: string): Promise<void> {
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    return navigator.clipboard.writeText(text)
+  }
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.setAttribute('readonly', '')
+  ta.style.position = 'fixed'
+  ta.style.left = '-9999px'
+  document.body.appendChild(ta)
+  ta.select()
+  const ok = document.execCommand('copy')
+  document.body.removeChild(ta)
+  return ok ? Promise.resolve() : Promise.reject(new Error('Copy command failed'))
 }
 
 // ── Reusable destructive confirmation (alertdialog) ──────────────────────────
@@ -126,7 +98,8 @@ function ConfirmDialog({
       labelledBy={titleId}
       describedBy={bodyId}
       onClose={busy ? () => {} : onCancel}
-      className="sess-confirm"
+      overlayClassName="sess-modal__overlay"
+      className="sess-modal panel sess-confirm"
     >
       <header className="sess-dialog__head">
         <h3 id={titleId} className="sess-dialog__title">
@@ -183,7 +156,13 @@ function NewSessionDialog({
   }
 
   return (
-    <ModalShell role="dialog" labelledBy={titleId} onClose={onCancel} className="sess-newchat">
+    <ModalShell
+      role="dialog"
+      labelledBy={titleId}
+      onClose={onCancel}
+      overlayClassName="sess-modal__overlay"
+      className="sess-modal panel sess-newchat"
+    >
       <form className="sess-dialog" onSubmit={submit}>
         <header className="sess-dialog__head">
           <span className="t-label">Control · Sessions</span>
@@ -479,10 +458,11 @@ export function SessionsPage() {
   }
   async function copyKey(key: string) {
     try {
-      await navigator.clipboard.writeText(key)
+      await copyWithFallback(key)
       toast.success('Copied session key', { id: 'sessions-copy-ok', duration: 1600 })
-    } catch {
-      toast.warning('Copy failed', { id: 'sessions-copy-err' })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      toast.warning('Copy failed: ' + message, { id: 'sessions-copy-err', duration: 2500 })
     }
   }
 

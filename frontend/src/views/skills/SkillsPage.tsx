@@ -1,9 +1,10 @@
 import './skills.css'
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { DownloadIcon, RefreshCwIcon, SearchIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { AsciiField } from '@/components/AsciiField'
+import { ModalShell } from '@/components/ModalShell'
 import { Button } from '@/components/ui/button'
 import { useRpc } from '@/app/providers'
 import {
@@ -62,46 +63,6 @@ interface InstallResponse {
 interface MutationResponse {
   success?: boolean
   message?: string
-}
-
-// ── Modal shell (tokenized dialog; overlay + Escape/backdrop close) ──────────
-function ModalShell({
-  labelledBy,
-  onClose,
-  children,
-}: {
-  labelledBy: string
-  onClose: () => void
-  children: React.ReactNode
-}) {
-  const panelRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    panelRef.current?.querySelector<HTMLElement>('button, a, input')?.focus()
-  }, [])
-  return (
-    <div
-      className="sk-modal__overlay"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose()
-      }}
-    >
-      <div
-        ref={panelRef}
-        className="sk-modal panel"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={labelledBy}
-        onKeyDown={(e) => {
-          if (e.key === 'Escape') {
-            e.stopPropagation()
-            onClose()
-          }
-        }}
-      >
-        {children}
-      </div>
-    </div>
-  )
 }
 
 // ── Logo badge (skills.js:643-655) ────────────────────────────────────────────
@@ -1024,7 +985,13 @@ function SkillDialog({
   const hasMissing = missingBins.length > 0 || missingEnv.length > 0
 
   return (
-    <ModalShell labelledBy={titleId} onClose={onClose}>
+    <ModalShell
+      role="dialog"
+      labelledBy={titleId}
+      onClose={onClose}
+      overlayClassName="sk-modal__overlay"
+      className="sk-modal panel"
+    >
       <header className="sk-dialog__head">
         <div className="sk-dialog__head-left">
           {skill.emoji ? <span className="sk-dialog__emoji">{skill.emoji}</span> : null}
@@ -1156,7 +1123,13 @@ function RegistryDialog({
   const demoTitle = item.demo?.title || ''
   const demoLang = item.demo?.language || ''
   return (
-    <ModalShell labelledBy={titleId} onClose={onClose}>
+    <ModalShell
+      role="dialog"
+      labelledBy={titleId}
+      onClose={onClose}
+      overlayClassName="sk-modal__overlay"
+      className="sk-modal panel"
+    >
       <header className="sk-dialog__head">
         <div className="sk-dialog__head-left">
           <LogoBadge item={item} cls="sk-dialog__logo" />

@@ -156,6 +156,52 @@ describe('LogsPage', () => {
     vi.useRealTimers()
   })
 
+  it('does not overlap polls while one is in flight (pollInFlightRef guard)', async () => {
+    // logs.js:174-176 — `if (!_el || _pollInFlight) return`. Hold the first
+    // logs.tail open so a second poll (fired by the 3000ms interval) lands while
+    // the first is still in flight; the guard must short-circuit it, so exactly
+    // one logs.tail call is outstanding until the first resolves.
+    vi.useFakeTimers()
+    let resolveFirst: ((v: unknown) => void) | undefined
+    let tailCalls = 0
+    mockRpc.call.mockImplementation((method: string) => {
+      if (method === 'logs.status') return Promise.resolve(STATUS_OK)
+      if (method === 'logs.tail') {
+        tailCalls += 1
+        if (tailCalls === 1) {
+          return new Promise((resolve) => {
+            resolveFirst = resolve
+          })
+        }
+        return Promise.resolve(tail([{ level: 'info', message: 'second' }]))
+      }
+      return Promise.resolve({})
+    })
+    renderPage()
+
+    // First poll is in flight (awaiting resolveFirst).
+    await vi.waitFor(() => expect(tailCalls).toBe(1))
+
+    // The interval fires a concurrent poll while the first is still pending —
+    // the in-flight guard blocks it, so no second logs.tail is issued yet.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    expect(tailCalls).toBe(1)
+
+    // Resolve the first poll; the guard clears and the next interval tick is
+    // free to issue a real second call.
+    await act(async () => {
+      resolveFirst?.(tail([{ level: 'info', message: 'first' }]))
+      await Promise.resolve()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    expect(tailCalls).toBe(2)
+    vi.useRealTimers()
+  })
+
   it('filters lines by the search input', async () => {
     wireRpc({
       tails: [
@@ -220,6 +266,36 @@ describe('LogsPage', () => {
     await waitFor(() => expect(screen.getByText('x')).toBeInTheDocument())
     // The autoscroll effect pushes scrollTop to scrollHeight after lines render.
     await waitFor(() => expect(display.scrollTop).toBe(999))
+  })
+
+  it('disabling auto-follow stops the autoscroll when new lines append', async () => {
+    // logs.js:86-90,332-335 — the autoscroll effect is gated on _autoFollow, so
+    // with the toggle off a fresh batch of lines must NOT move scrollTop.
+    vi.useFakeTimers()
+    wireRpc({
+      tails: [tail([]), tail([{ level: 'info', message: 'appended' }])],
+    })
+    renderPage()
+    // First (empty) tail lands: no lines yet, nothing scrolled.
+    await vi.waitFor(() => expect(screen.getByText(/No logs yet\./i)).toBeInTheDocument())
+
+    const display = screen.getByRole('log')
+    Object.defineProperty(display, 'scrollHeight', { value: 999, configurable: true })
+    display.scrollTop = 0
+
+    // Turn auto-follow off before any lines render.
+    const toggle = screen.getByLabelText(/auto-follow/i) as HTMLInputElement
+    fireEvent.click(toggle)
+    expect(toggle.checked).toBe(false)
+
+    // The next 3000ms poll appends a line; with auto-follow off the layout
+    // effect early-returns, so scrollTop is left untouched at 0.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+    await vi.waitFor(() => expect(screen.getByText('appended')).toBeInTheDocument())
+    expect(display.scrollTop).toBe(0)
+    vi.useRealTimers()
   })
 
   it('highlights the search term inside matching messages', async () => {
