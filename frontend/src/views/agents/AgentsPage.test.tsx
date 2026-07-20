@@ -272,6 +272,78 @@ describe('AgentsPage', () => {
     await waitFor(() => expect(toast.error).toHaveBeenCalled())
   })
 
+  // agents.js:432-437 — no-op-save short-circuit: an unchanged form must NOT
+  // call agents.update; it toasts 'Nothing to save' and keeps the dialog open.
+  it('saving an unchanged edit does not call agents.update and toasts "Nothing to save"', async () => {
+    wireRpc()
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Agent data-analyst')).toBeInTheDocument())
+    const custom = screen.getByLabelText('Agent data-analyst')
+    fireEvent.click(within(custom).getByRole('button', { name: /^edit$/i }))
+    const dialog = await screen.findByRole('dialog')
+    // Change nothing, click Save.
+    fireEvent.click(within(dialog).getByRole('button', { name: /save changes/i }))
+    await waitFor(() =>
+      expect(toast.info).toHaveBeenCalledWith('Nothing to save', expect.anything()),
+    )
+    expect(mockRpc.call).not.toHaveBeenCalledWith('agents.update', expect.anything())
+    // Dialog stays open.
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  // agents.js:307-312,499-506 — dirty-guard on close.
+  it('closing a dirty edit via Escape shows the discard confirm; dismissing keeps edits', async () => {
+    wireRpc()
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Agent data-analyst')).toBeInTheDocument())
+    const custom = screen.getByLabelText('Agent data-analyst')
+    fireEvent.click(within(custom).getByRole('button', { name: /^edit$/i }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText(/Display name/i), {
+      target: { value: 'Edited name' },
+    })
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    // Discard confirm appears; the edit dialog is NOT yet gone.
+    const confirm = await screen.findByRole('alertdialog')
+    expect(within(confirm).getByText(/Discard unsaved changes/i)).toBeInTheDocument()
+    // Dismiss the confirm — the edit dialog stays, edits intact.
+    fireEvent.click(within(confirm).getByRole('button', { name: /keep editing|cancel/i }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getByLabelText(/Display name/i)).toHaveValue(
+      'Edited name',
+    )
+  })
+
+  it('confirming discard on a dirty edit closes the dialog', async () => {
+    wireRpc()
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Agent data-analyst')).toBeInTheDocument())
+    const custom = screen.getByLabelText('Agent data-analyst')
+    fireEvent.click(within(custom).getByRole('button', { name: /^edit$/i }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText(/Display name/i), {
+      target: { value: 'Edited name' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: /^cancel$/i }))
+    const confirm = await screen.findByRole('alertdialog')
+    fireEvent.click(within(confirm).getByRole('button', { name: /^discard$/i }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  })
+
+  it('closing a non-dirty edit via Escape closes immediately with no discard prompt', async () => {
+    wireRpc()
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Agent data-analyst')).toBeInTheDocument())
+    const custom = screen.getByLabelText('Agent data-analyst')
+    fireEvent.click(within(custom).getByRole('button', { name: /^edit$/i }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.keyDown(dialog, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  })
+
   it('deleting requires confirmation then calls agents.delete and invalidates', async () => {
     wireRpc()
     renderPage()

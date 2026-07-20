@@ -13,6 +13,8 @@ import {
   agentToForm,
   buildCreatePayload,
   buildUpdatePayload,
+  isFormDirty,
+  isNoOpUpdate,
   parseToolsInput,
   validateCreate,
   type AgentForm,
@@ -103,12 +105,28 @@ function AgentDialog({
   const [form, setForm] = useState<AgentForm>(seed)
   const [toolsText, setToolsText] = useState(seed.tools.join(', '))
   const [idError, setIdError] = useState<string | null>(null)
+  const [showDiscard, setShowDiscard] = useState(false)
   const titleId = useId()
   const isCreate = mode === 'create'
   const idDisabled = !isCreate // id is never editable post-create (agents.js:324)
 
+  // agents.js:272-275,307-312 — the edit form is dirty vs its seed (tools live
+  // in the free-text field, so fold it into the comparison snapshot).
+  const dirty = !isCreate && isFormDirty(seed, { ...form, tools: parseToolsInput(toolsText) })
+
   function set<K extends keyof AgentForm>(key: K, value: AgentForm[K]) {
     setForm((f) => ({ ...f, [key]: value }))
+  }
+
+  // agents.js:307-312,499-506 — a dirty edit prompts to discard on close;
+  // create mode / a non-dirty edit closes immediately.
+  function attemptClose() {
+    if (saving) return
+    if (dirty) {
+      setShowDiscard(true)
+      return
+    }
+    onCancel()
   }
 
   function submit(e: React.FormEvent) {
@@ -126,7 +144,7 @@ function AgentDialog({
   }
 
   return (
-    <ModalShell role="dialog" labelledBy={titleId} onClose={saving ? () => {} : onCancel}>
+    <ModalShell role="dialog" labelledBy={titleId} onClose={attemptClose}>
       <form className="ag-dialog" onSubmit={submit}>
         <header className="ag-dialog__head">
           <span className="t-label">Control · Agents</span>
@@ -237,7 +255,7 @@ function AgentDialog({
         </div>
 
         <footer className="ag-dialog__foot">
-          <Button type="button" variant="ghost" disabled={saving} onClick={onCancel}>
+          <Button type="button" variant="ghost" disabled={saving} onClick={attemptClose}>
             Cancel
           </Button>
           <Button type="submit" disabled={saving}>
@@ -245,19 +263,39 @@ function AgentDialog({
           </Button>
         </footer>
       </form>
+
+      {showDiscard ? (
+        <ConfirmDialog
+          title="Discard unsaved changes?"
+          body="You have unsaved edits. Closing now will lose them."
+          confirmLabel="Discard"
+          cancelLabel="Keep editing"
+          onCancel={() => setShowDiscard(false)}
+          onConfirm={() => {
+            setShowDiscard(false)
+            onCancel()
+          }}
+        />
+      ) : null}
     </ModalShell>
   )
 }
 
-// ── Delete confirmation (alertdialog + destructive) ──────────────────────────
-function ConfirmDelete({
-  agentId,
-  busy,
+// ── Reusable destructive confirmation (alertdialog) ──────────────────────────
+function ConfirmDialog({
+  title,
+  body,
+  confirmLabel,
+  cancelLabel = 'Cancel',
+  busy = false,
   onCancel,
   onConfirm,
 }: {
-  agentId: string
-  busy: boolean
+  title: string
+  body: React.ReactNode
+  confirmLabel: string
+  cancelLabel?: string
+  busy?: boolean
   onCancel: () => void
   onConfirm: () => void
 }) {
@@ -273,19 +311,18 @@ function ConfirmDelete({
       <div className="ag-dialog ag-confirm">
         <header className="ag-dialog__head">
           <h3 id={titleId} className="ag-dialog__title">
-            Delete agent
+            {title}
           </h3>
         </header>
         <p id={bodyId} className="ag-confirm__body">
-          Delete agent <strong>{agentId}</strong>? Existing chats with this agent will keep working
-          but become unmanaged.
+          {body}
         </p>
         <footer className="ag-dialog__foot">
           <Button type="button" variant="ghost" disabled={busy} onClick={onCancel}>
-            Cancel
+            {cancelLabel}
           </Button>
           <Button type="button" variant="destructive" disabled={busy} onClick={onConfirm}>
-            Delete agent
+            {confirmLabel}
           </Button>
         </footer>
       </div>
@@ -628,15 +665,29 @@ export function AgentsPage() {
           saving={createMutation.isPending || updateMutation.isPending}
           onCancel={() => setDialog({ kind: 'none' })}
           onCreate={(id, name) => createMutation.mutate({ id, name })}
-          onSave={(initial, current) =>
-            updateMutation.mutate({ id: current.id, payload: buildUpdatePayload(initial, current) })
-          }
+          onSave={(initial, current) => {
+            const payload = buildUpdatePayload(initial, current)
+            // agents.js:432-437 — no-op save: nothing changed → skip the RPC,
+            // toast 'Nothing to save', and keep the dialog open.
+            if (isNoOpUpdate(payload)) {
+              toast.info('Nothing to save', { id: 'agents-update' })
+              return
+            }
+            updateMutation.mutate({ id: current.id, payload })
+          }}
         />
       ) : null}
 
       {dialog.kind === 'delete' ? (
-        <ConfirmDelete
-          agentId={dialog.id}
+        <ConfirmDialog
+          title="Delete agent"
+          body={
+            <>
+              Delete agent <strong>{dialog.id}</strong>? Existing chats with this agent will keep
+              working but become unmanaged.
+            </>
+          }
+          confirmLabel="Delete agent"
           busy={deleteMutation.isPending}
           onCancel={() => setDialog({ kind: 'none' })}
           onConfirm={() => deleteMutation.mutate(dialog.id)}

@@ -159,6 +159,22 @@ export function buildCreatePayload(input: CreateInput): { id: string; name?: str
   return payload
 }
 
+/** agents.js:272-275 — is the edited form dirty relative to its seed? A
+ * structural (JSON) comparison, matching the legacy dirty-tracker. */
+export function isFormDirty(initial: AgentForm, current: AgentForm): boolean {
+  try {
+    return JSON.stringify(initial) !== JSON.stringify(current)
+  } catch {
+    return true
+  }
+}
+
+/** agents.js:432-437 — an update payload that carries only {id} changes
+ * nothing, so the save is a no-op (skip the RPC, toast 'Nothing to save'). */
+export function isNoOpUpdate(payload: Record<string, unknown>): boolean {
+  return Object.keys(payload).length <= 1
+}
+
 /** agents.js:467-476 — diff the seed vs the edited form: {id} plus only the
  * changed keys. Tools compared structurally. */
 export function buildUpdatePayload(

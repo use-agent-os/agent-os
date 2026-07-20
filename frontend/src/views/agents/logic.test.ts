@@ -6,6 +6,8 @@ import {
   buildCreatePayload,
   buildUpdatePayload,
   isBuiltinAgent,
+  isFormDirty,
+  isNoOpUpdate,
   parseToolsInput,
   validateAgentId,
   validateCreate,
@@ -211,5 +213,39 @@ describe('buildUpdatePayload', () => {
       workspace: '/ws2',
       agentDir: '/dir2',
     })
+  })
+})
+
+describe('isFormDirty', () => {
+  // agents.js:272-275 — structural comparison of the seed vs the current form.
+  const base = agentToForm({
+    id: 'a',
+    name: 'A',
+    tools: ['t1'],
+    workspace: '/ws',
+    agent_dir: '/dir',
+    enabled: true,
+  })
+  it('is false when the form is unchanged', () => {
+    expect(isFormDirty(base, { ...base })).toBe(false)
+    expect(isFormDirty(base, { ...base, tools: ['t1'] })).toBe(false)
+  })
+  it('is true when any scalar field changed', () => {
+    expect(isFormDirty(base, { ...base, name: 'B' })).toBe(true)
+    expect(isFormDirty(base, { ...base, enabled: false })).toBe(true)
+  })
+  it('is true when the tools array changed', () => {
+    expect(isFormDirty(base, { ...base, tools: ['t1', 't2'] })).toBe(true)
+  })
+})
+
+describe('isNoOpUpdate', () => {
+  // agents.js:432-437 — an update payload with only {id} changes nothing.
+  it('is true when the payload has only id', () => {
+    expect(isNoOpUpdate({ id: 'a' })).toBe(true)
+  })
+  it('is false when the payload carries any changed field', () => {
+    expect(isNoOpUpdate({ id: 'a', name: 'B' })).toBe(false)
+    expect(isNoOpUpdate({ id: 'a', tools: [] })).toBe(false)
   })
 })
