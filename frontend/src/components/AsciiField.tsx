@@ -84,9 +84,9 @@ export function AsciiField() {
       for (const p of particles) {
         const y = (((p.y0 - t * p.vy) % height) + height) % height
         const depth = y / height // 0 top .. 1 bottom
-        const flicker = 0.55 + 0.45 * Math.sin(t * p.flickerHz * Math.PI * 2 + p.phase)
+        const flicker = 0.65 + 0.35 * Math.sin(t * p.flickerHz * Math.PI * 2 + p.phase)
         // Fade toward the top so embers dissolve as they rise.
-        const alpha = Math.max(0, depth * 0.9 + 0.1) * flicker
+        const alpha = Math.min(1, depth * 0.85 + 0.3) * flicker
         if (alpha < 0.03) continue
         ctx.globalAlpha = alpha
         ctx.fillText(p.char, p.x, y)

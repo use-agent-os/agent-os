@@ -33,7 +33,7 @@
 }
 .health-stage__title-block h2 {
   font-family: var(--font-mono);
-  font-size: clamp(1.5rem, 1.1rem + 1.4vw, 2.375rem);
+  font-size: clamp(1.75rem, 1.25rem + 1.6vw, 2.75rem);
   line-height: 1.05;
   font-weight: 700;
   letter-spacing: -0.01em;
@@ -82,7 +82,7 @@
   color: var(--dim);
 }
 .health-score strong {
-  font-size: 1.5rem;
+  font-size: 1.875rem;
   font-weight: 800;
   letter-spacing: -0.01em;
   line-height: 1.1;
@@ -153,7 +153,7 @@
 .health-count strong {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 1.75rem;
+  font-size: 2.25rem;
   font-weight: 700;
   line-height: 1;
 }

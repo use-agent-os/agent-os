@@ -78,28 +78,28 @@
 
   --background: #060608; /* legacy --bg */
   --foreground: #ececef; /* legacy --text */
-  --surface: #0c0c0f; /* legacy --bg-surface */
-  --elevated: #131318; /* legacy --bg-elevated */
-  --card: #0c0c0f;
+  --surface: #0e0e13; /* lifted from legacy #0c0c0f for contrast */
+  --elevated: #17171d; /* lifted from legacy #131318 */
+  --card: #0e0e13;
   --card-foreground: #ececef;
-  --popover: #131318;
+  --popover: #17171d;
   --popover-foreground: #ececef;
 
   --primary: #ccff00; /* legacy --accent (lime signal) */
   --primary-foreground: #0f1400; /* legacy --accent-foreground */
-  --secondary: #131318;
+  --secondary: #17171d;
   --secondary-foreground: #ececef;
-  --muted: #131318;
-  --muted-foreground: #a1a1aa; /* legacy --text-muted */
-  --dim: #82828a; /* legacy --text-dim */
-  --accent: #1c1c22; /* legacy --bg-hover: hover surface, NOT the signal color */
+  --muted: #17171d;
+  --muted-foreground: #b6b6c0; /* brightened from legacy #a1a1aa */
+  --dim: #93939e; /* brightened from legacy #82828a */
+  --accent: #21212a; /* hover surface (lifted), NOT the signal color */
   --accent-foreground: #ececef;
   --destructive: #f87171; /* legacy --danger */
   --destructive-foreground: #1a0808;
 
-  --border: rgba(255, 255, 255, 0.08); /* legacy --border */
-  --hairline: rgba(255, 255, 255, 0.06); /* legacy --hairline */
-  --input: rgba(255, 255, 255, 0.12);
+  --border: rgba(255, 255, 255, 0.13);
+  --hairline: rgba(255, 255, 255, 0.09);
+  --input: rgba(255, 255, 255, 0.16);
   --ring: #ccff00; /* focus = signal, per legacy */
 
   --ok: #22c55e;
@@ -107,13 +107,13 @@
   --danger: #f87171;
   --info: #60a5fa;
 
-  --sidebar: #0c0c0f;
+  --sidebar: #0e0e13;
   --sidebar-foreground: #ececef;
   --sidebar-primary: #ccff00;
   --sidebar-primary-foreground: #0f1400;
-  --sidebar-accent: #1c1c22;
+  --sidebar-accent: #21212a;
   --sidebar-accent-foreground: #ececef;
-  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-border: rgba(255, 255, 255, 0.13);
   --sidebar-ring: #ccff00;
 
   --grain-opacity: 0.05;
@@ -206,7 +206,7 @@
      trailing period rendered via CSS so the accessible name stays clean. */
   .t-display {
     font-family: var(--font-mono);
-    font-size: clamp(1.5rem, 1.1rem + 1.4vw, 2.375rem);
+    font-size: clamp(1.75rem, 1.25rem + 1.6vw, 2.75rem);
     line-height: 1.05;
     font-weight: 700;
     letter-spacing: -0.01em;
@@ -240,7 +240,7 @@
     font-size: 0.6875rem;
     text-transform: uppercase;
     letter-spacing: 0.22em;
-    color: var(--muted-foreground);
+    color: var(--foreground);
   }
   .panel__head::before {
     content: '';
@@ -281,12 +281,12 @@
     pointer-events: none;
     user-select: none;
     color: var(--primary);
-    opacity: 0.22;
+    opacity: 0.38;
     /* Soft edges left/right so the field breathes inside the header. */
     mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent);
   }
   :root[data-theme='light'] .ascii-field {
-    opacity: 0.16;
+    opacity: 0.22;
   }
   .ascii-field canvas {
     display: block;
