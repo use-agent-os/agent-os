@@ -42,6 +42,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- The framed chat input no longer balloons to fill the screen on a fresh
+  launch. The input buffer window is pinned to a single row
+  (`Dimension.exact(1)`) and a greedy spacer heads the layout, so the
+  compact frame + toolbar stay pinned to the bottom of the terminal
+  instead of the bottom rule + toolbar being pushed far below the
+  `◢ you` row.
 - `test_assistant_label_env_override` no longer wipes the subprocess
   environment (`PATH=""`), which crashed Python startup on Windows CI
   (`import _overlapped` → `WinError 10106`); it now layers the override

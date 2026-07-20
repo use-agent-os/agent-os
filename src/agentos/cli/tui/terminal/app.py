@@ -279,7 +279,7 @@ class ChatApplication:
                     FormattedTextControl(_input_prefix_fragments),
                     width=_input_prefix_width,
                 ),
-                Window(BufferControl(buffer=self._buffer), height=Dimension(min=1)),
+                Window(BufferControl(buffer=self._buffer), height=Dimension.exact(1)),
             ]
         )
         toolbar_window = Window(
@@ -299,7 +299,13 @@ class ChatApplication:
                 style=f"fg:{ACCENT_DIM}",
             )
 
-        children: list = []
+        # In non-full-screen mode the renderer reserves the rows below the
+        # cursor (`min_available_height`), which is large on a fresh launch
+        # against a tall terminal. Absorb that slack in a greedy spacer at the
+        # top so the framed input + toolbar stay compact and pinned to the
+        # bottom (the input buffer is `Dimension.exact(1)`, so it no longer
+        # balloons to fill the region — the cause of the over-tall frame).
+        children: list = [Window()]
         if input_header is not None:
             def _header_fragments():  # type: ignore[no-untyped-def]
                 try:
