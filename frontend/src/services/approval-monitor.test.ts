@@ -11,6 +11,7 @@ import {
   approvalsSettingsUrl,
   approvalsUrl,
   canAlwaysAllow,
+  readBrowserElevated,
   saveApprovalMode,
   setBrowserElevated,
   useApprovals,
@@ -540,6 +541,9 @@ describe('approval-monitor pure helpers', () => {
   })
 
   describe('setBrowserElevated', () => {
+    afterEach(() => {
+      useApprovals.setState({ elevatedMode: '' })
+    })
     it('persists valid modes under storage version 2 and returns the normalized value', () => {
       expect(setBrowserElevated('bypass')).toBe('bypass')
       expect(localStorage.getItem(ELEVATED_MODE_KEY)).toBe('bypass')
@@ -551,6 +555,28 @@ describe('approval-monitor pure helpers', () => {
       expect(setBrowserElevated('nonsense')).toBe('')
       expect(localStorage.getItem(ELEVATED_MODE_KEY)).toBeNull()
       expect(localStorage.getItem(ELEVATED_MODE_VERSION_KEY)).toBeNull()
+    })
+    it('mirrors the normalized mode into the reactive store slice (backs the readout)', () => {
+      setBrowserElevated('bypass')
+      expect(useApprovals.getState().elevatedMode).toBe('bypass')
+      setBrowserElevated('nonsense')
+      expect(useApprovals.getState().elevatedMode).toBe('')
+    })
+  })
+
+  describe('readBrowserElevated', () => {
+    afterEach(() => localStorage.clear())
+    it('downgrades a legacy full under an old storage version to bypass', () => {
+      localStorage.setItem(ELEVATED_MODE_KEY, 'full')
+      localStorage.setItem(ELEVATED_MODE_VERSION_KEY, '1')
+      expect(readBrowserElevated()).toBe('bypass')
+    })
+    it('keeps full under the current storage version and returns "" when unset', () => {
+      localStorage.setItem(ELEVATED_MODE_KEY, 'full')
+      localStorage.setItem(ELEVATED_MODE_VERSION_KEY, '2')
+      expect(readBrowserElevated()).toBe('full')
+      localStorage.clear()
+      expect(readBrowserElevated()).toBe('')
     })
   })
 })

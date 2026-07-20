@@ -62,19 +62,50 @@ interface ApprovalsState {
   pending: Approval[]
   count: number
   mode: string
+  // The browser session elevated mode (approval_monitor.js:227-239 / legacy
+  // approvals.js:234-243). Kept in the store so the approvals view's
+  // "Effective execution mode" readout re-renders reactively after an in-view
+  // Bypass resolve persists it (setBrowserElevated) — legacy re-ran _loadData
+  // after resolve; the store now backs that refresh live. Hydrated from
+  // localStorage on module load and kept in lockstep with it by
+  // setBrowserElevated. This is the concrete consumer that retires the deferred
+  // 'agentos:elevated-mode' CustomEvent — the store path replaces it.
+  elevatedMode: ElevatedMode
   setFromPoll(pending: Approval[], mode: string): void
   // approval_monitor.js:71-74,92-97 — zero the badge count on poll failure while
   // leaving any pending item backing an open prompt intact.
   zeroBadge(): void
+  setElevatedMode(mode: ElevatedMode): void
   clear(): void
+}
+
+/**
+ * approvals.js:234-243 — read the persisted browser elevated mode, downgrading a
+ * legacy 'full' written under an older storage version to 'bypass'. Used to
+ * hydrate the store on load so the readout starts from the stored value. (The
+ * approvals view re-exports this as browserElevatedMode() from its logic.ts.)
+ */
+export function readBrowserElevated(): ElevatedMode {
+  let mode = ''
+  let version = ''
+  try {
+    mode = localStorage.getItem(ELEVATED_MODE_KEY) || ''
+    version = localStorage.getItem(ELEVATED_MODE_VERSION_KEY) || ''
+  } catch {
+    /* storage unavailable */
+  }
+  if (mode === 'full' && version !== ELEVATED_MODE_STORAGE_VERSION) return 'bypass'
+  return mode === 'on' || mode === 'bypass' || mode === 'full' ? mode : ''
 }
 
 export const useApprovals = create<ApprovalsState>((set) => ({
   pending: [],
   count: 0,
   mode: 'prompt',
+  elevatedMode: readBrowserElevated(),
   setFromPoll: (pending, mode) => set({ pending, count: pending.length, mode }),
   zeroBadge: () => set({ count: 0 }),
+  setElevatedMode: (mode) => set({ elevatedMode: mode }),
   clear: () => set({ pending: [], count: 0 }),
 }))
 
@@ -109,6 +140,10 @@ export function setBrowserElevated(mode: string): ElevatedMode {
   } catch {
     /* storage unavailable */
   }
+  // Keep the reactive store in lockstep with localStorage so the approvals
+  // view's effective-execution-mode readout re-renders after an in-view Bypass
+  // resolve (the concrete consumer that replaces the deferred CustomEvent).
+  useApprovals.getState().setElevatedMode(normalized)
   return normalized
 }
 

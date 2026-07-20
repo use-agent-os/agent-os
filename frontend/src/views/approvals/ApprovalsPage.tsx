@@ -16,13 +16,7 @@ import {
   useApprovals,
   type Approval,
 } from '@/services/approval-monitor'
-import {
-  MODE_OPTIONS,
-  activeModeOption,
-  browserElevatedMode,
-  modeStateTone,
-  resolveExecutionMode,
-} from './logic'
+import { MODE_OPTIONS, activeModeOption, modeStateTone, resolveExecutionMode } from './logic'
 
 // approvals.js:184 — the config.get payload carries permissions.default_mode.
 interface ConfigGetResponse {
@@ -121,6 +115,10 @@ export function ApprovalsPage() {
   useBootstrap()
   const pending = useApprovals((s) => s.pending)
   const storeMode = useApprovals((s) => s.mode)
+  // Reactive browser elevated mode: the readout re-renders when an in-view
+  // Bypass resolve persists it (setBrowserElevated updates this store slice),
+  // not only on a coincidental re-render that re-reads localStorage.
+  const elevatedMode = useApprovals((s) => s.elevatedMode)
 
   useEffect(() => {
     document.title = 'Approvals - AgentOS Control'
@@ -142,7 +140,7 @@ export function ApprovalsPage() {
   const activeOpt = activeModeOption(mode)
 
   // approvals.js:176-192 — effective execution mode: config.get global default
-  // combined with the browser session elevated mode.
+  // combined with the reactive browser session elevated mode from the store.
   const configQuery = useQuery<ConfigGetResponse>({
     queryKey: ['config.get', 'approvals'],
     queryFn: async () => {
@@ -154,7 +152,7 @@ export function ApprovalsPage() {
     refetchOnWindowFocus: false,
   })
   const globalDefaultMode = configQuery.data?.permissions?.default_mode || ''
-  const execution = resolveExecutionMode(browserElevatedMode(), globalDefaultMode)
+  const execution = resolveExecutionMode(elevatedMode, globalDefaultMode)
 
   async function onSelectMode(next: string): Promise<void> {
     if (next === mode) return

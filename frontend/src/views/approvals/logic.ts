@@ -5,12 +5,7 @@
 // service (services/approval-monitor.ts); this module owns the config surface
 // (approval-strategy options + effective-execution-mode summary).
 
-import {
-  ELEVATED_MODE_KEY,
-  ELEVATED_MODE_VERSION_KEY,
-  ELEVATED_MODE_STORAGE_VERSION,
-  type ElevatedMode,
-} from '@/services/approval-monitor'
+import { readBrowserElevated, type ElevatedMode } from '@/services/approval-monitor'
 
 export interface ModeOption {
   value: string
@@ -58,18 +53,11 @@ export function normalizeElevatedMode(mode: string | null | undefined): Elevated
 }
 
 // approvals.js:234-243 — read the persisted browser elevated mode, downgrading a
-// legacy 'full' written under an older storage version to 'bypass'.
+// legacy 'full' written under an older storage version to 'bypass'. Delegates to
+// the service's readBrowserElevated (single source; the store hydrates from the
+// same reader) so the localStorage read + version-downgrade live in one place.
 export function browserElevatedMode(): ElevatedMode {
-  let mode = ''
-  let version = ''
-  try {
-    mode = localStorage.getItem(ELEVATED_MODE_KEY) || ''
-    version = localStorage.getItem(ELEVATED_MODE_VERSION_KEY) || ''
-  } catch {
-    /* storage unavailable */
-  }
-  if (mode === 'full' && version !== ELEVATED_MODE_STORAGE_VERSION) return 'bypass'
-  return normalizeElevatedMode(mode)
+  return readBrowserElevated()
 }
 
 export interface ExecutionModeSummary {

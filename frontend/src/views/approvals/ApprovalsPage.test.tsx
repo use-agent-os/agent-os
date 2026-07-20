@@ -1,10 +1,10 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
 import { ApprovalsPage } from './ApprovalsPage'
 import { useApprovals, type Approval } from '@/services/approval-monitor'
-import { approvalMonitor, saveApprovalMode } from '@/services/approval-monitor'
+import { approvalMonitor, saveApprovalMode, setBrowserElevated } from '@/services/approval-monitor'
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
@@ -69,10 +69,12 @@ describe('ApprovalsPage', () => {
     vi.mocked(toast.warning).mockClear()
     vi.mocked(toast.error).mockClear()
     setStore([], 'prompt')
+    useApprovals.setState({ elevatedMode: '' })
     localStorage.clear()
   })
   afterEach(() => {
     setStore([], 'prompt')
+    useApprovals.setState({ elevatedMode: '' })
     localStorage.clear()
   })
 
@@ -198,5 +200,34 @@ describe('ApprovalsPage', () => {
     pollNowSpy.mockClear()
     screen.getByRole('button', { name: /refresh/i }).click()
     await waitFor(() => expect(pollNowSpy).toHaveBeenCalled())
+  })
+
+  // Reviewer gap: the "Effective execution mode" readout reads the browser
+  // elevated mode; after an in-view Bypass resolve (monitor.resolve →
+  // setBrowserElevated) it must re-render IN-VIEW (no remount), the way legacy
+  // re-ran _loadData after resolve. The elevated mode is now reactive via the
+  // store, so a bypass resolve that persists it updates the readout live.
+  it('updates the effective-execution-mode readout in-view after a Bypass resolve (no remount)', async () => {
+    // config.get returns no global default, so the readout starts neutral.
+    mockRpc.call.mockResolvedValue({ permissions: { default_mode: '' } })
+    setStore([])
+    renderPage()
+    // Let config.get settle first so no later query re-render can mask the gap.
+    await waitFor(() => expect(mockRpc.call).toHaveBeenCalledWith('config.get'))
+    await waitFor(() => expect(screen.getByText('Approval prompts')).toBeInTheDocument())
+    // Quiet period: nothing else should re-render the view now.
+    await new Promise((r) => setTimeout(r, 20))
+
+    // A Bypass resolve persists the browser elevated mode via setBrowserElevated
+    // (monitor.resolve success path). Drive it directly — with NO view
+    // interaction that could churn React state — so ONLY a reactive
+    // elevated-mode subscription, not an incidental re-render + localStorage
+    // re-read, can refresh the readout. Legacy re-ran _loadData after resolve;
+    // the store now backs that refresh live.
+    act(() => {
+      setBrowserElevated('bypass')
+    })
+    await waitFor(() => expect(screen.getByText('Session BYPASS')).toBeInTheDocument())
+    expect(screen.queryByText('Approval prompts')).not.toBeInTheDocument()
   })
 })
