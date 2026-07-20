@@ -1,0 +1,331 @@
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { toast } from 'sonner'
+import { SkillsPage } from './SkillsPage'
+
+vi.mock('sonner', () => ({
+  toast: {
+    success: vi.fn(),
+    warning: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+  },
+}))
+
+type Handler = (...args: unknown[]) => void
+function makeRpc() {
+  const listeners = new Map<string, Set<Handler>>()
+  return {
+    waitForConnection: vi.fn().mockResolvedValue(undefined),
+    call: vi.fn(),
+    on: vi.fn((event: string, handler: Handler) => {
+      if (!listeners.has(event)) listeners.set(event, new Set())
+      listeners.get(event)!.add(handler)
+      return () => listeners.get(event)?.delete(handler)
+    }),
+    emit(event: string, ...args: unknown[]) {
+      listeners.get(event)?.forEach((h) => h(...args))
+    },
+  }
+}
+let mockRpc = makeRpc()
+
+vi.mock('@/app/providers', () => ({
+  useRpc: () => mockRpc,
+  useBootstrap: () => ({
+    version: '1',
+    ws_url: 'ws://127.0.0.1:18791/ws',
+    auth_mode: 'none',
+    base_path: '/control',
+    config_path: '/tmp/agentos.toml',
+    features: {},
+  }),
+}))
+
+const READY_MANAGED = {
+  name: 'trader',
+  description: 'Trades things',
+  layer: 'managed',
+  status: 'ready',
+  emoji: '📈',
+}
+const NEEDS_BUNDLED = {
+  name: 'weather',
+  description: 'Weather lookups',
+  layer: 'bundled',
+  status: 'needs_setup',
+  missing_bins: ['curl'],
+  install: [{ id: 'brew-curl', kind: 'brew', label: 'Install curl', bins: ['curl'] }],
+}
+const CATALOG_ITEM = {
+  name: 'Uniswap',
+  identifier: 'uniswap-swap',
+  provider: 'Uniswap',
+  source: 'clawhub',
+  description: 'DEX swaps',
+  category: 'defi',
+}
+
+function wireRpc(
+  opts: {
+    skills?: unknown[]
+    listReject?: boolean
+    searchResults?: unknown[]
+    installResponse?: Record<string, unknown>
+    uninstallResponse?: Record<string, unknown>
+    updateResponse?: Record<string, unknown>
+    depsResponse?: Record<string, unknown>
+  } = {},
+) {
+  mockRpc.call.mockImplementation((method: string) => {
+    switch (method) {
+      case 'skills.list':
+        return opts.listReject
+          ? Promise.reject(new Error('list down'))
+          : Promise.resolve({ skills: opts.skills ?? [READY_MANAGED, NEEDS_BUNDLED] })
+      case 'skills.search':
+        return Promise.resolve({ results: opts.searchResults ?? [CATALOG_ITEM] })
+      case 'skills.install':
+        return Promise.resolve(opts.installResponse ?? { success: true, name: 'uniswap-swap' })
+      case 'skills.uninstall':
+        return Promise.resolve(opts.uninstallResponse ?? { success: true })
+      case 'skills.update':
+        return Promise.resolve(opts.updateResponse ?? { results: [{ success: true }] })
+      case 'skills.deps.install':
+        return Promise.resolve(opts.depsResponse ?? { success: true, missing_still: {} })
+      default:
+        return Promise.resolve({})
+    }
+  })
+}
+
+function renderPage() {
+  return render(
+    <MemoryRouter>
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <SkillsPage />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  )
+}
+
+const callsFor = (m: string) => mockRpc.call.mock.calls.filter(([x]) => x === m)
+
+describe('SkillsPage', () => {
+  beforeEach(() => {
+    mockRpc = makeRpc()
+    vi.mocked(toast.success).mockClear()
+    vi.mocked(toast.error).mockClear()
+    vi.mocked(toast.info).mockClear()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('calls skills.list after waitForConnection and renders installed cards grouped by layer', async () => {
+    wireRpc()
+    renderPage()
+    await waitFor(() => expect(mockRpc.call).toHaveBeenCalledWith('skills.list', {}))
+    expect(mockRpc.waitForConnection).toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByLabelText('Skill trader')).toBeInTheDocument())
+    expect(screen.getByLabelText('Skill weather')).toBeInTheDocument()
+    // Layer groups (bundled before managed)
+    expect(screen.getByText('Bundled')).toBeInTheDocument()
+    expect(screen.getByText('Managed')).toBeInTheDocument()
+  })
+
+  it('renders the status metric pills from the payload', async () => {
+    wireRpc()
+    renderPage()
+    // 1 ready, 1 needs_setup, total 2
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Filter: All' })).toHaveTextContent('2'),
+    )
+    expect(screen.getByRole('button', { name: 'Filter: Ready' })).toHaveTextContent('1')
+    expect(screen.getByRole('button', { name: 'Filter: Needs setup' })).toHaveTextContent('1')
+  })
+
+  it('the status pill filters the installed list', async () => {
+    wireRpc()
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Skill weather')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Filter: Ready' }))
+    await waitFor(() => expect(screen.queryByLabelText('Skill weather')).not.toBeInTheDocument())
+    expect(screen.getByLabelText('Skill trader')).toBeInTheDocument()
+  })
+
+  it('the header filter searches name/description', async () => {
+    wireRpc()
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Skill trader')).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('Filter installed skills'), {
+      target: { value: 'weather' },
+    })
+    await waitFor(() => expect(screen.queryByLabelText('Skill trader')).not.toBeInTheDocument())
+    expect(screen.getByLabelText('Skill weather')).toBeInTheDocument()
+  })
+
+  it('toasts when skills.list fails', async () => {
+    wireRpc({ listReject: true })
+    renderPage()
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+  })
+
+  // ── Registry search debounce (skills.js:210-220, 250ms) ──────────────────
+  // Only the FINAL keystroke reaches the server, and it does so exactly once:
+  // rapid typing coalesces to a single skills.search for the settled value.
+  it('community search fires skills.search once after the debounce interval', async () => {
+    wireRpc()
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Skill trader')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /^Community$/i }))
+    // snapshot fetch (query:'') fires on tab entry
+    const input = await screen.findByLabelText('Search community skills')
+    const searchesFor = (q: string) =>
+      callsFor('skills.search').filter(([, p]) => (p as { query?: string })?.query === q)
+    // Type three quick keystrokes.
+    fireEvent.change(input, { target: { value: 'u' } })
+    fireEvent.change(input, { target: { value: 'un' } })
+    fireEvent.change(input, { target: { value: 'uni' } })
+    // The debounced search for the settled value fires exactly once.
+    await waitFor(() => expect(searchesFor('uni')).toHaveLength(1))
+    // The intermediate keystrokes never reached the server.
+    expect(searchesFor('u')).toHaveLength(0)
+    expect(searchesFor('un')).toHaveLength(0)
+  })
+
+  // ── Install (per-item busy, correct RPC + params + invalidation) ─────────
+  it('installing a catalog skill calls skills.install with identifier/source/force and reloads', async () => {
+    wireRpc()
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Skill trader')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /^Community$/i }))
+    const card = await screen.findByLabelText('Catalog skill Uniswap')
+    fireEvent.click(within(card).getByRole('button', { name: /^Install$/i }))
+    await waitFor(() =>
+      expect(mockRpc.call).toHaveBeenCalledWith('skills.install', {
+        identifier: 'uniswap-swap',
+        source: 'clawhub',
+        force: false,
+      }),
+    )
+    await waitFor(() => expect(toast.success).toHaveBeenCalled())
+    // success invalidates skills.list (a reload)
+    await waitFor(() => expect(callsFor('skills.list').length).toBeGreaterThanOrEqual(2))
+  })
+
+  it('a dangerous scan verdict arms a force install instead of erroring', async () => {
+    wireRpc({
+      installResponse: {
+        success: false,
+        scan_verdict: 'dangerous',
+        scan_findings: [1, 2],
+        name: 'Uniswap',
+      },
+    })
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Skill trader')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /^Community$/i }))
+    const card = await screen.findByLabelText('Catalog skill Uniswap')
+    fireEvent.click(within(card).getByRole('button', { name: /^Install$/i }))
+    // Button re-arms to "Force install"; the second click sends force:true.
+    const force = await within(card).findByRole('button', { name: /Force install/i })
+    fireEvent.click(force)
+    await waitFor(() =>
+      expect(mockRpc.call).toHaveBeenCalledWith('skills.install', {
+        identifier: 'uniswap-swap',
+        source: 'clawhub',
+        force: true,
+      }),
+    )
+  })
+
+  // ── Update / Uninstall from the installed-skill dialog ───────────────────
+  it('a managed skill dialog updates via skills.update and reloads', async () => {
+    wireRpc()
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Skill trader')).toBeInTheDocument())
+    fireEvent.click(screen.getByLabelText('Skill trader'))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Update$/i }))
+    await waitFor(() =>
+      expect(mockRpc.call).toHaveBeenCalledWith('skills.update', { name: 'trader' }),
+    )
+    await waitFor(() => expect(callsFor('skills.list').length).toBeGreaterThanOrEqual(2))
+  })
+
+  it('a managed skill dialog removes via skills.uninstall and closes', async () => {
+    wireRpc()
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Skill trader')).toBeInTheDocument())
+    fireEvent.click(screen.getByLabelText('Skill trader'))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Remove$/i }))
+    await waitFor(() =>
+      expect(mockRpc.call).toHaveBeenCalledWith('skills.uninstall', { name: 'trader' }),
+    )
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('bundled (non-managed) skill dialog has no Update/Remove', async () => {
+    wireRpc()
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Skill weather')).toBeInTheDocument())
+    fireEvent.click(screen.getByLabelText('Skill weather'))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).queryByRole('button', { name: /^Update$/i })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: /^Remove$/i })).not.toBeInTheDocument()
+  })
+
+  // ── deps.install prompt → confirm → deps.install ─────────────────────────
+  it('the install-deps button in a skill dialog calls skills.deps.install with name + install_id', async () => {
+    wireRpc()
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Skill weather')).toBeInTheDocument())
+    fireEvent.click(screen.getByLabelText('Skill weather'))
+    const dialog = await screen.findByRole('dialog')
+    // The install option surfaces because missing_bins is non-empty.
+    fireEvent.click(within(dialog).getByRole('button', { name: /Install via brew/i }))
+    await waitFor(() =>
+      expect(mockRpc.call).toHaveBeenCalledWith('skills.deps.install', {
+        name: 'weather',
+        install_id: 'brew-curl',
+      }),
+    )
+    // Nothing still missing → the dialog closes.
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('deps.install that leaves deps missing keeps the dialog open', async () => {
+    wireRpc({ depsResponse: { success: true, missing_still: { bins: ['curl'] } } })
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Skill weather')).toBeInTheDocument())
+    fireEvent.click(screen.getByLabelText('Skill weather'))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: /Install via brew/i }))
+    await waitFor(() =>
+      expect(mockRpc.call).toHaveBeenCalledWith('skills.deps.install', expect.anything()),
+    )
+    // Still missing → dialog stays open.
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  // ── Robinhood empty state ────────────────────────────────────────────────
+  it('the Robinhood tab shows the empty state when no robinhood skills are installed', async () => {
+    wireRpc()
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Skill trader')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Robinhood/i }))
+    expect(await screen.findByText(/Robinhood skills are on the way/i)).toBeInTheDocument()
+  })
+
+  it('sets the document title', async () => {
+    wireRpc()
+    renderPage()
+    await waitFor(() => expect(document.title).toBe('Skills - AgentOS Control'))
+  })
+})
