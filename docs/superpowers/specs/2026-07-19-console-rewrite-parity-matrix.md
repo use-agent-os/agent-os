@@ -19,13 +19,14 @@ Row format:
 | WS tick-watch (policy.tick_interval_ms, 2.5x timeout) | js/rpc.js:204-217 | ported | ws-rpc.test.ts::keepalive and reconnect > closes the socket when no frame arrives within the tick timeout |
 | WS keepalive ping every 55s | js/rpc.js:172-179 | ported | ws-rpc.test.ts::keepalive and reconnect > sends a ping every 55s while open |
 | WS reconnect backoff 800ms x1.7 max 15s | js/rpc.js:226-231 | ported | ws-rpc.test.ts::keepalive and reconnect > reconnects with backoff after close (800ms first retry) |
-| Default route: /overview desktop, /chat on <=768px | js/router.js:32 | pending | |
-| 404 route fallback rendered as text (XSS-safe) | js/router.js:48-55 | pending | |
-| Document title per route ("<Title> - AgentOS Control") | js/router.js:68-71 | pending | |
-| Nav active state + aria-current | js/router.js:59-66 | pending | |
+| Default route: /overview desktop, /chat on <=768px | js/router.js:32 | ported | app/routes.tsx::defaultPath (index route Navigate); matchMedia('(max-width: 768px)') → /chat else /overview |
+| 404 route fallback rendered as text (XSS-safe) | js/router.js:48-55 | ported | AppShell.test.tsx::routes > renders XSS-safe 404 text for unknown paths (asserts no <script> injected); app/routes.tsx::NotFound renders path as JSX text |
+| Document title per route ("<Title> - AgentOS Control") | js/router.js:68-71 | ported | AppShell.test.tsx::routes > sets the document title from the route; views/StubView.tsx sets document.title in useEffect |
+| Nav active state + aria-current | js/router.js:59-66 | ported | app/AppShell.tsx NavLink (React Router sets aria-current="page" + active className on match); manual dev-loop check |
 | Bootstrap data: version/ws_url/auth_mode/base_path/config_path/features | control_ui.py:_build_bootstrap_context | ported | test_control_ui_bootstrap.py::test_bootstrap_returns_json_context |
 | Bootstrap consumption: fetch /api/bootstrap, connect WS (stored wsUrl/wsToken override), mirror _state into connection store | js/app.js (bootstrap fetch + ws connect) | ported | lib/bootstrap.ts + app/providers.tsx; covered indirectly by Task 7/8 tests |
 | Stored WS override wins over bootstrap ws_url (agentos.wsUrl / agentos.wsToken) | js/app.js | ported | app/providers.tsx (WS_URL_KEY/WS_TOKEN_KEY); covered indirectly by Task 7/8 tests |
+| Connection banner: show while connecting/disconnected, clear on connect | js/app.js (connection status UI) | ported | app/AppShell.tsx (connState !== 'connected' → role=status banner; text per connecting/disconnected); manual dev-loop check |
 | noscript message | templates/index.html | pending | |
 | Feature flag AGENTOS_FEATURES.tokenViz (default false) | js/app.js:6-9 | pending | |
 | Custom base_path support for built assets | control_ui.py + vite base | pending | cutover-plan item |
