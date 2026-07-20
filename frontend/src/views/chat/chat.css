@@ -1,0 +1,78 @@
+/* Chat view — FULL-BLEED. Documented exception to the shared `.view-container`
+   inset (globals.css:479-481): chat owns its own flex layout — a growing,
+   scrollable thread region above a pinned composer row — and cancels the
+   container's padding with a negative-margin wrapper so the surface reaches the
+   viewport edges. Built on the shared TTY token system (globals.css): lime
+   (--primary) stays signal-only, radius 0, mono type. */
+
+/* Opt out of `.view-container`'s inset (padding-left/right 32px, top 24px,
+   bottom 48px — globals.css:494-497) by pulling the stage back out to the
+   container edges. The parent <main> is `flex-1 overflow-auto` (min-h-0), so
+   the stage fills its height and manages its own single scroll region. */
+.chat-stage {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* Fill the scroll-parent (<main>) height; the view-container is height:auto,
+     so anchor to the viewport height minus the shell header. */
+  height: calc(100dvh - var(--shell-header-h, 56px));
+  margin-top: -24px;
+  margin-bottom: -48px;
+  margin-left: -32px;
+  margin-right: -32px;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+}
+@media (max-width: 768px) {
+  .chat-stage {
+    /* Mobile container inset is 16px all round (globals.css:500-505). */
+    margin-top: -16px;
+    margin-bottom: -32px;
+    margin-left: -16px;
+    margin-right: -16px;
+    height: calc(100dvh - var(--shell-header-h, 56px));
+  }
+}
+
+/* The thread is the single scroll region: it grows to consume free space and
+   scrolls internally, keeping the composer pinned. */
+.chat-thread {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-thread {
+    scroll-behavior: auto;
+  }
+}
+@media (max-width: 768px) {
+  .chat-thread {
+    padding: 16px;
+  }
+}
+
+/* Composer row — pinned at the bottom, never scrolls with the thread. A later
+   task fills this with the real command-line composer; the foundation ships the
+   pinned shell so the layout is load-bearing from Task 1. */
+.chat-composer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 12px 32px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--card);
+}
+@media (max-width: 768px) {
+  .chat-composer {
+    padding: 12px 16px 16px;
+  }
+}
