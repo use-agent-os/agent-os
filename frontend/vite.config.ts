@@ -26,6 +26,11 @@ export default defineConfig(({ command }) => ({
     proxy: {
       '/ws': { target: gatewayWs, ws: true },
       '/control/api': { target: gateway, changeOrigin: true },
+      // Approval REST routes are registered at the gateway ROOT (app.py:535-537),
+      // NOT under /control — the approval-monitor service polls GET /api/approvals
+      // and POSTs /api/approvals/resolve. Without this the dev server 404s them
+      // and the approvals view / global prompt appear broken.
+      '/api': { target: gateway, changeOrigin: true },
     },
   },
   test: {
