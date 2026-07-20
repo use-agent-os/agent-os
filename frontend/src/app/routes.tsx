@@ -1,5 +1,6 @@
 import { Navigate, type RouteObject } from 'react-router'
 import { StubView } from '@/views/StubView'
+import { HealthPage } from '@/views/health/HealthPage'
 
 export const VIEWS: ReadonlyArray<{ path: string; title: string }> = [
   { path: 'overview', title: 'Overview' },
@@ -35,6 +36,10 @@ function NotFound() {
 
 export const routeChildren: RouteObject[] = [
   { index: true, element: <Navigate to={defaultPath()} replace /> },
-  ...VIEWS.map((v) => ({ path: v.path, element: <StubView title={v.title} /> })),
+  ...VIEWS.map((v) =>
+    v.path === 'health'
+      ? { path: v.path, element: <HealthPage /> }
+      : { path: v.path, element: <StubView title={v.title} /> },
+  ),
   { path: '*', element: <NotFound /> },
 ]
