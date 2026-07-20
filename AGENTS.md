@@ -56,6 +56,20 @@ uv run ruff format src tests                       # autofix formatting
 > Docker-migration tests) fail independently of your change — verify against a
 > clean tree before attributing a failure to your work.
 
+## Frontend lane (React console rewrite)
+
+The React console lives in `frontend/` (Node >= 22) and builds to
+`src/agentos/gateway/static/dist/` (gitignored; built at release).
+
+- Touched `frontend/**`? Run `cd frontend && npm run check` (tsc, eslint,
+  prettier, vitest) before committing. CI enforces this.
+- Python-only changes never require Node.
+- Dev loop: `agentos gateway run` + `cd frontend && npm run dev`
+  (Vite proxies `/ws` and `/control/api` to the gateway).
+- Every ported behavior updates
+  `docs/superpowers/specs/2026-07-19-console-rewrite-parity-matrix.md`
+  in the same commit (see the rewrite spec §6).
+
 ## Source layout — `src/agentos/`
 
 Every client hits one local **gateway**; the gateway runs turns through the
