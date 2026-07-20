@@ -171,6 +171,27 @@ def _build_key_bindings() -> KeyBindings:
             return
         event.current_buffer.insert_text(event.data)
 
+    def _page_lines(chat_app) -> int:  # type: ignore[no-untyped-def]
+        """A page ≈ the transcript pane's visible height (fallback 10)."""
+        window = getattr(chat_app, "_transcript_window", None)
+        info = getattr(window, "render_info", None) if window else None
+        height = getattr(info, "window_height", None)
+        return max(1, (height - 1)) if isinstance(height, int) and height > 1 else 10
+
+    @bindings.add(Keys.PageUp)
+    def _scroll_up(event) -> None:  # type: ignore[no-untyped-def]
+        # Scroll the full-screen transcript pane up into history. No-op on
+        # the native-scrollback surface (guarded in scroll_transcript).
+        chat_app = getattr(event.app, "_chat_application", None)
+        if chat_app is not None:
+            chat_app.scroll_transcript(_page_lines(chat_app))
+
+    @bindings.add(Keys.PageDown)
+    def _scroll_down(event) -> None:  # type: ignore[no-untyped-def]
+        chat_app = getattr(event.app, "_chat_application", None)
+        if chat_app is not None:
+            chat_app.scroll_transcript(-_page_lines(chat_app))
+
     return bindings
 
 
@@ -439,6 +460,37 @@ class ChatApplication:
         else:
             target = max(0, total_lines - self._transcript_scroll)
         return Point(x=0, y=target)
+
+    def scroll_transcript(self, lines: int) -> None:
+        """Scroll the transcript pane by ``lines`` logical lines.
+
+        ``lines > 0`` scrolls up into history (releasing the auto-follow
+        latch); ``lines < 0`` scrolls back toward the tail. Reaching the
+        bottom re-latches follow so new output resumes auto-scrolling.
+        """
+        if not self._fullscreen:
+            return
+        total = self._transcript.count("\n")
+        new_scroll = self._transcript_scroll + lines
+        # Clamp: 0 == pinned to the tail, total-1 == top of history.
+        new_scroll = max(0, min(new_scroll, max(0, total - 1)))
+        self._transcript_scroll = new_scroll
+        self._transcript_follow = new_scroll == 0
+        try:
+            self._app.invalidate()
+        except Exception:
+            pass
+
+    def scroll_transcript_to_bottom(self) -> None:
+        """Re-pin the transcript pane to the newest line (resume follow)."""
+        if not self._fullscreen:
+            return
+        self._transcript_scroll = 0
+        self._transcript_follow = True
+        try:
+            self._app.invalidate()
+        except Exception:
+            pass
 
     def append_transcript(self, text: str) -> None:
         """Append ANSI-encoded text to the full-screen transcript pane.

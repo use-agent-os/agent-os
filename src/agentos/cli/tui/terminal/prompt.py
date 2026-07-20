@@ -7,7 +7,12 @@ import os
 import re
 import sys
 from collections.abc import Callable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
+from contextlib import (
+    AbstractAsyncContextManager,
+    AbstractContextManager,
+    asynccontextmanager,
+    nullcontext,
+)
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -29,6 +34,7 @@ from agentos.cli.ui import (
     ACCENT_DIM,
     ACCENT_SOFT,
     console,
+    error_console,
 )
 from agentos.engine.commands import DEFAULT_REGISTRY, Surface, parse_surface
 from agentos.paths import state_dir
@@ -564,6 +570,31 @@ def _get_or_create_chat_app(
     return cached
 
 
+class _TranscriptConsoleSink:
+    """File-like sink that funnels Rich console output into the pane.
+
+    On the full-screen surface the app owns the whole screen, so Rich
+    output (startup screen, notices, slash-command results) must render
+    into the transcript pane rather than to stdout. Reports ``isatty()``
+    True so ``_CliConsole.is_terminal`` keeps emitting ANSI colour, which
+    the pane renders via ``ANSI(...)``.
+    """
+
+    def __init__(self, chat_app: ChatApplication) -> None:
+        self._chat_app = chat_app
+
+    def write(self, data: str) -> int:
+        if data:
+            self._chat_app.append_transcript(data)
+        return len(data or "")
+
+    def flush(self) -> None:
+        return None
+
+    def isatty(self) -> bool:
+        return True
+
+
 @asynccontextmanager
 async def interactive_session(
     *,
@@ -622,7 +653,26 @@ async def interactive_session(
 
     handle = InteractiveSessionHandle(chat_app)
     app_task: asyncio.Task[None] | None = None
-    stdout_cm = nullcontext() if output is not None else patch_stdout(raw=True)
+    # Output routing:
+    #  * Full-screen surface owns the screen — redirect Rich console output
+    #    into the transcript pane and skip patch_stdout (which is for
+    #    printing *above* a non-full-screen prompt).
+    #  * Native-scrollback surface — wrap patch_stdout so Rich output prints
+    #    above the persistent prompt.
+    console_redirect_active = False
+    prev_console_file: object | None = None
+    prev_error_file: object | None = None
+    stdout_cm: AbstractContextManager[None]
+    if chat_app.fullscreen:
+        sink = _TranscriptConsoleSink(chat_app)
+        prev_console_file = console.file
+        prev_error_file = error_console.file
+        console.file = sink  # type: ignore[assignment]
+        error_console.file = sink  # type: ignore[assignment]
+        console_redirect_active = True
+        stdout_cm = nullcontext()
+    else:
+        stdout_cm = nullcontext() if output is not None else patch_stdout(raw=True)
 
     try:
         stdout_cm.__enter__()
@@ -657,6 +707,15 @@ async def interactive_session(
             stdout_cm.__exit__(None, None, None)
         except Exception:
             pass
+
+        if console_redirect_active:
+            # Restore the real console streams so a later non-full-screen
+            # surface (or plain CLI output) writes to the terminal again.
+            try:
+                console.file = prev_console_file  # type: ignore[assignment]
+                error_console.file = prev_error_file  # type: ignore[assignment]
+            except Exception:
+                pass
 
         _toolbar_context["model"] = previous_model
         _toolbar_context["session_id"] = previous_session

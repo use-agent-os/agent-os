@@ -119,3 +119,74 @@ def test_streamed_turn_renders_in_pane_with_frame_pinned(fullscreen_env: None) -
     joined = "\n".join(rows)
     assert "line 24" in joined
     assert "first line" not in joined
+
+
+def test_scroll_transcript_releases_and_relatches_follow(fullscreen_env: None) -> None:
+    with create_pipe_input() as pipe:
+        chat = _build(pipe)
+        for i in range(1, 40):
+            chat.append_transcript(f"line {i}\n")
+        assert chat._transcript_follow is True
+        assert chat._transcript_scroll == 0
+
+        # Scroll up into history: follow releases, offset grows.
+        chat.scroll_transcript(10)
+        assert chat._transcript_follow is False
+        assert chat._transcript_scroll == 10
+
+        # Over-scroll clamps to the top of history (total_lines - 1).
+        chat.scroll_transcript(10_000)
+        total = chat._transcript.count("\n")
+        assert chat._transcript_scroll == total - 1
+
+        # Scrolling back to the bottom re-latches follow.
+        chat.scroll_transcript_to_bottom()
+        assert chat._transcript_follow is True
+        assert chat._transcript_scroll == 0
+
+
+def test_scroll_is_noop_when_not_fullscreen() -> None:
+    with create_pipe_input() as pipe:
+        chat = _build(pipe)  # flag off
+        chat.append_transcript("ignored\n")  # append also no-ops meaningfully
+        chat.scroll_transcript(5)
+        assert chat._transcript_scroll == 0
+        assert chat._transcript_follow is True
+
+
+def test_interactive_session_redirects_console_into_pane(fullscreen_env: None) -> None:
+    """In full-screen, Rich `console.print` output lands in the transcript
+    pane (not stdout), and the real console stream is restored on exit."""
+    import io
+
+    from prompt_toolkit.data_structures import Size
+    from prompt_toolkit.output.vt100 import Vt100_Output
+
+    from agentos.cli.tui.terminal.prompt import interactive_session
+    from agentos.cli.ui import console
+
+    async def _drive() -> tuple[str, type]:
+        original_file_type = type(console.file)
+        with create_pipe_input() as pipe:
+            out = Vt100_Output(io.StringIO(), lambda: Size(rows=12, columns=54))
+            async with interactive_session(
+                surface="cli_gateway",
+                model="m",
+                session_id="k",
+                input=pipe,
+                output=out,
+            ) as handle:
+                await asyncio.sleep(0.05)
+                # During the session, the sink is installed.
+                assert type(console.file).__name__ == "_TranscriptConsoleSink"
+                console.print("hello from a notice")
+                await asyncio.sleep(0.01)
+                transcript = handle._chat_app._transcript
+        # After exit the real stream is restored.
+        return transcript, original_file_type
+
+    transcript, original_file_type = asyncio.run(_drive())
+    assert "hello from a notice" in transcript
+    from agentos.cli.ui import console as console_after
+
+    assert type(console_after.file) is original_file_type
