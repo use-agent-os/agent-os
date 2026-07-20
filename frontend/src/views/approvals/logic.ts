@@ -5,7 +5,23 @@
 // service (services/approval-monitor.ts); this module owns the config surface
 // (approval-strategy options + effective-execution-mode summary).
 
-import { readBrowserElevated, type ElevatedMode } from '@/services/approval-monitor'
+import { readBrowserElevated, type Approval, type ElevatedMode } from '@/services/approval-monitor'
+
+// approvals.js:314-322 (_approvalDetail) — the pending-card Details body: the
+// warning text when present, else the FULL pretty-printed args/params JSON with
+// NO length cap. This is deliberately distinct from the modal contract's
+// approvalDetail() (services/approval-monitor.ts), which truncates at 900 chars
+// for the compact prompt; the legacy VIEW rendered args in full.
+export function approvalCardDetail(item: Approval): string {
+  if (item.warning) return String(item.warning)
+  const args = item.args ?? item.params ?? null
+  if (!args) return ''
+  try {
+    return JSON.stringify(args, null, 2)
+  } catch {
+    return String(args)
+  }
+}
 
 export interface ModeOption {
   value: string

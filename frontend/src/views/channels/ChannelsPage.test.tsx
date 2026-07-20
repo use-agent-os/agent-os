@@ -156,6 +156,34 @@ describe('ChannelsPage', () => {
     expect(screen.getByLabelText('Restart attempts')).toHaveTextContent('2')
   })
 
+  it('tones the Chat approvals attention tile as warn, not danger (channels.js:146,384-389)', async () => {
+    // Default fixture has one pending Telegram request → the tile is in
+    // attention. Legacy colors the attention stat with --warn, never --danger:
+    // the tile must not carry a tone-danger class.
+    wireRpc()
+    renderPage()
+    await waitFor(() =>
+      expect(screen.getByLabelText('Chat approvals')).toHaveClass('ch-stat--attention'),
+    )
+    expect(screen.getByLabelText('Chat approvals')).not.toHaveClass('tone-danger')
+  })
+
+  it('gives the inactive "N need attention" hint the danger ch-neg class (channels.js:139)', async () => {
+    // A dead channel is counted as attention; the Inactive tile's hint then
+    // reads "N need attention" and legacy emphasizes it with .ch-neg (--danger).
+    wireRpc({
+      channels: [{ name: 'dead-tg', type: 'telegram', status: 'dead', restart_attempts: 1 }],
+      access: [],
+    })
+    renderPage()
+    await waitFor(() =>
+      expect(screen.getByLabelText('Inactive').querySelector('.ch-neg')).not.toBeNull(),
+    )
+    expect(screen.getByLabelText('Inactive').querySelector('.ch-neg')).toHaveTextContent(
+      '1 need attention',
+    )
+  })
+
   it('renders a channel card with status chip, type and config details', async () => {
     wireRpc()
     renderPage()

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   MODE_OPTIONS,
   activeModeOption,
+  approvalCardDetail,
   executionModeSummary,
   modeStateTone,
   normalizeElevatedMode,
@@ -28,6 +29,29 @@ describe('MODE_OPTIONS / activeModeOption', () => {
   it('falls back to the first option (prompt) for an unknown mode (approvals.js:87)', () => {
     expect(activeModeOption('nonsense')).toBe(MODE_OPTIONS[0])
     expect(activeModeOption('')).toBe(MODE_OPTIONS[0])
+  })
+})
+
+describe('approvalCardDetail (approvals.js:314-322 — the VIEW, full args)', () => {
+  it('returns the warning text when present', () => {
+    expect(approvalCardDetail({ id: '1', warning: 'danger!' })).toBe('danger!')
+  })
+  it('pretty-prints args as full JSON', () => {
+    expect(approvalCardDetail({ id: '1', args: { a: 1 } })).toBe('{\n  "a": 1\n}')
+  })
+  it('falls back to params when args is absent', () => {
+    expect(approvalCardDetail({ id: '1', params: { b: 2 } })).toBe('{\n  "b": 2\n}')
+  })
+  it('renders the FULL args JSON with NO 900-char cap (unlike the modal contract)', () => {
+    const big = { blob: 'x'.repeat(2000) }
+    const out = approvalCardDetail({ id: '1', args: big })
+    const expected = JSON.stringify(big, null, 2)
+    expect(out).toBe(expected)
+    expect(out.length).toBeGreaterThan(900)
+    expect(out.endsWith('...')).toBe(false)
+  })
+  it('returns "" when there is neither warning nor args/params', () => {
+    expect(approvalCardDetail({ id: '1' })).toBe('')
   })
 })
 

@@ -288,19 +288,19 @@ function StatTile({
   hint,
   hero,
   attention,
-  tone,
 }: {
   label: string
   value: React.ReactNode
   hint: React.ReactNode
   hero?: boolean
   attention?: boolean
-  tone?: Tone
 }) {
-  const toneCls = tone ? ` ${toneClass(tone)}` : ''
+  // channels.js:146,384-389 — the attention tile is warn-toned via
+  // .ch-stat--attention (--warn), NOT a per-tile --tone; there is no danger
+  // tone on a stat tile in the legacy contract.
   return (
     <div
-      className={`ch-stat${hero ? ' ch-stat--hero' : ''}${attention ? ' ch-stat--attention' : ''}${toneCls}`}
+      className={`ch-stat${hero ? ' ch-stat--hero' : ''}${attention ? ' ch-stat--attention' : ''}`}
       aria-label={label}
     >
       <span className="ch-stat__label t-label">{label}</span>
@@ -455,9 +455,12 @@ export function ChannelsPage() {
           label="Inactive"
           value={stats.inactive}
           hint={
-            stats.attention
-              ? `${stats.attention} need attention`
-              : inactiveHint(stats.inactive, stats.disabled)
+            stats.attention ? (
+              // channels.js:139 — legacy wraps this hint in .ch-neg (--danger).
+              <span className="ch-neg">{stats.attention} need attention</span>
+            ) : (
+              inactiveHint(stats.inactive, stats.disabled)
+            )
           }
         />
         <StatTile label="Restart attempts" value={stats.restarts} hint="since gateway start" />
@@ -465,7 +468,6 @@ export function ChannelsPage() {
           label="Chat approvals"
           value={stats.pendingAccess}
           attention={stats.pendingAccess > 0}
-          tone={stats.pendingAccess > 0 ? 'danger' : undefined}
           hint={stats.pendingAccess ? 'Telegram account requests' : 'no accounts waiting'}
         />
       </section>

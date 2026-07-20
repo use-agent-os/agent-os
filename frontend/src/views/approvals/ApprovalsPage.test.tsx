@@ -195,6 +195,20 @@ describe('ApprovalsPage', () => {
     expect(screen.getByText(/"path": "\/etc"/)).toBeInTheDocument()
   })
 
+  it('renders the FULL args JSON in the card — no 900-char cap (approvals.js:314-322)', () => {
+    // A large args payload the modal contract would truncate at 900 chars; the
+    // VIEW rendered it in full, so the card must not clip it or append an ellipsis.
+    const big = { blob: 'x'.repeat(2000) }
+    setStore([{ id: 'a1', namespace: 'plugin', toolName: 'p', args: big }])
+    renderPage()
+    const pre = document.querySelector('.ap-card__pre') as HTMLElement | null
+    expect(pre).not.toBeNull()
+    const text = pre!.textContent ?? ''
+    expect(text).toBe(JSON.stringify(big, null, 2))
+    expect(text.length).toBeGreaterThan(900)
+    expect(text.endsWith('...')).toBe(false)
+  })
+
   it('refreshes the durable list on Refresh', async () => {
     renderPage()
     pollNowSpy.mockClear()

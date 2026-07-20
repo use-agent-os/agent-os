@@ -47,9 +47,13 @@
   flex-direction: column;
   gap: 6px;
 }
-.ch-stat--hero,
-.ch-stat--attention {
+.ch-stat--hero {
   border-left: 3px solid var(--tone, var(--border));
+}
+/* channels.css:384-389 (legacy) — the attention tile is warn-toned (yellow),
+   NOT danger: the value color and gutter both derive from --warn. */
+.ch-stat--attention {
+  border-left: 3px solid color-mix(in srgb, var(--warn) 42%, var(--border));
 }
 .ch-stat__value {
   font-size: 1.5rem;
@@ -58,11 +62,18 @@
   letter-spacing: -0.01em;
 }
 .ch-stat--attention .ch-stat__value {
-  color: var(--tone, var(--foreground));
+  color: var(--warn);
 }
 .ch-stat__hint {
   font-size: 0.75rem;
   color: var(--dim);
+}
+/* channels.css:78 (legacy .ch-neg) — the inactive tile's "N need attention"
+   hint carries danger (red) emphasis. */
+.ch-neg {
+  color: var(--danger);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Channel list. */

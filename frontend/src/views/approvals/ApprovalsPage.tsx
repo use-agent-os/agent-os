@@ -9,14 +9,19 @@ import { Button } from '@/components/ui/button'
 import { useBootstrap, useRpc } from '@/app/providers'
 import {
   approvalCommand,
-  approvalDetail,
   approvalMonitor,
   canAlwaysAllow,
   saveApprovalMode,
   useApprovals,
   type Approval,
 } from '@/services/approval-monitor'
-import { MODE_OPTIONS, activeModeOption, modeStateTone, resolveExecutionMode } from './logic'
+import {
+  MODE_OPTIONS,
+  activeModeOption,
+  approvalCardDetail,
+  modeStateTone,
+  resolveExecutionMode,
+} from './logic'
 
 // approvals.js:184 — the config.get payload carries permissions.default_mode.
 interface ConfigGetResponse {
@@ -35,7 +40,9 @@ function ApprovalCard({
 }) {
   const toolName = item.toolName || item.actionKind || 'Unknown'
   const command = approvalCommand(item)
-  const detail = approvalDetail(item)
+  // Card renders the FULL args JSON (approvals.js:314-322), not the modal's
+  // 900-char-truncated approvalDetail(); see approvalCardDetail in ./logic.
+  const detail = approvalCardDetail(item)
   const showAlways = canAlwaysAllow(item)
   return (
     <article className="ap-card panel tone-warn">
