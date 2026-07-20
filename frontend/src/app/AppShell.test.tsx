@@ -54,8 +54,8 @@ describe('routes', () => {
   })
 
   it('sets the document title from the route', () => {
-    renderAt('/logs')
-    expect(document.title).toBe('Logs - AgentOS Control')
+    renderAt('/cron')
+    expect(document.title).toBe('Cron - AgentOS Control')
   })
 
   // M1 — parity: router.js:68-71 — an unmatched route has no meta.title, so the
@@ -158,7 +158,7 @@ describe('app shell chrome', () => {
 
   it('hides the drawer on mobile until the hamburger opens it, and closes on nav click', () => {
     stubMatchMedia(true)
-    renderShellAt('/logs')
+    renderShellAt('/cron')
     const toggle = screen.getByRole('button', { name: 'Toggle menu' })
     const sidebar = document.getElementById('sidebar-nav')!
     // Closed drawer at <=768px: aria-expanded false, hidden + inert for AT.
@@ -180,7 +180,7 @@ describe('app shell chrome', () => {
 
   it('closes on Escape and on outside click', () => {
     stubMatchMedia(true)
-    renderShellAt('/logs')
+    renderShellAt('/cron')
     const toggle = screen.getByRole('button', { name: 'Toggle menu' })
 
     fireEvent.click(toggle)
@@ -198,7 +198,7 @@ describe('app shell chrome', () => {
 
   it('keeps the sidebar visible to AT on desktop (no aria-hidden/inert)', () => {
     stubMatchMedia(false)
-    renderShellAt('/logs')
+    renderShellAt('/cron')
     const sidebar = document.getElementById('sidebar-nav')!
     expect(sidebar).not.toHaveAttribute('aria-hidden')
     expect(sidebar).not.toHaveAttribute('inert')
@@ -208,7 +208,7 @@ describe('app shell chrome', () => {
   // Chat first, Approvals last under Settings.
   it('groups nav under Chat / Control / Settings with Chat first and Approvals last', () => {
     stubMatchMedia(false)
-    renderShellAt('/logs')
+    renderShellAt('/cron')
     const nav = screen.getByRole('navigation', { name: 'Main' })
     const labels = within(nav)
       .getAllByText(/^(Chat|Control|Settings)$/)
@@ -231,7 +231,7 @@ describe('app shell chrome', () => {
   it('renders the sidebar version footer with the build-suffix stripped', () => {
     stubMatchMedia(false)
     mockBootstrap = { ...mockBootstrap, version: '2026.7.19+1779915602' }
-    renderShellAt('/logs')
+    renderShellAt('/cron')
     const foot = screen.getByTestId('nav-foot')
     expect(foot).toHaveTextContent('v2026.7.19')
     expect(foot).not.toHaveTextContent('1779915602')
@@ -240,7 +240,7 @@ describe('app shell chrome', () => {
   it('suppresses the version footer when the bootstrap version is empty', () => {
     stubMatchMedia(false)
     mockBootstrap = { ...mockBootstrap, version: '' }
-    renderShellAt('/logs')
+    renderShellAt('/cron')
     expect(screen.queryByTestId('nav-foot')).toBeNull()
   })
 
@@ -249,7 +249,7 @@ describe('app shell chrome', () => {
   // 'Connecting'/'Disconnected' states.
   it('shows a persistent connection pill across all states including Connected', () => {
     stubMatchMedia(false)
-    renderShellAt('/logs')
+    renderShellAt('/cron')
     const pill = document.getElementById('conn-pill')!
 
     // Disconnected (initial store state).

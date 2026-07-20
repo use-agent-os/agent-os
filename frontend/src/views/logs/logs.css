@@ -1,0 +1,447 @@
+/* Logs view — tactical-HQ styling on the shared token system (globals.css).
+   Information structure references legacy css/views/logs.css; values rebuilt on
+   the design-system tokens. Status color flows ONLY through --tone (tone-*
+   classes); lime stays signal-only. */
+
+.lg-stage {
+  width: 100%;
+}
+
+/* Header: terminal hero over the atmospheric ASCII backdrop (Health posture). */
+.lg-stage__header {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 18px 0 22px;
+}
+.lg-stage__title-block {
+  position: relative; /* above the ascii-field */
+  min-width: 0;
+}
+.lg-stage__subtitle {
+  margin-top: 8px;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+.lg-stage__actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Status pills. */
+.lg-status-pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.lg-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: var(--surface);
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+}
+.lg-pill.tone-warn {
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--tone) 35%, var(--border));
+}
+
+/* Stat row: hairline-separated tiles (Approvals posture). */
+.lg-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--hairline);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 28px;
+}
+.lg-stat {
+  background: var(--surface);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* One gutter per tile: hero + any toned tile carry a single --tone rule. */
+.lg-stat--hero,
+.lg-stat.tone-danger,
+.lg-stat.tone-warn {
+  border-left: 3px solid var(--tone, var(--border));
+}
+.lg-stat__label {
+  color: var(--dim);
+}
+.lg-stat__value {
+  font-size: 1.5rem;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+.lg-stat.tone-danger .lg-stat__value,
+.lg-stat.tone-warn .lg-stat__value {
+  color: var(--tone, var(--foreground));
+}
+.lg-stat__sep {
+  margin: 0 3px;
+  color: var(--dim);
+  font-weight: 500;
+}
+.lg-stat__hint {
+  font-size: 0.75rem;
+  color: var(--dim);
+}
+
+/* Toolbar: uses the common .panel; overrides the padded body layout so the
+   controls sit in one row (panel gives the border + surface). */
+.lg-toolbar.panel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+}
+.lg-levels {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.lg-toolbar__label {
+  color: var(--dim);
+}
+.lg-levels__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.lg-level-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
+}
+.lg-level-btn__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.5;
+}
+.lg-level-btn:hover {
+  color: var(--foreground);
+}
+.lg-level-btn.is-active {
+  background: color-mix(in srgb, currentColor 14%, var(--background));
+  border-color: color-mix(in srgb, currentColor 50%, var(--border));
+}
+.lg-level-btn.is-active .lg-level-btn__dot {
+  opacity: 1;
+}
+.lg-level-btn--error {
+  color: var(--danger);
+}
+.lg-level-btn--warn {
+  color: var(--warn);
+}
+.lg-level-btn--info {
+  color: var(--info);
+}
+.lg-level-btn--debug {
+  color: var(--muted-foreground);
+}
+.lg-level-btn--trace {
+  color: var(--dim);
+}
+
+.lg-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 200px;
+}
+.lg-search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--dim);
+  pointer-events: none;
+  display: inline-flex;
+}
+.lg-search-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.lg-search-input {
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 12px 8px 32px;
+  font-size: 0.8125rem;
+  background: var(--background);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  color: var(--foreground);
+  outline: none;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.lg-search-input:focus {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 30%, transparent);
+}
+
+/* Auto-follow toggle (signal-tinted when on). */
+.lg-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  cursor: pointer;
+  user-select: none;
+}
+.lg-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.lg-toggle__track {
+  position: relative;
+  flex: none;
+  width: 38px;
+  height: 20px;
+  background: var(--background);
+  border: 1px solid var(--input);
+  border-radius: 999px;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+.lg-toggle__thumb {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 16px;
+  height: 16px;
+  background: var(--muted-foreground);
+  border-radius: 50%;
+  transition:
+    transform 120ms ease,
+    background 120ms ease;
+}
+.lg-toggle input:checked + .lg-toggle__track {
+  background: color-mix(in srgb, var(--primary) 35%, var(--background));
+  border-color: var(--primary);
+}
+.lg-toggle input:checked + .lg-toggle__track .lg-toggle__thumb {
+  transform: translateX(18px);
+  background: var(--primary);
+}
+.lg-toggle input:focus-visible + .lg-toggle__track {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.lg-toggle__label {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+/* Log stream. */
+.lg-stream {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  overflow: hidden;
+}
+.lg-display {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.55;
+  height: 480px;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+.lg-display__placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  color: var(--muted-foreground);
+  font-family: var(--font-sans, inherit);
+  font-size: 0.8125rem;
+}
+.lg-display__placeholder-icon {
+  display: inline-flex;
+  color: var(--dim);
+}
+.lg-display__placeholder-icon svg {
+  width: 18px;
+  height: 18px;
+}
+.lg-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: lg-spin 700ms linear infinite;
+}
+@keyframes lg-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lg-spinner {
+    animation: none;
+  }
+}
+
+.lg-line {
+  display: grid;
+  grid-template-columns: 180px 62px 1fr;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 16px;
+  white-space: pre-wrap;
+  /* One gutter per line: error/warn lines carry a single --tone rule. */
+  border-left: 2px solid var(--tone, transparent);
+  transition: background 60ms ease;
+}
+.lg-line:hover {
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
+}
+.lg-line.tone-danger {
+  background: color-mix(in srgb, var(--tone) 4%, transparent);
+}
+.lg-line__ts {
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lg-line__ts--empty::before {
+  content: '-';
+  color: var(--dim);
+  opacity: 0.4;
+}
+.lg-line__lvl {
+  align-self: start;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+}
+.lg-line__lvl--error {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+.lg-line__lvl--warn {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+.lg-line__lvl--info {
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 14%, transparent);
+}
+.lg-line__lvl--debug,
+.lg-line__lvl--trace {
+  color: var(--muted-foreground);
+  background: var(--surface);
+}
+.lg-line--debug,
+.lg-line--trace {
+  color: var(--muted-foreground);
+}
+.lg-line__msg {
+  min-width: 0;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+.lg-line__match {
+  background: color-mix(in srgb, var(--primary) 30%, transparent);
+  color: var(--primary);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+/* Mobile collapse. */
+@media (max-width: 768px) {
+  .lg-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .lg-stage__header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .lg-toolbar.panel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .lg-levels {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .lg-search-wrap {
+    width: 100%;
+    min-width: 0;
+  }
+  .lg-line {
+    grid-template-columns: 62px 1fr;
+  }
+  .lg-line__ts {
+    display: none;
+  }
+  .lg-line__msg {
+    grid-column: 1 / -1;
+  }
+}
