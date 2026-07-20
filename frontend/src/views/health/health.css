@@ -248,8 +248,8 @@
   grid-template-columns: 14px 1fr;
   gap: 14px;
   padding: 14px 16px;
-  /* Per-row severity gutter (terminal log-line posture). */
-  border-left: 2px solid color-mix(in srgb, var(--tone, transparent) 55%, transparent);
+  /* No per-row left gutter: the group panel already carries one — doubling
+     them stacks two bars. Row severity lives in the marker dot + meta tone. */
 }
 .health-finding.is-error {
   --tone: var(--danger);
