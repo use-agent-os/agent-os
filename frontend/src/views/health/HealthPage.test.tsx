@@ -1,7 +1,15 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { toast } from 'sonner'
 import { HealthPage } from './HealthPage'
+
+vi.mock('sonner', () => ({
+  toast: {
+    success: vi.fn(),
+    error: vi.fn(),
+  },
+}))
 
 const mockRpc = {
   waitForConnection: vi.fn().mockResolvedValue(undefined),
@@ -30,6 +38,13 @@ function renderPage() {
 }
 
 describe('HealthPage', () => {
+  beforeEach(() => {
+    // Reset call queues so *Once chains from one test never leak into the next.
+    mockRpc.call.mockReset()
+    mockRpc.waitForConnection.mockReset().mockResolvedValue(undefined)
+    vi.mocked(toast.success).mockClear()
+    vi.mocked(toast.error).mockClear()
+  })
   afterEach(() => {
     localStorage.clear()
   })
@@ -63,10 +78,58 @@ describe('HealthPage', () => {
   it('renders the synthetic gateway.unavailable finding on RPC failure', async () => {
     mockRpc.call.mockRejectedValue(new Error('boom'))
     renderPage()
+    // health.js:92-95 + :108 — the string appears twice: once as the rail
+    // summary (health-score__summary) and once as the finding title. Legacy set
+    // the same "Gateway health report unavailable" sentence on both.
     await waitFor(() =>
-      expect(screen.getByText('Gateway health report unavailable')).toBeInTheDocument(),
+      expect(screen.getAllByText('Gateway health report unavailable')).toHaveLength(2),
     )
+    // Header summary line stays the distinct wording (health.js:89).
     expect(screen.getByText('Health report unavailable')).toBeInTheDocument()
+  })
+
+  it('shows "Gateway health report unavailable" in the readiness rail, not the raw status token', async () => {
+    mockRpc.call.mockRejectedValue(new Error('boom'))
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Health report unavailable')).toBeInTheDocument())
+    // The rail readiness summary carries the human sentence; the bare
+    // "Unavailable" status token must not stand in for it (health.js:92-95).
+    const rail = document.querySelector('.health-score__summary')
+    expect(rail?.textContent).toBe('Gateway health report unavailable')
+  })
+
+  it('resets to the loading state on Refresh before the refetch settles (health.js:64-74)', async () => {
+    let resolveSecond: ((v: unknown) => void) | undefined
+    mockRpc.call
+      .mockResolvedValueOnce({
+        status: 'ready',
+        ready: true,
+        summary: 'All good',
+        findings: [],
+      })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve
+          }),
+      )
+    renderPage()
+    // First load settles into the report ('All good' shows in both the header
+    // summary line and the rail readiness summary).
+    await waitFor(() => expect(screen.getAllByText('All good').length).toBeGreaterThan(0))
+
+    // Refresh: legacy _load blanks the report to the loading placeholders
+    // immediately, BEFORE the second deep call settles.
+    screen.getByRole('button', { name: /refresh/i }).click()
+    await waitFor(() => expect(screen.getByText('Checking readiness')).toBeInTheDocument())
+    expect(screen.getByText('Loading health report')).toBeInTheDocument()
+    expect(document.querySelector('.health-status__rail.is-loading')).not.toBeNull()
+    // Stale report is gone while the refetch is in flight.
+    expect(screen.queryByText('All good')).not.toBeInTheDocument()
+
+    // Let the refetch settle and confirm the fresh report renders.
+    resolveSecond?.({ status: 'ready', ready: true, summary: 'Still good', findings: [] })
+    await waitFor(() => expect(screen.getAllByText('Still good').length).toBeGreaterThan(0))
   })
 
   it('uses config-target fix steps when the stored wsUrl equals the default (health.js:227-238)', async () => {
@@ -76,7 +139,7 @@ describe('HealthPage', () => {
     mockRpc.call.mockRejectedValue(new Error('boom'))
     renderPage()
     await waitFor(() =>
-      expect(screen.getByText('Gateway health report unavailable')).toBeInTheDocument(),
+      expect(screen.getAllByText('Gateway health report unavailable').length).toBeGreaterThan(0),
     )
     expect(screen.getByText('agentos doctor --config /tmp/agentos.toml --json')).toBeInTheDocument()
     expect(screen.getByText('agentos gateway start --config /tmp/agentos.toml')).toBeInTheDocument()
@@ -89,7 +152,7 @@ describe('HealthPage', () => {
     mockRpc.call.mockRejectedValue(new Error('boom'))
     renderPage()
     await waitFor(() =>
-      expect(screen.getByText('Gateway health report unavailable')).toBeInTheDocument(),
+      expect(screen.getAllByText('Gateway health report unavailable').length).toBeGreaterThan(0),
     )
     expect(
       screen.getByText('agentos doctor --gateway ws://127.0.0.1:19999/ws --json'),
@@ -142,5 +205,72 @@ describe('HealthPage', () => {
     await waitFor(() => expect(mockRpc.call).toHaveBeenCalledTimes(1))
     screen.getByRole('button', { name: /refresh/i }).click()
     await waitFor(() => expect(mockRpc.call).toHaveBeenCalledTimes(2))
+  })
+
+  // M16 — copy-feedback toasts mirror the legacy UI.toast contract as closely
+  // as the sonner seam allows: 1600ms ok / 2500ms err durations and a stable
+  // per-outcome id so identical visible toasts dedupe instead of stacking.
+  function reportWithCopyStep() {
+    return {
+      status: 'action_required',
+      ready: false,
+      summary: 'Needs setup',
+      findings: [
+        {
+          id: 'x.fix',
+          severity: 'error',
+          readinessImpact: 'blocks_ready',
+          surface: 'x',
+          title: 'Fix me',
+          fixSteps: [{ label: 'Do it', command: 'agentos doctor --json' }],
+        },
+      ],
+    }
+  }
+
+  async function clickFirstCopyButton() {
+    await waitFor(() => expect(screen.getByLabelText('Copy command')).toBeInTheDocument())
+    screen.getByLabelText('Copy command').click()
+  }
+
+  it('copy success fires a 1600ms ok toast with a stable id (legacy UI.toast ok/1600)', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.assign(navigator, { clipboard: { writeText } })
+    mockRpc.call.mockResolvedValue(reportWithCopyStep())
+    renderPage()
+    await clickFirstCopyButton()
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('agentos doctor --json'))
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        'Copied command',
+        expect.objectContaining({ id: 'health-copy-ok', duration: 1600 }),
+      ),
+    )
+  })
+
+  it('copy failure fires a 2500ms err toast with a stable id (legacy UI.toast err/2500)', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('denied'))
+    Object.assign(navigator, { clipboard: { writeText } })
+    mockRpc.call.mockResolvedValue(reportWithCopyStep())
+    renderPage()
+    await clickFirstCopyButton()
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        'Copy failed: denied',
+        expect.objectContaining({ id: 'health-copy-err', duration: 2500 }),
+      ),
+    )
+  })
+
+  it('re-copying reuses the same ok toast id so identical toasts dedupe', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.assign(navigator, { clipboard: { writeText } })
+    mockRpc.call.mockResolvedValue(reportWithCopyStep())
+    renderPage()
+    await clickFirstCopyButton()
+    screen.getByLabelText('Copy command').click()
+    await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(2))
+    const ids = vi.mocked(toast.success).mock.calls.map(([, opts]) => opts?.id)
+    expect(ids).toEqual(['health-copy-ok', 'health-copy-ok'])
   })
 })

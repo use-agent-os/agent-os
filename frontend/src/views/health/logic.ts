@@ -184,11 +184,10 @@ export function visibleEvidenceEntries(e?: Record<string, unknown>): Array<[stri
 }
 
 /**
- * health.js:453-460 — camelCase / snake_case -> "Sentence case" label.
- * Divergence from legacy (mandated by the Task 8 test contract): the body is
- * lower-cased before the leading capital, so `gatewayUrl` -> `Gateway url`
- * rather than the legacy `Gateway Url`. Sentence-case reads better and the
- * label is display-only.
+ * health.js:453-460 — camelCase / snake_case -> "Title-ish" label: split
+ * camel-humps and _/- separators into words and capitalize only the leading
+ * character, leaving each word's own casing intact. So `gatewayUrl` ->
+ * `Gateway Url` (each hump keeps its capital), matching legacy 1:1.
  */
 export function evidenceLabel(key: string): string {
   const label = String(key || '')
@@ -196,7 +195,6 @@ export function evidenceLabel(key: string): string {
     .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .toLowerCase()
   return label ? label.charAt(0).toUpperCase() + label.slice(1) : ''
 }
 

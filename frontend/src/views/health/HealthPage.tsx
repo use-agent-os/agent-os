@@ -86,15 +86,30 @@ function copyText(text: string): Promise<void> {
   return ok ? Promise.resolve() : Promise.reject(new Error('Copy command failed'))
 }
 
-// health.js:35-46 — copy handler with ok/err toast.
+// health.js:35-46 + components.js UI.toast — copy handler with ok/err toast.
+// Match the legacy UI.toast contract as closely as the sonner seam allows:
+//   * durations: 1600ms ok / 2500ms err (legacy UI.toast(msg, 'ok', 1600) /
+//     (msg, 'err', 2500)).
+//   * dedupe of identical visible toasts: legacy keys by `${type}\0${message}`
+//     and drops a repeat while one is visible. Sonner has no message-keyed
+//     dedupe, but a stable per-outcome `id` collapses repeats into a single
+//     toast (a re-fire updates the existing one in place instead of stacking).
+//   Residual seam (recorded on parity matrix row 64): sonner 2.0.7 renders the
+//   whole toast list in ONE aria-live="polite" region and dropped the per-toast
+//   `important` option, so error toasts cannot be announced assertively
+//   (role="alert"/aria-live="assertive") the way legacy UI.toast set role=alert
+//   on err/warn toasts. Not fakeable through the sonner API at this version.
+const COPY_OK_TOAST_ID = 'health-copy-ok'
+const COPY_ERR_TOAST_ID = 'health-copy-err'
+
 async function onCopyCommand(command: string): Promise<void> {
   if (!command) return
   try {
     await copyText(command)
-    toast.success('Copied command')
+    toast.success('Copied command', { id: COPY_OK_TOAST_ID, duration: 1600 })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    toast.error('Copy failed: ' + message)
+    toast.error('Copy failed: ' + message, { id: COPY_ERR_TOAST_ID, duration: 2500 })
   }
 }
 
@@ -375,15 +390,28 @@ export function HealthPage() {
     refetchOnReconnect: false,
   })
 
-  const summaryText = query.isError
-    ? 'Health report unavailable'
-    : query.data
-      ? query.data.summary || query.data.status || 'Health report loaded'
-      : 'Checking readiness'
+  // health.js:64-74 — legacy _load resets the view to the loading state at the
+  // very top of every (re)load, BEFORE the deep doctor.status call settles:
+  // summary → "Checking readiness", rail → is-loading strip, findings →
+  // "Loading health report". react-query keeps the previous data/error across a
+  // refetch, so gate the whole view on isFetching to reproduce that reset —
+  // Refresh (and every fresh view entry) blanks the stale report immediately.
+  const showLoading = query.isFetching
+
+  const summaryText = showLoading
+    ? 'Checking readiness'
+    : query.isError
+      ? 'Health report unavailable'
+      : query.data
+        ? query.data.summary || query.data.status || 'Health report loaded'
+        : 'Checking readiness'
 
   let railNode
   let findingsNode
-  if (query.isError) {
+  if (showLoading) {
+    railNode = <LoadingRail />
+    findingsNode = <article className="health-empty">Loading health report</article>
+  } else if (query.isError) {
     // health.js:86-115 — synthetic gateway.unavailable report + finding.
     // health.js:227-238 — usesDefault is URL-equality against the default RPC
     // URL (bootstrap ws_url stands in for legacy App.getDefaultRpcUrl()), not
@@ -394,10 +422,12 @@ export function HealthPage() {
     const errorReport: HealthReport = {
       status: 'unavailable',
       ready: false,
-      // Rail summary intentionally left empty so the rail shows the status token
-      // ("Unavailable") rather than duplicating the finding title. Legacy reused
-      // the finding title here; the console keeps the two strings distinct.
-      summary: '',
+      // health.js:92-95 — the rail summary carries the same
+      // "Gateway health report unavailable" string legacy set on the synthetic
+      // report, so the readiness rail reads a human sentence rather than the raw
+      // "unavailable" status token. (The header #health-summary line stays the
+      // distinct "Health report unavailable" per health.js:89.)
+      summary: 'Gateway health report unavailable',
       gatewayUrl,
       configPath: errorConfigPath,
       counts: { error: 1, warn: 0, info: 0, ok: 0 },

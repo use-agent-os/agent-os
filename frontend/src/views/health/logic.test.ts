@@ -101,8 +101,13 @@ describe('evidence', () => {
     const entries = visibleEvidenceEntries({ a: 1, restartRequired: true, b: null })
     expect(entries).toEqual([['a', 1]])
   })
-  it('labels camelCase keys', () => {
-    expect(evidenceLabel('gatewayUrl')).toBe('Gateway url')
+  it('labels camelCase keys keeping each hump capitalized (health.js:453-460)', () => {
+    // Legacy only upper-cases the leading char and leaves the rest untouched,
+    // so a camelCase hump stays capitalized: gatewayUrl -> "Gateway Url".
+    expect(evidenceLabel('gatewayUrl')).toBe('Gateway Url')
+  })
+  it('labels snake_case keys with a single leading capital', () => {
+    expect(evidenceLabel('config_path')).toBe('Config path')
   })
   it('truncates long JSON values at 120 chars', () => {
     const long = { k: 'x'.repeat(200) }
