@@ -33,6 +33,7 @@ from agentos.channels.contract import (
     ChannelSendResult,
 )
 from agentos.channels.types import ChannelHealth, IncomingMessage, OutgoingMessage
+from agentos.engine.native_commands import slack_command_manifest
 from agentos.env import trust_env as _trust_env
 
 log = structlog.get_logger(__name__)
@@ -193,6 +194,11 @@ class SlackChannel:
         if self._client is not None:
             await self._client.aclose()
             self._client = None
+
+    @staticmethod
+    def slash_command_manifest(request_url: str) -> dict[str, Any]:
+        """Return the app-manifest fragment that registers Slack slash commands."""
+        return slack_command_manifest(request_url)
 
     # ------------------------------------------------------------------
     # Inbound
@@ -639,6 +645,25 @@ class SlackChannel:
                 return Response(status_code=401)
         else:
             log.warning("slack.webhook_no_signing_secret")
+
+        content_type = request.headers.get("content-type", "")
+        if content_type.startswith("application/x-www-form-urlencoded"):
+            form = await request.form()
+            command = str(form.get("command") or "").strip()
+            if not command.startswith("/"):
+                return Response(status_code=400)
+            text = str(form.get("text") or "").strip()
+            self.enqueue(
+                self.parse_event(
+                    {
+                        "user": str(form.get("user_id") or "unknown"),
+                        "channel": str(form.get("channel_id") or self.slack_channel_id),
+                        "text": f"{command} {text}".strip(),
+                        "channel_type": str(form.get("channel_name") or "channel"),
+                    }
+                )
+            )
+            return Response(status_code=200)
 
         try:
             data = json.loads(body)

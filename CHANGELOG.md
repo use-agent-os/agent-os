@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `tools.enabled = false` provides an explicit plain-text mode for Ollama and
+  other models that do not reliably implement native tool calls.
+
+### Fixed
+
+- Ollama multi-turn tool conversations now preserve assistant tool calls,
+  correlate tool results by name, normalize native arguments, and retain the
+  provider's model and completion reason, preventing repeated searches caused
+  by malformed replay history (#44).
+- Channel slash commands now render their RPC results instead of returning a
+  generic `/<command> completed` acknowledgement; `/help` and `/history` also
+  request the correct catalog/history payloads.
+- Telegram Bot API sends retry transient connection failures before reporting
+  delivery failure.
+
 ## [2026.7.20] - 2026-07-20
 
 ### Added

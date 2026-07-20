@@ -33,6 +33,7 @@ from agentos.channels.contract import (
     ChannelSendResult,
 )
 from agentos.channels.types import Attachment, ChannelHealth, IncomingMessage, OutgoingMessage
+from agentos.engine.native_commands import telegram_bot_commands
 from agentos.env import trust_env as _trust_env
 
 log = structlog.get_logger(__name__)
@@ -54,6 +55,7 @@ FATAL_ERROR_CLASSES: tuple[str, ...] = (
 )
 
 _DEFAULT_TIMEOUT_S = 30.0
+_CONNECT_RETRY_DELAYS_S = (0.25, 0.5)
 _DEDUPE_SIZE = 4096
 _ALLOWED_UPDATES = ("message", "edited_message", "channel_post", "edited_channel_post")
 
@@ -227,18 +229,20 @@ class TelegramChannel:
         for sender_id in self.config.approved_sender_ids:
             if sender_id in approved_ids:
                 continue
-            approved.append({
-                **self._known_sender_profiles.get(
-                    sender_id,
-                    {
-                        "sender_id": sender_id,
-                        "username": "",
-                        "display_name": "",
-                        "chat_id": "",
-                    },
-                ),
-                "source": "config",
-            })
+            approved.append(
+                {
+                    **self._known_sender_profiles.get(
+                        sender_id,
+                        {
+                            "sender_id": sender_id,
+                            "username": "",
+                            "display_name": "",
+                            "chat_id": "",
+                        },
+                    ),
+                    "source": "config",
+                }
+            )
         return {
             "mode": self.config.access_mode,
             "group_mode": self.config.group_access_mode,
@@ -287,9 +291,7 @@ class TelegramChannel:
     def set_access_mode(self, mode: str) -> None:
         normalized = "pairing" if mode == "approval" else mode
         if normalized not in {"pairing", "allowlist", "open", "disabled"}:
-            raise ValueError(
-                "Telegram access mode must be pairing, allowlist, open, or disabled"
-            )
+            raise ValueError("Telegram access mode must be pairing, allowlist, open, or disabled")
         self.config.access_mode = cast(
             Literal["pairing", "allowlist", "open", "disabled"], normalized
         )
@@ -403,7 +405,21 @@ class TelegramChannel:
         if not self.config.token:
             raise ValueError("telegram API call requires token")
         client = self._get_client()
-        response = await client.post(f"/bot{self.config.token}/{method}", json=payload or {})
+        for retry_delay in (*_CONNECT_RETRY_DELAYS_S, None):
+            try:
+                response = await client.post(
+                    f"/bot{self.config.token}/{method}", json=payload or {}
+                )
+                break
+            except httpx.ConnectError:
+                if retry_delay is None:
+                    raise
+                log.warning(
+                    "telegram.api_connect_retry",
+                    method=method,
+                    retry_in_s=retry_delay,
+                )
+                await asyncio.sleep(retry_delay)
         response.raise_for_status()
         data = response.json()
         if data.get("ok") is not True:
@@ -426,6 +442,8 @@ class TelegramChannel:
             self.bot_user_id = str(me.get("id", "")) or None
             username = me.get("username")
             self.bot_username = str(username) if username else None
+
+        await self.register_slash_commands()
 
         if self.config.transport_name == "webhook":
             if self.config.webhook_url:
@@ -450,6 +468,12 @@ class TelegramChannel:
             transport=self.config.transport_name,
             bot_user_id=self.bot_user_id,
         )
+
+    async def register_slash_commands(self) -> None:
+        """Synchronize Telegram's native command menu with the channel registry."""
+        commands = telegram_bot_commands()
+        await self._api("setMyCommands", {"commands": commands})
+        log.info("telegram.commands_registered", count=len(commands))
 
     async def stop(self) -> None:
         task = self._poll_task

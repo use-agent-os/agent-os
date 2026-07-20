@@ -139,6 +139,7 @@ class SkillsConfig(BaseSettings):
 class ToolsConfig(BaseModel):
     """Top-level runtime tool policy configuration."""
 
+    enabled: bool = True
     profile: Literal["full", "minimal", "memory_only", "coding", "messaging"] | None = None
     allow: list[str] = Field(default_factory=list)
     deny: list[str] = Field(default_factory=list)

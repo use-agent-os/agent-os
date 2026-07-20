@@ -258,6 +258,8 @@ Channels:
 ```sh
 agentos channels types
 agentos channels describe telegram
+agentos channels native-commands telegram
+agentos channels native-commands slack --request-url https://agent.example/slack/events
 agentos channels add telegram --name personal
 agentos channels list
 agentos channels status
@@ -267,12 +269,23 @@ agentos channels restart personal
 agentos channels remove personal
 ```
 
+`native-commands` prints the native platform payload derived from the same
+channel command registry used for text `/command` dispatch. Telegram and
+Discord menus synchronize when their adapters start. Import the Slack manifest
+fragment into Slack's app settings; its `--request-url` must point to the
+gateway's Slack webhook endpoint.
+
 Raw config:
 
 ```sh
 agentos config get llm.provider
 agentos config set gateway.port 18791
 ```
+
+For Ollama models that do not reliably support native tool calls, set
+`tools.enabled = false` in the config file to run in plain-text mode. Keep it
+enabled for tool-capable cloud models such as `glm-5.2:cloud`; the Ollama
+provider preserves native tool-call history between turns.
 
 More detail:
 

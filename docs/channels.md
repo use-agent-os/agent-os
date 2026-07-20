@@ -146,6 +146,25 @@ Leave `slack_channel_id` empty when the adapter should reply to the incoming
 conversation. Set it only when you want a default fallback channel. Enable
 `reply_in_thread` when replies should stay in Slack threads.
 
+## Native Slash-Command Menus
+
+Telegram and Discord synchronize their native command menus when the adapter
+starts. The entries are derived from AgentOS's unified channel command registry,
+so they stay aligned with text `/command` dispatch.
+
+Slack requires slash commands to be declared in the Slack app manifest. Print
+the manifest fragment with the public Request URL for the Slack webhook route,
+then import it in the Slack app settings:
+
+```sh
+agentos channels native-commands slack \
+  --request-url https://agent.example/slack/events
+```
+
+The command endpoint acknowledges Slack's form submission and routes the
+resulting `/command` through the same channel dispatcher. Keep text command
+interception as the fallback for platforms without native command menus.
+
 ## Webhook Channels
 
 Slack webhook mode and WeCom require a public, provider-reachable URL.

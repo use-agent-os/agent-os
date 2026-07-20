@@ -92,7 +92,7 @@ Top-level: `init`, `onboard`, `configure`, `doctor`, `upgrade`, `chat`,
 | `skills` | `list`, `search`, `view`, `install`, `uninstall`, `update`, `publish`, `tap add/list/remove` |
 | `sessions` | `list`, `show`, `resume`, `abort`, `delete`, `export` |
 | `cron` | `list`, `status`, `add`, `update`, `remove`, `run`, `runs` |
-| `channels` | `list`, `status`, `types`, `describe`, `add`, `remove`, `enable`, `disable`, `edit`, `restart`, `logout`, `pairing …` |
+| `channels` | `list`, `status`, `types`, `describe`, `native-commands`, `add`, `remove`, `enable`, `disable`, `edit`, `restart`, `logout`, `pairing …` |
 | `memory` | `status`, `index`, `list`, `search`, `show`, `dream`, `embedding-download`, `repair …`, `raw-fallbacks …` |
 | `sandbox` | `status`, `on`, `bypass`, `full`, `reset` |
 | `search` | `list`, `status`, `query`, `configure` |
@@ -125,6 +125,7 @@ Main `agentos.toml` sections (full commented reference:
 | `[llm]` | `provider`, `model`, `api_key`, `base_url`, `proxy`, `[llm.provider_routing]` |
 | `[agentos_router]` | router on/off, `strategy` (`pilot-v1`), tier settings under `[agentos_router.tiers.c0..c3]` |
 | `[skills]` | skill filtering/injection: `filter_strategy`, `filter_top_k`, `injection_mode` |
+| `[tools]` | model-visible tools and policy; `enabled = false` runs providers in plain-text mode |
 | `[memory]` | memory source and embedding model, `[memory.dream]` |
 | `[sandbox]` | `sandbox`, `default_level` (DISABLED/STANDARD/STRICT/LOCKED), `backend`, network/mounts |
 | `[permissions]` | `default_mode` = `off` \| `on` \| `bypass` \| `full` (pair with `agentos sandbox …`) |

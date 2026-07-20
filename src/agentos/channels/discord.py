@@ -46,6 +46,7 @@ from agentos.channels.types import (
     IncomingMessage,
     OutgoingMessage,
 )
+from agentos.engine.native_commands import discord_application_commands
 from agentos.env import trust_env as _trust_env
 
 log = structlog.get_logger(__name__)
@@ -148,9 +149,7 @@ class DiscordChannel:
     _rate_limiter: RateLimiter = field(default_factory=RateLimiter, init=False, repr=False)
     _sent_messages: dict[str, str] = field(default_factory=dict, init=False, repr=False)
     _channel_types: dict[str, int] = field(default_factory=dict, init=False, repr=False)
-    _thread_parent_channels: dict[str, str] = field(
-        default_factory=dict, init=False, repr=False
-    )
+    _thread_parent_channels: dict[str, str] = field(default_factory=dict, init=False, repr=False)
 
     @property
     def capability_profile(self) -> ChannelCapabilityProfile:
@@ -389,9 +388,7 @@ class DiscordChannel:
             self._enqueue_reaction(self._annotate_channel_context(data))
         elif event_type == "INTERACTION_CREATE":
             interaction_id = str(data.get("id") or "")
-            if interaction_id and not self._dedupe.check_and_add(
-                f"interaction:{interaction_id}"
-            ):
+            if interaction_id and not self._dedupe.check_and_add(f"interaction:{interaction_id}"):
                 return
             self._handle_interaction(self._annotate_channel_context(data))
         elif event_type in {"CHANNEL_CREATE", "CHANNEL_UPDATE", "THREAD_CREATE", "THREAD_UPDATE"}:
@@ -416,12 +413,7 @@ class DiscordChannel:
         if isinstance(channel_id, str) and channel_id and channel_type is not None:
             self._channel_types[channel_id] = channel_type
         parent_id = data.get("parent_id")
-        if (
-            isinstance(channel_id, str)
-            and channel_id
-            and isinstance(parent_id, str)
-            and parent_id
-        ):
+        if isinstance(channel_id, str) and channel_id and isinstance(parent_id, str) and parent_id:
             self._thread_parent_channels[channel_id] = parent_id
 
     def _annotate_channel_context(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -444,10 +436,7 @@ class DiscordChannel:
         emoji_key = emoji.get("id") or emoji.get("name") or ""
         if not data.get("message_id") or not data.get("user_id") or not emoji_key:
             return ""
-        return (
-            f"reaction:{data.get('message_id', '')}:"
-            f"{data.get('user_id', '')}:{emoji_key}"
-        )
+        return f"reaction:{data.get('message_id', '')}:{data.get('user_id', '')}:{emoji_key}"
 
     def _enqueue_reaction(self, data: dict[str, Any]) -> None:
         user_id = data.get("user_id", "unknown")
@@ -537,6 +526,8 @@ class DiscordChannel:
         ready = await self._ws_recv()
         if ready.get("t") == "READY":
             await self._handle_dispatch("READY", ready.get("d", {}))
+
+        await self.register_native_slash_commands()
 
         self._connected = True
         self._state.last_heartbeat_ack = True
@@ -748,7 +739,7 @@ class DiscordChannel:
                 data={"content": content} if content else {},
                 files={"file": (Path(file_path).name, f)},
                 headers=self._auth_headers(),
-        )
+            )
         resp.raise_for_status()
         data = resp.json()
         message_id = str(data.get("id", ""))
@@ -812,6 +803,13 @@ class DiscordChannel:
         )
         resp.raise_for_status()
         log.info("discord.commands_registered", count=len(commands))
+
+    async def register_native_slash_commands(self) -> None:
+        """Synchronize Discord's application-command menu with the registry."""
+        if not self.config.application_id:
+            log.warning("discord.commands_not_registered", reason="missing_application_id")
+            return
+        await self.register_slash_commands(discord_application_commands())
 
     # ------------------------------------------------------------------
     # Mentions

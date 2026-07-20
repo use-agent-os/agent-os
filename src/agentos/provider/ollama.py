@@ -38,22 +38,85 @@ def _build_ollama_tool(tool: ToolDefinition) -> dict[str, Any]:
     }
 
 
-def _build_ollama_message(msg: Message) -> dict[str, Any]:
+def _tool_result_content(content: Any) -> str:
+    return content if isinstance(content, str) else json.dumps(content)
+
+
+def _build_ollama_message(
+    msg: Message,
+    tool_names_by_id: dict[str, str] | None = None,
+) -> dict[str, Any]:
     if isinstance(msg.content, str):
         return {"role": msg.role, "content": msg.content}
-    # Flatten to text for Ollama (tool_result -> tool role)
+
+    tool_names = tool_names_by_id if tool_names_by_id is not None else {}
     parts: list[str] = []
+    tool_calls: list[dict[str, Any]] = []
     for block in msg.content:
         if block.type == "text":
             parts.append(block.text)
+        elif block.type == "tool_use":
+            tool_names[block.id] = block.name
+            tool_calls.append(
+                {
+                    "id": block.id,
+                    "type": "function",
+                    "function": {
+                        "name": block.name,
+                        "arguments": block.input,
+                    },
+                }
+            )
         elif block.type == "tool_result":
-            return {
+            tool_result_message: dict[str, Any] = {
                 "role": "tool",
-                "content": (
-                    block.content if isinstance(block.content, str) else json.dumps(block.content)
-                ),
+                "content": _tool_result_content(block.content),
             }
-    return {"role": msg.role, "content": " ".join(parts)}
+            tool_name = tool_names.get(block.tool_use_id)
+            if tool_name:
+                tool_result_message["tool_name"] = tool_name
+            return tool_result_message
+
+    result: dict[str, Any] = {"role": msg.role, "content": " ".join(parts)}
+    if tool_calls:
+        result["tool_calls"] = tool_calls
+    return result
+
+
+def _build_ollama_messages(messages: list[Message]) -> list[dict[str, Any]]:
+    """Translate canonical history without dropping Ollama's tool-call pairing."""
+
+    result: list[dict[str, Any]] = []
+    tool_names_by_id: dict[str, str] = {}
+    for message in messages:
+        if not isinstance(message.content, str):
+            tool_results = [block for block in message.content if block.type == "tool_result"]
+            if tool_results:
+                for block in tool_results:
+                    tool_result = {
+                        "role": "tool",
+                        "content": _tool_result_content(block.content),
+                    }
+                    tool_name = tool_names_by_id.get(block.tool_use_id)
+                    if tool_name:
+                        tool_result["tool_name"] = tool_name
+                    result.append(tool_result)
+                continue
+        result.append(_build_ollama_message(message, tool_names_by_id))
+    return result
+
+
+def _normalize_tool_arguments(arguments: Any) -> dict[str, Any]:
+    if isinstance(arguments, dict):
+        return arguments
+    if isinstance(arguments, str):
+        try:
+            parsed = json.loads(arguments)
+        except json.JSONDecodeError:
+            return {"_raw": arguments}
+        if isinstance(parsed, dict):
+            return parsed
+    return {"_raw": arguments}
 
 
 class OllamaProvider:
@@ -98,7 +161,7 @@ class OllamaProvider:
         ollama_messages: list[dict[str, Any]] = []
         if cfg.system:
             ollama_messages.append({"role": "system", "content": cfg.system})
-        ollama_messages.extend(_build_ollama_message(m) for m in messages)
+        ollama_messages.extend(_build_ollama_messages(messages))
 
         payload: dict[str, Any] = {
             "model": self._model,
@@ -117,6 +180,8 @@ class OllamaProvider:
 
         input_tokens = 0
         output_tokens = 0
+        done_reason = "stop"
+        response_model = self._model
         # Ollama tool calls accumulate in the full response (not streamed per-chunk)
         pending_tool_calls: list[dict[str, Any]] = []
 
@@ -148,6 +213,9 @@ class OllamaProvider:
                             continue
 
                         msg_chunk = chunk.get("message", {})
+                        chunk_model = chunk.get("model")
+                        if isinstance(chunk_model, str) and chunk_model:
+                            response_model = chunk_model
 
                         # Text content
                         text = msg_chunk.get("content", "")
@@ -161,7 +229,9 @@ class OllamaProvider:
                                 {
                                     "id": tc.get("id", f"call_{len(pending_tool_calls)}"),
                                     "name": fn.get("name", ""),
-                                    "arguments": fn.get("arguments", {}),
+                                    "arguments": _normalize_tool_arguments(
+                                        fn.get("arguments", {})
+                                    ),
                                 }
                             )
 
@@ -169,6 +239,9 @@ class OllamaProvider:
                         if chunk.get("done"):
                             input_tokens = chunk.get("prompt_eval_count", 0)
                             output_tokens = chunk.get("eval_count", 0)
+                            raw_done_reason = chunk.get("done_reason")
+                            if isinstance(raw_done_reason, str) and raw_done_reason:
+                                done_reason = raw_done_reason
 
                     # Emit tool events after streaming completes
                     for call in pending_tool_calls:
@@ -182,9 +255,10 @@ class OllamaProvider:
                         )
 
                     yield DoneEvent(
-                        stop_reason="stop",
+                        stop_reason="tool_use" if pending_tool_calls else done_reason,
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
+                        model=response_model,
                     )
 
         except httpx.TimeoutException as exc:

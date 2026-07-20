@@ -24,6 +24,9 @@
 # agent_stream_heartbeat_interval_seconds = 15.0
 # agent_stream_idle_timeout_seconds = 180.0
 # webui_stream_idle_grace_seconds = 210.0
+# Keep a positive cap for smaller local models so repeated tool calls cannot
+# run forever. Zero means unlimited.
+# agent_max_iterations = 8
 
 # WebSocket per-connection outbound writer queue. When enabled (default),
 # each WS connection gets a bounded asyncio queue + dedicated writer task.
@@ -357,6 +360,11 @@ thinking_level = "medium"
 # model = "qwen3.5:9b"      # must be a vision-capable local model
 # supports_image = true
 # image_only = true
+
+[tools]
+# Plain-text fallback for models that do not reliably support native tool
+# calls. When false, AgentOS sends no tool definitions and executes no tools.
+enabled = true
 
 [agent_token_saving]
 # Project fresh tool results with the built-in tokenjuice reducer before they
