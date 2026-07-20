@@ -348,6 +348,38 @@ describe('SessionsPage', () => {
     await waitFor(() => expect(callsFor('sessions.list')).toBe(2))
   })
 
+  it('clears the selection and bulk bar when the sessions list reloads (Refresh)', async () => {
+    // sessions.js:150-152 — a successful (re)load clears _selected. Isolate the
+    // refetch-clears path from the 180ms search-debounce mount timer (which also
+    // clears on mount): let that timer fire and settle first, THEN select rows so
+    // only the sessions-reload effect can clear them.
+    wireRpc()
+    renderPage()
+    await screen.findByRole('button', { name: 'agent:main:chat:aaa' })
+    // drain the mount debounce timer so a later clear can only come from reload
+    await new Promise((r) => setTimeout(r, 220))
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select session agent:main:chat:aaa' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select session agent:bot:chat:bbb' }))
+    // bulk bar shows the selection and both boxes are checked
+    const bulkBar = await screen.findByRole('region', { name: /bulk actions/i })
+    expect(within(bulkBar).getByText('2')).toBeInTheDocument()
+    expect(
+      screen.getByRole('checkbox', { name: 'Select session agent:main:chat:aaa' }),
+    ).toBeChecked()
+
+    fireEvent.click(screen.getByRole('button', { name: /^refresh$/i }))
+    await waitFor(() => expect(callsFor('sessions.list')).toBe(2))
+
+    // selection cleared → bulk bar gone, checkboxes unchecked
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: /bulk actions/i })).not.toBeInTheDocument(),
+    )
+    expect(
+      screen.getByRole('checkbox', { name: 'Select session agent:main:chat:aaa' }),
+    ).not.toBeChecked()
+  })
+
   it('sets the document title', async () => {
     wireRpc()
     renderPage()

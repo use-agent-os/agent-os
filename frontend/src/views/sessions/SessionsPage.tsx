@@ -321,6 +321,20 @@ export function SessionsPage() {
     refetchOnWindowFocus: false,
   })
 
+  // sessions.js:150-152 — every successful sessions fetch clears the selection
+  // (legacy _loadData `_selected.clear()`), so a Refresh/refetch drops bulk
+  // selection + the bulk-action bar. dataUpdatedAt advances on every successful
+  // load (including a refetch that resolves to identical data). Done as a
+  // render-phase reset keyed on dataUpdatedAt (React's supported "adjust state
+  // when a derived value changes" pattern, mirroring ConfigPage) rather than an
+  // effect, so the cleared state lands before paint with no cascading render.
+  const sessionsUpdatedAt = sessionsQuery.dataUpdatedAt
+  const [lastLoadAt, setLastLoadAt] = useState(0)
+  if (sessionsUpdatedAt && sessionsUpdatedAt !== lastLoadAt) {
+    setLastLoadAt(sessionsUpdatedAt)
+    if (selected.size > 0) setSelected(new Set())
+  }
+
   // sessions.js:158 — load-failure toast (stable id so repeats dedupe).
   useEffect(() => {
     if (sessionsQuery.isError) {
