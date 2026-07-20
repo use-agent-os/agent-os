@@ -139,20 +139,23 @@ export function AppShell() {
         id="sidebar-nav"
         aria-hidden={drawerHidden || undefined}
         inert={drawerHidden || undefined}
-        className={`flex w-56 shrink-0 flex-col border-r bg-background p-3 max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:transition-transform ${
+        className={`flex w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:transition-transform ${
           sidebarOpen ? '' : 'max-md:-translate-x-full'
         }`}
       >
-        <div className="mb-4 px-2 font-semibold">AgentOS Control</div>
-        <nav aria-label="Main" className="flex-1">
+        {/* Wordmark: tight heavy sans, the lime mark dot is the only signal use here. */}
+        <div className="flex items-baseline gap-1.5 border-b border-hairline px-4 py-4">
+          <span className="text-[15px] font-extrabold tracking-tight">AgentOS</span>
+          <span className="t-label !text-primary">Control</span>
+        </div>
+        <nav aria-label="Main" className="flex-1 overflow-y-auto px-2 py-3">
           {NAV_GROUPS.map((group) => (
-            <div key={group.label} className="mb-3">
-              <div className="px-2 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                {group.label}
-              </div>
+            <div key={group.label} className="mb-4">
+              <div className="t-label px-2 pb-1.5">{group.label}</div>
               {group.items.map((v) => {
                 // router.js:59-66 — active nav item carries .is-active styling
-                // AND aria-current="page" for screen readers.
+                // AND aria-current="page" for screen readers. Lime is reserved
+                // as signal: active nav gets the left rule + lime text.
                 const active = activePath === v.path
                 return (
                   <Link
@@ -160,7 +163,11 @@ export function AppShell() {
                     to={`/${v.path}`}
                     onClick={() => setSidebarOpen(false)}
                     aria-current={active ? 'page' : undefined}
-                    className={`block rounded px-2 py-1.5 text-sm ${active ? 'bg-accent font-medium' : 'text-muted-foreground hover:bg-accent/50'}`}
+                    className={`relative block rounded-sm px-3 py-1.5 text-sm transition-colors duration-150 ${
+                      active
+                        ? 'bg-accent font-semibold text-primary before:absolute before:inset-y-1 before:left-0 before:w-[2px] before:bg-primary'
+                        : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
+                    }`}
                   >
                     {v.title}
                   </Link>
@@ -171,14 +178,17 @@ export function AppShell() {
         </nav>
         {/* app.js:66-68,88 — version footer, suppressed when version is empty. */}
         {version && (
-          <div className="mt-auto px-2 pt-2 text-xs text-muted-foreground" data-testid="nav-foot">
+          <div
+            className="t-data mt-auto border-t border-hairline px-4 py-3 text-[11px] text-dim"
+            data-testid="nav-foot"
+          >
             v{version}
           </div>
         )}
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b px-4 py-2">
-          <div className="flex items-center gap-2">
+        <header className="flex h-12 shrink-0 items-center justify-between border-b border-hairline bg-surface/60 px-4">
+          <div className="flex items-center gap-3">
             <Button
               ref={toggleRef}
               variant="ghost"
@@ -192,21 +202,29 @@ export function AppShell() {
             >
               <Menu className="size-4" />
             </Button>
-            {/* app.js:94,174-183 — persistent connection pill; never unmounts. */}
+            {/* app.js:94,174-183 — persistent connection pill; never unmounts.
+                Tactical readout: mono uppercase, square, status dot carries the
+                semantic state (the one permitted status dot on this surface). */}
             <span
               id="conn-pill"
               role="status"
               aria-live="polite"
               title={pillLabel}
               data-variant={pillVariant}
-              className={`rounded-full px-2 py-0.5 text-xs ${
+              className={`t-data inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-[11px] uppercase tracking-[0.14em] ${
                 pillOk
-                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                  ? 'border-ok/30 text-ok'
                   : pillVariant === 'warn'
-                    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                    : 'bg-destructive/10 text-destructive'
+                    ? 'border-warn/30 text-warn'
+                    : 'border-danger/30 text-danger'
               }`}
             >
+              <span
+                aria-hidden="true"
+                className={`size-1.5 rounded-full ${
+                  pillOk ? 'bg-ok' : pillVariant === 'warn' ? 'bg-warn' : 'bg-danger'
+                }`}
+              />
               {pillLabel}
             </span>
           </div>

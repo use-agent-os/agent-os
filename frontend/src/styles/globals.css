@@ -25,10 +25,10 @@
 }
 
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -48,11 +48,14 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-dim: var(--dim);
+  --color-surface: var(--surface);
+  --color-elevated: var(--elevated);
+  --color-hairline: var(--hairline);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -63,80 +66,104 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
-/* Light/dark tokens: seeded from shadcn's neutral base (OKLCH). Visual polish
-   happens per-view; exact legacy hex values live in
-   src/agentos/gateway/static/css/base.css for reference when tuning. */
+/* Tactical-HQ tokens, ported verbatim from the legacy brand system
+   (src/agentos/gateway/static/css/base.css). Near-black operator ground,
+   hairline-driven panels, decisive square corners. Lime #CCFF00 (sampled from
+   the AgentOS molecule logo) is reserved as SIGNAL: active nav, primary CTA,
+   focus rings, status flips. One accent. Never decorate with it. */
+:root[data-theme='dark'],
 :root {
-  color-scheme: light;
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  color-scheme: dark;
+  --radius: 4px; /* legacy --radius-md; square is the default posture */
+
+  --background: #060608; /* legacy --bg */
+  --foreground: #ececef; /* legacy --text */
+  --surface: #0c0c0f; /* legacy --bg-surface */
+  --elevated: #131318; /* legacy --bg-elevated */
+  --card: #0c0c0f;
+  --card-foreground: #ececef;
+  --popover: #131318;
+  --popover-foreground: #ececef;
+
+  --primary: #ccff00; /* legacy --accent (lime signal) */
+  --primary-foreground: #0f1400; /* legacy --accent-foreground */
+  --secondary: #131318;
+  --secondary-foreground: #ececef;
+  --muted: #131318;
+  --muted-foreground: #a1a1aa; /* legacy --text-muted */
+  --dim: #82828a; /* legacy --text-dim */
+  --accent: #1c1c22; /* legacy --bg-hover: hover surface, NOT the signal color */
+  --accent-foreground: #ececef;
+  --destructive: #f87171; /* legacy --danger */
+  --destructive-foreground: #1a0808;
+
+  --border: rgba(255, 255, 255, 0.08); /* legacy --border */
+  --hairline: rgba(255, 255, 255, 0.06); /* legacy --hairline */
+  --input: rgba(255, 255, 255, 0.12);
+  --ring: #ccff00; /* focus = signal, per legacy */
+
+  --ok: #22c55e;
+  --warn: #eab308;
+  --danger: #f87171;
+  --info: #60a5fa;
+
+  --sidebar: #0c0c0f;
+  --sidebar-foreground: #ececef;
+  --sidebar-primary: #ccff00;
+  --sidebar-primary-foreground: #0f1400;
+  --sidebar-accent: #1c1c22;
+  --sidebar-accent-foreground: #ececef;
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: #ccff00;
+
+  --grain-opacity: 0.05;
 }
 
-:root[data-theme='dark'] {
-  color-scheme: dark;
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.371 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+/* Light theme: legacy paper-neutral with the same hue family (olive signal). */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --background: #f4f5ee;
+  --foreground: #18181b;
+  --surface: #ffffff;
+  --elevated: #eff1e8;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+
+  --primary: #556f00;
+  --primary-foreground: #ffffff;
+  --secondary: #eff1e8;
+  --secondary-foreground: #18181b;
+  --muted: #eff1e8;
+  --muted-foreground: #4b4b53;
+  --dim: #66666e;
+  --accent: #e4e7da;
+  --accent-foreground: #18181b;
+  --destructive: #a61b1b;
+  --destructive-foreground: #ffffff;
+
+  --border: rgba(18, 20, 15, 0.1);
+  --hairline: rgba(18, 20, 15, 0.08);
+  --input: rgba(18, 20, 15, 0.14);
+  --ring: #556f00;
+
+  --ok: #166534;
+  --warn: #7a4f00;
+  --danger: #a61b1b;
+  --info: #1d4ed8;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #18181b;
+  --sidebar-primary: #556f00;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e4e7da;
+  --sidebar-accent-foreground: #18181b;
+  --sidebar-border: rgba(18, 20, 15, 0.1);
+  --sidebar-ring: #556f00;
+
+  --grain-opacity: 0.03;
 }
 
 @layer base {
@@ -146,5 +173,45 @@
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-sans);
+    font-size: 0.9375rem; /* legacy --fs-md */
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  /* Atmospheric grain (legacy body::before): fixed, pointer-events-none only. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 60;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.55 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    background-size: 160px 160px;
+    opacity: var(--grain-opacity);
+    mix-blend-mode: overlay;
+  }
+}
+
+@layer components {
+  /* Tactical micro-label: the mono, uppercase, wide-tracked kicker used for
+     group headers and metadata (legacy --track-label 0.22em). */
+  .t-label {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem; /* legacy --fs-2xs */
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    color: var(--dim);
+  }
+  /* Dashboard view title (legacy .view-display rung): tight, heavy, poster. */
+  .t-display {
+    font-size: clamp(1.75rem, 1.2rem + 1.6vw, 2.75rem);
+    line-height: 1;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+  /* Mono numerals for data readouts. */
+  .t-data {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
   }
 }

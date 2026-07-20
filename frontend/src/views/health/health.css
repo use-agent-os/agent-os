@@ -1,0 +1,390 @@
+/* Health view — tactical-HQ styling on the shared token system (globals.css).
+   Class contract mirrors legacy static/css/views/health.css; values rebuilt on
+   the new CSS variables. Lime stays signal-only: status tones carry ok/warn/
+   danger/info, never the accent. */
+
+.health-layout {
+  padding: 24px 28px 48px;
+  max-width: 1080px;
+}
+
+/* Header */
+.health-stage__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.health-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--dim);
+}
+.health-stage__title-block h2 {
+  font-size: clamp(1.75rem, 1.2rem + 1.6vw, 2.75rem);
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin-top: 6px;
+}
+#health-summary {
+  margin-top: 8px;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+
+/* Status rail: hairline-bordered tile over the flat field */
+.health-status__rail {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 2fr;
+  gap: 1px;
+  background: var(--hairline);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 28px;
+}
+.health-status__rail > * {
+  background: var(--surface);
+}
+.health-status__rail.is-loading {
+  opacity: 0.7;
+}
+
+.health-score {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.health-score__label {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--dim);
+}
+.health-score strong {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+.health-status__rail.is-ready .health-score strong {
+  color: var(--ok);
+}
+.health-status__rail.is-degraded .health-score strong {
+  color: var(--warn);
+}
+.health-status__rail.is-action_required .health-score strong,
+.health-status__rail.is-action-required .health-score strong,
+.health-status__rail.is-unavailable .health-score strong {
+  color: var(--danger);
+}
+.health-score__summary {
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+
+.health-report-context {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+.health-report-context__item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.health-report-context__item b {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+}
+.health-report-context__value {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--muted-foreground);
+  word-break: break-all;
+}
+
+/* Impact count tiles: mono numerals, hairline separations, no cards */
+.health-count-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--hairline);
+}
+.health-count {
+  background: var(--surface);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.health-count span {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+}
+.health-count strong {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.health-count.is-blocks_ready strong {
+  color: var(--danger);
+}
+.health-count.is-degrades strong {
+  color: var(--warn);
+}
+.health-count.is-optional strong {
+  color: var(--info);
+}
+.health-count.is-none strong {
+  color: var(--ok);
+}
+
+/* Finding groups */
+.health-findings {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+.health-finding-group__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+  margin-bottom: 4px;
+}
+.health-finding-group__header h3 {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.health-finding-group__header p {
+  font-size: 0.75rem;
+  color: var(--dim);
+  margin-top: 2px;
+}
+.health-finding-group__header > span {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8125rem;
+  color: var(--dim);
+}
+
+/* Finding card: marker rule + body, tone via the marker and meta */
+.health-finding {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  gap: 14px;
+  padding: 14px 0;
+}
+.health-finding + .health-finding {
+  border-top: 1px solid var(--hairline);
+}
+.health-finding__marker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-top: 5px;
+}
+.health-finding__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 1px; /* square posture */
+  background: var(--dim);
+}
+.health-finding.is-error .health-finding__dot {
+  background: var(--danger);
+}
+.health-finding.is-warn .health-finding__dot {
+  background: var(--warn);
+}
+.health-finding.is-info .health-finding__dot {
+  background: var(--info);
+}
+.health-finding.is-ok .health-finding__dot {
+  background: var(--ok);
+}
+.health-finding__line {
+  flex: 1;
+  width: 1px;
+  background: var(--hairline);
+}
+.health-finding__body {
+  min-width: 0;
+}
+.health-finding__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+}
+.health-finding.is-error .health-finding__meta > span:first-child {
+  color: var(--danger);
+}
+.health-finding.is-warn .health-finding__meta > span:first-child {
+  color: var(--warn);
+}
+.health-finding__title {
+  margin-top: 6px;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+.health-finding__detail {
+  margin-top: 4px;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+  max-width: 65ch;
+}
+
+.health-chip {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.1em;
+  color: var(--muted-foreground);
+}
+
+/* Evidence tags */
+.health-evidence {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+.health-evidence > span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.health-evidence b {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+}
+.health-evidence > span > :not(b),
+.health-evidence > span {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--muted-foreground);
+  word-break: break-all;
+}
+
+/* Fix steps */
+.health-steps {
+  margin-top: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--elevated);
+  padding: 12px 14px;
+}
+.health-steps__heading {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+  margin-bottom: 8px;
+}
+.health-steps ol {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.health-step {
+  display: grid;
+  grid-template-columns: 20px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+.health-step__number {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.75rem;
+  color: var(--dim);
+  padding-top: 2px;
+}
+.health-step__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.health-step__body > b {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.health-step__command {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.health-step__command code {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  background: var(--background);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.health-step__detail {
+  font-size: 0.75rem;
+  color: var(--dim);
+}
+
+.health-empty {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 28px;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--dim);
+}
+
+/* Mobile collapse */
+@media (max-width: 768px) {
+  .health-layout {
+    padding: 16px;
+  }
+  .health-status__rail {
+    grid-template-columns: 1fr;
+  }
+  .health-count-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .health-stage__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

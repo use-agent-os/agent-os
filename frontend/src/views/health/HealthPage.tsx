@@ -1,3 +1,4 @@
+import './health.css'
 import { useQuery } from '@tanstack/react-query'
 import { CopyIcon, RefreshCwIcon } from 'lucide-react'
 import { useEffect } from 'react'
