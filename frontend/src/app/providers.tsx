@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { fetchBootstrap, type Bootstrap } from '@/lib/bootstrap'
+import { fallbackBootstrap, fetchBootstrap, type Bootstrap } from '@/lib/bootstrap'
 import { WsRpcClient } from '@/lib/ws-rpc'
 import { useConnection } from '@/stores/connection'
 import { initTheme } from '@/stores/theme'
@@ -36,13 +36,33 @@ export function AppProviders({ children }: { children: ReactNode }) {
     initTheme()
     let cancelled = false
     const unsubscribe = rpc.on('_state', (s) => useConnection.getState().setState(s as RpcState))
-    fetchBootstrap().then((b) => {
-      if (cancelled) return
-      setBootstrap(b)
-      const url = localStorage.getItem(WS_URL_KEY) || b.ws_url
-      const token = localStorage.getItem(WS_TOKEN_KEY)
-      rpc.connect(url, token)
-    })
+    fetchBootstrap()
+      // Legacy served bootstrap inline (it could not fail): the shell always
+      // rendered and _autoConnect used the location-derived default WS URL with
+      // infinite WS reconnect backoff (app.js:186-203, rpc.js:226-231). A
+      // transient /api/bootstrap failure must never wedge the app on the
+      // "Connecting…" placeholder.
+      .catch(() => fallbackBootstrap())
+      .then((b) => {
+        if (cancelled) return
+        setBootstrap(b)
+        // app.js:197-203 — URL override from localStorage; the auth token
+        // lives in sessionStorage (per-tab session tier, NOT localStorage).
+        // Both reads tolerate storage access errors like legacy.
+        let storedUrl = ''
+        let token = ''
+        try {
+          storedUrl = localStorage.getItem(WS_URL_KEY) || ''
+        } catch {
+          /* storage unavailable */
+        }
+        try {
+          token = sessionStorage.getItem(WS_TOKEN_KEY) || ''
+        } catch {
+          /* storage unavailable */
+        }
+        rpc.connect(storedUrl || b.ws_url, token || undefined)
+      })
     return () => {
       cancelled = true
       unsubscribe()
