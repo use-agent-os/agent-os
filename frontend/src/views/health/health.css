@@ -327,17 +327,31 @@
   color: var(--muted-foreground);
 }
 
-/* Evidence tags */
+/* Evidence: terminal key-value readout (env-output posture) — aligned label
+   column, value column, hairline-separated rows inside a quiet inset block. */
 .health-evidence {
-  margin-top: 10px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
-}
-.health-evidence > span {
+  margin-top: 12px;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  max-width: 720px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  padding: 2px 12px;
+}
+.health-evidence > span {
+  display: grid;
+  grid-template-columns: minmax(150px, 200px) 1fr;
+  align-items: baseline;
+  gap: 16px;
+  padding: 6px 0;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--foreground);
+  word-break: break-all;
+}
+.health-evidence > span + span {
+  border-top: 1px solid var(--hairline);
 }
 .health-evidence b {
   font-family: var(--font-mono);
@@ -346,13 +360,7 @@
   text-transform: uppercase;
   letter-spacing: 0.14em;
   color: var(--dim);
-}
-.health-evidence > span > :not(b),
-.health-evidence > span {
-  font-family: var(--font-mono);
-  font-size: 0.6875rem;
-  color: var(--muted-foreground);
-  word-break: break-all;
+  word-break: normal;
 }
 
 /* Fix steps */
