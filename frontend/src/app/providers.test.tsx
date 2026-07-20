@@ -13,6 +13,18 @@ vi.mock('@/lib/ws-rpc', () => ({
   },
 }))
 
+// The approval monitor is a global REST poller wired at app boot. Mock the
+// singleton so we can assert start-on-mount / stop-on-unmount without running
+// real fetch polling loops in the provider tests. vi.mock is hoisted above
+// module init, so the spies must be created via vi.hoisted to exist in time.
+const { startMock, stopMock } = vi.hoisted(() => ({
+  startMock: vi.fn(),
+  stopMock: vi.fn(),
+}))
+vi.mock('@/services/approval-monitor', () => ({
+  approvalMonitor: { start: startMock, stop: stopMock },
+}))
+
 const BOOTSTRAP = {
   version: '1',
   ws_url: 'ws://127.0.0.1:18791/ws',
@@ -110,5 +122,25 @@ describe('AppProviders connection settings', () => {
     renderProviders()
     await waitFor(() => expect(screen.getByText('child')).toBeInTheDocument())
     expect(connectMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+// approval_monitor.js — the global approval monitor starts at app boot and is
+// torn down with the app tree.
+describe('AppProviders approval monitor wiring', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    startMock.mockClear()
+    stopMock.mockClear()
+  })
+
+  it('starts the approval monitor on mount and stops it on unmount', async () => {
+    stubFetchOk()
+    const view = renderProviders()
+    await waitFor(() => expect(screen.getByText('child')).toBeInTheDocument())
+    expect(startMock).toHaveBeenCalledTimes(1)
+    expect(stopMock).not.toHaveBeenCalled()
+    view.unmount()
+    expect(stopMock).toHaveBeenCalledTimes(1)
   })
 })

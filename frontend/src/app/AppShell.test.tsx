@@ -6,6 +6,7 @@ import { routeChildren } from './routes'
 import { AppProviders } from './providers'
 import { AppShell } from './AppShell'
 import { useConnection } from '@/stores/connection'
+import { useApprovals } from '@/services/approval-monitor'
 import type { Bootstrap } from '@/lib/bootstrap'
 
 // AppShell reads useBootstrap() (version footer) — in production it always runs
@@ -269,6 +270,56 @@ describe('app shell chrome', () => {
     expect(pill).toHaveTextContent('Connected')
     expect(pill).toHaveAttribute('title', 'Connected')
     expect(pill).toHaveAttribute('data-variant', 'ok')
+  })
+})
+
+// approval_monitor.js:118-138 — the pending approval count drives a badge on the
+// Approvals nav item (legacy #approval-count, hidden at 0). The shell reads the
+// useApprovals store directly; renderAt() does NOT start the monitor, so the
+// store is driven imperatively here.
+describe('approvals nav badge', () => {
+  // The nav lives in AppShell, so wrap it as the layout parent (like the other
+  // shell-chrome tests) rather than rendering a bare view.
+  function renderShellAt(path: string) {
+    const router = createMemoryRouter([{ element: <AppShell />, children: routeChildren }], {
+      initialEntries: [path],
+    })
+    return render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    )
+  }
+
+  afterEach(() => {
+    useApprovals.setState({ pending: [], count: 0, mode: 'prompt' })
+  })
+
+  it('hides the badge when no approvals are pending', () => {
+    useApprovals.setState({ pending: [], count: 0, mode: 'prompt' })
+    renderShellAt('/overview')
+    expect(screen.queryByTestId('approval-badge')).not.toBeInTheDocument()
+  })
+
+  it('shows the pending count on the Approvals nav item', () => {
+    useApprovals.setState({
+      pending: [{ id: 'a1' }, { id: 'a2' }, { id: 'a3' }],
+      count: 3,
+      mode: 'prompt',
+    })
+    renderShellAt('/overview')
+    const badge = screen.getByTestId('approval-badge')
+    expect(badge).toHaveTextContent('3')
+    expect(badge).toHaveAttribute('aria-label', '3 pending approvals')
+    // The badge lives on the Approvals link, not any other nav item.
+    const approvalsLink = screen.getByRole('link', { name: /approvals/i })
+    expect(approvalsLink).toContainElement(badge)
+  })
+
+  it('uses the singular aria-label for a single pending approval', () => {
+    useApprovals.setState({ pending: [{ id: 'a1' }], count: 1, mode: 'prompt' })
+    renderShellAt('/overview')
+    expect(screen.getByTestId('approval-badge')).toHaveAttribute('aria-label', '1 pending approval')
   })
 })
 

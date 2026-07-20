@@ -4,6 +4,7 @@ import { fallbackBootstrap, fetchBootstrap, resolveWsUrl, type Bootstrap } from 
 import { WsRpcClient } from '@/lib/ws-rpc'
 import { useConnection } from '@/stores/connection'
 import { initTheme } from '@/stores/theme'
+import { approvalMonitor } from '@/services/approval-monitor'
 import type { RpcState } from '@/lib/ws-rpc'
 
 const WS_URL_KEY = 'agentos.wsUrl'
@@ -73,6 +74,15 @@ export function AppProviders({ children }: { children: ReactNode }) {
       rpc.disconnect()
     }
   }, [rpc])
+
+  // approval_monitor.js — the global approval monitor is a REST poller wired at
+  // app boot (independent of the WS connection). Start it once on mount and
+  // tear it down on unmount so it never outlives the app tree (legacy called
+  // ApprovalMonitor.start() at boot and stop() was never needed in the SPA).
+  useEffect(() => {
+    approvalMonitor.start()
+    return () => approvalMonitor.stop()
+  }, [])
 
   if (!bootstrap) return <div className="p-8 text-sm">Connecting…</div>
 

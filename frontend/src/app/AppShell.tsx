@@ -21,8 +21,10 @@ import {
 } from 'lucide-react'
 import { Toaster } from '@/components/ui/sonner'
 import { Button } from '@/components/ui/button'
+import { ApprovalPrompt } from '@/components/ApprovalPrompt'
 import { useTheme } from '@/stores/theme'
 import { useConnection } from '@/stores/connection'
+import { useApprovals } from '@/services/approval-monitor'
 import { useBootstrap } from './providers'
 import { defaultViewPath } from './routes'
 
@@ -86,6 +88,9 @@ export function AppShell() {
   const mode = useTheme((s) => s.mode)
   const toggle = useTheme((s) => s.toggle)
   const connState = useConnection((s) => s.state)
+  // approval_monitor.js:118-138 — the pending approval count drives a nav badge
+  // on the Approvals item (legacy #approval-count, hidden at 0).
+  const approvalCount = useApprovals((s) => s.count)
   const bootstrap = useBootstrap()
   const location = useLocation()
 
@@ -177,6 +182,8 @@ export function AppShell() {
                 // a blinking terminal caret.
                 const active = activePath === v.path
                 const Icon = v.icon
+                // approval_monitor.js:118-138 — pending count badge on Approvals.
+                const showBadge = v.path === 'approvals' && approvalCount > 0
                 return (
                   <Link
                     key={v.path}
@@ -195,6 +202,18 @@ export function AppShell() {
                       aria-hidden="true"
                     />
                     {v.title}
+                    {showBadge ? (
+                      <span
+                        id="approval-count"
+                        data-testid="approval-badge"
+                        className="t-data ml-auto inline-flex min-w-5 items-center justify-center rounded-full border border-warn/40 px-1.5 text-[10px] font-semibold text-warn"
+                        aria-label={`${approvalCount} pending ${
+                          approvalCount === 1 ? 'approval' : 'approvals'
+                        }`}
+                      >
+                        {approvalCount}
+                      </span>
+                    ) : null}
                   </Link>
                 )
               })}
@@ -272,6 +291,8 @@ export function AppShell() {
           </div>
         </main>
       </div>
+      {/* approval_monitor.js:140-184 — global approval prompt, mounted once. */}
+      <ApprovalPrompt />
       <Toaster />
     </div>
   )
