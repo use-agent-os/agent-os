@@ -156,7 +156,7 @@ export function AppShell() {
   const version = sidebarVersion(bootstrap.version)
 
   return (
-    <div className="flex h-dvh font-sans">
+    <div className="flex h-dvh font-sans" style={{ ['--shell-header-h' as string]: '3rem' }}>
       <aside
         ref={sidebarRef}
         id="sidebar-nav"

@@ -15,7 +15,7 @@
   min-height: 0;
   /* Fill the scroll-parent (<main>) height; the view-container is height:auto,
      so anchor to the viewport height minus the shell header. */
-  height: calc(100dvh - var(--shell-header-h, 56px));
+  height: calc(100dvh - var(--shell-header-h, 48px));
   margin-top: -24px;
   margin-bottom: -48px;
   margin-left: -32px;
@@ -31,7 +31,7 @@
     margin-bottom: -32px;
     margin-left: -16px;
     margin-right: -16px;
-    height: calc(100dvh - var(--shell-header-h, 56px));
+    height: calc(100dvh - var(--shell-header-h, 48px));
   }
 }
 
