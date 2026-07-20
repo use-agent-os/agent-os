@@ -34,11 +34,20 @@ function renderProviders() {
   )
 }
 
+function setLocation(href: string) {
+  const url = new URL(href)
+  Object.defineProperty(window, 'location', {
+    configurable: true,
+    value: { href: url.href, protocol: url.protocol, host: url.host },
+  })
+}
+
 describe('AppProviders connection settings', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     localStorage.clear()
     sessionStorage.clear()
+    setLocation('http://localhost:3000/')
   })
 
   it('reads the auth token from sessionStorage, not localStorage (app.js:201)', async () => {
@@ -78,6 +87,22 @@ describe('AppProviders connection settings', () => {
     await waitFor(() => expect(screen.getByText('child')).toBeInTheDocument())
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
     expect(connectMock).toHaveBeenCalledWith(`${proto}//${location.host}/ws`, undefined)
+  })
+
+  it('connects with the location-derived wss default when bootstrap ws_url downgrades a same-host https page to ws:// (app.js:191-195)', async () => {
+    // Proxy dropped x-forwarded-proto → server emitted ws:// for an https page.
+    setLocation('https://console.example.com/control/')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ...BOOTSTRAP, ws_url: 'ws://console.example.com/ws' }),
+      }),
+    )
+    renderProviders()
+    await waitFor(() =>
+      expect(connectMock).toHaveBeenCalledWith('wss://console.example.com/ws', undefined),
+    )
   })
 
   it('renders the shell and connects when bootstrap responds non-ok', async () => {

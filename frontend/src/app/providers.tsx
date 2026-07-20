@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { fallbackBootstrap, fetchBootstrap, type Bootstrap } from '@/lib/bootstrap'
+import { fallbackBootstrap, fetchBootstrap, resolveWsUrl, type Bootstrap } from '@/lib/bootstrap'
 import { WsRpcClient } from '@/lib/ws-rpc'
 import { useConnection } from '@/stores/connection'
 import { initTheme } from '@/stores/theme'
@@ -61,7 +61,11 @@ export function AppProviders({ children }: { children: ReactNode }) {
         } catch {
           /* storage unavailable */
         }
-        rpc.connect(storedUrl || b.ws_url, token || undefined)
+        // Stored override wins verbatim (legacy loadConnectionSettings returned
+        // it unchanged). Otherwise use the server-computed ws_url, but restore
+        // the legacy location-derived scheme when a proxy drops x-forwarded-proto
+        // and downgrades a same-host https page to ws:// (resolveWsUrl).
+        rpc.connect(storedUrl || resolveWsUrl(b.ws_url), token || undefined)
       })
     return () => {
       cancelled = true

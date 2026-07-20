@@ -26,6 +26,35 @@ export function defaultWsUrl(): string {
 }
 
 /**
+ * Resolve the WS URL to connect with, given the server-computed bootstrap
+ * ws_url. Legacy (app.js:186-203) never used a server value — _autoConnect
+ * always derived the scheme from location.protocol via getDefaultRpcUrl, so
+ * an https page always produced wss://. The new console prefers the
+ * server-computed ws_url, which is correct behind a well-configured proxy but
+ * regresses when a TLS-terminating proxy omits x-forwarded-proto: the server
+ * then sees plain http and emits ws:// for a page served over https.
+ *
+ * That downgrade is a mixed-content connection the browser blocks outright, so
+ * we restore the legacy contract narrowly: when the page is https and the
+ * server's ws_url is a same-host ws:// downgrade, prefer the location-derived
+ * wss:// default. Any other ws_url — a different host, an already-wss URL, or
+ * a page that is not https — passes through untouched.
+ */
+export function resolveWsUrl(bootstrapWsUrl: string): string {
+  if (location.protocol !== 'https:') return bootstrapWsUrl
+  let parsed: URL
+  try {
+    parsed = new URL(bootstrapWsUrl, location.href)
+  } catch {
+    return bootstrapWsUrl
+  }
+  if (parsed.protocol === 'ws:' && parsed.host === location.host) {
+    return defaultWsUrl()
+  }
+  return bootstrapWsUrl
+}
+
+/**
  * Legacy inlined bootstrap data into the served HTML, so the shell could never
  * be blocked by a bootstrap failure: it always rendered, and _autoConnect
  * (app.js:186-203) connected with the location-derived default WS URL backed
