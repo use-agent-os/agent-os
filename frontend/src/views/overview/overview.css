@@ -1,0 +1,456 @@
+/* Overview view — tactical-HQ styling on the shared token system (globals.css).
+   Information structure references legacy css/views/overview.css; values rebuilt
+   on the design-system tokens. Status color flows ONLY through --tone (tone-*
+   classes); lime (--primary) stays signal-only. One gutter per nesting level. */
+
+.ov-stage {
+  width: 100%;
+}
+
+/* Header: terminal hero over the atmospheric ASCII backdrop (Health posture). */
+.ov-stage__header {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 18px 0 22px;
+}
+.ov-stage__title-block {
+  position: relative; /* above the ascii-field */
+  min-width: 0;
+}
+.ov-stage__subtitle {
+  margin-top: 8px;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+  max-width: 60ch;
+}
+.ov-stage__actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Connection pill: mono, square, one status dot carrying the semantic state.
+   Color via --tone only (tone-ok/warn/danger set upstream). */
+.ov-conn-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--tone, var(--border)) 30%, var(--border));
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--tone, var(--muted-foreground));
+}
+.ov-conn-pill__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tone, var(--dim));
+}
+
+/* Stat tiles: hairline-separated grid (Health count-tile posture). */
+.ov-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1px;
+  background: var(--hairline);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 28px;
+}
+.ov-stat {
+  position: relative;
+  background: var(--surface);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+button.ov-stat {
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+button.ov-stat:hover {
+  background: color-mix(in srgb, var(--foreground) 3%, var(--surface));
+}
+button.ov-stat:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+/* One gutter per tile: only toned tiles (Health) carry the single --tone rule. */
+.ov-stat.tone-ok,
+.ov-stat.tone-warn,
+.ov-stat.tone-danger {
+  border-left: 3px solid var(--tone, var(--border));
+}
+.ov-stat__icon {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: inline-flex;
+  color: var(--dim);
+  opacity: 0.7;
+}
+.ov-stat__icon svg {
+  width: 16px;
+  height: 16px;
+}
+.ov-stat__label {
+  color: var(--dim);
+}
+.ov-stat__value {
+  font-size: 1.5rem;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  color: var(--foreground);
+}
+.ov-stat__value--mono {
+  font-size: 1.25rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-stat__value--status {
+  font-size: 1.2rem;
+  line-height: 1.2;
+}
+/* The status value inherits the tile's --tone so the readiness word is toned. */
+.ov-stat.tone-ok .ov-stat__value--status,
+.ov-stat.tone-warn .ov-stat__value--status,
+.ov-stat.tone-danger .ov-stat__value--status {
+  color: var(--tone, var(--foreground));
+}
+.ov-stat__hint {
+  font-size: 0.75rem;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Grid: recent (wide) + connection (narrow), event stream spans full width. */
+.ov-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 16px;
+}
+.ov-panel {
+  min-width: 0;
+}
+.ov-panel--events {
+  grid-column: 1 / -1;
+}
+.ov-panel .panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ov-panel__meta {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.ov-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 4px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--primary);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.ov-link:hover {
+  color: color-mix(in srgb, var(--primary) 80%, var(--foreground));
+}
+.ov-link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Recent sessions list. */
+.ov-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ov-recent__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition:
+    background 80ms ease,
+    border-color 80ms ease;
+}
+.ov-recent__row:hover {
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+  border-color: var(--border);
+}
+.ov-recent__row:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+.ov-recent__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tone, var(--dim));
+}
+.ov-recent__key {
+  font-size: 0.78rem;
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.ov-recent__row:hover .ov-recent__key {
+  color: var(--primary);
+}
+.ov-recent__model {
+  font-size: 0.6875rem;
+  background: var(--background);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  padding: 1px 8px;
+  border-radius: var(--radius-sm);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-recent__msgs,
+.ov-recent__time {
+  font-size: 0.72rem;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.ov-recent__arrow {
+  color: var(--dim);
+  font-size: 0.75rem;
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+.ov-recent__row:hover .ov-recent__arrow {
+  opacity: 1;
+  color: var(--primary);
+  transform: translateX(2px);
+}
+.ov-recent__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 12px;
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  text-align: center;
+}
+.ov-recent__empty-icon {
+  width: 30px;
+  height: 30px;
+  color: var(--dim);
+}
+
+/* Connection form. */
+.ov-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ov-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ov-field__label {
+  color: var(--dim);
+}
+.ov-field__optional {
+  color: var(--dim);
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+.ov-field__input {
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 12px;
+  font-size: 0.8125rem;
+  background: var(--background);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-sm);
+  color: var(--foreground);
+  outline: none;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.ov-field__input:focus {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 30%, transparent);
+}
+.ov-form__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+/* Event stream. */
+.ov-event-log {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+.ov-event-log__empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  color: var(--muted-foreground);
+  font-family: var(--font-sans, inherit);
+  font-size: 0.8125rem;
+}
+.ov-event-log__pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary);
+  position: relative;
+  flex: none;
+}
+.ov-event-log__pulse::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 1px solid var(--primary);
+  opacity: 0.5;
+  animation: ov-listening 1.6s ease-in-out infinite;
+}
+@keyframes ov-listening {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+.ov-event-log__row {
+  display: grid;
+  grid-template-columns: 78px 190px 1fr;
+  gap: 12px;
+  padding: 4px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+.ov-event-log__row:last-child {
+  border-bottom: 0;
+}
+.ov-event-log__row.is-fresh {
+  animation: ov-row-flash 1.4s ease-out forwards;
+}
+@keyframes ov-row-flash {
+  from {
+    background: color-mix(in srgb, var(--primary) 16%, transparent);
+  }
+  to {
+    background: transparent;
+  }
+}
+.ov-event-log__ts {
+  color: var(--dim);
+}
+.ov-event-log__name {
+  color: var(--primary);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ov-event-log__payload {
+  color: var(--muted-foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Responsive collapse. */
+@media (max-width: 920px) {
+  .ov-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ov-event-log__pulse::after,
+  .ov-event-log__row.is-fresh {
+    animation: none !important;
+  }
+}
+@media (max-width: 768px) {
+  .ov-stage__header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ov-recent__row {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+  }
+  .ov-recent__model {
+    display: none;
+  }
+  .ov-recent__arrow {
+    display: none;
+  }
+  .ov-event-log__row {
+    grid-template-columns: 70px 1fr;
+  }
+  .ov-event-log__payload {
+    grid-column: 1 / -1;
+    padding-left: 82px;
+    color: var(--dim);
+  }
+}

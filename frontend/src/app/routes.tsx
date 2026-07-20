@@ -4,6 +4,7 @@ import { StubView } from '@/views/StubView'
 import { HealthPage } from '@/views/health/HealthPage'
 import { ApprovalsPage } from '@/views/approvals/ApprovalsPage'
 import { LogsPage } from '@/views/logs/LogsPage'
+import { OverviewPage } from '@/views/overview/OverviewPage'
 
 export const VIEWS: ReadonlyArray<{ path: string; title: string }> = [
   { path: 'overview', title: 'Overview' },
@@ -37,6 +38,7 @@ export function defaultViewPath(): string {
 
 function viewElement(path: string) {
   const view = VIEWS.find((v) => v.path === path)
+  if (path === 'overview') return <OverviewPage />
   if (path === 'health') return <HealthPage />
   if (path === 'approvals') return <ApprovalsPage />
   if (path === 'logs') return <LogsPage />
@@ -75,6 +77,7 @@ function NotFound() {
 export const routeChildren: RouteObject[] = [
   { index: true, element: <IndexView /> },
   ...VIEWS.map((v) => {
+    if (v.path === 'overview') return { path: v.path, element: <OverviewPage /> }
     if (v.path === 'health') return { path: v.path, element: <HealthPage /> }
     if (v.path === 'approvals') return { path: v.path, element: <ApprovalsPage /> }
     if (v.path === 'logs') return { path: v.path, element: <LogsPage /> }

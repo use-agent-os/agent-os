@@ -21,9 +21,21 @@ let mockBootstrap: Bootstrap = {
   features: { diagnostics: false },
 }
 
+// The index route (/) now renders the real OverviewPage (the default desktop
+// view is no longer a stub), which reads useRpc()/useConnection. The shell
+// tests drive the tree without AppProviders, so stub useRpc with a no-op RPC
+// whose waitForConnection never settles — OverviewPage mounts (shell chrome +
+// the view header render) without firing real RPC traffic in a chrome test.
+const noopRpc = {
+  waitForConnection: () => new Promise<void>(() => {}),
+  call: () => new Promise(() => {}),
+  on: () => () => {},
+  connect: () => {},
+  disconnect: () => {},
+}
 vi.mock('./providers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./providers')>()
-  return { ...actual, useBootstrap: () => mockBootstrap }
+  return { ...actual, useBootstrap: () => mockBootstrap, useRpc: () => noopRpc }
 })
 
 // Render the route tree without AppProviders (no network): test harness
