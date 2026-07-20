@@ -1,6 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation } from 'react-router'
-import { Menu, Moon, Sun } from 'lucide-react'
+import {
+  Activity,
+  BarChart3,
+  Bot,
+  CalendarClock,
+  LayoutDashboard,
+  Menu,
+  MessageSquare,
+  Moon,
+  Puzzle,
+  Radio,
+  Rocket,
+  ScrollText,
+  Settings2,
+  ShieldCheck,
+  Sun,
+  History,
+  type LucideIcon,
+} from 'lucide-react'
 import { Toaster } from '@/components/ui/sonner'
 import { Button } from '@/components/ui/button'
 import { useTheme } from '@/stores/theme'
@@ -13,29 +31,29 @@ import { defaultViewPath } from './routes'
 // group matches the legacy markup exactly.
 const NAV_GROUPS: ReadonlyArray<{
   label: string
-  items: ReadonlyArray<{ path: string; title: string }>
+  items: ReadonlyArray<{ path: string; title: string; icon: LucideIcon }>
 }> = [
-  { label: 'Chat', items: [{ path: 'chat', title: 'Chat' }] },
+  { label: 'Chat', items: [{ path: 'chat', title: 'Chat', icon: MessageSquare }] },
   {
     label: 'Control',
     items: [
-      { path: 'overview', title: 'Overview' },
-      { path: 'health', title: 'Health' },
-      { path: 'channels', title: 'Channels' },
-      { path: 'skills', title: 'Skills' },
-      { path: 'sessions', title: 'Sessions' },
-      { path: 'agents', title: 'Agents' },
-      { path: 'usage', title: 'Usage' },
-      { path: 'cron', title: 'Cron' },
+      { path: 'overview', title: 'Overview', icon: LayoutDashboard },
+      { path: 'health', title: 'Health', icon: Activity },
+      { path: 'channels', title: 'Channels', icon: Radio },
+      { path: 'skills', title: 'Skills', icon: Puzzle },
+      { path: 'sessions', title: 'Sessions', icon: History },
+      { path: 'agents', title: 'Agents', icon: Bot },
+      { path: 'usage', title: 'Usage', icon: BarChart3 },
+      { path: 'cron', title: 'Cron', icon: CalendarClock },
     ],
   },
   {
     label: 'Settings',
     items: [
-      { path: 'setup', title: 'Setup' },
-      { path: 'config', title: 'Config' },
-      { path: 'logs', title: 'Logs' },
-      { path: 'approvals', title: 'Approvals' },
+      { path: 'setup', title: 'Setup', icon: Rocket },
+      { path: 'config', title: 'Config', icon: Settings2 },
+      { path: 'logs', title: 'Logs', icon: ScrollText },
+      { path: 'approvals', title: 'Approvals', icon: ShieldCheck },
     ],
   },
 ]
@@ -155,20 +173,26 @@ export function AppShell() {
               {group.items.map((v) => {
                 // router.js:59-66 — active nav item carries .is-active styling
                 // AND aria-current="page" for screen readers. Lime is reserved
-                // as signal: active nav gets the left rule + lime text.
+                // as signal: active nav gets the left rule + lime icon/text.
                 const active = activePath === v.path
+                const Icon = v.icon
                 return (
                   <Link
                     key={v.path}
                     to={`/${v.path}`}
                     onClick={() => setSidebarOpen(false)}
                     aria-current={active ? 'page' : undefined}
-                    className={`relative block rounded-sm px-3 py-1.5 text-sm transition-colors duration-150 ${
+                    className={`relative flex items-center gap-2.5 rounded-sm px-2.5 py-[7px] text-[13px] transition-colors duration-150 ${
                       active
                         ? 'bg-accent font-semibold text-primary before:absolute before:inset-y-1 before:left-0 before:w-[2px] before:bg-primary'
                         : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
                     }`}
                   >
+                    <Icon
+                      className={`size-4 shrink-0 ${active ? 'text-primary' : 'text-dim'}`}
+                      strokeWidth={1.5}
+                      aria-hidden="true"
+                    />
                     {v.title}
                   </Link>
                 )
