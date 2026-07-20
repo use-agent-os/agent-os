@@ -66,6 +66,37 @@ const CATALOG_ITEM = {
   source: 'clawhub',
   description: 'DEX swaps',
   category: 'defi',
+  demo: { code: 'swap(1, ETH)', language: 'python', title: 'Quote a swap' },
+}
+// A needs_setup skill carrying both a Requirements manifest and Missing bins/env
+// (skills.js:743-777,792-803). requirements.items exercises the ready /
+// needs_setup / missing_skill status branches plus the missing + requires detail.
+const REQ_BUNDLED = {
+  name: 'oracle',
+  description: 'On-chain oracle reads',
+  layer: 'bundled',
+  status: 'needs_setup',
+  missing_bins: ['jq'],
+  missing_env: ['ORACLE_KEY'],
+  requirements: {
+    items: [
+      {
+        name: 'jq',
+        status: 'needs_setup',
+        missing_bins: ['jq'],
+      },
+      {
+        name: 'apikey',
+        status: 'missing_skill',
+        requires_env: ['ORACLE_KEY'],
+      },
+      {
+        name: 'python',
+        status: 'ready',
+        requires_bins: ['python3'],
+      },
+    ],
+  },
 }
 
 function wireRpc(
@@ -321,6 +352,81 @@ describe('SkillsPage', () => {
     await waitFor(() => expect(screen.getByLabelText('Skill trader')).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: /Robinhood/i }))
     expect(await screen.findByText(/Robinhood skills are on the way/i)).toBeInTheDocument()
+  })
+
+  // ── SK1: Requirements + Missing sections in the installed-skill dialog ────
+  // (skills.js:743-777,792-803,805,854-855)
+  it('the installed-skill dialog renders the Requirements section and Missing bins/env for a needs_setup skill', async () => {
+    wireRpc({ skills: [REQ_BUNDLED] })
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Skill oracle')).toBeInTheDocument())
+    fireEvent.click(screen.getByLabelText('Skill oracle'))
+    const dialog = await screen.findByRole('dialog')
+
+    // Requirements section: heading + one row per requirement item.
+    expect(within(dialog).getByText('Requirements')).toBeInTheDocument()
+    const reqRows = dialog.querySelectorAll('.sk-dialog__req-row')
+    expect(reqRows).toHaveLength(3)
+    // Per-requirement name (req-name spans are unique to each row).
+    const names = Array.from(dialog.querySelectorAll('.sk-dialog__req-name')).map(
+      (n) => n.textContent,
+    )
+    expect(names).toEqual(['jq', 'apikey', 'python'])
+    // Per-requirement status chips (ready / needs setup / missing skill).
+    expect(within(dialog).getByText('needs setup')).toBeInTheDocument()
+    expect(within(dialog).getByText('missing skill')).toBeInTheDocument()
+    expect(within(dialog).getByText('ready')).toBeInTheDocument()
+    // Detail: needs_setup row shows "Missing <code>jq</code>"; declared reqs
+    // show requires text ("ORACLE_KEY env", "python3").
+    const jqRow = reqRows[0]!
+    expect(jqRow.querySelector('.sk-dialog__req-detail')?.textContent).toContain('Missing')
+    expect(jqRow.querySelector('.sk-dialog__req-detail code')?.textContent).toBe('jq')
+    expect(within(dialog).getByText('ORACLE_KEY env')).toBeInTheDocument()
+    expect(within(dialog).getByText('python3')).toBeInTheDocument()
+
+    // Missing section: skill-level missing bins + env, each labelled.
+    const sectionTitles = Array.from(dialog.querySelectorAll('.sk-dialog__section-title')).map(
+      (t) => t.textContent,
+    )
+    expect(sectionTitles).toContain('Missing')
+    expect(within(dialog).getByText('binary')).toBeInTheDocument()
+    expect(within(dialog).getByText('env var')).toBeInTheDocument()
+    const missingCodes = Array.from(dialog.querySelectorAll('.sk-dialog__missing code')).map(
+      (c) => c.textContent,
+    )
+    expect(missingCodes).toEqual(['jq', 'ORACLE_KEY'])
+  })
+
+  // ── SK2: category badge on the registry card + detail dialog ──────────────
+  // (skills.js:659-660,670,685)
+  it('the registry card and detail dialog show the category badge (CAT_LABEL)', async () => {
+    wireRpc()
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Skill trader')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /^Community$/i }))
+    const card = await screen.findByLabelText('Catalog skill Uniswap')
+    // 'defi' → 'DeFi' label on the card.
+    expect(within(card).getByText('DeFi')).toBeInTheDocument()
+    // Open the detail dialog: the category chip renders there too.
+    fireEvent.click(card)
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('DeFi')).toBeInTheDocument()
+  })
+
+  // ── SK3: Demo section heading carries the demo title + language ───────────
+  // (skills.js:702-708)
+  it('the registry detail Demo section shows the demo title and language labels', async () => {
+    wireRpc()
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Skill trader')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /^Community$/i }))
+    const card = await screen.findByLabelText('Catalog skill Uniswap')
+    fireEvent.click(card)
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/Demo/)).toBeInTheDocument()
+    // Title + language render as their own labelled spans in the heading.
+    expect(within(dialog).getByText('Quote a swap')).toBeInTheDocument()
+    expect(within(dialog).getByText('python')).toBeInTheDocument()
   })
 
   it('sets the document title', async () => {

@@ -317,6 +317,8 @@
 .sk-rcard__titles {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 .sk-rcard__name {
   font-family: var(--font-mono);
@@ -327,6 +329,19 @@
 .sk-rcard__provider {
   font-size: 0.6875rem;
   color: var(--dim);
+}
+.sk-rcard__cat {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 0.59375rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
+  padding: 2px 7px;
+  border-radius: 999px;
 }
 .sk-rcard__desc {
   font-size: 0.75rem;
@@ -489,10 +504,65 @@
   padding: 6px 0;
   font-size: 0.8125rem;
 }
+/* skills.css:623-635 — Missing bins/env list for needs_setup skills. */
+.sk-dialog__missing {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.8125rem;
+}
+.sk-dialog__missing code {
+  font-family: var(--font-mono);
+  background: var(--background);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--primary);
+}
+/* skills.css:642-671 — per-requirement rows in the Requirements section. */
+.sk-dialog__requirements {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sk-dialog__req-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto minmax(0, 1.4fr);
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8125rem;
+}
+.sk-dialog__req-name {
+  min-width: 0;
+  font-family: var(--font-mono);
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}
+.sk-dialog__req-detail {
+  min-width: 0;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.sk-dialog__req-detail code {
+  font-family: var(--font-mono);
+  background: var(--background);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--primary);
+}
 .sk-dialog__setup {
   padding-left: 18px;
   font-size: 0.8125rem;
   color: var(--muted-foreground);
+}
+/* skills.css:717 — demo title + language labels in the Demo section heading. */
+.sk-dialog__demo-title,
+.sk-dialog__demo-lang {
+  font-size: 0.625rem;
+  color: var(--dim);
+  margin-left: 6px;
 }
 .sk-dialog__code {
   padding: 10px;

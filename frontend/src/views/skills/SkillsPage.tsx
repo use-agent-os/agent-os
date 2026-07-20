@@ -7,6 +7,7 @@ import { AsciiField } from '@/components/AsciiField'
 import { Button } from '@/components/ui/button'
 import { useRpc } from '@/app/providers'
 import {
+  CAT_LABEL,
   REGISTRY_SEARCH_DEBOUNCE_MS,
   categoryChips,
   communityFilter,
@@ -32,6 +33,8 @@ import {
   type DepsInstallResult,
   type RawSkill,
   type RegistryItem,
+  type SkillRequirementItem,
+  type SkillRequirements,
   type StatusFilter,
   type UpdateResult,
 } from './logic'
@@ -148,6 +151,9 @@ function RegistryCard({
   onInstall: (force: boolean) => void
 }) {
   const action = installAction(item, forceArmed)
+  // skills.js:659-660 — the category chip only shows for a known, non-'other'
+  // category (label from CAT_LABEL, falling back to the raw category key).
+  const cat = item.category && item.category !== 'other' ? item.category : ''
   return (
     <div
       className="sk-rcard"
@@ -168,6 +174,7 @@ function RegistryCard({
           <span className="sk-rcard__name">{item.name}</span>
           <span className="sk-rcard__provider">{item.provider || item.source || ''}</span>
         </div>
+        {cat ? <span className="sk-rcard__cat">{CAT_LABEL[cat] || cat}</span> : null}
       </div>
       <p className="sk-rcard__desc">{item.description || 'View details →'}</p>
       <div className="sk-rcard__foot">
@@ -914,6 +921,78 @@ function RegistryPanel({
   )
 }
 
+// ── Requirements section (skills.js:743-777) ──────────────────────────────────
+// Per-requirement name + status chip + missing/requires detail. Renders nothing
+// when there are no requirement items.
+function reqStatusLabel(status: string): string {
+  if (status === 'ready') return 'ready'
+  if (status === 'needs_setup') return 'needs setup'
+  if (status === 'missing_skill') return 'missing skill'
+  return 'no deps declared'
+}
+
+function reqStatusClass(status: string): string {
+  if (status === 'ready') return 'sk-chip--ok'
+  if (status === 'needs_setup' || status === 'missing_skill') return 'sk-chip--warn'
+  return 'sk-chip--unverified'
+}
+
+function RequirementRow({ item }: { item: SkillRequirementItem }) {
+  // skills.js:747-749 — missing bins + env, each rendered as <code>.
+  const missing = [...(item.missing_bins || []), ...(item.missing_env || [])]
+  // skills.js:750-755 — declared requirements as plain text fragments.
+  const requires: string[] = [...(item.requires_bins || [])]
+  if ((item.requires_any_bins || []).length) {
+    requires.push(`one of ${(item.requires_any_bins || []).join(' / ')}`)
+  }
+  ;(item.requires_env || []).forEach((e) => requires.push(`${e} env`))
+  const status = item.status || 'not_declared'
+
+  // skills.js:764-766 — detail prefers the missing codes, else the requires
+  // text, else a fallback string.
+  let detail: React.ReactNode
+  if (missing.length) {
+    detail = (
+      <>
+        Missing{' '}
+        {missing.map((m, i) => (
+          <span key={m}>
+            {i > 0 ? ', ' : ''}
+            <code>{m}</code>
+          </span>
+        ))}
+      </>
+    )
+  } else if (requires.length) {
+    detail = requires.join(', ')
+  } else {
+    detail = 'No declared dependencies'
+  }
+
+  return (
+    <div className="sk-dialog__req-row">
+      <span className="sk-dialog__req-name">{item.name || 'unknown'}</span>
+      <span className={`sk-chip ${reqStatusClass(status)}`}>{reqStatusLabel(status)}</span>
+      <span className="sk-dialog__req-detail">{detail}</span>
+    </div>
+  )
+}
+
+function RequirementsSection({ requirements }: { requirements?: SkillRequirements }) {
+  const items = Array.isArray(requirements?.items) ? requirements.items : []
+  if (!items.length) return null
+  return (
+    <div className="sk-dialog__section">
+      <div className="sk-dialog__section-title">Requirements</div>
+      <div className="sk-dialog__requirements">
+        {items.map((item, i) => (
+          <RequirementRow key={item.name || i} item={item} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Installed skill detail dialog (skills.js:779-864) ─────────────────────────
 function SkillDialog({
   skill,
@@ -938,6 +1017,11 @@ function SkillDialog({
   const homepage = safeUrl(skill.homepage)
   const updateBusy = busyKeys.has('update:' + skill.name)
   const removeBusy = busyKeys.has('uninstall:' + skill.name)
+
+  // skills.js:792-803 — the Missing bins/env list only shows for needs_setup.
+  const missingBins = status === 'needs_setup' ? skill.missing_bins || [] : []
+  const missingEnv = status === 'needs_setup' ? skill.missing_env || [] : []
+  const hasMissing = missingBins.length > 0 || missingEnv.length > 0
 
   return (
     <ModalShell labelledBy={titleId} onClose={onClose}>
@@ -966,6 +1050,24 @@ function SkillDialog({
       </header>
       <section className="sk-dialog__body">
         <p className="sk-dialog__desc">{skill.description || ''}</p>
+        <RequirementsSection requirements={skill.requirements} />
+        {hasMissing ? (
+          <div className="sk-dialog__section">
+            <div className="sk-dialog__section-title">Missing</div>
+            <ul className="sk-dialog__missing">
+              {missingBins.map((b) => (
+                <li key={`bin:${b}`}>
+                  <code>{b}</code> <span className="sk-dim">binary</span>
+                </li>
+              ))}
+              {missingEnv.map((e) => (
+                <li key={`env:${e}`}>
+                  <code>{e}</code> <span className="sk-dim">env var</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         {installs.length ? (
           <div className="sk-dialog__section">
             <div className="sk-dialog__section-title">Install</div>
@@ -1048,6 +1150,11 @@ function RegistryDialog({
   const titleId = useId()
   const homepage = safeUrl(item.homepage)
   const action = installAction(item, forceArmed)
+  // skills.js:685 — category chip between trust and source (known, non-'other').
+  const cat = item.category && item.category !== 'other' ? item.category : ''
+  // skills.js:703-704 — demo section heading appends the demo title + language.
+  const demoTitle = item.demo?.title || ''
+  const demoLang = item.demo?.language || ''
   return (
     <ModalShell labelledBy={titleId} onClose={onClose}>
       <header className="sk-dialog__head">
@@ -1071,6 +1178,7 @@ function RegistryDialog({
           >
             {item.trust_level || 'community'}
           </span>
+          {cat ? <span className="sk-chip">{CAT_LABEL[cat] || cat}</span> : null}
           <span className="sk-chip sk-mono">{item.source || ''}</span>
         </div>
         {item.description ? (
@@ -1092,7 +1200,13 @@ function RegistryDialog({
         ) : null}
         {item.demo && item.demo.code ? (
           <div className="sk-dialog__section">
-            <div className="sk-dialog__section-title">Demo</div>
+            <div className="sk-dialog__section-title">
+              Demo{' '}
+              {demoTitle ? (
+                <span className="sk-dialog__demo-title sk-mono">{demoTitle}</span>
+              ) : null}{' '}
+              {demoLang ? <span className="sk-dialog__demo-lang sk-mono">{demoLang}</span> : null}
+            </div>
             <pre className="sk-dialog__code">
               <code>{item.demo.code}</code>
             </pre>
