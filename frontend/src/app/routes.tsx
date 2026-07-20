@@ -9,6 +9,7 @@ import { ChannelsPage } from '@/views/channels/ChannelsPage'
 import { AgentsPage } from '@/views/agents/AgentsPage'
 import { SessionsPage } from '@/views/sessions/SessionsPage'
 import { UsagePage } from '@/views/usage/UsagePage'
+import { ConfigPage } from '@/views/config/ConfigPage'
 
 export const VIEWS: ReadonlyArray<{ path: string; title: string }> = [
   { path: 'overview', title: 'Overview' },
@@ -50,6 +51,7 @@ function viewElement(path: string) {
   if (path === 'agents') return <AgentsPage />
   if (path === 'sessions') return <SessionsPage />
   if (path === 'usage') return <UsagePage />
+  if (path === 'config') return <ConfigPage />
   return <StubView title={view?.title ?? 'Overview'} />
 }
 
@@ -93,6 +95,7 @@ export const routeChildren: RouteObject[] = [
     if (v.path === 'agents') return { path: v.path, element: <AgentsPage /> }
     if (v.path === 'sessions') return { path: v.path, element: <SessionsPage /> }
     if (v.path === 'usage') return { path: v.path, element: <UsagePage /> }
+    if (v.path === 'config') return { path: v.path, element: <ConfigPage /> }
     return { path: v.path, element: <StubView title={v.title} /> }
   }),
   { path: '*', element: <NotFound /> },
