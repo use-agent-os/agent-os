@@ -35,11 +35,42 @@ export function ApprovalPrompt() {
   const [busy, setBusy] = useState(false)
   const dialogRef = useRef<HTMLDivElement | null>(null)
 
-  // approval_monitor.js:90-91 — only the first pending item is prompted; the
-  // rest surface as they reach the head of the queue on subsequent polls.
-  const item: Approval | undefined = pending[0]
+  // approval_monitor.js:90-91 — legacy PINNED the modal to the item captured at
+  // open time and short-circuited polls while the modal was open (`if (_modal)
+  // return`), so the displayed approval never silently swapped under the
+  // operator. React re-renders on every store change; we reproduce the pin by
+  // holding the shown item in state and, when it drifts out of sync with the
+  // queue, ADJUSTING STATE DURING RENDER (the React-sanctioned pattern for
+  // "state derived from props with memory" — https://react.dev/reference/react/useState#storing-information-from-previous-renders).
+  // Once open, a changing queue head (a new higher-priority approval, or the
+  // tail shifting) leaves the shown item untouched; only when the pinned item
+  // leaves the queue (resolved here or elsewhere) do we advance to the new head,
+  // mirroring legacy reopening for pending[0] after _closeModal.
+  const [item, setItem] = useState<Approval | null>(null)
+  // Set in the resolve handler on SUCCESS to release the pin before the re-poll
+  // drains `pending` (finding 3): the head is skipped while it lingers in the
+  // queue, so the resolved item never flashes. Cleared (during render) once it
+  // has drained.
+  const [resolvedId, setResolvedId] = useState<string | null>(null)
 
-  // Move focus into the dialog when it opens so keyboard users land inside it.
+  const resolvedStillQueued = resolvedId != null && pending.some((p) => p.id === resolvedId)
+  if (resolvedId != null && !resolvedStillQueued) {
+    // The just-resolved item has drained from the queue; drop the skip marker.
+    setResolvedId(null)
+  }
+
+  const stillPending =
+    item != null && item.id !== resolvedId && pending.some((p) => p.id === item.id)
+  // Advance to the head, skipping a just-resolved item still lingering at the head.
+  const nextItem = stillPending ? item : (pending.find((p) => p.id !== resolvedId) ?? null)
+  // Re-pin only when the identity actually changed (guards the render-phase
+  // setState against an infinite loop).
+  if ((nextItem?.id ?? null) !== (item?.id ?? null)) {
+    setItem(nextItem)
+  }
+
+  // Move focus into the dialog when the pinned item changes (open / advance) so
+  // keyboard users land inside it.
   useEffect(() => {
     if (!item) return
     dialogRef.current?.focus()
@@ -55,12 +86,20 @@ export function ApprovalPrompt() {
 
   async function resolve(action: 'once' | 'always' | 'bypass' | 'deny'): Promise<void> {
     if (busy || !item) return
+    const resolvingId = item.id
     setBusy(true)
     try {
       await approvalMonitor.resolve(item, action)
+      // approval_monitor.js:206 — legacy _closeModal() ran on resolve success
+      // BEFORE the 150ms re-poll. Mark the item resolved so the pin releases
+      // immediately (the dialog closes / advances to the next head) rather than
+      // waiting for the store re-poll to drain `pending`; the resolved item can
+      // never flash while the re-poll is in flight.
+      setResolvedId(resolvingId)
     } catch {
       // resolve() already toasted the failure; re-enable the buttons so the
-      // operator can retry (approval_monitor.js:214-216).
+      // operator can retry (approval_monitor.js:214-216). The pinned item is
+      // kept so the operator can retry the SAME approval.
     } finally {
       setBusy(false)
     }

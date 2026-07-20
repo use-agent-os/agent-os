@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApprovalPrompt } from './ApprovalPrompt'
 import { approvalMonitor, useApprovals, type Approval } from '@/services/approval-monitor'
@@ -138,5 +138,97 @@ describe('ApprovalPrompt', () => {
     screen.getByRole('button', { name: /approve this time/i }).click()
     await waitFor(() => expect(deny).toBeDisabled())
     release?.()
+  })
+
+  // Reviewer findings 1-3: the prompt must pin the item captured at open time,
+  // survive transient poll failures that zero the badge, and release the pin on
+  // resolve success.
+  describe('pinning + poll resilience', () => {
+    function updateStore(next: { pending: Approval[]; count?: number; mode?: string }) {
+      act(() => {
+        useApprovals.setState({
+          pending: next.pending,
+          count: next.count ?? next.pending.length,
+          mode: next.mode ?? 'prompt',
+        })
+      })
+    }
+
+    it('keeps an open prompt when a transient poll failure zeroes the badge (finding 1)', () => {
+      // A failing poll calls zeroBadge() → count 0 but pending untouched. The
+      // open prompt must NOT unmount mid-read.
+      setPending([{ id: 'a1', namespace: 'exec', command: 'ls', toolName: 'shell' }])
+      render(<ApprovalPrompt />)
+      expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+      expect(screen.getByText('shell')).toBeInTheDocument()
+      // Simulate the service's failure path: badge zeroed, pending preserved.
+      act(() => useApprovals.getState().zeroBadge())
+      expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+      expect(screen.getByText('shell')).toBeInTheDocument()
+    })
+
+    it('does NOT swap the displayed item when the queue head changes while open (finding 2)', () => {
+      setPending([{ id: 'a1', namespace: 'exec', command: 'ls', toolName: 'first' }])
+      render(<ApprovalPrompt />)
+      expect(screen.getByText('first')).toBeInTheDocument()
+      // A new higher-priority approval arrives at the head on a later poll; the
+      // pinned item (a1) is still pending, so the shown item must not change.
+      updateStore({
+        pending: [
+          { id: 'a2', namespace: 'exec', command: 'rm', toolName: 'second' },
+          { id: 'a1', namespace: 'exec', command: 'ls', toolName: 'first' },
+        ],
+      })
+      expect(screen.getByText('first')).toBeInTheDocument()
+      expect(screen.queryByText('second')).not.toBeInTheDocument()
+    })
+
+    it('advances to the new head once the pinned item leaves the queue (finding 2 follow-through)', () => {
+      setPending([{ id: 'a1', namespace: 'exec', command: 'ls', toolName: 'first' }])
+      render(<ApprovalPrompt />)
+      expect(screen.getByText('first')).toBeInTheDocument()
+      // a1 is resolved elsewhere and drops out; the next poll carries only a2.
+      updateStore({
+        pending: [{ id: 'a2', namespace: 'exec', command: 'rm', toolName: 'second' }],
+      })
+      expect(screen.getByText('second')).toBeInTheDocument()
+      expect(screen.queryByText('first')).not.toBeInTheDocument()
+    })
+
+    it('closes when the pinned item is resolved and the queue empties', () => {
+      setPending([{ id: 'a1', namespace: 'exec', command: 'ls', toolName: 'first' }])
+      render(<ApprovalPrompt />)
+      expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+      updateStore({ pending: [] })
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    })
+
+    it('releases the pin on resolve success even before the store updates (finding 3)', async () => {
+      // resolve() resolves; the component must clear the pinned item itself
+      // (setItem(null)) rather than waiting for the re-poll to drain pending.
+      const item: Approval = { id: 'a1', namespace: 'exec', command: 'ls', toolName: 'shell' }
+      setPending([item])
+      render(<ApprovalPrompt />)
+      screen.getByRole('button', { name: /approve this time/i }).click()
+      await waitFor(() => expect(resolveSpy).toHaveBeenCalledWith(item, 'once'))
+      // Pin released → dialog gone, even though the store still lists a1 (the
+      // re-poll that drains it hasn't been simulated here).
+      await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    })
+
+    it('keeps the pinned item on resolve FAILURE so the operator can retry (finding 3)', async () => {
+      resolveSpy.mockRejectedValueOnce(new Error('boom'))
+      const item: Approval = { id: 'a1', namespace: 'exec', command: 'ls', toolName: 'shell' }
+      setPending([item])
+      render(<ApprovalPrompt />)
+      screen.getByRole('button', { name: /approve this time/i }).click()
+      await waitFor(() => expect(resolveSpy).toHaveBeenCalled())
+      // The prompt stays open on the same item (buttons re-enabled).
+      expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+      expect(screen.getByText('shell')).toBeInTheDocument()
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /approve this time/i })).toBeEnabled(),
+      )
+    })
   })
 })

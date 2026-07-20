@@ -195,7 +195,10 @@ describe('approval-monitor service', () => {
       mon.stop()
     })
 
-    it('clears the store to zero pending on a non-ok response', async () => {
+    it('zeroes the badge but PRESERVES pending on a non-ok response (open prompt survives)', async () => {
+      // approval_monitor.js:71-74 — a failed poll only calls _setBadge(0); it
+      // never touches the open modal. So the badge count drops to 0 while the
+      // pending item backing an open prompt stays put.
       useApprovals.getState().setFromPoll([{ id: 'x' }], 'prompt')
       fetchMock.mockResolvedValue(okResponse({}, false, 503))
       const mon = makeMonitor()
@@ -203,10 +206,12 @@ describe('approval-monitor service', () => {
       await vi.advanceTimersByTimeAsync(0)
       await flush()
       expect(useApprovals.getState().count).toBe(0)
+      expect(useApprovals.getState().pending).toEqual([{ id: 'x' }])
       mon.stop()
     })
 
-    it('clears the store to zero pending when fetch throws', async () => {
+    it('zeroes the badge but PRESERVES pending when fetch throws', async () => {
+      // approval_monitor.js:92-97 — the catch branch mirrors the non-ok branch.
       useApprovals.getState().setFromPoll([{ id: 'x' }], 'prompt')
       fetchMock.mockRejectedValue(new Error('offline'))
       const mon = makeMonitor()
@@ -214,6 +219,7 @@ describe('approval-monitor service', () => {
       await vi.advanceTimersByTimeAsync(0)
       await flush()
       expect(useApprovals.getState().count).toBe(0)
+      expect(useApprovals.getState().pending).toEqual([{ id: 'x' }])
       mon.stop()
     })
 
@@ -223,6 +229,13 @@ describe('approval-monitor service', () => {
       mon.start()
       mon.stop()
       expect(useApprovals.getState().count).toBe(0)
+    })
+
+    it('zeroBadge() zeroes the count but leaves pending intact', () => {
+      useApprovals.getState().setFromPoll([{ id: 'x' }, { id: 'y' }], 'prompt')
+      useApprovals.getState().zeroBadge()
+      expect(useApprovals.getState().count).toBe(0)
+      expect(useApprovals.getState().pending).toEqual([{ id: 'x' }, { id: 'y' }])
     })
   })
 

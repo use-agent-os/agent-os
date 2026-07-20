@@ -50,14 +50,22 @@ export type ElevatedMode = 'on' | 'bypass' | 'full' | ''
 // The reactive surface consumed by the nav badge + modal. The legacy service
 // pushed the same data through a CustomEvent ('agentos:approvals-pending') and
 // imperative DOM writes; the store replaces both.
+//
+// `count` backs the nav badge (legacy #approval-count); `pending` backs the
+// modal (legacy pinned _modal to pending[0] at open). These are deliberately
+// decoupled: a transient poll failure must zero the BADGE without dismissing an
+// OPEN prompt (approval_monitor.js:71-74,92-97 — the error/non-ok branch only
+// calls _setBadge(0) and NEVER touches _modal). So failure paths call
+// zeroBadge() (count → 0, pending untouched); only a successful poll replaces
+// the pending list via setFromPoll().
 interface ApprovalsState {
   pending: Approval[]
   count: number
   mode: string
-  // The prompt the modal shows: the first pending item + its display mode, or
-  // null when nothing is pending (approval_monitor.js:90-91 — legacy only
-  // opened the modal for pending[0] and only when no modal was already open).
   setFromPoll(pending: Approval[], mode: string): void
+  // approval_monitor.js:71-74,92-97 — zero the badge count on poll failure while
+  // leaving any pending item backing an open prompt intact.
+  zeroBadge(): void
   clear(): void
 }
 
@@ -66,6 +74,7 @@ export const useApprovals = create<ApprovalsState>((set) => ({
   count: 0,
   mode: 'prompt',
   setFromPoll: (pending, mode) => set({ pending, count: pending.length, mode }),
+  zeroBadge: () => set({ count: 0 }),
   clear: () => set({ pending: [], count: 0 }),
 }))
 
@@ -229,7 +238,9 @@ export class ApprovalMonitor {
         headers: authHeaders(),
       })
       if (!resp.ok) {
-        useApprovals.getState().setFromPoll([], useApprovals.getState().mode)
+        // approval_monitor.js:71-74 — zero the badge only; an open prompt keeps
+        // its pinned item (legacy never touched _modal on a failed poll).
+        useApprovals.getState().zeroBadge()
         this.increasePollBackoff()
         return
       }
@@ -250,7 +261,9 @@ export class ApprovalMonitor {
         this.lastToastCount = 0
       }
     } catch {
-      useApprovals.getState().setFromPoll([], useApprovals.getState().mode)
+      // approval_monitor.js:92-97 — same as the non-ok branch: zero the badge,
+      // preserve any pending item behind an open prompt.
+      useApprovals.getState().zeroBadge()
       this.increasePollBackoff()
     } finally {
       this.pollBusy = false
