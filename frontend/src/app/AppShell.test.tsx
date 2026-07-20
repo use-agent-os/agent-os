@@ -43,8 +43,12 @@ describe('routes', () => {
   })
 
   it('renders XSS-safe 404 text for unknown paths', () => {
-    renderAt('/nope<script>')
-    expect(screen.getByText(/Page not found:/)).toBeInTheDocument()
+    // The hostile path must actually reach the DOM as text: NotFound reads
+    // useLocation().pathname (router-driven), so the routed path — not a stale
+    // window.location — is what renders. Assert the full hostile string is
+    // present as literal text and that no <script> element was injected.
+    renderAt('/nope<script>alert(1)</script>')
+    expect(screen.getByText('Page not found: /nope<script>alert(1)</script>')).toBeInTheDocument()
     expect(document.querySelector('script')).toBeNull()
   })
 

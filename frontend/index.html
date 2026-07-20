@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>AgentOS Control</title>
+    <!-- Favicon parity: templates/index.html head — icon + shortcut icon +
+         apple-touch-icon all point at agentos-mark.png. Referenced from src
+         so Vite fingerprints the asset and rewrites the URL under base_path. -->
+    <link rel="icon" type="image/png" href="/src/assets/agentos-mark.png" />
+    <link rel="shortcut icon" type="image/png" href="/src/assets/agentos-mark.png" />
+    <link rel="apple-touch-icon" href="/src/assets/agentos-mark.png" />
     <script>
       // Theme flash prevention: must run BEFORE CSS so the first paint
       // already has the correct `data-theme`. Mirrors stores/theme.ts.

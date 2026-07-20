@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { type RouteObject } from 'react-router'
+import { type RouteObject, useLocation } from 'react-router'
 import { StubView } from '@/views/StubView'
 import { HealthPage } from '@/views/health/HealthPage'
 
@@ -53,14 +53,19 @@ function IndexView() {
 
 function NotFound() {
   // Parity: js/router.js:48-55 — path rendered as text, never HTML.
+  // Parity: js/router.js:54 — legacy shows the basename-relative path (`rel`),
+  // i.e. the path with the base_path stripped. useLocation().pathname is
+  // basename-relative under react-router (main.tsx sets basename from
+  // BASE_URL), so this restores that legacy display AND — unlike
+  // window.location.pathname, which createMemoryRouter never updates — actually
+  // reflects the routed path so a hostile path reaches the DOM (as text).
   // Parity: js/router.js:68 — an unmatched route has no meta.title, so the
   // legacy title resolves to 'Not Found - AgentOS Control'.
+  const { pathname } = useLocation()
   useEffect(() => {
     document.title = 'Not Found - AgentOS Control'
   }, [])
-  return (
-    <div className="p-8 text-muted-foreground">{'Page not found: ' + window.location.pathname}</div>
-  )
+  return <div className="p-8 text-muted-foreground">{'Page not found: ' + pathname}</div>
 }
 
 export const routeChildren: RouteObject[] = [
