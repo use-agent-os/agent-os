@@ -7,6 +7,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Protocol
 
 from agentos.cli.tui.terminal import prompt as terminal_prompt
+from agentos.cli.tui.terminal.app import resolve_chat_fullscreen
 from agentos.engine.commands import Surface
 
 _DEFAULT_INTERACTIVE_SESSION = terminal_prompt.interactive_session
@@ -95,14 +96,26 @@ async def open_terminal_surface(
     surface: Surface,
     model: str | None = None,
     session_id: str | None = None,
+    session_title: str | None = None,
+    router_tier: str | None = None,
+    fullscreen: bool | None = None,
 ) -> AsyncIterator[TerminalSurface]:
     session_factory = interactive_session
     if session_factory is _DEFAULT_INTERACTIVE_SESSION:
         session_factory = terminal_prompt.interactive_session
 
+    # Full-screen is the default for a real interactive `agentos chat`
+    # (env override honored, native fallback for non-TTY). Resolved here so
+    # the single chat entry point drives it for both the gateway and
+    # standalone surfaces without each caller opting in. See issue #46.
+    resolved_fullscreen = resolve_chat_fullscreen(fullscreen)
+
     async with session_factory(
         surface=surface,
         model=model,
         session_id=session_id,
+        session_title=session_title,
+        router_tier=router_tier,
+        fullscreen=resolved_fullscreen,
     ) as handle:
         yield TerminalSurface(handle, surface=surface)

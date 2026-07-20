@@ -160,6 +160,8 @@ async def test_terminal_chat_runtime_exposes_tui_output_handle_not_raw_chat_app(
             "surface": Surface.CLI_GATEWAY,
             "model": "model-a",
             "session_id": "session-a",
+            "session_title": None,
+            "router_tier": None,
         }
     ]
     assert exposed == [output_handle, output_handle]

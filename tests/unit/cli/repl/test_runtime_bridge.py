@@ -43,8 +43,14 @@ def _render_to_text(renderable: object) -> str:
     return captured.get()
 
 
-def test_gateway_runtime_notifier_maps_all_notice_kinds() -> None:
+def test_gateway_runtime_notifier_maps_all_notice_kinds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from agentos.cli.repl import runtime_bridge
+
+    # Pin the native-scrollback path so the notice mapping is asserted
+    # directly (full-screen buffers startup notices — covered separately).
+    monkeypatch.setenv("AGENTOS_CHAT_FULLSCREEN", "0")
 
     output_console = _RecordingConsole()
     notify = runtime_bridge._gateway_runtime_notifier(
@@ -89,6 +95,38 @@ def test_gateway_runtime_notifier_maps_all_notice_kinds() -> None:
     assert output_console.printed[5] == "[yellow]Goodbye.[/yellow]"
     assert output_console.printed[6] == "[red]Unknown command.[/red] [dim]Use /help.[/dim]"
     assert isinstance(output_console.printed[7], Panel)
+
+
+def test_gateway_notifier_buffers_startup_notices_in_fullscreen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In full-screen, startup notices are captured into the pane queue (so the
+    app's alternate screen buffer does not wipe them) rather than printed."""
+    from agentos.cli.repl import runtime_bridge
+    from agentos.cli.tui.terminal import prompt as prompt_module
+
+    monkeypatch.setenv("AGENTOS_CHAT_FULLSCREEN", "1")
+    prompt_module._pending_pane_output.clear()
+
+    # A real Rich Console so the notifier can capture() startup output.
+    output_console = Console(width=120, force_terminal=True)
+    notify = runtime_bridge._gateway_runtime_notifier(output_console, _fake_error_panel)
+
+    notify(
+        gateway_runtime.GatewayRuntimeNotice(kind="created", session_key="agent:main:x")
+    )
+    notify(gateway_runtime.GatewayRuntimeNotice(kind="welcome", session_key="agent:main:x"))
+
+    queued = "".join(prompt_module._pending_pane_output)
+    assert "Connected to gateway. Session: agent:main:x" in queued
+    assert "AgentOS" in queued  # branded startup screen captured into the queue
+
+    # During-session notices still print directly (the pane is live by then).
+    with output_console.capture() as captured:
+        notify(gateway_runtime.GatewayRuntimeNotice(kind="goodbye"))
+    assert "Goodbye" in captured.get()
+
+    prompt_module._pending_pane_output.clear()
 
 
 @pytest.mark.asyncio

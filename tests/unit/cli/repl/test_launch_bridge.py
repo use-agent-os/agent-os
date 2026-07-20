@@ -69,6 +69,10 @@ def test_launch_bridge_prints_standalone_banner_and_runs_standalone(
 ) -> None:
     from agentos.cli.repl import launch_bridge
 
+    # Pin native scrollback: full-screen instead buffers the banner into the
+    # transcript pane (covered separately) rather than printing it here.
+    monkeypatch.setenv("AGENTOS_CHAT_FULLSCREEN", "0")
+
     calls: list[dict[str, Any]] = []
     console = FakeConsole(is_terminal=True)
 
@@ -110,6 +114,45 @@ def test_launch_bridge_prints_standalone_banner_and_runs_standalone(
             "timeout": 7.25,
         }
     ]
+
+
+def test_launch_bridge_buffers_standalone_banner_into_pane_in_fullscreen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In full-screen the standalone banner is captured into the pane queue
+    (so the alternate screen buffer does not wipe it) rather than printed."""
+    from rich.console import Console
+
+    from agentos.cli.repl import launch_bridge
+    from agentos.cli.tui.terminal import prompt as prompt_module
+
+    monkeypatch.setenv("AGENTOS_CHAT_FULLSCREEN", "1")
+    prompt_module._pending_pane_output.clear()
+
+    async def fake_standalone(**_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(launch_bridge, "prepare_interactive_chat", lambda **_kwargs: None)
+
+    # A real Rich Console so the launch path can capture() the banner.
+    console = Console(width=120, force_terminal=True)
+
+    launch_bridge.launch_chat(
+        model="openai/test",
+        session_id="agent:main:test",
+        standalone=True,
+        workspace="",
+        workspace_strict=None,
+        timeout=None,
+        standalone_runner=fake_standalone,
+        gateway_runner=None,
+        output_console=console,
+    )
+
+    queued = "".join(prompt_module._pending_pane_output)
+    assert "AgentOS" in queued
+    assert "Session: agent:main:test" in queued
+    prompt_module._pending_pane_output.clear()
 
 
 def test_launch_bridge_warns_gateway_workspace_options_without_forwarding(

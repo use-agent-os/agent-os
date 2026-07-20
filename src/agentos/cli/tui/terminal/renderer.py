@@ -5,15 +5,25 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal, cast
 
+from agentos.cli.tui.terminal.prompt import DEFAULT_ASSISTANT_LABEL
 from agentos.cli.tui.terminal.stream import StreamingRenderer
 
 
 class TerminalRenderer:
     """Thin async protocol adapter over the current streaming renderer."""
 
-    def __init__(self, *, title: str = "cap", output_handle: Any | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        title: str | None = None,
+        output_handle: Any | None = None,
+    ) -> None:
+        # ``title`` defaults to the shared assistant label (see
+        # ``prompt.DEFAULT_ASSISTANT_LABEL``); pass an explicit value only
+        # when you need to override it for this renderer instance.
+        resolved = title if title is not None else DEFAULT_ASSISTANT_LABEL
         self.output_handle = output_handle
-        self._renderer = StreamingRenderer(title=title, output_handle=output_handle)
+        self._renderer = StreamingRenderer(title=resolved, output_handle=output_handle)
 
     async def _call_async_or_sync(
         self,

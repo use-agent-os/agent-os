@@ -11,7 +11,7 @@ from typing import Any, Literal
 from rich.text import Text
 
 from agentos.cli.chat.turn import TurnResult, UsageCounter, UsageSummary
-from agentos.cli.tui.terminal.prompt import _toolbar_context
+from agentos.cli.tui.terminal.prompt import DEFAULT_ASSISTANT_LABEL, _toolbar_context
 from agentos.cli.ui import ACCENT, ACCENT_SOFT, console, error_panel
 
 __all__ = [
@@ -346,9 +346,20 @@ class StreamingRenderer:
     def __init__(
         self,
         *,
-        title: str = "cap",
+        title: str | None = None,
         output_handle: Any | None = None,
     ) -> None:
+        # ``title`` defaults to the shared assistant label sourced from
+        # ``_toolbar_context["assistant_label"]`` (or ``AGENTOS_ASSISTANT_LABEL``,
+        # falling back to ``agentos``) so every caller renders the same
+        # speaker name without each site repeating the literal. The
+        # sentinel-None pattern lets us read the live value at construction
+        # time (Python evaluates plain defaults once at def time, which
+        # would freeze a stale label for the whole process).
+        if title is None:
+            title = str(
+                _toolbar_context.get("assistant_label") or DEFAULT_ASSISTANT_LABEL
+            )
         self.title = title
         self.buffer = ""
         self.started_at = time.monotonic()
@@ -408,7 +419,7 @@ class StreamingRenderer:
         self.stop()
         return False
 
-    def _open_cap_status_line(self) -> str:
+    def _open_assistant_status_line(self) -> str:
         """Return the assistant marker once, when visible text actually starts."""
         if self._status_line_open:
             return ""
@@ -437,7 +448,7 @@ class StreamingRenderer:
         if self._stream_started:
             return ""
         self._stop_waiting()
-        marker = self._open_cap_status_line()
+        marker = self._open_assistant_status_line()
         self._stream_started = True
         return marker
 
@@ -468,7 +479,7 @@ class StreamingRenderer:
         if not visible:
             # Chunk was a control directive or partial ``[[`` suffix the
             # sanitizer is still buffering; skip the marker side-effect so
-            # an empty ``◢ cap  `` doesn't print for a directive-only
+            # an empty ``◢ agentos  `` doesn't print for a directive-only
             # turn.
             return
         # Sanitized text becomes the source of truth for the live stream

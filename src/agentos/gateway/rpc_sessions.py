@@ -2516,6 +2516,35 @@ async def _handle_sessions_resolve(params: dict | None, ctx: RpcContext) -> dict
         "status": session.status,
         "agent_id": session.agent_id,
         "model": getattr(session, "model", None),
+        "display_name": getattr(session, "display_name", None),
+        "displayName": getattr(session, "display_name", None),
+        "router_hold_tier": _router_hold_tier_for_session(ctx, session.session_key),
         "created_at": session.created_at,
         "updated_at": session.updated_at,
     }
+
+
+def _router_hold_tier_for_session(ctx: RpcContext, session_key: str) -> str | None:
+    """Return the active Pilot Router tier hold for a session, if any.
+
+    Reads the same in-memory ``RouterControlHoldStore`` the
+    ``router.hold.set`` / ``router.hold.clear`` RPCs mutate so the CLI
+    can render an active tier pin in its bottom toolbar after resuming a
+    session. Returns ``None`` when the router is disabled or no hold is
+    active (mirrors ``rpc_router._router_state``'s availability rules).
+    """
+    runner = getattr(ctx, "turn_runner", None)
+    store = getattr(runner, "router_control_hold_store", None)
+    if store is None:
+        return None
+    cfg = getattr(runner, "router_control_config", None)
+    if cfg is None or not getattr(cfg, "enabled", False):
+        return None
+    try:
+        hold = store.get_valid(session_key)
+    except Exception:  # noqa: BLE001 - best-effort sidebar; never block resolve
+        return None
+    if hold is None:
+        return None
+    tier = getattr(hold, "tier", None)
+    return tier if isinstance(tier, str) and tier else None

@@ -16,6 +16,8 @@ import typer
 
 from agentos.cli.chat.launch import ChatCommandLaunchOverrides, ChatCommandRequest
 from agentos.cli.startup_screen import render_startup_screen
+from agentos.cli.tui.terminal.app import resolve_chat_fullscreen
+from agentos.cli.tui.terminal.prompt import queue_pane_output
 from agentos.cli.ui import console
 
 ChatRunner = Callable[..., Coroutine[Any, Any, None]]
@@ -93,11 +95,24 @@ def launch_chat(
     if standalone:
         if standalone_runner is None:
             raise RuntimeError("standalone chat runner was not configured")
-        render_startup_screen(
-            active_console,
-            session_key=session_id or None,
-            model=model or None,
-        )
+        # In full-screen the app takes the alternate screen buffer, so the
+        # startup screen rendered here would be wiped. Capture it (ANSI, at
+        # the real terminal width) and replay it into the transcript pane
+        # once the surface opens. See issue #46 (issue 1).
+        if resolve_chat_fullscreen():
+            with active_console.capture() as captured:
+                render_startup_screen(
+                    active_console,
+                    session_key=session_id or None,
+                    model=model or None,
+                )
+            queue_pane_output(captured.get())
+        else:
+            render_startup_screen(
+                active_console,
+                session_key=session_id or None,
+                model=model or None,
+            )
         asyncio.run(
             standalone_runner(
                 model=model or None,

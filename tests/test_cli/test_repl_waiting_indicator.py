@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from agentos.cli.repl import stream as stream_module
-from agentos.cli.repl.prompt import user_input_echo_payload
+from agentos.cli.repl.prompt import DEFAULT_ASSISTANT_LABEL, user_input_echo_payload
 from agentos.cli.repl.stream import StreamingRenderer, UsageSummary, WaitingIndicator
 
 
@@ -64,7 +64,7 @@ def test_waiting_status_renders_as_assistant_header_not_toolbar() -> None:
     header_text = "".join(fragment[1] for fragment in header_fragments)
     header_styles = " ".join(fragment[0] for fragment in header_fragments)
     assert "Tracking" not in toolbar_text
-    assert header_text.startswith("◢ cap  ")
+    assert header_text.startswith(f"◢ {DEFAULT_ASSISTANT_LABEL}  ")
     assert "Tracking" in header_text
     assert "3.0s" in header_text
     assert "bg:" not in header_styles
@@ -182,7 +182,7 @@ def test_visible_stream_opens_single_assistant_marker(monkeypatch) -> None:
         renderer.finalize(usage=None)
 
     output = buf.getvalue()
-    assert output.count("◢ cap") == 1
+    assert output.count(f"◢ {DEFAULT_ASSISTANT_LABEL}") == 1
     assert "hello world" in output
     assert renderer.buffer == "hello world"
 

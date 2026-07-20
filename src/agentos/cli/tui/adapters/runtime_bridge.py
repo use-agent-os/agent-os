@@ -23,8 +23,18 @@ from agentos.cli.tui import standalone_runtime as _standalone_runtime
 from agentos.cli.tui.adapters import commands as _commands
 from agentos.cli.tui.adapters import slash_bridge as _slash_bridge
 from agentos.cli.tui.backend.contracts import TuiOutputHandle
+from agentos.cli.tui.terminal.app import resolve_chat_fullscreen
+from agentos.cli.tui.terminal.prompt import queue_pane_output
 from agentos.cli.ui import console, error_panel
 from agentos.engine.commands import Surface
+
+# Startup notices are emitted before the interactive surface opens. In the
+# full-screen chat surface the app takes the alternate screen buffer, wiping
+# anything printed to stdout first — so these are captured and replayed into
+# the transcript pane once it is live (see issue #46, ``queue_pane_output``).
+_STARTUP_NOTICE_KINDS = frozenset(
+    {"created", "resumed", "resume_model_ignored", "model", "welcome"}
+)
 
 PENDING_QUEUE_MAX_SIZE = 8
 
@@ -164,7 +174,7 @@ def _gateway_runtime_notifier(
     output_console: Any,
     error_panel_factory: Callable[[str], Any],
 ) -> Callable[[_gateway_runtime.GatewayRuntimeNotice], None]:
-    def _notify(notice: _gateway_runtime.GatewayRuntimeNotice) -> None:
+    def _emit(notice: _gateway_runtime.GatewayRuntimeNotice) -> None:
         if notice.kind == "created":
             output_console.print(
                 f"[dim]Connected to gateway. Session: {notice.session_key}[/dim]"
@@ -189,6 +199,7 @@ def _gateway_runtime_notifier(
             render_startup_screen(
                 output_console,
                 session_key=notice.session_key,
+                session_title=notice.session_title,
                 model=notice.model,
             )
             return
@@ -200,6 +211,18 @@ def _gateway_runtime_notifier(
             return
         if notice.kind == "error":
             output_console.print(error_panel_factory(notice.message or ""))
+
+    def _notify(notice: _gateway_runtime.GatewayRuntimeNotice) -> None:
+        # In full-screen the startup notices land before the app owns the
+        # screen, so capture them (already ANSI-coloured, at the real
+        # terminal width) and replay them into the transcript pane on open
+        # instead of writing to the soon-to-be-hidden scrollback.
+        if notice.kind in _STARTUP_NOTICE_KINDS and resolve_chat_fullscreen():
+            with output_console.capture() as captured:
+                _emit(notice)
+            queue_pane_output(captured.get())
+            return
+        _emit(notice)
 
     return _notify
 

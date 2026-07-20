@@ -9,6 +9,8 @@ asyncio queue, and routes toolbar state updates through the existing
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
 import threading
 import time
 from collections.abc import AsyncIterator, Callable
@@ -19,7 +21,8 @@ from prompt_toolkit.application import Application
 from prompt_toolkit.auto_suggest import AutoSuggest
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer
-from prompt_toolkit.formatted_text import HTML, to_formatted_text
+from prompt_toolkit.data_structures import Point
+from prompt_toolkit.formatted_text import ANSI, HTML, to_formatted_text
 from prompt_toolkit.history import FileHistory, History
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
@@ -83,6 +86,47 @@ _EOF_SENTINEL: object = object()
 # level so tests can monkeypatch it if they need a tighter window.
 _DOUBLE_CTRL_C_WINDOW_S: float = 1.5
 _ACTIVE_INPUT_PREFIX_WIDTH: int = 7
+
+
+def _fullscreen_env() -> bool | None:
+    """Tri-state read of the ``AGENTOS_CHAT_FULLSCREEN`` override.
+
+    Returns ``True``/``False`` when the variable is set to a recognized
+    truthy/falsy value, or ``None`` when unset (so the caller falls back to
+    its own default). The full-screen transcript-pane surface renders the
+    assistant transcript inside a scrollable prompt-toolkit pane above a
+    permanently-pinned input frame (Claude Code style) instead of streaming
+    to native terminal scrollback. See issue #46 (issue 1).
+    """
+    raw = os.environ.get("AGENTOS_CHAT_FULLSCREEN")
+    if raw is None:
+        return None
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off", ""}:
+        return False
+    return None
+
+
+def resolve_chat_fullscreen(explicit: bool | None = None) -> bool:
+    """Resolve whether an ``agentos chat`` surface should run full-screen.
+
+    Precedence: an ``explicit`` argument wins; otherwise the
+    ``AGENTOS_CHAT_FULLSCREEN`` override wins; otherwise full-screen is the
+    default for an interactive TTY (a real ``agentos chat`` session) and is
+    off for non-TTY / piped contexts (tests, redirected output) so those
+    keep the plain native-scrollback behavior.
+    """
+    if explicit is not None:
+        return explicit
+    env = _fullscreen_env()
+    if env is not None:
+        return env
+    try:
+        return bool(sys.stdout.isatty())
+    except Exception:
+        return False
 
 
 def _build_key_bindings() -> KeyBindings:
@@ -156,6 +200,27 @@ def _build_key_bindings() -> KeyBindings:
             return
         event.current_buffer.insert_text(event.data)
 
+    def _page_lines(chat_app) -> int:  # type: ignore[no-untyped-def]
+        """A page ≈ the transcript pane's visible height (fallback 10)."""
+        window = getattr(chat_app, "_transcript_window", None)
+        info = getattr(window, "render_info", None) if window else None
+        height = getattr(info, "window_height", None)
+        return max(1, (height - 1)) if isinstance(height, int) and height > 1 else 10
+
+    @bindings.add(Keys.PageUp)
+    def _scroll_up(event) -> None:  # type: ignore[no-untyped-def]
+        # Scroll the full-screen transcript pane up into history. No-op on
+        # the native-scrollback surface (guarded in scroll_transcript).
+        chat_app = getattr(event.app, "_chat_application", None)
+        if chat_app is not None:
+            chat_app.scroll_transcript(_page_lines(chat_app))
+
+    @bindings.add(Keys.PageDown)
+    def _scroll_down(event) -> None:  # type: ignore[no-untyped-def]
+        chat_app = getattr(event.app, "_chat_application", None)
+        if chat_app is not None:
+            chat_app.scroll_transcript(-_page_lines(chat_app))
+
     return bindings
 
 
@@ -184,9 +249,28 @@ class ChatApplication:
         history: History | None = None,
         complete_while_typing: bool = True,
         input_header=None,
+        fullscreen: bool | None = None,
     ) -> None:
         self._surface = surface
         self._toolbar_context = toolbar_context
+        # Full-screen transcript surface. `_transcript` accumulates the
+        # ANSI-encoded conversation; a scrollable pane renders it above the
+        # pinned input frame. `_transcript_follow` latches
+        # auto-scroll-to-bottom; a user scroll up releases it.
+        # `_transcript_scroll` is the from-bottom line offset while not
+        # following. When ``fullscreen`` is not passed explicitly the
+        # constructor default stays native (env override honored) so a bare
+        # ``ChatApplication(...)`` — as tests build it — behaves as the plain
+        # native-scrollback surface; the real chat entry point
+        # (`open_terminal_surface`) resolves and passes the value.
+        if fullscreen is None:
+            env = _fullscreen_env()
+            fullscreen = env if env is not None else False
+        self._fullscreen: bool = fullscreen
+        self._transcript: str = ""
+        self._transcript_follow: bool = True
+        self._transcript_scroll: int = 0
+        self._transcript_window: Window | None = None
         self._submit_queue: asyncio.Queue[str | object] = asyncio.Queue()
         self._eof_seen = False
         # Set for the duration of the inline approval suspend window
@@ -259,7 +343,7 @@ class ChatApplication:
         # Persistent left-side prompt prefix. Keep the current input row
         # identified as ``you`` even before text is typed; submitted transcript
         # rows are echoed separately by ``user_input_echo_payload``.
-        from agentos.cli.ui import ACCENT  # noqa: PLC0415
+        from agentos.cli.ui import ACCENT, ACCENT_DIM  # noqa: PLC0415
 
         def _input_prefix_fragments():  # type: ignore[no-untyped-def]
             return to_formatted_text(
@@ -279,7 +363,7 @@ class ChatApplication:
                     FormattedTextControl(_input_prefix_fragments),
                     width=_input_prefix_width,
                 ),
-                Window(BufferControl(buffer=self._buffer), height=Dimension(min=1)),
+                Window(BufferControl(buffer=self._buffer), height=Dimension.exact(1)),
             ]
         )
         toolbar_window = Window(
@@ -287,7 +371,45 @@ class ChatApplication:
             height=Dimension.exact(1),
             style="class:bottom-toolbar",
         )
-        children: list = []
+
+        # Issue #46 §5: frame the active input row with a top and bottom rule
+        # (Claude Code style) so the typing area reads as a distinct box between
+        # the transcript and the bottom toolbar. A filled-char Window renders a
+        # full-width horizontal rule in the muted accent tone.
+        def _rule_window() -> Window:  # type: ignore[no-untyped-def]
+            return Window(
+                height=Dimension.exact(1),
+                char="─",
+                style=f"fg:{ACCENT_DIM}",
+            )
+
+        # Top-of-layout element that owns the vertical slack above the frame.
+        #  * Full-screen surface: a scrollable pane that renders the ANSI
+        #    conversation transcript and auto-scrolls to the newest line
+        #    (cursor pinned to the last logical line; wrap_lines follows it).
+        #  * Native-scrollback surface: a greedy empty spacer. In
+        #    non-full-screen mode the renderer reserves the rows below the
+        #    cursor (large on a fresh launch against a tall terminal); the
+        #    spacer absorbs that slack so the framed input + toolbar stay
+        #    compact and pinned to the bottom (the input buffer is
+        #    `Dimension.exact(1)`, so it no longer balloons to fill the
+        #    region — the cause of the over-tall frame).
+        top_element: Window
+        if self._fullscreen:
+            top_element = Window(
+                content=FormattedTextControl(
+                    lambda: ANSI(self._transcript),
+                    get_cursor_position=self._transcript_cursor_position,
+                    focusable=False,
+                    show_cursor=False,
+                ),
+                wrap_lines=True,
+                always_hide_cursor=True,
+            )
+            self._transcript_window = top_element
+        else:
+            top_element = Window()
+        children: list = [top_element]
         if input_header is not None:
             def _header_fragments():  # type: ignore[no-untyped-def]
                 try:
@@ -304,7 +426,9 @@ class ChatApplication:
                     height=Dimension.exact(1),
                 )
             )
+        children.append(_rule_window())
         children.append(input_window)
+        children.append(_rule_window())
         children.append(toolbar_window)
         root = FloatContainer(
             content=HSplit(children),
@@ -326,7 +450,7 @@ class ChatApplication:
             layout=layout,
             key_bindings=_build_key_bindings(),
             style=style,
-            full_screen=False,
+            full_screen=self._fullscreen,
             refresh_interval=0.1,
             input=input,
             output=output,
@@ -346,6 +470,84 @@ class ChatApplication:
     @property
     def surface(self) -> Surface:
         return self._surface
+
+    @property
+    def fullscreen(self) -> bool:
+        """True when the full-screen transcript-pane surface is active."""
+        return self._fullscreen
+
+    # ------------------------------------------------------------------ #
+    # Transcript pane (full-screen surface)                              #
+    # ------------------------------------------------------------------ #
+
+    def _transcript_cursor_position(self) -> Point:
+        """Virtual cursor that drives the pane's auto-scroll.
+
+        With ``wrap_lines`` on, prompt-toolkit scrolls to keep the control's
+        cursor visible (``get_vertical_scroll`` is ignored). Parking the
+        cursor on the last logical line follows the tail; lifting it by
+        ``_transcript_scroll`` lines lets the user scroll back through
+        history without following new output.
+        """
+        # Trailing newline yields an empty final line; anchor on the last
+        # line that actually carries text so the tail is not a blank row.
+        total_lines = self._transcript.count("\n")
+        if self._transcript_follow:
+            target = total_lines
+        else:
+            target = max(0, total_lines - self._transcript_scroll)
+        return Point(x=0, y=target)
+
+    def scroll_transcript(self, lines: int) -> None:
+        """Scroll the transcript pane by ``lines`` logical lines.
+
+        ``lines > 0`` scrolls up into history (releasing the auto-follow
+        latch); ``lines < 0`` scrolls back toward the tail. Reaching the
+        bottom re-latches follow so new output resumes auto-scrolling.
+        """
+        if not self._fullscreen:
+            return
+        total = self._transcript.count("\n")
+        new_scroll = self._transcript_scroll + lines
+        # Clamp: 0 == pinned to the tail, total-1 == top of history.
+        new_scroll = max(0, min(new_scroll, max(0, total - 1)))
+        self._transcript_scroll = new_scroll
+        self._transcript_follow = new_scroll == 0
+        try:
+            self._app.invalidate()
+        except Exception:
+            pass
+
+    def scroll_transcript_to_bottom(self) -> None:
+        """Re-pin the transcript pane to the newest line (resume follow)."""
+        if not self._fullscreen:
+            return
+        self._transcript_scroll = 0
+        self._transcript_follow = True
+        try:
+            self._app.invalidate()
+        except Exception:
+            pass
+
+    def append_transcript(self, text: str) -> None:
+        """Append ANSI-encoded text to the full-screen transcript pane.
+
+        Synchronous and ordered: callers append in the same order the
+        native-scrollback surface would have written bytes, so streamed
+        tokens, tool rows, Rich panels, and echoes stay interleaved
+        correctly. Re-follows the tail and repaints.
+        """
+        if not text:
+            return
+        self._transcript += text
+        # New output re-pins the view to the bottom (matches a terminal that
+        # scrolls on write); an explicit user scroll re-latches follow=False.
+        self._transcript_follow = True
+        self._transcript_scroll = 0
+        try:
+            self._app.invalidate()
+        except Exception:
+            pass
 
     def set_toolbar(self, key: str, value: str | None) -> None:
         """Mutate the shared toolbar dict in place.
@@ -552,6 +754,11 @@ class ChatApplication:
         from agentos.cli.ui import console  # noqa: PLC0415
 
         async with self.acquire_output():
+            if self._fullscreen and self._app.is_running:
+                # Full-screen surface: append into the transcript pane rather
+                # than suspending the app to write raw bytes to scrollback.
+                self.append_transcript(payload)
+                return
             if self._app.is_running:
                 async with in_terminal():
                     self._app.output.write_raw(payload)
@@ -575,6 +782,20 @@ class ChatApplication:
         from agentos.cli.ui import console  # noqa: PLC0415
 
         async with self.acquire_output():
+            if self._fullscreen and self._app.is_running:
+                # Full-screen surface: the whole turn appends into the
+                # transcript pane. No `in_terminal()` hold, so the input
+                # frame stays pinned and visible while tokens stream.
+                def _write(payload: str) -> None:
+                    self.append_transcript(payload)
+
+                self._active_stream_writer = _write
+                try:
+                    yield _write
+                finally:
+                    if self._active_stream_writer is _write:
+                        self._active_stream_writer = None
+                return
             if self._app.is_running:
                 async with in_terminal():
                     def _write(payload: str) -> None:

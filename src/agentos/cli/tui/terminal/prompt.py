@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import sys
 from collections.abc import Callable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
+from contextlib import (
+    AbstractAsyncContextManager,
+    AbstractContextManager,
+    asynccontextmanager,
+    nullcontext,
+)
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -28,6 +34,7 @@ from agentos.cli.ui import (
     ACCENT_DIM,
     ACCENT_SOFT,
     console,
+    error_console,
 )
 from agentos.engine.commands import DEFAULT_REGISTRY, Surface, parse_surface
 from agentos.paths import state_dir
@@ -48,9 +55,24 @@ class PromptConfig:
 
 _session: PromptSession[str] | None = None
 _sessions: dict[Surface, PromptSession[str]] = {}
+
+#: Single source for the assistant speaker label. Override via the
+#: ``AGENTOS_ASSISTANT_LABEL`` env var; defaults to ``agentos`` so the CLI,
+#: the streamed ``◢`` marker, and the pre-token waiting header all read the
+#: same name without per-file literals. See issue #46.
+DEFAULT_ASSISTANT_LABEL: str = os.environ.get("AGENTOS_ASSISTANT_LABEL") or "agentos"
+
 _toolbar_context: dict[str, object | None] = {
     "model": None,
     "session_id": None,
+    # Friendly display name for the active session (set by ``/new <title>``
+    # or loaded from the gateway on resume). Falls back to the opaque
+    # ``session_id`` substring in the bottom toolbar when unset.
+    "session_title": None,
+    # Active Pilot Router tier hold (e.g. ``"c3"``) for the current session,
+    # or ``None`` when automatic routing is in effect. Surfaced in the
+    # bottom toolbar so a pin set via ``/c3`` stays visible while typing.
+    "router_tier": None,
     "suppress": None,
     # Transient status surfaced in the assistant input header before the
     # first streamed chunk lands. Holds a live WaitingIndicator instance
@@ -59,6 +81,10 @@ _toolbar_context: dict[str, object | None] = {
     # a plain string for ad-hoc callers using ChatApplication.set_toolbar().
     # Cleared (set to None) when the stream starts or the turn ends.
     "status": None,
+    # Assistant speaker label; sourced from DEFAULT_ASSISTANT_LABEL but
+    # overridable per session. Read by the streamed renderer marker and
+    # the pre-token waiting header so they never hard-code ``cap``.
+    "assistant_label": DEFAULT_ASSISTANT_LABEL,
 }
 
 
@@ -146,24 +172,43 @@ _PREFIX_RE = re.compile(r"^\[(?P<model>.+?) (?P<mode>\w+)\] (?P<role>\w+) ▸ $"
 
 
 def _bottom_toolbar() -> HTML:
-    """Idle metadata bar: model and session, no background chips."""
+    """Idle metadata bar: session title, model, and active router tier.
+
+    Renders ``title · model_short · [tier:cN]``. The title is the friendly
+    ``session_title`` when set (e.g. via ``/new <title>``), falling back to
+    the trailing segment of the opaque session key so the bar is never
+    empty when a session is live. The tier chip only appears while a
+    Pilot Router hold is active (set by ``/c0``-``/c3``, cleared by
+    ``/auto``).
+    """
     if _toolbar_context.get("suppress"):
         return HTML("")
 
     model = str(_toolbar_context.get("model") or "")
     session_id = str(_toolbar_context.get("session_id") or "")
+    session_title = str(_toolbar_context.get("session_title") or "")
+    router_tier = str(_toolbar_context.get("router_tier") or "")
     model_short = model.rsplit("/", 1)[-1] if model else ""
-    session_short = session_id.rsplit(":", 1)[-1] if session_id else session_id
+    # Prefer the friendly title; fall back to the short opaque key segment
+    # (current behaviour) when no display name is set for this session.
+    display_name = session_title or (session_id.rsplit(":", 1)[-1] if session_id else "")
 
     parts: list[str] = []
+    if display_name:
+        parts.append(f"<style fg='{ACCENT_DEEP}'>{_html_escape(display_name)}</style>")
     if model_short:
-        parts.append(_html_escape(model_short))
-    if session_short:
-        parts.append(_html_escape(session_short))
+        parts.append(f"<style fg='{ACCENT_DEEP}'>{_html_escape(model_short)}</style>")
+    if router_tier:
+        parts.append(f"<style fg='{ACCENT_SOFT}'>tier:{_html_escape(router_tier)}</style>")
     if not parts:
         return HTML("")
-    body = " · ".join(parts)
-    return HTML(f"<style fg='{ACCENT_DEEP}'>{body}</style>")
+    # Render each part with its own style, joined by a dim separator, so
+    # the tier chip can pick up a softer accent without breaking the
+    # prompt-toolkit HTML parser (nested <style> is not supported; we
+    # build the full tag tree here instead).
+    sep = f"<style fg='{ACCENT_DEEP}'> · </style>"
+    body = sep.join(parts)
+    return HTML(body)
 
 
 def _format_prefix(prefix: str) -> AnyFormattedText:
@@ -213,9 +258,12 @@ def _input_header_fragments() -> AnyFormattedText:
         status_text = str(status_obj)
     if not status_text:
         return HTML("")
+    label = str(
+        _toolbar_context.get("assistant_label") or DEFAULT_ASSISTANT_LABEL
+    )
     return HTML(
         f"<style fg='{ACCENT}'>◢ </style>"
-        f"<b><style fg='{ACCENT}'>cap</style></b>"
+        f"<b><style fg='{ACCENT}'>{_html_escape(label)}</style></b>"
         f"<style fg='{ACCENT}'>  </style>"
         f"<style fg='{ACCENT_SOFT}'>{_html_escape(status_text)}</style>"
     )
@@ -233,10 +281,33 @@ def user_input_echo_payload(text: str) -> str:
 
 def queued_input_start_payload() -> str:
     """Render a short marker when a queued input becomes the active turn."""
+    label = str(
+        _toolbar_context.get("assistant_label") or DEFAULT_ASSISTANT_LABEL
+    )
     with console.capture() as capture:
-        _chrome_top("cap")
+        _chrome_top(label)
         console.print("running queued input", style=ACCENT_SOFT)
     return capture.get()
+
+
+def sync_session_chrome_from_state(state: object) -> None:
+    """Push ``ChatSessionState`` fields into the toolbar context.
+
+    Call after mutating ``display_name``, ``router_hold_tier``, ``model``,
+    or ``session_key`` so the bottom toolbar and waiting header pick up
+    the new values on the next repaint. The next ``console.print`` (which
+    slash handlers always emit) triggers that repaint under the
+    ``patch_stdout`` region owned by ``interactive_session``.
+    """
+    _toolbar_context["session_title"] = getattr(state, "display_name", None)
+    tier = getattr(state, "router_hold_tier", None)
+    _toolbar_context["router_tier"] = tier if isinstance(tier, str) and tier else None
+    model = getattr(state, "model", None)
+    if model is not None:
+        _toolbar_context["model"] = model
+    session_key = getattr(state, "session_key", None)
+    if session_key is not None:
+        _toolbar_context["session_id"] = session_key
 
 
 def echo_user_input(text: str) -> None:
@@ -401,6 +472,34 @@ async def prompt_approval(
 _chat_applications: dict[Surface, ChatApplication] = {}
 
 
+# Full-screen surface only: startup output (the "Connected to gateway" line,
+# the branded banner + catalogue panel) is rendered *before* the prompt-toolkit
+# Application takes the alternate screen buffer, so it would be wiped the moment
+# the app starts. In full-screen we capture that output (already ANSI-coloured,
+# rendered at the real terminal width) and replay it into the transcript pane
+# once the surface is open. See issue #46 (issue 1).
+_pending_pane_output: list[str] = []
+
+
+def queue_pane_output(text: str) -> None:
+    """Queue pre-surface startup output for replay into the full-screen pane.
+
+    No-op on empty text. The buffer is drained (and cleared) by
+    ``interactive_session`` when the full-screen surface opens.
+    """
+    if text:
+        _pending_pane_output.append(text)
+
+
+def _drain_pane_output(chat_app: ChatApplication) -> None:
+    """Flush any queued startup output into the transcript pane, in order."""
+    if not _pending_pane_output:
+        return
+    for chunk in _pending_pane_output:
+        chat_app.append_transcript(chunk)
+    _pending_pane_output.clear()
+
+
 class InteractiveSessionHandle:
     """Handle returned by `interactive_session()`.
 
@@ -453,6 +552,7 @@ def _get_or_create_chat_app(
     *,
     input: Input | None = None,
     output: Output | None = None,
+    fullscreen: bool | None = None,
 ) -> ChatApplication:
     # Local import to avoid a circular dependency with app.py at module load
     # (app.py only imports from `agentos.engine.commands`).
@@ -481,6 +581,7 @@ def _get_or_create_chat_app(
             auto_suggest=auto_suggest,
             history=history,
             input_header=_input_header_fragments,
+            fullscreen=fullscreen,
         )
 
     cached = _chat_applications.get(surface)
@@ -494,9 +595,35 @@ def _get_or_create_chat_app(
             auto_suggest=auto_suggest,
             history=history,
             input_header=_input_header_fragments,
+            fullscreen=fullscreen,
         )
         _chat_applications[surface] = cached
     return cached
+
+
+class _TranscriptConsoleSink:
+    """File-like sink that funnels Rich console output into the pane.
+
+    On the full-screen surface the app owns the whole screen, so Rich
+    output (startup screen, notices, slash-command results) must render
+    into the transcript pane rather than to stdout. Reports ``isatty()``
+    True so ``_CliConsole.is_terminal`` keeps emitting ANSI colour, which
+    the pane renders via ``ANSI(...)``.
+    """
+
+    def __init__(self, chat_app: ChatApplication) -> None:
+        self._chat_app = chat_app
+
+    def write(self, data: str) -> int:
+        if data:
+            self._chat_app.append_transcript(data)
+        return len(data or "")
+
+    def flush(self) -> None:
+        return None
+
+    def isatty(self) -> bool:
+        return True
 
 
 @asynccontextmanager
@@ -505,8 +632,11 @@ async def interactive_session(
     surface: Surface | str = Surface.CLI_GATEWAY,
     model: str | None = None,
     session_id: str | None = None,
+    session_title: str | None = None,
+    router_tier: str | None = None,
     input: Input | None = None,
     output: Output | None = None,
+    fullscreen: bool | None = None,
 ) -> AsyncIterator[InteractiveSessionHandle]:
     """Long-lived prompt-toolkit Application for this surface.
 
@@ -527,22 +657,56 @@ async def interactive_session(
     `_bottom_toolbar` callable used by `prompt_user`.
     """
     parsed = parse_surface(surface) if isinstance(surface, str) else surface
-    chat_app = _get_or_create_chat_app(parsed, input=input, output=output)
+    chat_app = _get_or_create_chat_app(
+        parsed, input=input, output=output, fullscreen=fullscreen
+    )
 
     # Toolbar context lives in `_toolbar_context`; mutate before launching so
     # the first redraw renders the right model / session_id chips.
     previous_model = _toolbar_context.get("model")
     previous_session = _toolbar_context.get("session_id")
     previous_suppress = _toolbar_context.get("suppress")
+    previous_title = _toolbar_context.get("session_title")
+    previous_tier = _toolbar_context.get("router_tier")
     if model is not None:
         _toolbar_context["model"] = model
     if session_id is not None:
         _toolbar_context["session_id"] = session_id
+    # ``session_title`` and ``router_tier`` are sourced from
+    # ``ChatSessionState`` by the chat runtime and forwarded via the
+    # surface factory so the bottom toolbar shows the friendly session
+    # name and any active Pilot Router pin from the first redraw.
+    # Unlike model/session_id we always overwrite (None is a meaningful
+    # value: "no title" / "automatic routing") so a stale chip from a
+    # prior surface doesn't leak into this one.
+    _toolbar_context["session_title"] = session_title
+    _toolbar_context["router_tier"] = router_tier if isinstance(
+        router_tier, str
+    ) and router_tier else None
     _toolbar_context["suppress"] = None
 
     handle = InteractiveSessionHandle(chat_app)
     app_task: asyncio.Task[None] | None = None
-    stdout_cm = nullcontext() if output is not None else patch_stdout(raw=True)
+    # Output routing:
+    #  * Full-screen surface owns the screen — redirect Rich console output
+    #    into the transcript pane and skip patch_stdout (which is for
+    #    printing *above* a non-full-screen prompt).
+    #  * Native-scrollback surface — wrap patch_stdout so Rich output prints
+    #    above the persistent prompt.
+    console_redirect_active = False
+    prev_console_file: object | None = None
+    prev_error_file: object | None = None
+    stdout_cm: AbstractContextManager[None]
+    if chat_app.fullscreen:
+        sink = _TranscriptConsoleSink(chat_app)
+        prev_console_file = console.file
+        prev_error_file = error_console.file
+        console.file = sink  # type: ignore[assignment]
+        error_console.file = sink  # type: ignore[assignment]
+        console_redirect_active = True
+        stdout_cm = nullcontext()
+    else:
+        stdout_cm = nullcontext() if output is not None else patch_stdout(raw=True)
 
     try:
         stdout_cm.__enter__()
@@ -554,6 +718,12 @@ async def interactive_session(
         # input/output pair before the caller starts pushing keystrokes
         # through `create_pipe_input`.
         await asyncio.sleep(0)
+        # Full-screen surface owns the whole screen, so the startup output
+        # (connect line + branded banner + catalogue panel) that was rendered
+        # before the app took the alternate buffer must be replayed into the
+        # transcript pane now that it is live. See issue #46 (issue 1).
+        if chat_app.fullscreen:
+            _drain_pane_output(chat_app)
         yield handle
     finally:
         # Tear down the Application before unwinding patch_stdout so the
@@ -578,6 +748,17 @@ async def interactive_session(
         except Exception:
             pass
 
+        if console_redirect_active:
+            # Restore the real console streams so a later non-full-screen
+            # surface (or plain CLI output) writes to the terminal again.
+            try:
+                console.file = prev_console_file  # type: ignore[assignment]
+                error_console.file = prev_error_file  # type: ignore[assignment]
+            except Exception:
+                pass
+
         _toolbar_context["model"] = previous_model
         _toolbar_context["session_id"] = previous_session
         _toolbar_context["suppress"] = previous_suppress
+        _toolbar_context["session_title"] = previous_title
+        _toolbar_context["router_tier"] = previous_tier

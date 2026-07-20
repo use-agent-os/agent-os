@@ -19,6 +19,7 @@ from agentos.cli.chat.session_state import ChatSessionState
 from agentos.cli.chat.turn import TurnResult
 from agentos.cli.tui.adapters.commands import is_exit_command, render_help_table
 from agentos.cli.tui.backend.contracts import TuiOutputHandle
+from agentos.cli.tui.terminal.prompt import sync_session_chrome_from_state
 from agentos.cli.ui import ACCENT, console, error_panel
 from agentos.engine.commands import Surface
 from agentos.session.compaction import (
@@ -31,6 +32,11 @@ from agentos.session.compaction_lifecycle import (
 
 STANDALONE_SLASH_HANDLER_WORDS = frozenset(
     {
+        "/auto",
+        "/c0",
+        "/c1",
+        "/c2",
+        "/c3",
         "/clear",
         "/compact",
         "/cost",
@@ -100,7 +106,13 @@ class CompactWithResult(Protocol):
 
 
 class StandaloneCreateSession(Protocol):
-    def __call__(self, session_key: str, *, agent_id: str = "main") -> Awaitable[Any]: ...
+    def __call__(
+        self,
+        session_key: str,
+        *,
+        agent_id: str = "main",
+        display_name: str | None = None,
+    ) -> Awaitable[Any]: ...
 
 
 class StandaloneReadTranscript(Protocol):
@@ -378,8 +390,23 @@ async def _replace_with_new_session(
     create_session = context.slash_services.create_session
     if create_session is None:
         raise RuntimeError("standalone chat requires session manager")
-    await create_session(session_key, agent_id="main")
-    state = ChatSessionState(session_key=session_key, model=context.model)
+    # Persist the title as the session ``display_name`` so it survives a
+    # later ``/resume`` and can be surfaced in the toolbar / ``/status``.
+    # ``SessionManager.create`` forwards ``**kwargs`` to the ``SessionNode``
+    # constructor, which has a nullable ``display_name`` column (no
+    # migration required). Fixes the pre-existing standalone bug where
+    # ``/new <title>`` accepted the arg then dropped it.
+    await create_session(
+        session_key,
+        agent_id="main",
+        display_name=title,
+    )
+    state = ChatSessionState(
+        session_key=session_key,
+        model=context.model,
+        display_name=title or None,
+        router_hold_tier=None,
+    )
     tool_ctx = context.build_tool_ctx(session_key)
 
     context.session_key = session_key
@@ -393,6 +420,7 @@ async def _replace_with_new_session(
             model=context.model,
         )
     )
+    sync_session_chrome_from_state(state)
     label = f" ({title})" if title else ""
     console.print(f"[green]Started new session{label}:[/green] {session_key}")
     return session_key
@@ -465,6 +493,63 @@ async def _compact_standalone_context(context: StandaloneSlashContext) -> None:
         )
 
 
+async def _apply_router_hold_standalone(
+    context: StandaloneSlashContext,
+    *,
+    tier: str | None,
+) -> None:
+    """Mutate the in-process Pilot Router hold store for the active session.
+
+    ``tier=None`` means "clear" (restore automatic routing); a non-empty
+    string pins the router to that tier. Mirrors what the gateway's
+    ``router.hold.set`` / ``router.hold.clear`` RPCs do, but touches the
+    ``TurnRunner`` instance living in this process directly. The store
+    and config come from ``turn_runner.router_control_hold_store`` /
+    ``router_control_config`` (always present on a real TurnRunner; the
+    config may be ``None`` or ``enabled=False`` when the operator hasn't
+    configured a Pilot Router — we surface that as a readable message).
+    """
+    turn_runner = context.turn_runner
+    store = getattr(turn_runner, "router_control_hold_store", None)
+    cfg = getattr(turn_runner, "router_control_config", None)
+    if store is None or cfg is None or not getattr(cfg, "enabled", False):
+        console.print("[yellow]Pilot Router is disabled or unavailable.[/yellow]")
+        return
+
+    # Lazily import so the slash adapter never pays the router_control
+    # import cost when no tier command is issued.
+    from agentos.router_control import (
+        RouterControlValidationError,
+        resolve_router_control_target,
+    )
+    from agentos.session.keys import canonicalize_session_key
+
+    session_key = canonicalize_session_key(context.session_key)
+
+    if tier is None:
+        cleared = store.clear(session_key)
+        context.state.router_hold_tier = None
+        sync_session_chrome_from_state(context.state)
+        if cleared is not None:
+            console.print(f"[{ACCENT}]router hold cleared (automatic routing)[/]")
+        else:
+            console.print(f"[{ACCENT}]router already on automatic routing[/]")
+        return
+
+    try:
+        target = resolve_router_control_target(cfg, f"tier:{tier}")
+    except RouterControlValidationError:
+        console.print(
+            f"[yellow]Tier '{tier}' is not configured on the Pilot Router.[/yellow]"
+        )
+        return
+    store.set_hold(session_key, target, evidence=f"slash command /{tier}")
+    context.state.router_hold_tier = tier
+    sync_session_chrome_from_state(context.state)
+    model_suffix = f" · {target.model}" if target.model else ""
+    console.print(f"[{ACCENT}]router pinned to tier {tier}[/]{model_suffix}")
+
+
 async def handle_standalone_slash_command(
     cmd: str,
     context: StandaloneSlashContext,
@@ -493,10 +578,23 @@ async def handle_standalone_slash_command(
         return True
 
     if cmd in {"/status", "/session"}:
-        console.print(
-            f"[{ACCENT}]session[/] [dim]{state.session_key}[/dim]\n"
-            f"[{ACCENT}]model[/] [dim]{state.model or 'default'}[/dim]"
+        title_line = (
+            f"[{ACCENT}]title[/] [dim]{state.display_name}[/dim]\n"
+            if state.display_name
+            else ""
         )
+        tier_line = (
+            f"[{ACCENT}]router[/] [dim]tier:{state.router_hold_tier}[/dim]\n"
+            if state.router_hold_tier
+            else f"[{ACCENT}]router[/] [dim]auto[/dim]\n"
+        )
+        status_text = (
+            f"{title_line}"
+            f"[{ACCENT}]session[/] [dim]{state.session_key}[/dim]\n"
+            f"[{ACCENT}]model[/] [dim]{state.model or 'default'}[/dim]\n"
+            f"{tier_line}"
+        )
+        console.print(status_text.rstrip("\n"))
         return True
 
     if cmd == "/models":
@@ -515,6 +613,14 @@ async def handle_standalone_slash_command(
 
     if cmd == "/cost":
         console.print(state.usage.render())
+        return True
+
+    if cmd in {"/c0", "/c1", "/c2", "/c3"}:
+        await _apply_router_hold_standalone(context, tier=cmd[1:])
+        return True
+
+    if cmd == "/auto":
+        await _apply_router_hold_standalone(context, tier=None)
         return True
 
     if cmd in {"/clear", "/reset"}:

@@ -6,6 +6,62 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `agentos chat` UX pass (issue #46):
+  - The assistant speaker label now defaults to `agentos` (was hard-coded
+    `cap`); override with the `AGENTOS_ASSISTANT_LABEL` env var. The
+    label is sourced from a single place and consumed by the streamed
+    `◢` marker, the pre-token waiting row, and the queued-turn marker.
+  - Session display name now surfaces in the bottom toolbar
+    (`title · model · [tier:cN]`) and `/status`. `/new <title>` persists
+    the title as `SessionNode.display_name` so it survives a later
+    `/resume`. The standalone `/new` path no longer drops the title
+    silently (pre-existing bug).
+  - `/c0` … `/c3` and `/auto` are now registered on both CLI surfaces
+    (`cli_gateway`, `cli_standalone`). Gateway mode reuses the existing
+    `router.hold.set` / `router.hold.clear` RPCs; standalone mutates the
+    in-process `RouterControlHoldStore` directly.
+  - The active Pilot Router tier hold shows in the bottom toolbar and in
+    `/status` (or `auto` when no hold is set).
+  - `SessionNode.derived_title` property fills the pre-existing dead
+    hook, falling back `display_name → label → short opaque session id`.
+  - The startup panel now renders `Session: <title> (<key>)` when a
+    friendly title is known (plumbed through `StartupData` and the
+    gateway welcome notice).
+  - The active input row is now framed by a top and bottom rule
+    (Claude Code style) so the typing area reads as a distinct box
+    between the transcript and the bottom toolbar. Consistent across the
+    gateway and `--standalone` surfaces.
+  - Full-screen chat surface is now the **default** for `agentos chat`: the
+    conversation renders in a scrollable in-app pane above a permanently-pinned
+    input frame, so the frame stays visible while the assistant streams (no
+    flicker, no dropped partial lines). The branded welcome screen (connect
+    line + banner + tool/skill panel) renders at the top of the pane on launch
+    — previously it was wiped by the alternate screen buffer. `PgUp`/`PgDn`
+    scroll history; new output re-pins to the tail. Non-TTY / piped
+    invocations fall back to native scrollback; `AGENTOS_CHAT_FULLSCREEN=0`
+    forces native scrollback and `=1` forces full-screen.
+
+### Changed
+
+- The bottom toolbar now leads with the session title (or short key
+  fallback) instead of only the opaque key segment, and shows the model
+  alias after it.
+
+### Fixed
+
+- The framed chat input no longer balloons to fill the screen on a fresh
+  launch. The input buffer window is pinned to a single row
+  (`Dimension.exact(1)`) and a greedy spacer heads the layout, so the
+  compact frame + toolbar stay pinned to the bottom of the terminal
+  instead of the bottom rule + toolbar being pushed far below the
+  `◢ you` row.
+- `test_assistant_label_env_override` no longer wipes the subprocess
+  environment (`PATH=""`), which crashed Python startup on Windows CI
+  (`import _overlapped` → `WinError 10106`); it now layers the override
+  on a copy of `os.environ`.
+
 ## [2026.7.19.post1] - 2026-07-19
 
 ### Changed

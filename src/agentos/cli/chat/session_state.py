@@ -87,6 +87,17 @@ class ChatSessionState:
     session_key: str
     model: str | None = None
     elevated: str | None = None
+    # Friendly display name for the session, populated from
+    # ``/new <title>`` or loaded from the gateway on resume. Surfaced in
+    # the bottom toolbar (``title · model · tier``) and ``/status`` so
+    # the opaque session key isn't the only identifier visible while
+    # typing. See issue #46.
+    display_name: str | None = None
+    # Active Pilot Router tier hold (e.g. ``"c3"``) for this session, or
+    # ``None`` when automatic routing is in effect. Set by ``/c0``-``/c3``
+    # and cleared by ``/auto``; shown in the bottom toolbar so a pinned
+    # tier stays visible while typing.
+    router_hold_tier: str | None = None
     transcript: ChatTranscript = field(default_factory=ChatTranscript)
     usage: UsageCounter = field(default_factory=UsageCounter)
 
