@@ -340,5 +340,27 @@ export function approvalsResolveUrl(): string {
   return '/api/approvals/resolve'
 }
 
+// approvals.js:291 — the approval-strategy settings endpoint. Root-absolute like
+// the poll/resolve endpoints (same rationale as approvalsUrl above).
+export function approvalsSettingsUrl(): string {
+  return '/api/approvals/settings'
+}
+
+/**
+ * approvals.js:291-301 — persist the approval strategy (prompt / auto-approve /
+ * auto-deny). POSTs { mode } to the root-absolute settings endpoint with the
+ * session Bearer token, throwing on a non-ok response so the caller can revert
+ * its optimistic UI. The caller re-polls (pollNow) after a success, mirroring
+ * the legacy _loadData() + ApprovalMonitor.pollNow() at approvals.js:298-299.
+ */
+export async function saveApprovalMode(mode: string): Promise<void> {
+  const resp = await fetch(approvalsSettingsUrl(), {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ mode }),
+  })
+  if (!resp.ok) throw new Error('HTTP ' + resp.status)
+}
+
 // The app-wide singleton wired by AppProviders (start on mount, stop on unmount).
 export const approvalMonitor = new ApprovalMonitor()

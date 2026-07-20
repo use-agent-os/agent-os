@@ -1,0 +1,248 @@
+/* Approvals view — tactical-HQ styling on the shared token system (globals.css).
+   Information structure references legacy css/views/approvals.css; values
+   rebuilt on the design-system tokens. Status color flows ONLY through --tone
+   (tone-* classes); lime stays signal-only. */
+
+.ap-stage {
+  width: 100%;
+}
+
+/* Header: terminal hero over the atmospheric ASCII backdrop (Health posture). */
+.ap-stage__header {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 18px 0 22px;
+}
+.ap-stage__title-block {
+  position: relative; /* above the ascii-field */
+}
+.ap-stage__subtitle {
+  margin-top: 8px;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+.ap-stage__refresh {
+  position: relative;
+}
+
+/* Stat row: hairline-separated tiles. The hero tile carries the strategy tone. */
+.ap-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--hairline);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 28px;
+}
+.ap-stat {
+  background: var(--surface);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ap-stat--hero {
+  border-left: 3px solid var(--tone, var(--border));
+}
+.ap-stat__value {
+  font-size: 1.5rem;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+.ap-stat--hero .ap-stat__value {
+  color: var(--tone, var(--foreground));
+}
+.ap-stat__hint {
+  font-size: 0.75rem;
+  color: var(--dim);
+}
+
+/* Strategy panel: uses the common .panel; radiogroup inside. */
+.ap-strategy {
+  margin-bottom: 28px;
+}
+.ap-strategy__options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.ap-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  padding: 12px 14px;
+  cursor: pointer;
+}
+.ap-radio.is-active {
+  /* Active choice is tinted by its tone; the whole tile carries the gutter. */
+  border-color: color-mix(in srgb, var(--tone, var(--border)) 55%, var(--border));
+  border-left: 3px solid var(--tone, var(--border));
+  background: color-mix(in srgb, var(--tone, var(--surface)) 8%, var(--surface));
+}
+.ap-radio input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.ap-radio__indicator {
+  margin-top: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid var(--input);
+  flex: none;
+}
+.ap-radio.is-active .ap-radio__indicator {
+  border-color: var(--tone, var(--primary));
+  background: radial-gradient(circle at center, var(--tone, var(--primary)) 0 3px, transparent 4px);
+}
+.ap-radio input:focus-visible + .ap-radio__indicator {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.ap-radio__body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.ap-radio__label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.ap-radio__desc {
+  font-size: 0.6875rem;
+  color: var(--dim);
+}
+
+/* Pending list. */
+.ap-pending__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.ap-pending__count {
+  color: var(--dim);
+}
+.ap-pending__list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Pending card: a warn-toned panel (attention state); tone via the gutter. */
+.ap-card {
+  border-left: 3px solid var(--tone, var(--border));
+}
+.ap-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--hairline);
+}
+.ap-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ap-card__name {
+  font-family: var(--font-mono);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+.ap-card__ns {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  color: var(--muted-foreground);
+}
+.ap-card__time {
+  color: var(--tone, var(--dim));
+  flex: none;
+}
+.ap-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  padding: 12px 16px 0;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+.ap-card__meta b {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+  margin-right: 4px;
+}
+.ap-card__block {
+  padding: 12px 16px 0;
+}
+.ap-card__block-label {
+  margin-bottom: 6px;
+}
+.ap-card__pre {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--foreground);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+}
+.ap-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 14px 16px 16px;
+}
+
+/* Empty state. */
+.ap-empty {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 28px;
+  text-align: center;
+}
+.ap-empty__title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+.ap-empty__text {
+  margin-top: 6px;
+  font-size: 0.8125rem;
+  color: var(--dim);
+}
+
+/* Mobile collapse. */
+@media (max-width: 768px) {
+  .ap-stats,
+  .ap-strategy__options {
+    grid-template-columns: 1fr;
+  }
+  .ap-stage__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

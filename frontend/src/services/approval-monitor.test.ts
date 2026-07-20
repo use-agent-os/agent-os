@@ -8,8 +8,10 @@ import {
   approvalDetail,
   approvalMeta,
   approvalsResolveUrl,
+  approvalsSettingsUrl,
   approvalsUrl,
   canAlwaysAllow,
+  saveApprovalMode,
   setBrowserElevated,
   useApprovals,
   type Approval,
@@ -456,9 +458,33 @@ describe('approval-monitor service', () => {
 describe('approval-monitor pure helpers', () => {
   afterEach(() => localStorage.clear())
 
-  it('approvalsUrl / approvalsResolveUrl are root-absolute (not base-path rewritten)', () => {
+  it('approvalsUrl / approvalsResolveUrl / approvalsSettingsUrl are root-absolute (not base-path rewritten)', () => {
     expect(approvalsUrl()).toBe('/api/approvals')
     expect(approvalsResolveUrl()).toBe('/api/approvals/resolve')
+    expect(approvalsSettingsUrl()).toBe('/api/approvals/settings')
+  })
+
+  describe('saveApprovalMode', () => {
+    afterEach(() => {
+      sessionStorage.clear()
+      vi.unstubAllGlobals()
+    })
+    it('POSTs { mode } to the settings endpoint with the session Bearer token', async () => {
+      sessionStorage.setItem('agentos.wsToken', 'tok-9')
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 } as Response)
+      vi.stubGlobal('fetch', fetchMock)
+      await saveApprovalMode('auto-approve')
+      expect(fetchMock).toHaveBeenCalledWith('/api/approvals/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer tok-9' },
+        body: JSON.stringify({ mode: 'auto-approve' }),
+      })
+    })
+    it('throws on a non-ok response so the caller can revert', async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500 } as Response)
+      vi.stubGlobal('fetch', fetchMock)
+      await expect(saveApprovalMode('auto-deny')).rejects.toThrow('HTTP 500')
+    })
   })
 
   describe('approvalCommand', () => {

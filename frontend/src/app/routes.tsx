@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { type RouteObject, useLocation } from 'react-router'
 import { StubView } from '@/views/StubView'
 import { HealthPage } from '@/views/health/HealthPage'
+import { ApprovalsPage } from '@/views/approvals/ApprovalsPage'
 
 export const VIEWS: ReadonlyArray<{ path: string; title: string }> = [
   { path: 'overview', title: 'Overview' },
@@ -36,6 +37,7 @@ export function defaultViewPath(): string {
 function viewElement(path: string) {
   const view = VIEWS.find((v) => v.path === path)
   if (path === 'health') return <HealthPage />
+  if (path === 'approvals') return <ApprovalsPage />
   return <StubView title={view?.title ?? 'Overview'} />
 }
 
@@ -70,10 +72,10 @@ function NotFound() {
 
 export const routeChildren: RouteObject[] = [
   { index: true, element: <IndexView /> },
-  ...VIEWS.map((v) =>
-    v.path === 'health'
-      ? { path: v.path, element: <HealthPage /> }
-      : { path: v.path, element: <StubView title={v.title} /> },
-  ),
+  ...VIEWS.map((v) => {
+    if (v.path === 'health') return { path: v.path, element: <HealthPage /> }
+    if (v.path === 'approvals') return { path: v.path, element: <ApprovalsPage /> }
+    return { path: v.path, element: <StubView title={v.title} /> }
+  }),
   { path: '*', element: <NotFound /> },
 ]
