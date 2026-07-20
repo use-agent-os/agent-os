@@ -12,6 +12,7 @@ from agentos.provider import (
     ContentBlockToolResult,
     ContentBlockToolUse,
     DoneEvent,
+    ErrorEvent,
     Message,
     ToolDefinition,
     ToolInputSchema,
@@ -23,12 +24,16 @@ from agentos.provider.ollama import OllamaProvider
 def _patch_transport(
     monkeypatch: pytest.MonkeyPatch,
     captured: dict[str, Any],
-    response_body: str,
+    response_body: str | bytes,
+    *,
+    status_code: int = 200,
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
         captured["payload"] = json.loads(request.content.decode("utf-8"))
-        return httpx.Response(200, text=response_body)
+        if isinstance(response_body, bytes):
+            return httpx.Response(status_code, content=response_body)
+        return httpx.Response(status_code, text=response_body)
 
     transport = httpx.MockTransport(handler)
     real_async_client = httpx.AsyncClient
@@ -211,3 +216,47 @@ def test_ollama_preserves_non_tool_done_reason_and_model(
     done = next(event for event in events if isinstance(event, DoneEvent))
     assert done.stop_reason == "length"
     assert done.model == "qwen2.5:7b"
+
+
+def test_ollama_bounds_non_utf8_http_error_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+    _patch_transport(
+        monkeypatch,
+        captured,
+        b"\xff" + b"x" * 3000,
+        status_code=502,
+    )
+    provider = OllamaProvider(model="configured-model")
+
+    async def _run() -> list[Any]:
+        return [event async for event in provider.chat([Message(role="user", content="Hi")])]
+
+    events = asyncio.run(_run())
+
+    assert len(events) == 1
+    error = events[0]
+    assert isinstance(error, ErrorEvent)
+    assert error.code == "502"
+    assert error.message.startswith("HTTP 502: �")
+    assert error.message.endswith("…")
+    assert len(error.message) <= 2010
+
+
+def test_ollama_ignores_malformed_tool_call_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+    chunks = (
+        '{"message":{"content":"ok","tool_calls":[null,{"function":null},'
+        '{"function":{"name":""}}]},"done":false}\n'
+        '{"message":null,"done":true,"done_reason":"stop"}\n'
+    )
+    _patch_transport(monkeypatch, captured, chunks)
+    provider = OllamaProvider(model="configured-model")
+
+    async def _run() -> list[Any]:
+        return [event async for event in provider.chat([Message(role="user", content="Hi")])]
+
+    events = asyncio.run(_run())
+
+    assert not any(isinstance(event, ToolUseEndEvent) for event in events)
+    done = next(event for event in events if isinstance(event, DoneEvent))
+    assert done.stop_reason == "stop"

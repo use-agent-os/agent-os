@@ -25,6 +25,7 @@ from .types import (
 )
 
 _OLLAMA_DEFAULT_BASE = "http://localhost:11434"
+_OLLAMA_ERROR_BODY_LIMIT = 2000
 
 
 def _build_ollama_tool(tool: ToolDefinition) -> dict[str, Any]:
@@ -119,6 +120,31 @@ def _normalize_tool_arguments(arguments: Any) -> dict[str, Any]:
     return {"_raw": arguments}
 
 
+def _format_error_body(body: bytes) -> str:
+    text = body.decode("utf-8", errors="replace")
+    if len(text) <= _OLLAMA_ERROR_BODY_LIMIT:
+        return text
+    return text[: _OLLAMA_ERROR_BODY_LIMIT - 1].rstrip() + "…"
+
+
+def _parse_tool_call(value: Any, fallback_index: int) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    function = value.get("function")
+    if not isinstance(function, dict):
+        return None
+    name = function.get("name")
+    if not isinstance(name, str) or not name:
+        return None
+    raw_id = value.get("id")
+    tool_use_id = str(raw_id) if raw_id is not None and raw_id != "" else f"call_{fallback_index}"
+    return {
+        "id": tool_use_id,
+        "name": name,
+        "arguments": _normalize_tool_arguments(function.get("arguments", {})),
+    }
+
+
 class OllamaProvider:
     """Streams from a local Ollama instance using the /api/chat endpoint."""
 
@@ -199,7 +225,7 @@ class OllamaProvider:
                     if response.status_code != 200:
                         body = await response.aread()
                         yield ErrorEvent(
-                            message=f"HTTP {response.status_code}: {body.decode()}",
+                            message=f"HTTP {response.status_code}: {_format_error_body(body)}",
                             code=str(response.status_code),
                         )
                         return
@@ -212,28 +238,30 @@ class OllamaProvider:
                         except json.JSONDecodeError:
                             continue
 
-                        msg_chunk = chunk.get("message", {})
+                        if not isinstance(chunk, dict):
+                            continue
+
+                        raw_message = chunk.get("message", {})
+                        msg_chunk = raw_message if isinstance(raw_message, dict) else {}
                         chunk_model = chunk.get("model")
                         if isinstance(chunk_model, str) and chunk_model:
                             response_model = chunk_model
 
                         # Text content
                         text = msg_chunk.get("content", "")
-                        if text:
+                        if isinstance(text, str) and text:
                             yield TextDeltaEvent(text=text)
 
                         # Ollama delivers tool_calls in a single chunk (non-streaming)
-                        for tc in msg_chunk.get("tool_calls", []):
-                            fn = tc.get("function", {})
-                            pending_tool_calls.append(
-                                {
-                                    "id": tc.get("id", f"call_{len(pending_tool_calls)}"),
-                                    "name": fn.get("name", ""),
-                                    "arguments": _normalize_tool_arguments(
-                                        fn.get("arguments", {})
-                                    ),
-                                }
-                            )
+                        raw_tool_calls = msg_chunk.get("tool_calls", [])
+                        if isinstance(raw_tool_calls, list):
+                            for raw_tool_call in raw_tool_calls:
+                                tool_call = _parse_tool_call(
+                                    raw_tool_call,
+                                    len(pending_tool_calls),
+                                )
+                                if tool_call is not None:
+                                    pending_tool_calls.append(tool_call)
 
                         # Final chunk carries usage stats
                         if chunk.get("done"):

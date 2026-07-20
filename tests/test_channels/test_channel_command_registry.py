@@ -293,6 +293,25 @@ async def test_channel_malformed_success_payload_falls_back_safely(command, payl
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["/status", "/compact"])
+async def test_channel_error_replies_are_bounded(command: str) -> None:
+    class FakeDispatcher:
+        async def dispatch(self, req_id, method, params, ctx):
+            return make_error_res(req_id, "INTERNAL_ERROR", "x" * 5000)
+
+    reply = await DEFAULT_COMMAND_REGISTRY.dispatch(
+        envelope=_envelope(),
+        message_content=command,
+        rpc_dispatcher=FakeDispatcher(),
+        context_factory=lambda _envelope: object(),
+    )
+
+    assert reply is not None
+    assert len(reply.content) <= 1900
+    assert reply.content.endswith("…")
+
+
+@pytest.mark.asyncio
 async def test_channel_compact_command_uses_short_context_budget_wording() -> None:
     msg = IncomingMessage(sender_id="u1", channel_id="c1", content="/compact")
     envelope = build_channel_route_envelope(
