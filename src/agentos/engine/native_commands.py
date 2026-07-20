@@ -6,6 +6,15 @@ from typing import Any
 
 from agentos.engine.commands import DEFAULT_REGISTRY, Surface
 
+# Platform constraints:
+# https://core.telegram.org/bots/api#setmycommands
+# https://discord.com/developers/docs/interactions/application-commands
+# https://api.slack.com/reference/manifests
+TELEGRAM_COMMAND_LIMIT = 100
+TELEGRAM_DESCRIPTION_LIMIT = 256
+DISCORD_DESCRIPTION_LIMIT = 100
+SLACK_DESCRIPTION_LIMIT = 48
+
 
 def _channel_commands() -> tuple[tuple[str, str], ...]:
     """Return canonical CHANNEL commands as ``(name, description)`` pairs."""
@@ -18,15 +27,15 @@ def _channel_commands() -> tuple[tuple[str, str], ...]:
 def telegram_bot_commands() -> list[dict[str, str]]:
     """Build the payload accepted by Telegram's ``setMyCommands`` API."""
     return [
-        {"command": name, "description": description[:256]}
+        {"command": name, "description": description[:TELEGRAM_DESCRIPTION_LIMIT]}
         for name, description in _channel_commands()
-    ]
+    ][:TELEGRAM_COMMAND_LIMIT]
 
 
 def discord_application_commands() -> list[dict[str, Any]]:
     """Build Discord CHAT_INPUT application-command registrations."""
     return [
-        {"name": name, "description": description[:100], "type": 1}
+        {"name": name, "description": description[:DISCORD_DESCRIPTION_LIMIT], "type": 1}
         for name, description in _channel_commands()
     ]
 
@@ -45,7 +54,7 @@ def slack_command_manifest(request_url: str) -> dict[str, Any]:
             "slash_commands": [
                 {
                     "command": f"/{name}",
-                    "description": description[:48],
+                    "description": description[:SLACK_DESCRIPTION_LIMIT],
                     "should_escape": False,
                     "url": request_url,
                 }

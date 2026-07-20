@@ -807,7 +807,14 @@ class DiscordChannel:
     async def register_native_slash_commands(self) -> None:
         """Synchronize Discord's application-command menu with the registry."""
         if not self.config.application_id:
-            log.warning("discord.commands_not_registered", reason="missing_application_id")
+            log.warning(
+                "discord.commands_not_registered",
+                reason="missing_application_id",
+                config_key="application_id",
+                setup_hint=(
+                    "Set channels.channels[].application_id to the Discord Application ID."
+                ),
+            )
             return
         await self.register_slash_commands(discord_application_commands())
 

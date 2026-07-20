@@ -152,9 +152,17 @@ Telegram and Discord synchronize their native command menus when the adapter
 starts. The entries are derived from AgentOS's unified channel command registry,
 so they stay aligned with text `/command` dispatch.
 
-Slack requires slash commands to be declared in the Slack app manifest. Print
-the manifest fragment with the public Request URL for the Slack webhook route,
-then import it in the Slack app settings:
+Slack requires slash commands to be declared in the Slack app manifest. To
+synchronize them automatically at adapter startup, configure `app_id`,
+`manifest_token`, and `command_request_url` on the Slack channel entry. The
+manifest token must be a short-lived Slack app configuration access token
+(`xoxe.xoxp-...`), not the Socket Mode app-level token (`xapp-...`). AgentOS
+exports the existing manifest first and replaces only `features.slash_commands`
+so unrelated app configuration is preserved.
+
+When those optional credentials are absent, print the manifest fragment with
+the public Request URL for the Slack webhook route and import it in the Slack
+app settings:
 
 ```sh
 agentos channels native-commands slack \

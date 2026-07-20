@@ -135,6 +135,10 @@ Main `agentos.toml` sections (full commented reference:
 | `[channels]` | messaging channels (`[[channels.channels]]` entries) |
 | `[compaction]`, `[agent_token_saving]`, `[task_runtime]` | context compaction, tool-result projection, concurrency |
 
+Slack native commands auto-sync when a Slack channel entry provides `app_id`,
+`manifest_token` (an app configuration access token), and `command_request_url`;
+otherwise export them with `agentos channels native-commands slack --request-url …`.
+
 ## Common operations (verified recipes)
 
 **Change the model/provider (persistently):**

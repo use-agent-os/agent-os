@@ -65,6 +65,10 @@ class SlackAuthError(Exception):
     """Raised when Slack token validation fails."""
 
 
+class SlackManifestError(Exception):
+    """Raised when Slack rejects a native-command manifest operation."""
+
+
 @dataclass
 class SlackChannel:
     """Channel adapter for Slack Web API.
@@ -88,6 +92,9 @@ class SlackChannel:
     # ``app_token`` (an ``xapp-`` App-Level Token with ``connections:write``).
     connection_mode: str = "webhook"
     app_token: str = ""
+    app_id: str = ""
+    manifest_token: str = ""
+    command_request_url: str = ""
     # ``policy`` declares the admit/deny semantics consumed by
     # ``agentos.channels._util.evaluate_policy``. Slack admits DMs, admits
     # group messages only when the bot is mentioned, and applies no
@@ -199,6 +206,67 @@ class SlackChannel:
     def slash_command_manifest(request_url: str) -> dict[str, Any]:
         """Return the app-manifest fragment that registers Slack slash commands."""
         return slack_command_manifest(request_url)
+
+    async def register_native_slash_commands(self) -> None:
+        """Merge AgentOS commands into the existing Slack app manifest."""
+        if not (self.app_id and self.manifest_token and self.command_request_url):
+            log.info(
+                "slack.commands_not_registered",
+                reason="missing_manifest_config",
+                config_keys=("app_id", "manifest_token", "command_request_url"),
+                setup_hint=(
+                    "Set Slack manifest sync fields or export with "
+                    "`agentos channels native-commands slack --request-url ...`."
+                ),
+            )
+            return
+
+        headers = {"Authorization": f"Bearer {self.manifest_token}"}
+        client = self._get_client()
+        exported = await client.post(
+            "/apps.manifest.export",
+            json={"app_id": self.app_id},
+            headers=headers,
+        )
+        exported.raise_for_status()
+        export_data = exported.json()
+        if not isinstance(export_data, dict) or not export_data.get("ok"):
+            error = (
+                export_data.get("error", "invalid response")
+                if isinstance(export_data, dict)
+                else "invalid response"
+            )
+            raise SlackManifestError(f"apps.manifest.export failed: {error}")
+        manifest = export_data.get("manifest")
+        if not isinstance(manifest, dict):
+            raise SlackManifestError("apps.manifest.export returned no manifest")
+
+        features = manifest.get("features")
+        if not isinstance(features, dict):
+            features = {}
+            manifest["features"] = features
+        command_fragment = slack_command_manifest(self.command_request_url)
+        features["slash_commands"] = command_fragment["features"]["slash_commands"]
+
+        updated = await client.post(
+            "/apps.manifest.update",
+            json={"app_id": self.app_id, "manifest": json.dumps(manifest)},
+            headers=headers,
+        )
+        updated.raise_for_status()
+        update_data = updated.json()
+        if not isinstance(update_data, dict) or not update_data.get("ok"):
+            error = (
+                update_data.get("error", "invalid response")
+                if isinstance(update_data, dict)
+                else "invalid response"
+            )
+            raise SlackManifestError(f"apps.manifest.update failed: {error}")
+        log.info(
+            "slack.commands_registered",
+            count=len(features["slash_commands"]),
+            app_id=self.app_id,
+        )
 
     # ------------------------------------------------------------------
     # Inbound
@@ -510,6 +578,10 @@ class SlackChannel:
         if not data.get("ok"):
             raise SlackAuthError(data.get("error", "unknown auth error"))
         self.bot_user_id = data["user_id"]
+        try:
+            await self.register_native_slash_commands()
+        except (httpx.HTTPError, SlackManifestError, ValueError) as exc:
+            log.warning("slack.commands_not_registered", reason="sync_failed", error=str(exc))
         if self.connection_mode == "socket":
             if not self.app_token:
                 raise SlackAuthError(

@@ -271,8 +271,10 @@ agentos channels remove personal
 
 `native-commands` prints the native platform payload derived from the same
 channel command registry used for text `/command` dispatch. Telegram and
-Discord menus synchronize when their adapters start. Import the Slack manifest
-fragment into Slack's app settings; its `--request-url` must point to the
+Discord menus synchronize when their adapters start. Slack also synchronizes
+at startup when its channel entry has `app_id`, a short-lived app configuration
+`manifest_token`, and `command_request_url`. Otherwise import the exported
+Slack manifest fragment manually; its `--request-url` must point to the
 gateway's Slack webhook endpoint.
 
 Raw config:

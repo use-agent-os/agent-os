@@ -1383,6 +1383,11 @@ class SlackChannelEntry(ConfiguredChannelEntry):
     # webhook. Socket Mode additionally requires ``app_token``.
     connection_mode: Literal["webhook", "socket"] = "webhook"
     app_token: str = ""
+    # Optional App Manifest API sync. ``manifest_token`` is a short-lived Slack
+    # app configuration access token, not the Socket Mode ``app_token``.
+    app_id: str = ""
+    manifest_token: str = ""
+    command_request_url: str = ""
 
     @model_validator(mode="after")
     def _validate_socket_app_token(self) -> SlackChannelEntry:

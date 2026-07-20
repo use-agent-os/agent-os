@@ -436,5 +436,8 @@ default_mode = "bypass"                 # off | on | bypass | full
 # connection_mode = "socket"  # socket = no public URL; webhook = Events API
 # app_token = "xapp-..."      # required for Slack Socket Mode
 # signing_secret = ""         # required for Slack webhook mode
+# app_id = "A12345"            # optional: enables native-command manifest sync
+# manifest_token = "xoxe.xoxp-..." # optional short-lived app configuration token
+# command_request_url = "https://agent.example/slack/events"
 # slack_channel_id = "C12345"
 # reply_in_thread = false
