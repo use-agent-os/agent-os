@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `agentos chat` UX pass (issue #46):
+  - The assistant speaker label now defaults to `agentos` (was hard-coded
+    `cap`); override with the `AGENTOS_ASSISTANT_LABEL` env var. The
+    label is sourced from a single place and consumed by the streamed
+    `◢` marker, the pre-token waiting row, and the queued-turn marker.
+  - Session display name now surfaces in the bottom toolbar
+    (`title · model · [tier:cN]`) and `/status`. `/new <title>` persists
+    the title as `SessionNode.display_name` so it survives a later
+    `/resume`. The standalone `/new` path no longer drops the title
+    silently (pre-existing bug).
+  - `/c0` … `/c3` and `/auto` are now registered on both CLI surfaces
+    (`cli_gateway`, `cli_standalone`). Gateway mode reuses the existing
+    `router.hold.set` / `router.hold.clear` RPCs; standalone mutates the
+    in-process `RouterControlHoldStore` directly.
+  - The active Pilot Router tier hold shows in the bottom toolbar and in
+    `/status` (or `auto` when no hold is set).
+  - `SessionNode.derived_title` property fills the pre-existing dead
+    hook, falling back `display_name → label → short opaque session id`.
+  - The startup panel now renders `Session: <title> (<key>)` when a
+    friendly title is known.
+
+### Changed
+
+- The bottom toolbar now leads with the session title (or short key
+  fallback) instead of only the opaque key segment, and shows the model
+  alias after it.
+
 ## [2026.7.19.post1] - 2026-07-19
 
 ### Changed

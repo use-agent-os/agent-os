@@ -67,6 +67,50 @@ agentos chat --session <session-key>
 agentos chat --standalone --workspace /path/to/project
 ```
 
+### Chat REPL slash commands
+
+`agentos chat` exposes a prompt-toolkit REPL with a slash-command palette.
+The most useful ones:
+
+| Command | Purpose |
+| --- | --- |
+| `/new [title]` | Start a new chat session. The optional title is persisted as the session's display name and shown in the bottom toolbar and `/status`. |
+| `/resume <key>` | Resume an existing session by key (or a prefix / display-name match in gateway mode). |
+| `/status` | Show the current session, model, permissions, and the active Pilot Router tier (or `auto`). |
+| `/model <id>` | Override the model for this session. |
+| `/clear` / `/reset` | Clear the current conversation context. |
+| `/compact` | Compact older context into a summary. |
+| `/cost` | Show per-session token and cost totals. |
+| `/save [path]` | Save the transcript to a Markdown file. |
+| `/c0` … `/c3` | Pin the Pilot Router to a configured tier for this session. The pin appears in the bottom toolbar (e.g. `tier:c3`) and stays active until you exit, run `/auto`, or the hold expires. |
+| `/auto` | Restore automatic Pilot Router routing (clears the tier pin). |
+| `/help` | List the commands available on the current surface. |
+| `/exit` / `/quit` | Leave the REPL. |
+
+Router tier commands (`/c0` … `/c3`, `/auto`) are available in both gateway
+and `--standalone` modes. Tiers not present in your `[agentos_router]`
+config are rejected with a readable error. In `--standalone` mode the
+router must be enabled in config; otherwise the command reports
+"Pilot Router is disabled or unavailable."
+
+### Assistant label and session chrome
+
+The assistant speaker label shown on the `◢` marker and the pre-token
+waiting row defaults to `agentos`. Override it with the
+`AGENTOS_ASSISTANT_LABEL` environment variable — the value is read once at
+startup and used by every renderer, so it stays consistent across the
+streamed reply marker, the waiting header, and the queued-turn marker.
+
+```sh
+AGENTOS_ASSISTANT_LABEL="Hani" agentos chat
+```
+
+The bottom toolbar renders `title · model · [tier:cN]` while typing. The
+title comes from `/new <title>` (or is loaded from the gateway on
+`/resume`); the tier chip appears only while a Pilot Router hold is
+active. `/status` mirrors the same fields plus the active permissions
+posture.
+
 One-shot automation:
 
 ```sh

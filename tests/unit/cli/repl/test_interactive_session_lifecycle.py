@@ -16,7 +16,7 @@ from prompt_toolkit.output import DummyOutput
 
 from agentos.cli.repl import prompt as prompt_module
 from agentos.cli.repl.app import ChatApplication
-from agentos.cli.repl.prompt import interactive_session
+from agentos.cli.repl.prompt import DEFAULT_ASSISTANT_LABEL, interactive_session
 from agentos.engine.commands import Surface
 
 
@@ -85,7 +85,7 @@ async def test_set_toolbar_mutates_shared_context() -> None:
                 active_header_text = "".join(
                     fragment[1] for fragment in to_formatted_text(active_header)
                 )
-                assert "◢ cap" in active_header_text
+                assert f"◢ {DEFAULT_ASSISTANT_LABEL}" in active_header_text
                 # Clearing the status drops the chip and brings back the
                 # idle dim line carrying the model alias.
                 handle.set_toolbar("status", None)

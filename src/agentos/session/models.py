@@ -160,6 +160,29 @@ class SessionNode(SQLModel, table=True):
     # from prior turns can be detected and rejected.
     epoch: int = 0
 
+    @property
+    def derived_title(self) -> str | None:
+        """Friendly title for display: explicit ``display_name`` first, else
+        the short opaque session id.
+
+        Fills the pre-existing ``getattr(s, "derived_title", None)`` hook
+        (``rpc_sessions``) that always returned ``None`` because no such
+        attribute existed on the model. Cheap (no transcript scan): depends
+        only on fields already on the row, so it is safe to call in hot
+        paths like ``sessions.list`` and ``sessions.resolve``. Future work
+        can extend this to derive a title from the first user message; the
+        return contract (``str | None``) already supports that.
+        """
+        if self.display_name:
+            return self.display_name
+        if self.label:
+            return self.label
+        # Fall back to the short opaque segment of the session id so list
+        # rows / the toolbar chip show something stable instead of an empty
+        # string when neither display_name nor label is set.
+        sid = (self.session_id or "").strip()
+        return sid[:8] if sid else None
+
 
 class TranscriptEntry(SQLModel, table=True):
     """Individual message stored in the transcript."""

@@ -1,9 +1,14 @@
 # AgentOS Configuration
 # Copy to agentos.toml and edit as needed:
 #   cp agentos.toml.example agentos.toml
-#
+
 # Precedence: env vars > agentos.toml > defaults
 # Also searched: ~/.agentos/config.toml (global user config)
+
+# Assistant speaker label shown on the ◢ marker, the pre-token waiting
+# row, and the queued-turn marker in `agentos chat`. Defaults to "agentos".
+# Env override: AGENTOS_ASSISTANT_LABEL="Hani"
+# assistant_label = "agentos"
 
 # Workspace/state defaults
 # Defaults:

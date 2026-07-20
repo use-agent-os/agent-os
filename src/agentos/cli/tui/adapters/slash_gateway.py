@@ -20,6 +20,7 @@ from agentos.cli.chat.session_state import ChatSessionState, messages_to_markdow
 from agentos.cli.chat.turn import TurnResult
 from agentos.cli.tui.adapters.commands import render_help_table
 from agentos.cli.tui.backend.contracts import TuiOutputHandle
+from agentos.cli.tui.terminal.prompt import sync_session_chrome_from_state
 from agentos.cli.ui import ACCENT, ACCENT_HEADER, console, error_panel
 from agentos.engine.commands import Surface
 
@@ -30,6 +31,11 @@ _PATH_REMOTE_GATEWAY_MESSAGE = _input_bridge.PATH_REMOTE_GATEWAY_MESSAGE
 GATEWAY_SLASH_HANDLER_WORDS = frozenset(
     {
         "/approvals",
+        "/auto",
+        "/c0",
+        "/c1",
+        "/c2",
+        "/c3",
         "/clear",
         "/compact",
         "/cost",
@@ -86,6 +92,8 @@ class GatewayClientLike(Protocol):
     async def usage_status(self) -> dict[str, Any]: ...
 
     async def upload_file(self, path: Path, mime: str, name: str) -> str: ...
+
+    async def call(self, method: str, params: dict | None = None) -> Any: ...
 
     def send_message(
         self,
@@ -175,23 +183,66 @@ async def handle_gateway_slash_command(
         title = parts[1].strip() if len(parts) > 1 else None
         session_key = await client.create_session(model=state.model, display_name=title)
         state.session_key = session_key
+        state.display_name = title or None
+        # A freshly created session has no router hold; clear any stale
+        # tier chip left over from a previous session.
+        state.router_hold_tier = None
         state.transcript.clear()
         state.usage.reset()
         try:
             _resolved = await asyncio.wait_for(client.resolve_session(session_key), timeout=2.0)
             state.model = _resolved.get("model") or state.model
+            # resolve is authoritative for the persisted display name and
+            # the active router hold, so prefer its view over the local
+            # title arg (covers the titled-session resume path too).
+            state.display_name = _resolved.get("displayName") or _resolved.get(
+                "display_name"
+            ) or state.display_name
+            tier = _resolved.get("router_hold_tier")
+            state.router_hold_tier = tier if isinstance(tier, str) and tier else None
         except Exception:  # noqa: BLE001 - network/timeout; non-fatal
             pass
+        sync_session_chrome_from_state(state)
         label = f" ({title})" if title else ""
         console.print(f"[green]Started new session{label}:[/green] {session_key}")
         return True
 
+    if parts := _slash_parts(cmd, "/resume"):
+        if len(parts) == 1 or not parts[1].strip():
+            console.print("[red]Usage: /resume <id>[/red]")
+            return True
+        target = cmd.split(maxsplit=1)[1].strip()
+        payload = await client.resolve_session(target)
+        state.session_key = payload.get("session_key") or payload.get("key") or target
+        state.model = payload.get("model") or state.model
+        state.display_name = payload.get("displayName") or payload.get("display_name")
+        tier = payload.get("router_hold_tier")
+        state.router_hold_tier = tier if isinstance(tier, str) and tier else None
+        state.transcript.clear()
+        state.usage.reset()
+        sync_session_chrome_from_state(state)
+        console.print(f"[green]Resumed session:[/green] {state.session_key}")
+        return True
+
     if cmd in {"/status", "/session"}:
-        console.print(
+        title_line = (
+            f"[{ACCENT}]title[/] [dim]{state.display_name}[/dim]\n"
+            if state.display_name
+            else ""
+        )
+        tier_line = (
+            f"[{ACCENT}]router[/] [dim]tier:{state.router_hold_tier}[/dim]\n"
+            if state.router_hold_tier
+            else f"[{ACCENT}]router[/] [dim]auto[/dim]\n"
+        )
+        status_text = (
+            f"{title_line}"
             f"[{ACCENT}]session[/] [dim]{state.session_key}[/dim]\n"
             f"[{ACCENT}]model[/] [dim]{state.model or 'default'}[/dim]\n"
+            f"{tier_line}"
             f"[{ACCENT}]permissions[/] [dim]{state.elevated or 'normal'}[/dim]"
         )
+        console.print(status_text)
         return True
 
     if parts := _slash_parts(cmd, "/sessions"):
@@ -204,19 +255,6 @@ async def handle_gateway_slash_command(
                 return True
         payload = await client.list_sessions(limit=limit)
         _print_sessions_table(payload.get("sessions", []))
-        return True
-
-    if parts := _slash_parts(cmd, "/resume"):
-        if len(parts) == 1 or not parts[1].strip():
-            console.print("[red]Usage: /resume <id>[/red]")
-            return True
-        target = cmd.split(maxsplit=1)[1].strip()
-        payload = await client.resolve_session(target)
-        state.session_key = payload.get("session_key") or payload.get("key") or target
-        state.model = payload.get("model") or state.model
-        state.transcript.clear()
-        state.usage.reset()
-        console.print(f"[green]Resumed session:[/green] {state.session_key}")
         return True
 
     if parts := _slash_parts(cmd, "/delete"):
@@ -298,6 +336,41 @@ async def handle_gateway_slash_command(
             f"{payload.get('totalTokens', 0):,} tok · "
             f"${float(payload.get('totalCostUsd', 0.0) or 0.0):.6f}[/dim]"
         )
+        return True
+
+    if cmd in {"/c0", "/c1", "/c2", "/c3"}:
+        tier = cmd[1:]
+        try:
+            res = await client.call(
+                "router.hold.set",
+                {"key": state.session_key, "tier": tier},
+            )
+        except Exception as exc:  # noqa: BLE001 - keep chat alive on RPC error
+            # ``router.disabled`` / ``router.unknown_tier`` from
+            # ``rpc_router._router_state`` / ``resolve_router_control_target``
+            # arrive as ``GatewayRPCError`` with a readable ``message``;
+            # surface it verbatim so the operator sees what to fix.
+            console.print(f"[yellow]{exc}[/yellow]")
+            return True
+        # ``res`` mirrors the ``router.hold.set`` payload: tier / model /
+        # provider / targetId / ttlSeconds. Show the pinned model so the
+        # user knows which backing model the tier maps to.
+        model = str((res or {}).get("model") or "") if isinstance(res, dict) else ""
+        suffix = f" · {model}" if model else ""
+        state.router_hold_tier = tier
+        sync_session_chrome_from_state(state)
+        console.print(f"[{ACCENT}]router pinned to tier {tier}[/]{suffix}")
+        return True
+
+    if cmd == "/auto":
+        try:
+            await client.call("router.hold.clear", {"key": state.session_key})
+        except Exception as exc:  # noqa: BLE001 - keep chat alive on RPC error
+            console.print(f"[yellow]{exc}[/yellow]")
+            return True
+        state.router_hold_tier = None
+        sync_session_chrome_from_state(state)
+        console.print(f"[{ACCENT}]router hold cleared (automatic routing)[/]")
         return True
 
     if _slash_parts(cmd, "/save"):

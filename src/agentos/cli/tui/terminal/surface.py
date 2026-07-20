@@ -95,6 +95,8 @@ async def open_terminal_surface(
     surface: Surface,
     model: str | None = None,
     session_id: str | None = None,
+    session_title: str | None = None,
+    router_tier: str | None = None,
 ) -> AsyncIterator[TerminalSurface]:
     session_factory = interactive_session
     if session_factory is _DEFAULT_INTERACTIVE_SESSION:
@@ -104,5 +106,7 @@ async def open_terminal_surface(
         surface=surface,
         model=model,
         session_id=session_id,
+        session_title=session_title,
+        router_tier=router_tier,
     ) as handle:
         yield TerminalSurface(handle, surface=surface)

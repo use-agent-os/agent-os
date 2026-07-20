@@ -52,6 +52,16 @@ class TerminalChatRuntimeContext:
         value = self.scope.get("session_key")
         return value if isinstance(value, str) else None
 
+    @property
+    def session_title(self) -> str | None:
+        value = self.scope.get("session_title")
+        return value if isinstance(value, str) else None
+
+    @property
+    def router_tier(self) -> str | None:
+        value = self.scope.get("router_tier")
+        return value if isinstance(value, str) else None
+
     def abort_turn(self) -> Awaitable[None]:
         if self.surface is not Surface.CLI_GATEWAY or self.abort_active_turn is None:
             return _noop_abort_turn()
@@ -148,6 +158,8 @@ async def run_terminal_chat_runtime(
             surface=surface,
             model=context.model,
             session_id=context.session_id,
+            session_title=context.session_title,
+            router_tier=context.router_tier,
         )
 
     def _expose_surface(tui_surface: TuiSurface) -> None:

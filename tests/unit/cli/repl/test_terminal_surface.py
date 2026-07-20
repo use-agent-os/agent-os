@@ -47,6 +47,8 @@ async def test_terminal_surface_wraps_existing_interactive_session(monkeypatch) 
             "surface": Surface.CLI_STANDALONE,
             "model": "model-a",
             "session_id": "session-a",
+            "session_title": None,
+            "router_tier": None,
         }
     ]
     assert redraw_count == [1]
@@ -96,6 +98,8 @@ async def test_terminal_surface_honors_legacy_prompt_session_monkeypatch(
             "surface": Surface.CLI_STANDALONE,
             "model": "model-a",
             "session_id": "session-a",
+            "session_title": None,
+            "router_tier": None,
         }
     ]
 

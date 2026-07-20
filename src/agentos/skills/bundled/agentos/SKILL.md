@@ -55,6 +55,23 @@ agentos chat                 # interactive terminal chat
 agentos agent -m "..."       # one-shot, automation-friendly agent turn
 ```
 
+### `agentos chat` REPL essentials
+
+The interactive REPL exposes slash commands; the most-used are `/new [title]`,
+`/resume <key>`, `/status`, `/model <id>`, `/clear`, `/compact`, `/cost`,
+`/save [path]`, `/help`, and `/exit`. Pilot Router tier pins are available
+in both gateway and `--standalone` modes:
+
+- `/c0` … `/c3` — pin the Pilot Router to a configured tier for this session.
+  The active tier shows in the bottom toolbar (e.g. `tier:c3`) and in
+  `/status` until you run `/auto`, exit, or the hold expires.
+- `/auto` — restore automatic Pilot Router routing (clear the pin).
+
+The assistant speaker label on the `◢` marker defaults to `agentos`; override
+with the `AGENTOS_ASSISTANT_LABEL` env var. The bottom toolbar renders
+`title · model · [tier:cN]` while typing, with the title sourced from
+`/new <title>` or loaded on `/resume`.
+
 ## CLI map
 
 Top-level: `init`, `onboard`, `configure`, `doctor`, `upgrade`, `chat`,
