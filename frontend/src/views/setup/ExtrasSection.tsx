@@ -65,6 +65,17 @@ function SearchCard({
   const [apiKeyEnv, setApiKeyEnv] = useState(
     config.search_api_key_env || (requiresKey ? spec.envKey || '' : '') || '',
   )
+  // Re-seed the env-var name to the new provider's envKey on a provider switch,
+  // unless the user has typed their own — legacy _syncSearchProviderKeyControls
+  // did `envInput.value = spec.envKey || ''` on every change (setup.js:1551-1555;
+  // '' when the provider needs no key). Without a touch flag, switching to Brave
+  // without typing would save api_key_env:'' instead of 'BRAVE_API_KEY'.
+  const [envTouched, setEnvTouched] = useState(false)
+  const [envProviderKey, setEnvProviderKey] = useState(provider)
+  if (envProviderKey !== provider) {
+    setEnvProviderKey(provider)
+    if (!envTouched) setApiKeyEnv(requiresKey ? spec.envKey || '' : '')
+  }
   const [proxy, setProxy] = useState(config.search_proxy || '')
   const [useEnvProxy, setUseEnvProxy] = useState(config.search_use_env_proxy === true)
   const [fallback, setFallback] = useState(config.search_fallback_policy || 'off')
@@ -180,7 +191,10 @@ function SearchCard({
               aria-label="Search API key env"
               value={apiKeyEnv}
               placeholder={spec.envKey || 'SEARCH_API_KEY'}
-              onChange={(e) => setApiKeyEnv(e.target.value)}
+              onChange={(e) => {
+                setEnvTouched(true)
+                setApiKeyEnv(e.target.value)
+              }}
             />
           </label>
         </div>
