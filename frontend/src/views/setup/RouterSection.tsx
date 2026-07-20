@@ -36,6 +36,7 @@ export function RouterSection({
   catalog,
   status,
   config,
+  draftProvider = '',
   onSave,
   onBack,
   onNext,
@@ -44,13 +45,16 @@ export function RouterSection({
   catalog: Catalog
   status: OnboardingStatus
   config: SetupConfig
+  // The provider drafted in the Provider step (not yet saved). Preview/table
+  // render on the effective provider — draft OR configured (setup.js:552-556).
+  draftProvider?: string
   onSave: (params: RouterConfigureParams) => void
   onBack: () => void
   onNext: () => void
   saving: boolean
 }) {
   const router = config.agentos_router || {}
-  const provider = effectiveProviderFn(status, config)
+  const provider = effectiveProviderFn(status, config, draftProvider)
   const configured = configuredProviderFn(status, config)
   const canSave = Boolean(provider && provider === configured)
 

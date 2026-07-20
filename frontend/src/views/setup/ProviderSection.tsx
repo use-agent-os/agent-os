@@ -48,6 +48,7 @@ export function ProviderSection({
   config,
   onSave,
   onNext,
+  onProviderChange,
   saving,
 }: {
   catalog: Catalog
@@ -55,6 +56,9 @@ export function ProviderSection({
   config: SetupConfig
   onSave: (providerId: string, params: Record<string, unknown>) => void
   onNext: () => void
+  // Lift the drafted provider up so cross-step consumers (Router preview) see it
+  // before Save — legacy _draftProvider read the live <select> (setup.js:430-435).
+  onProviderChange?: (providerId: string) => void
   saving: boolean
 }) {
   const providers = useMemo(
@@ -63,6 +67,10 @@ export function ProviderSection({
   )
   const initial = effectiveProviderFn(status, config)
   const [selected, setSelected] = useState(initial)
+  const selectProvider = (providerId: string) => {
+    setSelected(providerId)
+    onProviderChange?.(providerId)
+  }
   const spec: ProviderSpec | undefined = providers.find((p) => p.providerId === selected)
   const values = selected ? providerConfigFor(config, selected) || {} : {}
 
@@ -118,7 +126,7 @@ export function ProviderSection({
           <select
             aria-label="Provider"
             value={selected}
-            onChange={(e) => setSelected(e.target.value)}
+            onChange={(e) => selectProvider(e.target.value)}
           >
             <option value="" disabled>
               Choose a provider

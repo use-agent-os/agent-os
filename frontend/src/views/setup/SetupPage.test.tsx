@@ -246,6 +246,52 @@ describe('SetupPage', () => {
     })
   })
 
+  it('router preview uses the drafted provider chosen (unsaved) in the Provider step', async () => {
+    // No configured provider yet: config.llm carries no provider, needsOnboarding.
+    const noProviderConfig = { ...CONFIG, llm: {} }
+    mockRpc.call.mockImplementation((method: string) => {
+      if (method === 'onboarding.catalog') return Promise.resolve(CATALOG)
+      if (method === 'onboarding.status')
+        return Promise.resolve(
+          statusFor({ needsOnboarding: true, sectionDetails: { llm: { status: 'missing' } } }),
+        )
+      if (method === 'config.get') return Promise.resolve(noProviderConfig)
+      if (method === 'channels.status') return Promise.resolve({ channels: [] })
+      return Promise.resolve({})
+    })
+    renderPage()
+    // Starts on the provider step (llm missing).
+    await waitFor(() => expect(screen.getByLabelText('Provider')).toBeInTheDocument())
+
+    // Router step, before any pick: no configured provider → "Choose a provider first".
+    fireEvent.click(screen.getByRole('button', { name: /^Router Tiers:/ }))
+    await waitFor(() =>
+      expect(screen.getByText(/Choose a provider first to preview/)).toBeInTheDocument(),
+    )
+
+    // Back to provider, pick openai (draft only — do NOT save).
+    fireEvent.click(screen.getByRole('button', { name: /^Provider:/ }))
+    await waitFor(() => expect(screen.getByLabelText('Provider')).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'openai' } })
+
+    // Router step now previews the drafted provider's tiers (no save happened).
+    fireEvent.click(screen.getByRole('button', { name: /^Router Tiers:/ }))
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Router Tiers' })).toBeInTheDocument(),
+    )
+    // The tier table renders (drafted openai profile), not the empty-provider warning.
+    expect(screen.queryByText(/Choose a provider first to preview/)).not.toBeInTheDocument()
+    expect(screen.getByLabelText('c1 model')).toBeInTheDocument()
+    // Summary line reflects the drafted provider.
+    expect(screen.getByText('openai / Route c1')).toBeInTheDocument()
+    // Save is still gated on the provider being saved (draft ≠ configured).
+    expect(screen.getByText(/Save the provider before saving router tiers/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save Router' })).toBeDisabled()
+
+    // No provider.configure was sent — the draft never triggered a save.
+    expect(mockRpc.call.mock.calls.map((c) => c[0])).not.toContain('onboarding.provider.configure')
+  })
+
   it('channel save probes THEN upserts', async () => {
     wireCalls()
     renderPage()
@@ -299,6 +345,48 @@ describe('SetupPage', () => {
         'onboarding.search.configure',
         expect.objectContaining({ providerId: 'brave' }),
       ),
+    )
+  })
+
+  it('switching search provider re-seeds api_key_env to the new provider envKey', async () => {
+    wireCalls()
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Setup')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /^Capabilities:/ }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Save web search' })).toBeInTheDocument(),
+    )
+    // Start on duckduckgo (no key). Switch to brave WITHOUT typing an env name.
+    fireEvent.change(screen.getByLabelText('Search provider'), { target: { value: 'brave' } })
+    // The env field is re-seeded to BRAVE_API_KEY (legacy _syncSearchProviderKeyControls).
+    const envInput = screen.getByLabelText('Search API key env') as HTMLInputElement
+    expect(envInput.value).toBe('BRAVE_API_KEY')
+    fireEvent.click(screen.getByRole('button', { name: 'Save web search' }))
+    await waitFor(() =>
+      expect(mockRpc.call).toHaveBeenCalledWith(
+        'onboarding.search.configure',
+        expect.objectContaining({ providerId: 'brave', apiKeyEnv: 'BRAVE_API_KEY' }),
+      ),
+    )
+  })
+
+  it('a hand-typed search api_key_env is preserved across a provider switch', async () => {
+    wireCalls()
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Setup')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /^Capabilities:/ }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Save web search' })).toBeInTheDocument(),
+    )
+    // Reveal the key fields, type a custom env name, then switch provider.
+    fireEvent.change(screen.getByLabelText('Search provider'), { target: { value: 'brave' } })
+    const envInput = screen.getByLabelText('Search API key env') as HTMLInputElement
+    fireEvent.change(envInput, { target: { value: 'MY_CUSTOM_KEY' } })
+    // Switch away and back — the user's typed value is NOT clobbered by the reseed.
+    fireEvent.change(screen.getByLabelText('Search provider'), { target: { value: 'duckduckgo' } })
+    fireEvent.change(screen.getByLabelText('Search provider'), { target: { value: 'brave' } })
+    expect((screen.getByLabelText('Search API key env') as HTMLInputElement).value).toBe(
+      'MY_CUSTOM_KEY',
     )
   })
 

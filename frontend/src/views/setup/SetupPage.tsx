@@ -109,7 +109,11 @@ export function SetupPage() {
   }
   const currentStep: StepId = step ?? 'provider'
 
-  const effectiveProviderId = effectiveProviderFn(status, config)
+  // The provider drafted in the Provider step, lifted so the Router preview and
+  // the stepper chip see it before Save (legacy _draftProvider, setup.js:430-435).
+  // null → no draft yet; fall back to the configured/effective provider.
+  const [draftProvider, setDraftProvider] = useState<string | null>(null)
+  const effectiveProviderId = effectiveProviderFn(status, config, draftProvider ?? '')
   const reasons = useMemo(() => onboardingReasons(status, config), [status, config])
   const headline = setupHeadline(reasons)
 
@@ -372,6 +376,7 @@ export function SetupPage() {
             saving={providerMutation.isPending}
             onSave={(providerId, params) => providerMutation.mutate({ providerId, params })}
             onNext={() => setStep('router')}
+            onProviderChange={setDraftProvider}
           />
         ) : null}
         {currentStep === 'router' ? (
@@ -379,6 +384,7 @@ export function SetupPage() {
             catalog={catalog}
             status={status}
             config={config}
+            draftProvider={draftProvider ?? ''}
             saving={routerMutation.isPending}
             onSave={(params) => routerMutation.mutate(params)}
             onBack={() => setStep('provider')}
