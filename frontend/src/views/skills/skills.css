@@ -73,24 +73,43 @@
 
 /* ── Metric pills (status filter) ───────────────────────────────────────── */
 .sk-metrics {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 18px;
+  /* Terminal readout rail: one hairline-bordered strip, cells divided by
+     hairlines — matches the Health/Overview count-tile posture instead of
+     scattered boxed pills. Still clickable (each cell filters). */
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--hairline);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+@media (max-width: 640px) {
+  .sk-metrics {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 .sk-metric {
   --tone: var(--dim);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
-  padding: 8px 14px;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--tone);
-  border-radius: var(--radius);
-  background: var(--card);
+  gap: 6px;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 0;
+  /* Left tone gutter only shows on the active cell (see .is-active). */
+  border-left: 2px solid transparent;
+  border-radius: 0;
   cursor: pointer;
-  transition: border-color 0.12s;
+  text-align: left;
+  transition:
+    background 0.12s,
+    border-color 0.12s;
+}
+.sk-metric:hover {
+  background: var(--elevated);
 }
 .sk-metric--accent {
   --tone: var(--primary);
@@ -102,13 +121,18 @@
   --tone: var(--warn, #d9a441);
 }
 .sk-metric.is-active {
-  border-color: var(--tone);
-  box-shadow: inset 0 0 0 1px var(--tone);
+  border-left-color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 8%, var(--surface));
+}
+.sk-metric.is-active .sk-metric__value {
+  color: var(--tone);
 }
 .sk-metric__value {
   font-family: var(--font-mono);
-  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
+  font-size: 1.875rem;
   font-weight: 700;
+  line-height: 1;
   color: var(--foreground);
 }
 .sk-metric__label {
