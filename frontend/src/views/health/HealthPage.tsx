@@ -343,8 +343,15 @@ export function HealthPage() {
 
   // Simplification (parity matrix): legacy _gatewayContextUrl() read
   // App.loadConnectionSettings(); the new console owns the same effective value
-  // via the stored WS override falling back to bootstrap.ws_url.
-  const gatewayUrl = localStorage.getItem(WS_URL_KEY) || bootstrap.ws_url || ''
+  // via the stored WS override falling back to bootstrap.ws_url. Storage access
+  // is guarded like legacy app.js:205 — blocked storage falls back, not throws.
+  let storedWsUrl: string | null = null
+  try {
+    storedWsUrl = localStorage.getItem(WS_URL_KEY)
+  } catch {
+    /* blocked storage: fall back to bootstrap */
+  }
+  const gatewayUrl = storedWsUrl || bootstrap.ws_url || ''
   const configPath = bootstrap.config_path || ''
 
   const query = useQuery<HealthReport>({
