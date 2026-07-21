@@ -153,7 +153,7 @@ agentos providers status
 
 Router-supported profiles depend on the installed AgentOS version,
 optional dependencies, and configured provider credentials. Common profiles
-include OpenRouter (the default), Bankr, OpenAI, DeepSeek, Gemini,
+include OpenRouter (the default), Bankr, OpenCAP, OpenAI, DeepSeek, Gemini,
 DashScope, Moonshot, Volcengine, Zhipu, and compatible provider tiers exposed
 by the local catalog.
 

@@ -51,7 +51,7 @@ single-turn chat alone.
 | Unified surfaces | CLI, Web UI, gateway RPC, and channels share the same runtime path, tools, memory, approvals, and usage accounting. |
 | Durable sessions | Conversations, transcripts, compaction summaries, artifacts, cost, and replay data are persisted for later inspection. |
 | Personal memory | User facts, notes, and task traces can be saved and recalled through local keyword and semantic search. |
-| Multi-provider runtime | OpenRouter (the default), the Bankr LLM Gateway, OpenAI, Anthropic, Gemini, DeepSeek, DashScope, Ollama, and other provider-compatible backends can be configured through one schema. |
+| Multi-provider runtime | OpenRouter (the default), the Bankr LLM Gateway, OpenCAP, OpenAI, Anthropic, Gemini, DeepSeek, DashScope, Ollama, and other provider-compatible backends can be configured through one schema. |
 | Safe tool use | File, shell, web, memory, git, artifact, media, channel, and agent tools run behind policy layers and approval surfaces. |
 
 ## Documentation Map

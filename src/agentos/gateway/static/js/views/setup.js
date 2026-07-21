@@ -439,7 +439,7 @@ const SetupView = (() => {
   }
 
   function _isProviderAdvancedField(field, spec) {
-    if (['base_url', 'proxy'].includes(field.name)) return true;
+    if (['api_key_env', 'base_url', 'proxy'].includes(field.name)) return true;
     if (field.name === 'model') {
       return spec.routerSupported === true && field.required !== true;
     }
@@ -1306,7 +1306,8 @@ const SetupView = (() => {
     const isSecret = field.secret || field.type === 'password';
     const inputType = isSecret ? 'password' : (field.type === 'int' || field.type === 'float' ? 'number' : 'text');
     const placeholder = field.placeholder || (isSecret ? 'leave blank to keep current' : '');
-    return `<label ${attrs} for="${_esc(fieldId)}"><span>${_esc(field.label)}${required}</span>${desc}<input id="${_esc(fieldId)}" name="${_esc(fieldName)}" type="${inputType}" data-secret="${isSecret}" value="${isSecret ? '' : _esc(String(value || ''))}" placeholder="${_esc(placeholder)}"></label>`;
+    const autocomplete = isSecret ? 'new-password' : 'off';
+    return `<label ${attrs} for="${_esc(fieldId)}"><span>${_esc(field.label)}${required}</span>${desc}<input id="${_esc(fieldId)}" name="${_esc(fieldName)}" type="${inputType}" data-secret="${isSecret}" value="${isSecret ? '' : _esc(String(value || ''))}" placeholder="${_esc(placeholder)}" autocomplete="${autocomplete}" spellcheck="false"></label>`;
   }
 
   function _bindStep() {
@@ -1747,7 +1748,12 @@ const SetupView = (() => {
       return;
     }
     try {
-      await _rpc.call('onboarding.provider.configure', Object.assign({ providerId }, _readScopedFields('provider')));
+      const params = _readScopedFields('provider');
+      // A pasted key is an explicit credential source and takes precedence over
+      // the alternative env reference. Password managers can also autofill the
+      // adjacent env field, so never send both sources to the strict RPC.
+      if (String(params.apiKey || '').trim()) delete params.apiKeyEnv;
+      await _rpc.call('onboarding.provider.configure', Object.assign({ providerId }, params));
       await _load();
       if (_providerEnvMissing()) {
         UI.toast(`${_providerEnvKey()} is not visible to this gateway process.`, 'err');

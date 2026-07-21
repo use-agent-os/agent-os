@@ -21,11 +21,6 @@ def test_bankr_gateway_is_registered() -> None:
     assert "bankr" in list_provider_names()
 
 
-def test_opencap_gateway_is_removed() -> None:
-    assert "opencap" not in list_provider_names()
-    assert "opencap" not in ROUTER_TIER_PROFILE_IDS
-
-
 def test_bankr_gateway_spec_contract() -> None:
     spec = get_provider_spec("bankr")
     assert spec.backend == "openai_compat"
@@ -159,11 +154,10 @@ def test_legacy_migration_leaves_other_providers_untouched() -> None:
     assert result.changed is False
 
 
-def test_retired_opencap_provider_ids_are_not_migrated() -> None:
-    # The retired gateway provider ids are intentionally NOT migrated forward.
-    # A config pinning them is left as-is so strict schema validation rejects it
-    # and the operator re-selects a supported provider by hand.
-    for legacy in ("capgateway", "opencap-gateway", "opencap"):
+def test_retired_opencap_aliases_are_not_migrated() -> None:
+    # Historical aliases remain untouched so an operator must select the
+    # canonical provider id explicitly.
+    for legacy in ("capgateway", "opencap-gateway"):
         result = migrate_config_payload(
             {
                 "llm": {"provider": legacy, "model": "minimax-m3"},
@@ -176,6 +170,20 @@ def test_retired_opencap_provider_ids_are_not_migrated() -> None:
         assert (
             result.payload["agentos_router"]["tiers"]["c0"]["provider"] == legacy
         )
+
+
+def test_canonical_opencap_provider_id_is_preserved() -> None:
+    result = migrate_config_payload(
+        {
+            "llm": {"provider": "opencap", "model": "minimax-m3"},
+            "agentos_router": {
+                "tiers": {"c0": {"provider": "opencap", "model": "deepseek-v4-flash"}},
+            },
+        }
+    )
+
+    assert result.payload["llm"]["provider"] == "opencap"
+    assert result.payload["agentos_router"]["tiers"]["c0"]["provider"] == "opencap"
 
 
 def test_populate_from_bankr_parses_catalog_schema() -> None:

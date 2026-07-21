@@ -1,7 +1,10 @@
 """Unit tests for SessionUsage / UsageTracker cache token accumulation."""
 
+from unittest.mock import patch
+
 import pytest
 
+from agentos.engine.pricing import PriceEntry
 from agentos.engine.usage import ModelUsage, SessionUsage, UsageTracker
 
 
@@ -63,6 +66,59 @@ def test_usage_tracker_add_passes_cache_to_session() -> None:
     assert usage is not None
     assert usage.cache_read_tokens == 300
     assert usage.cache_write_tokens == 120
+
+
+def test_usage_tracker_uses_active_opencap_provider_for_live_model_price() -> None:
+    tracker = UsageTracker(default_provider_id="opencap")
+    tracker.add(
+        "session-a",
+        input_tokens=1_000_000,
+        output_tokens=1_000_000,
+        model_id="oc-uncensored-1.0",
+        cache_read_tokens=200_000,
+    )
+
+    with patch(
+        "agentos.engine.usage.lookup_price",
+        return_value=PriceEntry(0.20, 0.80, 0.10),
+    ) as lookup:
+        usage = tracker.get("session-a")
+        assert usage is not None
+        assert usage.total_cost == pytest.approx(0.98)
+        [row] = usage.model_breakdown
+
+    lookup.assert_called_with("oc-uncensored-1.0", provider_id="opencap")
+    assert row["provider"] == "opencap"
+    assert row["costUsd"] == pytest.approx(0.98)
+
+
+def test_usage_delta_keeps_opencap_provider_and_cached_input_pricing() -> None:
+    tracker = UsageTracker(default_provider_id="opencap")
+    tracker.add(
+        "session-a",
+        input_tokens=100,
+        output_tokens=10,
+        model_id="minimax-m3",
+        cache_read_tokens=20,
+    )
+    checkpoint = tracker.session_checkpoint("session-a")
+    tracker.add(
+        "session-a",
+        input_tokens=1_000,
+        output_tokens=100,
+        model_id="minimax-m3",
+        cache_read_tokens=500,
+    )
+
+    with patch(
+        "agentos.engine.usage.lookup_price",
+        return_value=PriceEntry(0.20, 0.80, 0.10),
+    ) as lookup:
+        delta = tracker.session_delta_snapshot("session-a", checkpoint)
+
+    assert delta is not None
+    assert delta.cost_usd == pytest.approx(0.00023)
+    lookup.assert_called_with("minimax-m3", provider_id="opencap")
 
 
 def test_usage_tracker_isolates_sessions() -> None:

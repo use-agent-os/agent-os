@@ -616,7 +616,7 @@ def _print_no_provider_error() -> None:
         ("Cause\n", "bold yellow"),
         (
             "No API key was found. The following environment variables were all empty:\n"
-            "  OPENROUTER_API_KEY, BANKR_API_KEY, OPENAI_API_KEY,\n"
+            "  OPENROUTER_API_KEY, BANKR_API_KEY, OPENCAP_API_KEY, OPENAI_API_KEY,\n"
             "  ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, GEMINI_API_KEY, and others.\n"
             "The config file ~/.agentos/config.toml also has no [llm].api_key set.\n\n"
         ),

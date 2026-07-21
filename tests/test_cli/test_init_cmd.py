@@ -8,6 +8,7 @@ from agentos.onboarding import get_provider_setup_spec
 _INIT_PROVIDER_CHOICES = (
     "openrouter",
     "bankr",
+    "opencap",
     "openai",
     "anthropic",
     "deepseek",
@@ -16,6 +17,10 @@ _INIT_PROVIDER_CHOICES = (
 
 def test_init_uses_bankr_gateway_model_default() -> None:
     assert _default_model_for_provider("bankr") == "minimax-m3"
+
+
+def test_init_uses_opencap_gateway_model_default() -> None:
+    assert _default_model_for_provider("opencap") == "oc-uncensored-1.0"
 
 
 def test_init_uses_direct_deepseek_model_default() -> None:

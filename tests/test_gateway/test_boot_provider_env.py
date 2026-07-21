@@ -36,6 +36,19 @@ def test_boot_resolves_direct_provider_env_key_and_base_url(
     assert cfg.llm.base_url == "https://ark.example/api/v3"
 
 
+def test_boot_resolves_opencap_env_key_and_base_url(monkeypatch) -> None:
+    monkeypatch.setenv("OPENCAP_API_KEY", "ocap-test-key")
+    monkeypatch.setenv("OPENCAP_BASE_URL", "https://opencap.example/v1")
+    cfg = GatewayConfig(llm={"provider": "opencap", "api_key": "", "base_url": ""})
+
+    runtime = resolve_llm_runtime_config(cfg)
+
+    assert runtime.api_key == "ocap-test-key"
+    assert runtime.base_url == "https://opencap.example/v1"
+    assert runtime.api_key_from_env is True
+    assert runtime.base_url_from_env is True
+
+
 def test_boot_uses_explicit_key_before_standard_env(monkeypatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
     monkeypatch.setenv("OPENROUTER_BASE_URL", "https://openrouter.example/api/v1")

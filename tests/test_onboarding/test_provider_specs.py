@@ -74,7 +74,7 @@ from agentos.onboarding.provider_specs import (  # noqa: E402
 )
 
 EXPECTED_SUPPORTED = {
-    "bankr", "openrouter", "openai", "anthropic", "ollama", "deepseek",
+    "bankr", "opencap", "openrouter", "openai", "anthropic", "ollama", "deepseek",
     "gemini", "dashscope", "moonshot", "zhipu", "qianfan",
     "volcengine",
 }

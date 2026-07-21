@@ -99,6 +99,7 @@ Onboarding-verified providers include:
 
 - OpenRouter
 - Bankr LLM Gateway
+- OpenCAP
 - OpenAI
 - Anthropic
 - Ollama
@@ -115,6 +116,27 @@ OpenAI-compatible or self-hosted backends. Use `agentos providers list` on
 your install to see the current catalog.
 
 Read: [`providers-and-models.md`](providers-and-models.md)
+
+### OpenCAP
+
+Configure OpenCAP with its dedicated inference key:
+
+```sh
+export OPENCAP_API_KEY="ocap_..."
+agentos configure provider --provider opencap --model oc-uncensored-1.0 \
+  --api-key-env OPENCAP_API_KEY
+```
+
+The default base URL is `https://gw.capminal.ai/api/inference/v1` and can be
+overridden with `OPENCAP_BASE_URL`. The default direct/fallback model is
+`oc-uncensored-1.0`. Pilot Router's `recommended` mode selects the matching
+multi-model OpenCAP profile. By default OpenCAP picks the cheapest eligible
+upstream; optionally pin one model with:
+
+```toml
+[llm.provider_routing]
+"glm-5.2" = "surplus"
+```
 
 ### Ollama plain-text mode
 

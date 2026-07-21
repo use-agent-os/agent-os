@@ -1,14 +1,17 @@
 from collections.abc import Iterator
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from agentos.engine.pricing import (
     PriceEntry,
     PricingCache,
+    _parse_opencap_prices,
+    calculate_cost_usd,
     lookup_price,
     reset_live_price_cache_for_tests,
     seed_live_price_cache_for_tests,
+    seed_opencap_price_cache,
 )
 
 
@@ -28,6 +31,130 @@ def test_deepseek_v4_pro_uses_non_discount_price_when_live_pricing_is_off(
 
     assert price.input_per_m == pytest.approx(1.74)
     assert price.output_per_m == pytest.approx(3.48)
+
+
+def test_opencap_pricing_fetches_public_catalog_and_caches_by_model() -> None:
+    import httpx as _httpx
+
+    response = _httpx.Response(
+        200,
+        json={
+            "data": [
+                {
+                    "id": "minimax-m3",
+                    "pricing": {
+                        "input": 0.2541,
+                        "output": 1.0164,
+                        "cachedInput": 0.05082,
+                    },
+                }
+            ]
+        },
+        request=_httpx.Request("GET", "https://gw.capminal.ai/api/public/models"),
+    )
+
+    with patch("agentos.engine.pricing.httpx.Client") as mock_client:
+        client = MagicMock()
+        client.get.return_value = response
+        mock_client.return_value.__enter__.return_value = client
+
+        first = lookup_price("minimax-m3", provider_id="opencap")
+        second = lookup_price("minimax-m3", provider_id="opencap")
+
+    client.get.assert_called_once_with(
+        "https://gw.capminal.ai/api/public/models",
+        headers={"Accept": "application/json"},
+    )
+    assert first == second
+    assert first.input_per_m == pytest.approx(0.2541)
+    assert first.output_per_m == pytest.approx(1.0164)
+    assert first.cached_input_per_m == pytest.approx(0.05082)
+
+
+def test_opencap_live_price_is_scoped_away_from_other_gateway_bare_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "agentos.engine.pricing._fetch_opencap_prices_sync",
+        lambda: {"minimax-m3": PriceEntry(0.2541, 1.0164, 0.05082)},
+    )
+
+    opencap = lookup_price("minimax-m3", provider_id="opencap")
+    other_gateway = lookup_price("minimax-m3")
+
+    assert opencap.input_per_m == pytest.approx(0.2541)
+    assert other_gateway.input_per_m == pytest.approx(0.0825)
+
+
+def test_opencap_boot_catalog_seeds_pricing_without_a_second_fetch() -> None:
+    count = seed_opencap_price_cache(
+        {
+            "data": [
+                {
+                    "id": "minimax-m3",
+                    "pricing": {"input": 0.2541, "output": 1.0164, "cachedInput": 0.05082},
+                }
+            ]
+        }
+    )
+
+    with patch(
+        "agentos.engine.pricing._fetch_opencap_prices_sync",
+        side_effect=AssertionError("pricing should reuse the boot catalog"),
+    ):
+        price = lookup_price("minimax-m3", provider_id="opencap")
+
+    assert count == 1
+    assert price == PriceEntry(0.2541, 1.0164, 0.05082)
+
+
+def test_opencap_pricing_rejects_non_finite_and_negative_catalog_rates() -> None:
+    prices = _parse_opencap_prices(
+        {
+            "data": [
+                {"id": "nan", "pricing": {"input": float("nan"), "output": 1.0}},
+                {"id": "infinite", "pricing": {"input": 1.0, "output": float("inf")}},
+                {"id": "negative", "pricing": {"input": -0.1, "output": 1.0}},
+                {
+                    "id": "valid",
+                    "pricing": {
+                        "input": 0.2,
+                        "output": 0.8,
+                        "cachedInput": float("-inf"),
+                    },
+                },
+            ]
+        }
+    )
+
+    assert prices == {"valid": PriceEntry(0.2, 0.8)}
+
+
+def test_opencap_live_pricing_failure_falls_back_without_failing_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_fetch() -> dict[str, PriceEntry]:
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr("agentos.engine.pricing._fetch_opencap_prices_sync", fail_fetch)
+
+    price = lookup_price("oc-uncensored-1.0", provider_id="opencap")
+
+    assert price.input_per_m == pytest.approx(0.20)
+    assert price.output_per_m == pytest.approx(0.80)
+
+
+def test_calculate_cost_usd_applies_cached_input_rate() -> None:
+    price = PriceEntry(input_per_m=0.20, output_per_m=0.80, cached_input_per_m=0.10)
+
+    cost = calculate_cost_usd(
+        price,
+        input_tokens=1_000_000,
+        output_tokens=1_000_000,
+        cached_input_tokens=200_000,
+    )
+
+    assert cost == pytest.approx(0.98)
 
 
 @pytest.mark.asyncio

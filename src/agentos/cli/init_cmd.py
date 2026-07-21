@@ -15,6 +15,8 @@ def _default_model_for_provider(provider: str) -> str:
     normalized = provider.strip().lower()
     if normalized == "bankr":
         return "minimax-m3"
+    if normalized == "opencap":
+        return "oc-uncensored-1.0"
     if normalized == "openrouter":
         return "minimax/minimax-m3"
     if normalized == "deepseek":
@@ -49,7 +51,15 @@ def run_init() -> None:
 
     provider = questionary.select(
         "Choose provider:",
-        choices=["openrouter", "bankr", "openai", "anthropic", "deepseek", "custom"],
+        choices=[
+            "openrouter",
+            "bankr",
+            "opencap",
+            "openai",
+            "anthropic",
+            "deepseek",
+            "custom",
+        ],
         default="openrouter",
     ).ask()
     if not provider:

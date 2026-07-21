@@ -17,6 +17,7 @@ from agentos.onboarding.status import get_onboarding_status
 
 _KEY_URLS = {
     "bankr": "https://bankr.bot/api-keys",
+    "opencap": "https://www.capminal.ai/",
     "openrouter": "https://openrouter.ai/keys",
     "openai": "https://platform.openai.com/api-keys",
     "anthropic": "https://console.anthropic.com/settings/keys",

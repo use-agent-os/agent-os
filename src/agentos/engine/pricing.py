@@ -6,6 +6,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass
+from math import isfinite
 from typing import Any, cast
 
 import httpx
@@ -13,6 +14,7 @@ import structlog
 
 from agentos.env import trust_env as _trust_env
 from agentos.provider.openrouter_attribution import openrouter_app_headers
+from agentos.provider.registry import get_provider_spec
 from agentos.secrets import clean_header_secret
 
 log = structlog.get_logger(__name__)
@@ -20,6 +22,7 @@ log = structlog.get_logger(__name__)
 _CACHE_TTL = 3600  # 1 hour
 _HTTP_TIMEOUT = 3.0
 _OPENROUTER_PRICING_BASE_URL = "https://openrouter.ai/api/v1"
+_OPENCAP_HTTP_TIMEOUT = 10.0
 _LIVE_PRICE_MISS_TTL = 300
 
 
@@ -112,6 +115,7 @@ class PriceEntry:
 
     input_per_m: float
     output_per_m: float
+    cached_input_per_m: float | None = None
 
 
 # Canonical non-discount prices that must override OpenRouter's promotional or routed
@@ -141,6 +145,9 @@ _PRICE_LOCK = threading.RLock()
 _LIVE_PRICE_CACHE: dict[str, PriceEntry] = {}
 _LIVE_PRICE_FETCHED_AT: dict[str, float] = {}
 _LIVE_PRICE_MISS_AT: dict[str, float] = {}
+_OPENCAP_PRICE_CACHE: dict[str, PriceEntry] = {}
+_OPENCAP_PRICE_FETCHED_AT = 0.0
+_OPENCAP_PRICE_ATTEMPTED_AT = 0.0
 
 
 def _lookup_price_override(model_id: str) -> PriceEntry | None:
@@ -185,6 +192,106 @@ def _float_or_none(value: object) -> float | None:
         return float(cast(Any, value))
     except (TypeError, ValueError):
         return None
+
+
+def _nonnegative_float_or_none(value: object) -> float | None:
+    parsed = _float_or_none(value)
+    if parsed is None or not isfinite(parsed) or parsed < 0:
+        return None
+    return parsed
+
+
+def _parse_opencap_prices(data: dict[str, Any]) -> dict[str, PriceEntry]:
+    """Parse OpenCAP's public USD-per-1M-token model catalog."""
+    models = data.get("data")
+    if not isinstance(models, list):
+        return {}
+    prices: dict[str, PriceEntry] = {}
+    for model in models:
+        if not isinstance(model, dict):
+            continue
+        model_id = str(model.get("id") or "").strip().lower()
+        pricing = model.get("pricing")
+        if not model_id or not isinstance(pricing, dict):
+            continue
+        input_price = _nonnegative_float_or_none(pricing.get("input"))
+        output_price = _nonnegative_float_or_none(pricing.get("output"))
+        if input_price is None or output_price is None:
+            continue
+        prices[model_id] = PriceEntry(
+            input_per_m=input_price,
+            output_per_m=output_price,
+            cached_input_per_m=_nonnegative_float_or_none(pricing.get("cachedInput")),
+        )
+    return prices
+
+
+def _fetch_opencap_prices_sync() -> dict[str, PriceEntry]:
+    url = get_provider_spec("opencap").model_catalog_url
+    if not url:
+        raise RuntimeError("OpenCAP model catalog URL is not configured")
+    with httpx.Client(timeout=_OPENCAP_HTTP_TIMEOUT, trust_env=_trust_env()) as client:
+        response = client.get(
+            url,
+            headers={"Accept": "application/json"},
+        )
+        response.raise_for_status()
+        payload = response.json()
+    if not isinstance(payload, dict):
+        return {}
+    return _parse_opencap_prices(cast(dict[str, Any], payload))
+
+
+def _store_opencap_prices(prices: dict[str, PriceEntry]) -> int:
+    """Atomically replace the OpenCAP pricing cache with validated entries."""
+    global _OPENCAP_PRICE_ATTEMPTED_AT, _OPENCAP_PRICE_FETCHED_AT
+
+    if not prices:
+        return 0
+    refreshed_at = time.monotonic()
+    with _PRICE_LOCK:
+        _OPENCAP_PRICE_CACHE.clear()
+        _OPENCAP_PRICE_CACHE.update(prices)
+        _OPENCAP_PRICE_FETCHED_AT = refreshed_at
+        _OPENCAP_PRICE_ATTEMPTED_AT = refreshed_at
+    log.info("pricing.opencap_refreshed", models=len(prices))
+    return len(prices)
+
+
+def seed_opencap_price_cache(data: dict[str, Any]) -> int:
+    """Seed pricing from an OpenCAP catalog payload already fetched at boot."""
+    return _store_opencap_prices(_parse_opencap_prices(data))
+
+
+def _lookup_opencap_price(model_id: str) -> PriceEntry | None:
+    """Return a cached live OpenCAP price, refreshing the public catalog as needed."""
+    global _OPENCAP_PRICE_ATTEMPTED_AT, _OPENCAP_PRICE_FETCHED_AT
+
+    key = str(model_id or "").strip().lower()
+    if not key:
+        return None
+    now = time.monotonic()
+    with _PRICE_LOCK:
+        cached = _OPENCAP_PRICE_CACHE.get(key)
+        if cached is not None and now - _OPENCAP_PRICE_FETCHED_AT <= _CACHE_TTL:
+            return cached
+        if now - _OPENCAP_PRICE_ATTEMPTED_AT <= _LIVE_PRICE_MISS_TTL:
+            return cached
+        _OPENCAP_PRICE_ATTEMPTED_AT = now
+
+    try:
+        prices = _fetch_opencap_prices_sync()
+    except Exception as exc:
+        log.warning("pricing.opencap_refresh_failed", error=str(exc))
+        return cached
+
+    if not prices:
+        log.warning("pricing.opencap_refresh_empty")
+        return cached
+    _store_opencap_prices(prices)
+    with _PRICE_LOCK:
+        price = _OPENCAP_PRICE_CACHE.get(key)
+    return price
 
 
 def _apply_discount_inverse(price_per_token: float, discount: float) -> float:
@@ -320,10 +427,14 @@ def refresh_live_prices(
 
 
 def reset_live_price_cache_for_tests() -> None:
+    global _OPENCAP_PRICE_ATTEMPTED_AT, _OPENCAP_PRICE_FETCHED_AT
     with _PRICE_LOCK:
         _LIVE_PRICE_CACHE.clear()
         _LIVE_PRICE_FETCHED_AT.clear()
         _LIVE_PRICE_MISS_AT.clear()
+        _OPENCAP_PRICE_CACHE.clear()
+        _OPENCAP_PRICE_FETCHED_AT = 0.0
+        _OPENCAP_PRICE_ATTEMPTED_AT = 0.0
 
 
 def seed_live_price_cache_for_tests(model_id: str, price: PriceEntry) -> None:
@@ -484,14 +595,21 @@ def _should_fetch_live_price(model_id: str) -> bool:
     return True
 
 
-def lookup_price(model_id: str) -> PriceEntry:
-    """Look up pricing, preferring live OpenRouter endpoint prices.
+def lookup_price(model_id: str, provider_id: str = "") -> PriceEntry:
+    """Look up provider-aware pricing, preferring live catalog prices.
 
-    Live lookup uses ``prompt``/``completion`` endpoint prices, explicitly not
-    cache-read prices. If OpenRouter is unreachable, the static table is only a
-    fail-open fallback so cost estimation keeps working offline.
+    OpenCAP uses its public model catalog because its bare model IDs overlap
+    with other gateways whose rates differ. OpenRouter live lookup uses
+    ``prompt``/``completion`` endpoint prices, explicitly not cache-read prices.
+    If either service is unreachable, the static table is a fail-open fallback
+    so cost estimation keeps working offline.
     """
     model_id = str(model_id or "").strip()
+    if str(provider_id or "").strip().lower() == "opencap":
+        opencap_price = _lookup_opencap_price(model_id)
+        if opencap_price is not None:
+            return opencap_price
+        return _lookup_static_price(model_id)
     override = _lookup_price_override(model_id)
     if override is not None:
         return override
@@ -518,3 +636,32 @@ def lookup_price(model_id: str) -> PriceEntry:
         _LIVE_PRICE_FETCHED_AT[key] = time.monotonic()
         _LIVE_PRICE_MISS_AT.pop(key, None)
         return price
+
+
+def calculate_cost_usd(
+    price: PriceEntry,
+    *,
+    input_tokens: int,
+    output_tokens: int,
+    cached_input_tokens: int = 0,
+) -> float:
+    """Calculate USD cost from USD-per-1M-token rates.
+
+    ``input_tokens`` follows OpenAI-compatible usage semantics and includes
+    cached prompt tokens. When a catalog publishes ``cached_input_per_m``, the
+    cached portion is removed from normal input and charged at that rate.
+    """
+    safe_input = max(0, int(input_tokens))
+    safe_output = max(0, int(output_tokens))
+    cached_input = min(safe_input, max(0, int(cached_input_tokens)))
+    regular_input = safe_input - cached_input
+    cached_rate = (
+        price.cached_input_per_m
+        if price.cached_input_per_m is not None
+        else price.input_per_m
+    )
+    return (
+        regular_input * price.input_per_m
+        + cached_input * cached_rate
+        + safe_output * price.output_per_m
+    ) / 1_000_000

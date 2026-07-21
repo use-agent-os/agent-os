@@ -244,7 +244,7 @@
             <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v18M3 12h18" /><circle cx="12" cy="12" r="9"/></svg>
           </div>
           <h3 class="text-[15px] font-semibold">Pluggable providers</h3>
-          <p class="mt-2 text-[13.5px] leading-relaxed text-[var(--text-dim)]">Speaks to OpenRouter, Bankr, OpenAI, Anthropic, Ollama, DeepSeek, Gemini, DashScope and more behind one config.</p>
+          <p class="mt-2 text-[13.5px] leading-relaxed text-[var(--text-dim)]">Speaks to OpenRouter, Bankr, OpenCAP, OpenAI, Anthropic, Ollama, DeepSeek, Gemini, DashScope and more behind one config.</p>
         </div>
       </div>
     </section>
@@ -444,7 +444,7 @@ agentos onboard --if-needed   # safe to re-run</pre>
         <a href="#providers" class="anchor-link text-[var(--accent)]">#</a>
       </h2>
       <p class="mt-5 max-w-[68ch] text-[16px] leading-relaxed text-[var(--text-dim)]">
-        These twelve providers appear in the first-run wizard. <span class="text-[var(--text)]">OpenRouter</span>
+        These thirteen providers appear in the first-run wizard. <span class="text-[var(--text)]">OpenRouter</span>
         is the default and sorts first. Each cloud provider reads its key from the listed environment variable;
         local providers need no key at all.
       </p>
@@ -466,6 +466,7 @@ agentos onboard --if-needed   # safe to re-run</pre>
               <td class="px-4 py-3 mono text-[var(--text-dim)]">openrouter.ai/api/v1</td>
             </tr>
             <tr><td class="px-4 py-3 font-medium">Bankr LLM Gateway</td><td class="px-4 py-3 mono text-[var(--text-dim)]">BANKR_API_KEY</td><td class="px-4 py-3 mono text-[var(--text-dim)]">llm.bankr.bot/v1</td></tr>
+            <tr><td class="px-4 py-3 font-medium">OpenCAP</td><td class="px-4 py-3 mono text-[var(--text-dim)]">OPENCAP_API_KEY</td><td class="px-4 py-3 mono text-[var(--text-dim)]">gw.capminal.ai/api/inference/v1</td></tr>
             <tr><td class="px-4 py-3 font-medium">OpenAI</td><td class="px-4 py-3 mono text-[var(--text-dim)]">OPENAI_API_KEY</td><td class="px-4 py-3 mono text-[var(--text-dim)]">api.openai.com/v1</td></tr>
             <tr><td class="px-4 py-3 font-medium">Anthropic</td><td class="px-4 py-3 mono text-[var(--text-dim)]">ANTHROPIC_API_KEY</td><td class="px-4 py-3 mono text-[var(--text-dim)]">api.anthropic.com</td></tr>
             <tr><td class="px-4 py-3 font-medium">Ollama <span class="text-[11px] text-[var(--ok)]">local</span></td><td class="px-4 py-3 mono text-[var(--text-faint)]">no key</td><td class="px-4 py-3 mono text-[var(--text-dim)]">localhost:11434</td></tr>
@@ -480,7 +481,7 @@ agentos onboard --if-needed   # safe to re-run</pre>
         </table>
       </div>
       <p class="mt-4 text-[13px] text-[var(--text-faint)]">
-        Beyond these twelve, the registry also knows Mistral, Groq, SiliconFlow, MiniMax, Azure OpenAI, LM Studio, vLLM and more. Set any of them by hand with <span class="mono text-[var(--text-dim)]">agentos configure provider</span>.
+        Beyond these thirteen, the registry also knows Mistral, Groq, SiliconFlow, MiniMax, Azure OpenAI, LM Studio, vLLM and more. Set any of them by hand with <span class="mono text-[var(--text-dim)]">agentos configure provider</span>.
       </p>
     </section>
 

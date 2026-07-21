@@ -82,6 +82,7 @@ base_url = "https://openrouter.ai/api/v1"
 # provider         env var                   default base_url
 # openrouter       OPENROUTER_API_KEY        https://openrouter.ai/api/v1
 # bankr            BANKR_API_KEY             https://llm.bankr.bot/v1
+# opencap          OPENCAP_API_KEY           https://gw.capminal.ai/api/inference/v1
 # openai           OPENAI_API_KEY            https://api.openai.com/v1
 # anthropic        ANTHROPIC_API_KEY         https://api.anthropic.com
 # ollama           none                      http://localhost:11434
@@ -109,8 +110,8 @@ base_url = "https://openrouter.ai/api/v1"
 # api_key = ""          # env DEEPSEEK_API_KEY also works
 # base_url = "https://api.deepseek.com"
 
-# Pin each model to its native upstream provider on OpenRouter
-# (only applies when provider = "openrouter").
+# Pin each model to an upstream provider. OpenRouter sends a preferred order;
+# OpenCAP sends a provider allow-list. Omit entries to keep gateway auto-routing.
 # [llm.provider_routing]
 # "deepseek/deepseek-v4-flash" = "deepseek"
 # "minimax/minimax-m3" = "minimax"

@@ -47,6 +47,7 @@ class ProviderSetupSpec:
 
 _PROVIDER_LABELS: dict[str, str] = {
     "bankr": "Bankr LLM Gateway",
+    "opencap": "OpenCAP",
     "openrouter": "OpenRouter",
     "openai": "OpenAI",
     "azure": "Azure OpenAI",
@@ -81,6 +82,7 @@ _PROVIDER_LABELS: dict[str, str] = {
 _ONBOARDING_VERIFIED_PROVIDER_IDS = frozenset(
     {
         "bankr",
+        "opencap",
         "openrouter",
         "openai",
         "anthropic",
@@ -133,6 +135,8 @@ def _what_you_need(spec: ProviderSpec) -> tuple[str, ...]:
 
 
 def _default_direct_model(provider_id: str) -> str:
+    if provider_id == "opencap":
+        return "oc-uncensored-1.0"
     if provider_id in ROUTER_TIER_PROFILE_IDS:
         tiers = _router_tier_profile_defaults(provider_id)
         tier = tiers.get("c1") or tiers.get("c0") or {}

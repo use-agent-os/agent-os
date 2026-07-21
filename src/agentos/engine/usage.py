@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 
-from .pricing import lookup_price
+from .pricing import calculate_cost_usd, lookup_price
 
 _current_usage_scope: ContextVar[str | None] = ContextVar(
     "agentos_usage_scope",
@@ -43,13 +43,17 @@ class ModelUsage:
     # model_breakdown serializer prefers this over the pricing-table estimate,
     # avoiding cache-discount drift in the per-model split.
     billed_cost: float = 0.0
+    provider_id: str = ""
 
     @property
     def cost(self) -> float:
-        price = lookup_price(self.model_id)
-        return (
-            self.input_tokens * price.input_per_m + self.output_tokens * price.output_per_m
-        ) / 1_000_000
+        price = lookup_price(self.model_id, provider_id=self.provider_id)
+        return calculate_cost_usd(
+            price,
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+            cached_input_tokens=self.cache_read_tokens,
+        )
 
 
 @dataclass
@@ -64,16 +68,20 @@ class SessionUsage:
     # (e.g. SessionUsage(1, 2, "model")) keep aligning with `model_id`.
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    provider_id: str = ""
 
     @property
     def cost(self) -> float:
         """Calculate cost in USD based on pricing table."""
         if self._per_model:
             return sum(m.cost for m in self._per_model.values())
-        price = lookup_price(self.model_id)
-        input_cost = self.input_tokens * price.input_per_m
-        output_cost = self.output_tokens * price.output_per_m
-        return (input_cost + output_cost) / 1_000_000
+        price = lookup_price(self.model_id, provider_id=self.provider_id)
+        return calculate_cost_usd(
+            price,
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+            cached_input_tokens=self.cache_read_tokens,
+        )
 
     @property
     def billed_cost(self) -> float:
@@ -136,6 +144,7 @@ class SessionUsage:
         cache_read_tokens: int = 0,
         cache_write_tokens: int = 0,
         billed_cost: float = 0.0,
+        provider_id: str = "",
     ) -> None:
         """Accumulate token counts, tracking per-model breakdown.
 
@@ -148,14 +157,18 @@ class SessionUsage:
         self.output_tokens += output_tokens
         self.cache_read_tokens += cache_read_tokens
         self.cache_write_tokens += cache_write_tokens
+        if provider_id:
+            self.provider_id = provider_id
         mid = model_id or self.model_id
         if mid:
             if self._per_model is None:
                 self._per_model = {}
             mu = self._per_model.get(mid)
             if mu is None:
-                mu = ModelUsage(model_id=mid)
+                mu = ModelUsage(model_id=mid, provider_id=provider_id or self.provider_id)
                 self._per_model[mid] = mu
+            elif provider_id:
+                mu.provider_id = provider_id
             mu.input_tokens += input_tokens
             mu.output_tokens += output_tokens
             mu.cache_read_tokens += cache_read_tokens
@@ -194,6 +207,7 @@ class SessionUsage:
                 return [
                     {
                         "model": self.model_id,
+                        "provider": self.provider_id,
                         "inputTokens": self.input_tokens,
                         "outputTokens": self.output_tokens,
                         "cacheReadTokens": self.cache_read_tokens,
@@ -205,6 +219,7 @@ class SessionUsage:
         return [
             {
                 "model": mu.model_id,
+                "provider": mu.provider_id,
                 "inputTokens": mu.input_tokens,
                 "outputTokens": mu.output_tokens,
                 "cacheReadTokens": mu.cache_read_tokens,
@@ -229,6 +244,7 @@ def _clone_session_usage(usage: SessionUsage) -> SessionUsage:
         model_id=usage.model_id,
         cache_read_tokens=usage.cache_read_tokens,
         cache_write_tokens=usage.cache_write_tokens,
+        provider_id=usage.provider_id,
     )
     if usage._per_model:
         clone._per_model = {
@@ -239,6 +255,7 @@ def _clone_session_usage(usage: SessionUsage) -> SessionUsage:
                 cache_read_tokens=mu.cache_read_tokens,
                 cache_write_tokens=mu.cache_write_tokens,
                 billed_cost=mu.billed_cost,
+                provider_id=mu.provider_id,
             )
             for mid, mu in usage._per_model.items()
         }
@@ -250,12 +267,19 @@ def _model_delta_cost(
     model_id: str,
     input_tokens: int,
     output_tokens: int,
+    cache_read_tokens: int,
     billed_cost: float,
+    provider_id: str,
 ) -> float:
     if billed_cost > 0.0:
         return billed_cost
-    price = lookup_price(model_id)
-    return (input_tokens * price.input_per_m + output_tokens * price.output_per_m) / 1_000_000
+    price = lookup_price(model_id, provider_id=provider_id)
+    return calculate_cost_usd(
+        price,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cached_input_tokens=cache_read_tokens,
+    )
 
 
 @dataclass
@@ -290,9 +314,10 @@ class SessionTotalsSnapshot:
 class UsageTracker:
     """Tracks per-session token usage and cost."""
 
-    def __init__(self) -> None:
+    def __init__(self, default_provider_id: str = "") -> None:
         self._sessions: dict[str, SessionUsage] = {}
         self._scopes: dict[tuple[str, str], SessionUsage] = {}
+        self._default_provider_id = str(default_provider_id or "").strip().lower()
 
     def add(
         self,
@@ -304,6 +329,7 @@ class UsageTracker:
         cache_read_tokens: int = 0,
         cache_write_tokens: int = 0,
         billed_cost: float = 0.0,
+        provider_id: str = "",
     ) -> None:
         """Record token usage for a session.
 
@@ -311,9 +337,10 @@ class UsageTracker:
         the per-model breakdown can report real provider-billed figures
         instead of the cache-blind pricing-table estimate.
         """
+        effective_provider_id = str(provider_id or self._default_provider_id).strip().lower()
         usage = self._sessions.get(session_key)
         if usage is None:
-            usage = SessionUsage(model_id=model_id)
+            usage = SessionUsage(model_id=model_id, provider_id=effective_provider_id)
             self._sessions[session_key] = usage
         usage.add(
             input_tokens,
@@ -322,6 +349,7 @@ class UsageTracker:
             cache_read_tokens=cache_read_tokens,
             cache_write_tokens=cache_write_tokens,
             billed_cost=billed_cost,
+            provider_id=effective_provider_id,
         )
         if model_id:
             usage.model_id = model_id
@@ -329,7 +357,7 @@ class UsageTracker:
         if scope_key:
             scoped = self._scopes.get((session_key, scope_key))
             if scoped is None:
-                scoped = SessionUsage(model_id=model_id)
+                scoped = SessionUsage(model_id=model_id, provider_id=effective_provider_id)
                 self._scopes[(session_key, scope_key)] = scoped
             scoped.add(
                 input_tokens,
@@ -338,6 +366,7 @@ class UsageTracker:
                 cache_read_tokens=cache_read_tokens,
                 cache_write_tokens=cache_write_tokens,
                 billed_cost=billed_cost,
+                provider_id=effective_provider_id,
             )
             if model_id:
                 scoped.model_id = model_id
@@ -395,20 +424,27 @@ class UsageTracker:
                 before = before_models.get(mid) if before_models else None
                 delta_input = mu.input_tokens - (before.input_tokens if before else 0)
                 delta_output = mu.output_tokens - (before.output_tokens if before else 0)
+                delta_cache_read = mu.cache_read_tokens - (
+                    before.cache_read_tokens if before else 0
+                )
                 delta_billed = mu.billed_cost - (before.billed_cost if before else 0.0)
-                if delta_input or delta_output or delta_billed:
+                if delta_input or delta_output or delta_cache_read or delta_billed:
                     cost_usd += _model_delta_cost(
                         model_id=mid,
                         input_tokens=max(0, delta_input),
                         output_tokens=max(0, delta_output),
+                        cache_read_tokens=max(0, delta_cache_read),
                         billed_cost=max(0.0, delta_billed),
+                        provider_id=mu.provider_id or usage.provider_id,
                     )
         else:
             cost_usd = _model_delta_cost(
                 model_id=usage.model_id,
                 input_tokens=max(0, input_tokens),
                 output_tokens=max(0, output_tokens),
+                cache_read_tokens=max(0, cache_read_tokens),
                 billed_cost=max(0.0, billed_cost),
+                provider_id=usage.provider_id,
             )
 
         return SessionTotalsSnapshot(

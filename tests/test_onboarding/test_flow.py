@@ -138,6 +138,7 @@ def test_interactive_provider_choice_offers_only_verified_supported_providers():
     offered = {choice.split(" ")[0] for choice in captured["choices"]}
     assert offered == {
         "bankr",
+        "opencap",
         "openrouter",
         "openai",
         "anthropic",
