@@ -24,6 +24,9 @@
 # agent_stream_heartbeat_interval_seconds = 15.0
 # agent_stream_idle_timeout_seconds = 180.0
 # webui_stream_idle_grace_seconds = 210.0
+# Keep a positive cap for smaller local models so repeated tool calls cannot
+# run forever. Zero means unlimited.
+# agent_max_iterations = 8
 
 # WebSocket per-connection outbound writer queue. When enabled (default),
 # each WS connection gets a bounded asyncio queue + dedicated writer task.
@@ -358,6 +361,11 @@ thinking_level = "medium"
 # supports_image = true
 # image_only = true
 
+[tools]
+# Plain-text fallback for models that do not reliably support native tool
+# calls. When false, AgentOS sends no tool definitions and executes no tools.
+enabled = true
+
 [agent_token_saving]
 # Project fresh tool results with the built-in tokenjuice reducer before they
 # are fed back into the model. Raw tool responses remain available through the
@@ -428,5 +436,8 @@ default_mode = "bypass"                 # off | on | bypass | full
 # connection_mode = "socket"  # socket = no public URL; webhook = Events API
 # app_token = "xapp-..."      # required for Slack Socket Mode
 # signing_secret = ""         # required for Slack webhook mode
+# app_id = "A12345"            # optional: enables native-command manifest sync
+# manifest_token = "xoxe.xoxp-..." # optional short-lived app configuration token
+# command_request_url = "https://agent.example/slack/events"
 # slack_channel_id = "C12345"
 # reply_in_thread = false

@@ -186,6 +186,10 @@ def _session_key(envelope: Any) -> dict[str, str]:
     return {"sessionKey": envelope.session_key}
 
 
+def _channel_commands(_envelope: Any) -> dict[str, str]:
+    return {"surface": Surface.CHANNEL.value}
+
+
 def _empty(_envelope: Any) -> dict[str, Any]:
     return {}
 
@@ -290,7 +294,11 @@ _COMMANDS: tuple[CommandDef, ...] = (
         name="/help",
         usage="/help",
         description="Show available commands.",
-        execution={_T: _local("help.show"), _S: _local("help.show"), _C: _rpc("status", _empty)},
+        execution={
+            _T: _local("help.show"),
+            _S: _local("help.show"),
+            _C: _rpc("commands.list_for_surface", _channel_commands),
+        },
     ),
     CommandDef(
         name="/status",

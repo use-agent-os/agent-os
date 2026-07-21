@@ -33,6 +33,7 @@ from agentos.channels.contract import (
     ChannelSendResult,
 )
 from agentos.channels.types import Attachment, ChannelHealth, IncomingMessage, OutgoingMessage
+from agentos.engine.native_commands import telegram_bot_commands
 from agentos.env import trust_env as _trust_env
 
 log = structlog.get_logger(__name__)
@@ -54,6 +55,7 @@ FATAL_ERROR_CLASSES: tuple[str, ...] = (
 )
 
 _DEFAULT_TIMEOUT_S = 30.0
+_CONNECT_RETRY_DELAYS_S = (0.25, 0.5)
 _DEDUPE_SIZE = 4096
 _ALLOWED_UPDATES = ("message", "edited_message", "channel_post", "edited_channel_post")
 
@@ -132,6 +134,7 @@ class TelegramChannel:
     _update_offset: int | None = field(default=None, init=False, repr=False)
     _dedupe: EventDedupeCache = field(init=False, repr=False)
     _connected: bool = field(default=False, init=False, repr=False)
+    _commands_registered: bool = field(default=False, init=False, repr=False)
     _last_message_at: datetime | None = field(default=None, init=False, repr=False)
     _known_sender_profiles: dict[str, dict[str, str]] = field(
         default_factory=dict, init=False, repr=False
@@ -227,18 +230,20 @@ class TelegramChannel:
         for sender_id in self.config.approved_sender_ids:
             if sender_id in approved_ids:
                 continue
-            approved.append({
-                **self._known_sender_profiles.get(
-                    sender_id,
-                    {
-                        "sender_id": sender_id,
-                        "username": "",
-                        "display_name": "",
-                        "chat_id": "",
-                    },
-                ),
-                "source": "config",
-            })
+            approved.append(
+                {
+                    **self._known_sender_profiles.get(
+                        sender_id,
+                        {
+                            "sender_id": sender_id,
+                            "username": "",
+                            "display_name": "",
+                            "chat_id": "",
+                        },
+                    ),
+                    "source": "config",
+                }
+            )
         return {
             "mode": self.config.access_mode,
             "group_mode": self.config.group_access_mode,
@@ -287,9 +292,7 @@ class TelegramChannel:
     def set_access_mode(self, mode: str) -> None:
         normalized = "pairing" if mode == "approval" else mode
         if normalized not in {"pairing", "allowlist", "open", "disabled"}:
-            raise ValueError(
-                "Telegram access mode must be pairing, allowlist, open, or disabled"
-            )
+            raise ValueError("Telegram access mode must be pairing, allowlist, open, or disabled")
         self.config.access_mode = cast(
             Literal["pairing", "allowlist", "open", "disabled"], normalized
         )
@@ -399,16 +402,52 @@ class TelegramChannel:
             self._owns_client = True
         return self._client
 
+    def _safe_api_error_detail(self, value: Any, fallback: str) -> str:
+        detail = str(value or fallback)
+        if self.config.token:
+            detail = detail.replace(self.config.token, "[REDACTED]")
+        return detail[:1000]
+
+    def _parse_api_response(self, response: Any, method: str) -> Any:
+        """Validate a Bot API response without exposing the token-bearing URL."""
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError:
+            status_code = getattr(response, "status_code", "unknown")
+            raise TelegramApiError(f"Telegram {method} failed with HTTP {status_code}") from None
+        try:
+            data = response.json()
+        except (TypeError, ValueError):
+            raise TelegramApiError(f"Telegram {method} returned invalid JSON") from None
+        if not isinstance(data, dict):
+            raise TelegramApiError(f"Telegram {method} returned an invalid response")
+        if data.get("ok") is not True:
+            fallback = f"Telegram {method} failed"
+            raise TelegramApiError(self._safe_api_error_detail(data.get("description"), fallback))
+        return data.get("result")
+
     async def _api(self, method: str, payload: dict[str, Any] | None = None) -> Any:
         if not self.config.token:
             raise ValueError("telegram API call requires token")
         client = self._get_client()
-        response = await client.post(f"/bot{self.config.token}/{method}", json=payload or {})
-        response.raise_for_status()
-        data = response.json()
-        if data.get("ok") is not True:
-            raise TelegramApiError(data.get("description", f"Telegram {method} failed"))
-        return data.get("result")
+        for retry_delay in (*_CONNECT_RETRY_DELAYS_S, None):
+            try:
+                response = await client.post(
+                    f"/bot{self.config.token}/{method}", json=payload or {}
+                )
+                break
+            except httpx.ConnectError:
+                if retry_delay is None:
+                    raise TelegramApiError(f"Telegram {method} connection failed") from None
+                log.warning(
+                    "telegram.api_connect_retry",
+                    method=method,
+                    retry_in_s=retry_delay,
+                )
+                await asyncio.sleep(retry_delay)
+            except httpx.RequestError:
+                raise TelegramApiError(f"Telegram {method} request failed") from None
+        return self._parse_api_response(response, method)
 
     async def start(self) -> None:
         if not self.config.token:
@@ -426,6 +465,11 @@ class TelegramChannel:
             self.bot_user_id = str(me.get("id", "")) or None
             username = me.get("username")
             self.bot_username = str(username) if username else None
+
+        try:
+            await self.register_slash_commands()
+        except TelegramApiError as exc:
+            log.warning("telegram.commands_not_registered", error=str(exc))
 
         if self.config.transport_name == "webhook":
             if self.config.webhook_url:
@@ -451,6 +495,14 @@ class TelegramChannel:
             bot_user_id=self.bot_user_id,
         )
 
+    async def register_slash_commands(self) -> None:
+        """Synchronize Telegram's native command menu with the channel registry."""
+        commands = telegram_bot_commands()
+        scope = {"type": "default"}
+        await self._api("setMyCommands", {"commands": commands, "scope": scope})
+        self._commands_registered = True
+        log.info("telegram.commands_registered", count=len(commands))
+
     async def stop(self) -> None:
         task = self._poll_task
         self._poll_task = None
@@ -460,6 +512,12 @@ class TelegramChannel:
                 await task
             except asyncio.CancelledError:
                 pass
+        if self._commands_registered:
+            try:
+                await self._api("deleteMyCommands", {"scope": {"type": "default"}})
+            except TelegramApiError as exc:
+                log.warning("telegram.commands_cleanup_failed", error=str(exc))
+            self._commands_registered = False
         if self._client is not None and self._owns_client:
             await self._client.aclose()
         self._client = None
@@ -660,12 +718,15 @@ class TelegramChannel:
         file_path = file_info.get("file_path")
         if not isinstance(file_path, str) or not file_path:
             raise TelegramApiError("Telegram getFile returned no file_path")
-        payload, content_type = await fetch_httpx_bytes_limited(
-            self._get_client(),
-            f"/file/bot{self.config.token}/{file_path}",
-            name=attachment.name,
-            limit=limit,
-        )
+        try:
+            payload, content_type = await fetch_httpx_bytes_limited(
+                self._get_client(),
+                f"/file/bot{self.config.token}/{file_path}",
+                name=attachment.name,
+                limit=limit,
+            )
+        except httpx.HTTPError:
+            raise TelegramApiError("Telegram file download failed") from None
         name = attachment.name
         if not name or name.startswith("telegram-"):
             path_name = file_path.rsplit("/", 1)[-1]
@@ -781,17 +842,16 @@ class TelegramChannel:
         if content:
             payload["caption"] = content
         client = self._get_client()
-        with path.open("rb") as f:
-            response = await client.post(
-                f"/bot{self.config.token}/sendDocument",
-                data=payload,
-                files={"document": (path.name, f)},
-            )
-        response.raise_for_status()
-        data = response.json()
-        if data.get("ok") is not True:
-            raise TelegramApiError(data.get("description", "Telegram sendDocument failed"))
-        raw_result = data.get("result")
+        try:
+            with path.open("rb") as f:
+                response = await client.post(
+                    f"/bot{self.config.token}/sendDocument",
+                    data=payload,
+                    files={"document": (path.name, f)},
+                )
+        except httpx.RequestError:
+            raise TelegramApiError("Telegram sendDocument request failed") from None
+        raw_result = self._parse_api_response(response, "sendDocument")
         result: dict[str, Any] = raw_result if isinstance(raw_result, dict) else {}
         raw_document = result.get("document")
         document: dict[str, Any] = raw_document if isinstance(raw_document, dict) else {}

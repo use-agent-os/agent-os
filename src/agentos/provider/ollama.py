@@ -25,6 +25,7 @@ from .types import (
 )
 
 _OLLAMA_DEFAULT_BASE = "http://localhost:11434"
+_OLLAMA_ERROR_BODY_LIMIT = 2000
 
 
 def _build_ollama_tool(tool: ToolDefinition) -> dict[str, Any]:
@@ -38,22 +39,110 @@ def _build_ollama_tool(tool: ToolDefinition) -> dict[str, Any]:
     }
 
 
-def _build_ollama_message(msg: Message) -> dict[str, Any]:
+def _tool_result_content(content: Any) -> str:
+    return content if isinstance(content, str) else json.dumps(content)
+
+
+def _build_ollama_message(
+    msg: Message,
+    tool_names_by_id: dict[str, str] | None = None,
+) -> dict[str, Any]:
     if isinstance(msg.content, str):
         return {"role": msg.role, "content": msg.content}
-    # Flatten to text for Ollama (tool_result -> tool role)
+
+    tool_names = tool_names_by_id if tool_names_by_id is not None else {}
     parts: list[str] = []
+    tool_calls: list[dict[str, Any]] = []
     for block in msg.content:
         if block.type == "text":
             parts.append(block.text)
+        elif block.type == "tool_use":
+            tool_names[block.id] = block.name
+            tool_calls.append(
+                {
+                    "id": block.id,
+                    "type": "function",
+                    "function": {
+                        "name": block.name,
+                        "arguments": block.input,
+                    },
+                }
+            )
         elif block.type == "tool_result":
-            return {
+            tool_result_message: dict[str, Any] = {
                 "role": "tool",
-                "content": (
-                    block.content if isinstance(block.content, str) else json.dumps(block.content)
-                ),
+                "content": _tool_result_content(block.content),
             }
-    return {"role": msg.role, "content": " ".join(parts)}
+            tool_name = tool_names.get(block.tool_use_id)
+            if tool_name:
+                tool_result_message["tool_name"] = tool_name
+            return tool_result_message
+
+    result: dict[str, Any] = {"role": msg.role, "content": " ".join(parts)}
+    if tool_calls:
+        result["tool_calls"] = tool_calls
+    return result
+
+
+def _build_ollama_messages(messages: list[Message]) -> list[dict[str, Any]]:
+    """Translate canonical history without dropping Ollama's tool-call pairing."""
+
+    result: list[dict[str, Any]] = []
+    tool_names_by_id: dict[str, str] = {}
+    for message in messages:
+        if not isinstance(message.content, str):
+            tool_results = [block for block in message.content if block.type == "tool_result"]
+            if tool_results:
+                for block in tool_results:
+                    tool_result = {
+                        "role": "tool",
+                        "content": _tool_result_content(block.content),
+                    }
+                    tool_name = tool_names_by_id.get(block.tool_use_id)
+                    if tool_name:
+                        tool_result["tool_name"] = tool_name
+                    result.append(tool_result)
+                continue
+        result.append(_build_ollama_message(message, tool_names_by_id))
+    return result
+
+
+def _normalize_tool_arguments(arguments: Any) -> dict[str, Any]:
+    if isinstance(arguments, dict):
+        return arguments
+    if isinstance(arguments, str):
+        try:
+            parsed = json.loads(arguments)
+        except json.JSONDecodeError:
+            return {"_raw": arguments}
+        if isinstance(parsed, dict):
+            return parsed
+    return {"_raw": arguments}
+
+
+def _format_error_body(body: bytes) -> str:
+    text = body.decode("utf-8", errors="replace")
+    if len(text) <= _OLLAMA_ERROR_BODY_LIMIT:
+        return text
+    return text[: _OLLAMA_ERROR_BODY_LIMIT - 1].rstrip() + "…"
+
+
+def _parse_tool_call(value: Any, fallback_index: int) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    function = value.get("function")
+    if not isinstance(function, dict):
+        return None
+    name = function.get("name")
+    if not isinstance(name, str) or not name:
+        return None
+    raw_id = value.get("id")
+    tool_use_id = str(raw_id) if raw_id is not None and raw_id != "" else f"call_{fallback_index}"
+    return {
+        "id": tool_use_id,
+        "name": name,
+        "arguments": _normalize_tool_arguments(function.get("arguments", {})),
+    }
 
 
 class OllamaProvider:
@@ -98,7 +187,7 @@ class OllamaProvider:
         ollama_messages: list[dict[str, Any]] = []
         if cfg.system:
             ollama_messages.append({"role": "system", "content": cfg.system})
-        ollama_messages.extend(_build_ollama_message(m) for m in messages)
+        ollama_messages.extend(_build_ollama_messages(messages))
 
         payload: dict[str, Any] = {
             "model": self._model,
@@ -117,6 +206,8 @@ class OllamaProvider:
 
         input_tokens = 0
         output_tokens = 0
+        done_reason = "stop"
+        response_model = self._model
         # Ollama tool calls accumulate in the full response (not streamed per-chunk)
         pending_tool_calls: list[dict[str, Any]] = []
 
@@ -134,7 +225,7 @@ class OllamaProvider:
                     if response.status_code != 200:
                         body = await response.aread()
                         yield ErrorEvent(
-                            message=f"HTTP {response.status_code}: {body.decode()}",
+                            message=f"HTTP {response.status_code}: {_format_error_body(body)}",
                             code=str(response.status_code),
                         )
                         return
@@ -147,28 +238,38 @@ class OllamaProvider:
                         except json.JSONDecodeError:
                             continue
 
-                        msg_chunk = chunk.get("message", {})
+                        if not isinstance(chunk, dict):
+                            continue
+
+                        raw_message = chunk.get("message", {})
+                        msg_chunk = raw_message if isinstance(raw_message, dict) else {}
+                        chunk_model = chunk.get("model")
+                        if isinstance(chunk_model, str) and chunk_model:
+                            response_model = chunk_model
 
                         # Text content
                         text = msg_chunk.get("content", "")
-                        if text:
+                        if isinstance(text, str) and text:
                             yield TextDeltaEvent(text=text)
 
                         # Ollama delivers tool_calls in a single chunk (non-streaming)
-                        for tc in msg_chunk.get("tool_calls", []):
-                            fn = tc.get("function", {})
-                            pending_tool_calls.append(
-                                {
-                                    "id": tc.get("id", f"call_{len(pending_tool_calls)}"),
-                                    "name": fn.get("name", ""),
-                                    "arguments": fn.get("arguments", {}),
-                                }
-                            )
+                        raw_tool_calls = msg_chunk.get("tool_calls", [])
+                        if isinstance(raw_tool_calls, list):
+                            for raw_tool_call in raw_tool_calls:
+                                tool_call = _parse_tool_call(
+                                    raw_tool_call,
+                                    len(pending_tool_calls),
+                                )
+                                if tool_call is not None:
+                                    pending_tool_calls.append(tool_call)
 
                         # Final chunk carries usage stats
                         if chunk.get("done"):
                             input_tokens = chunk.get("prompt_eval_count", 0)
                             output_tokens = chunk.get("eval_count", 0)
+                            raw_done_reason = chunk.get("done_reason")
+                            if isinstance(raw_done_reason, str) and raw_done_reason:
+                                done_reason = raw_done_reason
 
                     # Emit tool events after streaming completes
                     for call in pending_tool_calls:
@@ -182,9 +283,10 @@ class OllamaProvider:
                         )
 
                     yield DoneEvent(
-                        stop_reason="stop",
+                        stop_reason="tool_use" if pending_tool_calls else done_reason,
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
+                        model=response_model,
                     )
 
         except httpx.TimeoutException as exc:

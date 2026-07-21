@@ -7,7 +7,7 @@ API is preserved for existing callers (``gateway/boot.py``,
 ``gateway/channel_dispatch.py``).
 
 The channel-side slash-intercept-pre-persist invariant
-(``channel_dispatch.py:88-100``) stays where it lives; this module only
+(``channel_dispatch.py``) stays where it lives; this module only
 provides the dispatch lookup table.
 """
 
@@ -15,6 +15,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentos.channels.command_replies import (
+    bound_channel_text,
+    format_channel_compact_reply,
+    format_channel_success_reply,
+)
 from agentos.channels.types import OutgoingMessage
 from agentos.engine.commands import DEFAULT_REGISTRY, ExecutionKind, ParamsFactory, Surface
 from agentos.gateway.auth import Principal
@@ -62,13 +67,16 @@ class CommandRegistry:
         if match is None:
             return None
         name, method, params_factory = match
+        params = params_factory(envelope)
+        if method == "chat.history":
+            params = {**params, "limit": 10}
         res = await rpc_dispatcher.dispatch(
             f"channel-command:{name}",
             method,
-            params_factory(envelope),
+            params,
             context_factory(envelope),
         )
-        compact_reply = _format_channel_compact_reply(
+        compact_reply = format_channel_compact_reply(
             name=name,
             method=method,
             res=res,
@@ -79,52 +87,20 @@ class CommandRegistry:
         denied = bool(not res.ok and getattr(res.error, "code", "") == "UNAUTHORIZED")
         reason = "" if res.ok else f": {getattr(res.error, 'message', 'command failed')}"
         state = "completed" if res.ok else ("denied" if denied else "failed")
+        content = f"/{name} {state}{reason}"
+        if res.ok:
+            rendered = format_channel_success_reply(
+                name=name,
+                method=method,
+                payload=res.payload,
+            )
+            if rendered is not None:
+                content = rendered
         return OutgoingMessage(
-            content=f"/{name} {state}{reason}",
+            content=bound_channel_text(content),
             reply_to=envelope.thread_id or envelope.channel_id,
             metadata={"command": name, "method": method, "denied": denied},
         )
-
-
-def _format_channel_compact_reply(
-    *,
-    name: str,
-    method: str,
-    res: Any,
-    reply_to: str | None,
-) -> OutgoingMessage | None:
-    if name != "compact" or method != "sessions.contextCompact":
-        return None
-    denied = bool(not res.ok and getattr(res.error, "code", "") == "UNAUTHORIZED")
-    metadata = {"command": name, "method": method, "denied": denied}
-    if not res.ok:
-        error_message = getattr(res.error, "message", "command failed")
-        state = "denied" if denied else "failed"
-        return OutgoingMessage(
-            content=f"Compact {state}: {error_message}",
-            reply_to=reply_to,
-            metadata=metadata,
-        )
-    payload = res.payload if isinstance(res.payload, dict) else {}
-    status = str(payload.get("status") or "").lower()
-    compacted = bool(payload.get("compacted"))
-    if compacted or status == "completed":
-        return OutgoingMessage(
-            content="Context compacted.",
-            reply_to=reply_to,
-            metadata=metadata,
-        )
-    if status == "skipped" or payload.get("compacted") is False:
-        return OutgoingMessage(
-            content="Already within context budget; no compact was applied.",
-            reply_to=reply_to,
-            metadata=metadata,
-        )
-    return OutgoingMessage(
-        content="/compact completed",
-        reply_to=reply_to,
-        metadata=metadata,
-    )
 
 
 def build_channel_rpc_context(

@@ -81,7 +81,7 @@ def test_required_pydantic_fields_are_required_in_spec(type_name: str):
 def test_slack_secrets_are_marked_secret():
     spec = get_channel_setup_spec("slack")
     secrets = {f.name for f in spec.fields if f.secret}
-    assert {"token", "app_token", "signing_secret"} <= secrets
+    assert {"token", "app_token", "manifest_token", "signing_secret"} <= secrets
 
 
 def test_telegram_secrets_are_marked_secret():
