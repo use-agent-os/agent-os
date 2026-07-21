@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRpc } from '@/app/providers'
+import { chatMarkdown } from './markdown'
 import { createStreamController, type StreamController } from './transcript/stream'
 import type { CompactionSummary } from './transcript/compaction'
 import {
@@ -11,6 +12,11 @@ import {
   type HistoryPagingState,
   type HistoryResponse,
 } from './transcript/history'
+import {
+  routerFxNormalizeTier,
+  routerFxRequestKindFromAttachments,
+  routerFxResolveLayoutSeed,
+} from './transcript/routerFx'
 import {
   agentIdFromSessionKey,
   dayKey,
@@ -122,8 +128,35 @@ export interface PendingDelegates {
   pendingQueueLength: () => number
 }
 
+interface ChatRouterConfigResponse {
+  agentos_router?: {
+    enabled?: boolean
+    tiers?: Record<
+      string,
+      { model?: string; supports_image?: boolean; image_only?: boolean } | null | undefined
+    >
+  }
+}
+
+function createRouterConfigGate(): { promise: Promise<void>; resolve: () => void } {
+  let release: (() => void) | undefined
+  let resolved = false
+  const promise = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  return {
+    promise,
+    resolve: () => {
+      if (resolved) return
+      resolved = true
+      release?.()
+    },
+  }
+}
+
 export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEventSeams }): {
   containerRef: React.RefObject<HTMLDivElement | null>
+  routerFxDockRef: React.RefObject<HTMLDivElement | null>
   controller: StreamController
   /**
    * Send composed text + optional attachments (chat.js:6062 `_onSend` →
@@ -157,6 +190,23 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
   const rpc = useRpc()
   const queryClient = useQueryClient()
   const containerRef = useRef<HTMLDivElement>(null)
+  const routerFxDockRef = useRef<HTMLDivElement>(null)
+  const routerFeatureEnabledRef = useRef(false)
+  const [routerConfigGate] = useState(createRouterConfigGate)
+
+  // chat.js:1470-1535 `_loadFeatureToggles` — the animation engine needs the
+  // configured tier roster before a decision can become a multi-candidate strip.
+  // Keep this global config read independent of the session-keyed history query.
+  const routerConfigQuery = useQuery<ChatRouterConfigResponse>({
+    queryKey: ['config.get', 'chat-router-fx'],
+    queryFn: async () => {
+      await rpc.waitForConnection()
+      return rpc.call<ChatRouterConfigResponse>('config.get')
+    },
+    retry: false,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  })
 
   // Reactive mirror of the imperative `_isStreaming` flag. The controller's
   // `updateSendButton` dep fires on every stream lifecycle transition
@@ -216,32 +266,44 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
   // layout). Time is formatted here (CSS can't format an ISO string); the
   // sender is the agent id for assistant/system, "YOU" for user, "ERROR" for
   // errors. Kept next to the builders so every row stamps consistently.
-  const fmtRowTime = (ts?: string | number | null): string => {
-    let d: Date
-    if (ts == null || ts === '') {
-      d = new Date()
-    } else if (typeof ts === 'number') {
-      d = new Date(ts)
+  const stampRowMeta = useCallback(
+    (el: HTMLElement, role: string, ts?: string | number | null): void => {
+      let date: Date
+      if (ts == null || ts === '') {
+        date = new Date()
+      } else if (typeof ts === 'number') {
+        date = new Date(ts)
+      } else {
+        // History carries epoch-ms as a numeric string (e.g. "1784624965697");
+        // the send path carries an ISO string. Parse the numeric form as epoch,
+        // else fall back to Date's string parsing (ISO).
+        const epoch = Number(ts)
+        date = /^\d+$/.test(ts.trim()) && Number.isFinite(epoch) ? new Date(epoch) : new Date(ts)
+      }
+      el.dataset.time = Number.isNaN(date.getTime())
+        ? ''
+        : `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+      if (role === 'user') el.dataset.sender = 'YOU'
+      else if (role === 'error') el.dataset.sender = 'ERROR'
+      else if (role === 'system') el.dataset.sender = 'SYSTEM'
+      // assistant → the agent id from the current session key, uppercased.
+      else
+        el.dataset.sender = (agentIdFromSessionKey(sessionKeyRef.current) || 'AGENT').toUpperCase()
+    },
+    [],
+  )
+
+  const appendMessageBody = (row: HTMLElement, role: string, text: string): void => {
+    const body = document.createElement('div')
+    body.className = 'msg-body'
+    if (role === 'assistant') {
+      body.innerHTML = chatMarkdown.render(text || '')
+      chatMarkdown.bindCopy(body)
+      chatMarkdown.bindHighlight?.(body)
     } else {
-      // History carries epoch-ms as a numeric string (e.g. "1784624965697");
-      // the send path carries an ISO string. Parse the numeric form as epoch,
-      // else fall back to Date's string parsing (ISO).
-      const n = Number(ts)
-      d = /^\d+$/.test(ts.trim()) && Number.isFinite(n) ? new Date(n) : new Date(ts)
+      body.textContent = text || ''
     }
-    if (Number.isNaN(d.getTime())) return ''
-    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  }
-  const rowSender = (role: string): string => {
-    if (role === 'user') return 'YOU'
-    if (role === 'error') return 'ERROR'
-    if (role === 'system') return 'SYSTEM'
-    // assistant → the agent id from the current session key, uppercased.
-    return (agentIdFromSessionKey(sessionKeyRef.current) || 'AGENT').toUpperCase()
-  }
-  const stampRowMeta = (el: HTMLElement, role: string, ts?: string | number | null): void => {
-    el.dataset.time = fmtRowTime(ts)
-    el.dataset.sender = rowSender(role)
+    row.appendChild(body)
   }
 
   const appendMinimalRow = (role: string, text: string): HTMLElement | null => {
@@ -253,7 +315,7 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
     div.className = `msg ${role}`
     div.setAttribute('data-history-role', role)
     stampRowMeta(div, role)
-    div.innerHTML = `<div class="msg-body">${esc(text || '')}</div>`
+    appendMessageBody(div, role, text)
     th.appendChild(div)
     return div
   }
@@ -261,7 +323,17 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
   // eslint-disable-next-line react-hooks/refs -- factory stores the refs and reads .current only later, inside methods invoked outside render (never at creation)
   const [controller] = useState<StreamController>(() =>
     createStreamController(containerRef, {
+      markdown: chatMarkdown,
       getSessionKey: () => sessionKeyRef.current,
+      displayRoleLabel: (role) =>
+        role === 'assistant'
+          ? (agentIdFromSessionKey(sessionKeyRef.current) || 'agent').toUpperCase()
+          : role
+            ? role.charAt(0).toUpperCase() + role.slice(1)
+            : '',
+      routerFxDock: () => routerFxDockRef.current,
+      routerFeatureEnabled: () => routerFeatureEnabledRef.current,
+      routerFxAwaitConfig: () => routerConfigGate.promise,
       // Artifact preview/download URLs + download Authorization header
       // (chat.js:7575/7657 `App.getAuthToken()`).
       getAuthToken,
@@ -309,6 +381,36 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
     }),
   )
 
+  // Feed the controller's existing router-fx registry from config.get. The
+  // registry intentionally lives inside the controller; this effect mutates that
+  // single instance, then releases decision/scan paths waiting on config.
+  useEffect(() => {
+    if (routerConfigQuery.isPending) return
+
+    const router = routerConfigQuery.data?.agentos_router
+    const tiers = router?.tiers
+    const configTierKeys: string[] = []
+    const configTierSet = new Set<string>()
+    if (tiers && typeof tiers === 'object') {
+      Object.entries(tiers).forEach(([tier, rawTier]) => {
+        const lower = routerFxNormalizeTier(tier)
+        if (!lower) return
+        configTierKeys.push(lower)
+        configTierSet.add(lower)
+        controller.routerFxRegistry.setTierConfig(lower, {
+          model: typeof rawTier?.model === 'string' ? rawTier.model : '',
+          supportsImage: rawTier?.supports_image === true,
+          imageOnly: rawTier?.image_only === true,
+        })
+      })
+    }
+
+    controller.routerFxRegistry.setConfigTiers(configTierSet)
+    controller.routerFxRegistry.setSlotList(configTierKeys)
+    routerFeatureEnabledRef.current = router?.enabled === true
+    routerConfigGate.resolve()
+  }, [controller, routerConfigGate, routerConfigQuery.data, routerConfigQuery.isPending])
+
   // Per-session history paging state (legacy `_history*` module-globals). Held
   // in a ref: the imperative renderer reads/writes it directly, no React render
   // depends on it. Reset when the session key changes.
@@ -348,7 +450,7 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
         div.className = `msg ${role}`
         div.setAttribute('data-history-role', role)
         stampRowMeta(div, role)
-        div.innerHTML = `<div class="msg-body">${esc(text || '')}</div>`
+        appendMessageBody(div, role, text)
         th.appendChild(div)
         return div
       },
@@ -463,6 +565,7 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
       // controller's minimal row builder (the same one history/subagent use)
       // stands in until the full `_addMessage` lands with router-fx/turn-meta.
       const th = containerRef.current
+      let userDiv: HTMLElement | null = null
       if (th) {
         const empty = th.querySelector('.chat-empty')
         if (empty) empty.remove()
@@ -495,10 +598,19 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
           div.innerHTML = `<div class="msg-body">${esc(userText)}</div>`
         }
         th.appendChild(div)
+        userDiv = div
       }
 
-      // Start streaming UI (chat.js:6178) + thinking indicator (chat.js:6190).
+      // Start streaming UI + the delayed router scan (chat.js:6178-6190). Config
+      // usually resolves before the first send; the gate also handles a fast send
+      // during cold start without letting an empty registry suppress the strip.
       controller.startStreaming()
+      void routerConfigGate.promise.then(() => {
+        if (sessionKeyRef.current !== sessionKey || !controller.isStreaming()) return
+        controller.scheduleRouterFxBeginScan(userDiv, routerFxResolveLayoutSeed(sessionKey), {
+          requestKind: routerFxRequestKindFromAttachments(atts),
+        })
+      })
       controller.showThinkingIndicator()
       controller.scrollToBottom()
 
@@ -543,7 +655,7 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
           }
         })
     },
-    [rpc, controller],
+    [rpc, controller, routerConfigGate, stampRowMeta],
   )
 
   // chat.js:8439-8450 `_onStop`. Abort only while streaming; set the abort flag,
@@ -1145,6 +1257,7 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
 
   return {
     containerRef,
+    routerFxDockRef,
     controller,
     send,
     abort,

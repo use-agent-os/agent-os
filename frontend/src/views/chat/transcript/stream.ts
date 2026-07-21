@@ -166,6 +166,7 @@ interface ParkedStreamState {
 export interface MarkdownDep {
   render(text: string): string
   bindCopy(el: HTMLElement): void
+  bindHighlight?(el: HTMLElement): void
 }
 
 /**
@@ -214,16 +215,16 @@ export interface StreamControllerDeps {
    * The controller composes `createRouterFxRenderer` and wires the stream
    * lifecycle's router-fx hooks (settle-for-output, cancel-scan, staticize,
    * pause/resume, live-strip/anchor lookups, dock predicate) to it. The
-   * renderer's inputs are injected here so the config loader (a later task) can
-   * feed the SAME tier registry + visualisation pref the config-load path
-   * populates. Sensible faithful defaults let the controller stand alone:
+   * renderer's inputs are injected here so the chat config loader can feed the
+   * SAME tier registry + visualisation pref the config-load path populates.
+   * Sensible faithful defaults let the controller stand alone:
    *   - `routerFxRegistry`  — a fresh empty registry (config unknown → strips
    *      stay suppressed until config lands, matching legacy `configTiers===null`).
    *   - `routerFxPref`      — enabled by default, hydrated from localStorage
    *      (`agentos-router-fx`) via `routerFxLoadPref`.
    *   - `routerFeatureEnabled` — false until the operator routing flag is known.
    *   - `routerFxDock`      — legacy `_routerFxDock`: a DOM ELEMENT, not a flag.
-   *      Default null (no dock in the frontend yet) → all strips suppressed,
+   *      Default null (no mounted dock) → all strips suppressed,
    *      exactly as legacy `if (!_routerFxDock)` short-circuits. */
   routerFxRegistry?: RouterFxRegistry
   routerFxPref?: RouterFxPref
@@ -325,10 +326,11 @@ const defaultEsc = (s: string): string =>
     .replace(/"/g, '&quot;')
 
 const defaultMarkdown: MarkdownDep = {
-  // Text-only fallback: escape and preserve newlines. The real Markdown
-  // renderer (markdown.js) is injected by a later task.
+  // Text-only fallback for standalone controller consumers. The chat view
+  // injects its sanitized marked/DOMPurify renderer through this seam.
   render: (text: string): string => defaultEsc(text).replace(/\n/g, '<br>'),
   bindCopy: (): void => {},
+  bindHighlight: (): void => {},
 }
 
 /* ── Controller ─────────────────────────────────────────────────────────── */
@@ -434,7 +436,9 @@ export function createStreamController(
     ((el: HTMLElement) => routerFxRenderer.insertLiveRouterStripForAnchor(el))
   // Legacy `if (_routerFxDock)` tests the dock ELEMENT's presence (chat.js:6940).
   const routerFxDock = () => routerFxRenderer.hasDock()
-  const routerScanActive = deps.routerScanActive ?? (() => false)
+  const routerScanActive =
+    deps.routerScanActive ??
+    (() => routerFxRenderer.strips('.router-fx[data-scanning="true"]').length > 0)
 
   /* ── instance fields (legacy module-globals) ──────────────────────────── */
   const seqGate = createSeqGate()
@@ -613,6 +617,11 @@ export function createStreamController(
     const status = document.createElement('div')
     status.className = 'thinking-status'
 
+    const glyph = document.createElement('span')
+    glyph.className = 'thinking-glyph'
+    glyph.setAttribute('aria-hidden', 'true')
+    glyph.textContent = '▸'
+
     const dots = document.createElement('div')
     dots.className = 'typing-indicator'
     for (let i = 0; i < 3; i++) {
@@ -629,7 +638,13 @@ export function createStreamController(
     const verb = CAP_VERBS[Math.floor(elapsedMs / CAP_DWELL_MS) % CAP_VERBS.length]
     elapsed.textContent = `${verb} (${seconds}s)`
 
+    const agent = document.createElement('span')
+    agent.className = 'thinking-agent'
+    agent.textContent = `${displayRoleLabel('assistant')} is thinking`
+
+    status.appendChild(glyph)
     status.appendChild(dots)
+    status.appendChild(agent)
     status.appendChild(elapsed)
     body.appendChild(status)
     _thinkingEl.appendChild(body)
@@ -892,6 +907,7 @@ export function createStreamController(
         stripProtocolTextLeak(stripDirectiveTags(stripGeneratedArtifactMarkers(_activeTextRaw))),
       )
       Markdown.bindCopy(_activeTextSeg)
+      Markdown.bindHighlight?.(_activeTextSeg)
     }
     _renderDirty = false
     if (_autoScroll) scrollToBottom()
@@ -977,6 +993,7 @@ export function createStreamController(
         if (segText) {
           seg.el.innerHTML = Markdown.render(segText)
           Markdown.bindCopy(seg.el)
+          Markdown.bindHighlight?.(seg.el)
         } else {
           seg.el.remove()
         }
@@ -1414,6 +1431,7 @@ export function createStreamController(
     setRouterFxEnabled: (enabled: boolean): void => {
       routerFxPref.enabled = enabled
       routerFxSavePref(routerFxPref)
+      if (!enabled) routerFxRenderer.clearRouterFxVisuals('preference_disabled')
     },
     // compaction (Task 7 — compaction.ts). `showCompactionToast` is the live
     // entry point routed by `session.event.compaction`; the rest is the history/

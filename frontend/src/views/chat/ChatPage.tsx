@@ -165,6 +165,7 @@ export function ChatPage() {
 
   const {
     containerRef,
+    routerFxDockRef,
     controller,
     send,
     abort,
@@ -552,6 +553,14 @@ export function ChatPage() {
         hasPendingWork={hasPendingAttachmentWork(attachments.attachments)}
         onAttachFiles={attachments.addFiles}
         tray={<Attachments api={attachments} />}
+        routerFxDock={
+          <div
+            id="chat-routerfx-dock"
+            className="chat-routerfx-dock"
+            ref={routerFxDockRef}
+            aria-live="polite"
+          />
+        }
         toolbar={
           <Toolbar
             sessionKey={sessionKey}

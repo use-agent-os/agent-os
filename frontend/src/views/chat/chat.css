@@ -185,9 +185,9 @@
 }
 
 /* Streaming reuses the assistant text treatment (block cursor lives in the
-   ported DOM); thinking is quieter. */
+   ported DOM); thinking is quieter but remains clearly legible. */
 .msg.assistant.thinking {
-  opacity: 0.7;
+  opacity: 0.82;
 }
 
 /* A real `.msg-header` node (streaming/thinking) — matches the caption. */
@@ -206,6 +206,228 @@
   line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* ── Assistant Markdown (legacy markdown.js:40-115 / chat.js:7906-7914) ─────
+   Assistant text is sanitized before it enters innerHTML. These rules keep the
+   generated semantic markup in the terminal system instead of inheriting a
+   generic light-document presentation. */
+.msg.assistant .msg-body {
+  min-width: 0;
+  white-space: normal;
+}
+.msg.assistant .msg-body p {
+  margin: 0 0 0.65em;
+}
+.msg.assistant .msg-body p:last-child {
+  margin-bottom: 0;
+}
+.msg.assistant .msg-body ul,
+.msg.assistant .msg-body ol {
+  margin: 0.45em 0;
+  padding-left: 1.6em;
+}
+.msg.assistant .msg-body li {
+  margin: 0.18em 0;
+}
+.msg.assistant .msg-body h1,
+.msg.assistant .msg-body h2,
+.msg.assistant .msg-body h3,
+.msg.assistant .msg-body h4 {
+  margin: 0.85em 0 0.3em;
+  line-height: 1.3;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+.msg.assistant .msg-body h1,
+.msg.assistant .msg-body h2 {
+  font-size: 1rem;
+}
+.msg.assistant .msg-body h3,
+.msg.assistant .msg-body h4 {
+  font-size: 0.88rem;
+  color: var(--muted-foreground);
+}
+.msg.assistant .msg-body a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--primary) 55%, transparent);
+  text-underline-offset: 2px;
+}
+.msg.assistant .msg-body blockquote {
+  margin: 0.65em 0;
+  padding: 3px 12px;
+  border-left: 2px solid color-mix(in srgb, var(--primary) 42%, var(--border));
+  color: var(--muted-foreground);
+}
+.msg.assistant .msg-body table {
+  display: block;
+  max-width: 100%;
+  margin: 0.65em 0;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+.msg.assistant .msg-body th,
+.msg.assistant .msg-body td {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  text-align: left;
+  white-space: nowrap;
+}
+.msg.assistant .msg-body th {
+  background: var(--card);
+}
+
+.msg .code-block {
+  min-width: 0;
+  margin: 0.75em 0;
+  border-radius: var(--radius);
+}
+.msg .code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: color-mix(in srgb, var(--foreground) 5%, var(--card));
+  font-size: 0.68rem;
+}
+.msg .code-lang {
+  min-height: 1em;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--primary) 68%, var(--dim));
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+.msg .copy-btn {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  cursor: pointer;
+}
+.msg .copy-btn:hover,
+.msg .copy-btn:focus-visible {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 9%, transparent);
+  outline: none;
+}
+.msg .copy-btn:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+.msg .code-block pre {
+  box-sizing: border-box;
+  max-width: 100%;
+  margin: 0;
+  padding: 12px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: color-mix(in srgb, var(--background) 82%, #000);
+}
+.msg .code-block code,
+.msg .code-block .hljs {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  padding: 0;
+  overflow-wrap: normal;
+  background: transparent;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 0.77rem;
+  line-height: 1.55;
+  white-space: pre;
+}
+.msg .inline-code,
+.msg .math-raw {
+  padding: 1px 4px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--card));
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  white-space: break-spaces;
+}
+.msg .math-raw {
+  color: color-mix(in srgb, var(--primary) 55%, var(--foreground));
+  cursor: help;
+}
+
+/* ── Thinking indicator (chat.js:6379-6501) ─────────────────────────────── */
+.msg.thinking .thinking-body {
+  padding: 4px 0 4px 10px;
+  border-left: 2px solid color-mix(in srgb, var(--primary) 55%, var(--border));
+}
+.thinking-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+.thinking-glyph {
+  color: var(--primary);
+}
+.thinking-agent {
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.thinking-elapsed {
+  color: var(--dim);
+  white-space: nowrap;
+}
+.typing-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.typing-indicator .dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--dim);
+  animation: chat-thinking-dot 1.2s infinite ease-in-out;
+}
+.typing-indicator .dot:nth-child(2) {
+  animation-delay: 150ms;
+}
+.typing-indicator .dot:nth-child(3) {
+  animation-delay: 300ms;
+}
+@keyframes chat-thinking-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.28;
+    transform: scale(0.75);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .typing-indicator .dot {
+    animation: none;
+    opacity: 0.65;
+  }
 }
 
 @media (max-width: 768px) {
@@ -512,6 +734,250 @@
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
+}
+
+/* ── Router-fx composer dock (chat.js:1295/3897-3917) ─────────────────────
+   Exactly one imperative strip mounts here. Empty means zero layout footprint. */
+.chat-routerfx-dock {
+  width: 100%;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.chat-routerfx-dock:empty {
+  display: none;
+}
+.chat-routerfx-dock > .router-fx {
+  margin: 10px auto 0;
+}
+
+.router-fx {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(100%, 620px);
+  min-width: 0;
+  user-select: none;
+}
+.router-fx-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding-top: 2px;
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+}
+.router-fx-header .title {
+  padding-left: 0.32em;
+}
+.router-fx-header .glyph {
+  color: var(--dim);
+  letter-spacing: 0;
+}
+.router-fx[data-scanning='true'] .router-fx-header .glyph {
+  animation: router-fx-chevron 900ms ease-in-out infinite;
+}
+.router-fx[data-scanning='true'] .router-fx-header .glyph:last-child {
+  animation-delay: 450ms;
+}
+@keyframes router-fx-chevron {
+  50% {
+    transform: translateX(3px);
+  }
+}
+.router-fx-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--router-fx-cols, 2), minmax(0, 1fr));
+  grid-auto-rows: 34px;
+  gap: 4px;
+  padding: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(color-mix(in srgb, var(--foreground) 8%, transparent) 0.7px, transparent 1.2px)
+      0 0 / 8px 8px,
+    var(--card);
+}
+.router-fx-cell {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 6px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--background) 72%, transparent);
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background 180ms ease,
+    color 180ms ease;
+}
+.router-fx-cell .nm {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.router-fx-cell.pinging {
+  z-index: 3;
+  animation: router-fx-ping 200ms ease-out both;
+}
+@keyframes router-fx-ping {
+  45% {
+    transform: translateY(-1px) scale(1.06);
+    background: color-mix(in srgb, var(--foreground) 8%, var(--card));
+  }
+}
+.router-fx-cell.win {
+  z-index: 4;
+  transform: translateY(-1px);
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 8%, var(--card));
+  color: var(--primary);
+  font-weight: 700;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+.router-fx-cell.win::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--primary) 70%, transparent);
+}
+.router-fx[data-source='fallback'] .router-fx-cell.win {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, var(--card));
+  color: var(--danger);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--danger) 18%, transparent);
+}
+.router-fx[data-source='fallback'] .router-fx-cell.win::after,
+.router-fx[data-source='fallback'] .router-fx-burst i {
+  background: var(--danger);
+}
+.router-fx-selector {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  left: 8px;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  opacity: 0;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--primary) 5%, transparent);
+  transform: translate(0, 0);
+  transition:
+    transform 150ms cubic-bezier(0.18, 1.7, 0.5, 1),
+    opacity 120ms ease;
+}
+.router-fx-selector.visible {
+  opacity: 1;
+}
+.router-fx[data-state='settled'] .router-fx-selector {
+  opacity: 0;
+}
+.router-fx-burst {
+  position: absolute;
+  z-index: 5;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.router-fx-burst i {
+  position: absolute;
+  left: -2px;
+  top: -2px;
+  width: 4px;
+  height: 4px;
+  border-radius: var(--radius);
+  background: var(--primary);
+  opacity: 0;
+  animation: router-fx-burst 540ms ease-out forwards;
+}
+.router-fx-burst i:nth-child(1) {
+  --router-burst-x: -22px;
+  --router-burst-y: -10px;
+}
+.router-fx-burst i:nth-child(2) {
+  --router-burst-x: 22px;
+  --router-burst-y: -10px;
+}
+.router-fx-burst i:nth-child(3) {
+  --router-burst-x: -22px;
+  --router-burst-y: 10px;
+}
+.router-fx-burst i:nth-child(4) {
+  --router-burst-x: 22px;
+  --router-burst-y: 10px;
+}
+.router-fx-burst i:nth-child(5) {
+  --router-burst-x: 0;
+  --router-burst-y: -18px;
+}
+.router-fx-burst i:nth-child(6) {
+  --router-burst-x: 0;
+  --router-burst-y: 18px;
+}
+@keyframes router-fx-burst {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--router-burst-x), var(--router-burst-y)) scale(0.4);
+  }
+}
+.router-fx[data-observe='true'] {
+  opacity: 0.58;
+}
+.router-fx[data-observe='true'] .router-fx-header::after {
+  content: 'observe';
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+}
+.router-fx[data-render-mode='history'],
+.router-fx[data-render-mode='history'] *,
+.router-fx[data-render-mode='history'] *::before,
+.router-fx[data-render-mode='history'] *::after {
+  animation: none !important;
+  transition: none !important;
+}
+@media (max-width: 640px) {
+  .router-fx-grid {
+    grid-template-columns: repeat(
+      var(--router-fx-mobile-cols, var(--router-fx-cols, 2)),
+      minmax(0, 1fr)
+    );
+    grid-auto-rows: 30px;
+    padding: 6px;
+  }
+  .router-fx-header {
+    font-size: 0.58rem;
+    letter-spacing: 0.22em;
+  }
 }
 
 .chat-attachments {

@@ -191,8 +191,8 @@ export function routerFxUsageIdentity(
  * The router tier registry: the mutable tier bookkeeping the legacy view held
  * as IIFE module-globals and fed from `_loadFeatureToggles` (chat.js:1502-1531).
  * Extracted here as a small stateful object so the roster builders below stay
- * pure over it (unit-testable) and the config-loader (a later task) can populate
- * it via `setTierConfig`/`rememberTierDecision`/`setConfigTiers`.
+ * pure over it (unit-testable), while the chat config loader populates it via
+ * `setTierConfig`/`rememberTierDecision`/`setConfigTiers`.
  */
 export interface RouterFxRegistry {
   // chat.js:3376 — ordered slot list; chat.js:3377 tier→model; chat.js:3378
@@ -1576,7 +1576,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     pauseScanTimers,
     resumeLiveStrip,
     clearRouterFxVisuals,
-    // scan scheduling (send flow — a later task)
+    // scan scheduling (driven by the chat send flow)
     scheduleBeginScan,
     beginScan,
     // compaction (Task 7)

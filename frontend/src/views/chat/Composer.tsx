@@ -103,6 +103,8 @@ export interface ComposerProps {
    * previews sit with the composer (chat.js:8346 `_renderAttachmentPreview`).
    */
   tray?: React.ReactNode
+  /** Imperative router-fx mount point, rendered below the input row like legacy. */
+  routerFxDock?: React.ReactNode
   /**
    * Optional composer-settings toolbar (execution mode + Pilot Router + usage),
    * mounted behind a gear trigger in the input bar (chat.js:1248-1281
@@ -141,6 +143,7 @@ export function Composer({
   hasPendingWork = false,
   onAttachFiles,
   tray,
+  routerFxDock,
   toolbar,
   pendingCount = 0,
   onRecoverPending,
@@ -512,6 +515,7 @@ export function Composer({
           </button>
         )}
       </div>
+      {routerFxDock}
     </div>
   )
 }
