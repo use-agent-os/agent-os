@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { Composer } from './Composer'
 
@@ -33,7 +33,13 @@ describe('Composer', () => {
 
   it('shows an abort affordance while busy', () => {
     render(<Composer onSend={() => {}} onAbort={() => {}} busy={true} />)
-    expect(screen.getByRole('button', { name: /abort|stop/i })).toBeInTheDocument()
+    const stop = screen.getByRole('button', { name: /abort|stop/i })
+    expect(stop).toBeInTheDocument()
+    // A single SVG child keeps the filled stop square geometrically centred.
+    // The previous hidden "Abort" text remained a flex item and `btn-term`'s
+    // inherited 8px gap pushed the pseudo-glyph visibly to the left.
+    expect(stop.childElementCount).toBe(1)
+    expect(stop.querySelector('svg')).not.toBeNull()
   })
 
   it('hides the abort affordance when idle', () => {
@@ -163,6 +169,12 @@ describe('Composer', () => {
     expect(onAttachFiles).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps conversation-level New chat out of the composer and uses an SVG Send icon', () => {
+    render(<Composer onSend={() => {}} busy={false} />)
+    expect(screen.queryByRole('button', { name: /new chat/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Send' }).querySelector('svg')).not.toBeNull()
+  })
+
   it('grows the textarea with content (auto-resize, chat.js:2584)', () => {
     render(<Composer onSend={() => {}} busy={false} />)
     const ta = textbox()
@@ -171,6 +183,28 @@ describe('Composer', () => {
     Object.defineProperty(ta, 'scrollHeight', { configurable: true, value: 120 })
     fireEvent.change(ta, { target: { value: 'a\nb\nc' } })
     expect(ta.style.height).not.toBe('')
+  })
+
+  it('keeps router status above composer-local trays and the input row', () => {
+    const { container } = render(
+      <Composer
+        onSend={() => {}}
+        busy={false}
+        routerFxDock={<div data-testid="router-status" />}
+        tray={<div data-testid="attachment-tray" />}
+        slashMenu={<div data-testid="slash-menu" />}
+      />,
+    )
+    const dock = screen.getByTestId('router-status')
+    const tray = screen.getByTestId('attachment-tray')
+    const slashMenu = screen.getByTestId('slash-menu')
+    const composer = container.querySelector('.chat-composer')
+    expect(Array.from(container.querySelector('.chat-composer-shell')!.children)).toEqual([
+      dock,
+      tray,
+      slashMenu,
+      composer,
+    ])
   })
 
   // ── ESC priority chain (chat.js:2530-2538 / 2449) ──────────────────────────
@@ -287,26 +321,51 @@ describe('Composer', () => {
     expect(ref.current?.getValue()).toBe('recovered text')
   })
 
-  it('opens the settings popover on the trigger and closes it on an outside click', () => {
+  it('opens the settings popover on the trigger and closes it on an outside click', async () => {
     render(
       <Composer onSend={() => {}} busy={false} toolbar={<div data-testid="tb">settings</div>} />,
     )
     const trigger = screen.getByRole('button', { name: /run modes/i })
+    expect(trigger).toHaveAttribute('aria-controls', 'chat-toolbar-popover')
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
     // Open.
     fireEvent.click(trigger)
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('dialog', { name: 'Run modes' })).toBeInTheDocument()
     expect(screen.getByTestId('tb')).toBeInTheDocument()
     // A mousedown outside the toolbar wrap closes it (previously stayed open).
     fireEvent.mouseDown(document.body)
-    expect(screen.queryByTestId('tb')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByTestId('tb')).not.toBeInTheDocument())
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
   })
 
-  it('closes the settings popover on Escape', () => {
+  it('closes the settings popover on Escape and restores focus to its trigger', async () => {
     render(
       <Composer onSend={() => {}} busy={false} toolbar={<div data-testid="tb2">settings</div>} />,
     )
-    fireEvent.click(screen.getByRole('button', { name: /run modes/i }))
+    fireEvent.change(textbox(), { target: { value: 'keep this draft' } })
+    const trigger = screen.getByRole('button', { name: /run modes/i })
+    fireEvent.click(trigger)
     expect(screen.getByTestId('tb2')).toBeInTheDocument()
-    fireEvent.keyDown(document, { key: 'Escape' })
-    expect(screen.queryByTestId('tb2')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close run modes' })).toHaveFocus()
+    fireEvent.keyDown(textbox(), { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByTestId('tb2')).not.toBeInTheDocument())
+    expect(trigger).toHaveFocus()
+    expect(textbox()).toHaveValue('keep this draft')
+  })
+
+  it('exposes a labelled close control inside the settings dialog', async () => {
+    render(
+      <Composer onSend={() => {}} busy={false} toolbar={<div data-testid="tb3">settings</div>} />,
+    )
+    const trigger = screen.getByRole('button', { name: /run modes/i })
+    fireEvent.click(trigger)
+
+    const close = screen.getByRole('button', { name: 'Close run modes' })
+    expect(close).toHaveFocus()
+    fireEvent.click(close)
+
+    await waitFor(() => expect(screen.queryByTestId('tb3')).not.toBeInTheDocument())
+    expect(trigger).toHaveFocus()
   })
 })

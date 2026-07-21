@@ -154,7 +154,12 @@ function createRouterConfigGate(): { promise: Promise<void>; resolve: () => void
   }
 }
 
-export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEventSeams }): {
+export function useTranscript(opts: {
+  sessionKey: string
+  seams?: TranscriptEventSeams
+  /** Opens the full tool-result dialog rendered by ChatPage (chat.js:7311). */
+  openModal?: (title: string, html: string, buttons: Array<Record<string, unknown>>) => void
+}): {
   containerRef: React.RefObject<HTMLDivElement | null>
   routerFxDockRef: React.RefObject<HTMLDivElement | null>
   controller: StreamController
@@ -226,6 +231,11 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
   // Later-task seams, held in a ref so the (stable) subscription handlers always
   // read the latest without re-registering. Written in an effect.
   const seamsRef = useRef<TranscriptEventSeams>(opts.seams ?? {})
+
+  // The controller is created once, while the React-owned modal callback may
+  // change across renders. Route it through a ref so every View-full click sees
+  // the latest callback without rebuilding the imperative transcript controller.
+  const openModalRef = useRef(opts.openModal)
 
   // Stable syncer the once-created controller calls (via its `updateSendButton`
   // dep) to push the imperative `_isStreaming` flag into the reactive `busy`
@@ -334,6 +344,7 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
       routerFxDock: () => routerFxDockRef.current,
       routerFeatureEnabled: () => routerFeatureEnabledRef.current,
       routerFxAwaitConfig: () => routerConfigGate.promise,
+      openModal: (title, html, buttons) => openModalRef.current?.(title, html, buttons),
       // Artifact preview/download URLs + download Authorization header
       // (chat.js:7575/7657 `App.getAuthToken()`).
       getAuthToken,
@@ -384,6 +395,22 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
   // Feed the controller's existing router-fx registry from config.get. The
   // registry intentionally lives inside the controller; this effect mutates that
   // single instance, then releases decision/scan paths waiting on config.
+  useEffect(() => {
+    openModalRef.current = opts.openModal
+  }, [opts.openModal])
+
+  // chat.js:2575-2579 — streaming follows the tail only while the reader is
+  // already near it. Passive scroll tracking lets a manual upward scroll pause
+  // auto-follow until the reader returns within the legacy 60px threshold.
+  useEffect(() => {
+    const thread = containerRef.current
+    if (!thread) return
+    const onScroll = () => controller.updateAutoScrollFromThread()
+    thread.addEventListener('scroll', onScroll, { passive: true })
+    onScroll()
+    return () => thread.removeEventListener('scroll', onScroll)
+  }, [controller])
+
   useEffect(() => {
     if (routerConfigQuery.isPending) return
 

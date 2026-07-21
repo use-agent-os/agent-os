@@ -2,7 +2,11 @@ import './chat.css'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { toast } from 'sonner'
+import { FileDown, SquarePen, Terminal, X } from 'lucide-react'
+import { AnimatePresence } from 'motion/react'
 import { useRpc } from '@/app/providers'
+import { ShellHeaderPortal, ShellSidebarActionPortal } from '@/app/ShellHeaderSlot'
+import { ModalShell } from '@/components/ModalShell'
 import { Attachments, useAttachments } from './Attachments'
 import { Composer, type ComposerHandle } from './Composer'
 import {
@@ -103,6 +107,19 @@ function collectExportMessages(thread: HTMLElement | null): ExportMessage[] {
 export function ChatPage() {
   const rpc = useRpc()
   const [searchParams, setSearchParams] = useSearchParams()
+  const [toolResultModal, setToolResultModal] = useState<{
+    title: string
+    content: string
+  } | null>(null)
+
+  // transcript/tools.ts preserves the legacy UI.modal seam and hands us a
+  // small escaped <pre>. Decode it to text and let React render the content;
+  // never inject tool output as HTML.
+  const openToolResultModal = useCallback((title: string, html: string) => {
+    const template = document.createElement('template')
+    template.innerHTML = html
+    setToolResultModal({ title, content: template.content.textContent || '' })
+  }, [])
 
   // The active session key is REACTIVE state (legacy `_sessionKey`, chat.js:1170)
   // — changing it re-points `useTranscript`, which parks the old session's stream,
@@ -174,7 +191,7 @@ export function ChatPage() {
     isCompactInFlightForCurrentSession,
     setStreamIdlePausedForApproval,
     setPendingDelegates,
-  } = useTranscript({ sessionKey })
+  } = useTranscript({ sessionKey, openModal: openToolResultModal })
   const attachments = useAttachments()
 
   // The composer value mirror (chat.js:2639 `_textarea.value`) — drives the slash
@@ -260,20 +277,28 @@ export function ChatPage() {
   // `useTranscript`, which parks the outgoing session's stream, unsubscribes,
   // re-subscribes the new (empty) session, and reloads its (empty) history —
   // exactly the unsubscribe → park → new key → reset → subscribe sequence legacy
-  // did inline (chat.js:2694-2712). The composer clear + empty-state repaint are
-  // handled by the composer / transcript on the key change.
+  // did inline (chat.js:2694-2712). Pending work is cleared and the next-send
+  // intent is stamped here; the slash-command caller has already cleared its
+  // command text, while the sidebar action preserves any draft for the new chat.
   const onSessionAction = useCallback(
     (action: string) => {
       if (action === 'new_chat') {
         const key = genSessionKey(sessionKey)
+        pending.clearAll()
+        pendingIntentRef.current = 'new_chat'
         switchToSession(key)
         toast.info('New chat session in the current agent: ' + key)
       }
       // `compact_context` stays delegated to the compaction controller (Task 7)
       // via the hook's own RPC fallback — not a session-swap concern.
     },
-    [sessionKey, switchToSession],
+    [pending, sessionKey, switchToSession],
   )
+
+  const startNewChat = useCallback(() => {
+    onSessionAction('new_chat')
+    composerHandleRef.current?.focus()
+  }, [onSessionAction])
 
   // chat.js:2723 `sessions.reset` — the chip's reset control + the `/reset` slash
   // command both reset the CURRENT session in place (no key change). Fire the RPC
@@ -511,21 +536,38 @@ export function ChatPage() {
 
   return (
     <div className="chat-stage" onDrop={onDrop} onDragOver={onDragOver} onPaste={onPaste}>
-      {/* Session chip + switcher (chat.js:1219-1229 topbar-center). The React
-          view owns its own header row (no shared topbar-center slot); the chip
-          drives switch / copy / reset over the reactive session key. */}
-      <header className="chat-session-bar">
-        <SessionChip sessionKey={sessionKey} onSwitch={switchToSession} onReset={resetSession} />
+      {/* New chat is a conversation-level action, so it lives in the standard
+          AI-product position below the sidebar brand instead of beside Send. */}
+      <ShellSidebarActionPortal>
         <button
           type="button"
-          className="chat-export-btn"
-          title="Export this chat as Markdown"
-          aria-label="Export chat as Markdown"
-          onClick={onExportMarkdown}
+          className="chat-new-button"
+          title="New chat"
+          aria-label="New chat"
+          onClick={startNewChat}
         >
-          Export .md
+          <SquarePen aria-hidden="true" />
+          <span className="chat-new-button__label">New chat</span>
         </button>
-      </header>
+      </ShellSidebarActionPortal>
+      {/* Session context belongs to the shared shell chrome (legacy
+          topbar-center). The portal keeps one header while the chat view
+          continues to own the reactive session actions. */}
+      <ShellHeaderPortal>
+        <div className="chat-session-bar" role="group" aria-label="Chat session controls">
+          <SessionChip sessionKey={sessionKey} onSwitch={switchToSession} onReset={resetSession} />
+          <button
+            type="button"
+            className="chat-export-btn"
+            title="Export this chat as Markdown"
+            aria-label="Export chat as Markdown"
+            onClick={onExportMarkdown}
+          >
+            <FileDown className="chat-session-action-icon" aria-hidden="true" />
+            <span className="chat-session-action-label">Export .md</span>
+          </button>
+        </div>
+      </ShellHeaderPortal>
       <div className="chat-thread" ref={containerRef} />
       <PendingQueue queue={pending.queue} onRemove={pending.remove} onClearAll={pending.clearAll} />
       <Composer
@@ -554,12 +596,7 @@ export function ChatPage() {
         onAttachFiles={attachments.addFiles}
         tray={<Attachments api={attachments} />}
         routerFxDock={
-          <div
-            id="chat-routerfx-dock"
-            className="chat-routerfx-dock"
-            ref={routerFxDockRef}
-            aria-live="polite"
-          />
+          <div id="chat-routerfx-dock" className="chat-routerfx-dock" ref={routerFxDockRef} />
         }
         toolbar={
           <Toolbar
@@ -569,6 +606,46 @@ export function ChatPage() {
           />
         }
       />
+      <AnimatePresence>
+        {toolResultModal ? (
+          <ModalShell
+            role="dialog"
+            labelledBy="chat-tool-result-modal-title"
+            describedBy="chat-tool-result-modal-content"
+            overlayClassName="chat-output-modal-overlay"
+            className="chat-output-modal"
+            onClose={() => setToolResultModal(null)}
+          >
+            <header className="chat-output-modal__header">
+              <div className="chat-output-modal__identity">
+                <span className="chat-output-modal__icon" aria-hidden="true">
+                  <Terminal />
+                </span>
+                <div>
+                  <div className="chat-output-modal__eyebrow">Tool output</div>
+                  <h2 id="chat-tool-result-modal-title">{toolResultModal.title}</h2>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="chat-output-modal__close"
+                aria-label="Close"
+                title="Close tool output"
+                onClick={() => setToolResultModal(null)}
+              >
+                <X aria-hidden="true" />
+              </button>
+            </header>
+            <div className="chat-output-modal__meta">
+              <span>Full result</span>
+              <span>{toolResultModal.content.length.toLocaleString()} characters</span>
+            </div>
+            <pre id="chat-tool-result-modal-content" className="chat-tool-result-full">
+              {toolResultModal.content}
+            </pre>
+          </ModalShell>
+        ) : null}
+      </AnimatePresence>
     </div>
   )
 }

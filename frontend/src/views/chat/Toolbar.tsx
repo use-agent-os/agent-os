@@ -233,62 +233,77 @@ export function Toolbar({
 
   return (
     <div className="chat-toolbar" data-bypass={bypass ? 'on' : undefined}>
-      <div className="chat-toolbar-row">
-        <span className="chat-toolbar-row-label t-label">Execution mode</span>
-        <ElevatedPill
-          sessionMode={sessionMode}
-          globalMode={globalMode}
-          unavailable={unavailable}
-          onToggle={onPillToggle}
-        />
-      </div>
-
-      <div className="chat-toolbar-row">
-        <span className="chat-toolbar-row-label t-label">Pilot Router</span>
-        <label className="chat-toggle" aria-label="Pilot Router">
-          <input
-            type="checkbox"
-            checked={routerChecked}
-            onChange={(e) => void onRouterToggle(e.target.checked)}
+      <div className="chat-toolbar-controls">
+        <div className="chat-toolbar-row chat-toolbar-row--mode">
+          <span className="chat-toolbar-row-label t-label">Execution mode</span>
+          <ElevatedPill
+            sessionMode={sessionMode}
+            globalMode={globalMode}
+            unavailable={unavailable}
+            onToggle={onPillToggle}
           />
-          <span className="chat-toggle-track" aria-hidden="true">
-            <span className="chat-toggle-thumb" />
-          </span>
-        </label>
+        </div>
+
+        <div className="chat-toolbar-row">
+          <span className="chat-toolbar-row-label t-label">Pilot Router</span>
+          <label className="chat-toggle" aria-label="Pilot Router">
+            <input
+              type="checkbox"
+              checked={routerChecked}
+              onChange={(e) => void onRouterToggle(e.target.checked)}
+            />
+            <span className="chat-toggle-track" aria-hidden="true">
+              <span className="chat-toggle-thumb" />
+            </span>
+          </label>
+        </div>
+
+        <div className="chat-toolbar-row">
+          <span className="chat-toolbar-row-label t-label">Visual effects</span>
+          <label className="chat-toggle" aria-label="Visual effects">
+            <input
+              type="checkbox"
+              checked={routerFxChecked}
+              onChange={(e) => onRouterFxChange(e.target.checked)}
+            />
+            <span className="chat-toggle-track" aria-hidden="true">
+              <span className="chat-toggle-thumb" />
+            </span>
+          </label>
+        </div>
       </div>
 
-      <div className="chat-toolbar-row">
-        <span className="chat-toolbar-row-label t-label">Visual effects</span>
-        <label className="chat-toggle" aria-label="Visual effects">
-          <input
-            type="checkbox"
-            checked={routerFxChecked}
-            onChange={(e) => onRouterFxChange(e.target.checked)}
-          />
-          <span className="chat-toggle-track" aria-hidden="true">
-            <span className="chat-toggle-thumb" />
-          </span>
-        </label>
-      </div>
-
-      <div className="chat-toolbar-usage" aria-label="Session usage">
+      <div className="chat-toolbar-usage" role="group" aria-labelledby="chat-toolbar-usage-title">
+        <div id="chat-toolbar-usage-title" className="chat-toolbar-usage-title t-label">
+          Session usage
+        </div>
         {usage ? (
           <>
-            <span className="chat-toolbar-usage-model t-data">{usage.model || '—'}</span>
-            <span className="chat-toolbar-usage-metric">
-              <span className="t-label">in</span>{' '}
-              <span className="t-data">{tokens(usage.input)}</span>
-            </span>
-            <span className="chat-toolbar-usage-metric">
-              <span className="t-label">out</span>{' '}
-              <span className="t-data">{tokens(usage.output)}</span>
-            </span>
-            {usage.cost != null ? (
-              <span className="chat-toolbar-usage-metric">
-                <span className="t-label">cost</span>{' '}
-                <span className="t-data">${usage.cost.toFixed(4)}</span>
+            <div className="chat-toolbar-usage-model">
+              <span className="t-label">Model</span>
+              <span
+                className="chat-toolbar-usage-model-value t-data"
+                title={usage.model || 'Not reported'}
+              >
+                {usage.model || 'Not reported'}
               </span>
-            ) : null}
+            </div>
+            <div className="chat-toolbar-usage-metrics" data-has-cost={usage.cost != null}>
+              <span className="chat-toolbar-usage-metric">
+                <span className="t-label">in</span>
+                <span className="t-data">{tokens(usage.input)}</span>
+              </span>
+              <span className="chat-toolbar-usage-metric">
+                <span className="t-label">out</span>
+                <span className="t-data">{tokens(usage.output)}</span>
+              </span>
+              {usage.cost != null ? (
+                <span className="chat-toolbar-usage-metric">
+                  <span className="t-label">cost</span>
+                  <span className="t-data">${usage.cost.toFixed(4)}</span>
+                </span>
+              ) : null}
+            </div>
           </>
         ) : (
           <span className="chat-toolbar-usage-empty t-label">No usage yet</span>

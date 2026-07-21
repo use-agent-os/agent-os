@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   modelDisplayName,
   routerFxStripProvider,
@@ -216,7 +216,7 @@ describe('routerFxHasMultipleCandidates (parity chat.js:3551)', () => {
 function makeRenderer(reg: RouterFxRegistry, thread: HTMLElement | null) {
   return createRouterFxRenderer({
     thread: () => thread,
-    dock: () => null, // no dock in the frontend → strips suppressed (legacy parity)
+    dock: () => null, // this isolated factory test intentionally has no dock
     getSessionKey: () => 'agent:main:webchat:default',
     registry: reg,
     pref: { enabled: true, variant: 'default' },
@@ -242,6 +242,73 @@ describe('createRouterFxRenderer (factory smoke)', () => {
     expect(el).not.toBeNull()
     expect(el!.classList.contains('router-fx')).toBe(true)
     expect(el!.querySelectorAll('.router-fx-cell').length).toBe(3)
+    expect(el!.querySelector('.router-fx-header .title')).toHaveTextContent('Choosing a model')
+    expect(el).toHaveAttribute('role', 'status')
+    expect(el).toHaveAttribute('aria-live', 'polite')
+    expect(el).toHaveAttribute('aria-atomic', 'true')
+  })
+
+  it('uses friendly selected-model copy for a pre-settled strip', () => {
+    const reg = seededRegistry()
+    const renderer = makeRenderer(reg, document.createElement('div'))
+    const el = renderer.buildRouterFxElement(
+      { tier: 'c1', model: 'anthropic/claude-a' },
+      { preSettled: true },
+    )
+    expect(el).not.toBeNull()
+    expect(el!.dataset.state).toBe('settled')
+    expect(el!.dataset.hasWinner).toBe('true')
+    expect(el!.querySelector('.router-fx-header .title')).toHaveTextContent('Model selected')
+    expect(el).toHaveAttribute('aria-label', 'Model selected: claude-a')
+  })
+
+  it('describes observe-mode output as a suggestion rather than a selection', () => {
+    const reg = seededRegistry()
+    const renderer = makeRenderer(reg, document.createElement('div'))
+    const el = renderer.buildRouterFxElement(
+      { tier: 'c1', model: 'anthropic/claude-a', routing_applied: false },
+      { preSettled: true },
+    )
+    expect(el).not.toBeNull()
+    expect(el!.querySelector('.router-fx-header .title')).toHaveTextContent('Suggested model')
+    expect(el).toHaveAttribute('aria-label', 'Suggested model: claude-a')
+  })
+
+  it('never announces a selection when a scan finishes without a winner', () => {
+    vi.useFakeTimers()
+    const reg = seededRegistry()
+    const host = document.createElement('div')
+    const thread = document.createElement('div')
+    const anchor = document.createElement('div')
+    const dock = document.createElement('div')
+    anchor.className = 'msg user'
+    thread.appendChild(anchor)
+    host.append(thread, dock)
+    document.body.appendChild(host)
+    const renderer = createRouterFxRenderer({
+      thread: () => thread,
+      dock: () => dock,
+      getSessionKey: () => 's',
+      registry: reg,
+      pref: { enabled: true, variant: 'default' },
+      routerFeatureEnabled: () => true,
+      esc: (s) => s,
+      scrollToBottom: () => {},
+    })
+
+    try {
+      expect(renderer.beginScan(anchor, 'seed')).toBe(true)
+      vi.advanceTimersByTime(601)
+      const el = dock.querySelector('.router-fx') as HTMLElement
+      expect(el.dataset.state).toBe('settled')
+      expect(el.dataset.hasWinner).toBe('false')
+      expect(el.querySelector('.router-fx-header .title')).toHaveTextContent('Finalizing model')
+      expect(el.getAttribute('aria-label')).not.toContain('selected')
+    } finally {
+      renderer.clearRouterFxVisuals()
+      host.remove()
+      vi.useRealTimers()
+    }
   })
 
   it('hasDock reflects the injected dock element (chat.js `if (_routerFxDock)`)', () => {

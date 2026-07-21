@@ -4,7 +4,7 @@ import { RouterProvider, createMemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { routeChildren } from './routes'
 import { AppProviders } from './providers'
-import { AppShell } from './AppShell'
+import { AppShell, SIDEBAR_COLLAPSED_STORAGE_KEY } from './AppShell'
 import { useConnection } from '@/stores/connection'
 import { useApprovals } from '@/services/approval-monitor'
 import type { Bootstrap } from '@/lib/bootstrap'
@@ -144,6 +144,8 @@ describe('index route renders the default view without changing the URL', () => 
 describe('app shell chrome', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+    window.localStorage.removeItem(SIDEBAR_COLLAPSED_STORAGE_KEY)
+    document.body.style.overflow = ''
     mockBootstrap = { ...mockBootstrap, version: '' }
     useConnection.getState().setState('disconnected')
   })
@@ -199,14 +201,22 @@ describe('app shell chrome', () => {
 
     fireEvent.click(toggle)
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: 'Close navigation' })).toBeInTheDocument()
+    expect(document.body.style.overflow).toBe('hidden')
     // app.js:153-157 — Esc closes the drawer.
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle).toHaveFocus()
+    expect(document.body.style.overflow).toBe('')
 
     fireEvent.click(toggle)
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     // app.js:147-151 — a click outside the sidebar/toggle closes the drawer.
     fireEvent.click(screen.getByRole('main'))
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByRole('button', { name: 'Close navigation' }))
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
   })
 
@@ -216,6 +226,85 @@ describe('app shell chrome', () => {
     const sidebar = document.getElementById('sidebar-nav')!
     expect(sidebar).not.toHaveAttribute('aria-hidden')
     expect(sidebar).not.toHaveAttribute('inert')
+  })
+
+  it('places the single New chat action below the sidebar brand and keeps it in the rail', async () => {
+    stubMatchMedia(false)
+    renderShellAt('/chat')
+
+    const sidebar = document.getElementById('sidebar-nav')!
+    const slot = await screen.findByTestId('shell-sidebar-primary-action')
+    const action = await screen.findByRole('button', { name: 'New chat' })
+    const nav = screen.getByRole('navigation', { name: 'Main' })
+    expect(slot).toContainElement(action)
+    expect(sidebar).toContainElement(action)
+    expect(nav).not.toContainElement(action)
+    expect(document.querySelector('.chat-composer')).not.toContainElement(action)
+    expect(screen.getAllByRole('button', { name: 'New chat' })).toHaveLength(1)
+    expect(action).toHaveAttribute('title', 'New chat')
+    expect(action.querySelector('svg')).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse navigation' }))
+    expect(sidebar).toHaveAttribute('data-collapsed', 'true')
+    expect(action).toBeInTheDocument()
+  })
+
+  it('closes the mobile drawer and focuses Message after New chat', async () => {
+    stubMatchMedia(true)
+    renderShellAt('/chat')
+    const toggle = screen.getByRole('button', { name: 'Toggle menu' })
+    fireEvent.click(toggle)
+
+    const action = await screen.findByRole('button', { name: 'New chat' })
+    fireEvent.click(action)
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(document.getElementById('sidebar-nav')).toHaveAttribute('inert')
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveFocus()
+  })
+
+  it('aligns both shell headers and folds desktop navigation into an accessible icon rail', () => {
+    stubMatchMedia(false)
+    renderShellAt('/cron')
+
+    const sidebar = document.getElementById('sidebar-nav')!
+    const sidebarHead = sidebar.querySelector('.shell-sidebar__head')!
+    const shellHeader = screen.getByTestId('shell-header')
+    expect(sidebarHead).toHaveClass('h-12')
+    expect(shellHeader).toHaveClass('h-12')
+    expect(sidebar).toHaveAttribute('data-collapsed', 'false')
+
+    const collapse = screen.getByRole('button', { name: 'Collapse navigation' })
+    expect(collapse).toHaveAttribute('aria-controls', 'sidebar-nav')
+    expect(collapse).toHaveAttribute('aria-expanded', 'true')
+    fireEvent.click(collapse)
+
+    expect(sidebar).toHaveAttribute('data-collapsed', 'true')
+    expect(window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY)).toBe('true')
+    expect(screen.getByRole('link', { name: 'Cron' })).toHaveAttribute('aria-current', 'page')
+
+    const expand = screen.getByRole('button', { name: 'Expand navigation' })
+    expect(expand).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(expand)
+    expect(sidebar).toHaveAttribute('data-collapsed', 'false')
+    expect(window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY)).toBe('false')
+  })
+
+  it('restores the desktop rail preference without applying it to the mobile drawer', () => {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, 'true')
+
+    stubMatchMedia(false)
+    const desktop = renderShellAt('/sessions')
+    expect(document.getElementById('sidebar-nav')).toHaveAttribute('data-collapsed', 'true')
+    expect(screen.getByRole('link', { name: 'Sessions' })).toHaveAttribute('aria-current', 'page')
+    desktop.unmount()
+
+    stubMatchMedia(true)
+    renderShellAt('/sessions')
+    const sidebar = document.getElementById('sidebar-nav')!
+    expect(sidebar).toHaveAttribute('data-collapsed', 'false')
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle menu' }))
+    expect(screen.getByRole('link', { name: 'Sessions' })).toHaveTextContent('Sessions')
   })
 
   // M17 — parity: app.js:72-88 — nav grouped under Chat / Control / Settings,
@@ -239,9 +328,9 @@ describe('app shell chrome', () => {
     expect(links[links.length - 1]).toBe('Approvals')
   })
 
-  // M13 — parity: app.js:58-68 — version footer 'v<semver>' derived from the
+  // M13 — parity: app.js:58-68 — version label 'v<semver>' derived from the
   // bootstrap version with the '+NNN' build-suffix stripped and safe-charset
-  // filtered; suppressed entirely when the version is empty.
+  // filtered; the label is suppressed when empty while the status bar remains.
   it('renders the sidebar version footer with the build-suffix stripped', () => {
     stubMatchMedia(false)
     mockBootstrap = { ...mockBootstrap, version: '2026.7.19+1779915602' }
@@ -251,39 +340,58 @@ describe('app shell chrome', () => {
     expect(foot).not.toHaveTextContent('1779915602')
   })
 
-  it('suppresses the version footer when the bootstrap version is empty', () => {
+  it('suppresses only the version label when the bootstrap version is empty', () => {
     stubMatchMedia(false)
     mockBootstrap = { ...mockBootstrap, version: '' }
     renderShellAt('/cron')
-    expect(screen.queryByTestId('nav-foot')).toBeNull()
+    const foot = screen.getByTestId('nav-foot')
+    expect(foot).toHaveTextContent('DISCONNECTED')
+    expect(foot.querySelector('.shell-sidebar__version')).toBeNull()
   })
 
-  // M14 — parity: app.js:94,174-183 — the connection pill is PERSISTENT (never
-  // unmounts) and shows a compact 'Connected' ok state with a title attr, plus
-  // 'Connecting'/'Disconnected' states.
-  it('shows a persistent connection pill across all states including Connected', () => {
+  // M14 — the sidebar footer is the shell's single persistent connection
+  // indicator. The duplicate header pill was removed by owner request.
+  it('shows connection state only in the sidebar footer across all states', () => {
     stubMatchMedia(false)
     renderShellAt('/cron')
     const pill = document.getElementById('conn-pill')!
+    const header = screen.getByTestId('shell-header')
+
+    expect(screen.getAllByRole('status')).toHaveLength(1)
+    expect(header).not.toContainElement(pill)
 
     // Disconnected (initial store state).
-    expect(pill).toHaveTextContent('Disconnected')
-    expect(pill).toHaveAttribute('title', 'Disconnected')
+    expect(pill).toHaveTextContent('DISCONNECTED')
+    expect(pill).toHaveAttribute('title', expect.stringContaining('Disconnected'))
     expect(pill).toHaveAttribute('data-variant', 'err')
 
     // Connecting.
     act(() => useConnection.getState().setState('connecting'))
-    expect(pill).toHaveTextContent('Connecting')
-    expect(pill).toHaveAttribute('title', 'Connecting')
+    expect(pill).toHaveTextContent('CONNECTING')
+    expect(pill).toHaveAttribute('title', expect.stringContaining('Connecting'))
     expect(pill).toHaveAttribute('data-variant', 'warn')
 
-    // Connected — the pill STAYS mounted with a visible ok state (legacy did not
-    // unmount the indicator on connect).
+    // Connected stays mounted in the footer without a second header readout.
     act(() => useConnection.getState().setState('connected'))
     expect(document.getElementById('conn-pill')).not.toBeNull()
-    expect(pill).toHaveTextContent('Connected')
-    expect(pill).toHaveAttribute('title', 'Connected')
+    expect(pill).toHaveTextContent('CONNECTED')
+    expect(pill).toHaveAttribute('title', expect.stringContaining('Connected'))
     expect(pill).toHaveAttribute('data-variant', 'ok')
+    expect(header).not.toHaveTextContent('CONNECTED')
+  })
+
+  it('merges chat session controls into the single shell header', () => {
+    stubMatchMedia(false)
+    renderShellAt('/chat')
+
+    const header = screen.getByTestId('shell-header')
+    const slot = screen.getByTestId('shell-header-context')
+    const controls = screen.getByRole('group', { name: 'Chat session controls' })
+
+    expect(header).toContainElement(controls)
+    expect(slot).toContainElement(controls)
+    expect(document.querySelector('.chat-stage > .chat-session-bar')).toBeNull()
+    expect(document.querySelectorAll('header')).toHaveLength(1)
   })
 })
 

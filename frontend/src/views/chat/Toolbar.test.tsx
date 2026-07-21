@@ -298,8 +298,14 @@ describe('Toolbar', () => {
       ],
     })
     render(<Toolbar sessionKey={SESSION} />)
-    const readout = await screen.findByLabelText(/session usage/i)
+    const readout = await screen.findByRole('group', { name: /session usage/i })
     await waitFor(() => expect(readout).toHaveTextContent(/gpt-x/))
+    expect(readout).toHaveTextContent('Session usage')
+    expect(readout.querySelector('.chat-toolbar-usage-model-value')).toHaveAttribute(
+      'title',
+      'gpt-x',
+    )
+    expect(readout.querySelectorAll('.chat-toolbar-usage-metric')).toHaveLength(3)
     // Input + output tokens surface in the readout.
     expect(readout).toHaveTextContent(/1,?200/)
     expect(readout).toHaveTextContent(/3,?400/)

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useEffect } from 'react'
 import { MemoryRouter, useLocation } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -137,6 +137,7 @@ describe('ChatPage', () => {
     renderPage()
     expect(document.querySelector('.chat-stage')).not.toBeNull()
     expect(document.querySelector('.chat-composer')).not.toBeNull()
+    expect(document.querySelector('#chat-routerfx-dock')).not.toHaveAttribute('aria-live')
   })
 
   it('sends the composed text via chat.send with the legacy payload (chat.js:6150/6193)', async () => {
@@ -308,6 +309,36 @@ describe('ChatPage', () => {
     expect(thread.innerHTML).toBe(threadHtmlAfterAbort)
   })
 
+  it('pauses streaming auto-scroll after the reader moves away from the bottom (chat.js:2575)', async () => {
+    mockRpc = makeRpc()
+    renderPage()
+    const thread = document.querySelector('.chat-thread') as HTMLElement
+    let scrollHeight = 1_000
+    Object.defineProperties(thread, {
+      clientHeight: { configurable: true, get: () => 300 },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+    })
+
+    // The first delta starts the turn and follows its tail.
+    await act(async () => {
+      mockRpc.emit('session.event.text_delta', { seq: 1, text: 'first chunk' }, {})
+    })
+    expect(thread.scrollTop).toBe(1_000)
+
+    // The reader scrolls well above the 60px near-bottom threshold.
+    thread.scrollTop = 200
+    fireEvent.scroll(thread)
+
+    // More streamed content grows the document, but must not pull the reader
+    // back down while they are reading the earlier section.
+    scrollHeight = 1_200
+    await act(async () => {
+      mockRpc.emit('session.event.text_delta', { seq: 2, text: ' second chunk' }, {})
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    })
+    expect(thread.scrollTop).toBe(200)
+  })
+
   it('renders a "Response timed out" row when the stream idle timer fires (stream.ts:522)', async () => {
     // Fix 2: `addMessage` must be wired into the controller. Without it, the
     // idle-timeout row (stream.ts:522) silently no-ops and a stalled stream ends
@@ -341,6 +372,50 @@ describe('ChatPage', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('opens the complete tool output from View full and closes the dialog (chat.js:7311)', async () => {
+    mockRpc = makeRpc()
+    renderPage()
+    const fullOutput = `exit_code=0 ${'provider output '.repeat(20)}<not-html>`
+
+    await act(async () => {
+      mockRpc.emit(
+        'session.event.tool_use_start',
+        {
+          key: 'agent:main:webchat:default',
+          tool_use_id: 'tool-view-full',
+          name: 'exec_command',
+          input: { cmd: 'run provider check' },
+        },
+        {},
+      )
+      mockRpc.emit(
+        'session.event.tool_result',
+        {
+          key: 'agent:main:webchat:default',
+          tool_use_id: 'tool-view-full',
+          name: 'exec_command',
+          content: fullOutput,
+        },
+        {},
+      )
+    })
+
+    const viewFull = await screen.findByRole('button', { name: 'View full' })
+    fireEvent.click(viewFull)
+
+    const dialog = screen.getByRole('dialog', { name: 'Tool Result' })
+    expect(dialog).toHaveClass('chat-output-modal')
+    expect(within(dialog).getByText('Tool output')).toBeInTheDocument()
+    expect(within(dialog).getByText(`${fullOutput.length} characters`)).toBeInTheDocument()
+    expect(dialog).toHaveTextContent(fullOutput)
+    expect(dialog.querySelector('not-html')).toBeNull()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Tool Result' })).not.toBeInTheDocument(),
+    )
   })
 
   /* ── Session chip + lifecycle (Task 11) ─────────────────────────────────── */
@@ -413,6 +488,29 @@ describe('ChatPage', () => {
         key: 'agent:main:webchat:default',
       }),
     )
+  })
+
+  it('starts a fresh session from the New chat action and returns focus to the composer', async () => {
+    mockRpc = makeRpc()
+    renderPage()
+    const action = screen.getByRole('button', { name: 'New chat' })
+    expect(action.querySelector('svg')).not.toBeNull()
+    fireEvent.click(action)
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveFocus()
+    await waitFor(() => {
+      const subscriptions = mockRpc.call.mock.calls
+        .filter(([method]) => method === 'sessions.messages.subscribe')
+        .map(([, params]) => (params as { key: string }).key)
+      expect(
+        subscriptions.some(
+          (key) => key.startsWith('agent:main:webchat:') && key !== 'agent:main:webchat:default',
+        ),
+      ).toBe(true)
+    })
+    expect(toast.info).toHaveBeenCalledWith(
+      expect.stringContaining('New chat session in the current agent'),
+    )
+    expect(mockRpc.call.mock.calls.some(([method]) => method === 'chat.send')).toBe(false)
   })
 
   it('the "/new" slash command starts a new chat + subscribes it (chat.js:2692 via onSessionAction)', async () => {

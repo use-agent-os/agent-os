@@ -1,5 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { describe, it, expect, vi } from 'vitest'
 import {
+  createToolRenderer,
   toolDisplayName,
   fmtToolDuration,
   toolResultIsError,
@@ -7,6 +9,32 @@ import {
   parseSubagentCompletion,
   isControlPlaneToolName,
 } from './tools'
+
+const chatCss = readFileSync('src/views/chat/chat.css', 'utf8')
+
+function createToolHarness() {
+  const bubble = document.createElement('div')
+  const body = document.createElement('div')
+  body.className = 'msg-body'
+  bubble.appendChild(body)
+
+  const renderer = createToolRenderer({
+    ensureStreamBubble: () => bubble,
+    markVisibleStreamEvent: () => {},
+    flushPendingTextSegment: () => {},
+    newTextSegment: () => document.createElement('div'),
+    scrollToBottom: () => {},
+    getAutoScroll: () => false,
+    pushSegment: () => {},
+    getSearchProvider: () => '',
+    setSearchProvider: () => {},
+    getSessionKey: () => 'agent:main:webchat:test',
+    addMessage: () => null,
+    pushMessage: () => {},
+  })
+
+  return { body, renderer }
+}
 
 // Pure-helper parity tests. Every asserted string/format is confirmed against
 // the legacy source (static/js/views/chat.js) at the cited line, NOT guessed.
@@ -118,5 +146,119 @@ describe('isControlPlaneToolName (parity chat.js:7057)', () => {
     expect(isControlPlaneToolName('router_control')).toBe(true)
     expect(isControlPlaneToolName('bash')).toBe(false)
     expect(isControlPlaneToolName('')).toBe(false)
+  })
+})
+
+describe('tool activity DOM states', () => {
+  it('renders a compact running row with an accessible status and blocks expansion', () => {
+    const { body, renderer } = createToolHarness()
+    renderer.appendToolCall({
+      name: 'skill_view',
+      tool_use_id: 'tool-running',
+      input: { skill: 'bankr' },
+    })
+
+    const details = body.querySelector<HTMLDetailsElement>('.chat-tools-collapse')!
+    const summary = details.querySelector<HTMLElement>('.chat-tools-summary')!
+    const status = summary.querySelector<HTMLElement>('.chat-tools-status')!
+
+    expect(details).toHaveClass('chat-tools-collapse--running')
+    expect(details).toHaveAttribute('data-tool-name', 'skill_view')
+    expect(summary).toHaveAttribute('aria-disabled', 'true')
+    expect(status).toHaveAttribute('data-status', 'running')
+    expect(status).toHaveAttribute('aria-label', 'Running')
+    expect(details.querySelector('.chat-tool-input')).toHaveTextContent('"skill": "bankr"')
+
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+    expect(summary.dispatchEvent(click)).toBe(false)
+    expect(details.open).toBe(false)
+  })
+
+  it('settles a successful row with elapsed time, result content, and expansion enabled', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(1_000)
+      const { body, renderer } = createToolHarness()
+      renderer.appendToolCall({
+        name: 'exec_command',
+        tool_use_id: 'tool-success',
+        input: { cmd: 'bankr status' },
+      })
+
+      vi.setSystemTime(2_500)
+      renderer.appendToolResult({
+        name: 'exec_command',
+        tool_use_id: 'tool-success',
+        result: 'authenticated',
+        execution_status: { status: 'success' },
+      })
+
+      const details = body.querySelector<HTMLDetailsElement>('[data-tool-id="tool-success"]')!
+      const summary = details.querySelector<HTMLElement>('.chat-tools-summary')!
+      const status = summary.querySelector<HTMLElement>('.chat-tools-status')!
+
+      expect(details).not.toHaveClass('chat-tools-collapse--running')
+      expect(details).toHaveClass('chat-tools-collapse--success')
+      expect(summary).not.toHaveAttribute('aria-disabled')
+      expect(status).toHaveAttribute('data-status', 'success')
+      expect(status).toHaveAttribute('aria-label', 'Completed in 1.5s')
+      expect(status).toHaveTextContent('1.5s')
+      expect(details.querySelector('.chat-tool-result-preview')).toHaveTextContent('authenticated')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('settles a failed row with an accessible failure state', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(5_000)
+      const { body, renderer } = createToolHarness()
+      renderer.appendToolCall({
+        name: 'exec_command',
+        tool_use_id: 'tool-error',
+        input: { cmd: 'exit 1' },
+      })
+
+      vi.setSystemTime(5_500)
+      renderer.appendToolResult({
+        name: 'exec_command',
+        tool_use_id: 'tool-error',
+        result: 'permission denied',
+        execution_status: { status: 'error' },
+      })
+
+      const details = body.querySelector<HTMLDetailsElement>('[data-tool-id="tool-error"]')!
+      const status = details.querySelector<HTMLElement>('.chat-tools-status')!
+
+      expect(details).toHaveClass('chat-tools-collapse--error')
+      expect(status).toHaveAttribute('data-status', 'error')
+      expect(status).toHaveAttribute('aria-label', 'Failed in 0.5s')
+      expect(details.querySelector('.chat-tool-result')).toHaveClass('chat-tool-result--error')
+      expect(details.querySelector('.chat-tool-result-preview')).toHaveTextContent(
+        'permission denied',
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('tool activity stylesheet contract', () => {
+  it('replaces native disclosure chrome with the compact legacy row treatment', () => {
+    expect(chatCss).toContain('.chat-tools-collapse {')
+    expect(chatCss).toContain('border-left: 1px solid var(--border)')
+    expect(chatCss).toContain('.chat-tools-summary::-webkit-details-marker')
+    expect(chatCss).toContain('.chat-tools-collapse[open] > .chat-tools-summary::after')
+    expect(chatCss).toContain('.chat-tools-status {')
+  })
+
+  it('styles every tool state and provides a reduced-motion fallback', () => {
+    expect(chatCss).toContain('.chat-tools-collapse--running')
+    expect(chatCss).toContain('.chat-tools-collapse--success')
+    expect(chatCss).toContain('.chat-tools-collapse--error')
+    expect(chatCss).toContain('.chat-tools-collapse--unknown')
+    expect(chatCss).toContain('@keyframes chat-tool-spin')
+    expect(chatCss).toContain('@media (prefers-reduced-motion: reduce)')
   })
 })

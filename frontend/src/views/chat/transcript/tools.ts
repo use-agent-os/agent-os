@@ -269,6 +269,23 @@ function applyToolSummaryStatus(statusSpan: HTMLElement, status: string, duratio
   statusSpan.dataset.status = status || ''
   statusSpan.textContent = visibleStatus
   statusSpan.hidden = false
+  statusSpan.setAttribute('aria-live', 'polite')
+  const accessibleStatus =
+    status === 'running'
+      ? 'Running'
+      : status === 'success'
+        ? visibleStatus
+          ? `Completed in ${visibleStatus}`
+          : 'Completed'
+        : status === 'error'
+          ? visibleStatus
+            ? `Failed in ${visibleStatus}`
+            : 'Failed'
+          : status === 'unknown'
+            ? 'Unknown status'
+            : ''
+  if (accessibleStatus) statusSpan.setAttribute('aria-label', accessibleStatus)
+  else statusSpan.removeAttribute('aria-label')
 }
 
 // chat.js:7130-7141 — ensure + update the summary status span on a details el.
@@ -735,7 +752,16 @@ export function createToolRenderer(deps: ToolRendererDeps) {
               withInput._agentosToolInput =
                 withInput._agentosToolInput || toolInputById[toolId] || null
               details.classList.remove('chat-tools-collapse--running')
-              details.classList.add(toolResultStateClass(seg as StreamEventPayload))
+              const stateClass = toolResultStateClass(seg as StreamEventPayload)
+              details.classList.add(stateClass)
+              setToolSummaryStatus(
+                details,
+                stateClass === 'chat-tools-collapse--unknown'
+                  ? 'unknown'
+                  : isError
+                    ? 'error'
+                    : 'success',
+              )
               const toolsBody = details.querySelector('.chat-tools-body')
               const resultTarget = toolsBody || details
               if (findToolResultById(resultTarget, toolId)) continue

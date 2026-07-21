@@ -58,6 +58,8 @@ export const CAP_DWELL_MS = 2500
 export const AWAITING_MODEL_CLASS = 'awaiting-model'
 export const STREAM_ACTIVE_MARK_CLASS = 'streaming-active-mark'
 export const STREAM_ACTIVE_MARK_DELAY_MS = 3500
+// chat.js:2577-2578 — remain pinned while the viewport is within 60px of the end.
+export const AUTO_SCROLL_BOTTOM_GAP_PX = 60
 
 /* ── Pure seq gate (ported verbatim from chat.js:1645-1682) ─────────────── */
 
@@ -1274,6 +1276,16 @@ export function createStreamController(
     }
   }
 
+  function updateAutoScrollFromThread(): void {
+    // chat.js:2575-2579 — a manual scroll away from the tail pauses following;
+    // returning within 60px resumes it. This prevents streaming deltas from
+    // fighting a user who has moved up to read an earlier part of the answer.
+    const th = thread()
+    if (!th) return
+    const gap = th.scrollHeight - th.scrollTop - th.clientHeight
+    _autoScroll = gap < AUTO_SCROLL_BOTTOM_GAP_PX
+  }
+
   /* ── web_search provider badge (chat.js:463-478) ──────────────────────── */
 
   function refreshRunningSearchProviderBadges(provider: string): void {
@@ -1400,6 +1412,7 @@ export function createStreamController(
     hasViewLocalStreamState,
     // scroll
     scrollToBottom,
+    updateAutoScrollFromThread,
     // tool activity + subagent disclosure (Task 4 — tools.ts)
     appendToolCall: toolRenderer.appendToolCall,
     appendToolResult: toolRenderer.appendToolResult,

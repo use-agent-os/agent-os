@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { Copy, RotateCcw } from 'lucide-react'
 import {
   classifySessionKey,
   sessionItemKey,
@@ -228,7 +229,8 @@ export function SessionChip({
         aria-label="Copy session key"
         onClick={copy}
       >
-        copy
+        <Copy className="chat-session-action-icon" aria-hidden="true" />
+        <span className="chat-session-action-label">copy</span>
       </button>
       <button
         type="button"
@@ -237,7 +239,8 @@ export function SessionChip({
         aria-label="Reset session"
         onClick={onReset}
       >
-        reset
+        <RotateCcw className="chat-session-action-icon" aria-hidden="true" />
+        <span className="chat-session-action-label">reset</span>
       </button>
 
       {open && (

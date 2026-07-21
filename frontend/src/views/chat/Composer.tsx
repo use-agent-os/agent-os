@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { ArrowUpIcon, PaperclipIcon, SlidersHorizontalIcon, SquareIcon, XIcon } from 'lucide-react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { toast } from 'sonner'
 import { MAX_PENDING, sendButtonState, shouldAutofocusComposer } from './logic'
 
@@ -35,6 +37,8 @@ const MAX_TEXTAREA_HEIGHT = 160 // chat.js:2592 cap.
 /** Imperative handle exposed via `composerRef` — clears / sets the textarea. */
 export interface ComposerHandle {
   clear: () => void
+  /** Move keyboard focus into the message field without changing its draft. */
+  focus: () => void
   /**
    * Programmatically set the composer value + focus with the caret at the end
    * (chat.js:8608-8618 — the pending-recover / drain-head write path). Resets the
@@ -103,7 +107,7 @@ export interface ComposerProps {
    * previews sit with the composer (chat.js:8346 `_renderAttachmentPreview`).
    */
   tray?: React.ReactNode
-  /** Imperative router-fx mount point, rendered below the input row like legacy. */
+  /** Imperative router-fx mount point, rendered as a compact status above the input row. */
   routerFxDock?: React.ReactNode
   /**
    * Optional composer-settings toolbar (execution mode + Pilot Router + usage),
@@ -154,25 +158,35 @@ export function Composer({
   const [toolbarOpen, setToolbarOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const toolbarWrapRef = useRef<HTMLDivElement>(null)
+  const toolbarTriggerRef = useRef<HTMLButtonElement>(null)
+  const toolbarCloseRef = useRef<HTMLButtonElement>(null)
+  const reduceMotion = useReducedMotion()
 
   // Close the composer-settings popover on an outside click / Escape (it
-  // previously stayed open until the ☰ trigger was clicked again). Bound only
+  // previously stayed open until the toolbar trigger was clicked again). Bound only
   // while open; a mousedown outside the toolbar wrap or an Escape key closes it.
   useEffect(() => {
     if (!toolbarOpen) return
+    toolbarCloseRef.current?.focus()
     const onDocMouseDown = (e: MouseEvent) => {
       if (!toolbarWrapRef.current?.contains(e.target as Node)) setToolbarOpen(false)
     }
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setToolbarOpen(false)
+      if (e.key === 'Escape') {
+        // The open popover owns Escape before the textarea's clear/abort chain.
+        e.preventDefault()
+        e.stopPropagation()
+        setToolbarOpen(false)
+        toolbarTriggerRef.current?.focus()
+      }
     }
     // `mousedown` (not `click`) so it fires before the popover's own handlers
     // and doesn't race the trigger's toggle.
     document.addEventListener('mousedown', onDocMouseDown)
-    document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('keydown', onKeyDown, true)
     return () => {
       document.removeEventListener('mousedown', onDocMouseDown)
-      document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('keydown', onKeyDown, true)
     }
   }, [toolbarOpen])
 
@@ -237,6 +251,7 @@ export function Composer({
         historyIdxRef.current = null
         historyDraftRef.current = ''
       },
+      focus: () => textareaRef.current?.focus(),
       // chat.js:8608-8624 — the pending-recover / drain write: set the value,
       // focus with the caret at the end, and reset the history cursor since the
       // content is now user-editable text.
@@ -436,27 +451,61 @@ export function Composer({
 
   return (
     <div className="chat-composer-shell">
+      {routerFxDock}
       {tray}
       {slashMenu}
       <div className="chat-composer">
         {toolbar ? (
           <div className="chat-toolbar-wrap" ref={toolbarWrapRef}>
             <button
+              ref={toolbarTriggerRef}
               type="button"
               className="btn-term chat-toolbar-trigger"
               aria-haspopup="dialog"
               aria-expanded={toolbarOpen}
+              aria-controls="chat-toolbar-popover"
               aria-label="Run modes"
-              title="Run modes — execution, router"
+              title="Run modes: execution and routing"
               onClick={() => setToolbarOpen((v) => !v)}
             >
-              ☰
+              <SlidersHorizontalIcon aria-hidden="true" />
             </button>
-            {toolbarOpen ? (
-              <div className="chat-toolbar-popover" role="dialog" aria-label="Composer settings">
-                {toolbar}
-              </div>
-            ) : null}
+            <AnimatePresence initial={false}>
+              {toolbarOpen ? (
+                <motion.div
+                  id="chat-toolbar-popover"
+                  className="chat-toolbar-popover"
+                  role="dialog"
+                  aria-labelledby="chat-toolbar-popover-title"
+                  initial={reduceMotion ? false : { opacity: 0, scale: 0.985, y: 4 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.985, y: 2 }}
+                  transition={
+                    reduceMotion ? { duration: 0 } : { duration: 0.22, ease: [0.16, 1, 0.3, 1] }
+                  }
+                >
+                  <div className="chat-toolbar-popover__header">
+                    <h2 id="chat-toolbar-popover-title" className="chat-toolbar-popover__title">
+                      Run modes
+                    </h2>
+                    <button
+                      ref={toolbarCloseRef}
+                      type="button"
+                      className="chat-toolbar-popover__close"
+                      aria-label="Close run modes"
+                      title="Close run modes"
+                      onClick={() => {
+                        setToolbarOpen(false)
+                        toolbarTriggerRef.current?.focus()
+                      }}
+                    >
+                      <XIcon aria-hidden="true" />
+                    </button>
+                  </div>
+                  <div className="chat-toolbar-popover__body">{toolbar}</div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
           </div>
         ) : null}
         {onAttachFiles ? (
@@ -478,7 +527,7 @@ export function Composer({
               title="Attach a file"
               aria-label="Attach files"
             >
-              +
+              <PaperclipIcon aria-hidden="true" />
             </button>
           </>
         ) : null}
@@ -498,9 +547,9 @@ export function Composer({
             className="btn-term chat-composer__abort"
             onClick={() => onAbort?.()}
             title="Stop (Esc)"
-            aria-label="Abort"
+            aria-label="Stop"
           >
-            Abort
+            <SquareIcon aria-hidden="true" />
           </button>
         ) : (
           <button
@@ -511,11 +560,10 @@ export function Composer({
             title={sendLabel}
             aria-label="Send"
           >
-            Send
+            <ArrowUpIcon aria-hidden="true" />
           </button>
         )}
       </div>
-      {routerFxDock}
     </div>
   )
 }

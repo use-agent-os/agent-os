@@ -465,8 +465,8 @@ export interface RouterFxRendererDeps {
   thread: () => HTMLElement | null
   /**
    * chat.js `_routerFxDock` — the composer dock element that hosts strips. All
-   * strips live here (chat.js:3897-3902); returns null until the dock exists (no
-   * dock in the frontend yet → strips are suppressed, matching `if (!_routerFxDock)`).
+   * strips live here (chat.js:3897-3902); returns null until the React composer
+   * dock exists, preserving the legacy `if (!_routerFxDock)` suppression gate.
    */
   dock: () => HTMLElement | null
   /** chat.js `_sessionKey` — the active session key, read live. */
@@ -590,6 +590,9 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     wrap.dataset.state = 'idle'
     wrap.dataset.tier = routerFxNormalizeTier(decision.tier || '')
     wrap.dataset.source = decision.source || 'none'
+    wrap.setAttribute('role', wrap.dataset.renderMode === 'live' ? 'status' : 'group')
+    wrap.setAttribute('aria-live', wrap.dataset.renderMode === 'live' ? 'polite' : 'off')
+    wrap.setAttribute('aria-atomic', 'true')
     const identity = routerFxDecisionIdentity(decision)
     if (identity) wrap.dataset.routerIdentity = identity
     const observeMode = decision && decision.routing_applied === false
@@ -606,7 +609,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     header.className = 'router-fx-header'
     header.innerHTML =
       '<span class="glyph">←</span>' +
-      '<span class="title">AI model router</span>' +
+      '<span class="title">Choosing a model</span>' +
       '<span class="glyph">→</span>'
     wrap.appendChild(header)
 
@@ -723,9 +726,20 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
       } as RouterFxDecision)
     wrap.dataset.renderMode = mode
     const name = winnerName(effectiveDecision)
+    const hasWinner = !!wrap.querySelector('.router-fx-cell.win')
+    const statusLabel =
+      hasWinner && name
+        ? wrap.dataset.observe === 'true'
+          ? 'Suggested model'
+          : 'Model selected'
+        : 'Finalizing model'
+    const title = wrap.querySelector<HTMLElement>('.router-fx-header .title')
+    if (title) title.textContent = statusLabel
+    wrap.dataset.hasWinner = hasWinner ? 'true' : 'false'
     wrap.setAttribute('role', mode === 'live' ? 'status' : 'group')
     wrap.setAttribute('aria-live', mode === 'live' ? 'polite' : 'off')
-    wrap.setAttribute('aria-label', name ? `Router selected ${name}` : 'Router settled')
+    wrap.setAttribute('aria-atomic', 'true')
+    wrap.setAttribute('aria-label', hasWinner && name ? `${statusLabel}: ${name}` : statusLabel)
   }
 
   function clearVisualResidue(wrap: RouterFxStripElement): void {
