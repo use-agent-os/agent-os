@@ -41,7 +41,10 @@
    the middle instead of dashing to the screen edges on wide viewports. The
    column width is exposed as `--chat-col` so the composer can match it. */
 .chat-stage {
-  --chat-col: 820px;
+  /* The centered conversation column. Wider than a reading column so the side
+     gutters stay modest on large screens (they were too broad at 820px); still
+     capped so lines don't run edge-to-edge. */
+  --chat-col: min(1080px, 100% - 96px);
 }
 .chat-thread {
   flex: 1 1 auto;
@@ -148,11 +151,26 @@
 /* User: right, in a subtle translucent rounded panel — the one soft-rounded
    surface in the view (deliberate exception to radius-0, matching the
    reference), tinted just enough to separate "you" from the agent. */
+/* User bubble — the primary (lime) signal is the box fill, marking "you". Text
+   flips to the readable on-primary foreground; the caption reads on the lime.
+   `position:relative; z-index:1` lifts it ABOVE the fixed CRT scanline overlay
+   (globals.css body::after at z:0) so the fill reads as one FLAT lime, never
+   striped; the fill is fully opaque (no color-mix transparency) for the same
+   reason. */
 .msg.user {
+  position: relative;
+  z-index: 1;
   align-self: flex-end;
   padding: 9px 14px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  border-radius: 0; /* TTY: zero radius everywhere */
+  background: var(--primary);
+  color: var(--primary-foreground, #0a0a0a);
+}
+.msg.user .msg-body {
+  color: var(--primary-foreground, #0a0a0a);
+}
+.msg.user:not(:has(.msg-header))::before {
+  color: color-mix(in srgb, var(--primary-foreground, #0a0a0a) 72%, transparent);
 }
 .msg.user:not(:has(.msg-header))::before {
   text-align: right;
@@ -212,23 +230,76 @@
   }
 }
 .chat-composer {
+  position: relative;
   flex: 0 0 auto;
   display: flex;
-  align-items: flex-end;
+  align-items: center; /* center all controls on the input row (no overflow) */
   gap: 6px;
-  padding: 6px 6px 6px 10px;
+  padding: 7px 8px;
   border: 1px solid var(--border);
-  border-radius: 24px; /* rounded pill (reference); the composer is the one
-                          deliberate soft surface, like the user bubble */
+  border-radius: 0; /* TTY: zero radius everywhere */
   background: color-mix(in srgb, var(--foreground) 4%, var(--card));
-  transition:
-    border-color 140ms,
-    box-shadow 140ms;
+  transition: border-color 140ms;
 }
-/* Lime focus ring on the whole pill when the textarea is focused (signal). */
+/* Subtle light sweeping around the border — a thin conic-gradient ring on a
+   ::before layer that slowly rotates. It sits just outside the frame (inset -1px)
+   behind the composer, masked to a 1px edge so only the border glows, gently.
+   Lime is the signal; kept low-opacity so it reads as ambient, not loud. */
+.chat-composer::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  z-index: 0;
+  padding: 1px; /* ring thickness */
+  border-radius: 0;
+  background: conic-gradient(
+    from var(--chat-glow-angle, 0deg),
+    transparent 0deg,
+    transparent 200deg,
+    color-mix(in srgb, var(--primary) 65%, transparent) 300deg,
+    color-mix(in srgb, var(--primary) 20%, transparent) 340deg,
+    transparent 360deg
+  );
+  /* mask so the gradient only paints the 1px border, not the fill */
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: chat-composer-glow 6s linear infinite;
+  pointer-events: none;
+  opacity: 0.7;
+}
+@property --chat-glow-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes chat-composer-glow {
+  to {
+    --chat-glow-angle: 360deg;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-composer::before {
+    animation: none;
+    opacity: 0.35;
+  }
+}
+/* Keep the input row above the glow layer. */
+.chat-composer > * {
+  position: relative;
+  z-index: 1;
+}
+/* On focus the ring brightens to a steady lime edge (the active signal). */
 .chat-composer:focus-within {
   border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 40%, transparent);
+}
+.chat-composer:focus-within::before {
+  opacity: 1;
 }
 
 /* The mono textarea — transparent inside the pill (the pill carries the border),
@@ -260,22 +331,24 @@
   }
 }
 
-/* Icon buttons inside the pill (toolbar ☰ + attach +) — drop the `btn-term`
-   brackets and box, become quiet round icon buttons that light lime on hover. */
+/* Icon buttons inside the composer (toolbar ☰ + attach +) — square TTY icon
+   buttons (radius 0), centered on the row, quiet until they light lime on
+   hover. `btn-term` brackets stripped. */
 .chat-composer .chat-composer__attach,
 .chat-composer .chat-toolbar-trigger {
   flex: 0 0 auto;
   align-self: center;
-  width: 34px;
-  height: 34px;
-  min-width: 34px;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-size: 1.05rem;
+  line-height: 1;
   border: none;
-  border-radius: 50%;
+  border-radius: 0; /* TTY: zero radius */
   background: transparent;
   color: var(--dim);
   letter-spacing: 0;
@@ -296,20 +369,21 @@
   background: color-mix(in srgb, var(--primary) 12%, transparent);
 }
 
-/* Send — a round lime button (the pill's one filled signal); disabled dims. */
+/* Send — a square lime button (the composer's one filled signal); disabled
+   dims. Centered so the ↑ glyph never clips the frame. */
 .chat-composer .chat-composer__send {
   flex: 0 0 auto;
-  align-self: flex-end;
-  width: 36px;
-  height: 36px;
-  min-width: 36px;
+  align-self: center;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-size: 0; /* hide the "Send" text; show a glyph via ::before */
   border: none;
-  border-radius: 50%;
+  border-radius: 0; /* TTY: zero radius */
   background: var(--primary);
   color: var(--primary-foreground, #0a0a0a);
   cursor: pointer;
@@ -321,7 +395,13 @@
   content: '\2191'; /* ↑ up-arrow send glyph (reference) */
   font-size: 1.05rem;
   line-height: 1;
+  /* the ↑ glyph carries baseline padding — nudge it to the optical centre so it
+     sits dead-centre in the square button, not high/left. */
+  display: block;
+  width: 100%;
+  text-align: center;
   color: inherit;
+  font-family: var(--font-mono);
 }
 .chat-composer .chat-composer__send::after {
   content: none;
@@ -336,20 +416,20 @@
   color: var(--dim);
 }
 
-/* Abort — a round danger button in the Send slot while streaming. */
+/* Abort — a square danger button in the Send slot while streaming. */
 .chat-composer .chat-composer__abort {
   flex: 0 0 auto;
-  align-self: flex-end;
-  width: 36px;
-  height: 36px;
-  min-width: 36px;
+  align-self: center;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-size: 0;
   border: none;
-  border-radius: 50%;
+  border-radius: 0; /* TTY: zero radius */
   background: color-mix(in srgb, var(--destructive, #ff5555) 20%, transparent);
   color: var(--destructive, #ff5555);
   cursor: pointer;
@@ -508,7 +588,7 @@
    stays dim. Mounted inside the composer shell, above the input row. */
 .chat-slash {
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 0; /* TTY: zero radius */
   background: var(--card);
   box-sizing: border-box;
   margin: 0 4px 8px;
@@ -571,14 +651,18 @@
    radius 0, phosphor border; lime (--primary) is signal-only, reserved for the
    ACTIVE (current) session cue. Ported from the legacy topbar-center chip
    (chat.js:1219-1229 / 1836-2089). */
+/* The session bar reads as a continuation of the AppShell topbar (not a second
+   stacked header): same surface tint as the shell header, only a hairline rule
+   below to separate it from the thread. Padding follows the centered column so
+   the session controls line up with the conversation. */
 .chat-session-bar {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 32px;
-  border-bottom: 1px solid var(--border);
-  background: var(--card);
+  padding: 6px max(20px, calc((100% - var(--chat-col)) / 2));
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  background: color-mix(in srgb, var(--foreground) 3%, transparent);
   position: relative;
 }
 @media (max-width: 768px) {

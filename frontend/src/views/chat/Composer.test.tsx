@@ -286,4 +286,27 @@ describe('Composer', () => {
     expect(textbox().value).toBe('recovered text')
     expect(ref.current?.getValue()).toBe('recovered text')
   })
+
+  it('opens the settings popover on the trigger and closes it on an outside click', () => {
+    render(
+      <Composer onSend={() => {}} busy={false} toolbar={<div data-testid="tb">settings</div>} />,
+    )
+    const trigger = screen.getByRole('button', { name: /run modes/i })
+    // Open.
+    fireEvent.click(trigger)
+    expect(screen.getByTestId('tb')).toBeInTheDocument()
+    // A mousedown outside the toolbar wrap closes it (previously stayed open).
+    fireEvent.mouseDown(document.body)
+    expect(screen.queryByTestId('tb')).not.toBeInTheDocument()
+  })
+
+  it('closes the settings popover on Escape', () => {
+    render(
+      <Composer onSend={() => {}} busy={false} toolbar={<div data-testid="tb2">settings</div>} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /run modes/i }))
+    expect(screen.getByTestId('tb2')).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByTestId('tb2')).not.toBeInTheDocument()
+  })
 })

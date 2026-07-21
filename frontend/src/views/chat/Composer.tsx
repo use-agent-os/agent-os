@@ -150,6 +150,28 @@ export function Composer({
   const [value, setValue] = useState('')
   const [toolbarOpen, setToolbarOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const toolbarWrapRef = useRef<HTMLDivElement>(null)
+
+  // Close the composer-settings popover on an outside click / Escape (it
+  // previously stayed open until the ☰ trigger was clicked again). Bound only
+  // while open; a mousedown outside the toolbar wrap or an Escape key closes it.
+  useEffect(() => {
+    if (!toolbarOpen) return
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (!toolbarWrapRef.current?.contains(e.target as Node)) setToolbarOpen(false)
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setToolbarOpen(false)
+    }
+    // `mousedown` (not `click`) so it fires before the popover's own handlers
+    // and doesn't race the trigger's toggle.
+    document.addEventListener('mousedown', onDocMouseDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [toolbarOpen])
 
   // History-cycle cursor (legacy `_inputHistoryIdx` / `_inputHistoryDraft`,
   // chat.js:369). `null` = not navigating; the draft holds the pre-nav text.
@@ -415,7 +437,7 @@ export function Composer({
       {slashMenu}
       <div className="chat-composer">
         {toolbar ? (
-          <div className="chat-toolbar-wrap">
+          <div className="chat-toolbar-wrap" ref={toolbarWrapRef}>
             <button
               type="button"
               className="btn-term chat-toolbar-trigger"
