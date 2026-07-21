@@ -8,9 +8,9 @@
 // range it was ported from. Module-level `let _foo` globals in the legacy IIFE
 // become fields on the controller instance; functions that live OUTSIDE the
 // ported ranges (Markdown, the strip helpers, _addMessage, router-fx, run-state
-// sync, diagnostics, …) are injected as `deps` so later tasks can wire the real
-// implementations — each has a safe default here so the controller stands
-// alone.
+// sync, diagnostics, …) are injected as `deps`; the React integration supplies
+// their production implementations while safe defaults keep focused tests
+// standalone.
 //
 // The one pure, timing-independent piece — the 800-event seq de-dup window —
 // is extracted as `createSeqGate()` and unit-tested (stream.test.ts). The DOM
@@ -121,6 +121,8 @@ export function createSeqGate() {
 
   return {
     accept,
+    /** Seed/synchronize a server-advertised high-water value without marking a replay duplicate. */
+    sync: setSessionStreamSeq,
     /** High-water accepted seq for a session (parity `_sessionStreamSeq`). */
     highWater: sessionStreamSeq,
   }
@@ -140,7 +142,7 @@ interface StreamSegment {
 /**
  * Parked live-stream state for a backgrounded session
  * (chat.js:6860-6876). Only the fields this task's methods read/write are
- * modelled; later tasks that own router-fx / user-anchor restore extend it.
+ * modelled; router-fx and the send path supply the external anchor operations.
  */
 interface ParkedStreamState {
   isStreaming: boolean
@@ -162,7 +164,7 @@ interface ParkedStreamState {
 
 /**
  * The markdown renderer the flush path uses (legacy `Markdown`, markdown.js).
- * Injected so the real renderer can be wired by a later task; the default is a
+ * Injected so the integration can supply the shared renderer; the default is a
  * text-only escape so the bubble still shows content standalone.
  */
 export interface MarkdownDep {
@@ -174,9 +176,9 @@ export interface MarkdownDep {
 /**
  * Everything the ported streaming region references that lives OUTSIDE the
  * cited ranges. All optional: each has a faithful-enough default so the
- * controller is usable before later tasks land their real implementations.
- * Real wiring (router-fx, run-state, history sync, the export `messages`
- * array, diagnostics) is supplied by the transcript controller when available.
+ * controller is usable in focused tests. The production wiring (router-fx,
+ * run-state, history sync, messages, toasts and diagnostics) is supplied by
+ * `useTranscript`.
  */
 export interface StreamControllerDeps {
   markdown?: MarkdownDep
@@ -239,7 +241,7 @@ export interface StreamControllerDeps {
   /** chat.js `_historyHydrating` — is the history render in progress. Default: false. */
   historyHydrating?: () => boolean
   // Stream-lifecycle router-fx hook overrides. Default to the composed
-  // `routerFxRenderer` methods; kept overridable so a test / later task can
+  // `routerFxRenderer` methods; kept overridable so a test/integration can
   // stub them without re-composing the renderer.
   routerFxSettleForOutput?: () => void
   cancelPendingRouterFxScan?: (reason: string) => void
@@ -286,29 +288,28 @@ export interface StreamControllerDeps {
   getAuthToken?: () => string
   /**
    * chat.js `UI.toast` — a transient toast surface (used by the artifact
-   * download-failure path, chat.js:7667). Owned by the UI/toast surface (a later
-   * task); default no-op so a failed download degrades silently.
+   * download-failure path, chat.js:7667). Production injects Sonner; the default
+   * remains a no-op for standalone controller tests.
    */
   toast?: (message: string, kind?: string, durationMs?: number) => void
   /**
    * chat.js:6652 — the abort flag (`_aborted`, set in `_onSend`/ESC). When true,
-   * `appendDelta` drops incoming deltas. Owned by the send/abort flow (a later
-   * task); default `false` so streaming is never spuriously suppressed here.
+   * `appendDelta` drops incoming deltas. Production injects the send/abort flag;
+   * default `false` avoids spuriously suppressing standalone streams.
    */
   isAborted?: () => boolean
   /** chat.js:* — the diagnostics ring (legacy `_chatDiag`). Default: no-op. */
   diag?: (event: string, detail: Record<string, unknown>) => void
   /**
-   * chat.js:7311 `UI.modal` — open the "View full" tool-result modal. Owned by
-   * the UI/toast surface (a later task); default no-op so the tool card renders
-   * standalone (the "View full" button is inert until wired).
+   * chat.js:7311 `UI.modal` — open the "View full" tool-result modal. Production
+   * injects the React modal bridge; default no-op keeps tool cards standalone.
    */
   openModal?: (title: string, html: string, buttons: Array<Record<string, unknown>>) => void
   /**
    * chat.js:7814 `_addMessage` with provenance options — append the subagent
    * completion system row. Distinct from `addMessage` above (which is the
    * streaming timeout/error 3-arg form); this is the 4-arg provenance form the
-   * subagent path needs. Default: no-op (the real builder is a later task).
+   * subagent path needs. Production injects the real message builder.
    */
   addMessageWithOptions?: (
     role: string,
@@ -426,8 +427,8 @@ export function createStreamController(
   const currentSessionLiveRouterStrips =
     deps.currentSessionLiveRouterStrips ??
     ((key: string) => routerFxRenderer.currentSessionLiveRouterStrips(key))
-  // The parked live-user anchor is a send-flow concept (a later task); the
-  // router-fx engine does not track it, so this stays null until wired.
+  // The parked live-user anchor belongs to the send integration; the router-fx
+  // engine itself does not track it, so standalone controllers default to null.
   const currentSessionLiveUserAnchor = deps.currentSessionLiveUserAnchor ?? (() => null)
   const routerFxPauseScanTimers =
     deps.routerFxPauseScanTimers ?? ((el: HTMLElement) => routerFxRenderer.pauseScanTimers(el))
@@ -505,6 +506,13 @@ export function createStreamController(
     if (typeof seq !== 'number' || !Number.isFinite(seq)) return true
     const key = sessionKeyFromPayload(payload) || getSessionKey() || ''
     return seqGate.accept(key, seq)
+  }
+
+  function syncLastStreamSeqFromSession(key: string, currentSeq?: number): number {
+    if (typeof currentSeq === 'number' && Number.isFinite(currentSeq)) {
+      seqGate.sync(key || getSessionKey() || '', currentSeq)
+    }
+    return seqGate.highWater(key || getSessionKey() || '')
   }
 
   /* ── idle timer (chat.js:6209-6245) ───────────────────────────────────── */
@@ -1385,6 +1393,7 @@ export function createStreamController(
   return {
     // seq
     acceptStreamSeq,
+    syncLastStreamSeqFromSession,
     // idle timer
     resetStreamIdleTimer,
     clearStreamIdleTimer,
@@ -1405,6 +1414,7 @@ export function createStreamController(
     flushPendingTextSegment,
     endStreaming,
     reconcileFinalStreamText,
+    getStreamBubble: () => _streamBubble,
     // park/restore/clear
     parkCurrentSessionStreamState,
     restoreLiveStreamStateForSession,
@@ -1426,8 +1436,8 @@ export function createStreamController(
     renderStreamArtifacts: artifactRenderer.renderStreamArtifacts,
     downloadArtifact: artifactRenderer.downloadArtifact,
     // router-fx (Task 6 — routerFx.ts). The live entry point routes the
-    // `session.event.router_decision` event; the rest is the send/history/
-    // compaction surface later tasks drive.
+    // `session.event.router_decision` event; the rest serves send/history/
+    // compaction integrations.
     handleRouterDecision: routerFxRenderer.handleRouterDecision,
     buildRouterFxFromUsage: routerFxRenderer.buildRouterFxFromUsage,
     flushPendingRouterDecisions: routerFxRenderer.flushPendingRouterDecisions,

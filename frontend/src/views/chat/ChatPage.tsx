@@ -180,6 +180,22 @@ export function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Message hover actions are owned by the imperative transcript builder, but
+  // their backing edit/regenerate operations land in the React composer/send
+  // path. These refs bridge the boundary without reactifying message rows.
+  const [composerValue, setComposerValue] = useState('')
+  const slashHandleRef = useRef<SlashMenuHandle>(null)
+  const composerHandleRef = useRef<ComposerHandle>(null)
+  const regenerateMessageRef = useRef<(text: string) => void>(() => {})
+  const editMessage = useCallback((text: string) => {
+    composerHandleRef.current?.setValue(text)
+    composerHandleRef.current?.focus()
+    setComposerValue(text)
+  }, [])
+  const regenerateMessage = useCallback((text: string) => {
+    regenerateMessageRef.current(text)
+  }, [])
+
   const {
     containerRef,
     routerFxDockRef,
@@ -188,17 +204,18 @@ export function ChatPage() {
     abort,
     busy,
     history,
+    runState,
     isCompactInFlightForCurrentSession,
     setStreamIdlePausedForApproval,
     setPendingDelegates,
-  } = useTranscript({ sessionKey, openModal: openToolResultModal })
+  } = useTranscript({
+    sessionKey,
+    openModal: openToolResultModal,
+    onEditMessage: editMessage,
+    onRegenerateMessage: regenerateMessage,
+    onSessionKeyResolved: switchToSession,
+  })
   const attachments = useAttachments()
-
-  // The composer value mirror (chat.js:2639 `_textarea.value`) — drives the slash
-  // menu's open/filter state. Owned here so the menu + composer share one value.
-  const [composerValue, setComposerValue] = useState('')
-  const slashHandleRef = useRef<SlashMenuHandle>(null)
-  const composerHandleRef = useRef<ComposerHandle>(null)
 
   // The per-send session intent (chat.js:335 `_pendingSessionIntent`) — rides on
   // the next send (e.g. 'new_chat'), and is carried through the pending queue
@@ -265,7 +282,10 @@ export function ChatPage() {
   const abortAndRecover = useCallback(
     (source = 'webui_stop_button') => {
       abort(source)
-      pending.popAllIntoComposer()
+      const recovered = pending.popAllIntoComposer()
+      toast.warning(recovered ? 'Stopped — pending recovered to input' : 'Stopped', {
+        duration: 1800,
+      })
     },
     [abort, pending],
   )
@@ -397,6 +417,12 @@ export function ChatPage() {
     },
     [attachments, send, executeSlash, busy, isCompactInFlightForCurrentSession, pending],
   )
+
+  useEffect(() => {
+    regenerateMessageRef.current = (text: string) => {
+      void onComposerSend(text)
+    }
+  }, [onComposerSend])
 
   // The drained-queue-head send (chat.js:8549). Fires the send path a live send
   // would. A drained head is already-normalized text + attachments (normalized at
@@ -555,7 +581,12 @@ export function ChatPage() {
           continues to own the reactive session actions. */}
       <ShellHeaderPortal>
         <div className="chat-session-bar" role="group" aria-label="Chat session controls">
-          <SessionChip sessionKey={sessionKey} onSwitch={switchToSession} onReset={resetSession} />
+          <SessionChip
+            sessionKey={sessionKey}
+            runState={runState}
+            onSwitch={switchToSession}
+            onReset={resetSession}
+          />
           <button
             type="button"
             className="chat-export-btn"

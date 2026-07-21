@@ -62,5 +62,7 @@ describe('stream seq gate (parity chat.js:6345-6378, 1645-1682)', () => {
     gate.accept('s1', 7)
     expect(gate.highWater('s1')).toBe(9) // Math.max of accepted seqs
     expect(gate.highWater('s2')).toBe(0) // untouched session
+    gate.sync('s2', 12)
+    expect(gate.highWater('s2')).toBe(12) // server-advertised subscribe cursor
   })
 })

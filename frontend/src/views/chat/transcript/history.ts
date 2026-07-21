@@ -10,6 +10,7 @@
 // in useTranscript.ts (idiomatic React). Legacy source: static/js/views/chat.js.
 
 import type { ChatMessage } from '../types'
+import type { TurnMeta, TurnUsage } from './message'
 import { historyFallbackMessageIdentity, historyStableMessageIdentity } from '../logic'
 
 /** chat.js:350 — history page size for `chat.history` reads. */
@@ -86,9 +87,9 @@ export function historyResponseMetadata(data: HistoryResponse | null | undefined
 /**
  * Injected dependencies for the imperative history renderer. These are the
  * cross-module functions the legacy `_renderHistoryMessages` / scope-row /
- * day-separator paths reference that live OUTSIDE the ported ranges (router-fx,
- * turn-meta, sanitizers, run-state) — each defaults to a faithful no-op so the
- * renderer stands alone before later tasks wire the real implementations.
+ * day-separator paths reference that live OUTSIDE this module (message rows,
+ * turn metadata, sanitizers and history actions). `useTranscript` supplies the
+ * production implementations while tests can inject focused fakes.
  */
 export interface HistoryRenderDeps {
   /** The scroll container (legacy `_thread`). */
@@ -109,6 +110,16 @@ export interface HistoryRenderDeps {
   ) => HTMLElement | null
   /** chat.js:6819/748 — attach the hover Copy/Regenerate toolbar. */
   attachHoverActions: (el: HTMLElement, role: string) => void
+  /** chat.js:5700-5745 — per-assistant history usage metadata. */
+  turnMetaForMessage?: (message: Record<string, unknown>, assistantIndex: number) => TurnMeta | null
+  attachTurnMeta?: (
+    el: HTMLElement,
+    model: string,
+    input: number,
+    output: number,
+    usage: TurnUsage | null,
+  ) => void
+  resetMessageGrouping?: () => void
   /** chat.js:5971 — stamp history identity onto a finalized bubble. */
   stampHistoryElement: (
     el: HTMLElement,
@@ -263,9 +274,8 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
   /**
    * Render a full history page into the thread (chat.js:5550-5796, focused
    * port). Rebuilds the message rows + day separators from `messages` and drops
-   * the empty state; the router-fx / turn-meta / attachment machinery that legacy
-   * folds in here is owned by later tasks and dispatched through the injected
-   * seams. `opts.preserveScroll` restores the scroll offset after a prepend
+   * the empty state. Cross-module behavior is dispatched through the injected
+   * dependencies. `opts.preserveScroll` restores the scroll offset after a prepend
    * (used by the load-earlier path).
    */
   function renderHistoryMessages(
@@ -305,6 +315,8 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
       el.remove()
     })
     _lastHeaderDay = ''
+    deps.resetMessageGrouping?.()
+    let assistantIndex = 0
 
     messages.forEach((msg) => {
       const rawText = msg.text || ''
@@ -314,6 +326,10 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
       appendHistoryDaySeparator(timestamp)
       const div = deps.addMessage(msg.role, displayText, timestamp, {
         provenanceKind: (msg as { provenance_kind?: string }).provenance_kind || '',
+        provenanceSourceSessionKey:
+          (msg as { provenance_source_session_key?: string }).provenance_source_session_key || '',
+        provenanceSourceTool:
+          (msg as { provenance_source_tool?: string }).provenance_source_tool || '',
       })
       if (!div) return
       consumed.add(div)
@@ -327,6 +343,14 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
         timestamp,
       )
       deps.attachHoverActions(div, msg.role)
+      if (msg.role === 'assistant') {
+        const meta = deps.turnMetaForMessage?.(
+          msg as unknown as Record<string, unknown>,
+          assistantIndex,
+        )
+        assistantIndex += 1
+        if (meta) deps.attachTurnMeta?.(div, meta.model, meta.input, meta.output, meta.saved)
+      }
     })
 
     renderHistoryScopeRow(state)

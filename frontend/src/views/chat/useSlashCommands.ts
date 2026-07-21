@@ -18,15 +18,10 @@ import { normalizeSlashCommand, slashCommandKey, type SlashCommand } from './log
  * `_selectSlashCmd`'s action switch (chat.js:2691-2839) dispatches on the
  * serialized `execution.action` / `rpc_method`. The RPC-backed branches (reset /
  * usage / model / router.hold.set / router.hold.clear) are ported faithfully as
- * `rpc.call(...) + toast`. Two branches touch session/stream machinery not yet in
- * the React view and are FLAGGED as later-task seams (see `onSessionAction`):
- *  - `new_chat` (chat.js:2692-2715) — the session-swap (park stream, new key,
- *    persist, chip, viz reset, re-subscribe). Owned by a later session task.
- *  - `compact_context` (chat.js:2738-2763) — the in-flight-compaction separator +
- *    `_setCompactInFlight`; the RPC (`sessions.contextCompact`) is fired, but the
- *    in-thread separator/controls belong to the compaction controller (Task 7).
- * When `onSessionAction` is provided (ChatPage wires it to the transcript), those
- * are delegated; otherwise a faithful toast records the unported affordance.
+ * `rpc.call(...) + toast`. The two branches that cross into session/stream
+ * ownership delegate through `onSessionAction`: `new_chat` (chat.js:2692-2715)
+ * switches/persists/re-subscribes, while `compact_context` (chat.js:2738-2763)
+ * uses the composed compaction controller for in-flight UI around the RPC.
  */
 
 export interface UseSlashCommands {

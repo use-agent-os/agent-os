@@ -261,6 +261,7 @@ describe('ChatPage', () => {
       const params = aborts[0]![1] as Record<string, unknown>
       expect(params.sessionKey).toBe('agent:main:webchat:default')
     })
+    expect(toast.warning).toHaveBeenCalledWith('Stopped', { duration: 1800 })
   })
 
   it('drops a late text_delta after abort — the killed stream is NOT resurrected (chat.js:6652)', async () => {
@@ -418,6 +419,108 @@ describe('ChatPage', () => {
     )
   })
 
+  it('updates the current-session run tag and clears it on a terminal frame', async () => {
+    mockRpc = makeRpc()
+    renderPage()
+    const status = document.querySelector('#chat-run-status') as HTMLElement
+    expect(status).toHaveTextContent('Idle')
+
+    act(() => {
+      mockRpc.emit('session.event.state_change', {
+        key: 'agent:main:webchat:default',
+        to_state: 'thinking',
+        stream_seq: 1,
+      })
+    })
+    await waitFor(() => expect(status).toHaveTextContent('Running'))
+
+    act(() => {
+      mockRpc.emit('task.running', {
+        key: 'agent:main:webchat:default',
+        task_id: 'task-1',
+      })
+    })
+    expect(status).toHaveAttribute('data-status', 'running')
+
+    act(() => {
+      mockRpc.emit('sessions.changed', {
+        key: 'agent:main:webchat:default',
+        reason: 'turn_complete',
+        run_status: 'idle',
+      })
+    })
+    await waitFor(() => expect(status).toHaveTextContent('Idle'))
+  })
+
+  it('attaches real per-turn usage metadata to a completed assistant bubble', async () => {
+    mockRpc = makeRpc()
+    renderPage()
+    act(() => {
+      mockRpc.emit(
+        'session.event.text_delta',
+        { key: 'agent:main:webchat:default', stream_seq: 1, text: 'done' },
+        {},
+      )
+      mockRpc.emit(
+        'session.event.done',
+        {
+          key: 'agent:main:webchat:default',
+          stream_seq: 2,
+          text: 'done',
+          model: 'openrouter/vendor/model-20260722',
+          input_tokens: 1250,
+          output_tokens: 42,
+          cost_usd: 0.00125,
+        },
+        {},
+      )
+    })
+
+    const meta = await waitFor(() => {
+      const node = document.querySelector('.msg.assistant .msg-meta') as HTMLElement | null
+      expect(node).not.toBeNull()
+      return node!
+    })
+    expect(meta).toHaveTextContent('model')
+    expect(meta).toHaveTextContent('↑1.3k ↓42')
+    expect(meta).toHaveTextContent('$0.00125')
+  })
+
+  it('surfaces a subscription failure through the legacy error toast', async () => {
+    mockRpc = makeRpc()
+    mockRpc.call.mockImplementation((...args: unknown[]) => {
+      if (args[0] === 'sessions.messages.subscribe') {
+        return Promise.reject(new Error('socket unavailable'))
+      }
+      if (args[0] === 'commands.list_for_surface') {
+        return Promise.resolve({ surface: 'web_chat', commands: SLASH_CATALOG })
+      }
+      return Promise.resolve({})
+    })
+    renderPage()
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        'Session stream subscription failed: socket unavailable',
+        { duration: 6000 },
+      ),
+    )
+  })
+
+  it('shows a warning event as a transient warning toast, not a transcript row', async () => {
+    mockRpc = makeRpc()
+    renderPage()
+    act(() => {
+      mockRpc.emit('session.event.warning', {
+        key: 'agent:main:webchat:default',
+        message: 'Provider is warming up',
+      })
+    })
+
+    expect(toast.warning).toHaveBeenCalledWith('Provider is warming up', { duration: 5000 })
+    expect(document.querySelector('.msg.error')).toBeNull()
+  })
+
   /* ── Session chip + lifecycle (Task 11) ─────────────────────────────────── */
 
   it('opens ?session=<key> and subscribes that session (chat.js:1211/2857)', async () => {
@@ -428,6 +531,7 @@ describe('ChatPage', () => {
     await waitFor(() =>
       expect(mockRpc.call).toHaveBeenCalledWith('sessions.messages.subscribe', {
         key: 'agent:trader:webchat:default',
+        since_stream_seq: 0,
       }),
     )
   })
@@ -453,6 +557,7 @@ describe('ChatPage', () => {
     await waitFor(() =>
       expect(mockRpc.call).toHaveBeenCalledWith('sessions.messages.subscribe', {
         key: 'agent:main:webchat:other',
+        since_stream_seq: 0,
       }),
     )
   })

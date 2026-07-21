@@ -191,11 +191,31 @@
 
 /* A real `.msg-header` node (streaming/thinking) — matches the caption. */
 .msg-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 0.64rem;
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: var(--dim);
   margin-bottom: 4px;
+}
+.msg-header .msg-time {
+  margin-left: auto;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+.msg-tags {
+  display: inline-flex;
+  align-items: center;
+}
+.cron-tag {
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
+  border-radius: var(--radius);
+  color: var(--primary);
+  font-size: 0.58rem;
+  letter-spacing: 0.12em;
 }
 
 /* Body — a touch smaller than before (console density) while keeping a roomy
@@ -205,6 +225,141 @@
   line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* Per-turn receipt: compact model/tokens/cost data below an assistant turn.
+   It stays dim by default; lime is reserved for the actual router saving. */
+.msg-meta {
+  display: flex;
+  max-width: 100%;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 9px;
+  margin-top: 6px;
+  color: var(--dim);
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  user-select: text;
+}
+.msg-meta__model {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: color-mix(in srgb, var(--foreground) 72%, var(--dim));
+}
+.msg-meta__tokens,
+.msg-meta__cost,
+.msg-meta__cached,
+.msg-meta__reasoning {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.msg-meta__saved {
+  color: var(--primary);
+  text-transform: uppercase;
+}
+
+/* Bubble actions are real controls, revealed on hover/focus. They live in the
+   outer gutter and never occupy transcript flow or alter copied message text. */
+.msg.assistant > .msg-body,
+.msg.user > .msg-body {
+  position: relative;
+}
+.msg .msg-body > .msg-actions {
+  position: absolute;
+  bottom: 0;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+.msg.assistant .msg-body > .msg-actions {
+  left: 100%;
+  margin-left: 8px;
+  transform: translateX(-3px);
+}
+.msg.user .msg-body > .msg-actions {
+  right: 100%;
+  margin-right: 8px;
+  transform: translateX(3px);
+}
+.msg:hover .msg-actions,
+.msg:focus-within .msg-actions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+.msg.streaming .msg-actions {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+.msg-action {
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+}
+.msg-action:hover,
+.msg-action:focus-visible {
+  background: var(--accent);
+  color: var(--primary);
+  outline: 1px solid color-mix(in srgb, var(--primary) 45%, transparent);
+}
+.msg-action svg {
+  width: 14px;
+  height: 14px;
+}
+
+.msg.subagent {
+  opacity: 0.9;
+}
+.chat-subagent-disclosure {
+  overflow: hidden;
+  border-left: 1px solid var(--primary);
+  border-radius: var(--radius);
+}
+.chat-subagent-disclosure-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  color: var(--dim);
+  cursor: pointer;
+  font-size: 0.72rem;
+  list-style: none;
+}
+.chat-subagent-disclosure-summary::-webkit-details-marker {
+  display: none;
+}
+.chat-subagent-disclosure-summary:hover,
+.chat-subagent-disclosure-summary:focus-visible {
+  color: var(--foreground);
+}
+.chat-subagent-disclosure-body {
+  max-height: 320px;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--dim);
+  font: inherit;
+  font-size: 0.7rem;
+  white-space: pre-wrap;
 }
 
 /* ── Assistant Markdown (legacy markdown.js:40-115 / chat.js:7906-7914) ─────
@@ -1824,6 +1979,30 @@
 }
 .chat-session-chip.is-active .chat-session-chip-caret {
   color: var(--primary);
+}
+.chat-session-run-status {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.chat-session-run-status.chip-ok {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+  color: var(--primary);
+}
+.chat-session-run-status.chip-warn {
+  border-color: color-mix(in srgb, var(--warning, #f0b429) 45%, var(--border));
+  color: var(--warning, #f0b429);
+}
+.chat-session-run-status.chip-danger {
+  border-color: color-mix(in srgb, var(--danger, #ff5555) 45%, var(--border));
+  color: var(--danger, #ff5555);
 }
 /* copy / reset — bracket buttons, quiet until hover (lime signal). */
 .chat-session-copy,

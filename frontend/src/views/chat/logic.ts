@@ -250,6 +250,40 @@ export function sessionRunStatus(source: RunStatusSource | null | undefined): Ru
   return { status, label: runStatusLabel(status), task }
 }
 
+/** chat.js:1694-1701 — terminal session-change predicate, including run-status-only frames. */
+export function sessionChangeIsTerminal(payload: RunStatusSource | null | undefined): boolean {
+  const source = (payload || {}) as RunStatusSource & { reason?: unknown; status?: unknown }
+  const reason = String(source.reason || '').toLowerCase()
+  if (reason === 'turn_complete' || reason === 'task_terminal') return true
+  const lifecycle = String(source.status || '').toLowerCase()
+  if (['done', 'failed', 'killed', 'timeout'].includes(lifecycle)) return true
+  const runStatus = normalizeRunStatus(source.run_status || source.runStatus)
+  return ['failed', 'timeout', 'cancelled', 'interrupted'].includes(runStatus)
+}
+
+/** chat.js:5300-5303 — only unexpected replay gaps warrant a user-facing warning. */
+export function replayGapShouldWarn(reason: unknown): boolean {
+  const value = String(reason || '').toLowerCase()
+  return !['stream_buffer_empty', 'stream_buffer_reset', 'cursor_ahead_of_stream'].includes(value)
+}
+
+/** chat.js:1703-1711 — idle terminal subscribe snapshots need a history refresh. */
+export function subscribeResultNeedsTerminalHistorySync(
+  source: (RunStatusSource & { replayed_count?: unknown }) | null | undefined,
+): boolean {
+  if (!source || Number(source.replayed_count || 0) > 0) return false
+  const state = sessionRunStatus(source)
+  if (state.status !== 'idle' || !state.task) return false
+  const taskStatus = String(state.task.status || '').toLowerCase()
+  const terminalReason = String(
+    state.task.terminal_reason || state.task.terminalReason || '',
+  ).toLowerCase()
+  return (
+    ['succeeded', 'success', 'complete', 'completed', 'done'].includes(taskStatus) ||
+    terminalReason === 'completed'
+  )
+}
+
 /**
  * Read `?session=` from a search string (chat.js:1182-1187), pure over the
  * injected search rather than `window.location.search`. Returns the value or
@@ -304,14 +338,75 @@ export function historyStableMessageIdentity(msg: ChatMessage): string {
   return stableId ? String(stableId) : ''
 }
 
-/**
- * Fallback history identity when there is no stable id (chat.js:5838-5839):
- * `${role}|${text}`. Legacy pipes the text through `_historyFallbackText`
- * (chat.js:5842-5846), a role-specific strip pipeline ported by later tasks;
- * this foundation trims the text (the common tail of every legacy branch).
- */
+// chat.js:383-433 — assistant control/protocol markers are display-only
+// transport details and must never leak into rendered text or fallback ids.
+const DIRECTIVE_TAG_RE = /\[\[\s*(?:reply_to_current|reply_to\s*:\s*[^\]\n]+)\s*\]\]\s*/g
+const GENERATED_ARTIFACT_MARKER_RE = /(?:^|\s*)\[generated artifact omitted:\s*[^\]\n]+?\]\s*/gi
+const PROTOCOL_TEXT_MARKER_RE =
+  /<\s*(?:minimax:tool_call|tool_calls?|tvoe_calls|invoke\b|parameter\b|effect_calls\b|details\b|angle\s+brackets\b)/i
+const PROTOCOL_TEXT_PARAMETER_RE =
+  /<\s*parameter\s+name\s*=\s*["'](?:path|content|command|code|patch)["']/i
+const PROTOCOL_TEXT_INVOKE_RE = /<\s*invoke\s+name\s*=\s*["'][A-Za-z_][A-Za-z0-9_.:-]*["']/i
+const PROTOCOL_TEXT_HTML_RE = /<!doctype\s+html\b|<html\b|<\/html\s*>/i
+const PROTOCOL_TEXT_CLOSE_RE = /<\/\s*invoke\s*>|<\/\s*(?:tool_calls?|tvoe_calls)\s*>/i
+const PROTOCOL_TEXT_STANDALONE_RE =
+  /<\s*(?:parameter|effect_calls|tool_calls?|tvoe_calls|angle\s+brackets)\s*>/i
+const PROTOCOL_TEXT_DETAILS_RE = /<\s*details\s*>\s*<\s*summary\s*>\s*View areas around line\b/i
+
+/** chat.js:387-389 — strip reply-threading control directives before display. */
+export function stripDirectiveTags(text: string): string {
+  return String(text || '')
+    .replace(DIRECTIVE_TAG_RE, '')
+    .replace(/^\n+/, '')
+}
+
+/** chat.js:391-400 — remove generated-artifact omission markers and normalize whitespace. */
+export function stripGeneratedArtifactMarkers(text: string): string {
+  const value = String(text || '')
+  if (!value.includes('[generated artifact omitted:')) return value
+  return value
+    .replace(/\r\n/g, '\n')
+    .replace(GENERATED_ARTIFACT_MARKER_RE, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function looksLikeProtocolTextSuffix(suffix: string): boolean {
+  if (/<\s*minimax:tool_call\s*>/i.test(suffix)) return true
+  if (PROTOCOL_TEXT_STANDALONE_RE.test(suffix)) return true
+  if (PROTOCOL_TEXT_DETAILS_RE.test(suffix)) return true
+  if (PROTOCOL_TEXT_PARAMETER_RE.test(suffix)) return true
+  if (PROTOCOL_TEXT_INVOKE_RE.test(suffix) && PROTOCOL_TEXT_CLOSE_RE.test(suffix)) return true
+  if (PROTOCOL_TEXT_HTML_RE.test(suffix) && PROTOCOL_TEXT_INVOKE_RE.test(suffix)) return true
+  return false
+}
+
+/** chat.js:419-426 — trim only suffixes that positively match a tool-protocol leak. */
+export function stripProtocolTextLeak(text: string): string {
+  const value = String(text || '')
+  if (!value) return value
+  const match = PROTOCOL_TEXT_MARKER_RE.exec(value)
+  if (!match) return value
+  const suffix = value.slice(match.index)
+  if (!looksLikeProtocolTextSuffix(suffix)) return value
+  return value.slice(0, match.index).trimEnd()
+}
+
+/** chat.js:5842-5846 — role-specific normalized text used by id-less history rows. */
+export function historyFallbackText(role: Role, text: string): string {
+  if (role === 'assistant') {
+    return stripProtocolTextLeak(
+      stripDirectiveTags(stripGeneratedArtifactMarkers(text || '')),
+    ).trim()
+  }
+  if (role === 'user') return stripTimePrefix(text || '').trim()
+  return (text || '').trim()
+}
+
+/** chat.js:5838-5846 — fallback identity after the exact legacy strip pipeline. */
 export function historyFallbackMessageIdentity(role: Role, text: string): string {
-  return `${role || ''}|${(text || '').trim()}`
+  return `${role || ''}|${historyFallbackText(role, text)}`
 }
 
 // chat.js:430 — the "[<iso> <weekday> <tz>]\n" prefix the engine prepends to

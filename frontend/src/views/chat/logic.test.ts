@@ -29,12 +29,19 @@ import {
   pageDumpMarkerScore,
   parseSlashInput,
   readSessionFromUrl,
+  replayGapShouldWarn,
   resolveAttachmentMime,
   sendButtonState,
   sessionItemKey,
+  sessionChangeIsTerminal,
   sessionRunStatus,
   shouldAutofocusComposer,
   slashCommandKey,
+  stripDirectiveTags,
+  stripGeneratedArtifactMarkers,
+  stripProtocolTextLeak,
+  stripTimePrefix,
+  subscribeResultNeedsTerminalHistorySync,
   webchatSessionKey,
   ACTIVE_SESSION_STORAGE_KEY,
   MAX_PENDING,
@@ -142,14 +149,38 @@ describe('historyStableMessageIdentity', () => {
   })
 })
 
-// Parity: chat.js:5838-5839 — `${role}|${text}` (the fallback text pipeline is
-// ported by later tasks; this task passes the text through trimmed).
+// Parity: chat.js:383-433 / 5838-5846 — display and fallback-id strip pipeline.
 describe('historyFallbackMessageIdentity', () => {
   it('joins role and text with a pipe', () => {
     expect(historyFallbackMessageIdentity('user', 'hello')).toBe('user|hello')
   })
   it('trims the text', () => {
     expect(historyFallbackMessageIdentity('assistant', '  hi  ')).toBe('assistant|hi')
+  })
+  it('strips the engine time prefix from user rows', () => {
+    const text = '[2026-07-22T00:12+07:00 Wed Asia/Ho_Chi_Minh]\nhello'
+    expect(stripTimePrefix(text)).toBe('hello')
+    expect(historyFallbackMessageIdentity('user', text)).toBe('user|hello')
+  })
+  it('strips directives and generated-artifact markers from assistant rows', () => {
+    expect(stripDirectiveTags('[[reply_to: abc]]\nanswer')).toBe('answer')
+    expect(stripGeneratedArtifactMarkers('answer [generated artifact omitted: chart.png]')).toBe(
+      'answer',
+    )
+    expect(
+      historyFallbackMessageIdentity(
+        'assistant',
+        '[[reply_to_current]] answer [generated artifact omitted: chart.png]',
+      ),
+    ).toBe('assistant|answer')
+  })
+  it('strips a positive protocol suffix but preserves ordinary angle-bracket text', () => {
+    const leaked =
+      'Useful answer\n<invoke name="exec_command"><parameter name="command">pwd</parameter></invoke>'
+    expect(stripProtocolTextLeak(leaked)).toBe('Useful answer')
+    expect(stripProtocolTextLeak('Use <details> for optional prose')).toBe(
+      'Use <details> for optional prose',
+    )
   })
 })
 
@@ -584,6 +615,43 @@ describe('sessionRunStatus', () => {
     const out = sessionRunStatus({ last_task: { status: 'succeeded', task_id: 'done' } })
     expect(out.status).toBe('idle')
     expect(out.task).toEqual({ status: 'succeeded', task_id: 'done' })
+  })
+})
+
+describe('sessionChangeIsTerminal', () => {
+  it('accepts terminal reasons and lifecycle statuses (chat.js:1695-1698)', () => {
+    expect(sessionChangeIsTerminal({ reason: 'turn_complete' })).toBe(true)
+    expect(sessionChangeIsTerminal({ status: 'killed' })).toBe(true)
+    expect(sessionChangeIsTerminal({ status: 'running' })).toBe(false)
+  })
+
+  it('accepts run-status-only terminal frames (chat.js:1699-1700)', () => {
+    expect(sessionChangeIsTerminal({ run_status: 'failed' })).toBe(true)
+    expect(sessionChangeIsTerminal({ runStatus: 'cancelled' })).toBe(true)
+    expect(sessionChangeIsTerminal({ run_status: 'abandoned' })).toBe(true)
+    expect(sessionChangeIsTerminal({ run_status: 'running' })).toBe(false)
+  })
+})
+
+describe('subscription recovery helpers', () => {
+  it('warns only for unexpected replay gaps (chat.js:5300-5303)', () => {
+    expect(replayGapShouldWarn('socket_gap')).toBe(true)
+    expect(replayGapShouldWarn('stream_buffer_empty')).toBe(false)
+    expect(replayGapShouldWarn('stream_buffer_reset')).toBe(false)
+    expect(replayGapShouldWarn('cursor_ahead_of_stream')).toBe(false)
+  })
+
+  it('refreshes an idle terminal snapshot only when no frames replayed (chat.js:1703-1711)', () => {
+    const terminal = { run_status: 'idle', last_task: { status: 'succeeded' } }
+    expect(subscribeResultNeedsTerminalHistorySync(terminal)).toBe(true)
+    expect(subscribeResultNeedsTerminalHistorySync({ ...terminal, replayed_count: 1 })).toBe(false)
+    expect(
+      subscribeResultNeedsTerminalHistorySync({
+        run_status: 'idle',
+        last_task: { status: 'idle', terminal_reason: 'completed' },
+      }),
+    ).toBe(true)
+    expect(subscribeResultNeedsTerminalHistorySync({ run_status: 'running' })).toBe(false)
   })
 })
 

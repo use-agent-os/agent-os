@@ -26,9 +26,9 @@ import { MAX_PENDING, sendButtonState, shouldAutofocusComposer } from './logic'
  * (chat.js:6067 — "Wait for file attachment processing to finish") blocks a send
  * while a read/upload is in flight.
  *
- * Still deferred with clean seams: the enqueue-while-streaming branch
- * (chat.js:6091) and slash-command handling (chat.js:6113). Until then a click /
- * Enter while `busy` is a no-op that keeps the composer intact.
+ * ChatPage also composes the enqueue-while-streaming branch (chat.js:6091) and
+ * slash-command handling (chat.js:6113), keeping the input component focused on
+ * keyboard/input behavior rather than RPC ownership.
  */
 
 const MIN_TEXTAREA_HEIGHT = 40 // chat.js:2590 fallback when minHeight is unset.

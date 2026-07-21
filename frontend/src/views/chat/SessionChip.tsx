@@ -3,8 +3,10 @@ import { toast } from 'sonner'
 import { Copy, RotateCcw } from 'lucide-react'
 import {
   classifySessionKey,
+  runStatusChipClass,
   sessionItemKey,
   sessionRunStatus,
+  type RunStatusResult,
   type SessionGroup,
   type SessionListItem,
 } from './logic'
@@ -29,6 +31,8 @@ const GROUP_ORDER: SessionGroup[] = ['Web chat', 'CLI', 'Sub-agents', 'Agents', 
 export interface SessionChipProps {
   /** The current (canonical) session key (chat.js:1223). */
   sessionKey: string
+  /** Live current-session run state (chat.js:1767 `_applySessionRunState`). */
+  runState?: RunStatusResult
   /** Switch to a different session (chat.js:1809 `_switchToSession`). */
   onSwitch: (key: string) => void
   /** Reset the current session (chat.js:2723 `sessions.reset`). */
@@ -82,6 +86,7 @@ async function defaultFetchSessions(): Promise<SessionListItem[]> {
 
 export function SessionChip({
   sessionKey,
+  runState = sessionRunStatus(undefined),
   onSwitch,
   onReset,
   onCopy = defaultCopy,
@@ -222,6 +227,21 @@ export function SessionChip({
           ▾
         </span>
       </button>
+      <span
+        id="chat-run-status"
+        className={`chip chat-session-run-status ${runStatusChipClass(runState.status)}`.trim()}
+        title={[
+          runState.label,
+          runState.task?.task_id,
+          runState.task?.queue_position ? `queue #${runState.task.queue_position}` : '',
+          runState.task?.terminal_reason || runState.task?.terminalReason,
+        ]
+          .filter(Boolean)
+          .join(' - ')}
+        data-status={runState.status}
+      >
+        {runState.label}
+      </span>
       <button
         type="button"
         className="chat-session-copy"
