@@ -42,11 +42,37 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 24px 32px;
+  padding: 20px 32px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 4px;
   scroll-behavior: smooth;
+}
+/* Consecutive rows from the SAME sender stay tight (they read as one turn and
+   the second drops its meta caption — see below). A turn from a DIFFERENT
+   sender gets a little air above it, but modest — the reference keeps turns
+   close, not spread out. */
+.chat-thread > .msg + .msg {
+  margin-top: 2px;
+}
+.chat-thread > .msg.user + .msg.assistant,
+.chat-thread > .msg.user + .msg.system,
+.chat-thread > .msg.user + .msg.error,
+.chat-thread > .msg.assistant + .msg.user,
+.chat-thread > .msg.system + .msg.user,
+.chat-thread > .msg.error + .msg.user,
+.chat-thread > .msg.assistant + .msg.error,
+.chat-thread > .msg.system + .msg.assistant {
+  margin-top: 8px;
+}
+
+/* Group consecutive same-sender rows: the follow-up row drops its meta caption
+   so a multi-part turn reads as one block (like the reference, where the tool
+   row sits directly under the agent's text with no repeated name/time). */
+.chat-thread > .msg.assistant + .msg.assistant:not(:has(.msg-header))::before,
+.chat-thread > .msg.system + .msg.system:not(:has(.msg-header))::before,
+.chat-thread > .msg.user + .msg.user:not(:has(.msg-header))::before {
+  display: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .chat-thread {
@@ -59,123 +85,104 @@
   }
 }
 
-/* ── Message bubbles ────────────────────────────────────────────────────────
-   Left/right conversation like a normal chat, but on the TTY token system:
-   each turn is its own box with a phosphor border, sharp corners (radius 0) and
-   mono type. User turns align right (lime signal border — "you"); assistant /
-   system turns align left (neutral); errors align left with the danger tone
-   gutter. Day + compaction separators stay full-width (they are NOT `.msg`, so
-   they are unaffected by these rules). */
+/* ── Message rows ────────────────────────────────────────────────────────────
+   ChatGPT/Grok-style conversation on the TTY token system. Assistant turns are
+   borderless: a `▸ HH:MM  NAME` meta caption (agent glyph + time + name) above
+   roomy body text on the left. User turns sit right in a subtle translucent
+   rounded panel with a `NAME  HH:MM` caption. Errors are a quiet left-gutter
+   notice. The meta line is CSS-generated from the `data-time` / `data-sender`
+   attributes the row builders stamp, so it stays out of the ported streaming
+   DOM. Day + compaction separators are NOT `.msg`, so these rules skip them.
+   References: user-supplied ChatGPT/Grok chat screenshots; UI-Pro-Max ux rules
+   (body line-height 1.6, adequate contrast, 8px touch spacing). */
 .msg {
   align-self: flex-start; /* assistant/system/error default to the left */
-  max-width: min(78%, 720px);
+  max-width: min(84%, 780px);
   min-width: 0;
   box-sizing: border-box;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: 0; /* TTY: zero radius */
-  background: var(--card);
   color: var(--foreground);
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
 
-/* User turns: right-aligned, lime signal border marks the sender as "you". */
-.msg.user {
-  align-self: flex-end;
-  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
-  background: color-mix(in srgb, var(--primary) 7%, var(--card));
+/* Meta caption. Left rows: `▸ HH:MM  NAME`. The `▸` is the terminal agent glyph
+   (lime signal) — no avatar asset needed. Suppressed when the imperative DOM
+   already emits a `.msg-header` node (streaming/thinking) so it never doubles. */
+.msg:not(:has(.msg-header))::before {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.64rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+  content: attr(data-time) '  ' attr(data-sender);
+}
+.msg.assistant:not(:has(.msg-header))::before,
+.msg.system:not(:has(.msg-header))::before {
+  content: '\25B8 ' attr(data-time) '  ' attr(data-sender);
+}
+/* The agent glyph is the one lime signal in the caption (sender identity). */
+.msg.assistant:not(:has(.msg-header))::first-letter {
+  color: var(--primary);
+}
+.msg.error:not(:has(.msg-header))::before {
+  content: attr(data-time) '  ' attr(data-sender);
+  color: color-mix(in srgb, var(--danger, #ff5555) 75%, var(--dim));
 }
 
-/* Assistant / streaming / thinking: left, neutral phosphor box. */
+/* Assistant / system: borderless text on the left. */
 .msg.assistant,
 .msg.system {
   align-self: flex-start;
 }
 
-/* The live streaming bubble reuses the assistant box; the block cursor already
-   lives inside via the ported streaming DOM. */
-.msg.assistant.streaming {
-  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
-}
-
-/* Errors: left, single danger tone gutter (never a stacked border). */
-.msg.error {
-  align-self: flex-start;
-  border-color: var(--border);
-  border-left: 3px solid var(--danger, #ff5555);
-  background: color-mix(in srgb, var(--danger, #ff5555) 6%, var(--card));
-}
-
-/* The thinking indicator is quieter than a real turn. */
-.msg.assistant.thinking {
-  opacity: 0.85;
-  border-style: dashed;
-}
-
-/* Role caption above the body (You / Agent / System). Dim, mono, lowercased so
-   it reads as a terminal label, not chat chrome. When the imperative DOM
-   already emits a `.msg-header` (streaming/thinking) we style that; otherwise a
-   CSS-generated caption gives every bubble a sender label without touching the
-   ported row builders. */
-.msg-header {
-  font-size: 0.62rem;
-  text-transform: lowercase;
-  letter-spacing: 0.1em;
-  color: var(--dim);
-  margin-bottom: 3px;
-}
-.msg.user .msg-header {
-  text-align: right;
-  color: color-mix(in srgb, var(--primary) 70%, var(--dim));
-}
-
-/* CSS-generated sender caption for rows that carry no `.msg-header` node
-   (history/user/error/system rows built by the minimal row builders). Keyed off
-   `data-history-role`; suppressed when a real `.msg-header` is present so the
-   caption never doubles up. */
-.msg:not(:has(.msg-header))::before {
-  display: block;
-  font-size: 0.62rem;
-  text-transform: lowercase;
-  letter-spacing: 0.1em;
-  color: var(--dim);
-  margin-bottom: 3px;
-  content: 'agent';
+/* User: right, in a subtle translucent rounded panel — the one soft-rounded
+   surface in the view (deliberate exception to radius-0, matching the
+   reference), tinted just enough to separate "you" from the agent. */
+.msg.user {
+  align-self: flex-end;
+  padding: 9px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
 }
 .msg.user:not(:has(.msg-header))::before {
-  content: 'you';
   text-align: right;
-  color: color-mix(in srgb, var(--primary) 70%, var(--dim));
-}
-.msg.error:not(:has(.msg-header))::before {
-  content: 'error';
-  color: color-mix(in srgb, var(--danger, #ff5555) 80%, var(--dim));
-}
-.msg.system:not(:has(.msg-header))::before {
-  content: 'system';
+  content: attr(data-sender) '  ' attr(data-time);
 }
 
+/* Errors: a quiet left danger gutter, no panel. */
+.msg.error {
+  align-self: flex-start;
+  padding-left: 10px;
+  border-left: 2px solid var(--danger, #ff5555);
+}
+
+/* Streaming reuses the assistant text treatment (block cursor lives in the
+   ported DOM); thinking is quieter. */
+.msg.assistant.thinking {
+  opacity: 0.7;
+}
+
+/* A real `.msg-header` node (streaming/thinking) — matches the caption. */
+.msg-header {
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--dim);
+  margin-bottom: 4px;
+}
+
+/* Body — roomy line-height per UI-Pro-Max readability rule (1.5–1.75). */
 .msg-body {
   font-size: 0.9375rem;
-  line-height: 1.5;
+  line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-/* Timestamp — a faint trailing caption. */
-.msg-time {
-  font-size: 0.6rem;
-  color: var(--dim);
-  margin-top: 3px;
-}
-.msg.user .msg-time {
-  text-align: right;
-}
-
 @media (max-width: 768px) {
   .msg {
-    max-width: 88%;
+    max-width: 92%;
   }
 }
 

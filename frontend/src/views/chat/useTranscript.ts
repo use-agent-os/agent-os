@@ -12,6 +12,7 @@ import {
   type HistoryResponse,
 } from './transcript/history'
 import {
+  agentIdFromSessionKey,
   dayKey,
   dayLabel,
   esc,
@@ -210,6 +211,39 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
   // entangled — a later task); this faithful minimal row lets a subagent
   // disclosure, an idle-timeout row (stream.ts:522), and a keep-alive row
   // (stream.ts:653) render standalone. Reads `containerRef.current` lazily.
+  // Meta caption helpers — the `data-time` (HH:MM) + `data-sender` (NAME/YOU)
+  // attributes the CSS renders above each row (matching the reference chat
+  // layout). Time is formatted here (CSS can't format an ISO string); the
+  // sender is the agent id for assistant/system, "YOU" for user, "ERROR" for
+  // errors. Kept next to the builders so every row stamps consistently.
+  const fmtRowTime = (ts?: string | number | null): string => {
+    let d: Date
+    if (ts == null || ts === '') {
+      d = new Date()
+    } else if (typeof ts === 'number') {
+      d = new Date(ts)
+    } else {
+      // History carries epoch-ms as a numeric string (e.g. "1784624965697");
+      // the send path carries an ISO string. Parse the numeric form as epoch,
+      // else fall back to Date's string parsing (ISO).
+      const n = Number(ts)
+      d = /^\d+$/.test(ts.trim()) && Number.isFinite(n) ? new Date(n) : new Date(ts)
+    }
+    if (Number.isNaN(d.getTime())) return ''
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  }
+  const rowSender = (role: string): string => {
+    if (role === 'user') return 'YOU'
+    if (role === 'error') return 'ERROR'
+    if (role === 'system') return 'SYSTEM'
+    // assistant → the agent id from the current session key, uppercased.
+    return (agentIdFromSessionKey(sessionKeyRef.current) || 'AGENT').toUpperCase()
+  }
+  const stampRowMeta = (el: HTMLElement, role: string, ts?: string | number | null): void => {
+    el.dataset.time = fmtRowTime(ts)
+    el.dataset.sender = rowSender(role)
+  }
+
   const appendMinimalRow = (role: string, text: string): HTMLElement | null => {
     const th = containerRef.current
     if (!th) return null
@@ -218,6 +252,7 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
     const div = document.createElement('div')
     div.className = `msg ${role}`
     div.setAttribute('data-history-role', role)
+    stampRowMeta(div, role)
     div.innerHTML = `<div class="msg-body">${esc(text || '')}</div>`
     th.appendChild(div)
     return div
@@ -312,6 +347,7 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
         const div = document.createElement('div')
         div.className = `msg ${role}`
         div.setAttribute('data-history-role', role)
+        stampRowMeta(div, role)
         div.innerHTML = `<div class="msg-body">${esc(text || '')}</div>`
         th.appendChild(div)
         return div
@@ -339,6 +375,9 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
         } else {
           delete el.dataset.historyTs
         }
+        // The meta caption (time + sender) uses the real message ts when history
+        // carries one, else the row stays clock-less — sender is always set.
+        stampRowMeta(el, role || 'assistant', ts != null && ts !== '' ? String(ts) : null)
       },
       stripProtocolTextLeak: (t) => t,
       stripDirectiveTags: (t) => t,
@@ -433,7 +472,9 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
         // chat.js:6127-6130 — the send-path user bubble records its send time
         // (`ts: new Date().toISOString()`) so the export emits the `_(time)_`
         // suffix (chat.js:8398). Mirror it onto the DOM row the collector reads.
-        div.dataset.historyTs = new Date().toISOString()
+        const userTs = new Date().toISOString()
+        div.dataset.historyTs = userTs
+        stampRowMeta(div, 'user', userTs)
         // chat.js:6136-6144 — render the attachments block when present.
         if (atts.length > 0) {
           const bodyText = userText ? `<div class="msg-attachment-text">${esc(userText)}</div>` : ''
@@ -495,6 +536,8 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
           if (th2) {
             const div = document.createElement('div')
             div.className = 'msg error'
+            div.setAttribute('data-history-role', 'error')
+            stampRowMeta(div, 'error')
             div.innerHTML = `<div class="msg-body">${esc('Send failed: ' + message)}</div>`
             th2.appendChild(div)
           }

@@ -651,6 +651,18 @@ describe('ChatPage', () => {
     expect(md).toMatch(/### .+_\(.+\)_/)
   })
 
+  it('stamps the meta caption (data-time HH:MM + data-sender) on the sent user bubble', async () => {
+    mockRpc = makeRpc()
+    renderPage()
+    typeAndSend('meta caption line')
+    await waitFor(() => expect(document.querySelector('.msg.user')).not.toBeNull())
+    const row = document.querySelector('.msg.user') as HTMLElement
+    // The CSS meta caption renders `attr(data-sender) attr(data-time)`; the
+    // builder must stamp both so a user turn shows "YOU HH:MM" like the ref.
+    expect(row.dataset.sender).toBe('YOU')
+    expect(row.dataset.time).toMatch(/^\d{2}:\d{2}$/)
+  })
+
   it('export omits the time suffix for a row WITHOUT data-history-ts (chat.js:8398 falsy branch)', async () => {
     mockRpc = makeRpc()
     renderPage()
