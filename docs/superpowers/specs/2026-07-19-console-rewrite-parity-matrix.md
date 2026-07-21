@@ -570,6 +570,43 @@ Row format:
 | Preference load/save (`agentos-router-fx`): defaults enabled+default variant unless stored | chat.js:3398-3417 | ported | routerFx.ts routerFxLoadPref/routerFxSavePref; the controller hydrates the pref via routerFxLoadPref at composition. **Note:** the in-app "Visual effects" toggle that flips `enabled`+saves is a later task (the config/settings surface) |
 | Seed cache trim + resolve (localStorage): cap 300 / trim 250 oldest-by-stamp; resolve caches (stamp:tier:i<turn>) | chat.js:3589-3630 | ported | routerFx.ts routerFxSeedCacheTrim/routerFxResolveSeed/routerFxResolveLayoutSeed. **Note:** localStorage side-effecting; not unit-asserted here (the deterministic key/prefix IS asserted via routerFxSeedCacheKey). **Live-sweep pending (controller)** |
 
+> **Plan 3 — Task 7 (compaction separators + controls, imperative).** The
+> compaction context-separator region (chat.js:2916-3397) + in-flight controls
+> (chat.js:8654-8710) ported near-verbatim (design §2.1 — owner-approved
+> imperative boundary, NOT reactified) as `transcript/compaction.ts`, composed
+> into `createStreamController` exactly like tools/artifacts/router-fx. The
+> compaction event seam in useTranscript is FILLED: `session.event.compaction`
+> now drives `controller.showCompactionToast`. Router-fx compaction-turn
+> suppression is wired — the compaction toast calls the composed router-fx
+> renderer's `suppressForCompaction` (chat.js:3269-3282, ported in Task 6).
+> Module-globals → controller/renderer-instance fields: `_compactionSeparatorEl`,
+> `_compactionSeparatorTimer`, `_compactInFlight`, `_compactInFlightKey`,
+> `_lastCompactionToastSig`/`_lastCompactionToastAt` (via the toast-dedup
+> closure). The in-flight state ownership moves to the compaction renderer, so
+> `isCompactInFlightForCurrentSession` (which router-fx + the thinking indicator
+> gate on) now sources from it via a late-bound delegate. Pure helpers are
+> unit-tested (compaction.test.ts, 39 tests); separator/toast DOM behavior is
+> **live-sweep pending (controller)**. Timings ported EXACTLY: separator
+> auto-removal 4500ms, toast-dedup window 1500ms, corner-toast durations
+> 4500/5000ms.
+
+| Behavior | Legacy | Status | Frontend evidence |
+| --- | --- | --- | --- |
+| Terminal-status set: `completed/skipped/failed/error/cancelled/emergency_ephemeral` (case-insensitive); NOT `done`/`running` | chat.js:2991-3002 | ported | compaction.ts compactionTerminalStatus. **Unit-tested** — compaction.test.ts > true for the six terminal statuses (case-insensitive); false for started/observed/done/running/empty |
+| Separator tone map: completed→ok, failed/error→err, cancelled/emergency_ephemeral→warn, skipped+reason→warn, else info | chat.js:3035-3041 | ported | compaction.ts compactionSeparatorTone. **Unit-tested** — compaction.test.ts > completed→ok; failed/error→err (NOT "error"); cancelled/emergency→warn; skipped ±reason; started/observed/unknown→info |
+| Status label map (started/observed/emergency/skipped±reason/failed/error/cancelled/completed/default) | chat.js:3019-3033 | ported | compaction.ts compactionStatusLabel. **Unit-tested** — compaction.test.ts > 6 label cases incl. internal-vs-external skip reason + manual/auto default |
+| Separator persistence: explicit override, else terminal AND completed only | chat.js:3011-3017 | ported | compaction.ts shouldPersistCompactionSeparator. **Unit-tested** — compaction.test.ts > persist override; only completed persists; non-terminal never |
+| Separator animated flag: override, else started/observed only | chat.js:3004-3009 | ported | compaction.ts compactionSeparatorAnimated. **Unit-tested** — compaction.test.ts > override; started/observed only |
+| User-visible predicate: user_visible flag → manual always → skipped internal-reason hidden → else visible | chat.js:3231-3241 | ported | compaction.ts compactionUserVisible. **Unit-tested** — compaction.test.ts > flag; manual; internal-vs-external skip; non-skipped auto |
+| Reason accessor (reason → skip_reason → ""); internal-skip-reason set (7); skip-message + status-detail maps | chat.js:3227-3229/3200-3261 | ported | compaction.ts compactionReason/INTERNAL_COMPACTION_SKIP_REASONS/compactionSkipMessage/compactionStatusDetail. **Unit-tested** — compaction.test.ts > reason precedence; 7 internal reasons; manual/auto skip messages; detail (internal→"" before map, mapped detail, underscore-spaced) |
+| Failure blocks pending: refused / safe_to_send false / one of 4 blocking error reasons | chat.js:3158-3178 | ported | compaction.ts compactFailureBlocksPending. **Unit-tested** — compaction.test.ts > refused/safe_to_send; blocking reason incl. nested error.code; else false |
+| Semantic-memory notice (degraded + safety≠error) + safe-message checkpoint redaction | chat.js:3180-3198 | ported | compaction.ts compactSemanticMemoryNotice/compactSafeMessageDetail. **Unit-tested** — compaction.test.ts > degraded notice (both key casings), error/ok suppress; redacts checkpoint paths to [memory checkpoint] |
+| Duplicate-toast suppression: same (key\|source\|status\|event\|reason) sig within 1500ms | chat.js:2916-2928 | ported | compaction.ts createCompactionToastDedup (module-globals `_lastCompactionToastSig`/`_lastCompactionToastAt` → closure fields; `now`/`getSessionKey` injected for testability). **Unit-tested** — compaction.test.ts > suppresses dup in-window then distinct sig; allows repeat after window |
+| Live session separator sync: hide on not-user-visible / hidden skip; ensure+place+class/tone/label+dataset; auto-scroll; terminal → persist or schedule-removal(4500ms) | chat.js:3043-3079 | ported | compaction.ts syncCompactionSeparator (+ build/ensure/place/hide/clearTimer/scheduleRemoval, verbatim; reuses classes `chat-context-separator`/`--session`/`--live`/`--{tone}`/`--{status}`). **Live-sweep pending (controller)** |
+| History compaction-summary separators: clear + insert `.chat-compaction-separator` markers at covered_through_id (after, skipping trailing router-fx; else before next), hide live separator when any inserted | chat.js:3081-3156 | ported | compaction.ts renderCompactionSummarySeparators (+ clear/insert/id helpers); wired in useTranscript after each history render (initial + load-earlier), reading `_historyCompactionSummaries` via the paging ref. **Live-sweep pending (controller)** |
+| In-flight controls: setCompactInFlight (drives Send button) / isCompactInFlightForCurrentSession / settleCompactInFlight (terminal drain vs preserve/recover pending, re-show thinking) | chat.js:8654-8689 | ported (delta) | compaction.ts setCompactInFlight/isCompactInFlightForCurrentSession/settleCompactInFlight. **Delta:** pending-queue helpers (`_popAllPendingIntoComposer`/`_schedulePendingDrainAfterTerminal`/`_pendingQueue.length`) + `_updateSendButton` are injected `deps` (default no-op/0/false) — owned by the send flow (a later task). **Live-sweep pending (controller)** |
+| Compaction toast entry (session.event.compaction): status derive (compacted flag), replay gate, dedup, separator sync, per-status branches (started→in-flight+hideThinking+router-fx suppress; observed→hideThinking+suppress; emergency→settle+toast; skipped→settle+scheduleRemoval; semantic-notice→settle+completed-sep+historySync; failed/error→settle(±preserve/recover)+sep+toast; cancelled→settle(recover)+toast; completed→settle+historySync) | chat.js:3285-3362 | ported | compaction.ts showCompactionToast, composed on the controller; wired live: useTranscript `session.event.compaction` → `controller.showCompactionToast` (after foreign+seq gate). Router-fx suppression calls the composed `routerFxRenderer.suppressForCompaction`; history sync invalidates the react-query history key; corner toasts route through the (later-task) toast dep. **Live-sweep pending (controller)** |
+
 ## Mechanical inventory (generated by scripts/fe_parity_inventory.py)
 
 ### RPC methods (58)

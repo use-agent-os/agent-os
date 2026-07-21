@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRpc } from '@/app/providers'
 import { createStreamController, type StreamController } from './transcript/stream'
+import type { CompactionSummary } from './transcript/compaction'
 import {
   CHAT_HISTORY_PAGE_SIZE,
   createHistoryRenderer,
@@ -112,6 +113,13 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
   // read the latest without re-registering. Written in an effect.
   const seamsRef = useRef<TranscriptEventSeams>(opts.seams ?? {})
 
+  // chat.js `_historyCompactionSummaries` — the history summary rows, exposed to
+  // the (once-created) compaction renderer via a late-bound getter ref so the
+  // controller's useState initializer never reads `pagingRef` directly (which
+  // React's rules-of-hooks flags as reading a hook value during render). The
+  // real getter is installed in an effect once `pagingRef` exists.
+  const historyCompactionSummariesRef = useRef<() => CompactionSummary[]>(() => [])
+
   // eslint-disable-next-line react-hooks/refs -- factory stores the refs and reads .current only later, inside methods invoked outside render (never at creation)
   const [controller] = useState<StreamController>(() =>
     createStreamController(containerRef, {
@@ -121,6 +129,18 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
       getAuthToken,
       applySessionRunState: (state) => seamsRef.current.applySessionRunState?.(state),
       diag: (event, detail) => seamsRef.current.diag?.(event, detail),
+      // Compaction (Task 7): the history summary rows the history load populates
+      // live (chat.js `_historyCompactionSummaries`), read via a late-bound
+      // getter ref (installed in an effect) so this initializer stays ref-free.
+      getHistoryCompactionSummaries: () => historyCompactionSummariesRef.current(),
+      // chat.js:5305 `_scheduleHistorySync` → invalidate the history query so a
+      // completed/skipped compaction refetches the (now-summarized) transcript.
+      scheduleHistorySync: () =>
+        void queryClient.invalidateQueries({
+          queryKey: ['chat', 'history', sessionKeyRef.current],
+        }),
+      // Pending-queue recovery (chat.js:8596/8644) is owned by the send flow (a
+      // later task); leave the faithful no-op defaults until then.
       // Subagent-completion system row (chat.js:7814 `_addMessage`). No real
       // `_addMessage` DOM builder exists in the frontend yet (router-fx/turn-meta
       // entangled — a later task); provide the same faithful minimal row the
@@ -204,6 +224,12 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
   useEffect(() => {
     seamsRef.current = opts.seams ?? {}
   }, [opts.seams])
+  // Install the compaction-summary getter now that `pagingRef` exists (the
+  // controller's late-bound getter reads through this ref).
+  useEffect(() => {
+    historyCompactionSummariesRef.current = () =>
+      pagingRef.current.compactionSummaries as CompactionSummary[]
+  }, [])
 
   /* ── History read via react-query (chat.js:5440 `_loadHistory`) ─────────── */
 
@@ -248,7 +274,11 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
       compactionSummaries: meta.summaries,
     }
     historyRenderer.renderHistoryMessages(messages, pagingRef.current)
-  }, [historyQuery.data, historyRenderer])
+    // chat.js:3119 — overlay the history compaction-summary separators once the
+    // message rows exist (the history renderer is a focused port; this is folded
+    // in here, reading the summaries the controller was given above).
+    controller.renderCompactionSummarySeparators(messages)
+  }, [historyQuery.data, historyRenderer, controller])
 
   // Surface a history-load error into the scope row (chat.js:5484-5488).
   useEffect(() => {
@@ -297,6 +327,8 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
           previousScrollHeight,
           previousScrollTop,
         })
+        // Re-overlay the compaction-summary separators against the new row set.
+        controller.renderCompactionSummarySeparators(mergedMessages)
       } catch {
         state.loadingEarlier = false
         state.error = 'Could not load earlier history.'
@@ -308,7 +340,7 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
     reloadHistoryRef.current = () => {
       void queryClient.invalidateQueries({ queryKey: ['chat', 'history', opts.sessionKey] })
     }
-  }, [opts.sessionKey, historyRenderer, rpc, queryClient])
+  }, [opts.sessionKey, historyRenderer, rpc, queryClient, controller])
 
   /* ── Live WS subscription + all rpc.on handlers (chat.js:2857/4699-5181) ── */
 
@@ -475,12 +507,16 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
       }),
     )
 
-    // chat.js:4881 — compaction → Task-7 seam.
+    // chat.js:4881 — compaction → controller compaction renderer (Task 7). The
+    // renderer drives the in-thread context separator + in-flight controls +
+    // router-fx compaction-turn suppression; the seam stays as an optional
+    // observer hook for a later task (it never replaces the real handler).
     unsubs.push(
       onEvent(
         'session.event.compaction',
         (payload: StreamEventPayload, meta: Record<string, unknown>) => {
           if (!gateStreamFrame('event.compaction', payload)) return
+          controller.showCompactionToast(payload as Record<string, unknown>, meta)
           seams().showCompactionToast?.(payload, meta)
         },
       ),

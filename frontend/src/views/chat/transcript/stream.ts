@@ -27,6 +27,11 @@ import {
   type RouterFxRegistry,
   type RouterFxPref,
 } from './routerFx'
+import {
+  createCompactionRenderer,
+  type CompactionRenderer,
+  type CompactionSummary,
+} from './compaction'
 
 /* ── Constants (ported verbatim from chat.js) ───────────────────────────── */
 
@@ -242,8 +247,24 @@ export interface StreamControllerDeps {
     anchor: HTMLElement | null,
     bubble: HTMLElement | null,
   ) => void
-  /** chat.js:6383/6403 — compaction gate for the thinking indicator. */
-  isCompactInFlightForCurrentSession?: () => boolean
+  /* ── compaction (Task 7 — compaction.ts, composed below) ──────────────────
+   * The controller composes `createCompactionRenderer` and OWNS the
+   * compaction-in-flight state (chat.js:8654-8663) — so `isCompactInFlight-
+   * ForCurrentSession` is now sourced from the compaction renderer, not this
+   * dep — and wires the compaction toast to router-fx suppression. The renderer
+   * reads the history summary array + pending-queue helpers that live outside
+   * the streaming range; those are injected here. */
+  /** chat.js `_historyCompactionSummaries` — history summary rows, read live.
+   *  Default: none (the history renderer feeds the real array). */
+  getHistoryCompactionSummaries?: () => CompactionSummary[]
+  /** chat.js:5305 `_scheduleHistorySync` — debounced history refresh. */
+  scheduleHistorySync?: () => void
+  /** chat.js:8644 `_schedulePendingDrainAfterTerminal`. Default: no-op. */
+  schedulePendingDrainAfterTerminal?: () => void
+  /** chat.js:8596 `_popAllPendingIntoComposer`. Default: false. */
+  popAllPendingIntoComposer?: () => boolean
+  /** chat.js `_pendingQueue.length`. Default: 0. */
+  pendingQueueLength?: () => number
   /** chat.js:6412 — true while any router strip is still scanning. */
   routerScanActive?: () => boolean
   /** chat.js:6729/6879 — the debounced history-sync timer handle to cancel. */
@@ -339,8 +360,14 @@ export function createStreamController(
   const applySessionRunState = deps.applySessionRunState ?? (() => {})
   const updateSendButton = deps.updateSendButton ?? (() => {})
   const pushMessage = deps.pushMessage ?? (() => {})
-  const isCompactInFlightForCurrentSession =
-    deps.isCompactInFlightForCurrentSession ?? (() => false)
+  // Compaction-in-flight ownership moved to the composed compaction renderer
+  // (Task 7, created below). Router-fx + the thinking indicator gate on it, but
+  // only ever CALL it (never at composition time), so a late-bound delegate is
+  // safe: it resolves to `compactionRenderer.isCompactInFlightForCurrentSession`
+  // once that is assigned, and is a no-op (false) before then.
+  let compactionRenderer: CompactionRenderer | null = null
+  const isCompactInFlightForCurrentSession = (): boolean =>
+    compactionRenderer ? compactionRenderer.isCompactInFlightForCurrentSession() : false
   const clearHistorySyncTimer = deps.clearHistorySyncTimer ?? (() => {})
   const liveStreamStateBySession =
     deps.liveStreamStateBySession ?? new Map<string, ParkedStreamState>()
@@ -1284,6 +1311,45 @@ export function createStreamController(
     diag,
   })
 
+  /* ── compaction renderer (chat.js:2916-3397 + 8654-8710, compaction.ts) ── */
+
+  // chat.js:5918-5925 — is `el` the current session's live stream bubble
+  // (the compaction separator's placement anchor).
+  function isCurrentSessionStreamBubble(el: HTMLElement | null): boolean {
+    if (!el || el !== _streamBubble) return false
+    const currentKey = getSessionKey() || ''
+    const streamKey = _streamSessionKey || el.dataset.streamSessionKey || ''
+    return (
+      !!currentKey &&
+      streamKey === currentKey &&
+      (!el.dataset.streamSessionKey || el.dataset.streamSessionKey === currentKey)
+    )
+  }
+
+  compactionRenderer = createCompactionRenderer({
+    thread,
+    getSessionKey: () => getSessionKey() || '',
+    esc,
+    getStreamBubble: () => _streamBubble,
+    isStreaming: () => _isStreaming,
+    isCurrentSessionStreamBubble,
+    getAutoScroll: () => _autoScroll,
+    scrollToBottom,
+    getHistoryCompactionSummaries: deps.getHistoryCompactionSummaries ?? (() => []),
+    updateSendButton,
+    hideThinkingIndicator,
+    showThinkingIndicator,
+    // Wire the compaction toast into the composed router-fx renderer's
+    // compaction-turn suppression (chat.js:3269-3282 / 3302/3307).
+    suppressRouterFxForCompaction: (payload) => routerFxRenderer.suppressForCompaction(payload),
+    scheduleHistorySync: deps.scheduleHistorySync ?? (() => {}),
+    schedulePendingDrainAfterTerminal: deps.schedulePendingDrainAfterTerminal ?? (() => {}),
+    popAllPendingIntoComposer: deps.popAllPendingIntoComposer ?? (() => false),
+    pendingQueueLength: deps.pendingQueueLength ?? (() => 0),
+    toast,
+    diag,
+  })
+
   return {
     // seq
     acceptStreamSeq,
@@ -1337,6 +1403,16 @@ export function createStreamController(
     suppressRouterFxForCompaction: routerFxRenderer.suppressForCompaction,
     routerFxRegistry,
     routerFxPref,
+    // compaction (Task 7 — compaction.ts). `showCompactionToast` is the live
+    // entry point routed by `session.event.compaction`; the rest is the history/
+    // separator/in-flight surface the history renderer + send flow drive.
+    showCompactionToast: compactionRenderer.showCompactionToast,
+    syncCompactionSeparator: compactionRenderer.syncCompactionSeparator,
+    renderCompactionSummarySeparators: compactionRenderer.renderCompactionSummarySeparators,
+    clearCompactionSummarySeparators: compactionRenderer.clearCompactionSummarySeparators,
+    setCompactInFlight: compactionRenderer.setCompactInFlight,
+    settleCompactInFlight: compactionRenderer.settleCompactInFlight,
+    isCompactInFlightForCurrentSession: compactionRenderer.isCompactInFlightForCurrentSession,
     // introspection (for the transcript controller + tests)
     isStreaming: (): boolean => _isStreaming,
     streamSessionKey: (): string => _streamSessionKey,
