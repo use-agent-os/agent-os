@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agentos.engine import pricing
 from agentos.engine.pricing import (
     PriceEntry,
     PricingCache,
@@ -53,7 +54,7 @@ def test_opencap_pricing_fetches_public_catalog_and_caches_by_model() -> None:
         request=_httpx.Request("GET", "https://gw.capminal.ai/api/public/models"),
     )
 
-    with patch("agentos.engine.pricing.httpx.Client") as mock_client:
+    with patch.object(pricing.httpx, "Client") as mock_client:
         client = MagicMock()
         client.get.return_value = response
         mock_client.return_value.__enter__.return_value = client
@@ -75,7 +76,8 @@ def test_opencap_live_price_is_scoped_away_from_other_gateway_bare_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "agentos.engine.pricing._fetch_opencap_prices_sync",
+        pricing,
+        "_fetch_opencap_prices_sync",
         lambda: {"minimax-m3": PriceEntry(0.2541, 1.0164, 0.05082)},
     )
 
@@ -98,8 +100,9 @@ def test_opencap_boot_catalog_seeds_pricing_without_a_second_fetch() -> None:
         }
     )
 
-    with patch(
-        "agentos.engine.pricing._fetch_opencap_prices_sync",
+    with patch.object(
+        pricing,
+        "_fetch_opencap_prices_sync",
         side_effect=AssertionError("pricing should reuse the boot catalog"),
     ):
         price = lookup_price("minimax-m3", provider_id="opencap")
@@ -136,7 +139,7 @@ def test_opencap_live_pricing_failure_falls_back_without_failing_usage(
     def fail_fetch() -> dict[str, PriceEntry]:
         raise RuntimeError("offline")
 
-    monkeypatch.setattr("agentos.engine.pricing._fetch_opencap_prices_sync", fail_fetch)
+    monkeypatch.setattr(pricing, "_fetch_opencap_prices_sync", fail_fetch)
 
     price = lookup_price("oc-uncensored-1.0", provider_id="opencap")
 
