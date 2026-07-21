@@ -13,6 +13,7 @@ import { ConfigPage } from '@/views/config/ConfigPage'
 import { SkillsPage } from '@/views/skills/SkillsPage'
 import { CronPage } from '@/views/cron/CronPage'
 import { SetupPage } from '@/views/setup/SetupPage'
+import { ChatPage } from '@/views/chat/ChatPage'
 
 export const VIEWS: ReadonlyArray<{ path: string; title: string }> = [
   { path: 'overview', title: 'Overview' },
@@ -58,6 +59,7 @@ function viewElement(path: string) {
   if (path === 'skills') return <SkillsPage />
   if (path === 'cron') return <CronPage />
   if (path === 'setup') return <SetupPage />
+  if (path === 'chat') return <ChatPage />
   return <StubView title={view?.title ?? 'Overview'} />
 }
 
@@ -105,6 +107,7 @@ export const routeChildren: RouteObject[] = [
     if (v.path === 'skills') return { path: v.path, element: <SkillsPage /> }
     if (v.path === 'cron') return { path: v.path, element: <CronPage /> }
     if (v.path === 'setup') return { path: v.path, element: <SetupPage /> }
+    if (v.path === 'chat') return { path: v.path, element: <ChatPage /> }
     return { path: v.path, element: <StubView title={v.title} /> }
   }),
   { path: '*', element: <NotFound /> },
