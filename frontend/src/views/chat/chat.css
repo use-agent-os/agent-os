@@ -579,3 +579,192 @@
   color: var(--dim);
   padding: 10px;
 }
+
+/* ── Composer toolbar (execution mode + Pilot Router + usage readout) ─────────
+   Ported from chat.js:1256-1280. Terminal styling: sharp corners (radius 0),
+   status color flows ONLY through the --tone gutter (.tone-* classes); lime
+   (--primary) stays signal-only for the active/bypass affordance. */
+.chat-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-family: var(--font-mono);
+}
+.chat-toolbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.chat-toolbar-row-label {
+  font-size: 0.72rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+/* The execution-mode pill. Neutral by default (border/foreground); the --tone
+   gutter (tone-danger) lights the left edge, and .is-active switches the accent
+   to the lime signal to mark an in-force elevated mode. */
+.chat-pill {
+  appearance: none;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--tone, var(--border));
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease,
+    color 0.12s ease;
+}
+.chat-pill:hover:not(.chat-pill--disabled) {
+  border-color: color-mix(in srgb, var(--tone, var(--border)) 55%, var(--border));
+}
+.chat-pill.is-active {
+  border-color: var(--primary);
+  border-left-color: var(--primary);
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+}
+.chat-pill--disabled {
+  cursor: not-allowed;
+  color: var(--dim);
+  border-left-color: var(--border);
+  opacity: 0.7;
+}
+
+/* Pilot Router switch — sharp track, lime thumb glow when on. */
+.chat-toggle {
+  position: relative;
+  display: inline-flex;
+  cursor: pointer;
+}
+.chat-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.chat-toggle-track {
+  width: 34px;
+  height: 18px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  display: inline-flex;
+  align-items: center;
+  padding: 1px;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease;
+}
+.chat-toggle-thumb {
+  width: 14px;
+  height: 14px;
+  background: var(--dim);
+  transition:
+    transform 0.12s ease,
+    background 0.12s ease;
+}
+.chat-toggle input:checked + .chat-toggle-track {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, var(--surface));
+}
+.chat-toggle input:checked + .chat-toggle-track .chat-toggle-thumb {
+  background: var(--primary);
+  transform: translateX(16px);
+}
+.chat-toggle input:focus-visible + .chat-toggle-track {
+  outline: 1px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/* Per-session usage readout — a terminal readout rail, not boxed pills. */
+.chat-toolbar-usage {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  font-size: 0.72rem;
+}
+.chat-toolbar-usage-model {
+  color: var(--foreground);
+}
+.chat-toolbar-usage-metric .t-label {
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.chat-toolbar-usage-metric .t-data {
+  color: var(--foreground);
+}
+.chat-toolbar-usage-empty {
+  color: var(--dim);
+}
+
+/* Bypass-confirm dialog (chat.js:1376-1382 UI.confirm) — reuses ModalShell. */
+.chat-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--background) 78%, transparent);
+  padding: 20px;
+}
+.chat-modal {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--danger);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  max-width: 420px;
+  width: 100%;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.chat-modal-body {
+  font-size: 0.8rem;
+  color: var(--dim);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.chat-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Gear trigger + popover holding the toolbar in the composer input bar
+   (chat.js:1248-1281 chat-toolbar-wrap). */
+.chat-toolbar-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.chat-toolbar-trigger {
+  line-height: 1;
+}
+.chat-toolbar-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  min-width: 240px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 12px;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--background) 60%, transparent);
+}

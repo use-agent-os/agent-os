@@ -5,7 +5,18 @@
 // service (services/approval-monitor.ts); this module owns the config surface
 // (approval-strategy options + effective-execution-mode summary).
 
-import { readBrowserElevated, type Approval, type ElevatedMode } from '@/services/approval-monitor'
+import {
+  normalizeElevatedMode,
+  readBrowserElevated,
+  type Approval,
+  type ElevatedMode,
+} from '@/services/approval-monitor'
+
+// Re-exported from the single elevated-mode source of truth
+// (services/approval-monitor.ts) so existing approvals-view imports of
+// `normalizeElevatedMode` from this module keep resolving without a duplicate
+// implementation. The chat toolbar shares the same source.
+export { normalizeElevatedMode }
 
 // approvals.js:314-322 (_approvalDetail) — the pending-card Details body: the
 // warning text when present, else the FULL pretty-printed args/params JSON with
@@ -61,11 +72,6 @@ export function modeStateTone(mode: string): Tone {
   if (mode === 'auto-approve') return 'warn'
   if (mode === 'auto-deny') return 'danger'
   return 'ok'
-}
-
-// approvals.js:245-247 — only on/bypass/full are valid elevated modes.
-export function normalizeElevatedMode(mode: string | null | undefined): ElevatedMode {
-  return mode === 'on' || mode === 'bypass' || mode === 'full' ? mode : ''
 }
 
 // approvals.js:234-243 — read the persisted browser elevated mode, downgrading a

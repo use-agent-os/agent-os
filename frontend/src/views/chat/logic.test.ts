@@ -22,6 +22,9 @@ import {
   PAGE_DUMP_CHARS,
   messageTranscriptId,
   normalizeOutgoingComposerPayload,
+  effectiveElevatedMode,
+  findSessionUsage,
+  normalizeSessionUsage,
   normalizeSlashCommand,
   pageDumpMarkerScore,
   parseSlashInput,
@@ -619,5 +622,80 @@ describe('classifySessionKey', () => {
 describe('ACTIVE_SESSION_STORAGE_KEY', () => {
   it('is the legacy key so a returning tab reopens the same session', () => {
     expect(ACTIVE_SESSION_STORAGE_KEY).toBe('agentos_active_session')
+  })
+})
+
+// Parity: chat.js:2221-2223 (_effectiveElevatedMode) — the session override wins,
+// else the global default; the winner is normalized to on/bypass/full/''.
+describe('effectiveElevatedMode', () => {
+  it('prefers the session override over the global default', () => {
+    expect(effectiveElevatedMode('bypass', 'on')).toBe('bypass')
+  })
+  it('falls back to the global default when there is no session override', () => {
+    expect(effectiveElevatedMode('', 'full')).toBe('full')
+  })
+  it('normalizes an unknown mode to the empty string', () => {
+    expect(effectiveElevatedMode('nonsense', '')).toBe('')
+    expect(effectiveElevatedMode('', 'garbage')).toBe('')
+    expect(effectiveElevatedMode('', '')).toBe('')
+  })
+})
+
+// Parity: chat.js:604-607 (_loadCurrentSessionUsage) — locate the current
+// session's entry by any of its key aliases (session / sessionKey / key).
+describe('findSessionUsage', () => {
+  const rows = [
+    { session: 'agent:main:webchat:a', input_tokens: 1 },
+    { sessionKey: 'agent:main:webchat:b', input_tokens: 2 },
+    { key: 'agent:main:webchat:c', input_tokens: 3 },
+  ]
+  it('matches on any of the session/sessionKey/key aliases', () => {
+    expect(findSessionUsage(rows, 'agent:main:webchat:a')?.input_tokens).toBe(1)
+    expect(findSessionUsage(rows, 'agent:main:webchat:b')?.input_tokens).toBe(2)
+    expect(findSessionUsage(rows, 'agent:main:webchat:c')?.input_tokens).toBe(3)
+  })
+  it('returns undefined when no row matches (legacy clears the readout)', () => {
+    expect(findSessionUsage(rows, 'agent:main:webchat:z')).toBeUndefined()
+    expect(findSessionUsage(undefined, 'x')).toBeUndefined()
+  })
+})
+
+// Parity: chat.js:609-615 (_loadCurrentSessionUsage) — coerce a usage row's
+// snake/camel token + cost + model fields into a stable numeric shape; a
+// non-positive cost becomes null (the legacy widget treats 0 as "no cost yet").
+describe('normalizeSessionUsage', () => {
+  it('reads snake_case token fields and a positive cost', () => {
+    expect(
+      normalizeSessionUsage({
+        input_tokens: 10,
+        output_tokens: 20,
+        cache_read_tokens: 5,
+        cache_write_tokens: 3,
+        cost_usd: 0.25,
+        model: 'gpt-x',
+      }),
+    ).toEqual({ input: 10, output: 20, cacheRead: 5, cacheWrite: 3, cost: 0.25, model: 'gpt-x' })
+  })
+  it('reads camelCase aliases', () => {
+    expect(
+      normalizeSessionUsage({
+        inputTokens: 4,
+        outputTokens: 6,
+        cacheReadTokens: 1,
+        cacheWriteTokens: 2,
+        costUsd: 0.5,
+        model: 'y',
+      }),
+    ).toEqual({ input: 4, output: 6, cacheRead: 1, cacheWrite: 2, cost: 0.5, model: 'y' })
+  })
+  it('coerces a zero/negative cost to null and missing fields to 0/""', () => {
+    expect(normalizeSessionUsage({ input_tokens: 7, cost_usd: 0 })).toEqual({
+      input: 7,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cost: null,
+      model: '',
+    })
   })
 })

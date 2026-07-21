@@ -95,6 +95,12 @@ export interface ComposerProps {
    * previews sit with the composer (chat.js:8346 `_renderAttachmentPreview`).
    */
   tray?: React.ReactNode
+  /**
+   * Optional composer-settings toolbar (execution mode + Pilot Router + usage),
+   * mounted behind a gear trigger in the input bar (chat.js:1248-1281
+   * `chat-toolbar-wrap`). Absent when the view has no toolbar.
+   */
+  toolbar?: React.ReactNode
 }
 
 export function Composer({
@@ -111,8 +117,10 @@ export function Composer({
   hasPendingWork = false,
   onAttachFiles,
   tray,
+  toolbar,
 }: ComposerProps) {
   const [value, setValue] = useState('')
+  const [toolbarOpen, setToolbarOpen] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // History-cycle cursor (legacy `_inputHistoryIdx` / `_inputHistoryDraft`,
@@ -323,6 +331,26 @@ export function Composer({
       {tray}
       {slashMenu}
       <div className="chat-composer">
+        {toolbar ? (
+          <div className="chat-toolbar-wrap">
+            <button
+              type="button"
+              className="btn-term chat-toolbar-trigger"
+              aria-haspopup="dialog"
+              aria-expanded={toolbarOpen}
+              aria-label="Run modes"
+              title="Run modes — execution, router"
+              onClick={() => setToolbarOpen((v) => !v)}
+            >
+              ☰
+            </button>
+            {toolbarOpen ? (
+              <div className="chat-toolbar-popover" role="dialog" aria-label="Composer settings">
+                {toolbar}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         {onAttachFiles ? (
           <>
             <input

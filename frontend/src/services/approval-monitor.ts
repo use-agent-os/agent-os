@@ -85,6 +85,22 @@ interface ApprovalsState {
  * hydrate the store on load so the readout starts from the stored value. (The
  * approvals view re-exports this as browserElevatedMode() from its logic.ts.)
  */
+// approvals.js:245-247 / chat.js:2217-2219 (_normalizeElevatedMode) — only
+// on/bypass/full are valid elevated modes; anything else is the empty string.
+// The single source of truth for the elevated-mode model (shared by the chat
+// toolbar + the approvals readout, both of which re-export it from here).
+export function normalizeElevatedMode(mode: string | null | undefined): ElevatedMode {
+  return mode === 'on' || mode === 'bypass' || mode === 'full' ? mode : ''
+}
+
+// chat.js:2225-2227 (_isApprovalBypassMode) — bypass + full skip approval
+// prompts; on/'' keep them. Shared with the chat toolbar (which derives the
+// glow/dot state from the effective mode) and the approvals readout, so it
+// lives in the single elevated-mode source of truth alongside the reader.
+export function isApprovalBypassMode(mode: string | null | undefined): boolean {
+  return mode === 'bypass' || mode === 'full'
+}
+
 export function readBrowserElevated(): ElevatedMode {
   let mode = ''
   let version = ''
@@ -95,7 +111,7 @@ export function readBrowserElevated(): ElevatedMode {
     /* storage unavailable */
   }
   if (mode === 'full' && version !== ELEVATED_MODE_STORAGE_VERSION) return 'bypass'
-  return mode === 'on' || mode === 'bypass' || mode === 'full' ? mode : ''
+  return normalizeElevatedMode(mode)
 }
 
 export const useApprovals = create<ApprovalsState>((set) => ({

@@ -11,6 +11,7 @@ import {
   approvalsSettingsUrl,
   approvalsUrl,
   canAlwaysAllow,
+  isApprovalBypassMode,
   readBrowserElevated,
   saveApprovalMode,
   setBrowserElevated,
@@ -540,6 +541,17 @@ describe('approval-monitor pure helpers', () => {
       expect(canAlwaysAllow({ id: '1', namespace: 'exec', command: 'ls' })).toBe(true)
       expect(canAlwaysAllow({ id: '1', namespace: 'exec' })).toBe(false)
       expect(canAlwaysAllow({ id: '1', namespace: 'plugin', command: 'ls' })).toBe(false)
+    })
+  })
+
+  // chat.js:2225-2227 (_isApprovalBypassMode) / approvals share the elevated-mode
+  // model — bypass + full both skip approval prompts; on/'' do not.
+  describe('isApprovalBypassMode', () => {
+    it('is true only for bypass and full', () => {
+      expect(isApprovalBypassMode('bypass')).toBe(true)
+      expect(isApprovalBypassMode('full')).toBe(true)
+      expect(isApprovalBypassMode('on')).toBe(false)
+      expect(isApprovalBypassMode('')).toBe(false)
     })
   })
 

@@ -4,7 +4,21 @@
 // so each helper is unit-testable in isolation. Cited legacy line ranges are
 // against static/js/views/chat.js.
 
+import {
+  isApprovalBypassMode,
+  normalizeElevatedMode,
+  type ElevatedMode,
+} from '@/services/approval-monitor'
 import type { ChatMessage, Role } from './types'
+
+// The elevated-mode model is SHARED with the approvals view: the storage keys,
+// version-downgrade reader, normalizer, and bypass predicate all live in the
+// single source of truth (services/approval-monitor.ts). The chat toolbar
+// re-exports the pieces it needs so callers can import from one module, but the
+// implementations are NOT duplicated here — there is exactly one elevated-mode
+// store.
+export { isApprovalBypassMode, normalizeElevatedMode }
+export type { ElevatedMode }
 
 // The stable webchat session key (chat.js:11).
 const WEBCHAT_SESSION_KEY = 'agent:main:webchat:default'
@@ -842,5 +856,81 @@ export function inputNormalizationProvenanceFromAttachments(attachments: Pending
       generated_attachment_count: generated.length,
       guard_action: meta.guardAction || 'generated_text_attachment',
     },
+  }
+}
+
+/**
+ * chat.js:2221-2223 (_effectiveElevatedMode) — the effective execution mode for
+ * the chat session: the browser session override wins, else the global
+ * `permissions.default_mode`, normalized to on/bypass/full/''. The two inputs
+ * (both already read elsewhere: the session mode from the shared elevated store,
+ * the global from config.get) are injected so this stays pure.
+ */
+export function effectiveElevatedMode(sessionMode: string, globalMode: string): ElevatedMode {
+  return normalizeElevatedMode(sessionMode || globalMode)
+}
+
+// A single usage.status session row (chat.js:604-615). Keys arrive in either
+// snake_case (server) or camelCase; the current row is matched by any of its
+// key aliases.
+export interface UsageRow {
+  session?: string
+  sessionKey?: string
+  key?: string
+  input_tokens?: number
+  inputTokens?: number
+  output_tokens?: number
+  outputTokens?: number
+  cache_read_tokens?: number
+  cacheReadTokens?: number
+  cache_write_tokens?: number
+  cacheWriteTokens?: number
+  cost_usd?: number
+  costUsd?: number
+  model?: string
+  contextStatus?: unknown
+  context_status?: unknown
+}
+
+// The normalized per-session usage totals (chat.js:569 `_usageAccum` shape,
+// without the routed-turn/savings accounting the widget layers on top).
+export interface SessionUsage {
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+  cost: number | null
+  model: string
+}
+
+/**
+ * chat.js:604-607 (_loadCurrentSessionUsage) — find the row for the active
+ * session, matching on any of the `session` / `sessionKey` / `key` aliases the
+ * server may use. Returns undefined when nothing matches (legacy then clears
+ * the readout).
+ */
+export function findSessionUsage(
+  rows: UsageRow[] | undefined | null,
+  sessionKey: string,
+): UsageRow | undefined {
+  if (!Array.isArray(rows)) return undefined
+  return rows.find((s) => (s.session || s.sessionKey || s.key) === sessionKey)
+}
+
+/**
+ * chat.js:609-615 (_loadCurrentSessionUsage) — coerce a usage row into the
+ * numeric totals the readout renders. Token fields accept snake/camel aliases;
+ * a non-positive cost is nulled (the legacy widget treats 0 as "no cost yet").
+ */
+export function normalizeSessionUsage(row: UsageRow): SessionUsage {
+  const num = (v: unknown): number => Number(v || 0)
+  const cost = Number(row.cost_usd || row.costUsd || 0)
+  return {
+    input: num(row.input_tokens ?? row.inputTokens),
+    output: num(row.output_tokens ?? row.outputTokens),
+    cacheRead: num(row.cache_read_tokens ?? row.cacheReadTokens),
+    cacheWrite: num(row.cache_write_tokens ?? row.cacheWriteTokens),
+    cost: cost > 0 ? cost : null,
+    model: row.model || '',
   }
 }

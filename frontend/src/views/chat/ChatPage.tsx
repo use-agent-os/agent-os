@@ -16,6 +16,7 @@ import {
 } from './logic'
 import { SessionChip } from './SessionChip'
 import { SlashMenu, type SlashMenuHandle } from './SlashMenu'
+import { Toolbar } from './Toolbar'
 import { useSlashCommands } from './useSlashCommands'
 import { useTranscript } from './useTranscript'
 
@@ -286,6 +287,7 @@ export function ChatPage() {
         hasPendingWork={hasPendingAttachmentWork(attachments.attachments)}
         onAttachFiles={attachments.addFiles}
         tray={<Attachments api={attachments} />}
+        toolbar={<Toolbar sessionKey={sessionKey} />}
       />
     </div>
   )
