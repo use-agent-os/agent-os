@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,6 +13,7 @@ from agentos.gateway.config import (
     _router_tier_profile_defaults,
 )
 from agentos.onboarding.provider_specs import get_provider_setup_spec
+from agentos.provider import model_catalog as model_catalog_module
 from agentos.provider.failures import ProviderFailureKind, classify_provider_error
 from agentos.provider.model_catalog import ModelCatalog
 from agentos.provider.openai import OpenAIProvider
@@ -59,9 +61,9 @@ def test_opencap_gateway_onboarding_spec() -> None:
     assert spec.deployment == "cloud"
     assert spec.requires_api_key is True
     assert spec.default_base_url == "https://gw.capminal.ai/api/inference/v1"
-    assert spec.default_direct_model == "oc-uncensored-1.0"
+    assert spec.default_direct_model == "minimax-m3"
     model_field = next(field for field in spec.fields if field.name == "model")
-    assert model_field.default == "oc-uncensored-1.0"
+    assert model_field.default == "minimax-m3"
     assert any(field.name == "api_key" and field.required for field in spec.fields)
 
 
@@ -170,6 +172,47 @@ async def test_fetch_opencap_uses_public_unauthenticated_catalog() -> None:
     model = catalog.get("glm-5.2")
     assert model is not None
     assert model.provider == "opencap"
+
+
+@pytest.mark.asyncio
+async def test_slow_opencap_catalog_refresh_does_not_block_event_loop() -> None:
+    request_started = asyncio.Event()
+    release_request = asyncio.Event()
+    ticker_ran = asyncio.Event()
+    ticks = 0
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+    response.json.return_value = {"data": []}
+
+    async def slow_get(*_args, **_kwargs):
+        request_started.set()
+        await release_request.wait()
+        return response
+
+    async def ticker() -> None:
+        nonlocal ticks
+        while not release_request.is_set():
+            ticks += 1
+            ticker_ran.set()
+            await asyncio.sleep(0)
+
+    with patch.object(model_catalog_module.httpx, "AsyncClient") as client_cls:
+        client = AsyncMock()
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get = AsyncMock(side_effect=slow_get)
+        client_cls.return_value = client
+
+        refresh_task = asyncio.create_task(ModelCatalog().fetch_opencap())
+        ticker_task = asyncio.create_task(ticker())
+        await asyncio.wait_for(request_started.wait(), timeout=0.1)
+        await asyncio.wait_for(ticker_ran.wait(), timeout=0.1)
+        assert refresh_task.done() is False
+        release_request.set()
+        await refresh_task
+        await ticker_task
+
+    assert ticks > 0
 
 
 def test_opencap_gateway_uses_conservative_shared_id_limits() -> None:

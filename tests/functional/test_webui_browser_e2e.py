@@ -231,7 +231,7 @@ def test_control_ui_loads_in_real_browser(tmp_path: Path) -> None:
     assert payload["appCount"] == 1
     assert payload["basePath"] == "/control"
     assert payload["authMode"] == "none"
-    assert payload["providerModelBeforeSave"] == "oc-uncensored-1.0"
+    assert payload["providerModelBeforeSave"] == "minimax-m3"
     assert payload["providerAdvancedOpen"] is False
     assert payload["providerEnvVisible"] is False
     assert payload["providerEnvBeforeSave"] == "OPENCAP_API_KEY"

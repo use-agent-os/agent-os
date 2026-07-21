@@ -238,12 +238,14 @@ Provider and router:
 agentos onboard
 agentos onboard status
 agentos configure provider --provider openrouter --api-key-env OPENROUTER_API_KEY
-agentos configure provider --provider opencap --model oc-uncensored-1.0 --api-key-env OPENCAP_API_KEY
 agentos configure router --router recommended
 agentos providers list
 agentos providers configure openrouter
 agentos providers status
 ```
+
+Provider-specific setup examples, including OpenCAP, live in
+[`providers-and-models.md`](providers-and-models.md).
 
 Search:
 

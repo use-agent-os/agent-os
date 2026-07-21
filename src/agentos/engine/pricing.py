@@ -14,7 +14,6 @@ import structlog
 
 from agentos.env import trust_env as _trust_env
 from agentos.provider.openrouter_attribution import openrouter_app_headers
-from agentos.provider.registry import get_provider_spec
 from agentos.secrets import clean_header_secret
 
 log = structlog.get_logger(__name__)
@@ -22,7 +21,6 @@ log = structlog.get_logger(__name__)
 _CACHE_TTL = 3600  # 1 hour
 _HTTP_TIMEOUT = 3.0
 _OPENROUTER_PRICING_BASE_URL = "https://openrouter.ai/api/v1"
-_OPENCAP_HTTP_TIMEOUT = 10.0
 _LIVE_PRICE_MISS_TTL = 300
 
 
@@ -123,7 +121,8 @@ class PriceEntry:
 _PRICE_OVERRIDES: list[tuple[str, PriceEntry]] = [
     ("deepseek/deepseek-v4-pro", PriceEntry(1.74, 3.48)),
     # Bankr LLM Gateway (llm.bankr.bot) catalog prices — not vendor rack rates.
-    # Ids are bare. Ids shared with approved direct-provider static entries
+    # These bare IDs are also served by OpenCAP, whose provider-scoped live
+    # catalog takes precedence above. Ids shared with direct-provider entries
     # (gpt-5.4-mini, gpt-5.5, deepseek-v4-flash) are intentionally absent: the
     # direct rack rates keep pricing those ids, which overestimates the gateway
     # spend rather than underestimating direct spend.
@@ -146,8 +145,6 @@ _LIVE_PRICE_CACHE: dict[str, PriceEntry] = {}
 _LIVE_PRICE_FETCHED_AT: dict[str, float] = {}
 _LIVE_PRICE_MISS_AT: dict[str, float] = {}
 _OPENCAP_PRICE_CACHE: dict[str, PriceEntry] = {}
-_OPENCAP_PRICE_FETCHED_AT = 0.0
-_OPENCAP_PRICE_ATTEMPTED_AT = 0.0
 
 
 def _lookup_price_override(model_id: str) -> PriceEntry | None:
@@ -226,34 +223,13 @@ def _parse_opencap_prices(data: dict[str, Any]) -> dict[str, PriceEntry]:
     return prices
 
 
-def _fetch_opencap_prices_sync() -> dict[str, PriceEntry]:
-    url = get_provider_spec("opencap").model_catalog_url
-    if not url:
-        raise RuntimeError("OpenCAP model catalog URL is not configured")
-    with httpx.Client(timeout=_OPENCAP_HTTP_TIMEOUT, trust_env=_trust_env()) as client:
-        response = client.get(
-            url,
-            headers={"Accept": "application/json"},
-        )
-        response.raise_for_status()
-        payload = response.json()
-    if not isinstance(payload, dict):
-        return {}
-    return _parse_opencap_prices(cast(dict[str, Any], payload))
-
-
 def _store_opencap_prices(prices: dict[str, PriceEntry]) -> int:
     """Atomically replace the OpenCAP pricing cache with validated entries."""
-    global _OPENCAP_PRICE_ATTEMPTED_AT, _OPENCAP_PRICE_FETCHED_AT
-
     if not prices:
         return 0
-    refreshed_at = time.monotonic()
     with _PRICE_LOCK:
         _OPENCAP_PRICE_CACHE.clear()
         _OPENCAP_PRICE_CACHE.update(prices)
-        _OPENCAP_PRICE_FETCHED_AT = refreshed_at
-        _OPENCAP_PRICE_ATTEMPTED_AT = refreshed_at
     log.info("pricing.opencap_refreshed", models=len(prices))
     return len(prices)
 
@@ -264,34 +240,12 @@ def seed_opencap_price_cache(data: dict[str, Any]) -> int:
 
 
 def _lookup_opencap_price(model_id: str) -> PriceEntry | None:
-    """Return a cached live OpenCAP price, refreshing the public catalog as needed."""
-    global _OPENCAP_PRICE_ATTEMPTED_AT, _OPENCAP_PRICE_FETCHED_AT
-
+    """Return a boot-seeded OpenCAP price without performing outbound I/O."""
     key = str(model_id or "").strip().lower()
     if not key:
         return None
-    now = time.monotonic()
     with _PRICE_LOCK:
-        cached = _OPENCAP_PRICE_CACHE.get(key)
-        if cached is not None and now - _OPENCAP_PRICE_FETCHED_AT <= _CACHE_TTL:
-            return cached
-        if now - _OPENCAP_PRICE_ATTEMPTED_AT <= _LIVE_PRICE_MISS_TTL:
-            return cached
-        _OPENCAP_PRICE_ATTEMPTED_AT = now
-
-    try:
-        prices = _fetch_opencap_prices_sync()
-    except Exception as exc:
-        log.warning("pricing.opencap_refresh_failed", error=str(exc))
-        return cached
-
-    if not prices:
-        log.warning("pricing.opencap_refresh_empty")
-        return cached
-    _store_opencap_prices(prices)
-    with _PRICE_LOCK:
-        price = _OPENCAP_PRICE_CACHE.get(key)
-    return price
+        return _OPENCAP_PRICE_CACHE.get(key)
 
 
 def _apply_discount_inverse(price_per_token: float, discount: float) -> float:
@@ -427,14 +381,11 @@ def refresh_live_prices(
 
 
 def reset_live_price_cache_for_tests() -> None:
-    global _OPENCAP_PRICE_ATTEMPTED_AT, _OPENCAP_PRICE_FETCHED_AT
     with _PRICE_LOCK:
         _LIVE_PRICE_CACHE.clear()
         _LIVE_PRICE_FETCHED_AT.clear()
         _LIVE_PRICE_MISS_AT.clear()
         _OPENCAP_PRICE_CACHE.clear()
-        _OPENCAP_PRICE_FETCHED_AT = 0.0
-        _OPENCAP_PRICE_ATTEMPTED_AT = 0.0
 
 
 def seed_live_price_cache_for_tests(model_id: str, price: PriceEntry) -> None:
@@ -551,7 +502,7 @@ _PRICING_TABLE: list[tuple[str, PriceEntry]] = [
     ("qwen-max", PriceEntry(0.345, 1.377)),
     # MiniMax.
     ("minimax/minimax-m2.7", PriceEntry(0.118, 0.99)),
-    # Bankr LLM Gateway (llm.bankr.bot) catalog prices — not vendor rack rates.
+    # Bankr LLM Gateway fallback prices for bare IDs also served by OpenCAP.
     # Shadowed by _PRICE_OVERRIDES for these ids; keep both lists in sync.
     ("oc-uncensored-1.0", PriceEntry(0.20, 0.80)),
     ("minimax-m3", PriceEntry(0.0825, 0.33)),
@@ -606,6 +557,8 @@ def lookup_price(model_id: str, provider_id: str = "") -> PriceEntry:
     """
     model_id = str(model_id or "").strip()
     if str(provider_id or "").strip().lower() == "opencap":
+        # OpenCAP's public catalog is canonical for this provider. Shared bare
+        # IDs intentionally bypass the Bankr/static override entries below.
         opencap_price = _lookup_opencap_price(model_id)
         if opencap_price is not None:
             return opencap_price

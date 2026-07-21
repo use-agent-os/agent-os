@@ -16,7 +16,7 @@ def _default_model_for_provider(provider: str) -> str:
     if normalized == "bankr":
         return "minimax-m3"
     if normalized == "opencap":
-        return "oc-uncensored-1.0"
+        return "minimax-m3"
     if normalized == "openrouter":
         return "minimax/minimax-m3"
     if normalized == "deepseek":

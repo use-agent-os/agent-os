@@ -63,7 +63,7 @@ class SessionUsage:
     input_tokens: int = 0
     output_tokens: int = 0
     model_id: str = ""
-    _per_model: dict[str, ModelUsage] | None = None
+    _per_model: dict[tuple[str, str], ModelUsage] | None = None
     # New cache counters appended at the end so existing positional callers
     # (e.g. SessionUsage(1, 2, "model")) keep aligning with `model_id`.
     cache_read_tokens: int = 0
@@ -163,12 +163,12 @@ class SessionUsage:
         if mid:
             if self._per_model is None:
                 self._per_model = {}
-            mu = self._per_model.get(mid)
+            resolved_provider = str(provider_id or self.provider_id).strip().lower()
+            usage_key = (resolved_provider, mid)
+            mu = self._per_model.get(usage_key)
             if mu is None:
-                mu = ModelUsage(model_id=mid, provider_id=provider_id or self.provider_id)
-                self._per_model[mid] = mu
-            elif provider_id:
-                mu.provider_id = provider_id
+                mu = ModelUsage(model_id=mid, provider_id=resolved_provider)
+                self._per_model[usage_key] = mu
             mu.input_tokens += input_tokens
             mu.output_tokens += output_tokens
             mu.cache_read_tokens += cache_read_tokens
@@ -248,7 +248,7 @@ def _clone_session_usage(usage: SessionUsage) -> SessionUsage:
     )
     if usage._per_model:
         clone._per_model = {
-            mid: ModelUsage(
+            usage_key: ModelUsage(
                 model_id=mu.model_id,
                 input_tokens=mu.input_tokens,
                 output_tokens=mu.output_tokens,
@@ -257,7 +257,7 @@ def _clone_session_usage(usage: SessionUsage) -> SessionUsage:
                 billed_cost=mu.billed_cost,
                 provider_id=mu.provider_id,
             )
-            for mid, mu in usage._per_model.items()
+            for usage_key, mu in usage._per_model.items()
         }
     return clone
 
@@ -420,8 +420,8 @@ class UsageTracker:
 
         if usage._per_model:
             before_models = checkpoint._per_model if checkpoint and checkpoint._per_model else {}
-            for mid, mu in usage._per_model.items():
-                before = before_models.get(mid) if before_models else None
+            for usage_key, mu in usage._per_model.items():
+                before = before_models.get(usage_key) if before_models else None
                 delta_input = mu.input_tokens - (before.input_tokens if before else 0)
                 delta_output = mu.output_tokens - (before.output_tokens if before else 0)
                 delta_cache_read = mu.cache_read_tokens - (
@@ -430,7 +430,7 @@ class UsageTracker:
                 delta_billed = mu.billed_cost - (before.billed_cost if before else 0.0)
                 if delta_input or delta_output or delta_cache_read or delta_billed:
                     cost_usd += _model_delta_cost(
-                        model_id=mid,
+                        model_id=mu.model_id,
                         input_tokens=max(0, delta_input),
                         output_tokens=max(0, delta_output),
                         cache_read_tokens=max(0, delta_cache_read),

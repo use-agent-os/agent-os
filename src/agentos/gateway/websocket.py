@@ -911,6 +911,7 @@ async def _message_loop(
                 session_manager=session_manager,
                 config=config,
                 provider_selector=provider_selector,
+                model_catalog=getattr(turn_runner, "_model_catalog", None),
                 tool_registry=tool_registry,
                 subscription_manager=subscription_manager,
                 channel_manager=channel_manager,

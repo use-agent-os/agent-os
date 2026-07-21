@@ -88,6 +88,7 @@ class RpcContext:
     memory_stores: dict[str, Any] = field(default_factory=dict)
     memory_retrievers: dict[str, Any] = field(default_factory=dict)
     originating_envelope: Any = None  # Channel RouteEnvelope for RPC side effects
+    model_catalog: Any = None  # Boot-fetched ModelCatalog instance
 
     @property
     def role(self) -> str:

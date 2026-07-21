@@ -1,5 +1,5 @@
 from collections.abc import Iterator
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -34,51 +34,28 @@ def test_deepseek_v4_pro_uses_non_discount_price_when_live_pricing_is_off(
     assert price.output_per_m == pytest.approx(3.48)
 
 
-def test_opencap_pricing_fetches_public_catalog_and_caches_by_model() -> None:
-    import httpx as _httpx
+def test_opencap_unseeded_lookup_uses_static_fallback_without_outbound_io() -> None:
+    with patch.object(
+        pricing.httpx,
+        "Client",
+        side_effect=AssertionError("synchronous pricing lookup must not perform I/O"),
+    ):
+        price = lookup_price("minimax-m3", provider_id="opencap")
 
-    response = _httpx.Response(
-        200,
-        json={
-            "data": [
-                {
-                    "id": "minimax-m3",
-                    "pricing": {
-                        "input": 0.2541,
-                        "output": 1.0164,
-                        "cachedInput": 0.05082,
-                    },
-                }
-            ]
-        },
-        request=_httpx.Request("GET", "https://gw.capminal.ai/api/public/models"),
-    )
-
-    with patch.object(pricing.httpx, "Client") as mock_client:
-        client = MagicMock()
-        client.get.return_value = response
-        mock_client.return_value.__enter__.return_value = client
-
-        first = lookup_price("minimax-m3", provider_id="opencap")
-        second = lookup_price("minimax-m3", provider_id="opencap")
-
-    client.get.assert_called_once_with(
-        "https://gw.capminal.ai/api/public/models",
-        headers={"Accept": "application/json"},
-    )
-    assert first == second
-    assert first.input_per_m == pytest.approx(0.2541)
-    assert first.output_per_m == pytest.approx(1.0164)
-    assert first.cached_input_per_m == pytest.approx(0.05082)
+    assert price == PriceEntry(0.0825, 0.33)
 
 
 def test_opencap_live_price_is_scoped_away_from_other_gateway_bare_ids(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        pricing,
-        "_fetch_opencap_prices_sync",
-        lambda: {"minimax-m3": PriceEntry(0.2541, 1.0164, 0.05082)},
+    seed_opencap_price_cache(
+        {
+            "data": [
+                {
+                    "id": "minimax-m3",
+                    "pricing": {"input": 0.2541, "output": 1.0164, "cachedInput": 0.05082},
+                }
+            ]
+        }
     )
 
     opencap = lookup_price("minimax-m3", provider_id="opencap")
@@ -101,9 +78,9 @@ def test_opencap_boot_catalog_seeds_pricing_without_a_second_fetch() -> None:
     )
 
     with patch.object(
-        pricing,
-        "_fetch_opencap_prices_sync",
-        side_effect=AssertionError("pricing should reuse the boot catalog"),
+        pricing.httpx,
+        "Client",
+        side_effect=AssertionError("pricing should reuse the async boot catalog"),
     ):
         price = lookup_price("minimax-m3", provider_id="opencap")
 
@@ -133,14 +110,7 @@ def test_opencap_pricing_rejects_non_finite_and_negative_catalog_rates() -> None
     assert prices == {"valid": PriceEntry(0.2, 0.8)}
 
 
-def test_opencap_live_pricing_failure_falls_back_without_failing_usage(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def fail_fetch() -> dict[str, PriceEntry]:
-        raise RuntimeError("offline")
-
-    monkeypatch.setattr(pricing, "_fetch_opencap_prices_sync", fail_fetch)
-
+def test_opencap_missing_catalog_entry_falls_back_without_failing_usage() -> None:
     price = lookup_price("oc-uncensored-1.0", provider_id="opencap")
 
     assert price.input_per_m == pytest.approx(0.20)

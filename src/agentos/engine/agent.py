@@ -3623,7 +3623,11 @@ class Agent:
             done_model = self.config.model_id or ""
         from agentos.engine.pricing import lookup_price
 
-        price = lookup_price(done_model)
+        done_provider = provider_metadata(self.provider)
+        price = lookup_price(
+            done_model,
+            provider_id=done_provider.provider_kind or done_provider.provider_name,
+        )
         estimated_cost = (
             total_input_tokens * price.input_per_m + total_output_tokens * price.output_per_m
         ) / 1_000_000

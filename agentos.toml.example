@@ -110,13 +110,18 @@ base_url = "https://openrouter.ai/api/v1"
 # api_key = ""          # env DEEPSEEK_API_KEY also works
 # base_url = "https://api.deepseek.com"
 
-# Pin each model to an upstream provider. OpenRouter sends a preferred order;
-# OpenCAP sends a provider allow-list. Omit entries to keep gateway auto-routing.
+# OpenRouter: pin namespaced model IDs to a preferred upstream provider.
 # [llm.provider_routing]
 # "deepseek/deepseek-v4-flash" = "deepseek"
 # "minimax/minimax-m3" = "minimax"
 # "z-ai/glm-5.2" = "z-ai"
 # "anthropic/claude-opus-4.8" = "anthropic"
+#
+# OpenCAP uses bare model IDs and sends values as a provider allow-list. Check
+# its live model catalog for current model and upstream provider IDs. Omit this
+# table to keep gateway auto-routing.
+# [llm.provider_routing]
+# "glm-5.2" = "provider-id-from-live-catalog"
 
 [memory]
 # "workspace" stores MEMORY.md and memory/*.md under workspace_dir.

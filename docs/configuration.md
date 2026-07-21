@@ -119,24 +119,8 @@ Read: [`providers-and-models.md`](providers-and-models.md)
 
 ### OpenCAP
 
-Configure OpenCAP with its dedicated inference key:
-
-```sh
-export OPENCAP_API_KEY="ocap_..."
-agentos configure provider --provider opencap --model oc-uncensored-1.0 \
-  --api-key-env OPENCAP_API_KEY
-```
-
-The default base URL is `https://gw.capminal.ai/api/inference/v1` and can be
-overridden with `OPENCAP_BASE_URL`. The default direct/fallback model is
-`oc-uncensored-1.0`. Pilot Router's `recommended` mode selects the matching
-multi-model OpenCAP profile. By default OpenCAP picks the cheapest eligible
-upstream; optionally pin one model with:
-
-```toml
-[llm.provider_routing]
-"glm-5.2" = "surplus"
-```
+See [Providers and Models — OpenCAP routing](providers-and-models.md#opencap-routing)
+for the canonical setup, model catalog, routing, and pricing behavior.
 
 ### Ollama plain-text mode
 

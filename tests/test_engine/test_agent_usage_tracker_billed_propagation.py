@@ -91,7 +91,7 @@ def test_agent_forwards_billed_cost_to_tracker() -> None:
     usage = tracker.get("agent:test:webchat:s1")
     assert usage is not None
     assert usage._per_model is not None
-    mu = usage._per_model["anthropic/claude-4.7-opus"]
+    mu = usage._per_model[("", "anthropic/claude-4.7-opus")]
     assert mu.billed_cost == 0.1254
     assert mu.input_tokens == 29213
     assert mu.cache_read_tokens == 11588
@@ -116,7 +116,7 @@ def test_agent_forwards_zero_billed_when_provider_lacked_cost() -> None:
     usage = tracker.get("agent:test:webchat:s2")
     assert usage is not None
     assert usage._per_model is not None
-    mu = usage._per_model["z-ai/glm-5.1"]
+    mu = usage._per_model[("", "z-ai/glm-5.1")]
     assert mu.billed_cost == 0.0
 
 

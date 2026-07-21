@@ -50,7 +50,7 @@ _STATIC_FALLBACK: dict[str, tuple[int, int]] = {
     "kimi-k2.6": (32_768, 262_144),
     "moonshotai/kimi-k2.6": (DEFAULT_MAX_TOKENS, 262_142),
     "moonshotai/kimi-k2.5": (65_535, 262_144),
-    # Bankr LLM Gateway (llm.bankr.bot) catalog. Ids are bare. "gpt-5.5",
+    # Shared Bankr/OpenCAP gateway catalog IDs are bare. "gpt-5.5",
     # "gpt-5.4-mini" and "deepseek-v4-flash" already have entries above (the
     # deepseek entry keeps the DeepSeek direct contract values; the gateway's
     # 128K output cap lives in _PROVIDER_STATIC_FALLBACK). "kimi-k2.6" above
@@ -111,6 +111,15 @@ class ModelCatalog:
 
     def __len__(self) -> int:
         return len(self._models)
+
+    def list_models(self, provider_id: str = "") -> list[ModelInfo]:
+        """Return cached models, optionally restricted to one provider."""
+        provider = provider_id.strip().lower()
+        return [
+            model
+            for model in self._models.values()
+            if not provider or model.provider.strip().lower() == provider
+        ]
 
     def _populate_from_data(self, models: list[dict]) -> None:
         """Parse a list of OpenRouter model dicts into ModelInfo entries."""

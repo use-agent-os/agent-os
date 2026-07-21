@@ -5,10 +5,15 @@ import pytest
 from agentos.agents.registry import AgentRegistry
 from agentos.gateway.config import GatewayConfig
 from agentos.gateway.rpc import RpcContext, get_dispatcher
+from agentos.provider.model_catalog import ModelCatalog
 
 
 class _FailingModelSelector:
+    def __init__(self) -> None:
+        self.calls = 0
+
     async def list_models(self) -> list[dict]:
+        self.calls += 1
         raise RuntimeError("provider unavailable")
 
 
@@ -120,6 +125,48 @@ async def test_models_rpc_list_provider_failure_returns_empty() -> None:
 
     assert result.error is None, result.error
     assert result.payload == []
+
+
+@pytest.mark.asyncio
+async def test_models_rpc_list_uses_boot_catalog_when_provider_endpoint_fails() -> None:
+    catalog = ModelCatalog()
+    catalog._populate_from_opencap(
+        [
+            {
+                "id": "minimax-m3",
+                "name": "MiniMax M3",
+                "contextLength": 1_048_576,
+                "maxOutput": 131_072,
+                "modality": {"input": ["text", "image"]},
+            }
+        ]
+    )
+
+    selector = _FailingModelSelector()
+    result = await get_dispatcher().dispatch(
+        "r1",
+        "models.list",
+        {"provider": "opencap"},
+        RpcContext(
+            conn_id="test",
+            config=GatewayConfig(llm={"provider": "opencap", "model": "minimax-m3"}),
+            provider_selector=selector,
+            model_catalog=catalog,
+        ),
+    )
+
+    assert result.error is None, result.error
+    assert selector.calls == 0
+    assert result.payload == [
+        {
+            "id": "minimax-m3",
+            "name": "MiniMax M3",
+            "provider": "opencap",
+            "contextWindow": 1_048_576,
+            "capabilities": ["chat", "tools"],
+            "pricing": {"inputPer1k": 0.0, "outputPer1k": 0.0},
+        }
+    ]
 
 
 @pytest.mark.asyncio

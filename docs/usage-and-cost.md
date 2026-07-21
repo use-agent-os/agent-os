@@ -79,10 +79,6 @@ agentos agent --max-iterations 20 --timeout 600 -m "Bounded task"
 ## Notes and Limits
 
 - Cost is an estimate based on recorded runtime usage and configured pricing.
-- When OpenCAP is active, AgentOS reads per-model input, output, and cached-input
-  rates from `https://gw.capminal.ai/api/public/models` and caches the public
-  catalog for one hour. A stale cached value or the existing static pricing
-  table is used if the pricing endpoint is temporarily unavailable.
 - Provider bills remain the source of truth for actual charges.
 - Tool compression and routing can reduce model context cost, but they should
   be checked against task success, not only token totals.
