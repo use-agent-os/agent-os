@@ -172,8 +172,14 @@ export function sendButtonState(
   input: string,
   busy: boolean,
   pendingCompaction: boolean,
+  hasPendingAttachments = false,
 ): { disabled: boolean; label: string } {
-  const disabled = (input ?? '').trim().length === 0
+  // Task-9 carry-forward: attachment-aware enable. Legacy `hasPayload = text ||
+  // _pendingAttachments.length > 0` (chat.js:6064) permits a send with empty
+  // text but pending attachments; the disable-on-empty React affordance must
+  // therefore stay enabled when attachments are pending.
+  const hasText = (input ?? '').trim().length > 0
+  const disabled = !hasText && !hasPendingAttachments
   const label = pendingCompaction
     ? 'Send (queues until compaction finishes)'
     : busy
@@ -189,4 +195,364 @@ export function esc(s: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+}
+
+/* ── Attachments — mime allowlist, caps, mime resolution, payload normalization
+   ─────────────────────────────────────────────────────────────────────────────
+   Ported verbatim from static/js/views/chat.js:251-334 (constants), 8291-8325
+   (mime + download helpers), 7932-8050 (page-dump detection + outgoing payload
+   normalization). Values CONFIRMED against source, not the brief. */
+
+// chat.js:251 — inline (base64-on-frame) threshold, also the text-family hard cap.
+export const INLINE_THRESHOLD_BYTES = 2_000_000
+export const ATTACHMENT_TEXT_HARD_CAP_BYTES = INLINE_THRESHOLD_BYTES // chat.js:252
+export const LARGE_PASTE_CHARS = 20_000 // chat.js:253
+export const PAGE_DUMP_CHARS = 8_000 // chat.js:254
+export const PAGE_DUMP_MARKER_MIN_SCORE = 3 // chat.js:255
+// chat.js:256-267 — the page-dump heuristic markers (matched case-insensitively).
+export const PAGE_DUMP_MARKERS = [
+  'Chat session',
+  'agent:main:webchat:',
+  'Still waiting for agent response',
+  'AI MODEL ROUTER',
+  'The provider returned an empty response',
+  'Pulsing',
+  'Running',
+  'Send a message',
+  'SYSTEM',
+  'CAP',
+]
+export const ATTACHMENT_IMAGE_HARD_CAP_BYTES = 5 * 1024 * 1024 // chat.js:268
+export const ATTACHMENT_PDF_HARD_CAP_BYTES = 30 * 1024 * 1024 // chat.js:269 (staged PDF bridge cap)
+export const ATTACHMENT_IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] // chat.js:270-275
+export const ATTACHMENT_TEXT_MIMES = [
+  'text/plain',
+  'text/markdown',
+  'text/html',
+  'text/csv',
+  'application/json',
+] // chat.js:276-282
+export const ATTACHMENT_ALLOWED_MIMES = [
+  ...ATTACHMENT_IMAGE_MIMES,
+  'application/pdf',
+  ...ATTACHMENT_TEXT_MIMES,
+] // chat.js:283-287
+export const ATTACHMENT_EXTENSION_MIMES: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  pdf: 'application/pdf',
+  txt: 'text/plain',
+  md: 'text/markdown',
+  markdown: 'text/markdown',
+  html: 'text/html',
+  htm: 'text/html',
+  csv: 'text/csv',
+  json: 'application/json',
+} // chat.js:288-302
+// chat.js:303 — the exact allowed-types label shown in the rejection message.
+export const ATTACHMENT_ALLOWED_LABEL = 'PNG, JPEG, GIF, WEBP, PDF, TXT, MD, HTML, CSV, JSON'
+
+/** chat.js:304 — is this mime in the attachment allowlist. */
+export function isAllowedAttachmentMime(mime: string): boolean {
+  return typeof mime === 'string' && ATTACHMENT_ALLOWED_MIMES.indexOf(mime) !== -1
+}
+/** chat.js:307 — is this an image mime. */
+export function isImageAttachmentMime(mime: string): boolean {
+  return typeof mime === 'string' && ATTACHMENT_IMAGE_MIMES.indexOf(mime) !== -1
+}
+/** chat.js:310 — is this a text-family mime. */
+export function isTextAttachmentMime(mime: string): boolean {
+  return typeof mime === 'string' && ATTACHMENT_TEXT_MIMES.indexOf(mime) !== -1
+}
+/** chat.js:313 — only images and PDFs may be staged-uploaded (>2 MB). */
+export function canStageAttachmentMime(mime: string): boolean {
+  return mime === 'application/pdf' || isImageAttachmentMime(mime)
+}
+/** chat.js:316-321 — the per-type hard cap in bytes (unknown → the image cap). */
+export function attachmentHardCapBytes(mime: string): number {
+  if (mime === 'application/pdf') return ATTACHMENT_PDF_HARD_CAP_BYTES
+  if (isImageAttachmentMime(mime)) return ATTACHMENT_IMAGE_HARD_CAP_BYTES
+  if (isTextAttachmentMime(mime)) return ATTACHMENT_TEXT_HARD_CAP_BYTES
+  return ATTACHMENT_IMAGE_HARD_CAP_BYTES
+}
+
+/**
+ * chat.js:8291-8297 — resolve a file's effective mime. An allowed `file.type`
+ * wins; otherwise the extension map; otherwise the raw `file.type`; otherwise
+ * `application/octet-stream`.
+ */
+export function resolveAttachmentMime(
+  file:
+    | {
+        name?: string
+        type?: string
+      }
+    | null
+    | undefined,
+): string {
+  const name = file && file.name ? String(file.name) : ''
+  const ext = name.includes('.') ? (name.split('.').pop() || '').toLowerCase() : ''
+  const extensionMime = ATTACHMENT_EXTENSION_MIMES[ext]
+  if (file && file.type && isAllowedAttachmentMime(file.type)) return file.type
+  return extensionMime || (file && file.type) || 'application/octet-stream'
+}
+
+// chat.js:7933 — cheap token estimate (floor(len/4), min 1 for non-empty).
+export function estimateTextTokens(text: string): number {
+  return text ? Math.max(1, Math.floor(text.length / 4)) : 0
+}
+
+// chat.js:7936-7941 — count distinct page-dump markers present (case-insensitive).
+export function pageDumpMarkerScore(text: string): number {
+  const lowered = String(text || '').toLowerCase()
+  return PAGE_DUMP_MARKERS.reduce(
+    (score, marker) => (lowered.includes(marker.toLowerCase()) ? score + 1 : score),
+    0,
+  )
+}
+
+// chat.js:7943-7950 — base64-encode bytes in 0x8000-char chunks (avoids the
+// call-stack blowup of spreading a huge Uint8Array into String.fromCharCode).
+function bytesToBase64(bytes: Uint8Array): string {
+  const chunkSize = 0x8000
+  const chunks: string[] = []
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    chunks.push(String.fromCharCode(...bytes.subarray(i, i + chunkSize)))
+  }
+  return btoa(chunks.join(''))
+}
+
+// chat.js:7952-7955 — the generated .txt name for a large paste / page dump.
+export function largePasteAttachmentName(kind: 'page_dump' | 'large_paste'): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '-').replace('Z', '')
+  return `${kind === 'page_dump' ? 'webchat-page-dump' : 'webchat-paste'}-${stamp}.txt`
+}
+
+/**
+ * A pending-attachment buffer entry (chat.js:247-249). Two-mode: `inline`
+ * (≤ 2 MB, base64-on-frame) and `staged` (image/PDF > 2 MB, POSTed to
+ * /api/v1/files/upload → `file_uuid`), plus the transient `inline_pending`
+ * (FileReader in flight) and `uploading` (staged POST in flight) states.
+ */
+export interface PendingAttachment {
+  kind: 'inline' | 'staged' | 'inline_pending' | 'uploading'
+  local_id: number
+  name: string
+  mime: string
+  size: number
+  data?: string
+  dataUrl?: string
+  file_uuid?: string
+  // Provenance for a normalization-generated attachment (chat.js:8025-8033).
+  generated?: boolean
+  normalizationKind?: 'page_dump' | 'large_paste'
+  inputNormalization?: {
+    kind: 'page_dump' | 'large_paste'
+    originalChars: number
+    markerScore: number
+    materialEstimatedTokens: number
+    guardAction: string
+  }
+}
+
+/** The RPC attachment shape sent on `chat.send` params (chat.js:8159-8164). */
+export type OutgoingAttachment =
+  | { type: string; file_uuid: string; mime: string; name: string }
+  | { type: string; data?: string; mime: string; name: string }
+
+/** chat.js:8299-8301 — is a read (inline_pending) or upload (uploading) in flight. */
+export function hasPendingAttachmentWork(attachments: PendingAttachment[]): boolean {
+  return (attachments || []).some(
+    (att) => att.kind === 'inline_pending' || att.kind === 'uploading',
+  )
+}
+
+/** chat.js:8308-8311 — the download filename, defaulting to "attachment". */
+export function attachmentDownloadName(att: { name?: string } | null | undefined): string {
+  const raw = String((att && att.name) || 'attachment').trim()
+  return raw || 'attachment'
+}
+
+/**
+ * chat.js:8313-8325 — resolve a safe download href for an attachment. Prefers an
+ * embedded `dataUrl` (rejecting `javascript:`), then base64 `data`, then a
+ * remote url; empty string when none is safe/available.
+ */
+export function attachmentDownloadHref(
+  att:
+    | { dataUrl?: string; data?: string; url?: string; download_url?: string; downloadUrl?: string }
+    | null
+    | undefined,
+  mime?: string,
+): string {
+  if (!att) return ''
+  if (att.dataUrl) {
+    const dataUrl = String(att.dataUrl).trim()
+    return /^javascript:/i.test(dataUrl) ? '' : dataUrl
+  }
+  if (att.data) {
+    return `data:${mime || 'application/octet-stream'};base64,${String(att.data)}`
+  }
+  const url = String(att.url || att.download_url || att.downloadUrl || '').trim()
+  if (url && !/^javascript:/i.test(url)) return url
+  return ''
+}
+
+/** The result of normalizing an outgoing composer payload (chat.js:7982). */
+export interface NormalizedComposerPayload {
+  text: string
+  displayText: string
+  attachments: PendingAttachment[]
+  normalized: {
+    kind: 'page_dump' | 'large_paste'
+    originalChars: number
+    markerScore: number
+    materialEstimatedTokens: number
+  } | null
+}
+
+/**
+ * chat.js:7982-8050 `_normalizeOutgoingComposerPayload`. A short / plain message
+ * (or an allowed slash command) passes through untouched. A >= 20k-char paste
+ * (`LARGE_PASTE_CHARS`) OR a >= 8k-char page dump with marker score >= 3 is
+ * converted into a generated inline `.txt` attachment carrying provenance, and
+ * the message text is replaced with a canned instruction. Returns `null` (and
+ * toasts) when the pasted bytes exceed the text hard cap (chat.js:8007-8014).
+ *
+ * `UI.toast` is a side effect in legacy; here it is injected as `options.onToast`
+ * so the helper stays pure and unit-testable. The component passes the real toast.
+ */
+export async function normalizeOutgoingComposerPayload(
+  text: string,
+  attachments: PendingAttachment[],
+  options: {
+    allowSlashCommand?: boolean
+    onToast?: (message: string, level: 'warn' | 'info', ms?: number) => void
+    nextLocalId?: () => number
+  } = {},
+): Promise<NormalizedComposerPayload | null> {
+  const onToast = options.onToast ?? (() => {})
+  const nextLocalId = options.nextLocalId ?? (() => Date.now() + Math.floor(Math.random() * 1000))
+  const raw = String(text || '')
+  const markerScore = pageDumpMarkerScore(raw)
+  const isPageDump = raw.length >= PAGE_DUMP_CHARS && markerScore >= PAGE_DUMP_MARKER_MIN_SCORE
+  const isLargePaste = raw.length >= LARGE_PASTE_CHARS
+  // chat.js:7987 — an allowed slash command bypasses normalization.
+  if (options.allowSlashCommand && raw.startsWith('/')) {
+    return {
+      text: raw,
+      displayText: raw,
+      attachments: attachments.map((a) => ({ ...a })),
+      normalized: null,
+    }
+  }
+  // chat.js:7995 — neither trigger fired: pass through.
+  if (!isPageDump && !isLargePaste) {
+    return {
+      text: raw,
+      displayText: raw,
+      attachments: attachments.map((a) => ({ ...a })),
+      normalized: null,
+    }
+  }
+
+  const kind: 'page_dump' | 'large_paste' = isPageDump ? 'page_dump' : 'large_paste'
+  const bytes = new TextEncoder().encode(raw)
+  const materialEstimatedTokens = estimateTextTokens(raw)
+  if (bytes.length > ATTACHMENT_TEXT_HARD_CAP_BYTES) {
+    onToast(
+      `Pasted text is too large to attach directly (${Math.round(bytes.length / 1000 / 1000)} MB). Save it as a file or send a shorter summary.`,
+      'warn',
+      6000,
+    )
+    return null
+  }
+
+  const encoded = bytesToBase64(bytes)
+  const generatedAttachment: PendingAttachment = {
+    kind: 'inline',
+    local_id: nextLocalId(),
+    name: largePasteAttachmentName(kind),
+    mime: 'text/plain',
+    size: bytes.length,
+    data: encoded,
+    dataUrl: `data:text/plain;base64,${encoded}`,
+    generated: true,
+    normalizationKind: kind,
+    inputNormalization: {
+      kind,
+      originalChars: raw.length,
+      markerScore,
+      materialEstimatedTokens,
+      guardAction: 'generated_text_attachment',
+    },
+  }
+  const message =
+    kind === 'page_dump'
+      ? 'Please process the attached WebChat page dump.'
+      : 'Please process the attached pasted text.'
+  onToast('Large pasted text was attached as a .txt file.', 'info', 2500)
+  return {
+    text: message,
+    displayText: message,
+    attachments: [...attachments.map((a) => ({ ...a })), generatedAttachment],
+    normalized: { kind, originalChars: raw.length, markerScore, materialEstimatedTokens },
+  }
+}
+
+/**
+ * chat.js:8157-8164 — map a pending attachment into its `chat.send` RPC shape. A
+ * `staged` entry ships its `file_uuid`; everything else ships inline base64
+ * `data` (defaulting the type to `image/png` as legacy does, chat.js:8163).
+ */
+export function outgoingAttachment(att: PendingAttachment): OutgoingAttachment {
+  if (att.kind === 'staged') {
+    return { type: att.mime, file_uuid: att.file_uuid || '', mime: att.mime, name: att.name }
+  }
+  return { type: att.mime || 'image/png', data: att.data, mime: att.mime, name: att.name }
+}
+
+/**
+ * chat.js:7963-7980 — build the input-normalization provenance object from any
+ * generated attachments, for the `chat.send` `inputProvenance` param. Returns
+ * null when no generated attachment is present.
+ */
+export function inputNormalizationProvenanceFromAttachments(attachments: PendingAttachment[]): {
+  kind: 'web_message'
+  source: 'WebChat'
+  input_normalization: {
+    source: 'input_normalization'
+    original_chars: number
+    material_estimated_tokens: number
+    marker_score: number
+    generated_attachment_count: number
+    guard_action: string
+  }
+} | null {
+  const nonNegativeInteger = (value: unknown): number => {
+    const number = Number(value)
+    if (!Number.isFinite(number) || number < 0) return 0
+    return Math.floor(number)
+  }
+  const generated = (attachments || []).filter(
+    (a) => a && a.generated === true && a.inputNormalization,
+  )
+  const first = generated[0]
+  if (!first || !first.inputNormalization) return null
+  const meta = first.inputNormalization
+  return {
+    kind: 'web_message',
+    source: 'WebChat',
+    input_normalization: {
+      source: 'input_normalization',
+      original_chars: nonNegativeInteger(meta.originalChars),
+      material_estimated_tokens: nonNegativeInteger(meta.materialEstimatedTokens),
+      marker_score: nonNegativeInteger(meta.markerScore),
+      generated_attachment_count: generated.length,
+      guard_action: meta.guardAction || 'generated_text_attachment',
+    },
+  }
 }

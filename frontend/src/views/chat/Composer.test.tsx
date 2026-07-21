@@ -2,6 +2,10 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { Composer } from './Composer'
 
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() },
+}))
+
 // The Composer is a real, idiomatic React component (unlike the imperative
 // transcript region). It owns the command line: a growing textarea, the
 // bracket Send/Abort buttons, Enter-to-send, sent-message history cycling on
@@ -122,6 +126,41 @@ describe('Composer', () => {
     const ta = textbox()
     fireEvent.keyDown(ta, { key: 'ArrowDown' })
     expect(ta.value).toBe('')
+  })
+
+  it('enables send with empty text when attachments are pending (chat.js:6064)', () => {
+    render(<Composer onSend={() => {}} busy={false} hasPendingAttachments={true} />)
+    // Empty composer, but a pending attachment → Send is enabled.
+    expect(screen.getByRole('button', { name: /send/i })).toBeEnabled()
+  })
+
+  it('sends an attachments-only composer (empty text) on click (chat.js:6118)', () => {
+    const onSend = vi.fn()
+    render(<Composer onSend={onSend} busy={false} hasPendingAttachments={true} />)
+    fireEvent.click(screen.getByRole('button', { name: /send/i }))
+    expect(onSend).toHaveBeenCalledWith('')
+  })
+
+  it('blocks send and warns while attachment work is in flight (chat.js:6067)', async () => {
+    const onSend = vi.fn()
+    const { toast } = await import('sonner')
+    render(
+      <Composer onSend={onSend} busy={false} hasPendingAttachments={true} hasPendingWork={true} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /send/i }))
+    expect(onSend).not.toHaveBeenCalled()
+    expect(toast.warning).toHaveBeenCalledWith('Wait for file attachment processing to finish')
+  })
+
+  it('exposes an attach-files picker when onAttachFiles is provided', () => {
+    const onAttachFiles = vi.fn()
+    render(<Composer onSend={() => {}} busy={false} onAttachFiles={onAttachFiles} />)
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    expect(input).not.toBeNull()
+    fireEvent.change(input, {
+      target: { files: [new File(['x'], 'a.png', { type: 'image/png' })] },
+    })
+    expect(onAttachFiles).toHaveBeenCalledTimes(1)
   })
 
   it('grows the textarea with content (auto-resize, chat.js:2584)', () => {

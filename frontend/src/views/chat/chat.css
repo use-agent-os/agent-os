@@ -136,3 +136,150 @@
   border-color: var(--destructive, #ff5555);
   background: color-mix(in srgb, var(--destructive, #ff5555) 12%, transparent);
 }
+
+/* The attach (+) bracket button sits left of the input, same TTY posture. */
+.chat-composer__attach {
+  flex: 0 0 auto;
+  align-self: stretch;
+  cursor: pointer;
+  min-width: 2.25rem;
+}
+
+/* ── Attachments (Task 9) ───────────────────────────────────────────────────
+   The composer-shell wraps the pinned tray above the input row. The tray shows
+   pending previews + the inline cap/mime rejection; ported from the legacy
+   imperative preview (chat.js:8346) onto the shared TTY token system. */
+.chat-composer-shell {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 32px 0;
+  background: var(--card);
+}
+@media (max-width: 768px) {
+  .chat-attachments {
+    padding: 10px 16px 0;
+  }
+}
+
+/* Cap/mime rejection — a single severity gutter (one tone rail), no boxed pill.
+   `.tone-warn` + `.tone-rail` from the shared status-tone system (globals.css). */
+.chat-attachments__rejection {
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--tone, var(--warn)) 8%, transparent);
+}
+
+.chat-attachments__tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+/* Image preview thumbnail (chat.js:8359). Square, sharp corners, remove overlay. */
+.attachment-thumb {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  max-width: 96px;
+}
+.attachment-thumb img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  display: block;
+}
+.attachment-thumb .attachment-name {
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.6875rem;
+  color: var(--dim);
+  font-family: var(--font-mono);
+}
+
+/* File chip (non-image) (chat.js:8370). Mono, phosphor border, busy spinner. */
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--background);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  max-width: 100%;
+}
+.attachment-chip--busy {
+  opacity: 0.75;
+}
+.attachment-chip__icon {
+  color: var(--dim);
+  text-transform: uppercase;
+}
+.attachment-chip__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 16ch;
+  color: var(--foreground);
+}
+.attachment-chip__meta {
+  color: var(--dim);
+  white-space: nowrap;
+}
+.attachment-chip__spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid color-mix(in srgb, var(--primary) 40%, transparent);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  display: inline-block;
+  animation: chat-attach-spin 0.7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .attachment-chip__spinner {
+    animation: none;
+  }
+}
+@keyframes chat-attach-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Remove (×) control — a lime signal on hover, otherwise dim. */
+.attachment-remove {
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 0.9375rem;
+  line-height: 1;
+  padding: 0 2px;
+}
+.attachment-thumb .attachment-remove {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: color-mix(in srgb, var(--background) 70%, transparent);
+}
+.attachment-remove:hover {
+  color: var(--primary);
+}

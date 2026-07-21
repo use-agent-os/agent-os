@@ -11,7 +11,16 @@ import {
   type HistoryPagingState,
   type HistoryResponse,
 } from './transcript/history'
-import { dayKey, dayLabel, esc, historyFallbackMessageIdentity, stripTimePrefix } from './logic'
+import {
+  dayKey,
+  dayLabel,
+  esc,
+  historyFallbackMessageIdentity,
+  inputNormalizationProvenanceFromAttachments,
+  outgoingAttachment,
+  stripTimePrefix,
+  type PendingAttachment,
+} from './logic'
 import type { ChatMessage, Role, StreamEventPayload } from './types'
 
 // app.js:200-207 `getAuthToken` reads the connection token from sessionStorage
@@ -99,8 +108,12 @@ function isCurrentSessionPayload(
 export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEventSeams }): {
   containerRef: React.RefObject<HTMLDivElement | null>
   controller: StreamController
-  /** Send composed text (chat.js:6062 `_onSend` → `chat.send`, chat.js:6193). */
-  send: (text: string) => void
+  /**
+   * Send composed text + optional attachments (chat.js:6062 `_onSend` →
+   * `chat.send`, chat.js:6193). Attachments ride on the RPC params as legacy
+   * (`displayText` + `attachments` + `inputProvenance`, chat.js:6157-6167).
+   */
+  send: (text: string, attachments?: PendingAttachment[]) => void
   /** Abort the in-flight turn (chat.js:8439 `_onStop` → `chat.abort`, chat.js:8444). */
   abort: (source?: string) => void
   /** Reactive streaming flag (legacy `_isStreaming`) — drives the composer's busy prop. */
@@ -288,15 +301,26 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
   // UI, and fire `chat.send` with the legacy `{ message, sessionKey }` shape
   // (chat.js:6150). The already-wired subscription renders the resulting stream.
   const send = useCallback(
-    (text: string) => {
+    (text: string, attachments: PendingAttachment[] = []) => {
       const trimmed = (text ?? '').trim()
       const sessionKey = sessionKeyRef.current
-      // chat.js:6118 — empty payload or no session is a no-op. While streaming,
-      // legacy enqueues (Task-9 seam); until then a busy send is inert.
-      if (!trimmed || !sessionKey || controller.isStreaming()) return
+      const atts = attachments ?? []
+      // chat.js:6064/6118 — `hasPayload = text || _pendingAttachments.length > 0`;
+      // an attachments-only send (empty text) is allowed. No session, no payload,
+      // or already streaming (Task-13 enqueue seam) is a no-op.
+      const hasPayload = Boolean(trimmed) || atts.length > 0
+      if (!hasPayload || !sessionKey || controller.isStreaming()) return
 
       abortedRef.current = false
-      setHistory((prev) => [...prev, trimmed])
+      // chat.js:6128 — history/↑↓ tracks the user's display text (not the provider
+      // fallback). Only record non-empty text so an attachments-only send doesn't
+      // seed a blank history entry.
+      if (trimmed) setHistory((prev) => [...prev, trimmed])
+
+      // chat.js:6129 — the model receives a fallback prompt when text is empty but
+      // attachments are present ("Describe these attachments").
+      const userText = trimmed
+      const providerText = trimmed || 'Describe these attachments'
 
       // Show the user's message row (chat.js:6133 `_addMessage('user', …)`). The
       // controller's minimal row builder (the same one history/subagent use)
@@ -308,7 +332,25 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
         const div = document.createElement('div')
         div.className = 'msg user'
         div.setAttribute('data-history-role', 'user')
-        div.innerHTML = `<div class="msg-body">${esc(trimmed)}</div>`
+        // chat.js:6136-6144 — render the attachments block when present.
+        if (atts.length > 0) {
+          const bodyText = userText ? `<div class="msg-attachment-text">${esc(userText)}</div>` : ''
+          const chips = atts
+            .map((a) => {
+              const mime = a.mime || ''
+              if (mime.startsWith('image/') && (a.dataUrl || a.data)) {
+                const src = a.dataUrl || `data:${esc(mime || 'image/png')};base64,${a.data}`
+                return `<img class="msg-thumb" src="${src}" alt="${esc(a.name)}">`
+              }
+              return `<span class="msg-file-chip"><span class="msg-file-chip__name">${esc(
+                a.name,
+              )}</span><span class="msg-file-chip__meta">${esc(mime || 'attachment')}</span></span>`
+            })
+            .join('')
+          div.innerHTML = `<div class="msg-body msg-body--has-attachments">${bodyText}<div class="msg-attachments">${chips}</div></div>`
+        } else {
+          div.innerHTML = `<div class="msg-body">${esc(userText)}</div>`
+        }
         th.appendChild(div)
       }
 
@@ -317,10 +359,21 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
       controller.showThinkingIndicator()
       controller.scrollToBottom()
 
-      // chat.js:6150 — the RPC params. Attachments / intent / _source elevated
-      // mode ride on this object in legacy; those land in Task 9.
-      const params: Record<string, unknown> = { message: trimmed, sessionKey }
-      seamsRef.current.diag?.('send.start', { textLen: trimmed.length })
+      // chat.js:6150-6167 — the RPC params. Attachments ride as `displayText` +
+      // `attachments` (staged → file_uuid, else inline base64) + `inputProvenance`
+      // for a normalization-generated attachment. Intent / _source elevated mode
+      // are later-task seams.
+      const params: Record<string, unknown> = { message: providerText, sessionKey }
+      if (atts.length > 0) {
+        params.displayText = userText
+        params.attachments = atts.map(outgoingAttachment)
+        const provenance = inputNormalizationProvenanceFromAttachments(atts)
+        if (provenance) params.inputProvenance = provenance
+      }
+      seamsRef.current.diag?.('send.start', {
+        textLen: providerText.length,
+        attachments: atts.length,
+      })
       rpc
         .call('chat.send', params)
         .then((res) => {

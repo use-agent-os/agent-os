@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { sendButtonState, shouldAutofocusComposer } from './logic'
 
 /**
@@ -14,13 +15,18 @@ import { sendButtonState, shouldAutofocusComposer } from './logic'
  * useTranscript send action (chat.js:6062 `_onSend` → `chat.send`) and
  * `onAbort` to the abort action (chat.js:8439 `_onStop` → `chat.abort`).
  *
- * SEAM for Task 9 (attachments): `onSend` currently receives plain text. The
- * attachments task will thread a normalized payload
- * (`normalizeOutgoingComposerPayload`, chat.js:6078) + a pending-attachments
- * preview through here; the send/enqueue-while-streaming branches (chat.js:6091)
- * and slash-command handling (chat.js:6113) land with it. Until then a click /
- * Enter while `busy` is a no-op that keeps the composer intact (legacy would
- * enqueue), and the label reflects the queue intent via `sendButtonState`.
+ * Task 9 (attachments): the composer is now attachment-aware. `onSend` still
+ * receives the raw composer text — ChatPage normalizes it against the pending
+ * buffer (`normalizeOutgoingComposerPayload`, chat.js:7982) and fires chat.send
+ * with the attachments (chat.js:6157). The send-enable + no-op-guard here honor
+ * legacy `hasPayload = text || _pendingAttachments.length > 0` (chat.js:6064):
+ * an attachments-only send (empty text) is allowed. The pending-work guard
+ * (chat.js:6067 — "Wait for file attachment processing to finish") blocks a send
+ * while a read/upload is in flight.
+ *
+ * Still deferred with clean seams: the enqueue-while-streaming branch
+ * (chat.js:6091) and slash-command handling (chat.js:6113). Until then a click /
+ * Enter while `busy` is a no-op that keeps the composer intact.
  */
 
 const MIN_TEXTAREA_HEIGHT = 40 // chat.js:2590 fallback when minHeight is unset.
@@ -40,6 +46,28 @@ export interface ComposerProps {
    * `_messages` filtered to role 'user', chat.js:8712-8714). Drives ↑/↓ cycling.
    */
   history?: string[]
+  /**
+   * Whether attachments are pending (chat.js:6064 `_pendingAttachments.length`).
+   * Enables an attachments-only send (empty text) and is passed to
+   * `sendButtonState`. Default false (no attachments).
+   */
+  hasPendingAttachments?: boolean
+  /**
+   * Whether a read/upload is in flight (chat.js:6067 `_hasPendingAttachmentWork`).
+   * When true, a send toasts "Wait for file attachment processing to finish" and
+   * no-ops rather than sending a half-processed attachment.
+   */
+  hasPendingWork?: boolean
+  /**
+   * Attach files chosen via the composer's file picker (chat.js file input). The
+   * drop/paste surfaces live on ChatPage; the picker is the composer-local one.
+   */
+  onAttachFiles?: (files: File[] | FileList) => void
+  /**
+   * Optional slot for the attachment tray, rendered above the input row so the
+   * previews sit with the composer (chat.js:8346 `_renderAttachmentPreview`).
+   */
+  tray?: React.ReactNode
 }
 
 export function Composer({
@@ -48,6 +76,10 @@ export function Composer({
   busy,
   pendingCompaction = false,
   history = [],
+  hasPendingAttachments = false,
+  hasPendingWork = false,
+  onAttachFiles,
+  tray,
 }: ComposerProps) {
   const [value, setValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -132,14 +164,21 @@ export function Composer({
 
   const doSend = useCallback(() => {
     const text = value.trim()
-    // chat.js:6118 — an empty composer is a no-op. The enqueue-while-streaming
-    // branch (chat.js:6091) is a Task-9 seam; until then Send is inert while busy.
-    if (!text || busy) return
+    // chat.js:6067 — block while a read/upload is in flight so a half-processed
+    // attachment is never sent ("Wait for file attachment processing to finish").
+    if (hasPendingWork) {
+      toast.warning('Wait for file attachment processing to finish')
+      return
+    }
+    // chat.js:6064/6118 — `hasPayload = text || _pendingAttachments.length > 0`;
+    // an attachments-only send (empty text) is allowed. The enqueue-while-
+    // streaming branch (chat.js:6091) is a Task-13 seam; until then inert while busy.
+    if ((!text && !hasPendingAttachments) || busy) return
     onSend(text)
     setProgrammatic('')
     historyIdxRef.current = null
     historyDraftRef.current = ''
-  }, [value, busy, onSend, setProgrammatic])
+  }, [value, busy, hasPendingAttachments, hasPendingWork, onSend, setProgrammatic])
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -211,42 +250,79 @@ export function Composer({
     value,
     busy,
     pendingCompaction,
+    hasPendingAttachments,
+  )
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const onFilePicked = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files.length > 0) onAttachFiles?.(e.target.files)
+      // Reset so re-picking the same file fires change again.
+      e.target.value = ''
+    },
+    [onAttachFiles],
   )
 
   return (
-    <div className="chat-composer">
-      <textarea
-        ref={textareaRef}
-        className="chat-composer__input"
-        value={value}
-        onChange={onChange}
-        onKeyDown={onKeyDown}
-        placeholder="Send a message..."
-        rows={1}
-        aria-label="Message"
-      />
-      {busy ? (
-        <button
-          type="button"
-          className="btn-term chat-composer__abort"
-          onClick={() => onAbort?.()}
-          title="Stop (Esc)"
-          aria-label="Abort"
-        >
-          Abort
-        </button>
-      ) : (
-        <button
-          type="button"
-          className="btn-term chat-composer__send"
-          onClick={doSend}
-          disabled={sendDisabled}
-          title={sendLabel}
-          aria-label="Send"
-        >
-          Send
-        </button>
-      )}
+    <div className="chat-composer-shell">
+      {tray}
+      <div className="chat-composer">
+        {onAttachFiles ? (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/markdown,text/html,text/csv,application/json,.png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.md,.markdown,.html,.htm,.csv,.json"
+              className="chat-composer__file-input"
+              onChange={onFilePicked}
+              aria-label="Attach files"
+              hidden
+            />
+            <button
+              type="button"
+              className="btn-term chat-composer__attach"
+              onClick={() => fileInputRef.current?.click()}
+              title="Attach a file"
+              aria-label="Attach files"
+            >
+              +
+            </button>
+          </>
+        ) : null}
+        <textarea
+          ref={textareaRef}
+          className="chat-composer__input"
+          value={value}
+          onChange={onChange}
+          onKeyDown={onKeyDown}
+          placeholder="Send a message..."
+          rows={1}
+          aria-label="Message"
+        />
+        {busy ? (
+          <button
+            type="button"
+            className="btn-term chat-composer__abort"
+            onClick={() => onAbort?.()}
+            title="Stop (Esc)"
+            aria-label="Abort"
+          >
+            Abort
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn-term chat-composer__send"
+            onClick={doSend}
+            disabled={sendDisabled}
+            title={sendLabel}
+            aria-label="Send"
+          >
+            Send
+          </button>
+        )}
+      </div>
     </div>
   )
 }

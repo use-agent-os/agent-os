@@ -4,6 +4,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { describe, expect, it, vi } from 'vitest'
 import { ChatPage } from './ChatPage'
 
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() },
+}))
+
+function makeImageFile(name: string, size = 100): File {
+  const file = new File([new Blob(['img'], { type: 'image/png' })], name, { type: 'image/png' })
+  Object.defineProperty(file, 'size', { value: size, configurable: true })
+  return file
+}
+
 // Same provider-wrapping pattern SkillsPage.test.tsx uses: there is no shared
 // `@/test/utils` wrapper in this repo, so the RPC provider is stubbed via a
 // module mock and the tree is wrapped in MemoryRouter + QueryClientProvider.
@@ -76,6 +86,31 @@ describe('ChatPage', () => {
       const params = sends[0]![1] as Record<string, unknown>
       expect(params.message).toBe('hello world')
       expect(params.sessionKey).toBe('agent:main:webchat:default')
+    })
+  })
+
+  it('enables an attachments-only send and threads attachments into chat.send (chat.js:6064/6157)', async () => {
+    mockRpc = makeRpc()
+    renderPage()
+    // Attach an image via the composer file picker (fire change on the hidden input).
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [makeImageFile('shot.png')] } })
+    })
+    // The inline FileReader resolves → the send button enables even with empty text.
+    const send = await screen.findByRole('button', { name: /send/i })
+    await waitFor(() => expect(send).toBeEnabled())
+    fireEvent.click(send)
+    await waitFor(() => {
+      const sends = mockRpc.call.mock.calls.filter(([m]) => m === 'chat.send')
+      expect(sends.length).toBe(1)
+      const params = sends[0]![1] as Record<string, unknown>
+      // Empty-text attachments-only send → the fallback provider prompt.
+      expect(params.message).toBe('Describe these attachments')
+      const atts = params.attachments as Array<Record<string, unknown>>
+      expect(atts).toHaveLength(1)
+      expect(atts[0]?.name).toBe('shot.png')
+      expect(atts[0]?.mime).toBe('image/png')
     })
   })
 
