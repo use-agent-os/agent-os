@@ -59,6 +59,126 @@
   }
 }
 
+/* ── Message bubbles ────────────────────────────────────────────────────────
+   Left/right conversation like a normal chat, but on the TTY token system:
+   each turn is its own box with a phosphor border, sharp corners (radius 0) and
+   mono type. User turns align right (lime signal border — "you"); assistant /
+   system turns align left (neutral); errors align left with the danger tone
+   gutter. Day + compaction separators stay full-width (they are NOT `.msg`, so
+   they are unaffected by these rules). */
+.msg {
+  align-self: flex-start; /* assistant/system/error default to the left */
+  max-width: min(78%, 720px);
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 0; /* TTY: zero radius */
+  background: var(--card);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+/* User turns: right-aligned, lime signal border marks the sender as "you". */
+.msg.user {
+  align-self: flex-end;
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+  background: color-mix(in srgb, var(--primary) 7%, var(--card));
+}
+
+/* Assistant / streaming / thinking: left, neutral phosphor box. */
+.msg.assistant,
+.msg.system {
+  align-self: flex-start;
+}
+
+/* The live streaming bubble reuses the assistant box; the block cursor already
+   lives inside via the ported streaming DOM. */
+.msg.assistant.streaming {
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+}
+
+/* Errors: left, single danger tone gutter (never a stacked border). */
+.msg.error {
+  align-self: flex-start;
+  border-color: var(--border);
+  border-left: 3px solid var(--danger, #ff5555);
+  background: color-mix(in srgb, var(--danger, #ff5555) 6%, var(--card));
+}
+
+/* The thinking indicator is quieter than a real turn. */
+.msg.assistant.thinking {
+  opacity: 0.85;
+  border-style: dashed;
+}
+
+/* Role caption above the body (You / Agent / System). Dim, mono, lowercased so
+   it reads as a terminal label, not chat chrome. When the imperative DOM
+   already emits a `.msg-header` (streaming/thinking) we style that; otherwise a
+   CSS-generated caption gives every bubble a sender label without touching the
+   ported row builders. */
+.msg-header {
+  font-size: 0.62rem;
+  text-transform: lowercase;
+  letter-spacing: 0.1em;
+  color: var(--dim);
+  margin-bottom: 3px;
+}
+.msg.user .msg-header {
+  text-align: right;
+  color: color-mix(in srgb, var(--primary) 70%, var(--dim));
+}
+
+/* CSS-generated sender caption for rows that carry no `.msg-header` node
+   (history/user/error/system rows built by the minimal row builders). Keyed off
+   `data-history-role`; suppressed when a real `.msg-header` is present so the
+   caption never doubles up. */
+.msg:not(:has(.msg-header))::before {
+  display: block;
+  font-size: 0.62rem;
+  text-transform: lowercase;
+  letter-spacing: 0.1em;
+  color: var(--dim);
+  margin-bottom: 3px;
+  content: 'agent';
+}
+.msg.user:not(:has(.msg-header))::before {
+  content: 'you';
+  text-align: right;
+  color: color-mix(in srgb, var(--primary) 70%, var(--dim));
+}
+.msg.error:not(:has(.msg-header))::before {
+  content: 'error';
+  color: color-mix(in srgb, var(--danger, #ff5555) 80%, var(--dim));
+}
+.msg.system:not(:has(.msg-header))::before {
+  content: 'system';
+}
+
+.msg-body {
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Timestamp — a faint trailing caption. */
+.msg-time {
+  font-size: 0.6rem;
+  color: var(--dim);
+  margin-top: 3px;
+}
+.msg.user .msg-time {
+  text-align: right;
+}
+
+@media (max-width: 768px) {
+  .msg {
+    max-width: 88%;
+  }
+}
+
 /* Composer row — pinned at the bottom, never scrolls with the thread. The
    command-line composer (Task 8): a growing mono textarea + the bracket
    Send/Abort button, on the shared TTY token system (radius 0, lime signal). */
