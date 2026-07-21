@@ -89,7 +89,9 @@ function basename(path: unknown): string {
 }
 
 // chat.js:7043-7047 — publish_artifact target basename (name || path).
-function publishArtifactTargetName(input: unknown): string {
+// Exported so the artifact renderer (artifacts.ts) reuses this one definition
+// rather than duplicating it (DRY — it is the SAME legacy `_publishArtifactTargetName`).
+export function publishArtifactTargetName(input: unknown): string {
   const obj = toolInputObject(input)
   if (!obj) return ''
   return basename(obj.name || obj.path)

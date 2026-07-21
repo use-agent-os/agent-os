@@ -18,6 +18,7 @@
 
 import type { StreamEventPayload } from '../types'
 import { createToolRenderer, type ToolRenderer } from './tools'
+import { createArtifactRenderer, type Artifact, type ArtifactRenderer } from './artifacts'
 
 /* ── Constants (ported verbatim from chat.js) ───────────────────────────── */
 
@@ -134,7 +135,7 @@ interface ParkedStreamState {
   segments: StreamSegment[]
   activeTextSeg: HTMLElement | null
   activeTextRaw: string
-  streamArtifacts: unknown[]
+  streamArtifacts: Artifact[]
   lastVisibleStreamEvent: string
   routerStrips: HTMLElement[]
   streamGeneration: number
@@ -193,10 +194,6 @@ export interface StreamControllerDeps {
   updateSendButton?: () => void
   /** chat.js:6807 — record a finished assistant message for export. */
   pushMessage?: (message: Record<string, unknown>) => void
-  /** chat.js:6811 — snapshot of stream artifacts to attach to the message. */
-  getStreamArtifacts?: () => unknown[]
-  /** chat.js:6043 — re-render stream artifacts after a reconcile replace. */
-  renderStreamArtifacts?: () => void
   /** chat.js:6585/6726/6822/… — router-fx hooks. Defaults: no-ops. */
   routerFxSettleForOutput?: () => void
   cancelPendingRouterFxScan?: (reason: string) => void
@@ -225,6 +222,17 @@ export interface StreamControllerDeps {
   liveStreamStateBySession?: Map<string, ParkedStreamState>
   /** The active session key (legacy `_sessionKey`), read live. */
   getSessionKey?: () => string
+  /**
+   * chat.js `App.getAuthToken()` — the connection auth token, appended to
+   * artifact preview/download URLs (chat.js:7575/7599/7657). Default: "".
+   */
+  getAuthToken?: () => string
+  /**
+   * chat.js `UI.toast` — a transient toast surface (used by the artifact
+   * download-failure path, chat.js:7667). Owned by the UI/toast surface (a later
+   * task); default no-op so a failed download degrades silently.
+   */
+  toast?: (message: string, kind?: string, durationMs?: number) => void
   /**
    * chat.js:6652 — the abort flag (`_aborted`, set in `_onSend`/ESC). When true,
    * `appendDelta` drops incoming deltas. Owned by the send/abort flow (a later
@@ -301,8 +309,6 @@ export function createStreamController(
   const applySessionRunState = deps.applySessionRunState ?? (() => {})
   const updateSendButton = deps.updateSendButton ?? (() => {})
   const pushMessage = deps.pushMessage ?? (() => {})
-  const getStreamArtifacts = deps.getStreamArtifacts ?? (() => [])
-  const renderStreamArtifacts = deps.renderStreamArtifacts ?? (() => {})
   const routerFxSettleForOutput = deps.routerFxSettleForOutput ?? (() => {})
   const cancelPendingRouterFxScan = deps.cancelPendingRouterFxScan ?? (() => {})
   const routerFxStaticizeCompletedStrips = deps.routerFxStaticizeCompletedStrips ?? (() => {})
@@ -319,6 +325,8 @@ export function createStreamController(
   const liveStreamStateBySession =
     deps.liveStreamStateBySession ?? new Map<string, ParkedStreamState>()
   const getSessionKey = deps.getSessionKey ?? (() => '')
+  const getAuthToken = deps.getAuthToken ?? (() => '')
+  const toast = deps.toast ?? (() => {})
   const isAborted = deps.isAborted ?? (() => false)
   const diag = deps.diag ?? (() => {})
   const openModal = deps.openModal ?? (() => {})
@@ -343,7 +351,7 @@ export function createStreamController(
   let _segments: StreamSegment[] = []
   let _activeTextSeg: HTMLElement | null = null
   let _activeTextRaw = ''
-  let _streamArtifacts: unknown[] = []
+  let _streamArtifacts: Artifact[] = []
   let _lastVisibleStreamEvent = ''
   let _streamBubble: HTMLElement | null = null
   let _autoScroll = true
@@ -884,7 +892,7 @@ export function createStreamController(
         role: 'assistant',
         text: cleanedText,
         ts: new Date().toISOString(),
-        artifacts: getStreamArtifacts().slice(),
+        artifacts: _streamArtifacts.slice(),
         ...(wasAborted ? { interrupted: true } : {}),
       })
 
@@ -933,7 +941,7 @@ export function createStreamController(
     if (lastSeg && lastSeg.type === 'text') lastSeg.raw = finalText
     _renderDirty = true
     flushRender()
-    renderStreamArtifacts()
+    artifactRenderer.renderStreamArtifacts()
   }
 
   function reconcileFinalStreamText(finalText: string): void {
@@ -1187,6 +1195,23 @@ export function createStreamController(
     diag,
   })
 
+  /* ── artifact renderer (chat.js:7457-7679, artifacts.ts) ──────────────── */
+
+  const artifactRenderer: ArtifactRenderer = createArtifactRenderer({
+    ensureStreamBubble,
+    markVisibleStreamEvent,
+    scrollToBottom,
+    getAutoScroll: () => _autoScroll,
+    getStreamBubble: () => _streamBubble,
+    pushStreamArtifact: (artifact) => _streamArtifacts.push(artifact),
+    getStreamArtifacts: () => _streamArtifacts,
+    getSessionKey: () => _streamSessionKey || getSessionKey() || '',
+    getAuthToken,
+    esc,
+    toast,
+    diag,
+  })
+
   return {
     // seq
     acceptStreamSeq,
@@ -1224,6 +1249,11 @@ export function createStreamController(
     reconstructToolCalls: toolRenderer.reconstructToolCalls,
     appendSubagentCompletion: toolRenderer.appendSubagentCompletion,
     setSearchProvider,
+    // artifacts (Task 5 — artifacts.ts)
+    appendArtifact: artifactRenderer.appendArtifact,
+    renderArtifacts: artifactRenderer.renderArtifacts,
+    renderStreamArtifacts: artifactRenderer.renderStreamArtifacts,
+    downloadArtifact: artifactRenderer.downloadArtifact,
     // introspection (for the transcript controller + tests)
     isStreaming: (): boolean => _isStreaming,
     streamSessionKey: (): string => _streamSessionKey,

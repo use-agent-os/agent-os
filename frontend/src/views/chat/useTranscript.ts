@@ -13,6 +13,18 @@ import {
 import { dayKey, dayLabel, esc, stripTimePrefix } from './logic'
 import type { ChatMessage, StreamEventPayload } from './types'
 
+// app.js:200-207 `getAuthToken` reads the connection token from sessionStorage
+// (providers.tsx uses the same key). The artifact renderer appends it to
+// preview/download URLs + the download Authorization header (chat.js:7575/7657).
+const WS_TOKEN_KEY = 'agentos.wsToken'
+function getAuthToken(): string {
+  try {
+    return sessionStorage.getItem(WS_TOKEN_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
 /**
  * Imperative transcript controller + live wiring.
  *
@@ -104,6 +116,9 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
   const [controller] = useState<StreamController>(() =>
     createStreamController(containerRef, {
       getSessionKey: () => sessionKeyRef.current,
+      // Artifact preview/download URLs + download Authorization header
+      // (chat.js:7575/7657 `App.getAuthToken()`).
+      getAuthToken,
       applySessionRunState: (state) => seamsRef.current.applySessionRunState?.(state),
       diag: (event, detail) => seamsRef.current.diag?.(event, detail),
       // Subagent-completion system row (chat.js:7814 `_addMessage`). No real
@@ -401,11 +416,12 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
       }),
     )
 
-    // chat.js:4769 — artifact → Task-5 seam.
+    // chat.js:4769 — artifact → controller artifact renderer (Task 5).
     unsubs.push(
       onEvent('session.event.artifact', (payload: StreamEventPayload) => {
         if (!gateStreamFrame('event.artifact', payload)) return
         controller.resetStreamIdleTimer()
+        controller.appendArtifact(payload)
         seams().appendArtifact?.(payload)
       }),
     )
