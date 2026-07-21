@@ -11,8 +11,8 @@ import {
   type HistoryPagingState,
   type HistoryResponse,
 } from './transcript/history'
-import { dayKey, dayLabel, esc, stripTimePrefix } from './logic'
-import type { ChatMessage, StreamEventPayload } from './types'
+import { dayKey, dayLabel, esc, historyFallbackMessageIdentity, stripTimePrefix } from './logic'
+import type { ChatMessage, Role, StreamEventPayload } from './types'
 
 // app.js:200-207 `getAuthToken` reads the connection token from sessionStorage
 // (providers.tsx uses the same key). The artifact renderer appends it to
@@ -203,8 +203,19 @@ export function useTranscript(opts: { sessionKey: string; seams?: TranscriptEven
         return div
       },
       attachHoverActions: () => {},
-      stampHistoryElement: (el, stableIdentity) => {
+      stampHistoryElement: (el, stableIdentity, role, text, transcriptId = null) => {
         if (stableIdentity) el.setAttribute('data-message-id', stableIdentity)
+        el.setAttribute('data-history-role', role || '')
+        el.setAttribute('data-history-raw-text', text || '')
+        el.setAttribute(
+          'data-history-fallback-id',
+          historyFallbackMessageIdentity(role as Role, text),
+        )
+        if (transcriptId != null) {
+          el.dataset.transcriptId = String(transcriptId)
+        } else {
+          delete el.dataset.transcriptId
+        }
       },
       stripProtocolTextLeak: (t) => t,
       stripDirectiveTags: (t) => t,
