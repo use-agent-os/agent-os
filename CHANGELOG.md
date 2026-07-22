@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.7.22.post1] - 2026-07-22
+
+### Fixed
+
+- `agentos chat` full-screen transcript now responds to the first mouse wheel
+  tick instead of needing several scrolls before the pane moves: the wheel step
+  is larger and the tick that releases follow mode is compensated so the
+  wrapped-line cursor leaves the viewport immediately.
+
 ## [2026.7.22] - 2026-07-22
 
 ### Added
