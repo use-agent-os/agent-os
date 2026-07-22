@@ -196,7 +196,7 @@ class MCPStreamableHTTPClient(MCPClient):
                 )
             )
             await session.initialize()
-        except Exception:
+        except BaseException:
             await stack.aclose()
             raise
 
