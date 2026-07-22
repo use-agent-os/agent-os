@@ -3262,6 +3262,12 @@ class TurnRunner:
         metadata: dict[str, Any] | None = None,
     ) -> tuple[list, ToolHandler | None]:
         """Build tool definitions and handler from registry, filtered by ToolContext."""
+        tools_config = getattr(self._config, "tools", None)
+        if tools_config is not None and not getattr(tools_config, "enabled", True):
+            if metadata is not None:
+                metadata["tool_profile"] = "disabled"
+            log.info("tool_context_disabled")
+            return [], None
         if self._tool_registry is None:
             return [], None
         from agentos.tools.dispatch import build_tool_handler

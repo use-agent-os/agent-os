@@ -19,9 +19,23 @@ class _StandaloneSlashHarness:
         self.flush_calls: list[dict[str, object]] = []
         self.transcripts: dict[str, list[object]] = {}
 
-    async def create_session(self, session_key: str, *, agent_id: str = "main") -> object:
-        self.create_calls.append({"session_key": session_key, "agent_id": agent_id})
-        return SimpleNamespace(session_key=session_key, agent_id=agent_id)
+    async def create_session(
+        self,
+        session_key: str,
+        *,
+        agent_id: str = "main",
+        display_name: str | None = None,
+    ) -> object:
+        self.create_calls.append(
+            {
+                "session_key": session_key,
+                "agent_id": agent_id,
+                "display_name": display_name,
+            }
+        )
+        return SimpleNamespace(
+            session_key=session_key, agent_id=agent_id, display_name=display_name
+        )
 
     async def read_transcript(self, session_key: str) -> list[object]:
         return list(self.transcripts.get(session_key, []))
@@ -237,8 +251,13 @@ async def test_standalone_slash_adapter_new_session_uses_typed_create_handle() -
     new_session_key = harness.create_calls[0]["session_key"]
     assert new_session_key.startswith("agent:main:standalone:")
     assert harness.create_calls[0]["agent_id"] == "main"
+    # Regression: ``/new <title>`` must persist the title as the session
+    # ``display_name`` so it can be surfaced in the toolbar / ``/status``
+    # and survive a later ``/resume`` (issue #46).
+    assert harness.create_calls[0]["display_name"] == "scratch"
     assert context.session_key == new_session_key
     assert context.state.session_key == new_session_key
+    assert context.state.display_name == "scratch"
     assert context.tool_ctx == {"session_key": new_session_key}
     assert replacement_calls[0]["session_key"] == new_session_key
 

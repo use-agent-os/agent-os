@@ -9,12 +9,16 @@ from typing import Any
 @dataclass
 class MCPServerConfig:
     name: str
-    transport: str  # "stdio" | "sse"
+    transport: str  # "stdio" | "sse" | "streamable_http"
     command: str | None = None  # for stdio
     args: list[str] = field(default_factory=list)  # for stdio
-    url: str | None = None  # for sse
+    url: str | None = None  # for HTTP transports
     message_endpoint: str | None = None  # for sse, default "/message"
     env: dict[str, str] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=dict)
+    oauth: bool = False
+    oauth_redirect_uri: str | None = None
+    state_dir: str | None = None
     tool_timeout_seconds: float = 30.0
 
 

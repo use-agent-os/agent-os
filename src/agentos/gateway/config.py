@@ -139,6 +139,7 @@ class SkillsConfig(BaseSettings):
 class ToolsConfig(BaseModel):
     """Top-level runtime tool policy configuration."""
 
+    enabled: bool = True
     profile: Literal["full", "minimal", "memory_only", "coding", "messaging"] | None = None
     allow: list[str] = Field(default_factory=list)
     deny: list[str] = Field(default_factory=list)
@@ -1207,11 +1208,13 @@ class MCPServerEntry(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENTOS_MCP_SERVER_")
 
     name: str = ""
-    transport: str = "stdio"  # "stdio" | "sse"
+    transport: Literal["stdio", "sse", "streamable_http"] = "stdio"
     command: str | None = None  # for stdio
     args: list[str] = Field(default_factory=list)  # for stdio
-    url: str | None = None  # for sse
+    url: str | None = None  # for HTTP transports
     env: dict[str, str] = Field(default_factory=dict)
+    headers: dict[str, str] = Field(default_factory=dict)
+    oauth: bool = False
     tool_timeout_seconds: float = 30.0
 
 
@@ -1382,6 +1385,11 @@ class SlackChannelEntry(ConfiguredChannelEntry):
     # webhook. Socket Mode additionally requires ``app_token``.
     connection_mode: Literal["webhook", "socket"] = "webhook"
     app_token: str = ""
+    # Optional App Manifest API sync. ``manifest_token`` is a short-lived Slack
+    # app configuration access token, not the Socket Mode ``app_token``.
+    app_id: str = ""
+    manifest_token: str = ""
+    command_request_url: str = ""
 
     @model_validator(mode="after")
     def _validate_socket_app_token(self) -> SlackChannelEntry:

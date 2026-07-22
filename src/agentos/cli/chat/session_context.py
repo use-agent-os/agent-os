@@ -37,6 +37,12 @@ class GatewaySessionContext:
         self.scope["session_key"] = self.state.session_key
         self.scope["state"] = self.state
         self.scope["model"] = self.state.model
+        # Mirror the session chrome fields so the terminal surface
+        # factory can forward them into ``_toolbar_context`` for the
+        # first redraw (see ``open_terminal_surface`` / issue #46).
+        self.scope["session_title"] = self.state.display_name
+        tier = self.state.router_hold_tier
+        self.scope["router_tier"] = tier if isinstance(tier, str) and tier else None
 
 
 @dataclass
@@ -85,3 +91,9 @@ class StandaloneSessionContext:
         self.scope["tool_ctx"] = self.tool_ctx
         self.scope["state"] = self.state
         self.scope["model"] = self.state.model
+        # Mirror the session chrome fields so the terminal surface
+        # factory can forward them into ``_toolbar_context`` for the
+        # first redraw (see ``open_terminal_surface`` / issue #46).
+        self.scope["session_title"] = self.state.display_name
+        tier = self.state.router_hold_tier
+        self.scope["router_tier"] = tier if isinstance(tier, str) and tier else None

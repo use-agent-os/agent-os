@@ -1,0 +1,15 @@
+interface:
+  display_name: "Robinhood Agentic Trading"
+  short_description: "Safe Robinhood MCP trading workflows"
+  default_prompt: "Use $robinhood-agentic-trading to review my Agentic account and prepare a risk-checked trade plan."
+
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "robinhood-trading"
+      description: "Robinhood Trading MCP server"
+      transport: "streamable_http"
+      url: "https://agent.robinhood.com/mcp/trading"
+
+policy:
+  allow_implicit_invocation: true

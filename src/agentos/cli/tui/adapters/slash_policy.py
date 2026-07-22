@@ -88,6 +88,14 @@ STATE_MUTATION_SLASH_WORDS: frozenset[str] = frozenset(
         "/status",
         "/session",
         "/elevated",
+        # Pilot Router tier holds take effect on the next turn (the router
+        # step reads the hold store at turn start), so they enqueue behind
+        # the active turn rather than cancelling it.
+        "/auto",
+        "/c0",
+        "/c1",
+        "/c2",
+        "/c3",
     }
 )
 

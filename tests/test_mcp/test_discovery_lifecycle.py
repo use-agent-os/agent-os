@@ -76,9 +76,38 @@ async def test_discovered_mcp_clients_have_owner_and_close_lifecycle(
     assert snapshot[0].server_name == "docs"
     assert snapshot[0].transport == "stdio"
     assert snapshot[0].client is client
+    assert snapshot[0].registered_tools == ("mcp_lookup",)
     assert await discovery.close_active_clients(owner="docs") == 1
     assert client.closed is True
     assert discovery.active_clients_snapshot() == ()
+
+
+@pytest.mark.asyncio
+async def test_disconnect_unregisters_tools_owned_by_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentos.mcp import discovery
+
+    config = MCPServerConfig(name="docs", transport="stdio", command="mock-mcp")
+    client = FakeMCPClient(
+        config,
+        tools=[
+            MCPToolDef(
+                name="lookup",
+                description="Lookup docs",
+                input_schema={"properties": {}, "required": []},
+            )
+        ],
+    )
+    monkeypatch.setattr(discovery, "create_client", lambda _config: client)
+    registry = ToolRegistry()
+
+    await discovery.discover_and_register(config, registry, owner="docs")
+    assert registry.get("mcp_lookup") is not None
+
+    assert await discovery.disconnect_and_unregister("docs", registry) == 1
+    assert registry.get("mcp_lookup") is None
+    assert client.closed is True
 
 
 @pytest.mark.asyncio

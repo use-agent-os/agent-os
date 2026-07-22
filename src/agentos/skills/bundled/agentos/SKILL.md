@@ -55,6 +55,32 @@ agentos chat                 # interactive terminal chat
 agentos agent -m "..."       # one-shot, automation-friendly agent turn
 ```
 
+### `agentos chat` REPL essentials
+
+The interactive REPL exposes slash commands; the most-used are `/new [title]`,
+`/resume <key>`, `/status`, `/model <id>`, `/clear`, `/compact`, `/cost`,
+`/save [path]`, `/help`, and `/exit`. Pilot Router tier pins are available
+in both gateway and `--standalone` modes:
+
+- `/c0` … `/c3` — pin the Pilot Router to a configured tier for this session.
+  The active tier shows in the bottom toolbar (e.g. `tier:c3`) and in
+  `/status` until you run `/auto`, exit, or the hold expires.
+- `/auto` — restore automatic Pilot Router routing (clear the pin).
+
+The assistant speaker label on the `◢` marker defaults to `agentos`; override
+with the `AGENTOS_ASSISTANT_LABEL` env var. The active input row is framed by a
+top and bottom rule so it reads as a distinct box; the bottom toolbar renders
+`title · model · [tier:cN]` while typing, with the title sourced from
+`/new <title>` or loaded on `/resume`. `agentos chat` runs full-screen by
+default: the conversation renders in a scrollable pane above the pinned input
+frame (the branded welcome screen shows at the top on launch), so the frame
+stays visible while the assistant streams (`PgUp`/`PgDn` scroll history). The
+mouse wheel also scrolls when the pointer is over the transcript. In the
+multiline input, `Home`/`End` and `Ctrl+A`/`Ctrl+E` move to the current line's
+start/end; macOS `Cmd+Left`/`Cmd+Right` work when the terminal maps them to
+`Home`/`End`. Set `AGENTOS_CHAT_FULLSCREEN=0` to opt out to native scrollback;
+non-TTY contexts fall back automatically.
+
 ## CLI map
 
 Top-level: `init`, `onboard`, `configure`, `doctor`, `upgrade`, `chat`,
@@ -69,7 +95,7 @@ Top-level: `init`, `onboard`, `configure`, `doctor`, `upgrade`, `chat`,
 | `skills` | `list`, `search`, `view`, `install`, `uninstall`, `update`, `publish`, `tap add/list/remove` |
 | `sessions` | `list`, `show`, `resume`, `abort`, `delete`, `export` |
 | `cron` | `list`, `status`, `add`, `update`, `remove`, `run`, `runs` |
-| `channels` | `list`, `status`, `types`, `describe`, `add`, `remove`, `enable`, `disable`, `edit`, `restart`, `logout`, `pairing …` |
+| `channels` | `list`, `status`, `types`, `describe`, `native-commands`, `add`, `remove`, `enable`, `disable`, `edit`, `restart`, `logout`, `pairing …` |
 | `memory` | `status`, `index`, `list`, `search`, `show`, `dream`, `embedding-download`, `repair …`, `raw-fallbacks …` |
 | `sandbox` | `status`, `on`, `bypass`, `full`, `reset` |
 | `search` | `list`, `status`, `query`, `configure` |
@@ -102,6 +128,7 @@ Main `agentos.toml` sections (full commented reference:
 | `[llm]` | `provider`, `model`, `api_key`, `base_url`, `proxy`, `[llm.provider_routing]` |
 | `[agentos_router]` | router on/off, `strategy` (`pilot-v1`), tier settings under `[agentos_router.tiers.c0..c3]` |
 | `[skills]` | skill filtering/injection: `filter_strategy`, `filter_top_k`, `injection_mode` |
+| `[tools]` | model-visible tools and policy; `enabled = false` runs providers in plain-text mode |
 | `[memory]` | memory source and embedding model, `[memory.dream]` |
 | `[sandbox]` | `sandbox`, `default_level` (DISABLED/STANDARD/STRICT/LOCKED), `backend`, network/mounts |
 | `[permissions]` | `default_mode` = `off` \| `on` \| `bypass` \| `full` (pair with `agentos sandbox …`) |
@@ -110,6 +137,10 @@ Main `agentos.toml` sections (full commented reference:
 | `[updates]` | `notify` (default true) — the once-per-24h "new release available" notice |
 | `[channels]` | messaging channels (`[[channels.channels]]` entries) |
 | `[compaction]`, `[agent_token_saving]`, `[task_runtime]` | context compaction, tool-result projection, concurrency |
+
+Slack native commands auto-sync when a Slack channel entry provides `app_id`,
+`manifest_token` (an app configuration access token), and `command_request_url`;
+otherwise export them with `agentos channels native-commands slack --request-url …`.
 
 ## Common operations (verified recipes)
 

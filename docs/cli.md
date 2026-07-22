@@ -67,6 +67,90 @@ agentos chat --session <session-key>
 agentos chat --standalone --workspace /path/to/project
 ```
 
+### Chat REPL slash commands
+
+`agentos chat` exposes a prompt-toolkit REPL with a slash-command palette.
+The most useful ones:
+
+| Command | Purpose |
+| --- | --- |
+| `/new [title]` | Start a new chat session. The optional title is persisted as the session's display name and shown in the bottom toolbar and `/status`. |
+| `/resume <key>` | Resume an existing session by key (or a prefix / display-name match in gateway mode). |
+| `/status` | Show the current session, model, permissions, and the active Pilot Router tier (or `auto`). |
+| `/model <id>` | Override the model for this session. |
+| `/clear` / `/reset` | Clear the current conversation context. |
+| `/compact` | Compact older context into a summary. |
+| `/cost` | Show per-session token and cost totals. |
+| `/save [path]` | Save the transcript to a Markdown file. |
+| `/c0` … `/c3` | Pin the Pilot Router to a configured tier for this session. The pin appears in the bottom toolbar (e.g. `tier:c3`) and stays active until you exit, run `/auto`, or the hold expires. |
+| `/auto` | Restore automatic Pilot Router routing (clears the tier pin). |
+| `/help` | List the commands available on the current surface. |
+| `/exit` / `/quit` | Leave the REPL. |
+
+Router tier commands (`/c0` … `/c3`, `/auto`) are available in both gateway
+and `--standalone` modes. Tiers not present in your `[agentos_router]`
+config are rejected with a readable error. In `--standalone` mode the
+router must be enabled in config; otherwise the command reports
+"Pilot Router is disabled or unavailable."
+
+### Assistant label and session chrome
+
+The assistant speaker label shown on the `◢` marker and the pre-token
+waiting row defaults to `agentos`. Override it with the
+`AGENTOS_ASSISTANT_LABEL` environment variable — the value is read once at
+startup and used by every renderer, so it stays consistent across the
+streamed reply marker, the waiting header, and the queued-turn marker.
+
+```sh
+AGENTOS_ASSISTANT_LABEL="Hani" agentos chat
+```
+
+The active input row is framed by a top and bottom rule, so the typing
+area reads as a distinct box between the transcript and the bottom
+toolbar:
+
+```
+────────────────────────────────────────
+ ◢ you  <your message here>
+────────────────────────────────────────
+ title · model · [tier:cN]
+```
+
+Press `Enter` to submit the current message. Use `Alt+Enter` or
+`Shift+Enter` to insert a newline when your terminal reports those modified
+keys distinctly; `Ctrl+J` is the portable newline fallback. The input frame
+grows with the message up to 10 visible lines, then scrolls internally while
+remaining pinned above the bottom toolbar. `Up` and `Down` move between lines
+in a multiline draft before moving through chat input history at the first or
+last line.
+
+The bottom toolbar renders `title · model · [tier:cN]` while typing. The
+title comes from `/new <title>` (or is loaded from the gateway on
+`/resume`); the tier chip appears only while a Pilot Router hold is
+active. `/status` mirrors the same fields plus the active permissions
+posture.
+
+**Full-screen surface (default).** `agentos chat` renders the conversation
+in a scrollable in-app pane above a permanently-pinned input frame (Claude
+Code style), so the frame stays visible while the assistant streams. The
+branded welcome screen renders at the top of the pane on launch. `PgUp`/`PgDn`
+scroll back through history; the mouse wheel scrolls when the pointer is over
+the transcript. New output re-pins to the newest line.
+
+Input navigation follows the current logical line in multiline drafts:
+`Home`/`End` and `Ctrl+A`/`Ctrl+E` move to that line's start/end. On macOS,
+`Cmd+Left`/`Cmd+Right` work when the terminal maps those shortcuts to
+`Home`/`End`; use `Ctrl+A`/`Ctrl+E` as the portable fallback.
+
+Full-screen is the default for an interactive terminal. Non-TTY / piped
+invocations fall back to native scrollback automatically. To force a mode set
+`AGENTOS_CHAT_FULLSCREEN`:
+
+```sh
+AGENTOS_CHAT_FULLSCREEN=0 agentos chat   # opt out — stream to native scrollback
+AGENTOS_CHAT_FULLSCREEN=1 agentos chat   # force full-screen (e.g. under a pipe)
+```
+
 One-shot automation:
 
 ```sh
@@ -188,6 +272,8 @@ Channels:
 ```sh
 agentos channels types
 agentos channels describe telegram
+agentos channels native-commands telegram
+agentos channels native-commands slack --request-url https://agent.example/slack/events
 agentos channels add telegram --name personal
 agentos channels list
 agentos channels status
@@ -197,12 +283,25 @@ agentos channels restart personal
 agentos channels remove personal
 ```
 
+`native-commands` prints the native platform payload derived from the same
+channel command registry used for text `/command` dispatch. Telegram and
+Discord menus synchronize when their adapters start. Slack also synchronizes
+at startup when its channel entry has `app_id`, a short-lived app configuration
+`manifest_token`, and `command_request_url`. Otherwise import the exported
+Slack manifest fragment manually; its `--request-url` must point to the
+gateway's Slack webhook endpoint.
+
 Raw config:
 
 ```sh
 agentos config get llm.provider
 agentos config set gateway.port 18791
 ```
+
+For Ollama models that do not reliably support native tool calls, set
+`tools.enabled = false` in the config file to run in plain-text mode. Keep it
+enabled for tool-capable cloud models such as `glm-5.2:cloud`; the Ollama
+provider preserves native tool-call history between turns.
 
 More detail:
 

@@ -170,6 +170,7 @@ are released under AgentOS's repository license (Apache-2.0; see `LICENSE`):
 - `nano-pdf`
 - `pdf-toolkit`
 - `pptx`
+- `robinhood-agentic-trading`
 - `robinhood-rwa-addresses`
 - `stack-trace-generic-probe`
 - `stack-trace-go-probe`

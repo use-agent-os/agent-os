@@ -28,6 +28,27 @@ def test_render_startup_screen_wide_contains_agentos() -> None:
     assert "x/y-model" in text
 
 
+def test_render_startup_screen_shows_title_and_key_when_titled() -> None:
+    # Issue #46 §2: when a friendly session title is known it renders as
+    # ``Session: <title> (<key>)`` (matches the CHANGELOG claim).
+    text = _render(120, session_key="agent:main:demo", session_title="Fix login")
+    assert "Session: Fix login (agent:main:demo)" in text
+
+
+def test_render_startup_screen_shows_key_only_without_title() -> None:
+    text = _render(120, session_key="agent:main:demo")
+    assert "Session: agent:main:demo" in text
+    assert "(agent:main:demo)" not in text
+
+
+def test_gather_startup_data_carries_session_title() -> None:
+    data = gather_startup_data(session_key="k", session_title="My chat")
+    assert data.session_title == "My chat"
+    # Blank titles normalise to ``None`` so the render falls back to key-only.
+    assert gather_startup_data(session_key="k", session_title="  ").session_title is None
+    assert gather_startup_data(session_key="k").session_title is None
+
+
 def test_render_startup_screen_compact_does_not_crash() -> None:
     text = _render(60, session_key="agent:main:demo")
     assert "AgentOS Agent" in text

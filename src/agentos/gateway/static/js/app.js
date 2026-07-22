@@ -36,6 +36,8 @@ const App = (() => {
     Router.register('/cron', (el) => _renderStandardView(CronView, el), () => CronView.destroy(), { title: 'Cron' });
     Router.register('/usage', (el) => _renderStandardView(UsageView, el), () => UsageView.destroy(), { title: 'Usage' });
     Router.register('/config', (el) => _renderStandardView(ConfigView, el), () => ConfigView.destroy(), { title: 'Config' });
+    Router.register('/mcp', (el) => _renderStandardView(MCPView, el), () => MCPView.destroy(), { title: 'MCP Servers' });
+    Router.register('/mcp/oauth/callback', (el) => _renderStandardView(MCPView, el), () => MCPView.destroy(), { title: 'MCP Authorization' });
     Router.register('/setup', (el) => _renderStandardView(SetupView, el), () => SetupView.destroy(), { title: 'Setup' });
     Router.register('/channels', (el) => _renderStandardView(ChannelsView, el), () => ChannelsView.destroy(), { title: 'Channels' });
     Router.register('/approvals', (el) => _renderStandardView(ApprovalsView, el), () => ApprovalsView.destroy(), { title: 'Approvals' });
@@ -75,6 +77,7 @@ const App = (() => {
         <a class="nav-item" href="#" data-path="/overview">${icons.home()} Overview</a>
         <a class="nav-item" href="#" data-path="/health">${icons.logs()} Health</a>
         <a class="nav-item" href="#" data-path="/channels">${icons.channels()} Channels</a>
+        <a class="nav-item" href="#" data-path="/mcp">${icons.mcp()} MCP Servers</a>
         <a class="nav-item" href="#" data-path="/skills">${icons.skills()} Skills</a>
         <a class="nav-item" href="#" data-path="/sessions">${icons.sessions()} Sessions</a>
         <a class="nav-item" href="#" data-path="/agents">${icons.agents()} Agents</a>

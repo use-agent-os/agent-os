@@ -186,6 +186,10 @@ def _session_key(envelope: Any) -> dict[str, str]:
     return {"sessionKey": envelope.session_key}
 
 
+def _channel_commands(_envelope: Any) -> dict[str, str]:
+    return {"surface": Surface.CHANNEL.value}
+
+
 def _empty(_envelope: Any) -> dict[str, Any]:
     return {}
 
@@ -252,11 +256,14 @@ _COMMANDS: tuple[CommandDef, ...] = (
             _C: _rpc("sessions.contextCompact", _key),
         },
     ),
-    # ---- Router tier holds (web + channel) --------------------------------
+    # ---- Router tier holds (web + channel + cli) -------------------------
     # /c0-/c3 pin the Pilot Router to one configured tier for this session
     # (short-lived hold, same mechanism as the router_control tool); /auto
     # restores automatic routing. Tiers not present in the active router
-    # config are rejected by the RPC with an operator-readable error.
+    # config are rejected by the RPC (gateway) or the LOCAL handler
+    # (standalone) with an operator-readable error. CLI surfaces reuse the
+    # existing router.hold.* RPC when a gateway is reachable and hit the
+    # in-process hold store directly under --standalone.
     *(
         CommandDef(
             name=f"/{tier}",
@@ -264,6 +271,8 @@ _COMMANDS: tuple[CommandDef, ...] = (
             description=f"Pin the Pilot Router to tier {tier} for this session.",
             execution={
                 _W: _rpc("router.hold.set", _tier_hold(tier)),
+                _T: _rpc("router.hold.set", _tier_hold(tier)),
+                _S: _local("router.hold.set"),
                 _C: _rpc("router.hold.set", _tier_hold(tier)),
             },
         )
@@ -275,6 +284,8 @@ _COMMANDS: tuple[CommandDef, ...] = (
         description="Restore automatic Pilot Router routing (clear tier hold).",
         execution={
             _W: _rpc("router.hold.clear", _key),
+            _T: _rpc("router.hold.clear", _key),
+            _S: _local("router.hold.clear"),
             _C: _rpc("router.hold.clear", _key),
         },
     ),
@@ -283,7 +294,11 @@ _COMMANDS: tuple[CommandDef, ...] = (
         name="/help",
         usage="/help",
         description="Show available commands.",
-        execution={_T: _local("help.show"), _S: _local("help.show"), _C: _rpc("status", _empty)},
+        execution={
+            _T: _local("help.show"),
+            _S: _local("help.show"),
+            _C: _rpc("commands.list_for_surface", _channel_commands),
+        },
     ),
     CommandDef(
         name="/status",

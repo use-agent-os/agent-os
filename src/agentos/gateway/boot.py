@@ -1914,6 +1914,9 @@ async def build_services(
                     args=entry.args,
                     url=entry.url,
                     env=entry.env,
+                    headers=entry.headers,
+                    oauth=entry.oauth,
+                    state_dir=config.state_dir,
                     tool_timeout_seconds=entry.tool_timeout_seconds,
                 )
                 names = await asyncio.wait_for(

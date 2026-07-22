@@ -23,6 +23,11 @@ from agentos.cli.gateway_rpc import confirm_or_exit, run_gateway_sync
 from agentos.cli.output import print_json
 from agentos.cli.ui import ACCENT_HEADER, ACCENT_MARKUP
 from agentos.cli.ui import console as ui_console
+from agentos.engine.native_commands import (
+    discord_application_commands,
+    slack_command_manifest,
+    telegram_bot_commands,
+)
 from agentos.onboarding.channel_specs import (
     get_channel_setup_spec,
     list_channel_setup_specs,
@@ -85,9 +90,7 @@ def _render_channels_table(entries: list[dict[str, Any]], *, title: str) -> None
     table.add_column("details")
     for e in entries:
         details = ", ".join(
-            f"{k}={v}"
-            for k, v in e.items()
-            if k not in {"name", "type", "enabled", "agent_id"}
+            f"{k}={v}" for k, v in e.items() if k not in {"name", "type", "enabled", "agent_id"}
         )
         table.add_row(
             e["name"],
@@ -128,18 +131,12 @@ def _filter_status_rows(payload: dict[str, Any], name: str | None) -> list[dict[
         return []
     if not name:
         return [row for row in rows if isinstance(row, dict)]
-    return [
-        row
-        for row in rows
-        if isinstance(row, dict) and str(row.get("name") or "") == name
-    ]
+    return [row for row in rows if isinstance(row, dict) and str(row.get("name") or "") == name]
 
 
 def _resolve_pairing_channel(config_path: Path | None, name: str) -> str:
     cfg = load_config(resolve_config_path(config_path)[0])
-    telegram_names = [
-        entry.name for entry in cfg.channels.channels if entry.type == "telegram"
-    ]
+    telegram_names = [entry.name for entry in cfg.channels.channels if entry.type == "telegram"]
     if name in telegram_names:
         return name
     if name == "telegram" and len(telegram_names) == 1:
@@ -184,8 +181,8 @@ def pairing_list(
     table.add_column("Expires/approved")
     for row in rows:
         for request in row["pending"]:
-            identity = request.get("username") or request.get("display_name") or request.get(
-                "sender_id"
+            identity = (
+                request.get("username") or request.get("display_name") or request.get("sender_id")
             )
             table.add_row(
                 row["channel"],
@@ -221,9 +218,7 @@ def pairing_approve(
     except (InvalidPairingCodeError, PairingApprovalLockedError, PairingStoreError) as exc:
         typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2) from exc
-    typer.echo(
-        f"Approved {request.get('sender_id')} for Telegram channel {channel_name}."
-    )
+    typer.echo(f"Approved {request.get('sender_id')} for Telegram channel {channel_name}.")
 
 
 @pairing_app.command("revoke")
@@ -259,9 +254,7 @@ def channels_list(
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
 ) -> None:
     target = (
-        resolve_config_path(config_path)[0]
-        if json_output
-        else _resolve_and_announce(config_path)
+        resolve_config_path(config_path)[0] if json_output else _resolve_and_announce(config_path)
     )
     cfg = load_config(target)
     entries = list_channel_entries(cfg)
@@ -450,11 +443,7 @@ def channels_edit(
     target = _resolve_and_announce(config_path)
     cfg = load_config(target)
     existing = next(
-        (
-            e.model_dump(mode="python")
-            for e in cfg.channels.channels
-            if e.name == name
-        ),
+        (e.model_dump(mode="python") for e in cfg.channels.channels if e.name == name),
         None,
     )
     if existing is None:
@@ -496,16 +485,18 @@ def channels_types(
     """List supported channel types."""
     specs = list_channel_setup_specs()
     if json_output:
-        print_json([
-            {
-                "type": s.type,
-                "label": s.label,
-                "transport": s.transport,
-                "requires_public_url": s.requires_public_url,
-                "dependency_extra": s.dependency_extra,
-            }
-            for s in specs
-        ])
+        print_json(
+            [
+                {
+                    "type": s.type,
+                    "label": s.label,
+                    "transport": s.transport,
+                    "requires_public_url": s.requires_public_url,
+                    "dependency_extra": s.dependency_extra,
+                }
+                for s in specs
+            ]
+        )
         return
     table = Table(title="Supported channel types")
     table.add_column("type", no_wrap=True)
@@ -515,7 +506,9 @@ def channels_types(
     table.add_column("extras", no_wrap=True)
     for s in specs:
         table.add_row(
-            s.type, s.label, s.transport,
+            s.type,
+            s.label,
+            s.transport,
             "yes" if s.requires_public_url else "no",
             s.dependency_extra or "—",
         )
@@ -535,25 +528,31 @@ def channels_describe(
         raise typer.Exit(code=2) from exc
 
     if json_output:
-        print_json({
-            "type": spec.type,
-            "label": spec.label,
-            "description": spec.description,
-            "transport": spec.transport,
-            "requires_public_url": spec.requires_public_url,
-            "dependency_extra": spec.dependency_extra,
-            "restart_required": spec.restart_required,
-            "docs_hint": spec.docs_hint,
-            "fields": [
-                {
-                    "name": f.name, "label": f.label, "type": f.field_type,
-                    "required": f.required, "default": f.default,
-                    "choices": list(f.choices), "secret": f.secret,
-                    "description": f.description,
-                }
-                for f in spec.fields
-            ],
-        })
+        print_json(
+            {
+                "type": spec.type,
+                "label": spec.label,
+                "description": spec.description,
+                "transport": spec.transport,
+                "requires_public_url": spec.requires_public_url,
+                "dependency_extra": spec.dependency_extra,
+                "restart_required": spec.restart_required,
+                "docs_hint": spec.docs_hint,
+                "fields": [
+                    {
+                        "name": f.name,
+                        "label": f.label,
+                        "type": f.field_type,
+                        "required": f.required,
+                        "default": f.default,
+                        "choices": list(f.choices),
+                        "secret": f.secret,
+                        "description": f.description,
+                    }
+                    for f in spec.fields
+                ],
+            }
+        )
         return
 
     console = Console(width=160, force_terminal=False)
@@ -582,3 +581,28 @@ def channels_describe(
             ",".join(f.choices) if f.choices else "—",
         )
     console.print(table)
+
+
+@channels_app.command("native-commands")
+def channels_native_commands(
+    platform: str = typer.Argument(..., help="Platform: telegram, discord, or slack."),
+    request_url: str = typer.Option(
+        "",
+        "--request-url",
+        help="Slack slash-command Request URL (required only for slack).",
+    ),
+) -> None:
+    """Print the native command-menu payload derived from the channel registry."""
+    match platform.strip().lower():
+        case "telegram":
+            payload: object = {"commands": telegram_bot_commands()}
+        case "discord":
+            payload = discord_application_commands()
+        case "slack":
+            try:
+                payload = slack_command_manifest(request_url)
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc), param_hint="--request-url") from exc
+        case _:
+            raise typer.BadParameter("platform must be telegram, discord, or slack")
+    print_json(payload)

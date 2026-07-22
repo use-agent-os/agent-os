@@ -20,6 +20,7 @@ class ActiveMCPClient:
     server_name: str
     transport: str
     client: MCPClient
+    registered_tools: tuple[str, ...] = ()
 
     async def close(self) -> None:
         await self.client.close()
@@ -55,6 +56,19 @@ async def close_active_clients(owner: str | None = None) -> int:
     return closed
 
 
+async def disconnect_and_unregister(owner: str, registry: ToolRegistry) -> int:
+    """Close one MCP server and remove the tools registered by that server."""
+    entries = [
+        entry
+        for entry in active_clients_snapshot()
+        if entry.owner == owner or entry.server_name == owner
+    ]
+    for entry in entries:
+        for name in entry.registered_tools:
+            registry.unregister(name)
+    return await close_active_clients(owner)
+
+
 def create_client(config: MCPServerConfig) -> MCPClient:
     """Factory: create the appropriate MCPClient for the given transport."""
     if config.transport == "stdio":
@@ -65,6 +79,10 @@ def create_client(config: MCPServerConfig) -> MCPClient:
         from agentos.mcp.sse import MCPSSEClient
 
         return MCPSSEClient(config)
+    elif config.transport == "streamable_http":
+        from agentos.mcp.streamable_http import MCPStreamableHTTPClient
+
+        return MCPStreamableHTTPClient(config)
     else:
         raise ValueError(f"Unknown MCP transport: {config.transport!r}")
 
@@ -119,13 +137,6 @@ async def discover_and_register(
     registered: list[str] = []
     try:
         await client.connect()
-        entry = ActiveMCPClient(
-            owner=owner or config.name,
-            server_name=config.name,
-            transport=config.transport,
-            client=client,
-        )
-        _active_clients.append(entry)
         tools = await client.list_tools()
         for t in tools:
             _make_tool_handler(
@@ -136,6 +147,14 @@ async def discover_and_register(
                 timeout_seconds=config.tool_timeout_seconds,
             )
             registered.append(f"mcp_{t.name}")
+        entry = ActiveMCPClient(
+            owner=owner or config.name,
+            server_name=config.name,
+            transport=config.transport,
+            client=client,
+            registered_tools=tuple(registered),
+        )
+        _active_clients.append(entry)
     except Exception:
         if entry is not None:
             try:

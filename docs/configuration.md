@@ -116,6 +116,32 @@ your install to see the current catalog.
 
 Read: [`providers-and-models.md`](providers-and-models.md)
 
+### Ollama plain-text mode
+
+AgentOS supports Ollama native tool calls. For a local model that does not
+reliably implement Ollama's tool-call protocol, disable model-visible tools and
+route directly to the configured model:
+
+```toml
+agent_max_iterations = 8
+
+[llm]
+provider = "ollama"
+model = "qwen2.5:7b"
+base_url = "http://localhost:11434"
+
+[tools]
+enabled = false
+
+[agentos_router]
+enabled = false
+```
+
+`tools.enabled = false` is a hard plain-text mode: no tool definitions are sent
+to the provider and no tool handler is exposed for the turn. Keep a positive
+`agent_max_iterations` when enabling tools on smaller local models so malformed
+or repetitive tool calls terminate predictably.
+
 ## Router Configuration
 
 Router modes:
@@ -280,6 +306,41 @@ agentos channels status <name> --json
 ```
 
 See [`channels.md`](channels.md) for details.
+
+## MCP Configuration
+
+Use **Settings > MCP Servers** in the Web UI for normal MCP setup. It supports
+live connect/disconnect controls, inline validation, OAuth authorization, and a
+featured Robinhood Trading preset.
+
+For scripted deployments, configure servers in TOML:
+
+```toml
+[mcp]
+enabled = true
+connect_timeout_seconds = 10
+
+[[mcp.servers]]
+name = "robinhood-trading"
+transport = "streamable_http"
+url = "https://agent.robinhood.com/mcp/trading"
+oauth = true
+tool_timeout_seconds = 30
+```
+
+Supported transports are `stdio`, `sse`, and `streamable_http`. Streamable HTTP
+uses the optional MCP SDK, so install the MCP extra when it is not already
+present:
+
+```sh
+uv sync --extra mcp
+```
+
+OAuth access and refresh tokens are not written to `config.toml`. AgentOS keeps
+them in a server-scoped JSON file under the configured state directory with
+file mode `0600` inside a `0700` directory on POSIX systems. On Windows, the
+credential file inherits the current user's state-directory ACL. Removing the
+server from the MCP screen also clears that credential file.
 
 ## Memory Configuration
 

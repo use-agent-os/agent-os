@@ -36,6 +36,7 @@ class GatewayRuntimeNotice:
     session_key: str | None = None
     model: str | None = None
     message: str | None = None
+    session_title: str | None = None
 
 
 class GatewayClientLike(Protocol):
@@ -67,6 +68,11 @@ class GatewayClientLike(Protocol):
     async def usage_status(self) -> dict[str, Any]: ...
 
     async def upload_file(self, path: Path, mime: str, name: str) -> str: ...
+
+    # Generic RPC surface used by /c0-/c3 and /auto to call
+    # router.hold.set / router.hold.clear (issue #46). Mirrors
+    # ``GatewayClient.call`` in ``cli.gateway_client``.
+    async def call(self, method: str, params: dict | None = None) -> Any: ...
 
     def send_message(
         self,
@@ -165,13 +171,27 @@ async def run_gateway_chat(
         try:
             resolved = await asyncio.wait_for(client.resolve_session(session_key), timeout=2.0)
             state.model = resolved.get("model") or state.model
+            # Surface the persisted display name (set via ``/new <title>``)
+            # and any active Pilot Router tier hold in the bottom toolbar
+            # from the very first redraw. See issue #46.
+            state.display_name = resolved.get("displayName") or resolved.get(
+                "display_name"
+            )
+            tier = resolved.get("router_hold_tier")
+            state.router_hold_tier = tier if isinstance(tier, str) and tier else None
         except Exception:  # noqa: BLE001 - network/timeout; non-fatal
             pass
 
         session_context = GatewaySessionContext.create(state)
         active_turn_session_key: str | None = None
 
-        deps.notify(GatewayRuntimeNotice(kind="welcome"))
+        deps.notify(
+            GatewayRuntimeNotice(
+                kind="welcome",
+                session_key=session_key,
+                session_title=state.display_name,
+            )
+        )
 
         async def _dispatch_input(user_input: str) -> bool:
             nonlocal active_turn_session_key
