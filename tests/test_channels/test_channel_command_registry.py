@@ -9,8 +9,14 @@ from agentos.gateway.protocol import make_error_res, make_ok_res
 from agentos.gateway.routing import build_channel_route_envelope
 
 
-def _envelope():
-    msg = IncomingMessage(sender_id="u1", channel_id="c1", content="test")
+def _envelope(*, bot_username: str | None = None):
+    metadata = {"bot_username": bot_username} if bot_username else {}
+    msg = IncomingMessage(
+        sender_id="u1",
+        channel_id="c1",
+        content="test",
+        metadata=metadata,
+    )
     return build_channel_route_envelope(
         msg,
         session_key="agent:main:telegram:u1",
@@ -79,6 +85,36 @@ def test_all_native_channel_commands_map_to_real_rpc(command, method, params) ->
     _name, matched_method, params_factory = match
     assert matched_method == method
     assert params_factory(_envelope()) == params
+
+
+@pytest.mark.parametrize(
+    ("command", "bot_username", "expected_name"),
+    [
+        ("/status", None, "status"),
+        ("/status@AgentBot", "AgentBot", "status"),
+        ("/status@agentbot details", "AgentBot", "status"),
+    ],
+)
+def test_command_registry_normalizes_commands_addressed_to_current_bot(
+    command: str,
+    bot_username: str | None,
+    expected_name: str,
+) -> None:
+    match = DEFAULT_COMMAND_REGISTRY.match(
+        _envelope(bot_username=bot_username),
+        command,
+    )
+
+    assert match is not None
+    assert match[0] == expected_name
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["/status@OtherBot", "/status@", "/status@AgentBot@OtherBot"],
+)
+def test_command_registry_rejects_commands_addressed_to_another_bot(command: str) -> None:
+    assert DEFAULT_COMMAND_REGISTRY.match(_envelope(bot_username="AgentBot"), command) is None
 
 
 @pytest.mark.asyncio
