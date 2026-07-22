@@ -71,6 +71,7 @@ class LockedFileHistory(FileHistory):
         with self._write_lock:
             super().store_string(string)
 
+
 if TYPE_CHECKING:
     from prompt_toolkit.input.base import Input
     from prompt_toolkit.output.base import Output
@@ -88,7 +89,7 @@ _EOF_SENTINEL: object = object()
 _DOUBLE_CTRL_C_WINDOW_S: float = 1.5
 _ACTIVE_INPUT_PREFIX_WIDTH: int = 7
 _MAX_INPUT_HEIGHT: int = 10
-_MOUSE_SCROLL_LINES: int = 3
+_MOUSE_SCROLL_LINES: int = 11
 
 
 class _TranscriptControl(FormattedTextControl):
@@ -452,7 +453,7 @@ class ChatApplication:
             top_element = Window(
                 content=_TranscriptControl(
                     lambda: ANSI(self._transcript),
-                    scroll=self.scroll_transcript,
+                    scroll=self.scroll_transcript_with_mouse,
                     get_cursor_position=self._transcript_cursor_position,
                     focusable=False,
                     show_cursor=False,
@@ -465,6 +466,7 @@ class ChatApplication:
             top_element = Window()
         children: list = [top_element]
         if input_header is not None:
+
             def _header_fragments():  # type: ignore[no-untyped-def]
                 try:
                     rendered = input_header() if callable(input_header) else input_header
@@ -572,6 +574,17 @@ class ChatApplication:
             self._app.invalidate()
         except Exception:
             pass
+
+    def scroll_transcript_with_mouse(self, lines: int) -> None:
+        """Scroll by wheel, compensating when releasing transcript follow."""
+        # With ``wrap_lines=True`` prompt-toolkit only re-scrolls the pane when
+        # the virtual cursor moves far enough to leave the current viewport.
+        # Right at the follow->scroll transition the cursor is still pinned
+        # near the tail, so the first wheel tick barely moves it and the pane
+        # looks unresponsive ("have to wheel several times before it kicks
+        # in"). Compensate by doubling the step on the releasing tick so the
+        # cursor visibly exits the viewport on the first wheel event.
+        self.scroll_transcript(lines * 2 if self._transcript_follow and lines > 0 else lines)
 
     def scroll_transcript_to_bottom(self) -> None:
         """Re-pin the transcript pane to the newest line (resume follow)."""
@@ -853,6 +866,7 @@ class ChatApplication:
                 return
             if self._app.is_running:
                 async with in_terminal():
+
                     def _write(payload: str) -> None:
                         if not payload:
                             return

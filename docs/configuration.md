@@ -328,13 +328,9 @@ oauth = true
 tool_timeout_seconds = 30
 ```
 
-Supported transports are `stdio`, `sse`, and `streamable_http`. Streamable HTTP
-uses the optional MCP SDK, so install the MCP extra when it is not already
-present:
-
-```sh
-uv sync --extra mcp
-```
+Supported transports are `stdio`, `sse`, and `streamable_http`. The MCP SDK is
+included in the standard AgentOS installation, so Streamable HTTP and OAuth work
+without installing an additional package extra.
 
 OAuth access and refresh tokens are not written to `config.toml`. AgentOS keeps
 them in a server-scoped JSON file under the configured state directory with

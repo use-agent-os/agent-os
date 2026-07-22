@@ -155,7 +155,7 @@ async def discover_and_register(
             registered_tools=tuple(registered),
         )
         _active_clients.append(entry)
-    except Exception:
+    except BaseException:
         if entry is not None:
             try:
                 _active_clients.remove(entry)

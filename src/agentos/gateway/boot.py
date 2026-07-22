@@ -1475,6 +1475,68 @@ async def preload_agentos_router_runtime(config: GatewayConfig) -> None:
         )
 
 
+async def _discover_configured_mcp_servers(
+    config: GatewayConfig,
+    tool_registry: ToolRegistry,
+) -> None:
+    """Connect configured MCP servers without starting an interactive OAuth flow."""
+    if not config.mcp.enabled:
+        return
+    if not config.mcp.servers:
+        log.info("build_services.mcp_enabled_no_servers")
+        return
+
+    from agentos.mcp.discovery import discover_and_register
+    from agentos.mcp.streamable_http import FileOAuthStorage
+    from agentos.mcp.types import MCPServerConfig
+
+    timeout = config.mcp.connect_timeout_seconds
+    for entry in config.mcp.servers:
+        try:
+            mcp_cfg = MCPServerConfig(
+                name=entry.name,
+                transport=entry.transport,
+                command=entry.command,
+                args=entry.args,
+                url=entry.url,
+                env=entry.env,
+                headers=entry.headers,
+                oauth=entry.oauth,
+                state_dir=config.state_dir,
+                tool_timeout_seconds=entry.tool_timeout_seconds,
+            )
+            if mcp_cfg.oauth and mcp_cfg.url:
+                storage = FileOAuthStorage(mcp_cfg.name, mcp_cfg.url, mcp_cfg.state_dir)
+                if not await storage.is_authenticated():
+                    log.info(
+                        "build_services.mcp_server_authentication_required",
+                        server=entry.name,
+                    )
+                    continue
+
+            names = await asyncio.wait_for(
+                discover_and_register(mcp_cfg, tool_registry),
+                timeout=timeout,
+            )
+            log.info(
+                "build_services.mcp_server_registered",
+                server=entry.name,
+                tools=len(names),
+            )
+        except TimeoutError:
+            log.warning(
+                "build_services.mcp_server_timeout",
+                server=entry.name,
+                timeout=timeout,
+            )
+        except Exception as exc:
+            log.warning(
+                "build_services.mcp_server_failed",
+                server=entry.name,
+                error=str(exc),
+            )
+
+
 async def build_services(
     config: GatewayConfig | None = None,
     session_manager: Any = None,
@@ -1900,48 +1962,7 @@ async def build_services(
         log.warning("build_services.search_provider_failed", error=str(e))
 
     # ── MCP discovery (boot order 22) ───────────────────────────────
-    if config.mcp.enabled and config.mcp.servers:
-        from agentos.mcp.discovery import discover_and_register
-        from agentos.mcp.types import MCPServerConfig
-
-        timeout = config.mcp.connect_timeout_seconds
-        for entry in config.mcp.servers:
-            try:
-                mcp_cfg = MCPServerConfig(
-                    name=entry.name,
-                    transport=entry.transport,
-                    command=entry.command,
-                    args=entry.args,
-                    url=entry.url,
-                    env=entry.env,
-                    headers=entry.headers,
-                    oauth=entry.oauth,
-                    state_dir=config.state_dir,
-                    tool_timeout_seconds=entry.tool_timeout_seconds,
-                )
-                names = await asyncio.wait_for(
-                    discover_and_register(mcp_cfg, tool_registry),
-                    timeout=timeout,
-                )
-                log.info(
-                    "build_services.mcp_server_registered",
-                    server=entry.name,
-                    tools=len(names),
-                )
-            except TimeoutError:
-                log.warning(
-                    "build_services.mcp_server_timeout",
-                    server=entry.name,
-                    timeout=timeout,
-                )
-            except Exception as e:
-                log.warning(
-                    "build_services.mcp_server_failed",
-                    server=entry.name,
-                    error=str(e),
-                )
-    elif config.mcp.enabled:
-        log.info("build_services.mcp_enabled_no_servers")
+    await _discover_configured_mcp_servers(config, tool_registry)
 
     flush_service = build_flush_service(
         tool_registry=tool_registry,

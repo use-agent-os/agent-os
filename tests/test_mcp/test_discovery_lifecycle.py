@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -121,6 +122,27 @@ async def test_failed_mcp_discovery_closes_client_without_leaking(
     monkeypatch.setattr(discovery, "create_client", lambda _config: client)
 
     with pytest.raises(RuntimeError, match="list failed"):
+        await discovery.discover_and_register(config, ToolRegistry())
+
+    assert client.closed is True
+    assert discovery.active_clients_snapshot() == ()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_mcp_discovery_closes_client_without_leaking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentos.mcp import discovery
+
+    class CancelledMCPClient(FakeMCPClient):
+        async def list_tools(self) -> list[MCPToolDef]:
+            raise asyncio.CancelledError
+
+    config = MCPServerConfig(name="cancelled", transport="stdio", command="mock-mcp")
+    client = CancelledMCPClient(config)
+    monkeypatch.setattr(discovery, "create_client", lambda _config: client)
+
+    with pytest.raises(asyncio.CancelledError):
         await discovery.discover_and_register(config, ToolRegistry())
 
     assert client.closed is True

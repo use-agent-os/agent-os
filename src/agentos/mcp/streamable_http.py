@@ -23,7 +23,7 @@ from agentos.paths import state_dir as default_state_dir
 
 
 class MCPDependencyError(RuntimeError):
-    """Raised when Streamable HTTP is selected without the optional MCP SDK."""
+    """Raised when the required MCP SDK is missing from the installation."""
 
 
 class FileOAuthStorage:
@@ -153,7 +153,8 @@ class MCPStreamableHTTPClient(MCPClient):
             from mcp.shared.auth import OAuthClientMetadata
         except ImportError as exc:
             raise MCPDependencyError(
-                'Streamable HTTP requires the optional dependency: uv sync --extra mcp'
+                "Streamable HTTP support is unavailable because the MCP SDK is missing. "
+                "Reinstall or upgrade AgentOS."
             ) from exc
 
         auth = None
@@ -195,7 +196,7 @@ class MCPStreamableHTTPClient(MCPClient):
                 )
             )
             await session.initialize()
-        except Exception:
+        except BaseException:
             await stack.aclose()
             raise
 

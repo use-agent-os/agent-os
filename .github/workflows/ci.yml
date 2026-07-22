@@ -107,7 +107,7 @@ jobs:
 
       - name: Install dependencies
         shell: bash
-        run: uv sync --extra dev --extra recommended --extra mcp --frozen
+        run: uv sync --extra dev --extra recommended --frozen
 
       - name: Lint
         shell: bash
@@ -178,7 +178,7 @@ jobs:
 
       - name: Install dependencies
         shell: bash
-        run: uv sync --extra dev --extra recommended --extra mcp --frozen
+        run: uv sync --extra dev --extra recommended --frozen
 
       - name: Test
         shell: bash
@@ -214,7 +214,7 @@ jobs:
 
       - name: Install dependencies
         shell: bash
-        run: uv sync --extra dev --extra recommended --extra mcp --frozen
+        run: uv sync --extra dev --extra recommended --frozen
 
       - name: Run release packaging contract tests
         shell: bash
