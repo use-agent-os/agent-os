@@ -1,5 +1,5 @@
-import { useCallback, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useCallback, useEffect, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence } from 'motion/react'
 import { toast } from 'sonner'
 import { ModalShell } from '@/components/ModalShell'
@@ -58,6 +58,7 @@ export function Toolbar({
   onRouterFxToggle?: (enabled: boolean) => void
 }) {
   const rpc = useRpc()
+  const queryClient = useQueryClient()
 
   // ── Elevated mode ─────────────────────────────────────────────────────────
   // The SESSION override lives in the shared reactive store; the GLOBAL default
@@ -172,7 +173,10 @@ export function Toolbar({
           },
         })
         toast.info('Pilot Router: ' + (next ? 'ON' : 'OFF'))
-        void configQuery.refetch()
+        // Both Toolbar and the imperative transcript keep a config.get query.
+        // Invalidate the shared prefix so history strips rebuild against the
+        // new operator state instead of leaving the transcript registry stale.
+        await queryClient.invalidateQueries({ queryKey: ['config.get'] })
         setRouterPending(null)
       } catch (err) {
         setRouterPending(null)
@@ -180,7 +184,7 @@ export function Toolbar({
         toast.error('Failed: ' + message)
       }
     },
-    [rpc, configQuery],
+    [rpc, queryClient],
   )
 
   // ── Visual effects (router-fx) toggle ─────────────────────────────────────
@@ -194,6 +198,14 @@ export function Toolbar({
     routerFxLoadPref(pref)
     return pref.enabled
   })
+
+  // chat.js:1483-1486 — a focus/config refresh re-hydrates the browser-local
+  // preference and updates the mounted switch without remounting the toolbar.
+  useEffect(() => {
+    if (typeof routerFxEnabled !== 'boolean') return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- controlled external preference synchronization
+    setRouterFxChecked(routerFxEnabled)
+  }, [routerFxEnabled])
 
   const onRouterFxChange = useCallback(
     (next: boolean) => {

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useEffect } from 'react'
 import { MemoryRouter, useLocation } from 'react-router'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { focusManager, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
 import { ChatPage } from './ChatPage'
@@ -121,6 +121,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  focusManager.setFocused(undefined)
   vi.unstubAllGlobals()
 })
 
@@ -137,7 +138,329 @@ describe('ChatPage', () => {
     renderPage()
     expect(document.querySelector('.chat-stage')).not.toBeNull()
     expect(document.querySelector('.chat-composer')).not.toBeNull()
-    expect(document.querySelector('#chat-routerfx-dock')).not.toHaveAttribute('aria-live')
+    expect(document.querySelector('#chat-routerfx-dock')).toHaveAttribute('aria-live', 'polite')
+  })
+
+  it('preloads the web search provider badge seed on view entry', async () => {
+    mockRpc = makeRpc()
+    renderPage()
+
+    await waitFor(() => {
+      expect(mockRpc.call).toHaveBeenCalledWith('tools.search_provider', {})
+    })
+  })
+
+  it('reconstructs persisted tools, attachments, artifacts, savings, and router receipt', async () => {
+    mockRpc = makeRpc()
+    mockRpc.call.mockImplementation((...args: unknown[]) => {
+      if (args[0] === 'commands.list_for_surface') {
+        return Promise.resolve({ surface: 'web_chat', commands: SLASH_CATALOG })
+      }
+      if (args[0] === 'config.get') {
+        return Promise.resolve({
+          agentos_router: {
+            enabled: true,
+            rollout_phase: 'full',
+            tiers: {
+              c1: { model: 'provider/fast', supports_image: true },
+              c2: { model: 'provider/flagship', supports_image: true },
+            },
+          },
+        })
+      }
+      if (args[0] === 'chat.history') {
+        return Promise.resolve({
+          messages: [
+            {
+              role: 'user',
+              text: 'make a chart',
+              timestamp: 100,
+              attachments: [{ name: 'input.png', mime: 'image/png', data: 'AA==' }],
+            },
+            {
+              role: 'assistant',
+              text: 'Done',
+              timestamp: 200,
+              tool_calls: [
+                {
+                  type: 'tool_use',
+                  name: 'publish_artifact',
+                  tool_use_id: 'tool-1',
+                  input: { name: 'AGENTOS_7day_chart.png' },
+                },
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'tool-1',
+                  content: 'published',
+                },
+              ],
+              artifacts: [
+                {
+                  id: 'artifact-1',
+                  name: 'AGENTOS_7day_chart.png',
+                  mime: 'image/png',
+                  download_url: '/api/v1/artifacts/artifact-1',
+                },
+                {
+                  id: 'artifact-2',
+                  name: 'voice-note.wav',
+                  mime: 'audio/wav',
+                  download_url: '/api/v1/artifacts/artifact-2',
+                },
+              ],
+              usage: {
+                model: 'provider/fast',
+                routed_model: 'provider/fast',
+                routed_tier: 'c1',
+                routing_source: 'pilot',
+                total_savings_pct: 42,
+                input_tokens: 100,
+                output_tokens: 20,
+              },
+            },
+          ],
+          history_scope: 'complete',
+        })
+      }
+      return Promise.resolve({})
+    })
+    renderPage()
+
+    await waitFor(() => {
+      expect(document.querySelector('.msg-artifact-card--image')).not.toBeNull()
+      expect(document.querySelector('.chat-tools-collapse')).not.toBeNull()
+      expect(document.querySelector('.msg-thumb')).not.toBeNull()
+      expect(document.querySelector('.msg-meta__saved')).toHaveTextContent('Saved ~42%')
+      expect(document.querySelector('#chat-routerfx-dock .router-fx')).toHaveAttribute(
+        'data-state',
+        'settled',
+      )
+    })
+    expect(document.querySelector('.msg-artifact-card__name')).toHaveTextContent(
+      'AGENTOS_7day_chart.png',
+    )
+    const audioCard = document.querySelector('.msg-artifact-card--audio') as HTMLElement
+    expect(audioCard).not.toHaveAttribute('data-artifact-download')
+    expect(audioCard.querySelector('a[data-artifact-download]')).toHaveAttribute(
+      'data-artifact-download',
+      '/api/v1/artifacts/artifact-2',
+    )
+    const fetchCallsBeforeAudioClick = (fetch as ReturnType<typeof vi.fn>).mock.calls.length
+    fireEvent.click(audioCard.querySelector('audio') as HTMLAudioElement)
+    expect(fetch).toHaveBeenCalledTimes(fetchCallsBeforeAudioClick)
+  })
+
+  it('downloads a non-anchor artifact target through the authenticated delegate', async () => {
+    mockRpc = makeRpc()
+    renderPage()
+    const blob = new Blob(['audio'], { type: 'audio/wav' })
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, blob: async () => blob })
+    vi.stubGlobal('fetch', fetchMock)
+    const createObjectURL = vi.fn().mockReturnValue('blob:artifact')
+    const revokeObjectURL = vi.fn()
+    ;(URL as unknown as { createObjectURL: unknown }).createObjectURL = createObjectURL
+    ;(URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = revokeObjectURL
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const thread = document.querySelector('.chat-thread') as HTMLElement
+    thread.insertAdjacentHTML(
+      'beforeend',
+      '<button data-artifact-id="audio-1" data-artifact-name="clip.wav" data-artifact-download="/api/v1/artifacts/audio-1"><span>clip.wav</span></button>',
+    )
+
+    fireEvent.click(screen.getByText('clip.wav'))
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v1/artifacts/audio-1'),
+        expect.objectContaining({
+          method: 'GET',
+          credentials: 'same-origin',
+          headers: expect.objectContaining({
+            'x-agentos-session-key': 'agent:main:webchat:default',
+          }),
+        }),
+      ),
+    )
+    expect(clickSpy).toHaveBeenCalledTimes(1)
+    expect(createObjectURL).toHaveBeenCalledWith(blob)
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:artifact')
+    clickSpy.mockRestore()
+  })
+
+  it('waits for router config before requesting the initial persisted history', async () => {
+    mockRpc = makeRpc()
+    let resolveConfig!: (value: Record<string, unknown>) => void
+    const configResponse = new Promise<Record<string, unknown>>((resolve) => {
+      resolveConfig = resolve
+    })
+    mockRpc.call.mockImplementation((...args: unknown[]) => {
+      if (args[0] === 'commands.list_for_surface') {
+        return Promise.resolve({ surface: 'web_chat', commands: SLASH_CATALOG })
+      }
+      if (args[0] === 'config.get') return configResponse
+      return Promise.resolve({})
+    })
+    renderPage()
+
+    await waitFor(() => {
+      expect(mockRpc.call.mock.calls.some((call) => call[0] === 'config.get')).toBe(true)
+    })
+    expect(mockRpc.call.mock.calls.some((call) => call[0] === 'chat.history')).toBe(false)
+
+    await act(async () => {
+      resolveConfig({ agentos_router: { enabled: false, tiers: {} } })
+      await configResponse
+    })
+    await waitFor(() => {
+      expect(mockRpc.call.mock.calls.some((call) => call[0] === 'chat.history')).toBe(true)
+    })
+  })
+
+  it('rebuilds persisted router receipts when initial config arrives after the wait ceiling', async () => {
+    mockRpc = makeRpc()
+    let resolveConfig!: (value: Record<string, unknown>) => void
+    const configResponse = new Promise<Record<string, unknown>>((resolve) => {
+      resolveConfig = resolve
+    })
+    const persistedHistory = {
+      messages: [
+        { role: 'user', text: 'route this', timestamp: 100 },
+        {
+          role: 'assistant',
+          text: 'Done',
+          timestamp: 200,
+          usage: {
+            model: 'provider/fast',
+            routed_model: 'provider/fast',
+            routed_tier: 'c1',
+            routing_source: 'pilot',
+          },
+        },
+      ],
+      history_scope: 'complete',
+    }
+    mockRpc.call.mockImplementation((...args: unknown[]) => {
+      if (args[0] === 'commands.list_for_surface') {
+        return Promise.resolve({ surface: 'web_chat', commands: SLASH_CATALOG })
+      }
+      if (args[0] === 'config.get') return configResponse
+      if (args[0] === 'chat.history') return Promise.resolve(persistedHistory)
+      return Promise.resolve({})
+    })
+    renderPage()
+
+    await waitFor(
+      () => {
+        expect(mockRpc.call.mock.calls.filter((call) => call[0] === 'chat.history')).toHaveLength(1)
+      },
+      { timeout: 2500 },
+    )
+    expect(document.querySelector('#chat-routerfx-dock .router-fx')).toBeNull()
+
+    await act(async () => {
+      resolveConfig({
+        agentos_router: {
+          enabled: true,
+          rollout_phase: 'full',
+          tiers: {
+            c1: { model: 'provider/fast', supports_image: true },
+            c2: { model: 'provider/flagship', supports_image: true },
+          },
+        },
+      })
+      await configResponse
+    })
+
+    await waitFor(() => {
+      expect(mockRpc.call.mock.calls.filter((call) => call[0] === 'chat.history')).toHaveLength(2)
+      expect(document.querySelector('#chat-routerfx-dock .router-fx')).toHaveAttribute(
+        'data-state',
+        'settled',
+      )
+    })
+  })
+
+  it('shares history and live header grouping without inserting a day separator mid-turn', async () => {
+    mockRpc = makeRpc()
+    const today = new Date().toISOString().slice(0, 10)
+    mockRpc.call.mockImplementation((...args: unknown[]) => {
+      if (args[0] === 'commands.list_for_surface') {
+        return Promise.resolve({ surface: 'web_chat', commands: SLASH_CATALOG })
+      }
+      if (args[0] === 'config.get') {
+        return Promise.resolve({ agentos_router: { enabled: false, tiers: {} } })
+      }
+      if (args[0] === 'chat.history') {
+        return Promise.resolve({
+          messages: [
+            {
+              role: 'assistant',
+              text: 'persisted answer',
+              timestamp: `${today}T08:00:00.000Z`,
+            },
+          ],
+          history_scope: 'complete',
+        })
+      }
+      return Promise.resolve({})
+    })
+    renderPage()
+    const thread = document.querySelector('.chat-thread') as HTMLElement
+
+    await waitFor(() => {
+      expect(thread.querySelector('.msg.assistant')).toHaveTextContent('persisted answer')
+      expect(
+        mockRpc.call.mock.calls.some((call) => call[0] === 'sessions.messages.subscribe'),
+      ).toBe(true)
+    })
+    expect(thread.querySelectorAll('.chat-day-sep')).toHaveLength(1)
+
+    const composer = screen.getByRole('textbox') as HTMLTextAreaElement
+    fireEvent.change(composer, { target: { value: 'next turn' } })
+    fireEvent.click(screen.getByRole('button', { name: /send/i }))
+    await waitFor(() => {
+      expect(mockRpc.call.mock.calls.some((call) => call[0] === 'chat.send')).toBe(true)
+      expect(thread.querySelector('.msg.user')).toHaveTextContent('next turn')
+    })
+    await act(async () => {
+      mockRpc.emit('session.event.text_delta', { seq: 1, text: 'live answer' }, {})
+    })
+
+    expect(thread.querySelectorAll('.chat-day-sep')).toHaveLength(1)
+    expect(thread.querySelector('.msg.assistant.streaming .msg-header')).not.toBeNull()
+  })
+
+  it('re-hydrates the mounted Visual-effects switch after a focus config refresh', async () => {
+    mockRpc = makeRpc()
+    mockRpc.call.mockImplementation((...args: unknown[]) => {
+      if (args[0] === 'commands.list_for_surface') {
+        return Promise.resolve({ surface: 'web_chat', commands: SLASH_CATALOG })
+      }
+      if (args[0] === 'config.get') {
+        return Promise.resolve({ agentos_router: { enabled: true, tiers: {} } })
+      }
+      return Promise.resolve({})
+    })
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: /run modes/i }))
+    const toggle = await screen.findByRole('checkbox', { name: /visual effects/i })
+    expect(toggle).toBeChecked()
+    const initialConfigCalls = mockRpc.call.mock.calls.filter(
+      (call) => call[0] === 'config.get',
+    ).length
+
+    localStorage.setItem('agentos-router-fx', JSON.stringify({ enabled: false }))
+    await act(async () => {
+      focusManager.setFocused(false)
+      focusManager.setFocused(true)
+    })
+
+    await waitFor(() => {
+      expect(
+        mockRpc.call.mock.calls.filter((call) => call[0] === 'config.get').length,
+      ).toBeGreaterThan(initialConfigCalls)
+      expect(toggle).not.toBeChecked()
+    })
   })
 
   it('sends the composed text via chat.send with the legacy payload (chat.js:6150/6193)', async () => {
@@ -471,6 +794,10 @@ describe('ChatPage', () => {
           input_tokens: 1250,
           output_tokens: 42,
           cost_usd: 0.00125,
+          routed_model: 'openrouter/vendor/model-20260722',
+          routed_tier: 'c1',
+          routing_source: 'pilot',
+          total_savings_pct: 51,
         },
         {},
       )
@@ -484,6 +811,8 @@ describe('ChatPage', () => {
     expect(meta).toHaveTextContent('model')
     expect(meta).toHaveTextContent('↑1.3k ↓42')
     expect(meta).toHaveTextContent('$0.00125')
+    expect(meta.querySelector('.msg-meta__saved')).toHaveTextContent('Saved ~51%')
+    expect(meta.querySelector('.msg-meta__saved')).toHaveClass('msg-meta__saved--flash')
   })
 
   it('surfaces a subscription failure through the legacy error toast', async () => {
@@ -709,6 +1038,42 @@ describe('ChatPage', () => {
     await waitFor(() => expect(screen.getByText('Pending 1/5')).toBeInTheDocument())
     expect(mockRpc.call.mock.calls.filter(([m]) => m === 'chat.send').length).toBe(1)
     expect(screen.getByText('queued while busy')).toBeInTheDocument()
+  })
+
+  it('uses task.succeeded as a 75ms terminal backstop and drains pending', async () => {
+    mockRpc = makeRpc()
+    renderPage()
+    await waitFor(() =>
+      expect(mockRpc.call.mock.calls.filter(([method]) => method === 'chat.history').length).toBe(
+        1,
+      ),
+    )
+    typeAndSend('first message')
+    await waitFor(() =>
+      expect(mockRpc.call.mock.calls.filter(([method]) => method === 'chat.send').length).toBe(1),
+    )
+    await act(async () => typeAndSend('queued after terminal'))
+    await waitFor(() => expect(screen.getByText('Pending 1/5')).toBeInTheDocument())
+    const historyCallsBefore = mockRpc.call.mock.calls.filter(
+      ([method]) => method === 'chat.history',
+    ).length
+
+    act(() => {
+      mockRpc.emit('task.succeeded', {
+        key: 'agent:main:webchat:default',
+        task_id: 'task-success-backstop',
+      })
+    })
+
+    await waitFor(() =>
+      expect(mockRpc.call.mock.calls.filter(([method]) => method === 'chat.send').length).toBe(2),
+    )
+    expect(screen.queryByText('Pending 1/5')).not.toBeInTheDocument()
+    await waitFor(() =>
+      expect(
+        mockRpc.call.mock.calls.filter(([method]) => method === 'chat.history').length,
+      ).toBeGreaterThan(historyCallsBefore),
+    )
   })
 
   it('caps the pending queue at MAX_PENDING (5) and toasts when full (chat.js:8511)', async () => {

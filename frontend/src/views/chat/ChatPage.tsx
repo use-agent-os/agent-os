@@ -199,10 +199,11 @@ export function ChatPage() {
   const {
     containerRef,
     routerFxDockRef,
-    controller,
     send,
     abort,
     busy,
+    routerFxEnabled,
+    setRouterFxEnabled,
     history,
     runState,
     isCompactInFlightForCurrentSession,
@@ -291,9 +292,8 @@ export function ChatPage() {
   )
 
   // chat.js:2692-2715 `new_chat` — start a fresh session in the current agent.
-  // Task 10 left `onSessionAction('new_chat', …)` UNWIRED (the session-swap
-  // primitives were a later task — THIS one). We now own them: generate a new
-  // key (chat.js:2696 `_genKey`) and switch to it. `switchToSession` re-points
+  // The session action owns the full legacy transition: generate a new key
+  // (chat.js:2696 `_genKey`) and switch to it. `switchToSession` re-points
   // `useTranscript`, which parks the outgoing session's stream, unsubscribes,
   // re-subscribes the new (empty) session, and reloads its (empty) history —
   // exactly the unsubscribe → park → new key → reset → subscribe sequence legacy
@@ -528,15 +528,15 @@ export function ChatPage() {
   // chat.js:2518-2539 `_onDocKeydown` — the from-anywhere ESC priority chain:
   //   1. streaming        → abort the turn (which recovers pending).
   //   2. pending non-empty → recover the whole queue into the composer.
-  // Deferred to overlays (a visible modal/popover owns its own ESC) and to other
-  // editable targets (an ESC inside a different input is theirs). The composer's
+  // Visible overlays own their ESC, as do other editable targets (an ESC inside
+  // a different input is theirs). The composer's
   // own ESC (Composer.tsx) handles the focused-composer case + the clear rung; a
   // guard here skips when the composer is the target so it isn't double-handled.
   useEffect(() => {
     const onDocKeydown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       if (e.defaultPrevented) return
-      // Defer to any visible overlay's own dismiss handler (chat.js:8583-8588).
+      // A visible overlay's own dismiss handler takes priority (chat.js:8583-8588).
       if (document.querySelector('.modal-backdrop, .chat-session-popover')) return
       const target = e.target as HTMLElement | null
       const isEditable =
@@ -627,13 +627,18 @@ export function ChatPage() {
         onAttachFiles={attachments.addFiles}
         tray={<Attachments api={attachments} />}
         routerFxDock={
-          <div id="chat-routerfx-dock" className="chat-routerfx-dock" ref={routerFxDockRef} />
+          <div
+            id="chat-routerfx-dock"
+            className="chat-routerfx-dock"
+            ref={routerFxDockRef}
+            aria-live="polite"
+          />
         }
         toolbar={
           <Toolbar
             sessionKey={sessionKey}
-            routerFxEnabled={controller.routerFxPref.enabled}
-            onRouterFxToggle={controller.setRouterFxEnabled}
+            routerFxEnabled={routerFxEnabled}
+            onRouterFxToggle={setRouterFxEnabled}
           />
         }
       />

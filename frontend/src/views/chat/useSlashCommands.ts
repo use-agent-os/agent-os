@@ -139,7 +139,7 @@ export function useSlashCommands(opts?: {
       }
 
       switch (action) {
-        // chat.js:2692-2715 — session swap. Not yet portable in the React view.
+        // chat.js:2692-2715 — delegate the fully wired React session swap.
         case 'new_chat':
         case '/new': {
           if (onSessionActionRef.current) onSessionActionRef.current('new_chat', cmd, args)

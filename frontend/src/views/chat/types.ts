@@ -1,6 +1,5 @@
-// Chat view — shared types. Foundation for the chat-view migration (Task 1);
-// extended by later tasks. Kept intentionally small: a chat message, the
-// message role, and the raw stream-event payload shape the gateway emits.
+// Chat view — shared boundary types. Kept intentionally small: a chat message,
+// the message role, and the open stream-event payload shape the gateway emits.
 
 export type Role = 'user' | 'assistant' | 'system'
 
@@ -20,8 +19,8 @@ export interface ChatMessage {
 /**
  * The raw payload carried by a streamed chat event. The gateway sends an
  * open-ended object; `seq` and `session_key` are the fields the client keys on
- * (sequence ordering + session routing). Later tasks narrow specific event
- * variants on top of this.
+ * (sequence ordering + session routing). Event handlers narrow their own
+ * variants at the consumption boundary.
  */
 export interface StreamEventPayload {
   seq?: number

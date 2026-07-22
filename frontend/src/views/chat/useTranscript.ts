@@ -4,7 +4,11 @@ import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import { useApprovals } from '@/services/approval-monitor'
 import { chatMarkdown } from './markdown'
-import { createStreamController, type StreamController } from './transcript/stream'
+import {
+  createStreamController,
+  type StreamController,
+  type TranscriptHeaderStateRef,
+} from './transcript/stream'
 import type { CompactionSummary } from './transcript/compaction'
 import {
   CHAT_HISTORY_PAGE_SIZE,
@@ -35,6 +39,7 @@ import {
   historyFallbackMessageIdentity,
   inputNormalizationProvenanceFromAttachments,
   outgoingAttachment,
+  renderMessageAttachmentHtml,
   replayGapShouldWarn,
   sessionChangeIsTerminal,
   sessionRunStatus,
@@ -155,6 +160,10 @@ interface ChatRouterConfigResponse {
   }
 }
 
+interface SearchProviderResponse {
+  provider?: string
+}
+
 function createRouterConfigGate(): { promise: Promise<void>; resolve: () => void } {
   let release: (() => void) | undefined
   let resolved = false
@@ -169,6 +178,26 @@ function createRouterConfigGate(): { promise: Promise<void>; resolve: () => void
       release?.()
     },
   }
+}
+
+/** chat.js:3569-3575 — config readiness gate with the legacy 1500ms ceiling. */
+export function awaitRouterConfigReady(
+  configReady: Promise<void>,
+  timeoutMs = 1500,
+): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = window.setTimeout(resolve, timeoutMs)
+    configReady.then(
+      () => {
+        window.clearTimeout(timer)
+        resolve()
+      },
+      () => {
+        window.clearTimeout(timer)
+        resolve()
+      },
+    )
+  })
 }
 
 export function useTranscript(opts: {
@@ -193,6 +222,10 @@ export function useTranscript(opts: {
   abort: (source?: string) => void
   /** Reactive streaming flag (legacy `_isStreaming`) — drives the composer's busy prop. */
   busy: boolean
+  /** Reactive mirror of the browser-local router/Savings visual preference. */
+  routerFxEnabled: boolean
+  /** Persist and apply the shared router/Savings visual preference. */
+  setRouterFxEnabled: (enabled: boolean) => void
   /** The user's sent-message history, oldest→newest (legacy `_messages`, chat.js:8712). */
   history: string[]
   /** Current session run state rendered by the header chip. */
@@ -229,6 +262,18 @@ export function useTranscript(opts: {
     queryFn: async () => {
       await rpc.waitForConnection()
       return rpc.call<ChatRouterConfigResponse>('config.get')
+    },
+    retry: false,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  })
+  // chat.js:1203-1209 — warm the web_search badge on view entry. Tool-result
+  // payloads remain the fallback source when this optional lookup fails.
+  const searchProviderQuery = useQuery<SearchProviderResponse>({
+    queryKey: ['tools.search_provider', 'chat'],
+    queryFn: async () => {
+      await rpc.waitForConnection()
+      return rpc.call<SearchProviderResponse>('tools.search_provider', {})
     },
     retry: false,
     staleTime: 0,
@@ -304,6 +349,13 @@ export function useTranscript(opts: {
   const abortedRef = useRef(false)
 
   const messageRendererRef = useRef<MessageRenderer | null>(null)
+  // Router-decision replay caches frames until history has rebuilt user anchors
+  // (chat.js `_historyHasRendered` / `_historyHydrating`). These refs are read
+  // lazily by the imperative controller and reset on every session boundary.
+  const historyHasRenderedRef = useRef(false)
+  const historyHydratingRef = useRef(false)
+  const routerConfigAppliedRef = useRef(false)
+  const headerStateRef = useRef<TranscriptHeaderStateRef['current']>({ day: '', role: '' })
 
   // Shared metadata helpers for the real imperative message builder. Reads
   // `containerRef.current` lazily so history and live-stream rows use the same
@@ -340,6 +392,32 @@ export function useTranscript(opts: {
     [],
   )
 
+  const stampHistoryElement = useCallback(
+    (
+      el: HTMLElement,
+      stableIdentity: string,
+      role: string,
+      text: string,
+      transcriptId: string | null = null,
+      ts: string | number | null = null,
+    ): void => {
+      if (stableIdentity) el.setAttribute('data-message-id', stableIdentity)
+      else el.removeAttribute('data-message-id')
+      el.setAttribute('data-history-role', role || '')
+      el.setAttribute('data-history-raw-text', text || '')
+      el.setAttribute(
+        'data-history-fallback-id',
+        historyFallbackMessageIdentity(role as Role, text),
+      )
+      if (transcriptId != null) el.dataset.transcriptId = String(transcriptId)
+      else delete el.dataset.transcriptId
+      if (ts != null && ts !== '') el.dataset.historyTs = String(ts)
+      else delete el.dataset.historyTs
+      stampRowMeta(el, role || 'assistant', ts)
+    },
+    [stampRowMeta],
+  )
+
   // eslint-disable-next-line react-hooks/refs -- factory stores the refs and reads .current only later, inside methods invoked outside render (never at creation)
   const [controller] = useState<StreamController>(() =>
     createStreamController(containerRef, {
@@ -347,6 +425,9 @@ export function useTranscript(opts: {
       stripProtocolTextLeak,
       stripDirectiveTags,
       stripGeneratedArtifactMarkers,
+      dayKey,
+      dayLabel,
+      headerState: headerStateRef,
       getSessionKey: () => sessionKeyRef.current,
       displayRoleLabel: (role) =>
         role === 'assistant'
@@ -356,7 +437,9 @@ export function useTranscript(opts: {
             : '',
       routerFxDock: () => routerFxDockRef.current,
       routerFeatureEnabled: () => routerFeatureEnabledRef.current,
-      routerFxAwaitConfig: () => routerConfigGate.promise,
+      routerFxAwaitConfig: () => awaitRouterConfigReady(routerConfigGate.promise),
+      historyHasRendered: () => historyHasRenderedRef.current,
+      historyHydrating: () => historyHydratingRef.current,
       openModal: (title, html, buttons) => openModalRef.current?.(title, html, buttons),
       // Artifact preview/download URLs + download Authorization header
       // (chat.js:7575/7657 `App.getAuthToken()`).
@@ -370,6 +453,7 @@ export function useTranscript(opts: {
       // `_isStreaming` flag here to keep the reactive `busy` mirror in sync so
       // the composer swaps between Send and Abort.
       updateSendButton: () => setBusyRef.current(),
+      stampHistoryElement,
       diag: (event, detail) => seamsRef.current.diag?.(event, detail),
       // Compaction (Task 7): the history summary rows the history load populates
       // live (chat.js `_historyCompactionSummaries`), read via a late-bound
@@ -385,7 +469,8 @@ export function useTranscript(opts: {
       // seams: the pending QUEUE lives in ChatPage (composer-adjacent), so the
       // delegates are installed via `setPendingDelegates` after mount and read
       // lazily through `pendingDelegatesRef` — the controller's compaction-settle
-      // (chat.js:8681/8685) then drives the real drain/recover.
+      // (chat.js:8681/8685) then drives the real drain/recover. The initial safe
+      // defaults cover the short interval before ChatPage installs those delegates.
       schedulePendingDrainAfterTerminal: () =>
         pendingDelegatesRef.current.schedulePendingDrainAfterTerminal(),
       popAllPendingIntoComposer: () => pendingDelegatesRef.current.popAllPendingIntoComposer(),
@@ -432,6 +517,11 @@ export function useTranscript(opts: {
       getSessionKey: () => sessionKeyRef.current,
       isStreaming: () => controller.isStreaming(),
       scrollToBottom: () => controller.scrollToBottom(),
+      dayKey,
+      dayLabel,
+      headerState: headerStateRef,
+      getSavingsStreak: () => controller.getSavingsStreak(),
+      savingsLabel: (savePct) => controller.savingsLabel(savePct),
       toast: (message, kind, durationMs) => {
         const options = durationMs ? { duration: durationMs } : undefined
         if (kind === 'warn') toast.warning(message, options)
@@ -441,6 +531,17 @@ export function useTranscript(opts: {
       onEdit: (text) => messageActionsRef.current.onEdit?.(text),
       onRegenerate: (text) => messageActionsRef.current.onRegenerate?.(text),
     }),
+  )
+
+  // The imperative controller owns the real preference object; this state is
+  // only its React-facing mirror so Toolbar also follows cross-tab/focus reloads.
+  const [routerFxEnabled, setRouterFxEnabledState] = useState(() => controller.routerFxPref.enabled)
+  const setRouterFxEnabled = useCallback(
+    (enabled: boolean) => {
+      controller.setRouterFxEnabled(enabled)
+      setRouterFxEnabledState(enabled)
+    },
+    [controller],
   )
 
   // Feed the controller's existing router-fx registry from config.get. The
@@ -474,6 +575,28 @@ export function useTranscript(opts: {
     return () => thread.removeEventListener('scroll', onScroll)
   }, [controller])
 
+  // chat.js:916-932 `_bindHoverActions` — anchor artifact targets keep native
+  // download behavior; any non-anchor target delegates to the authenticated
+  // fetch path so token/session headers and failure toasts work.
+  useEffect(() => {
+    const thread = containerRef.current
+    if (!thread) return
+    const onArtifactClick = (event: MouseEvent): void => {
+      if (!(event.target instanceof Element)) return
+      const artifact = event.target.closest<HTMLElement>('[data-artifact-download]')
+      if (!artifact || artifact.tagName === 'A') return
+      event.preventDefault()
+      event.stopPropagation()
+      void controller.downloadArtifact({
+        id: artifact.dataset.artifactId || '',
+        name: artifact.dataset.artifactName || 'artifact',
+        download_url: artifact.dataset.artifactDownload || '',
+      })
+    }
+    thread.addEventListener('click', onArtifactClick)
+    return () => thread.removeEventListener('click', onArtifactClick)
+  }, [controller])
+
   useEffect(() => {
     if (routerConfigQuery.isPending) return
 
@@ -495,11 +618,43 @@ export function useTranscript(opts: {
       })
     }
 
+    Object.keys(controller.routerFxRegistry.models).forEach((tier) => {
+      if (!configTierSet.has(tier)) delete controller.routerFxRegistry.models[tier]
+    })
+    Object.keys(controller.routerFxRegistry.tierConfigs).forEach((tier) => {
+      if (!configTierSet.has(tier)) delete controller.routerFxRegistry.tierConfigs[tier]
+    })
     controller.routerFxRegistry.setConfigTiers(configTierSet)
     controller.routerFxRegistry.setSlotList(configTierKeys)
     routerFeatureEnabledRef.current = router?.enabled === true
+    const refreshedRouterFxEnabled = controller.reloadRouterFxPreference()
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- config/focus refresh synchronizes an external localStorage preference into the Toolbar mirror
+    setRouterFxEnabledState(refreshedRouterFxEnabled)
     routerConfigGate.resolve()
-  }, [controller, routerConfigGate, routerConfigQuery.data, routerConfigQuery.isPending])
+    const isRefresh = routerConfigAppliedRef.current
+    routerConfigAppliedRef.current = true
+    // The initial history wait has the legacy 1500ms ceiling. If config arrives
+    // after that ceiling, history may already have rendered without an
+    // authoritative tier roster; rebuild it once so persisted router receipts
+    // are reconstructed instead of remaining absent until an unrelated refresh.
+    if (isRefresh || historyHasRenderedRef.current) {
+      void queryClient.invalidateQueries({
+        queryKey: ['chat', 'history', sessionKeyRef.current],
+      })
+    }
+  }, [
+    controller,
+    queryClient,
+    routerConfigGate,
+    routerConfigQuery.data,
+    routerConfigQuery.dataUpdatedAt,
+    routerConfigQuery.isPending,
+  ])
+
+  useEffect(() => {
+    const provider = searchProviderQuery.data?.provider
+    if (provider) controller.setSearchProvider(provider)
+  }, [controller, searchProviderQuery.data?.provider])
 
   // Per-session history paging state (legacy `_history*` module-globals). Held
   // in a ref: the imperative renderer reads/writes it directly, no React render
@@ -530,40 +685,60 @@ export function useTranscript(opts: {
       displayRoleLabel: (role) => (role ? role.charAt(0).toUpperCase() + role.slice(1) : ''),
       dayKey,
       dayLabel,
+      headerState: headerStateRef,
       addMessage: (role, text, timestamp, options) =>
         messageRendererRef.current?.addMessage(role, text, timestamp, options) ?? null,
+      replaceMessage: (row, role, text, timestamp, options = {}) => {
+        let subagent = role === 'system' && row.classList.contains('subagent')
+        if (role === 'system' && options.provenanceSourceTool === 'subagent_completion') {
+          subagent = true
+        }
+        const displayRole = subagent ? 'subagent' : role
+        row.className = `msg ${displayRole}`
+        stampRowMeta(row, displayRole, timestamp)
+        let body = row.querySelector<HTMLElement>(':scope > .msg-body')
+        if (!body) {
+          body = document.createElement('div')
+          row.appendChild(body)
+        }
+        messageRendererRef.current?.renderBody(body, role, text, options)
+        row.querySelectorAll(':scope > .msg-meta').forEach((node) => node.remove())
+      },
+      syncMessageHeader: (row, displayRole, timestamp, options, sameGroup) =>
+        messageRendererRef.current?.syncMessageHeader(
+          row,
+          displayRole,
+          timestamp,
+          options,
+          sameGroup,
+        ),
       attachHoverActions: (row, role) => messageRendererRef.current?.attachHoverActions(row, role),
+      reconstructToolCalls: (row, segments) =>
+        controller.reconstructToolCalls(row, segments, {
+          stripText: (text) => stripDirectiveTags(stripProtocolTextLeak(text)),
+          renderText: (text, into) => {
+            into.innerHTML = chatMarkdown.render(text)
+            chatMarkdown.bindCopy(into)
+            chatMarkdown.bindHighlight?.(into)
+          },
+        }),
+      renderMessageAttachmentHtml,
+      renderArtifacts: (artifacts) => controller.renderArtifacts(artifacts),
+      prepareHistoryRouterFx: () => controller.prepareHistoryRouterFx(),
+      reconcileHistoryRouterFx: (usage, options) =>
+        controller.reconcileHistoryRouterFx(usage, options),
+      finishHistoryRouterFx: () => controller.finishHistoryRouterFx(),
+      beginSavingsHistoryReplay: () => controller.beginSavingsHistoryReplay(),
+      noteSavingsHistoryTurn: (usage) => controller.noteSavingsHistoryTurn(usage),
+      markHistoryRendered: () => {
+        historyHasRenderedRef.current = true
+      },
       turnMetaForMessage: (message, assistantIndex) =>
         historyTurnMeta(message) || recallTurnMeta(sessionKeyRef.current, assistantIndex),
       attachTurnMeta: (row, model, input, output, usage) =>
         messageRendererRef.current?.attachTurnMeta(row, model, input, output, usage),
       resetMessageGrouping: () => messageRendererRef.current?.resetGrouping(),
-      stampHistoryElement: (el, stableIdentity, role, text, transcriptId = null, ts = null) => {
-        if (stableIdentity) el.setAttribute('data-message-id', stableIdentity)
-        el.setAttribute('data-history-role', role || '')
-        el.setAttribute('data-history-raw-text', text || '')
-        el.setAttribute(
-          'data-history-fallback-id',
-          historyFallbackMessageIdentity(role as Role, text),
-        )
-        if (transcriptId != null) {
-          el.dataset.transcriptId = String(transcriptId)
-        } else {
-          delete el.dataset.transcriptId
-        }
-        // chat.js:8398 — export emits `### role _(ts.toLocaleString())_` when the
-        // message carries a ts. Legacy sources it from `msg.timestamp || msg.ts`
-        // (chat.js:5648); a message with no ts omits the attribute (and the
-        // suffix), matching legacy's `msg.ts ? … : ''` branch.
-        if (ts != null && ts !== '') {
-          el.dataset.historyTs = String(ts)
-        } else {
-          delete el.dataset.historyTs
-        }
-        // The meta caption (time + sender) uses the real message ts when history
-        // carries one, else the row stays clock-less — sender is always set.
-        stampRowMeta(el, role || 'assistant', ts != null && ts !== '' ? String(ts) : null)
-      },
+      stampHistoryElement,
       stripProtocolTextLeak,
       stripDirectiveTags,
       stripGeneratedArtifactMarkers,
@@ -571,6 +746,13 @@ export function useTranscript(opts: {
       loadEarlierHistory: () => void loadEarlierHistoryRef.current(),
       reloadHistory: () => void reloadHistoryRef.current(),
       isStreaming: () => controller.isStreaming(),
+      shouldAutoScroll: () => controller.isAutoScrollEnabled(),
+      getStreamBubble: () => controller.getStreamBubble(),
+      getThinkingIndicator: () => controller.getThinkingIndicator(),
+      getCurrentSessionLiveUserAnchor: () => controller.getCurrentSessionLiveUserAnchor(),
+      getPendingFinalizedAssistantBubble: () => controller.getPendingFinalizedAssistantBubble(),
+      isPendingFinalizedAssistantBubble: (row) => controller.isPendingFinalizedAssistantBubble(row),
+      clearPendingFinalizedAssistantBubble: () => controller.clearPendingFinalizedAssistantBubble(),
       diag: (event, detail) => seamsRef.current.diag?.(event, detail),
     }),
   )
@@ -657,20 +839,7 @@ export function useTranscript(opts: {
             const bodyText = userText
               ? `<div class="msg-attachment-text">${esc(userText)}</div>`
               : ''
-            const chips = atts
-              .map((a) => {
-                const mime = a.mime || ''
-                if (mime.startsWith('image/') && (a.dataUrl || a.data)) {
-                  const src = a.dataUrl || `data:${esc(mime || 'image/png')};base64,${a.data}`
-                  return `<img class="msg-thumb" src="${src}" alt="${esc(a.name)}">`
-                }
-                return `<span class="msg-file-chip"><span class="msg-file-chip__name">${esc(
-                  a.name,
-                )}</span><span class="msg-file-chip__meta">${esc(
-                  mime || 'attachment',
-                )}</span></span>`
-              })
-              .join('')
+            const chips = atts.map((attachment) => renderMessageAttachmentHtml(attachment)).join('')
             body.innerHTML = `${bodyText}<div class="msg-attachments">${chips}</div>`
             messageRendererRef.current?.attachHoverActions(userDiv, 'user')
           }
@@ -770,6 +939,12 @@ export function useTranscript(opts: {
     abortedRef.current = false
     stopRequestedByUserRef.current = false
     activeTaskGroupsRef.current.clear()
+    historyHasRenderedRef.current = false
+    historyHydratingRef.current = true
+    headerStateRef.current.day = ''
+    headerStateRef.current.role = ''
+    controller.resetSavingsPopupCooldown()
+    controller.clearRouterFxVisuals('session_switch')
     controller.syncLastStreamSeqFromSession(opts.sessionKey)
     // eslint-disable-next-line react-hooks/set-state-in-effect -- a session-key transition must synchronously reset the externally-driven status mirror
     applySessionRunState({ run_status: 'idle' })
@@ -780,7 +955,11 @@ export function useTranscript(opts: {
   const historyQuery = useQuery<HistoryResponse>({
     queryKey: ['chat', 'history', opts.sessionKey],
     queryFn: async () => {
+      historyHydratingRef.current = true
       await rpc.waitForConnection()
+      // Do not reconstruct router receipts against placeholder tier labels. The
+      // timeout is faithful: config failure must never hang history forever.
+      await awaitRouterConfigReady(routerConfigGate.promise)
       // Legacy `_loadHistory` params (chat.js:5457-5462): `sessionKey`, `limit`,
       // `includeCanonical:false`, `includeSummaries:true`.
       return rpc.call<HistoryResponse>('chat.history', {
@@ -801,11 +980,17 @@ export function useTranscript(opts: {
   // Render the initial page whenever a fresh history response settles for the
   // CURRENT session (chat.js:5467-5479). The render is imperative; gate on the
   // response identity so we render each settled page exactly once.
-  const renderedResponseRef = useRef<HistoryResponse | null>(null)
+  const renderedResponseAtRef = useRef(0)
   useEffect(() => {
     const data = historyQuery.data
-    if (!data || renderedResponseRef.current === data) return
-    renderedResponseRef.current = data
+    if (!data) return
+    historyHydratingRef.current = false
+    // React Query may structurally share an equal refetch payload. A successful
+    // refetch must still rerun history lifecycle hooks (especially pending
+    // router-decision flush), so gate on the query's success timestamp instead
+    // of object identity.
+    if (renderedResponseAtRef.current === historyQuery.dataUpdatedAt) return
+    renderedResponseAtRef.current = historyQuery.dataUpdatedAt
     const messages = (data.messages || []) as ChatMessage[]
     const meta = historyResponseMetadata(data)
     pagingRef.current = {
@@ -822,11 +1007,12 @@ export function useTranscript(opts: {
     // message rows exist (the history renderer is a focused port; this is folded
     // in here, reading the summaries the controller was given above).
     controller.renderCompactionSummarySeparators(messages)
-  }, [historyQuery.data, historyRenderer, controller])
+  }, [historyQuery.data, historyQuery.dataUpdatedAt, historyRenderer, controller])
 
   // Surface a history-load error into the scope row (chat.js:5484-5488).
   useEffect(() => {
     if (!historyQuery.isError) return
+    historyHydratingRef.current = false
     pagingRef.current.error = 'Could not load chat history.'
     historyRenderer.renderHistoryScopeRow(pagingRef.current)
   }, [historyQuery.isError, historyRenderer])
@@ -892,6 +1078,7 @@ export function useTranscript(opts: {
     const sessionKey = opts.sessionKey
     const unsubs: Array<() => void> = []
     let cancelled = false
+    const succeededTerminalTimers = new Set<number>()
     const seams = () => seamsRef.current
     const diag = (event: string, detail: Record<string, unknown>) =>
       seamsRef.current.diag?.(event, detail)
@@ -1315,12 +1502,28 @@ export function useTranscript(opts: {
                   last_task: { ...rawPayload, status: taskTerminal },
                 },
           )
-          if (!controller.isStreaming()) {
-            if (taskTerminal === 'succeeded') {
+          if (taskTerminal === 'succeeded') {
+            // chat.js:6256-6273 — task.succeeded is a terminal backstop for
+            // providers whose chat.done frame is missing or delayed. Give the
+            // normal done path 75ms to win; otherwise end only the same stream
+            // generation, resync history and release the pending queue.
+            const streamGeneration = controller.streamGeneration()
+            const terminalTimer = window.setTimeout(() => {
+              succeededTerminalTimers.delete(terminalTimer)
+              if (!isCurrentSessionPayload(rawPayload, sessionKeyRef.current)) return
+              if (isStaleEpoch(rawPayload)) return
+              controller.scheduleHistorySync()
+              if (controller.isStreaming() && controller.streamGeneration() === streamGeneration) {
+                controller.endStreaming()
+                pendingDelegatesRef.current.schedulePendingDrainAfterTerminal()
+              }
+            }, 75)
+            succeededTerminalTimers.add(terminalTimer)
+            if (!controller.isStreaming()) {
               pendingDelegatesRef.current.schedulePendingDrainAfterTerminal()
-            } else {
-              pendingDelegatesRef.current.popAllPendingIntoComposer()
             }
+          } else if (!controller.isStreaming()) {
+            pendingDelegatesRef.current.popAllPendingIntoComposer()
           }
         }
 
@@ -1353,12 +1556,19 @@ export function useTranscript(opts: {
           const model = String(usage.model || usage.routed_model || '')
           const input = Number(usage.input_tokens || usage.inputTokens || 0)
           const output = Number(usage.output_tokens || usage.outputTokens || 0)
+          const isReplayedFrame = rawMeta.replayed === true
+          // SavingsFX must run BEFORE the footer/storage snapshot: it updates the
+          // streak and may suppress this one identity-switch turn.
+          controller.maybeFireSavingsPopup(finishedBubble, usage, {
+            animate: !isReplayedFrame,
+          })
           messageRendererRef.current?.attachTurnMeta(
             finishedBubble,
             model,
             Number.isFinite(input) ? input : 0,
             Number.isFinite(output) ? output : 0,
             usage,
+            { flash: !isReplayedFrame },
           )
           if (finishedBubble) {
             const assistants = Array.from(
@@ -1492,6 +1702,8 @@ export function useTranscript(opts: {
 
     return () => {
       cancelled = true
+      succeededTerminalTimers.forEach((timer) => window.clearTimeout(timer))
+      succeededTerminalTimers.clear()
       // Park the OUTGOING session's live stream state before we tear the
       // subscription down (chat.js:1813 `_parkCurrentSessionStreamState`, called
       // from `_switchToSession` before `_unsubscribeSession`). Cleanups run
@@ -1519,7 +1731,7 @@ export function useTranscript(opts: {
       error: '',
       compactionSummaries: [],
     }
-    renderedResponseRef.current = null
+    renderedResponseAtRef.current = 0
   }, [opts.sessionKey])
 
   // On unmount, tear down any live stream timers/rAF (parity legacy destroy —
@@ -1559,6 +1771,8 @@ export function useTranscript(opts: {
     send,
     abort,
     busy,
+    routerFxEnabled,
+    setRouterFxEnabled,
     history,
     runState,
     isCompactInFlightForCurrentSession,

@@ -285,6 +285,22 @@ describe('Toolbar', () => {
     expect(toggle).not.toBeChecked()
   })
 
+  it('updates the mounted Visual-effects switch when the live preference prop refreshes', async () => {
+    const view = render(<Toolbar sessionKey={SESSION} routerFxEnabled onRouterFxToggle={vi.fn()} />)
+    const toggle = await screen.findByRole('checkbox', { name: /visual effects/i })
+    expect(toggle).toBeChecked()
+
+    view.rerender(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <Toolbar sessionKey={SESSION} routerFxEnabled={false} onRouterFxToggle={vi.fn()} />
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => expect(toggle).not.toBeChecked())
+  })
+
   it('renders the usage readout from usage.status for the current session', async () => {
     rpcRouter(configWith(), {
       sessions: [

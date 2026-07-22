@@ -33,6 +33,7 @@ import {
   type CompactionRenderer,
   type CompactionSummary,
 } from './compaction'
+import { createSavingsFx, type SavingsUsage } from './savingsFx'
 
 /* ── Constants (ported verbatim from chat.js) ───────────────────────────── */
 
@@ -174,6 +175,18 @@ export interface MarkdownDep {
 }
 
 /**
+ * Shared transcript header cursor. Legacy owns one `_lastHeaderDay` /
+ * `_lastHeaderRole` pair across history rows, live messages and streaming
+ * bubbles; keeping the ref shared prevents live/reload grouping drift.
+ */
+export interface TranscriptHeaderStateRef {
+  current: {
+    day: string
+    role: string
+  }
+}
+
+/**
  * Everything the ported streaming region references that lives OUTSIDE the
  * cited ranges. All optional: each has a faithful-enough default so the
  * controller is usable in focused tests. The production wiring (router-fx,
@@ -193,6 +206,8 @@ export interface StreamControllerDeps {
   /** chat.js:7833/7840 — day separator key + human label. */
   dayKey?: (iso: string) => string
   dayLabel?: (dayKey: string) => string
+  /** Shared legacy `_lastHeaderDay` / `_lastHeaderRole` cursor. */
+  headerState?: TranscriptHeaderStateRef
   /** chat.js:7851 — append a plain (non-streaming) message row. */
   addMessage?: (role: string, text: string, timestamp?: string) => HTMLElement | null
   /** chat.js:5971 — stamp history identity onto a finalized bubble. */
@@ -206,8 +221,12 @@ export interface StreamControllerDeps {
   ) => void
   /** chat.js:6819/748 — attach the hover Copy/Regenerate toolbar. */
   attachHoverActions?: (el: HTMLElement, role: string) => void
-  /** chat.js:6777 — remember the just-finalized assistant bubble for reconcile. */
+  /**
+   * chat.js:6777 — observe the just-finalized assistant bubble after the
+   * controller has recorded its own reconciliation state.
+   */
   markPendingFinalizedAssistantBubble?: (el: HTMLElement, cleanedText: string) => void
+  /** Observe the controller clearing its pending-finalized reconciliation state. */
   clearPendingFinalizedAssistantBubble?: () => void
   /** chat.js:6563/6230/6951 — session run-status sync (running / approval). */
   applySessionRunState?: (state: Record<string, unknown>) => void
@@ -359,12 +378,10 @@ export function createStreamController(
     ((role: string) => (role ? role.charAt(0).toUpperCase() + role.slice(1) : ''))
   const dayKey = deps.dayKey ?? (() => '')
   const dayLabel = deps.dayLabel ?? ((k: string) => k)
+  const headerState = deps.headerState ?? { current: { day: '', role: '' } }
   const addMessage = deps.addMessage ?? (() => null)
   const stampHistoryElement = deps.stampHistoryElement ?? (() => {})
   const attachHoverActions = deps.attachHoverActions ?? (() => {})
-  const markPendingFinalizedAssistantBubble = deps.markPendingFinalizedAssistantBubble ?? (() => {})
-  const clearPendingFinalizedAssistantBubble =
-    deps.clearPendingFinalizedAssistantBubble ?? (() => {})
   const applySessionRunState = deps.applySessionRunState ?? (() => {})
   const updateSendButton = deps.updateSendButton ?? (() => {})
   const pushMessage = deps.pushMessage ?? (() => {})
@@ -377,6 +394,7 @@ export function createStreamController(
   const isCompactInFlightForCurrentSession = (): boolean =>
     compactionRenderer ? compactionRenderer.isCompactInFlightForCurrentSession() : false
   const clearHistorySyncTimer = deps.clearHistorySyncTimer ?? (() => {})
+  const scheduleHistorySync = deps.scheduleHistorySync ?? (() => {})
   const liveStreamStateBySession =
     deps.liveStreamStateBySession ?? new Map<string, ParkedStreamState>()
   const getSessionKey = deps.getSessionKey ?? (() => '')
@@ -414,6 +432,12 @@ export function createStreamController(
     diag,
   })
 
+  /* ── SavingsFX (savings-fx.js + chat.js:5184-5248) ─────────────────────
+   * The standalone preference is preserved under its legacy storage key, but
+   * chat intentionally synchronizes it to the shared Visual effects toggle. */
+  const savingsFx = createSavingsFx({ thread })
+  savingsFx.setEnabled(routerFxPref.enabled)
+
   // Stream-lifecycle router-fx hooks now route to the composed renderer
   // (chat.js:6585/6716/6907/…). Overridable, but the renderer is the default.
   const routerFxSettleForOutput =
@@ -427,9 +451,10 @@ export function createStreamController(
   const currentSessionLiveRouterStrips =
     deps.currentSessionLiveRouterStrips ??
     ((key: string) => routerFxRenderer.currentSessionLiveRouterStrips(key))
-  // The parked live-user anchor belongs to the send integration; the router-fx
-  // engine itself does not track it, so standalone controllers default to null.
-  const currentSessionLiveUserAnchor = deps.currentSessionLiveUserAnchor ?? (() => null)
+  // The router-fx engine does not own the user row, so derive it from the live
+  // transcript by default. Integrations may still override the lookup.
+  const currentSessionLiveUserAnchor =
+    deps.currentSessionLiveUserAnchor ?? ((key: string) => defaultCurrentSessionLiveUserAnchor(key))
   const routerFxPauseScanTimers =
     deps.routerFxPauseScanTimers ?? ((el: HTMLElement) => routerFxRenderer.pauseScanTimers(el))
   const routerFxResumeLiveStrip =
@@ -484,13 +509,61 @@ export function createStreamController(
   let _thinkingTimerInterval: ReturnType<typeof setInterval> | null = null
   let _thinkingStartTime = 0
 
-  // header dedup (chat.js:6601/6620) — private to this controller.
-  let _lastHeaderRole = ''
-  let _lastHeaderDay = ''
-
   // finalize/reconcile bookkeeping (chat.js:59-60)
   let _pendingFinalizedAssistantBubble: HTMLElement | null = null
   let _pendingFinalizedAssistantFallbackId = ''
+
+  function isUserMessageElement(el: Element | null): el is HTMLElement {
+    return (
+      !!el && (el.classList.contains('user') || el.getAttribute('data-history-role') === 'user')
+    )
+  }
+
+  function defaultCurrentSessionLiveUserAnchor(key: string): HTMLElement | null {
+    const th = thread()
+    if (!th || !key || !_isStreaming) return null
+    const streamKey =
+      _streamSessionKey || _streamBubble?.dataset.streamSessionKey || getSessionKey()
+    if (streamKey && streamKey !== key) return null
+
+    let candidate = _streamBubble?.previousElementSibling || null
+    while (candidate) {
+      if (isUserMessageElement(candidate)) return candidate
+      candidate = candidate.previousElementSibling
+    }
+    const users = th.querySelectorAll<HTMLElement>('.msg.user, .msg[data-history-role="user"]')
+    return users.length > 0 ? users[users.length - 1]! : null
+  }
+
+  function markPendingFinalizedAssistantBubble(bubble: HTMLElement, cleanedText: string): void {
+    if (!bubble || !cleanedText) return
+    _pendingFinalizedAssistantBubble = bubble
+    _pendingFinalizedAssistantFallbackId = `assistant|${cleanedText.trim()}`
+    bubble.dataset.pendingFinalizedAssistant = 'true'
+    bubble.dataset.pendingFinalizedSessionKey = getSessionKey() || ''
+    bubble.dataset.pendingFinalizedFallbackId = _pendingFinalizedAssistantFallbackId
+    deps.markPendingFinalizedAssistantBubble?.(bubble, cleanedText)
+  }
+
+  function clearPendingFinalizedAssistantBubble(): void {
+    if (_pendingFinalizedAssistantBubble) {
+      delete _pendingFinalizedAssistantBubble.dataset.pendingFinalizedAssistant
+      delete _pendingFinalizedAssistantBubble.dataset.pendingFinalizedSessionKey
+      delete _pendingFinalizedAssistantBubble.dataset.pendingFinalizedFallbackId
+    }
+    _pendingFinalizedAssistantBubble = null
+    _pendingFinalizedAssistantFallbackId = ''
+    deps.clearPendingFinalizedAssistantBubble?.()
+  }
+
+  function isPendingFinalizedAssistantBubble(el: HTMLElement | null): boolean {
+    return !!(
+      el &&
+      el === _pendingFinalizedAssistantBubble &&
+      el.dataset.pendingFinalizedAssistant === 'true' &&
+      el.dataset.pendingFinalizedSessionKey === (getSessionKey() || '')
+    )
+  }
 
   /* ── seq accept (chat.js:6345-6350) ───────────────────────────────────── */
 
@@ -612,7 +685,7 @@ export function createStreamController(
     _thinkingEl.setAttribute('aria-live', 'polite')
     _thinkingEl.dataset.sessionKey = _streamSessionKey || getSessionKey() || ''
 
-    if (_lastHeaderRole !== 'assistant') {
+    if (headerState.current.role !== 'assistant') {
       const header = document.createElement('div')
       header.className = 'msg-header'
       const roleLabel = document.createElement('span')
@@ -812,16 +885,16 @@ export function createStreamController(
       // Day separator for streaming bubbles (use current time as timestamp)
       const now = new Date().toISOString()
       const day = dayKey(now)
-      if (day && day !== _lastHeaderDay && th) {
+      if (day && day !== headerState.current.day && th) {
         const sep = document.createElement('div')
         sep.className = 'chat-day-sep'
         sep.innerHTML = `<span>${dayLabel(day)}</span>`
         th.insertBefore(sep, null)
-        _lastHeaderDay = day
-        _lastHeaderRole = ''
+        headerState.current.day = day
+        headerState.current.role = ''
       }
 
-      const sameGroup = _lastHeaderRole === 'assistant'
+      const sameGroup = headerState.current.role === 'assistant'
       if (!sameGroup) {
         _streamBubble.innerHTML = `
           <div class="msg-header">
@@ -830,7 +903,7 @@ export function createStreamController(
             <span class="msg-time"></span>
           </div>
           <div class="msg-body"></div>`
-        _lastHeaderRole = 'assistant'
+        headerState.current.role = 'assistant'
       } else {
         _streamBubble.innerHTML = `<div class="msg-body"></div>`
       }
@@ -1382,7 +1455,7 @@ export function createStreamController(
     // Wire the compaction toast into the composed router-fx renderer's
     // compaction-turn suppression (chat.js:3269-3282 / 3302/3307).
     suppressRouterFxForCompaction: (payload) => routerFxRenderer.suppressForCompaction(payload),
-    scheduleHistorySync: deps.scheduleHistorySync ?? (() => {}),
+    scheduleHistorySync,
     schedulePendingDrainAfterTerminal: deps.schedulePendingDrainAfterTerminal ?? (() => {}),
     popAllPendingIntoComposer: deps.popAllPendingIntoComposer ?? (() => false),
     pendingQueueLength: deps.pendingQueueLength ?? (() => 0),
@@ -1415,6 +1488,12 @@ export function createStreamController(
     endStreaming,
     reconcileFinalStreamText,
     getStreamBubble: () => _streamBubble,
+    getThinkingIndicator: () => _thinkingEl,
+    getCurrentSessionLiveUserAnchor: (key = getSessionKey() || '') =>
+      currentSessionLiveUserAnchor(key),
+    getPendingFinalizedAssistantBubble: () => _pendingFinalizedAssistantBubble,
+    isPendingFinalizedAssistantBubble,
+    clearPendingFinalizedAssistantBubble,
     // park/restore/clear
     parkCurrentSessionStreamState,
     restoreLiveStreamStateForSession,
@@ -1423,6 +1502,7 @@ export function createStreamController(
     // scroll
     scrollToBottom,
     updateAutoScrollFromThread,
+    isAutoScrollEnabled: () => _autoScroll,
     // tool activity + subagent disclosure (Task 4 — tools.ts)
     appendToolCall: toolRenderer.appendToolCall,
     appendToolResult: toolRenderer.appendToolResult,
@@ -1440,12 +1520,40 @@ export function createStreamController(
     // compaction integrations.
     handleRouterDecision: routerFxRenderer.handleRouterDecision,
     buildRouterFxFromUsage: routerFxRenderer.buildRouterFxFromUsage,
+    prepareHistoryRouterFx: routerFxRenderer.prepareHistoryRouterFx,
+    reconcileHistoryRouterFx: routerFxRenderer.reconcileHistoryRouterFx,
+    finishHistoryRouterFx: routerFxRenderer.finishHistoryRouterFx,
     flushPendingRouterDecisions: routerFxRenderer.flushPendingRouterDecisions,
     cachePendingRouterDecision: routerFxRenderer.cachePendingRouterDecision,
     scheduleRouterFxBeginScan: routerFxRenderer.scheduleBeginScan,
     suppressRouterFxForCompaction: routerFxRenderer.suppressForCompaction,
+    clearRouterFxVisuals: routerFxRenderer.clearRouterFxVisuals,
     routerFxRegistry,
     routerFxPref,
+    // SavingsFX (Part 3). `maybeFireSavingsPopup` mutates the usage suppression
+    // marker before the turn footer/storage snapshot, matching legacy order.
+    maybeFireSavingsPopup: (
+      bubble: HTMLElement | null,
+      usage: SavingsUsage | null | undefined,
+      opts: { animate?: boolean } = {},
+    ): boolean => savingsFx.maybeFire(bubble, usage, opts),
+    beginSavingsHistoryReplay: savingsFx.beginHistoryReplay,
+    noteSavingsHistoryTurn: savingsFx.noteHistoryTurn,
+    resetSavingsPopupCooldown: savingsFx.resetPopupCooldown,
+    cleanupSavingsFx: savingsFx.cleanup,
+    getSavingsStreak: savingsFx.getStreak,
+    savingsLabel: savingsFx.savingsLabel,
+    savingsFxEnabled: savingsFx.isEnabled,
+    // chat.js:1479-1486 — config refresh also re-hydrates the browser-local
+    // visual preference and keeps SavingsFX on the exact same gate.
+    reloadRouterFxPreference: (): boolean => {
+      routerFxLoadPref(routerFxPref)
+      savingsFx.setEnabled(routerFxPref.enabled)
+      if (!routerFxPref.enabled) {
+        routerFxRenderer.clearRouterFxVisuals('preference_disabled_external_refresh')
+      }
+      return routerFxPref.enabled
+    },
     // chat.js:1424-1437 — the "Visual effects" toolbar toggle writes the live
     // `_routerFx.enabled` and persists it. Ownership of the pref mutation stays
     // in the controller (this module owns `routerFxPref`), so the toolbar calls
@@ -1454,7 +1562,9 @@ export function createStreamController(
     setRouterFxEnabled: (enabled: boolean): void => {
       routerFxPref.enabled = enabled
       routerFxSavePref(routerFxPref)
-      if (!enabled) routerFxRenderer.clearRouterFxVisuals('preference_disabled')
+      savingsFx.setEnabled(enabled)
+      if (enabled) scheduleHistorySync()
+      else routerFxRenderer.clearRouterFxVisuals('preference_disabled')
     },
     // compaction (Task 7 — compaction.ts). `showCompactionToast` is the live
     // entry point routed by `session.event.compaction`; the rest is the history/
@@ -1469,6 +1579,8 @@ export function createStreamController(
     // introspection (for the transcript controller + tests)
     isStreaming: (): boolean => _isStreaming,
     streamSessionKey: (): string => _streamSessionKey,
+    streamGeneration: (): number => _streamGeneration,
+    scheduleHistorySync,
   }
 }
 

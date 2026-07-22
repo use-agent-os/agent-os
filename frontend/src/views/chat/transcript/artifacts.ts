@@ -294,7 +294,7 @@ export function createArtifactRenderer(deps: ArtifactRendererDeps) {
           <span class="msg-artifact-card__action" aria-hidden="true">Download</span>
         </a>`
       } else if (isAudioArtifact(artifact)) {
-        html += `<div class="msg-artifact-card msg-artifact-card--audio" data-artifact-category="${escAttr(category)}" data-artifact-download="${escAttr(downloadUrl)}" data-artifact-id="${escAttr(artifact?.id || '')}" data-artifact-name="${escAttr(name)}">
+        html += `<div class="msg-artifact-card msg-artifact-card--audio" data-artifact-category="${escAttr(category)}" data-artifact-id="${escAttr(artifact?.id || '')}" data-artifact-name="${escAttr(name)}">
           <audio class="msg-artifact-audio" controls preload="metadata" src="${escAttr(downloadHref)}"></audio>
           <span class="msg-artifact-card__body">
             <span class="msg-artifact-card__name">${esc(name)}</span>

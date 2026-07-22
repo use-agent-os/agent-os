@@ -787,16 +787,75 @@ export function attachmentDownloadHref(
   mime?: string,
 ): string {
   if (!att) return ''
+  const safeHref = (value: unknown, imageOnly = false): string => {
+    const raw = String(value || '').trim()
+    if (!raw) return ''
+    try {
+      // The URL parser normalizes ASCII tabs/newlines in schemes, so inputs
+      // such as `java\nscript:` cannot bypass the protocol allowlist. Relative
+      // gateway URLs resolve against the inert base and remain permitted.
+      const parsed = new URL(raw, 'https://agentos.invalid/')
+      if (!['http:', 'https:', 'blob:', 'data:'].includes(parsed.protocol.toLowerCase())) return ''
+      if (
+        imageOnly &&
+        parsed.protocol === 'data:' &&
+        !/^data:image\/[a-z0-9.+-]+(?:[;,])/i.test(raw)
+      ) {
+        return ''
+      }
+      return raw
+    } catch {
+      return ''
+    }
+  }
   if (att.dataUrl) {
-    const dataUrl = String(att.dataUrl).trim()
-    return /^javascript:/i.test(dataUrl) ? '' : dataUrl
+    return safeHref(
+      att.dataUrl,
+      String(mime || '')
+        .toLowerCase()
+        .startsWith('image/'),
+    )
   }
   if (att.data) {
     return `data:${mime || 'application/octet-stream'};base64,${String(att.data)}`
   }
-  const url = String(att.url || att.download_url || att.downloadUrl || '').trim()
-  if (url && !/^javascript:/i.test(url)) return url
-  return ''
+  return safeHref(att.url || att.download_url || att.downloadUrl || '')
+}
+
+/**
+ * chat.js:8327-8344 — one attachment chip used by both live user turns and
+ * persisted-history reconstruction. All payload-derived attributes/text are
+ * escaped before the imperative transcript inserts this HTML.
+ */
+export function renderMessageAttachmentHtml(attachment: unknown): string {
+  if (!attachment || typeof attachment !== 'object' || Array.isArray(attachment)) return ''
+  const att = attachment as Record<string, unknown>
+  const mime = String(att.type || att.mime || '')
+  const name = String(att.name || 'attachment')
+  const href = attachmentDownloadHref(
+    {
+      dataUrl: typeof att.dataUrl === 'string' ? att.dataUrl : undefined,
+      data: typeof att.data === 'string' ? att.data : undefined,
+      url: typeof att.url === 'string' ? att.url : undefined,
+      download_url: typeof att.download_url === 'string' ? att.download_url : undefined,
+      downloadUrl: typeof att.downloadUrl === 'string' ? att.downloadUrl : undefined,
+    },
+    mime,
+  )
+  if (mime.toLowerCase().startsWith('image/') && (att.dataUrl || att.data)) {
+    if (!href) return ''
+    return `<img class="msg-thumb" src="${esc(href)}" alt="${esc(name)}">`
+  }
+
+  const inner =
+    '<span class="msg-file-chip__icon" aria-hidden="true">file</span>' +
+    `<span class="msg-file-chip__name">${esc(name)}</span>` +
+    `<span class="msg-file-chip__meta">${esc(mime || 'attachment')}</span>`
+  if (href) {
+    const downloadName = attachmentDownloadName({ name })
+    return `<a class="msg-file-chip msg-file-chip--download" title="${esc(name)}" href="${esc(href)}" download="${esc(downloadName)}">${inner}</a>`
+  }
+  return `<span class="msg-file-chip msg-file-chip--disabled" title="${esc(name)}">${inner}</span>`
 }
 
 /** The result of normalizing an outgoing composer payload (chat.js:7982). */

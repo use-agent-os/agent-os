@@ -10,8 +10,11 @@
 // in useTranscript.ts (idiomatic React). Legacy source: static/js/views/chat.js.
 
 import type { ChatMessage } from '../types'
+import type { Artifact } from './artifacts'
 import type { TurnMeta, TurnUsage } from './message'
+import type { TranscriptHeaderStateRef } from './stream'
 import { historyFallbackMessageIdentity, historyStableMessageIdentity } from '../logic'
+import { routerFxRequestKindFromAttachments, type RouterFxHistoryOptions } from './routerFx'
 
 /** chat.js:350 — history page size for `chat.history` reads. */
 export const CHAT_HISTORY_PAGE_SIZE = 50
@@ -48,6 +51,28 @@ export function mergeHistoryMessagePages(
     merged.push(msg)
   })
   return merged
+}
+
+/**
+ * Read one persisted list of object payloads without trusting the RPC boundary.
+ * `chat.history` currently emits dictionaries for all three fields consumed by
+ * the history renderer (`tool_calls`, `attachments`, and `artifacts`).
+ */
+function historyMessageRecords(
+  msg: ChatMessage | null | undefined,
+  field: 'tool_calls' | 'attachments' | 'artifacts',
+): Array<Record<string, unknown>> {
+  const value = (msg as unknown as Record<string, unknown> | null | undefined)?.[field]
+  if (!Array.isArray(value)) return []
+  return value.filter(
+    (item): item is Record<string, unknown> =>
+      item !== null && typeof item === 'object' && !Array.isArray(item),
+  )
+}
+
+/** `chat.history` persists generated files on the message's `artifacts` field. */
+export function historyMessageArtifacts(msg: ChatMessage | null | undefined): Artifact[] {
+  return historyMessageRecords(msg, 'artifacts') as Artifact[]
 }
 
 /* ── History response metadata (chat.js:5329-5348) ──────────────────────── */
@@ -101,6 +126,8 @@ export interface HistoryRenderDeps {
   /** chat.js:7833/7840 — day-separator key + human label. */
   dayKey: (iso: string) => string
   dayLabel: (dayKey: string) => string
+  /** Shared legacy `_lastHeaderDay` / `_lastHeaderRole` cursor. */
+  headerState?: TranscriptHeaderStateRef
   /** chat.js:7851 — append a plain (non-streaming) message row. */
   addMessage: (
     role: string,
@@ -108,8 +135,47 @@ export interface HistoryRenderDeps {
     timestamp?: string | null,
     options?: Record<string, unknown>,
   ) => HTMLElement | null
+  /** chat.js:6011 — refresh a reused history row without replacing its DOM identity. */
+  replaceMessage: (
+    el: HTMLElement,
+    role: string,
+    text: string,
+    timestamp?: string | null,
+    options?: Record<string, unknown>,
+  ) => void
+  /** chat.js:5983-6009 — create/remove/refresh a row header after identity reuse. */
+  syncMessageHeader: (
+    el: HTMLElement,
+    displayRole: string,
+    timestamp: string | number | null | undefined,
+    options: Record<string, unknown>,
+    sameGroup: boolean,
+  ) => void
   /** chat.js:6819/748 — attach the hover Copy/Regenerate toolbar. */
   attachHoverActions: (el: HTMLElement, role: string) => void
+  /** chat.js:5675-5676 — rebuild persisted tool segments inside the message body. */
+  reconstructToolCalls: (el: HTMLElement, segments: Array<Record<string, unknown>>) => void
+  /**
+   * chat.js:5684-5689/8327 — render one persisted attachment as escaped,
+   * insertion-safe HTML. The injected attachment renderer owns URL validation.
+   */
+  renderMessageAttachmentHtml: (attachment: Record<string, unknown>) => string
+  /** chat.js:5691-5694/7595 — render persisted artifact cards as escaped HTML. */
+  renderArtifacts: (artifacts: Artifact[]) => string
+  /** chat.js:5611-5616 — remove foreign/unstamped dock residue before a rebuild. */
+  prepareHistoryRouterFx: () => void
+  /** chat.js:5712-5741 — rebuild a settled dock receipt from persisted usage. */
+  reconcileHistoryRouterFx: (
+    usage: TurnUsage | null | undefined,
+    opts: RouterFxHistoryOptions,
+  ) => HTMLElement | null
+  /** chat.js:5751-5770 — flush pending decisions and perform the final dock sweep. */
+  finishHistoryRouterFx: () => void
+  /** SavingsFX history replay recomputes streak state oldest→newest. */
+  beginSavingsHistoryReplay: () => void
+  noteSavingsHistoryTurn: (usage: TurnUsage | null | undefined) => void
+  /** Must set `_historyHasRendered` before pending router decisions flush. */
+  markHistoryRendered: () => void
   /** chat.js:5700-5745 — per-assistant history usage metadata. */
   turnMetaForMessage?: (message: Record<string, unknown>, assistantIndex: number) => TurnMeta | null
   attachTurnMeta?: (
@@ -141,6 +207,15 @@ export interface HistoryRenderDeps {
   reloadHistory: () => void
   /** True while the streaming controller holds a live bubble for this session. */
   isStreaming: () => boolean
+  /** Preserve the reader-controlled auto-follow state during async history refreshes. */
+  shouldAutoScroll: () => boolean
+  /** Live nodes preserved/reordered during a history refresh (chat.js:5554-5587/5753-5777). */
+  getStreamBubble: () => HTMLElement | null
+  getThinkingIndicator: () => HTMLElement | null
+  getCurrentSessionLiveUserAnchor: () => HTMLElement | null
+  getPendingFinalizedAssistantBubble: () => HTMLElement | null
+  isPendingFinalizedAssistantBubble: (el: HTMLElement | null) => boolean
+  clearPendingFinalizedAssistantBubble: () => void
   /** chat.js:* — the diagnostics ring (legacy `_chatDiag`). Default: no-op. */
   diag?: (event: string, detail: Record<string, unknown>) => void
 }
@@ -166,9 +241,7 @@ export interface HistoryPagingState {
  */
 export function createHistoryRenderer(deps: HistoryRenderDeps) {
   const diag = deps.diag ?? (() => {})
-
-  // Header-dedup state, private to the renderer (legacy `_lastHeaderDay`).
-  let _lastHeaderDay = ''
+  const headerState = deps.headerState ?? { current: { day: '', role: '' } }
 
   function historyFallbackText(role: string, text: string): string {
     // chat.js:5842-5846 — role-specific display-text strip pipeline.
@@ -183,17 +256,92 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
     return (text || '').trim()
   }
 
+  function historyFallbackIdentity(role: string, text: string): string {
+    return `${role || ''}|${historyFallbackText(role, text)}`
+  }
+
+  function historyElementRole(el: HTMLElement): string {
+    const tagged = el.getAttribute('data-history-role') || ''
+    if (tagged) return tagged
+    if (el.classList.contains('user')) return 'user'
+    if (el.classList.contains('assistant')) return 'assistant'
+    if (el.classList.contains('subagent') || el.classList.contains('system')) return 'system'
+    return ''
+  }
+
+  function historyElementText(el: HTMLElement): string {
+    const raw = el.getAttribute('data-history-raw-text') || ''
+    if (raw) return raw
+    const body = el.querySelector('.msg-body')
+    return body ? (body.textContent || '').trim() : ''
+  }
+
+  function historyElementFallbackIdentity(el: HTMLElement): string {
+    const role = historyElementRole(el)
+    const text = historyElementText(el)
+    return role || text ? historyFallbackIdentity(role, text) : ''
+  }
+
+  function pushIdentityElement(
+    map: Map<string, HTMLElement[]>,
+    identity: string,
+    el: HTMLElement,
+  ): void {
+    const elements = map.get(identity) || []
+    elements.push(el)
+    map.set(identity, elements)
+  }
+
+  function shiftIdentityElement(
+    map: Map<string, HTMLElement[]>,
+    identity: string,
+    consumed: Set<HTMLElement>,
+  ): HTMLElement | null {
+    if (!identity) return null
+    const elements = map.get(identity)
+    if (!elements) return null
+    while (elements.length > 0) {
+      const el = elements.shift()
+      if (el && !consumed.has(el)) return el
+    }
+    return null
+  }
+
+  function historyStillWaitingForAssistant(messages: ChatMessage[]): boolean {
+    if (messages.length === 0) return true
+    return messages[messages.length - 1]?.role !== 'assistant'
+  }
+
+  function historyLiveTailAnchor(): HTMLElement | null {
+    if (!deps.isStreaming()) return null
+    const bubble = deps.getStreamBubble()
+    if (bubble?.isConnected) return bubble
+    const thinking = deps.getThinkingIndicator()
+    return thinking?.isConnected ? thinking : null
+  }
+
+  function appendHistoryElementInOrder(el: HTMLElement): void {
+    const th = deps.thread()
+    if (!th) return
+    const liveTail = historyLiveTailAnchor()
+    if (liveTail && el !== liveTail) th.insertBefore(el, liveTail)
+    else th.appendChild(el)
+  }
+
   function appendHistoryDaySeparator(timestamp: string | null | undefined): void {
     // chat.js:5805-5819
     const th = deps.thread()
     if (!th) return
     const day = deps.dayKey(timestamp || '')
-    if (!day || day === _lastHeaderDay) return
+    if (!day || day === headerState.current.day) return
     const sep = document.createElement('div')
     sep.className = 'chat-day-sep'
     sep.innerHTML = `<span>${deps.dayLabel(day)}</span>`
-    th.appendChild(sep)
-    _lastHeaderDay = day
+    const liveTail = historyLiveTailAnchor()
+    if (liveTail) th.insertBefore(sep, liveTail)
+    else th.appendChild(sep)
+    headerState.current.day = day
+    headerState.current.role = ''
   }
 
   function removeHistoryScopeRows(): void {
@@ -292,45 +440,100 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
     removeHistoryScopeRows()
 
     if (messages.length === 0) {
-      // Preserve a live streaming bubble on an empty history refresh
-      // (chat.js:5554-5581, the live-stream-keep branch) — the streaming
-      // controller owns those nodes, so leave them in place.
-      if (deps.isStreaming()) {
-        diag('history.empty.keep_live_stream_view', {})
+      const streamBubble = deps.getStreamBubble()
+      const liveUserAnchor = deps.getCurrentSessionLiveUserAnchor()
+      const thinking = deps.getThinkingIndicator()
+      if (deps.isStreaming() && (streamBubble || liveUserAnchor || thinking)) {
+        th.querySelectorAll<HTMLElement>('.msg').forEach((el) => {
+          if (el !== streamBubble && el !== liveUserAnchor && el !== thinking) el.remove()
+        })
+        th.querySelectorAll('.chat-day-sep, .chat-empty').forEach((el) => el.remove())
+        if (liveUserAnchor && !liveUserAnchor.isConnected) th.appendChild(liveUserAnchor)
+        if (streamBubble && !streamBubble.isConnected) th.appendChild(streamBubble)
+        if (thinking && !thinking.isConnected) th.appendChild(thinking)
+        if (deps.shouldAutoScroll()) th.scrollTop = th.scrollHeight
+        diag('history.empty.keep_live_stream_view', {
+          hasStreamBubble: !!streamBubble,
+          hasLiveUserAnchor: !!liveUserAnchor,
+          hasThinkingIndicator: !!thinking,
+        })
+        return
+      }
+      const pendingFinalized = deps.getPendingFinalizedAssistantBubble()
+      if (pendingFinalized?.isConnected) {
+        if (deps.shouldAutoScroll()) th.scrollTop = th.scrollHeight
+        diag('history.empty.keep_pending_finalized_assistant', {})
         return
       }
       th.innerHTML = ''
-      _lastHeaderDay = ''
+      headerState.current.day = ''
+      headerState.current.role = ''
+      deps.beginSavingsHistoryReplay()
+      const empty = document.createElement('div')
+      empty.className = 'chat-empty'
+      empty.textContent = 'No messages yet.'
+      th.appendChild(empty)
+      deps.markHistoryRendered()
       diag('history.empty.rendered_empty_state', {})
       return
     }
 
-    // Drop stale day separators + any prior message rows; rebuild deterministically.
+    const existingByStableIdentity = new Map<string, HTMLElement>()
+    const existingByFallbackIdentity = new Map<string, HTMLElement[]>()
+    th.querySelectorAll<HTMLElement>('.msg').forEach((el) => {
+      const stable = el.getAttribute('data-message-id') || ''
+      if (stable) existingByStableIdentity.set(stable, el)
+      const fallback =
+        el.getAttribute('data-history-fallback-id') || historyElementFallbackIdentity(el)
+      if (fallback) pushIdentityElement(existingByFallbackIdentity, fallback, el)
+    })
+
+    th.querySelector('.chat-empty')?.remove()
     th.querySelectorAll('.chat-day-sep, .chat-empty').forEach((el) => el.remove())
     const consumed = new Set<HTMLElement>()
-    const existing = Array.from(th.querySelectorAll<HTMLElement>('.msg'))
-    existing.forEach((el) => {
-      // Never reap a live streaming bubble while streaming (owned by the controller).
-      if (deps.isStreaming()) return
-      el.remove()
-    })
-    _lastHeaderDay = ''
+    headerState.current.day = ''
+    headerState.current.role = ''
     deps.resetMessageGrouping?.()
+    deps.prepareHistoryRouterFx()
+    deps.beginSavingsHistoryReplay()
     let assistantIndex = 0
+    let userIndex = 0
+    let lastUserRequestKind: 'image' | 'text' = 'text'
 
     messages.forEach((msg) => {
+      if (msg.role === 'user') {
+        userIndex += 1
+        lastUserRequestKind = routerFxRequestKindFromAttachments(
+          historyMessageRecords(msg, 'attachments'),
+        )
+      }
       const rawText = msg.text || ''
       const displayText = msg.role === 'user' ? deps.stripTimePrefix(rawText) : rawText
       const stableIdentity = historyStableMessageIdentity(msg)
+      const fallbackIdentity = historyFallbackIdentity(msg.role, displayText)
       const timestamp = (msg.timestamp as unknown as string) ?? (msg as { ts?: string }).ts ?? null
       appendHistoryDaySeparator(timestamp)
-      const div = deps.addMessage(msg.role, displayText, timestamp, {
+      const messageOptions = {
         provenanceKind: (msg as { provenance_kind?: string }).provenance_kind || '',
         provenanceSourceSessionKey:
           (msg as { provenance_source_session_key?: string }).provenance_source_session_key || '',
         provenanceSourceTool:
           (msg as { provenance_source_tool?: string }).provenance_source_tool || '',
-      })
+      }
+      // Capture the shared cursor before `addMessage` advances it. Reused rows
+      // do not go through `addMessage`, while newly-created rows do; this makes
+      // the reconciliation result identical for both identity paths.
+      const previousHeaderDay = headerState.current.day
+      const previousHeaderRole = headerState.current.role
+      let div = stableIdentity ? existingByStableIdentity.get(stableIdentity) || null : null
+      if (!div) {
+        div = shiftIdentityElement(existingByFallbackIdentity, fallbackIdentity, consumed)
+      }
+      if (div) {
+        deps.replaceMessage(div, msg.role, displayText, timestamp, messageOptions)
+      } else {
+        div = deps.addMessage(msg.role, displayText, timestamp, messageOptions)
+      }
       if (!div) return
       consumed.add(div)
       deps.stampHistoryElement(
@@ -342,6 +545,53 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
         // chat.js:5648 — export mirrors `ts: msg.timestamp || msg.ts || null`.
         timestamp,
       )
+      appendHistoryElementInOrder(div)
+
+      const displayRole = div.classList.contains('subagent') ? 'subagent' : msg.role
+      const day = deps.dayKey(timestamp || '')
+      const collapsible = displayRole === 'user' || displayRole === 'assistant'
+      const sameGroup =
+        collapsible && displayRole === previousHeaderRole && day === previousHeaderDay && day !== ''
+      deps.syncMessageHeader(div, displayRole, timestamp, messageOptions, sameGroup)
+      if (collapsible) headerState.current.role = displayRole
+
+      // chat.js:5675-5694 — body additions have a strict order. Tool
+      // reconstruction may replace the entire body; attachments follow those
+      // segments, then generated artifacts follow the attachments.
+      const toolCalls = historyMessageRecords(msg, 'tool_calls')
+      if (msg.role === 'assistant' && toolCalls.length > 0) {
+        deps.reconstructToolCalls(div, toolCalls)
+      }
+
+      const attachments = historyMessageRecords(msg, 'attachments')
+      if (attachments.length > 0) {
+        const body = div.querySelector<HTMLElement>('.msg-body')
+        if (body) {
+          body.classList.add('msg-body--has-attachments')
+          if (msg.role === 'user' && (body.textContent || '').trim()) {
+            // The body came from message text; escape it before the deliberate
+            // legacy innerHTML rewrite so history payloads cannot inject markup.
+            body.innerHTML = `<div class="msg-attachment-text">${deps.esc(body.textContent || '')}</div>`
+          }
+          const attachmentHtml = attachments
+            .map((attachment) => deps.renderMessageAttachmentHtml(attachment))
+            .join('')
+          body.insertAdjacentHTML(
+            'beforeend',
+            `<div class="msg-attachments">${attachmentHtml}</div>`,
+          )
+        }
+      }
+
+      const artifacts = historyMessageArtifacts(msg)
+      if (artifacts.length > 0) {
+        const body = div.querySelector<HTMLElement>('.msg-body')
+        if (body) body.insertAdjacentHTML('beforeend', deps.renderArtifacts(artifacts))
+      }
+
+      // Tool reconstruction and the user-attachment body rewrite above remove
+      // the toolbar installed by addMessage. Re-attach only after every body
+      // mutation so actions are last and remain interactive (chat.js:5695-5698).
       deps.attachHoverActions(div, msg.role)
       if (msg.role === 'assistant') {
         const meta = deps.turnMetaForMessage?.(
@@ -349,9 +599,60 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
           assistantIndex,
         )
         assistantIndex += 1
-        if (meta) deps.attachTurnMeta?.(div, meta.model, meta.input, meta.output, meta.saved)
+        if (meta) {
+          const savedUsage = meta.saved ? { ...meta.saved } : null
+          // chat.js:991-996 `_savedUsageFromMeta` — older locally persisted
+          // turn-meta rows can keep the model only on the outer record. Carry
+          // that real value into the cloned usage payload so SavingsFX/router
+          // identity reconstruction does not silently lose the turn.
+          if (savedUsage && !savedUsage.model && !savedUsage.routed_model && meta.model) {
+            savedUsage.model = meta.model
+          }
+          deps.noteSavingsHistoryTurn(savedUsage)
+          if (savedUsage) {
+            const raw = msg as unknown as Record<string, unknown>
+            deps.reconcileHistoryRouterFx(savedUsage, {
+              turnIndex: userIndex,
+              requestKind: lastUserRequestKind,
+              hintTimestamp:
+                (raw.timestamp as string | number | null | undefined) ||
+                (raw.ts as string | number | null | undefined) ||
+                (raw.message_id as string | number | null | undefined) ||
+                '',
+            })
+          }
+          deps.attachTurnMeta?.(div, meta.model, meta.input, meta.output, savedUsage)
+        } else {
+          deps.noteSavingsHistoryTurn(null)
+        }
       }
     })
+
+    // Pending live/replayed decisions may now resolve against the reconstructed
+    // user anchors. Set the lifecycle flag before flushing them (chat.js:5751).
+    deps.markHistoryRendered()
+    deps.finishHistoryRouterFx()
+
+    const streamBubble = deps.getStreamBubble()
+    const thinking = deps.getThinkingIndicator()
+    const liveUserAnchor = deps.getCurrentSessionLiveUserAnchor()
+    th.querySelectorAll<HTMLElement>('.msg').forEach((el) => {
+      if (deps.isStreaming() && el === streamBubble) return
+      if (deps.isStreaming() && el === thinking) return
+      if (deps.isStreaming() && el === liveUserAnchor) return
+      if (deps.isPendingFinalizedAssistantBubble(el) && historyStillWaitingForAssistant(messages))
+        return
+      if (!consumed.has(el)) el.remove()
+    })
+    const pendingFinalized = deps.getPendingFinalizedAssistantBubble()
+    if (
+      pendingFinalized &&
+      (consumed.has(pendingFinalized) ||
+        !pendingFinalized.isConnected ||
+        !historyStillWaitingForAssistant(messages))
+    ) {
+      deps.clearPendingFinalizedAssistantBubble()
+    }
 
     renderHistoryScopeRow(state)
 

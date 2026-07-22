@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest'
-import { createSeqGate } from './stream'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ROUTER_FX_PREF_KEY } from './routerFx'
+import { createSeqGate, createStreamController } from './stream'
 
 // The seq gate is the one pure, timing-independent core of the streaming
 // renderer. It is ported verbatim from legacy chat.js
@@ -64,5 +65,120 @@ describe('stream seq gate (parity chat.js:6345-6378, 1645-1682)', () => {
     expect(gate.highWater('s2')).toBe(0) // untouched session
     gate.sync('s2', 12)
     expect(gate.highWater('s2')).toBe(12) // server-advertised subscribe cursor
+  })
+})
+
+describe('stream history-reconciliation state', () => {
+  beforeEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('re-hydrates the shared router and SavingsFX preference on config refresh', () => {
+    localStorage.setItem(ROUTER_FX_PREF_KEY, JSON.stringify({ enabled: true }))
+    const controller = createStreamController({ current: document.createElement('div') })
+    expect(controller.routerFxPref.enabled).toBe(true)
+    expect(controller.savingsFxEnabled()).toBe(true)
+
+    localStorage.setItem(ROUTER_FX_PREF_KEY, JSON.stringify({ enabled: false }))
+    expect(controller.reloadRouterFxPreference()).toBe(false)
+    expect(controller.routerFxPref.enabled).toBe(false)
+    expect(controller.savingsFxEnabled()).toBe(false)
+
+    localStorage.removeItem(ROUTER_FX_PREF_KEY)
+  })
+
+  it('renders the live day separator, stamps raw history text, and tracks the finalized bubble', () => {
+    const thread = document.createElement('div')
+    document.body.appendChild(thread)
+    const stampHistoryElement = vi.fn(
+      (row: HTMLElement, _stable: string, role: string, text: string) => {
+        row.dataset.historyRole = role
+        row.dataset.historyRawText = text
+      },
+    )
+    const controller = createStreamController(
+      { current: thread },
+      {
+        getSessionKey: () => 'agent:main:webchat:test',
+        dayKey: () => '2026-07-22',
+        dayLabel: () => 'Today',
+        stampHistoryElement,
+      },
+    )
+
+    controller.startStreaming()
+    controller.appendDelta('final answer')
+    const bubble = controller.getStreamBubble()
+    controller.endStreaming()
+
+    expect(thread.querySelector('.chat-day-sep')).toHaveTextContent('Today')
+    expect(stampHistoryElement).toHaveBeenCalledWith(bubble, '', 'assistant', 'final answer')
+    expect(bubble).toHaveAttribute('data-history-raw-text', 'final answer')
+    expect(controller.getPendingFinalizedAssistantBubble()).toBe(bubble)
+    expect(controller.isPendingFinalizedAssistantBubble(bubble)).toBe(true)
+
+    controller.clearPendingFinalizedAssistantBubble()
+    expect(controller.getPendingFinalizedAssistantBubble()).toBeNull()
+    expect(bubble).not.toHaveAttribute('data-pending-finalized-assistant')
+    controller.clearViewLocalStreamState('test_cleanup')
+  })
+
+  it('reuses the shared live-message grouping cursor without splitting a turn', () => {
+    const thread = document.createElement('div')
+    document.body.appendChild(thread)
+    const headerState = { current: { day: '2026-07-22', role: 'user' } }
+    const existingSeparator = document.createElement('div')
+    existingSeparator.className = 'chat-day-sep'
+    existingSeparator.textContent = 'Today'
+    thread.appendChild(existingSeparator)
+
+    const controller = createStreamController(
+      { current: thread },
+      {
+        getSessionKey: () => 'agent:main:webchat:test',
+        dayKey: () => '2026-07-22',
+        dayLabel: () => 'Today',
+        headerState,
+      },
+    )
+
+    controller.startStreaming()
+    controller.appendDelta('first answer')
+
+    expect(thread.querySelectorAll('.chat-day-sep')).toHaveLength(1)
+    expect(thread.querySelector('.msg.assistant .msg-header')).not.toBeNull()
+    expect(headerState.current.role).toBe('assistant')
+    controller.endStreaming()
+    controller.clearViewLocalStreamState('test_cleanup')
+  })
+
+  it('derives, parks, and restores the current live user anchor by default', () => {
+    const thread = document.createElement('div')
+    document.body.appendChild(thread)
+    const user = document.createElement('div')
+    user.className = 'msg user'
+    user.dataset.historyRole = 'user'
+    user.innerHTML = '<div class="msg-body">question</div>'
+    thread.appendChild(user)
+    const controller = createStreamController(
+      { current: thread },
+      {
+        getSessionKey: () => 'agent:main:webchat:test',
+      },
+    )
+
+    controller.startStreaming()
+    const bubble = controller.ensureStreamBubble()
+    expect(controller.getCurrentSessionLiveUserAnchor()).toBe(user)
+
+    expect(controller.parkCurrentSessionStreamState('session_switch')).toBe(true)
+    expect(user.isConnected).toBe(false)
+    expect(bubble.isConnected).toBe(false)
+
+    expect(controller.restoreLiveStreamStateForSession('agent:main:webchat:test')).toBe(true)
+    expect(user.isConnected).toBe(true)
+    expect(bubble.isConnected).toBe(true)
+    expect(user.nextElementSibling).toBe(bubble)
+    controller.clearViewLocalStreamState('test_cleanup')
   })
 })

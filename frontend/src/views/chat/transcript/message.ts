@@ -1,4 +1,4 @@
-import type { MarkdownDep } from './stream'
+import type { MarkdownDep, TranscriptHeaderStateRef } from './stream'
 import { modelDisplayName } from './routerFx'
 import {
   stripDirectiveTags,
@@ -26,7 +26,12 @@ export interface TurnUsage extends Record<string, unknown> {
   cached_tokens?: number
   reasoning_tokens?: number
   cost_usd?: number
+  total_savings_usd?: number
+  savings_usd?: number
+  savings_pct?: number
   total_savings_pct?: number
+  routing_confidence?: number
+  cache_hit_active?: boolean
   __savings_ui_suppressed?: boolean
 }
 
@@ -45,9 +50,23 @@ export interface MessageRendererDeps {
   getSessionKey: () => string
   isStreaming: () => boolean
   scrollToBottom: () => void
+  /** chat.js:7833/7840 — shared day cursor + human separator label. */
+  dayKey?: (timestamp: string | number | null | undefined) => string
+  dayLabel?: (dayKey: string) => string
+  /** Shared legacy `_lastHeaderDay` / `_lastHeaderRole` cursor. */
+  headerState?: TranscriptHeaderStateRef
   toast: (message: string, kind?: 'info' | 'warn' | 'error', durationMs?: number) => void
+  /** savings-fx.js:166 — the streak snapshot owned by the composed controller. */
+  getSavingsStreak?: () => { current: number; max: number }
+  /** savings-fx.js:62-65 — shared label formatter; never invents a percentage. */
+  savingsLabel?: (savePct: number) => string
   onEdit?: (text: string) => void
   onRegenerate?: (text: string) => void
+}
+
+export interface TurnMetaOptions {
+  /** chat.js:1092 — one-shot shimmer for a live, non-replayed savings turn. */
+  flash?: boolean
 }
 
 const TURN_META_LS = 'agentos.turnmeta.'
@@ -55,6 +74,24 @@ const TURN_META_LS = 'agentos.turnmeta.'
 function numeric(value: unknown): number {
   const n = Number(value || 0)
   return Number.isFinite(n) ? n : 0
+}
+
+const SAVINGS_FLAME_PATH =
+  'M8 16c3.4 0 6-2.55 6-5.78 0-3.05-2.7-4.6-2.7-7.55 0 0-1.55 1.45-2.5 4.4C8.55 4.5 8.4 1 6.5 0 6.6 3 4 4.45 4 7.6 4 11.05 5.65 16 8 16z'
+
+function savingsFlame(className: string): SVGSVGElement {
+  const ns = 'http://www.w3.org/2000/svg'
+  const flame = document.createElementNS(ns, 'svg')
+  flame.setAttribute('class', className)
+  flame.setAttribute('viewBox', '0 0 16 16')
+  flame.setAttribute('aria-hidden', 'true')
+  flame.setAttribute('width', '1em')
+  flame.setAttribute('height', '1em')
+  const path = document.createElementNS(ns, 'path')
+  path.setAttribute('d', SAVINGS_FLAME_PATH)
+  path.setAttribute('fill', 'currentColor')
+  flame.appendChild(path)
+  return flame
 }
 
 export function formatTokenCount(n: number): string {
@@ -170,6 +207,9 @@ function actionButton(action: string, label: string, paths: string[]): HTMLButto
 }
 
 export function createMessageRenderer(deps: MessageRendererDeps) {
+  const dayKey = deps.dayKey ?? (() => '')
+  const dayLabel = deps.dayLabel ?? ((key: string) => key)
+  const headerState = deps.headerState ?? { current: { day: '', role: '' } }
   function extractBubbleText(row: HTMLElement): string {
     const body = row.querySelector(':scope > .msg-body') as HTMLElement | null
     if (!body) return ''
@@ -305,6 +345,68 @@ export function createMessageRenderer(deps: MessageRendererDeps) {
     }
   }
 
+  function messageTimestampTitle(timestamp?: string | number | null): string {
+    if (timestamp == null || timestamp === '') return ''
+    const date =
+      typeof timestamp === 'number'
+        ? new Date(timestamp)
+        : /^\d+$/.test(timestamp.trim())
+          ? new Date(Number(timestamp))
+          : new Date(timestamp)
+    return Number.isNaN(date.getTime()) ? '' : date.toLocaleString()
+  }
+
+  /**
+   * chat.js:5983-6009 — reconcile a row header after history identity reuse.
+   * `sameGroup` is calculated by the history traversal rather than from the
+   * current DOM, because unconsumed rows and a live stream tail remain mounted
+   * while pagination is being rebuilt.
+   */
+  function syncMessageHeader(
+    row: HTMLElement,
+    displayRole: string,
+    timestamp: string | number | null | undefined,
+    options: MessageOptions = {},
+    sameGroup = false,
+  ): void {
+    const existing = row.querySelector<HTMLElement>(':scope > .msg-header')
+    const timestampTitle = messageTimestampTitle(timestamp)
+    if (sameGroup) {
+      existing?.remove()
+      if (timestampTitle) row.title = timestampTitle
+      else row.removeAttribute('title')
+      return
+    }
+
+    const header = existing || document.createElement('div')
+    header.className = 'msg-header'
+    header.replaceChildren()
+
+    const label = document.createElement('span')
+    label.className = 'role-label'
+    label.textContent = deps.displayRoleLabel(displayRole)
+    header.appendChild(label)
+
+    if (options.provenanceKind === 'cron') {
+      const tags = document.createElement('span')
+      tags.className = 'msg-tags'
+      const tag = document.createElement('span')
+      tag.className = 'cron-tag'
+      tag.textContent = 'Cron'
+      tags.appendChild(tag)
+      header.appendChild(tags)
+    }
+
+    const time = document.createElement('span')
+    time.className = 'msg-time'
+    time.textContent = row.dataset.time || ''
+    header.appendChild(time)
+    if (timestampTitle) header.title = timestampTitle
+    else header.removeAttribute('title')
+    row.removeAttribute('title')
+    if (!existing) row.insertBefore(header, row.firstChild)
+  }
+
   function addMessage(
     role: string,
     text: string,
@@ -314,6 +416,23 @@ export function createMessageRenderer(deps: MessageRendererDeps) {
     const thread = deps.thread()
     if (!thread) return null
     thread.querySelector('.chat-empty')?.remove()
+
+    // chat.js:7856-7866 — every non-stream row participates in the SAME day
+    // cursor as history and streaming. This keeps a live prompt on the correct
+    // side of midnight and prevents the stream from inserting a separator
+    // between that prompt and its response.
+    const day = dayKey(timestamp)
+    if (day && day !== headerState.current.day) {
+      const separator = document.createElement('div')
+      separator.className = 'chat-day-sep'
+      const label = document.createElement('span')
+      label.textContent = dayLabel(day)
+      separator.appendChild(label)
+      thread.appendChild(separator)
+      headerState.current.day = day
+      headerState.current.role = ''
+    }
+
     const subagent = isSubagentCompletion(role, text, options)
     const displayRole = subagent ? 'subagent' : role
     const row = document.createElement('div')
@@ -322,33 +441,13 @@ export function createMessageRenderer(deps: MessageRendererDeps) {
     deps.stampRowMeta(row, displayRole, timestamp)
 
     const collapsible = displayRole === 'user' || displayRole === 'assistant'
-    const previous = thread.lastElementChild
     const sameGroup =
       collapsible &&
-      previous?.classList.contains('msg') === true &&
-      previous.classList.contains(displayRole)
-    if (!sameGroup) {
-      const header = document.createElement('div')
-      header.className = 'msg-header'
-      const label = document.createElement('span')
-      label.className = 'role-label'
-      label.textContent = deps.displayRoleLabel(displayRole)
-      header.appendChild(label)
-      if (options.provenanceKind === 'cron') {
-        const tags = document.createElement('span')
-        tags.className = 'msg-tags'
-        const tag = document.createElement('span')
-        tag.className = 'cron-tag'
-        tag.textContent = 'Cron'
-        tags.appendChild(tag)
-        header.appendChild(tags)
-      }
-      const time = document.createElement('span')
-      time.className = 'msg-time'
-      time.textContent = row.dataset.time || ''
-      header.appendChild(time)
-      row.appendChild(header)
-    }
+      displayRole === headerState.current.role &&
+      day === headerState.current.day &&
+      day !== ''
+    if (collapsible) headerState.current.role = displayRole
+    syncMessageHeader(row, displayRole, timestamp, options, sameGroup)
 
     const body = document.createElement('div')
     renderBody(body, role, text, options)
@@ -365,26 +464,35 @@ export function createMessageRenderer(deps: MessageRendererDeps) {
     totalInput: number,
     totalOutput: number,
     usage: TurnUsage | null = null,
+    opts: TurnMetaOptions = {},
   ): void {
     if (!row) return
     row.querySelectorAll(':scope > .msg-meta').forEach((node) => node.remove())
     const data = usage || {}
     const hasModel = Boolean(model.trim())
     const hasTokens = totalInput > 0 || totalOutput > 0
-    const savings = numeric(data.total_savings_pct)
+    // chat.js:1022-1025 accepts a persisted percentage only when the payload
+    // contains a real finite number. Do not coerce malformed strings into UI.
+    const savings =
+      typeof data.total_savings_pct === 'number' && Number.isFinite(data.total_savings_pct)
+        ? data.total_savings_pct
+        : 0
     const hasSavings =
       !data.__savings_ui_suppressed &&
       Boolean(data.routed_tier && data.routing_source && data.routing_source !== 'none') &&
       savings > 0
-    if (!hasModel && !hasTokens && numeric(data.cost_usd) <= 0 && !hasSavings) return
+    const streak = Math.trunc(deps.getSavingsStreak?.().current || 0)
+    const hasCombo = hasSavings && streak >= 2
+    if (!hasModel && !hasTokens && numeric(data.cost_usd) <= 0 && !hasSavings && !hasCombo) return
     const meta = document.createElement('div')
     meta.className = 'msg-meta'
-    const add = (className: string, text: string, title = '') => {
+    const add = (className: string, text: string, title = ''): HTMLSpanElement => {
       const span = document.createElement('span')
       span.className = className
       span.textContent = text
       if (title) span.title = title
       meta.appendChild(span)
+      return span
     }
     if (hasModel) {
       const display = modelDisplayName(model)
@@ -404,11 +512,46 @@ export function createMessageRenderer(deps: MessageRendererDeps) {
     const cost = numeric(data.cost_usd)
     if (cost > 0) add('msg-meta__cost', `$${cost.toFixed(6).replace(/\.?0+$/, '')}`)
     if (hasSavings) {
-      add(
-        'msg-meta__saved',
-        `saved ~${Math.round(savings)}%`,
-        `Pilot Router routed this turn (~${Math.round(savings)}% vs flagship)`,
-      )
+      const tierClass =
+        savings >= 65 ? ' msg-meta__saved--peak' : savings >= 45 ? ' msg-meta__saved--high' : ''
+      const saved = document.createElement('span')
+      saved.className = `msg-meta__saved${tierClass}`
+      saved.title = `Pilot Router routed this turn (~${Math.round(savings)}% vs flagship)`
+      saved.appendChild(savingsFlame('msg-meta__saved-flame'))
+      const label = document.createElement('span')
+      label.className = 'msg-meta__saved-label'
+      label.textContent = deps.savingsLabel
+        ? deps.savingsLabel(savings)
+        : savings > 0
+          ? `Saved ~${Math.round(savings)}%`
+          : 'Cost optimized'
+      saved.appendChild(label)
+      meta.appendChild(saved)
+      if (opts.flash && savings >= 20) {
+        saved.classList.add('msg-meta__saved--flash')
+        saved.addEventListener(
+          'animationend',
+          () => saved.classList.remove('msg-meta__saved--flash'),
+          { once: true },
+        )
+      }
+    }
+    if (hasCombo) {
+      const tierClass =
+        streak >= 5 ? ' msg-meta__combo--blaze' : streak >= 3 ? ' msg-meta__combo--hot' : ''
+      const combo = document.createElement('span')
+      combo.className = `msg-meta__combo${tierClass}`
+      combo.title = `Pilot Router combo — ${streak} consecutive savings turns`
+      combo.setAttribute('aria-label', `Combo ${streak}`)
+      combo.appendChild(savingsFlame('msg-meta__combo-flame'))
+      const label = document.createElement('span')
+      label.className = 'msg-meta__combo-label'
+      label.textContent = 'COMBO'
+      const count = document.createElement('span')
+      count.className = 'msg-meta__combo-count'
+      count.textContent = `×${streak}`
+      combo.append(label, count)
+      meta.appendChild(combo)
     }
     row.appendChild(meta)
   }
@@ -419,7 +562,11 @@ export function createMessageRenderer(deps: MessageRendererDeps) {
     attachHoverActions,
     attachTurnMeta,
     extractBubbleText,
-    resetGrouping: () => {},
+    syncMessageHeader,
+    resetGrouping: () => {
+      headerState.current.day = ''
+      headerState.current.role = ''
+    },
   }
 }
 

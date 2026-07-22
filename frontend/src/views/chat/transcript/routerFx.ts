@@ -66,6 +66,28 @@ export interface RouterFxDecision {
   [k: string]: unknown
 }
 
+/** Persisted assistant-turn routing fields carried by `chat.history` usage. */
+export interface RouterFxUsage {
+  routed_tier?: string
+  routed_model?: string
+  model?: string
+  routing_source?: string
+  routing_confidence?: number
+  routing_applied?: boolean
+  rollout_phase?: string
+  [k: string]: unknown
+}
+
+/** Context the history walk supplies for one assistant turn. */
+export interface RouterFxHistoryOptions {
+  /** Stable assistant timestamp/message id used only when no cached layout seed exists. */
+  hintTimestamp?: number | string | null
+  /** Request kind derived from the most recent user message's attachments. */
+  requestKind?: string
+  /** One-based count of user messages encountered by the history walk. */
+  turnIndex: number | string
+}
+
 /** A deduped roster entry for one visual grid cell (chat.js:3543-3548). */
 export interface RouterFxVisualEntry {
   key: string
@@ -1532,34 +1554,24 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     scrollToBottom()
   }
 
-  /* ── history entry point (chat.js:4637-4680) ──────────────────────────── */
+  /* ── history entry point (chat.js:4637-4680 / 5611-5770) ─────────────── */
 
-  function buildRouterFxFromUsage(
-    usage:
-      | {
-          routed_tier?: string
-          routed_model?: string
-          model?: string
-          routing_source?: string
-          routing_confidence?: number
-          routing_applied?: boolean
-          rollout_phase?: string
-        }
-      | null
-      | undefined,
-    seedKey: string | number | null | undefined,
-    opts: { requestKind?: string } = {},
-  ): RouterFxStripElement | null {
-    if (!usage) return null
-    if (!pref.enabled) return null
+  /**
+   * Apply the history-only render gates and normalize persisted usage into the
+   * live decision shape. `chat.history` carries this data under `message.usage`
+   * (legacy also accepts `message.turn_usage`); it does not persist a separate
+   * router-decision object.
+   */
+  function historyDecisionFromUsage(
+    usage: RouterFxUsage | null | undefined,
+  ): RouterFxDecision | null {
+    if (!usage || !pref.enabled) return null
     if (reg.configTiers !== null && !routerFeatureEnabled()) return null
     const tier = routerFxNormalizeTier(usage.routed_tier || '')
     if (!tier) return null
-    if (reg.configTiers !== null && !reg.configTiers.has(tier)) {
-      return null
-    }
+    if (reg.configTiers !== null && !reg.configTiers.has(tier)) return null
     reg.rememberTierDecision(tier, usage.routed_model || usage.model || '')
-    const decision: RouterFxDecision = {
+    return {
       tier,
       model: usage.routed_model || usage.model || '',
       source: usage.routing_source || 'none',
@@ -1568,18 +1580,110 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
       routing_applied: usage.routing_applied !== false,
       rollout_phase: usage.rollout_phase || 'full',
     }
+  }
+
+  function buildRouterFxFromUsage(
+    usage: RouterFxUsage | null | undefined,
+    seedKey: string | number | null | undefined,
+    opts: { requestKind?: string } = {},
+  ): RouterFxStripElement | null {
+    const decision = historyDecisionFromUsage(usage)
+    if (!decision) return null
     const requestKind = routerFxRequestKindFromDecision(decision, opts.requestKind)
     return buildRouterFxElement(decision, {
       preSettled: true,
-      seedKey: seedKey != null ? String(seedKey) : 'history:' + tier,
+      seedKey: seedKey != null ? String(seedKey) : 'history:' + decision.tier,
       requestKind,
     })
+  }
+
+  /**
+   * chat.js:5611-5616 — remove dock residue that cannot belong to this history
+   * rebuild. A stamped strip for the current session survives so the per-turn
+   * reconciliation below can reuse it without visually reordering the cells.
+   */
+  function prepareHistoryRouterFx(): void {
+    const currentSessionKey = sessionKey()
+    strips().forEach((el) => {
+      if (el.dataset.sessionKey === currentSessionKey && el.dataset.turnIndex) return
+      removeStrip(el)
+    })
+  }
+
+  /**
+   * chat.js:5712-5741 — reconcile one persisted assistant turn into the singleton
+   * composer dock. The caller walks history oldest-to-newest, so the latest
+   * eligible turn naturally replaces older settled receipts. A current-session
+   * live scan always wins and is never overwritten by history hydration.
+   */
+  function reconcileHistoryRouterFx(
+    usage: RouterFxUsage | null | undefined,
+    opts: RouterFxHistoryOptions,
+  ): RouterFxStripElement | null {
+    const decision = historyDecisionFromUsage(usage)
+    if (!decision) return null
+    const requestKind = routerFxRequestKindFromDecision(decision, opts.requestKind)
+    if (!routerFxHasMultipleCandidates(reg, requestKind, decision)) return null
+
+    const currentSessionKey = sessionKey()
+    const existing = strips()
+    const liveStrip = existing.find(
+      (el) =>
+        (el.dataset.live === 'true' || el.dataset.scanning === 'true') &&
+        el.dataset.sessionKey === currentSessionKey,
+    )
+    if (liveStrip) return null
+
+    const identity = routerFxDecisionIdentity(decision)
+    const dockStrip = existing[0] || null
+    const alreadyInPlace =
+      dockStrip &&
+      dockStrip.dataset.sessionKey === currentSessionKey &&
+      dockStrip.dataset.routerIdentity === identity &&
+      dockStrip.dataset.live !== 'true' &&
+      dockStrip.dataset.scanning !== 'true'
+    if (alreadyInPlace) {
+      dockStrip.dataset.turnIndex = String(opts.turnIndex)
+      normalizeSettledStrip(dockStrip, 'history', decision)
+      return dockStrip
+    }
+
+    const seed = routerFxResolveLayoutSeed(currentSessionKey, opts.hintTimestamp ?? undefined)
+    const wrap = buildRouterFxElement(decision, {
+      preSettled: true,
+      renderMode: 'history',
+      seedKey: seed,
+      requestKind,
+    })
+    if (!wrap) return null
+    wrap.dataset.sessionKey = currentSessionKey
+    wrap.dataset.turnIndex = String(opts.turnIndex)
+    insertAnchored(wrap)
+    return wrap
+  }
+
+  /**
+   * chat.js:5751-5770 — run after the history owner marks hydration complete.
+   * Pending replay decisions can now find a user anchor; stale/unstamped strips
+   * are then pruned, with the visual preference acting as the final sweep.
+   */
+  function finishHistoryRouterFx(): void {
+    flushPendingRouterDecisions()
+    const currentSessionKey = sessionKey()
+    strips().forEach((el) => {
+      if (el.dataset.sessionKey === currentSessionKey && el.dataset.turnIndex) return
+      removeStrip(el)
+    })
+    if (!pref.enabled) clearRouterFxVisuals('preference_disabled_history')
   }
 
   return {
     // live entry + history builder
     handleRouterDecision,
     buildRouterFxFromUsage,
+    prepareHistoryRouterFx,
+    reconcileHistoryRouterFx,
+    finishHistoryRouterFx,
     // pending-anchor cache (flushed by the history renderer once an anchor exists)
     cachePendingRouterDecision,
     flushPendingRouterDecisions,

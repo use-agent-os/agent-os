@@ -30,6 +30,7 @@ import {
   parseSlashInput,
   readSessionFromUrl,
   replayGapShouldWarn,
+  renderMessageAttachmentHtml,
   resolveAttachmentMime,
   sendButtonState,
   sessionItemKey,
@@ -469,7 +470,40 @@ describe('attachment helpers (parity chat.js:8299-8325)', () => {
       'data:text/plain;base64,QQ==',
     )
     expect(attachmentDownloadHref({ dataUrl: 'javascript:alert(1)' }, 'text/plain')).toBe('')
+    expect(attachmentDownloadHref({ url: 'java\nscript:alert(1)' }, 'text/plain')).toBe('')
+    expect(attachmentDownloadHref({ url: 'vbscript:alert(1)' }, 'text/plain')).toBe('')
+    expect(attachmentDownloadHref({ url: '/api/v1/attachments/a' }, 'text/plain')).toBe(
+      '/api/v1/attachments/a',
+    )
     expect(attachmentDownloadHref(null, 'text/plain')).toBe('')
+  })
+  it('renders escaped history/live attachment markup and rejects an unsafe image source', () => {
+    const html = renderMessageAttachmentHtml({
+      name: '"><img src=x onerror=alert(1)>',
+      mime: 'text/plain',
+      data: 'QQ==',
+    })
+    const host = document.createElement('div')
+    host.innerHTML = html
+    expect(host.querySelectorAll('img')).toHaveLength(0)
+    expect(host.querySelector('.msg-file-chip__name')).toHaveTextContent(
+      '"><img src=x onerror=alert(1)>',
+    )
+    expect(host.querySelector('a')).toHaveAttribute('download', '"><img src=x onerror=alert(1)>')
+    expect(
+      renderMessageAttachmentHtml({
+        name: 'unsafe.png',
+        mime: 'image/png',
+        dataUrl: 'javascript:alert(1)',
+      }),
+    ).toBe('')
+    expect(
+      renderMessageAttachmentHtml({
+        name: 'wrong-data-type.png',
+        mime: 'image/png',
+        dataUrl: 'data:text/html,<script>alert(1)</script>',
+      }),
+    ).toBe('')
   })
 })
 
