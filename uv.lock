@@ -3898,6 +3898,7 @@ dependencies = [
     { name = "html2text" },
     { name = "httpx" },
     { name = "jinja2" },
+    { name = "mcp" },
     { name = "openpyxl" },
     { name = "pdfplumber" },
     { name = "pillow" },
@@ -3943,9 +3944,6 @@ matrix = [
 matrix-e2e = [
     { name = "markdown" },
     { name = "matrix-nio", extra = ["e2e"] },
-]
-mcp = [
-    { name = "mcp" },
 ]
 mem0 = [
     { name = "mem0ai" },
@@ -4003,7 +4001,7 @@ requires-dist = [
     { name = "markdown", marker = "extra == 'matrix-e2e'", specifier = ">=3.0" },
     { name = "matrix-nio", marker = "extra == 'matrix'", specifier = ">=0.25,<0.26" },
     { name = "matrix-nio", extras = ["e2e"], marker = "extra == 'matrix-e2e'", specifier = ">=0.25,<0.26" },
-    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.2.0" },
+    { name = "mcp", specifier = ">=1.2.0" },
     { name = "mem0ai", marker = "extra == 'mem0'", specifier = ">=0.1.70" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
     { name = "numpy", marker = "extra == 'ml-router'", specifier = ">=1.26" },
@@ -4045,7 +4043,7 @@ requires-dist = [
     { name = "websockets", specifier = ">=13.0" },
     { name = "yoyo-migrations", specifier = ">=8.2" },
 ]
-provides-extras = ["dev", "mcp", "memory", "recommended", "ml-router", "mem0", "matrix", "matrix-e2e", "document-extras"]
+provides-extras = ["dev", "memory", "recommended", "ml-router", "mem0", "matrix", "matrix-e2e", "document-extras"]
 
 [package.metadata.requires-dev]
 dev = [
