@@ -34,6 +34,13 @@ _pending_by_state: dict[str, _PendingOAuth] = {}
 _pending_by_server: dict[str, _PendingOAuth] = {}
 
 
+def _require_mcp_enabled(ctx: RpcContext) -> None:
+    if ctx.config is None:
+        raise ValueError("No config available")
+    if not ctx.config.mcp.enabled:
+        raise ValueError("MCP runtime is disabled")
+
+
 def _server_entry(ctx: RpcContext, name: str) -> Any:
     if ctx.config is None:
         raise ValueError("No config available")
@@ -62,6 +69,7 @@ def _runtime_config(
 
 
 async def _activate(ctx: RpcContext, config: MCPServerConfig) -> list[str]:
+    _require_mcp_enabled(ctx)
     if ctx.tool_registry is None:
         raise ValueError("Tool registry unavailable")
     await disconnect_and_unregister(config.name, ctx.tool_registry)
@@ -135,6 +143,7 @@ async def _handle_mcp_status(params: dict | None, ctx: RpcContext) -> dict[str, 
 
 @_d.method("mcp.connect", scope="operator.admin")
 async def _handle_mcp_connect(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    _require_mcp_enabled(ctx)
     name = str((params or {}).get("name") or "").strip()
     if not name:
         raise ValueError("params.name is required")
@@ -159,6 +168,7 @@ async def _handle_mcp_disconnect(params: dict | None, ctx: RpcContext) -> dict[s
 
 @_d.method("mcp.oauth.start", scope="operator.admin")
 async def _handle_mcp_oauth_start(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    _require_mcp_enabled(ctx)
     values = params or {}
     name = str(values.get("name") or "").strip()
     redirect_uri = str(values.get("redirectUri") or "").strip()

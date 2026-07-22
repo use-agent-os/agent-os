@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -72,6 +72,44 @@ async def test_mcp_connect_requests_authorization_before_network(tmp_path) -> No
     assert result.error is None
     assert result.payload["connected"] is False
     assert result.payload["authorizationRequired"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "params"),
+    [
+        ("mcp.connect", {"name": "robinhood-trading"}),
+        (
+            "mcp.oauth.start",
+            {
+                "name": "robinhood-trading",
+                "redirectUri": "http://127.0.0.1/control/mcp/oauth/callback",
+            },
+        ),
+    ],
+)
+async def test_mcp_runtime_disabled_rejects_live_connection(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    params: dict[str, str],
+) -> None:
+    from agentos.gateway import rpc_mcp
+
+    ctx = _ctx(tmp_path)
+    ctx.config.mcp.enabled = False
+    activate = AsyncMock()
+    oauth_client = MagicMock()
+    monkeypatch.setattr(rpc_mcp, "_activate", activate)
+    monkeypatch.setattr(rpc_mcp, "MCPStreamableHTTPClient", oauth_client)
+
+    result = await get_dispatcher().dispatch("r1", method, params, ctx)
+
+    assert result.error is not None
+    assert result.error.code == "INVALID_REQUEST"
+    assert result.error.message == "MCP runtime is disabled"
+    activate.assert_not_awaited()
+    oauth_client.assert_not_called()
 
 
 @pytest.mark.asyncio
