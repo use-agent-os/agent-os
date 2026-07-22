@@ -86,6 +86,7 @@ _EOF_SENTINEL: object = object()
 # level so tests can monkeypatch it if they need a tighter window.
 _DOUBLE_CTRL_C_WINDOW_S: float = 1.5
 _ACTIVE_INPUT_PREFIX_WIDTH: int = 7
+_MAX_INPUT_HEIGHT: int = 10
 
 
 def _fullscreen_env() -> bool | None:
@@ -139,6 +140,18 @@ def _build_key_bindings() -> KeyBindings:
     cancel an in-flight turn task without tearing down the input surface.
     """
     bindings = KeyBindings()
+
+    @bindings.add("enter")
+    def _submit(event) -> None:  # type: ignore[no-untyped-def]
+        event.current_buffer.validate_and_handle()
+
+    @bindings.add("escape", "enter")
+    @bindings.add("c-j")
+    def _newline(event) -> None:  # type: ignore[no-untyped-def]
+        # Alt+Enter arrives as Escape followed by Enter. Terminals that can
+        # distinguish Shift+Enter commonly emit LF, the same sequence as
+        # Ctrl+J, so Ctrl+J is also the portable fallback.
+        event.current_buffer.newline(copy_margin=False)
 
     @bindings.add("c-c")
     def _ctrl_c(event) -> None:  # type: ignore[no-untyped-def]
@@ -322,7 +335,7 @@ class ChatApplication:
         self._next_paste_index = 1
 
         self._buffer = Buffer(
-            multiline=False,
+            multiline=True,
             accept_handler=self._on_accept,
             completer=completer,
             auto_suggest=auto_suggest,
@@ -357,14 +370,23 @@ class ChatApplication:
         def _input_prefix_width():  # type: ignore[no-untyped-def]
             return Dimension.exact(_ACTIVE_INPUT_PREFIX_WIDTH)
 
+        def _input_height() -> Dimension:
+            visible_lines = min(_MAX_INPUT_HEIGHT, self._buffer.document.line_count)
+            return Dimension.exact(max(1, visible_lines))
+
         input_window = VSplit(
             [
                 Window(
                     FormattedTextControl(_input_prefix_fragments),
                     width=_input_prefix_width,
                 ),
-                Window(BufferControl(buffer=self._buffer), height=Dimension.exact(1)),
-            ]
+                Window(
+                    BufferControl(buffer=self._buffer),
+                    height=_input_height,
+                    dont_extend_height=True,
+                ),
+            ],
+            height=_input_height,
         )
         toolbar_window = Window(
             FormattedTextControl(_toolbar_fragments),

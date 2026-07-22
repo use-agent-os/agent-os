@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.7.22] - 2026-07-22
+
 ### Added
 
 - `tools.enabled = false` provides an explicit plain-text mode for Ollama and
@@ -13,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- `agentos chat` input frame now supports multiline input instead of
+  submitting on every `Enter` (#62).
 - Ollama multi-turn tool conversations now preserve assistant tool calls,
   correlate tool results by name, normalize native arguments, and retain the
   provider's model and completion reason, preventing repeated searches caused

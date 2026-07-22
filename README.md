@@ -36,7 +36,7 @@ OpenAI, Anthropic, Ollama, DeepSeek, Gemini, Qwen/DashScope, and 20+
 other providers. You do not need to change your code or config to
 switch providers.
 
-AgentOS 2026.7.20 is the current release. The project website is
+AgentOS 2026.7.22 is the current release. The project website is
 [useagentos.dev](https://useagentos.dev). Follow
 [@useAgentOS](https://x.com/useAgentOS) on X for updates.
 
@@ -224,14 +224,14 @@ agentos gateway run
 > new terminal window. Or run the PATH command from step 1 again.
 
 For an install pinned to one exact version, add `==<version>` — for
-example `uv tool install --python 3.12 "use-agent-os[recommended]==2026.7.20"` —
+example `uv tool install --python 3.12 "use-agent-os[recommended]==2026.7.22"` —
 or use the GitHub release wheel link directly:
-`https://github.com/use-agent-os/agent-os/releases/download/v2026.7.20/use_agent_os-2026.7.20-py3-none-any.whl`.
+`https://github.com/use-agent-os/agent-os/releases/download/v2026.7.22/use_agent_os-2026.7.22-py3-none-any.whl`.
 
 > [!NOTE]
 > Release install commands use published GitHub release assets.
 > Python wheel installs use versioned wheel filenames — for example
-> `use_agent_os-2026.7.20-py3-none-any.whl` — because the installers validate the
+> `use_agent_os-2026.7.22-py3-none-any.whl` — because the installers validate the
 > version segment inside the wheel filename, so there is no `latest`
 > wheel alias. Only the Windows portable zip has a version-independent
 > `releases/latest/download/` alias.

@@ -116,6 +116,14 @@ toolbar:
  title · model · [tier:cN]
 ```
 
+Press `Enter` to submit the current message. Use `Alt+Enter` or
+`Shift+Enter` to insert a newline when your terminal reports those modified
+keys distinctly; `Ctrl+J` is the portable newline fallback. The input frame
+grows with the message up to 10 visible lines, then scrolls internally while
+remaining pinned above the bottom toolbar. `Up` and `Down` move between lines
+in a multiline draft before moving through chat input history at the first or
+last line.
+
 The bottom toolbar renders `title · model · [tier:cN]` while typing. The
 title comes from `/new <title>` (or is loaded from the gateway on
 `/resume`); the tier chip appears only while a Pilot Router hold is

@@ -37,9 +37,9 @@ async def test_interactive_session_yields_submitted_lines() -> None:
     """Two newline-terminated payloads on the pipe surface as two lines."""
     with create_pipe_input() as pipe:
         async with interactive_session(input=pipe, output=DummyOutput()) as handle:
-            pipe.send_text("hello\n")
+            pipe.send_text("hello\r")
             first = await asyncio.wait_for(handle.next_line(), timeout=2.0)
-            pipe.send_text("world\n")
+            pipe.send_text("world\r")
             second = await asyncio.wait_for(handle.next_line(), timeout=2.0)
 
     assert first == "hello"
@@ -123,8 +123,8 @@ async def test_chat_application_submit_iter_round_trips_lines() -> None:
 
         collector = asyncio.create_task(collect())
         await asyncio.sleep(0.05)
-        pipe.send_text("alpha\n")
-        pipe.send_text("beta\n")
+        pipe.send_text("alpha\r")
+        pipe.send_text("beta\r")
         lines = await asyncio.wait_for(collector, timeout=2.0)
         chat_app.application.exit()
         try:
@@ -133,6 +133,40 @@ async def test_chat_application_submit_iter_round_trips_lines() -> None:
             app_task.cancel()
 
     assert lines == ["alpha", "beta"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("newline_sequence", "shortcut"),
+    [
+        ("\x1b\r", "Alt+Enter"),
+        ("\n", "Shift+Enter/Ctrl+J"),
+    ],
+)
+async def test_multiline_shortcut_inserts_newline_without_submitting(
+    newline_sequence: str,
+    shortcut: str,
+) -> None:
+    """Modified Enter inserts a newline; plain Enter submits the draft."""
+    with create_pipe_input() as pipe:
+        chat_app = _fresh_chat_app(pipe_input=pipe)
+        app_task = asyncio.create_task(chat_app.application.run_async())
+        await asyncio.sleep(0.05)
+
+        pipe.send_text(f"first{newline_sequence}second")
+        await asyncio.sleep(0.05)
+
+        assert chat_app._buffer.text == "first\nsecond", shortcut
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(chat_app.next_line(), timeout=0.05)
+
+        pipe.send_text("\r")
+        submitted = await asyncio.wait_for(chat_app.next_line(), timeout=2.0)
+        chat_app.application.exit()
+        await asyncio.wait_for(app_task, timeout=1.0)
+
+    assert submitted == "first\nsecond"
+    assert chat_app._buffer.text == ""
 
 
 @pytest.mark.asyncio
