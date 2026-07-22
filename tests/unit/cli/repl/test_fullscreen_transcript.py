@@ -26,6 +26,7 @@ from prompt_toolkit.mouse_events import MouseButton, MouseEvent, MouseEventType
 from prompt_toolkit.output.vt100 import Vt100_Output
 
 from agentos.cli.repl.app import ChatApplication
+from agentos.cli.tui.terminal.app import _MOUSE_SCROLL_LINES
 from agentos.engine.commands import Surface
 
 
@@ -131,7 +132,7 @@ def test_scroll_transcript_releases_and_relatches_follow(fullscreen_env: None) -
         assert chat._transcript_follow is True
         assert chat._transcript_scroll == 0
 
-        # Scroll up into history: follow releases, offset grows.
+        # Generic scrolling preserves the requested offset (for example, Page Up).
         chat.scroll_transcript(10)
         assert chat._transcript_follow is False
         assert chat._transcript_scroll == 10
@@ -178,7 +179,12 @@ def test_mouse_wheel_scrolls_through_transcript_control(fullscreen_env: None) ->
         )
 
         assert control.mouse_handler(scroll_up) is None
-        assert chat._transcript_scroll == 3
+        # First wheel tick is doubled so the wrapped cursor visibly exits the viewport.
+        assert chat._transcript_scroll == _MOUSE_SCROLL_LINES * 2
+        assert chat._transcript_follow is False
+
+        assert control.mouse_handler(scroll_down) is None
+        assert chat._transcript_scroll == _MOUSE_SCROLL_LINES
         assert chat._transcript_follow is False
 
         assert control.mouse_handler(scroll_down) is None
