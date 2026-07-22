@@ -15,7 +15,7 @@ messaging (Web UI, CLI, chat). One shared turn loop drives every client.
 
 ```sh
 uv sync --extra dev --extra recommended                        # dev deps + local embeddings
-uv sync --extra dev --extra recommended --extra mcp --frozen   # match CI exactly
+uv sync --extra dev --extra recommended --frozen               # match CI exactly
 ```
 
 ## Quality gate — run before every commit / PR

@@ -55,6 +55,16 @@ def test_channel_sdks_in_base(project_table: dict) -> None:
     assert not missing, f"channel SDKs missing from base deps: {sorted(missing)}"
 
 
+def test_mcp_sdk_is_a_base_dependency(project_table: dict) -> None:
+    """The built-in MCP UI and server must work without an install extra."""
+
+    base = _dep_names(project_table["dependencies"])
+    extras = project_table.get("optional-dependencies", {})
+
+    assert "mcp" in base
+    assert "mcp" not in extras
+
+
 def test_no_dead_extras(project_table: dict) -> None:
     """msteams extra is intentionally absent; matrix extra installs matrix-nio."""
 

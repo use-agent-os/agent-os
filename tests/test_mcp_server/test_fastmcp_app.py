@@ -98,8 +98,8 @@ def test_create_mcp_server_has_no_benchmark_or_mock_public_tools() -> None:
     assert "mock" not in names
 
 
-def test_optional_mcp_dependency_minimum_supports_fastmcp() -> None:
+def test_base_mcp_dependency_minimum_supports_fastmcp() -> None:
     pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
-    mcp_specs = pyproject["project"]["optional-dependencies"]["mcp"]
+    dependencies = pyproject["project"]["dependencies"]
 
-    assert "mcp>=1.2.0" in mcp_specs
+    assert "mcp>=1.2.0" in dependencies
