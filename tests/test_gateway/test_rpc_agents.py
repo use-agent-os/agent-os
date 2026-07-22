@@ -138,6 +138,7 @@ async def test_models_rpc_list_uses_boot_catalog_when_provider_endpoint_fails() 
                 "contextLength": 1_048_576,
                 "maxOutput": 131_072,
                 "modality": {"input": ["text", "image"]},
+                "pricing": {"input": 0.2541, "output": 1.0164},
             }
         ]
     )
@@ -157,16 +158,33 @@ async def test_models_rpc_list_uses_boot_catalog_when_provider_endpoint_fails() 
 
     assert result.error is None, result.error
     assert selector.calls == 0
-    assert result.payload == [
+    expected = [
         {
             "id": "minimax-m3",
             "name": "MiniMax M3",
             "provider": "opencap",
             "contextWindow": 1_048_576,
-            "capabilities": ["chat", "tools"],
-            "pricing": {"inputPer1k": 0.0, "outputPer1k": 0.0},
+            "capabilities": ["chat", "tools", "vision"],
+            "pricing": {"inputPer1k": 0.0002541, "outputPer1k": 0.0010164},
         }
     ]
+    assert result.payload == expected
+
+    vision_result = await get_dispatcher().dispatch(
+        "r2",
+        "models.list",
+        {"provider": "opencap", "capabilities": ["vision"]},
+        RpcContext(
+            conn_id="test",
+            config=GatewayConfig(llm={"provider": "opencap", "model": "minimax-m3"}),
+            provider_selector=selector,
+            model_catalog=catalog,
+        ),
+    )
+
+    assert vision_result.error is None, vision_result.error
+    assert vision_result.payload == expected
+    assert selector.calls == 0
 
 
 @pytest.mark.asyncio

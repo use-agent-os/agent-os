@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from math import isfinite
 from typing import Any, cast
 
 import httpx
@@ -95,6 +96,17 @@ _PROVIDER_STATIC_FALLBACK: dict[str, dict[str, tuple[int, int]]] = {
 }
 
 
+def _catalog_price_per_1k(value: object) -> float:
+    """Convert a validated catalog USD-per-million value to USD per 1K tokens."""
+    try:
+        price_per_million = float(cast(Any, value))
+    except (TypeError, ValueError):
+        return 0.0
+    if not isfinite(price_per_million) or price_per_million < 0:
+        return 0.0
+    return price_per_million / 1000
+
+
 class ModelCatalog:
     """In-memory cache of model metadata fetched from provider API.
 
@@ -145,7 +157,13 @@ class ModelCatalog:
                 supports_vision="image" in input_modalities,
             )
 
-    def _populate_from_gateway(self, models: list[dict], *, provider_id: str) -> None:
+    def _populate_from_gateway(
+        self,
+        models: list[dict],
+        *,
+        provider_id: str,
+        pricing_per_million: bool = False,
+    ) -> None:
         """Parse OpenAI-compatible gateway model dicts into ModelInfo entries.
 
         Gateway catalogs expose an OpenAI-compatible ``/models`` list. Field names are
@@ -154,7 +172,8 @@ class ModelCatalog:
         table / default via ``resolve_max_tokens``. The catalog carries no
         tool/reasoning flags, so tools default on (every gateway llm supports
         them) and reasoning stays off — capability resolution for bankr is
-        handled in get_capabilities.
+        handled in get_capabilities. OpenCAP's public catalog additionally
+        publishes USD-per-million pricing; callers opt into that unit explicitly.
         """
         for m in models:
             model_id = m.get("id", "")
@@ -164,6 +183,9 @@ class ModelCatalog:
             input_modalities = {str(item).lower() for item in modality.get("input", [])}
             context_window = m.get("context_length") or m.get("contextLength") or 0
             max_output = m.get("max_output") or m.get("maxOutput") or 0
+            pricing = m.get("pricing") if pricing_per_million else None
+            if not isinstance(pricing, dict):
+                pricing = {}
             self._models[model_id] = ModelInfo(
                 provider=provider_id,
                 model_id=model_id,
@@ -173,6 +195,8 @@ class ModelCatalog:
                 supports_reasoning=False,
                 supports_tools=True,
                 supports_vision="image" in input_modalities,
+                input_cost_per_1k=_catalog_price_per_1k(pricing.get("input")),
+                output_cost_per_1k=_catalog_price_per_1k(pricing.get("output")),
             )
 
     def _populate_from_bankr(self, models: list[dict]) -> None:
@@ -181,7 +205,11 @@ class ModelCatalog:
 
     def _populate_from_opencap(self, models: list[dict]) -> None:
         """Parse OpenCAP gateway model dicts into ModelInfo entries."""
-        self._populate_from_gateway(models, provider_id="opencap")
+        self._populate_from_gateway(
+            models,
+            provider_id="opencap",
+            pricing_per_million=True,
+        )
 
     def get_capabilities(
         self,

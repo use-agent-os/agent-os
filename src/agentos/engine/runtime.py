@@ -436,6 +436,12 @@ def _provider_for_tier_model(tiers: object, model_id: str) -> str:
     return ""
 
 
+def _provider_for_tier(tiers: object, tier_name: str) -> str:
+    if not isinstance(tiers, Mapping) or not tier_name:
+        return ""
+    return str(_tier_value(tiers.get(tier_name), "provider", "") or "").strip()
+
+
 def _select_savings_baseline_model(
     tiers: object,
     baseline_input_tokens: float,
@@ -484,6 +490,7 @@ def _compute_comprehensive_turn_savings(
     routed_model: str,
     *,
     routed_provider: str = "",
+    routed_tier: str = "",
     estimated_output_savings_pct: float = 0.03,
 ) -> _ComprehensiveTurnSavings:
     """Estimate per-turn savings from token counts and model prices only."""
@@ -505,7 +512,11 @@ def _compute_comprehensive_turn_savings(
         baseline_output_tokens,
     )
     actual_model = routed_model or event.model
-    provider = routed_provider or _provider_for_tier_model(tiers, actual_model)
+    provider = (
+        routed_provider
+        or _provider_for_tier(tiers, routed_tier)
+        or _provider_for_tier_model(tiers, actual_model)
+    )
     routed_price = lookup_price(actual_model, provider_id=provider)
     actual_cost_usd = _token_cost_usd(
         actual_input_tokens,

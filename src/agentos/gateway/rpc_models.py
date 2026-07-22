@@ -14,7 +14,8 @@ def _model_info_to_wire(m: dict[str, Any]) -> dict[str, Any]:
     capabilities: list[str] = ["chat"]
     if m.get("supports_tools"):
         capabilities.append("tools")
-    # Providers can signal vision support via extra fields; keep extensible
+    if m.get("supports_vision"):
+        capabilities.append("vision")
     return {
         "id": m.get("model_id", ""),
         "name": m.get("display_name") or m.get("model_id", ""),

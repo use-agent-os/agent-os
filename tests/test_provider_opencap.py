@@ -91,13 +91,14 @@ def test_opencap_router_profile_contract() -> None:
     tiers = _router_tier_profile_defaults("opencap")
 
     assert {tier["provider"] for tier in tiers.values()} == {"opencap"}
-    assert tiers["c0"]["model"] == "oc-uncensored-1.0"
+    assert tiers["c0"]["model"] == "deepseek-v4-flash"
     assert tiers["c1"]["model"] == "minimax-m3"
     assert tiers["c2"]["model"] == "glm-5.2"
     assert tiers["c3"]["model"] == "claude-opus-4.8"
     assert tiers["image_model"]["model"] == "minimax-m3"
     assert tiers["image_model"]["supports_image"] is True
     assert tiers["image_model"]["image_only"] is True
+    assert all(tier["model"] != "oc-uncensored-1.0" for tier in tiers.values())
 
 
 def test_opencap_direct_provider_auto_selects_router_profile() -> None:
@@ -117,6 +118,7 @@ def test_populate_from_opencap_parses_gateway_catalog() -> None:
                 "contextLength": 1_048_576,
                 "maxOutput": 131_072,
                 "modality": {"input": ["text", "image"], "output": ["text"]},
+                "pricing": {"input": 0.2541, "output": "1.0164"},
             },
             {
                 "id": "oc-uncensored-1.0",
@@ -135,12 +137,37 @@ def test_populate_from_opencap_parses_gateway_catalog() -> None:
     assert minimax.max_output_tokens == 131_072
     assert minimax.supports_vision is True
     assert minimax.supports_tools is True
+    assert minimax.input_cost_per_1k == pytest.approx(0.0002541)
+    assert minimax.output_cost_per_1k == pytest.approx(0.0010164)
 
     uncensored = catalog.get("oc-uncensored-1.0")
     assert uncensored is not None
     assert uncensored.provider == "opencap"
     assert uncensored.max_output_tokens == 0
     assert catalog.get_capabilities("oc-uncensored-1.0", "opencap").supports_vision is False
+
+
+def test_populate_from_opencap_defaults_missing_or_malformed_pricing_to_zero() -> None:
+    catalog = ModelCatalog()
+    catalog._populate_from_opencap(
+        [
+            {"id": "missing-price"},
+            {
+                "id": "malformed-price",
+                "pricing": {"input": -1, "output": "not-a-number"},
+            },
+            {
+                "id": "non-finite-price",
+                "pricing": {"input": "nan", "output": "inf"},
+            },
+        ]
+    )
+
+    for model_id in ("missing-price", "malformed-price", "non-finite-price"):
+        model = catalog.get(model_id)
+        assert model is not None
+        assert model.input_cost_per_1k == 0.0
+        assert model.output_cost_per_1k == 0.0
 
 
 @pytest.mark.asyncio

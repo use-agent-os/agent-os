@@ -672,17 +672,14 @@ def _bankr_tiers() -> dict:
 
 
 def _opencap_tiers() -> dict:
-    """OpenCAP routing config using bare model ids served by its gateway."""
+    """OpenCAP routing config using neutral bare model ids served by its gateway.
+
+    Safety-sensitive models such as ``oc-uncensored-1.0`` remain available as
+    explicit user overrides, but are never selected by the recommended profile.
+    """
     tiers = _bankr_tiers()
     for tier in tiers.values():
         tier["provider"] = "opencap"
-    tiers["c0"].update(
-        model="oc-uncensored-1.0",
-        description=(
-            "default OpenCAP route for trivial chat, short rewrites, extraction, "
-            "and low-risk simple Q&A"
-        ),
-    )
     return tiers
 
 
