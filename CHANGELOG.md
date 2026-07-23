@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.7.23] - 2026-07-23
+
+### Added
+
+- Mouse drag selection and copy in the full-screen `agentos chat` transcript:
+  left-drag highlights text in the transcript pane and mouse-up copies the
+  plain text (ANSI stripped, CJK width-aware) to the system clipboard via a
+  cross-platform dispatcher (pbcopy, wl-copy, xclip, xsel, clip, OSC 52
+  fallback) (#76).
+- Rendering for reasoning-model think blocks in the CLI, with hidden tags and
+  boundary markers so partial think content streams cleanly.
+
+### Changed
+
+- The waiting indicator is now turn-lifetime: it persists across the pre-token,
+  mid-stream, and tool-call phases to give a consistent "agent is working"
+  signal. `StreamingRenderer` uses the waiting indicator instead of a Rich
+  `Live` instance, which removes ghost panel artifacts in Windows PowerShell.
+- Markdown streaming keeps block and inline styles intact while preserving the
+  raw buffer for downstream consumers.
+
+### Fixed
+
+- Telegram no longer deletes its persistent native command menu on adapter
+  shutdown. Bot command menus are server-side configuration and must survive
+  gateway restarts and overlapping adapter lifecycles (#74, fixes #52).
+
 ## [2026.7.22.post1] - 2026-07-22
 
 ### Added
