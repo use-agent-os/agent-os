@@ -38,6 +38,7 @@ import {
   layerLabel,
   registryEmptyMessage,
   registryKey,
+  robinhoodEmptyMessage,
   robinhoodSkills,
   safeUrl,
   skillDotClass,
@@ -214,6 +215,46 @@ function RegistryCard({
   )
 }
 
+function PartnerSkillCard({ skill, onOpen }: { skill: RawSkill; onOpen: () => void }) {
+  const status = skillStatus(skill)
+  const statusLabel =
+    status === 'ready' ? 'Ready' : status === 'needs_setup' ? 'Setup required' : 'No manifest'
+  const statusClass =
+    status === 'ready'
+      ? 'sk-chip--ok'
+      : status === 'needs_setup'
+        ? 'sk-chip--warn'
+        : 'sk-chip--unverified'
+
+  return (
+    <article className="sk-rcard sk-rcard--partner" aria-label={`Robinhood skill ${skill.name}`}>
+      <button
+        type="button"
+        className="sk-rcard__details"
+        aria-label={`View details for ${skill.name}`}
+        onClick={onOpen}
+      >
+        <div className="sk-rcard__head">
+          <PartnerLogo brand="robinhood" className="sk-rcard__logo" decorative />
+          <div className="sk-rcard__titles">
+            <span className="sk-rcard__name">{skill.name}</span>
+            <span className="sk-rcard__provider">Robinhood</span>
+          </div>
+        </div>
+        <span className="sk-rcard__desc">{skill.description || 'Open details'}</span>
+      </button>
+      <div className="sk-rcard__foot">
+        <span className="sk-rcard__src sk-mono">bundled</span>
+        <span className={`sk-chip ${statusClass}`} title={skillDotTitle(skill)}>
+          {status === 'ready' ? <CheckIcon aria-hidden="true" /> : null}
+          {status === 'needs_setup' ? <TriangleAlertIcon aria-hidden="true" /> : null}
+          {statusLabel}
+        </span>
+      </div>
+    </article>
+  )
+}
+
 // ── Install button (skills.js:633-641) — per-item busy, force arming ──────────
 function InstallButton({
   action,
@@ -276,9 +317,11 @@ export function SkillsPage() {
 
   // Registry (bankr/community) query text + debounced community query.
   const [bankrQuery, setBankrQuery] = useState('')
+  const [robinhoodQuery, setRobinhoodQuery] = useState('')
   const [communityText, setCommunityText] = useState('')
   const [communityQuery, setCommunityQuery] = useState('')
   const [bankrCat, setBankrCat] = useState('all')
+  const [robinhoodStatus, setRobinhoodStatus] = useState<StatusFilter>('all')
   const [communityCat, setCommunityCat] = useState('all')
   const [githubUrl, setGithubUrl] = useState('')
 
@@ -635,7 +678,16 @@ export function SkillsPage() {
       ) : null}
 
       {tab === 'robinhood' ? (
-        <RobinhoodPanel skills={rhSkills} onOpen={(name) => setDialog({ kind: 'skill', name })} />
+        <RobinhoodPanel
+          skills={rhSkills}
+          loading={skillsQuery.isLoading}
+          error={skillsQuery.isError ? String(skillsQuery.error) : ''}
+          query={robinhoodQuery}
+          onQuery={setRobinhoodQuery}
+          statusFilter={robinhoodStatus}
+          onStatusFilter={setRobinhoodStatus}
+          onOpen={(name) => setDialog({ kind: 'skill', name })}
+        />
       ) : null}
 
       {tab === 'community' ? (
@@ -925,7 +977,7 @@ function PartnerIntro({
 }) {
   return (
     <div className={`sk-partner sk-partner--${brand}`}>
-      <PartnerLogo brand={brand} className="sk-partner__logo" />
+      <PartnerLogo brand={brand} className="sk-partner__logo" decorative />
       <div className="sk-partner__copy">
         <h2>{title}</h2>
         <p>{description}</p>
@@ -942,11 +994,32 @@ function PartnerIntro({
 
 function RobinhoodPanel({
   skills,
+  loading,
+  error,
+  query,
+  onQuery,
+  statusFilter,
+  onStatusFilter,
   onOpen,
 }: {
   skills: RawSkill[]
+  loading: boolean
+  error: string
+  query: string
+  onQuery: (query: string) => void
+  statusFilter: StatusFilter
+  onStatusFilter: (status: StatusFilter) => void
   onOpen: (name: string) => void
 }) {
+  const stats = skillStats(skills)
+  const filtered = filterSkills(skills, query.trim(), statusFilter)
+  const filters = [
+    { key: 'all' as const, label: 'All', count: stats.total },
+    { key: 'ready' as const, label: 'Ready', count: stats.ready },
+    { key: 'needs-setup' as const, label: 'Needs setup', count: stats.needs },
+    { key: 'not-declared' as const, label: 'No manifest', count: stats.notDeclared },
+  ].filter((item) => item.key === 'all' || item.count > 0 || item.key === statusFilter)
+
   return (
     <div
       id="sk-panel-robinhood"
@@ -960,25 +1033,59 @@ function RobinhoodPanel({
         description="Official bundled capabilities for Robinhood products and on-chain assets."
         count={skills.length}
       />
-      {skills.length === 0 ? (
-        <div className="sk-empty sk-empty--contained">
-          <p className="sk-empty__title">Robinhood skills are on the way</p>
-          <p className="sk-empty__hint">
-            No Robinhood skills are installed yet. Browse Bankr or Community while this catalog
-            grows.
-          </p>
+      <div className="sk-browse__bar">
+        <div className="sk-search-wrap sk-search-wrap--lg">
+          <SearchIcon className="sk-search-icon" aria-hidden="true" />
+          <input
+            type="search"
+            className="sk-search-input sk-search-input--lg"
+            placeholder="Search Robinhood skills…"
+            aria-label="Search Robinhood skills"
+            autoComplete="off"
+            value={query}
+            onChange={(event) => onQuery(event.target.value)}
+          />
         </div>
-      ) : (
-        <div className="sk-grid sk-grid--source">
-          <AnimatePresence initial={false}>
-            {skills.map((s) => (
-              <MotionListItem key={s.name}>
-                <SkillCard skill={s} onOpen={() => onOpen(s.name!)} />
-              </MotionListItem>
-            ))}
-          </AnimatePresence>
+      </div>
+      {filters.length > 1 ? (
+        <div className="sk-chips" aria-label="Robinhood skill status">
+          {filters.map((filter) => (
+            <button
+              key={filter.key}
+              type="button"
+              className={`sk-chip-btn${statusFilter === filter.key ? ' is-active' : ''}`}
+              aria-label={`Filter Robinhood skills: ${filter.label}`}
+              aria-pressed={statusFilter === filter.key}
+              onClick={() => onStatusFilter(filter.key)}
+            >
+              {filter.label} <span className="sk-chip-btn__count">{filter.count}</span>
+            </button>
+          ))}
         </div>
-      )}
+      ) : null}
+      <div className="sk-browse__results">
+        {error ? (
+          <div className="sk-error">
+            Failed to load: {error}
+            <br />
+            <span className="sk-dim">Press Refresh to retry.</span>
+          </div>
+        ) : loading ? (
+          <SkillsSkeleton label="Loading Robinhood skills" />
+        ) : filtered.length === 0 ? (
+          <div className="sk-registry__hint">{robinhoodEmptyMessage(query, statusFilter)}</div>
+        ) : (
+          <div className="sk-grid sk-grid--registry">
+            <AnimatePresence initial={false}>
+              {filtered.map((skill) => (
+                <MotionListItem key={skill.name}>
+                  <PartnerSkillCard skill={skill} onOpen={() => onOpen(skill.name!)} />
+                </MotionListItem>
+              ))}
+            </AnimatePresence>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

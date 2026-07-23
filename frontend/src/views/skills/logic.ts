@@ -266,6 +266,15 @@ export function robinhoodSkills(skills: RawSkill[]): RawSkill[] {
   return skills.filter(isRobinhoodSkill).sort((a, b) => (a.name || '').localeCompare(b.name || ''))
 }
 
+export function robinhoodEmptyMessage(filterText: string, statusFilter: StatusFilter): string {
+  const query = filterText.trim()
+  if (query) return `No Robinhood skills match ${query}.`
+  if (statusFilter === 'ready') return 'No Robinhood skills are ready.'
+  if (statusFilter === 'needs-setup') return 'No Robinhood skills currently need setup.'
+  if (statusFilter === 'not-declared') return 'No Robinhood skills without a manifest.'
+  return 'Robinhood skills are on the way. No Robinhood skills are installed yet.'
+}
+
 // ── Registry (community / bankr) derivations ──────────────────────────────────
 
 /**

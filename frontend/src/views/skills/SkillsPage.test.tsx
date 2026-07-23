@@ -101,9 +101,25 @@ const REQ_BUNDLED = {
   },
 }
 
+const ROBINHOOD_READY = {
+  name: 'robinhood-rwa-addresses',
+  description: 'Look up tokenized-stock contract addresses.',
+  layer: 'bundled',
+  status: 'ready',
+}
+
+const ROBINHOOD_UNDECLARED = {
+  name: 'robinhood-agentic-trading',
+  description: 'Operate Robinhood Agentic Trading through the Robinhood Trading MCP.',
+  layer: 'bundled',
+  status: 'not_declared',
+}
+
 function wireRpc(
   opts: {
     skills?: unknown[]
+    skillsSequence?: unknown[][]
+    listPromise?: Promise<unknown>
     listReject?: boolean
     searchResults?: unknown[]
     installResponse?: Record<string, unknown>
@@ -112,9 +128,16 @@ function wireRpc(
     depsResponse?: Record<string, unknown>
   } = {},
 ) {
+  let listIndex = 0
   mockRpc.call.mockImplementation((method: string) => {
     switch (method) {
       case 'skills.list':
+        if (opts.listPromise) return opts.listPromise
+        if (opts.skillsSequence) {
+          const index = Math.min(listIndex, opts.skillsSequence.length - 1)
+          listIndex += 1
+          return Promise.resolve({ skills: opts.skillsSequence[index] ?? [] })
+        }
         return opts.listReject
           ? Promise.reject(new Error('list down'))
           : Promise.resolve({ skills: opts.skills ?? [READY_MANAGED, NEEDS_BUNDLED] })
@@ -392,6 +415,107 @@ describe('SkillsPage', () => {
     await waitFor(() => expect(screen.getByLabelText('Skill trader')).toBeInTheDocument())
     fireEvent.click(screen.getByRole('tab', { name: /Robinhood/i }))
     expect(await screen.findByText(/Robinhood skills are on the way/i)).toBeInTheDocument()
+    expect(screen.getByLabelText('Search Robinhood skills')).toBeInTheDocument()
+  })
+
+  it('gives Robinhood the Bankr catalog shell while preserving installed-skill actions', async () => {
+    wireRpc({ skills: [ROBINHOOD_UNDECLARED, ROBINHOOD_READY] })
+    renderPage()
+    fireEvent.click(screen.getByRole('tab', { name: /Robinhood/i }))
+
+    const readyCard = await screen.findByLabelText('Robinhood skill robinhood-rwa-addresses')
+    const tradingCard = screen.getByLabelText('Robinhood skill robinhood-agentic-trading')
+    expect(readyCard).toHaveClass('sk-rcard', 'sk-rcard--partner')
+    expect(readyCard.closest('.sk-grid')).toHaveClass('sk-grid--registry')
+    expect(within(readyCard).getByRole('presentation')).toHaveAttribute('src', robinhoodSymbolUrl)
+    expect(within(readyCard).getByText('Robinhood')).toBeInTheDocument()
+    expect(within(readyCard).getByText('bundled')).toBeInTheDocument()
+    expect(within(readyCard).getByText('Ready')).toBeInTheDocument()
+    expect(within(tradingCard).getByText('No manifest')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Install$/i })).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Search Robinhood skills'), {
+      target: { value: 'addresses' },
+    })
+    await waitFor(() =>
+      expect(
+        screen.queryByLabelText('Robinhood skill robinhood-agentic-trading'),
+      ).not.toBeInTheDocument(),
+    )
+    expect(screen.getByLabelText('Robinhood skill robinhood-rwa-addresses')).toBeInTheDocument()
+    expect(callsFor('skills.search')).toHaveLength(0)
+
+    fireEvent.change(screen.getByLabelText('Search Robinhood skills'), {
+      target: { value: '   ' },
+    })
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText('Robinhood skill robinhood-agentic-trading'),
+      ).toBeInTheDocument(),
+    )
+    expect(screen.getByLabelText('Robinhood skill robinhood-rwa-addresses')).toBeInTheDocument()
+
+    fireEvent.click(
+      within(readyCard).getByRole('button', {
+        name: 'View details for robinhood-rwa-addresses',
+      }),
+    )
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('filters Robinhood status locally without changing the partner catalog contract', async () => {
+    wireRpc({ skills: [ROBINHOOD_UNDECLARED, ROBINHOOD_READY] })
+    renderPage()
+    fireEvent.click(screen.getByRole('tab', { name: /Robinhood/i }))
+    await screen.findByLabelText('Robinhood skill robinhood-rwa-addresses')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Robinhood skills: Ready' }))
+    expect(screen.getByLabelText('Robinhood skill robinhood-rwa-addresses')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(
+        screen.queryByLabelText('Robinhood skill robinhood-agentic-trading'),
+      ).not.toBeInTheDocument(),
+    )
+    expect(callsFor('skills.search')).toHaveLength(0)
+  })
+
+  it('keeps an active zero-count Robinhood status visible after refresh', async () => {
+    wireRpc({
+      skillsSequence: [[ROBINHOOD_UNDECLARED, ROBINHOOD_READY], [ROBINHOOD_UNDECLARED]],
+    })
+    renderPage()
+    fireEvent.click(screen.getByRole('tab', { name: /Robinhood/i }))
+    await screen.findByLabelText('Robinhood skill robinhood-rwa-addresses')
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Robinhood skills: Ready' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
+
+    const readyFilter = await screen.findByRole('button', {
+      name: 'Filter Robinhood skills: Ready',
+    })
+    await waitFor(() => expect(readyFilter).toHaveTextContent('Ready 0'))
+    expect(readyFilter).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText('No Robinhood skills are ready.')).toBeInTheDocument()
+  })
+
+  it('shows a Robinhood skeleton instead of a false empty state while skills load', async () => {
+    wireRpc({ listPromise: new Promise(() => undefined) })
+    renderPage()
+    fireEvent.click(screen.getByRole('tab', { name: /Robinhood/i }))
+
+    expect(
+      await screen.findByRole('status', { name: 'Loading Robinhood skills' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Robinhood skills are on the way/i)).not.toBeInTheDocument()
+  })
+
+  it('shows the skills load failure inside the Robinhood source panel', async () => {
+    wireRpc({ listReject: true })
+    renderPage()
+    fireEvent.click(screen.getByRole('tab', { name: /Robinhood/i }))
+
+    expect(await screen.findByText(/Failed to load: Error: list down/i)).toBeInTheDocument()
+    expect(screen.queryByText(/Robinhood skills are on the way/i)).not.toBeInTheDocument()
   })
 
   // ── SK1: Requirements + Missing sections in the installed-skill dialog ────

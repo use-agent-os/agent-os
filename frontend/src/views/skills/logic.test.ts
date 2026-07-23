@@ -18,6 +18,7 @@ import {
   markInstalled,
   registryEmptyMessage,
   registryKey,
+  robinhoodEmptyMessage,
   robinhoodSkills,
   safeUrl,
   skillDotClass,
@@ -159,6 +160,20 @@ describe('isRobinhoodSkill / robinhoodSkills', () => {
       skill({ layer: 'managed', name: 'robinhood-nope' }),
     ]
     expect(robinhoodSkills(list).map((s) => s.name)).toEqual(['robinhood-a', 'robinhood-z'])
+  })
+})
+
+describe('robinhoodEmptyMessage', () => {
+  it('explains query, status, and default empty states', () => {
+    expect(robinhoodEmptyMessage('rwa', 'all')).toBe('No Robinhood skills match rwa.')
+    expect(robinhoodEmptyMessage('', 'ready')).toBe('No Robinhood skills are ready.')
+    expect(robinhoodEmptyMessage('', 'needs-setup')).toBe(
+      'No Robinhood skills currently need setup.',
+    )
+    expect(robinhoodEmptyMessage('', 'not-declared')).toBe(
+      'No Robinhood skills without a manifest.',
+    )
+    expect(robinhoodEmptyMessage('', 'all')).toContain('Robinhood skills are on the way')
   })
 })
 
