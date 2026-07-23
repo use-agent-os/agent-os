@@ -134,7 +134,13 @@ posture.
 in a scrollable in-app pane above a permanently-pinned input frame (Claude
 Code style), so the frame stays visible while the assistant streams. The
 branded welcome screen renders at the top of the pane on launch. `PgUp`/`PgDn`
-scroll back through history; new output re-pins to the newest line.
+scroll back through history; the mouse wheel scrolls when the pointer is over
+the transcript. New output re-pins to the newest line.
+
+Input navigation follows the current logical line in multiline drafts:
+`Home`/`End` and `Ctrl+A`/`Ctrl+E` move to that line's start/end. On macOS,
+`Cmd+Left`/`Cmd+Right` work when the terminal maps those shortcuts to
+`Home`/`End`; use `Ctrl+A`/`Ctrl+E` as the portable fallback.
 
 Full-screen is the default for an interactive terminal. Non-TTY / piped
 invocations fall back to native scrollback automatically. To force a mode set

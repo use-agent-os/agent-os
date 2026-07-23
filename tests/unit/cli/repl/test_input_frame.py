@@ -15,10 +15,12 @@ from __future__ import annotations
 import asyncio
 import io
 
+import pytest
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.data_structures import Size
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout.controls import BufferControl
 from prompt_toolkit.output.vt100 import Vt100_Output
 
@@ -165,6 +167,44 @@ def test_multiline_arrow_navigation_precedes_history_navigation() -> None:
             await app.run_async()
 
     asyncio.run(_exercise())
+
+
+@pytest.mark.parametrize(
+    ("key", "expected_column"),
+    [
+        (Keys.Home, 0),
+        ("c-a", 0),
+        (Keys.End, len("middle text")),
+        ("c-e", len("middle text")),
+    ],
+)
+def test_line_boundary_shortcuts_stay_within_current_draft_line(
+    key: Keys | str,
+    expected_column: int,
+) -> None:
+    from agentos.cli.repl.app import _build_key_bindings
+
+    bindings = _build_key_bindings()
+    matching = [binding for binding in bindings.bindings if tuple(binding.keys) == (key,)]
+    assert len(matching) == 1
+
+    with create_pipe_input() as pipe:
+        chat = _build_app(pipe)
+        chat._buffer.text = "first\nmiddle text\nlast"
+        chat._buffer.cursor_position = len("first\nmiddle")
+
+        class _Event:
+            app = chat.application
+
+            @property
+            def current_buffer(self) -> Buffer:
+                return chat._buffer
+
+        matching[0].handler(_Event())
+
+        document = chat._buffer.document
+        assert document.cursor_position_row == 1
+        assert document.cursor_position_col == expected_column
 
 
 def test_frame_with_more_than_ten_lines_keeps_toolbar_at_bottom() -> None:

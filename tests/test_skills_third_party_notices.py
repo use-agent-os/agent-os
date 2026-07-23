@@ -24,6 +24,7 @@ ORIGINALS = {
     "nano-pdf",
     "pdf-toolkit",
     "pptx",
+    "robinhood-agentic-trading",
     "robinhood-rwa-addresses",
     "stack-trace-generic-probe",
     "stack-trace-go-probe",

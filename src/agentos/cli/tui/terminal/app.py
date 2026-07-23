@@ -37,6 +37,7 @@ from prompt_toolkit.layout import (
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
+from prompt_toolkit.mouse_events import MouseEventType
 
 from agentos.cli.tui.terminal.paste import (
     pasted_content_summary,
@@ -70,6 +71,7 @@ class LockedFileHistory(FileHistory):
         with self._write_lock:
             super().store_string(string)
 
+
 if TYPE_CHECKING:
     from prompt_toolkit.input.base import Input
     from prompt_toolkit.output.base import Output
@@ -87,6 +89,24 @@ _EOF_SENTINEL: object = object()
 _DOUBLE_CTRL_C_WINDOW_S: float = 1.5
 _ACTIVE_INPUT_PREFIX_WIDTH: int = 7
 _MAX_INPUT_HEIGHT: int = 10
+_MOUSE_SCROLL_LINES: int = 11
+
+
+class _TranscriptControl(FormattedTextControl):
+    """Formatted transcript content with wheel events routed to chat scroll state."""
+
+    def __init__(self, *args, scroll: Callable[[int], None], **kwargs) -> None:  # noqa: ANN002, ANN003
+        super().__init__(*args, **kwargs)
+        self._scroll = scroll
+
+    def mouse_handler(self, mouse_event):  # type: ignore[no-untyped-def]
+        if mouse_event.event_type == MouseEventType.SCROLL_UP:
+            self._scroll(_MOUSE_SCROLL_LINES)
+            return None
+        if mouse_event.event_type == MouseEventType.SCROLL_DOWN:
+            self._scroll(-_MOUSE_SCROLL_LINES)
+            return None
+        return super().mouse_handler(mouse_event)
 
 
 def _fullscreen_env() -> bool | None:
@@ -152,6 +172,18 @@ def _build_key_bindings() -> KeyBindings:
         # distinguish Shift+Enter commonly emit LF, the same sequence as
         # Ctrl+J, so Ctrl+J is also the portable fallback.
         event.current_buffer.newline(copy_margin=False)
+
+    @bindings.add(Keys.Home)
+    @bindings.add("c-a")
+    def _start_of_line(event) -> None:  # type: ignore[no-untyped-def]
+        buffer = event.current_buffer
+        buffer.cursor_position += buffer.document.get_start_of_line_position()
+
+    @bindings.add(Keys.End)
+    @bindings.add("c-e")
+    def _end_of_line(event) -> None:  # type: ignore[no-untyped-def]
+        buffer = event.current_buffer
+        buffer.cursor_position += buffer.document.get_end_of_line_position()
 
     @bindings.add("c-c")
     def _ctrl_c(event) -> None:  # type: ignore[no-untyped-def]
@@ -419,8 +451,9 @@ class ChatApplication:
         top_element: Window
         if self._fullscreen:
             top_element = Window(
-                content=FormattedTextControl(
+                content=_TranscriptControl(
                     lambda: ANSI(self._transcript),
+                    scroll=self.scroll_transcript_with_mouse,
                     get_cursor_position=self._transcript_cursor_position,
                     focusable=False,
                     show_cursor=False,
@@ -433,6 +466,7 @@ class ChatApplication:
             top_element = Window()
         children: list = [top_element]
         if input_header is not None:
+
             def _header_fragments():  # type: ignore[no-untyped-def]
                 try:
                     rendered = input_header() if callable(input_header) else input_header
@@ -473,6 +507,7 @@ class ChatApplication:
             key_bindings=_build_key_bindings(),
             style=style,
             full_screen=self._fullscreen,
+            mouse_support=self._fullscreen,
             refresh_interval=0.1,
             input=input,
             output=output,
@@ -539,6 +574,17 @@ class ChatApplication:
             self._app.invalidate()
         except Exception:
             pass
+
+    def scroll_transcript_with_mouse(self, lines: int) -> None:
+        """Scroll by wheel, compensating when releasing transcript follow."""
+        # With ``wrap_lines=True`` prompt-toolkit only re-scrolls the pane when
+        # the virtual cursor moves far enough to leave the current viewport.
+        # Right at the follow->scroll transition the cursor is still pinned
+        # near the tail, so the first wheel tick barely moves it and the pane
+        # looks unresponsive ("have to wheel several times before it kicks
+        # in"). Compensate by doubling the step on the releasing tick so the
+        # cursor visibly exits the viewport on the first wheel event.
+        self.scroll_transcript(lines * 2 if self._transcript_follow and lines > 0 else lines)
 
     def scroll_transcript_to_bottom(self) -> None:
         """Re-pin the transcript pane to the newest line (resume follow)."""
@@ -820,6 +866,7 @@ class ChatApplication:
                 return
             if self._app.is_running:
                 async with in_terminal():
+
                     def _write(payload: str) -> None:
                         if not payload:
                             return

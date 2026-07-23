@@ -19,11 +19,14 @@ import asyncio
 import io
 
 import pytest
-from prompt_toolkit.data_structures import Size
+from prompt_toolkit.data_structures import Point, Size
 from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.layout.controls import BufferControl
+from prompt_toolkit.mouse_events import MouseButton, MouseEvent, MouseEventType
 from prompt_toolkit.output.vt100 import Vt100_Output
 
 from agentos.cli.repl.app import ChatApplication
+from agentos.cli.tui.terminal.app import _MOUSE_SCROLL_LINES
 from agentos.engine.commands import Surface
 
 
@@ -129,7 +132,7 @@ def test_scroll_transcript_releases_and_relatches_follow(fullscreen_env: None) -
         assert chat._transcript_follow is True
         assert chat._transcript_scroll == 0
 
-        # Scroll up into history: follow releases, offset grows.
+        # Generic scrolling preserves the requested offset (for example, Page Up).
         chat.scroll_transcript(10)
         assert chat._transcript_follow is False
         assert chat._transcript_scroll == 10
@@ -152,6 +155,67 @@ def test_scroll_is_noop_when_not_fullscreen() -> None:
         chat.scroll_transcript(5)
         assert chat._transcript_scroll == 0
         assert chat._transcript_follow is True
+
+
+def test_mouse_wheel_scrolls_through_transcript_control(fullscreen_env: None) -> None:
+    with create_pipe_input() as pipe:
+        chat = _build(pipe)
+        for i in range(1, 40):
+            chat.append_transcript(f"line {i}\n")
+
+        assert chat._transcript_window is not None
+        control = chat._transcript_window.content
+        scroll_up = MouseEvent(
+            position=Point(x=0, y=0),
+            event_type=MouseEventType.SCROLL_UP,
+            button=MouseButton.NONE,
+            modifiers=frozenset(),
+        )
+        scroll_down = MouseEvent(
+            position=Point(x=0, y=0),
+            event_type=MouseEventType.SCROLL_DOWN,
+            button=MouseButton.NONE,
+            modifiers=frozenset(),
+        )
+
+        assert control.mouse_handler(scroll_up) is None
+        # First wheel tick is doubled so the wrapped cursor visibly exits the viewport.
+        assert chat._transcript_scroll == _MOUSE_SCROLL_LINES * 2
+        assert chat._transcript_follow is False
+
+        assert control.mouse_handler(scroll_down) is None
+        assert chat._transcript_scroll == _MOUSE_SCROLL_LINES
+        assert chat._transcript_follow is False
+
+        assert control.mouse_handler(scroll_down) is None
+        assert chat._transcript_scroll == 0
+        assert chat._transcript_follow is True
+
+        input_control = next(
+            window.content
+            for window in chat.application.layout.find_all_windows()
+            if isinstance(window.content, BufferControl)
+        )
+        assert input_control.mouse_handler(scroll_up) is NotImplemented
+        assert chat._transcript_scroll == 0
+        assert chat._transcript_follow is True
+
+
+def test_mouse_reporting_is_enabled_only_for_fullscreen(fullscreen_env: None) -> None:
+    with create_pipe_input() as pipe:
+        fullscreen_chat = _build(pipe)
+        assert fullscreen_chat.application.mouse_support() is True
+
+    with create_pipe_input() as pipe:
+        native_chat = ChatApplication(
+            surface=Surface.CLI_GATEWAY,
+            toolbar_context={"model": None, "session_id": None, "suppress": None},
+            bottom_toolbar=lambda: "",
+            input=pipe,
+            output=Vt100_Output(io.StringIO(), lambda: Size(rows=14, columns=54)),
+            fullscreen=False,
+        )
+        assert native_chat.application.mouse_support() is False
 
 
 def test_resolve_chat_fullscreen_precedence(monkeypatch: pytest.MonkeyPatch) -> None:

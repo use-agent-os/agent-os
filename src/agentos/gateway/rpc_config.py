@@ -152,11 +152,25 @@ def _restore_redacted_values(payload: Any, source: Any, prefix: str = "") -> tup
         return restored, redacted_paths
     if isinstance(payload, list):
         source_list = source if isinstance(source, list) else []
+        named_sources: dict[str, Any] = {}
+        duplicate_names: set[str] = set()
+        for item in source_list:
+            if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+                continue
+            name = item["name"]
+            if name in named_sources:
+                duplicate_names.add(name)
+            else:
+                named_sources[name] = item
+        for name in duplicate_names:
+            named_sources.pop(name, None)
         restored_list: list[Any] = []
         list_redacted_paths: set[str] = set()
         for index, value in enumerate(payload):
             current = f"{prefix}.{index}" if prefix else str(index)
             source_value = source_list[index] if index < len(source_list) else None
+            if isinstance(value, dict) and isinstance(value.get("name"), str):
+                source_value = named_sources.get(value["name"], source_value)
             child, child_paths = _restore_redacted_values(value, source_value, current)
             restored_list.append(child)
             list_redacted_paths.update(child_paths)

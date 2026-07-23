@@ -43,6 +43,7 @@ For gateway lifecycle, host/port, and exposure details, see
 | Agents | Manage durable agent entries. |
 | Usage | Inspect token and estimated-cost rollups. |
 | Cron | View and manage scheduled runs. |
+| MCP Servers | Add local or remote MCP servers, connect tools live, and complete OAuth authorization. |
 | Config | Edit setup sections from the browser. |
 | Logs | Inspect runtime logs and diagnostics. |
 | Approvals | Respond to sensitive tool-call approval requests. |
@@ -101,6 +102,26 @@ Use the approvals area when:
 - a command requires elevated permissions;
 - a channel or external action needs human confirmation;
 - unattended automation should pause before a risky operation.
+
+## MCP Servers
+
+Open **Settings > MCP Servers** to add and manage external MCP connections. The
+screen supports local `stdio`, legacy SSE, and Streamable HTTP servers. Remote
+servers can use custom headers or OAuth. OAuth tokens are stored separately
+from `config.toml` in the AgentOS state directory. AgentOS applies mode `0600`
+inside a `0700` directory on POSIX systems; Windows uses the current user's
+state-directory ACL.
+
+The featured Robinhood Trading connection uses:
+
+```text
+https://agent.robinhood.com/mcp/trading
+```
+
+It is configured as Streamable HTTP with OAuth. Saving the connection opens the
+provider authorization flow and loads its tools without requiring a gateway
+restart. Agentic trading involves significant risk. Review the server's access
+and action permissions before authorizing it.
 
 ## Logs and Diagnostics
 

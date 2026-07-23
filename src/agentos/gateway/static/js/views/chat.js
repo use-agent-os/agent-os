@@ -672,7 +672,7 @@ const ChatView = (() => {
 
   function _displayRoleLabel(role) {
     return role === 'user' ? 'You'
-      : role === 'assistant' ? 'Cap'
+      : role === 'assistant' ? 'AGENTOS'
       : role === 'subagent' ? 'Sub-agent'
       : role ? role.charAt(0).toUpperCase() + role.slice(1)
       : '';

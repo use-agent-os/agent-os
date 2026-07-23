@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -76,9 +77,38 @@ async def test_discovered_mcp_clients_have_owner_and_close_lifecycle(
     assert snapshot[0].server_name == "docs"
     assert snapshot[0].transport == "stdio"
     assert snapshot[0].client is client
+    assert snapshot[0].registered_tools == ("mcp_lookup",)
     assert await discovery.close_active_clients(owner="docs") == 1
     assert client.closed is True
     assert discovery.active_clients_snapshot() == ()
+
+
+@pytest.mark.asyncio
+async def test_disconnect_unregisters_tools_owned_by_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentos.mcp import discovery
+
+    config = MCPServerConfig(name="docs", transport="stdio", command="mock-mcp")
+    client = FakeMCPClient(
+        config,
+        tools=[
+            MCPToolDef(
+                name="lookup",
+                description="Lookup docs",
+                input_schema={"properties": {}, "required": []},
+            )
+        ],
+    )
+    monkeypatch.setattr(discovery, "create_client", lambda _config: client)
+    registry = ToolRegistry()
+
+    await discovery.discover_and_register(config, registry, owner="docs")
+    assert registry.get("mcp_lookup") is not None
+
+    assert await discovery.disconnect_and_unregister("docs", registry) == 1
+    assert registry.get("mcp_lookup") is None
+    assert client.closed is True
 
 
 @pytest.mark.asyncio
@@ -92,6 +122,27 @@ async def test_failed_mcp_discovery_closes_client_without_leaking(
     monkeypatch.setattr(discovery, "create_client", lambda _config: client)
 
     with pytest.raises(RuntimeError, match="list failed"):
+        await discovery.discover_and_register(config, ToolRegistry())
+
+    assert client.closed is True
+    assert discovery.active_clients_snapshot() == ()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_mcp_discovery_closes_client_without_leaking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentos.mcp import discovery
+
+    class CancelledMCPClient(FakeMCPClient):
+        async def list_tools(self) -> list[MCPToolDef]:
+            raise asyncio.CancelledError
+
+    config = MCPServerConfig(name="cancelled", transport="stdio", command="mock-mcp")
+    client = CancelledMCPClient(config)
+    monkeypatch.setattr(discovery, "create_client", lambda _config: client)
+
+    with pytest.raises(asyncio.CancelledError):
         await discovery.discover_and_register(config, ToolRegistry())
 
     assert client.closed is True

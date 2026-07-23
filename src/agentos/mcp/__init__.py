@@ -7,6 +7,7 @@ from agentos.mcp.discovery import (
     ActiveMCPClient,
     active_clients_snapshot,
     close_active_clients,
+    disconnect_and_unregister,
     discover_and_register,
 )
 from agentos.mcp.types import MCPServerConfig, MCPToolDef, MCPToolResult
@@ -19,5 +20,6 @@ __all__ = [
     "MCPToolResult",
     "active_clients_snapshot",
     "close_active_clients",
+    "disconnect_and_unregister",
     "discover_and_register",
 ]

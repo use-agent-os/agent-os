@@ -41,6 +41,12 @@ def test_user_role_label_and_time_align_right() -> None:
     assert ".msg.user .role-label { text-align: right; }" in css
 
 
+def test_assistant_role_label_uses_agentos_name() -> None:
+    js = _js()
+    assert "role === 'assistant' ? 'AGENTOS'" in js
+    assert "role === 'assistant' ? 'Cap'" not in js
+
+
 def test_composer_input_bar_is_floating_pill() -> None:
     css = _css()
     start = css.index(".chat-input-bar {")

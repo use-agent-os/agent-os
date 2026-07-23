@@ -1481,7 +1481,7 @@ class OpenClawMigrator:
                 )
             url = raw.get("url")
             command = raw.get("command")
-            transport = "sse" if url else "stdio"
+            transport: Literal["stdio", "sse"] = "sse" if url else "stdio"
             entries.append(
                 MCPServerEntry(
                     name=str(name),

@@ -74,9 +74,12 @@ top and bottom rule so it reads as a distinct box; the bottom toolbar renders
 `/new <title>` or loaded on `/resume`. `agentos chat` runs full-screen by
 default: the conversation renders in a scrollable pane above the pinned input
 frame (the branded welcome screen shows at the top on launch), so the frame
-stays visible while the assistant streams (`PgUp`/`PgDn` scroll history). Set
-`AGENTOS_CHAT_FULLSCREEN=0` to opt out to native scrollback; non-TTY contexts
-fall back automatically.
+stays visible while the assistant streams (`PgUp`/`PgDn` scroll history). The
+mouse wheel also scrolls when the pointer is over the transcript. In the
+multiline input, `Home`/`End` and `Ctrl+A`/`Ctrl+E` move to the current line's
+start/end; macOS `Cmd+Left`/`Cmd+Right` work when the terminal maps them to
+`Home`/`End`. Set `AGENTOS_CHAT_FULLSCREEN=0` to opt out to native scrollback;
+non-TTY contexts fall back automatically.
 
 ## CLI map
 
