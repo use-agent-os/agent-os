@@ -136,75 +136,6 @@ def _discord_spec() -> ChannelSetupSpec:
     )
 
 
-def _dingtalk_spec() -> ChannelSetupSpec:
-    return ChannelSetupSpec(
-        type="dingtalk",
-        label="DingTalk",
-        description="DingTalk corp robot via stream connection.",
-        transport="websocket",
-        requires_public_url=False,
-        dependency_extra=None,
-        restart_required=True,
-        docs_hint="https://open.dingtalk.com/document/",
-        fields=(
-            *_common_fields(),
-            ChannelSetupField("client_id", "Client id", "text", required=True),
-            ChannelSetupField("client_secret", "Client secret", "password",
-                              required=True, secret=True),
-        ),
-    )
-
-
-def _wecom_spec() -> ChannelSetupSpec:
-    return ChannelSetupSpec(
-        type="wecom",
-        label="WeCom",
-        description="Enterprise WeChat (WeCom) corp app via webhook.",
-        transport="webhook",
-        requires_public_url=True,
-        dependency_extra=None,
-        restart_required=True,
-        docs_hint="https://developer.work.weixin.qq.com/document/",
-        help="WeCom webhook mode requires a public URL reachable by WeCom.",
-        fields=(
-            *_common_fields(),
-            ChannelSetupField("corp_id", "Corp id", "text", required=True),
-            ChannelSetupField("corp_secret", "Corp secret", "password",
-                              required=True, secret=True),
-            ChannelSetupField("agent_id_int", "Agent id (int)", "int",
-                              required=True),
-            ChannelSetupField("token", "Token", "password",
-                              required=True, secret=True),
-            ChannelSetupField("encoding_aes_key", "Encoding AES key", "password",
-                              required=True, secret=True),
-            ChannelSetupField("webhook_path", "Webhook path", "text",
-                              required=False, default="/wecom/events"),
-            ChannelSetupField("api_base", "API base", "text",
-                              required=False,
-                              default="https://qyapi.weixin.qq.com"),
-        ),
-    )
-
-
-def _qq_spec() -> ChannelSetupSpec:
-    return ChannelSetupSpec(
-        type="qq",
-        label="QQ Bot",
-        description="Tencent QQ Bot via websocket.",
-        transport="websocket",
-        requires_public_url=False,
-        dependency_extra=None,
-        restart_required=True,
-        docs_hint="https://bot.q.qq.com/wiki/",
-        fields=(
-            *_common_fields(),
-            ChannelSetupField("app_id", "App id", "text", required=True),
-            ChannelSetupField("app_secret", "App secret", "password",
-                              required=True, secret=True),
-        ),
-    )
-
-
 def _msteams_spec() -> ChannelSetupSpec:
     return ChannelSetupSpec(
         type="msteams",
@@ -223,35 +154,6 @@ def _msteams_spec() -> ChannelSetupSpec:
                               required=True, secret=True),
             ChannelSetupField("webhook_path", "Webhook path", "text",
                               required=False, default="/msteams/messages"),
-        ),
-    )
-
-
-def _matrix_spec() -> ChannelSetupSpec:
-    return ChannelSetupSpec(
-        type="matrix",
-        label="Matrix",
-        description="Matrix homeserver client (sync long-poll).",
-        transport="websocket",
-        requires_public_url=False,
-        dependency_extra="matrix",
-        restart_required=True,
-        docs_hint="https://matrix.org/docs/",
-        fields=(
-            *_common_fields(),
-            ChannelSetupField("homeserver_url", "Homeserver URL", "text",
-                              required=True),
-            ChannelSetupField("user_id", "User id (@user:server)", "text",
-                              required=True),
-            ChannelSetupField("password", "Password", "password",
-                              required=False, secret=True, default=""),
-            ChannelSetupField("access_token", "Access token", "password",
-                              required=False, secret=True, default=""),
-            ChannelSetupField("device_id", "Device id", "text",
-                              required=False, default=""),
-            ChannelSetupField("encryption", "Encryption", "select",
-                              required=False, default="off",
-                              choices=("off", "required", "best_effort")),
         ),
     )
 
@@ -319,16 +221,12 @@ def _telegram_spec() -> ChannelSetupSpec:
 
 
 _BUILDERS = {
-    "dingtalk": _dingtalk_spec,
     "discord": _discord_spec,
-    "matrix": _matrix_spec,
     # msteams is intentionally absent: the adapter is text-only and hidden
     # from runtime catalog surfaces until first-class support lands. The
     # _msteams_spec helper is retained for future restoration.
-    "qq": _qq_spec,
     "slack": _slack_spec,
     "telegram": _telegram_spec,
-    "wecom": _wecom_spec,
 }
 
 

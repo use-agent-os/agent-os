@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- Retired the DingTalk, Matrix, QQ Bot, and WeCom channel adapters across the
+  runtime, CLI, Web UI, configuration schema, install metadata, and current
+  documentation. Supported messaging adapters are now Slack, Telegram, and
+  Discord.
+
 ## [2026.7.22.post1] - 2026-07-22
 
 ### Fixed

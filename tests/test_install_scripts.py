@@ -109,10 +109,8 @@ def test_install_scripts_support_optional_extras() -> None:
 
     for script in scripts:
         assert "AGENTOS_INSTALL_EXTRAS" in script
-        for legacy_extra in ("feishu", "telegram", "dingtalk", "wecom", "qq"):
-            assert legacy_extra not in script
-        assert "matrix" in script
-        assert "matrix-e2e" in script
+        for retired_extra in ("dingtalk", "matrix", "matrix-e2e", "qq", "wecom"):
+            assert retired_extra not in script.lower()
         assert "document-extras" in script
         assert "msteams" not in script
 

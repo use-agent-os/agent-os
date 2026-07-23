@@ -4,13 +4,9 @@ import { AdapterLogo } from './AdapterLogo'
 
 describe('AdapterLogo', () => {
   it.each([
-    ['dingtalk', 'dingtalk'],
     ['discord', 'discord'],
-    ['matrix', 'matrix'],
-    ['qq', 'qq'],
     ['slack', 'slack'],
     ['telegram', 'telegram'],
-    ['wecom', 'wechat'],
     ['msteams', 'teams'],
   ])('renders the %s brand mark', (type, logoKey) => {
     const { container } = render(<AdapterLogo type={type} />)
@@ -24,4 +20,12 @@ describe('AdapterLogo', () => {
     const { container } = render(<AdapterLogo type="future-channel" />)
     expect(container.querySelector('[data-adapter-logo="generic"]')).toBeInTheDocument()
   })
+
+  it.each(['dingtalk', 'matrix', 'qq', 'qqbot', 'wecom'])(
+    'does not retain a retired %s brand mapping',
+    (type) => {
+      const { container } = render(<AdapterLogo type={type} />)
+      expect(container.querySelector('[data-adapter-logo="generic"]')).toBeInTheDocument()
+    },
+  )
 })

@@ -1409,35 +1409,6 @@ class DiscordChannelEntry(ConfiguredChannelEntry):
     intents: int = 33281
 
 
-class DingTalkChannelEntry(ConfiguredChannelEntry):
-    """Gateway config entry for a DingTalk channel."""
-
-    type: Literal["dingtalk"] = "dingtalk"
-    client_id: str
-    client_secret: str
-
-
-class WeComChannelEntry(ConfiguredChannelEntry):
-    """Gateway config entry for a WeCom corp-app channel."""
-
-    type: Literal["wecom"] = "wecom"
-    corp_id: str
-    corp_secret: str
-    agent_id_int: int
-    token: str
-    encoding_aes_key: str
-    webhook_path: str = "/wecom/events"
-    api_base: str = "https://qyapi.weixin.qq.com"
-
-
-class QQChannelEntry(ConfiguredChannelEntry):
-    """Gateway config entry for a QQ Bot channel."""
-
-    type: Literal["qq"] = "qq"
-    app_id: str
-    app_secret: str
-
-
 class MSTeamsChannelEntry(ConfiguredChannelEntry):
     """Gateway config entry for an MS Teams channel."""
 
@@ -1445,18 +1416,6 @@ class MSTeamsChannelEntry(ConfiguredChannelEntry):
     app_id: str
     app_password: str
     webhook_path: str = "/msteams/messages"
-
-
-class MatrixChannelEntry(ConfiguredChannelEntry):
-    """Gateway config entry for a Matrix channel."""
-
-    type: Literal["matrix"] = "matrix"
-    homeserver_url: str
-    user_id: str
-    password: str = ""
-    access_token: str = ""
-    device_id: str = ""
-    encryption: Literal["off", "required", "best_effort"] = "off"
 
 
 class TelegramChannelEntry(ConfiguredChannelEntry):

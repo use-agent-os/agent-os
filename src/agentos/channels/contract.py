@@ -25,10 +25,6 @@ from typing import Any
 PUBLIC_VENDOR_ADAPTERS: tuple[str, ...] = (
     "slack",
     "discord",
-    "dingtalk",
-    "wecom",
-    "qq",
-    "matrix",
     "telegram",
 )
 

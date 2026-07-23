@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
 from agentos.channels._attachment_io import (
@@ -10,7 +8,6 @@ from agentos.channels._attachment_io import (
     preferred_attachment_mime,
 )
 from agentos.channels.discord import DiscordChannel, DiscordChannelConfig
-from agentos.channels.matrix import MatrixChannel, MatrixChannelConfig
 from agentos.channels.telegram import TelegramChannel, TelegramChannelConfig
 from agentos.channels.types import Attachment
 from agentos.gateway.attachment_ingest import (
@@ -95,104 +92,6 @@ def test_telegram_photo_uses_largest_photo_file_id() -> None:
     att = msg.attachments[0]
     assert att.mime_type == "image/jpeg"
     assert att.metadata["telegram_file_id"] == "large"
-
-
-@pytest.mark.asyncio
-async def test_matrix_media_event_creates_attachment_with_mxc_url() -> None:
-    channel = MatrixChannel(MatrixChannelConfig(user_id="@bot:example.test"))
-    channel._bot_user_id = "@bot:example.test"
-    room = SimpleNamespace(room_id="!room:example.test", member_count=2)
-    event = SimpleNamespace(
-        event_id="$event",
-        sender="@user:example.test",
-        body="report.pdf",
-        url="mxc://example.test/media",
-        source={
-            "content": {
-                "msgtype": "m.file",
-                "info": {"mimetype": "application/pdf", "size": 12},
-            }
-        },
-    )
-
-    await channel._on_room_message_media(room, event)
-    msg = await channel.receive()
-
-    assert msg.attachments == [
-        Attachment(
-            name="report.pdf",
-            mime_type="application/pdf",
-            url="mxc://example.test/media",
-            size=12,
-            metadata={"matrix_mxc_url": "mxc://example.test/media", "matrix_media_kind": "file"},
-        )
-    ]
-
-
-@pytest.mark.asyncio
-async def test_matrix_resolve_inbound_attachment_downloads_bytes() -> None:
-    class FakeBody:
-        async def iter_chunked(self, chunk_size: int):
-            yield b"%PDF-1.4\n"
-
-    class FakeResponse:
-        status = 200
-        headers = {"content-type": "application/pdf"}
-        content = FakeBody()
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb) -> None:
-            return None
-
-    class FakeSession:
-        def get(self, url: str, **kwargs):
-            assert url == "https://matrix.example.test/_matrix/media"
-            return FakeResponse()
-
-    class FakeClient:
-        ssl = None
-        client_session = FakeSession()
-
-        def mxc_to_http(self, mxc_url: str):
-            assert mxc_url == "mxc://example.test/media"
-            return "https://matrix.example.test/_matrix/media"
-
-    channel = MatrixChannel(MatrixChannelConfig(user_id="@bot:example.test"))
-    channel._client = FakeClient()
-
-    resolved = await channel.resolve_inbound_attachment(
-        Attachment(
-            name="report.pdf",
-            mime_type="application/pdf",
-            url="mxc://example.test/media",
-            metadata={"matrix_mxc_url": "mxc://example.test/media"},
-        )
-    )
-
-    assert resolved.data == b"%PDF-1.4\n"
-    assert resolved.mime_type == "application/pdf"
-
-
-@pytest.mark.asyncio
-async def test_matrix_resolve_inbound_attachment_fails_closed_without_streaming() -> None:
-    class FakeClient:
-        async def download(self, mxc_url: str):
-            raise AssertionError("unbounded Matrix download fallback must not be called")
-
-    channel = MatrixChannel(MatrixChannelConfig(user_id="@bot:example.test"))
-    channel._client = FakeClient()
-
-    with pytest.raises(RuntimeError, match="bounded media streaming"):
-        await channel.resolve_inbound_attachment(
-            Attachment(
-                name="report.pdf",
-                mime_type="application/pdf",
-                url="mxc://example.test/media",
-                metadata={"matrix_mxc_url": "mxc://example.test/media"},
-            )
-        )
 
 
 @pytest.mark.asyncio
@@ -282,26 +181,5 @@ async def test_telegram_oversize_declared_attachment_skips_get_file() -> None:
                 mime_type="text/plain",
                 size=TEXT_ATTACHMENT_BYTES + 1,
                 metadata={"telegram_file_id": "file-1"},
-            )
-        )
-
-
-@pytest.mark.asyncio
-async def test_matrix_oversize_declared_attachment_skips_download() -> None:
-    class FakeClient:
-        async def download(self, mxc_url: str):
-            raise AssertionError("oversize Matrix attachment should not download")
-
-    channel = MatrixChannel(MatrixChannelConfig(user_id="@bot:example.test"))
-    channel._client = FakeClient()
-
-    with pytest.raises(ValueError, match="exceeds"):
-        await channel.resolve_inbound_attachment(
-            Attachment(
-                name="huge.txt",
-                mime_type="text/plain",
-                url="mxc://example.test/media",
-                size=TEXT_ATTACHMENT_BYTES + 1,
-                metadata={"matrix_mxc_url": "mxc://example.test/media"},
             )
         )

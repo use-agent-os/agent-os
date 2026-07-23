@@ -13,8 +13,8 @@ with a ``schema_version`` and auto-rebuild on mismatch.
 
 Streaming edits use ``TurnContext.update_activity``; if the channel
 reports the operation as unsupported, the adapter falls back to
-final-flush for the remainder of the stream — same flicker mitigation
-shape as ``WeComChannel.send_streaming``.
+final-flush for the remainder of the stream to avoid repeated partial
+messages.
 """
 
 from __future__ import annotations
@@ -499,7 +499,7 @@ class MSTeamsChannel:
         """Stream a message via send_activity + update_activity edits.
 
         Falls back to final-flush behavior if ``update_activity`` reports
-        the channel as unsupported (matches WeCom flicker mitigation).
+        the channel as unsupported.
         Edits throttled at ``edit_interval_s`` (default 2.0 s).
         """
         if self._adapter is None:
@@ -582,8 +582,7 @@ class MSTeamsChannel:
                 # send the **complete** accumulated text as a fresh
                 # message so the user gets the full reply (the partial
                 # first chunk stays in place but is no longer the only
-                # thing visible). Same flicker-mitigation shape as
-                # WeCom's final-flush-only path.
+                # thing visible).
                 async def _final_send(turn_context: Any, _text: str = accumulated) -> None:
                     await turn_context.send_activity(_text)
 

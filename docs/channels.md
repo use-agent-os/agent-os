@@ -2,8 +2,7 @@
 
 Channels let AgentOS run from messaging platforms while sharing the same
 agent runtime as the CLI and Web UI. Use channels when you want the same agent
-to answer from Slack, Telegram, DingTalk, QQ, WeCom, Discord, Matrix,
-or another supported adapter.
+to answer from Slack, Telegram, or Discord.
 
 ## Supported Channel Types
 
@@ -19,13 +18,9 @@ This build exposes the following channel families:
 
 | Type | Label | Transport | Public URL needed |
 | --- | --- | --- | :---: |
-| `dingtalk` | DingTalk | websocket | no |
 | `discord` | Discord | websocket | no |
-| `matrix` | Matrix | websocket | no |
-| `qq` | QQ Bot | websocket | no |
 | `slack` | Slack | mixed | depends on mode |
 | `telegram` | Telegram | mixed | depends on mode |
-| `wecom` | WeCom | webhook | yes |
 
 The local `channels describe <type>` output is the source of truth for required
 fields, secrets, extras, and restart behavior.
@@ -175,8 +170,8 @@ interception as the fallback for platforms without native command menus.
 
 ## Webhook Channels
 
-Slack webhook mode and WeCom require a public, provider-reachable URL.
-Telegram may require one depending on mode.
+Slack webhook mode requires a public, provider-reachable URL. Telegram may
+require one depending on mode.
 
 For public channels:
 

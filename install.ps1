@@ -36,8 +36,6 @@ $profileName = if ($Profile) {
 }
 
 $validExtras = @(
-    'matrix',
-    'matrix-e2e',
     'document-extras'
 )
 

@@ -11,7 +11,7 @@ channels, scheduling, and reusable skills.
 | CLI chat | Interactive terminal agent work. |
 | CLI agent | Single-turn automation, CI-like runs, and benchmark-style invocations. |
 | Gateway RPC | Local server surface for Web UI, CLI clients, channels, and external clients. |
-| Channels | Telegram, Slack, Discord, DingTalk, WeCom, Matrix, QQ, terminal, and websocket-style integrations. |
+| Channels | Telegram, Slack, Discord, terminal, and websocket-style integrations. |
 
 ## Distinctive Features
 

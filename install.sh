@@ -23,7 +23,7 @@ Usage: bash install.sh [--version v2026.7.22.post1|latest] [--profile recommende
 Environment equivalents:
   AGENTOS_VERSION=v2026.7.22.post1
   AGENTOS_INSTALL_PROFILE=recommended|core
-  AGENTOS_INSTALL_EXTRAS=matrix
+  AGENTOS_INSTALL_EXTRAS=document-extras
   AGENTOS_INSTALL_DRY_RUN=1
 HELP
 }
@@ -74,7 +74,7 @@ is_release_version() {
     [[ "$1" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?(\.post[0-9]+)?$ ]]
 }
 
-valid_extras=" matrix matrix-e2e document-extras "
+valid_extras=" document-extras "
 extras_csv="${AGENTOS_INSTALL_EXTRAS:-}"
 if [[ -n "${cli_extras}" ]]; then
     extras_csv="${extras_csv}${extras_csv:+,}${cli_extras}"

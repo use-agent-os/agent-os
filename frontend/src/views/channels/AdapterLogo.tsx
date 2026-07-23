@@ -1,28 +1,18 @@
 import {
-  IconBrandDingtalk,
   IconBrandDiscord,
-  IconBrandMatrix,
-  IconBrandQq,
   IconBrandSlack,
   IconBrandTeams,
   IconBrandTelegram,
-  IconBrandWechat,
   IconPlugConnected,
   type TablerIcon,
 } from '@tabler/icons-react'
 
 const ADAPTER_LOGOS: Record<string, { icon: TablerIcon; key: string }> = {
-  dingtalk: { icon: IconBrandDingtalk, key: 'dingtalk' },
   discord: { icon: IconBrandDiscord, key: 'discord' },
-  matrix: { icon: IconBrandMatrix, key: 'matrix' },
   microsoftteams: { icon: IconBrandTeams, key: 'teams' },
   msteams: { icon: IconBrandTeams, key: 'teams' },
-  qq: { icon: IconBrandQq, key: 'qq' },
-  qqbot: { icon: IconBrandQq, key: 'qq' },
   slack: { icon: IconBrandSlack, key: 'slack' },
   telegram: { icon: IconBrandTelegram, key: 'telegram' },
-  wechat: { icon: IconBrandWechat, key: 'wechat' },
-  wecom: { icon: IconBrandWechat, key: 'wechat' },
 }
 
 function normalizedAdapterType(type: string): string {

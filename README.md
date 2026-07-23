@@ -340,21 +340,16 @@ git lfs pull --include="src/agentos/agentos_router/models/**"
    --user`. If `agentos` is not found after install, open a new
    terminal.
 
-3. **(optional) Install extra features.** Most chat channels —
-   Telegram, DingTalk, QQ, WeCom, Slack, and Discord — already work
-   with the base install. These are the extra, opt-in ones:
-
-   - `matrix` — Matrix chat channel (adds `matrix-nio`)
-   - `matrix-e2e` — Matrix chat channel with end-to-end encryption
-     (needs libolm)
-   - `document-extras` — makes PDFs, using WeasyPrint
+3. **(optional) Install extra features.** Telegram, Slack, and Discord
+   already work with the base install. The remaining opt-in extra is
+   `document-extras`, which adds PDF generation through WeasyPrint.
 
    ```sh
-   AGENTOS_INSTALL_EXTRAS=matrix bash scripts/install_source.sh        # macOS / Linux
+   AGENTOS_INSTALL_EXTRAS=document-extras bash scripts/install_source.sh        # macOS / Linux
    ```
 
    ```powershell
-   powershell -ExecutionPolicy Bypass -File ./scripts/install_source.ps1 -Extras matrix   # Windows
+   powershell -ExecutionPolicy Bypass -File ./scripts/install_source.ps1 -Extras document-extras   # Windows
    ```
 
 4. **Set up and run** — see [Configuration](#configuration).
@@ -426,8 +421,8 @@ adds the test, lint, and type-check tools. To add more extras to
 this same setup:
 
 ```sh
-uv sync --extra recommended --extra dev --extra matrix
-uv run agentos channels status matrix --json
+uv sync --extra recommended --extra dev --extra document-extras
+uv run agentos channels types --json
 ```
 
 In this mode, add `uv run` before every `agentos` command shown in
@@ -567,8 +562,8 @@ Only treat a channel as connected when the status shows
 `enabled=true`, `configured=true`, and `connected=true`. Discord
 uses websocket mode by default, Telegram uses polling, and Slack can
 use Socket Mode — none of these need a public URL. Telegram webhook
-mode, Slack webhook mode, and WeCom do need a public URL that the
-provider can reach.
+mode and Slack webhook mode do need a public URL that the provider
+can reach.
 
 **Public network binding**
 
@@ -618,7 +613,7 @@ settings are all in `agentos.toml.example`.
 | **Persistent local memory** | AgentOS remembers things between sessions, using a main `MEMORY.md` file plus dated notes in Markdown. You can search this memory two ways: by keyword (SQLite full-text search) or by meaning (`sqlite-vec`). The meaning search runs on your device using a built-in ONNX model, or you can switch to OpenAI or Ollama instead. There are optional extra features too: old memories can slowly fade, and a "dream" mode can clean up and merge memories (you must turn this on yourself). |
 | **Layered security sandbox** | There are three safety levels: Standard, Strict, and Locked. Each one controls what tools are allowed to do. On Linux, Bubblewrap keeps code running in its own safe space. On macOS, this job is done by `sandbox-exec` (Apple's Seatbelt). Windows does not have this sandbox yet. If AgentOS is denied the same action too many times in a row, it pauses itself automatically and does not keep trying. Any blocked output is deleted right away. Skill details and tool results are also cleaned (escaped) so they can't trick the AI into doing something unsafe. |
 | **Built-in tools** | AgentOS can read, write, and edit files; run shell commands and background tasks; use git; search the web (with Brave or DuckDuckGo) and fetch pages safely (blocking unsafe internal network requests); create spreadsheets, PPTX, and PDF files; generate images; and turn text into speech. |
-| **Unified gateway** | One local web server (built with Starlette) runs at `127.0.0.1:18791`. It uses WebSockets and has a built-in control page at `/control/`. The Web UI, the CLI, and every chat channel — Terminal, WebSocket, Slack, Telegram, Discord, DingTalk, WeCom, Matrix, and QQ — all share one single `TurnRunner` engine underneath. |
+| **Unified gateway** | One local web server (built with Starlette) runs at `127.0.0.1:18791`. It uses WebSockets and has a built-in control page at `/control/`. The Web UI, CLI, terminal, websocket, Slack, Telegram, and Discord clients all share one single `TurnRunner` engine underneath. |
 | **Durable sessions, subagents, and scheduling** | Sessions, chat history, and replay data are all saved in SQLite, and each agent gets its own workspace folder. An agent can start smaller "subagent" helpers, up to a limited depth. A `SchedulerEngine`, with its own built-in cron reader, runs jobs on a schedule through `agentos cron`. |
 | **Operator controls** | A person can review and approve risky tool calls before they run. You can see how many tokens and how much cost each turn and each session used, with `agentos cost`. More diagnostic tools are available from both the CLI and the Web UI. |
 

@@ -40,6 +40,22 @@ def test_channels_add_telegram_polling_minimal(tmp_path, monkeypatch):
     assert "restart" in result.stdout.lower()
 
 
+def test_channels_add_rejects_retired_types_without_traceback(tmp_path, monkeypatch):
+    target = _setenv(monkeypatch, tmp_path)
+
+    for retired in ("dingtalk", "matrix", "qq", "qqbot", "wecom"):
+        result = runner.invoke(
+            app,
+            ["channels", "add", retired, "--name", f"retired-{retired}"],
+        )
+
+        assert result.exit_code == 2
+        assert "unknown channel type" in result.output.lower()
+        assert retired in result.output.lower()
+
+    assert not target.exists()
+
+
 def test_channels_pairing_cli_list_approve_and_revoke(tmp_path, monkeypatch):
     _setenv(monkeypatch, tmp_path)
     added = runner.invoke(
@@ -274,60 +290,6 @@ def test_channels_edit_preserves_non_secret_bool_when_unchanged(tmp_path, monkey
     assert "reply_in_thread = true" in target.read_text()
 
 
-def test_channels_add_token_resolves_to_alias_order_not_field_order(tmp_path, monkeypatch):
-    """For wecom, --token should resolve to the literal 'token' field
-    (alias index 0), not 'corp_secret' (alias index 5) which would happen
-    under naive spec-field-order resolution.
-    """
-    _setenv(monkeypatch, tmp_path)
-    result = runner.invoke(
-        app,
-        [
-            "channels",
-            "add",
-            "wecom",
-            "--name",
-            "wc",
-            "--token",
-            "wecom-token",
-            "--field",
-            "corp_id=cid",
-            "--field",
-            "corp_secret=cs",
-            "--field",
-            "agent_id_int=1000",
-            "--field",
-            "encoding_aes_key=" + "a" * 43,
-        ],
-    )
-    assert result.exit_code == 0, result.stdout
-    assert "wecom.token" in result.stdout
-    assert "wecom.corp_secret" not in result.stdout
-
-
-def test_channels_add_token_flag_echoes_resolved_field(tmp_path, monkeypatch):
-    _setenv(monkeypatch, tmp_path)
-    result = runner.invoke(
-        app,
-        [
-            "channels",
-            "add",
-            "matrix",
-            "--name",
-            "m",
-            "--token",
-            "syt-abc",
-            "--field",
-            "homeserver_url=https://matrix.org",
-            "--field",
-            "user_id=@me:matrix.org",
-        ],
-    )
-    assert result.exit_code == 0, result.stdout
-    assert "--token" in result.stdout
-    assert "matrix.access_token" in result.stdout
-
-
 def test_channels_add_token_flag_for_slack_resolves_to_token(tmp_path, monkeypatch):
     _setenv(monkeypatch, tmp_path)
     result = runner.invoke(
@@ -369,12 +331,11 @@ def test_channels_types_lists_all_supported(tmp_path, monkeypatch):
     _setenv(monkeypatch, tmp_path)
     result = runner.invoke(app, ["channels", "types"])
     assert result.exit_code == 0
-    out = result.stdout
-    for t in ("slack", "telegram", "discord", "dingtalk", "wecom", "qq", "matrix"):
+    out = result.stdout.lower()
+    for t in ("slack", "telegram", "discord"):
         assert t in out
-    # msteams is intentionally hidden from the channel catalog CLI surface
-    # until first-class support lands.
-    assert "msteams" not in out
+    for retired in ("dingtalk", "matrix", "qq", "wecom", "msteams"):
+        assert retired not in out
     assert "transport" in out.lower()
 
 

@@ -16,10 +16,17 @@ def test_bundled_channels_are_importable_adapter_modules() -> None:
     assert missing == []
 
 
-def test_workspace_state_does_not_advertise_unshipped_whatsapp() -> None:
+def test_workspace_state_does_not_advertise_unshipped_or_retired_channels() -> None:
     state = build_workspace_state()
 
-    assert "whatsapp" not in state["bundled_channels"]
+    assert {
+        "dingtalk",
+        "matrix",
+        "qq",
+        "qqbot",
+        "wecom",
+        "whatsapp",
+    }.isdisjoint(state["bundled_channels"])
 
 
 def test_workspace_state_channel_inventory_matches_public_and_internal_adapters() -> None:

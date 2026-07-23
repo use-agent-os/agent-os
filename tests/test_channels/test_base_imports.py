@@ -1,32 +1,24 @@
-"""Smoke test: every channel adapter must be importable with only base deps.
-
-After 0.1.0's refactor each vendor SDK (lark-oapi / python-telegram-bot /
-dingtalk-stream / qq-botpy / cryptography) lives in base ``dependencies``
-rather than in an opt-in extra. A bare ``pip install use-agent-os`` must
-therefore be enough to ``import`` any of the in-tree channel adapters
-without raising ``ImportError``.
-
-These tests guard against the regression where someone moves an SDK back
-into an extra and silently breaks the "everything works out of the box"
-guarantee from the install plan.
-"""
+"""Smoke tests for the supported built-in channel surface."""
 
 from __future__ import annotations
 
 import importlib
+import importlib.util
+
+import pytest
+
+from agentos.channels.contract import PUBLIC_VENDOR_ADAPTERS
+from agentos.channels.registry import discover_channel_names
+
+RETIRED_ADAPTERS = {"dingtalk", "matrix", "qq", "wecom"}
 
 
-def test_telegram_module_importable() -> None:
-    importlib.import_module("agentos.channels.telegram")
+@pytest.mark.parametrize("adapter_name", PUBLIC_VENDOR_ADAPTERS)
+def test_public_vendor_adapter_module_importable(adapter_name: str) -> None:
+    importlib.import_module(f"agentos.channels.{adapter_name}")
 
 
-def test_dingtalk_module_importable() -> None:
-    importlib.import_module("agentos.channels.dingtalk")
-
-
-def test_qq_module_importable() -> None:
-    importlib.import_module("agentos.channels.qq")
-
-
-def test_wecom_module_importable() -> None:
-    importlib.import_module("agentos.channels.wecom")
+def test_retired_builtin_adapter_modules_are_absent() -> None:
+    assert RETIRED_ADAPTERS.isdisjoint(discover_channel_names())
+    for adapter_name in RETIRED_ADAPTERS:
+        assert importlib.util.find_spec(f"agentos.channels.{adapter_name}") is None

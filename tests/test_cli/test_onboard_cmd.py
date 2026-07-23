@@ -1976,9 +1976,13 @@ def test_configure_channels_rejects_unknown_field(tmp_path, monkeypatch):
             "configure",
             "channels",
             "--channel-type",
-            "matrix",
+            "slack",
             "--name",
-            "matrix-main",
+            "work",
+            "--token",
+            "xoxb-secret",
+            "--field",
+            "signing_secret=ss",
             "--field",
             "not_a_field=value",
         ],
@@ -1986,6 +1990,28 @@ def test_configure_channels_rejects_unknown_field(tmp_path, monkeypatch):
 
     assert result.exit_code == 2
     assert "unknown field" in result.output.lower()
+    assert not target.exists()
+
+
+def test_configure_channels_rejects_retired_channel_type(tmp_path, monkeypatch):
+    target = tmp_path / "c.toml"
+    monkeypatch.setenv("AGENTOS_GATEWAY_CONFIG_PATH", str(target))
+
+    result = runner.invoke(
+        app,
+        [
+            "configure",
+            "channels",
+            "--channel-type",
+            "matrix",
+            "--name",
+            "matrix-main",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "matrix" in result.output.lower()
+    assert "unsupported" in result.output.lower() or "unknown" in result.output.lower()
     assert not target.exists()
 
 

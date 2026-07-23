@@ -43,7 +43,7 @@ Usage: bash scripts/install_source.sh [--profile recommended|core] [--extras nam
 
 Environment equivalents:
   AGENTOS_INSTALL_PROFILE=recommended|core
-  AGENTOS_INSTALL_EXTRAS=matrix
+  AGENTOS_INSTALL_EXTRAS=document-extras
   AGENTOS_INSTALL_DRY_RUN=1
 HELP
             exit 0
@@ -69,7 +69,7 @@ fi
 dry_run="${AGENTOS_INSTALL_DRY_RUN:-0}"
 profile="${cli_profile:-${AGENTOS_INSTALL_PROFILE:-recommended}}"
 
-valid_extras=" matrix matrix-e2e document-extras "
+valid_extras=" document-extras "
 extras_csv="${AGENTOS_INSTALL_EXTRAS:-}"
 if [[ -n "${cli_extras}" ]]; then
     extras_csv="${extras_csv}${extras_csv:+,}${cli_extras}"
