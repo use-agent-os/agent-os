@@ -2,6 +2,7 @@
 
 | Version | Tag | Date | Notes |
 |---|---|---|---|
+| 2026.7.23 | v2026.7.23 | 2026-07-23 | Mouse drag selection and copy in the full-screen `agentos chat` transcript (#76); turn-lifetime waiting indicator and markdown streaming fixes that remove ghost panels in Windows PowerShell; reasoning-model think-block rendering; Telegram keeps its native command menu across gateway restarts (#74). |
 | 2026.7.22.post1 | v2026.7.22.post1 | 2026-07-22 | `agentos chat` full-screen transcript mouse wheel scrolling is responsive on the first tick (larger wheel step plus follow-release compensation) (#69). |
 | 2026.7.22 | v2026.7.22 | 2026-07-22 | Native slash-command menus for Telegram, Slack, and Discord (#45); Ollama multi-turn tool-call history fixes and a `tools.enabled = false` plain-text fallback mode (#44); channel slash commands render their RPC results instead of a generic acknowledgement; Telegram delivery retries transient connection failures; `agentos chat` input frame supports multiline input (#62). |
 | 2026.7.20 | v2026.7.20 | 2026-07-20 | `agentos chat` CLI UX pass (#46/#47): assistant speaker label defaults to `agentos` and is configurable via `AGENTOS_ASSISTANT_LABEL`; session title in the bottom toolbar and startup panel; `/c0`–`/c3` and `/auto` router-tier holds on both CLI surfaces; framed input box; full-screen chat transcript pane now the default. |

@@ -12,7 +12,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$defaultVersion = 'v2026.7.22.post1'
+$defaultVersion = 'v2026.7.23'
 $repoSlug = if ($env:AGENTOS_REPOSITORY) { $env:AGENTOS_REPOSITORY } else { 'use-agent-os/agent-os' }
 $pythonVersion = if ($env:AGENTOS_PYTHON_VERSION) { $env:AGENTOS_PYTHON_VERSION } else { '3.12' }
 $originalPath = if ($env:Path) { $env:Path } else { '' }
@@ -92,7 +92,7 @@ function Test-ReleaseVersion {
 }
 
 if ($Version -notin @('latest', 'stable') -and -not (Test-ReleaseVersion $Version)) {
-    Write-Error "install.ps1: unsupported AGENTOS_VERSION='$Version'. The release installer only supports latest, stable, or release versions like v2026.7.22.post1. Use git clone plus scripts/install_source.ps1 for main, dev, branch, or source installs."
+    Write-Error "install.ps1: unsupported AGENTOS_VERSION='$Version'. The release installer only supports latest, stable, or release versions like v2026.7.23. Use git clone plus scripts/install_source.ps1 for main, dev, branch, or source installs."
     exit 1
 }
 
