@@ -145,6 +145,18 @@ the system clipboard (`pbcopy` on macOS, `wl-copy`/`xclip`/`xsel` on Linux,
 selection. The emulator's own selection gesture (typically `Shift+drag` on
 Linux, `Option+drag` in iTerm2) also still works if you prefer it.
 
+**Markdown rendering.** The assistant's streamed reply is styled inline as
+it arrives: `#`/`##`/`###` headings render in the brand accent, `>`
+quotes get a dimmed bar, `---` becomes a rule, list markers are tinted,
+tables keep their pipes aligned, fenced code blocks stream in a uniform
+code color (no waiting for the closing fence), and inline spans —
+`**bold**`, `*italic*`, `~~strike~~`, inline `` `code` ``, and
+`[text](url)` links —
+are styled in place. File names, branch names, and other important terms
+the model wraps in backticks stand out in the accent color. The render is
+write-once (no repaint loop), and `NO_COLOR` (or a non-color terminal)
+downgrades the stream to plain text so piped output stays greppable.
+
 Input navigation follows the current logical line in multiline drafts:
 `Home`/`End` and `Ctrl+A`/`Ctrl+E` move to that line's start/end. On macOS,
 `Cmd+Left`/`Cmd+Right` work when the terminal maps those shortcuts to

@@ -79,7 +79,14 @@ mouse wheel also scrolls when the pointer is over the transcript. Dragging the
 left mouse button across the transcript highlights a span in reverse video;
 releasing the button copies the plain text (ANSI stripped, CJK width-aware) to
 the system clipboard (`pbcopy` / `wl-copy` / `xclip` / `xsel` / `clip`, with
-an OSC 52 fallback). Click again to clear the selection. In the
+an OSC 52 fallback). Click again to clear the selection. The assistant's
+streamed reply is styled inline as it arrives: `#` headings in the brand
+accent, `>` quotes with a dimmed bar, `---` rules, tinted list markers,
+aligned tables, fenced code blocks streamed in a uniform code color, and
+inline `**bold**` / `*italic*` / `~~strike~~` / `code` / `[text](url)`
+links. Backticked file names and branch names stand out in the accent
+color. The render is write-once (no repaint); `NO_COLOR` or a non-color
+terminal downgrades the stream to plain text. In the
 multiline input, `Home`/`End` and `Ctrl+A`/`Ctrl+E` move to the current line's
 start/end; macOS `Cmd+Left`/`Cmd+Right` work when the terminal maps them to
 `Home`/`End`. Set `AGENTOS_CHAT_FULLSCREEN=0` to opt out to native scrollback;

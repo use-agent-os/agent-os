@@ -11,6 +11,11 @@ from typing import Any, Literal
 from rich.text import Text
 
 from agentos.cli.chat.turn import TurnResult, UsageCounter, UsageSummary
+from agentos.cli.tui.terminal.markdown_stream import (
+    MarkdownStreamRenderer,
+    markdown_enabled,
+    render_markup_to_ansi,
+)
 from agentos.cli.tui.terminal.prompt import DEFAULT_ASSISTANT_LABEL, _toolbar_context
 from agentos.cli.ui import ACCENT, ACCENT_SOFT, console, error_panel
 
@@ -265,16 +270,17 @@ class _ToolCallStrip:
 
 
 class WaitingIndicator:
-    """Pre-token waiting renderable: spinner frame + verb + elapsed.
+    """Turn-lifetime waiting renderable: spinner frame + verb + elapsed.
 
-    The instance is parked in ``_toolbar_context['status']`` while the turn
-    is in flight but has not yet produced its first chunk. The
-    prompt-toolkit input header reads the slot on every redraw and calls
-    :meth:`toolbar_text` to pull the live frame; combined with the
-    ``PromptSession``'s ``refresh_interval`` this gives the assistant reply
-    row a real Braille spinner without mounting any Rich ``Live`` region
-    (which had historically caused ghost-panel artefacts on Windows
-    PowerShell).
+    The instance is parked in ``_toolbar_context['status']`` for the whole
+    turn — while the model is thinking pre-token, while tokens stream, and
+    while tool calls run — so the user always sees an "agent is working"
+    signal pinned above the input frame. The prompt-toolkit input header
+    reads the slot on every redraw and calls :meth:`toolbar_text` to pull
+    the live frame; combined with the ``PromptSession``'s
+    ``refresh_interval`` this gives the assistant reply row a real Braille
+    spinner without mounting any Rich ``Live`` region (which had
+    historically caused ghost-panel artefacts on Windows PowerShell).
 
     The verb tuple and dwell duration are mirrored in the gateway-side
     ``chat.js`` (``CAP_VERBS`` / ``CAP_DWELL_MS``) so the CLI and
@@ -324,18 +330,25 @@ class WaitingIndicator:
 class StreamingRenderer:
     """One streaming renderer for gateway and standalone responses.
 
-    Strategy: a transient assistant status header before the first token
-    (no Rich ``Live`` instance), then a plain-text token stream that writes
-    deltas straight to the terminal. There is no post-stream re-render —
-    the streamed text is the final view, matching how Claude Code, codex,
-    aider, and other agent CLIs present model output. This avoids the Rich
-    ``Live`` + ``Markdown`` + ``Panel`` update loop, which leaked ghost
-    panel borders on Windows PowerShell and other terminals whenever the
-    rendered height grew past the visible viewport (CJK width-measurement
-    made the overflow common), and it also avoids the doubled output a
-    one-shot re-render produces.
+    Strategy: a turn-lifetime assistant status indicator in the input
+    header (no Rich ``Live`` instance) — mounted from turn start through
+    the last token / tool call and cleared only at finalize / error /
+    cancel — plus a token stream that writes deltas straight to the
+    terminal through a line-buffered markdown pass
+    (:mod:`agentos.cli.tui.terminal.markdown_stream`). There is no
+    post-stream re-render — the streamed text is the final view, matching
+    how Claude Code, codex, aider, and other agent CLIs present model
+    output. The markdown pass preserves that contract: it buffers each
+    delta only until a newline arrives, styles the completed line once
+    (headings, quotes, rules, lists, tables, fenced code, inline
+    ``**bold**`` / ``*italic*`` / ``~~strike~~`` / ``code`` / links), and
+    never repaints — avoiding the Rich ``Live`` + ``Markdown`` + ``Panel``
+    update loop, which leaked ghost panel borders on Windows PowerShell
+    and other terminals whenever the rendered height grew past the
+    visible viewport (CJK width-measurement made the overflow common),
+    and also avoiding the doubled output a one-shot re-render produces.
 
-    The pre-token waiting state lives in the prompt-toolkit
+    The waiting indicator lives in the prompt-toolkit
     input-header slot via the shared ``_toolbar_context['status']`` key. We
     park a live :class:`WaitingIndicator` instance there and the header
     callable pulls the current spinner frame / verb / elapsed on every redraw.
@@ -369,6 +382,12 @@ class StreamingRenderer:
         self._visible_output = False
         self._strip = _ToolCallStrip()
         self._directive_sanitizer = _DirectiveStreamSanitizer()
+        # Line-buffered markdown pass over the sanitized stream. Disabled
+        # under NO_COLOR / non-color consoles so piped output stays plain.
+        # The raw text (pre-markdown) is what lands in ``self.buffer`` so
+        # downstream consumers (``/save``, transcript markdown) keep the
+        # source of truth; the styled form only reaches the terminal.
+        self._markdown = MarkdownStreamRenderer(enabled=markdown_enabled())
         # Optional TUI output handle. When provided, async callers can route
         # token writes through `aappend_text` so the output mutex serializes the
         # write-and-flush with concurrent slash-handler / input-echo writes.
@@ -416,6 +435,12 @@ class StreamingRenderer:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> Literal[False]:
+        # Drain any line the markdown pass still holds (the with-block
+        # pattern has no explicit finalize call, so without this the
+        # trailing partial line would silently vanish).
+        flushed = self._flush_markdown()
+        if flushed:
+            self._write_payload(flushed)
         self.stop()
         return False
 
@@ -440,17 +465,39 @@ class StreamingRenderer:
         self._waiting_active = False
 
     def _begin_stream(self) -> str:
-        """Drop waiting feedback and return the assistant marker.
+        """Return the assistant marker once, when visible text actually starts.
 
         Called only once the first visible text delta lands, so control-only
-        chunks do not leave empty reply chrome in scrollback.
+        chunks do not leave empty reply chrome in scrollback. The waiting
+        indicator stays mounted in the input header — it is the turn-lifetime
+        "agent is working" signal, only cleared by :meth:`stop` (finalize /
+        error / cancel), not by the first token.
         """
         if self._stream_started:
             return ""
-        self._stop_waiting()
         marker = self._open_assistant_status_line()
         self._stream_started = True
         return marker
+
+    def _render_stream_payload(self, visible: str) -> str:
+        """Render a sanitized text delta for terminal display.
+
+        Runs the line-buffered markdown pass and converts the resulting
+        Rich markup to ANSI. When markdown is disabled (``NO_COLOR`` /
+        non-color console) the raw text is returned unchanged so model
+        bytes reach the terminal verbatim — no Rich markup parsing, no
+        tab expansion. The raw ``visible`` text still lands in
+        ``self.buffer``; only the *display* form is styled.
+        """
+        if not self._markdown.enabled:
+            return visible
+        return render_markup_to_ansi(self._markdown.feed(visible))
+
+    def _flush_markdown(self) -> str:
+        """Emit any trailing partial line the markdown pass still holds."""
+        if not self._markdown.enabled:
+            return self._markdown.flush()
+        return render_markup_to_ansi(self._markdown.flush())
 
     def _end_stream_line(self) -> str:
         """Ensure subsequent console.print starts on a fresh line."""
@@ -465,6 +512,9 @@ class StreamingRenderer:
             payload += trailing
             self.buffer += trailing
             self._visible_output = True
+        # Drain the markdown line buffer (no trailing newline added — the
+        # block below owns line termination).
+        payload += self._flush_markdown()
         if self._stream_started and self.buffer and not self.buffer.endswith("\n"):
             payload += "\n"
         return payload
@@ -487,7 +537,7 @@ class StreamingRenderer:
         # markdown), so raw model bytes that contain ANSI cannot resurface
         # via downstream consumers.
         self.buffer += visible
-        payload = self._begin_stream() + visible
+        payload = self._begin_stream() + self._render_stream_payload(visible)
         self._visible_output = True
         # Write straight to the underlying stream: no Rich markup parsing
         # (model output may contain ``[bracket]`` sequences), no auto-wrap
@@ -513,7 +563,7 @@ class StreamingRenderer:
         if not visible:
             return
         self.buffer += visible
-        payload = self._begin_stream() + visible
+        payload = self._begin_stream() + self._render_stream_payload(visible)
         self._visible_output = True
         await self._awrite_payload(payload)
 
@@ -522,10 +572,11 @@ class StreamingRenderer:
 
         Pre-token: the waiting indicator's own refresh loop keeps the elapsed
         counter alive; we just make sure it is still mounted. Mid-stream the
-        arriving tokens are the progress signal, so pulse is a no-op.
+        arriving tokens are the progress signal, but the indicator stays
+        mounted too (it is the turn-lifetime "agent is working" signal), so
+        pulse only re-mounts if something cleared it externally.
         """
-        if not self._stream_started:
-            self._start_waiting()
+        self._start_waiting()
 
     def error(self, message: str) -> None:
         payload = self._end_stream_line()
@@ -546,14 +597,12 @@ class StreamingRenderer:
 
     def status(self, message: str, *, style: str = "dim") -> None:
         payload = self._end_stream_line()
-        self._stop_waiting()
         self._visible_output = True
         payload += _capture_console_print(Text(message, style=style))
         self._write_payload(payload)
 
     async def astatus(self, message: str, *, style: str = "dim") -> None:
         payload = self._end_stream_line()
-        self._stop_waiting()
         self._visible_output = True
         payload += _capture_console_print(Text(message, style=style))
         await self._awrite_payload(payload)
@@ -565,7 +614,6 @@ class StreamingRenderer:
         tool_use_id: str | None = None,
     ) -> None:
         payload = self._end_stream_line()
-        self._stop_waiting()
         summary = _summarize_args(name, args)
         self._visible_output = True
         payload += self._strip.record_start_payload(name, summary, tool_use_id)
@@ -578,7 +626,6 @@ class StreamingRenderer:
         tool_use_id: str | None = None,
     ) -> None:
         payload = self._end_stream_line()
-        self._stop_waiting()
         summary = _summarize_args(name, args)
         self._visible_output = True
         payload += self._strip.record_start_payload(name, summary, tool_use_id)
@@ -720,22 +767,22 @@ class StreamingRenderer:
         self._stop_waiting()
 
     def start(self) -> None:
-        """Resume visible feedback after an external pause (e.g. approvals).
+        """Resume the turn-lifetime waiting indicator after an external pause.
 
-        If no content has streamed yet, bring back the waiting indicator so
-        the user still sees that work is in progress. Once token streaming
-        has begun the next ``append_text`` resumes naturally, so there is
-        nothing to restart here.
+        The indicator is mounted for the whole turn (pre-token, mid-stream,
+        tool calls), so ``start`` simply re-mounts it; :meth:`_start_waiting`
+        is idempotent when it is already active.
         """
-        if not self._stream_started:
-            self._start_waiting()
+        self._start_waiting()
 
     @contextmanager
     def paused(self) -> Iterator[None]:
+        """Suspend the indicator during an inline approval (which owns the
+        screen), restoring it on exit so the turn signal resumes."""
         had_waiting = self._waiting_active
         self.stop()
         try:
             yield
         finally:
-            if had_waiting and not self._stream_started:
+            if had_waiting:
                 self._start_waiting()

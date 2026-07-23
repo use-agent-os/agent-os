@@ -74,12 +74,13 @@ _toolbar_context: dict[str, object | None] = {
     # bottom toolbar so a pin set via ``/c3`` stays visible while typing.
     "router_tier": None,
     "suppress": None,
-    # Transient status surfaced in the assistant input header before the
-    # first streamed chunk lands. Holds a live WaitingIndicator instance
+    # Turn-lifetime status surfaced in the assistant input header above
+    # the pinned input frame. Holds a live WaitingIndicator instance
     # (see cli/repl/stream.py) whose toolbar_text() is read on every
     # redraw so the Braille spinner advances frame-by-frame. May also be
     # a plain string for ad-hoc callers using ChatApplication.set_toolbar().
-    # Cleared (set to None) when the stream starts or the turn ends.
+    # Mounted for the whole turn (pre-token, mid-stream, tool calls);
+    # cleared (set to None) when the turn ends.
     "status": None,
     # Assistant speaker label; sourced from DEFAULT_ASSISTANT_LABEL but
     # overridable per session. Read by the streamed renderer marker and
@@ -248,7 +249,7 @@ def _chrome_bottom() -> None:
 
 
 def _input_header_fragments() -> AnyFormattedText:
-    """Render pre-token waiting feedback on the assistant reply row."""
+    """Render the turn-lifetime waiting indicator on the assistant reply row."""
     status_obj = _toolbar_context.get("status")
     if status_obj is None:
         return HTML("")

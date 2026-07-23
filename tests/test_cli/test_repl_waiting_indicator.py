@@ -117,8 +117,8 @@ def test_pulse_restart_preserves_monotonic_elapsed() -> None:
 
 
 def test_streaming_renderer_uses_toolbar_status_not_rich_live() -> None:
-    """Lock down: pre-token feedback is a live ``WaitingIndicator`` parked
-    in the prompt-toolkit assistant header slot, not a Rich ``Live`` region.
+    """Lock down: turn feedback is a live ``WaitingIndicator`` parked in the
+    prompt-toolkit assistant header slot, not a Rich ``Live`` region.
 
     Historical context: a Markdown+Panel Live update loop produced ghost
     panel borders on Windows PowerShell whenever the rendered height grew
@@ -126,6 +126,9 @@ def test_streaming_renderer_uses_toolbar_status_not_rich_live() -> None:
     Live instance and routed waiting feedback through
     ``_toolbar_context['status']``; the header callable pulls the current
     spinner frame on every redraw driven by ``PromptSession.refresh_interval``.
+
+    The indicator is mounted for the *whole turn* — pre-token, mid-stream,
+    and across tool calls — and cleared only when the turn ends.
     """
     from agentos.cli.repl import prompt as prompt_mod
 
@@ -144,12 +147,75 @@ def test_streaming_renderer_uses_toolbar_status_not_rich_live() -> None:
             mounted = prompt_mod._toolbar_context.get("status")
             assert isinstance(mounted, WaitingIndicator)
             renderer.append_text("foo")
-            # First chunk clears the status block before any text writes.
-            assert prompt_mod._toolbar_context.get("status") is None
+            # Tokens do NOT clear the indicator — it is the turn-lifetime
+            # "agent is working" signal above the input frame.
+            assert isinstance(prompt_mod._toolbar_context.get("status"), WaitingIndicator)
             renderer.append_text("bar")
             renderer.pulse()
-        # On stop the status block stays cleared.
+            assert isinstance(prompt_mod._toolbar_context.get("status"), WaitingIndicator)
+        # On exit the status block is cleared.
         assert prompt_mod._toolbar_context.get("status") is None
+    finally:
+        prompt_mod._toolbar_context["status"] = previous_status
+
+
+def test_waiting_indicator_survives_tool_rows_and_clears_at_finalize(
+    monkeypatch,
+) -> None:
+    """Tool rows, status rows, and streamed text must not drop the
+    turn-lifetime indicator; finalize/error are the only clears."""
+    from agentos.cli.repl import prompt as prompt_mod
+
+    buf = io.StringIO()
+    test_console = Console(file=buf, force_terminal=False, width=120, highlight=False)
+    monkeypatch.setattr(stream_module, "console", test_console)
+
+    previous_status = prompt_mod._toolbar_context.get("status")
+    try:
+        prompt_mod._toolbar_context["status"] = None
+        with StreamingRenderer() as renderer:
+            assert isinstance(prompt_mod._toolbar_context.get("status"), WaitingIndicator)
+            renderer.tool_start("read_file", {"path": "x"}, None)
+            assert isinstance(prompt_mod._toolbar_context.get("status"), WaitingIndicator)
+            renderer.append_text("answer text\n")
+            assert isinstance(prompt_mod._toolbar_context.get("status"), WaitingIndicator)
+            renderer.status("working…")
+            assert isinstance(prompt_mod._toolbar_context.get("status"), WaitingIndicator)
+            renderer.finalize(usage=None)
+            assert prompt_mod._toolbar_context.get("status") is None
+    finally:
+        prompt_mod._toolbar_context["status"] = previous_status
+
+
+def test_waiting_indicator_cleared_on_error() -> None:
+    from agentos.cli.repl import prompt as prompt_mod
+
+    previous_status = prompt_mod._toolbar_context.get("status")
+    try:
+        prompt_mod._toolbar_context["status"] = None
+        with StreamingRenderer() as renderer:
+            renderer.append_text("partial\n")
+            assert isinstance(prompt_mod._toolbar_context.get("status"), WaitingIndicator)
+            renderer.error("boom")
+            assert prompt_mod._toolbar_context.get("status") is None
+    finally:
+        prompt_mod._toolbar_context["status"] = previous_status
+
+
+def test_waiting_indicator_restored_after_pause() -> None:
+    """The approval pause context suspends and restores the indicator,
+    even mid-stream."""
+    from agentos.cli.repl import prompt as prompt_mod
+
+    previous_status = prompt_mod._toolbar_context.get("status")
+    try:
+        prompt_mod._toolbar_context["status"] = None
+        with StreamingRenderer() as renderer:
+            renderer.append_text("stream started\n")
+            assert isinstance(prompt_mod._toolbar_context.get("status"), WaitingIndicator)
+            with renderer.paused():
+                assert prompt_mod._toolbar_context.get("status") is None
+            assert isinstance(prompt_mod._toolbar_context.get("status"), WaitingIndicator)
     finally:
         prompt_mod._toolbar_context["status"] = previous_status
 
