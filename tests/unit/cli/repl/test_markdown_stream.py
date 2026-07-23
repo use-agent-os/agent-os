@@ -232,9 +232,9 @@ def test_think_single_line_form() -> None:
 
 
 def test_empty_think_block_produces_no_body_lines() -> None:
-    out = _render_all(["before\n", "<think>\n", "</think>\n", "after\n"])
+    out = _render_all(["<think>\n", "</think>\n", "after\n"])
     lines = _display_lines(out)
-    assert lines == ["before", "", "", "after"]
+    assert lines == ["", "", "after"]
 
 
 def test_think_stray_angle_bracket_closes_block() -> None:
@@ -269,22 +269,158 @@ def test_unclosed_think_flushes_dim() -> None:
 
 
 def test_think_state_resets_between_blocks() -> None:
-    out = _render_all(
-        [
-            "<think>\n",
-            "one\n",
-            "</think>\n",
-            "main content\n",
-            "<think>\n",
-            "two\n",
-            "</think>\n",
-            "more content\n",
-        ]
-    )
+    r = MarkdownStreamRenderer(enabled=True)
+    out = r.feed("<think>\n")
+    out += r.feed("one\n")
+    out += r.feed("</think>\n")
+    out += r.feed("main content\n")
+    # A tool row (or any block-level interruption) lands here in the real
+    # stream — that's what re-arms the think-opener guard.
+    r.mark_boundary()
+    out += r.feed("<think>\n")
+    out += r.feed("two\n")
+    out += r.feed("</think>\n")
+    out += r.feed("more content\n")
+    out += r.flush()
     assert "[dim italic]one[/]" in out
     assert "[dim italic]two[/]" in out
     assert "[dim italic]main content[/]" not in out
     assert "[dim italic]more content[/]" not in out
+
+
+# ---------------------------------------------------------------------------
+# Think-opener guard: quoted tags in prose must NOT open a think block
+# ---------------------------------------------------------------------------
+
+
+def test_bare_think_tag_after_prose_renders_literally() -> None:
+    """The user asks "what tag is used for X?" — the agent's reply quotes
+    the tag on its own line. It must stay visible, not open a think block."""
+    out = _render_all(
+        [
+            "The tag to use is:\n",
+            "<think>\n",
+            "and the closing tag is\n",
+            "</think>\n",
+        ]
+    )
+    lines = _display_lines(out)
+    assert "<think>" in lines
+    assert "</think>" in lines
+    assert "and the closing tag is" in lines
+    assert "[dim italic]" not in out
+
+
+def test_bare_think_tag_after_blank_prose_line_still_literal() -> None:
+    """Even with a paragraph break before it, a quoted tag after prose is
+    not a reasoning block (blanks do not re-arm the guard)."""
+    out = _render_all(["some explanation\n", "\n", "<think>\n", "body\n"])
+    lines = _display_lines(out)
+    assert "<think>" in lines
+    assert "[dim italic]" not in out
+
+
+def test_single_line_think_after_prose_renders_literally() -> None:
+    out = _render_all(["example format:\n", "<think>some content</think>\n"])
+    lines = _display_lines(out)
+    assert "<think>some content</think>" in lines
+
+
+def test_think_opens_after_tool_row_boundary() -> None:
+    """The genuine reasoning pattern: prose, tool call, then think."""
+    r = MarkdownStreamRenderer(enabled=True)
+    out = r.feed("Let me check the balance.\n")
+    r.mark_boundary()  # tool row emitted at this point in the real stream
+    out += r.feed("<think>\n")
+    out += r.feed("user has 0.897 ETH\n")
+    out += r.feed("</think>\n")
+    out += r.flush()
+    assert "[dim italic]user has 0.897 ETH[/]" in out
+    assert "<think>" not in out
+
+
+def test_think_opens_after_fence_close() -> None:
+    out = _render_all(["```\n", "code\n", "```\n", "<think>\n", "reasoning\n", "</think>\n"])
+    assert "[dim italic]reasoning[/]" in out
+
+
+def test_think_tag_in_backticks_untouched() -> None:
+    out = _render_all(["The tags are `<think>` and `</think>`.\n"])
+    assert "[bold #DDFF66]<think>[/]" in out
+    assert "[bold #DDFF66]</think>[/]" in out
+
+
+def test_think_tag_question_full_flow() -> None:
+    """End-to-end: a tag-explanation answer loses nothing."""
+    r = MarkdownStreamRenderer(enabled=True)
+    answer = (
+        "The tag for code snippets is `<code>` or a fenced block:\n"
+        "\n"
+        "```\n"
+        "<think>\n"
+        "```\n"
+        "\n"
+        "The reasoning tag is <think> (rarely seen in prose).\n"
+    )
+    out = r.feed(answer) + r.flush()
+    lines = _display_lines(out)
+    assert any("<code>" in ln for ln in lines)
+    # The fenced example stays literal code.
+    assert "[#DDFF66 on #1a1a1a]<think>[/]" in out
+    # The inline prose mention stays visible and undimmed.
+    assert any("<think> (rarely seen in prose)." in ln for ln in lines)
+    assert "[dim italic]" not in out
+
+
+# ---------------------------------------------------------------------------
+# Stray think-tag artifacts (bare ``<>`` / ``</>`` lines from the model)
+# ---------------------------------------------------------------------------
+
+
+def test_stray_angle_bracket_line_hidden_outside_think() -> None:
+    out = _render_all(["some answer\n", "<>\n", "next line\n"])
+    lines = _display_lines(out)
+    assert lines == ["some answer", "", "next line"]
+
+
+def test_stray_closing_angle_bracket_line_hidden() -> None:
+    out = _render_all(["text\n", "</>\n"])
+    lines = _display_lines(out)
+    assert lines == ["text", ""]
+
+
+def test_stray_artifact_between_think_blocks_hidden() -> None:
+    """The observed pattern: ``</think>`` followed by an extra bare ``<>``
+    line — neither may reach the screen."""
+    out = _render_all(
+        [
+            "<think>\n",
+            "reasoning\n",
+            "</think>\n",
+            "<>\n",
+            "real answer\n",
+        ]
+    )
+    lines = _display_lines(out)
+    assert "<>" not in "".join(lines)
+    assert lines[-1] == "real answer"
+
+
+def test_inline_angle_brackets_in_prose_preserved() -> None:
+    out = _render_all(["use Vec<> or a <> b syntax\n"])
+    assert "use Vec&lt;&gt; or a &lt;&gt; b syntax" in _display_lines(out)[0] or (
+        "use Vec<> or a <> b syntax" in _display_lines(out)[0]
+    )
+
+
+def test_angle_bracket_line_inside_fence_preserved() -> None:
+    out = _render_all(["```\n", "<>\n", "```\n"])
+    assert "[#DDFF66 on #1a1a1a]<>[/]" in out
+
+
+def test_angle_bracket_in_table_cell_preserved() -> None:
+    out = _render_all(["| a | b |\n|---|---|\n| <> | x |\n"])
+    assert "<>" in "".join(_display_lines(out))
 
 
 def test_table_cjk_cells_align_by_display_width() -> None:

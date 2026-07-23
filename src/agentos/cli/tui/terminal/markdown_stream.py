@@ -83,14 +83,19 @@ _STRIKE_RE = re.compile(r"~~([^~\n]+)~~")
 _LINK_RE = re.compile(r"\[([^\]\n]+)\]\(([^)\s]+)\)")
 
 # Reasoning-model think tags. The block forms own a whole line; the
-# single-line form wraps content inline (``<think>…</think>``). A bare
-# ``<>`` line while a block is open is accepted as a defensive closer —
-# some models / transports mangle ``</think>`` into it, and without the
-# valve everything after would render dim forever.
+# single-line form wraps content inline (``<think>…</think>``).
 _THINK_OPEN_RE = re.compile(r"^\s*<think>\s*$")
 _THINK_CLOSE_RE = re.compile(r"^\s*</think>\s*$")
 _THINK_INLINE_RE = re.compile(r"^\s*<think>(.*?)</think>\s*$")
-_THINK_STRAY_CLOSER = "<>"
+# Stray think-tag artifacts: models occasionally emit a bare ``<>`` (or
+# ``</>``) line — a mangled ``</think>`` — which must never reach the
+# screen as literal text. The artifact is hidden in every state, and while
+# a think block is open it also closes the block (without that valve,
+# everything after would render dim forever). Matching is anchored to the
+# whole line so inline occurrences in prose, tables, and code (``a <> b``)
+# are left untouched; fenced code is checked before this and always stays
+# literal anyway.
+_STRAY_THINK_ARTIFACT_RE = re.compile(r"^\s*</?>\s*$")
 
 
 def _styled(text: str, style: str) -> str:
@@ -506,6 +511,16 @@ class MarkdownStreamRenderer:
         # Inside a ``<think>`` block (reasoning models). Body lines render
         # dim-italic with a near-gray bar until the closing tag.
         self._in_think = False
+        # Think-opener guard. A bare ``<think>`` line is only treated as a
+        # reasoning block opener (a) before the first content line of the
+        # turn, or (b) right after a block-level boundary (tool row, status
+        # row, fence close, table block, previous think close). Genuine
+        # reasoning streams only ever open think blocks in those positions;
+        # a ``<think>`` line appearing after prose is the model *quoting*
+        # the tag (e.g. answering "what tag is used for X?") and must
+        # render literally instead of swallowing the reply.
+        self._seen_content = False
+        self._block_boundary = True
         # Blockquote continuation state: a `>` line opens a quote block;
         # consecutive non-empty lines keep it so multiline quotes style
         # uniformly. Cleared by a blank line or a non-quote block line.
@@ -546,6 +561,17 @@ class MarkdownStreamRenderer:
             out.append(rendered + "\n")
         return "".join(out)
 
+    def mark_boundary(self) -> None:
+        """Mark a block-level boundary in the prose stream.
+
+        Called by the streaming renderer whenever a non-markdown payload
+        (tool row, status row) is emitted inline. Genuine think blocks only
+        ever open right after such boundaries (or at turn start), so this
+        is what lets the opener guard accept them while rejecting
+        ``<think>`` lines quoted inside prose.
+        """
+        self._block_boundary = True
+
     def flush(self) -> str:
         """Emit any trailing partial line at end-of-turn."""
         if not self._enabled:
@@ -574,10 +600,18 @@ class MarkdownStreamRenderer:
         if not self._table_lines:
             return ""
         lines, self._table_lines = self._table_lines, []
+        # A table block is a block-level boundary: a think block opening
+        # right after it is a genuine reasoning block, not a quoted tag.
+        self._block_boundary = True
         return _render_table_block(lines)
 
+    def _can_open_think(self) -> bool:
+        """Think-opener guard: accept a bare ``<think>`` line only at turn
+        start or right after a block-level boundary (see ``__init__``)."""
+        return self._block_boundary or not self._seen_content
+
     def _render_line(self, line: str) -> str | None:
-        """Render one logical line.
+        """Render one logical line, maintaining the think-opener guard flags.
 
         Returns ``None`` when the line was buffered for a table block
         (emit nothing), otherwise the display text for the line — which
@@ -585,6 +619,31 @@ class MarkdownStreamRenderer:
         markers (the caller still emits the newline so paragraph spacing
         is preserved).
         """
+        was_in_think = self._in_think
+        rendered = self._render_line_inner(line)
+        stripped = line.strip()
+        if not stripped or rendered is None:
+            # Blank lines and buffered table rows leave the guard flags
+            # untouched: a blank line after prose must NOT re-arm the
+            # think-opener guard (that's the quoted-tag case).
+            return rendered
+        if was_in_think or self._in_think:
+            # Think body, an accepted opener, or a genuine close — none of
+            # these are prose content. A close re-arms the boundary so a
+            # following think block opens.
+            if was_in_think and not self._in_think:
+                self._block_boundary = True
+            return rendered
+        if _FENCE_RE.match(line) or _STRAY_THINK_ARTIFACT_RE.match(line):
+            self._block_boundary = True
+            return rendered
+        # A genuine content line: the turn has prose and the boundary is
+        # gone, so a following bare ``<think>`` is quoted text.
+        self._seen_content = True
+        self._block_boundary = False
+        return rendered
+
+    def _render_line_inner(self, line: str) -> str | None:
         # Fence open/close toggles state; the fence line itself is hidden
         # so the block reads as one continuous region.
         if _FENCE_RE.match(line):
@@ -593,18 +652,28 @@ class MarkdownStreamRenderer:
             return (table_out + "\n") if table_out else ""
         if self._in_fence:
             return _render_code_line(line)
+        # Stray think-tag artifacts (a bare ``<>`` / ``</>`` line) are
+        # hidden in every state; inside a think block they also close it.
+        # Checked after fences so code stays literal, and anchored to the
+        # whole line so prose/table content like ``a <> b`` is untouched.
+        if _STRAY_THINK_ARTIFACT_RE.match(line):
+            if self._in_think:
+                self._in_think = False
+            return ""
         # Think blocks: tags own their line and are hidden; body lines
         # render dim-italic with a near-gray bar. Checked after fences so
-        # a ``<think>`` inside a code fence stays literal code.
-        inline_think = _THINK_INLINE_RE.match(line)
-        if inline_think:
-            return _render_think_line(inline_think.group(1))
-        if _THINK_OPEN_RE.match(line):
-            self._in_think = True
-            table_out = self._flush_table()
-            return (table_out + "\n") if table_out else ""
+        # a ``<think>`` inside a code fence stays literal code. The opener
+        # guard rejects tags quoted inside prose (they render literally).
+        if self._can_open_think():
+            inline_think = _THINK_INLINE_RE.match(line)
+            if inline_think:
+                return _render_think_line(inline_think.group(1))
+            if _THINK_OPEN_RE.match(line):
+                self._in_think = True
+                table_out = self._flush_table()
+                return (table_out + "\n") if table_out else ""
         if self._in_think:
-            if _THINK_CLOSE_RE.match(line) or line.strip() == _THINK_STRAY_CLOSER:
+            if _THINK_CLOSE_RE.match(line):
                 self._in_think = False
                 return ""
             return _render_think_line(line)

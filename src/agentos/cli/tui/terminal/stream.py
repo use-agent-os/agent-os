@@ -517,6 +517,11 @@ class StreamingRenderer:
         payload += self._flush_markdown()
         if self._stream_started and self.buffer and not self.buffer.endswith("\n"):
             payload += "\n"
+        # A tool row / status row / finalize is a block-level interruption
+        # of the prose stream — genuine think blocks open right after such
+        # boundaries, so the markdown renderer's think-opener guard keys
+        # off this marker (see markdown_stream.mark_boundary).
+        self._markdown.mark_boundary()
         return payload
 
     def append_text(self, delta: str) -> None:
