@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -104,6 +105,29 @@ def test_opencap_router_profile_contract() -> None:
 def test_opencap_direct_provider_auto_selects_router_profile() -> None:
     cfg = GatewayConfig(llm={"provider": "opencap", "model": "minimax-m3"})
 
+    assert cfg.agentos_router.tier_profile == "opencap"
+    assert cfg.agentos_router.tiers == _router_tier_profile_defaults("opencap")
+
+
+def test_opencap_router_profile_loads_from_disk_on_gateway_restart(tmp_path: Path) -> None:
+    config_path = tmp_path / "agentos.toml"
+    config_path.write_text(
+        """
+[llm]
+provider = "opencap"
+model = "minimax-m3"
+
+[agentos_router]
+enabled = true
+tier_profile = "opencap"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    cfg = GatewayConfig.load(config_path)
+
+    assert cfg.config_path == str(config_path)
+    assert cfg.llm.provider == "opencap"
     assert cfg.agentos_router.tier_profile == "opencap"
     assert cfg.agentos_router.tiers == _router_tier_profile_defaults("opencap")
 
