@@ -75,7 +75,11 @@ top and bottom rule so it reads as a distinct box; the bottom toolbar renders
 default: the conversation renders in a scrollable pane above the pinned input
 frame (the branded welcome screen shows at the top on launch), so the frame
 stays visible while the assistant streams (`PgUp`/`PgDn` scroll history). The
-mouse wheel also scrolls when the pointer is over the transcript. In the
+mouse wheel also scrolls when the pointer is over the transcript. Dragging the
+left mouse button across the transcript highlights a span in reverse video;
+releasing the button copies the plain text (ANSI stripped, CJK width-aware) to
+the system clipboard (`pbcopy` / `wl-copy` / `xclip` / `xsel` / `clip`, with
+an OSC 52 fallback). Click again to clear the selection. In the
 multiline input, `Home`/`End` and `Ctrl+A`/`Ctrl+E` move to the current line's
 start/end; macOS `Cmd+Left`/`Cmd+Right` work when the terminal maps them to
 `Home`/`End`. Set `AGENTOS_CHAT_FULLSCREEN=0` to opt out to native scrollback;

@@ -37,11 +37,17 @@ from prompt_toolkit.layout import (
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
-from prompt_toolkit.mouse_events import MouseEventType
+from prompt_toolkit.mouse_events import MouseButton, MouseEventType
 
+from agentos.cli.tui.terminal.clipboard import copy_to_system_clipboard
 from agentos.cli.tui.terminal.paste import (
     pasted_content_summary,
     should_collapse_pasted_content,
+)
+from agentos.cli.tui.terminal.selection import (
+    Selection,
+    extract_selection_text,
+    highlight_fragments,
 )
 from agentos.engine.commands import Surface
 
@@ -93,11 +99,29 @@ _MOUSE_SCROLL_LINES: int = 11
 
 
 class _TranscriptControl(FormattedTextControl):
-    """Formatted transcript content with wheel events routed to chat scroll state."""
+    """Formatted transcript content with wheel + selection mouse handling.
 
-    def __init__(self, *args, scroll: Callable[[int], None], **kwargs) -> None:  # noqa: ANN002, ANN003
+    Wheel events route to chat scroll state. Left-button drag builds a
+    :class:`~agentos.cli.tui.terminal.selection.Selection` in
+    content-coordinate space; mouse-up finalizes the selection and copies
+    the plain text to the system clipboard. The owning
+    :class:`ChatApplication` is notified so it can repaint the pane with
+    the highlight.
+    """
+
+    def __init__(
+        self,
+        *args,  # noqa: ANN002
+        scroll: Callable[[int], None],
+        on_selection_change: Callable[[Selection | None], None],
+        on_copy: Callable[[Selection], None],
+        **kwargs,  # noqa: ANN003
+    ) -> None:
         super().__init__(*args, **kwargs)
         self._scroll = scroll
+        self._on_selection_change = on_selection_change
+        self._on_copy = on_copy
+        self._selection_anchor: tuple[int, int] | None = None
 
     def mouse_handler(self, mouse_event):  # type: ignore[no-untyped-def]
         if mouse_event.event_type == MouseEventType.SCROLL_UP:
@@ -106,6 +130,27 @@ class _TranscriptControl(FormattedTextControl):
         if mouse_event.event_type == MouseEventType.SCROLL_DOWN:
             self._scroll(-_MOUSE_SCROLL_LINES)
             return None
+        # Selection: left-drag within the transcript content. Positions are
+        # already in content coordinates (row = logical line, col = display
+        # column) thanks to prompt-toolkit's Window mouse wrapper.
+        if mouse_event.button is MouseButton.LEFT:
+            if mouse_event.event_type == MouseEventType.MOUSE_DOWN:
+                self._selection_anchor = (mouse_event.position.y, mouse_event.position.x)
+                self._on_selection_change(None)
+                return None
+            if mouse_event.event_type == MouseEventType.MOUSE_MOVE:
+                if self._selection_anchor is not None:
+                    cursor = (mouse_event.position.y, mouse_event.position.x)
+                    self._on_selection_change(Selection(self._selection_anchor, cursor))
+                return None
+            if mouse_event.event_type == MouseEventType.MOUSE_UP:
+                if self._selection_anchor is not None:
+                    cursor = (mouse_event.position.y, mouse_event.position.x)
+                    selection = Selection(self._selection_anchor, cursor)
+                    self._selection_anchor = None
+                    self._on_selection_change(selection)
+                    self._on_copy(selection)
+                return None
         return super().mouse_handler(mouse_event)
 
 
@@ -316,6 +361,10 @@ class ChatApplication:
         self._transcript_follow: bool = True
         self._transcript_scroll: int = 0
         self._transcript_window: Window | None = None
+        # Current mouse-driven selection in the transcript pane, or None.
+        # Set by ``_TranscriptControl`` callbacks; read when rendering the
+        # pane to layer the reverse-video highlight.
+        self._transcript_selection: Selection | None = None
         self._submit_queue: asyncio.Queue[str | object] = asyncio.Queue()
         self._eof_seen = False
         # Set for the duration of the inline approval suspend window
@@ -450,10 +499,18 @@ class ChatApplication:
         #    region — the cause of the over-tall frame).
         top_element: Window
         if self._fullscreen:
+
+            def _transcript_text():  # type: ignore[no-untyped-def]
+                if self._transcript_selection is not None:
+                    return highlight_fragments(self._transcript, self._transcript_selection)
+                return ANSI(self._transcript)
+
             top_element = Window(
                 content=_TranscriptControl(
-                    lambda: ANSI(self._transcript),
+                    _transcript_text,
                     scroll=self.scroll_transcript_with_mouse,
+                    on_selection_change=self._on_transcript_selection_change,
+                    on_copy=self._on_transcript_copy,
                     get_cursor_position=self._transcript_cursor_position,
                     focusable=False,
                     show_cursor=False,
@@ -597,6 +654,24 @@ class ChatApplication:
         except Exception:
             pass
 
+    def _on_transcript_selection_change(self, selection: Selection | None) -> None:
+        """Store the active selection and repaint the transcript pane."""
+        self._transcript_selection = selection
+        try:
+            self._app.invalidate()
+        except Exception:
+            pass
+
+    def _on_transcript_copy(self, selection: Selection) -> None:
+        """Copy the selected plain text to the system clipboard.
+
+        The selection highlight is kept visible after the copy so the user
+        gets confirmation of what was lifted; the next mouse-down clears it.
+        """
+        text = extract_selection_text(self._transcript, selection)
+        if text:
+            copy_to_system_clipboard(text)
+
     def append_transcript(self, text: str) -> None:
         """Append ANSI-encoded text to the full-screen transcript pane.
 
@@ -608,6 +683,9 @@ class ChatApplication:
         if not text:
             return
         self._transcript += text
+        # The transcript grew; drop any active selection because row indexes
+        # now refer to stale content.
+        self._transcript_selection = None
         # New output re-pins the view to the bottom (matches a terminal that
         # scrolls on write); an explicit user scroll re-latches follow=False.
         self._transcript_follow = True

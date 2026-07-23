@@ -137,6 +137,14 @@ branded welcome screen renders at the top of the pane on launch. `PgUp`/`PgDn`
 scroll back through history; the mouse wheel scrolls when the pointer is over
 the transcript. New output re-pins to the newest line.
 
+**Select and copy.** Drag with the left mouse button across the transcript
+to highlight any span (the selection shows in reverse video); releasing the
+button copies the plain text — ANSI styling stripped, CJK width-aware — to
+the system clipboard (`pbcopy` on macOS, `wl-copy`/`xclip`/`xsel` on Linux,
+`clip` on Windows, OSC 52 escape as a fallback). Click anywhere to clear the
+selection. The emulator's own selection gesture (typically `Shift+drag` on
+Linux, `Option+drag` in iTerm2) also still works if you prefer it.
+
 Input navigation follows the current logical line in multiline drafts:
 `Home`/`End` and `Ctrl+A`/`Ctrl+E` move to that line's start/end. On macOS,
 `Cmd+Left`/`Cmd+Right` work when the terminal maps those shortcuts to
