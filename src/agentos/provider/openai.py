@@ -79,6 +79,7 @@ def _provider_display_name(provider_kind: str) -> str:
     return {
         "openai": "OpenAI",
         "openrouter": "OpenRouter",
+        "opencap": "OpenCAP",
         "deepseek": "DeepSeek",
         "moonshot": "Moonshot",
         "dashscope": "DashScope",
@@ -796,13 +797,15 @@ class OpenAIProvider:
             payload["tools"] = [_build_openai_tool(t) for t in tools]
             if cfg.tool_choice is not None:
                 payload["tool_choice"] = cfg.tool_choice
-        if self._provider_kind == "openrouter":
-            pinned_provider = self._provider_routing.get(self._model)
-            if pinned_provider:
+        pinned_provider = self._provider_routing.get(self._model)
+        if pinned_provider:
+            if self._provider_kind == "openrouter":
                 payload["provider"] = {
                     "order": [pinned_provider],
                     "allow_fallbacks": True,
                 }
+            elif self._provider_kind == "opencap":
+                payload["provider"] = [pinned_provider]
 
         # Reasoning injection (gated on thinking being enabled)
         direct_deepseek_v4 = _is_direct_deepseek_v4_request(self._provider_kind, self._model)

@@ -126,7 +126,11 @@ def test_control_ui_loads_in_real_browser(tmp_path: Path) -> None:
               const browser = await chromium.launch({ headless: true });
               const page = await browser.newPage();
               const errors = [];
+              const sentFrames = [];
               page.on("pageerror", err => errors.push(String(err)));
+              page.on("websocket", socket => {
+                socket.on("framesent", event => sentFrames.push(String(event.payload)));
+              });
               const response = await page.goto(process.env.TARGET_URL, {
                 waitUntil: "domcontentloaded",
                 timeout: 30000,
@@ -135,12 +139,49 @@ def test_control_ui_loads_in_real_browser(tmp_path: Path) -> None:
                 () => document.querySelector("#conn-pill")?.textContent === "Connected",
                 { timeout: 15000 }
               );
+              const initialTitle = await page.title();
+              await page.goto(new URL("setup", process.env.TARGET_URL).href, {
+                waitUntil: "domcontentloaded",
+                timeout: 30000,
+              });
+              await page.waitForSelector("[data-provider-select]", { timeout: 15000 });
+              await page.selectOption("[data-provider-select]", "opencap");
+              const modelInput = '[data-scope="provider"][data-name="model"] input';
+              const apiKeyInput = '[data-scope="provider"][data-name="api_key"] input';
+              const apiKeyEnvInput = '[data-scope="provider"][data-name="api_key_env"] input';
+              const providerModelBeforeSave = await page.inputValue(modelInput);
+              const providerAdvancedOpen = await page.locator('[data-provider-advanced]').evaluate(
+                element => element.open
+              );
+              const providerEnvVisible = await page.locator(apiKeyEnvInput).isVisible();
+              await page.fill(apiKeyInput, "opencap-browser-regression-key");
+              const providerEnvBeforeSave = await page.inputValue(apiKeyEnvInput);
+              await page.click("[data-save-provider]");
+              await page.waitForFunction(
+                () => document.querySelector("[data-router-mode]"),
+                { timeout: 15000 }
+              );
+              const providerRequest = sentFrames
+                .map(frame => {
+                  try { return JSON.parse(frame); } catch (_) { return null; }
+                })
+                .find(frame => frame?.method === "onboarding.provider.configure");
               const result = {
                 status: response ? response.status() : 0,
-                title: await page.title(),
+                title: initialTitle,
                 appCount: await page.locator("#app").count(),
                 basePath: await page.locator("#agentos-data").getAttribute("data-base-path"),
                 authMode: await page.locator("#agentos-data").getAttribute("data-auth-mode"),
+                providerModelBeforeSave,
+                providerAdvancedOpen,
+                providerEnvVisible,
+                providerEnvBeforeSave,
+                providerRequestFound: Boolean(providerRequest),
+                providerRequestHasApiKey: Boolean(providerRequest?.params?.apiKey),
+                providerRequestHasApiKeyEnv: Object.hasOwn(
+                  providerRequest?.params || {},
+                  "apiKeyEnv"
+                ),
                 pageErrors: errors,
               };
               await browser.close();
@@ -156,6 +197,7 @@ def test_control_ui_loads_in_real_browser(tmp_path: Path) -> None:
 
     env = os.environ.copy()
     env["AGENTOS_STATE_DIR"] = str(state_dir)
+    env["AGENTOS_GATEWAY_CONFIG_PATH"] = str(tmp_path / "agentos.toml")
     server = subprocess.Popen(
         [sys.executable, str(server_script)],
         cwd=Path.cwd(),
@@ -185,8 +227,15 @@ def test_control_ui_loads_in_real_browser(tmp_path: Path) -> None:
         _stop_process(server)
 
     assert payload["status"] == 200
-    assert payload["title"] == "AgentOS Control"
+    assert payload["title"] == "Overview - AgentOS Control"
     assert payload["appCount"] == 1
     assert payload["basePath"] == "/control"
     assert payload["authMode"] == "none"
+    assert payload["providerModelBeforeSave"] == "minimax-m3"
+    assert payload["providerAdvancedOpen"] is False
+    assert payload["providerEnvVisible"] is False
+    assert payload["providerEnvBeforeSave"] == "OPENCAP_API_KEY"
+    assert payload["providerRequestFound"] is True
+    assert payload["providerRequestHasApiKey"] is True
+    assert payload["providerRequestHasApiKeyEnv"] is False
     assert payload["pageErrors"] == []

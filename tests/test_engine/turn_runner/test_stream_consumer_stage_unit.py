@@ -18,6 +18,8 @@ from typing import Any
 
 import pytest
 
+from agentos.engine import runtime as runtime_module
+from agentos.engine.pricing import PriceEntry
 from agentos.engine.turn_runner.stream_consumer_stage import (
     _SUPPRESS,
     StreamConsumerStage,
@@ -198,6 +200,7 @@ def _make_input(
     private_memory_allowed: bool = True,
     sync_manager: Any | None = None,
     input_provenance: dict[str, Any] | None = None,
+    router_cfg: Any | None = None,
 ) -> StreamConsumerStageInput:
     return StreamConsumerStageInput(
         agent=SimpleNamespace(),
@@ -215,7 +218,7 @@ def _make_input(
         run_kind="default",
         heartbeat_ack_max_chars=300,
         bootstrap_context_mode=None,
-        router_cfg=None,
+        router_cfg=router_cfg,
         session_manager_present=session_manager_present,
         state=state if state is not None else _make_state(),
     )
@@ -569,6 +572,50 @@ def test_done_handler_normalizes_and_emits_done() -> None:
     assert transformed.routing_applied is False
     assert transformed.rollout_phase == "observe"
     assert state.done_event is transformed
+    assert extra == []
+
+
+def test_done_handler_uses_provider_from_exact_routed_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lookups: list[tuple[str, str]] = []
+
+    def lookup_price(model_id: str, provider_id: str = "") -> PriceEntry:
+        lookups.append((model_id, provider_id))
+        prices = {
+            ("minimax-m3", "bankr"): PriceEntry(0.08, 0.32),
+            ("minimax-m3", "opencap"): PriceEntry(0.25, 1.0),
+            ("claude-opus-4.8", "opencap"): PriceEntry(2.0, 8.0),
+        }
+        return prices.get((model_id, provider_id), PriceEntry(0.0, 0.0))
+
+    monkeypatch.setattr(runtime_module, "lookup_price", lookup_price)
+    tiers = {
+        "c0": {"provider": "bankr", "model": "minimax-m3"},
+        "c1": {"provider": "opencap", "model": "minimax-m3"},
+        "c3": {"provider": "opencap", "model": "claude-opus-4.8"},
+    }
+    state = _make_state()
+    inp = _make_input(
+        state=state,
+        turn=_make_turn(
+            metadata={
+                "routed_tier": "c1",
+                "routed_model": "minimax-m3",
+            }
+        ),
+        router_cfg=SimpleNamespace(tiers=tiers, estimated_output_savings_pct=0.03),
+    )
+
+    transformed, extra = _DoneHandler().handle(
+        DoneEvent(text="result", input_tokens=1_000_000, model="minimax-m3"),
+        inp,
+        state,
+    )
+
+    assert ("minimax-m3", "opencap") in lookups
+    assert transformed.total_savings_usd == pytest.approx(1.75)
+    assert transformed.total_savings_pct == pytest.approx(87.5)
     assert extra == []
 
 

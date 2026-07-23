@@ -81,11 +81,9 @@ LEGACY_OPENROUTER_MODEL_IDS: dict[str, str] = {
 OPENROUTER_PROVIDER_ID = "openrouter"
 
 GATEWAY_PROVIDER_ID = "bankr"
-# The retired ``opencap`` gateway provider (and its own predecessors,
-# "capgateway" / "opencap-gateway") is intentionally NOT migrated forward: on-disk
-# configs pinning any of these now fail validation with UnknownProviderError so
-# the operator re-selects a supported provider. Only the router section rename is
-# still applied for old configs.
+# Historical aliases ("capgateway" / "opencap-gateway") are intentionally not
+# rewritten. Canonical ``opencap`` is a supported provider again, so existing
+# configurations using that id remain valid without migration.
 LEGACY_GATEWAY_PROVIDER_IDS: tuple[str, ...] = ()
 LEGACY_ROUTER_SECTION = "cap_router"
 

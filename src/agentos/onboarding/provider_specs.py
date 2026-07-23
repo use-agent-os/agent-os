@@ -47,6 +47,7 @@ class ProviderSetupSpec:
 
 _PROVIDER_LABELS: dict[str, str] = {
     "bankr": "Bankr LLM Gateway",
+    "opencap": "OpenCAP",
     "openrouter": "OpenRouter",
     "openai": "OpenAI",
     "azure": "Azure OpenAI",
@@ -81,6 +82,7 @@ _PROVIDER_LABELS: dict[str, str] = {
 _ONBOARDING_VERIFIED_PROVIDER_IDS = frozenset(
     {
         "bankr",
+        "opencap",
         "openrouter",
         "openai",
         "anthropic",

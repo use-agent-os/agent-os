@@ -4,8 +4,10 @@ from agentos.engine.pricing import (
     PriceEntry,
     reset_live_price_cache_for_tests,
     seed_live_price_cache_for_tests,
+    seed_opencap_price_cache,
 )
 from agentos.engine.runtime import _compute_comprehensive_turn_savings
+from agentos.engine.steps.agentos_router import _compute_savings
 from agentos.engine.types import DoneEvent
 
 TEXT_TIERS = {
@@ -42,6 +44,35 @@ def test_comprehensive_savings_uses_input_output_and_reasoning_prices() -> None:
     assert result.actual_cost_usd == pytest.approx(0.00028)
     assert result.usd == pytest.approx(0.01722)
     assert result.pct == pytest.approx(98.4)
+
+
+def test_opencap_savings_uses_provider_scoped_prices_for_shared_model_ids() -> None:
+    seed_opencap_price_cache(
+        {
+            "data": [
+                {"id": "minimax-m3", "pricing": {"input": 0.25, "output": 1.0}},
+                {"id": "claude-opus-4.8", "pricing": {"input": 2.0, "output": 8.0}},
+            ]
+        }
+    )
+    tiers = {
+        "c1": {"provider": "opencap", "model": "minimax-m3"},
+        "c3": {"provider": "opencap", "model": "claude-opus-4.8"},
+    }
+
+    routing = _compute_savings("minimax-m3", tiers, "c1")
+    comprehensive = _compute_comprehensive_turn_savings(
+        DoneEvent(input_tokens=1_000_000, output_tokens=0, model="minimax-m3"),
+        {},
+        tiers,
+        "minimax-m3",
+        routed_provider="opencap",
+    )
+
+    assert routing["savings_routed_price_per_m"] == pytest.approx(0.25)
+    assert routing["savings_max_price_per_m"] == pytest.approx(2.0)
+    assert comprehensive.actual_cost_usd == pytest.approx(0.25)
+    assert comprehensive.baseline_cost_usd == pytest.approx(2.0)
 
 
 def test_tool_projection_restores_only_the_input_baseline() -> None:

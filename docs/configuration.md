@@ -99,6 +99,7 @@ Onboarding-verified providers include:
 
 - OpenRouter
 - Bankr LLM Gateway
+- OpenCAP
 - OpenAI
 - Anthropic
 - Ollama
@@ -115,6 +116,11 @@ OpenAI-compatible or self-hosted backends. Use `agentos providers list` on
 your install to see the current catalog.
 
 Read: [`providers-and-models.md`](providers-and-models.md)
+
+### OpenCAP
+
+See [Providers and Models — OpenCAP routing](providers-and-models.md#opencap-routing)
+for the canonical setup, model catalog, routing, and pricing behavior.
 
 ### Ollama plain-text mode
 

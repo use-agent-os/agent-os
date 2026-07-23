@@ -16,7 +16,7 @@ def test_providers_list_shows_all_supported(tmp_path: Path, monkeypatch):
     result = runner.invoke(app, ["providers", "list"])
     assert result.exit_code == 0
     out = result.stdout
-    for pid in ("openrouter", "openai", "ollama", "vllm", "azure"):
+    for pid in ("opencap", "openrouter", "openai", "ollama", "vllm", "azure"):
         assert pid in out
 
 

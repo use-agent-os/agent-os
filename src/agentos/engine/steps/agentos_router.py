@@ -667,7 +667,7 @@ def _tier_thinking_level(tier_cfg: dict) -> str | None:
     return None
 
 
-def _compute_savings(routed_model: str, tiers: dict) -> dict:
+def _compute_savings(routed_model: str, tiers: dict, routed_tier: str = "") -> dict:
     """Return savings metadata: pct display + raw prices for per-turn USD computation.
 
     This intentionally follows 49b7e08: savings are the input-price delta
@@ -676,9 +676,24 @@ def _compute_savings(routed_model: str, tiers: dict) -> dict:
     """
     text_tiers = [v for v in tiers.values() if not v.get("image_only", False)]
     priced_tiers = text_tiers or list(tiers.values())
-    prices = [lookup_price(v.get("model", "")).input_per_m for v in priced_tiers]
+    prices = [
+        lookup_price(
+            v.get("model", ""),
+            provider_id=str(v.get("provider") or ""),
+        ).input_per_m
+        for v in priced_tiers
+    ]
     max_price = max(prices) if prices else 0.0
-    routed_price = lookup_price(routed_model).input_per_m
+    routed_cfg = tiers.get(routed_tier, {}) if routed_tier else {}
+    if not routed_cfg:
+        routed_cfg = next(
+            (tier for tier in tiers.values() if tier.get("model") == routed_model),
+            {},
+        )
+    routed_price = lookup_price(
+        routed_model,
+        provider_id=str(routed_cfg.get("provider") or ""),
+    ).input_per_m
     pct = (
         0.0
         if max_price <= 0 or routed_price >= max_price
@@ -1232,7 +1247,7 @@ async def apply_agentos_router(ctx: TurnContext) -> TurnContext:
         ctx.metadata["routing_confidence"] = decision.confidence
         ctx.metadata["routing_source"] = decision.source
         ctx.metadata["route_max_history_turns"] = 1
-        ctx.metadata.update(_compute_savings(decision.model, tiers))
+        ctx.metadata.update(_compute_savings(decision.model, tiers, decision.tier))
         _record_thinking_metadata(ctx, router_cfg, image_tiers[tier_name])
         log.debug("agentos_router.image_routed", tier=decision.tier, model=decision.model)
         return ctx
@@ -1277,7 +1292,7 @@ async def apply_agentos_router(ctx: TurnContext) -> TurnContext:
             ctx.metadata["router_control_target_model"] = hold.model
             ctx.metadata["router_control_target_provider"] = hold.provider
             ctx.metadata["router_control_evidence"] = hold.evidence
-            ctx.metadata.update(_compute_savings(decision.model, tiers))
+            ctx.metadata.update(_compute_savings(decision.model, tiers, decision.tier))
             _record_thinking_metadata(ctx, router_cfg, tiers[decision.tier])
             log.debug(
                 "agentos_router.router_control_hold_applied",
@@ -1435,7 +1450,7 @@ async def apply_agentos_router(ctx: TurnContext) -> TurnContext:
     ctx.metadata["applied_model"] = ctx.model
     ctx.metadata["routing_confidence"] = decision.confidence
     ctx.metadata["routing_source"] = decision.source
-    ctx.metadata.update(_compute_savings(decision.model, tiers))
+    ctx.metadata.update(_compute_savings(decision.model, tiers, decision.tier))
 
     context_states = ctx.metadata.get("session_context_states") or ctx.metadata.get(
         "active_context_states"

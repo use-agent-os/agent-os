@@ -6,6 +6,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass
+from math import isfinite
 from typing import Any, cast
 
 import httpx
@@ -112,6 +113,7 @@ class PriceEntry:
 
     input_per_m: float
     output_per_m: float
+    cached_input_per_m: float | None = None
 
 
 # Canonical non-discount prices that must override OpenRouter's promotional or routed
@@ -119,7 +121,8 @@ class PriceEntry:
 _PRICE_OVERRIDES: list[tuple[str, PriceEntry]] = [
     ("deepseek/deepseek-v4-pro", PriceEntry(1.74, 3.48)),
     # Bankr LLM Gateway (llm.bankr.bot) catalog prices — not vendor rack rates.
-    # Ids are bare. Ids shared with approved direct-provider static entries
+    # These bare IDs are also served by OpenCAP, whose provider-scoped live
+    # catalog takes precedence above. Ids shared with direct-provider entries
     # (gpt-5.4-mini, gpt-5.5, deepseek-v4-flash) are intentionally absent: the
     # direct rack rates keep pricing those ids, which overestimates the gateway
     # spend rather than underestimating direct spend.
@@ -141,6 +144,7 @@ _PRICE_LOCK = threading.RLock()
 _LIVE_PRICE_CACHE: dict[str, PriceEntry] = {}
 _LIVE_PRICE_FETCHED_AT: dict[str, float] = {}
 _LIVE_PRICE_MISS_AT: dict[str, float] = {}
+_OPENCAP_PRICE_CACHE: dict[str, PriceEntry] = {}
 
 
 def _lookup_price_override(model_id: str) -> PriceEntry | None:
@@ -185,6 +189,63 @@ def _float_or_none(value: object) -> float | None:
         return float(cast(Any, value))
     except (TypeError, ValueError):
         return None
+
+
+def _nonnegative_float_or_none(value: object) -> float | None:
+    parsed = _float_or_none(value)
+    if parsed is None or not isfinite(parsed) or parsed < 0:
+        return None
+    return parsed
+
+
+def _parse_opencap_prices(data: dict[str, Any]) -> dict[str, PriceEntry]:
+    """Parse OpenCAP's public USD-per-1M-token model catalog."""
+    models = data.get("data")
+    if not isinstance(models, list):
+        return {}
+    prices: dict[str, PriceEntry] = {}
+    for model in models:
+        if not isinstance(model, dict):
+            continue
+        model_id = str(model.get("id") or "").strip().lower()
+        pricing = model.get("pricing")
+        if not model_id or not isinstance(pricing, dict):
+            continue
+        input_price = _nonnegative_float_or_none(pricing.get("input"))
+        output_price = _nonnegative_float_or_none(pricing.get("output"))
+        if input_price is None or output_price is None:
+            continue
+        prices[model_id] = PriceEntry(
+            input_per_m=input_price,
+            output_per_m=output_price,
+            cached_input_per_m=_nonnegative_float_or_none(pricing.get("cachedInput")),
+        )
+    return prices
+
+
+def _store_opencap_prices(prices: dict[str, PriceEntry]) -> int:
+    """Atomically replace the OpenCAP pricing cache with validated entries."""
+    if not prices:
+        return 0
+    with _PRICE_LOCK:
+        _OPENCAP_PRICE_CACHE.clear()
+        _OPENCAP_PRICE_CACHE.update(prices)
+    log.info("pricing.opencap_refreshed", models=len(prices))
+    return len(prices)
+
+
+def seed_opencap_price_cache(data: dict[str, Any]) -> int:
+    """Seed pricing from an OpenCAP catalog payload already fetched at boot."""
+    return _store_opencap_prices(_parse_opencap_prices(data))
+
+
+def _lookup_opencap_price(model_id: str) -> PriceEntry | None:
+    """Return a boot-seeded OpenCAP price without performing outbound I/O."""
+    key = str(model_id or "").strip().lower()
+    if not key:
+        return None
+    with _PRICE_LOCK:
+        return _OPENCAP_PRICE_CACHE.get(key)
 
 
 def _apply_discount_inverse(price_per_token: float, discount: float) -> float:
@@ -324,6 +385,7 @@ def reset_live_price_cache_for_tests() -> None:
         _LIVE_PRICE_CACHE.clear()
         _LIVE_PRICE_FETCHED_AT.clear()
         _LIVE_PRICE_MISS_AT.clear()
+        _OPENCAP_PRICE_CACHE.clear()
 
 
 def seed_live_price_cache_for_tests(model_id: str, price: PriceEntry) -> None:
@@ -440,7 +502,7 @@ _PRICING_TABLE: list[tuple[str, PriceEntry]] = [
     ("qwen-max", PriceEntry(0.345, 1.377)),
     # MiniMax.
     ("minimax/minimax-m2.7", PriceEntry(0.118, 0.99)),
-    # Bankr LLM Gateway (llm.bankr.bot) catalog prices — not vendor rack rates.
+    # Bankr LLM Gateway fallback prices for bare IDs also served by OpenCAP.
     # Shadowed by _PRICE_OVERRIDES for these ids; keep both lists in sync.
     ("oc-uncensored-1.0", PriceEntry(0.20, 0.80)),
     ("minimax-m3", PriceEntry(0.0825, 0.33)),
@@ -484,14 +546,23 @@ def _should_fetch_live_price(model_id: str) -> bool:
     return True
 
 
-def lookup_price(model_id: str) -> PriceEntry:
-    """Look up pricing, preferring live OpenRouter endpoint prices.
+def lookup_price(model_id: str, provider_id: str = "") -> PriceEntry:
+    """Look up provider-aware pricing, preferring live catalog prices.
 
-    Live lookup uses ``prompt``/``completion`` endpoint prices, explicitly not
-    cache-read prices. If OpenRouter is unreachable, the static table is only a
-    fail-open fallback so cost estimation keeps working offline.
+    OpenCAP uses its public model catalog because its bare model IDs overlap
+    with other gateways whose rates differ. OpenRouter live lookup uses
+    ``prompt``/``completion`` endpoint prices, explicitly not cache-read prices.
+    If either service is unreachable, the static table is a fail-open fallback
+    so cost estimation keeps working offline.
     """
     model_id = str(model_id or "").strip()
+    if str(provider_id or "").strip().lower() == "opencap":
+        # OpenCAP's public catalog is canonical for this provider. Shared bare
+        # IDs intentionally bypass the Bankr/static override entries below.
+        opencap_price = _lookup_opencap_price(model_id)
+        if opencap_price is not None:
+            return opencap_price
+        return _lookup_static_price(model_id)
     override = _lookup_price_override(model_id)
     if override is not None:
         return override
@@ -518,3 +589,32 @@ def lookup_price(model_id: str) -> PriceEntry:
         _LIVE_PRICE_FETCHED_AT[key] = time.monotonic()
         _LIVE_PRICE_MISS_AT.pop(key, None)
         return price
+
+
+def calculate_cost_usd(
+    price: PriceEntry,
+    *,
+    input_tokens: int,
+    output_tokens: int,
+    cached_input_tokens: int = 0,
+) -> float:
+    """Calculate USD cost from USD-per-1M-token rates.
+
+    ``input_tokens`` follows OpenAI-compatible usage semantics and includes
+    cached prompt tokens. When a catalog publishes ``cached_input_per_m``, the
+    cached portion is removed from normal input and charged at that rate.
+    """
+    safe_input = max(0, int(input_tokens))
+    safe_output = max(0, int(output_tokens))
+    cached_input = min(safe_input, max(0, int(cached_input_tokens)))
+    regular_input = safe_input - cached_input
+    cached_rate = (
+        price.cached_input_per_m
+        if price.cached_input_per_m is not None
+        else price.input_per_m
+    )
+    return (
+        regular_input * price.input_per_m
+        + cached_input * cached_rate
+        + safe_output * price.output_per_m
+    ) / 1_000_000

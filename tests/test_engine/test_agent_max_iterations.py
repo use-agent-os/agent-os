@@ -505,6 +505,31 @@ async def test_agent_done_event_uses_current_turn_real_billed_usage_delta() -> N
 
 
 @pytest.mark.asyncio
+async def test_agent_forwards_active_provider_to_usage_tracker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("agentos.engine.pricing._lookup_opencap_price", lambda _model_id: None)
+    provider = _DoneUsageProvider(input_tokens=1_000_000, output_tokens=1_000_000)
+    provider.provider_kind = "opencap"
+    tracker = UsageTracker()
+    session_key = "agent:test:opencap-usage"
+    agent = Agent(
+        provider=provider,
+        config=AgentConfig(model_id="oc-uncensored-1.0"),
+        usage_tracker=tracker,
+        session_key=session_key,
+    )
+
+    events = [event async for event in agent.run_turn("hello")]
+
+    assert any(event.kind == "done" for event in events)
+    usage = tracker.get(session_key)
+    assert usage is not None
+    assert usage.provider_id == "opencap"
+    assert usage.model_breakdown[0]["provider"] == "opencap"
+
+
+@pytest.mark.asyncio
 async def test_agent_stops_when_turn_billed_cost_budget_is_exceeded() -> None:
     provider = _DoneUsageProvider(billed_cost=0.25)
     agent = Agent(

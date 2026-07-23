@@ -60,6 +60,7 @@ from agentos.provider import (
     ProviderHeartbeatEvent,
     ToolDefinition,
     ToolUseEndEvent,
+    provider_metadata,
 )
 from agentos.provider import (
     DoneEvent as ProviderDoneEvent,
@@ -2336,6 +2337,7 @@ class Agent:
                                     # gateway/rpc_usage.py:_reconcile_breakdown_to_row
                                     # (the pro-rate fallback now skips when items
                                     # already carry real billed totals).
+                                    metadata = provider_metadata(self.provider)
                                     self._usage_tracker.add(
                                         self._session_key,
                                         input_tokens=raw_ev.input_tokens,
@@ -2344,6 +2346,9 @@ class Agent:
                                         cache_read_tokens=raw_ev.cached_tokens,
                                         cache_write_tokens=raw_ev.cache_write_tokens,
                                         billed_cost=raw_ev.billed_cost,
+                                        provider_id=(
+                                            metadata.provider_kind or metadata.provider_name
+                                        ),
                                     )
 
                             elif isinstance(raw_ev, ProviderErrorEvent):
@@ -3618,7 +3623,11 @@ class Agent:
             done_model = self.config.model_id or ""
         from agentos.engine.pricing import lookup_price
 
-        price = lookup_price(done_model)
+        done_provider = provider_metadata(self.provider)
+        price = lookup_price(
+            done_model,
+            provider_id=done_provider.provider_kind or done_provider.provider_name,
+        )
         estimated_cost = (
             total_input_tokens * price.input_per_m + total_output_tokens * price.output_per_m
         ) / 1_000_000

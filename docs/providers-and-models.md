@@ -38,6 +38,9 @@ Non-interactive onboarding-style configuration:
 ```sh
 export OPENROUTER_API_KEY="sk-..."
 agentos configure provider --provider openrouter --api-key-env OPENROUTER_API_KEY
+
+export OPENCAP_API_KEY="ocap_..."
+agentos configure provider --provider opencap --api-key-env OPENCAP_API_KEY
 ```
 
 Direct provider examples:
@@ -58,6 +61,7 @@ This build exposes onboarding support for:
 
 - OpenRouter (default provider)
 - Bankr LLM Gateway
+- OpenCAP
 - OpenAI
 - Anthropic
 - Ollama
@@ -72,6 +76,30 @@ This build exposes onboarding support for:
 The provider registry may contain additional compatible providers for advanced
 or self-hosted setups. Use `agentos providers list` on your install for the
 current catalog.
+
+### OpenCAP routing
+
+OpenCAP defaults to `https://gw.capminal.ai/api/inference/v1` and uses one
+OpenAI-compatible key for inference. Its public model catalog is unauthenticated.
+The default direct/fallback model is the balanced C1 model, `minimax-m3`. The `recommended`
+router profile selects bare OpenCAP model IDs across C0-C3 and the vision route,
+with `oc-uncensored-1.0` available as an explicit C0 route rather than the setup default.
+
+At gateway boot, AgentOS fetches the public catalog asynchronously for model
+choices, capabilities, and provider-scoped cost estimates. If that fetch fails,
+configured models can still run with static capability and cost fallbacks.
+
+OpenCAP chooses the cheapest eligible upstream when no route is configured.
+To restrict one model to a supported upstream, use bare model IDs and an
+upstream provider ID advertised by the current live catalog:
+
+```toml
+[llm.provider_routing]
+"glm-5.2" = "provider-id-from-live-catalog"
+```
+
+AgentOS sends this as OpenCAP's provider allow-list. OpenRouter uses the same
+configuration table but retains its existing preferred-order payload.
 
 ## Model Inspection
 

@@ -40,6 +40,8 @@ class ProviderSpec:
     metadata_supported: bool = True
     runtime_supported: bool = True
     capabilities: frozenset[str] = field(default_factory=lambda: frozenset({"chat"}))
+    # Appended to preserve ProviderSpec's public positional constructor contract.
+    model_catalog_url: str = ""
 
     _LOCAL_PROVIDERS: ClassVar[frozenset[str]] = frozenset(
         {"ollama", "lm_studio", "ovms", "vllm"}
@@ -74,6 +76,7 @@ def _spec(
     env_key: str = "",
     default_base_url: str = "",
     *,
+    model_catalog_url: str = "",
     support_level: ProviderSupportLevel = "compat_mock_verified",
     required_fields: frozenset[str] | None = None,
     reasoning_shape: str = "none",
@@ -90,6 +93,7 @@ def _spec(
         provider_kind=provider_kind,
         env_key=env_key,
         default_base_url=default_base_url,
+        model_catalog_url=model_catalog_url,
         support_level=support_level,
         required_fields=required_fields,
         reasoning_shape=reasoning_shape,
@@ -108,6 +112,14 @@ for _provider_spec in [
         "BANKR_API_KEY",
         "https://llm.bankr.bot/v1",
         support_level="compat_configured",
+    ),
+    _spec(
+        "opencap",
+        "openai_compat",
+        "opencap",
+        "OPENCAP_API_KEY",
+        "https://gw.capminal.ai/api/inference/v1",
+        model_catalog_url="https://gw.capminal.ai/api/public/models",
     ),
     _spec(
         "openrouter",

@@ -505,6 +505,7 @@ class _DoneHandler:
             metadata,
             agentos_router_tiers,
             routed_model,
+            routed_tier=str(routed_tier or ""),
             estimated_output_savings_pct=estimated_output_savings_pct,
         )
         provider_cache_hit = (event.cached_tokens or 0) > 0

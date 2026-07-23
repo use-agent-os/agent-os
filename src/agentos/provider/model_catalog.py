@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from math import isfinite
+from typing import Any, cast
+
 import httpx
 import structlog
 
@@ -48,7 +51,7 @@ _STATIC_FALLBACK: dict[str, tuple[int, int]] = {
     "kimi-k2.6": (32_768, 262_144),
     "moonshotai/kimi-k2.6": (DEFAULT_MAX_TOKENS, 262_142),
     "moonshotai/kimi-k2.5": (65_535, 262_144),
-    # Bankr LLM Gateway (llm.bankr.bot) catalog. Ids are bare. "gpt-5.5",
+    # Shared Bankr/OpenCAP gateway catalog IDs are bare. "gpt-5.5",
     # "gpt-5.4-mini" and "deepseek-v4-flash" already have entries above (the
     # deepseek entry keeps the DeepSeek direct contract values; the gateway's
     # 128K output cap lives in _PROVIDER_STATIC_FALLBACK). "kimi-k2.6" above
@@ -79,16 +82,29 @@ _STATIC_FALLBACK: dict[str, tuple[int, int]] = {
 
 # Per-provider overrides for ids whose shared _STATIC_FALLBACK entry carries a
 # different provider's contract. "deepseek-v4-flash" keeps the DeepSeek direct
-# windows (393K max output) above, but the Bankr gateway serves the same id
+# windows (393K max output) above, but compatible gateways serve the same id
 # with a 128K output cap — sending the direct value would over-ask the gateway.
-_PROVIDER_STATIC_FALLBACK: dict[str, dict[str, tuple[int, int]]] = {
-    "bankr": {
-        "deepseek-v4-flash": (128_000, 1_000_000),
-        # Moonshot direct serves kimi-k2.6 with 32K output / 262K context; the
-        # gateway lists 64K output / 256K context for the same bare id.
-        "kimi-k2.6": (65_536, 256_000),
-    },
+_GATEWAY_STATIC_FALLBACK = {
+    "deepseek-v4-flash": (128_000, 1_000_000),
+    # Moonshot direct serves kimi-k2.6 with 32K output / 262K context; the
+    # gateways list 64K output / 256K context for the same bare id.
+    "kimi-k2.6": (65_536, 256_000),
 }
+_PROVIDER_STATIC_FALLBACK: dict[str, dict[str, tuple[int, int]]] = {
+    "bankr": dict(_GATEWAY_STATIC_FALLBACK),
+    "opencap": dict(_GATEWAY_STATIC_FALLBACK),
+}
+
+
+def _catalog_price_per_1k(value: object) -> float:
+    """Convert a validated catalog USD-per-million value to USD per 1K tokens."""
+    try:
+        price_per_million = float(cast(Any, value))
+    except (TypeError, ValueError):
+        return 0.0
+    if not isfinite(price_per_million) or price_per_million < 0:
+        return 0.0
+    return price_per_million / 1000
 
 
 class ModelCatalog:
@@ -107,6 +123,15 @@ class ModelCatalog:
 
     def __len__(self) -> int:
         return len(self._models)
+
+    def list_models(self, provider_id: str = "") -> list[ModelInfo]:
+        """Return cached models, optionally restricted to one provider."""
+        provider = provider_id.strip().lower()
+        return [
+            model
+            for model in self._models.values()
+            if not provider or model.provider.strip().lower() == provider
+        ]
 
     def _populate_from_data(self, models: list[dict]) -> None:
         """Parse a list of OpenRouter model dicts into ModelInfo entries."""
@@ -132,16 +157,23 @@ class ModelCatalog:
                 supports_vision="image" in input_modalities,
             )
 
-    def _populate_from_bankr(self, models: list[dict]) -> None:
-        """Parse Bankr LLM Gateway model dicts into ModelInfo entries.
+    def _populate_from_gateway(
+        self,
+        models: list[dict],
+        *,
+        provider_id: str,
+        pricing_per_million: bool = False,
+    ) -> None:
+        """Parse OpenAI-compatible gateway model dicts into ModelInfo entries.
 
-        Bankr exposes an OpenAI-compatible ``/v1/models`` list. Field names are
+        Gateway catalogs expose an OpenAI-compatible ``/models`` list. Field names are
         read defensively (``context_length``/``contextLength``,
         ``max_output``/``maxOutput``) and missing values fall back to the static
         table / default via ``resolve_max_tokens``. The catalog carries no
         tool/reasoning flags, so tools default on (every gateway llm supports
         them) and reasoning stays off — capability resolution for bankr is
-        handled in get_capabilities.
+        handled in get_capabilities. OpenCAP's public catalog additionally
+        publishes USD-per-million pricing; callers opt into that unit explicitly.
         """
         for m in models:
             model_id = m.get("id", "")
@@ -151,8 +183,11 @@ class ModelCatalog:
             input_modalities = {str(item).lower() for item in modality.get("input", [])}
             context_window = m.get("context_length") or m.get("contextLength") or 0
             max_output = m.get("max_output") or m.get("maxOutput") or 0
+            pricing = m.get("pricing") if pricing_per_million else None
+            if not isinstance(pricing, dict):
+                pricing = {}
             self._models[model_id] = ModelInfo(
-                provider="bankr",
+                provider=provider_id,
                 model_id=model_id,
                 display_name=m.get("name", model_id),
                 context_window=context_window,
@@ -160,7 +195,21 @@ class ModelCatalog:
                 supports_reasoning=False,
                 supports_tools=True,
                 supports_vision="image" in input_modalities,
+                input_cost_per_1k=_catalog_price_per_1k(pricing.get("input")),
+                output_cost_per_1k=_catalog_price_per_1k(pricing.get("output")),
             )
+
+    def _populate_from_bankr(self, models: list[dict]) -> None:
+        """Parse Bankr LLM Gateway model dicts into ModelInfo entries."""
+        self._populate_from_gateway(models, provider_id="bankr")
+
+    def _populate_from_opencap(self, models: list[dict]) -> None:
+        """Parse OpenCAP gateway model dicts into ModelInfo entries."""
+        self._populate_from_gateway(
+            models,
+            provider_id="opencap",
+            pricing_per_million=True,
+        )
 
     def get_capabilities(
         self,
@@ -223,8 +272,8 @@ class ModelCatalog:
                 supports_tools=True,
                 reasoning_format="zai" if supports_reasoning else "none",
             )
-        if provider_id == "bankr":
-            # Bankr catalog ids are bare (e.g. "minimax-m3"); legacy
+        if provider_id in {"bankr", "opencap"}:
+            # Gateway catalog ids are bare (e.g. "minimax-m3"); legacy Bankr
             # configs may still carry the namespaced "virtuals/<id>" form, so
             # strip the prefix before matching. Prefer live catalog modality data
             # when a fetch populated it; otherwise fall back to a prefix heuristic
@@ -329,6 +378,26 @@ class ModelCatalog:
 
         self._populate_from_bankr(data.get("data", []))
         log.debug("model_catalog.fetched_bankr", count=len(self._models))
+
+    async def fetch_opencap(self, proxy: str = "") -> dict[str, Any]:
+        """Fetch OpenCAP's public, unauthenticated live model catalog."""
+        url = get_provider_spec("opencap").model_catalog_url
+        if not url:
+            raise RuntimeError("OpenCAP model catalog URL is not configured")
+        async with httpx.AsyncClient(
+            timeout=10.0, trust_env=_trust_env(), proxy=proxy or None
+        ) as client:
+            resp = await client.get(url, headers={"Accept": "application/json"})
+            resp.raise_for_status()
+            payload = resp.json()
+
+        if not isinstance(payload, dict):
+            raise ValueError("OpenCAP model catalog response must be a JSON object")
+        data = cast(dict[str, Any], payload)
+
+        self._populate_from_opencap(data.get("data", []))
+        log.debug("model_catalog.fetched_opencap", count=len(self._models))
+        return data
 
     def get(self, model_id: str) -> ModelInfo | None:
         """Look up model metadata by ID."""

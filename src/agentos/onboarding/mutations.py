@@ -17,6 +17,7 @@ from agentos.gateway.config import (
     LlmProviderConfig,
     MemoryEmbeddingConfig,
     _bankr_tiers,
+    _opencap_tiers,
     _openrouter_tiers,
     _router_tier_profile_defaults,
 )
@@ -133,7 +134,7 @@ def _tiers_are_machine_written_defaults(
     Anything else is treated as a custom, operator-authored tier set and left
     untouched.
     """
-    if tiers in (_openrouter_tiers(), _bankr_tiers()):
+    if tiers in (_openrouter_tiers(), _bankr_tiers(), _opencap_tiers()):
         return True
     old_provider = str(old_provider or "").strip().lower()
     old_model = str(old_model or "").strip()

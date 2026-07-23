@@ -242,6 +242,33 @@ def test_openrouter_http_error_names_provider_request(monkeypatch: Any) -> None:
     assert error.message == "OpenRouter chat request failed (HTTP 500): Internal Server Error"
 
 
+def test_opencap_http_error_names_provider_and_preserves_detail(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+    _patch_transport_response(
+        monkeypatch,
+        captured,
+        httpx.Response(
+            400,
+            json={"error": {"message": "unsupported_provider"}},
+            request=httpx.Request(
+                "POST", "https://gw.capminal.ai/api/inference/v1/chat/completions"
+            ),
+        ),
+    )
+    provider = OpenAIProvider(
+        api_key="test",
+        model="glm-5.2",
+        base_url="https://gw.capminal.ai/api/inference/v1",
+        provider_kind="opencap",
+    )
+
+    events = _collect_events(provider, ChatConfig())
+
+    error = next(event for event in events if isinstance(event, ErrorEvent))
+    assert error.code == "400"
+    assert error.message == "OpenCAP chat request failed (HTTP 400): unsupported_provider"
+
+
 def test_openrouter_deepseek_v4_returns_reasoning_content_from_details(
     monkeypatch: Any,
 ) -> None:
@@ -298,6 +325,66 @@ def test_openrouter_deepseek_v4_returns_reasoning_content_from_details(
     }
     assert captured["payload"]["reasoning"] == {"effort": "high"}
     assert done.reasoning_content == "I considered the request."
+
+
+def test_opencap_default_request_omits_provider_allow_list(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured)
+    provider = OpenAIProvider(
+        api_key="test",
+        model="glm-5.2",
+        base_url="https://gw.capminal.ai/api/inference/v1",
+        provider_kind="opencap",
+    )
+
+    _collect(provider, ChatConfig())
+
+    assert captured["url"] == "https://gw.capminal.ai/api/inference/v1/chat/completions"
+    assert "provider" not in captured["payload"]
+
+
+def test_opencap_request_emits_provider_allow_list(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured)
+    provider = OpenAIProvider(
+        api_key="test",
+        model="glm-5.2",
+        base_url="https://gw.capminal.ai/api/inference/v1",
+        provider_kind="opencap",
+        provider_routing={"glm-5.2": "surplus"},
+    )
+
+    _collect(provider, ChatConfig())
+
+    assert captured["payload"]["provider"] == ["surplus"]
+
+
+def test_opencap_reuses_streaming_and_tool_request_contract(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured)
+    provider = OpenAIProvider(
+        api_key="test",
+        model="glm-5.2",
+        base_url="https://gw.capminal.ai/api/inference/v1",
+        provider_kind="opencap",
+    )
+    tool = ToolDefinition(
+        name="lookup",
+        description="Lookup a value.",
+        input_schema=ToolInputSchema(properties={"q": {"type": "string"}}, required=["q"]),
+    )
+
+    events = _collect_events(
+        provider,
+        ChatConfig(tool_choice="required"),
+        tools=[tool],
+    )
+
+    assert captured["payload"]["stream"] is True
+    assert captured["payload"]["stream_options"] == {"include_usage": True}
+    assert captured["payload"]["tool_choice"] == "required"
+    assert captured["payload"]["tools"][0]["function"]["name"] == "lookup"
+    assert any(isinstance(event, DoneEvent) for event in events)
 
 
 def _collect_events(

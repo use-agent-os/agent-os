@@ -415,17 +415,31 @@ def _tier_value(tier: object, key: str, default: object = None) -> object:
     return getattr(tier, key, default)
 
 
-def _iter_text_tier_models(tiers: object) -> list[str]:
+def _iter_text_tier_models(tiers: object) -> list[tuple[str, str]]:
     if not isinstance(tiers, Mapping):
         return []
-    models: list[str] = []
+    models: list[tuple[str, str]] = []
     for tier in tiers.values():
         if bool(_tier_value(tier, "image_only", False)):
             continue
         model = str(_tier_value(tier, "model", "") or "").strip()
         if model:
-            models.append(model)
+            provider = str(_tier_value(tier, "provider", "") or "").strip()
+            models.append((provider, model))
     return models
+
+
+def _provider_for_tier_model(tiers: object, model_id: str) -> str:
+    for provider, model in _iter_text_tier_models(tiers):
+        if model == model_id:
+            return provider
+    return ""
+
+
+def _provider_for_tier(tiers: object, tier_name: str) -> str:
+    if not isinstance(tiers, Mapping) or not tier_name:
+        return ""
+    return str(_tier_value(tiers.get(tier_name), "provider", "") or "").strip()
 
 
 def _select_savings_baseline_model(
@@ -434,8 +448,8 @@ def _select_savings_baseline_model(
     baseline_output_tokens: float,
 ) -> _SavingsBaseline:
     best = _SavingsBaseline(cost_usd=-1.0)
-    for model in _iter_text_tier_models(tiers):
-        price = lookup_price(model)
+    for provider, model in _iter_text_tier_models(tiers):
+        price = lookup_price(model, provider_id=provider)
         cost_usd = _token_cost_usd(baseline_input_tokens, baseline_output_tokens, price)
         if cost_usd > best.cost_usd:
             best = _SavingsBaseline(model=model, price=price, cost_usd=cost_usd)
@@ -475,6 +489,8 @@ def _compute_comprehensive_turn_savings(
     tiers: object,
     routed_model: str,
     *,
+    routed_provider: str = "",
+    routed_tier: str = "",
     estimated_output_savings_pct: float = 0.03,
 ) -> _ComprehensiveTurnSavings:
     """Estimate per-turn savings from token counts and model prices only."""
@@ -495,7 +511,13 @@ def _compute_comprehensive_turn_savings(
         baseline_input_tokens,
         baseline_output_tokens,
     )
-    routed_price = lookup_price(routed_model or event.model)
+    actual_model = routed_model or event.model
+    provider = (
+        routed_provider
+        or _provider_for_tier(tiers, routed_tier)
+        or _provider_for_tier_model(tiers, actual_model)
+    )
+    routed_price = lookup_price(actual_model, provider_id=provider)
     actual_cost_usd = _token_cost_usd(
         actual_input_tokens,
         actual_output_side_tokens,

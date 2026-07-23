@@ -258,6 +258,9 @@ agentos providers configure openrouter
 agentos providers status
 ```
 
+Provider-specific setup examples, including OpenCAP, live in
+[`providers-and-models.md`](providers-and-models.md).
+
 Search:
 
 ```sh

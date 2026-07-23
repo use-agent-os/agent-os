@@ -529,6 +529,33 @@ def test_setup_provider_form_can_submit_api_key_env():
     assert "onboarding.provider.configure" in txt
 
 
+def test_setup_provider_api_key_env_is_hidden_under_advanced_options():
+    txt = (VIEWS / "setup.js").read_text(encoding="utf-8")
+    assert "['api_key_env', 'base_url', 'proxy'].includes(field.name)" in txt
+
+
+def test_setup_provider_pasted_key_takes_precedence_over_env_reference():
+    txt = (VIEWS / "setup.js").read_text(encoding="utf-8")
+    start = txt.index("async function _saveProvider()")
+    end = txt.index("async function _saveRouter()", start)
+    save_provider = txt[start:end]
+
+    assert "const params = _readScopedFields('provider');" in save_provider
+    assert "if (String(params.apiKey || '').trim()) delete params.apiKeyEnv;" in save_provider
+    assert "Object.assign({ providerId }, params)" in save_provider
+
+
+def test_setup_provider_fields_resist_credential_autofill():
+    txt = (VIEWS / "setup.js").read_text(encoding="utf-8")
+    start = txt.index("function _fieldHtml(")
+    end = txt.index("function _bindStep()", start)
+    field_html = txt[start:end]
+
+    assert "const autocomplete = isSecret ? 'new-password' : 'off';" in field_html
+    assert 'autocomplete="${autocomplete}"' in field_html
+    assert 'spellcheck="false"' in field_html
+
+
 def test_setup_provider_controls_have_browser_field_names():
     txt = (VIEWS / "setup.js").read_text(encoding="utf-8")
     assert 'name="setup_provider"' in txt
