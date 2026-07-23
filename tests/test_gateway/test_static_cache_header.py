@@ -50,6 +50,14 @@ def test_built_asset_carries_immutable_cache_control(client: TestClient) -> None
     assert "immutable" in cache
 
 
+@pytest.mark.parametrize(
+    "path",
+    ("assets/app-a1b2c3.js", r"assets\app-a1b2c3.js"),
+)
+def test_fingerprinted_asset_classification_is_cross_platform(path: str) -> None:
+    assert control_ui._is_fingerprinted_asset_path(path) is True
+
+
 def test_spa_shell_is_not_cached(client: TestClient) -> None:
     response = client.get("/control/")
 

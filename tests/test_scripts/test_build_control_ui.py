@@ -301,9 +301,8 @@ def _write_packaging_fixture(project: Path, module) -> None:
     (project / "src" / "agentos").mkdir(parents=True)
     (project / "src" / "agentos" / "__init__.py").write_text("", encoding="utf-8")
     dist = write_dist_fixture(project)
-    (dist / module.LICENSE_BUNDLE_NAME).write_text(
-        module.LICENSE_BUNDLE_PREAMBLE + "\nPackage: fixture@1.0.0\n",
-        encoding="utf-8",
+    (dist / module.LICENSE_BUNDLE_NAME).write_bytes(
+        (module.LICENSE_BUNDLE_PREAMBLE + "\nPackage: fixture@1.0.0\n").encode()
     )
 
     references = (

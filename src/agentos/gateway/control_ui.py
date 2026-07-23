@@ -28,6 +28,12 @@ _CONTROL_BASE_TAG = re.compile(
 )
 
 
+def _is_fingerprinted_asset_path(path: str) -> bool:
+    """Classify mounted asset paths independently of the host path separator."""
+    normalized = path.replace("\\", "/").lstrip("/")
+    return normalized.startswith("assets/")
+
+
 class _CachedStaticFiles(StaticFiles):
     """StaticFiles subclass that attaches Cache-Control to 200 responses.
 
@@ -49,8 +55,7 @@ class _CachedStaticFiles(StaticFiles):
                 )
             raise
         if response.status_code == 200:
-            normalized = path.lstrip("/")
-            if not normalized.startswith("assets/"):
+            if not _is_fingerprinted_asset_path(path):
                 # Top-level files have stable URLs (index.html, pre-paint theme
                 # bootstrap, and the license ledger), so they must not survive
                 # an upgrade in cache.

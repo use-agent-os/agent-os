@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 from pathlib import Path
 from typing import Any
@@ -141,12 +142,14 @@ def test_load_rewrites_retired_channels_with_secure_backup_and_safe_log(
     assert "legacy-matrix" not in migrated_text
     assert "retired-access-token-secret" not in migrated_text
     assert migrated_text.index('name = "primary"') < migrated_text.index('name = "secondary"')
-    assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
 
     backups = list(tmp_path.glob("config.toml.backup.*"))
     assert len(backups) == 1
     assert "retired-access-token-secret" in backups[0].read_text(encoding="utf-8")
-    assert stat.S_IMODE(backups[0].stat().st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(backups[0].stat().st_mode) == 0o600
 
     migration_records = [
         record
