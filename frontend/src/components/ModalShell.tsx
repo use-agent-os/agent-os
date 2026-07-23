@@ -3,11 +3,26 @@ import { createPortal } from 'react-dom'
 import { motion, useReducedMotion } from 'motion/react'
 import { SUBTLE_SPRING, overlayVariants, panelVariants } from '@/lib/motion'
 
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
+
+function focusableElements(panel: HTMLElement): HTMLElement[] {
+  return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    (element) => !element.closest('[inert], [aria-hidden="true"]'),
+  )
+}
+
 // Shared modal shell for the tokenized dialogs across the agents / sessions /
 // skills views. Superset of the three previously-duplicated inline shells:
 //   - role: 'dialog' | 'alertdialog' (destructive confirms use alertdialog)
 //   - aria-labelledby / optional aria-describedby
-//   - focus the first focusable control on open (input,textarea,select,button)
+//   - focus the first focusable control, contain Tab, and restore the trigger
 //   - Escape closes (stopPropagation so a nested confirm doesn't also bubble up)
 //   - backdrop mousedown closes (only when the press starts on the overlay)
 // Each view keeps its own scoped CSS by passing overlayClassName + className
@@ -39,11 +54,14 @@ export function ModalShell({
   const reduce = useReducedMotion()
 
   useEffect(() => {
-    // Focus the first focusable control for keyboard users.
-    const first = panelRef.current?.querySelector<HTMLElement>(
-      'input:not([disabled]), textarea, select, button',
-    )
-    first?.focus()
+    const previousFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const panel = panelRef.current
+    const first = panel ? focusableElements(panel)[0] : undefined
+    ;(first ?? panel)?.focus()
+    return () => {
+      if (previousFocus?.isConnected) previousFocus.focus()
+    }
   }, [])
 
   // Reduced-motion (and the jsdom test env, which reports reduced-motion): no
@@ -78,6 +96,7 @@ export function ModalShell({
         aria-modal="true"
         aria-labelledby={labelledBy}
         aria-describedby={describedBy}
+        tabIndex={-1}
         initial="initial"
         animate="animate"
         exit="exit"
@@ -86,6 +105,27 @@ export function ModalShell({
           if (e.key === 'Escape') {
             e.stopPropagation()
             onClose()
+            return
+          }
+          if (e.key === 'Tab') {
+            const panel = panelRef.current
+            if (!panel) return
+            const focusable = focusableElements(panel)
+            if (focusable.length === 0) {
+              e.preventDefault()
+              panel.focus()
+              return
+            }
+            const first = focusable[0]!
+            const last = focusable.at(-1)!
+            const active = document.activeElement
+            if (e.shiftKey && (active === first || !panel.contains(active))) {
+              e.preventDefault()
+              last.focus()
+            } else if (!e.shiftKey && active === last) {
+              e.preventDefault()
+              first.focus()
+            }
           }
         }}
       >

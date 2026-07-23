@@ -24,7 +24,31 @@ describe('Channels integration workspace CSS contract', () => {
     expect(css).toMatch(
       /\.control-surface \.ch-card\.ch-card::before \{[\s\S]*?background: var\(--tone, var\(--dim\)\);/,
     )
+    expect(css).toMatch(
+      /\.ch-card__mark \{[\s\S]*?width: 2\.2rem;[\s\S]*?height: 2\.2rem;[\s\S]*?color: var\(--primary\);/,
+    )
+    expect(css).toMatch(/\.ch-card__mark > svg \{[\s\S]*?width: 1\.25rem;/)
     expect(css).toMatch(/\.ch-access \{[\s\S]*?border-top: 1px solid var\(--hairline\);/)
+  })
+
+  it('uses a viewport-anchored, rounded setup surface with compact responsive fields', () => {
+    expect(css).toMatch(/\.ch-setup-overlay \{[\s\S]*?position: fixed;[\s\S]*?z-index: 120;/)
+    expect(css).toMatch(
+      /\.ch-setup-dialog \{[\s\S]*?width: min\(58rem, 100%\);[\s\S]*?border-radius: calc\(var\(--radius-surface\) \+ 0\.25rem\);/,
+    )
+    expect(css).toMatch(
+      /@media \(max-width: 768px\)[\s\S]*?\.ch-setup__types,[\s\S]*?\.ch-setup__fields \{[\s\S]*?grid-template-columns: 1fr;/,
+    )
+    expect(css).toMatch(/\.ch-setup__type-mark > svg \{[\s\S]*?width: 1\.15rem;/)
+  })
+
+  it('keeps setup controls aligned and gives the enabled control its own row', () => {
+    expect(css).toMatch(/\.ch-setup__field \{[\s\S]*?height: 100%;[\s\S]*?flex-direction: column;/)
+    expect(css).toMatch(/\.ch-setup__field\.is-wide \{[\s\S]*?grid-column: 1 \/ -1;/)
+    expect(css).toMatch(/\.ch-setup__input,[\s\S]*?\.ch-setup__select \{[\s\S]*?margin-top: auto;/)
+    expect(css).toMatch(
+      /\.ch-setup__check \{[\s\S]*?min-height: 2\.65rem;[\s\S]*?margin-top: auto;/,
+    )
   })
 
   it('collapses cleanly and respects reduced motion', () => {
@@ -32,7 +56,7 @@ describe('Channels integration workspace CSS contract', () => {
       /@media \(max-width: 520px\)[\s\S]*?\.control-surface \.ch-command \.ch-stats,[\s\S]*?\.ch-card__meta \{[\s\S]*?grid-template-columns: 1fr;/,
     )
     expect(css).toMatch(
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.ch-command,[\s\S]*?\.ch-stat__value,[\s\S]*?\.ch-command__cadence > span,[\s\S]*?\.ch-refresh-spin \{[\s\S]*?animation: none;/,
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.ch-command,[\s\S]*?\.ch-stat__value,[\s\S]*?\.ch-command__cadence > span,[\s\S]*?\.ch-refresh-spin,[\s\S]*?\.ch-setup__types button \{[\s\S]*?animation: none;/,
     )
   })
 })

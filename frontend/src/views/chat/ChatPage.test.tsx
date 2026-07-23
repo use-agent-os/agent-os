@@ -135,7 +135,8 @@ describe('ChatPage', () => {
   it('renders the full-bleed chat shell with a thread region', () => {
     mockRpc = makeRpc()
     renderPage()
-    expect(document.querySelector('.chat-thread')).not.toBeNull()
+    expect(document.querySelector('.chat-thread')).toHaveAttribute('data-history-ready', 'false')
+    expect(screen.getByRole('status')).toHaveTextContent('Opening conversation…')
     expect(screen.getByRole('heading', { name: 'Chat', level: 1 })).toBeInTheDocument()
     expect(document.title).toBe('Chat - AgentOS Control')
   })
@@ -159,7 +160,7 @@ describe('ChatPage', () => {
     })
   })
 
-  it('reconstructs persisted tools, attachments, artifacts, savings, and router receipt', async () => {
+  it('reconstructs persisted tools, attachments, artifacts, usage, and router receipt', async () => {
     mockRpc = makeRpc()
     mockRpc.call.mockImplementation((...args: unknown[]) => {
       if (args[0] === 'commands.list_for_surface') {
@@ -239,12 +240,15 @@ describe('ChatPage', () => {
       expect(document.querySelector('.msg-artifact-card--image')).not.toBeNull()
       expect(document.querySelector('.chat-tools-collapse')).not.toBeNull()
       expect(document.querySelector('.msg-thumb')).not.toBeNull()
-      expect(document.querySelector('.msg-meta__saved')).toHaveTextContent('Saved ~42%')
+      expect(document.querySelector('.msg-meta')).toHaveTextContent('fast↑100 ↓20')
+      expect(document.querySelector('.msg-meta__saved')).toBeNull()
+      expect(document.querySelector('.msg-meta__combo')).toBeNull()
       expect(document.querySelector('#chat-routerfx-dock .router-fx')).toHaveAttribute(
         'data-state',
         'settled',
       )
     })
+    expect(document.querySelector('.chat-thread')).toHaveAttribute('data-history-ready', 'true')
     expect(document.querySelector('.msg-artifact-card__name')).toHaveTextContent(
       'AGENTOS_7day_chart.png',
     )
@@ -257,6 +261,81 @@ describe('ChatPage', () => {
     const fetchCallsBeforeAudioClick = (fetch as ReturnType<typeof vi.fn>).mock.calls.length
     fireEvent.click(audioCard.querySelector('audio') as HTMLAudioElement)
     expect(fetch).toHaveBeenCalledTimes(fetchCallsBeforeAudioClick)
+  })
+
+  it('reveals entry atomically after replay and its terminal history refresh settle', async () => {
+    mockRpc = makeRpc()
+    let resolveSubscribe!: (value: Record<string, unknown>) => void
+    let resolveRefreshedHistory!: (value: Record<string, unknown>) => void
+    const subscribeResult = new Promise<Record<string, unknown>>((resolve) => {
+      resolveSubscribe = resolve
+    })
+    const refreshedHistory = new Promise<Record<string, unknown>>((resolve) => {
+      resolveRefreshedHistory = resolve
+    })
+    let historyReads = 0
+    mockRpc.call.mockImplementation((...args: unknown[]) => {
+      if (args[0] === 'commands.list_for_surface') {
+        return Promise.resolve({ surface: 'web_chat', commands: SLASH_CATALOG })
+      }
+      if (args[0] === 'chat.history') {
+        historyReads += 1
+        if (historyReads === 1) {
+          return Promise.resolve({
+            messages: [{ role: 'user', text: 'question', timestamp: 100 }],
+            history_scope: 'complete',
+          })
+        }
+        return refreshedHistory
+      }
+      if (args[0] === 'sessions.messages.subscribe') return subscribeResult
+      return Promise.resolve({})
+    })
+    renderPage()
+
+    await waitFor(() => expect(document.querySelector('.msg.user')).toHaveTextContent('question'))
+    const thread = document.querySelector('.chat-thread') as HTMLElement
+    expect(thread).toHaveAttribute('data-history-ready', 'false')
+
+    act(() => {
+      mockRpc.emit(
+        'session.event.text_delta',
+        {
+          key: 'agent:main:webchat:default',
+          stream_seq: 1,
+          text: 'replayed draft',
+        },
+        { replayed: true },
+      )
+      mockRpc.emit(
+        'chat.done',
+        {
+          key: 'agent:main:webchat:default',
+          text: 'final answer',
+        },
+        { replayed: true },
+      )
+    })
+    await waitFor(() => expect(historyReads).toBe(2))
+
+    await act(async () => {
+      resolveSubscribe({ subscribed: true, replay_complete: true, replayed_count: 2 })
+      await subscribeResult
+    })
+    expect(thread).toHaveAttribute('data-history-ready', 'false')
+
+    await act(async () => {
+      resolveRefreshedHistory({
+        messages: [
+          { role: 'user', text: 'question', timestamp: 100 },
+          { role: 'assistant', text: 'final answer', timestamp: 200 },
+        ],
+        history_scope: 'complete',
+      })
+      await refreshedHistory
+    })
+    await waitFor(() => expect(thread).toHaveAttribute('data-history-ready', 'true'))
+    expect(thread.querySelector('.msg.assistant')).toHaveTextContent('final answer')
   })
 
   it('downloads a non-anchor artifact target through the authenticated delegate', async () => {
@@ -646,6 +725,7 @@ describe('ChatPage', () => {
     mockRpc = makeRpc()
     renderPage()
     const thread = document.querySelector('.chat-thread') as HTMLElement
+    await waitFor(() => expect(thread).toHaveAttribute('data-history-ready', 'true'))
     let scrollHeight = 1_000
     Object.defineProperties(thread, {
       clientHeight: { configurable: true, get: () => 300 },
@@ -820,8 +900,8 @@ describe('ChatPage', () => {
     expect(meta).toHaveTextContent('model')
     expect(meta).toHaveTextContent('↑1.3k ↓42')
     expect(meta).toHaveTextContent('$0.00125')
-    expect(meta.querySelector('.msg-meta__saved')).toHaveTextContent('Saved ~51%')
-    expect(meta.querySelector('.msg-meta__saved')).toHaveClass('msg-meta__saved--flash')
+    expect(meta.querySelector('.msg-meta__saved')).toBeNull()
+    expect(meta.querySelector('.msg-meta__combo')).toBeNull()
   })
 
   it('surfaces a subscription failure through the legacy error toast', async () => {
@@ -842,6 +922,9 @@ describe('ChatPage', () => {
         'Session stream subscription failed: socket unavailable',
         { duration: 6000 },
       ),
+    )
+    await waitFor(() =>
+      expect(document.querySelector('.chat-thread')).toHaveAttribute('data-history-ready', 'true'),
     )
   })
 

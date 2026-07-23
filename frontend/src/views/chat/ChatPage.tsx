@@ -596,7 +596,11 @@ export function ChatPage() {
           />
         </div>
       </ShellHeaderPortal>
-      <div className="chat-thread" ref={containerRef} />
+      <div className="chat-thread" ref={containerRef} data-history-ready="false" />
+      <div className="chat-history-loading" role="status" aria-live="polite">
+        <span className="chat-history-loading__dot" aria-hidden="true" />
+        <span>Opening conversation…</span>
+      </div>
       <PendingQueue queue={pending.queue} onRemove={pending.remove} onClearAll={pending.clearAll} />
       <Composer
         onSend={onComposerSend}

@@ -1048,7 +1048,7 @@ export interface UsageRow {
 }
 
 // The normalized per-session usage totals (chat.js:569 `_usageAccum` shape,
-// without the routed-turn/savings accounting the widget layers on top).
+// without the widget-specific accounting layered on top).
 export interface SessionUsage {
   input: number
   output: number

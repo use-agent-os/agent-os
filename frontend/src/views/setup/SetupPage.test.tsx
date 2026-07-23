@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ComponentProps } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
 import { SetupPage } from './SetupPage'
@@ -138,22 +139,25 @@ function wireCalls(status: Record<string, unknown> = statusFor()) {
     if (method === 'onboarding.catalog') return Promise.resolve(CATALOG)
     if (method === 'onboarding.status') return Promise.resolve(status)
     if (method === 'config.get') return Promise.resolve(CONFIG)
-    if (method === 'channels.status') return Promise.resolve({ channels: [] })
     if (method === 'doctor.memory.status') return Promise.resolve(null)
     return Promise.resolve({})
   })
 }
 
-function renderPage() {
-  return render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+function renderPage(props: ComponentProps<typeof SetupPage> = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const page = (nextProps: ComponentProps<typeof SetupPage>) => (
+    <QueryClientProvider client={client}>
       <MemoryRouter>
-        <SetupPage />
+        <SetupPage {...nextProps} />
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   )
+  const result = render(page(props))
+  return {
+    ...result,
+    rerenderPage: (nextProps: ComponentProps<typeof SetupPage>) => result.rerender(page(nextProps)),
+  }
 }
 
 describe('SetupPage', () => {
@@ -167,7 +171,7 @@ describe('SetupPage', () => {
   })
   afterEach(() => vi.clearAllTimers())
 
-  it('loads the five setup reads after waitForConnection and renders the stepper', async () => {
+  it('loads guided settings without duplicating channel setup', async () => {
     wireCalls()
     renderPage()
     await waitFor(() => expect(screen.getByText('Setup')).toBeInTheDocument())
@@ -175,11 +179,11 @@ describe('SetupPage', () => {
     expect(methods).toContain('onboarding.catalog')
     expect(methods).toContain('onboarding.status')
     expect(methods).toContain('config.get')
-    expect(methods).toContain('channels.status')
+    expect(methods).not.toContain('channels.status')
     expect(mockRpc.waitForConnection).toHaveBeenCalled()
-    // Five stepper items.
     expect(screen.getByRole('navigation', { name: 'Setup steps' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Provider:/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Channels:/ })).not.toBeInTheDocument()
   })
 
   it('shows the error banner when a setup read fails', async () => {
@@ -192,13 +196,13 @@ describe('SetupPage', () => {
     )
   })
 
-  it('auto-selects the first step needing action', async () => {
+  it('keeps channel readiness visible but sends its setup outside Settings', async () => {
     wireCalls(statusFor({ sectionDetails: { channels: { status: 'missing', label: 'Channels' } } }))
     renderPage()
-    // channels needs action → starts on the channels step.
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Save Channel' })).toBeInTheDocument(),
-    )
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Finish' })).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /^Channels:/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText('Channels setup needed'))
+    expect(navigateSpy).toHaveBeenCalledWith('/channels?view=setup')
   })
 
   it('provider save calls onboarding.provider.configure with masked secret + advances', async () => {
@@ -219,6 +223,35 @@ describe('SetupPage', () => {
         expect.objectContaining({ providerId: 'openai', apiKey: 'sk-secret' }),
       ),
     )
+  })
+
+  it('uses the shared select and checkbox controls throughout Guided setup', async () => {
+    wireCalls()
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Provider:/ }))
+    const provider = await screen.findByLabelText('Provider')
+    expect(provider.parentElement).toHaveClass('setup-select')
+
+    fireEvent.click(screen.getByRole('button', { name: /^Capabilities:/ }))
+    expect(screen.getByLabelText('Search provider').parentElement).toHaveClass('setup-select')
+    const imageToggle = screen.getByLabelText('Image generation enabled')
+    const imageProvider = screen.getByLabelText('Image provider')
+    expect(imageToggle).toHaveClass('setup-check__input')
+    expect(
+      imageToggle.compareDocumentPosition(imageProvider) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+
+    const audioToggle = screen.getByLabelText('Voice audio enabled')
+    fireEvent.click(audioToggle)
+    expect(screen.getByText('Save to make voice audio available to agents.')).toBeInTheDocument()
+    const audioProvider = screen.getByLabelText('Audio provider')
+    expect(
+      audioToggle.compareDocumentPosition(audioProvider) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Finish:/ }))
+    expect(screen.getByLabelText('Notify on new release')).toHaveClass('setup-check__input')
   })
 
   it('router save calls onboarding.router.configure with the assembled payload', async () => {
@@ -256,7 +289,6 @@ describe('SetupPage', () => {
           statusFor({ needsOnboarding: true, sectionDetails: { llm: { status: 'missing' } } }),
         )
       if (method === 'config.get') return Promise.resolve(noProviderConfig)
-      if (method === 'channels.status') return Promise.resolve({ channels: [] })
       return Promise.resolve({})
     })
     renderPage()
@@ -290,41 +322,6 @@ describe('SetupPage', () => {
 
     // No provider.configure was sent — the draft never triggered a save.
     expect(mockRpc.call.mock.calls.map((c) => c[0])).not.toContain('onboarding.provider.configure')
-  })
-
-  it('channel save probes THEN upserts', async () => {
-    wireCalls()
-    renderPage()
-    await waitFor(() => expect(screen.getByText('Setup')).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: /^Channels:/ }))
-    await waitFor(() => expect(screen.getByLabelText('Name')).toBeInTheDocument())
-    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'mybot' } })
-    fireEvent.change(screen.getByLabelText('Bot token'), { target: { value: 'tok' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save Channel' }))
-    await waitFor(() => {
-      const methods = mockRpc.call.mock.calls.map((c) => c[0])
-      const probeIdx = methods.indexOf('onboarding.channel.probe')
-      const upsertIdx = methods.indexOf('onboarding.channel.upsert')
-      expect(probeIdx).toBeGreaterThanOrEqual(0)
-      expect(upsertIdx).toBeGreaterThan(probeIdx)
-    })
-  })
-
-  it('channel save is blocked and toasts when a required field is blank', async () => {
-    wireCalls()
-    renderPage()
-    await waitFor(() => expect(screen.getByText('Setup')).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: /^Channels:/ }))
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Save Channel' })).toBeInTheDocument(),
-    )
-    // name + token blank → validation error, no probe/upsert.
-    fireEvent.click(screen.getByRole('button', { name: 'Save Channel' }))
-    await waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith('Name is required.', expect.anything()),
-    )
-    const methods = mockRpc.call.mock.calls.map((c) => c[0])
-    expect(methods).not.toContain('onboarding.channel.probe')
   })
 
   it('search save calls onboarding.search.configure; brave reveals the masked key field', async () => {
@@ -481,6 +478,114 @@ describe('SetupPage', () => {
     )
   })
 
+  it('blocks a dirty guided draft when a previously revisionless snapshot advances', async () => {
+    wireCalls()
+    const status = statusFor({
+      needsOnboarding: true,
+      sectionDetails: { llm: { status: 'missing', label: 'Provider', required: true } },
+    })
+    const firstProps: ComponentProps<typeof SetupPage> = {
+      embedded: true,
+      externalSnapshot: { catalog: CATALOG, status, config: CONFIG },
+    }
+    const view = renderPage(firstProps)
+    const providerPanel = (await screen.findByRole('heading', { name: 'Provider' })).closest(
+      'section',
+    )!
+    const keyInput = within(providerPanel).getByLabelText('API key') as HTMLInputElement
+    fireEvent.change(keyInput, { target: { value: 'stale-secret' } })
+
+    view.rerenderPage({
+      ...firstProps,
+      externalSnapshot: {
+        catalog: CATALOG,
+        status,
+        config: CONFIG,
+        revision: 'revision-b',
+      },
+    })
+
+    expect(
+      await screen.findByText(/configuration changed while a guided draft was open/i),
+    ).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Save Provider' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Save Provider' }))
+    expect(mockRpc.call).not.toHaveBeenCalledWith(
+      'onboarding.provider.configure',
+      expect.anything(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Discard stale drafts' }))
+    await waitFor(() => {
+      const latestProviderPanel = screen
+        .getByRole('heading', { name: 'Provider' })
+        .closest('section')!
+      expect(within(latestProviderPanel).getByLabelText('API key')).toHaveValue('')
+    })
+    expect(screen.getByRole('button', { name: 'Save Provider' })).toBeEnabled()
+  })
+
+  it('clears the saved secret even when refresh fails and preserves another capability draft', async () => {
+    wireCalls()
+    const onSnapshotReload = vi.fn().mockRejectedValue(new Error('refresh offline'))
+    renderPage({
+      embedded: true,
+      externalSnapshot: {
+        catalog: CATALOG,
+        status: statusFor({
+          needsOnboarding: true,
+          sectionDetails: { llm: { status: 'missing', label: 'Provider', required: true } },
+        }),
+        config: CONFIG,
+        revision: 'revision-a',
+      },
+      onSnapshotReload,
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Capabilities:/ }))
+    const searchDraft = (await screen.findByLabelText('Search max results')) as HTMLInputElement
+    fireEvent.change(searchDraft, { target: { value: '9' } })
+    fireEvent.click(screen.getByRole('button', { name: /^Provider:/ }))
+    const providerPanel = (await screen.findByRole('heading', { name: 'Provider' })).closest(
+      'section',
+    )!
+    const providerSecret = within(providerPanel).getByLabelText('API key') as HTMLInputElement
+    fireEvent.change(providerSecret, { target: { value: 'one-time-secret' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Provider' }))
+    await waitFor(() => expect(onSnapshotReload).toHaveBeenCalled())
+    await waitFor(() => {
+      const latestProviderPanel = screen
+        .getByRole('heading', { name: 'Provider' })
+        .closest('section')!
+      expect(within(latestProviderPanel).getByLabelText('API key')).toHaveValue('')
+    })
+    expect(screen.getByLabelText('Search max results')).toHaveValue(9)
+    expect(toast.warning).toHaveBeenCalledWith(
+      expect.stringContaining('could not be refreshed'),
+      expect.anything(),
+    )
+  })
+
+  it('disables guided writes when the shared snapshot is write-blocked', async () => {
+    wireCalls()
+    renderPage({
+      embedded: true,
+      externalSnapshot: {
+        catalog: CATALOG,
+        status: statusFor({
+          needsOnboarding: true,
+          sectionDetails: { llm: { status: 'missing', label: 'Provider', required: true } },
+        }),
+        config: CONFIG,
+        diskDiverged: true,
+        writeBlocked: true,
+      },
+    })
+
+    expect(await screen.findByRole('button', { name: 'Save Provider' })).toBeDisabled()
+  })
+
   it('exit setup navigates to overview', async () => {
     wireCalls()
     renderPage()
@@ -502,5 +607,7 @@ describe('SetupPage', () => {
     // A blocking reason for the missing env key is shown.
     const reasons = screen.getByRole('list', { name: /Setup actions needed|Optional improvements/ })
     expect(within(reasons).getByText(/is not visible/)).toBeInTheDocument()
+    fireEvent.click(within(reasons).getByText('Channels setup needed'))
+    expect(navigateSpy).toHaveBeenCalledWith('/channels?view=setup')
   })
 })

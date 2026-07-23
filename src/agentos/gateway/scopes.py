@@ -83,6 +83,7 @@ METHOD_SCOPES: dict[str, str] = {
     "health": READ_SCOPE,
     "status": READ_SCOPE,
     "config.get": READ_SCOPE,
+    "config.snapshot": READ_SCOPE,
     "config.schema.lookup": READ_SCOPE,
     "sessions.get": READ_SCOPE,
     "sessions.list": READ_SCOPE,

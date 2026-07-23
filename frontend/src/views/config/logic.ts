@@ -20,12 +20,28 @@ export interface TabDef {
   prefixes: string[]
 }
 
-// config.js:22-29 — the six form tabs and the top-level prefixes each collects.
+// The legacy editor shipped six prefix-based tabs. The React control plane keeps
+// that matching contract, but classifies the complete GatewayConfig surface so
+// newly added runtime/safety/capability fields cannot silently disappear from
+// Form mode. `other` is a forward-compatible catch-all for future top-level keys.
 export const TABS: readonly TabDef[] = [
   {
     id: 'core',
     label: 'Core',
-    prefixes: ['general', 'auth', 'host', 'port', 'version', 'debug', 'control_ui', 'diagnostics'],
+    prefixes: [
+      'general',
+      'host',
+      'port',
+      'version',
+      'debug',
+      'workspace',
+      'bootstrap',
+      'state_dir',
+      'config_path',
+      'control_ui',
+      'updates',
+      'diagnostics',
+    ],
   },
   {
     id: 'ai',
@@ -35,24 +51,72 @@ export const TABS: readonly TabDef[] = [
       'model',
       'agent',
       'llm',
-      'skills',
       'agentos_router',
       'prompt_cache',
       'thinking',
+      'prompt',
+      'agent_token_saving',
+      'compaction',
+      'context_budget',
+      'context_overflow',
+      'preflight_compact',
+      'llm_timeout',
+      'llm_request_timeout',
+      'agent_runtime_timeout',
+      'agent_iteration_timeout',
+      'agent_tool_timeout',
+      'agent_request_timeout',
+      'agent_max_provider_retries',
+      'agent_max_iterations',
+      'agent_stream',
+      'webui_stream',
+      'agents',
+      'agents_defaults',
+      'subagents',
     ],
   },
   { id: 'memory', label: 'Memory', prefixes: ['memory'] },
   {
-    id: 'communication',
-    label: 'Communication',
-    prefixes: ['channel', 'telegram', 'slack', 'discord', 'email', 'messaging'],
+    id: 'capabilities',
+    label: 'Capabilities',
+    prefixes: ['tools', 'skills', 'attachments', 'search', 'image_generation', 'audio', 'mcp'],
   },
-  { id: 'automation', label: 'Automation', prefixes: ['cron', 'scheduler'] },
   {
-    id: 'infrastructure',
-    label: 'Infrastructure',
-    prefixes: ['log', 'storage', 'db', 'cache', 'search'],
+    id: 'connections',
+    label: 'Connections',
+    prefixes: [
+      'channel',
+      'channels',
+      'channel_admin_senders',
+      'telegram',
+      'slack',
+      'discord',
+      'email',
+      'messaging',
+      'heartbeat',
+    ],
   },
+  {
+    id: 'safety',
+    label: 'Safety',
+    prefixes: ['auth', 'cors', 'tls', 'permissions', 'safety', 'sandbox', 'rate_limit'],
+  },
+  {
+    id: 'runtime',
+    label: 'Runtime',
+    prefixes: [
+      'task_runtime',
+      'log',
+      'storage',
+      'db',
+      'cache',
+      'ws_writer',
+      'client_ws',
+      'cron',
+      'scheduler',
+    ],
+  },
+  { id: 'other', label: 'Other', prefixes: [] },
 ]
 
 // config.js:32-125 — per-field help, keyed by config path. Falls back to a
@@ -206,7 +270,17 @@ export function searchBlob(value: unknown): string {
  * search text over key OR value.
  */
 export function entriesForTab(config: ConfigData, tab: TabDef, searchText: string): Entry[] {
+  const matches = (candidate: TabDef, key: string) => {
+    const lk = key.toLowerCase()
+    return candidate.prefixes.some(
+      (p) => lk.startsWith(p + '.') || lk === p || lk.startsWith(p + '_'),
+    )
+  }
   const topLevel = Object.entries(config).filter(([k]) => {
+    if (tab.id === 'search') return true
+    if (tab.id === 'other') {
+      return !TABS.some((candidate) => candidate.id !== 'other' && matches(candidate, k))
+    }
     const lk = k.toLowerCase()
     return tab.prefixes.some((p) => lk.startsWith(p + '.') || lk === p || lk.startsWith(p + '_'))
   })
@@ -234,7 +308,18 @@ export function groupIdForKey(k: string, v: unknown): string {
 /** config.js:497-500 — a group title: de-cased separators, title-cased words. */
 export function groupTitle(id: string): string {
   if (id === 'general') return 'General'
-  return id.replace(/[_-]/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase())
+  const acronyms: Record<string, string> = {
+    agentos: 'AgentOS',
+    api: 'API',
+    llm: 'LLM',
+    mcp: 'MCP',
+    ui: 'UI',
+  }
+  return id
+    .replace(/[_-]/g, ' ')
+    .split(' ')
+    .map((word) => acronyms[word.toLowerCase()] || word.replace(/^\w/, (ch) => ch.toUpperCase()))
+    .join(' ')
 }
 
 /** config.js:481-489 — bundle leaf entries into ordered groups (insertion order). */
@@ -258,11 +343,19 @@ export function fieldLabel(k: string, groupId: string): string {
   return k
 }
 
-// config.js:514 — bind posture is CLI-only: host/port render display-only and
-// the RPC rejects writes anyway.
-const READONLY_KEYS = new Set(['host', 'port'])
+// Bind posture is CLI-only; version is distribution metadata; auth.token/password
+// are environment/runtime owned. The RPC rejects or ignores writes to these
+// fields, so the editor must never advertise them as saveable.
+const READONLY_KEYS = new Set([
+  'host',
+  'port',
+  'version',
+  'config_path',
+  'auth.token',
+  'auth.password',
+])
 
-/** config.js:514,531 — is this key display-only (host/port)? */
+/** Is this key display-only because the RPC contract rejects writes? */
 export function isReadonlyKey(k: string): boolean {
   return READONLY_KEYS.has(k)
 }

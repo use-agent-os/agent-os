@@ -1,15 +1,22 @@
 import './channels.css'
-import { useEffect } from 'react'
-import { useNavigate } from 'react-router'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useBlocker, useNavigate, useSearchParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AnimatePresence } from 'motion/react'
-import { CableIcon, RefreshCwIcon, SettingsIcon, ShieldCheckIcon } from 'lucide-react'
+import { CableIcon, PlusIcon, RefreshCwIcon, Settings2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 import { CommandLine } from '@/components/CommandLine'
 import { MotionListItem } from '@/lib/motion'
 import { Button } from '@/components/ui/button'
 import { useRpc } from '@/app/providers'
 import { relTime } from '@/views/overview/logic'
+import {
+  loadSettingsSnapshot,
+  SETTINGS_SNAPSHOT_QUERY_KEY,
+  type SettingsSnapshot,
+} from '@/views/settings/snapshot'
+import { AdapterLogo } from './AdapterLogo'
+import { ChannelSetupDialog } from './ChannelSetupDialog'
 import {
   channelDisplay,
   channelStats,
@@ -220,12 +227,18 @@ function AccessPanel({
 function ChannelCard({
   channel,
   busy,
+  configurationMode,
+  onConfigure,
+  onOpenAdvanced,
   onSetMode,
   onResolve,
   onRevoke,
 }: {
   channel: MergedChannel
   busy: boolean
+  configurationMode: 'loading' | 'guided' | 'advanced'
+  onConfigure: () => void
+  onOpenAdvanced: () => void
   onSetMode: (channel: string, mode: string) => void
   onResolve: (channel: string, senderId: string, approved: boolean) => void
   onRevoke: (channel: string, senderId: string) => void
@@ -244,10 +257,12 @@ function ChannelCard({
     <article className={`ch-card ${toneClass(d.tone)}`} aria-label={`Channel ${d.name}`}>
       <header className="ch-card__head">
         <div className="ch-card__identity">
-          <span
-            className={`ch-card__dot tone-${d.tone === 'danger' ? 'danger' : d.tone === 'ok' ? 'ok' : 'dim'}`}
-            aria-hidden="true"
-          />
+          <span className="ch-card__mark" aria-hidden="true">
+            <AdapterLogo type={String(channel.type || '')} />
+            <span
+              className={`ch-card__dot tone-${d.tone === 'danger' ? 'danger' : d.tone === 'ok' ? 'ok' : 'dim'}`}
+            />
+          </span>
           <div>
             <span className="ch-card__name" title={d.name}>
               {d.name}
@@ -255,7 +270,33 @@ function ChannelCard({
             <span className="ch-card__type t-data">{channel.type || 'unknown'}</span>
           </div>
         </div>
-        <span className={`ch-card__chip t-data ${toneClass(d.tone)}`}>{d.status}</span>
+        <div className="ch-card__head-actions">
+          {configurationMode === 'guided' ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="ch-card__configure"
+              onClick={onConfigure}
+            >
+              <Settings2Icon />
+              <span>Configure</span>
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="ch-card__configure"
+              disabled={configurationMode === 'loading'}
+              onClick={onOpenAdvanced}
+            >
+              <Settings2Icon />
+              <span>{configurationMode === 'loading' ? 'Loading…' : 'Advanced config'}</span>
+            </Button>
+          )}
+          <span className={`ch-card__chip t-data ${toneClass(d.tone)}`}>{d.status}</span>
+        </div>
       </header>
       <div className="ch-card__body">
         <dl className="ch-card__meta">
@@ -316,7 +357,14 @@ function StatTile({
 export function ChannelsPage() {
   const rpc = useRpc()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
+  const setupDirtyRef = useRef(false)
+  const [setupResetVersion, setSetupResetVersion] = useState(0)
+  const [setupDirty, setSetupDirty] = useState(false)
+  const [setupSaveError, setSetupSaveError] = useState('')
+  const setupOpen = searchParams.get('view') === 'setup'
+  const editingName = searchParams.get('channel') || undefined
 
   useEffect(() => {
     document.title = 'Channels - AgentOS Control'
@@ -336,6 +384,12 @@ export function ChannelsPage() {
       return sortChannels(mergeChannels(status.channels, access.channels))
     },
     refetchInterval: POLL_MS,
+    refetchOnWindowFocus: false,
+  })
+
+  const setupSnapshotQuery = useQuery<SettingsSnapshot>({
+    queryKey: SETTINGS_SNAPSHOT_QUERY_KEY,
+    queryFn: () => loadSettingsSnapshot(rpc),
     refetchOnWindowFocus: false,
   })
 
@@ -360,6 +414,107 @@ export function ChannelsPage() {
   }, [rpc, queryClient])
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['channels'] })
+
+  const updateSetupDirty = useCallback((dirty: boolean) => {
+    setupDirtyRef.current = dirty
+    setSetupDirty(dirty)
+  }, [])
+
+  const openSetup = (channelName?: string) => {
+    setSetupSaveError('')
+    updateSetupDirty(false)
+    setSetupResetVersion((version) => version + 1)
+    const next = new URLSearchParams(searchParams)
+    next.set('view', 'setup')
+    if (channelName) next.set('channel', channelName)
+    else next.delete('channel')
+    setSearchParams(next)
+  }
+
+  const closeSetup = ({ reset = false }: { reset?: boolean } = {}) => {
+    if (reset) {
+      updateSetupDirty(false)
+      setSetupSaveError('')
+      setSetupResetVersion((version) => version + 1)
+    }
+    const next = new URLSearchParams(searchParams)
+    next.delete('view')
+    next.delete('channel')
+    setSearchParams(next, { replace: true })
+  }
+
+  const setupNavigationBlocker = useBlocker(() => setupDirtyRef.current)
+  const setupNavigationBlockerRef = useRef(setupNavigationBlocker)
+  useEffect(() => {
+    setupNavigationBlockerRef.current = setupNavigationBlocker
+  }, [setupNavigationBlocker])
+
+  interface ChannelSaveResult {
+    restartRequired?: boolean
+    warnings?: string[]
+  }
+
+  const channelSetupMutation = useMutation({
+    mutationFn: async ({
+      entry,
+      expectedRevision,
+    }: {
+      entry: Record<string, unknown>
+      expectedRevision?: string
+    }) => {
+      await rpc.call('onboarding.channel.probe', { entry })
+      return await rpc.call<ChannelSaveResult>('onboarding.channel.upsert', {
+        entry,
+        ...(expectedRevision ? { expectedRevision } : {}),
+      })
+    },
+    onMutate: () => setSetupSaveError(''),
+    onSuccess: async (result) => {
+      updateSetupDirty(false)
+      await Promise.all([
+        invalidate(),
+        queryClient.invalidateQueries({ queryKey: SETTINGS_SNAPSHOT_QUERY_KEY }),
+      ])
+      toast.success(
+        result.restartRequired
+          ? 'Channel saved. Restart AgentOS to activate it.'
+          : 'Channel saved.',
+        { id: 'channels-setup-save' },
+      )
+      if (setupNavigationBlockerRef.current.state === 'blocked') {
+        setSetupSaveError('')
+        setSetupResetVersion((version) => version + 1)
+        setupNavigationBlockerRef.current.proceed()
+      } else {
+        closeSetup({ reset: true })
+      }
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : String(error)
+      const conflict = message.includes('config revision mismatch')
+      setSetupSaveError(
+        conflict
+          ? 'Configuration changed elsewhere. Reload this setup, then review your draft.'
+          : `Channel could not be saved: ${message}`,
+      )
+      if (conflict) void setupSnapshotQuery.refetch()
+      toast.error(conflict ? 'Channel draft needs a fresh configuration.' : message, {
+        id: 'channels-setup-save-error',
+      })
+    },
+  })
+
+  const discardBlockedNavigation = () => {
+    if (setupNavigationBlocker.state !== 'blocked') return
+    updateSetupDirty(false)
+    setSetupSaveError('')
+    setSetupResetVersion((version) => version + 1)
+    setupNavigationBlocker.proceed()
+  }
+
+  const keepBlockedNavigation = () => {
+    if (setupNavigationBlocker.state === 'blocked') setupNavigationBlocker.reset()
+  }
 
   // channels.js:319-334 — mode select mutation (open warns; else info) + refetch.
   const setModeMutation = useMutation({
@@ -411,6 +566,9 @@ export function ChannelsPage() {
 
   const channels = channelsQuery.data ?? []
   const stats = channelStats(channels)
+  const guidedChannelTypes = new Set(
+    (setupSnapshotQuery.data?.catalog?.channels || []).map((spec) => spec.type),
+  )
 
   const onSetMode = (channel: string, mode: string) => setModeMutation.mutate({ channel, mode })
   const onResolve = (channel: string, senderId: string, approved: boolean) =>
@@ -425,19 +583,25 @@ export function ChannelsPage() {
           <span className="t-label">Control · Channels</span>
           <h1 className="t-display">Channels</h1>
           <p className="ch-stage__subtitle">
-            Runtime status for configured channels, with account approvals for Telegram bots.
+            Add messaging adapters, monitor runtime health, and manage account access in one place.
           </p>
         </div>
-        <Button
-          variant="outline"
-          title="Refresh"
-          className="ch-stage__refresh text-xs uppercase tracking-[0.14em]"
-          disabled={channelsQuery.isFetching}
-          onClick={() => void invalidate()}
-        >
-          <RefreshCwIcon className={channelsQuery.isFetching ? 'ch-refresh-spin' : undefined} />
-          <span>{channelsQuery.isFetching ? 'Refreshing…' : 'Refresh'}</span>
-        </Button>
+        <div className="ch-stage__actions">
+          <Button
+            variant="outline"
+            title="Refresh"
+            className="ch-stage__refresh text-xs uppercase tracking-[0.14em]"
+            disabled={channelsQuery.isFetching}
+            onClick={() => void invalidate()}
+          >
+            <RefreshCwIcon className={channelsQuery.isFetching ? 'ch-refresh-spin' : undefined} />
+            <span>{channelsQuery.isFetching ? 'Refreshing…' : 'Refresh'}</span>
+          </Button>
+          <Button type="button" className="ch-stage__add" onClick={() => openSetup()}>
+            <PlusIcon />
+            <span>Add channel</span>
+          </Button>
+        </div>
       </header>
 
       <section
@@ -513,10 +677,6 @@ export function ChannelsPage() {
                 {channels.length} channel{channels.length === 1 ? '' : 's'}
               </span>
             ) : null}
-            <Button type="button" variant="outline" size="sm" onClick={() => navigate('/setup')}>
-              <ShieldCheckIcon />
-              <span>Manage setup</span>
-            </Button>
           </div>
         </div>
 
@@ -524,13 +684,13 @@ export function ChannelsPage() {
           <div className="ch-empty">
             <div className="ch-empty__title">No configured channels.</div>
             <p className="ch-empty__msg">
-              Channel provisioning stays in guided setup and the CLI so credentials, dependency
-              extras, webhook URLs, and restart requirements stay explicit.
+              Connect Telegram, Slack, Discord, or another adapter here. AgentOS validates the
+              configuration before saving and keeps credentials write-only.
             </p>
             <div className="ch-empty__actions">
-              <Button type="button" onClick={() => navigate('/setup')}>
-                <SettingsIcon />
-                <span>Guided setup</span>
+              <Button type="button" onClick={() => openSetup()}>
+                <PlusIcon />
+                <span>Add your first channel</span>
               </Button>
             </div>
             <div className="ch-empty__commands">
@@ -544,21 +704,65 @@ export function ChannelsPage() {
         ) : (
           <div className="ch-cards">
             <AnimatePresence initial={false}>
-              {channels.map((channel, i) => (
-                <MotionListItem key={String(channel.name || channel.id || i)}>
-                  <ChannelCard
-                    channel={channel}
-                    busy={busy}
-                    onSetMode={onSetMode}
-                    onResolve={onResolve}
-                    onRevoke={onRevoke}
-                  />
-                </MotionListItem>
-              ))}
+              {channels.map((channel, i) => {
+                const type = String(channel.type || '')
+                const configurationMode = setupSnapshotQuery.isLoading
+                  ? 'loading'
+                  : guidedChannelTypes.has(type)
+                    ? 'guided'
+                    : 'advanced'
+                return (
+                  <MotionListItem key={String(channel.name || channel.id || i)}>
+                    <ChannelCard
+                      channel={channel}
+                      busy={busy}
+                      configurationMode={configurationMode}
+                      onConfigure={() => openSetup(String(channel.name || ''))}
+                      onOpenAdvanced={() => navigate('/config')}
+                      onSetMode={onSetMode}
+                      onResolve={onResolve}
+                      onRevoke={onRevoke}
+                    />
+                  </MotionListItem>
+                )
+              })}
             </AnimatePresence>
           </div>
         )}
       </section>
+
+      <ChannelSetupDialog
+        key={`${editingName || 'new'}:${setupResetVersion}:${setupSnapshotQuery.data ? 'ready' : 'loading'}`}
+        open={setupOpen}
+        editingName={editingName}
+        snapshot={setupSnapshotQuery.data}
+        runtimeChannels={channels}
+        loading={setupSnapshotQuery.isLoading}
+        loadError={
+          setupSnapshotQuery.isError
+            ? setupSnapshotQuery.error instanceof Error
+              ? setupSnapshotQuery.error.message
+              : String(setupSnapshotQuery.error)
+            : undefined
+        }
+        saving={channelSetupMutation.isPending}
+        saveError={setupSaveError}
+        onRetry={() => void setupSnapshotQuery.refetch()}
+        onSave={(entry, expectedRevision) =>
+          channelSetupMutation.mutate({ entry, expectedRevision })
+        }
+        onClose={() => closeSetup()}
+        onDiscard={() => closeSetup({ reset: true })}
+        navigationBlocked={setupNavigationBlocker.state === 'blocked'}
+        onKeepNavigation={keepBlockedNavigation}
+        onDiscardNavigation={discardBlockedNavigation}
+        onResolveConflict={() => setSetupSaveError('')}
+        onOpenAdvanced={() => navigate('/config')}
+        onDirtyChange={updateSetupDirty}
+      />
+      <span className="sr-only" aria-live="polite">
+        {setupDirty ? 'Channel setup has unsaved changes.' : ''}
+      </span>
     </div>
   )
 }

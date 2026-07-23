@@ -4,7 +4,7 @@
 // echoed). Save/Next are gated on a selected provider.
 import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { NeedList, PanelHead, SetupField } from './parts'
+import { NeedList, PanelHead, SetupField, SetupSelect } from './parts'
 import {
   effectiveProvider as effectiveProviderFn,
   isProviderAdvancedField,
@@ -123,7 +123,7 @@ export function ProviderSection({
       <div className="setup-form">
         <label>
           <span>Provider</span>
-          <select
+          <SetupSelect
             aria-label="Provider"
             value={selected}
             onChange={(e) => selectProvider(e.target.value)}
@@ -136,7 +136,7 @@ export function ProviderSection({
                 {p.label}
               </option>
             ))}
-          </select>
+          </SetupSelect>
         </label>
 
         <div className={`setup-provider-meta ${TONE_CLASS[supportTone]}`}>

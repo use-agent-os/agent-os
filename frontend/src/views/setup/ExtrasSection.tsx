@@ -5,7 +5,14 @@
 // settings uses config.patch). All decision-shaped derivation lives in logic.ts.
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { CapabilityBadge, EnvRecoveryCommand, NeedList, PanelHead } from './parts'
+import {
+  CapabilityBadge,
+  EnvRecoveryCommand,
+  NeedList,
+  PanelHead,
+  SetupCheckbox,
+  SetupSelect,
+} from './parts'
 import {
   audioStatusText,
   buildAudioConfigureParams,
@@ -28,6 +35,8 @@ import {
   type ProviderSpec,
   type SetupConfig,
 } from './logic'
+
+type ExtrasResetTarget = 'search' | 'memoryEmbedding' | 'memorySettings' | 'image' | 'audio'
 
 function saveVariant(status: OnboardingStatus, name: string): 'default' | 'outline' {
   return capabilityIsPrimary(status, name) ? 'default' : 'outline'
@@ -150,7 +159,7 @@ function SearchCard({
       />
       <label>
         <span>Provider</span>
-        <select
+        <SetupSelect
           aria-label="Search provider"
           value={provider}
           onChange={(e) => setProvider(e.target.value)}
@@ -160,7 +169,7 @@ function SearchCard({
               {p.label}
             </option>
           ))}
-        </select>
+        </SetupSelect>
       </label>
       <label>
         <span>Max results</span>
@@ -214,35 +223,31 @@ function SearchCard({
               onChange={(e) => setProxy(e.target.value)}
             />
           </label>
-          <label className="setup-check">
-            <input
-              type="checkbox"
-              aria-label="Use environment proxy"
-              checked={useEnvProxy}
-              onChange={(e) => setUseEnvProxy(e.target.checked)}
-            />
-            <span>Use environment proxy</span>
-          </label>
+          <SetupCheckbox
+            ariaLabel="Use environment proxy"
+            checked={useEnvProxy}
+            onChange={setUseEnvProxy}
+          >
+            Use environment proxy
+          </SetupCheckbox>
           <label>
             <span>Fallback policy</span>
-            <select
+            <SetupSelect
               aria-label="Search fallback policy"
               value={fallback}
               onChange={(e) => setFallback(e.target.value)}
             >
               <option value="off">Off</option>
               <option value="network">Network retry</option>
-            </select>
+            </SetupSelect>
           </label>
-          <label className="setup-check">
-            <input
-              type="checkbox"
-              aria-label="Search diagnostics"
-              checked={diagnostics}
-              onChange={(e) => setDiagnostics(e.target.checked)}
-            />
-            <span>Diagnostics</span>
-          </label>
+          <SetupCheckbox
+            ariaLabel="Search diagnostics"
+            checked={diagnostics}
+            onChange={setDiagnostics}
+          >
+            Diagnostics
+          </SetupCheckbox>
         </div>
       </details>
       <Button
@@ -356,7 +361,7 @@ function MemoryEmbeddingCard({
       />
       <label>
         <span>Provider</span>
-        <select
+        <SetupSelect
           aria-label="Memory embedding provider"
           value={provider}
           onChange={(e) => setProvider(e.target.value)}
@@ -366,7 +371,7 @@ function MemoryEmbeddingCard({
               {p.label}
             </option>
           ))}
-        </select>
+        </SetupSelect>
       </label>
       {flags.localControlEnabled ? (
         <label>
@@ -482,14 +487,14 @@ function MemorySettingsCard({
       </p>
       <label>
         <span>Memory provider</span>
-        <select
+        <SetupSelect
           aria-label="Memory provider"
           value={providerName}
           onChange={(e) => setProviderName(e.target.value)}
         >
-          <option value="">None — built-in memory only</option>
+          <option value="">None - built-in memory only</option>
           <option value="mem0">mem0</option>
-        </select>
+        </SetupSelect>
       </label>
       <label>
         <span>Long-term memory budget (MEMORY.md)</span>
@@ -526,7 +531,7 @@ function MemorySettingsCard({
       </label>
       {overBudget ? (
         <div className="setup-warning panel tone-warn tone-rail">
-          Injection limit too small — the user profile block may be dropped.
+          Injection limit too small. The user profile block may be dropped.
         </div>
       ) : null}
       <Button type="button" variant="outline" disabled={saving} onClick={collect}>
@@ -576,6 +581,12 @@ function ImageCard({
   const [baseUrl, setBaseUrl] = useState(
     String(providerConfig.base_url || spec.defaultBaseUrl || ''),
   )
+  const statusText =
+    enabled === enabledInitial
+      ? imageGenerationStatusText(status)
+      : enabled
+        ? 'Save to make image generation available to agents.'
+        : 'Save to hide image generation from agents.'
 
   const needs = enabled
     ? credentialNeedList(spec.whatYouNeed, apiKeyEnv || spec.envKey)
@@ -625,14 +636,22 @@ function ImageCard({
         <h3 className="t-label">Image generation</h3>
         <CapabilityBadge status={status} name="image_generation" />
       </div>
-      <p className="setup-muted">{imageGenerationStatusText(status)}</p>
+      <p className="setup-muted">{statusText}</p>
       <EnvRecoveryCommand command={envRecoveryCommand(status, 'image_generation')} />
       <NeedList items={needs} label="Image needs" />
+      <SetupCheckbox
+        ariaLabel="Image generation enabled"
+        checked={enabled}
+        className="setup-capability-toggle"
+        onChange={setEnabled}
+      >
+        Enable image generation
+      </SetupCheckbox>
       {enabled ? (
         <div className="setup-advanced__body">
           <label>
             <span>Provider</span>
-            <select
+            <SetupSelect
               aria-label="Image provider"
               value={provider}
               onChange={(e) => setProvider(e.target.value)}
@@ -642,7 +661,7 @@ function ImageCard({
                   {p.label}
                 </option>
               ))}
-            </select>
+            </SetupSelect>
           </label>
           <label>
             <span>Primary model</span>
@@ -682,15 +701,6 @@ function ImageCard({
           </label>
         </div>
       ) : null}
-      <label className="setup-check">
-        <input
-          type="checkbox"
-          aria-label="Image generation enabled"
-          checked={enabled}
-          onChange={(e) => setEnabled(e.target.checked)}
-        />
-        <span>Enabled</span>
-      </label>
       <Button
         type="button"
         variant={saveVariant(status, 'image_generation')}
@@ -742,6 +752,12 @@ function AudioCard({
   const [languageCode, setLanguageCode] = useState(
     String(tts.language_code || spec.defaultLanguageCode || ''),
   )
+  const statusText =
+    enabled === enabledInitial
+      ? audioStatusText(status)
+      : enabled
+        ? 'Save to make voice audio available to agents.'
+        : 'Save to hide voice audio from agents.'
 
   const needs = enabled
     ? credentialNeedList(spec.whatYouNeed, apiKeyEnv || spec.envKey)
@@ -807,14 +823,22 @@ function AudioCard({
         <h3 className="t-label">Voice audio</h3>
         <CapabilityBadge status={status} name="audio" />
       </div>
-      <p className="setup-muted">{audioStatusText(status)}</p>
+      <p className="setup-muted">{statusText}</p>
       <EnvRecoveryCommand command={envRecoveryCommand(status, 'audio')} />
       <NeedList items={needs} label="Audio needs" />
+      <SetupCheckbox
+        ariaLabel="Voice audio enabled"
+        checked={enabled}
+        className="setup-capability-toggle"
+        onChange={setEnabled}
+      >
+        Enable voice audio
+      </SetupCheckbox>
       {enabled ? (
         <div className="setup-advanced__body">
           <label>
             <span>Provider</span>
-            <select
+            <SetupSelect
               aria-label="Audio provider"
               value={provider}
               onChange={(e) => setProvider(e.target.value)}
@@ -824,7 +848,7 @@ function AudioCard({
                   {p.label}
                 </option>
               ))}
-            </select>
+            </SetupSelect>
           </label>
           <label>
             <span>API key</span>
@@ -883,15 +907,6 @@ function AudioCard({
           </label>
         </div>
       ) : null}
-      <label className="setup-check">
-        <input
-          type="checkbox"
-          aria-label="Voice audio enabled"
-          checked={enabled}
-          onChange={(e) => setEnabled(e.target.checked)}
-        />
-        <span>Enabled</span>
-      </label>
       <Button
         type="button"
         variant={saveVariant(status, 'audio')}
@@ -916,6 +931,9 @@ export function ExtrasSection({
   onBack,
   onNext,
   saving,
+  resetVersions,
+  conflicts,
+  onDirtyChange,
 }: {
   catalog: Catalog
   status: OnboardingStatus
@@ -928,6 +946,15 @@ export function ExtrasSection({
   onBack: () => void
   onNext: () => void
   saving: boolean
+  resetVersions: {
+    search: number
+    memoryEmbedding: number
+    memorySettings: number
+    image: number
+    audio: number
+  }
+  conflicts: Record<ExtrasResetTarget, boolean>
+  onDirtyChange: (target: ExtrasResetTarget) => void
 }) {
   return (
     <section className="setup-panel panel">
@@ -936,35 +963,60 @@ export function ExtrasSection({
         subtitle="Web search · Memory recall · Image generation · Voice audio"
       />
       <div className="setup-extras">
-        <SearchCard
-          catalog={catalog}
-          status={status}
-          config={config}
-          onSave={onSaveSearch}
-          saving={saving}
-        />
-        <MemoryEmbeddingCard
-          catalog={catalog}
-          status={status}
-          config={config}
-          onSave={onSaveMemory}
-          saving={saving}
-        />
-        <MemorySettingsCard config={config} onSave={onSaveMemorySettings} saving={saving} />
-        <ImageCard
-          catalog={catalog}
-          status={status}
-          config={config}
-          onSave={onSaveImage}
-          saving={saving}
-        />
-        <AudioCard
-          catalog={catalog}
-          status={status}
-          config={config}
-          onSave={onSaveAudio}
-          saving={saving}
-        />
+        <div className="setup-capability-slot" onChangeCapture={() => onDirtyChange('search')}>
+          <SearchCard
+            key={`search:${resetVersions.search}`}
+            catalog={catalog}
+            status={status}
+            config={config}
+            onSave={onSaveSearch}
+            saving={saving || conflicts.search}
+          />
+        </div>
+        <div
+          className="setup-capability-slot"
+          onChangeCapture={() => onDirtyChange('memoryEmbedding')}
+        >
+          <MemoryEmbeddingCard
+            key={`memory-embedding:${resetVersions.memoryEmbedding}`}
+            catalog={catalog}
+            status={status}
+            config={config}
+            onSave={onSaveMemory}
+            saving={saving || conflicts.memoryEmbedding}
+          />
+        </div>
+        <div
+          className="setup-capability-slot"
+          onChangeCapture={() => onDirtyChange('memorySettings')}
+        >
+          <MemorySettingsCard
+            key={`memory-settings:${resetVersions.memorySettings}`}
+            config={config}
+            onSave={onSaveMemorySettings}
+            saving={saving || conflicts.memorySettings}
+          />
+        </div>
+        <div className="setup-capability-slot" onChangeCapture={() => onDirtyChange('image')}>
+          <ImageCard
+            key={`image:${resetVersions.image}`}
+            catalog={catalog}
+            status={status}
+            config={config}
+            onSave={onSaveImage}
+            saving={saving || conflicts.image}
+          />
+        </div>
+        <div className="setup-capability-slot" onChangeCapture={() => onDirtyChange('audio')}>
+          <AudioCard
+            key={`audio:${resetVersions.audio}`}
+            catalog={catalog}
+            status={status}
+            config={config}
+            onSave={onSaveAudio}
+            saving={saving || conflicts.audio}
+          />
+        </div>
       </div>
       <div className="setup-actions">
         <Button type="button" variant="outline" onClick={onBack}>

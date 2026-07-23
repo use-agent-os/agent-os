@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   CheckIcon,
+  EyeIcon,
+  EyeOffIcon,
   HelpCircleIcon,
   RefreshCwIcon,
   SearchIcon,
@@ -12,6 +14,11 @@ import {
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { useRpc } from '@/app/providers'
+import {
+  isMethodNotFoundRpcError,
+  SETTINGS_SNAPSHOT_QUERY_KEY,
+  type SettingsSnapshot,
+} from '@/views/settings/snapshot'
 import {
   buildApplyPayload,
   buildPatchPayload,
@@ -41,7 +48,27 @@ interface SaveResult {
   restartRequired?: boolean
 }
 
+interface ConfigEditorSnapshot {
+  config: ConfigData
+  revision?: string
+  diskDiverged?: boolean
+  writeBlocked?: boolean
+}
+
+interface ConfigPageProps {
+  embedded?: boolean
+  /**
+   * Embedded Settings owns the authoritative snapshot. `null` means that
+   * snapshot is still loading; `undefined` keeps the standalone loader.
+   */
+  externalSnapshot?: SettingsSnapshot | null
+  externalSnapshotError?: boolean
+  onSnapshotReload?: () => Promise<SettingsSnapshot | undefined>
+}
+
 type EditorMode = 'form' | 'yaml'
+
+const SEARCH_TAB: TabDef = { id: 'search', label: 'Search results', prefixes: [] }
 
 // ── Per-field help tooltip trigger ───────────────────────────────────────────
 function HelpTrigger({ configKey }: { configKey: string }) {
@@ -81,6 +108,7 @@ function ConfigField({
   onChange: (key: string, kind: 'boolean' | 'number' | 'json' | 'string', raw: string) => void
 }) {
   const inputId = useId()
+  const [secretVisible, setSecretVisible] = useState(false)
   const label = fieldLabel(configKey, groupId)
   const kind = fieldKind(configKey, value)
 
@@ -163,10 +191,21 @@ function ConfigField({
         <input
           id={inputId}
           className="cfg-input cfg-input--text"
-          type={sensitive ? 'password' : 'text'}
+          type={sensitive && !secretVisible ? 'password' : 'text'}
           value={String(value ?? '')}
           onChange={(e) => onChange(configKey, 'string', e.target.value)}
         />
+        {sensitive ? (
+          <button
+            type="button"
+            className="cfg-secret-toggle"
+            aria-label={`${secretVisible ? 'Hide' : 'Show'} ${configKey}`}
+            aria-pressed={secretVisible}
+            onClick={() => setSecretVisible((visible) => !visible)}
+          >
+            {secretVisible ? <EyeOffIcon aria-hidden="true" /> : <EyeIcon aria-hidden="true" />}
+          </button>
+        ) : null}
       </div>
     )
   }
@@ -257,20 +296,24 @@ function StickyBar({
   count,
   yamlMode,
   dirty,
+  invalid,
   diffOpen,
   onToggleDiff,
   onDiscard,
   onSave,
   saving,
+  saveDisabled,
 }: {
   count: number
   yamlMode: boolean
   dirty: DirtyMap
+  invalid: InvalidJsonMap
   diffOpen: boolean
   onToggleDiff: () => void
   onDiscard: () => void
   onSave: () => void
   saving: boolean
+  saveDisabled: boolean
 }) {
   const diffId = useId()
   return (
@@ -301,7 +344,7 @@ function StickyBar({
         <Button type="button" variant="ghost" size="sm" disabled={saving} onClick={onDiscard}>
           Discard
         </Button>
-        <Button type="button" size="sm" disabled={saving} onClick={onSave}>
+        <Button type="button" size="sm" disabled={saveDisabled} onClick={onSave}>
           <CheckIcon />
           <span>Save</span>
         </Button>
@@ -318,16 +361,30 @@ function StickyBar({
               <span className="cfg-diff-row__new">unsaved draft</span>
             </div>
           ) : (
-            Object.entries(dirty).map(([key, { old: oldV, new: newV }]) => (
-              <div className="cfg-diff-row" key={key}>
-                <span className="cfg-diff-row__key t-data">{key}</span>
-                <span className="cfg-diff-row__old">{summariseDiffValue(oldV)}</span>
-                <span className="cfg-diff-row__arrow" aria-hidden="true">
-                  {'->'}
-                </span>
-                <span className="cfg-diff-row__new">{summariseDiffValue(newV)}</span>
-              </div>
-            ))
+            <>
+              {Object.entries(dirty)
+                .filter(([key]) => !(key in invalid))
+                .map(([key, { old: oldV, new: newV }]) => (
+                  <div className="cfg-diff-row" key={key}>
+                    <span className="cfg-diff-row__key t-data">{key}</span>
+                    <span className="cfg-diff-row__old">{summariseDiffValue(oldV)}</span>
+                    <span className="cfg-diff-row__arrow" aria-hidden="true">
+                      {'->'}
+                    </span>
+                    <span className="cfg-diff-row__new">{summariseDiffValue(newV)}</span>
+                  </div>
+                ))}
+              {Object.keys(invalid).map((key) => (
+                <div className="cfg-diff-row" key={key}>
+                  <span className="cfg-diff-row__key t-data">{key}</span>
+                  <span className="cfg-diff-row__old">loaded JSON</span>
+                  <span className="cfg-diff-row__arrow" aria-hidden="true">
+                    {'->'}
+                  </span>
+                  <span className="cfg-diff-row__new">Fix invalid JSON</span>
+                </div>
+              ))}
+            </>
           )}
         </div>
       ) : null}
@@ -336,15 +393,23 @@ function StickyBar({
 }
 
 // ── Page ─────────────────────────────────────────────────────────────────────
-export function ConfigPage() {
+export function ConfigPage({
+  embedded = false,
+  externalSnapshot,
+  externalSnapshotError = false,
+  onSnapshotReload,
+}: ConfigPageProps = {}) {
   const rpc = useRpc()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const usesExternalSnapshot = externalSnapshot !== undefined
 
   const [mode, setMode] = useState<EditorMode>('form')
   const [activeTab, setActiveTab] = useState<string>('core')
   const [search, setSearch] = useState('')
   const [diffOpen, setDiffOpen] = useState(false)
+  const [formResetKey, setFormResetKey] = useState(0)
+  const [snapshotConflict, setSnapshotConflict] = useState(false)
 
   // Form-mode edit state (all derived against the loaded config snapshot).
   const [editedValues, setEditedValues] = useState<Record<string, unknown>>({})
@@ -361,30 +426,60 @@ export function ConfigPage() {
   const [yamlDraft, setYamlDraft] = useState<string | null>(null)
 
   useEffect(() => {
-    document.title = 'Config - AgentOS Control'
-  }, [])
+    if (!embedded) document.title = 'Config - AgentOS Control'
+  }, [embedded])
 
-  const configQuery = useQuery<ConfigData>({
-    queryKey: ['config'],
+  const configQuery = useQuery<ConfigEditorSnapshot>({
+    queryKey: ['config', 'editor'],
     queryFn: async () => {
       await rpc.waitForConnection()
+      try {
+        const snapshot = await rpc.call<SettingsSnapshot>('config.snapshot')
+        if (!snapshot || !Object.prototype.hasOwnProperty.call(snapshot, 'config')) {
+          throw new Error('config.snapshot returned an invalid response')
+        }
+        return {
+          config: (snapshot.config as ConfigData | undefined) ?? {},
+          revision: snapshot.revision ?? undefined,
+          diskDiverged: snapshot.diskDiverged,
+          writeBlocked: snapshot.writeBlocked,
+        }
+      } catch (error) {
+        if (!isMethodNotFoundRpcError(error)) throw error
+      }
+      // Compatibility fallback for an older gateway during a rolling upgrade.
       const data = await rpc.call<ConfigData>('config.get')
-      return data ?? {}
+      return { config: data ?? {} }
     },
+    enabled: !usesExternalSnapshot,
     refetchOnWindowFocus: false,
   })
 
   // config.js:305 — load-failure toast (stable id so repeats dedupe).
   useEffect(() => {
-    if (configQuery.isError) {
+    if (!usesExternalSnapshot && configQuery.isError) {
       const err = configQuery.error
       const message = err instanceof Error ? err.message : String(err)
       toast.error('Failed to load config: ' + message, { id: 'config-load-err' })
     }
-  }, [configQuery.isError, configQuery.error])
+  }, [usesExternalSnapshot, configQuery.isError, configQuery.error])
 
-  const config = useMemo(() => configQuery.data ?? {}, [configQuery.data])
+  const editorSnapshot = usesExternalSnapshot
+    ? externalSnapshot
+      ? {
+          config: (externalSnapshot.config as ConfigData | undefined) ?? {},
+          revision: externalSnapshot.revision ?? undefined,
+          diskDiverged: externalSnapshot.diskDiverged,
+          writeBlocked: externalSnapshot.writeBlocked,
+        }
+      : undefined
+    : configQuery.data
+  const config = useMemo(() => editorSnapshot?.config ?? {}, [editorSnapshot?.config])
+  const configRevision = editorSnapshot?.revision
+  const diskDiverged = editorSnapshot?.diskDiverged === true
+  const writeBlocked = editorSnapshot?.writeBlocked === true
   const baselineYaml = useMemo(() => objToYaml(config), [config])
+  const yamlHasChanges = yamlDraft !== null && yamlDraft !== baselineYaml
 
   // Reset all edit state whenever a fresh config snapshot arrives (load / reload
   // / post-save). config.js:295-305,732,742 blanked _dirty/_invalidJson/_yamlDraft.
@@ -392,31 +487,56 @@ export function ConfigPage() {
   // supported "adjust state when a prop/derived value changes" pattern) rather
   // than an effect, so the blank state is applied before paint with no cascading
   // second render.
-  const [lastSnapshotAt, setLastSnapshotAt] = useState(0)
-  const configUpdatedAt = configQuery.dataUpdatedAt
-  if (configUpdatedAt && configUpdatedAt !== lastSnapshotAt) {
-    setLastSnapshotAt(configUpdatedAt)
+  const snapshotIdentity = usesExternalSnapshot
+    ? (externalSnapshot?.revision ?? externalSnapshot)
+    : configQuery.dataUpdatedAt
+  const [lastSnapshotIdentity, setLastSnapshotIdentity] = useState<unknown>(snapshotIdentity)
+  const hasPendingDraft =
+    Object.keys(dirty).length > 0 || Object.keys(invalid).length > 0 || yamlHasChanges
+  if (snapshotIdentity && snapshotIdentity !== lastSnapshotIdentity) {
+    setLastSnapshotIdentity(snapshotIdentity)
+    // A background Settings refresh may carry an unrelated guided change. Keep
+    // an operator's in-progress Advanced draft intact; explicit discard/save
+    // paths below own the reset. Pristine editors safely adopt the new snapshot.
+    if (hasPendingDraft) {
+      // Never let an edit based on revision A silently inherit revision B's CAS
+      // token. Keep the draft visible for comparison, but require an explicit
+      // discard/reload before any write can proceed.
+      setSnapshotConflict(true)
+    } else {
+      setEditedValues({})
+      setDirty({})
+      setInvalid({})
+      setJsonDrafts({})
+      setYamlDraft(null)
+      setDiffOpen(false)
+      setFormResetKey((key) => key + 1)
+    }
+  }
+
+  const clearEditorDraft = useCallback(() => {
     setEditedValues({})
     setDirty({})
     setInvalid({})
     setJsonDrafts({})
     setYamlDraft(null)
     setDiffOpen(false)
-  }
+    setFormResetKey((key) => key + 1)
+    setSnapshotConflict(false)
+  }, [])
 
   const onDiscardOrReload = useCallback(() => {
     // Reloading a fresh snapshot re-runs the render-phase reset above; but an
     // invalidate that resolves to an identical snapshot keeps the same
     // dataUpdatedAt, so clear the local edit state here too (Discard/Reload
     // must always drop pending edits — config.js:224-231,242-251).
-    setEditedValues({})
-    setDirty({})
-    setInvalid({})
-    setJsonDrafts({})
-    setYamlDraft(null)
-    setDiffOpen(false)
-    void queryClient.invalidateQueries({ queryKey: ['config'] })
-  }, [queryClient])
+    clearEditorDraft()
+    if (usesExternalSnapshot) {
+      void onSnapshotReload?.()
+    } else {
+      void queryClient.invalidateQueries({ queryKey: ['config'] })
+    }
+  }, [clearEditorDraft, onSnapshotReload, queryClient, usesExternalSnapshot])
 
   // config.js:585-616 — a field edit: parse → validate JSON → diff vs loaded.
   const onFieldChange = useCallback(
@@ -460,14 +580,18 @@ export function ConfigPage() {
   )
 
   // YAML edit: dirty when the draft differs from the loaded baseline.
-  const onYamlChange = useCallback((text: string) => {
-    setYamlDraft(text)
-  }, [])
-
-  const yamlDirty = yamlDraft !== null && yamlDraft !== baselineYaml
+  const onYamlChange = useCallback(
+    (text: string) => {
+      // Canonicalise a reverted YAML edit back to "no draft". Otherwise a
+      // later background snapshot could make the old-but-reverted text appear
+      // dirty against the new baseline and raise a false conflict.
+      setYamlDraft(text === baselineYaml ? null : text)
+    },
+    [baselineYaml],
+  )
 
   const patchMutation = useMutation({
-    mutationFn: (payload: { patches: Record<string, unknown> }) =>
+    mutationFn: (payload: { patches: Record<string, unknown>; expectedRevision?: string }) =>
       rpc.call<SaveResult>('config.patch', payload),
     onSuccess: (res) => {
       if (res?.restartRequired) {
@@ -477,7 +601,9 @@ export function ConfigPage() {
       } else {
         toast.success('Config saved', { id: 'config-save' })
       }
+      clearEditorDraft()
       void queryClient.invalidateQueries({ queryKey: ['config'] })
+      void queryClient.invalidateQueries({ queryKey: SETTINGS_SNAPSHOT_QUERY_KEY })
     },
     onError: (err) => {
       const message = err instanceof Error ? err.message : String(err)
@@ -486,8 +612,11 @@ export function ConfigPage() {
   })
 
   const applyMutation = useMutation({
-    mutationFn: (payload: { config_yaml: string; baseline_yaml: string }) =>
-      rpc.call<SaveResult>('config.apply', payload),
+    mutationFn: (payload: {
+      config_yaml: string
+      baseline_yaml: string
+      expectedRevision?: string
+    }) => rpc.call<SaveResult>('config.apply', payload),
     onSuccess: (res) => {
       if (res?.restartRequired) {
         toast.info('Config applied. Gateway restart required for the change to take effect.', {
@@ -496,7 +625,9 @@ export function ConfigPage() {
       } else {
         toast.success('Config applied', { id: 'config-apply' })
       }
+      clearEditorDraft()
       void queryClient.invalidateQueries({ queryKey: ['config'] })
+      void queryClient.invalidateQueries({ queryKey: SETTINGS_SNAPSHOT_QUERY_KEY })
     },
     onError: (err) => {
       const message = err instanceof Error ? err.message : String(err)
@@ -506,15 +637,60 @@ export function ConfigPage() {
 
   const saving = patchMutation.isPending || applyMutation.isPending
 
+  // Both draft surfaces remain mounted logically, but one may never overwrite
+  // pending work from the other. The visible save bar therefore tracks either
+  // draft, not only the currently selected editor.
+  const formKeys = dirtyCount(dirty)
+  const formPendingKeys = new Set([...Object.keys(dirty), ...Object.keys(invalid)]).size
+  const invalidJson = hasInvalidJson(invalid)
+  const yamlDirty = yamlHasChanges
+  const count = yamlDirty ? 1 : formPendingKeys
+  const barVisible = formPendingKeys > 0 || yamlDirty
+  const activeEditorCanSave =
+    mode === 'yaml'
+      ? yamlDirty && formPendingKeys === 0
+      : formKeys > 0 && !invalidJson && !yamlDirty
+
   // config.js:722-745 — Save: YAML mode → config.apply; form mode → config.patch
   // with the invalid-JSON gate + the no-op short-circuit.
   const onSave = useCallback(() => {
-    if (mode === 'yaml') {
-      const text = yamlDraft ?? baselineYaml
-      applyMutation.mutate(buildApplyPayload(text, baselineYaml))
+    if (writeBlocked) {
+      toast.error('The config file changed outside AgentOS. Restart or reload the gateway first.', {
+        id: 'config-save',
+      })
       return
     }
-    if (hasInvalidJson(invalid)) {
+    if (snapshotConflict) {
+      toast.error('Configuration changed in another workspace. Discard and reload before saving.', {
+        id: 'config-save',
+      })
+      return
+    }
+    if (mode === 'yaml') {
+      if (formPendingKeys > 0) {
+        toast.warning('Save or discard the pending Form changes before applying YAML.', {
+          id: 'config-save',
+        })
+        return
+      }
+      const text = yamlDraft ?? baselineYaml
+      if (!yamlDirty) {
+        toast.info('No changes to save', { id: 'config-save' })
+        return
+      }
+      applyMutation.mutate({
+        ...buildApplyPayload(text, baselineYaml),
+        ...(configRevision ? { expectedRevision: configRevision } : {}),
+      })
+      return
+    }
+    if (yamlDirty) {
+      toast.warning('Save or discard the pending YAML change before saving Form fields.', {
+        id: 'config-save',
+      })
+      return
+    }
+    if (invalidJson) {
       toast.error('Fix invalid JSON before saving', { id: 'config-save' })
       return
     }
@@ -523,28 +699,98 @@ export function ConfigPage() {
       toast.info('No changes to save', { id: 'config-save' })
       return
     }
-    patchMutation.mutate(payload)
-  }, [mode, yamlDraft, baselineYaml, invalid, dirty, applyMutation, patchMutation])
+    patchMutation.mutate({
+      ...payload,
+      ...(configRevision ? { expectedRevision: configRevision } : {}),
+    })
+  }, [
+    mode,
+    formPendingKeys,
+    yamlDraft,
+    baselineYaml,
+    yamlDirty,
+    invalidJson,
+    dirty,
+    writeBlocked,
+    snapshotConflict,
+    configRevision,
+    applyMutation,
+    patchMutation,
+  ])
 
-  // config.js:667-679 — the sticky bar tracks BOTH edit surfaces independently:
-  // it is visible whenever there are pending form edits OR the YAML draft is
-  // dirty (the latter only counts in YAML mode). So switching to YAML mode with
-  // pending form edits keeps the bar up showing the form dirty count — the YAML
-  // "1 change" only takes over once the YAML draft itself diverges.
-  const formKeys = dirtyCount(dirty)
-  const yamlDirtyVisible = mode === 'yaml' && yamlDirty
-  const count = yamlDirtyVisible ? 1 : formKeys
-  const barVisible = formKeys > 0 || yamlDirtyVisible
+  // Keep the pending bar visible across editor switches so neither draft can
+  // disappear from the operator's awareness.
+  const yamlDirtyVisible = yamlDirty
+
+  useEffect(() => {
+    if (!barVisible) return
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warnBeforeUnload)
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload)
+  }, [barVisible])
+
+  const onReload = () => {
+    if (barVisible) {
+      toast.warning('Discard pending changes before reloading the configuration.', {
+        id: 'config-reload',
+      })
+      return
+    }
+    onDiscardOrReload()
+  }
+
+  const configLoading = usesExternalSnapshot
+    ? externalSnapshot === null && !externalSnapshotError
+    : configQuery.isLoading
+  const configError = usesExternalSnapshot ? externalSnapshotError : configQuery.isError
+  const configReady = usesExternalSnapshot ? externalSnapshot !== null : configQuery.isSuccess
+
+  const retryConfig = () => {
+    if (usesExternalSnapshot) {
+      void onSnapshotReload?.()
+    } else {
+      void configQuery.refetch()
+    }
+  }
+
+  const onTabKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+      let nextIndex: number | null = null
+      if (event.key === 'ArrowRight') nextIndex = (index + 1) % TABS.length
+      if (event.key === 'ArrowLeft') nextIndex = (index - 1 + TABS.length) % TABS.length
+      if (event.key === 'Home') nextIndex = 0
+      if (event.key === 'End') nextIndex = TABS.length - 1
+      if (nextIndex === null) return
+      event.preventDefault()
+      const next = TABS[nextIndex]
+      if (!next) return
+      setActiveTab(next.id)
+      const tabs =
+        event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+      tabs?.[nextIndex]?.focus()
+    },
+    [],
+  )
+
+  const visibleTab = search.trim() ? SEARCH_TAB : TABS.find((tab) => tab.id === activeTab)
 
   return (
-    <div className="cfg-stage">
-      <header className="cfg-stage__header">
+    <div className={`cfg-stage${embedded ? ' cfg-stage--embedded' : ''}`}>
+      <header className={`cfg-stage__header${embedded ? ' cfg-stage__header--embedded' : ''}`}>
         <div className="cfg-stage__title-block">
-          <span className="t-label">Control · Config</span>
-          <h1 className="t-display">Config</h1>
+          <span className="t-label">{embedded ? 'Advanced workspace' : 'Control · Config'}</span>
+          {embedded ? (
+            <h2 className="cfg-stage__embedded-title">Configuration editor</h2>
+          ) : (
+            <h1 className="t-display">Config</h1>
+          )}
           <p className="cfg-stage__subtitle">
-            Advanced gateway configuration. Use guided setup for provider, router, channels, and
-            extras.
+            {embedded
+              ? 'Edit the complete runtime surface with a reviewed diff before it is applied.'
+              : 'Advanced gateway configuration. Use guided setup for provider, router, channels, and extras.'}
           </p>
         </div>
         <div className="cfg-stage__actions">
@@ -566,20 +812,22 @@ export function ConfigPage() {
               YAML
             </button>
           </div>
-          <Button
-            variant="outline"
-            className="text-xs uppercase tracking-[0.14em]"
-            title="Open guided setup"
-            onClick={() => navigate('/setup')}
-          >
-            <SlidersHorizontalIcon />
-            <span>Guided setup</span>
-          </Button>
+          {!embedded ? (
+            <Button
+              variant="outline"
+              className="text-xs uppercase tracking-[0.14em]"
+              title="Open guided setup"
+              onClick={() => navigate('/setup')}
+            >
+              <SlidersHorizontalIcon />
+              <span>Guided setup</span>
+            </Button>
+          ) : null}
           <Button
             variant="outline"
             className="text-xs uppercase tracking-[0.14em]"
             title="Reload config"
-            onClick={onDiscardOrReload}
+            onClick={onReload}
           >
             <RefreshCwIcon />
             <span>Reload</span>
@@ -588,7 +836,7 @@ export function ConfigPage() {
             className="text-xs uppercase tracking-[0.14em]"
             title="Save config"
             aria-label="Save config"
-            disabled={saving}
+            disabled={saving || snapshotConflict || writeBlocked || !activeEditorCanSave}
             onClick={onSave}
           >
             <CheckIcon />
@@ -597,18 +845,59 @@ export function ConfigPage() {
         </div>
       </header>
 
-      {mode === 'form' ? (
+      {configLoading ? (
+        <div className="cfg-state" role="status">
+          Loading configuration…
+        </div>
+      ) : null}
+
+      {configError ? (
+        <div className="cfg-state cfg-state--error" role="alert">
+          <span>Configuration could not be loaded.</span>
+          <Button type="button" size="sm" variant="outline" onClick={retryConfig}>
+            Retry
+          </Button>
+        </div>
+      ) : null}
+
+      {snapshotConflict ? (
+        <div className="cfg-state cfg-state--error" role="alert">
+          <span>
+            Configuration changed while this draft was open. Discard the stale draft before saving
+            against the latest revision.
+          </span>
+          <Button type="button" size="sm" variant="outline" onClick={onDiscardOrReload}>
+            Discard draft &amp; reload
+          </Button>
+        </div>
+      ) : null}
+
+      {diskDiverged && !embedded ? (
+        <div className="cfg-state cfg-state--error" role="alert">
+          <span>
+            The config file changed outside AgentOS. Writes are blocked until the gateway reloads or
+            restarts with that file.
+          </span>
+          <Button type="button" size="sm" variant="outline" onClick={onDiscardOrReload}>
+            Refresh state
+          </Button>
+        </div>
+      ) : null}
+
+      {configReady && mode === 'form' ? (
         <div className="cfg-form">
           <div className="cfg-toolbar">
             <div className="cfg-tabs" role="tablist" aria-label="Config sections">
-              {TABS.map((tab) => (
+              {TABS.map((tab, index) => (
                 <button
                   key={tab.id}
                   type="button"
                   role="tab"
                   aria-selected={tab.id === activeTab}
+                  tabIndex={tab.id === activeTab ? 0 : -1}
                   className={`cfg-tab${tab.id === activeTab ? ' is-active' : ''}`}
                   onClick={() => setActiveTab(tab.id)}
+                  onKeyDown={(event) => onTabKeyDown(event, index)}
                 >
                   {tab.label}
                 </button>
@@ -627,22 +916,24 @@ export function ConfigPage() {
               />
             </label>
           </div>
-          {TABS.filter((t) => t.id === activeTab).map((tab) => (
+          {visibleTab ? (
             <FormTab
-              key={tab.id}
+              key={visibleTab.id}
               config={config}
-              tab={tab}
+              tab={visibleTab}
               search={search.toLowerCase()}
               editedValues={editedValues}
               dirty={dirty}
               invalid={invalid}
               jsonDrafts={jsonDrafts}
-              resetKey={lastSnapshotAt}
+              resetKey={formResetKey}
               onChange={onFieldChange}
             />
-          ))}
+          ) : null}
         </div>
-      ) : (
+      ) : null}
+
+      {configReady && mode === 'yaml' ? (
         <div className="cfg-yaml">
           <textarea
             className="cfg-input cfg-yaml__area"
@@ -652,7 +943,7 @@ export function ConfigPage() {
             onChange={(e) => onYamlChange(e.target.value)}
           />
         </div>
-      )}
+      ) : null}
 
       {barVisible ? (
         <StickyBar
@@ -662,11 +953,13 @@ export function ConfigPage() {
           // per-field form diff rows.
           yamlMode={yamlDirtyVisible}
           dirty={dirty}
+          invalid={invalid}
           diffOpen={diffOpen}
           onToggleDiff={() => setDiffOpen((o) => !o)}
           onDiscard={onDiscardOrReload}
           onSave={onSave}
           saving={saving}
+          saveDisabled={saving || snapshotConflict || writeBlocked || !activeEditorCanSave}
         />
       ) : null}
     </div>

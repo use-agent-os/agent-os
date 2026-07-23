@@ -1164,7 +1164,17 @@ def validate_channel_entry(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         entry = parse_channel_entry(full)
     except ValidationError as exc:
-        raise ValueError(str(exc)) from exc
+        # ``str(ValidationError)`` includes Pydantic's ``input_value`` and can
+        # expose channel credentials, including write-only secrets merged from
+        # an existing entry. Keep actionable locations/messages but never echo
+        # the rejected input back through CLI or RPC errors.
+        issues: list[str] = []
+        for issue in exc.errors(include_url=False, include_input=False):
+            location = ".".join(str(part) for part in issue.get("loc", ()))
+            message = str(issue.get("msg") or "invalid value")
+            issues.append(f"{location}: {message}" if location else message)
+        detail = "; ".join(issues) or "invalid channel entry"
+        raise ValueError(detail) from exc
     if (
         type_name == "slack"
         and getattr(entry, "connection_mode", "webhook") == "webhook"

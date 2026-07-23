@@ -702,9 +702,10 @@
      as one block under prefers-reduced-motion. Terminal-flavored: content
      "boots in" with a short rise + fade rather than a generic slide. */
 
-  /* View enter: the whole page rises + fades on mount (200-260ms). Applied by
-     AppShell to the view-container wrapper, keyed on route so it replays on
-     navigation. */
+  /* Control view enter: the whole page rises + fades on mount (200-260ms).
+     Chat deliberately opts out because transforming a long scroll layer causes
+     expensive rasterization; its small header/composer choreography lives in
+     chat-unified.css. */
   /* `backwards` (not `both`): the fade+rise plays on mount, but once it ends the
      element reverts to its un-transformed computed style. `both` would retain
      the final keyframe's `transform: translateY(0)` (an identity matrix) — and

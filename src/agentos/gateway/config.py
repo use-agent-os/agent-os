@@ -2025,6 +2025,26 @@ class GatewayConfig(BaseSettings):
     def inherit_runtime_secrets(self, other: GatewayConfig) -> None:
         self._runtime_secret_paths = set(other._runtime_secret_paths)
 
+    def mark_env_sourced_auth_secrets(self, source_payload: dict[str, Any]) -> None:
+        """Keep auth credentials supplied only by environment out of TOML.
+
+        The source payload distinguishes an environment value from an
+        intentionally persisted/provisioned credential. This is deliberately
+        provenance-based: matching a value alone could erase a credential the
+        CLI explicitly wrote.
+        """
+        auth_payload = source_payload.get("auth")
+        auth_payload = auth_payload if isinstance(auth_payload, dict) else {}
+        env_names = {
+            "token": ("AGENTOS_AUTH_TOKEN", "AGENTOS_GATEWAY_AUTH__TOKEN"),
+            "password": ("AGENTOS_AUTH_PASSWORD", "AGENTOS_GATEWAY_AUTH__PASSWORD"),
+        }
+        for field_name, candidates in env_names.items():
+            if field_name in auth_payload:
+                continue
+            if any(name in os.environ for name in candidates):
+                self.mark_runtime_secret(f"auth.{field_name}")
+
     @classmethod
     def load_from_toml(cls, path: str | Path) -> GatewayConfig:
         """Load config from a TOML file."""
@@ -2035,6 +2055,7 @@ class GatewayConfig(BaseSettings):
             data = tomllib.load(f)
         migration = migrate_config_payload(data)
         cfg = cls(**migration.payload)
+        cfg.mark_env_sourced_auth_secrets(migration.payload)
         if migration.changed:
             backup_and_write_migrated_config(target, migration.payload, migration)
         return cfg
@@ -2061,12 +2082,15 @@ class GatewayConfig(BaseSettings):
                     data = tomllib.load(f)
                 migration = migrate_config_payload(data)
                 cfg = cls(**migration.payload)
+                cfg.mark_env_sourced_auth_secrets(migration.payload)
                 if migration.changed:
                     backup_and_write_migrated_config(path, migration.payload, migration)
                 cfg.config_path = str(path)
                 return cfg
 
-        return cls()
+        cfg = cls()
+        cfg.mark_env_sourced_auth_secrets({})
+        return cfg
 
 
 # --- bind-address resolution ----------------------------------------------

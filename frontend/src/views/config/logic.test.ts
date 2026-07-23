@@ -108,6 +108,91 @@ describe('entriesForTab', () => {
     // no match
     expect(entriesForTab(cfg, core, 'zzz')).toEqual([])
   })
+
+  it('classifies every current GatewayConfig top-level field exactly once', () => {
+    const fields = [
+      'tls',
+      'host',
+      'port',
+      'version',
+      'debug',
+      'log_file_enabled',
+      'log_level',
+      'log_file_max_bytes',
+      'log_file_backup_count',
+      'workspace_dir',
+      'workspace_strict',
+      'bootstrap_max_chars',
+      'bootstrap_total_max_chars',
+      'auth',
+      'cors',
+      'attachments',
+      'rate_limit',
+      'tools',
+      'permissions',
+      'task_runtime',
+      'skills',
+      'llm',
+      'prompt_cache',
+      'safety',
+      'prompt',
+      'memory',
+      'agentos_router',
+      'agent_token_saving',
+      'compaction',
+      'mcp',
+      'heartbeat',
+      'image_generation',
+      'audio',
+      'sandbox',
+      'channels',
+      'agents',
+      'agents_defaults',
+      'subagents',
+      'updates',
+      'control_ui',
+      'diagnostics_enabled',
+      'channel_admin_senders',
+      'context_budget_tokens',
+      'context_overflow_policy',
+      'preflight_compact_ratio',
+      'agent_runtime_timeout_seconds',
+      'agent_iteration_timeout_seconds',
+      'agent_tool_timeout_seconds',
+      'agent_request_timeout_seconds',
+      'agent_max_provider_retries',
+      'agent_max_iterations',
+      'llm_request_timeout_seconds',
+      'agent_stream_heartbeat_interval_seconds',
+      'agent_stream_idle_timeout_seconds',
+      'webui_stream_idle_grace_seconds',
+      'client_ws_keepalive_timeout_s',
+      'ws_writer_queue_enabled',
+      'ws_writer_queue_maxsize',
+      'llm_timeout_seconds',
+      'search_provider',
+      'search_api_key',
+      'search_api_key_env',
+      'search_max_results',
+      'search_proxy',
+      'search_use_env_proxy',
+      'search_fallback_policy',
+      'search_diagnostics',
+      'state_dir',
+      'config_path',
+    ]
+    const config = Object.fromEntries(fields.map((field) => [field, null]))
+
+    for (const field of fields) {
+      const owners = TABS.filter((tab) =>
+        entriesForTab(config, tab, '').some(([key]) => key === field),
+      )
+      expect(
+        owners.map((tab) => tab.id),
+        field,
+      ).toHaveLength(1)
+    }
+  })
 })
 
 // ── grouping — config.js:481-510 ────────────────────────────────────────────
@@ -130,8 +215,9 @@ describe('groupEntries / groupTitle / fieldLabel', () => {
 
   it('titles ids by de-casing separators', () => {
     expect(groupTitle('general')).toBe('General')
-    expect(groupTitle('agentos_router')).toBe('Agentos Router')
-    expect(groupTitle('control-ui')).toBe('Control Ui')
+    expect(groupTitle('agentos_router')).toBe('AgentOS Router')
+    expect(groupTitle('control-ui')).toBe('Control UI')
+    expect(groupTitle('mcp_api')).toBe('MCP API')
   })
 
   it('strips the group prefix from the field label but not from general', () => {
@@ -284,9 +370,14 @@ describe('isSensitiveKey / isReadonlyKey', () => {
     expect(isSensitiveKey('x.password')).toBe(true)
     expect(isSensitiveKey('host')).toBe(false)
   })
-  it('marks only host/port readonly', () => {
+  it('keeps gateway bind, config path, and runtime-owned auth credentials readonly', () => {
     expect(isReadonlyKey('host')).toBe(true)
     expect(isReadonlyKey('port')).toBe(true)
+    expect(isReadonlyKey('version')).toBe(true)
+    expect(isReadonlyKey('config_path')).toBe(true)
+    expect(isReadonlyKey('auth.token')).toBe(true)
+    expect(isReadonlyKey('auth.password')).toBe(true)
+    expect(isReadonlyKey('auth.mode')).toBe(false)
     expect(isReadonlyKey('debug')).toBe(false)
   })
 })
@@ -296,6 +387,10 @@ describe('fieldKind', () => {
   it('classifies readonly first', () => {
     expect(fieldKind('host', '0.0.0.0')).toBe('readonly')
     expect(fieldKind('port', 18791)).toBe('readonly')
+    expect(fieldKind('version', '2026.7.19')).toBe('readonly')
+    expect(fieldKind('config_path', '/tmp/agentos.toml')).toBe('readonly')
+    expect(fieldKind('auth.token', 'runtime-secret')).toBe('readonly')
+    expect(fieldKind('auth.password', 'runtime-secret')).toBe('readonly')
   })
   it('classifies by value type', () => {
     expect(fieldKind('debug', true)).toBe('boolean')

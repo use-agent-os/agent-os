@@ -301,6 +301,7 @@ describe('app shell chrome', () => {
     expect(controlShell).toHaveAttribute('data-surface', 'control')
     expect(controlShell).toHaveAttribute('data-design', 'unified')
     expect(controlView).toHaveClass('control-surface')
+    expect(controlView).toHaveClass('view-enter')
     expect(within(controlView as HTMLElement).getByTestId('control-header-signal')).toHaveAttribute(
       'aria-hidden',
       'true',
@@ -320,6 +321,8 @@ describe('app shell chrome', () => {
     expect(chatShell).toHaveAttribute('data-surface', 'chat')
     expect(chatShell).toHaveAttribute('data-design', 'unified')
     expect(chatView).toHaveClass('chat-surface')
+    expect(chatView).toHaveClass('chat-view-enter')
+    expect(chatView).not.toHaveClass('view-enter')
     expect(chatView).not.toHaveClass('control-surface')
     expect(within(chatView as HTMLElement).queryByTestId('control-header-signal')).toBeNull()
     expect(screen.getByRole('link', { name: 'Chat' })).toHaveAttribute('aria-current', 'page')
@@ -333,6 +336,30 @@ describe('app shell chrome', () => {
     renderShellAt('/missing-page')
     expect(screen.queryByTestId('shell-header')).not.toBeInTheDocument()
     expect(screen.getByRole('main')).toHaveAttribute('id', 'main-content')
+  })
+
+  it('resets the persistent route scroller before entering Chat', async () => {
+    stubMatchMedia(false)
+    const router = createMemoryRouter([{ element: <AppShell />, children: routeChildren }], {
+      initialEntries: ['/overview'],
+    })
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    )
+    const main = screen.getByRole('main')
+    main.scrollTop = 320
+    main.scrollLeft = 12
+
+    await act(async () => {
+      await router.navigate('/chat')
+    })
+
+    expect(screen.getByRole('main')).toBe(main)
+    expect(main.scrollTop).toBe(0)
+    expect(main.scrollLeft).toBe(0)
+    expect(main).toHaveClass('shell-main--chat')
   })
 
   it('restores the desktop rail preference without applying it to the mobile drawer', () => {
@@ -368,9 +395,46 @@ describe('app shell chrome', () => {
     const links = within(nav)
       .getAllByRole('link')
       .map((el) => el.textContent)
-    // Chat is the very first nav item; Approvals is the very last.
-    expect(links[0]).toBe('Chat')
-    expect(links[links.length - 1]).toBe('Approvals')
+    expect(links).toEqual([
+      'Chat',
+      'Overview',
+      'Health',
+      'Channels',
+      'MCP Servers',
+      'Skills',
+      'Sessions',
+      'Agents',
+      'Usage',
+      'Cron',
+      'Agent setup',
+      'Logs',
+      'Approvals',
+    ])
+  })
+
+  it('keeps legacy setup and config deep links on the single Agent setup nav item', () => {
+    stubMatchMedia(false)
+    const setup = renderShellAt('/setup')
+    expect(screen.getByRole('link', { name: 'Agent setup' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    setup.unmount()
+
+    renderShellAt('/config')
+    expect(screen.getByRole('link', { name: 'Agent setup' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+  })
+
+  it('keeps MCP navigation active while completing an OAuth callback', () => {
+    stubMatchMedia(false)
+    renderShellAt('/mcp/oauth/callback?error=access_denied')
+    expect(screen.getByRole('link', { name: 'MCP Servers' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
   })
 
   // M13 — parity: app.js:58-68 — version label 'v<semver>' derived from the

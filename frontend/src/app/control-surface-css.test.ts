@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 const controlCss = readFileSync('src/styles/control-surface.css', 'utf8')
 const globalsCss = readFileSync('src/styles/globals.css', 'utf8')
 const setupCss = readFileSync('src/views/setup/setup.css', 'utf8')
+const configCss = readFileSync('src/views/config/config.css', 'utf8')
 const cronCss = readFileSync('src/views/cron/cron.css', 'utf8')
 
 describe('Control surface CSS contract', () => {
@@ -28,6 +29,12 @@ describe('Control surface CSS contract', () => {
     expect(controlCss).toMatch(
       /@media \(max-width: 768px\)[\s\S]*?\.shell\[data-design='unified'\] \.shell-sidebar \{[\s\S]*?position: fixed;/,
     )
+  })
+
+  it('keeps the persistent route scroll root immediate across page changes', () => {
+    const routeScroller = controlCss.match(/\.shell-main--control \{([\s\S]*?)\n\}/)?.[1] ?? ''
+    expect(routeScroller).toContain('scroll-behavior: auto')
+    expect(routeScroller).not.toContain('scroll-behavior: smooth')
   })
 
   it('uses one semantic soft-radius scale across controls, surfaces, and dialogs', () => {
@@ -55,12 +62,12 @@ describe('Control surface CSS contract', () => {
     )
   })
 
-  it('mirrors Control tokens into every portalled dialog family including Cron', () => {
+  it('mirrors Control tokens into every portalled dialog family including Cron and MCP', () => {
     expect(controlCss).toMatch(
-      /:root\[data-theme='dark'\][\s\S]*?:is\(\.ag-modal__overlay, \.sess-modal__overlay, \.sk-modal__overlay, \.cron-modal__overlay\)/,
+      /:root\[data-theme='dark'\][\s\S]*?:is\([\s\S]*?\.ag-modal__overlay,[\s\S]*?\.cron-modal__overlay,[\s\S]*?\.mcp-modal__overlay[\s\S]*?\)/,
     )
     expect(controlCss).toMatch(
-      /:root\[data-theme='light'\][\s\S]*?:is\(\.ag-modal__overlay, \.sess-modal__overlay, \.sk-modal__overlay, \.cron-modal__overlay\)/,
+      /:root\[data-theme='light'\][\s\S]*?:is\([\s\S]*?\.ag-modal__overlay,[\s\S]*?\.cron-modal__overlay,[\s\S]*?\.mcp-modal__overlay[\s\S]*?\)/,
     )
   })
 
@@ -87,6 +94,39 @@ describe('Control surface CSS contract', () => {
     )
     expect(controlCss).not.toMatch(
       /:is\([\s\S]*?\.setup-stage__header,[\s\S]*?\.cron-stage__header[\s\S]*?\) \{\s*margin-bottom: 1\.5rem;/,
+    )
+  })
+
+  it('places Settings on the shared Control hero and action rhythm', () => {
+    expect(controlCss).toMatch(
+      /:is\([\s\S]*?\.settings-stage__header[\s\S]*?\) \{[\s\S]*?min-height: 10rem;[\s\S]*?padding: 1\.5rem 1\.75rem;/,
+    )
+    expect(controlCss).toMatch(
+      /:is\([\s\S]*?\.settings-stage__title-block[\s\S]*?\) \{[\s\S]*?min-width: 0;/,
+    )
+    expect(controlCss).toMatch(
+      /:is\([\s\S]*?\.settings-stage__actions[\s\S]*?\) \{[\s\S]*?justify-content: flex-end;/,
+    )
+  })
+
+  it('lets embedded Settings reset legacy Control chrome with route-level specificity', () => {
+    expect(setupCss).toMatch(
+      /\.control-surface \.setup-stage--embedded \.setup-stepper \{[\s\S]*?flex-direction: column;[\s\S]*?border: 0;[\s\S]*?background: transparent;[\s\S]*?box-shadow: none;/,
+    )
+    expect(setupCss).toMatch(
+      /\.control-surface \.setup-stage--embedded \.setup-panel \{[\s\S]*?border: 0;[\s\S]*?background: transparent;[\s\S]*?box-shadow: none;/,
+    )
+    expect(configCss).toMatch(
+      /\.control-surface \.cfg-stage--embedded \.cfg-stage__header--embedded \{[\s\S]*?min-height: 0;[\s\S]*?margin-bottom: 0\.75rem;/,
+    )
+    expect(controlCss).toMatch(
+      /\.control-surface \.setup-router-toolbar input\[type='number'\] \{[\s\S]*?box-sizing: border-box;[\s\S]*?padding: 0\.58rem 2\.65rem 0\.58rem 0\.75rem;/,
+    )
+  })
+
+  it('shows keyboard focus on the custom Advanced Config switch track', () => {
+    expect(configCss).toMatch(
+      /\.cfg-switch input:focus-visible \+ \.cfg-switch__track \{[\s\S]*?box-shadow: 0 0 0 3px/,
     )
   })
 })

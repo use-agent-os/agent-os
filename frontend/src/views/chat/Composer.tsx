@@ -238,7 +238,7 @@ export function Composer({
   // Autofocus on mount when the environment warrants it (chat.js:1353-1360).
   useEffect(() => {
     if (typeof window !== 'undefined' && shouldAutofocusComposer(window)) {
-      textareaRef.current?.focus()
+      textareaRef.current?.focus({ preventScroll: true })
     }
   }, [])
 
@@ -251,7 +251,7 @@ export function Composer({
         historyIdxRef.current = null
         historyDraftRef.current = ''
       },
-      focus: () => textareaRef.current?.focus(),
+      focus: () => textareaRef.current?.focus({ preventScroll: true }),
       // chat.js:8608-8624 — the pending-recover / drain write: set the value,
       // focus with the caret at the end, and reset the history cursor since the
       // content is now user-editable text.
@@ -259,7 +259,7 @@ export function Composer({
         setProgrammatic(text)
         historyIdxRef.current = null
         historyDraftRef.current = ''
-        textareaRef.current?.focus()
+        textareaRef.current?.focus({ preventScroll: true })
       },
       getValue: () => textareaRef.current?.value ?? '',
     }),

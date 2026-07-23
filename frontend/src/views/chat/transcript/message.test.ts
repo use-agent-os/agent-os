@@ -32,6 +32,17 @@ beforeEach(() => {
 })
 
 describe('message renderer', () => {
+  it('can suppress per-row auto-scroll during a bulk history replay', () => {
+    const scrollToBottom = vi.fn()
+    const { renderer } = makeRenderer({ scrollToBottom })
+
+    renderer.addMessage('assistant', 'persisted row', null, { autoScroll: false })
+    expect(scrollToBottom).not.toHaveBeenCalled()
+
+    renderer.addMessage('assistant', 'live row')
+    expect(scrollToBottom).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps live rows on the correct side of a shared day boundary', () => {
     const headerState = { current: { day: '', role: '' } }
     const { thread, renderer } = makeRenderer({
@@ -88,7 +99,7 @@ describe('message renderer', () => {
     expect(row.querySelector('pre')).toHaveTextContent('<img src=x onerror=alert(1)>')
   })
 
-  it('attaches model, token, cost, cache, reasoning, and savings metadata', () => {
+  it('attaches model, token, cost, cache, and reasoning metadata', () => {
     const { renderer } = makeRenderer()
     const row = renderer.addMessage('assistant', 'done')!
     renderer.attachTurnMeta(row, 'openrouter/vendor/model-20260722', 1_250, 42, {
@@ -101,98 +112,21 @@ describe('message renderer', () => {
     })
 
     expect(row.querySelector('.msg-meta')).toHaveTextContent(
-      'model↑1.3k ↓42cache:500think:12$0.00125Saved ~51%',
+      'model↑1.3k ↓42cache:500think:12$0.00125',
     )
-    expect(row.querySelector('.msg-meta__saved')).toHaveClass('msg-meta__saved--high')
-    expect(row.querySelector('.msg-meta__saved-flame path')).toHaveAttribute('fill', 'currentColor')
   })
 
-  it('renders saved intensity, live flash, and the current combo snapshot', () => {
-    const { renderer } = makeRenderer({
-      getSavingsStreak: () => ({ current: 5, max: 5 }),
-      savingsLabel: (pct: number) => `Saved ~${Math.round(pct)}%`,
-    })
+  it('does not render the retired savings or combo UI from usage payloads', () => {
+    const { renderer } = makeRenderer()
     const row = renderer.addMessage('assistant', 'done')!
-    renderer.attachTurnMeta(
-      row,
-      'provider/model',
-      10,
-      2,
-      {
-        routed_tier: 'c1',
-        routing_source: 'pilot',
-        total_savings_pct: 70,
-      },
-      { flash: true },
-    )
-
-    const saved = row.querySelector('.msg-meta__saved')!
-    expect(saved).toHaveClass('msg-meta__saved--peak', 'msg-meta__saved--flash')
-    saved.dispatchEvent(new Event('animationend'))
-    expect(saved).not.toHaveClass('msg-meta__saved--flash')
-    expect(row.querySelector('.msg-meta__combo')).toHaveClass('msg-meta__combo--blaze')
-    expect(row.querySelector('.msg-meta__combo')).toHaveAttribute('aria-label', 'Combo 5')
-    expect(row.querySelector('.msg-meta__combo')).toHaveTextContent('COMBO×5')
-  })
-
-  it('uses hot combo at x3, base combo at x2, and never fabricates unsupported savings', () => {
-    const makeUsage = () => ({
+    renderer.attachTurnMeta(row, 'provider/model', 10, 2, {
       routed_tier: 'c1',
       routing_source: 'pilot',
-      total_savings_pct: 30,
+      total_savings_pct: 70,
     })
-    const base = makeRenderer({ getSavingsStreak: () => ({ current: 2, max: 2 }) })
-    const baseRow = base.renderer.addMessage('assistant', 'base')!
-    base.renderer.attachTurnMeta(baseRow, '', 0, 0, makeUsage())
-    expect(baseRow.querySelector('.msg-meta__combo')).not.toHaveClass(
-      'msg-meta__combo--hot',
-      'msg-meta__combo--blaze',
-    )
-
-    const hot = makeRenderer({ getSavingsStreak: () => ({ current: 3, max: 3 }) })
-    const hotRow = hot.renderer.addMessage('assistant', 'hot')!
-    hot.renderer.attachTurnMeta(hotRow, '', 0, 0, makeUsage())
-    expect(hotRow.querySelector('.msg-meta__combo')).toHaveClass('msg-meta__combo--hot')
-
-    const unsupported = makeRenderer({ getSavingsStreak: () => ({ current: 9, max: 9 }) })
-    const unsupportedRow = unsupported.renderer.addMessage('assistant', 'plain')!
-    unsupported.renderer.attachTurnMeta(unsupportedRow, 'provider/model', 1, 1, {
-      routed_tier: 'c1',
-      routing_source: 'pilot',
-    })
-    expect(unsupportedRow.querySelector('.msg-meta__saved')).toBeNull()
-    expect(unsupportedRow.querySelector('.msg-meta__combo')).toBeNull()
-  })
-
-  it('hides saved and combo metadata on an identity-switch suppression turn', () => {
-    const { renderer } = makeRenderer({
-      getSavingsStreak: () => ({ current: 1, max: 2 }),
-    })
-    const row = renderer.addMessage('assistant', 'switched')!
-    renderer.attachTurnMeta(row, 'provider/model', 1, 1, {
-      routed_tier: 'c1',
-      routing_source: 'pilot',
-      total_savings_pct: 55,
-      __savings_ui_suppressed: true,
-    })
-
     expect(row.querySelector('.msg-meta__saved')).toBeNull()
     expect(row.querySelector('.msg-meta__combo')).toBeNull()
-  })
-
-  it('does not coerce a malformed persisted savings percentage', () => {
-    const { renderer } = makeRenderer({
-      getSavingsStreak: () => ({ current: 7, max: 7 }),
-    })
-    const row = renderer.addMessage('assistant', 'malformed')!
-    renderer.attachTurnMeta(row, 'provider/model', 1, 1, {
-      routed_tier: 'c1',
-      routing_source: 'pilot',
-      total_savings_pct: '51' as unknown as number,
-    })
-
-    expect(row.querySelector('.msg-meta__saved')).toBeNull()
-    expect(row.querySelector('.msg-meta__combo')).toBeNull()
+    expect(row.querySelector('.msg-meta')).toHaveTextContent('model↑10 ↓2')
   })
 })
 
@@ -207,15 +141,11 @@ describe('historyTurnMeta', () => {
   })
 })
 
-describe('SavingsFX footer CSS contract', () => {
-  it('keeps saved tiers, flash, combo tiers, popup fallback, and reduced-motion rules styled', () => {
-    expect(chatCss).toContain('.msg-meta__saved--high')
-    expect(chatCss).toContain('.msg-meta__saved--peak')
-    expect(chatCss).toContain('.msg-meta__saved--flash .msg-meta__saved-label')
-    expect(chatCss).toContain('.msg-meta__combo--hot')
-    expect(chatCss).toContain('.msg-meta__combo--blaze')
-    expect(chatCss).toContain('.savings-float')
-    expect(chatCss).toContain('@media (prefers-reduced-motion: reduce)')
-    expect(chatCss).toMatch(/\.msg-meta__saved\s*\{[\s\S]*border-radius: var\(--radius\)/)
+describe('retired SavingsFX CSS contract', () => {
+  it('does not ship saved, combo, or popup presentation rules', () => {
+    expect(chatCss).not.toContain('.msg-meta__saved')
+    expect(chatCss).not.toContain('.msg-meta__combo')
+    expect(chatCss).not.toContain('.savings-float')
+    expect(chatCss).not.toContain('@keyframes chat-savings')
   })
 })

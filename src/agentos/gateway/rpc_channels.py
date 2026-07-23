@@ -120,7 +120,7 @@ def _persist_telegram_access(
     access_mode: str | None = None,
     approved_sender_ids: list[str] | None = None,
 ) -> tuple[Any, str]:
-    from agentos.gateway.rpc_onboarding import _apply_inplace, _persist
+    from agentos.gateway.rpc_onboarding import _persist
     from agentos.onboarding.mutations import upsert_channel
 
     config, entry = _telegram_entry(ctx, channel_name)
@@ -131,7 +131,6 @@ def _persist_telegram_access(
         payload["approved_sender_ids"] = approved_sender_ids
     result = upsert_channel(config, entry_payload=payload)
     config_path = _persist(ctx, result.config, restart_required=False)
-    _apply_inplace(ctx, result.config)
     updated = next(item for item in result.config.channels.channels if item.name == channel_name)
     return updated, config_path
 

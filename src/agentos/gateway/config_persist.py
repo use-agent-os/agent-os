@@ -57,6 +57,20 @@ def get_runtime_overrides() -> dict[str, Any]:
     return dict(_RUNTIME_OVERRIDES)
 
 
+def _clear_committed_runtime_overrides(explicit_paths: set[str] | None) -> None:
+    """Forget boot overrides superseded by an explicit persisted edit."""
+    if not explicit_paths:
+        return
+    for override_path in tuple(_RUNTIME_OVERRIDES):
+        if any(
+            explicit == override_path
+            or explicit.startswith(f"{override_path}.")
+            or override_path.startswith(f"{explicit}.")
+            for explicit in explicit_paths
+        ):
+            _RUNTIME_OVERRIDES.pop(override_path, None)
+
+
 def read_raw_bind_overrides(config_path: str | None) -> dict[str, Any]:
     """Return the RAW on-disk ``host``/``port``/``debug`` for the override map.
 
@@ -113,6 +127,24 @@ def _drop_dotted(data: dict, path: str) -> None:
     node.pop(keys[-1], None)
 
 
+def prepare_persist_payload(
+    config: Any,
+    *,
+    explicit_paths: set[str] | None = None,
+) -> dict[str, Any]:
+    """Return the exact semantic payload a live writer would persist."""
+    explicit = explicit_paths or set()
+    data = cast(dict[str, Any], config.to_toml_dict())
+    for path, original in _RUNTIME_OVERRIDES.items():
+        if path in explicit:
+            continue
+        if original is None:
+            _drop_dotted(data, path)
+        else:
+            _set_dotted(data, path, original)
+    return data
+
+
 def persist_config(
     config: Any,
     *,
@@ -136,21 +168,17 @@ def persist_config(
     """
     from agentos.onboarding.config_store import persist_config as _store_persist
 
-    explicit = explicit_paths or set()
-    data = config.to_toml_dict()
-    for path, original in _RUNTIME_OVERRIDES.items():
-        if path in explicit:
-            continue
-        if original is None:
-            _drop_dotted(data, path)
-        else:
-            _set_dotted(data, path, original)
+    data = prepare_persist_payload(config, explicit_paths=explicit_paths)
 
     result = _store_persist(
         cast("GatewayConfig", _TomlDictConfig(data)),
         path=getattr(config, "config_path", None),
         backup=True,
     )
+    # Once an explicitly edited boot-override field is durable, its old
+    # provenance is stale. Clearing it only after the atomic writer succeeds
+    # prevents a later unrelated save from restoring the pre-edit value.
+    _clear_committed_runtime_overrides(explicit_paths)
     # Back-fill the resolved path so a first-run caller (config_path was None)
     # can name the real file, and subsequent writes target the same one.
     if not getattr(config, "config_path", None):

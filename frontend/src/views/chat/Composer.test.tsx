@@ -17,6 +17,16 @@ vi.mock('sonner', () => ({
 const textbox = () => screen.getByRole('textbox') as HTMLTextAreaElement
 
 describe('Composer', () => {
+  it('autofocuses without moving the persistent route scroller', () => {
+    const focus = vi.spyOn(HTMLTextAreaElement.prototype, 'focus')
+    try {
+      render(<Composer onSend={() => {}} busy={false} />)
+      expect(focus).toHaveBeenCalledWith({ preventScroll: true })
+    } finally {
+      focus.mockRestore()
+    }
+  })
+
   it('disables send when empty and enables on input', () => {
     render(<Composer onSend={() => {}} busy={false} />)
     const send = screen.getByRole('button', { name: /send/i })

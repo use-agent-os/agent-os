@@ -21,6 +21,9 @@ export interface FieldSpec {
   placeholder?: string
   description?: string
   choices?: string[]
+  group?: string
+  advanced?: boolean
+  help?: string
   showWhen?: Record<string, unknown>
   [key: string]: unknown
 }
@@ -47,6 +50,15 @@ export interface ProviderSpec {
 export interface ChannelSpec {
   type: string
   label?: string
+  description?: string
+  transport?: string
+  requiresPublicUrl?: boolean
+  dependencyExtra?: string | null
+  restartRequired?: boolean
+  docsHint?: string
+  help?: string
+  blocking?: boolean
+  canProbe?: boolean
   whatYouNeed?: string[]
   fields?: FieldSpec[]
   [key: string]: unknown
@@ -61,7 +73,12 @@ export interface Catalog {
   memoryEmbeddingProviders?: ProviderSpec[]
   channels?: ChannelSpec[]
   routerProfiles?: {
-    profiles?: Array<{ providerId: string; tiers?: Record<string, TierSpec> }>
+    profiles?: Array<{
+      profileId?: string
+      providerId: string
+      label?: string
+      tiers?: Record<string, TierSpec>
+    }>
     defaultTier?: string
     judge?: {
       profiles?: Record<string, { autoModel?: string | null; models?: string[] }>
@@ -173,6 +190,7 @@ export interface SetupConfig {
     tts?: Record<string, unknown>
     [key: string]: unknown
   }
+  channels?: { channels?: Array<Record<string, unknown>> }
   updates?: { notify?: boolean }
   [key: string]: unknown
 }
@@ -214,7 +232,6 @@ export type StepId = 'provider' | 'router' | 'channels' | 'extras' | 'finish'
 export const STEPS: Array<{ id: StepId; label: string }> = [
   { id: 'provider', label: 'Provider' },
   { id: 'router', label: 'Router Tiers' },
-  { id: 'channels', label: 'Channels' },
   { id: 'extras', label: 'Capabilities' },
   { id: 'finish', label: 'Finish' },
 ]
@@ -322,8 +339,12 @@ export function stepForSection(name: string): StepId {
 /** setup.js:286-300 — auto-select the initial step from status. */
 export function initialStepFromStatus(status: OnboardingStatus): StepId {
   const details = status.sectionDetails || {}
-  const entry = SECTION_STEPS.find(([section]) => stepDetailNeedsAction(details[section]))
+  const entry = SECTION_STEPS.find(
+    ([section, destination]) =>
+      destination !== 'channels' && stepDetailNeedsAction(details[section]),
+  )
   if (entry) return entry[1] as StepId
+  if (stepDetailNeedsAction(details.channels)) return 'finish'
   if (status.needsOnboarding === false) return 'finish'
   return 'provider'
 }

@@ -11,6 +11,8 @@ export interface MessageOptions {
   provenanceKind?: string
   provenanceSourceSessionKey?: string
   provenanceSourceTool?: string
+  /** Bulk history replay positions the transcript once after every row exists. */
+  autoScroll?: boolean
   [key: string]: unknown
 }
 
@@ -32,7 +34,6 @@ export interface TurnUsage extends Record<string, unknown> {
   total_savings_pct?: number
   routing_confidence?: number
   cache_hit_active?: boolean
-  __savings_ui_suppressed?: boolean
 }
 
 export interface TurnMeta {
@@ -56,17 +57,8 @@ export interface MessageRendererDeps {
   /** Shared legacy `_lastHeaderDay` / `_lastHeaderRole` cursor. */
   headerState?: TranscriptHeaderStateRef
   toast: (message: string, kind?: 'info' | 'warn' | 'error', durationMs?: number) => void
-  /** savings-fx.js:166 — the streak snapshot owned by the composed controller. */
-  getSavingsStreak?: () => { current: number; max: number }
-  /** savings-fx.js:62-65 — shared label formatter; never invents a percentage. */
-  savingsLabel?: (savePct: number) => string
   onEdit?: (text: string) => void
   onRegenerate?: (text: string) => void
-}
-
-export interface TurnMetaOptions {
-  /** chat.js:1092 — one-shot shimmer for a live, non-replayed savings turn. */
-  flash?: boolean
 }
 
 const TURN_META_LS = 'agentos.turnmeta.'
@@ -74,24 +66,6 @@ const TURN_META_LS = 'agentos.turnmeta.'
 function numeric(value: unknown): number {
   const n = Number(value || 0)
   return Number.isFinite(n) ? n : 0
-}
-
-const SAVINGS_FLAME_PATH =
-  'M8 16c3.4 0 6-2.55 6-5.78 0-3.05-2.7-4.6-2.7-7.55 0 0-1.55 1.45-2.5 4.4C8.55 4.5 8.4 1 6.5 0 6.6 3 4 4.45 4 7.6 4 11.05 5.65 16 8 16z'
-
-function savingsFlame(className: string): SVGSVGElement {
-  const ns = 'http://www.w3.org/2000/svg'
-  const flame = document.createElementNS(ns, 'svg')
-  flame.setAttribute('class', className)
-  flame.setAttribute('viewBox', '0 0 16 16')
-  flame.setAttribute('aria-hidden', 'true')
-  flame.setAttribute('width', '1em')
-  flame.setAttribute('height', '1em')
-  const path = document.createElementNS(ns, 'path')
-  path.setAttribute('d', SAVINGS_FLAME_PATH)
-  path.setAttribute('fill', 'currentColor')
-  flame.appendChild(path)
-  return flame
 }
 
 export function formatTokenCount(n: number): string {
@@ -454,7 +428,7 @@ export function createMessageRenderer(deps: MessageRendererDeps) {
     row.appendChild(body)
     attachHoverActions(row, displayRole)
     thread.appendChild(row)
-    deps.scrollToBottom()
+    if (options.autoScroll !== false) deps.scrollToBottom()
     return row
   }
 
@@ -464,26 +438,13 @@ export function createMessageRenderer(deps: MessageRendererDeps) {
     totalInput: number,
     totalOutput: number,
     usage: TurnUsage | null = null,
-    opts: TurnMetaOptions = {},
   ): void {
     if (!row) return
     row.querySelectorAll(':scope > .msg-meta').forEach((node) => node.remove())
     const data = usage || {}
     const hasModel = Boolean(model.trim())
     const hasTokens = totalInput > 0 || totalOutput > 0
-    // chat.js:1022-1025 accepts a persisted percentage only when the payload
-    // contains a real finite number. Do not coerce malformed strings into UI.
-    const savings =
-      typeof data.total_savings_pct === 'number' && Number.isFinite(data.total_savings_pct)
-        ? data.total_savings_pct
-        : 0
-    const hasSavings =
-      !data.__savings_ui_suppressed &&
-      Boolean(data.routed_tier && data.routing_source && data.routing_source !== 'none') &&
-      savings > 0
-    const streak = Math.trunc(deps.getSavingsStreak?.().current || 0)
-    const hasCombo = hasSavings && streak >= 2
-    if (!hasModel && !hasTokens && numeric(data.cost_usd) <= 0 && !hasSavings && !hasCombo) return
+    if (!hasModel && !hasTokens && numeric(data.cost_usd) <= 0) return
     const meta = document.createElement('div')
     meta.className = 'msg-meta'
     const add = (className: string, text: string, title = ''): HTMLSpanElement => {
@@ -511,48 +472,6 @@ export function createMessageRenderer(deps: MessageRendererDeps) {
     if (reasoning > 0) add('msg-meta__reasoning', `think:${formatTokenCount(reasoning)}`)
     const cost = numeric(data.cost_usd)
     if (cost > 0) add('msg-meta__cost', `$${cost.toFixed(6).replace(/\.?0+$/, '')}`)
-    if (hasSavings) {
-      const tierClass =
-        savings >= 65 ? ' msg-meta__saved--peak' : savings >= 45 ? ' msg-meta__saved--high' : ''
-      const saved = document.createElement('span')
-      saved.className = `msg-meta__saved${tierClass}`
-      saved.title = `Pilot Router routed this turn (~${Math.round(savings)}% vs flagship)`
-      saved.appendChild(savingsFlame('msg-meta__saved-flame'))
-      const label = document.createElement('span')
-      label.className = 'msg-meta__saved-label'
-      label.textContent = deps.savingsLabel
-        ? deps.savingsLabel(savings)
-        : savings > 0
-          ? `Saved ~${Math.round(savings)}%`
-          : 'Cost optimized'
-      saved.appendChild(label)
-      meta.appendChild(saved)
-      if (opts.flash && savings >= 20) {
-        saved.classList.add('msg-meta__saved--flash')
-        saved.addEventListener(
-          'animationend',
-          () => saved.classList.remove('msg-meta__saved--flash'),
-          { once: true },
-        )
-      }
-    }
-    if (hasCombo) {
-      const tierClass =
-        streak >= 5 ? ' msg-meta__combo--blaze' : streak >= 3 ? ' msg-meta__combo--hot' : ''
-      const combo = document.createElement('span')
-      combo.className = `msg-meta__combo${tierClass}`
-      combo.title = `Pilot Router combo — ${streak} consecutive savings turns`
-      combo.setAttribute('aria-label', `Combo ${streak}`)
-      combo.appendChild(savingsFlame('msg-meta__combo-flame'))
-      const label = document.createElement('span')
-      label.className = 'msg-meta__combo-label'
-      label.textContent = 'COMBO'
-      const count = document.createElement('span')
-      count.className = 'msg-meta__combo-count'
-      count.textContent = `×${streak}`
-      combo.append(label, count)
-      meta.appendChild(combo)
-    }
     row.appendChild(meta)
   }
 

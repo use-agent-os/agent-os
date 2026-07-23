@@ -171,9 +171,6 @@ export interface HistoryRenderDeps {
   ) => HTMLElement | null
   /** chat.js:5751-5770 — flush pending decisions and perform the final dock sweep. */
   finishHistoryRouterFx: () => void
-  /** SavingsFX history replay recomputes streak state oldest→newest. */
-  beginSavingsHistoryReplay: () => void
-  noteSavingsHistoryTurn: (usage: TurnUsage | null | undefined) => void
   /** Must set `_historyHasRendered` before pending router decisions flush. */
   markHistoryRendered: () => void
   /** chat.js:5700-5745 — per-assistant history usage metadata. */
@@ -468,7 +465,6 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
       th.innerHTML = ''
       headerState.current.day = ''
       headerState.current.role = ''
-      deps.beginSavingsHistoryReplay()
       const empty = document.createElement('div')
       empty.className = 'chat-empty'
       empty.textContent = 'No messages yet.'
@@ -495,7 +491,6 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
     headerState.current.role = ''
     deps.resetMessageGrouping?.()
     deps.prepareHistoryRouterFx()
-    deps.beginSavingsHistoryReplay()
     let assistantIndex = 0
     let userIndex = 0
     let lastUserRequestKind: 'image' | 'text' = 'text'
@@ -519,6 +514,10 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
           (msg as { provenance_source_session_key?: string }).provenance_source_session_key || '',
         provenanceSourceTool:
           (msg as { provenance_source_tool?: string }).provenance_source_tool || '',
+        // History is a bulk reconstruction. Per-row tail following causes
+        // repeated layouts and exposes a top-to-bottom scroll on Chat entry;
+        // the renderer positions the completed transcript exactly once below.
+        autoScroll: false,
       }
       // Capture the shared cursor before `addMessage` advances it. Reused rows
       // do not go through `addMessage`, while newly-created rows do; this makes
@@ -600,18 +599,17 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
         )
         assistantIndex += 1
         if (meta) {
-          const savedUsage = meta.saved ? { ...meta.saved } : null
+          const turnUsage = meta.saved ? { ...meta.saved } : null
           // chat.js:991-996 `_savedUsageFromMeta` — older locally persisted
           // turn-meta rows can keep the model only on the outer record. Carry
-          // that real value into the cloned usage payload so SavingsFX/router
-          // identity reconstruction does not silently lose the turn.
-          if (savedUsage && !savedUsage.model && !savedUsage.routed_model && meta.model) {
-            savedUsage.model = meta.model
+          // that real value into the cloned usage payload so router identity
+          // reconstruction does not silently lose the turn.
+          if (turnUsage && !turnUsage.model && !turnUsage.routed_model && meta.model) {
+            turnUsage.model = meta.model
           }
-          deps.noteSavingsHistoryTurn(savedUsage)
-          if (savedUsage) {
+          if (turnUsage) {
             const raw = msg as unknown as Record<string, unknown>
-            deps.reconcileHistoryRouterFx(savedUsage, {
+            deps.reconcileHistoryRouterFx(turnUsage, {
               turnIndex: userIndex,
               requestKind: lastUserRequestKind,
               hintTimestamp:
@@ -621,9 +619,7 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
                 '',
             })
           }
-          deps.attachTurnMeta?.(div, meta.model, meta.input, meta.output, savedUsage)
-        } else {
-          deps.noteSavingsHistoryTurn(null)
+          deps.attachTurnMeta?.(div, meta.model, meta.input, meta.output, turnUsage)
         }
       }
     })

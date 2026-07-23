@@ -569,9 +569,17 @@ def create_gateway_app(
             allow_methods=config.cors.allowed_methods,
             allow_headers=config.cors.allowed_headers,
         ),
-        Middleware(RateLimitMiddleware, config=config),
+        Middleware(
+            RateLimitMiddleware,
+            config=config,
+            control_ui_base_path=config.control_ui.base_path,
+        ),
         Middleware(SecurityHeadersMiddleware, path_prefix=config.control_ui.base_path),
-        Middleware(AuthMiddleware, config=config),
+        Middleware(
+            AuthMiddleware,
+            config=config,
+            control_ui_base_path=config.control_ui.base_path,
+        ),
     ]
 
     app = Starlette(routes=routes, middleware=middleware, debug=config.debug)

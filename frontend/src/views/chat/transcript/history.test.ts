@@ -76,8 +76,6 @@ function historyDeps(
     prepareHistoryRouterFx: () => {},
     reconcileHistoryRouterFx: () => null,
     finishHistoryRouterFx: () => {},
-    beginSavingsHistoryReplay: () => {},
-    noteSavingsHistoryTurn: () => {},
     markHistoryRendered: () => {},
     stampHistoryElement: () => {},
     stripProtocolTextLeak: (text) => text,
@@ -153,6 +151,26 @@ describe('messagePageIdentity (parity chat.js:5350)', () => {
 
   it('returns "" for a nullish message', () => {
     expect(messagePageIdentity(null as unknown as ChatMessage)).toBe('')
+  })
+})
+
+describe('history replay scroll behavior', () => {
+  it('marks every reconstructed row for one-shot final positioning', () => {
+    const thread = document.createElement('div')
+    document.body.appendChild(thread)
+    const addMessage = vi.fn(historyDeps(thread).addMessage)
+    const messages = [
+      { role: 'user', text: 'first' },
+      { role: 'assistant', text: 'second' },
+    ] as ChatMessage[]
+    const renderer = createHistoryRenderer(historyDeps(thread, { addMessage }))
+
+    renderer.renderHistoryMessages(messages, pagingState(messages))
+
+    expect(addMessage).toHaveBeenCalledTimes(2)
+    for (const call of addMessage.mock.calls) {
+      expect(call[3]).toEqual(expect.objectContaining({ autoScroll: false }))
+    }
   })
 })
 
@@ -350,11 +368,10 @@ describe('createHistoryRenderer persisted rich content', () => {
     expect(body.lastElementChild).toHaveClass('msg-actions')
   })
 
-  it('replays savings and router usage oldest-to-newest with user request context', () => {
+  it('replays router usage oldest-to-newest with user request context', () => {
     const thread = document.createElement('div')
     document.body.appendChild(thread)
     const lifecycle: string[] = []
-    const noteSavingsHistoryTurn = vi.fn(() => lifecycle.push('savings'))
     const reconcileHistoryRouterFx = vi.fn(() => {
       lifecycle.push('router')
       return null
@@ -396,7 +413,6 @@ describe('createHistoryRenderer persisted rich content', () => {
             ? { model: String(usage.model), input: 0, output: 0, saved: { ...usage } }
             : null
         },
-        noteSavingsHistoryTurn,
         reconcileHistoryRouterFx,
         markHistoryRendered,
         finishHistoryRouterFx,
@@ -405,8 +421,6 @@ describe('createHistoryRenderer persisted rich content', () => {
 
     renderer.renderHistoryMessages(messages, pagingState(messages))
 
-    expect(noteSavingsHistoryTurn).toHaveBeenCalledTimes(3)
-    expect(noteSavingsHistoryTurn).toHaveBeenLastCalledWith(null)
     expect(reconcileHistoryRouterFx).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ routed_tier: 'c1' }),
@@ -420,10 +434,9 @@ describe('createHistoryRenderer persisted rich content', () => {
     expect(lifecycle.slice(-2)).toEqual(['rendered', 'finished'])
   })
 
-  it('backfills the outer turn-meta model before replaying saved usage', () => {
+  it('backfills the outer turn-meta model before replaying router usage', () => {
     const thread = document.createElement('div')
     document.body.appendChild(thread)
-    const noteSavingsHistoryTurn = vi.fn()
     const reconcileHistoryRouterFx = vi.fn(() => null)
     const messages = [
       { role: 'user', text: 'hello' },
@@ -441,16 +454,12 @@ describe('createHistoryRenderer persisted rich content', () => {
             total_savings_pct: 25,
           },
         }),
-        noteSavingsHistoryTurn,
         reconcileHistoryRouterFx,
       }),
     )
 
     renderer.renderHistoryMessages(messages, pagingState(messages))
 
-    expect(noteSavingsHistoryTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ model: 'provider/legacy-model' }),
-    )
     expect(reconcileHistoryRouterFx).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'provider/legacy-model' }),
       expect.objectContaining({ turnIndex: 1 }),

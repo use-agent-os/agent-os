@@ -37,16 +37,91 @@ For gateway lifecycle, host/port, and exposure details, see
 | --- | --- |
 | Chat | Run and resume chat sessions, inspect tool activity, publish artifacts, and use manual compact controls. |
 | Overview / Health | See readiness, provider state, memory state, sandbox posture, and recovery hints. |
-| Channels | Inspect configured channel adapter status and jump to guided setup for configuration changes. |
+| Channels | Inspect configured channel adapter status and jump to Agent setup for configuration changes. |
 | Skills | Browse available skills. |
 | Sessions | Inspect durable conversations and operational state. |
 | Agents | Manage durable agent entries. |
 | Usage | Inspect token and estimated-cost rollups. |
 | Cron | View and manage scheduled runs. |
 | MCP Servers | Add local or remote MCP servers, connect tools live, and complete OAuth authorization. |
-| Config | Edit setup sections from the browser. |
+| Agent setup | Configure the agent through Guided capability setup or the complete Advanced Form/YAML editor. |
 | Logs | Inspect runtime logs and diagnostics. |
 | Approvals | Respond to sensitive tool-call approval requests. |
+
+## Agent Setup
+
+Open **Settings > Agent setup**, or go directly to:
+
+```text
+http://127.0.0.1:18791/control/settings
+```
+
+The workspace has two modes:
+
+- **Guided** configures the provider, Pilot Router, channels, search, memory,
+  image generation, audio, and readiness through the specialized onboarding
+  operations for each capability.
+- **Advanced** exposes Form and YAML editors for the complete current gateway
+  configuration. Form mode groups every current `GatewayConfig` key, keeps an
+  **Other** section for future keys, searches across all sections, supports
+  keyboard tab navigation, and provides accessible show/hide controls for
+  sensitive inputs.
+
+The workspace uses one redacted `config.snapshot` composite for a coherent view
+of the catalog, readiness, active configuration, revision, persistence target,
+restart state, and runtime/disk coherence. Writes still use the narrowly scoped
+onboarding operations or `config.patch` / `config.apply`; the snapshot itself is
+read-only. A legacy gateway fallback is used only when `config.snapshot` is not
+implemented, not when the snapshot call fails or returns an invalid payload.
+
+Existing bookmarks remain valid: `/control/setup` opens Guided mode and
+`/control/config` opens Advanced mode. Both are compatibility paths into the
+same Agent setup workspace, not separate sidebar destinations. Guided and
+Advanced stay mounted while you switch between them so in-progress drafts are
+not discarded merely by changing modes.
+
+### Configuration write safety
+
+Guided and Advanced are two editors for the same persisted configuration. Each
+write carries the snapshot `revision` as `expectedRevision` when available. If
+another editor advances that revision while a local draft is open, Save is
+disabled until the stale draft is explicitly discarded and the latest snapshot
+is loaded. A one-time secret is cleared from the saved form immediately after a
+successful write, even when the follow-up refresh cannot complete.
+
+Gateway configuration writes are persist-first transactions:
+
+1. validate a cloned candidate configuration;
+2. verify `expectedRevision` and the live/disk coherence state;
+3. atomically persist the candidate;
+4. update the running configuration;
+5. hot-apply the adapters that support it.
+
+If persistence fails, the running configuration and runtime adapters remain
+unchanged. If persistence succeeds but a hot-apply adapter fails, the persisted
+configuration remains authoritative and the gateway records a pending restart
+reason instead of reporting the change as fully live.
+
+An external edit to the active config file is fail-closed. In that state,
+`config.snapshot` returns `revision: null`, `diskDiverged: true`, and
+`writeBlocked: true`; Agent setup shows **Out of sync** and disables both Guided
+and Advanced writes. Reload or restart the gateway with that file before
+editing again. Refreshing only the browser cannot reconcile a stale running
+configuration.
+
+`host`, `port`, `config_path`, `auth.token`, and `auth.password` are display-only
+in Advanced. The WebSocket config mutation RPCs reject attempts to retarget the
+active config file or replace runtime-owned authentication credentials. Other
+authentication settings, such as `auth.mode`, remain editable and may require a
+gateway restart.
+
+Restart reporting is deliberately conservative. Mutation responses expose
+`restartRequired`; subsequent snapshots expose cumulative `pendingRestart` and
+`restartReasons` for boot-captured settings and failed hot applies. This covers
+areas such as memory, channels, sandbox/bind posture, task runtime, server
+middleware, MCP discovery, tools/skills loading, state paths, heartbeat, and
+diagnostics. Treat a restart advisory as part of completing the change rather
+than as a save failure.
 
 ## Chat Sessions
 

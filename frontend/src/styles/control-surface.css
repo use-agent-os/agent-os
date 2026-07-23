@@ -54,7 +54,13 @@
 /* ModalShell portals to document.body, so it cannot inherit the scoped shell
    variables. Mirror the Control palette on the non-chat dialog overlays. */
 :root[data-theme='dark']
-  :is(.ag-modal__overlay, .sess-modal__overlay, .sk-modal__overlay, .cron-modal__overlay) {
+  :is(
+    .ag-modal__overlay,
+    .sess-modal__overlay,
+    .sk-modal__overlay,
+    .cron-modal__overlay,
+    .mcp-modal__overlay
+  ) {
   color-scheme: dark;
   --background: #090c11;
   --foreground: #f2f4f7;
@@ -77,7 +83,13 @@
 }
 
 :root[data-theme='light']
-  :is(.ag-modal__overlay, .sess-modal__overlay, .sk-modal__overlay, .cron-modal__overlay) {
+  :is(
+    .ag-modal__overlay,
+    .sess-modal__overlay,
+    .sk-modal__overlay,
+    .cron-modal__overlay,
+    .mcp-modal__overlay
+  ) {
   color-scheme: light;
   --background: #f3f5f7;
   --foreground: #171b22;
@@ -407,7 +419,10 @@
       transparent 30rem
     ),
     var(--background);
-  scroll-behavior: smooth;
+  /* This node persists across routes. Smooth behavior makes a previous page's
+     offset visibly normalize while Chat mounts, so route-root positioning must
+     remain immediate; individual widgets own any intentional motion. */
+  scroll-behavior: auto;
 }
 
 .shell-main--control:focus {
@@ -510,8 +525,10 @@
     .cron-stage__header,
     .ch-stage__header,
     .ap-stage__header,
+    .mcp-stage__header,
     .cfg-stage__header,
-    .setup-stage__header
+    .setup-stage__header,
+    .settings-stage__header
   ) {
   position: relative;
   z-index: 1;
@@ -537,9 +554,14 @@
     .sess-stage__header,
     .ch-stage__header,
     .ap-stage__header,
+    .mcp-stage__header,
     .cfg-stage__header
   ) {
   margin-bottom: 1.5rem;
+}
+
+.control-surface .settings-stage__header {
+  margin-bottom: 0.5rem;
 }
 
 @media (min-width: 1121px) {
@@ -559,8 +581,10 @@
     .cron-stage__title-block,
     .ch-stage__title-block,
     .ap-stage__title-block,
+    .mcp-stage__title-block,
     .cfg-stage__title-block,
-    .setup-stage__title-block
+    .setup-stage__title-block,
+    .settings-stage__title-block
   ) {
   position: relative;
   z-index: 1;
@@ -608,7 +632,8 @@
     .ch-stage__subtitle,
     .ap-stage__subtitle,
     .cfg-stage__subtitle,
-    .setup-stage__subtitle
+    .setup-stage__subtitle,
+    .settings-stage__subtitle
   ) {
   max-width: 66ch;
   margin-top: 0.55rem;
@@ -627,7 +652,8 @@
     .sess-stage__actions,
     .cron-stage__actions,
     .cfg-stage__actions,
-    .setup-stage__aside
+    .setup-stage__aside,
+    .settings-stage__actions
   ) {
   position: relative;
   z-index: 1;
@@ -1192,15 +1218,23 @@
     .setup-form select,
     .setup-mini input,
     .setup-mini select,
+    .setup-router-toolbar input[type='number'],
     .setup-advanced__body input,
     .setup-advanced__body select,
-    .setup-tier-table input,
+    .setup-tier-table input:not([type='checkbox']),
     .setup-tier-table select
   ) {
   min-height: 2.5rem;
   border-radius: var(--radius-sm);
   padding-inline: 0.7rem;
   font-size: 0.875rem;
+}
+
+.control-surface .setup-router-toolbar input[type='number'] {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0.58rem 2.65rem 0.58rem 0.75rem;
 }
 
 .control-surface .setup-extras {
@@ -1330,8 +1364,10 @@
       .cron-stage__header,
       .ch-stage__header,
       .ap-stage__header,
+      .mcp-stage__header,
       .cfg-stage__header,
-      .setup-stage__header
+      .setup-stage__header,
+      .settings-stage__header
     ) {
     grid-template-columns: 1fr;
     align-items: start;
@@ -1346,8 +1382,10 @@
       .ag-stage__actions,
       .sess-stage__actions,
       .cron-stage__actions,
+      .mcp-stage__actions,
       .cfg-stage__actions,
-      .setup-stage__aside
+      .setup-stage__aside,
+      .settings-stage__actions
     ) {
     width: 100%;
     justify-content: flex-start;
@@ -1447,10 +1485,17 @@
       .ch-stage__header,
       .ap-stage__header,
       .cfg-stage__header,
-      .setup-stage__header
+      .setup-stage__header,
+      .settings-stage__header
     ) {
     min-height: 13rem;
     padding: 1.25rem;
+  }
+
+  .control-surface .mcp-stage__header {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    min-height: auto;
   }
 
   .control-surface [data-slot='button'],
@@ -1574,7 +1619,8 @@
       .sess-stage__actions,
       .cron-stage__actions,
       .cfg-stage__actions,
-      .setup-stage__aside
+      .setup-stage__aside,
+      .settings-stage__actions
     )
     > [data-slot='button'] {
     flex: 1 1 auto;

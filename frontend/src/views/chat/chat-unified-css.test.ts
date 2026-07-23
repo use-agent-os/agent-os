@@ -19,6 +19,45 @@ describe('unified Chat CSS contract', () => {
     expect(css).toMatch(/\.chat-surface \.chat-composer:focus-within \{/)
   })
 
+  it('keeps the large transcript stationary and coordinates only lightweight entry surfaces', () => {
+    expect(css).toMatch(
+      /\.chat-surface \.chat-thread \{[\s\S]*?overflow-anchor: none;[\s\S]*?scrollbar-gutter: stable;/,
+    )
+    expect(css).toMatch(
+      /\.chat-view-enter \.chat-composer-shell \{[\s\S]*?animation: chat-composer-enter/,
+    )
+    expect(css).toMatch(
+      /\.shell\[data-surface='chat'\] \.shell-chat-header \{[\s\S]*?animation: chat-header-enter/,
+    )
+    expect(css).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.chat-view-enter \.chat-composer-shell,[\s\S]*?animation: none !important;/,
+    )
+  })
+
+  it('keeps history out of the paint tree until positioned and reserves image geometry', () => {
+    expect(css).toMatch(
+      /\.chat-surface \.chat-thread\[data-history-ready='false'\] \{[\s\S]*?visibility: hidden;/,
+    )
+    expect(css).toMatch(
+      /\.chat-surface \.chat-thread\[data-history-ready='true'\] \+ \.chat-history-loading \{[\s\S]*?display: none;/,
+    )
+    expect(css).toMatch(
+      /\.chat-surface \.msg-artifact-preview,[\s\S]*?aspect-ratio: 16 \/ 10;[\s\S]*?object-fit: contain;/,
+    )
+  })
+
+  it('reserves portalled header geometry before reactive controls mount', () => {
+    expect(css).toMatch(
+      /\.shell-chat-header__context \{[\s\S]*?min-height: 2\.5rem;[\s\S]*?overflow: visible;/,
+    )
+    expect(css).toMatch(
+      /\.shell-chat-header__primary-action \{[\s\S]*?min-width: 6\.75rem;[\s\S]*?min-height: 2\.5rem;/,
+    )
+    expect(css).toMatch(
+      /@media \(max-width: 768px\)[\s\S]*?\.shell-chat-header \{[\s\S]*?min-height: 6\.25rem;/,
+    )
+  })
+
   it('keeps lime as a signal instead of filling the user message bubble', () => {
     const userBubble = css.match(/\.chat-surface \.msg\.user \{([\s\S]*?)\n\}/)?.[1] ?? ''
     expect(userBubble).toContain('background: var(--elevated)')

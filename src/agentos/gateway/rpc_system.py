@@ -150,55 +150,66 @@ async def _handle_set_heartbeats(params: dict | None, ctx: RpcContext) -> dict[s
         params = {}
     if not isinstance(params, dict):
         raise ValueError("params must be an object")
-    should_persist = ctx.config is not None
-    if ctx.config is None:
-        ctx.config = GatewayConfig()
-    if not hasattr(ctx.config, "heartbeat"):
+    running_config = ctx.config
+    candidate = (
+        running_config.model_copy(deep=True)
+        if running_config is not None and hasattr(running_config, "model_copy")
+        else GatewayConfig()
+    )
+    if not hasattr(candidate, "heartbeat"):
         raise ValueError("No heartbeat config available")
 
-    heartbeat = ctx.config.heartbeat
+    heartbeat = candidate.heartbeat
+    changed_paths: set[str] = set()
 
     if "enabled" in params:
         enabled = params["enabled"]
         if not isinstance(enabled, bool):
             raise ValueError("params.enabled must be a boolean")
         heartbeat.enabled = enabled
+        changed_paths.add("heartbeat.enabled")
 
     if "intervalMs" in params:
         interval_ms = params["intervalMs"]
         if isinstance(interval_ms, bool) or not isinstance(interval_ms, int) or interval_ms <= 0:
             raise ValueError("params.intervalMs must be a positive integer")
         heartbeat.interval_ms = interval_ms
+        changed_paths.add("heartbeat.interval_ms")
 
     if "target" in params:
         target = params["target"]
         if not isinstance(target, str) or not target.strip():
             raise ValueError("params.target must be a non-empty string")
         heartbeat.target = target.strip()
+        changed_paths.add("heartbeat.target")
 
     if "to" in params:
         to = params["to"]
         if to is not None and not isinstance(to, str):
             raise ValueError("params.to must be a string or null")
         heartbeat.to = to or ""
+        changed_paths.add("heartbeat.to")
 
     if "accountId" in params:
         account_id = params["accountId"]
         if account_id is not None and not isinstance(account_id, str):
             raise ValueError("params.accountId must be a string or null")
         heartbeat.account_id = account_id or ""
+        changed_paths.add("heartbeat.account_id")
 
     if "threadId" in params:
         thread_id = params["threadId"]
         if thread_id is not None and not isinstance(thread_id, str):
             raise ValueError("params.threadId must be a string or null")
         heartbeat.thread_id = thread_id or ""
+        changed_paths.add("heartbeat.thread_id")
 
     if "prompt" in params:
         prompt = params["prompt"]
         if prompt is not None and not isinstance(prompt, str):
             raise ValueError("params.prompt must be a string or null")
         heartbeat.prompt = prompt
+        changed_paths.add("heartbeat.prompt")
 
     if "ackMaxChars" in params:
         ack_max_chars = params["ackMaxChars"]
@@ -209,21 +220,33 @@ async def _handle_set_heartbeats(params: dict | None, ctx: RpcContext) -> dict[s
         ):
             raise ValueError("params.ackMaxChars must be a non-negative integer")
         heartbeat.ack_max_chars = ack_max_chars
+        changed_paths.add("heartbeat.ack_max_chars")
 
     if "lightContext" in params:
         light_context = params["lightContext"]
         if not isinstance(light_context, bool):
             raise ValueError("params.lightContext must be a boolean")
         heartbeat.light_context = light_context
+        changed_paths.add("heartbeat.light_context")
+
+    if running_config is not None:
+        from agentos.gateway.config_commit import commit_config, expected_revision
+
+        commit_config(
+            ctx,
+            candidate,
+            source_config=running_config,
+            explicit_paths=changed_paths,
+            changed_paths=changed_paths,
+            expected=expected_revision(params),
+        )
+        heartbeat = ctx.config.heartbeat
+    else:
+        ctx.config = candidate
 
     heartbeat_loop = getattr(ctx, "heartbeat_loop", None)
     if heartbeat_loop is not None and hasattr(heartbeat_loop, "nudge"):
         heartbeat_loop.nudge()
-
-    from agentos.gateway.rpc_config import _persist_config
-
-    if should_persist:
-        _persist_config(ctx.config)
 
     return {
         "enabled": heartbeat.enabled,

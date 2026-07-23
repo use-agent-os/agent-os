@@ -4,16 +4,17 @@ import { StubView } from '@/views/StubView'
 import { HealthPage } from '@/views/health/HealthPage'
 import { ApprovalsPage } from '@/views/approvals/ApprovalsPage'
 import { LogsPage } from '@/views/logs/LogsPage'
+import { McpPage } from '@/views/mcp/McpPage'
 import { OverviewPage } from '@/views/overview/OverviewPage'
 import { ChannelsPage } from '@/views/channels/ChannelsPage'
 import { AgentsPage } from '@/views/agents/AgentsPage'
 import { SessionsPage } from '@/views/sessions/SessionsPage'
 import { UsagePage } from '@/views/usage/UsagePage'
-import { ConfigPage } from '@/views/config/ConfigPage'
 import { SkillsPage } from '@/views/skills/SkillsPage'
 import { CronPage } from '@/views/cron/CronPage'
-import { SetupPage } from '@/views/setup/SetupPage'
+import { SettingsPage } from '@/views/settings/SettingsPage'
 import { ChatPage } from '@/views/chat/ChatPage'
+import { RouteErrorBoundary } from './RouteErrorBoundary'
 
 export const VIEWS: ReadonlyArray<{ path: string; title: string }> = [
   { path: 'overview', title: 'Overview' },
@@ -23,9 +24,11 @@ export const VIEWS: ReadonlyArray<{ path: string; title: string }> = [
   { path: 'agents', title: 'Agents' },
   { path: 'cron', title: 'Cron' },
   { path: 'usage', title: 'Usage' },
+  { path: 'settings', title: 'Agent Setup' },
   { path: 'config', title: 'Config' },
   { path: 'setup', title: 'Setup' },
   { path: 'channels', title: 'Channels' },
+  { path: 'mcp', title: 'MCP Servers' },
   { path: 'approvals', title: 'Approvals' },
   { path: 'skills', title: 'Skills' },
   { path: 'logs', title: 'Logs' },
@@ -52,13 +55,13 @@ function viewElement(path: string) {
   if (path === 'approvals') return <ApprovalsPage />
   if (path === 'logs') return <LogsPage />
   if (path === 'channels') return <ChannelsPage />
+  if (path === 'mcp') return <McpPage />
   if (path === 'agents') return <AgentsPage />
   if (path === 'sessions') return <SessionsPage />
   if (path === 'usage') return <UsagePage />
-  if (path === 'config') return <ConfigPage />
+  if (path === 'settings' || path === 'config' || path === 'setup') return <SettingsPage />
   if (path === 'skills') return <SkillsPage />
   if (path === 'cron') return <CronPage />
-  if (path === 'setup') return <SetupPage />
   if (path === 'chat') return <ChatPage />
   return <StubView title={view?.title ?? 'Overview'} />
 }
@@ -92,7 +95,7 @@ function NotFound() {
   return <div className="p-8 text-muted-foreground">{'Page not found: ' + pathname}</div>
 }
 
-export const routeChildren: RouteObject[] = [
+const unguardedRouteChildren: RouteObject[] = [
   { index: true, element: <IndexView /> },
   ...VIEWS.map((v) => {
     if (v.path === 'overview') return { path: v.path, element: <OverviewPage /> }
@@ -100,15 +103,26 @@ export const routeChildren: RouteObject[] = [
     if (v.path === 'approvals') return { path: v.path, element: <ApprovalsPage /> }
     if (v.path === 'logs') return { path: v.path, element: <LogsPage /> }
     if (v.path === 'channels') return { path: v.path, element: <ChannelsPage /> }
+    if (v.path === 'mcp') return { path: v.path, element: <McpPage /> }
     if (v.path === 'agents') return { path: v.path, element: <AgentsPage /> }
     if (v.path === 'sessions') return { path: v.path, element: <SessionsPage /> }
     if (v.path === 'usage') return { path: v.path, element: <UsagePage /> }
-    if (v.path === 'config') return { path: v.path, element: <ConfigPage /> }
+    if (v.path === 'settings' || v.path === 'config' || v.path === 'setup') {
+      return { path: v.path, element: <SettingsPage /> }
+    }
     if (v.path === 'skills') return { path: v.path, element: <SkillsPage /> }
     if (v.path === 'cron') return { path: v.path, element: <CronPage /> }
-    if (v.path === 'setup') return { path: v.path, element: <SetupPage /> }
     if (v.path === 'chat') return { path: v.path, element: <ChatPage /> }
     return { path: v.path, element: <StubView title={v.title} /> }
   }),
+  { path: 'mcp/oauth/callback', element: <McpPage /> },
   { path: '*', element: <NotFound /> },
 ]
+
+// Keep the shell mounted when an individual view fails. React Router otherwise
+// falls back to its stack-heavy developer page, which strands users without
+// navigation or a recovery path.
+export const routeChildren: RouteObject[] = unguardedRouteChildren.map((route) => ({
+  ...route,
+  errorElement: <RouteErrorBoundary />,
+}))

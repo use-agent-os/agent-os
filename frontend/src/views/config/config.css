@@ -7,6 +7,10 @@
   width: 100%;
 }
 
+.cfg-stage--embedded {
+  min-width: 0;
+}
+
 /* Header hero with the atmospheric ASCII backdrop behind it. */
 .cfg-stage__header {
   position: relative;
@@ -32,6 +36,21 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+.cfg-stage__header--embedded,
+.control-surface .cfg-stage--embedded .cfg-stage__header--embedded {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 0;
+  margin-bottom: 0.75rem;
+  padding: 0.25rem 0 1rem;
+  border-bottom: 1px solid var(--hairline);
+}
+.cfg-stage__embedded-title {
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
 }
 
 /* Form / YAML mode toggle. */
@@ -171,6 +190,29 @@
   gap: 8px;
 }
 
+.cfg-secret-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  border-radius: var(--radius-control);
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.cfg-secret-toggle:hover,
+.cfg-secret-toggle:focus-visible {
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+.cfg-secret-toggle svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
 /* Inputs. */
 .cfg-input {
   font-family: var(--font-mono);
@@ -235,8 +277,17 @@
 .cfg-switch input:checked + .cfg-switch__track {
   background: var(--primary);
 }
+.cfg-switch:hover .cfg-switch__track {
+  background: color-mix(in srgb, var(--primary) 22%, var(--border));
+}
+.cfg-switch input:focus-visible + .cfg-switch__track {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 22%, transparent);
+}
 .cfg-switch input:checked + .cfg-switch__track .cfg-switch__thumb {
   transform: translateX(18px);
+}
+.cfg-switch:has(input:checked):hover .cfg-switch__track {
+  background: var(--primary);
 }
 .cfg-switch__text {
   font-family: var(--font-mono);
@@ -345,6 +396,38 @@
   font-size: 0.8125rem;
 }
 
+.cfg-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 5rem;
+  padding: 1rem 0;
+  border-block: 1px solid var(--hairline);
+  color: var(--muted-foreground);
+  font-size: 0.82rem;
+}
+
+.cfg-state--error {
+  color: var(--danger);
+}
+
+.cfg-stage--embedded .cfg-group {
+  border: 0;
+  border-top: 1px solid var(--hairline);
+  background: transparent;
+  box-shadow: none;
+}
+
+.cfg-stage--embedded .cfg-group__head {
+  padding-inline: 0;
+}
+
+.cfg-stage--embedded .cfg-group__fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding-inline: 0;
+}
+
 /* Sticky save bar. */
 .cfg-stickybar {
   position: sticky;
@@ -416,4 +499,41 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 840px) {
+  .cfg-stage__header,
+  .cfg-stage__header--embedded,
+  .control-surface .cfg-stage--embedded .cfg-stage__header--embedded {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .cfg-stage__actions,
+  .cfg-toolbar {
+    width: 100%;
+  }
+
+  .cfg-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+  }
+
+  .cfg-tab {
+    white-space: nowrap;
+  }
+
+  .cfg-search,
+  .cfg-search__input {
+    width: 100%;
+  }
+
+  .cfg-stage--embedded .cfg-group__fields {
+    grid-template-columns: 1fr;
+  }
+
+  .cfg-diff-row {
+    grid-template-columns: 1fr;
+  }
 }

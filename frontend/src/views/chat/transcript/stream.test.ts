@@ -73,16 +73,29 @@ describe('stream history-reconciliation state', () => {
     document.body.innerHTML = ''
   })
 
-  it('re-hydrates the shared router and SavingsFX preference on config refresh', () => {
+  it('suppresses replay scroll writes until the hidden entry barrier opens', () => {
+    const thread = document.createElement('div')
+    thread.dataset.historyReady = 'false'
+    Object.defineProperty(thread, 'scrollHeight', { configurable: true, value: 480 })
+    thread.scrollTop = 24
+    const controller = createStreamController({ current: thread })
+
+    controller.scrollToBottom()
+    expect(thread.scrollTop).toBe(24)
+
+    thread.dataset.historyReady = 'true'
+    controller.scrollToBottom()
+    expect(thread.scrollTop).toBe(480)
+  })
+
+  it('re-hydrates the router visual preference on config refresh', () => {
     localStorage.setItem(ROUTER_FX_PREF_KEY, JSON.stringify({ enabled: true }))
     const controller = createStreamController({ current: document.createElement('div') })
     expect(controller.routerFxPref.enabled).toBe(true)
-    expect(controller.savingsFxEnabled()).toBe(true)
 
     localStorage.setItem(ROUTER_FX_PREF_KEY, JSON.stringify({ enabled: false }))
     expect(controller.reloadRouterFxPreference()).toBe(false)
     expect(controller.routerFxPref.enabled).toBe(false)
-    expect(controller.savingsFxEnabled()).toBe(false)
 
     localStorage.removeItem(ROUTER_FX_PREF_KEY)
   })

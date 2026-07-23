@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation } from 'react-router'
 import {
   Activity,
@@ -9,11 +9,11 @@ import {
   Menu,
   MessageSquare,
   Moon,
+  Network,
   PanelLeftClose,
   PanelLeftOpen,
   Puzzle,
   Radio,
-  Rocket,
   ScrollText,
   Settings2,
   ShieldCheck,
@@ -47,6 +47,7 @@ const NAV_GROUPS: ReadonlyArray<{
       { path: 'overview', title: 'Overview', icon: LayoutDashboard },
       { path: 'health', title: 'Health', icon: Activity },
       { path: 'channels', title: 'Channels', icon: Radio },
+      { path: 'mcp', title: 'MCP Servers', icon: Network },
       { path: 'skills', title: 'Skills', icon: Puzzle },
       { path: 'sessions', title: 'Sessions', icon: History },
       { path: 'agents', title: 'Agents', icon: Bot },
@@ -57,8 +58,7 @@ const NAV_GROUPS: ReadonlyArray<{
   {
     label: 'Settings',
     items: [
-      { path: 'setup', title: 'Setup', icon: Rocket },
-      { path: 'config', title: 'Config', icon: Settings2 },
+      { path: 'settings', title: 'Agent setup', icon: Settings2 },
       { path: 'logs', title: 'Logs', icon: ScrollText },
       { path: 'approvals', title: 'Approvals', icon: ShieldCheck },
     ],
@@ -132,6 +132,7 @@ export function AppShell() {
   const [primaryActionSlot, setPrimaryActionSlot] = useState<HTMLDivElement | null>(null)
   const sidebarRef = useRef<HTMLElement | null>(null)
   const toggleRef = useRef<HTMLButtonElement | null>(null)
+  const mainRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     const mq = mobileQuery()
@@ -205,8 +206,21 @@ export function AppShell() {
   // pathname's leading segment, or the default view when we're at the index.
   const normalizedPath = normalizedRoutePath(location.pathname)
   const atIndex = normalizedPath === ''
-  const activePath = atIndex ? defaultViewPath() : normalizedPath
+  const routePath = atIndex ? defaultViewPath() : normalizedPath.split('/')[0]
+  const activePath = routePath === 'setup' || routePath === 'config' ? 'settings' : routePath
   const isChat = activePath === 'chat'
+
+  // <main> persists while its route surface changes. A Control page can leave
+  // this node deeply scrolled, whereas Chat owns a separate transcript scroller.
+  // Reset the route root before paint so its old offset cannot clamp or animate
+  // while the Chat frame is becoming visible.
+  useLayoutEffect(() => {
+    const main = mainRef.current
+    if (!main) return
+    main.scrollTop = 0
+    main.scrollLeft = 0
+  }, [location.pathname])
+
   // The sidebar footer is the shell's single connection indicator. Keeping the
   // reactive state here avoids duplicating the same readout in the header.
   const pillState = connState
@@ -402,13 +416,15 @@ export function AppShell() {
           </section>
         ) : null}
         <main
+          ref={mainRef}
           id="main-content"
           tabIndex={-1}
           className={`min-h-0 flex-1 ${isChat ? 'shell-main--chat overflow-hidden' : 'shell-main--control overflow-auto'}`}
         >
           {/* Common container: every view fills and centers identically.
-              `key` on the route path makes React remount the wrapper on
-              navigation, so the .view-enter animation replays per view. */}
+              Control pages use the shared whole-view entrance. Chat keeps its
+              large scroll layer stationary and coordinates only its lightweight
+              header/composer surfaces in chat-unified.css. */}
           <ShellHeaderSlotProvider
             target={headerSlot}
             primaryActionTarget={primaryActionSlot}
@@ -416,7 +432,9 @@ export function AppShell() {
           >
             <div
               key={location.pathname}
-              className={`view-container view-enter ${isChat ? 'chat-surface' : 'control-surface'}`}
+              className={`view-container ${
+                isChat ? 'chat-surface chat-view-enter' : 'control-surface view-enter'
+              }`}
             >
               {!isChat ? <AsciiField /> : null}
               <Outlet />

@@ -234,11 +234,11 @@ line- or entry-limited:
   lower-priority block after it) is dropped whole rather than sliced
   mid-block — memory is checked first, then user.
 
-All three limits can also be adjusted from the gateway web UI: Setup view →
-"Memory" card. The card exposes friendly labels for each budget, warns when
-the combined limits would exceed the injection limit, and shows live
-per-store usage. Changes save through `config.patch` and apply immediately —
-no gateway restart needed.
+All three limits can also be adjusted from the gateway web UI: **Agent setup →
+Guided → Capabilities → Memory settings**. The card exposes friendly labels for
+each budget and warns when the combined limits would exceed the injection
+limit. Changes save through `config.patch` and apply immediately — no gateway
+restart needed.
 
 ### The `memory` tool
 
@@ -409,12 +409,13 @@ embedder_base_url = "http://localhost:11434"
 vector_store_path = ""  # empty -> <agent state dir>/mem0
 ```
 
-The same keys are editable from the Setup view's **Memory** card (the *Memory
-provider* selector) and the Config view's **Memory** tab.
+The same keys are editable from **Agent setup**: Guided mode's **Memory
+settings** card (the *Memory provider* selector) and Advanced mode's **Memory**
+section.
 
 **Restart required.** The provider manager is built once at gateway boot, so
 changing `memory.provider.name` — or any `memory.provider.mem0.*` setting —
-only takes effect after a gateway restart. The Setup and Config UIs surface a
+only takes effect after a gateway restart. Both Agent setup modes surface a
 restart hint when you save these keys.
 
 **Privacy.** With the default stack, everything (LLM, embeddings, vector

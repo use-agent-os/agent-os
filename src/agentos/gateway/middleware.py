@@ -170,15 +170,29 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     PUBLIC_PATHS = _PUBLIC_PATHS
 
-    def __init__(self, app: ASGIApp, config: GatewayConfig) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        config: GatewayConfig,
+        control_ui_base_path: str | None = None,
+    ) -> None:
         super().__init__(app)
         self._config = config
+        base_path = (
+            config.control_ui.base_path
+            if control_ui_base_path is None
+            else control_ui_base_path
+        )
+        self._ui_prefix = _safe_ui_exempt_prefix(base_path)
+
+    def _is_ui_path(self, path: str) -> bool:
+        if self._ui_prefix is None:
+            return False
+        return path == self._ui_prefix or path.startswith(self._ui_prefix + "/")
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         # Skip auth for public endpoints and WebSocket upgrades (WS handles own auth)
-        if request.url.path in self.PUBLIC_PATHS or request.url.path.startswith(
-            self._config.control_ui.base_path
-        ):
+        if request.url.path in self.PUBLIC_PATHS or self._is_ui_path(request.url.path):
             return await call_next(request)  # type: ignore[no-any-return]
 
         if request.headers.get("upgrade", "").lower() == "websocket":
@@ -190,7 +204,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         if auth_mode == "token":
             token = self._extract_token(request)
-            if token != self._config.auth.token:
+            configured_token = self._config.auth.token
+            if not configured_token or token != configured_token:
                 return JSONResponse(
                     {"error": "Unauthorized", "code": "UNAUTHORIZED"}, status_code=401
                 )
@@ -218,11 +233,27 @@ class AuthMiddleware(BaseHTTPMiddleware):
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Simple sliding-window rate limiter per client IP."""
 
-    def __init__(self, app: ASGIApp, config: GatewayConfig) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        config: GatewayConfig,
+        control_ui_base_path: str | None = None,
+    ) -> None:
         super().__init__(app)
         self._config = config
+        base_path = (
+            config.control_ui.base_path
+            if control_ui_base_path is None
+            else control_ui_base_path
+        )
+        self._ui_prefix = _safe_ui_exempt_prefix(base_path)
         # {ip: [(timestamp, count), ...]}
         self._windows: dict[str, list[float]] = defaultdict(list)
+
+    def _is_ui_path(self, path: str) -> bool:
+        if self._ui_prefix is None:
+            return False
+        return path == self._ui_prefix or path.startswith(self._ui_prefix + "/")
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         if not self._config.rate_limit.enabled:
@@ -233,9 +264,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # without this exemption a couple of refreshes from a single LAN device
         # blows past the API bucket and the operator sees a hard 429 on the
         # bare HTML. Mutating endpoints under /api/* are still limited.
-        base = self._config.control_ui.base_path
         path = request.url.path
-        if base and (path == base or path.startswith(f"{base}/")):
+        if self._is_ui_path(path):
             return await call_next(request)  # type: ignore[no-any-return]
         if request.method == "GET" and path == "/api/approvals":
             return await call_next(request)  # type: ignore[no-any-return]

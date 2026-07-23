@@ -169,7 +169,7 @@ describe('stepForSection / initialStepFromStatus (setup.js:280-305)', () => {
     const s: OnboardingStatus = {
       sectionDetails: { llm: detail({ status: 'ok' }), channels: detail({ status: 'missing' }) },
     }
-    expect(initialStepFromStatus(s)).toBe('channels')
+    expect(initialStepFromStatus(s)).toBe('finish')
   })
   it('initial step: finish when needsOnboarding===false and nothing pending', () => {
     expect(initialStepFromStatus({ needsOnboarding: false })).toBe('finish')

@@ -4,7 +4,7 @@
 // provider being saved (effective === configured).
 import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { PanelHead } from './parts'
+import { PanelHead, SetupCheckbox, SetupSelect } from './parts'
 import {
   buildRouterConfigureParams,
   configuredProvider as configuredProviderFn,
@@ -59,8 +59,8 @@ export function RouterSection({
   const canSave = Boolean(provider && provider === configured)
 
   const routerCatalog = catalog.routerProfiles || {}
-  const profiles = routerCatalog.profiles || []
-  const profile = provider ? profiles.find((p) => p.providerId === provider) : undefined
+  const profiles = Array.isArray(routerCatalog.profiles) ? routerCatalog.profiles : []
+  const profile = provider ? profiles.find((p) => p?.providerId === provider) : undefined
   const tiers = useMemo(
     () => (provider ? mergeTiers(profile?.tiers, router.tiers) : {}),
     [provider, profile?.tiers, router.tiers],
@@ -76,14 +76,22 @@ export function RouterSection({
 
   // Judge model catalog: AUTO is judge_model === null → the empty option.
   const judgeCatalog = routerCatalog.judge || {}
-  const judgeProfile = provider ? (judgeCatalog.profiles || {})[provider] || {} : {}
-  const judgeAutoModel = judgeProfile.autoModel || null
-  const judgeModels = judgeProfile.models || []
+  const judgeProfiles =
+    judgeCatalog.profiles &&
+    typeof judgeCatalog.profiles === 'object' &&
+    !Array.isArray(judgeCatalog.profiles)
+      ? judgeCatalog.profiles
+      : {}
+  const judgeProfile = provider ? judgeProfiles[provider] || {} : {}
+  const judgeAutoModel = typeof judgeProfile.autoModel === 'string' ? judgeProfile.autoModel : null
+  const judgeModels = Array.isArray(judgeProfile.models)
+    ? judgeProfile.models.filter((model): model is string => typeof model === 'string')
+    : []
   const judgeLoaded = router.judge_model || ''
   const judgeIsLocal = Boolean(router.judge_base_url)
   const [judge, setJudge] = useState(judgeLoaded)
   const judgeAutoLabel = judgeAutoModel
-    ? `Auto (recommended) — ${judgeAutoModel}`
+    ? `Auto (recommended) - ${judgeAutoModel}`
     : 'Auto (recommended)'
 
   // Editable tier rows (only text tiers + image_model).
@@ -95,8 +103,13 @@ export function RouterSection({
     setRows(seedRows(visibleTiers))
   }
 
-  const setRow = (name: string, patch: Partial<TierRowState>) =>
-    setRows((r) => ({ ...r, [name]: { ...r[name]!, ...patch } }))
+  const rowFor = (name: string, tier: TierSpec): TierRowState => rows[name] ?? tierRowState(tier)
+
+  const setRow = (name: string, tier: TierSpec, patch: Partial<TierRowState>) =>
+    setRows((current) => ({
+      ...current,
+      [name]: { ...tierRowState(tier), ...current[name], ...patch },
+    }))
 
   const showJudge = mode === 'llm_judge'
   const showPilot = mode === 'pilot-v1'
@@ -111,7 +124,7 @@ export function RouterSection({
       defaultTier,
       judgeModel,
       pilotThresholdRaw: pilotThreshold,
-      tiers: visibleTiers.map(([name]) => ({ tier: name, ...rows[name]! })),
+      tiers: visibleTiers.map(([name, tier]) => ({ tier: name, ...rowFor(name, tier) })),
     })
     onSave(params)
   }
@@ -122,16 +135,16 @@ export function RouterSection({
       <div className="setup-router-toolbar">
         <label>
           <span>Mode</span>
-          <select
+          <SetupSelect
             aria-label="Router mode"
             value={mode}
             disabled={!provider}
             onChange={(e) => setMode(e.target.value as RouterMode)}
           >
-            <option value="pilot-v1">Local ML — English-optimized (Pilot)</option>
+            <option value="pilot-v1">Local ML - English-optimized (Pilot)</option>
             <option value="llm_judge">Smart routing (LLM-based)</option>
             <option value="disabled">Off</option>
-          </select>
+          </SetupSelect>
           {showPilot ? (
             <small className="setup-hint">
               English-optimized local ML router; runs offline with the self-trained AgentOS model.
@@ -140,7 +153,7 @@ export function RouterSection({
         </label>
         <label>
           <span>Default text model</span>
-          <select
+          <SetupSelect
             aria-label="Default text model"
             value={defaultTier}
             disabled={!provider}
@@ -151,12 +164,12 @@ export function RouterSection({
                 {tierLabel(t)}
               </option>
             ))}
-          </select>
+          </SetupSelect>
         </label>
         {showJudge ? (
           <label>
             <span>Judge model</span>
-            <select
+            <SetupSelect
               aria-label="Judge model"
               value={judge}
               onChange={(e) => setJudge(e.target.value)}
@@ -167,7 +180,7 @@ export function RouterSection({
                   {m}
                 </option>
               ))}
-            </select>
+            </SetupSelect>
           </label>
         ) : null}
         {showPilot ? (
@@ -193,48 +206,77 @@ export function RouterSection({
       {provider ? (
         <div className="setup-tier-table" role="table">
           <div className="setup-tier-table__row is-head" role="row">
-            <span>Tier</span>
-            <span>Provider</span>
-            <span>Model</span>
-            <span>Thinking</span>
-            <span>Image</span>
+            <span role="columnheader">Tier</span>
+            <span role="columnheader">Provider</span>
+            <span role="columnheader">Model</span>
+            <span role="columnheader">Thinking</span>
+            <span role="columnheader">Image</span>
           </div>
-          {visibleTiers.map(([name]) => {
-            const row = rows[name]!
+          {visibleTiers.map(([name, tier]) => {
+            // A coherent settings snapshot can add a tier while this mounted
+            // editor keeps another tier draft. Seed newly visible rows from
+            // their catalog/config spec instead of dereferencing stale state.
+            const row = rowFor(name, tier)
             const isImageModel = name === 'image_model'
+            const supportsImage = isImageModel || row.supportsImage
             return (
               <div className="setup-tier-table__row" role="row" key={name}>
-                <span>
+                <div className="setup-tier-table__cell setup-tier-table__cell--tier" role="cell">
+                  <span className="setup-tier-table__mobile-label" aria-hidden="true">
+                    Tier
+                  </span>
                   <code>{name}</code>
-                </span>
-                <input
-                  aria-label={`${name} provider`}
-                  value={row.provider}
-                  onChange={(e) => setRow(name, { provider: e.target.value })}
-                />
-                <input
-                  aria-label={`${name} model`}
-                  value={row.model}
-                  onChange={(e) => setRow(name, { model: e.target.value })}
-                />
-                <select
-                  aria-label={`${name} thinking level`}
-                  value={row.thinkingLevel}
-                  onChange={(e) => setRow(name, { thinkingLevel: e.target.value })}
-                >
-                  {THINKING_LEVELS.map((v) => (
-                    <option key={v} value={v}>
-                      {v || '-'}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="checkbox"
-                  aria-label={`${name} supports image`}
-                  checked={isImageModel ? true : row.supportsImage}
-                  disabled={isImageModel}
-                  onChange={(e) => setRow(name, { supportsImage: e.target.checked })}
-                />
+                </div>
+                <div className="setup-tier-table__cell" role="cell">
+                  <span className="setup-tier-table__mobile-label" aria-hidden="true">
+                    Provider
+                  </span>
+                  <input
+                    aria-label={`${name} provider`}
+                    value={row.provider}
+                    onChange={(e) => setRow(name, tier, { provider: e.target.value })}
+                  />
+                </div>
+                <div className="setup-tier-table__cell setup-tier-table__cell--model" role="cell">
+                  <span className="setup-tier-table__mobile-label" aria-hidden="true">
+                    Model
+                  </span>
+                  <input
+                    aria-label={`${name} model`}
+                    value={row.model}
+                    onChange={(e) => setRow(name, tier, { model: e.target.value })}
+                  />
+                </div>
+                <div className="setup-tier-table__cell" role="cell">
+                  <span className="setup-tier-table__mobile-label" aria-hidden="true">
+                    Thinking
+                  </span>
+                  <SetupSelect
+                    aria-label={`${name} thinking level`}
+                    value={row.thinkingLevel}
+                    onChange={(e) => setRow(name, tier, { thinkingLevel: e.target.value })}
+                  >
+                    {THINKING_LEVELS.map((v) => (
+                      <option key={v} value={v}>
+                        {v || '-'}
+                      </option>
+                    ))}
+                  </SetupSelect>
+                </div>
+                <div className="setup-tier-table__cell setup-tier-table__cell--image" role="cell">
+                  <span className="setup-tier-table__mobile-label" aria-hidden="true">
+                    Image
+                  </span>
+                  <SetupCheckbox
+                    ariaLabel={`${name} supports image`}
+                    checked={supportsImage}
+                    className="setup-check--compact"
+                    disabled={isImageModel}
+                    onChange={(checked) => setRow(name, tier, { supportsImage: checked })}
+                  >
+                    {supportsImage ? 'On' : 'Off'}
+                  </SetupCheckbox>
+                </div>
               </div>
             )
           })}
@@ -269,12 +311,16 @@ export function RouterSection({
 function seedRows(entries: Array<[string, TierSpec]>): Record<string, TierRowState> {
   const rows: Record<string, TierRowState> = {}
   entries.forEach(([name, tier]) => {
-    rows[name] = {
-      provider: String(tier.provider || ''),
-      model: String(tier.model || ''),
-      thinkingLevel: String(tier.thinkingLevel || tier.thinking_level || ''),
-      supportsImage: Boolean(tier.supportsImage || tier.supports_image),
-    }
+    rows[name] = tierRowState(tier)
   })
   return rows
+}
+
+function tierRowState(tier: TierSpec | null | undefined): TierRowState {
+  return {
+    provider: String(tier?.provider || ''),
+    model: String(tier?.model || ''),
+    thinkingLevel: String(tier?.thinkingLevel || tier?.thinking_level || ''),
+    supportsImage: Boolean(tier?.supportsImage || tier?.supports_image),
+  }
 }

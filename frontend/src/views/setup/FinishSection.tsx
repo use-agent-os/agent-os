@@ -5,6 +5,7 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { CommandLine } from '@/components/CommandLine'
+import { SetupCheckbox } from './parts'
 import {
   configCliArg,
   envFixCommands,
@@ -156,15 +157,9 @@ export function FinishSection({
 
       <section className="setup-subpanel" aria-label="Update preferences">
         <h3 className="t-label">Updates</h3>
-        <label className="setup-check">
-          <input
-            type="checkbox"
-            aria-label="Notify on new release"
-            checked={notify}
-            onChange={(e) => setNotify(e.target.checked)}
-          />
-          <span>Notify me when a new release of use-agent-os is available</span>
-        </label>
+        <SetupCheckbox ariaLabel="Notify on new release" checked={notify} onChange={setNotify}>
+          Notify me when a new release of use-agent-os is available
+        </SetupCheckbox>
         <div className="setup-actions">
           <Button
             type="button"

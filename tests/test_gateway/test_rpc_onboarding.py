@@ -668,6 +668,94 @@ async def test_channel_probe_validates_and_redacts_without_persisting(tmp_path, 
 
 
 @pytest.mark.asyncio
+async def test_channel_probe_can_keep_existing_write_only_secret(tmp_path, monkeypatch):
+    target = tmp_path / "c.toml"
+    monkeypatch.setenv("AGENTOS_GATEWAY_CONFIG_PATH", str(target))
+    from agentos.gateway.config import GatewayConfig
+
+    ctx = _admin_ctx()
+    ctx.config = GatewayConfig(
+        channels={
+            "channels": [
+                {
+                    "type": "telegram",
+                    "name": "tg",
+                    "token": "123:existing-secret",
+                    "transport_name": "polling",
+                }
+            ]
+        }
+    )
+    ctx.config.config_path = str(target)
+
+    res = await get_dispatcher().dispatch(
+        "r1",
+        "onboarding.channel.probe",
+        {
+            "entry": {
+                "type": "telegram",
+                "name": "tg",
+                "token": "",
+                "transport_name": "polling",
+                "default_chat_id": "42",
+            }
+        },
+        ctx,
+    )
+
+    assert res.error is None, res.error
+    assert res.payload["entry"]["token"] == "***"
+    assert "123:existing-secret" not in str(res.payload)
+    assert not target.exists()
+
+
+@pytest.mark.asyncio
+async def test_channel_probe_validation_error_never_exposes_existing_secret(tmp_path, monkeypatch):
+    target = tmp_path / "c.toml"
+    monkeypatch.setenv("AGENTOS_GATEWAY_CONFIG_PATH", str(target))
+    from agentos.gateway.config import GatewayConfig
+
+    ctx = _admin_ctx()
+    ctx.config = GatewayConfig(
+        channels={
+            "channels": [
+                {
+                    "type": "telegram",
+                    "name": "tg",
+                    "token": "123:existing-secret",
+                    "transport_name": "polling",
+                    "webhook_secret_token": "existing-webhook-secret",
+                }
+            ]
+        }
+    )
+    ctx.config.config_path = str(target)
+
+    res = await get_dispatcher().dispatch(
+        "r1",
+        "onboarding.channel.probe",
+        {
+            "entry": {
+                "type": "telegram",
+                "name": "tg",
+                "token": "",
+                "transport_name": "webhook",
+                "webhook_url": "",
+                "webhook_secret_token": "",
+            }
+        },
+        ctx,
+    )
+
+    assert res.error is not None
+    assert "webhook_url" in res.error.message
+    assert "123:existing-secret" not in res.error.message
+    assert "existing-webhook-secret" not in res.error.message
+    assert "input_value" not in res.error.message
+    assert not target.exists()
+
+
+@pytest.mark.asyncio
 async def test_search_configure_redacts_api_key(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTOS_GATEWAY_CONFIG_PATH", str(tmp_path / "c.toml"))
     res = await get_dispatcher().dispatch(

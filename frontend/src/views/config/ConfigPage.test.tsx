@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ComponentProps } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
 import { ConfigPage } from './ConfigPage'
@@ -31,6 +32,7 @@ function sampleConfig() {
   return {
     host: '127.0.0.1', // core, readonly (prefix 'host')
     port: 18791, // core, readonly (prefix 'port')
+    version: '2026.7.19', // core, readonly distribution metadata
     debug: false, // core, boolean (prefix 'debug')
     diagnostics: { retention_days: 8000 }, // core, number (prefix 'diagnostics' → flattened)
     provider: 'openai', // ai, string
@@ -42,18 +44,26 @@ function sampleConfig() {
   }
 }
 
-function renderPage() {
-  return render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
-      <ConfigPage />
-    </QueryClientProvider>,
+function renderPage(props: ComponentProps<typeof ConfigPage> = {}) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const page = (nextProps: ComponentProps<typeof ConfigPage>) => (
+    <QueryClientProvider client={client}>
+      <ConfigPage {...nextProps} />
+    </QueryClientProvider>
   )
+  const result = render(page(props))
+  return {
+    ...result,
+    rerenderPage: (nextProps: ComponentProps<typeof ConfigPage>) =>
+      result.rerender(page(nextProps)),
+  }
 }
 
 async function loadWith(config: Record<string, unknown>) {
   mockRpc.call.mockImplementation((method: string) => {
+    if (method === 'config.snapshot') {
+      return Promise.reject(Object.assign(new Error('missing'), { code: 'METHOD_NOT_FOUND' }))
+    }
     if (method === 'config.get') return Promise.resolve(config)
     return Promise.resolve({})
   })
@@ -81,25 +91,187 @@ describe('ConfigPage', () => {
     expect(screen.getByText('retention_days')).toBeInTheDocument()
   })
 
-  it('renders host/port as read-only (no editable input, no save tracking)', async () => {
+  it('uses config.get only when config.snapshot is explicitly unavailable', async () => {
+    await loadWith(sampleConfig())
+    expect(mockRpc.call).toHaveBeenCalledWith('config.snapshot')
+    expect(mockRpc.call).toHaveBeenCalledWith('config.get')
+  })
+
+  it('surfaces snapshot authorization errors without issuing legacy reads', async () => {
+    mockRpc.call.mockImplementation((method: string) => {
+      if (method === 'config.snapshot') {
+        return Promise.reject(Object.assign(new Error('forbidden'), { code: 'FORBIDDEN' }))
+      }
+      return Promise.resolve({})
+    })
+    renderPage()
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringContaining('forbidden'),
+        expect.anything(),
+      ),
+    )
+    expect(mockRpc.call).not.toHaveBeenCalledWith('config.get')
+  })
+
+  it('rejects a malformed successful snapshot instead of masking it with config.get', async () => {
+    mockRpc.call.mockResolvedValue({})
+    renderPage()
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringContaining('invalid response'),
+        expect.anything(),
+      ),
+    )
+    expect(mockRpc.call).not.toHaveBeenCalledWith('config.get')
+  })
+
+  it('uses the Settings-owned snapshot without issuing a duplicate config read', async () => {
+    renderPage({
+      embedded: true,
+      externalSnapshot: { revision: 'revision-a', config: sampleConfig() },
+    })
+
+    await screen.findByLabelText('debug')
+    expect(mockRpc.call).not.toHaveBeenCalled()
+  })
+
+  it('blocks a form draft when the owning snapshot advances until it is discarded', async () => {
+    const reload = vi.fn().mockResolvedValue({
+      revision: 'revision-b',
+      config: { ...sampleConfig(), diagnostics: { retention_days: 8100 } },
+    })
+    const firstProps: ComponentProps<typeof ConfigPage> = {
+      embedded: true,
+      externalSnapshot: { revision: 'revision-a', config: sampleConfig() },
+      onSnapshotReload: reload,
+    }
+    const view = renderPage(firstProps)
+    fireEvent.click(await screen.findByLabelText('debug'))
+    await screen.findByText(/change pending/i)
+
+    view.rerenderPage({
+      ...firstProps,
+      externalSnapshot: {
+        revision: 'revision-b',
+        config: { ...sampleConfig(), diagnostics: { retention_days: 8100 } },
+      },
+    })
+
+    expect(
+      await screen.findByText(/configuration changed while this draft was open/i),
+    ).toBeVisible()
+    expect(screen.getByRole('button', { name: /save config/i })).toBeDisabled()
+    expect(
+      within(screen.getByRole('region', { name: /pending changes/i })).getByRole('button', {
+        name: /^save$/i,
+      }),
+    ).toBeDisabled()
+    expect(mockRpc.call).not.toHaveBeenCalledWith('config.patch', expect.anything())
+
+    fireEvent.click(screen.getByRole('button', { name: /discard draft/i }))
+    await waitFor(() => expect(reload).toHaveBeenCalled())
+    expect(await screen.findByDisplayValue('8100')).toBeInTheDocument()
+    expect(screen.queryByText(/change pending/i)).not.toBeInTheDocument()
+  })
+
+  it('does not create a stale-draft conflict after YAML is reverted exactly to baseline', async () => {
+    const firstProps: ComponentProps<typeof ConfigPage> = {
+      embedded: true,
+      externalSnapshot: { revision: 'revision-a', config: sampleConfig() },
+    }
+    const view = renderPage(firstProps)
+    fireEvent.click(screen.getByRole('button', { name: /^yaml$/i }))
+    const editor = (await screen.findByLabelText(/yaml editor/i)) as HTMLTextAreaElement
+    const baseline = editor.value
+    fireEvent.change(editor, { target: { value: `${baseline}\n# draft` } })
+    await screen.findByText(/change pending/i)
+    fireEvent.change(editor, { target: { value: baseline } })
+    await waitFor(() => expect(screen.queryByText(/change pending/i)).not.toBeInTheDocument())
+
+    view.rerenderPage({
+      ...firstProps,
+      externalSnapshot: {
+        revision: 'revision-b',
+        config: { ...sampleConfig(), diagnostics: { retention_days: 8100 } },
+      },
+    })
+
+    expect(
+      screen.queryByText(/configuration changed while this draft was open/i),
+    ).not.toBeInTheDocument()
+  })
+
+  it('fails closed when the persisted config diverges from the running gateway', async () => {
+    renderPage({
+      embedded: true,
+      externalSnapshot: {
+        revision: undefined,
+        config: sampleConfig(),
+        diskDiverged: true,
+        writeBlocked: true,
+      },
+    })
+
+    expect(await screen.findByRole('button', { name: /save config/i })).toBeDisabled()
+    expect(screen.queryByText(/config file changed outside AgentOS/i)).not.toBeInTheDocument()
+  })
+
+  it('renders host, port, and version as read-only metadata', async () => {
     await loadWith(sampleConfig())
     await waitFor(() => expect(screen.getByText('host')).toBeInTheDocument())
-    // The readonly value renders as text; there is no input carrying data-cfg-key host.
+    // Read-only values render as text and cannot enter dirty/save tracking.
     expect(document.querySelector('[data-cfg-readonly="host"]')).not.toBeNull()
+    expect(document.querySelector('[data-cfg-readonly="port"]')).not.toBeNull()
+    expect(document.querySelector('[data-cfg-readonly="version"]')).toHaveTextContent('2026.7.19')
     expect(document.querySelector('input[data-cfg-key="host"]')).toBeNull()
+    expect(screen.queryByDisplayValue('2026.7.19')).not.toBeInTheDocument()
+  })
+
+  it('reveals and re-masks write-only values with an accessible icon control', async () => {
+    await loadWith(sampleConfig())
+    fireEvent.click(screen.getByRole('tab', { name: 'Memory' }))
+    const input = await screen.findByDisplayValue('sk-secret')
+    expect(input).toHaveAttribute('type', 'password')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show memory.embedding.remote.api_key' }))
+    expect(input).toHaveAttribute('type', 'text')
+    fireEvent.click(screen.getByRole('button', { name: 'Hide memory.embedding.remote.api_key' }))
+    expect(input).toHaveAttribute('type', 'password')
+  })
+
+  it('supports arrow, Home, and End keyboard navigation across config sections', async () => {
+    await loadWith(sampleConfig())
+    const core = await screen.findByRole('tab', { name: 'Core' })
+    core.focus()
+    fireEvent.keyDown(core, { key: 'ArrowRight' })
+    expect(screen.getByRole('tab', { name: 'AI & Agents' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'AI & Agents' }), { key: 'End' })
+    expect(screen.getByRole('tab', { name: 'Other' })).toHaveAttribute('aria-selected', 'true')
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Other' }), { key: 'Home' })
+    expect(core).toHaveAttribute('aria-selected', 'true')
   })
 
   it('sets a field dirty → the sticky save bar appears; no-op reset hides it again', async () => {
     await loadWith(sampleConfig())
     const toggle = await screen.findByLabelText('debug')
+    const headerSave = screen.getByRole('button', { name: /save config/i })
     // Sticky bar hidden initially.
     expect(screen.queryByText(/changes? pending/i)).not.toBeInTheDocument()
+    expect(headerSave).toBeDisabled()
     // Flip debug false→true → dirty.
     fireEvent.click(toggle)
     await waitFor(() => expect(screen.getByText(/changes? pending/i)).toBeInTheDocument())
+    expect(headerSave).toBeEnabled()
     // Flip back true→false → no-op → sticky bar gone (computeDirty short-circuit).
     fireEvent.click(toggle)
     await waitFor(() => expect(screen.queryByText(/changes? pending/i)).not.toBeInTheDocument())
+    expect(headerSave).toBeDisabled()
   })
 
   it('Save (form mode) calls config.patch with only the dirty dotted keys', async () => {
@@ -144,33 +316,46 @@ describe('ConfigPage', () => {
     )
   })
 
-  it('invalid JSON in an object field blocks Save (config.patch never fires)', async () => {
+  it('keeps an invalid-only JSON draft visible and protected until it is discarded', async () => {
     await loadWith(sampleConfig())
+    const getCallsBefore = mockRpc.call.mock.calls.filter((call) => call[0] === 'config.get').length
     // Open the control_ui.allowed_origins object field editor.
     const jsonArea = await screen.findByDisplayValue(/https:\/\/a\.example\.com/)
     fireEvent.change(jsonArea, { target: { value: '{ broken' } })
     await waitFor(() => expect(screen.getByText('Invalid JSON')).toBeInTheDocument())
-    // Sticky bar not shown for an invalid-only edit; use the header Save.
-    fireEvent.click(screen.getByRole('button', { name: /save config/i }))
-    await waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith(
-        expect.stringMatching(/invalid json/i),
-        expect.anything(),
-      ),
+    const pending = screen.getByRole('region', { name: /pending changes/i })
+    expect(within(pending).getByText('1')).toBeVisible()
+    expect(screen.getByRole('button', { name: /save config/i })).toBeDisabled()
+    expect(within(pending).getByRole('button', { name: /^save$/i })).toBeDisabled()
+    expect(within(pending).getByRole('button', { name: /^discard$/i })).toBeEnabled()
+
+    const beforeUnload = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(beforeUnload)
+    expect(beforeUnload.defaultPrevented).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: /^reload$/i }))
+    expect(toast.warning).toHaveBeenCalledWith(
+      expect.stringMatching(/discard pending changes/i),
+      expect.anything(),
     )
+    expect(mockRpc.call.mock.calls.filter((call) => call[0] === 'config.get')).toHaveLength(
+      getCallsBefore,
+    )
+    expect(screen.getByDisplayValue('{ broken')).toBeInTheDocument()
     expect(mockRpc.call).not.toHaveBeenCalledWith('config.patch', expect.anything())
+
+    fireEvent.click(within(pending).getByRole('button', { name: /^discard$/i }))
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: /pending changes/i })).toBeNull(),
+    )
+    expect(screen.getByDisplayValue(/https:\/\/a\.example\.com/)).toBeInTheDocument()
   })
 
-  it('Save with no dirty fields short-circuits with a "No changes to save" toast', async () => {
+  it('disables header Save when there are no changes', async () => {
     await loadWith(sampleConfig())
     await screen.findByLabelText('debug')
-    fireEvent.click(screen.getByRole('button', { name: /save config/i }))
-    await waitFor(() =>
-      expect(toast.info).toHaveBeenCalledWith(
-        expect.stringMatching(/no changes to save/i),
-        expect.anything(),
-      ),
-    )
+    expect(screen.getByRole('button', { name: /save config/i })).toBeDisabled()
+    expect(toast.info).not.toHaveBeenCalled()
     expect(mockRpc.call).not.toHaveBeenCalledWith('config.patch', expect.anything())
   })
 
@@ -216,6 +401,7 @@ describe('ConfigPage', () => {
     expect(baseline).toContain('debug: false')
     fireEvent.change(area, { target: { value: baseline + '\n# edit\n' } })
     await waitFor(() => expect(screen.getByText(/changes? pending/i)).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: /save config/i })).toBeEnabled()
     mockRpc.call.mockImplementation((method: string) => {
       if (method === 'config.get') return Promise.resolve(sampleConfig())
       if (method === 'config.apply') return Promise.resolve({ restartRequired: false })
@@ -249,6 +435,7 @@ describe('ConfigPage', () => {
     const bar = screen.getByRole('region', { name: /pending changes/i })
     expect(within(bar).getByText('1')).toBeInTheDocument()
     expect(within(bar).getByText(/change pending/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /save config/i })).toBeDisabled()
   })
 
   it('preserves an invalid object-field JSON draft across a tab switch (text and flag stay in sync)', async () => {
@@ -302,5 +489,17 @@ describe('ConfigPage', () => {
     await loadWith(sampleConfig())
     await screen.findByLabelText('debug')
     expect(document.title).toBe('Config - AgentOS Control')
+  })
+
+  it('uses a level-two title when embedded below the Settings page heading', async () => {
+    mockRpc.call.mockResolvedValue({ config: sampleConfig() })
+    renderPage({ embedded: true })
+
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Configuration editor' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', { level: 1, name: 'Configuration editor' }),
+    ).not.toBeInTheDocument()
   })
 })

@@ -33,7 +33,6 @@ import {
   type CompactionRenderer,
   type CompactionSummary,
 } from './compaction'
-import { createSavingsFx, type SavingsUsage } from './savingsFx'
 
 /* ── Constants (ported verbatim from chat.js) ───────────────────────────── */
 
@@ -431,12 +430,6 @@ export function createStreamController(
     awaitConfig: deps.routerFxAwaitConfig ?? (() => Promise.resolve()),
     diag,
   })
-
-  /* ── SavingsFX (savings-fx.js + chat.js:5184-5248) ─────────────────────
-   * The standalone preference is preserved under its legacy storage key, but
-   * chat intentionally synchronizes it to the shared Visual effects toggle. */
-  const savingsFx = createSavingsFx({ thread })
-  savingsFx.setEnabled(routerFxPref.enabled)
 
   // Stream-lifecycle router-fx hooks now route to the composed renderer
   // (chat.js:6585/6716/6907/…). Overridable, but the renderer is the default.
@@ -899,7 +892,6 @@ export function createStreamController(
         _streamBubble.innerHTML = `
           <div class="msg-header">
             <span class="role-label">${esc(displayRoleLabel('assistant'))}</span>
-            <span class="savings-indicator"></span>
             <span class="msg-time"></span>
           </div>
           <div class="msg-body"></div>`
@@ -1352,7 +1344,11 @@ export function createStreamController(
   function scrollToBottom(): void {
     // chat.js:7924-7928
     const th = thread()
-    if (th) {
+    // Initial history and the session subscription are hydrated as one hidden
+    // transaction. Replayed text/tool/artifact/router frames all reach this
+    // shared seam; suppress their incremental writes until the entry barrier
+    // positions the completed transcript once and exposes it.
+    if (th && th.dataset.historyReady !== 'false') {
       th.scrollTop = th.scrollHeight
     }
   }
@@ -1530,25 +1526,10 @@ export function createStreamController(
     clearRouterFxVisuals: routerFxRenderer.clearRouterFxVisuals,
     routerFxRegistry,
     routerFxPref,
-    // SavingsFX (Part 3). `maybeFireSavingsPopup` mutates the usage suppression
-    // marker before the turn footer/storage snapshot, matching legacy order.
-    maybeFireSavingsPopup: (
-      bubble: HTMLElement | null,
-      usage: SavingsUsage | null | undefined,
-      opts: { animate?: boolean } = {},
-    ): boolean => savingsFx.maybeFire(bubble, usage, opts),
-    beginSavingsHistoryReplay: savingsFx.beginHistoryReplay,
-    noteSavingsHistoryTurn: savingsFx.noteHistoryTurn,
-    resetSavingsPopupCooldown: savingsFx.resetPopupCooldown,
-    cleanupSavingsFx: savingsFx.cleanup,
-    getSavingsStreak: savingsFx.getStreak,
-    savingsLabel: savingsFx.savingsLabel,
-    savingsFxEnabled: savingsFx.isEnabled,
-    // chat.js:1479-1486 — config refresh also re-hydrates the browser-local
-    // visual preference and keeps SavingsFX on the exact same gate.
+    // chat.js:1479-1486 — config refresh re-hydrates the browser-local router
+    // visual preference.
     reloadRouterFxPreference: (): boolean => {
       routerFxLoadPref(routerFxPref)
-      savingsFx.setEnabled(routerFxPref.enabled)
       if (!routerFxPref.enabled) {
         routerFxRenderer.clearRouterFxVisuals('preference_disabled_external_refresh')
       }
@@ -1558,11 +1539,10 @@ export function createStreamController(
     // `_routerFx.enabled` and persists it. Ownership of the pref mutation stays
     // in the controller (this module owns `routerFxPref`), so the toolbar calls
     // this rather than mutating the object across the component boundary. The
-    // live engine reads `pref.enabled` off this SAME object → immediate pickup.
+    // live router engine reads `pref.enabled` off this SAME object.
     setRouterFxEnabled: (enabled: boolean): void => {
       routerFxPref.enabled = enabled
       routerFxSavePref(routerFxPref)
-      savingsFx.setEnabled(enabled)
       if (enabled) scheduleHistorySync()
       else routerFxRenderer.clearRouterFxVisuals('preference_disabled')
     },

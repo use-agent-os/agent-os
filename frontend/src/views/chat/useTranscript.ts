@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
@@ -222,9 +222,9 @@ export function useTranscript(opts: {
   abort: (source?: string) => void
   /** Reactive streaming flag (legacy `_isStreaming`) — drives the composer's busy prop. */
   busy: boolean
-  /** Reactive mirror of the browser-local router/Savings visual preference. */
+  /** Reactive mirror of the browser-local router visual preference. */
   routerFxEnabled: boolean
-  /** Persist and apply the shared router/Savings visual preference. */
+  /** Persist and apply the router visual preference. */
   setRouterFxEnabled: (enabled: boolean) => void
   /** The user's sent-message history, oldest→newest (legacy `_messages`, chat.js:8712). */
   history: string[]
@@ -354,6 +354,9 @@ export function useTranscript(opts: {
   // lazily by the imperative controller and reset on every session boundary.
   const historyHasRenderedRef = useRef(false)
   const historyHydratingRef = useRef(false)
+  const historySettledSessionRef = useRef('')
+  const subscriptionSettledSessionRef = useRef('')
+  const [subscriptionSettleRevision, setSubscriptionSettleRevision] = useState(0)
   const routerConfigAppliedRef = useRef(false)
   const headerStateRef = useRef<TranscriptHeaderStateRef['current']>({ day: '', role: '' })
 
@@ -500,6 +503,24 @@ export function useTranscript(opts: {
     }),
   )
 
+  const revealTranscriptIfSettled = useCallback(
+    (sessionKey: string, historyFetchStatus: string): void => {
+      const th = containerRef.current
+      if (!th || th.dataset.historyReady === 'true') return
+      if (sessionKeyRef.current !== sessionKey) return
+      if (historySettledSessionRef.current !== sessionKey) return
+      if (subscriptionSettledSessionRef.current !== sessionKey) return
+      if (historyFetchStatus !== 'idle') return
+
+      // Replay deltas may still have one queued rAF render. Drain it while the
+      // transcript is hidden, position once, then expose on this layout frame.
+      controller.flushPendingTextSegment()
+      if (controller.isAutoScrollEnabled()) th.scrollTop = th.scrollHeight
+      th.dataset.historyReady = 'true'
+    },
+    [controller],
+  )
+
   // eslint-disable-next-line react-hooks/refs -- factory stores ref-backed callbacks and reads .current only when an imperative message method runs, never during creation
   const [messageRenderer] = useState(() =>
     createMessageRenderer({
@@ -520,8 +541,6 @@ export function useTranscript(opts: {
       dayKey,
       dayLabel,
       headerState: headerStateRef,
-      getSavingsStreak: () => controller.getSavingsStreak(),
-      savingsLabel: (savePct) => controller.savingsLabel(savePct),
       toast: (message, kind, durationMs) => {
         const options = durationMs ? { duration: durationMs } : undefined
         if (kind === 'warn') toast.warning(message, options)
@@ -728,8 +747,6 @@ export function useTranscript(opts: {
       reconcileHistoryRouterFx: (usage, options) =>
         controller.reconcileHistoryRouterFx(usage, options),
       finishHistoryRouterFx: () => controller.finishHistoryRouterFx(),
-      beginSavingsHistoryReplay: () => controller.beginSavingsHistoryReplay(),
-      noteSavingsHistoryTurn: (usage) => controller.noteSavingsHistoryTurn(usage),
       markHistoryRendered: () => {
         historyHasRenderedRef.current = true
       },
@@ -931,6 +948,17 @@ export function useTranscript(opts: {
     setHistory([])
   }
 
+  // Keep a newly mounted/switched transcript out of the paint tree until its
+  // persisted rows have been reconstructed and positioned. This is a visual
+  // atomicity boundary: the user never sees the scroll container at its default
+  // top position while history is still arriving.
+  useLayoutEffect(() => {
+    const th = containerRef.current
+    historySettledSessionRef.current = ''
+    subscriptionSettledSessionRef.current = ''
+    if (th) th.dataset.historyReady = 'false'
+  }, [opts.sessionKey])
+
   // A session swap clears the abort/stop flags so a prior session's pending stop
   // can't gate the new session's drain (legacy resets these on the session
   // transition / destroy — chat.js:1722/8799). Ref writes live in an effect (not
@@ -943,7 +971,6 @@ export function useTranscript(opts: {
     historyHydratingRef.current = true
     headerStateRef.current.day = ''
     headerStateRef.current.role = ''
-    controller.resetSavingsPopupCooldown()
     controller.clearRouterFxVisuals('session_switch')
     controller.syncLastStreamSeqFromSession(opts.sessionKey)
     // eslint-disable-next-line react-hooks/set-state-in-effect -- a session-key transition must synchronously reset the externally-driven status mirror
@@ -981,41 +1008,77 @@ export function useTranscript(opts: {
   // CURRENT session (chat.js:5467-5479). The render is imperative; gate on the
   // response identity so we render each settled page exactly once.
   const renderedResponseAtRef = useRef(0)
-  useEffect(() => {
+  useLayoutEffect(() => {
     const data = historyQuery.data
     if (!data) return
-    historyHydratingRef.current = false
     // React Query may structurally share an equal refetch payload. A successful
     // refetch must still rerun history lifecycle hooks (especially pending
     // router-decision flush), so gate on the query's success timestamp instead
     // of object identity.
-    if (renderedResponseAtRef.current === historyQuery.dataUpdatedAt) return
-    renderedResponseAtRef.current = historyQuery.dataUpdatedAt
-    const messages = (data.messages || []) as ChatMessage[]
-    const meta = historyResponseMetadata(data)
-    pagingRef.current = {
-      loadedMessages: messages.slice(),
-      oldestCursor: meta.oldestCursor,
-      hasMore: meta.hasMore,
-      scope: meta.scope,
-      loadingEarlier: false,
-      error: '',
-      compactionSummaries: meta.summaries,
+    const responseIsNew = renderedResponseAtRef.current !== historyQuery.dataUpdatedAt
+    if (responseIsNew) {
+      historyHydratingRef.current = false
+      renderedResponseAtRef.current = historyQuery.dataUpdatedAt
+      const messages = (data.messages || []) as ChatMessage[]
+      const meta = historyResponseMetadata(data)
+      pagingRef.current = {
+        loadedMessages: messages.slice(),
+        oldestCursor: meta.oldestCursor,
+        hasMore: meta.hasMore,
+        scope: meta.scope,
+        loadingEarlier: false,
+        error: '',
+        compactionSummaries: meta.summaries,
+      }
+      const th = containerRef.current
+      const followTail = controller.isAutoScrollEnabled()
+      const preserveReaderPosition = !followTail && th != null
+      const previousScrollHeight = th?.scrollHeight ?? 0
+      const previousScrollTop = th?.scrollTop ?? 0
+      historyRenderer.renderHistoryMessages(
+        messages,
+        pagingRef.current,
+        preserveReaderPosition
+          ? {
+              preserveScroll: true,
+              previousScrollHeight,
+              previousScrollTop,
+            }
+          : {},
+      )
+      // chat.js:3119 — overlay the history compaction-summary separators once
+      // the message rows exist.
+      controller.renderCompactionSummarySeparators(messages)
+      historySettledSessionRef.current = opts.sessionKey
     }
-    historyRenderer.renderHistoryMessages(messages, pagingRef.current)
-    // chat.js:3119 — overlay the history compaction-summary separators once the
-    // message rows exist (the history renderer is a focused port; this is folded
-    // in here, reading the summaries the controller was given above).
-    controller.renderCompactionSummarySeparators(messages)
-  }, [historyQuery.data, historyQuery.dataUpdatedAt, historyRenderer, controller])
+    revealTranscriptIfSettled(opts.sessionKey, historyQuery.fetchStatus)
+  }, [
+    historyQuery.data,
+    historyQuery.dataUpdatedAt,
+    historyQuery.fetchStatus,
+    historyRenderer,
+    controller,
+    opts.sessionKey,
+    revealTranscriptIfSettled,
+    subscriptionSettleRevision,
+  ])
 
   // Surface a history-load error into the scope row (chat.js:5484-5488).
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!historyQuery.isError) return
     historyHydratingRef.current = false
     pagingRef.current.error = 'Could not load chat history.'
     historyRenderer.renderHistoryScopeRow(pagingRef.current)
-  }, [historyQuery.isError, historyRenderer])
+    historySettledSessionRef.current = opts.sessionKey
+    revealTranscriptIfSettled(opts.sessionKey, historyQuery.fetchStatus)
+  }, [
+    historyQuery.fetchStatus,
+    historyQuery.isError,
+    historyRenderer,
+    opts.sessionKey,
+    revealTranscriptIfSettled,
+    subscriptionSettleRevision,
+  ])
 
   /* ── Backward pagination (chat.js:5492 `_loadEarlierHistory`) ───────────── */
 
@@ -1079,6 +1142,7 @@ export function useTranscript(opts: {
     const unsubs: Array<() => void> = []
     let cancelled = false
     const succeededTerminalTimers = new Set<number>()
+    const pendingReplayTasks = new Set<Promise<void>>()
     const seams = () => seamsRef.current
     const diag = (event: string, detail: Record<string, unknown>) =>
       seamsRef.current.diag?.(event, detail)
@@ -1147,6 +1211,15 @@ export function useTranscript(opts: {
           { duration: 6000 },
         )
         diag('session.subscribe.error', { sessionKey })
+      } finally {
+        // The gateway returns from subscribe only after replay frames have been
+        // sent. Some replay handlers (notably router decisions) continue across
+        // async config work, so include them in the same entry barrier.
+        await Promise.allSettled(Array.from(pendingReplayTasks))
+        if (!cancelled && sessionKey === sessionKeyRef.current) {
+          subscriptionSettledSessionRef.current = sessionKey
+          setSubscriptionSettleRevision((revision) => revision + 1)
+        }
       }
     }
 
@@ -1187,11 +1260,23 @@ export function useTranscript(opts: {
 
     // chat.js:4699 — router_decision → controller router-fx renderer (Task 6).
     unsubs.push(
-      onEvent('session.event.router_decision', (payload: StreamEventPayload) => {
-        if (!gateStreamFrame('event.router_decision', payload)) return
-        void controller.handleRouterDecision(payload as Record<string, unknown>)
-        seams().handleRouterDecision?.(payload)
-      }),
+      onEvent(
+        'session.event.router_decision',
+        (payload: StreamEventPayload, meta: Record<string, unknown>) => {
+          if (!gateStreamFrame('event.router_decision', payload)) return
+          const task = controller.handleRouterDecision(payload as Record<string, unknown>)
+          if (meta.replayed === true) {
+            pendingReplayTasks.add(task)
+            void task.then(
+              () => pendingReplayTasks.delete(task),
+              () => pendingReplayTasks.delete(task),
+            )
+          } else {
+            void task
+          }
+          seams().handleRouterDecision?.(payload)
+        },
+      ),
     )
 
     // chat.js:4714 — text_delta → Task-2 controller stream path.
@@ -1556,19 +1641,12 @@ export function useTranscript(opts: {
           const model = String(usage.model || usage.routed_model || '')
           const input = Number(usage.input_tokens || usage.inputTokens || 0)
           const output = Number(usage.output_tokens || usage.outputTokens || 0)
-          const isReplayedFrame = rawMeta.replayed === true
-          // SavingsFX must run BEFORE the footer/storage snapshot: it updates the
-          // streak and may suppress this one identity-switch turn.
-          controller.maybeFireSavingsPopup(finishedBubble, usage, {
-            animate: !isReplayedFrame,
-          })
           messageRendererRef.current?.attachTurnMeta(
             finishedBubble,
             model,
             Number.isFinite(input) ? input : 0,
             Number.isFinite(output) ? output : 0,
             usage,
-            { flash: !isReplayedFrame },
           )
           if (finishedBubble) {
             const assistants = Array.from(

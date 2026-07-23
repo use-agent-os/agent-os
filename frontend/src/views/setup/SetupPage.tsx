@@ -2,11 +2,22 @@ import './setup.css'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  ArrowRightIcon,
+  BotIcon,
+  BoxesIcon,
+  CircleAlertIcon,
+  ClipboardCheckIcon,
+  RadioTowerIcon,
+  RouteIcon,
+  type LucideIcon,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
+import { Button } from '@/components/ui/button'
+import type { SettingsSnapshot } from '@/views/settings/snapshot'
 import { ProviderSection } from './ProviderSection'
 import { RouterSection } from './RouterSection'
-import { ChannelsSection, type ChannelsRuntimeStatus } from './ChannelsSection'
 import { ExtrasSection } from './ExtrasSection'
 import { FinishSection } from './FinishSection'
 import {
@@ -26,9 +37,6 @@ import {
   type StepId,
 } from './logic'
 
-// setup.js:2002-2007 — the 5s channel-status poll cadence.
-const CHANNEL_POLL_MS = 5000
-
 const HEADLINE_TONE: Record<string, string> = {
   'is-warn': 'tone-warn',
   'is-optional': 'tone-info',
@@ -40,22 +48,85 @@ const STEP_TONE: Record<string, string> = {
   'is-muted': 'tone-dim',
 }
 
-export function SetupPage() {
+const STEP_ICONS: Record<StepId, LucideIcon> = {
+  provider: BotIcon,
+  router: RouteIcon,
+  channels: RadioTowerIcon,
+  extras: BoxesIcon,
+  finish: ClipboardCheckIcon,
+}
+
+interface SetupPageProps {
+  embedded?: boolean
+  /**
+   * `undefined` keeps the standalone compatibility loader used by focused
+   * tests and direct embeds. `null` means an owning Settings workspace is
+   * still loading its atomic snapshot.
+   */
+  externalSnapshot?: SettingsSnapshot | null
+  onSnapshotReload?: () => Promise<SettingsSnapshot | undefined>
+}
+
+type GuidedResetTarget =
+  | 'provider'
+  | 'router'
+  | 'search'
+  | 'memoryEmbedding'
+  | 'memorySettings'
+  | 'image'
+  | 'audio'
+  | 'finish'
+
+const INITIAL_RESET_VERSIONS: Record<GuidedResetTarget, number> = {
+  provider: 0,
+  router: 0,
+  search: 0,
+  memoryEmbedding: 0,
+  memorySettings: 0,
+  image: 0,
+  audio: 0,
+  finish: 0,
+}
+
+const GUIDED_RESET_TARGETS = Object.keys(INITIAL_RESET_VERSIONS) as GuidedResetTarget[]
+
+function initialTargetFlags(): Record<GuidedResetTarget, boolean> {
+  return Object.fromEntries(GUIDED_RESET_TARGETS.map((target) => [target, false])) as Record<
+    GuidedResetTarget,
+    boolean
+  >
+}
+
+function initialTargetRevisions(
+  revision?: string | null,
+): Record<GuidedResetTarget, string | undefined> {
+  return Object.fromEntries(
+    GUIDED_RESET_TARGETS.map((target) => [target, revision ?? undefined]),
+  ) as Record<GuidedResetTarget, string | undefined>
+}
+
+export function SetupPage({
+  embedded = false,
+  externalSnapshot,
+  onSnapshotReload,
+}: SetupPageProps = {}) {
   const rpc = useRpc()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const usesExternalSnapshot = externalSnapshot !== undefined
 
   useEffect(() => {
-    document.title = 'Setup - AgentOS Control'
-  }, [])
+    if (!embedded) document.title = 'Setup - AgentOS Control'
+  }, [embedded])
 
-  // setup.js:62-79 — parallel catalog + status + config + channels + memory doctor.
+  // setup.js:62-79 — compatibility loader for catalog + status + config.
   const catalogQuery = useQuery<Catalog>({
     queryKey: ['setup', 'catalog'],
     queryFn: async () => {
       await rpc.waitForConnection()
       return (await rpc.call<Catalog>('onboarding.catalog')) ?? {}
     },
+    enabled: !usesExternalSnapshot,
     refetchOnWindowFocus: false,
   })
   const statusQuery = useQuery<OnboardingStatus>({
@@ -64,6 +135,7 @@ export function SetupPage() {
       await rpc.waitForConnection()
       return (await rpc.call<OnboardingStatus>('onboarding.status')) ?? {}
     },
+    enabled: !usesExternalSnapshot,
     refetchOnWindowFocus: false,
   })
   const configQuery = useQuery<SetupConfig>({
@@ -72,33 +144,76 @@ export function SetupPage() {
       await rpc.waitForConnection()
       return (await rpc.call<SetupConfig>('config.get')) ?? {}
     },
+    enabled: !usesExternalSnapshot,
     refetchOnWindowFocus: false,
   })
 
-  // Channel dirty state pauses the poll (setup.js:2003-2004).
-  const [channelDirty, setChannelDirty] = useState(false)
   const [step, setStep] = useState<StepId | null>(null)
+  const [resetVersions, setResetVersions] = useState(INITIAL_RESET_VERSIONS)
+  const [targetDirty, setTargetDirty] = useState(initialTargetFlags)
+  const currentExternalRevision = externalSnapshot?.revision ?? undefined
+  const [targetRevisions, setTargetRevisions] = useState(() =>
+    initialTargetRevisions(currentExternalRevision),
+  )
+  const [lastExternalRevision, setLastExternalRevision] = useState(currentExternalRevision)
 
-  const channelStatusQuery = useQuery<ChannelsRuntimeStatus>({
-    queryKey: ['setup', 'channels'],
-    queryFn: async () => {
-      await rpc.waitForConnection()
-      return await rpc
-        .call<ChannelsRuntimeStatus>('channels.status')
-        .catch(() => ({ channels: [] }) as ChannelsRuntimeStatus)
-    },
-    // setup.js:2002-2008 — poll only while on the channels step and not dirty.
-    refetchInterval: step === 'channels' && !channelDirty ? CHANNEL_POLL_MS : false,
-    refetchOnWindowFocus: false,
-  })
+  if (currentExternalRevision && currentExternalRevision !== lastExternalRevision) {
+    setLastExternalRevision(currentExternalRevision)
+    // Pristine forms can safely adopt the coherent snapshot immediately. Dirty
+    // forms retain both their draft and the revision they were based on; their
+    // save control is blocked below until the operator explicitly discards it.
+    setResetVersions(
+      (versions) =>
+        Object.fromEntries(
+          GUIDED_RESET_TARGETS.map((target) => [
+            target,
+            targetDirty[target] ? versions[target] : versions[target] + 1,
+          ]),
+        ) as Record<GuidedResetTarget, number>,
+    )
+    setTargetRevisions(
+      (revisions) =>
+        Object.fromEntries(
+          GUIDED_RESET_TARGETS.map((target) => [
+            target,
+            targetDirty[target] ? revisions[target] : currentExternalRevision,
+          ]),
+        ) as Record<GuidedResetTarget, string | undefined>,
+    )
+  }
 
-  const catalog = catalogQuery.data ?? {}
-  const status = useMemo(() => statusQuery.data ?? {}, [statusQuery.data])
-  const config = useMemo(() => configQuery.data ?? {}, [configQuery.data])
-  const channelStatus = channelStatusQuery.data ?? { channels: [] }
+  const markTargetDirty = (target: GuidedResetTarget) => {
+    setTargetDirty((dirty) => (dirty[target] ? dirty : { ...dirty, [target]: true }))
+  }
 
-  const loaded = catalogQuery.isSuccess && statusQuery.isSuccess && configQuery.isSuccess
-  const loadFailed = catalogQuery.isError || statusQuery.isError || configQuery.isError
+  const resetSavedTarget = (target: GuidedResetTarget, revision?: string) => {
+    setResetVersions((versions) => ({ ...versions, [target]: versions[target] + 1 }))
+    setTargetDirty((dirty) => ({ ...dirty, [target]: false }))
+    if (revision) {
+      setTargetRevisions((revisions) => ({ ...revisions, [target]: revision }))
+    }
+  }
+
+  const adoptTargetRevision = (target: GuidedResetTarget, revision?: string) => {
+    if (!revision) return
+    setTargetRevisions((revisions) => ({ ...revisions, [target]: revision }))
+  }
+
+  const catalog = externalSnapshot?.catalog ?? catalogQuery.data ?? {}
+  const status = useMemo(
+    () => externalSnapshot?.status ?? statusQuery.data ?? {},
+    [externalSnapshot?.status, statusQuery.data],
+  )
+  const config = useMemo(
+    () => externalSnapshot?.config ?? configQuery.data ?? {},
+    [externalSnapshot?.config, configQuery.data],
+  )
+  const loaded = usesExternalSnapshot
+    ? externalSnapshot !== null
+    : catalogQuery.isSuccess && statusQuery.isSuccess && configQuery.isSuccess
+  const loadFailed = usesExternalSnapshot
+    ? false
+    : catalogQuery.isError || statusQuery.isError || configQuery.isError
 
   // setup.js:280-300 — auto-select the initial step once status is known.
   const [autoSelected, setAutoSelected] = useState(false)
@@ -115,31 +230,120 @@ export function SetupPage() {
   const effectiveProviderId = effectiveProviderFn(status, config, draftProvider ?? '')
   const reasons = useMemo(() => onboardingReasons(status, config), [status, config])
   const headline = setupHeadline(reasons)
+  const conflictedTargets = currentExternalRevision
+    ? GUIDED_RESET_TARGETS.filter(
+        (target) => targetDirty[target] && targetRevisions[target] !== currentExternalRevision,
+      )
+    : []
+  const targetConflicted = (target: GuidedResetTarget) => conflictedTargets.includes(target)
+  const writeBlocked = externalSnapshot?.writeBlocked === true
+
+  const discardConflictedDrafts = () => {
+    if (!currentExternalRevision || conflictedTargets.length === 0) return
+    setResetVersions((versions) => {
+      const next = { ...versions }
+      conflictedTargets.forEach((target) => {
+        next[target] += 1
+      })
+      return next
+    })
+    setTargetDirty((dirty) => {
+      const next = { ...dirty }
+      conflictedTargets.forEach((target) => {
+        next[target] = false
+      })
+      return next
+    })
+    setTargetRevisions((revisions) => {
+      const next = { ...revisions }
+      conflictedTargets.forEach((target) => {
+        next[target] = currentExternalRevision
+      })
+      return next
+    })
+    if (conflictedTargets.includes('provider')) setDraftProvider(null)
+  }
 
   // Reload all setup reads (setup.js:1316,1751,1848,…).
-  const reload = () => {
-    void queryClient.invalidateQueries({ queryKey: ['setup'] })
+  const reload = async (): Promise<SettingsSnapshot | undefined> => {
+    if (usesExternalSnapshot && onSnapshotReload) {
+      return await onSnapshotReload()
+    }
+    await queryClient.invalidateQueries({ queryKey: ['setup'] })
+    return undefined
+  }
+
+  const reloadAfterSave = async (toastId: string): Promise<SettingsSnapshot | undefined> => {
+    try {
+      return await reload()
+    } catch {
+      toast.warning('Saved, but the latest agent state could not be refreshed.', {
+        id: `${toastId}-refresh`,
+      })
+      return undefined
+    }
+  }
+
+  // Guided and Advanced edit the same persisted document. When Settings owns
+  // an atomic snapshot, carry its revision into every guided write so a stale
+  // browser tab cannot silently overwrite a newer configuration.
+  const withExpectedRevision = <T extends Record<string, unknown>>(
+    target: GuidedResetTarget,
+    params: T,
+  ) => {
+    if (writeBlocked) {
+      throw new Error('config file changed outside AgentOS; restart or reload the gateway first')
+    }
+    return targetRevisions[target]
+      ? { ...params, expectedRevision: targetRevisions[target] }
+      : params
   }
 
   // ── mutations (one per onboarding.*.configure / config.patch) ─────────────
 
   const providerMutation = useMutation({
     mutationFn: (vars: { providerId: string; params: Record<string, unknown> }) =>
-      rpc.call('onboarding.provider.configure', { providerId: vars.providerId, ...vars.params }),
+      rpc.call(
+        'onboarding.provider.configure',
+        withExpectedRevision('provider', { providerId: vars.providerId, ...vars.params }),
+      ),
     onSuccess: async () => {
+      resetSavedTarget('provider')
       // setup.js:1751-1761 — reload, then re-check the env-missing guard on the
       // FRESH status (the refetch result, not the stale cached data/config).
-      const [freshStatus, freshConfig] = await Promise.all([
-        statusQuery.refetch(),
-        configQuery.refetch(),
-      ])
-      void queryClient.invalidateQueries({ queryKey: ['setup'] })
-      const s = freshStatus.data ?? {}
+      let freshStatus: OnboardingStatus = {}
+      let freshConfig: SetupConfig = {}
+      let freshRevision: string | undefined
+      try {
+        if (usesExternalSnapshot && onSnapshotReload) {
+          const fresh = await onSnapshotReload()
+          freshStatus = fresh?.status ?? {}
+          freshConfig = fresh?.config ?? {}
+          freshRevision = fresh?.revision ?? undefined
+        } else {
+          const [statusResult, configResult] = await Promise.all([
+            statusQuery.refetch(),
+            configQuery.refetch(),
+          ])
+          void queryClient.invalidateQueries({ queryKey: ['setup'] })
+          freshStatus = statusResult.data ?? {}
+          freshConfig = configResult.data ?? {}
+        }
+      } catch {
+        toast.warning('Provider saved, but the latest agent state could not be refreshed.', {
+          id: 'setup-provider-refresh',
+        })
+        return
+      }
+      // Re-mount only the form that was just committed. This adopts the
+      // canonical response and removes any one-time pasted credential without
+      // disturbing drafts in the other persistently mounted guided steps.
+      adoptTargetRevision('provider', freshRevision)
+      const s = freshStatus
       if (providerEnvMissing(s)) {
-        toast.error(
-          `${providerEnvKey(freshConfig.data ?? {})} is not visible to this gateway process.`,
-          { id: 'setup-provider' },
-        )
+        toast.error(`${providerEnvKey(freshConfig)} is not visible to this gateway process.`, {
+          id: 'setup-provider',
+        })
         setStep('provider')
         return
       }
@@ -151,35 +355,28 @@ export function SetupPage() {
 
   const routerMutation = useMutation({
     mutationFn: (params: RouterConfigureParams) =>
-      rpc.call('onboarding.router.configure', params as unknown as Record<string, unknown>),
-    onSuccess: () => {
+      rpc.call(
+        'onboarding.router.configure',
+        withExpectedRevision('router', params as unknown as Record<string, unknown>),
+      ),
+    onSuccess: async () => {
       toast.info('Router saved.', { id: 'setup-router' })
-      reload()
-      setStep('channels')
+      resetSavedTarget('router')
+      const fresh = await reloadAfterSave('setup-router')
+      adoptTargetRevision('router', fresh?.revision ?? undefined)
+      setStep('extras')
     },
     onError: (err) => saveError('setup-router', err),
   })
 
-  const channelMutation = useMutation({
-    // setup.js:1865-1866 — probe THEN upsert.
-    mutationFn: async (entry: Record<string, unknown>) => {
-      await rpc.call('onboarding.channel.probe', { entry })
-      await rpc.call('onboarding.channel.upsert', { entry })
-    },
-    onSuccess: () => {
-      toast.info('Channel saved. Restart required.', { id: 'setup-channel' })
-      setChannelDirty(false)
-      void channelStatusQuery.refetch()
-    },
-    onError: (err) => saveError('setup-channel', err),
-  })
-
   const searchMutation = useMutation({
     mutationFn: (params: Record<string, unknown>) =>
-      rpc.call('onboarding.search.configure', params),
-    onSuccess: () => {
+      rpc.call('onboarding.search.configure', withExpectedRevision('search', params)),
+    onSuccess: async () => {
       toast.info('Search saved.', { id: 'setup-search' })
-      reload()
+      resetSavedTarget('search')
+      const fresh = await reloadAfterSave('setup-search')
+      adoptTargetRevision('search', fresh?.revision ?? undefined)
     },
     onError: (err) => saveError('setup-search', err),
   })
@@ -191,8 +388,11 @@ export function SetupPage() {
 
   const memoryMutation = useMutation({
     mutationFn: (params: Record<string, unknown>) =>
-      rpc.call<ConfigureResult>('onboarding.memory_embedding.configure', params),
-    onSuccess: (res) => {
+      rpc.call<ConfigureResult>(
+        'onboarding.memory_embedding.configure',
+        withExpectedRevision('memoryEmbedding', params),
+      ),
+    onSuccess: async (res) => {
       const remote = (res?.entry as { remote?: Record<string, string> })?.remote || {}
       const advisory = envReferenceSaveAdvisory({
         surface: 'Memory embedding',
@@ -203,30 +403,40 @@ export function SetupPage() {
       if (advisory.kind === 'warn') toast.warning(advisory.message, { id: 'setup-memory' })
       else if (advisory.kind === 'info') toast.info(advisory.message, { id: 'setup-memory' })
       else toast.info('Memory embedding saved. Restart required.', { id: 'setup-memory' })
-      reload()
+      resetSavedTarget('memoryEmbedding')
+      const fresh = await reloadAfterSave('setup-memory')
+      adoptTargetRevision('memoryEmbedding', fresh?.revision ?? undefined)
     },
     onError: (err) => saveError('setup-memory', err),
   })
 
   const memorySettingsMutation = useMutation({
     mutationFn: (patches: Record<string, unknown>) =>
-      rpc.call<ConfigureResult>('config.patch', { patches }),
-    onSuccess: (res) => {
+      rpc.call<ConfigureResult>(
+        'config.patch',
+        withExpectedRevision('memorySettings', { patches }),
+      ),
+    onSuccess: async (res) => {
       toast.info(
         res?.restartRequired
           ? 'Memory settings saved. Restart required.'
           : 'Memory settings saved.',
         { id: 'setup-memory-settings' },
       )
-      reload()
+      resetSavedTarget('memorySettings')
+      const fresh = await reloadAfterSave('setup-memory-settings')
+      adoptTargetRevision('memorySettings', fresh?.revision ?? undefined)
     },
     onError: (err) => saveError('setup-memory-settings', err),
   })
 
   const imageMutation = useMutation({
     mutationFn: (params: Record<string, unknown>) =>
-      rpc.call<ConfigureResult>('onboarding.imageGeneration.configure', params),
-    onSuccess: (res) => {
+      rpc.call<ConfigureResult>(
+        'onboarding.imageGeneration.configure',
+        withExpectedRevision('image', params),
+      ),
+    onSuccess: async (res) => {
       const entry = res?.entry || {}
       const advisory = envReferenceSaveAdvisory({
         surface: 'Image generation',
@@ -238,15 +448,20 @@ export function SetupPage() {
       if (advisory.kind === 'warn') toast.warning(advisory.message, { id: 'setup-image' })
       else if (advisory.kind === 'info') toast.info(advisory.message, { id: 'setup-image' })
       else toast.info('Image generation saved.', { id: 'setup-image' })
-      reload()
+      resetSavedTarget('image')
+      const fresh = await reloadAfterSave('setup-image')
+      adoptTargetRevision('image', fresh?.revision ?? undefined)
     },
     onError: (err) => saveError('setup-image', err),
   })
 
   const audioMutation = useMutation({
     mutationFn: (params: Record<string, unknown>) =>
-      rpc.call<ConfigureResult>('onboarding.audio.configure', params),
-    onSuccess: (res) => {
+      rpc.call<ConfigureResult>(
+        'onboarding.audio.configure',
+        withExpectedRevision('audio', params),
+      ),
+    onSuccess: async (res) => {
       const entry = res?.entry || {}
       const advisory = envReferenceSaveAdvisory({
         surface: 'Voice audio',
@@ -258,17 +473,24 @@ export function SetupPage() {
       if (advisory.kind === 'warn') toast.warning(advisory.message, { id: 'setup-audio' })
       else if (advisory.kind === 'info') toast.info(advisory.message, { id: 'setup-audio' })
       else toast.info('Voice audio saved.', { id: 'setup-audio' })
-      reload()
+      resetSavedTarget('audio')
+      const fresh = await reloadAfterSave('setup-audio')
+      adoptTargetRevision('audio', fresh?.revision ?? undefined)
     },
     onError: (err) => saveError('setup-audio', err),
   })
 
   const updatesMutation = useMutation({
     mutationFn: (notify: boolean) =>
-      rpc.call('config.patch', { patches: { 'updates.notify': notify } }),
-    onSuccess: () => {
+      rpc.call(
+        'config.patch',
+        withExpectedRevision('finish', { patches: { 'updates.notify': notify } }),
+      ),
+    onSuccess: async () => {
       toast.info('Update preference saved.', { id: 'setup-updates' })
-      reload()
+      resetSavedTarget('finish')
+      const fresh = await reloadAfterSave('setup-updates')
+      adoptTargetRevision('finish', fresh?.revision ?? undefined)
     },
     onError: (err) => saveError('setup-updates', err),
   })
@@ -299,55 +521,84 @@ export function SetupPage() {
   }
 
   return (
-    <div className="setup-stage">
-      <header className="setup-stage__header">
-        <div className="setup-stage__title-block">
-          <span className="t-label">Control · Setup</span>
-          <h1 className="t-display">Setup</h1>
-          <p className="setup-stage__subtitle">{headline.title}</p>
-        </div>
-        <div className="setup-stage__aside">
-          <button
-            type="button"
-            className="setup-exit"
-            aria-label="Exit setup and return to Overview"
-            onClick={() => navigate('/overview')}
-          >
-            <span aria-hidden="true">←</span>
-            <span>Exit setup</span>
-          </button>
-          <div className={`setup-status ${HEADLINE_TONE[headline.tone]}`}>{headline.chip}</div>
-        </div>
-      </header>
-
-      {reasons.length ? (
-        <ul
-          className="setup-reasons"
-          aria-label={
-            headline.tone === 'is-warn' ? 'Setup actions needed' : 'Optional improvements'
-          }
-        >
-          {reasons.map((reason) => (
-            <li
-              className={`setup-reasons__item ${reason.tier === 'blocking' ? 'tone-warn' : 'tone-info'}`}
-              key={reason.text}
+    <div className={`setup-stage${embedded ? ' setup-stage--embedded' : ''}`}>
+      {!embedded ? (
+        <header className="setup-stage__header">
+          <div className="setup-stage__title-block">
+            <span className="t-label">Control · Setup</span>
+            <h1 className="t-display">Setup</h1>
+            <p className="setup-stage__subtitle">{headline.title}</p>
+          </div>
+          <div className="setup-stage__aside">
+            <button
+              type="button"
+              className="setup-exit"
+              aria-label="Exit setup and return to Overview"
+              onClick={() => navigate('/overview')}
             >
-              <button
-                type="button"
-                className="setup-reasons__action"
-                onClick={() => setStep(reason.step)}
-              >
-                <span>{reason.text}</span>
-                <span aria-hidden="true">{reason.tier === 'blocking' ? 'Fix →' : 'Review →'}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
+              <span aria-hidden="true">←</span>
+              <span>Exit setup</span>
+            </button>
+            <div className={`setup-status ${HEADLINE_TONE[headline.tone]}`}>{headline.chip}</div>
+          </div>
+        </header>
+      ) : null}
+
+      {reasons.length || conflictedTargets.length > 0 ? (
+        <div className="setup-notices">
+          {reasons.length ? (
+            <ul
+              className="setup-reasons"
+              aria-label={
+                headline.tone === 'is-warn' ? 'Setup actions needed' : 'Optional improvements'
+              }
+            >
+              {reasons.map((reason) => (
+                <li
+                  className={`setup-reasons__item ${reason.tier === 'blocking' ? 'tone-warn' : 'tone-info'}`}
+                  key={reason.text}
+                >
+                  <button
+                    type="button"
+                    className="setup-reasons__action"
+                    onClick={() =>
+                      reason.step === 'channels'
+                        ? navigate('/channels?view=setup')
+                        : setStep(reason.step)
+                    }
+                  >
+                    <CircleAlertIcon className="setup-reasons__icon" aria-hidden="true" />
+                    <span className="setup-reasons__text">{reason.text}</span>
+                    <span className="setup-reasons__cta">
+                      {reason.tier === 'blocking' ? 'Continue' : 'Review'}
+                      <ArrowRightIcon aria-hidden="true" />
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {conflictedTargets.length > 0 ? (
+            <div className="setup-warning panel tone-warn tone-rail" role="alert">
+              <span>
+                The configuration changed while{' '}
+                {conflictedTargets.length === 1 ? 'a guided draft was' : 'guided drafts were'} open.
+                Review the latest state, then discard the stale{' '}
+                {conflictedTargets.length === 1 ? 'draft' : 'drafts'} before saving.
+              </span>
+              <Button type="button" size="sm" variant="outline" onClick={discardConflictedDrafts}>
+                Discard stale drafts
+              </Button>
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
       <nav className="setup-stepper" aria-label="Setup steps">
-        {STEPS.map((s, idx) => {
+        {STEPS.map((s) => {
           const st = stepStatus(s.id, status, effectiveProviderId)
+          const StepIcon = STEP_ICONS[s.id]
           return (
             <button
               key={s.id}
@@ -357,82 +608,113 @@ export function SetupPage() {
               aria-current={s.id === currentStep ? 'step' : undefined}
               onClick={() => setStep(s.id)}
             >
-              <span className="setup-stepper__num">{idx + 1}</span>
-              <span className="setup-stepper__label">{s.label}</span>
-              <small className={`setup-stepper__state ${STEP_TONE[st.tone]}`}>{st.label}</small>
+              <span className="setup-stepper__icon" aria-hidden="true">
+                <StepIcon />
+              </span>
+              <span className="setup-stepper__copy">
+                <span className="setup-stepper__label">{s.label}</span>
+                <small className={`setup-stepper__state ${STEP_TONE[st.tone]}`}>{st.label}</small>
+              </span>
             </button>
           )
         })}
       </nav>
 
       <div className="setup-body">
-        {currentStep === 'provider' ? (
-          <ProviderSection
-            catalog={catalog}
-            status={status}
-            config={config}
-            saving={providerMutation.isPending}
-            onSave={(providerId, params) => providerMutation.mutate({ providerId, params })}
-            onNext={() => setStep('router')}
-            onProviderChange={setDraftProvider}
-          />
+        {embedded || currentStep === 'provider' ? (
+          <div
+            className="setup-step-panel"
+            hidden={currentStep !== 'provider'}
+            onChangeCapture={() => markTargetDirty('provider')}
+          >
+            <ProviderSection
+              key={`provider:${resetVersions.provider}`}
+              catalog={catalog}
+              status={status}
+              config={config}
+              saving={providerMutation.isPending || targetConflicted('provider') || writeBlocked}
+              onSave={(providerId, params) => providerMutation.mutate({ providerId, params })}
+              onNext={() => setStep('router')}
+              onProviderChange={setDraftProvider}
+            />
+          </div>
         ) : null}
-        {currentStep === 'router' ? (
-          <RouterSection
-            catalog={catalog}
-            status={status}
-            config={config}
-            draftProvider={draftProvider ?? ''}
-            saving={routerMutation.isPending}
-            onSave={(params) => routerMutation.mutate(params)}
-            onBack={() => setStep('provider')}
-            onNext={() => setStep('channels')}
-          />
+        {embedded || currentStep === 'router' ? (
+          <div
+            className="setup-step-panel"
+            hidden={currentStep !== 'router'}
+            onChangeCapture={() => markTargetDirty('router')}
+          >
+            <RouterSection
+              key={`router:${resetVersions.router}`}
+              catalog={catalog}
+              status={status}
+              config={config}
+              draftProvider={draftProvider ?? ''}
+              saving={routerMutation.isPending || targetConflicted('router') || writeBlocked}
+              onSave={(params) => routerMutation.mutate(params)}
+              onBack={() => setStep('provider')}
+              onNext={() => setStep('extras')}
+            />
+          </div>
         ) : null}
-        {currentStep === 'channels' ? (
-          <ChannelsSection
-            catalog={catalog}
-            channelStatus={channelStatus}
-            saving={channelMutation.isPending}
-            onSave={(entry) => channelMutation.mutate(entry)}
-            onBack={() => setStep('router')}
-            onNext={() => setStep('extras')}
-            onDirtyChange={setChannelDirty}
-            onValidationError={(msg) => toast.error(msg, { id: 'setup-channel' })}
-          />
+        {embedded || currentStep === 'extras' ? (
+          <div className="setup-step-panel" hidden={currentStep !== 'extras'}>
+            <ExtrasSection
+              catalog={catalog}
+              status={status}
+              config={config}
+              saving={
+                writeBlocked ||
+                searchMutation.isPending ||
+                memoryMutation.isPending ||
+                memorySettingsMutation.isPending ||
+                imageMutation.isPending ||
+                audioMutation.isPending
+              }
+              resetVersions={{
+                search: resetVersions.search,
+                memoryEmbedding: resetVersions.memoryEmbedding,
+                memorySettings: resetVersions.memorySettings,
+                image: resetVersions.image,
+                audio: resetVersions.audio,
+              }}
+              conflicts={{
+                search: targetConflicted('search'),
+                memoryEmbedding: targetConflicted('memoryEmbedding'),
+                memorySettings: targetConflicted('memorySettings'),
+                image: targetConflicted('image'),
+                audio: targetConflicted('audio'),
+              }}
+              onDirtyChange={markTargetDirty}
+              onSaveSearch={(params) => searchMutation.mutate(params)}
+              onSaveMemory={(params) => memoryMutation.mutate(params)}
+              onSaveMemorySettings={(patches) => memorySettingsMutation.mutate(patches)}
+              onSaveImage={(params) => imageMutation.mutate(params)}
+              onSaveAudio={(params) => audioMutation.mutate(params)}
+              onBack={() => setStep('router')}
+              onNext={() => setStep('finish')}
+            />
+          </div>
         ) : null}
-        {currentStep === 'extras' ? (
-          <ExtrasSection
-            catalog={catalog}
-            status={status}
-            config={config}
-            saving={
-              searchMutation.isPending ||
-              memoryMutation.isPending ||
-              memorySettingsMutation.isPending ||
-              imageMutation.isPending ||
-              audioMutation.isPending
-            }
-            onSaveSearch={(params) => searchMutation.mutate(params)}
-            onSaveMemory={(params) => memoryMutation.mutate(params)}
-            onSaveMemorySettings={(patches) => memorySettingsMutation.mutate(patches)}
-            onSaveImage={(params) => imageMutation.mutate(params)}
-            onSaveAudio={(params) => audioMutation.mutate(params)}
-            onBack={() => setStep('channels')}
-            onNext={() => setStep('finish')}
-          />
-        ) : null}
-        {currentStep === 'finish' ? (
-          <FinishSection
-            status={status}
-            config={config}
-            saving={updatesMutation.isPending}
-            onBack={() => setStep('extras')}
-            onReload={reload}
-            onExit={() => navigate('/overview')}
-            onGoStep={(s) => setStep(s)}
-            onSaveUpdatesNotify={(notify) => updatesMutation.mutate(notify)}
-          />
+        {embedded || currentStep === 'finish' ? (
+          <div
+            className="setup-step-panel"
+            hidden={currentStep !== 'finish'}
+            onChangeCapture={() => markTargetDirty('finish')}
+          >
+            <FinishSection
+              key={`finish:${resetVersions.finish}`}
+              status={status}
+              config={config}
+              saving={updatesMutation.isPending || targetConflicted('finish') || writeBlocked}
+              onBack={() => setStep('extras')}
+              onReload={reload}
+              onExit={() => navigate('/overview')}
+              onGoStep={(s) => (s === 'channels' ? navigate('/channels?view=setup') : setStep(s))}
+              onSaveUpdatesNotify={(notify) => updatesMutation.mutate(notify)}
+            />
+          </div>
         ) : null}
       </div>
     </div>

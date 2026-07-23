@@ -5,7 +5,14 @@ from __future__ import annotations
 import copy
 from typing import Any, cast
 
-from agentos.gateway.config_persist import persist_config as _persist_config
+from agentos.gateway.config_commit import (
+    commit_config,
+    config_disk_state,
+    expected_revision,
+    pending_restart_metadata,
+    sync_provider_selector,
+    update_config_in_place,
+)
 from agentos.gateway.rpc import RpcContext, get_dispatcher
 
 _d = get_dispatcher()
@@ -13,10 +20,7 @@ _d = get_dispatcher()
 
 def _update_config_in_place(old: Any, new: Any) -> None:
     """Copy all fields from new config into the existing config object in-memory."""
-    for field_name in type(new).model_fields:
-        setattr(old, field_name, getattr(new, field_name))
-    if hasattr(old, "inherit_runtime_secrets"):
-        old.inherit_runtime_secrets(new)
+    update_config_in_place(old, new)
 
 
 def _inherit_runtime_secrets(source: Any, target: Any) -> None:
@@ -199,12 +203,26 @@ def _memory_restart_fingerprint(config: Any) -> dict[str, Any]:
     if not isinstance(memory, dict):
         return {}
     return {
+        "source": memory.get("source"),
         "retrieval_mode": memory.get("retrieval_mode"),
         "embedding": memory.get("embedding"),
         # The external memory-provider manager is built once at boot, so
         # selecting a provider (or retuning its mem0 sub-settings) needs a
         # gateway restart to take live effect.
         "provider": memory.get("provider"),
+        # Managers, repair service topology/cadence, and managed Dream cron
+        # schedules are all constructed/reconciled during boot.
+        "repair": {
+            "enabled": memory.get("repair_enabled"),
+            "interval_seconds": memory.get("repair_interval_seconds"),
+            "max_items_per_tick": memory.get("repair_max_items_per_tick"),
+        },
+        "dream_schedule": {
+            key: (memory.get("dream") or {}).get(key)
+            if isinstance(memory.get("dream"), dict)
+            else None
+            for key in ("enabled", "auto_schedule", "interval_h", "cron")
+        },
     }
 
 
@@ -260,6 +278,73 @@ def _bind_restart_fingerprint(config: Any) -> dict[str, Any]:
     return {
         "host": data.get("host"),
         "auth_mode": auth.get("mode") if isinstance(auth, dict) else None,
+        "allow_unauthenticated_public": (
+            auth.get("allow_unauthenticated_public") if isinstance(auth, dict) else None
+        ),
+    }
+
+
+def _boot_runtime_restart_fingerprints(config: Any) -> dict[str, Any]:
+    """Values captured by boot-created services without a generic hot adapter."""
+    if config is None or not hasattr(config, "model_dump"):
+        return {}
+    data = config.model_dump(mode="python")
+    if not isinstance(data, dict):
+        return {}
+    task_runtime = data.get("task_runtime")
+    task_runtime = task_runtime if isinstance(task_runtime, dict) else {}
+    subagents = data.get("subagents")
+    subagents = subagents if isinstance(subagents, dict) else {}
+    heartbeat = data.get("heartbeat")
+    heartbeat = heartbeat if isinstance(heartbeat, dict) else {}
+    tools = data.get("tools")
+    tools = tools if isinstance(tools, dict) else {}
+    skills = data.get("skills")
+    skills = skills if isinstance(skills, dict) else {}
+    return {
+        # TaskRuntime constructor captures these queue/semaphore/deadline values.
+        "task_runtime": {
+            "max_concurrency": task_runtime.get("max_concurrency"),
+            "max_pending_per_session": task_runtime.get("max_pending_per_session"),
+            "channel_inflight_cap": task_runtime.get("channel_inflight_cap"),
+            "turn_hard_deadline_s": task_runtime.get("turn_hard_deadline_s"),
+            "pending_overflow_policy": task_runtime.get("pending_overflow_policy"),
+            "subagent_reserved_slots": subagents.get("subagent_reserved_slots"),
+        },
+        # Uvicorn TLS and Starlette middleware/routes are assembled once.
+        "tls": data.get("tls"),
+        "cors": data.get("cors"),
+        "control_ui": data.get("control_ui"),
+        "server_debug": data.get("debug"),
+        "state_dir": data.get("state_dir"),
+        # RotatingFileHandler is built before services start.
+        "logging": {
+            "log_file_enabled": data.get("log_file_enabled"),
+            "log_level": data.get("log_level"),
+            "log_file_max_bytes": data.get("log_file_max_bytes"),
+            "log_file_backup_count": data.get("log_file_backup_count"),
+        },
+        # Boot discovery owns the initially connected MCP clients/tools.
+        "mcp": data.get("mcp"),
+        # The SSRF resolver snapshots this trust boundary into module state.
+        "tools_runtime": {
+            "trusted_fake_ip_cidrs": tools.get("trusted_fake_ip_cidrs"),
+        },
+        # SkillLoader resolves its discovery layers once during boot. Keep
+        # filter settings out: those are intentionally read live per turn.
+        "skill_loader": {
+            "workspace_dir": data.get("workspace_dir"),
+            "allow_bundled": skills.get("allow_bundled"),
+            "managed_dir": skills.get("managed_dir"),
+            "extra_dirs": skills.get("extra_dirs"),
+        },
+        # The watcher and heartbeat ToolContext capture these paths/posture.
+        "heartbeat_watcher": {
+            "config_path": heartbeat.get("config_path"),
+            "workspace_dir": data.get("workspace_dir"),
+            "workspace_strict": data.get("workspace_strict"),
+        },
+        "diagnostics": data.get("diagnostics_enabled"),
     }
 
 
@@ -270,17 +355,101 @@ def _restart_required(
     old_sandbox_posture_fingerprint: dict[str, Any],
     new_config: Any,
     old_bind_fingerprint: dict[str, Any] | None = None,
+    old_boot_runtime_fingerprints: dict[str, Any] | None = None,
+    changed_paths: set[str] | None = None,
 ) -> bool:
-    return (
-        old_memory_fingerprint != _memory_restart_fingerprint(new_config)
-        or old_channels_fingerprint != _channels_restart_fingerprint(new_config)
-        or old_sandbox_posture_fingerprint
-        != _sandbox_posture_restart_fingerprint(new_config)
-        or (
-            old_bind_fingerprint is not None
-            and old_bind_fingerprint != _bind_restart_fingerprint(new_config)
+    return bool(
+        _restart_reasons(
+            old_memory_fingerprint=old_memory_fingerprint,
+            old_channels_fingerprint=old_channels_fingerprint,
+            old_sandbox_posture_fingerprint=old_sandbox_posture_fingerprint,
+            old_bind_fingerprint=old_bind_fingerprint,
+            old_boot_runtime_fingerprints=old_boot_runtime_fingerprints,
+            changed_paths=changed_paths,
+            new_config=new_config,
         )
     )
+
+
+def _restart_reasons(
+    *,
+    old_memory_fingerprint: dict[str, Any],
+    old_channels_fingerprint: Any,
+    old_sandbox_posture_fingerprint: dict[str, Any],
+    new_config: Any,
+    old_bind_fingerprint: dict[str, Any] | None = None,
+    old_boot_runtime_fingerprints: dict[str, Any] | None = None,
+    changed_paths: set[str] | None = None,
+) -> list[str]:
+    reasons: list[str] = []
+    if old_memory_fingerprint != _memory_restart_fingerprint(new_config):
+        reasons.append("memory")
+    if old_channels_fingerprint != _channels_restart_fingerprint(new_config):
+        reasons.append("channels")
+    if old_sandbox_posture_fingerprint != _sandbox_posture_restart_fingerprint(new_config):
+        reasons.append("sandbox")
+    if (
+        old_bind_fingerprint is not None
+        and old_bind_fingerprint != _bind_restart_fingerprint(new_config)
+    ):
+        reasons.append("gateway_bind")
+    if old_boot_runtime_fingerprints is not None:
+        new_boot = _boot_runtime_restart_fingerprints(new_config)
+        for name, old_value in old_boot_runtime_fingerprints.items():
+            if old_value != new_boot.get(name):
+                reasons.append(name)
+    if not reasons and _has_unproven_live_change(changed_paths or set()):
+        reasons.append("config")
+    return reasons
+
+
+def _has_unproven_live_change(changed_paths: set[str]) -> bool:
+    """Fail safe: unknown config changes require restart by default.
+
+    Only paths with a concrete hot adapter or an audited live-read consumer
+    are exempt. Work on leaf paths so a changed parent such as ``memory`` does
+    not hide an explicitly allowlisted live child.
+    """
+    leaves = {
+        path
+        for path in changed_paths
+        if not any(other.startswith(f"{path}.") for other in changed_paths if other != path)
+    }
+    hot_prefixes = ("llm", "image_generation", "audio")
+    search_paths = {
+        "search_provider",
+        "search_api_key",
+        "search_api_key_env",
+        "search_max_results",
+        "search_proxy",
+        "search_use_env_proxy",
+        "search_fallback_policy",
+        "search_diagnostics",
+    }
+    live_paths = {
+        *_SAFE_WRITE_PATCH_PATHS,
+        "skills.filter_top_k",
+        "skills.filter_strategy",
+        "skills.filter_embedding_model",
+        "skills.max_skills_prompt_chars",
+        "skills.injection_mode",
+        "task_runtime.pending_overflow_policy_per_channel",
+        "task_runtime.stream_relay_coalesce_ms",
+        "task_runtime.stream_relay_coalesce_chars",
+        "updates.notify",
+        "memory.curated_memory_char_limit",
+        "memory.curated_user_char_limit",
+        "memory.inject_limit",
+    }
+    for path in leaves:
+        if path in search_paths or path in live_paths or path.startswith("rate_limit."):
+            continue
+        if any(path == prefix or path.startswith(f"{prefix}.") for prefix in hot_prefixes):
+            continue
+        if path.startswith("agentos_router.") and path != "agentos_router.require_router_runtime":
+            continue
+        return True
+    return False
 
 
 def _validate_memory_embedding_semantics(config: Any) -> None:
@@ -293,45 +462,17 @@ def _validate_memory_embedding_semantics(config: Any) -> None:
 
 
 def _sync_provider_selector(ctx: RpcContext, config: Any) -> None:
-    llm_cfg = getattr(config, "llm", None)
-    if llm_cfg is None:
-        return
-
-    from agentos.gateway.llm_runtime import resolve_llm_runtime_config
-    from agentos.provider.selector import ProviderConfig
-
-    runtime = resolve_llm_runtime_config(config)
-    selector = getattr(ctx, "provider_selector", None)
-    if selector is None or not hasattr(selector, "sync_primary"):
-        return
-
-    selector.sync_primary(
-        ProviderConfig(
-            provider=runtime.provider,
-            model=runtime.model,
-            api_key=runtime.api_key,
-            base_url=runtime.base_url,
-            proxy=runtime.proxy,
-            provider_routing=runtime.provider_routing,
-        )
-    )
-
-
-def _sync_image_generation(config: Any) -> None:
-    from agentos.tools.builtin.media import configure_audio, configure_image_generation
-
-    configure_image_generation(
-        getattr(config, "image_generation", None),
-        llm_config=getattr(config, "llm", None),
-        agentos_router_config=getattr(config, "agentos_router", None),
-    )
-    configure_audio(getattr(config, "audio", None))
+    sync_provider_selector(ctx, config)
 
 
 # Read-only paths that cannot be modified via config.set/patch/apply.
-# host/port: bind posture is CLI-only (agentos gateway run --bind / --port),
-# so the config UI/RPC can never persist an unsafe public-bind config.
-_READONLY_PATHS = frozenset({"auth.token", "auth.password", "host", "port"})
+# host/port: bind posture is CLI-only (agentos gateway run --bind / --port).
+# auth credentials are provisioned through the guarded CLI flow, and
+# config_path is the boot-selected persistence target rather than user data.
+_BIND_READONLY_PATHS = frozenset({"host", "port"})
+_AUTH_CREDENTIAL_PATHS = frozenset({"auth.token", "auth.password"})
+_TARGET_READONLY_PATHS = frozenset({"config_path", "version"})
+_READONLY_PATHS = _BIND_READONLY_PATHS | _AUTH_CREDENTIAL_PATHS | _TARGET_READONLY_PATHS
 _SAFE_WRITE_PATCH_PATHS = frozenset(
     {
         "skills.filter_enabled",
@@ -348,17 +489,57 @@ _SAFE_WRITE_PATCH_PATHS = frozenset(
 )
 
 
-def _preserve_readonly_bind(payload: dict, config: Any) -> dict:
-    """Copy the RUNNING host/port into *payload* — bind posture is CLI-only.
+def _value_at_path(payload: dict[str, Any], path: str) -> Any:
+    try:
+        return _resolve_path(payload, path)
+    except KeyError:
+        return None
 
-    Preserve, do not reject: a UI full-config round-trip that echoes the
-    current host must not fail, and a submitted host/port must never replace
-    the running one.
+
+def _has_path(payload: dict[str, Any], path: str) -> bool:
+    node: Any = payload
+    for part in path.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return False
+        node = node[part]
+    return True
+
+
+def _assert_auth_credentials_unchanged(
+    payload: dict[str, Any],
+    source: dict[str, Any],
+    *,
+    only_present: bool = False,
+) -> None:
+    """Reject direct credential rotation while allowing untouched round-trips."""
+    for path in sorted(_AUTH_CREDENTIAL_PATHS):
+        if only_present and not _has_path(payload, path):
+            continue
+        if _value_at_path(payload, path) != _value_at_path(source, path):
+            raise ValueError(
+                f"Path is read-only: {path}; provision gateway credentials through the CLI"
+            )
+
+
+def _preserve_readonly_values(payload: dict, config: Any) -> dict:
+    """Copy every runtime-owned/read-only value from the active config.
+
+    Full-object clients echo these fields, so preserve instead of rejecting at
+    that boundary. Direct set/dot-path credential or target edits are rejected
+    separately with an explicit error.
     """
     payload = dict(payload)
     if config is not None:
         payload["host"] = config.host
         payload["port"] = config.port
+        payload["config_path"] = getattr(config, "config_path", None)
+        payload["version"] = getattr(config, "version", None)
+        auth = dict(payload.get("auth") or {})
+        auth["token"] = getattr(config.auth, "token", None)
+        auth["password"] = getattr(config.auth, "password", None)
+        payload["auth"] = auth
+    else:
+        payload.pop("config_path", None)
     return payload
 
 
@@ -400,6 +581,47 @@ def _deep_merge(base: dict, patch: dict) -> dict:
     return result
 
 
+@_d.method("config.snapshot", scope="operator.read")
+async def _handle_config_snapshot(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    """Return one coherent, redacted setup/config view for control surfaces."""
+    if params is not None and not isinstance(params, dict):
+        raise ValueError("params must be an object")
+
+    from agentos.gateway.rpc_onboarding import _active_config, _status_payload
+    from agentos.onboarding.setup_engine import setup_catalog_payload
+
+    config = _active_config(ctx)
+    status = _status_payload(ctx, config)
+    sections = dict(status.get("sections") or {})
+    pending_restart, restart_reasons = pending_restart_metadata(config)
+    disk_state = config_disk_state(config)
+    public_config = (
+        config.to_public_dict()
+        if hasattr(config, "to_public_dict")
+        else config.model_dump()
+        if hasattr(config, "model_dump")
+        else {}
+    )
+    return {
+        "config": public_config,
+        "catalog": setup_catalog_payload(),
+        "status": status,
+        "readiness": {
+            "coreReady": sections.get("llm") == "ok",
+            "runtimeReady": not bool(status.get("needsOnboarding", True)),
+            "needsOnboarding": bool(status.get("needsOnboarding", True)),
+            "sections": sections,
+            "sectionDetails": dict(status.get("sectionDetails") or {}),
+        },
+        "revision": disk_state.revision,
+        "configPath": status.get("configPath") or getattr(config, "config_path", None),
+        "pendingRestart": pending_restart,
+        "restartReasons": restart_reasons,
+        "diskDiverged": disk_state.disk_diverged,
+        "writeBlocked": disk_state.write_blocked,
+    }
+
+
 @_d.method("config.set", scope="operator.admin")
 async def _handle_config_set(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     if not isinstance(params, dict) or "path" not in params or "value" not in params:
@@ -416,7 +638,9 @@ async def _handle_config_set(params: dict | None, ctx: RpcContext) -> dict[str, 
     old_channels_fingerprint = _channels_restart_fingerprint(ctx.config)
     old_sandbox_posture_fingerprint = _sandbox_posture_restart_fingerprint(ctx.config)
     old_bind_fingerprint = _bind_restart_fingerprint(ctx.config)
+    old_boot_runtime_fingerprints = _boot_runtime_restart_fingerprints(ctx.config)
     cfg_dict = ctx.config.model_dump() if hasattr(ctx.config, "model_dump") else {}
+    source_cfg_dict = copy.deepcopy(cfg_dict) if isinstance(cfg_dict, dict) else {}
     # Validate path exists
     source_value = _resolve_path(cfg_dict, path)
     value = params["value"]
@@ -427,6 +651,8 @@ async def _handle_config_set(params: dict | None, ctx: RpcContext) -> dict[str, 
         )
     restored_value, redacted_paths = _restore_redacted_values(value, source_value, path)
     _set_path(cfg_dict, path, restored_value)
+    _assert_auth_credentials_unchanged(cfg_dict, source_cfg_dict)
+    cfg_dict = _preserve_readonly_values(cfg_dict, ctx.config)
 
     # Re-validate full config
     from agentos.gateway.config import GatewayConfig
@@ -441,19 +667,28 @@ async def _handle_config_set(params: dict | None, ctx: RpcContext) -> dict[str, 
     # and freezes a transient CLI bind. Subtract them unconditionally.
     explicit_paths = ({path} | _collect_paths(value, path)) - _READONLY_PATHS
     _clear_runtime_secret_paths(new_config, explicit_paths - redacted_paths)
-    _sync_provider_selector(ctx, new_config)
-    _update_config_in_place(ctx.config, new_config)
-    _sync_image_generation(new_config)
-    _persist_config(ctx.config, explicit_paths=explicit_paths)
-    return {
-        "restartRequired": _restart_required(
+    changed_paths = diff_paths(
+        ctx.config.model_dump(mode="python"),
+        new_config.model_dump(mode="python"),
+    )
+    result = commit_config(
+        ctx,
+        new_config,
+        source_config=ctx.config,
+        explicit_paths=explicit_paths,
+        changed_paths=changed_paths,
+        expected=expected_revision(params),
+        restart_reasons=_restart_reasons(
             old_memory_fingerprint=old_memory_fingerprint,
             old_channels_fingerprint=old_channels_fingerprint,
             old_sandbox_posture_fingerprint=old_sandbox_posture_fingerprint,
             old_bind_fingerprint=old_bind_fingerprint,
+            old_boot_runtime_fingerprints=old_boot_runtime_fingerprints,
+            changed_paths=changed_paths,
             new_config=new_config,
-        )
-    }
+        ),
+    )
+    return {"restartRequired": result.restart_required}
 
 
 @_d.method("config.patch", scope="operator.admin")
@@ -475,13 +710,18 @@ async def _handle_config_patch(params: dict | None, ctx: RpcContext) -> dict[str
     old_channels_fingerprint = _channels_restart_fingerprint(ctx.config)
     old_sandbox_posture_fingerprint = _sandbox_posture_restart_fingerprint(ctx.config)
     old_bind_fingerprint = _bind_restart_fingerprint(ctx.config)
+    old_boot_runtime_fingerprints = _boot_runtime_restart_fingerprints(ctx.config)
     cfg_dict = ctx.config.model_dump() if hasattr(ctx.config, "model_dump") else {}
     source_cfg_dict = copy.deepcopy(cfg_dict) if isinstance(cfg_dict, dict) else {}
     redacted_paths: set[str] = set()
 
     # Apply dot-path patches (e.g. {"skills.filter_enabled": true})
     for path, value in dot_patches.items():
-        if path in _READONLY_PATHS:
+        if path in _BIND_READONLY_PATHS:
+            continue
+        if path in _TARGET_READONLY_PATHS:
+            if value != _value_at_path(source_cfg_dict, path):
+                raise ValueError(f"Path is read-only: {path}")
             continue
         if value == _REDACTED_PUBLIC_VALUE and _is_sensitive_redacted_path(path):
             raise ValueError(
@@ -501,9 +741,10 @@ async def _handle_config_patch(params: dict | None, ctx: RpcContext) -> dict[str
         patch_data, merge_restored_paths = _restore_redacted_values(patch_data, source_cfg_dict)
         redacted_paths.update(merge_restored_paths)
         cfg_dict = _deep_merge(cfg_dict, patch_data)
-        # The merge path bypasses the per-path _READONLY_PATHS skip above, so
-        # re-assert the running bind posture (host/port are CLI-only).
-        cfg_dict = _preserve_readonly_bind(cfg_dict, ctx.config)
+    _assert_auth_credentials_unchanged(cfg_dict, source_cfg_dict)
+    # Merge/nested patches can carry read-only fields without naming their dot
+    # paths directly. Re-assert every runtime-owned value before validation.
+    cfg_dict = _preserve_readonly_values(cfg_dict, ctx.config)
 
     explicit_paths = set(dot_patches.keys()) | _collect_paths(patch_data)
     for path, value in dot_patches.items():
@@ -522,22 +763,27 @@ async def _handle_config_patch(params: dict | None, ctx: RpcContext) -> dict[str
         _validate_memory_embedding_semantics(new_config)
     _inherit_runtime_secrets(ctx.config, new_config)
     _clear_runtime_secret_paths(new_config, explicit_paths - redacted_paths)
-
-    _sync_provider_selector(ctx, new_config)
-    # Update in-memory config so subsequent requests see changes immediately
-    _update_config_in_place(ctx.config, new_config)
-    _sync_image_generation(new_config)
-
-    _persist_config(ctx.config, explicit_paths=explicit_paths)
-    return {
-        "patched": list(dot_patches.keys()) + (["(merge)"] if patch_data else []),
-        "restartRequired": _restart_required(
+    changed_paths = diff_paths(source_cfg_dict, new_config.model_dump(mode="python"))
+    result = commit_config(
+        ctx,
+        new_config,
+        source_config=ctx.config,
+        explicit_paths=explicit_paths,
+        changed_paths=changed_paths,
+        expected=expected_revision(params),
+        restart_reasons=_restart_reasons(
             old_memory_fingerprint=old_memory_fingerprint,
             old_channels_fingerprint=old_channels_fingerprint,
             old_sandbox_posture_fingerprint=old_sandbox_posture_fingerprint,
             old_bind_fingerprint=old_bind_fingerprint,
+            old_boot_runtime_fingerprints=old_boot_runtime_fingerprints,
+            changed_paths=changed_paths,
             new_config=new_config,
         ),
+    )
+    return {
+        "patched": list(dot_patches.keys()) + (["(merge)"] if patch_data else []),
+        "restartRequired": result.restart_required,
     }
 
 
@@ -600,44 +846,46 @@ async def _handle_config_apply(params: dict | None, ctx: RpcContext) -> dict[str
         # so an echoed transient posture never freezes. (A form-mode config.patch
         # sends only the dirty keys, which are not in the override map.)
         explicit_paths = _collect_paths(config_payload) - set(get_runtime_overrides())
-    if ctx.config is not None and not config_payload.get("config_path"):
-        config_payload["config_path"] = getattr(ctx.config, "config_path", None)
-    # Full replace preserves the RUNNING bind posture (host/port are CLI-only).
-    config_payload = _preserve_readonly_bind(config_payload, ctx.config)
+    explicit_paths -= _READONLY_PATHS
 
     old_memory_fingerprint = _memory_restart_fingerprint(ctx.config)
     old_channels_fingerprint = _channels_restart_fingerprint(ctx.config)
     old_sandbox_posture_fingerprint = _sandbox_posture_restart_fingerprint(ctx.config)
     old_bind_fingerprint = _bind_restart_fingerprint(ctx.config)
+    old_boot_runtime_fingerprints = _boot_runtime_restart_fingerprints(ctx.config)
     old_payload = (
         ctx.config.model_dump(mode="python")
         if ctx.config is not None and hasattr(ctx.config, "model_dump")
         else {}
     )
     config_payload, redacted_paths = _restore_redacted_values(config_payload, old_payload)
+    _assert_auth_credentials_unchanged(config_payload, old_payload, only_present=True)
+    config_payload = _preserve_readonly_values(config_payload, ctx.config)
 
     # Validate and persist the full replacement config
     new_config = GatewayConfig(**config_payload)
     _validate_memory_embedding_semantics(new_config)
     _inherit_runtime_secrets(ctx.config, new_config)
     _clear_runtime_secret_paths(new_config, _collect_paths(config_payload) - redacted_paths)
-    _sync_provider_selector(ctx, new_config)
-    if ctx.config is not None:
-        _update_config_in_place(ctx.config, new_config)
-    _sync_image_generation(new_config)
-    _persist_config(
-        ctx.config if ctx.config is not None else new_config,
+    changed_paths = diff_paths(old_payload, new_config.model_dump(mode="python"))
+    result = commit_config(
+        ctx,
+        new_config,
+        source_config=ctx.config,
         explicit_paths=explicit_paths,
-    )
-    return {
-        "restartRequired": _restart_required(
+        changed_paths=changed_paths,
+        expected=expected_revision(params),
+        restart_reasons=_restart_reasons(
             old_memory_fingerprint=old_memory_fingerprint,
             old_channels_fingerprint=old_channels_fingerprint,
             old_sandbox_posture_fingerprint=old_sandbox_posture_fingerprint,
             old_bind_fingerprint=old_bind_fingerprint,
+            old_boot_runtime_fingerprints=old_boot_runtime_fingerprints,
+            changed_paths=changed_paths,
             new_config=new_config,
-        )
-    }
+        ),
+    )
+    return {"restartRequired": result.restart_required}
 
 
 @_d.method("config.schema", scope="operator.admin")

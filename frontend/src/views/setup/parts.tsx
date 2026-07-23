@@ -2,6 +2,8 @@
 // "what you need" list, capability readiness badge, section panel head, and the
 // CLI env-recovery command row. Kept dumb — all decisions live in logic.ts and
 // each section owns its state; these only render.
+import { CheckIcon, ChevronDownIcon } from 'lucide-react'
+import type { ReactNode, SelectHTMLAttributes } from 'react'
 import { CommandLine } from '@/components/CommandLine'
 import { capabilityBadge, type FieldSpec, type OnboardingStatus } from './logic'
 
@@ -52,6 +54,48 @@ export function PanelHead({ title, subtitle }: { title: string; subtitle: React.
   )
 }
 
+export function SetupSelect({ children, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+  return (
+    <span className="setup-select">
+      <select {...props}>{children}</select>
+      <ChevronDownIcon aria-hidden="true" size={16} strokeWidth={2} />
+    </span>
+  )
+}
+
+export function SetupCheckbox({
+  ariaLabel,
+  checked,
+  className = '',
+  disabled = false,
+  children,
+  onChange,
+}: {
+  ariaLabel: string
+  checked: boolean
+  className?: string
+  disabled?: boolean
+  children: ReactNode
+  onChange: (checked: boolean) => void
+}) {
+  return (
+    <label className={`setup-check ${className}`.trim()}>
+      <input
+        className="setup-check__input"
+        type="checkbox"
+        aria-label={ariaLabel}
+        checked={checked}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span className="setup-check__control" aria-hidden="true">
+        <CheckIcon size={14} strokeWidth={2.5} />
+      </span>
+      <span className="setup-check__label">{children}</span>
+    </label>
+  )
+}
+
 /**
  * setup.js:1290-1310 — a catalog-driven field. Secrets render type=password with
  * NO value (never echoed/logged). Value/onChange are controlled by the section.
@@ -80,19 +124,13 @@ export function SetupField({
 
   if (field.type === 'bool') {
     return (
-      <label className="setup-check">
-        <input
-          type="checkbox"
-          aria-label={field.label || field.name}
-          checked={checked}
-          onChange={(e) => onToggle(e.target.checked)}
-        />
-        <span>
+      <SetupCheckbox ariaLabel={field.label || field.name} checked={checked} onChange={onToggle}>
+        <>
           {field.label}
           {required}
           {desc}
-        </span>
-      </label>
+        </>
+      </SetupCheckbox>
     )
   }
 
@@ -104,13 +142,13 @@ export function SetupField({
           {required}
         </span>
         {desc}
-        <select value={value} onChange={(e) => onChange(e.target.value)}>
+        <SetupSelect value={value} onChange={(e) => onChange(e.target.value)}>
           {(field.choices || []).map((choice) => (
             <option key={choice} value={choice}>
               {choice}
             </option>
           ))}
-        </select>
+        </SetupSelect>
       </label>
     )
   }

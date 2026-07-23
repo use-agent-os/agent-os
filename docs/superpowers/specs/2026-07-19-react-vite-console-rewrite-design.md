@@ -4,6 +4,17 @@ Date: 2026-07-19
 Status: Approved design, pending implementation plan
 Branch: `worktree-fe-core-swap` (to be rebranded `feat/...` at PR time)
 
+> **Current implementation note (2026-07-23).** The original migration kept
+> the 13 legacy route contracts described below. The current console also has a
+> canonical `/settings` **Agent setup** workspace: `/setup` opens its Guided
+> mode and `/config` opens Advanced mode for compatibility. The sidebar exposes
+> one Agent setup item. A read-only `config.snapshot` RPC supplies a coherent,
+> redacted setup/config snapshot; existing specialized onboarding mutations and
+> `config.patch` / `config.apply` remain the write contracts. Those writes now
+> share a persist-first transaction boundary, optional revision/CAS, fail-closed
+> disk-divergence checks, readonly runtime-owned paths, and conservative restart
+> metadata.
+
 ## 1. Goal
 
 Replace the current vanilla-JS control console (~21,200 lines JS, ~13,500
@@ -35,9 +46,11 @@ on shadcn components — not a pixel-faithful port.
   `{base_path}/static` (`_CachedStaticFiles`, 30-day Cache-Control,
   `?v=` cache-busting), Jinja2 `templates/index.html` with SPA fallback,
   bootstrap data injected as data-attributes on `#agentos-data`.
-- Backend interface: WebSocket-RPC at `/ws` (plus `/api/*` REST). The
-  rewrite changes **no** RPC surface — the new FE is a different consumer
-  of the same protocol.
+- Backend interface: WebSocket-RPC at `/ws` (plus `/api/*` REST). The baseline
+  rewrite was a different consumer of the same protocol. The later Agent setup
+  consolidation adds the read-only `config.snapshot` composite and hardens the
+  existing mutation contracts with shared transactional/CAS semantics; it does
+  not introduce a broader generic write surface.
 
 ## 3. Repository layout & packaging
 
@@ -51,8 +64,9 @@ frontend/                          # React source — NOT packaged in the wheel
     app/                           # AppShell, React Router routes, providers
     lib/                           # WsRpcClient, bootstrap, markdown, icons, utils
     components/                    # shared UI incl. shadcn/ui components (code-owned)
-    views/                         # 13 view modules: overview, health, chat, sessions,
-                                   # agents, cron, usage, config, setup, channels,
+    views/                         # legacy behavior modules plus additive surfaces:
+                                   # overview, health, chat, sessions, agents, cron,
+                                   # usage, config, setup, settings, channels, MCP,
                                    # approvals, skills, logs
     styles/                        # Tailwind entry + design tokens (CSS variables)
 
@@ -114,6 +128,38 @@ Packaging rules:
 - **Layer 3 — Cutover & removal:** point `control_ui.py` at `dist/`;
   delete `static/js/`, `static/css/`, `static/vendor/`, Jinja template;
   update docs and notices; wire release pipeline.
+
+Post-rewrite information architecture composes the Layer-1 Config and Setup
+modules inside `views/settings/SettingsPage.tsx`. Both surfaces stay mounted so
+switching Guided/Advanced does not discard drafts. The legacy URLs remain
+registered as compatibility entry points rather than duplicate navigation.
+
+### Agent setup data and write contract
+
+- `SettingsPage` owns one `config.snapshot` query and passes that exact object
+  to Guided and Advanced. `/settings` is canonical; `/setup` and `/config` only
+  choose the initial mode. Local tab switching does not churn routes or remount
+  either editor.
+- The snapshot is read-scoped and redacted. It includes catalog, status,
+  readiness, active public config, config target, revision, pending-restart
+  metadata, and `diskDiverged` / `writeBlocked`. Compatibility reads are used
+  only when the server returns `METHOD_NOT_FOUND`; malformed or failed snapshot
+  calls remain visible errors.
+- Guided tracks a base revision per capability card; Advanced tracks one base
+  revision per Form/YAML draft. A changed upstream revision preserves the local
+  draft for review but disables Save until explicit discard/reload. Successful
+  Guided saves clear only their committed card, including one-time secrets.
+- All Config and onboarding writers validate a clone, verify CAS/disk state,
+  atomically persist, then update the running object and hot-apply supported
+  adapters. Persistence failure cannot mutate the live runtime. A post-persist
+  hot-apply failure records a pending restart reason.
+- Semantic divergence between the running config and its file is fail-closed:
+  the snapshot returns a null revision with `diskDiverged` and `writeBlocked`,
+  the workspace shows one global **Out of sync** warning, and both editors
+  disable writes until the gateway reloads/restarts from that file.
+- `host`, `port`, `config_path`, `auth.token`, and `auth.password` are readonly
+  on the WebSocket config mutation surface. Restart metadata errs on the safe
+  side for settings captured by boot-created services and failed hot applies.
 
 ## 6. Migration protocol — nothing left behind
 
@@ -210,8 +256,11 @@ and the Jinja template — in the same PR that flips serving to `dist/`.
 - **FE gate:** `tsc --noEmit && eslint && prettier --check && vitest run`
   — added to CI and documented as a new FE lane in AGENTS.md (Node
   version pinned; Python-only changes don't require it).
-- **Python gate unchanged:** existing gateway tests (2,358 passing at
-  baseline in this worktree) must stay green; no RPC surface changes.
+- **Python gate:** the existing gateway suite remains mandatory. The later
+  `config.snapshot` composite, persist-first commit boundary, revision-aware
+  writes, disk-divergence blocking, readonly paths, and restart metadata add
+  focused gateway regression tests; the original baseline count is historical,
+  not a target.
 
 ## 9. Open-source obligations
 
@@ -229,7 +278,8 @@ and the Jinja template — in the same PR that flips serving to `dist/`.
 ## 10. Out of scope
 
 - Playwright E2E (optional follow-up).
-- Any RPC/backend behavior change.
+- Backend feature expansion beyond the additive Agent setup read composite and
+  write-hardening contract documented above.
 - Visual redesign beyond what adopting shadcn/ui implies; feature additions.
 - `tokenViz` widget stays behind its feature flag: the flag and the legacy
   behavior are ported (widget off by default), not redesigned.
