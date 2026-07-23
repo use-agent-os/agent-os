@@ -3,6 +3,7 @@
 # Installer contract:
 #   - installs into a user-owned prefix (never Program Files or system32)
 #   - prefers uv tool install; falls back to pip --user; errors clearly if neither exists
+#   - rebuilds the bundled React control UI with Node.js 22+ before installing
 #   - defaults to the "recommended" runtime profile (memory + bundled BGE
 #     embedding assets) and allows `$env:AGENTOS_INSTALL_PROFILE="core"` to opt back down
 #   - on Windows, best-effort installs Microsoft Visual C++ Redistributable
@@ -24,6 +25,9 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+$repoRoot = Split-Path -Parent $PSScriptRoot
+Set-Location -LiteralPath $repoRoot
 
 # --- prefix resolution ------------------------------------------------------
 
@@ -50,8 +54,6 @@ $profile = if ($Profile) {
 }
 
 $validExtras = @(
-    'matrix',
-    'matrix-e2e',
     'document-extras'
 )
 
@@ -163,6 +165,60 @@ function Test-EmbeddingAssets {
     }
 }
 
+function Test-ControlUiToolchain {
+    param(
+        [switch]$WarnOnly
+    )
+
+    $problems = New-Object System.Collections.Generic.List[string]
+    $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $nodeCommand) {
+        $problems.Add('Node.js was not found on PATH.')
+    }
+    else {
+        $nodeVersionOutput = @(& node --version 2>$null)
+        $nodeVersion = ($nodeVersionOutput -join '').Trim()
+        if ($LASTEXITCODE -ne 0 -or -not $nodeVersion) {
+            $problems.Add('Node.js is present but could not be executed.')
+        }
+        else {
+            $nodeVersionMatch = [regex]::Match($nodeVersion, '^v?(?<major>\d+)(?:\.|$)')
+            if (-not $nodeVersionMatch.Success) {
+                $problems.Add('Could not determine the installed Node.js version.')
+            }
+            elseif ([int]$nodeVersionMatch.Groups['major'].Value -lt 22) {
+                $problems.Add("Node.js $nodeVersion is too old; version 22 or newer is required.")
+            }
+        }
+    }
+
+    $npmCommand = Get-Command npm -ErrorAction SilentlyContinue
+    if (-not $npmCommand) {
+        $problems.Add('npm was not found on PATH.')
+    }
+    else {
+        $npmVersionOutput = @(& npm --version 2>$null)
+        $npmVersion = ($npmVersionOutput -join '').Trim()
+        if ($LASTEXITCODE -ne 0 -or -not $npmVersion) {
+            $problems.Add('npm is present but could not be executed.')
+        }
+    }
+
+    if ($problems.Count -eq 0) {
+        return
+    }
+
+    $details = $problems -join ' '
+    if ($WarnOnly) {
+        Write-Host 'install_source.ps1: dry-run note - a real source install requires Node.js 22+ and npm to build the React control UI.'
+        Write-Host "install_source.ps1: $details"
+        Write-Host 'install_source.ps1: install Node.js 22+ (including npm) and retry.'
+        return
+    }
+
+    Write-Error "install_source.ps1: Node.js 22 or newer and npm are required to build the React control UI. $details Install Node.js 22+ (including npm) and retry."
+}
+
 function Test-WindowsVCRedistInstalled {
     if (-not $script:isWindowsHost) {
         return $true
@@ -246,6 +302,18 @@ $installCmd = if ($installer -eq 'uv') {
     "python $($installArgs -join ' ')"
 }
 
+$controlUiBuildArgs = @('scripts/build_control_ui.py', 'build')
+$controlUiBuildLauncher = if (Get-Command python -ErrorAction SilentlyContinue) {
+    'python'
+} else {
+    'uv'
+}
+$controlUiBuildCmd = if ($controlUiBuildLauncher -eq 'python') {
+    "python $($controlUiBuildArgs -join ' ')"
+} else {
+    "uv run --no-project python $($controlUiBuildArgs -join ' ')"
+}
+
 # --- banner -----------------------------------------------------------------
 
 function Write-Banner {
@@ -275,8 +343,10 @@ WARNING: you have selected network-exposed default - ensure you
 }
 
 if ($dryRun) {
+    Write-Host "install_source.ps1: dry-run — would build control UI: $controlUiBuildCmd"
     Write-Host "install_source.ps1: dry-run — would run: $installCmd"
     Write-Host "install_source.ps1: dry-run — prefix: $prefix"
+    Test-ControlUiToolchain -WarnOnly
     Test-EmbeddingAssets -WarnOnly
     Write-Banner
     if ($env:AGENTOS_LISTEN -eq '0.0.0.0') {
@@ -287,8 +357,22 @@ if ($dryRun) {
 
 # --- execute ---------------------------------------------------------------
 
+Test-ControlUiToolchain
 Install-WindowsVCRedistIfNeeded
 Test-EmbeddingAssets
+
+Write-Host 'install_source.ps1: building the React control UI'
+Write-Host "install_source.ps1: running: $controlUiBuildCmd"
+if ($controlUiBuildLauncher -eq 'python') {
+    & python @controlUiBuildArgs
+}
+else {
+    & uv run --no-project python @controlUiBuildArgs
+}
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "install_source.ps1: control UI build failed with exit code $LASTEXITCODE."
+    exit $LASTEXITCODE
+}
 
 Write-Host "install_source.ps1: installing via $installer into prefix $prefix"
 Write-Host "install_source.ps1: running: $installCmd"

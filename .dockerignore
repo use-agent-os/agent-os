@@ -38,7 +38,8 @@ logs
 # --- Docs + tests NOT needed inside the runtime image -----------------------
 tests
 docs
-scripts
+scripts/*
+!scripts/build_control_ui.py
 CHANGELOG.md
 KNOWN_LIMITATIONS.md
 
@@ -56,6 +57,8 @@ install.ps1
 dist
 build
 *.egg-info
+frontend/node_modules
+frontend/coverage
 
 # --- CI / local tooling -----------------------------------------------------
 uv.lock

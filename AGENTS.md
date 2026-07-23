@@ -16,6 +16,7 @@ messaging (Web UI, CLI, chat). One shared turn loop drives every client.
 ```sh
 uv sync --extra dev --extra recommended                        # dev deps + local embeddings
 uv sync --extra dev --extra recommended --frozen               # match CI exactly
+npm --prefix frontend ci                                       # Node 22+; React console deps
 ```
 
 ## Quality gate — run before every commit / PR
@@ -23,6 +24,8 @@ uv sync --extra dev --extra recommended --frozen               # match CI exactl
 Run these in order; all must pass. This mirrors CI (`.github/workflows/ci.yml`):
 
 ```sh
+python scripts/build_control_ui.py build        # clean, build, license, verify React dist
+npm --prefix frontend run check                 # tsc, eslint, prettier, vitest
 uv run ruff check src tests                    # lint (E, F, I, N, W, UP; line-length 100)
 uv run mypy src/agentos --show-error-codes     # type check
 uv run pytest -q                               # full test suite (~490 test files)
@@ -55,6 +58,22 @@ uv run ruff format src tests                       # autofix formatting
 > A small set of pre-existing failures (some `onboard_cmd` ANSI-width tests and
 > Docker-migration tests) fail independently of your change — verify against a
 > clean tree before attributing a failure to your work.
+
+## Frontend lane (React console rewrite)
+
+The React console lives in `frontend/` (Node >= 22) and builds to
+`src/agentos/gateway/static/dist/` (gitignored; built at release).
+
+- Touched `frontend/**`? Run `cd frontend && npm run check` (tsc, eslint,
+  prettier, vitest) before committing. CI enforces this.
+- Python-only inner loops do not require Node. The final wheel/release gate does:
+  run `python scripts/build_control_ui.py build` so the artifact contains a
+  fresh verified UI and exact third-party license ledger.
+- The production gateway serves only the generated React bundle. A missing or
+  invalid bundle returns an actionable `503`; it never falls back to the
+  retired console.
+- Dev loop: `agentos gateway run` + `cd frontend && npm run dev`
+  (Vite proxies `/ws` and `/control/api` to the gateway).
 
 ## Source layout — `src/agentos/`
 

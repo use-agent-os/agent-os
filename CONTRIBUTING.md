@@ -23,10 +23,17 @@ uv sync --extra dev --extra recommended
 Run the quality gate before opening a pull request:
 
 ```sh
+python scripts/build_control_ui.py build
+npm --prefix frontend run check
 uv run ruff check src tests
+uv run mypy src/agentos --show-error-codes
 uv run pytest -q
 uv build --wheel
 ```
+
+Node.js 22 or newer is required for source installs and release-artifact
+builds. Python-only inner-loop tests do not need Node, but the final wheel gate
+does because the wheel must contain a freshly verified Control UI bundle.
 
 Default tests must be offline, deterministic, credential-free, and safe for
 forks. Do not add network, provider, browser, or channel requirements to the

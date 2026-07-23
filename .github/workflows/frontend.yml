@@ -1,0 +1,44 @@
+name: frontend
+"on":
+  pull_request:
+    paths:
+      - "frontend/**"
+      - "scripts/build_control_ui.py"
+      - "src/agentos/gateway/control_ui.py"
+      - "pyproject.toml"
+      - ".github/workflows/frontend.yml"
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - "scripts/build_control_ui.py"
+      - "src/agentos/gateway/control_ui.py"
+      - "pyproject.toml"
+      - ".github/workflows/frontend.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build and verify packaged Control UI
+        run: python scripts/build_control_ui.py build
+      - name: Check frontend source
+        working-directory: frontend
+        run: npm run check

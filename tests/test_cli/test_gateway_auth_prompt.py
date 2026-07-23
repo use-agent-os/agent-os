@@ -367,11 +367,12 @@ def test_persist_failure_warns_but_still_proceeds(tmp_path, monkeypatch) -> None
 # --- shared persistence path ----------------------------------------------
 
 
-def test_rpc_persist_path_is_the_shared_helper() -> None:
-    """The RPC config write path and the CLI prompt must share one writer."""
-    from agentos.gateway import config_persist, rpc_config
+def test_rpc_persist_path_uses_the_shared_transactional_writer() -> None:
+    """RPC writes wrap the same persistence primitive used by the CLI prompt."""
+    from agentos.gateway import config_commit, config_persist, rpc_config
 
-    assert rpc_config._persist_config is config_persist.persist_config
+    assert config_commit.persist_config is config_persist.persist_config
+    assert rpc_config.commit_config is config_commit.commit_config
 
 
 def test_persist_config_writes_toml_round_trip(tmp_path) -> None:

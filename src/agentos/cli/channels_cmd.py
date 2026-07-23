@@ -359,8 +359,12 @@ def channels_add(
         "enabled": enabled,
         "agent_id": agent_id,
     }
-    apply_channel_token(payload, type_name, token)
-    payload.update(parse_channel_field_pairs(fields, type_name))
+    try:
+        apply_channel_token(payload, type_name, token)
+        payload.update(parse_channel_field_pairs(fields, type_name))
+    except KeyError as exc:
+        typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2) from exc
 
     cfg = load_config(target)
     try:

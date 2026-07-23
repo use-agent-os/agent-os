@@ -26,16 +26,12 @@ from agentos.channels.contract import (
     normalize_channel_send_result,
     run_channel_contract,
 )
-from agentos.channels.dingtalk import DingTalkChannel, DingTalkChannelConfig
 from agentos.channels.discord import DiscordChannel, DiscordChannelConfig
 from agentos.channels.manager import ChannelManager
-from agentos.channels.matrix import MatrixChannel, MatrixChannelConfig
 from agentos.channels.msteams import MSTeamsChannel, MSTeamsChannelConfig
-from agentos.channels.qq import QQChannel, QQChannelConfig
 from agentos.channels.slack import SlackChannel
 from agentos.channels.telegram import TelegramChannel, TelegramChannelConfig
 from agentos.channels.types import IncomingMessage
-from agentos.channels.wecom import WeComChannel, WeComChannelConfig
 
 PlatformCapabilityExpectation = dict[
     str,
@@ -156,11 +152,7 @@ def test_platform_manifest_derives_honest_boundary_from_profile() -> None:
     [
         ("slack", SlackChannel(token="xoxb-token", slack_channel_id="C-default")),
         ("discord", DiscordChannel(DiscordChannelConfig(token="token"))),
-        ("dingtalk", DingTalkChannel(DingTalkChannelConfig())),
-        ("wecom", WeComChannel(WeComChannelConfig())),
-        ("qq", QQChannel(QQChannelConfig())),
         ("msteams", MSTeamsChannel(MSTeamsChannelConfig())),
-        ("matrix", MatrixChannel(MatrixChannelConfig())),
         ("telegram", TelegramChannel(TelegramChannelConfig(transport_name="webhook"))),
     ],
 )
@@ -236,36 +228,6 @@ def test_public_vendor_channels_expose_platform_manifests(
             },
         ),
         (
-            MatrixChannel(MatrixChannelConfig()),
-            {
-                ChannelPlatformCategories.FILES: (
-                    ChannelPlatformCapabilityStatus.SUPPORTED,
-                    ("media.upload", "room_send"),
-                    (),
-                ),
-                ChannelPlatformCategories.ATTACHMENTS: (
-                    ChannelPlatformCapabilityStatus.SUPPORTED,
-                    ("media.download",),
-                    (),
-                ),
-            },
-        ),
-        (
-            WeComChannel(WeComChannelConfig()),
-            {
-                ChannelPlatformCategories.FILES: (
-                    ChannelPlatformCapabilityStatus.SUPPORTED,
-                    ("media/upload", "message/send:file"),
-                    (),
-                ),
-                ChannelPlatformCategories.ATTACHMENTS: (
-                    ChannelPlatformCapabilityStatus.UNSUPPORTED,
-                    (),
-                    (),
-                ),
-            },
-        ),
-        (
             MSTeamsChannel(MSTeamsChannelConfig()),
             {
                 ChannelPlatformCategories.FILES: (
@@ -276,36 +238,6 @@ def test_public_vendor_channels_expose_platform_manifests(
                 ChannelPlatformCategories.ATTACHMENTS: (
                     ChannelPlatformCapabilityStatus.UNSUPPORTED,
                     ("Bot Framework attachments",),
-                    (),
-                ),
-            },
-        ),
-        (
-            DingTalkChannel(DingTalkChannelConfig()),
-            {
-                ChannelPlatformCategories.FILES: (
-                    ChannelPlatformCapabilityStatus.UNSUPPORTED,
-                    (),
-                    (),
-                ),
-                ChannelPlatformCategories.CARDS: (
-                    ChannelPlatformCapabilityStatus.SUPPORTED,
-                    ("MarkdownCardInstance",),
-                    (),
-                ),
-            },
-        ),
-        (
-            QQChannel(QQChannelConfig()),
-            {
-                ChannelPlatformCategories.FILES: (
-                    ChannelPlatformCapabilityStatus.UNSUPPORTED,
-                    (),
-                    (),
-                ),
-                ChannelPlatformCategories.MEDIA: (
-                    ChannelPlatformCapabilityStatus.UNSUPPORTED,
-                    (),
                     (),
                 ),
             },
@@ -332,11 +264,7 @@ def test_platform_manifests_are_provider_specific(
     [
         ("slack", SlackChannel(token="xoxb-token", slack_channel_id="C-default")),
         ("discord", DiscordChannel(DiscordChannelConfig(token="token"))),
-        ("dingtalk", DingTalkChannel(DingTalkChannelConfig())),
-        ("wecom", WeComChannel(WeComChannelConfig())),
-        ("qq", QQChannel(QQChannelConfig())),
         ("msteams", MSTeamsChannel(MSTeamsChannelConfig())),
-        ("matrix", MatrixChannel(MatrixChannelConfig())),
         ("telegram", TelegramChannel(TelegramChannelConfig(transport_name="webhook"))),
     ],
 )
@@ -388,22 +316,6 @@ def test_telegram_profile_matches_current_bot_api_adapter_surface() -> None:
     assert profile.supports(ChannelCapabilities.NATIVE_FILE_UPLOAD)
 
 
-def test_matrix_profile_matches_current_sync_adapter_surface() -> None:
-    channel = MatrixChannel(MatrixChannelConfig())
-
-    profile = channel.capability_profile
-
-    assert profile.supports(ChannelCapabilities.WEBSOCKET)
-    assert profile.supports(ChannelCapabilities.GROUP_CHAT)
-    assert profile.supports(ChannelCapabilities.MENTIONS)
-    assert profile.supports(ChannelCapabilities.MEDIA)
-    assert profile.supports(ChannelCapabilities.REPLY)
-    assert profile.supports(ChannelCapabilities.EDIT)
-    assert profile.supports(ChannelCapabilities.DELETE)
-    assert not profile.supports(ChannelCapabilities.THREAD_REPLY)
-    assert profile.supports(ChannelCapabilities.NATIVE_FILE_UPLOAD)
-
-
 def test_msteams_profile_matches_current_bot_framework_adapter_surface() -> None:
     channel = MSTeamsChannel(MSTeamsChannelConfig())
 
@@ -417,51 +329,6 @@ def test_msteams_profile_matches_current_bot_framework_adapter_surface() -> None
     assert profile.supports(ChannelCapabilities.DELETE)
     assert not profile.supports(ChannelCapabilities.NATIVE_FILE_UPLOAD)
     assert not profile.supports(ChannelCapabilities.CARD_ACTIONS)
-
-
-def test_dingtalk_profile_matches_current_stream_adapter_surface() -> None:
-    channel = DingTalkChannel(DingTalkChannelConfig())
-
-    profile = channel.capability_profile
-
-    assert profile.supports(ChannelCapabilities.WEBSOCKET)
-    assert profile.supports(ChannelCapabilities.GROUP_CHAT)
-    assert profile.supports(ChannelCapabilities.MENTIONS)
-    assert profile.supports(ChannelCapabilities.REPLY)
-    assert profile.supports(ChannelCapabilities.CARDS)
-    assert not profile.supports(ChannelCapabilities.EDIT)
-    assert not profile.supports(ChannelCapabilities.DELETE)
-    assert not profile.supports(ChannelCapabilities.NATIVE_FILE_UPLOAD)
-
-
-def test_wecom_profile_matches_current_corp_app_adapter_surface() -> None:
-    channel = WeComChannel(WeComChannelConfig())
-
-    profile = channel.capability_profile
-
-    assert profile.supports(ChannelCapabilities.WEBHOOK)
-    assert profile.supports(ChannelCapabilities.GROUP_CHAT)
-    assert profile.supports(ChannelCapabilities.MENTIONS)
-    assert profile.supports(ChannelCapabilities.REPLY)
-    assert not profile.supports(ChannelCapabilities.EDIT)
-    assert not profile.supports(ChannelCapabilities.DELETE)
-    assert profile.supports(ChannelCapabilities.NATIVE_FILE_UPLOAD)
-    assert profile.supports(ChannelCapabilities.MEDIA)
-
-
-def test_qq_profile_matches_current_official_bot_adapter_surface() -> None:
-    channel = QQChannel(QQChannelConfig())
-
-    profile = channel.capability_profile
-
-    assert profile.supports(ChannelCapabilities.WEBSOCKET)
-    assert profile.supports(ChannelCapabilities.GROUP_CHAT)
-    assert profile.supports(ChannelCapabilities.MENTIONS)
-    assert profile.supports(ChannelCapabilities.REPLY)
-    assert not profile.supports(ChannelCapabilities.EDIT)
-    assert not profile.supports(ChannelCapabilities.DELETE)
-    assert not profile.supports(ChannelCapabilities.NATIVE_FILE_UPLOAD)
-    assert not profile.supports(ChannelCapabilities.MEDIA)
 
 
 def test_group_thread_metadata_builds_thread_session_key() -> None:

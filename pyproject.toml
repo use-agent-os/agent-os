@@ -53,9 +53,6 @@ dependencies = [
     "pypdf>=4.0.0",
     "reportlab>=4.0.0",
     "python-telegram-bot>=20.0",
-    "dingtalk-stream>=0.24.3,<0.25",
-    "qq-botpy>=1.2.1,<1.3",
-    "cryptography>=42",
 ]
 
 [project.urls]
@@ -99,8 +96,6 @@ ml-router = [
 # and mem0's config-dict schema when bumping. Ollama LLM/embedder + embedded
 # Qdrant vector store come in transitively via mem0ai's own extras.
 mem0 = ["mem0ai>=0.1.70"]
-matrix = ["matrix-nio>=0.25,<0.26", "markdown>=3.0"]
-matrix-e2e = ["matrix-nio[e2e]>=0.25,<0.26", "markdown>=3.0"]
 document-extras = [
     "weasyprint>=60.0",
 ]
@@ -115,6 +110,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentos"]
+artifacts = [
+    "src/agentos/gateway/static/dist/**",
+]
 exclude = [
     "src/agentos/scheduler/templates/*.md",
     "src/agentos/skills/bundled/**/THIRD_PARTY_NOTICES.md",
@@ -126,6 +124,72 @@ exclude = [
 "migrations/" = "agentos/_migrations/"
 "src/agentos/skills/bundled/pptx/references/pptxgenjs.md" = "agentos/skills/bundled/pptx/references/pptxgenjs.md"
 "src/agentos/skills/bundled/pptx/references/python_pptx.md" = "agentos/skills/bundled/pptx/references/python_pptx.md"
+
+[tool.hatch.build.targets.sdist]
+artifacts = [
+    "src/agentos/gateway/static/dist/**",
+]
+include = [
+    "/.dockerignore",
+    "/.env.example",
+    "/.gitattributes",
+    "/.github/**",
+    "/.gitignore",
+    "/AGENTS.md",
+    "/CHANGELOG.md",
+    "/CLAUDE.md",
+    "/CODE_OF_CONDUCT.md",
+    "/CONTRIBUTING.md",
+    "/Dockerfile",
+    "/Formula/**",
+    "/LICENSE",
+    "/MIGRATION.md",
+    "/NOTICE",
+    "/README.md",
+    "/README.product.md",
+    "/README.release.md",
+    "/RELEASES.md",
+    "/SECURITY.md",
+    "/SUPPORT.md",
+    "/THIRD_PARTY_NOTICES.md",
+    "/agentos.toml.example",
+    "/assets/**",
+    "/compose.yaml",
+    "/docs/**",
+    "/frontend/**",
+    "/install.ps1",
+    "/install.sh",
+    "/migrations/**",
+    "/pyproject.toml",
+    "/scripts/**",
+    "/service-units/**",
+    "/skills-lock.json",
+    "/src/**",
+    "/start.ps1",
+    "/start.sh",
+    "/tests/**",
+    "/uv.lock",
+]
+exclude = [
+    "/.agentos/**",
+    "/.claude/**",
+    "/.codegraph/**",
+    "/.codex/**",
+    "/.mypy_cache/**",
+    "/.omc/**",
+    "/.omx/**",
+    "/.pytest_cache/**",
+    "/.ruff_cache/**",
+    "/.venv/**",
+    "/build/**",
+    "/dist/**",
+    "/frontend/coverage/**",
+    "/frontend/node_modules/**",
+    "/htmlcov/**",
+    "/node_modules/**",
+    "**/__pycache__/**",
+    "**/*.pyc",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -189,11 +253,8 @@ exclude = [
 [[tool.mypy.overrides]]
 module = [
     "botbuilder.*",
-    "botpy.*",
     "cachetools.*",
-    "dingtalk_stream.*",
     "jieba",
-    "nio.*",
     "numpy.*",
     "onnxruntime.*",
     "readability.*",

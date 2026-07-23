@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import venv
+import sys
 import zipfile
 from pathlib import Path
 
@@ -45,7 +45,16 @@ def test_wheel_contains_migration(tmp_path: Path) -> None:
 def test_installed_wheel_resolves_migrations(tmp_path: Path) -> None:
     """After pip-installing into a fresh venv, _resolve_migrations_dir() finds V010."""
     venv_dir = tmp_path / "venv"
-    venv.create(venv_dir, with_pip=True)
+    # The project requires uv and some uv-managed macOS interpreters cannot run
+    # stdlib ``ensurepip`` because their relocatable libpython is not present at
+    # the temporary venv's rpath. Let uv seed pip from its managed cache while
+    # keeping the venv pinned to the exact interpreter running this test.
+    subprocess.run(
+        ["uv", "venv", "--seed", "--python", sys.executable, str(venv_dir)],
+        check=True,
+        capture_output=True,
+        timeout=120,
+    )
     pip = venv_dir / ("Scripts" if os.name == "nt" else "bin") / "pip"
     py = venv_dir / ("Scripts" if os.name == "nt" else "bin") / "python"
 
@@ -95,9 +104,10 @@ def test_installed_wheel_resolves_migrations(tmp_path: Path) -> None:
 @pytest.mark.skipif(shutil.which("docker") is None, reason="docker not on PATH")
 @pytest.mark.skipif(os.name == "nt", reason="docker smoke uses Linux container images")
 @pytest.mark.skipif(
-    os.environ.get("AGENTOS_SKIP_DOCKER_SMOKE") == "1",
-    reason="docker smoke disabled via env",
+    os.environ.get("AGENTOS_RUN_DOCKER_SMOKE") != "1",
+    reason="live Docker registry smoke is opt-in",
 )
+@pytest.mark.slow
 def test_docker_image_resolves_migrations() -> None:
     """`docker build` + `docker run` resolves _migrations including V010.
 

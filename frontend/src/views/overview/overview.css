@@ -1,0 +1,919 @@
+/* Overview command center. One integrated system pulse leads into recent work,
+   live gateway activity, and a deliberately secondary connection utility. */
+
+.ov-stage {
+  width: 100%;
+  --ov-surface: color-mix(in srgb, var(--surface) 96%, var(--elevated));
+  --ov-soft: color-mix(in srgb, var(--surface) 78%, transparent);
+  --ov-motion-ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.ov-stage__header {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  padding: 1.125rem 0 1.375rem;
+}
+
+.ov-stage__title-block {
+  position: relative;
+  min-width: 0;
+}
+
+.ov-stage__subtitle {
+  max-width: 42rem;
+  margin-top: 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+.ov-stage__actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.ov-stage__actions svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.ov-refresh-spin {
+  animation: ov-spin 800ms linear infinite;
+}
+
+/* System pulse ---------------------------------------------------------- */
+
+.ov-command {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+  background: var(--ov-surface);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.08),
+    0 18px 48px rgba(0, 0, 0, 0.05);
+  animation: ov-surface-enter 320ms var(--ov-motion-ease) both;
+}
+
+.ov-command::before {
+  position: absolute;
+  z-index: 1;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    var(--primary),
+    color-mix(in srgb, var(--primary) 36%, transparent) 48%,
+    transparent 80%
+  );
+  content: '';
+  pointer-events: none;
+}
+
+.ov-command__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 4.25rem;
+  padding: 0.875rem 1.125rem;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.ov-command__toolbar > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+.ov-command__eyebrow,
+.ov-stat__label {
+  color: var(--dim);
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 650;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+
+.ov-command__toolbar strong {
+  color: var(--foreground);
+  font-size: 0.9375rem;
+  font-weight: 650;
+}
+
+.ov-command__cadence {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.ov-command__cadence > span {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: var(--radius-pill);
+  background: var(--ok);
+  box-shadow: 0 0 0 0.22rem color-mix(in srgb, var(--ok) 10%, transparent);
+}
+
+.ov-command__body {
+  display: grid;
+  grid-template-columns: minmax(17rem, 0.88fr) minmax(30rem, 1.55fr);
+  min-height: 13.5rem;
+}
+
+.ov-command__metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.control-surface .ov-command .ov-stat {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.35rem;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 1.15rem 1.25rem;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  box-shadow: none;
+}
+
+.control-surface .ov-command button.ov-stat {
+  cursor: pointer;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease;
+}
+
+.control-surface .ov-command button.ov-stat:hover {
+  background: color-mix(in srgb, var(--foreground) 3.5%, transparent);
+}
+
+.control-surface .ov-command button.ov-stat:focus-visible {
+  z-index: 2;
+  outline: 2px solid var(--ring);
+  outline-offset: -3px;
+}
+
+.ov-command__metrics .ov-stat {
+  border-left: 1px solid var(--hairline);
+}
+
+.ov-command__metrics .ov-stat:nth-child(n + 3) {
+  border-top: 1px solid var(--hairline);
+}
+
+.control-surface .ov-command .ov-stat--hero {
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 1.5rem;
+  border-right: 1px solid var(--hairline);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--tone, var(--dim)) 76%, transparent);
+}
+
+.ov-stat__icon {
+  display: grid;
+  width: 2.2rem;
+  height: 2.2rem;
+  margin-bottom: auto;
+  place-items: center;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--background) 42%, transparent);
+  color: var(--muted-foreground);
+}
+
+.ov-stat--hero .ov-stat__icon {
+  width: 3.1rem;
+  height: 3.1rem;
+  margin-bottom: 0.45rem;
+  border-color: color-mix(in srgb, var(--tone, var(--dim)) 28%, var(--border));
+  background: color-mix(in srgb, var(--tone, var(--dim)) 9%, transparent);
+  color: var(--tone, var(--dim));
+}
+
+.ov-stat__icon svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  stroke-width: 1.75;
+}
+
+.ov-stat--hero .ov-stat__icon svg {
+  width: 1.4rem;
+  height: 1.4rem;
+}
+
+.control-surface .ov-command .ov-stat__value {
+  overflow: hidden;
+  margin-top: auto;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: clamp(1.55rem, 1.25rem + 0.75vw, 2.15rem);
+  font-variant-numeric: tabular-nums;
+  font-weight: 660;
+  letter-spacing: -0.045em;
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: ov-value-enter 280ms var(--ov-motion-ease) both;
+}
+
+.control-surface .ov-command .ov-stat__value--status {
+  color: var(--tone, var(--foreground));
+  font-family: var(--font-sans);
+  font-size: clamp(1.85rem, 1.45rem + 1vw, 2.75rem);
+  font-weight: 690;
+  letter-spacing: -0.05em;
+  white-space: normal;
+}
+
+.control-surface .ov-command .ov-stat__value--mono {
+  font-size: clamp(1.2rem, 1.05rem + 0.45vw, 1.65rem);
+}
+
+.ov-stat__hint {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-stat--hero .ov-stat__hint {
+  max-width: 30rem;
+  white-space: normal;
+}
+
+.ov-stat__arrow {
+  position: absolute;
+  right: 1rem;
+  bottom: 1rem;
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  color: var(--dim);
+  transition:
+    background-color 180ms ease,
+    color 180ms ease,
+    transform 180ms var(--ov-motion-ease);
+}
+
+.ov-stat__arrow svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.ov-stat:hover .ov-stat__arrow {
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  color: var(--primary);
+  transform: translateX(0.15rem);
+}
+
+.ov-stat:not(.ov-stat--hero) .ov-stat__hint {
+  padding-right: 2rem;
+}
+
+.ov-stat.is-loading .ov-stat__value,
+.ov-stat.is-loading .ov-stat__hint {
+  opacity: 0.46;
+}
+
+.ov-stat.is-loading .ov-stat__icon {
+  animation: ov-loading-pulse 1.1s ease-in-out infinite;
+}
+
+/* Operational workspace ------------------------------------------------ */
+
+.ov-grid {
+  display: grid;
+  grid-template-areas:
+    'recent events'
+    'connection connection';
+  grid-template-columns: minmax(0, 1.25fr) minmax(22rem, 0.85fr);
+  gap: 1rem;
+}
+
+.control-surface .ov-panel.ov-panel {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+  background: var(--ov-surface);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.08),
+    0 12px 36px rgba(0, 0, 0, 0.04);
+  animation: ov-panel-enter 320ms var(--ov-motion-ease) both;
+}
+
+.ov-panel--recent {
+  grid-area: recent;
+}
+
+.ov-panel--events {
+  grid-area: events;
+  animation-delay: 45ms;
+}
+
+.ov-panel--conn {
+  grid-area: connection;
+  animation-delay: 90ms;
+}
+
+.control-surface .ov-panel .panel__head {
+  display: flex;
+  min-height: 4.5rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.ov-panel__heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.ov-panel__heading > svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: 0 0 auto;
+  color: var(--primary);
+  stroke-width: 1.75;
+}
+
+.ov-panel__heading > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+.ov-panel__heading span {
+  color: var(--foreground);
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+
+.ov-panel__heading small {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  font-weight: 450;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-panel__meta {
+  display: inline-flex;
+  min-height: 1.75rem;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  padding: 0.25rem 0.55rem;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 540;
+}
+
+.ov-panel__live {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: var(--radius-pill);
+  background: var(--ok);
+  animation: ov-live-pulse 1.2s ease-in-out infinite;
+}
+
+.ov-link {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  padding: 0 0.55rem;
+  color: var(--primary);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 620;
+  white-space: nowrap;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease;
+}
+
+.ov-link:hover {
+  background: color-mix(in srgb, var(--primary) 9%, transparent);
+}
+
+.ov-link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* Recent sessions */
+
+.control-surface .ov-panel--recent .panel__body {
+  padding: 0.45rem 0;
+}
+
+.ov-recent {
+  display: flex;
+  min-height: 10rem;
+  flex-direction: column;
+}
+
+.ov-recent__row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
+  min-height: 3.55rem;
+  align-items: center;
+  gap: 0.7rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0.65rem 1rem;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: background-color 160ms ease;
+  animation: ov-row-enter 260ms var(--ov-motion-ease) both;
+}
+
+.ov-recent__row:nth-child(2) {
+  animation-delay: 30ms;
+}
+
+.ov-recent__row:nth-child(3) {
+  animation-delay: 60ms;
+}
+
+.ov-recent__row:nth-child(4) {
+  animation-delay: 90ms;
+}
+
+.ov-recent__row:nth-child(5) {
+  animation-delay: 120ms;
+}
+
+.ov-recent__row + .ov-recent__row {
+  border-top: 1px solid var(--hairline);
+}
+
+.ov-recent__row:hover {
+  background: color-mix(in srgb, var(--foreground) 3.5%, transparent);
+}
+
+.ov-recent__row:focus-visible {
+  z-index: 1;
+  outline: 2px solid var(--ring);
+  outline-offset: -3px;
+}
+
+.ov-recent__dot {
+  width: 0.48rem;
+  height: 0.48rem;
+  border-radius: var(--radius-pill);
+  background: var(--tone, var(--dim));
+  box-shadow: 0 0 0 0.24rem color-mix(in srgb, var(--tone, var(--dim)) 9%, transparent);
+}
+
+.ov-recent__key {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-recent__model {
+  max-width: 10rem;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--background) 42%, transparent);
+  padding: 0.2rem 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.625rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-recent__msgs,
+.ov-recent__time {
+  color: var(--dim);
+  font-size: 0.6875rem;
+  white-space: nowrap;
+}
+
+.ov-recent__arrow {
+  color: var(--dim);
+  font-size: 0.75rem;
+  opacity: 0;
+  transition:
+    color 160ms ease,
+    opacity 160ms ease,
+    transform 160ms var(--ov-motion-ease);
+}
+
+.ov-recent__row:hover .ov-recent__arrow {
+  color: var(--primary);
+  opacity: 1;
+  transform: translateX(0.15rem);
+}
+
+.ov-recent__empty {
+  display: flex;
+  min-height: 10rem;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 2rem 1rem;
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  text-align: center;
+}
+
+.ov-recent__empty-icon {
+  width: 1.8rem;
+  height: 1.8rem;
+  color: var(--dim);
+  stroke-width: 1.5;
+}
+
+/* Event stream */
+
+.control-surface .ov-panel--events .panel__body {
+  padding: 0;
+}
+
+.ov-event-log {
+  min-height: 10.9rem;
+  max-height: 23rem;
+  overflow-y: auto;
+  background: color-mix(in srgb, var(--background) 36%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+}
+
+.ov-event-log__empty {
+  display: flex;
+  min-height: 10.9rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+}
+
+.ov-event-log__pulse {
+  position: relative;
+  width: 0.45rem;
+  height: 0.45rem;
+  flex: 0 0 auto;
+  border-radius: var(--radius-pill);
+  background: var(--primary);
+}
+
+.ov-event-log__pulse::after {
+  position: absolute;
+  inset: -0.16rem;
+  border: 1px solid var(--primary);
+  border-radius: inherit;
+  content: '';
+  animation: ov-listening 1.2s ease-in-out infinite;
+}
+
+.ov-event-log__row {
+  display: grid;
+  grid-template-columns: 4.4rem minmax(8rem, 0.72fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  min-height: 2.45rem;
+  align-items: center;
+  padding: 0.45rem 0.9rem;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.ov-event-log__row:last-child {
+  border-bottom: 0;
+}
+
+.ov-event-log__row.is-fresh {
+  animation: ov-event-fresh 620ms var(--ov-motion-ease) both;
+}
+
+.ov-event-log__ts {
+  color: var(--dim);
+}
+
+.ov-event-log__name {
+  overflow: hidden;
+  color: var(--primary);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-event-log__payload {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Connection utility */
+
+.control-surface .ov-panel--conn .panel__body {
+  padding: 1rem;
+}
+
+.ov-form {
+  display: grid;
+  grid-template-columns: minmax(16rem, 1.4fr) minmax(13rem, 0.85fr) auto;
+  align-items: end;
+  gap: 0.8rem;
+}
+
+.ov-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ov-field__label {
+  color: var(--dim);
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ov-field__optional {
+  color: var(--dim);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.control-surface .ov-field__input {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.65rem 0.75rem;
+}
+
+.ov-form__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.ov-form__actions [data-slot='button'] {
+  min-height: 2.75rem;
+}
+
+@keyframes ov-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@keyframes ov-surface-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.45rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ov-panel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.35rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ov-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.2rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ov-value-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.25rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ov-loading-pulse {
+  50% {
+    opacity: 0.48;
+  }
+}
+
+@keyframes ov-live-pulse {
+  50% {
+    opacity: 0.42;
+    transform: scale(0.86);
+  }
+}
+
+@keyframes ov-listening {
+  from {
+    opacity: 0.55;
+    transform: scale(0.78);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.9);
+  }
+}
+
+@keyframes ov-event-fresh {
+  from {
+    background: color-mix(in srgb, var(--primary) 14%, transparent);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+@media (max-width: 1100px) {
+  .ov-grid {
+    grid-template-areas:
+      'recent'
+      'events'
+      'connection';
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .ov-command__body {
+    grid-template-columns: 1fr;
+  }
+
+  .control-surface .ov-command .ov-stat--hero {
+    min-height: 12rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+
+  .ov-command__metrics .ov-stat:nth-child(odd) {
+    border-left: 0;
+  }
+}
+
+@media (max-width: 700px) {
+  .ov-stage__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ov-stage__actions {
+    width: 100%;
+  }
+
+  .ov-stage__actions [data-slot='button'] {
+    min-height: 2.75rem;
+  }
+
+  .ov-command__toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ov-form {
+    grid-template-columns: 1fr;
+  }
+
+  .ov-form__actions {
+    width: 100%;
+  }
+
+  .ov-form__actions [data-slot='button'] {
+    flex: 1;
+  }
+
+  .ov-panel__heading small {
+    white-space: normal;
+  }
+
+  .ov-recent__row {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+  }
+
+  .ov-recent__model,
+  .ov-recent__arrow {
+    display: none;
+  }
+
+  .ov-event-log__row {
+    grid-template-columns: 3.8rem minmax(0, 1fr);
+  }
+
+  .ov-event-log__payload {
+    grid-column: 1 / -1;
+    padding-left: 4.55rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .ov-command__metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .control-surface .ov-command .ov-stat {
+    min-height: 10.25rem;
+    padding: 1rem;
+  }
+
+  .control-surface .ov-command .ov-stat--hero {
+    min-height: 11.5rem;
+  }
+
+  .control-surface .ov-command .ov-stat__value {
+    font-size: 1.35rem;
+  }
+
+  .control-surface .ov-command .ov-stat__value--status {
+    font-size: 2rem;
+  }
+
+  .ov-stat__arrow {
+    right: 0.65rem;
+    bottom: 0.65rem;
+  }
+
+  .ov-recent__msgs {
+    display: none;
+  }
+
+  .ov-recent__row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ov-refresh-spin,
+  .ov-command,
+  .ov-panel,
+  .ov-recent__row,
+  .ov-stat__value,
+  .ov-stat.is-loading .ov-stat__icon,
+  .ov-panel__live,
+  .ov-event-log__pulse::after,
+  .ov-event-log__row.is-fresh {
+    animation: none;
+  }
+
+  .ov-stat__arrow,
+  .ov-recent__arrow {
+    transition: none;
+  }
+}

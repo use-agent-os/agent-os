@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +17,78 @@ def test_source_install_scripts_force_refresh_local_uv_tool_package() -> None:
 
     assert "'--force', '--reinstall-package', 'use-agent-os'" in ps1
     assert "--force --reinstall-package use-agent-os" in sh
+
+
+def test_source_installers_build_control_ui_before_python_package_install() -> None:
+    ps1 = SOURCE_PS1.read_text(encoding="utf-8")
+    sh = SOURCE_SH.read_text(encoding="utf-8")
+
+    for script in (ps1, sh):
+        assert "scripts/build_control_ui.py" in script
+        assert "Node.js 22 or newer" in script
+        assert "npm" in script
+
+    assert "node_major < 22" in sh
+    assert "command -v npm" in sh
+    assert sh.index('"${control_ui_build_args[@]}"') < sh.index('"${install_args[@]}"')
+
+    assert "Get-Command npm" in ps1
+    assert "-lt 22" in ps1
+    assert ps1.index("install_source.ps1: building the React control UI") < ps1.index(
+        "install_source.ps1: installing via"
+    )
+
+
+def test_source_installer_dry_run_reports_control_ui_build_without_running_it() -> None:
+    if sys.platform.startswith("win"):
+        return
+
+    env = os.environ.copy()
+    env["AGENTOS_INSTALL_DRY_RUN"] = "1"
+    env["AGENTOS_INSTALL_PROFILE"] = "core"
+    result = subprocess.run(
+        ["bash", str(SOURCE_SH)],
+        cwd=ROOT.parent,
+        env=env,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (
+        "dry-run — would build control UI: python3 scripts/build_control_ui.py build"
+    ) in result.stdout
+
+
+def test_source_installer_rejects_node_older_than_22(tmp_path: Path) -> None:
+    if sys.platform.startswith("win"):
+        return
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_node = fake_bin / "node"
+    fake_node.write_text("#!/bin/sh\nprintf 'v21.9.0\\n'\n", encoding="utf-8")
+    fake_node.chmod(0o755)
+    fake_npm = fake_bin / "npm"
+    fake_npm.write_text("#!/bin/sh\nprintf '10.9.0\\n'\n", encoding="utf-8")
+    fake_npm.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["AGENTOS_INSTALL_PROFILE"] = "core"
+    result = subprocess.run(
+        ["bash", str(SOURCE_SH)],
+        cwd=ROOT.parent,
+        env=env,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "Node.js v21.9.0 is too old" in result.stderr
+    assert "building the React control UI" not in result.stdout
 
 
 def test_install_scripts_do_not_run_onboarding_or_gateway() -> None:
@@ -109,10 +182,8 @@ def test_install_scripts_support_optional_extras() -> None:
 
     for script in scripts:
         assert "AGENTOS_INSTALL_EXTRAS" in script
-        for legacy_extra in ("feishu", "telegram", "dingtalk", "wecom", "qq"):
-            assert legacy_extra not in script
-        assert "matrix" in script
-        assert "matrix-e2e" in script
+        for retired_extra in ("dingtalk", "matrix", "matrix-e2e", "qq", "wecom"):
+            assert retired_extra not in script.lower()
         assert "document-extras" in script
         assert "msteams" not in script
 

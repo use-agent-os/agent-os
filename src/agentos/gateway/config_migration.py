@@ -89,6 +89,20 @@ GATEWAY_PROVIDER_ID = "bankr"
 LEGACY_GATEWAY_PROVIDER_IDS: tuple[str, ...] = ()
 LEGACY_ROUTER_SECTION = "cap_router"
 
+# Channel adapters retired from the built-in runtime. Persisted entries are
+# removed before strict channel validation so an upgrade can still boot and
+# atomically rewrite the user's config. QQ aliases are migration-only: they do
+# not become accepted public channel type ids.
+RETIRED_CHANNEL_TYPE_ALIASES: dict[str, str] = {
+    "dingtalk": "dingtalk",
+    "matrix": "matrix",
+    "qq": "qq",
+    "qq-bot": "qq",
+    "qq_bot": "qq",
+    "qqbot": "qq",
+    "wecom": "wecom",
+}
+
 DEPRECATED_AGENT_TOKEN_SAVING_FIELDS: frozenset[str] = frozenset(
     {
         "agent_token_saving.tool_result_compression_enabled",
@@ -285,6 +299,34 @@ def migrate_config_payload(data: dict[str, Any]) -> ConfigMigrationResult:
             builder.payload["agentos_router"] = legacy_router
             builder.changes.append(
                 f"{LEGACY_ROUTER_SECTION} -> agentos_router"
+            )
+
+    channels_section = builder.payload.get("channels")
+    if isinstance(channels_section, dict) and isinstance(
+        configured_channels := channels_section.get("channels"), list
+    ):
+        retained_channels: list[Any] = []
+        retired_type_counts: dict[str, int] = {}
+        for entry in configured_channels:
+            raw_type = entry.get("type") if isinstance(entry, dict) else None
+            normalized_type = raw_type.strip().lower() if isinstance(raw_type, str) else ""
+            retired_type = RETIRED_CHANNEL_TYPE_ALIASES.get(normalized_type)
+            if retired_type is None:
+                retained_channels.append(entry)
+                continue
+            retired_type_counts[retired_type] = retired_type_counts.get(retired_type, 0) + 1
+
+        if retired_type_counts:
+            channels_section["channels"] = retained_channels
+            removed_count = sum(retired_type_counts.values())
+            entry_label = "entry" if removed_count == 1 else "entries"
+            type_summary = ", ".join(
+                f"{channel_type}={retired_type_counts[channel_type]}"
+                for channel_type in sorted(retired_type_counts)
+            )
+            builder.changes.append(
+                "channels.channels: removed "
+                f"{removed_count} retired channel adapter {entry_label} ({type_summary})"
             )
 
     _rename_gateway_provider(builder.payload.get("llm"), "provider", "llm.provider")

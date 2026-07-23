@@ -84,11 +84,9 @@ async def test_removed_tools_are_not_dispatchable_by_name() -> None:
 
 
 def test_web_ui_tool_icon_map_avoids_removed_wrapper_tools() -> None:
-    source = Path("src/agentos/gateway/static/js/views/chat.js").read_text(
-        encoding="utf-8"
-    )
-    start = source.index("const _TOOL_EMOJI = {")
-    end = source.index("  function _toolEmoji", start)
+    source = Path("frontend/src/views/chat/transcript/tools.ts").read_text(encoding="utf-8")
+    start = source.index("const TOOL_ICONS:")
+    end = source.index("export function toolIconName", start)
     tool_display_map = source[start:end]
 
     for name in REMOVED_TOOL_NAMES:

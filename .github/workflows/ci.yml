@@ -100,10 +100,25 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+
+      - name: Build and verify packaged Control UI
+        shell: bash
+        run: python scripts/build_control_ui.py build
+
+      - name: Check frontend source
+        shell: bash
+        run: npm --prefix frontend run check
 
       - name: Install dependencies
         shell: bash
@@ -140,7 +155,9 @@ jobs:
 
       - name: Build wheel
         shell: bash
-        run: uv build --wheel
+        run: |
+          uv build --wheel
+          python scripts/build_control_ui.py verify-archive dist/*.whl
 
   windows-compat:
     name: Lint, test, and build (windows-latest, 3.12)
@@ -171,10 +188,21 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+
+      - name: Build and verify packaged Control UI
+        shell: bash
+        run: python scripts/build_control_ui.py build
 
       - name: Install dependencies
         shell: bash
@@ -207,10 +235,21 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+
+      - name: Build and verify packaged Control UI
+        shell: bash
+        run: python scripts/build_control_ui.py build
 
       - name: Install dependencies
         shell: bash
@@ -220,7 +259,9 @@ jobs:
         shell: bash
         run: |
           uv run pytest \
+            tests/test_scripts/test_build_control_ui.py \
             tests/test_scripts/test_build_wheelhouse_zip.py \
+            tests/test_frontend_third_party_notices.py \
             tests/test_install_scripts.py \
             tests/test_root_start_scripts.py \
             tests/test_release_consistency.py \

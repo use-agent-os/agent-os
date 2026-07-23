@@ -1,96 +1,113 @@
-"""Smoke tests for Cache-Control on /control/static/* responses.
-
-The Control UI serves vendored JS/CSS through a `_CachedStaticFiles` subclass
-(see ``agentos.gateway.control_ui``). These tests pin the header semantics
-so a refactor that drops the subclass — or breaks the env-rollback knob —
-shows up immediately.
-"""
+"""Cache policy tests for the built React Control UI."""
 
 from __future__ import annotations
 
-import os
+from pathlib import Path
 
 import pytest
 from starlette.applications import Starlette
 from starlette.testclient import TestClient
 
+from agentos.gateway import control_ui
 from agentos.gateway.config import GatewayConfig
-from agentos.gateway.control_ui import create_control_ui_routes
 
 
 @pytest.fixture
-def _app(monkeypatch: pytest.MonkeyPatch) -> Starlette:
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.delenv("AGENTOS_STATIC_NO_CACHE", raising=False)
-    config = GatewayConfig()
-    config.control_ui.enabled = True
-    routes = create_control_ui_routes(config)
-    return Starlette(routes=routes)
+    dist = tmp_path / "dist"
+    assets = dist / "assets"
+    assets.mkdir(parents=True)
+    (dist / "index.html").write_text(
+        (
+            "<!doctype html><html><head>"
+            '<base data-agentos-control-base href="./">'
+            '</head><body><div id="root"></div></body></html>'
+        ),
+        encoding="utf-8",
+    )
+    (assets / "app-a1b2c3.js").write_text("export {};\n", encoding="utf-8")
+    (dist / "theme-bootstrap.js").write_text(
+        "document.documentElement.dataset.theme = 'light';\n",
+        encoding="utf-8",
+    )
+    (dist / "THIRD_PARTY_LICENSES.txt").write_text(
+        "Generated dependency licenses\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(control_ui, "_DIST_DIR", dist)
+    app = Starlette(routes=control_ui.create_control_ui_routes(GatewayConfig()))
+    return TestClient(app)
 
 
-def test_static_asset_carries_long_cache_control(_app: Starlette) -> None:
-    client = TestClient(_app)
-    response = client.get("/control/static/js/app.js")
+def test_built_asset_carries_immutable_cache_control(client: TestClient) -> None:
+    response = client.get("/control/static/dist/assets/app-a1b2c3.js")
+
     assert response.status_code == 200, response.text
-    cache = response.headers.get("Cache-Control", "")
-    assert "max-age=2592000" in cache, cache
-    assert "public" in cache, cache
+    cache = response.headers.get("cache-control", "")
+    assert "public" in cache
+    assert "max-age=31536000" in cache
+    assert "immutable" in cache
 
 
-def test_control_ui_bootstrap_includes_config_path(tmp_path) -> None:
-    config = GatewayConfig()
-    config.config_path = str(tmp_path / "AgentOS Config.toml")
-    config.control_ui.enabled = True
-    app = Starlette(routes=create_control_ui_routes(config))
-    client = TestClient(app)
+@pytest.mark.parametrize(
+    "path",
+    ("assets/app-a1b2c3.js", r"assets\app-a1b2c3.js"),
+)
+def test_fingerprinted_asset_classification_is_cross_platform(path: str) -> None:
+    assert control_ui._is_fingerprinted_asset_path(path) is True
 
+
+def test_spa_shell_is_not_cached(client: TestClient) -> None:
     response = client.get("/control/")
 
     assert response.status_code == 200
-    assert 'data-config-path="' in response.text
-    assert str(config.config_path) in response.text
+    assert "no-store" in response.headers.get("cache-control", "")
 
 
-def test_control_ui_bootstrap_ws_url_uses_client_reachable_wildcard_host() -> None:
-    config = GatewayConfig()
-    config.host = "0.0.0.0"
-    config.port = 20002
-    config.control_ui.enabled = True
-    app = Starlette(routes=create_control_ui_routes(config))
-    client = TestClient(app)
-
-    response = client.get("/control/")
+def test_direct_built_index_is_not_cached(client: TestClient) -> None:
+    response = client.get("/control/static/dist/index.html")
 
     assert response.status_code == 200
-    assert 'data-ws-url="ws://127.0.0.1:20002/ws"' in response.text
-    assert 'data-ws-url="ws://0.0.0.0:20002/ws"' not in response.text
+    assert "no-store" in response.headers.get("cache-control", "")
+    assert "immutable" not in response.headers.get("cache-control", "")
 
 
-def test_env_rollback_disables_cache_control(
+def test_generated_license_ledger_is_not_cached(client: TestClient) -> None:
+    response = client.get("/control/static/dist/THIRD_PARTY_LICENSES.txt")
+
+    assert response.status_code == 200
+    assert "no-store" in response.headers.get("cache-control", "")
+    assert "immutable" not in response.headers.get("cache-control", "")
+
+
+def test_stable_theme_bootstrap_is_not_cached(client: TestClient) -> None:
+    response = client.get("/control/static/dist/theme-bootstrap.js")
+
+    assert response.status_code == 200
+    assert "no-store" in response.headers.get("cache-control", "")
+    assert "immutable" not in response.headers.get("cache-control", "")
+
+
+def test_env_rollback_disables_asset_cache_control(
+    client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # AGENTOS_STATIC_NO_CACHE=1 must completely skip the Cache-Control
-    # header so a release with a static-cache problem can be defused without
-    # a redeploy.
     monkeypatch.setenv("AGENTOS_STATIC_NO_CACHE", "1")
-    config = GatewayConfig()
-    config.control_ui.enabled = True
-    app = Starlette(routes=create_control_ui_routes(config))
-    client = TestClient(app)
-    response = client.get("/control/static/js/app.js")
+
+    response = client.get("/control/static/dist/assets/app-a1b2c3.js")
+
     assert response.status_code == 200
-    # Either header is absent or it does not advertise our long max-age.
-    cache = response.headers.get("Cache-Control", "")
-    assert "max-age=2592000" not in cache
+    cache = response.headers.get("cache-control", "")
+    assert "max-age=31536000" not in cache
+    assert "immutable" not in cache
 
 
-def test_nonexistent_path_does_not_add_header(_app: Starlette) -> None:
-    client = TestClient(_app)
-    response = client.get("/control/static/js/does-not-exist-12345.js")
-    # 404 must not be tagged with a long-cache header — clients would otherwise
-    # remember a "missing" asset for 30 days.
+def test_missing_asset_does_not_add_cache_header(client: TestClient) -> None:
+    response = client.get("/control/static/dist/assets/does-not-exist.js")
+
     assert response.status_code == 404
-    assert "max-age=2592000" not in response.headers.get("Cache-Control", "")
-
-
-def _cleanup_env() -> None:
-    os.environ.pop("AGENTOS_STATIC_NO_CACHE", None)
+    cache = response.headers.get("cache-control", "")
+    assert "no-store" in cache
+    assert "max-age=31536000" not in cache
+    assert "immutable" not in cache

@@ -4,6 +4,7 @@
 # Installer contract:
 #   - installs into a user-owned prefix (never /usr/local, /opt, or admin paths)
 #   - prefers uv tool install; falls back to pip --user; errors clearly if neither exists
+#   - rebuilds the bundled React control UI with Node.js 22+ before installing
 #   - defaults to the "recommended" runtime profile (memory + bundled BGE
 #     embedding assets) and allows `AGENTOS_INSTALL_PROFILE=core` to opt back down
 #   - prints a post-install banner documenting the default bind
@@ -16,6 +17,10 @@
 # without touching the system.
 
 set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "${script_dir}/.." && pwd)"
+cd "${repo_root}"
 
 cli_profile=""
 cli_extras=""
@@ -43,7 +48,7 @@ Usage: bash scripts/install_source.sh [--profile recommended|core] [--extras nam
 
 Environment equivalents:
   AGENTOS_INSTALL_PROFILE=recommended|core
-  AGENTOS_INSTALL_EXTRAS=matrix
+  AGENTOS_INSTALL_EXTRAS=document-extras
   AGENTOS_INSTALL_DRY_RUN=1
 HELP
             exit 0
@@ -69,7 +74,7 @@ fi
 dry_run="${AGENTOS_INSTALL_DRY_RUN:-0}"
 profile="${cli_profile:-${AGENTOS_INSTALL_PROFILE:-recommended}}"
 
-valid_extras=" matrix matrix-e2e document-extras "
+valid_extras=" document-extras "
 extras_csv="${AGENTOS_INSTALL_EXTRAS:-}"
 if [[ -n "${cli_extras}" ]]; then
     extras_csv="${extras_csv}${extras_csv:+,}${cli_extras}"
@@ -180,6 +185,56 @@ check_embedding_assets() {
     fi
 }
 
+check_control_ui_toolchain() {
+    local mode="${1:-strict}"
+    local node_version=""
+    local node_major=""
+    local npm_version=""
+    local problems=()
+
+    if ! command -v node >/dev/null 2>&1; then
+        problems+=("Node.js was not found on PATH.")
+    else
+        node_version="$(node --version 2>/dev/null || true)"
+        if [[ "${node_version}" =~ ^v?([0-9]+)([.].*)?$ ]]; then
+            node_major="${BASH_REMATCH[1]}"
+            if (( node_major < 22 )); then
+                problems+=("Node.js ${node_version} is too old; version 22 or newer is required.")
+            fi
+        else
+            problems+=("Could not determine the installed Node.js version.")
+        fi
+    fi
+
+    if ! command -v npm >/dev/null 2>&1; then
+        problems+=("npm was not found on PATH.")
+    else
+        npm_version="$(npm --version 2>/dev/null || true)"
+        if [[ -z "${npm_version}" ]]; then
+            problems+=("npm is present but could not be executed.")
+        fi
+    fi
+
+    if (( ${#problems[@]} == 0 )); then
+        return 0
+    fi
+
+    if [[ "${mode}" == "warn" ]]; then
+        echo "install_source.sh: dry-run note — a real source install requires Node.js 22+ and npm to build the React control UI." >&2
+    else
+        echo "install_source.sh: Node.js 22 or newer and npm are required to build the React control UI." >&2
+    fi
+    local problem=""
+    for problem in "${problems[@]}"; do
+        echo "install_source.sh: ${problem}" >&2
+    done
+    echo "install_source.sh: install Node.js 22+ (including npm) and retry." >&2
+    if [[ "${mode}" == "warn" ]]; then
+        return 0
+    fi
+    exit 1
+}
+
 # --- installer selection ----------------------------------------------------
 
 installer=""
@@ -196,6 +251,14 @@ else
     exit 1
 fi
 install_cmd="${install_args[*]}"
+
+control_ui_build_args=()
+if command -v python3 >/dev/null 2>&1; then
+    control_ui_build_args=(python3 scripts/build_control_ui.py build)
+else
+    control_ui_build_args=(uv run --no-project python scripts/build_control_ui.py build)
+fi
+control_ui_build_cmd="${control_ui_build_args[*]}"
 
 # --- banner -----------------------------------------------------------------
 
@@ -226,8 +289,10 @@ WARNING
 }
 
 if [[ "${dry_run}" = "1" ]]; then
+    echo "install_source.sh: dry-run — would build control UI: ${control_ui_build_cmd}"
     echo "install_source.sh: dry-run — would run: ${install_cmd}"
     echo "install_source.sh: dry-run — prefix: ${prefix}"
+    check_control_ui_toolchain warn
     check_embedding_assets warn
     print_banner
     if [[ "${AGENTOS_LISTEN:-}" = "0.0.0.0" ]]; then
@@ -238,7 +303,12 @@ fi
 
 # --- execute ---------------------------------------------------------------
 
+check_control_ui_toolchain
 check_embedding_assets
+
+echo "install_source.sh: building the React control UI"
+echo "install_source.sh: running: ${control_ui_build_cmd}"
+"${control_ui_build_args[@]}"
 
 echo "install_source.sh: installing via ${installer} into prefix ${prefix}"
 echo "install_source.sh: running: ${install_cmd}"

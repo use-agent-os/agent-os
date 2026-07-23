@@ -55,7 +55,7 @@ while IFS= read -r path || [[ -n "${path}" ]]; do
     pyproject.toml | uv.lock)
       mark_dependency_changed
       ;;
-    .github/workflows/wheelhouse-release.yml)
+    .github/workflows/wheelhouse-release.yml | .github/workflows/pypi-publish.yml | .github/workflows/frontend.yml)
       mark_ci_changed
       mark_release_changed
       ;;
@@ -65,12 +65,16 @@ while IFS= read -r path || [[ -n "${path}" ]]; do
     .github/scripts/*)
       mark_ci_changed
       ;;
-    tests/test_scripts/test_build_wheelhouse_zip.py | tests/test_install_scripts.py | tests/test_root_start_scripts.py | tests/test_release_consistency.py | tests/test_public_release_hygiene.py)
+    tests/test_scripts/test_build_control_ui.py | tests/test_scripts/test_build_wheelhouse_zip.py | tests/test_frontend_third_party_notices.py | tests/test_install_scripts.py | tests/test_root_start_scripts.py | tests/test_release_consistency.py | tests/test_public_release_hygiene.py)
       mark_test_changed
       mark_release_changed
       ;;
     tests/*)
       mark_test_changed
+      ;;
+    frontend/* | scripts/build_control_ui.py | src/agentos/gateway/control_ui.py | src/agentos/gateway/boot.py | Dockerfile | .dockerignore | .gitignore)
+      mark_runtime_changed
+      mark_release_changed
       ;;
     scripts/build_wheelhouse_zip.py | scripts/install_source.sh | scripts/install_source.ps1)
       mark_runtime_changed
@@ -82,7 +86,10 @@ while IFS= read -r path || [[ -n "${path}" ]]; do
     src/* | scripts/* | migrations/*)
       mark_runtime_changed
       ;;
-    docs/* | README.md | README.*.md | CHANGELOG.md | CODE_OF_CONDUCT.md | CONTRIBUTING.md | MIGRATION.md | SECURITY.md | SUPPORT.md | THIRD_PARTY_NOTICES.md | .github/pull_request_template.md | .github/ISSUE_TEMPLATE/*)
+    THIRD_PARTY_NOTICES.md)
+      mark_release_changed
+      ;;
+    docs/* | README.md | README.*.md | CHANGELOG.md | CODE_OF_CONDUCT.md | CONTRIBUTING.md | MIGRATION.md | SECURITY.md | SUPPORT.md | .github/pull_request_template.md | .github/ISSUE_TEMPLATE/*)
       ;;
     *)
       mark_runtime_changed

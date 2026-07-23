@@ -1,0 +1,1467 @@
+/* Skills view — rebuilt on the shared token system (globals.css). Class
+   contract echoes legacy static/css/views/skills.css; values rebuilt on the
+   new CSS variables. Lime (--primary) stays signal-only; status tones carry
+   ok/warn/danger, never the accent. Outer width/padding come from the shared
+   .view-container in AppShell. */
+
+.sk-stage {
+  width: 100%;
+}
+
+/* ── Header hero with the atmospheric ASCII backdrop ────────────────────── */
+.sk-stage__header {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 18px 0 22px;
+}
+.sk-stage__title-block {
+  position: relative;
+}
+.sk-stage__subtitle {
+  margin-top: 8px;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+  max-width: 52ch;
+}
+.sk-stage__actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ── Search input ───────────────────────────────────────────────────────── */
+.sk-search-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.sk-search-icon {
+  position: absolute;
+  left: 9px;
+  width: 14px;
+  height: 14px;
+  color: var(--dim);
+  pointer-events: none;
+}
+.sk-search-input {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  padding: 7px 10px 7px 28px;
+  background: var(--input, var(--card));
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--foreground);
+  min-width: 200px;
+}
+.sk-search-input:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+}
+.sk-search-input--lg {
+  min-width: 100%;
+  padding: 9px 12px 9px 32px;
+}
+.sk-search-wrap--lg {
+  display: flex;
+  flex: 1;
+}
+
+/* ── Metric pills (status filter) ───────────────────────────────────────── */
+.sk-metrics {
+  /* Terminal readout rail: one hairline-bordered strip, cells divided by
+     hairlines — matches the Health/Overview count-tile posture instead of
+     scattered boxed pills. Still clickable (each cell filters). */
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--hairline);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 20px;
+}
+@media (max-width: 640px) {
+  .sk-metrics {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+.sk-metric {
+  --tone: var(--dim);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 0;
+  /* Left tone gutter only shows on the active cell (see .is-active). */
+  border-left: 2px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background 0.12s,
+    border-color 0.12s;
+}
+.sk-metric:hover {
+  background: var(--elevated);
+}
+.sk-metric--accent {
+  --tone: var(--primary);
+}
+.sk-metric--ok {
+  --tone: var(--ok, #4caf50);
+}
+.sk-metric--warn {
+  --tone: var(--warn, #d9a441);
+}
+.sk-metric.is-active {
+  border-left-color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 8%, var(--surface));
+}
+.sk-metric.is-active .sk-metric__value {
+  color: var(--tone);
+}
+.sk-metric__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.875rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--foreground);
+}
+.sk-metric__label {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--dim);
+}
+
+/* ── Tabs ───────────────────────────────────────────────────────────────── */
+.sk-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 18px;
+}
+.sk-tab {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 9px 14px;
+  color: var(--dim);
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  cursor: pointer;
+}
+.sk-tab.is-active {
+  color: var(--foreground);
+  border-bottom-color: var(--primary);
+}
+
+/* ── Layer groups ───────────────────────────────────────────────────────── */
+.sk-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+  background: var(--card);
+}
+.sk-group__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+.sk-group__head::-webkit-details-marker {
+  display: none;
+}
+.sk-group__caret {
+  color: var(--dim);
+  transition: transform 0.12s;
+}
+.sk-group:not([open]) .sk-group__caret {
+  transform: rotate(-90deg);
+}
+.sk-group__label {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--foreground);
+}
+.sk-group__count {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--dim);
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+}
+.sk-group__meta {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  margin-left: auto;
+}
+
+/* ── Card grids ─────────────────────────────────────────────────────────── */
+.sk-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+  padding: 0 12px 14px;
+}
+.sk-grid--registry {
+  padding: 0;
+}
+.sk-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  cursor: pointer;
+}
+.sk-card:hover {
+  border-color: var(--dim);
+}
+.sk-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sk-card__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  flex-shrink: 0;
+  background: var(--dim);
+}
+.sk-card__dot.is-ready {
+  background: var(--ok, #4caf50);
+}
+.sk-card__dot.is-needs {
+  background: var(--warn, #d9a441);
+}
+.sk-card__dot.is-unverified {
+  background: var(--dim);
+}
+.sk-card__name {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.sk-card__emoji {
+  font-size: 0.85rem;
+  /* Skill-supplied emoji is real catalog metadata (kept for parity), but full-
+     color emoji clash with the mono/terminal palette — desaturate them so they
+     read as muted glyphs, not stickers. */
+  filter: grayscale(1) brightness(1.1) contrast(0.9);
+  opacity: 0.75;
+}
+.sk-card__desc {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Registry cards ─────────────────────────────────────────────────────── */
+.sk-browse__bar {
+  margin-bottom: 12px;
+}
+.sk-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.sk-chip-btn {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--card);
+  color: var(--dim);
+  cursor: pointer;
+}
+.sk-chip-btn.is-active {
+  color: var(--foreground);
+  border-color: var(--primary);
+}
+.sk-chip-btn__count {
+  color: var(--dim);
+}
+.sk-rcard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+.sk-rcard:hover {
+  border-color: var(--dim);
+}
+.sk-rcard__details {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.sk-rcard__details:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+.sk-rcard__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sk-rcard__logo,
+.sk-dialog__logo {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius);
+  object-fit: cover;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--background);
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--dim);
+  flex-shrink: 0;
+  /* Registry logos are full-color brand art; mute them to the terminal palette
+     so the catalog reads as one mono surface, not a sticker wall. */
+  filter: grayscale(1) contrast(0.92) brightness(1.05);
+  opacity: 0.85;
+}
+.sk-rcard__titles {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.sk-rcard__name {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.sk-rcard__provider {
+  font-size: 0.6875rem;
+  color: var(--dim);
+}
+.sk-rcard__cat {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 0.59375rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+}
+.sk-rcard__desc {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  flex: 1;
+}
+.sk-rcard__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sk-rcard__src {
+  font-size: 0.625rem;
+  color: var(--dim);
+}
+
+/* ── GitHub install row ─────────────────────────────────────────────────── */
+.sk-github-install {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  align-items: stretch;
+}
+
+/* ── States ─────────────────────────────────────────────────────────────── */
+.sk-error {
+  padding: 14px;
+  border: 1px solid var(--danger, #c0392b);
+  border-radius: var(--radius);
+  color: var(--danger, #c0392b);
+  font-size: 0.8125rem;
+}
+.sk-registry__loading,
+.sk-registry__hint,
+.sk-empty__state {
+  padding: 22px;
+  text-align: center;
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+}
+.sk-empty {
+  padding: 40px 22px;
+  text-align: center;
+}
+.sk-empty__title {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  color: var(--foreground);
+}
+.sk-empty__hint {
+  margin-top: 8px;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+.sk-dim {
+  color: var(--dim);
+}
+.sk-mono {
+  font-family: var(--font-mono);
+}
+
+/* ── Chips ──────────────────────────────────────────────────────────────── */
+.sk-chip {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  color: var(--dim);
+}
+.sk-chip--ok {
+  --tone: var(--ok, #4caf50);
+  color: var(--tone);
+  border-color: var(--tone);
+}
+.sk-chip--warn {
+  --tone: var(--warn, #d9a441);
+  color: var(--tone);
+  border-color: var(--tone);
+}
+.sk-chip--unverified {
+  color: var(--dim);
+}
+
+/* ── Modal / dialog ─────────────────────────────────────────────────────── */
+.sk-modal__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--background) 70%, transparent);
+  backdrop-filter: blur(2px);
+}
+.sk-modal {
+  width: min(560px, 100%);
+  max-height: 86vh;
+  overflow-y: auto;
+  border-radius: var(--radius);
+}
+.sk-dialog__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--hairline, var(--border));
+}
+.sk-dialog__head-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sk-dialog__emoji {
+  font-size: 1.2rem;
+}
+.sk-dialog__skill-icon {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 2.25rem;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--background);
+  color: var(--muted-foreground);
+}
+.sk-dialog__skill-icon svg {
+  width: 1rem;
+  height: 1rem;
+}
+.sk-dialog__name {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  color: var(--foreground);
+}
+.sk-dialog__provider {
+  font-size: 0.6875rem;
+  color: var(--dim);
+}
+.sk-dialog__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+.sk-dialog__body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.sk-dialog__desc {
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+.sk-dialog__section-title {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--dim);
+  margin-bottom: 6px;
+}
+.sk-dialog__install-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 0.8125rem;
+}
+/* skills.css:623-635 — Missing bins/env list for needs_setup skills. */
+.sk-dialog__missing {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.8125rem;
+}
+.sk-dialog__missing code {
+  font-family: var(--font-mono);
+  background: var(--background);
+  padding: 1px 6px;
+  border-radius: var(--radius);
+  color: var(--primary);
+}
+/* skills.css:642-671 — per-requirement rows in the Requirements section. */
+.sk-dialog__requirements {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sk-dialog__req-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto minmax(0, 1.4fr);
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8125rem;
+}
+.sk-dialog__req-name {
+  min-width: 0;
+  font-family: var(--font-mono);
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}
+.sk-dialog__req-detail {
+  min-width: 0;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.sk-dialog__req-detail code {
+  font-family: var(--font-mono);
+  background: var(--background);
+  padding: 1px 5px;
+  border-radius: var(--radius);
+  color: var(--primary);
+}
+.sk-dialog__setup {
+  padding-left: 18px;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+/* skills.css:717 — demo title + language labels in the Demo section heading. */
+.sk-dialog__demo-title,
+.sk-dialog__demo-lang {
+  font-size: 0.625rem;
+  color: var(--dim);
+  margin-left: 6px;
+}
+.sk-dialog__code {
+  padding: 10px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow-x: auto;
+  font-size: 0.75rem;
+}
+.sk-dialog__link {
+  font-size: 0.8125rem;
+  color: var(--primary);
+}
+.sk-dialog__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--hairline, var(--border));
+}
+.sk-dialog__path {
+  flex: 1;
+  font-size: 0.6875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Skills library UX refresh ────────────────────────────────────────────
+   The Skills route behaves like a directory: source first, then contextual
+   search/filter controls, then results. These page-scoped rules deliberately
+   outrank the shared Control KPI/tab treatment without changing other routes. */
+.control-surface .sk-stage {
+  width: 100%;
+  max-width: 92rem;
+  margin-inline: auto;
+}
+
+.control-surface .sk-stage__header {
+  min-height: 8.25rem;
+  margin-bottom: 1rem;
+  padding-block: 1.25rem;
+}
+
+.control-surface .sk-stage__title-block .t-display {
+  margin-top: 0;
+}
+
+.control-surface .sk-stage__subtitle {
+  max-width: 58ch;
+  font-size: 0.9375rem;
+}
+
+.control-surface .sk-refresh {
+  min-height: 2.75rem;
+  padding-inline: 0.9rem;
+}
+
+.control-surface .sk-refresh svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.control-surface .sk-source-nav {
+  position: sticky;
+  z-index: 10;
+  top: 0.75rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+  background: color-mix(in srgb, var(--surface) 96%, var(--elevated));
+  padding: 0.375rem;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.08);
+}
+
+.control-surface .sk-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  width: 100%;
+  max-width: none;
+  gap: 0.375rem;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  overflow: visible;
+}
+
+.control-surface .sk-tab {
+  display: flex;
+  min-width: 0;
+  min-height: 3.75rem;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 0.55rem 0.75rem;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  letter-spacing: 0;
+  text-align: left;
+  text-transform: none;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease;
+}
+
+.control-surface .sk-tab:hover {
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+  color: var(--foreground);
+}
+
+.control-surface .sk-tab.is-active {
+  border-color: color-mix(in srgb, var(--primary) 34%, var(--border));
+  background: color-mix(in srgb, var(--primary) 8%, var(--elevated));
+  color: var(--foreground);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 8%, transparent);
+}
+
+.control-surface .sk-tab__icon {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 2.25rem;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  background: var(--background);
+  color: var(--dim);
+}
+
+.control-surface .sk-tab.is-active .sk-tab__icon {
+  border-color: color-mix(in srgb, var(--primary) 32%, var(--border));
+  color: var(--primary);
+}
+
+.control-surface .sk-tab__icon > svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.control-surface .sk-tab__brand {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.control-surface .sk-tab__brand--fallback {
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.control-surface .sk-tab__copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.control-surface .sk-tab__label {
+  overflow: hidden;
+  color: inherit;
+  font-size: 0.8125rem;
+  font-weight: 650;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.control-surface .sk-tab__description {
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 0.6875rem;
+  font-weight: 450;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.control-surface .sk-library-tools {
+  display: grid;
+  grid-template-columns: minmax(17rem, 1fr) auto;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+  background: color-mix(in srgb, var(--surface) 96%, var(--elevated));
+  padding: 0.75rem;
+}
+
+.control-surface .sk-search-wrap--library,
+.control-surface .sk-search-input--library {
+  width: 100%;
+}
+
+.control-surface .sk-search-input--library,
+.control-surface .sk-search-input--lg {
+  min-height: 3rem;
+  padding: 0.7rem 0.9rem 0.7rem 2.6rem;
+  font-family: var(--font-sans);
+  font-size: 0.9375rem;
+}
+
+.control-surface .sk-search-wrap--library .sk-search-icon,
+.control-surface .sk-search-wrap--lg .sk-search-icon {
+  left: 0.95rem;
+  width: 1rem;
+  height: 1rem;
+}
+
+.control-surface .sk-metrics {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0;
+}
+
+.control-surface .sk-metric {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 3rem;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  padding: 0.55rem 0.75rem;
+  background: transparent;
+  box-shadow: none;
+}
+
+.control-surface .sk-metric:hover {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+}
+
+.control-surface .sk-metric.is-active {
+  border-color: color-mix(in srgb, var(--tone) 42%, var(--border));
+  background: color-mix(in srgb, var(--tone) 9%, var(--surface));
+  box-shadow: none;
+}
+
+.control-surface .sk-metric__value {
+  order: 2;
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.control-surface .sk-metric__label {
+  order: 1;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.control-surface .sk-metric.is-active .sk-metric__label,
+.control-surface .sk-metric.is-active .sk-metric__value {
+  color: var(--tone);
+}
+
+.control-surface .sk-group {
+  margin-bottom: 1rem;
+  overflow: clip;
+  border-color: var(--border);
+  border-radius: var(--radius-surface);
+  background: color-mix(in srgb, var(--surface) 96%, var(--elevated));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.control-surface .sk-group__head {
+  min-height: 3.4rem;
+  gap: 0.625rem;
+  padding: 0.75rem 1rem;
+}
+
+.control-surface .sk-group[open] .sk-group__head {
+  border-bottom: 1px solid var(--hairline);
+}
+
+.control-surface .sk-group__caret {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 1rem;
+  transition: transform 180ms ease;
+}
+
+.control-surface .sk-group:not([open]) .sk-group__caret {
+  transform: rotate(-90deg);
+}
+
+.control-surface .sk-group__label {
+  font-size: 0.8125rem;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.control-surface .sk-group__count {
+  min-width: 1.7rem;
+  padding: 0.15rem 0.45rem;
+  border: 0;
+  background: var(--elevated);
+  text-align: center;
+}
+
+.control-surface .sk-group__meta {
+  font-size: 0.75rem;
+}
+
+.control-surface .sk-grid {
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: 0.75rem;
+  padding: 0.875rem;
+}
+
+.control-surface .sk-grid--registry,
+.control-surface .sk-grid--source {
+  padding: 0;
+}
+
+.control-surface .sk-card {
+  min-height: 10.5rem;
+  gap: 0.75rem;
+  border-color: var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--background) 72%, var(--surface));
+  padding: 1rem;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.control-surface .sk-card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
+  background: var(--surface);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.07);
+}
+
+.control-surface .sk-card:active {
+  transform: scale(0.995);
+}
+
+.control-surface .sk-card__head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.control-surface .sk-card__icon {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 2rem;
+  place-items: center;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  background: var(--elevated);
+  color: var(--muted-foreground);
+}
+
+.control-surface .sk-card__icon svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.control-surface .sk-card__name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.control-surface .sk-card__status {
+  --status-tone: var(--dim);
+  display: inline-flex;
+  min-height: 1.65rem;
+  flex: none;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid color-mix(in srgb, var(--status-tone) 36%, var(--border));
+  border-radius: var(--radius-pill);
+  padding: 0.2rem 0.5rem;
+  color: var(--status-tone);
+  font-size: 0.625rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.control-surface .sk-card__status.is-ready {
+  --status-tone: var(--ok);
+}
+
+.control-surface .sk-card__status.is-needs {
+  --status-tone: var(--warn);
+}
+
+.control-surface .sk-card__dot {
+  width: 0.38rem;
+  height: 0.38rem;
+  flex: 0 0 0.38rem;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+}
+
+.control-surface .sk-card__desc {
+  display: -webkit-box;
+  min-height: 3.8rem;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
+.control-surface .sk-card__foot {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: auto;
+  color: var(--dim);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.control-surface .sk-card__foot svg {
+  width: 0.8rem;
+  height: 0.8rem;
+  transition: transform 180ms ease;
+}
+
+.control-surface .sk-card:hover .sk-card__foot {
+  color: var(--primary);
+}
+
+.control-surface .sk-card:hover .sk-card__foot svg {
+  transform: translateX(2px);
+}
+
+.control-surface .sk-panel--source {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.control-surface .sk-partner,
+.control-surface .sk-community-intro {
+  display: flex;
+  min-height: 5.75rem;
+  align-items: center;
+  gap: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+  background: color-mix(in srgb, var(--surface) 96%, var(--elevated));
+  padding: 1rem;
+}
+
+.control-surface .sk-partner__logo {
+  width: 3.25rem;
+  height: 3.25rem;
+  flex: 0 0 3.25rem;
+  object-fit: cover;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+}
+
+.control-surface .sk-partner__logo--fallback {
+  display: grid;
+  place-items: center;
+  color: var(--primary);
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+
+.control-surface .sk-partner__copy,
+.control-surface .sk-community-intro > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.control-surface .sk-partner h2,
+.control-surface .sk-community-intro h2,
+.control-surface .sk-github-install h2 {
+  color: var(--foreground);
+  font-size: 0.9375rem;
+  font-weight: 680;
+  letter-spacing: -0.015em;
+}
+
+.control-surface .sk-partner p,
+.control-surface .sk-community-intro p,
+.control-surface .sk-github-install p {
+  margin-top: 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.control-surface .sk-partner__count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  color: var(--dim);
+  font-size: 0.6875rem;
+  white-space: nowrap;
+}
+
+.control-surface .sk-partner__count strong {
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+}
+
+.control-surface .sk-community-intro__icon,
+.control-surface .sk-github-install__icon {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: 0 0 2.5rem;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+  color: var(--primary);
+}
+
+.control-surface :is(.sk-community-intro__icon, .sk-github-install__icon) svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.control-surface .sk-browse__bar {
+  margin: 0;
+  border: 0;
+  background: transparent;
+}
+
+.control-surface .sk-chips {
+  gap: 0.5rem;
+  margin: -0.25rem 0 0;
+}
+
+.control-surface .sk-chip-btn {
+  min-height: 2rem;
+  border-radius: var(--radius-pill);
+  padding: 0.35rem 0.7rem;
+  background: var(--surface);
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.control-surface .sk-chip-btn.is-active {
+  border-color: color-mix(in srgb, var(--primary) 44%, var(--border));
+  background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+  color: var(--foreground);
+}
+
+.control-surface .sk-rcard {
+  min-height: 11rem;
+  gap: 0.85rem;
+  border-color: var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface) 96%, var(--elevated));
+  padding: 1rem;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.control-surface .sk-rcard:hover {
+  border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.07);
+}
+
+.control-surface .sk-rcard__logo,
+.sk-dialog__logo {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius-control);
+  filter: none;
+  opacity: 1;
+}
+
+.control-surface .sk-rcard__name {
+  font-size: 0.8125rem;
+}
+
+.control-surface .sk-rcard__desc {
+  display: -webkit-box;
+  min-height: 3.6rem;
+  overflow: hidden;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
+.control-surface .sk-rcard__foot [data-slot='button'] {
+  min-height: 2.25rem;
+}
+
+.control-surface .sk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.control-surface .sk-chip svg {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.control-surface .sk-github-install {
+  display: grid;
+  grid-template-columns: minmax(15rem, 0.8fr) minmax(20rem, 1.2fr);
+  align-items: center;
+  gap: 1.25rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+  background: color-mix(in srgb, var(--surface) 96%, var(--elevated));
+  padding: 1rem;
+}
+
+.control-surface .sk-github-install__intro,
+.control-surface .sk-github-install__controls {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.control-surface .sk-github-install__controls [data-slot='button'] {
+  min-width: 5.25rem;
+  min-height: 3rem;
+}
+
+.control-surface .sk-empty--contained {
+  margin: 0;
+}
+
+.control-surface .sk-skeleton {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: 0.75rem;
+}
+
+.control-surface .sk-skeleton__card {
+  display: flex;
+  min-height: 9.5rem;
+  flex-direction: column;
+  gap: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 1rem;
+}
+
+.control-surface .sk-skeleton__line {
+  width: 100%;
+  height: 0.7rem;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--foreground) 8%, var(--surface));
+}
+
+.control-surface .sk-skeleton__line--title {
+  width: 48%;
+  height: 0.9rem;
+}
+
+.control-surface .sk-skeleton__line--short {
+  width: 68%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .control-surface .sk-skeleton__line {
+    animation: sk-skeleton-pulse 1.4s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes sk-skeleton-pulse {
+  to {
+    opacity: 0.42;
+  }
+}
+
+.sk-modal {
+  width: min(43rem, 100%);
+  border-radius: var(--radius-dialog);
+}
+
+@media (max-width: 1080px) {
+  .control-surface .sk-library-tools {
+    grid-template-columns: 1fr;
+  }
+
+  .control-surface .sk-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .control-surface .sk-metric {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 760px) {
+  .control-surface .sk-stage__header {
+    min-height: 7rem;
+    padding-block: 1rem;
+  }
+
+  .control-surface .sk-source-nav {
+    position: relative;
+    top: auto;
+  }
+
+  .control-surface .sk-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .control-surface .sk-tab {
+    min-height: 3.5rem;
+  }
+
+  .control-surface .sk-library-tools {
+    padding: 0.625rem;
+  }
+
+  .control-surface .sk-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .control-surface .sk-metric {
+    min-height: 2.75rem;
+  }
+
+  .control-surface .sk-partner,
+  .control-surface .sk-community-intro {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .control-surface .sk-partner__count {
+    width: 100%;
+    margin-left: 4.25rem;
+  }
+
+  .control-surface .sk-github-install {
+    grid-template-columns: 1fr;
+  }
+
+  .control-surface .sk-github-install__controls {
+    align-items: stretch;
+  }
+
+  .control-surface .sk-group__head {
+    flex-wrap: wrap;
+  }
+
+  .control-surface .sk-group__meta {
+    width: 100%;
+    margin-left: 1.625rem;
+  }
+}
+
+@media (max-width: 520px) {
+  .control-surface .sk-tab {
+    gap: 0.55rem;
+    padding-inline: 0.55rem;
+  }
+
+  .control-surface .sk-tab__icon {
+    width: 2rem;
+    height: 2rem;
+    flex-basis: 2rem;
+  }
+
+  .control-surface .sk-tab__description {
+    display: none;
+  }
+
+  .control-surface .sk-grid,
+  .control-surface .sk-skeleton {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .control-surface .sk-card__status {
+    font-size: 0.59375rem;
+  }
+
+  .control-surface .sk-github-install__controls {
+    flex-direction: column;
+  }
+
+  .control-surface .sk-github-install__controls [data-slot='button'] {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .control-surface :is(.sk-tab, .sk-card, .sk-card__foot svg, .sk-group__caret) {
+    transition: none;
+  }
+
+  .control-surface .sk-card:hover,
+  .control-surface .sk-card:active {
+    transform: none;
+  }
+}

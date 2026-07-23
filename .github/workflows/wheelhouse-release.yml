@@ -111,8 +111,18 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
       - name: Install uv
         run: python -m pip install uv
+
+      - name: Build and verify packaged Control UI
+        run: python scripts/build_control_ui.py build
 
       - name: Check tag version
         if: ${{ github.event_name == 'push' || github.event.inputs.tag != '' }}

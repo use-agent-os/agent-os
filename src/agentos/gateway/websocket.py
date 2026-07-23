@@ -139,13 +139,13 @@ def is_allowed_ws_origin(
 # (events, RPC responses, ticks) is enqueued from any producer task and
 # drained sequentially by a dedicated writer task. WS-frame ``seq`` is
 # minted by the writer at DEQUEUE time so that lossy drops never consume
-# a seq number — the frontend at ``static/js/rpc.js`` closes the socket
+# a seq number — the frontend at ``frontend/src/lib/ws-rpc.ts`` closes the socket
 # on any seq gap.
 #
 # ``_LOSSY_EVENTS`` is intentionally narrow: the lossy event MUST NOT be
 # routed through ``SessionStreamRegistry.record()`` upstream, otherwise a
 # silent drop here would create a ``stream_seq`` gap that the frontend
-# would be filtered by ``chat.js:_acceptStreamSeq`` on reconnect. The
+# would filter in its chat stream controller on reconnect. The
 # only event that satisfies that constraint today is the
 # liveness ``tick`` emitted from ``_tick_loop`` — its name is not prefixed
 # ``session.event.`` so ``EventBridge.emit`` skips ``record()`` for it.

@@ -19,6 +19,11 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from agentos.gateway.config_commit import (
+    ConfigCommitResult,
+    commit_config,
+    expected_revision,
+)
 from agentos.gateway.rpc import RpcContext, get_dispatcher
 
 _d = get_dispatcher()
@@ -44,71 +49,6 @@ def _config_path_for(ctx: RpcContext, source: Any) -> str | None:
     if path:
         return str(path)
     return None
-
-
-def _apply_inplace(ctx: RpcContext, new_cfg: Any) -> None:
-    """Mirror new config fields into ``ctx.config`` so the running gateway sees them."""
-    if ctx.config is None or ctx.config is new_cfg:
-        return
-    for field_name in type(new_cfg).model_fields:
-        setattr(ctx.config, field_name, getattr(new_cfg, field_name))
-    if hasattr(ctx.config, "inherit_runtime_secrets"):
-        ctx.config.inherit_runtime_secrets(new_cfg)
-
-
-def _sync_provider_selector(ctx: RpcContext, llm_cfg: Any) -> None:
-    selector = getattr(ctx, "provider_selector", None)
-    if selector is None or llm_cfg is None or not hasattr(selector, "sync_primary"):
-        return
-    config = getattr(ctx, "config", None)
-    if config is not None:
-        from agentos.gateway.llm_runtime import resolve_llm_runtime_config
-
-        runtime = resolve_llm_runtime_config(config)
-        api_key = runtime.api_key
-        base_url = runtime.base_url
-        proxy = runtime.proxy
-    else:
-        api_key = llm_cfg.api_key
-        base_url = llm_cfg.base_url
-        proxy = getattr(llm_cfg, "proxy", "")
-    from agentos.provider.selector import ProviderConfig
-
-    selector.sync_primary(
-        ProviderConfig(
-            provider=llm_cfg.provider,
-            model=llm_cfg.model,
-            api_key=api_key,
-            base_url=base_url,
-            proxy=proxy,
-            provider_routing=getattr(llm_cfg, "provider_routing", {}),
-        )
-    )
-
-
-def _sync_image_generation(config: Any) -> None:
-    from agentos.tools.builtin.media import configure_audio, configure_image_generation
-
-    configure_image_generation(
-        getattr(config, "image_generation", None),
-        llm_config=getattr(config, "llm", None),
-        agentos_router_config=getattr(config, "agentos_router", None),
-    )
-    configure_audio(getattr(config, "audio", None))
-
-
-def _sync_search_provider(config: Any) -> None:
-    from agentos.tools.builtin.web import configure_search
-
-    configure_search(
-        provider_name=config.search_provider,
-        max_results=config.search_max_results,
-        api_key=config.search_api_key,
-        proxy=config.search_proxy,
-        use_env_proxy=config.search_use_env_proxy,
-        fallback_policy=config.search_fallback_policy,
-        diagnostics=config.search_diagnostics,
-    )
 
 
 def _onboarding_explicit_paths(new_cfg: Any) -> set[str]:
@@ -140,40 +80,43 @@ def _all_dotted_paths(payload: Any, prefix: str = "") -> set[str]:
 
 
 def _persist(ctx: RpcContext, new_cfg: Any, *, restart_required: bool) -> str:
-    from agentos.gateway.config_persist import persist_config as _shared_persist
-    from agentos.onboarding.config_store import resolve_config_path
-
-    if (
-        ctx.config is not None
-        and ctx.config is not new_cfg
-        and hasattr(new_cfg, "inherit_runtime_secrets")
-    ):
-        new_cfg.inherit_runtime_secrets(ctx.config)
-    path = _config_path_for(ctx, new_cfg) or _config_path_for(ctx, ctx.config)
-    # Route through the shared gateway writer so the runtime-override map is
-    # honoured (a CLI --listen/--debug or break-glass mode=none is never frozen
-    # by an onboarding save). Ensure ``config_path`` is set so the shared writer
-    # targets the same file the onboarding writer would have resolved.
-    resolved_path = str(path) if path else str(resolve_config_path(None)[0])
-    if not getattr(new_cfg, "config_path", None):
-        new_cfg.config_path = resolved_path
-    _shared_persist(new_cfg, explicit_paths=_onboarding_explicit_paths(new_cfg))
-    # Preserve the resolved path on the running config so subsequent saves
-    # round-trip to the same file.
-    if (
-        ctx.config is not None
-        and hasattr(ctx.config, "config_path")
-        and not getattr(ctx.config, "config_path", None)
-    ):
-        ctx.config.config_path = resolved_path
-    return resolved_path
+    result = commit_config(
+        ctx,
+        new_cfg,
+        source_config=ctx.config,
+        explicit_paths=_onboarding_explicit_paths(new_cfg),
+        restart_reasons=("channels",) if restart_required else (),
+    )
+    return str(result.path)
 
 
-def _status_payload(ctx: RpcContext) -> dict[str, Any]:
+def _commit_mutation(
+    ctx: RpcContext,
+    source_cfg: Any,
+    new_cfg: Any,
+    params: Any,
+    *,
+    changed_paths: set[str],
+    restart_required: bool,
+    restart_reason: str,
+) -> ConfigCommitResult:
+    reasons = (restart_reason,) if restart_required else ()
+    return commit_config(
+        ctx,
+        new_cfg,
+        source_config=source_cfg,
+        explicit_paths=_onboarding_explicit_paths(new_cfg),
+        changed_paths=changed_paths,
+        expected=expected_revision(params),
+        restart_reasons=reasons,
+    )
+
+
+def _status_payload(ctx: RpcContext, config: Any | None = None) -> dict[str, Any]:
     from agentos.onboarding.next_steps import env_recovery_commands
     from agentos.onboarding.status import get_onboarding_status
 
-    cfg = _active_config(ctx)
+    cfg = config if config is not None else _active_config(ctx)
     s = get_onboarding_status(cfg)
     return {
         "configPath": _config_path_for(ctx, cfg) or s.config_path,
@@ -217,27 +160,9 @@ async def _onboarding_status(params: Any, ctx: RpcContext) -> dict[str, Any]:
 
 @_d.method("onboarding.catalog", scope="operator.read")
 async def _onboarding_catalog(params: Any, ctx: RpcContext) -> dict[str, Any]:
-    from agentos.onboarding.audio_specs import audio_provider_catalog_payload
-    from agentos.onboarding.channel_specs import channel_catalog_payload
-    from agentos.onboarding.image_generation_specs import (
-        image_generation_provider_catalog_payload,
-    )
-    from agentos.onboarding.memory_embedding_specs import (
-        memory_embedding_provider_catalog_payload,
-    )
-    from agentos.onboarding.provider_specs import provider_catalog_payload
-    from agentos.onboarding.router_specs import router_catalog_payload
-    from agentos.onboarding.search_specs import search_provider_catalog_payload
+    from agentos.onboarding.setup_engine import setup_catalog_payload
 
-    return {
-        "providers": provider_catalog_payload(),
-        "channels": channel_catalog_payload(),
-        "searchProviders": search_provider_catalog_payload(),
-        "routerProfiles": router_catalog_payload(),
-        "memoryEmbeddingProviders": memory_embedding_provider_catalog_payload(),
-        "imageGenerationProviders": image_generation_provider_catalog_payload(),
-        "audioProviders": audio_provider_catalog_payload(),
-    }
+    return setup_catalog_payload()
 
 
 def _require(params: Any, key: str) -> Any:
@@ -262,14 +187,19 @@ async def _provider_configure(params: Any, ctx: RpcContext) -> dict[str, Any]:
         base_url=params.get("baseUrl", "") if isinstance(params, dict) else "",
         proxy=params.get("proxy", "") if isinstance(params, dict) else "",
     )
-    _apply_inplace(ctx, res.config)
-    _sync_provider_selector(ctx, res.config.llm)
-    _sync_image_generation(res.config)
-    config_path = _persist(ctx, res.config, restart_required=res.restart_required)
+    commit = _commit_mutation(
+        ctx,
+        cfg,
+        res.config,
+        params,
+        changed_paths={"llm", "agentos_router"},
+        restart_required=res.restart_required,
+        restart_reason="provider",
+    )
     return {
         "changed": res.changed,
-        "restartRequired": res.restart_required,
-        "configPath": config_path,
+        "restartRequired": commit.restart_required,
+        "configPath": str(commit.path),
         "entry": res.public_payload,
         "warnings": res.warnings,
     }
@@ -335,13 +265,19 @@ async def _router_configure(params: Any, ctx: RpcContext) -> dict[str, Any]:
             safety_net_threshold=safety_net_threshold,
             verify_local_endpoint=False,
         )
-    _apply_inplace(ctx, res.config)
-    _sync_provider_selector(ctx, res.config.llm)
-    config_path = _persist(ctx, res.config, restart_required=res.restart_required)
+    commit = _commit_mutation(
+        ctx,
+        cfg,
+        res.config,
+        params,
+        changed_paths={"agentos_router", "llm.model"},
+        restart_required=res.restart_required,
+        restart_reason="router",
+    )
     return {
         "changed": res.changed,
-        "restartRequired": res.restart_required,
-        "configPath": config_path,
+        "restartRequired": commit.restart_required,
+        "configPath": str(commit.path),
         "entry": res.public_payload,
         "warnings": res.warnings,
     }
@@ -349,20 +285,21 @@ async def _router_configure(params: Any, ctx: RpcContext) -> dict[str, Any]:
 
 @_d.method("onboarding.channel.probe", scope="operator.admin")
 async def _channel_probe(params: Any, ctx: RpcContext) -> dict[str, Any]:
-    from agentos.onboarding.mutations import validate_channel_entry
-    from agentos.onboarding.redaction import redact_channel_entry
+    from agentos.onboarding.mutations import upsert_channel
 
     entry = _require(params, "entry")
     if not isinstance(entry, dict):
         raise ValueError("params.entry must be an object")
-    normalized = validate_channel_entry(entry)
-    type_name = str(normalized.get("type") or "")
+    # Validate against the same merge semantics used by upsert. This lets an
+    # existing channel keep a write-only credential when the edit form leaves
+    # that secret blank, without persisting or mutating the active config.
+    result = upsert_channel(_active_config(ctx), entry_payload=entry)
     return {
         "status": "ready",
         "connected": False,
         "restartRequired": True,
-        "entry": redact_channel_entry(type_name, normalized),
-        "warnings": [],
+        "entry": result.public_payload,
+        "warnings": result.warnings,
     }
 
 
@@ -385,13 +322,28 @@ async def _search_configure(params: Any, ctx: RpcContext) -> dict[str, Any]:
         ),
         diagnostics=params.get("diagnostics", False) if isinstance(params, dict) else False,
     )
-    _apply_inplace(ctx, res.config)
-    _sync_search_provider(res.config)
-    config_path = _persist(ctx, res.config, restart_required=res.restart_required)
+    commit = _commit_mutation(
+        ctx,
+        cfg,
+        res.config,
+        params,
+        changed_paths={
+            "search_provider",
+            "search_api_key",
+            "search_api_key_env",
+            "search_max_results",
+            "search_proxy",
+            "search_use_env_proxy",
+            "search_fallback_policy",
+            "search_diagnostics",
+        },
+        restart_required=res.restart_required,
+        restart_reason="search",
+    )
     return {
         "changed": res.changed,
-        "restartRequired": res.restart_required,
-        "configPath": config_path,
+        "restartRequired": commit.restart_required,
+        "configPath": str(commit.path),
         "entry": res.public_payload,
         "warnings": res.warnings,
     }
@@ -412,13 +364,19 @@ async def _image_generation_configure(params: Any, ctx: RpcContext) -> dict[str,
         base_url=params.get("baseUrl", "") if isinstance(params, dict) else "",
         enabled=params.get("enabled", True) if isinstance(params, dict) else True,
     )
-    _apply_inplace(ctx, res.config)
-    _sync_image_generation(res.config)
-    config_path = _persist(ctx, res.config, restart_required=res.restart_required)
+    commit = _commit_mutation(
+        ctx,
+        cfg,
+        res.config,
+        params,
+        changed_paths={"image_generation"},
+        restart_required=res.restart_required,
+        restart_reason="image_generation",
+    )
     return {
         "changed": res.changed,
-        "restartRequired": res.restart_required,
-        "configPath": config_path,
+        "restartRequired": commit.restart_required,
+        "configPath": str(commit.path),
         "entry": res.public_payload,
         "warnings": res.warnings,
     }
@@ -439,12 +397,19 @@ async def _memory_embedding_configure(params: Any, ctx: RpcContext) -> dict[str,
         base_url=params.get("baseUrl", "") if isinstance(params, dict) else "",
         onnx_dir=params.get("onnxDir", "") if isinstance(params, dict) else "",
     )
-    _apply_inplace(ctx, res.config)
-    config_path = _persist(ctx, res.config, restart_required=res.restart_required)
+    commit = _commit_mutation(
+        ctx,
+        cfg,
+        res.config,
+        params,
+        changed_paths={"memory.embedding"},
+        restart_required=res.restart_required,
+        restart_reason="memory",
+    )
     return {
         "changed": res.changed,
-        "restartRequired": res.restart_required,
-        "configPath": config_path,
+        "restartRequired": commit.restart_required,
+        "configPath": str(commit.path),
         "entry": res.public_payload,
         "warnings": res.warnings,
     }
@@ -467,13 +432,19 @@ async def _audio_configure(params: Any, ctx: RpcContext) -> dict[str, Any]:
         tts_model=params.get("ttsModel", "") if isinstance(params, dict) else "",
         language_code=params.get("languageCode", "") if isinstance(params, dict) else "",
     )
-    _apply_inplace(ctx, res.config)
-    _sync_image_generation(res.config)
-    config_path = _persist(ctx, res.config, restart_required=res.restart_required)
+    commit = _commit_mutation(
+        ctx,
+        cfg,
+        res.config,
+        params,
+        changed_paths={"audio"},
+        restart_required=res.restart_required,
+        restart_reason="audio",
+    )
     return {
         "changed": res.changed,
-        "restartRequired": res.restart_required,
-        "configPath": config_path,
+        "restartRequired": commit.restart_required,
+        "configPath": str(commit.path),
         "entry": res.public_payload,
         "warnings": res.warnings,
     }
@@ -488,12 +459,19 @@ async def _channel_upsert(params: Any, ctx: RpcContext) -> dict[str, Any]:
         raise ValueError("params.entry must be an object")
     cfg = _active_config(ctx)
     res = upsert_channel(cfg, entry_payload=entry)
-    _apply_inplace(ctx, res.config)
-    config_path = _persist(ctx, res.config, restart_required=True)
+    commit = _commit_mutation(
+        ctx,
+        cfg,
+        res.config,
+        params,
+        changed_paths={"channels"},
+        restart_required=True,
+        restart_reason="channels",
+    )
     return {
         "changed": res.changed,
-        "restartRequired": True,
-        "configPath": config_path,
+        "restartRequired": commit.restart_required,
+        "configPath": str(commit.path),
         "entry": res.public_payload,
         "warnings": res.warnings,
     }
@@ -506,12 +484,19 @@ async def _channel_remove(params: Any, ctx: RpcContext) -> dict[str, Any]:
     name = _require(params, "name")
     cfg = _active_config(ctx)
     res = remove_channel(cfg, name=name)
-    _apply_inplace(ctx, res.config)
-    config_path = _persist(ctx, res.config, restart_required=True)
+    commit = _commit_mutation(
+        ctx,
+        cfg,
+        res.config,
+        params,
+        changed_paths={"channels"},
+        restart_required=True,
+        restart_reason="channels",
+    )
     return {
         "changed": res.changed,
-        "restartRequired": True,
-        "configPath": config_path,
+        "restartRequired": commit.restart_required,
+        "configPath": str(commit.path),
         "removed": name,
     }
 
@@ -522,12 +507,19 @@ async def _toggle(ctx: RpcContext, params: Any, enabled: bool) -> dict[str, Any]
     name = _require(params, "name")
     cfg = _active_config(ctx)
     res = set_channel_enabled(cfg, name=name, enabled=enabled)
-    _apply_inplace(ctx, res.config)
-    config_path = _persist(ctx, res.config, restart_required=True)
+    commit = _commit_mutation(
+        ctx,
+        cfg,
+        res.config,
+        params,
+        changed_paths={"channels"},
+        restart_required=True,
+        restart_reason="channels",
+    )
     return {
         "changed": res.changed,
-        "restartRequired": True,
-        "configPath": config_path,
+        "restartRequired": commit.restart_required,
+        "configPath": str(commit.path),
         "name": name,
         "enabled": enabled,
     }

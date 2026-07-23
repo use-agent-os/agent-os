@@ -120,6 +120,10 @@ Top-level: `init`, `onboard`, `configure`, `doctor`, `upgrade`, `chat`,
 | `mcp-server` | `run` (MCP bridge) |
 | `replay`, `dist`, `onboard` | replay recorded turns / workspace inventory / setup status |
 
+Built-in channel types are `discord`, `slack`, and `telegram`; use `agentos
+channels types` as the authoritative catalog. Config migration backs up the
+file before removing entries for retired built-in channel types.
+
 ## Configuration
 
 File resolution (highest precedence first):

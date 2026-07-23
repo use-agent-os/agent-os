@@ -64,6 +64,12 @@ REQUIRED_RUNTIME_MODULE_RELS = (
     "agentos/dist/__init__.py",
     "agentos/dist/workspace_state.py",
 )
+CONTROL_UI_WHEEL_PREFIX = "agentos/gateway/static/dist"
+REQUIRED_CONTROL_UI_WHEEL_RELS = (
+    f"{CONTROL_UI_WHEEL_PREFIX}/index.html",
+    f"{CONTROL_UI_WHEEL_PREFIX}/THIRD_PARTY_LICENSES.txt",
+    f"{CONTROL_UI_WHEEL_PREFIX}/theme-bootstrap.js",
+)
 FORBIDDEN_RELEASE_SEGMENTS = {".git", ".github", ".omx"}
 FORBIDDEN_RELEASE_ROOTS = {"docs", "tests", "scripts"}
 FORBIDDEN_RELEASE_TEXT_MARKERS = (
@@ -292,6 +298,41 @@ def missing_required_runtime_modules_in_wheel(wheel_path: Path) -> list[str]:
     with ZipFile(wheel_path) as archive:
         names = set(archive.namelist())
     return sorted(set(REQUIRED_RUNTIME_MODULE_RELS) - names)
+
+
+def missing_control_ui_assets_in_wheel(wheel_path: Path) -> list[str]:
+    with ZipFile(wheel_path) as archive:
+        names = set(archive.namelist())
+
+    missing = sorted(set(REQUIRED_CONTROL_UI_WHEEL_RELS) - names)
+    asset_prefix = f"{CONTROL_UI_WHEEL_PREFIX}/assets/"
+    if not any(name.startswith(asset_prefix) and name.endswith(".js") for name in names):
+        missing.append(f"{asset_prefix}*.js")
+    if not any(name.startswith(asset_prefix) and name.endswith(".css") for name in names):
+        missing.append(f"{asset_prefix}*.css")
+    return missing
+
+
+def build_control_ui_dist(repo_root: Path, env: dict[str, str]) -> None:
+    builder = repo_root / "scripts" / "build_control_ui.py"
+    if not builder.is_file():
+        raise SystemExit(f"Control UI builder is missing: {builder}")
+    run([sys.executable, str(builder), "build"], cwd=repo_root, env=env)
+
+
+def verify_control_ui_archive(
+    repo_root: Path,
+    archive_path: Path,
+    env: dict[str, str],
+) -> None:
+    verifier = repo_root / "scripts" / "build_control_ui.py"
+    if not verifier.is_file():
+        raise SystemExit(f"Control UI verifier is missing: {verifier}")
+    run(
+        [sys.executable, str(verifier), "verify-archive", str(archive_path)],
+        cwd=repo_root,
+        env=env,
+    )
 
 
 def find_built_wheel(wheel_dir: Path) -> Path:
@@ -1749,6 +1790,7 @@ def main(argv: list[str] | None = None) -> int:
         runtime_root = work_dir / "runtime" / "python"
         extract_python_runtime_archive(runtime_archive, runtime_root)
 
+    build_control_ui_dist(repo_root, env)
     wheel_path = build_wheel(repo_root, wheel_dir, env)
     missing_runtime_modules = missing_required_runtime_modules_in_wheel(wheel_path)
     if missing_runtime_modules:
@@ -1756,6 +1798,14 @@ def main(argv: list[str] | None = None) -> int:
         for entry in missing_runtime_modules:
             print(f"  {entry}", file=sys.stderr)
         return 1
+
+    missing_control_ui_assets = missing_control_ui_assets_in_wheel(wheel_path)
+    if missing_control_ui_assets:
+        print("Built wheel is missing required Control UI assets:", file=sys.stderr)
+        for entry in missing_control_ui_assets:
+            print(f"  {entry}", file=sys.stderr)
+        return 1
+    verify_control_ui_archive(repo_root, wheel_path, env)
 
     wheel_violations = forbidden_release_wheel_paths(wheel_path)
     if wheel_violations:

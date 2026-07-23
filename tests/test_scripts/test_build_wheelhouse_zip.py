@@ -59,6 +59,89 @@ def test_build_wheel_retries_once_after_transient_uv_failure(monkeypatch, tmp_pa
     assert len(calls) == 2
 
 
+def test_control_ui_is_built_before_release_packaging(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    module = load_script()
+    verifier = tmp_path / "scripts" / "build_control_ui.py"
+    verifier.parent.mkdir(parents=True)
+    verifier.write_text("# fixture\n", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(
+        module,
+        "run",
+        lambda args, *, cwd, env: calls.append((args, cwd, env)),
+    )
+    env = {"UV_CACHE_DIR": "cache"}
+
+    module.build_control_ui_dist(tmp_path, env)
+
+    assert calls == [
+        ([sys.executable, str(verifier), "build"], tmp_path, env),
+    ]
+
+
+def test_built_release_archive_uses_central_control_ui_verifier(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    module = load_script()
+    verifier = tmp_path / "scripts" / "build_control_ui.py"
+    verifier.parent.mkdir(parents=True)
+    verifier.write_text("# fixture\n", encoding="utf-8")
+    wheel_path = tmp_path / "use_agent_os-0.1.0-py3-none-any.whl"
+    calls = []
+    monkeypatch.setattr(
+        module,
+        "run",
+        lambda args, *, cwd, env: calls.append((args, cwd, env)),
+    )
+    env = {"UV_CACHE_DIR": "cache"}
+
+    module.verify_control_ui_archive(tmp_path, wheel_path, env)
+
+    assert calls == [
+        (
+            [
+                sys.executable,
+                str(verifier),
+                "verify-archive",
+                str(wheel_path),
+            ],
+            tmp_path,
+            env,
+        ),
+    ]
+
+
+def test_control_ui_wheel_guard_requires_shell_license_and_bundles(tmp_path: Path) -> None:
+    module = load_script()
+    complete_wheel = tmp_path / "complete.whl"
+    with ZipFile(complete_wheel, "w") as archive:
+        archive.writestr("agentos/gateway/static/dist/index.html", "<html></html>")
+        archive.writestr(
+            "agentos/gateway/static/dist/THIRD_PARTY_LICENSES.txt",
+            "licenses",
+        )
+        archive.writestr("agentos/gateway/static/dist/theme-bootstrap.js", "theme")
+        archive.writestr("agentos/gateway/static/dist/assets/app-a1b2c3.js", "js")
+        archive.writestr("agentos/gateway/static/dist/assets/app-a1b2c3.css", "css")
+
+    assert module.missing_control_ui_assets_in_wheel(complete_wheel) == []
+
+    incomplete_wheel = tmp_path / "incomplete.whl"
+    with ZipFile(incomplete_wheel, "w") as archive:
+        archive.writestr("agentos/gateway/static/dist/index.html", "<html></html>")
+
+    assert module.missing_control_ui_assets_in_wheel(incomplete_wheel) == [
+        "agentos/gateway/static/dist/THIRD_PARTY_LICENSES.txt",
+        "agentos/gateway/static/dist/theme-bootstrap.js",
+        "agentos/gateway/static/dist/assets/*.js",
+        "agentos/gateway/static/dist/assets/*.css",
+    ]
+
+
 def test_release_name_records_platform_python_profile() -> None:
     module = load_script()
 

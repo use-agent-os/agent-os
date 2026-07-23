@@ -1,9 +1,4 @@
-"""Invariants for pyproject.toml after the channel install contract cleanup.
-
-Real-used channel SDKs stay in base dependencies. Base-install channels
-must not be re-exposed as empty optional extras, because package metadata
-is also a user-visible install contract.
-"""
+"""Invariants for the supported channel install contract."""
 
 from __future__ import annotations
 
@@ -41,18 +36,12 @@ def _dep_names(specs: list[str]) -> set[str]:
     return names
 
 
-def test_channel_sdks_in_base(project_table: dict) -> None:
-    """Channel adapters that ``import`` a vendor SDK must keep that SDK in base."""
+def test_supported_channel_sdk_is_in_base(project_table: dict) -> None:
+    """Telegram imports its vendor SDK and must keep it in the base install."""
 
     base = _dep_names(project_table["dependencies"])
-    required = {
-        "python-telegram-bot",
-        "dingtalk-stream",
-        "qq-botpy",
-        "cryptography",
-    }
-    missing = required - base
-    assert not missing, f"channel SDKs missing from base deps: {sorted(missing)}"
+    assert "python-telegram-bot" in base
+    assert not {"dingtalk-stream", "qq-botpy", "cryptography"} & base
 
 
 def test_mcp_sdk_is_a_base_dependency(project_table: dict) -> None:
@@ -66,17 +55,10 @@ def test_mcp_sdk_is_a_base_dependency(project_table: dict) -> None:
 
 
 def test_no_dead_extras(project_table: dict) -> None:
-    """msteams extra is intentionally absent; matrix extra installs matrix-nio."""
+    """Retired and non-public adapters must not expose install extras."""
 
     extras = project_table.get("optional-dependencies", {})
-    assert "msteams" not in extras, (
-        "msteams extra stays absent: the adapter is text-only and not advertised"
-    )
-    assert "matrix" in extras, "matrix extra must exist and pull matrix-nio"
-    matrix_specs = extras["matrix"]
-    assert any("matrix-nio" in spec for spec in matrix_specs), (
-        "matrix extra must declare matrix-nio (without [e2e]); use matrix-e2e for E2EE"
-    )
+    assert not {"dingtalk", "matrix", "matrix-e2e", "msteams", "qq", "wecom"} & set(extras)
 
 
 def test_base_channel_extras_are_not_exposed_as_noop_aliases(
@@ -85,7 +67,7 @@ def test_base_channel_extras_are_not_exposed_as_noop_aliases(
     """Base-install channels must not be exposed as no-op extras."""
 
     extras = project_table.get("optional-dependencies", {})
-    for name in ("feishu", "telegram", "dingtalk", "wecom", "qq"):
+    for name in ("discord", "slack", "telegram"):
         assert name not in extras, f"{name} is installed from base; do not expose a no-op extra"
 
 
@@ -95,8 +77,16 @@ def test_lockfile_does_not_advertise_removed_base_channel_extras(
     """uv.lock metadata must match the package install contract."""
 
     provides_extras = set(lock_package.get("provides-extras", []))
-    for name in ("feishu", "telegram", "dingtalk", "wecom", "qq"):
-        assert name not in provides_extras
+    assert not {
+        "dingtalk",
+        "discord",
+        "matrix",
+        "matrix-e2e",
+        "qq",
+        "slack",
+        "telegram",
+        "wecom",
+    } & provides_extras
 
 
 def test_no_duplicate_ml_extra(project_table: dict) -> None:

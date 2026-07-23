@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -237,20 +238,128 @@ def test_ci_change_classifier_tracks_release_surface_changes(tmp_path: Path) -> 
     assert outputs["release_changed"] == "true"
 
 
+def test_ci_change_classifier_treats_control_ui_as_runtime_and_release_surface(
+    tmp_path: Path,
+) -> None:
+    outputs = _classify_changed_files(
+        tmp_path,
+        [
+            "frontend/src/App.tsx",
+            "frontend/package-lock.json",
+            "scripts/build_control_ui.py",
+            "src/agentos/gateway/control_ui.py",
+        ],
+    )
+
+    assert outputs["docs_only"] == "false"
+    assert outputs["runtime_changed"] == "true"
+    assert outputs["test_changed"] == "false"
+    assert outputs["ci_changed"] == "false"
+    assert outputs["dependency_changed"] == "false"
+    assert outputs["release_changed"] == "true"
+
+
+def test_ci_change_classifier_tracks_control_ui_release_contract_files(
+    tmp_path: Path,
+) -> None:
+    outputs = _classify_changed_files(
+        tmp_path,
+        [
+            "Dockerfile",
+            ".dockerignore",
+            ".gitignore",
+            "src/agentos/gateway/boot.py",
+            "THIRD_PARTY_NOTICES.md",
+            "tests/test_scripts/test_build_control_ui.py",
+            "tests/test_frontend_third_party_notices.py",
+        ],
+    )
+
+    assert outputs["docs_only"] == "false"
+    assert outputs["runtime_changed"] == "true"
+    assert outputs["test_changed"] == "true"
+    assert outputs["ci_changed"] == "false"
+    assert outputs["dependency_changed"] == "false"
+    assert outputs["release_changed"] == "true"
+
+
 def test_manual_workflows_reference_existing_test_files() -> None:
     for text in _workflow_texts():
         for raw_path in TEST_PATH_RE.findall(text):
             assert Path(raw_path).is_file(), f"workflow references missing test: {raw_path}"
 
 
-def test_webui_browser_workflow_is_manual_and_opt_in() -> None:
+def test_webui_browser_workflow_runs_for_relevant_prs_without_credentials() -> None:
     data = _workflow("webui-browser-smoke.yml")
     text = (WORKFLOW_DIR / "webui-browser-smoke.yml").read_text(encoding="utf-8")
 
-    assert _trigger_keys(data) == {"workflow_dispatch"}
+    assert _trigger_keys(data) == {"pull_request", "push", "workflow_dispatch"}
+    pull_request = data["on"]["pull_request"]
+    assert "frontend/**" in pull_request["paths"]
+    assert "scripts/build_control_ui.py" in pull_request["paths"]
+    assert "src/agentos/gateway/control_ui.py" in pull_request["paths"]
+    assert "tests/functional/test_webui_browser*.py" in pull_request["paths"]
     assert 'AGENTOS_WEBUI_BROWSER_E2E: "1"' in text
+    assert 'AGENTOS_WEBUI_BROWSER_CHAT_E2E: "1"' in text
     assert "tests/functional/test_webui_browser_e2e.py" in text
-    assert "playwright install chromium" in text
+    assert "tests/functional/test_webui_browser_chat_e2e.py" in text
+    assert "npm --prefix frontend exec -- playwright install chromium" in text
+    assert "OPENROUTER_API_KEY" not in text
+    assert "secrets." not in text
+
+
+def test_browser_smoke_uses_one_exact_lockfile_pinned_playwright_installation() -> None:
+    manifest = json.loads(Path("frontend/package.json").read_text(encoding="utf-8"))
+    lock = json.loads(Path("frontend/package-lock.json").read_text(encoding="utf-8"))
+    version = manifest["devDependencies"]["playwright"]
+
+    assert re.fullmatch(r"\d+\.\d+\.\d+", version)
+    assert lock["packages"][""]["devDependencies"]["playwright"] == version
+    assert lock["packages"]["node_modules/playwright"]["version"] == version
+
+    for test_path in (
+        Path("tests/functional/test_webui_browser_e2e.py"),
+        Path("tests/functional/test_webui_browser_chat_e2e.py"),
+    ):
+        text = test_path.read_text(encoding="utf-8")
+        assert 'FRONTEND_DIR / "node_modules"' in text
+        assert '"install"' not in text
+
+
+def test_ubuntu_quality_runs_frontend_source_gate_without_rebuilding() -> None:
+    data = _workflow("ci.yml")
+    steps = data["jobs"]["ubuntu-quality"]["steps"]
+    commands = [step.get("run") for step in steps if isinstance(step, dict)]
+
+    assert commands.count("npm --prefix frontend run check") == 1
+    assert commands.count("python scripts/build_control_ui.py build") == 1
+
+
+def test_control_ui_is_built_before_runtime_and_release_validation() -> None:
+    shared_build = "python scripts/build_control_ui.py build"
+    workflows = {
+        "ci.yml": 3,
+        "frontend.yml": 1,
+        "pypi-publish.yml": 1,
+        "wheelhouse-release.yml": 1,
+        "webui-browser-smoke.yml": 1,
+        "live-release-e2e.yml": 1,
+    }
+
+    for name, minimum_count in workflows.items():
+        text = (WORKFLOW_DIR / name).read_text(encoding="utf-8")
+        assert text.count(shared_build) >= minimum_count, (
+            f"{name} must build and verify the generated Control UI"
+        )
+        assert 'node-version: "22"' in text, f"{name} must use the supported Node runtime"
+
+
+def test_distribution_workflows_verify_control_ui_inside_built_archives() -> None:
+    ci = (WORKFLOW_DIR / "ci.yml").read_text(encoding="utf-8")
+    pypi = (WORKFLOW_DIR / "pypi-publish.yml").read_text(encoding="utf-8")
+
+    assert "verify-archive dist/*.whl" in ci
+    assert "verify-archive dist/*.whl dist/*.tar.gz" in pypi
 
 
 def test_llm_workflow_is_single_manual_smoke() -> None:
@@ -270,8 +379,9 @@ def test_live_release_e2e_workflow_is_manual_and_separates_private_inputs() -> N
 
     assert _trigger_keys(data) == {"workflow_dispatch"}
     assert "tests/functional/test_gateway_llm_e2e.py" in text
-    assert "tests/functional/test_webui_browser_chat_e2e.py" in text
     assert "tests/functional/test_live_channel_telegram_smoke.py" in text
+    assert "tests/functional/test_webui_browser_chat_e2e.py" not in text
+    assert "playwright install chromium" not in text
     assert "OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}" in text
     assert (
         "AGENTOS_LIVE_TELEGRAM_BOT_TOKEN: "

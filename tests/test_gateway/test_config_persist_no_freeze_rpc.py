@@ -162,7 +162,13 @@ async def test_break_glass_mode_none_not_frozen_by_later_patch_safe(tmp_path):
 
     # break-glass recorded the on-disk auth originals at the prompt.
     set_runtime_overrides(
-        {"auth.mode": "token", "auth.allow_unauthenticated_public": False}
+        {
+            "host": None,
+            "port": None,
+            "debug": None,
+            "auth.mode": "token",
+            "auth.allow_unauthenticated_public": False,
+        }
     )
     cfg = _running_config(
         cfg_path,
@@ -228,7 +234,7 @@ async def test_config_apply_baseline_diff_persists_deliberate_auth_mode_edit(tmp
     import yaml
 
     cfg_path = tmp_path / "config.toml"
-    _seed_disk(cfg_path, {"auth": {"mode": "password"}})
+    _seed_disk(cfg_path, {"auth": {"mode": "password", "token": "existing-token"}})
 
     # break-glass recorded the on-disk auth originals; running is mode=none.
     set_runtime_overrides(
@@ -236,16 +242,20 @@ async def test_config_apply_baseline_diff_persists_deliberate_auth_mode_edit(tmp
     )
     cfg = _running_config(
         cfg_path,
-        auth=AuthConfig(mode="none", allow_unauthenticated_public=True),
+        auth=AuthConfig(
+            mode="none",
+            token="existing-token",
+            allow_unauthenticated_public=True,
+        ),
     )
     # Baseline = what config.get showed (running config, auth echoed none).
     baseline = cfg.model_dump(mode="json")
+    baseline["auth"]["token"] = "[redacted]"
     baseline_yaml = yaml.safe_dump(baseline)
     # User deliberately switches auth.mode none -> token in the YAML.
     edited = dict(baseline)
     edited["auth"] = dict(baseline["auth"])
     edited["auth"]["mode"] = "token"
-    edited["auth"]["token"] = "fresh-token"
     edited_yaml = yaml.safe_dump(edited)
 
     res = await get_dispatcher().dispatch(
@@ -260,6 +270,18 @@ async def test_config_apply_baseline_diff_persists_deliberate_auth_mode_edit(tmp
     # Deliberate edit (none in baseline -> token submitted) persisted; NOT
     # restored to the on-disk password original the way round-2 would.
     assert saved["auth"]["mode"] == "token"
+    assert saved["auth"]["token"] == "existing-token"
+
+    follow_up = await get_dispatcher().dispatch(
+        "r2",
+        "config.patch",
+        {"patches": {"prompt_cache.mode": "on"}},
+        _admin_ctx(cfg),
+    )
+    assert follow_up.error is None, follow_up.error
+    saved = _read(cfg_path)
+    assert saved["auth"]["mode"] == "token"
+    assert saved["auth"]["token"] == "existing-token"
 
 
 @pytest.mark.asyncio

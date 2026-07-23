@@ -5,13 +5,9 @@ from __future__ import annotations
 import pytest
 
 from agentos.gateway.config import (
-    DingTalkChannelEntry,
     DiscordChannelEntry,
-    MatrixChannelEntry,
-    QQChannelEntry,
     SlackChannelEntry,
     TelegramChannelEntry,
-    WeComChannelEntry,
 )
 from agentos.onboarding.channel_specs import (
     ChannelSetupSpec,
@@ -22,23 +18,16 @@ from agentos.onboarding.channel_specs import (
 
 # msteams is intentionally absent: the adapter is text-only and hidden
 # from runtime catalog surfaces until first-class support lands.
-ALL_TYPES = {
-    "slack", "discord", "dingtalk", "wecom", "qq",
-    "matrix", "telegram",
-}
+ALL_TYPES = {"discord", "slack", "telegram"}
 
 ENTRY_MODELS = {
     "slack": SlackChannelEntry,
     "discord": DiscordChannelEntry,
-    "dingtalk": DingTalkChannelEntry,
-    "wecom": WeComChannelEntry,
-    "qq": QQChannelEntry,
-    "matrix": MatrixChannelEntry,
     "telegram": TelegramChannelEntry,
 }
 
-EXPECTED_PUBLIC_URL = {"wecom"}
 CONDITIONAL_PUBLIC_URL = {"slack", "telegram"}
+RETIRED_TYPES = {"dingtalk", "matrix", "qq", "qqbot", "wecom"}
 
 
 def test_catalog_includes_all_channels():
@@ -141,18 +130,6 @@ def test_channel_catalog_payload_exposes_ui_metadata():
     assert slack["requiresPublicUrl"] is False
 
 
-def test_matrix_encryption_choices():
-    spec = get_channel_setup_spec("matrix")
-    field = next(f for f in spec.fields if f.name == "encryption")
-    assert field.choices == ("off", "required", "best_effort")
-
-
-@pytest.mark.parametrize("type_name", sorted(EXPECTED_PUBLIC_URL))
-def test_webhook_channels_require_public_url(type_name: str):
-    spec = get_channel_setup_spec(type_name)
-    assert spec.requires_public_url is True
-
-
 @pytest.mark.parametrize("type_name", sorted(CONDITIONAL_PUBLIC_URL))
 def test_conditional_webhook_channels_flagged(type_name: str):
     spec = get_channel_setup_spec(type_name)
@@ -160,26 +137,23 @@ def test_conditional_webhook_channels_flagged(type_name: str):
 
 
 def test_base_channel_specs_do_not_advertise_legacy_extras():
-    for type_name in ("telegram", "dingtalk", "wecom", "qq"):
-        spec = get_channel_setup_spec(type_name)
-        assert spec.dependency_extra is None
-
-
-def test_matrix_advertises_its_real_optional_extra():
-    spec = get_channel_setup_spec("matrix")
-    assert spec.dependency_extra == "matrix"
+    assert get_channel_setup_spec("telegram").dependency_extra is None
 
 
 def test_channel_catalog_payload_only_advertises_real_install_extras():
     payload = {entry["type"]: entry for entry in channel_catalog_payload()}
-    for type_name in ("telegram", "dingtalk", "wecom", "qq"):
-        assert payload[type_name]["dependencyExtra"] is None
-    assert payload["matrix"]["dependencyExtra"] == "matrix"
+    assert payload["telegram"]["dependencyExtra"] is None
 
 
 def test_unknown_channel_raises():
     with pytest.raises(KeyError):
         get_channel_setup_spec("not-a-channel")
+
+
+@pytest.mark.parametrize("type_name", sorted(RETIRED_TYPES))
+def test_retired_channels_are_absent_from_catalog(type_name: str) -> None:
+    with pytest.raises(KeyError):
+        get_channel_setup_spec(type_name)
 
 
 def test_msteams_is_hidden_from_catalog():

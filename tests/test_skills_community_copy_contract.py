@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SURFACES = [
     ROOT / "src" / "agentos" / "cli" / "skills_cmd.py",
-    ROOT / "src" / "agentos" / "gateway" / "static" / "js" / "views" / "skills.js",
+    ROOT / "frontend" / "src" / "views" / "skills" / "SkillsPage.tsx",
     ROOT / "src" / "agentos" / "skills" / "hub" / "__init__.py",
     ROOT / "src" / "agentos" / "skills" / "hub" / "clawhub.py",
     ROOT / "src" / "agentos" / "skills" / "hub" / "source.py",

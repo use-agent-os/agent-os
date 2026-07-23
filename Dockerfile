@@ -14,7 +14,23 @@
 #     start because the in-container bind is a wildcard by design — that is
 #     the intended signal to operators running the image.
 
-FROM python:3.13-slim-bookworm
+FROM node:22-bookworm-slim AS control-ui-builder
+
+WORKDIR /build
+
+# The shared builder is Python stdlib-only. Keeping the Node toolchain in this
+# stage ensures the final runtime image contains neither npm nor node_modules.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY frontend/ ./frontend/
+COPY scripts/build_control_ui.py ./scripts/build_control_ui.py
+
+RUN python3 scripts/build_control_ui.py build
+
+
+FROM python:3.13-slim-bookworm AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -39,9 +55,12 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy minimal build context — everything else is in .dockerignore.
-COPY pyproject.toml README.md README.release.md ./
+COPY pyproject.toml README.md README.release.md LICENSE NOTICE THIRD_PARTY_NOTICES.md ./
 COPY src/ ./src/
 COPY migrations/ ./migrations/
+COPY --from=control-ui-builder \
+    /build/src/agentos/gateway/static/dist/ \
+    ./src/agentos/gateway/static/dist/
 
 RUN python - <<'PY'
 from pathlib import Path
@@ -68,7 +87,7 @@ for path in required:
         pointers.append(str(path))
 if missing or pointers:
     raise SystemExit(
-        "Bundled BGE embedding or v4_phase3 router assets are unavailable in this "
+        "Bundled BGE embedding or Pilot router assets are unavailable in this "
         'build context. Run `git lfs pull --include="src/agentos/memory/models/**"` '
         'and `git lfs pull --include="src/agentos/agentos_router/models/**"` '
         f"before docker build. Missing={missing} Pointers={pointers}"

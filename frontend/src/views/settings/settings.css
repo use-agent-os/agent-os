@@ -1,0 +1,258 @@
+.settings-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+}
+
+.settings-health {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.5rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--tone) 10%, var(--surface));
+  color: var(--tone);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.settings-health svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.settings-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-width: 0;
+  padding: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+  background: var(--surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--background) 38%, transparent);
+}
+
+.settings-surface-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.settings-surface-tabs button {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 9.75rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted-foreground);
+  text-align: left;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.settings-surface-tabs button:hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--surface));
+  color: var(--foreground);
+}
+
+.settings-surface-tabs button.is-active {
+  border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
+  background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+  color: var(--foreground);
+}
+
+.settings-surface-tabs svg {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  color: currentColor;
+}
+
+.settings-surface-tabs button.is-active svg {
+  color: var(--primary);
+}
+
+.settings-surface-tabs span {
+  display: grid;
+  gap: 0.05rem;
+  min-width: 0;
+}
+
+.settings-surface-tabs strong {
+  font-size: 0.8rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.settings-surface-tabs small {
+  color: var(--muted-foreground);
+  font-size: 0.66rem;
+  white-space: nowrap;
+}
+
+.settings-glance {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.settings-glance__item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0.35rem 0.8rem;
+}
+
+.settings-glance__item + .settings-glance__item {
+  border-left: 1px solid var(--hairline);
+}
+
+.settings-glance__item > svg {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  color: var(--primary);
+}
+
+.settings-glance__item > span {
+  display: grid;
+  gap: 0.05rem;
+  min-width: 0;
+}
+
+.settings-glance__item small,
+.settings-glance__item strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-glance__item small {
+  color: var(--muted-foreground);
+  font-size: 0.65rem;
+}
+
+.settings-glance__item strong {
+  max-width: 13rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.settings-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--tone) 9%, var(--surface));
+  color: var(--foreground);
+  font-size: 0.82rem;
+}
+
+.settings-surface {
+  min-width: 0;
+}
+
+.settings-surface:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary) 58%, transparent);
+  outline-offset: 0.35rem;
+}
+
+.settings-surface[hidden] {
+  display: none;
+}
+
+.settings-spin {
+  animation: settings-spin 700ms linear infinite;
+}
+
+@keyframes settings-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 960px) {
+  .settings-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settings-surface-tabs button {
+    flex: 1;
+  }
+
+  .settings-glance {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 620px) {
+  .settings-workspace {
+    gap: 0.85rem;
+  }
+
+  .settings-health {
+    padding-inline: 0.6rem;
+  }
+
+  .settings-toolbar {
+    gap: 0.45rem;
+    padding: 0.35rem;
+  }
+
+  .settings-surface-tabs {
+    width: 100%;
+  }
+
+  .settings-surface-tabs button {
+    min-width: 0;
+    padding-inline: 0.55rem;
+  }
+
+  .settings-surface-tabs small {
+    display: none;
+  }
+
+  .settings-glance {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-glance__item {
+    padding: 0.45rem 0.6rem;
+  }
+
+  .settings-glance__item strong {
+    max-width: none;
+    font-size: 0.72rem;
+  }
+
+  .settings-load-error {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-surface-tabs button {
+    transition: none;
+  }
+
+  .settings-spin {
+    animation: none;
+  }
+}

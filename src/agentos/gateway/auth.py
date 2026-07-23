@@ -85,7 +85,8 @@ class TokenScopeResolver:
         peer_ip: str | None = None,
     ) -> Principal:
         provided = (auth_params or {}).get("token")
-        if provided != config.auth.token:
+        configured_token = config.auth.token
+        if not configured_token or provided != configured_token:
             raise ValueError("Invalid token")
 
         allowed_roles = config.auth.allowed_roles

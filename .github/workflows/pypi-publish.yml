@@ -88,11 +88,24 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
 
+      - name: Build and verify packaged Control UI
+        run: python scripts/build_control_ui.py build
+
       - name: Build distributions
         run: uv build
+
+      - name: Verify packaged Control UI in distributions
+        run: python scripts/build_control_ui.py verify-archive dist/*.whl dist/*.tar.gz
 
       - name: Check tag matches package version
         run: |

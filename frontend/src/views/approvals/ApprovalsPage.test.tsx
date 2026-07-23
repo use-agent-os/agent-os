@@ -1,0 +1,260 @@
+import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { toast } from 'sonner'
+import { ApprovalsPage } from './ApprovalsPage'
+import { useApprovals, type Approval } from '@/services/approval-monitor'
+import { approvalMonitor, saveApprovalMode, setBrowserElevated } from '@/services/approval-monitor'
+
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
+}))
+
+// Drive resolution + settings save + the re-poll through the singleton service;
+// spy on the mutation surface but keep the real useApprovals store + helpers.
+vi.mock('@/services/approval-monitor', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/approval-monitor')>()
+  return {
+    ...actual,
+    approvalMonitor: {
+      resolve: vi.fn().mockResolvedValue(undefined),
+      pollNow: vi.fn().mockResolvedValue(undefined),
+    },
+    saveApprovalMode: vi.fn().mockResolvedValue(undefined),
+  }
+})
+
+const mockRpc = {
+  waitForConnection: vi.fn().mockResolvedValue(undefined),
+  call: vi.fn(),
+}
+vi.mock('@/app/providers', () => ({
+  useRpc: () => mockRpc,
+  useBootstrap: () => ({
+    version: '1',
+    ws_url: 'ws://127.0.0.1:18791/ws',
+    auth_mode: 'none',
+    base_path: '/control',
+    config_path: '/tmp/agentos.toml',
+    features: {},
+  }),
+}))
+
+const resolveSpy = vi.mocked(approvalMonitor.resolve)
+const pollNowSpy = vi.mocked(approvalMonitor.pollNow)
+const saveModeSpy = vi.mocked(saveApprovalMode)
+
+function setStore(pending: Approval[], mode = 'prompt') {
+  useApprovals.setState({ pending, count: pending.length, mode })
+}
+
+function renderPage() {
+  return render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <ApprovalsPage />
+    </QueryClientProvider>,
+  )
+}
+
+describe('ApprovalsPage', () => {
+  beforeEach(() => {
+    mockRpc.call.mockReset().mockResolvedValue({ permissions: { default_mode: '' } })
+    mockRpc.waitForConnection.mockReset().mockResolvedValue(undefined)
+    resolveSpy.mockReset().mockResolvedValue(undefined)
+    pollNowSpy.mockReset().mockResolvedValue(undefined)
+    saveModeSpy.mockReset().mockResolvedValue(undefined)
+    vi.mocked(toast.success).mockClear()
+    vi.mocked(toast.warning).mockClear()
+    vi.mocked(toast.error).mockClear()
+    setStore([], 'prompt')
+    useApprovals.setState({ elevatedMode: '' })
+    localStorage.clear()
+  })
+  afterEach(() => {
+    setStore([], 'prompt')
+    useApprovals.setState({ elevatedMode: '' })
+    localStorage.clear()
+  })
+
+  it('renders the header, strategy radiogroup, and pending count from the store', async () => {
+    setStore(
+      [
+        {
+          id: 'a1',
+          namespace: 'exec',
+          toolName: 'shell',
+          command: 'rm -rf /tmp/x',
+          sessionKey: 's-1',
+        },
+      ],
+      'prompt',
+    )
+    renderPage()
+    expect(screen.getByRole('heading', { name: 'Approvals' })).toBeInTheDocument()
+    // Strategy radiogroup with all three options.
+    const group = screen.getByRole('radiogroup', { name: /approval strategy/i })
+    expect(group).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /ask every time/i })).toBeChecked()
+    // Pending stat reflects the store count.
+    expect(screen.getByText('shell')).toBeInTheDocument()
+    expect(screen.getByText('rm -rf /tmp/x')).toBeInTheDocument()
+    const pendingRegion = screen.getByRole('region', { name: 'Pending approvals' })
+    expect(pendingRegion.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+  })
+
+  it('re-polls the monitor on mount so the durable pending list is fresh', async () => {
+    renderPage()
+    await waitFor(() => expect(pollNowSpy).toHaveBeenCalled())
+  })
+
+  it('shows the empty state when there are no pending approvals', () => {
+    setStore([], 'prompt')
+    renderPage()
+    expect(screen.getByText(/no pending approvals/i)).toBeInTheDocument()
+  })
+
+  it('presents the risk posture and policy as one decision workspace', () => {
+    setStore([], 'prompt')
+    renderPage()
+    const operations = screen.getByLabelText('Approval operations')
+    expect(within(operations).getByText('Execution gate')).toBeInTheDocument()
+    expect(document.querySelector('.ap-workspace .ap-empty')).not.toBeNull()
+    expect(document.querySelector('.ap-workspace .ap-strategy')).not.toBeNull()
+  })
+
+  it('reflects the active strategy from the store (auto-approve preselected)', () => {
+    setStore([], 'auto-approve')
+    renderPage()
+    expect(screen.getByRole('radio', { name: /auto approve/i })).toBeChecked()
+  })
+
+  it('reads config.get for the effective execution mode after waitForConnection', async () => {
+    mockRpc.call.mockResolvedValue({ permissions: { default_mode: 'bypass' } })
+    renderPage()
+    await waitFor(() => expect(mockRpc.call).toHaveBeenCalledWith('config.get'))
+    // Global bypass surfaces in the effective-mode readout.
+    await waitFor(() => expect(screen.getByText('Global BYPASS')).toBeInTheDocument())
+  })
+
+  it('saves the strategy on change, toasts, and re-polls (approvals.js:291-299)', async () => {
+    setStore([], 'prompt')
+    renderPage()
+    screen.getByRole('radio', { name: /auto approve/i }).click()
+    await waitFor(() => expect(saveModeSpy).toHaveBeenCalledWith('auto-approve'))
+    await waitFor(() => expect(pollNowSpy).toHaveBeenCalled())
+    // approvals.js:297 — auto-approve is the warn-toned outcome.
+    expect(toast.warning).toHaveBeenCalled()
+  })
+
+  it('uses the info-toned toast for non-auto-approve strategy saves (approvals.js:297)', async () => {
+    setStore([], 'prompt')
+    renderPage()
+    screen.getByRole('radio', { name: /auto deny/i }).click()
+    await waitFor(() => expect(saveModeSpy).toHaveBeenCalledWith('auto-deny'))
+    expect(toast.success).toHaveBeenCalled()
+    expect(toast.warning).not.toHaveBeenCalled()
+  })
+
+  it('reverts + error-toasts when saving the strategy fails', async () => {
+    saveModeSpy.mockRejectedValueOnce(new Error('nope'))
+    setStore([], 'prompt')
+    renderPage()
+    screen.getByRole('radio', { name: /auto deny/i }).click()
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    // The failed option is not left selected; prompt (original) stays checked.
+    await waitFor(() =>
+      expect(screen.getByRole('radio', { name: /ask every time/i })).toBeChecked(),
+    )
+  })
+
+  it('resolves an approval with "once" when Approve once is clicked', async () => {
+    const item: Approval = { id: 'a1', namespace: 'exec', toolName: 't', command: 'ls' }
+    setStore([item])
+    renderPage()
+    screen.getByRole('button', { name: /approve once/i }).click()
+    await waitFor(() => expect(resolveSpy).toHaveBeenCalledWith(item, 'once'))
+  })
+
+  it('offers "Always allow" only for exec items with a command', () => {
+    setStore([{ id: 'a1', namespace: 'plugin', toolName: 'p', args: { path: '/x' } }])
+    const { rerender } = renderPage()
+    expect(screen.queryByRole('button', { name: /always allow/i })).not.toBeInTheDocument()
+    setStore([{ id: 'a2', namespace: 'exec', toolName: 't', command: 'ls' }])
+    rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <ApprovalsPage />
+      </QueryClientProvider>,
+    )
+    expect(screen.getByRole('button', { name: /always allow/i })).toBeInTheDocument()
+  })
+
+  it('resolves with "bypass" and "deny" for those actions', async () => {
+    const item: Approval = { id: 'a1', namespace: 'exec', toolName: 't', command: 'ls' }
+    setStore([item])
+    renderPage()
+    screen.getByRole('button', { name: /bypass/i }).click()
+    await waitFor(() => expect(resolveSpy).toHaveBeenCalledWith(item, 'bypass'))
+    screen.getByRole('button', { name: /^deny$/i }).click()
+    await waitFor(() => expect(resolveSpy).toHaveBeenCalledWith(item, 'deny'))
+  })
+
+  it('renders the detail JSON block when a card has no command', () => {
+    setStore([{ id: 'a1', namespace: 'plugin', toolName: 'p', args: { path: '/etc' } }])
+    renderPage()
+    expect(screen.getByText(/"path": "\/etc"/)).toBeInTheDocument()
+  })
+
+  it('renders the FULL args JSON in the card — no 900-char cap (approvals.js:314-322)', () => {
+    // A large args payload the modal contract would truncate at 900 chars; the
+    // VIEW rendered it in full, so the card must not clip it or append an ellipsis.
+    const big = { blob: 'x'.repeat(2000) }
+    setStore([{ id: 'a1', namespace: 'plugin', toolName: 'p', args: big }])
+    renderPage()
+    const pre = document.querySelector('.ap-card__pre') as HTMLElement | null
+    expect(pre).not.toBeNull()
+    const text = pre!.textContent ?? ''
+    expect(text).toBe(JSON.stringify(big, null, 2))
+    expect(text.length).toBeGreaterThan(900)
+    expect(text.endsWith('...')).toBe(false)
+  })
+
+  it('refreshes the durable list on Refresh', async () => {
+    renderPage()
+    pollNowSpy.mockClear()
+    screen.getByRole('button', { name: /refresh/i }).click()
+    await waitFor(() => expect(pollNowSpy).toHaveBeenCalled())
+  })
+
+  // Reviewer gap: the "Effective execution mode" readout reads the browser
+  // elevated mode; after an in-view Bypass resolve (monitor.resolve →
+  // setBrowserElevated) it must re-render IN-VIEW (no remount), the way legacy
+  // re-ran _loadData after resolve. The elevated mode is now reactive via the
+  // store, so a bypass resolve that persists it updates the readout live.
+  it('updates the effective-execution-mode readout in-view after a Bypass resolve (no remount)', async () => {
+    // config.get returns no global default, so the readout starts neutral.
+    mockRpc.call.mockResolvedValue({ permissions: { default_mode: '' } })
+    setStore([])
+    renderPage()
+    // Let config.get settle first so no later query re-render can mask the gap.
+    await waitFor(() => expect(mockRpc.call).toHaveBeenCalledWith('config.get'))
+    await waitFor(() => expect(screen.getByText('Approval prompts')).toBeInTheDocument())
+    // Quiet period: nothing else should re-render the view now.
+    await new Promise((r) => setTimeout(r, 20))
+
+    // A Bypass resolve persists the browser elevated mode via setBrowserElevated
+    // (monitor.resolve success path). Drive it directly — with NO view
+    // interaction that could churn React state — so ONLY a reactive
+    // elevated-mode subscription, not an incidental re-render + localStorage
+    // re-read, can refresh the readout. Legacy re-ran _loadData after resolve;
+    // the store now backs that refresh live.
+    act(() => {
+      setBrowserElevated('bypass')
+    })
+    await waitFor(() => expect(screen.getByText('Session BYPASS')).toBeInTheDocument())
+    expect(screen.queryByText('Approval prompts')).not.toBeInTheDocument()
+  })
+})

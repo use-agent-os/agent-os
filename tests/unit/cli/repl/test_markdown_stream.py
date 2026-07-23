@@ -31,7 +31,19 @@ from agentos.cli.tui.terminal.stream import StreamingRenderer
 @pytest.fixture
 def tty_console(monkeypatch: pytest.MonkeyPatch) -> Console:
     """Force the module console to a color-capable terminal."""
-    fake = Console(file=io.StringIO(), width=100, force_terminal=True, color_system="truecolor")
+    # CI runners and agent shells may export NO_COLOR=1 / TERM=dumb. Those
+    # ambient values must not override a fixture whose purpose is explicitly
+    # to model a color-capable, width-controlled TTY.
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    fake = Console(
+        file=io.StringIO(),
+        width=100,
+        height=25,
+        force_terminal=True,
+        color_system="truecolor",
+        no_color=False,
+    )
     monkeypatch.setattr(md_module, "console", fake)
     return fake
 

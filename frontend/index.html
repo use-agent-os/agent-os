@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <base data-agentos-control-base href="./" />
+    <title>AgentOS Control</title>
+    <!-- Keep browser and home-screen icons on the same AgentOS mark. Referenced
+         from src so Vite fingerprints the asset for the packaged console. -->
+    <link rel="icon" type="image/png" href="/src/assets/agentos-mark.png" />
+    <link rel="shortcut icon" type="image/png" href="/src/assets/agentos-mark.png" />
+    <link rel="apple-touch-icon" href="/src/assets/agentos-mark.png" />
+    <!-- External so the production CSP can reject all inline scripts. It runs
+         before Vite's stylesheet and module tags to prevent a theme flash. -->
+    <script vite-ignore src="./theme-bootstrap.js"></script>
+  </head>
+  <body>
+    <noscript>
+      <div style="padding:2rem;font-family:system-ui,-apple-system,sans-serif;max-width:560px;margin:2rem auto">
+        <h2 style="margin:0 0 .5rem">JavaScript required</h2>
+        <p style="margin:0">AgentOS Control needs JavaScript to render the chat, sessions, and configuration views.</p>
+      </div>
+    </noscript>
+    <div id="app"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

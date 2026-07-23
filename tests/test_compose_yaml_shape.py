@@ -52,6 +52,32 @@ def _load_dockerfile() -> str:
     return (_ROOT / "Dockerfile").read_text(encoding="utf-8")
 
 
+def test_dockerfile_builds_control_ui_in_node_stage() -> None:
+    dockerfile = _load_dockerfile()
+    dockerignore = (_ROOT / ".dockerignore").read_text(encoding="utf-8")
+
+    assert re.search(
+        r"FROM node:22(?:-[^\s]+)? AS control-ui-builder",
+        dockerfile,
+    )
+    assert "RUN python3 scripts/build_control_ui.py build" in dockerfile
+    assert (
+        "COPY --from=control-ui-builder \\\n"
+        "    /build/src/agentos/gateway/static/dist/ \\\n"
+        "    ./src/agentos/gateway/static/dist/"
+    ) in dockerfile
+    assert dockerfile.index("RUN python3 scripts/build_control_ui.py build") < dockerfile.index(
+        'RUN pip install ".[recommended]"'
+    )
+    assert (
+        "COPY pyproject.toml README.md README.release.md LICENSE NOTICE "
+        "THIRD_PARTY_NOTICES.md ./"
+    ) in dockerfile
+
+    assert "frontend/node_modules" in dockerignore
+    assert "!scripts/build_control_ui.py" in dockerignore
+
+
 def test_dockerfile_gateway_port_matches_compose() -> None:
     """Dockerfile's container gateway port must match compose's 18791.
 

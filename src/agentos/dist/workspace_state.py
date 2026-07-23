@@ -46,14 +46,10 @@ SCHEMA_VERSION = 1
 # under ``agentos.channels``. Helpers (``_util``, ``manager``, ``types``)
 # are intentionally excluded — they are infra, not channels.
 BUNDLED_CHANNELS: tuple[str, ...] = (
-    "dingtalk",
     "discord",
-    "matrix",
-    "qq",
     "slack",
     "telegram",
     "terminal",
-    "wecom",
     "websocket",
 )
 

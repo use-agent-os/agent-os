@@ -59,8 +59,16 @@ def _tracked_text_files() -> list[Path]:
     for rel in raw.splitlines():
         path = Path(rel)
         if path.suffix.lower() in {
-            ".bin", ".onnx", ".pkl", ".joblib", ".woff2",
-            ".png", ".jpg", ".jpeg", ".gif", ".ico",
+            ".bin",
+            ".onnx",
+            ".pkl",
+            ".joblib",
+            ".woff2",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".ico",
         }:
             continue
         if not path.exists():
@@ -228,6 +236,9 @@ def test_gitignore_does_not_hide_tracked_release_files() -> None:
         ["git", "ls-files", "-c", "-i", "--exclude-standard"],
         text=True,
     )
-    ignored_tracked = [line for line in raw.splitlines() if line.strip()]
+    # A pre-commit cleanup can leave an index entry for a file that has already
+    # been deleted from the worktree. It is not a hidden release file and
+    # disappears from the index with the deletion commit.
+    ignored_tracked = [line for line in raw.splitlines() if line.strip() and Path(line).exists()]
 
     assert ignored_tracked == []

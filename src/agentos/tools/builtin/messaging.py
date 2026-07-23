@@ -31,12 +31,8 @@ def _outgoing_metadata(channel: str, target: str, thread_id: str | None) -> dict
         if thread_id:
             metadata["thread_id"] = thread_id
         return metadata
-    if channel == "matrix":
-        return {"room_id": target}
     if channel == "slack":
         return {"thread_ts": thread_id} if thread_id else {}
-    if channel == "wecom":
-        return {"touser": target}
 
     metadata = {"recipient": target}
     if thread_id:
@@ -51,7 +47,7 @@ def _delete_message_id(channel: str, target: str, message_id: str) -> str:
 
 
 def _reply_to_target(channel: str, target: str, thread_id: str | None) -> str | None:
-    if channel in {"telegram", "matrix", "wecom"}:
+    if channel == "telegram":
         return target
     if channel == "slack":
         return thread_id

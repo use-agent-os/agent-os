@@ -8,7 +8,7 @@ UI, Pilot Router, memory/search support, and safe local defaults.
 
 - Python 3.12 or newer for terminal installs.
 - `uv` for the recommended terminal install.
-- Git and Git LFS only when installing from source.
+- Git, Git LFS, and Node.js 22 or newer only when installing from source.
 - A provider API key unless you use a local provider such as Ollama.
 
 ## Recommended Install

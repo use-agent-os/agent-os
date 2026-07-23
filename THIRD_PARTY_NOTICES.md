@@ -29,9 +29,10 @@ AgentOS. It covers:
 - The cron prompt-injection scanner was reviewed against Hermes Agent
   reference material; the MIT notice is reproduced below for conservative
   attribution.
-- The vendored front-end JavaScript libraries served from
-  `src/agentos/gateway/static/vendor/` for the Web UI console (Markdown
-  rendering, HTML sanitization, and code-block syntax highlighting).
+- The production dependencies and font assets bundled into the React Control
+  UI. Exact package versions and complete upstream license texts are generated
+  from `frontend/package-lock.json` plus the checked-in font licenses into the shipped
+  `static/dist/THIRD_PARTY_LICENSES.txt`.
 
 ## OpenSquilla-derived core modules
 
@@ -402,27 +403,56 @@ copyleft requirement and no restriction on commercial use. This notice, together
 with the ODC-BY reference above, provides that attribution for the checked-in
 WildChat-derived golden-set rows.
 
-## Vendored Web UI JavaScript libraries
+## React Control UI production dependencies
 
-- Component: `marked.min.js` (Markdown parser).
-- Upstream project: https://github.com/markedjs/marked
-- Version bundled: v15.0.7
-- License: MIT
-- Copyright notice: Copyright (c) 2011-2025, Christopher Jeffrey.
+The browser bundle is built from the lockfile-pinned packages below. The
+release build generates `static/dist/THIRD_PARTY_LICENSES.txt` from the
+installed package metadata, upstream package license files, and the checked-in
+font licenses. That generated file is included in every wheel and source
+distribution alongside the minified browser assets, so the exact copyright
+and permission notices shipped by each upstream project remain available even
+when multiple packages use the same license.
 
-- Component: `purify.min.js` (DOMPurify, HTML sanitizer).
-- Upstream project: https://github.com/cure53/DOMPurify
-- Version bundled: 3.2.5
-- License: Apache License 2.0 and Mozilla Public License 2.0 (dual-licensed;
-  upstream permits either).
-- Copyright notice: Copyright (c) Cure53 and other contributors.
+- `@radix-ui/react-compose-refs@1.1.3` — MIT
+- `@radix-ui/react-slot@1.3.0` — MIT
+- `@tabler/icons@3.45.0` — MIT
+- `@tabler/icons-react@3.45.0` — MIT
+- `@tanstack/query-core@5.101.2` — MIT
+- `@tanstack/react-query@5.101.2` — MIT
+- `class-variance-authority@0.7.1` — Apache-2.0
+- `clsx@2.1.1` — MIT
+- `cookie@1.1.1` — MIT
+- `dompurify@3.4.12` — MPL-2.0 or Apache-2.0
+- `framer-motion@12.42.2` — MIT
+- `highlight.js@11.11.1` — BSD-3-Clause
+- `lucide-react@1.25.0` — ISC
+- `marked@18.0.7` — MIT
+- `motion@12.42.2` — MIT
+- `motion-dom@12.42.2` — MIT
+- `motion-utils@12.39.0` — MIT
+- `react@19.2.7` — MIT
+- `react-dom@19.2.7` — MIT
+- `react-router@7.18.1` — MIT
+- `scheduler@0.27.0` — MIT
+- `set-cookie-parser@2.7.2` — MIT
+- `sonner@2.0.7` — MIT
+- `tailwind-merge@3.6.0` — MIT
+- `tslib@2.8.1` — 0BSD
+- `zustand@5.0.14` — MIT
 
-- Component: `prism-core.min.js`, `prism-autoloader.min.js`, and the
-  per-language grammars under `prism-langs/` (Prism, syntax highlighting).
-- Upstream project: https://github.com/PrismJS/prism
-- License: MIT
-- Copyright notice: Copyright (c) 2012 Lea Verou.
+The type-only `@types/*` and `csstype` packages installed to compile the
+TypeScript source do not enter the browser bundle and are intentionally
+omitted from this production list.
 
-These libraries are served as static assets to the browser for the Web UI
-console (`src/agentos/gateway/templates/index.html`); AgentOS does not modify
-their source and loads the upstream-minified builds as-is.
+### React Control UI fonts
+
+- Inter Variable — Copyright (c) 2016 The Inter Project Authors
+  (https://github.com/rsms/inter), SIL Open Font License 1.1.
+- JetBrains Mono Variable — Copyright 2020 The JetBrains Mono Project Authors
+  (https://github.com/JetBrains/JetBrainsMono), SIL Open Font License 1.1.
+
+The complete upstream notices and OFL 1.1 texts are kept in
+`frontend/src/assets/fonts/Inter-LICENSE.txt` and
+`frontend/src/assets/fonts/JetBrainsMono-LICENSE.txt`. The shared Control UI
+builder appends both files verbatim to the license ledger shipped beside the
+font binaries.

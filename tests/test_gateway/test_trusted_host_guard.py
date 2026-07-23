@@ -250,10 +250,11 @@ class TestLoopbackOriginGuardHttp:
         API surface must NOT wholesale-exempt /api/* from the Origin guard."""
         from agentos.gateway.app import create_gateway_app
 
-        client = TestClient(
-            create_gateway_app(_config(base_path=base_path)),
-            base_url="http://localhost",
-        )
+        config = _config()
+        # Bypass assignment validation to prove the middleware remains
+        # fail-closed even if an invalid value is injected by application code.
+        object.__setattr__(config.control_ui, "base_path", base_path.rstrip("/"))
+        client = TestClient(create_gateway_app(config), base_url="http://localhost")
         resp = client.get("/api/config", headers={"origin": "http://evil.com"})
         assert resp.status_code == 403
         assert "access-control-allow-origin" not in resp.headers

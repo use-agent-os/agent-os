@@ -1,0 +1,539 @@
+/* Config view — write surface on the shared token system (globals.css). Class
+   contract mirrors legacy static/css/views/config.css; values rebuilt on the
+   new CSS variables. Status color only via --tone; lime stays signal-only. */
+
+/* Outer width/padding come from the shared .view-container in AppShell. */
+.cfg-stage {
+  width: 100%;
+}
+
+.cfg-stage--embedded {
+  min-width: 0;
+}
+
+/* Header hero with the atmospheric ASCII backdrop behind it. */
+.cfg-stage__header {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 18px 0 22px;
+}
+.cfg-stage__title-block {
+  position: relative; /* sits above the ascii-field */
+}
+.cfg-stage__subtitle {
+  margin-top: 6px;
+  max-width: 62ch;
+  color: var(--dim);
+  font-size: 0.875rem;
+}
+.cfg-stage__actions {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.cfg-stage__header--embedded,
+.control-surface .cfg-stage--embedded .cfg-stage__header--embedded {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 0;
+  margin-bottom: 0.75rem;
+  padding: 0.25rem 0 1rem;
+  border-bottom: 1px solid var(--hairline);
+}
+.cfg-stage__embedded-title {
+  font-size: 1.05rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+/* Form / YAML mode toggle. */
+.cfg-mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.cfg-mode-btn {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 6px 12px;
+  color: var(--dim);
+  background: transparent;
+  cursor: pointer;
+}
+.cfg-mode-btn.is-active {
+  color: var(--background);
+  background: var(--primary);
+}
+
+/* Toolbar: tabs + search. */
+.cfg-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.cfg-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.cfg-tab {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--dim);
+  background: transparent;
+  cursor: pointer;
+}
+.cfg-tab:hover {
+  color: var(--foreground);
+}
+.cfg-tab.is-active {
+  color: var(--foreground);
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.cfg-search {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.cfg-search__icon {
+  position: absolute;
+  left: 10px;
+  width: 14px;
+  height: 14px;
+  color: var(--dim);
+  pointer-events: none;
+}
+.cfg-search__input {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  padding: 7px 12px 7px 30px;
+  min-width: 240px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  color: var(--foreground);
+}
+.cfg-search__input:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+}
+
+/* Settings groups + fields. */
+.cfg-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.cfg-group__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--hairline);
+}
+.cfg-group__meta {
+  color: var(--dim);
+  font-size: 0.6875rem;
+}
+.cfg-group__fields {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.cfg-field {
+  display: grid;
+  gap: 6px;
+}
+.cfg-field__label-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cfg-field__label {
+  color: var(--foreground);
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-size: 0.8125rem;
+}
+.cfg-field--dirty .cfg-field__label {
+  color: var(--primary);
+}
+.cfg-field--invalid .cfg-input--json {
+  border-color: var(--danger);
+}
+.cfg-field__control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cfg-secret-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  border-radius: var(--radius-control);
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.cfg-secret-toggle:hover,
+.cfg-secret-toggle:focus-visible {
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+.cfg-secret-toggle svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+/* Inputs. */
+.cfg-input {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+  color: var(--foreground);
+  width: 100%;
+}
+.cfg-input:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+}
+.cfg-input--number {
+  max-width: 220px;
+}
+.cfg-input--json,
+.cfg-yaml__area {
+  width: 100%;
+  resize: vertical;
+  line-height: 1.5;
+}
+.cfg-readonly {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  color: var(--dim);
+  padding: 7px 0;
+}
+
+/* Boolean switch. */
+.cfg-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+.cfg-switch input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.cfg-switch__track {
+  position: relative;
+  width: 38px;
+  height: 20px;
+  border-radius: var(--radius-pill);
+  background: var(--border);
+  transition: background 0.15s ease;
+}
+.cfg-switch__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-pill);
+  background: var(--background);
+  transition: transform 0.15s ease;
+}
+.cfg-switch input:checked + .cfg-switch__track {
+  background: var(--primary);
+}
+.cfg-switch:hover .cfg-switch__track {
+  background: color-mix(in srgb, var(--primary) 22%, var(--border));
+}
+.cfg-switch input:focus-visible + .cfg-switch__track {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+.cfg-switch input:checked + .cfg-switch__track .cfg-switch__thumb {
+  transform: translateX(18px);
+}
+.cfg-switch:has(input:checked):hover .cfg-switch__track {
+  background: var(--primary);
+}
+.cfg-switch__text {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--dim);
+}
+
+/* Object (JSON) field. */
+.cfg-object {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--background);
+}
+.cfg-object > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.cfg-object__summary {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--dim);
+}
+.cfg-object__action {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--primary);
+}
+.cfg-object[open] > summary {
+  border-bottom: 1px solid var(--hairline);
+}
+.cfg-object .cfg-input--json {
+  border: none;
+  border-radius: var(--radius);
+}
+.cfg-json-error {
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--danger);
+}
+.cfg-hidden {
+  display: none;
+}
+
+/* Help trigger + tooltip (CSS-revealed on hover/focus). */
+.cfg-help {
+  position: relative;
+  display: inline-flex;
+}
+.cfg-help__btn {
+  display: inline-flex;
+  color: var(--dim);
+  cursor: help;
+}
+.cfg-help__btn svg {
+  width: 13px;
+  height: 13px;
+}
+.cfg-help__btn:hover {
+  color: var(--foreground);
+}
+.cfg-help__tip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  width: max-content;
+  max-width: 360px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease;
+}
+.cfg-help:hover .cfg-help__tip,
+.cfg-help__btn:focus-visible + .cfg-help__tip {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* YAML editor. */
+.cfg-yaml__area {
+  min-height: 60vh;
+}
+
+/* Empty state. */
+.cfg-empty {
+  padding: 28px 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+  color: var(--dim);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
+.cfg-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 5rem;
+  padding: 1rem 0;
+  border-block: 1px solid var(--hairline);
+  color: var(--muted-foreground);
+  font-size: 0.82rem;
+}
+
+.cfg-state--error {
+  color: var(--danger);
+}
+
+.cfg-stage--embedded .cfg-group {
+  border: 0;
+  border-top: 1px solid var(--hairline);
+  background: transparent;
+  box-shadow: none;
+}
+
+.cfg-stage--embedded .cfg-group__head {
+  padding-inline: 0;
+}
+
+.cfg-stage--embedded .cfg-group__fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding-inline: 0;
+}
+
+/* Sticky save bar. */
+.cfg-stickybar {
+  position: sticky;
+  bottom: 16px;
+  margin-top: 20px;
+  padding: 0;
+}
+.cfg-stickybar__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+}
+.cfg-stickybar__pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--tone, var(--info));
+}
+.cfg-stickybar__count {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+.cfg-stickybar__sep {
+  color: var(--dim);
+}
+.cfg-stickybar__diff-toggle {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--primary);
+  background: transparent;
+  cursor: pointer;
+}
+.cfg-stickybar__spacer {
+  flex: 1;
+}
+.cfg-stickybar__diff {
+  display: grid;
+  gap: 4px;
+  padding: 8px 14px 12px;
+  border-top: 1px solid var(--hairline);
+  max-height: 40vh;
+  overflow: auto;
+}
+.cfg-diff-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(0, 2fr) auto minmax(0, 2fr);
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+.cfg-diff-row__key {
+  color: var(--foreground);
+}
+.cfg-diff-row__old {
+  color: var(--dim);
+  text-decoration: line-through;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cfg-diff-row__arrow {
+  color: var(--dim);
+}
+.cfg-diff-row__new {
+  color: var(--ok);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 840px) {
+  .cfg-stage__header,
+  .cfg-stage__header--embedded,
+  .control-surface .cfg-stage--embedded .cfg-stage__header--embedded {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .cfg-stage__actions,
+  .cfg-toolbar {
+    width: 100%;
+  }
+
+  .cfg-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+  }
+
+  .cfg-tab {
+    white-space: nowrap;
+  }
+
+  .cfg-search,
+  .cfg-search__input {
+    width: 100%;
+  }
+
+  .cfg-stage--embedded .cfg-group__fields {
+    grid-template-columns: 1fr;
+  }
+
+  .cfg-diff-row {
+    grid-template-columns: 1fr;
+  }
+}

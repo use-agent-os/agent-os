@@ -50,6 +50,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
@@ -57,8 +59,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra dev --extra recommended --frozen
 
-      - name: Install Playwright browser
-        run: npx --yes playwright install chromium
+      - name: Build and verify packaged Control UI
+        run: python scripts/build_control_ui.py build
 
       - name: Fail if OpenRouter secret is missing
         shell: bash
@@ -85,11 +87,6 @@ jobs:
         env:
           AGENTOS_GATEWAY_LLM_E2E: "1"
         run: uv run pytest tests/functional/test_gateway_llm_e2e.py -q -s
-
-      - name: Run real-browser chat e2e
-        env:
-          AGENTOS_WEBUI_BROWSER_CHAT_E2E: "1"
-        run: uv run pytest tests/functional/test_webui_browser_chat_e2e.py -q -s
 
       - name: Run live Telegram channel smoke
         if: ${{ inputs.run_telegram_channel }}

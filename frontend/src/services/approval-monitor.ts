@@ -1,0 +1,405 @@
+/**
+ * AgentOS Control — global approval-prompt monitor service.
+ *
+ * Typed port of legacy static/js/approval_monitor.js (271 lines). This is a
+ * REST-polling service (NOT WS-RPC): it polls GET /api/approvals with an
+ * adaptive 1500ms→30000ms backoff, re-polls immediately on window focus /
+ * visibilitychange, and resolves approvals via POST /api/approvals/resolve.
+ *
+ * The pending list + count are published to a zustand store (useApprovals) so
+ * the nav badge and the <ApprovalPrompt /> modal render off React state instead
+ * of the legacy imperative DOM writes (_setBadge / _openModal). elevatedMode
+ * persistence, the toast-on-new-pending hook, and pollNow() are preserved 1:1.
+ */
+import { create } from 'zustand'
+import { authenticatedHeaders } from '@/lib/http-auth'
+import { toast } from 'sonner'
+
+// approval_monitor.js:4-8 — polling cadence + elevated-mode storage constants.
+const POLL_MS = 1500
+const POLL_MAX_MS = 30000
+export const ELEVATED_MODE_KEY = 'agentos.elevatedMode'
+export const ELEVATED_MODE_VERSION_KEY = 'agentos.elevatedMode.version'
+export const ELEVATED_MODE_STORAGE_VERSION = '2'
+
+// app.py:289-335 — the enriched pending item shape returned by GET /api/approvals.
+export interface Approval {
+  id: string
+  namespace?: string
+  toolName?: string
+  actionKind?: string
+  sessionKey?: string
+  agent?: string
+  command?: string
+  warning?: string
+  argv?: unknown[]
+  args?: unknown
+  params?: unknown
+  mode?: string
+  created_at?: number
+}
+
+export interface ApprovalsResponse {
+  pending?: Approval[]
+  mode?: string
+  allowPatterns?: unknown[]
+  denyPatterns?: unknown[]
+}
+
+export type ElevatedMode = 'on' | 'bypass' | 'full' | ''
+
+// The reactive surface consumed by the nav badge + modal. The legacy service
+// pushed the same data through a CustomEvent ('agentos:approvals-pending') and
+// imperative DOM writes; the store replaces both.
+//
+// `count` backs the nav badge (legacy #approval-count); `pending` backs the
+// modal (legacy pinned _modal to pending[0] at open). These are deliberately
+// decoupled: a transient poll failure must zero the BADGE without dismissing an
+// OPEN prompt (approval_monitor.js:71-74,92-97 — the error/non-ok branch only
+// calls _setBadge(0) and NEVER touches _modal). So failure paths call
+// zeroBadge() (count → 0, pending untouched); only a successful poll replaces
+// the pending list via setFromPoll().
+interface ApprovalsState {
+  pending: Approval[]
+  count: number
+  mode: string
+  // The browser session elevated mode (approval_monitor.js:227-239 / legacy
+  // approvals.js:234-243). Kept in the store so the approvals view's
+  // "Effective execution mode" readout re-renders reactively after an in-view
+  // Bypass resolve persists it (setBrowserElevated) — legacy re-ran _loadData
+  // after resolve; the store now backs that refresh live. Hydrated from
+  // localStorage on module load and kept in lockstep with it by
+  // setBrowserElevated. This is the concrete consumer that retires the deferred
+  // 'agentos:elevated-mode' CustomEvent — the store path replaces it.
+  elevatedMode: ElevatedMode
+  setFromPoll(pending: Approval[], mode: string): void
+  // approval_monitor.js:71-74,92-97 — zero the badge count on poll failure while
+  // leaving any pending item backing an open prompt intact.
+  zeroBadge(): void
+  setElevatedMode(mode: ElevatedMode): void
+  clear(): void
+}
+
+/**
+ * approvals.js:234-243 — read the persisted browser elevated mode, downgrading a
+ * legacy 'full' written under an older storage version to 'bypass'. Used to
+ * hydrate the store on load so the readout starts from the stored value. (The
+ * approvals view re-exports this as browserElevatedMode() from its logic.ts.)
+ */
+// approvals.js:245-247 / chat.js:2217-2219 (_normalizeElevatedMode) — only
+// on/bypass/full are valid elevated modes; anything else is the empty string.
+// The single source of truth for the elevated-mode model (shared by the chat
+// toolbar + the approvals readout, both of which re-export it from here).
+export function normalizeElevatedMode(mode: string | null | undefined): ElevatedMode {
+  return mode === 'on' || mode === 'bypass' || mode === 'full' ? mode : ''
+}
+
+// chat.js:2225-2227 (_isApprovalBypassMode) — bypass + full skip approval
+// prompts; on/'' keep them. Shared with the chat toolbar (which derives the
+// glow/dot state from the effective mode) and the approvals readout, so it
+// lives in the single elevated-mode source of truth alongside the reader.
+export function isApprovalBypassMode(mode: string | null | undefined): boolean {
+  return mode === 'bypass' || mode === 'full'
+}
+
+export function readBrowserElevated(): ElevatedMode {
+  let mode = ''
+  let version = ''
+  try {
+    mode = localStorage.getItem(ELEVATED_MODE_KEY) || ''
+    version = localStorage.getItem(ELEVATED_MODE_VERSION_KEY) || ''
+  } catch {
+    /* storage unavailable */
+  }
+  if (mode === 'full' && version !== ELEVATED_MODE_STORAGE_VERSION) return 'bypass'
+  return normalizeElevatedMode(mode)
+}
+
+export const useApprovals = create<ApprovalsState>((set) => ({
+  pending: [],
+  count: 0,
+  mode: 'prompt',
+  elevatedMode: readBrowserElevated(),
+  setFromPoll: (pending, mode) => set({ pending, count: pending.length, mode }),
+  zeroBadge: () => set({ count: 0 }),
+  setElevatedMode: (mode) => set({ elevatedMode: mode }),
+  clear: () => set({ pending: [], count: 0 }),
+}))
+
+// approval_monitor.js:227-239 — normalize + persist the browser elevated mode
+// under storage version '2'. Only on/bypass/full are valid; anything else
+// clears the keys. Returns the normalized value for the resolve toast copy.
+export function setBrowserElevated(mode: string): ElevatedMode {
+  const normalized: ElevatedMode = mode === 'full' || mode === 'bypass' || mode === 'on' ? mode : ''
+  try {
+    if (normalized) {
+      localStorage.setItem(ELEVATED_MODE_KEY, normalized)
+      localStorage.setItem(ELEVATED_MODE_VERSION_KEY, ELEVATED_MODE_STORAGE_VERSION)
+    } else {
+      localStorage.removeItem(ELEVATED_MODE_KEY)
+      localStorage.removeItem(ELEVATED_MODE_VERSION_KEY)
+    }
+  } catch {
+    /* storage unavailable */
+  }
+  // Keep the reactive store in lockstep with localStorage so the approvals
+  // view's effective-execution-mode readout re-renders after an in-view Bypass
+  // resolve (the concrete consumer that replaces the deferred CustomEvent).
+  useApprovals.getState().setElevatedMode(normalized)
+  return normalized
+}
+
+// approval_monitor.js:241-246 — derive the command line shown in the modal.
+export function approvalCommand(item: Approval): string {
+  if (item.command) return String(item.command)
+  if (Array.isArray(item.argv) && item.argv.length > 0) return item.argv.map(String).join(' ')
+  const args = item.args as { command?: unknown } | null | undefined
+  if (args && args.command) return String(args.command)
+  return ''
+}
+
+// approval_monitor.js:248-258 — detail body: warning text, else pretty-printed
+// args/params truncated at 900 chars.
+export function approvalDetail(item: Approval): string {
+  if (item.warning) return String(item.warning)
+  const args = item.args ?? item.params ?? null
+  if (!args) return ''
+  try {
+    const text = JSON.stringify(args, null, 2)
+    return text.length > 900 ? text.slice(0, 900) + '...' : text
+  } catch {
+    return String(args)
+  }
+}
+
+// approval_monitor.js:148-152 — the modal meta line ("Namespace · Mode · Session").
+export function approvalMeta(item: Approval, mode: string): string {
+  return [
+    item.namespace ? 'Namespace: ' + item.namespace : '',
+    mode ? 'Mode: ' + mode : '',
+    item.sessionKey ? 'Session: ' + item.sessionKey : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+// approval_monitor.js:145 — "Always Allow This Type" only offered for exec
+// commands.
+export function canAlwaysAllow(item: Approval): boolean {
+  return item.namespace === 'exec' && !!item.command
+}
+
+export type ApprovalAction = 'once' | 'always' | 'bypass' | 'deny'
+
+/**
+ * The approval-monitor singleton. start() begins polling + wires focus/
+ * visibility re-poll; stop() tears everything down. pollNow() is the re-poll
+ * hook the approvals view calls after it mutates settings. resolve() posts a
+ * decision and re-polls. The class is instantiated once (approvalMonitor) but
+ * kept a class so tests can spin up isolated instances with injected timers.
+ */
+export class ApprovalMonitor {
+  private timer: ReturnType<typeof setTimeout> | null = null
+  private busy = false
+  private pollBusy = false
+  private pollDelayMs = POLL_MS
+  private started = false
+  private lastToastCount = 0
+
+  private onFocus = (): void => {
+    // approval_monitor.js:107-110
+    this.resetPollBackoff()
+    void this.poll()
+  }
+
+  private onVisibilityChange = (): void => {
+    // approval_monitor.js:100-105
+    if (document.visibilityState === 'visible') {
+      this.resetPollBackoff()
+      void this.poll()
+    }
+  }
+
+  // approval_monitor.js:17-23
+  start(): void {
+    if (this.started) return
+    this.started = true
+    this.schedulePoll(0)
+    window.addEventListener('focus', this.onFocus)
+    document.addEventListener('visibilitychange', this.onVisibilityChange)
+  }
+
+  // approval_monitor.js:25-32
+  stop(): void {
+    this.started = false
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = null
+    window.removeEventListener('focus', this.onFocus)
+    document.removeEventListener('visibilitychange', this.onVisibilityChange)
+    useApprovals.getState().clear()
+  }
+
+  // approval_monitor.js:34-36 — the re-poll hook consumed by the approvals view.
+  async pollNow(): Promise<void> {
+    await this.poll()
+  }
+
+  // approval_monitor.js:38-46 — self-rescheduling poll loop; each tick polls
+  // then re-arms at the current (possibly backed-off) delay.
+  private schedulePoll(delayMs: number = this.pollDelayMs): void {
+    if (!this.started) return
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = setTimeout(() => {
+      this.timer = null
+      void this.poll().then(() => this.schedulePoll(this.pollDelayMs))
+    }, delayMs)
+  }
+
+  // approval_monitor.js:48-50
+  private resetPollBackoff(): void {
+    this.pollDelayMs = POLL_MS
+  }
+
+  // approval_monitor.js:52-54 — exponential backoff, clamped to [POLL_MS, MAX].
+  private increasePollBackoff(): void {
+    this.pollDelayMs = Math.min(POLL_MAX_MS, Math.max(POLL_MS, this.pollDelayMs * 2))
+  }
+
+  // approval_monitor.js:63-98 — the poll body. Reentrancy-guarded via pollBusy.
+  private async poll(): Promise<void> {
+    if (this.pollBusy) return
+    this.pollBusy = true
+    try {
+      const resp = await fetch(approvalsUrl(), {
+        cache: 'no-store',
+        headers: authenticatedHeaders(),
+      })
+      if (!resp.ok) {
+        // approval_monitor.js:71-74 — zero the badge only; an open prompt keeps
+        // its pinned item (legacy never touched _modal on a failed poll).
+        useApprovals.getState().zeroBadge()
+        this.increasePollBackoff()
+        return
+      }
+      const data = (await resp.json()) as ApprovalsResponse
+      const pending = Array.isArray(data.pending) ? data.pending : []
+      const mode = data.mode || 'prompt'
+      useApprovals.getState().setFromPoll(pending, mode)
+
+      // approval_monitor.js:80-81 — pending resets the backoff, empty grows it.
+      if (pending.length > 0) this.resetPollBackoff()
+      else this.increasePollBackoff()
+
+      // approval_monitor.js:83-88 — toast once per new pending count.
+      if (pending.length > 0 && pending.length !== this.lastToastCount) {
+        this.lastToastCount = pending.length
+        toast.warning('Approval required', { id: 'approval-required', duration: 2500 })
+      } else if (pending.length === 0) {
+        this.lastToastCount = 0
+      }
+    } catch {
+      // approval_monitor.js:92-97 — same as the non-ok branch: zero the badge,
+      // preserve any pending item behind an open prompt.
+      useApprovals.getState().zeroBadge()
+      this.increasePollBackoff()
+    } finally {
+      this.pollBusy = false
+    }
+  }
+
+  /**
+   * approval_monitor.js:171-220 — resolve a pending approval. Maps the modal
+   * button action to the (approved, allowAlways, rememberIntent, elevatedMode)
+   * tuple, POSTs it, persists elevated mode on success, toasts the outcome, and
+   * re-polls. Reentrancy-guarded via `busy`. Rejects on HTTP error so the modal
+   * can re-enable its buttons; resolves on success.
+   */
+  async resolve(item: Approval, action: ApprovalAction): Promise<void> {
+    if (this.busy) return
+    this.busy = true
+    // approval_monitor.js:173-177
+    const approved = action === 'once' || action === 'always' || action === 'bypass'
+    const allowAlways = action === 'always'
+    const rememberIntent = action === 'always'
+    const elevatedMode: ElevatedMode = action === 'bypass' ? 'bypass' : ''
+    const body: Record<string, unknown> = {
+      id: item.id,
+      namespace: item.namespace || 'exec',
+      approved,
+      allowAlways,
+      rememberIntent,
+    }
+    if (elevatedMode) body.elevatedMode = elevatedMode
+    try {
+      const resp = await fetch(approvalsResolveUrl(), {
+        method: 'POST',
+        headers: authenticatedHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(body),
+      })
+      if (!resp.ok) throw new Error('HTTP ' + resp.status)
+      if (elevatedMode) setBrowserElevated(elevatedMode)
+      // approval_monitor.js:207-211 — outcome toast. Legacy tone is
+      // `approved ? 'info' : 'warn'`; a bypass sets approved=true → 'info', and
+      // the port maps info→toast.success. So bypass toasts success, not warning.
+      if (elevatedMode) {
+        toast.success('Approval bypass enabled', { id: 'approval-outcome', duration: 2500 })
+      } else if (approved) {
+        toast.success('Approval granted', { id: 'approval-outcome', duration: 2500 })
+      } else {
+        toast.warning('Approval denied', { id: 'approval-outcome', duration: 2500 })
+      }
+      this.resetPollBackoff()
+      // approval_monitor.js:213 — legacy re-polled after 150ms; poll immediately
+      // (the store update is what the modal reacts to, no DOM settle to wait on).
+      await this.poll()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      toast.error('Approval failed: ' + message, { id: 'approval-error', duration: 4000 })
+      throw err instanceof Error ? err : new Error(message)
+    } finally {
+      this.busy = false
+    }
+  }
+}
+
+/**
+ * approval_monitor.js:67 — the poll endpoint. Legacy fetched the ROOT-absolute
+ * '/api/approvals'; these routes are registered at the gateway root (app.py:
+ * 535-537), NOT under control_ui.base_path, and the rate-limit exemption keys
+ * off the bare '/api/approvals' (middleware.py:240). So — unlike /api/bootstrap
+ * which lives under base_path — the approvals REST surface is root-absolute and
+ * must NOT be rewritten through the BASE_URL-derived base. We keep the legacy
+ * root-absolute path verbatim.
+ */
+export function approvalsUrl(): string {
+  return '/api/approvals'
+}
+
+export function approvalsResolveUrl(): string {
+  return '/api/approvals/resolve'
+}
+
+// approvals.js:291 — the approval-strategy settings endpoint. Root-absolute like
+// the poll/resolve endpoints (same rationale as approvalsUrl above).
+export function approvalsSettingsUrl(): string {
+  return '/api/approvals/settings'
+}
+
+/**
+ * approvals.js:291-301 — persist the approval strategy (prompt / auto-approve /
+ * auto-deny). POSTs { mode } to the root-absolute settings endpoint with the
+ * session Bearer token, throwing on a non-ok response so the caller can revert
+ * its optimistic UI. The caller re-polls (pollNow) after a success, mirroring
+ * the legacy _loadData() + ApprovalMonitor.pollNow() at approvals.js:298-299.
+ */
+export async function saveApprovalMode(mode: string): Promise<void> {
+  const resp = await fetch(approvalsSettingsUrl(), {
+    method: 'POST',
+    headers: authenticatedHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ mode }),
+  })
+  if (!resp.ok) throw new Error('HTTP ' + resp.status)
+}
+
+// The app-wide singleton wired by AppProviders (start on mount, stop on unmount).
+export const approvalMonitor = new ApprovalMonitor()

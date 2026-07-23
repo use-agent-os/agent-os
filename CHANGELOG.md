@@ -6,6 +6,61 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Added one fail-closed Control UI build contract,
+  `python scripts/build_control_ui.py build`, for local source installs, CI,
+  Docker, wheel/sdist publication, and wheelhouse releases. It requires
+  Node.js 22 or newer, performs a clean locked npm install, enforces bundle
+  budgets, generates an exact third-party license ledger, and verifies the
+  resulting React bundle before packaging.
+
+### Changed
+
+- The production Control UI is now the React 19 + Vite application on every
+  route. Release wheels, source distributions, Docker images, and wheelhouse
+  archives carry the same prebuilt, verified bundle; a missing or invalid
+  bundle returns an actionable `503` instead of silently serving a different
+  interface.
+- Repository source builds and the provided source-install scripts now require
+  Node.js 22 or newer and npm so they can build the Control UI before
+  installing the Python package. Published wheels remain ready to run without
+  Node.js.
+- The SPA shell and runtime bootstrap are uncached while fingerprinted Vite
+  assets are served with immutable caching. A runtime-injected base element
+  lets one artifact serve `/control` and safe non-root custom prefixes,
+  including deep-link refreshes; root, `/api`, and `/ws` prefixes are rejected
+  because they overlap gateway routes.
+- Guided setup and advanced configuration now share one Agent Setup workspace
+  at `/control/settings`; the existing `/control/setup` and `/control/config`
+  URLs remain compatibility routes, while adapter onboarding and credential
+  validation now live with channel status and access management.
+- Configuration clients now read one redacted `config.snapshot` and submit
+  optimistic `expectedRevision` writes through a shared persist-first
+  transaction. The gateway reports cumulative restart reasons, preserves
+  write-only secret semantics, and provides explicit recovery when runtime and
+  on-disk state diverge.
+
+### Security
+
+- The packaged Control UI now uses a same-origin Content Security Policy
+  without `unsafe-inline` scripts. Theme initialization runs from a packaged
+  pre-paint script; HTTP requests stay same-origin while explicit `ws:` and
+  `wss:` remote-gateway profiles remain supported.
+- Configuration snapshots never return stored secret values, and stale Control
+  UI drafts fail closed when the active configuration changes on disk instead
+  of overwriting an operator's out-of-band edit.
+
+### Removed
+
+- Retired the DingTalk, Matrix, QQ Bot, and WeCom channel adapters across the
+  runtime, CLI, Web UI, configuration schema, install metadata, and current
+  documentation. Supported messaging adapters are now Slack, Telegram, and
+  Discord.
+- Removed the retired Jinja Control UI template and its hand-maintained
+  JavaScript, CSS, fonts, images, and vendored browser libraries. There is no
+  legacy frontend fallback at runtime or in release artifacts.
+
 ## [2026.7.23] - 2026-07-23
 
 ### Added

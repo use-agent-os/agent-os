@@ -26,8 +26,8 @@ Read: [`approvals-and-permissions.md`](approvals-and-permissions.md)
 
 ## Channel
 
-A messaging integration such as Telegram, Slack, Discord, DingTalk,
-WeCom, Matrix, QQ, terminal, or websocket-style clients.
+A messaging integration such as Telegram, Slack, Discord, terminal, or
+websocket-style clients.
 
 Read: [`channels.md`](channels.md)
 

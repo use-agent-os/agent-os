@@ -292,6 +292,11 @@ agentos configure search --search-provider duckduckgo
 
 Channels:
 
+Built-in channel types are `discord`, `slack`, and `telegram`; `agentos
+channels types` is the authoritative catalog. On upgrade, config entries for
+retired built-in channel types are removed only after AgentOS creates the
+normal secure config backup.
+
 ```sh
 agentos channels types
 agentos channels describe telegram

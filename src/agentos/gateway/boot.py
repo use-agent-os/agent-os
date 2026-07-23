@@ -2134,19 +2134,20 @@ async def start_gateway_server(
         config.mark_runtime_secret("auth.token")
         log.info("gateway.auth_token_generated")
 
-    # Gateway-specific: resolve Control UI root directory (boot order 17)
+    # Gateway-specific: resolve the built React Control UI (boot order 17)
     if config.control_ui.enabled:
-        from agentos.gateway.control_ui import _STATIC_DIR, _TEMPLATE_DIR
+        from agentos.gateway.control_ui import _DIST_DIR
 
-        if not _TEMPLATE_DIR.is_dir():
-            log.warning("gateway.control_ui.templates_missing", path=str(_TEMPLATE_DIR))
-        if not _STATIC_DIR.is_dir():
-            log.warning("gateway.control_ui.static_missing", path=str(_STATIC_DIR))
+        if not (_DIST_DIR / "index.html").is_file():
+            log.warning(
+                "gateway.control_ui.dist_missing",
+                path=str(_DIST_DIR),
+                hint="run `python scripts/build_control_ui.py build`",
+            )
         log.info(
             "gateway.control_ui.resolved",
             base_path=config.control_ui.base_path,
-            templates=str(_TEMPLATE_DIR),
-            static=str(_STATIC_DIR),
+            dist=str(_DIST_DIR),
         )
     else:
         log.info("gateway.control_ui.disabled")

@@ -1,0 +1,794 @@
+@import 'tailwindcss';
+
+/* Self-hosted variable fonts (copied from the legacy gateway static bundle). */
+@font-face {
+  font-family: 'Inter Variable';
+  src: url('../assets/fonts/Inter-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono Variable';
+  src: url('../assets/fonts/JetBrainsMono-Variable.woff2') format('woff2');
+  font-weight: 100 800;
+  font-display: swap;
+}
+
+/* This app themes via `data-theme="dark|light"` on <html> (see stores/theme.ts),
+   NOT shadcn's default `.dark` class. Re-point the `dark:` variant used by the
+   vendored components at that attribute so their dark-mode utilities resolve. */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+@theme {
+  --font-sans: 'Inter Variable', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+}
+
+@theme inline {
+  --radius-xs: var(--radius-compact);
+  --radius-sm: var(--radius-control);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius-surface);
+  --radius-xl: var(--radius-dialog);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-dim: var(--dim);
+  --color-surface: var(--surface);
+  --color-elevated: var(--elevated);
+  --color-hairline: var(--hairline);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+/* Tactical-HQ tokens, ported verbatim from the legacy brand system
+   (src/agentos/gateway/static/css/base.css). Near-black operator ground,
+   hairline-driven panels, decisive square corners. Lime #CCFF00 (sampled from
+   the AgentOS molecule logo) is reserved as SIGNAL: active nav, primary CTA,
+   focus rings, status flips. One accent. Never decorate with it. */
+:root[data-theme='dark'],
+:root {
+  color-scheme: dark;
+  /* Shape scale: compact details 6px, controls 8px, groups 10px, elevated
+     surfaces 14px, dialogs 18px. Pills are reserved for status/toggle shapes.
+     Keep these values absolute: derived custom properties are computed at the
+     element where they are declared, so overriding only --radius in a nested
+     shell would otherwise leave descendants using the old root calculation. */
+  --radius-compact: 6px;
+  --radius-control: 8px;
+  --radius: 10px;
+  --radius-surface: 14px;
+  --radius-dialog: 18px;
+  --radius-pill: 999px;
+  /* Blocking tool approvals must stay above every route-owned dialog. */
+  --z-critical-approval: 2000;
+
+  --background: #060608; /* legacy --bg */
+  --foreground: #ececef; /* legacy --text */
+  --surface: #0e0e13; /* lifted from legacy #0c0c0f for contrast */
+  --elevated: #17171d; /* lifted from legacy #131318 */
+  --card: #0e0e13;
+  --card-foreground: #ececef;
+  --popover: #17171d;
+  --popover-foreground: #ececef;
+
+  --primary: #ccff00; /* legacy --accent (lime signal) */
+  --primary-foreground: #0f1400; /* legacy --accent-foreground */
+  --secondary: #17171d;
+  --secondary-foreground: #ececef;
+  --muted: #17171d;
+  --muted-foreground: #b6b6c0; /* brightened from legacy #a1a1aa */
+  --dim: #93939e; /* brightened from legacy #82828a */
+  --accent: #21212a; /* hover surface (lifted), NOT the signal color */
+  --accent-foreground: #ececef;
+  --destructive: #f87171; /* legacy --danger */
+  --destructive-foreground: #1a0808;
+
+  --border: rgba(204, 255, 0, 0.18); /* signal-tinted terminal border, crisp */
+  --hairline: rgba(204, 255, 0, 0.1);
+  --input: rgba(255, 255, 255, 0.16);
+  --ring: #ccff00; /* focus = signal, per legacy */
+
+  --ok: #22c55e;
+  --warn: #eab308;
+  --danger: #f87171;
+  --info: #60a5fa;
+
+  --sidebar: #0e0e13;
+  --sidebar-foreground: #ececef;
+  --sidebar-primary: #ccff00;
+  --sidebar-primary-foreground: #0f1400;
+  --sidebar-accent: #21212a;
+  --sidebar-accent-foreground: #ececef;
+  --sidebar-border: rgba(255, 255, 255, 0.13);
+  --sidebar-ring: #ccff00;
+
+  --grain-opacity: 0.05;
+}
+
+/* Light theme: legacy paper-neutral with the same hue family (olive signal). */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --background: #f4f5ee;
+  --foreground: #18181b;
+  --surface: #ffffff;
+  --elevated: #eff1e8;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+
+  --primary: #556f00;
+  --primary-foreground: #ffffff;
+  --secondary: #eff1e8;
+  --secondary-foreground: #18181b;
+  --muted: #eff1e8;
+  --muted-foreground: #4b4b53;
+  --dim: #66666e;
+  --accent: #e4e7da;
+  --accent-foreground: #18181b;
+  --destructive: #a61b1b;
+  --destructive-foreground: #ffffff;
+
+  --border: rgba(18, 20, 15, 0.1);
+  --hairline: rgba(18, 20, 15, 0.08);
+  --input: rgba(18, 20, 15, 0.14);
+  --ring: #556f00;
+
+  --ok: #166534;
+  --warn: #7a4f00;
+  --danger: #a61b1b;
+  --info: #1d4ed8;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #18181b;
+  --sidebar-primary: #556f00;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e4e7da;
+  --sidebar-accent-foreground: #18181b;
+  --sidebar-border: rgba(18, 20, 15, 0.1);
+  --sidebar-ring: #556f00;
+
+  --grain-opacity: 0.03;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    /* Full-terminal posture: mono is the UI voice, sans is the exception.
+       Crisper glyph edges than the antialiased default — a monitor/TTY reads
+       sharper, not smoothed. Disable ligatures/contextual alternates so code
+       renders character-for-character like a real terminal. */
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    -webkit-font-smoothing: auto;
+    -moz-osx-font-smoothing: auto;
+    text-rendering: geometricPrecision;
+    font-feature-settings:
+      'liga' 0,
+      'calt' 0;
+    font-variant-ligatures: none;
+  }
+  /* Atmospheric grain (legacy body::before): fixed, pointer-events-none only. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 60;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.55 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    background-size: 160px 160px;
+    opacity: var(--grain-opacity);
+    mix-blend-mode: overlay;
+  }
+  /* CRT scanlines + faint vignette (Terminal-CLI signal, ui-ux-pro-max DB).
+     Kept at LOW opacity so it never touches text contrast (a11y: the strain
+     that flags Cyberpunk/Retro-Futurism comes from neon glow + high-opacity
+     lines, which we deliberately omit). Fixed, pointer-events-none, sits above
+     content but below modals/toasts. */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    /* Sits at z 0 (just above the fixed page background, BELOW all panels,
+       buttons, cards and the sidebar which stack in the normal flow at z:auto>0)
+       so the scanlines texture the empty ground only — never striping the
+       interactive surfaces on top of it. */
+    z-index: 0;
+    background:
+      repeating-linear-gradient(
+        to bottom,
+        rgba(0, 0, 0, 0) 0,
+        rgba(0, 0, 0, 0) 2px,
+        rgba(0, 0, 0, 0.16) 3px
+      ),
+      radial-gradient(120% 120% at 50% 50%, transparent 62%, rgba(0, 0, 0, 0.28) 100%);
+  }
+  :root[data-theme='light'] body::after {
+    background:
+      repeating-linear-gradient(
+        to bottom,
+        rgba(0, 0, 0, 0) 0,
+        rgba(0, 0, 0, 0) 2px,
+        rgba(0, 0, 0, 0.045) 3px
+      ),
+      radial-gradient(120% 120% at 50% 50%, transparent 70%, rgba(40, 30, 20, 0.06) 100%);
+  }
+}
+
+/* These custom console classes live in @layer utilities (Tailwind's highest
+   layer) — NOT @layer components. Reason: Tailwind v4's @import registers layer
+   order from its own internal statement; a `@layer components{}` block that
+   appears earlier in this file than that statement gets ordered AHEAD of `base`,
+   so the base preflight (`*{padding:0}`) would win over `.view-container`
+   padding. `utilities` is always registered last, so it reliably beats base. */
+@layer utilities {
+  /* Tactical micro-label: the mono, uppercase, wide-tracked kicker used for
+     group headers and metadata (legacy --track-label 0.22em). */
+  .t-label {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem; /* legacy --fs-2xs */
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    color: var(--dim);
+  }
+  /* Terminal view title: mono, bold, lowercase, with the signal-colored
+     trailing period rendered via CSS so the accessible name stays clean. */
+  .t-display {
+    font-family: var(--font-mono);
+    font-size: clamp(1.75rem, 1.25rem + 1.6vw, 2.75rem);
+    line-height: 1.05;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    text-transform: lowercase;
+  }
+  /* Terminal prompt sigil before the view title (`> health.`). */
+  .t-display::before {
+    content: '> ';
+    color: var(--primary);
+    opacity: 0.85;
+  }
+  /* Title ends in a signal-colored blinking block cursor — a real TTY caret,
+     rendered via ::after so it's common to every view (all use .t-display),
+     zero per-view markup. Static under reduced-motion. */
+  .t-display::after {
+    content: '';
+    display: inline-block;
+    width: 0.5ch;
+    height: 0.95em;
+    margin-left: 0.18em;
+    translate: 0 0.08em;
+    background: var(--primary);
+    vertical-align: baseline;
+    animation: cursor-blink 1.05s steps(1) infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .t-display::after {
+      animation: none;
+      opacity: 0.7;
+    }
+  }
+  /* Bracket button — `[ LABEL ]` TUI affordance. Compose on a real <button>
+     so keyboard/focus/44px hit-target are preserved (a11y). */
+  .btn-term {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 0.75rem;
+    color: var(--foreground);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: transparent;
+    padding: 7px 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition:
+      color 120ms,
+      border-color 120ms,
+      background 120ms;
+  }
+  .btn-term::before {
+    content: '[';
+    color: var(--dim);
+  }
+  .btn-term::after {
+    content: ']';
+    color: var(--dim);
+  }
+  .btn-term:hover {
+    color: var(--primary);
+    border-color: var(--primary);
+  }
+  .btn-term:hover::before,
+  .btn-term:hover::after {
+    color: var(--primary);
+  }
+  .btn-term:active {
+    background: var(--primary);
+    color: var(--primary-foreground);
+  }
+  /* Terminal-window chrome: three traffic-light dots + a mono path segment,
+     used in the topbar to frame the console as an emulator window. */
+  .term-dots {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .term-dots span {
+    width: 10px;
+    height: 10px;
+    border-radius: var(--radius-pill);
+    display: block;
+  }
+  .term-dots span:nth-child(1) {
+    background: var(--danger);
+  }
+  .term-dots span:nth-child(2) {
+    background: var(--warn);
+  }
+  .term-dots span:nth-child(3) {
+    background: var(--ok);
+  }
+  /* Chat uses the shell header's middle slot for session actions. Retire the
+     decorative traffic lights before that row gets tight; other routes keep
+     their existing shell chrome. */
+  @media (max-width: 1279px) {
+    .shell-header--chat .term-dots {
+      display: none;
+    }
+  }
+  /* App-shell geometry: the sidebar brand cell and global header share one
+     48px baseline. Desktop can fold to a 64px icon rail; mobile remains a
+     labelled drawer regardless of the saved desktop preference. */
+  .shell-sidebar {
+    width: 15rem;
+    overflow-x: hidden;
+  }
+  .shell-sidebar__head,
+  .shell-header {
+    height: var(--shell-header-h, 3rem);
+    min-height: var(--shell-header-h, 3rem);
+  }
+  .shell-nav-link {
+    height: 2.5rem;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  .shell-sidebar__brand,
+  .shell-nav-link__label {
+    max-width: 10rem;
+    overflow: hidden;
+    white-space: nowrap;
+    opacity: 1;
+    transition:
+      max-width 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      opacity 100ms ease-out;
+  }
+  .shell-mobile-menu {
+    display: none;
+  }
+  .shell-sidebar__primary-action {
+    flex: 0 0 auto;
+    padding: 0.75rem 0.625rem 0;
+  }
+  .shell-sidebar__primary-action:empty {
+    display: none;
+  }
+  .shell-sidebar__primary-action-content {
+    width: 100%;
+  }
+  .shell-sidebar__primary-action:not(:empty) + .shell-sidebar__nav {
+    padding-top: 1rem;
+  }
+  @media (min-width: 769px) {
+    .shell-sidebar {
+      transition: width 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    .shell-sidebar[data-collapsed='true'] {
+      width: 4rem;
+    }
+    .shell-sidebar[data-collapsed='true'] .shell-sidebar__head {
+      justify-content: center;
+      padding-right: 0.5rem;
+      padding-left: 0.5rem;
+    }
+    .shell-sidebar[data-collapsed='true'] .shell-sidebar__brand,
+    .shell-sidebar[data-collapsed='true'] .shell-nav-link__label {
+      max-width: 0;
+      opacity: 0;
+    }
+    .shell-sidebar[data-collapsed='true'] .shell-sidebar__collapse {
+      margin-left: 0;
+    }
+    .shell-sidebar[data-collapsed='true'] .shell-sidebar__nav {
+      padding-right: 0.5rem;
+      padding-left: 0.5rem;
+    }
+    .shell-sidebar[data-collapsed='true'] .shell-sidebar__primary-action {
+      padding-right: 0;
+      padding-left: 0;
+    }
+    .shell-sidebar[data-collapsed='true'] .shell-nav-group {
+      margin-bottom: 0.75rem;
+    }
+    .shell-sidebar[data-collapsed='true'] .shell-nav-group__label {
+      height: 1px;
+      margin: 0.375rem 0.625rem 0.5rem;
+      padding: 0;
+      overflow: hidden;
+      color: transparent;
+      background: var(--hairline);
+    }
+    .shell-sidebar[data-collapsed='true'] .shell-nav-group__label::before {
+      content: none;
+    }
+    .shell-sidebar[data-collapsed='true'] .shell-nav-link {
+      min-height: 2.5rem;
+      justify-content: center;
+      gap: 0;
+      padding-right: 0;
+      padding-left: 0;
+    }
+    .shell-sidebar[data-collapsed='true'] .caret-blink::after {
+      display: none;
+    }
+    .shell-sidebar[data-collapsed='true'] .shell-nav-link__badge {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      height: 1rem;
+      min-width: 1rem;
+      margin-left: 0;
+      padding-right: 0.1875rem;
+      padding-left: 0.1875rem;
+      font-size: 0.5625rem;
+      line-height: 1;
+    }
+    .shell-sidebar[data-collapsed='true'] .shell-sidebar__footer {
+      justify-content: center;
+      padding-right: 0;
+      padding-left: 0;
+    }
+    .shell-sidebar[data-collapsed='true'] .shell-sidebar__status-label,
+    .shell-sidebar[data-collapsed='true'] .shell-sidebar__version {
+      display: none;
+    }
+  }
+  @media (max-width: 768px) {
+    .shell-sidebar {
+      position: fixed;
+      z-index: 40;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      width: min(15rem, calc(100vw - 3rem));
+      transform: translateX(-100%);
+      transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+    .shell-sidebar[data-drawer-open='true'] {
+      transform: translateX(0);
+      box-shadow: 20px 0 48px rgba(0, 0, 0, 0.28);
+    }
+    .shell-mobile-menu {
+      display: inline-flex;
+    }
+    .shell-sidebar__collapse {
+      display: none;
+    }
+    .shell-sidebar__backdrop {
+      position: fixed;
+      z-index: 30;
+      inset: 0;
+      border: 0;
+      background: rgba(0, 0, 0, 0.42);
+      backdrop-filter: blur(1px);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .shell-sidebar,
+    .shell-sidebar__brand,
+    .shell-nav-link__label {
+      transition: none;
+    }
+  }
+  /* Terminal nav group label: shell-comment posture (# control). */
+  .nav-group {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    text-transform: lowercase;
+    letter-spacing: 0.12em;
+    color: var(--dim);
+  }
+  .nav-group::before {
+    content: '# ';
+    color: var(--dim);
+  }
+  /* Blinking terminal caret after the active nav label. */
+  .caret-blink::after {
+    content: '▍';
+    margin-left: 6px;
+    color: var(--primary);
+    animation: caret-blink 1.1s steps(1) infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .caret-blink::after {
+      animation: none;
+    }
+  }
+  /* ---- Common status-tone system (terminal severity gutter) ----
+     Set a tone class on any element, then use .tone-rail (left gutter rule)
+     or .tone-border (tinted full border). Views map their own state classes
+     to --tone the same way; NEVER hardcode status colors per view. */
+  .tone-ok {
+    --tone: var(--ok);
+  }
+  .tone-warn {
+    --tone: var(--warn);
+  }
+  .tone-danger {
+    --tone: var(--danger);
+  }
+  .tone-info {
+    --tone: var(--info);
+  }
+  .tone-dim {
+    --tone: var(--dim);
+  }
+  .tone-rail {
+    border-left: 2px solid var(--tone, var(--border));
+  }
+  .tone-border {
+    border: 1px solid color-mix(in srgb, var(--tone, var(--border)) 45%, var(--border));
+  }
+  /* Common terminal command line (see components/CommandLine.tsx). */
+  .cmdline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    max-width: 720px;
+    background: var(--background);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-sm);
+    padding: 5px 6px 5px 12px;
+  }
+  .cmdline__prompt {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--primary);
+    user-select: none;
+    flex: none;
+  }
+  .cmdline code {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--foreground);
+    white-space: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .cmdline .cmdline__copy {
+    opacity: 0.45;
+    flex: none;
+  }
+  .cmdline:hover .cmdline__copy,
+  .cmdline .cmdline__copy:focus-visible {
+    opacity: 1;
+  }
+  /* Mono numerals for data readouts. */
+  .t-data {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+  }
+  /* Boxed panel: the composition unit of the console. Header row carries a
+     signal dot + mono kicker; content sits inside the border. */
+  .panel {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .panel__head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--hairline);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    color: var(--foreground);
+  }
+  .panel__head::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: var(--radius-pill);
+    background: var(--primary);
+    flex: none;
+  }
+  .panel__head > [data-slot='panel-meta'] {
+    margin-left: auto;
+    letter-spacing: 0.1em;
+    color: var(--dim);
+  }
+  .panel__body {
+    padding: 16px;
+  }
+  /* Common view container — owned by AppShell's <main>, inherited by EVERY
+     view. Views must NOT set their own outer max-width/padding; a future
+     full-bleed surface (chat) opts out with its own negative-margin wrapper. */
+  .view-container {
+    width: 100%;
+    max-width: 1600px;
+    /* Left-aligned, not centered: a centered block on a wide viewport leaves a
+       large dead gutter on the right. Content hugs the sidebar edge with a
+       consistent inset and only caps its far edge.
+       NOTE: use physical longhands (padding-left/right/top/bottom), NOT the
+       `padding-inline`/`padding-block` shorthands — Tailwind v4's base reset
+       sets `padding-inline-start: 0` on `*`, and a cross-layer shorthand does
+       not reliably override that longhand. Matching the exact longhand wins. */
+    margin-left: 0;
+    margin-right: 0;
+    padding-left: 32px;
+    padding-right: 32px;
+    padding-top: 24px;
+    padding-bottom: 48px;
+  }
+  @media (max-width: 768px) {
+    .view-container {
+      padding-left: 16px;
+      padding-right: 16px;
+      padding-top: 16px;
+      padding-bottom: 32px;
+    }
+  }
+  /* Atmospheric ASCII field: decorative canvas, never interactive. The canvas
+     reads `color` for its glyph tint (signal). */
+  .ascii-field {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    user-select: none;
+    color: var(--primary);
+    opacity: 0.38;
+    /* Soft edges left/right so the field breathes inside the header. */
+    mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent);
+  }
+  :root[data-theme='light'] .ascii-field {
+    opacity: 0.22;
+  }
+  .ascii-field canvas {
+    display: block;
+  }
+
+  /* ---- Motion system (Subtle tier per ui-ux-pro-max) ----
+     CSS-driven so it costs nothing at runtime and every animation is disabled
+     as one block under prefers-reduced-motion. Terminal-flavored: content
+     "boots in" with a short rise + fade rather than a generic slide. */
+
+  /* Control view enter: the whole page rises + fades on mount (200-260ms).
+     Chat deliberately opts out because transforming a long scroll layer causes
+     expensive rasterization; its small header/composer choreography lives in
+     chat-unified.css. */
+  /* `backwards` (not `both`): the fade+rise plays on mount, but once it ends the
+     element reverts to its un-transformed computed style. `both` would retain
+     the final keyframe's `transform: translateY(0)` (an identity matrix) — and
+     *any* non-none transform on an ancestor makes it the containing block for
+     descendant position:fixed elements, which anchors modal overlays to this
+     container instead of the viewport (dialogs render low/off-centre). */
+  .view-enter {
+    animation: view-enter 240ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+
+  /* Boot-in stagger: children reveal in sequence like a TTY drawing rows.
+     Add .boot-seq to a container; its direct children animate with an
+     index-based delay via --i (set inline: style={{'--i': n}}), or fall back
+     to nth-child steps for up to 12 items when --i isn't provided. */
+  .boot-seq > * {
+    animation: boot-row 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation-delay: calc(var(--i, 0) * 35ms);
+  }
+  .boot-seq.boot-auto > *:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  .boot-seq.boot-auto > *:nth-child(2) {
+    animation-delay: 35ms;
+  }
+  .boot-seq.boot-auto > *:nth-child(3) {
+    animation-delay: 70ms;
+  }
+  .boot-seq.boot-auto > *:nth-child(4) {
+    animation-delay: 105ms;
+  }
+  .boot-seq.boot-auto > *:nth-child(5) {
+    animation-delay: 140ms;
+  }
+  .boot-seq.boot-auto > *:nth-child(6) {
+    animation-delay: 175ms;
+  }
+  .boot-seq.boot-auto > *:nth-child(n + 7) {
+    animation-delay: 210ms;
+  }
+
+  /* Single-element rise-in helper (panels, cards that mount on their own). */
+  .rise-in {
+    animation: boot-row 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .view-enter,
+    .boot-seq > *,
+    .rise-in {
+      animation: none;
+    }
+  }
+}
+
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes view-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes boot-row {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

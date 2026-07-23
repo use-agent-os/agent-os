@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agentos.gateway.auth import OpenScopeResolver
+from agentos.gateway.auth import OpenScopeResolver, resolve_auth
 from agentos.gateway.config import AuthConfig, GatewayConfig
 from agentos.gateway.scopes import (
     CLI_DEFAULT_OPERATOR_SCOPES,
@@ -51,3 +51,9 @@ def test_open_auth_debug_operator_uses_configured_token_scopes() -> None:
     assert principal.scopes == normalize_operator_scopes(configured_scopes)
     assert principal.is_owner is False
     assert principal.authenticated is False
+
+
+def test_token_auth_without_configured_token_fails_closed() -> None:
+    config = GatewayConfig(auth=AuthConfig(mode="token", token=None))
+
+    assert resolve_auth(config, {}, "operator", peer_ip="127.0.0.1") is None

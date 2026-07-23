@@ -1,0 +1,66 @@
+/* Global approval prompt modal (components/ApprovalPrompt.tsx). Built on the
+   shared token system: a warn-toned .panel over a dimmed backdrop. Status color
+   flows only through --tone (the panel carries .tone-warn → --tone: var(--warn));
+   the left gutter is the single colored rule. */
+@layer components {
+  .approval-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-critical-approval);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: color-mix(in srgb, var(--background) 72%, transparent);
+    backdrop-filter: blur(2px);
+  }
+  .approval-modal {
+    width: 100%;
+    max-width: 560px;
+    max-height: calc(100dvh - 48px);
+    display: flex;
+    flex-direction: column;
+    /* The one colored gutter for this nesting level (tone-rail on --tone). */
+    border-left: 2px solid var(--tone, var(--border));
+    box-shadow: 0 24px 64px -24px rgb(0 0 0 / 0.55);
+  }
+  .approval-modal__body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+  }
+  .approval-modal__tool {
+    font-family: var(--font-mono);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--foreground);
+    word-break: break-word;
+  }
+  .approval-modal__meta {
+    font-size: 0.75rem;
+    color: var(--dim);
+  }
+  .approval-modal__detail {
+    margin: 0;
+    max-height: 240px;
+    overflow: auto;
+    padding: 10px 12px;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-sm);
+    background: var(--background);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--foreground);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .approval-modal__foot {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 14px 16px;
+    border-top: 1px solid var(--hairline);
+  }
+}

@@ -103,12 +103,11 @@ class ManagedChannel(Channel, Protocol):
     Async-lifecycle convention
     --------------------------
     Adapters whose underlying SDK exposes only an infinite-loop entry
-    point (DingTalk ``DingTalkStreamClient.start_forever``, QQ
-    ``botpy.Client.start``, Matrix ``client.sync_forever``) MUST wrap
-    that loop in ``asyncio.create_task(...)`` spawned from ``start()``
-    and return once the task is registered. ``stop()`` cancels the
-    task and awaits its completion. ``ChannelManager`` relies on this
-    contract to bound ``start_all()`` with a 30 s timeout by default.
+    point MUST wrap that loop in ``asyncio.create_task(...)`` spawned
+    from ``start()`` and return once the task is registered. ``stop()``
+    cancels the task and awaits its completion. ``ChannelManager``
+    relies on this contract to bound ``start_all()`` with a 30 s
+    timeout by default.
     Adapters with known slow cold starts may expose ``startup_timeout_s``.
 
     metadata['is_group'] contract

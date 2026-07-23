@@ -170,7 +170,10 @@ async def test_config_patch_auth_mode_reports_restart_required(tmp_path):
     """auth.mode is applied to AuthMiddleware live, but the startup guard and
     the captured bind posture only re-evaluate on restart — so a hot change
     must be flagged restart-required so the operator isn't misled."""
-    cfg = GatewayConfig(config_path=str(tmp_path / "c.toml"))  # mode defaults to "none"
+    cfg = GatewayConfig(
+        config_path=str(tmp_path / "c.toml"),
+        auth={"mode": "none", "token": "provisioned-token"},
+    )
     res = await get_dispatcher().dispatch(
         "r1",
         "config.patch",
@@ -217,7 +220,10 @@ async def test_config_patch_same_auth_and_host_does_not_report_restart_required(
 
 @pytest.mark.asyncio
 async def test_config_apply_auth_mode_reports_restart_required(tmp_path):
-    cfg = GatewayConfig(config_path=str(tmp_path / "c.toml"))
+    cfg = GatewayConfig(
+        config_path=str(tmp_path / "c.toml"),
+        auth={"mode": "none", "token": "provisioned-token"},
+    )
     payload = cfg.model_dump(mode="python")
     payload["auth"]["mode"] = "token"
 
