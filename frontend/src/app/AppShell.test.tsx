@@ -316,6 +316,7 @@ describe('app shell chrome', () => {
     const collapse = screen.getByRole('button', { name: 'Collapse navigation' })
     expect(collapse).toHaveAttribute('aria-controls', 'sidebar-nav')
     expect(collapse).toHaveAttribute('aria-expanded', 'true')
+    expect(collapse.querySelector('svg')).toHaveClass('lucide-chevron-left')
     fireEvent.click(collapse)
 
     expect(sidebar).toHaveAttribute('data-collapsed', 'true')
@@ -324,6 +325,7 @@ describe('app shell chrome', () => {
 
     const expand = screen.getByRole('button', { name: 'Expand navigation' })
     expect(expand).toHaveAttribute('aria-expanded', 'false')
+    expect(expand.querySelector('svg')).toHaveClass('lucide-chevron-right')
     fireEvent.click(expand)
     expect(sidebar).toHaveAttribute('data-collapsed', 'false')
     expect(window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY)).toBe('false')

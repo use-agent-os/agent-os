@@ -164,30 +164,44 @@
 
   .shell[data-design='unified'] .shell-sidebar[data-collapsed='true'] .shell-sidebar__head {
     justify-content: center;
-    gap: 0.25rem;
     padding-inline: 0.25rem;
+    background: transparent;
   }
 
   .shell[data-design='unified'] .shell-sidebar[data-collapsed='true'] .shell-sidebar__brand {
-    flex: none;
     max-width: none;
+    gap: 0;
     opacity: 1;
   }
 
-  .shell[data-design='unified'] .shell-sidebar[data-collapsed='true'] .shell-sidebar__brand-mark {
-    width: 1.5rem;
-    height: 1.5rem;
-  }
-
   .shell[data-design='unified'] .shell-sidebar[data-collapsed='true'] .shell-sidebar__brand-copy {
-    max-width: 0;
-    opacity: 0;
+    display: none;
   }
 
   .shell[data-design='unified'] .shell-sidebar[data-collapsed='true'] .shell-sidebar__collapse {
-    width: 1.75rem;
-    height: 1.75rem;
+    position: absolute;
+    z-index: 2;
+    top: 2.375rem;
+    right: 0;
+    width: 2rem;
+    height: 2rem;
     margin-left: 0;
+    translate: 50% -50%;
+    border: 0;
+    background: var(--sidebar);
+    box-shadow: none;
+  }
+
+  .shell[data-design='unified']
+    .shell-sidebar[data-collapsed='true']
+    .shell-sidebar__collapse::after {
+    position: absolute;
+    inset: 0 0 0 50%;
+    border: 1px solid var(--sidebar-border);
+    border-left: 0;
+    border-radius: 0 var(--radius-control) var(--radius-control) 0;
+    content: '';
+    pointer-events: none;
   }
 
   .shell[data-design='unified'] .shell-sidebar[data-collapsed='true'] .shell-sidebar__nav {
