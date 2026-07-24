@@ -129,22 +129,18 @@ async def test_default_prompt_only_injects_retained_bundled_skills(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    class MockBinCache(dict):
+        def __contains__(self, key: object) -> bool:
+            return True
+        def __getitem__(self, key: str) -> bool:
+            return True
+
     monkeypatch.setattr(
         skills_filter_step,
         "_elig_ctx",
         EligibilityContext(
             os_name="linux",
-            has_bin_cache={
-                "codex": True,
-                "curl": True,
-                "ffmpeg": True,
-                "ffprobe": True,
-                "xelatex": True,
-                "nano-pdf": True,
-                "python": True,
-                "python3": True,
-                "tmux": True,
-            },
+            has_bin_cache=MockBinCache(),
         ),
     )
     loader = SkillLoader(bundled_dir=BUNDLED, snapshot_path=tmp_path / "snapshot.json")

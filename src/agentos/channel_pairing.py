@@ -125,10 +125,10 @@ class ChannelPairingStore:
             if os.name == "posix":
                 import fcntl
 
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)  # type: ignore[attr-defined]
 
                 def unlock() -> None:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)  # type: ignore[attr-defined]
 
             elif os.name == "nt":  # pragma: no cover - exercised on Windows CI.
                 import msvcrt

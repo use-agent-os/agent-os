@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
@@ -311,21 +310,21 @@ def test_stream_py_has_no_live_constructor() -> None:
 
     The approval path relies on the pre-token surface being the
     prompt-toolkit assistant header slot, not a Rich `Live` region. Run
-    `grep` as a subprocess so the assertion fails loudly if a future
-    regression re-introduces `Live(`.
+    a Python check so the assertion fails loudly if a future regression
+    re-introduces `Live(`.
     """
     repo_root = Path(__file__).resolve().parents[4]
     target = repo_root / "src" / "agentos" / "cli" / "repl" / "stream.py"
     assert target.exists(), f"missing target: {target}"
-    result = subprocess.run(
-        ["grep", "-n", "Live(", str(target)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    # grep returns 1 on "no matches", 0 on "matches found". We want 1.
-    assert result.returncode == 1, (
-        f"`Live(` re-appeared in stream.py:\n{result.stdout}"
+
+    content = target.read_text("utf-8")
+    matches = []
+    for line_idx, line in enumerate(content.splitlines(), 1):
+        if "Live(" in line:
+            matches.append(f"{line_idx}:{line}")
+
+    assert not matches, (
+        "`Live(` re-appeared in stream.py:\n" + "\n".join(matches)
     )
 
 

@@ -582,11 +582,11 @@ class CuratedMemoryStore:
             return
         fd = open(lock_path, "a+", encoding="utf-8")
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            fcntl.flock(fd, fcntl.LOCK_EX)  # type: ignore[attr-defined]
             yield
         finally:
             try:
-                fcntl.flock(fd, fcntl.LOCK_UN)
+                fcntl.flock(fd, fcntl.LOCK_UN)  # type: ignore[attr-defined]
             except OSError:  # pragma: no cover
                 pass
             fd.close()

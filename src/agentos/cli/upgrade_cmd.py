@@ -121,12 +121,12 @@ def _kill_process_group(proc: subprocess.Popen[str]) -> None:
         proc.kill()
         return
     try:
-        pgid = os.getpgid(proc.pid)
+        pgid = os.getpgid(proc.pid)  # type: ignore[attr-defined]
     except ProcessLookupError:
         return
-    for sig in (signal.SIGTERM, signal.SIGKILL):
+    for sig in (signal.SIGTERM, signal.SIGKILL):  # type: ignore[attr-defined]
         try:
-            os.killpg(pgid, sig)
+            os.killpg(pgid, sig)  # type: ignore[attr-defined]
         except ProcessLookupError:
             return
         except OSError:
