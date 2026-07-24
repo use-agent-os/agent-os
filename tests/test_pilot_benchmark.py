@@ -65,10 +65,31 @@ def test_ordinary_lengths_respect_the_char_bound(benchmark_result):
 
 
 def test_warm_p50_meets_hard_ceiling_at_2048(benchmark_result):
+    from scripts.pilot_router.benchmark_features import active_ceiling_ms
     p50 = benchmark_result.ceiling_p50_ms()
+    ceiling = active_ceiling_ms()
     assert benchmark_result.passes_ceiling(), (
-        f"warm p50 at 2048 chars = {p50:.2f} ms exceeds the 50 ms hard ceiling"
+        f"warm p50 at 2048 chars = {p50:.2f} ms exceeds the {ceiling:.1f} ms hard ceiling"
     )
+
+
+def test_active_ceiling_ms_behavior(monkeypatch):
+    import os
+
+    from scripts.pilot_router.benchmark_features import (
+        CEILING_MS,
+        CEILING_MS_WINDOWS,
+        active_ceiling_ms,
+    )
+
+    # Test baseline without factor environment variable set
+    monkeypatch.delenv("AGENTOS_BENCHMARK_FACTOR", raising=False)
+    expected_base = CEILING_MS_WINDOWS if os.name == "nt" else CEILING_MS
+    assert active_ceiling_ms() == expected_base
+
+    # Test with custom scaling factor
+    monkeypatch.setenv("AGENTOS_BENCHMARK_FACTOR", "1.5")
+    assert active_ceiling_ms() == expected_base * 1.5
 
 
 def test_count_tokens_pretrunc_is_not_capped_by_baked_in_truncation():

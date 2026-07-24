@@ -75,7 +75,10 @@ def test_uv_tool_dir_symlinked_bin_classified_as_uv_tool(tmp_path: Path) -> None
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     link = bin_dir / "agentos"
-    link.symlink_to(real_exe)
+    try:
+        link.symlink_to(real_exe)
+    except OSError as e:
+        pytest.skip(f"Symlinks are not allowed or supported: {e}")
     # package_dir is elsewhere (a shim location) so only the symlink target ties
     # the install to the tools tree.
     pkg = tmp_path / "shim" / "agentos"

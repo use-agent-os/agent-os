@@ -310,13 +310,15 @@ async def test_approved_background_process_uses_host_grant_when_sandbox_enabled(
         ),
     )
 
-    pending = json.loads(await shell.background_process("rm target.txt", workdir=str(tmp_path)))
+    import os
+    cmd = "del target.txt" if os.name == "nt" else "rm target.txt"
+    pending = json.loads(await shell.background_process(cmd, workdir=str(tmp_path)))
     assert pending["status"] == "approval_required"
     approval_id = str(pending["approval_id"])
     get_approval_queue().resolve(approval_id, approved=True)
 
     result = await shell.background_process(
-        "rm target.txt",
+        cmd,
         workdir=str(tmp_path),
         timeout=5,
         approval_id=approval_id,
