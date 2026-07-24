@@ -14,13 +14,13 @@ import {
   BarChart3,
   Bot,
   CalendarClock,
+  ChevronLeft,
+  ChevronRight,
   LayoutDashboard,
   Menu,
   MessageSquare,
   Moon,
   Network,
-  PanelLeftClose,
-  PanelLeftOpen,
   Puzzle,
   Radio,
   ScrollText,
@@ -367,9 +367,9 @@ export function AppShell() {
             onClick={toggleSidebarCollapsed}
           >
             {compactSidebar ? (
-              <PanelLeftOpen className="size-4" />
+              <ChevronRight className="size-4" />
             ) : (
-              <PanelLeftClose className="size-4" />
+              <ChevronLeft className="size-4" />
             )}
           </Button>
         </div>
