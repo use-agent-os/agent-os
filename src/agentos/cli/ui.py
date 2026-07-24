@@ -15,8 +15,10 @@ from agentos.ui import (
     error_console,
     error_panel,
     markup_escape,
+    prompt_message,
     questionary_style,
     section_rule,
+    styled_questionary,
     warning_panel,
 )
 
@@ -84,7 +86,9 @@ __all__ = [
     "error_panel",
     "markup_escape",
     "notice_panel",
+    "prompt_message",
     "questionary_style",
     "section_rule",
+    "styled_questionary",
     "warning_panel",
 ]

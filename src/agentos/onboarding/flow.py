@@ -70,56 +70,21 @@ from agentos.ui import (
     ACCENT_SOFT,
     console,
     markup_escape,
-    questionary_style,
     setup_cockpit_panel,
     setup_step_panel,
+    styled_questionary,
     warning_panel,
 )
 
-_QSTYLE = None
-
-
-def _qs():
-    global _QSTYLE
-    if _QSTYLE is None:
-        built = questionary_style()
-        if built is None:
-            return None
-        _QSTYLE = built
-    return _QSTYLE
-
 
 def _styled(q):
-    """Wrap the questionary module so every prompt inherits the brand style.
+    """Wrap the questionary module so every prompt inherits the brand layout.
 
-    When ``questionary_style()`` returns ``None`` (e.g. test stub or missing
-    optional dep) the wrapper passes calls through unchanged.
+    Delegates to :func:`agentos.ui.styled_questionary`, which is shared with the
+    other interactive CLI surfaces. When the brand style is unavailable (e.g.
+    test stub or missing optional dep) the module passes through unchanged.
     """
-    from types import SimpleNamespace
-
-    style = _qs()
-    if style is None:
-        return q
-    try:
-        import questionary.prompts.common as questionary_common
-
-        questionary_common.INDICATOR_SELECTED = "☑"
-        questionary_common.INDICATOR_UNSELECTED = "☐"
-    except Exception:
-        pass
-
-    def _wrap(name):
-        fn = getattr(q, name)
-        return lambda *a, **kw: fn(*a, **{"style": style, **kw})
-
-    return SimpleNamespace(
-        select=_wrap("select"),
-        text=_wrap("text"),
-        confirm=_wrap("confirm"),
-        password=_wrap("password"),
-        checkbox=_wrap("checkbox"),
-        Choice=getattr(q, "Choice", None),
-    )
+    return styled_questionary(q)
 
 
 @dataclass(frozen=True)

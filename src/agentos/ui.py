@@ -350,3 +350,94 @@ def questionary_style():
             ("disabled", "fg:#666666 italic"),
         ]
     )
+
+
+PROMPT_CARET = "›"
+
+# Free-text prompts render their input buffer inline with the question label.
+# Only these two get the caret treatment: ``select`` already lists its choices
+# below the question and ``confirm`` renders ``(y/N)`` inline by convention.
+_NEXT_LINE_PROMPTS = ("text", "password")
+
+_WRAPPED_PROMPTS = ("select", "text", "confirm", "password", "checkbox")
+
+
+def prompt_message(message: str, default: object = None) -> str:
+    """Format a prompt label so the caret lands on the line below the question.
+
+    questionary renders its prompt tokens as ``"? " + " {message} "``, so a
+    trailing newline breaks the line and the caret prefixes the input buffer.
+    A non-empty ``default`` moves onto the question line as a hint instead of
+    being pre-filled into the buffer, so typing replaces it rather than
+    appending to it.
+    """
+    hint = f" ({default})" if default not in (None, "") else ""
+    return f"{message}{hint}\n{PROMPT_CARET}"
+
+
+class _DefaultOnEmpty:
+    """Question proxy substituting ``default`` for an empty submission.
+
+    The default is no longer pre-filled into the input buffer, so Enter on an
+    untouched prompt yields ``""``. ``None`` (Ctrl+C / Esc) passes through
+    untouched so callers can still detect cancellation.
+    """
+
+    def __init__(self, question: object, default: object) -> None:
+        self._question = question
+        self._default = default
+
+    def _resolve(self, answer: object) -> object:
+        return self._default if answer == "" else answer
+
+    def ask(self, *args: object, **kwargs: object) -> object:
+        return self._resolve(self._question.ask(*args, **kwargs))  # type: ignore[attr-defined]
+
+    def unsafe_ask(self, *args: object, **kwargs: object) -> object:
+        return self._resolve(self._question.unsafe_ask(*args, **kwargs))  # type: ignore[attr-defined]
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._question, name)
+
+
+def styled_questionary(q):
+    """Wrap the questionary module so every prompt inherits the brand layout.
+
+    Prompts get the brand style, and free-text prompts get their input caret on
+    the line below the question (see :func:`prompt_message`).
+
+    When ``questionary_style()`` returns ``None`` (e.g. test stub or missing
+    optional dep) the module is passed through unchanged.
+    """
+    from types import SimpleNamespace
+
+    style = questionary_style()
+    if style is None:
+        return q
+    try:
+        import questionary.prompts.common as questionary_common
+
+        questionary_common.INDICATOR_SELECTED = "☑"
+        questionary_common.INDICATOR_UNSELECTED = "☐"
+    except Exception:
+        pass
+
+    def _wrap(name):
+        fn = getattr(q, name)
+        if name not in _NEXT_LINE_PROMPTS:
+            return lambda *a, **kw: fn(*a, **{"style": style, **kw})
+
+        def call(message, *a, **kw):
+            # Only ``text`` carries a value default; ``password`` never does.
+            default = kw.pop("default", "") if name == "text" else ""
+            question = fn(
+                prompt_message(message, default), *a, **{"style": style, **kw}
+            )
+            return _DefaultOnEmpty(question, default) if default else question
+
+        return call
+
+    return SimpleNamespace(
+        **{name: _wrap(name) for name in _WRAPPED_PROMPTS},
+        Choice=getattr(q, "Choice", None),
+    )
