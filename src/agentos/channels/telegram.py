@@ -756,6 +756,8 @@ class TelegramChannel:
         username = sender.get("username")
         if username:
             metadata["sender_username"] = str(username)
+        if self.bot_username:
+            metadata["bot_username"] = self.bot_username
         display_name = " ".join(
             str(sender.get(key) or "").strip() for key in ("first_name", "last_name")
         ).strip()
@@ -807,6 +809,15 @@ class TelegramChannel:
                 if entity_type == "text_mention":
                     user = entity.get("user") or {}
                     if str(user.get("id", "")) == str(self.bot_user_id or ""):
+                        return True
+                if entity_type == "bot_command":
+                    offset = int(entity.get("offset", 0))
+                    length = int(entity.get("length", 0))
+                    command = text[offset : offset + length]
+                    _, separator, target = command.partition("@")
+                    if not separator:
+                        return True
+                    if target.casefold() == username.lstrip("@").casefold():
                         return True
         return mention in text.lower()
 
