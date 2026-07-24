@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import questionary
+import questionary as _questionary
 import tomli_w
 import typer
 
-from agentos.cli.ui import console
+from agentos.cli.ui import console, styled_questionary
 from agentos.onboarding import get_provider_setup_spec
 from agentos.paths import default_agentos_home
 
@@ -46,6 +46,8 @@ def run_init() -> None:
     config_path = home / "config.toml"
     home.mkdir(parents=True, exist_ok=True)
     (home / "state").mkdir(parents=True, exist_ok=True)
+
+    questionary = styled_questionary(_questionary)
 
     provider = questionary.select(
         "Choose provider:",
