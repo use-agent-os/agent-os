@@ -137,6 +137,18 @@ describe('Control surface CSS contract', () => {
     expect(configCss).toMatch(
       /\.control-surface \.cfg-stage--embedded \.cfg-stage__header--embedded \{[\s\S]*?min-height: 0;[\s\S]*?margin-bottom: 0\.75rem;/,
     )
+    expect(configCss).toMatch(
+      /\.control-surface \.cfg-stage--embedded \.cfg-group \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\);[\s\S]*?border: 0;[\s\S]*?background: transparent;[\s\S]*?box-shadow: none;/,
+    )
+    expect(configCss).toMatch(
+      /\.control-surface \.cfg-stage--embedded \.cfg-group__head \{[\s\S]*?border-right: 0;[\s\S]*?border-bottom: 1px solid var\(--hairline\);/,
+    )
+    expect(configCss).toMatch(
+      /\.control-surface \.cfg-stage \.cfg-yaml__area \{[\s\S]*?min-height: 60vh;/,
+    )
+    expect(configCss).toMatch(
+      /@media \(max-width: 840px\) \{[\s\S]*?\.control-surface \.cfg-stage--embedded \.cfg-group__fields \{[\s\S]*?grid-template-columns: 1fr;/,
+    )
     expect(controlCss).toMatch(
       /\.control-surface \.setup-router-toolbar input\[type='number'\] \{[\s\S]*?box-sizing: border-box;[\s\S]*?padding: 0\.58rem 2\.65rem 0\.58rem 0\.75rem;/,
     )

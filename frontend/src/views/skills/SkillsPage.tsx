@@ -126,6 +126,9 @@ function LogoBadge({ item, cls }: { item: RegistryItem; cls: string }) {
   const logoUrl = safeUrl(item.logo)
   const [broken, setBroken] = useState(false)
   if (!logoUrl || broken) {
+    if (item.source?.toLowerCase() === 'bankr') {
+      return <PartnerLogo brand="bankr" className={cls} decorative />
+    }
     return <span className={`${cls} ${cls}--initials`}>{initials(item.provider || item.name)}</span>
   }
   return (

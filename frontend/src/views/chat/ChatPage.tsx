@@ -23,6 +23,7 @@ import {
   type PendingAttachment,
 } from './logic'
 import { PendingQueue } from './PendingQueue'
+import { resetSession as requestSessionReset } from './resetSession'
 import { SessionChip } from './SessionChip'
 import { SlashMenu, type SlashMenuHandle } from './SlashMenu'
 import { Toolbar } from './Toolbar'
@@ -328,12 +329,7 @@ export function ChatPage() {
   // and let the terminal `sessions.changed` resync history (useTranscript owns
   // that path); toast the outcome.
   const resetSession = useCallback(() => {
-    rpc
-      .call('sessions.reset', { key: sessionKey })
-      .then(() => toast.info('Session reset'))
-      .catch((err: unknown) =>
-        toast.error('Reset failed: ' + (err instanceof Error ? err.message : String(err))),
-      )
+    void requestSessionReset(rpc, sessionKey)
   }, [rpc, sessionKey])
 
   // Slash catalog + execution (chat.js:2615/2842). `new_chat` is now WIRED through

@@ -71,6 +71,13 @@ const CATALOG_ITEM = {
   category: 'defi',
   demo: { code: 'swap(1, ETH)', language: 'python', title: 'Quote a swap' },
 }
+const BANKR_CATALOG_ITEM = {
+  name: 'bankr-token-scam-analysis',
+  identifier: 'bankr-token-scam-analysis',
+  provider: 'BankrBot',
+  source: 'bankr',
+  description: 'Analyze token risk.',
+}
 // A needs_setup skill carrying both a Requirements manifest and Missing bins/env
 // (skills.js:743-777,792-803). requirements.items exercises the ready /
 // needs_setup / missing_skill status branches plus the missing + requires detail.
@@ -304,6 +311,16 @@ describe('SkillsPage', () => {
 
     expect(logo).toHaveAttribute('src', CATALOG_ITEM.logo)
     expect(logo).toHaveAttribute('referrerpolicy', 'no-referrer')
+  })
+
+  it('uses the official Bankr icon when a Bankr catalog item has no logo metadata', async () => {
+    wireRpc({ searchResults: [BANKR_CATALOG_ITEM] })
+    renderPage()
+    await waitFor(() => expect(screen.getByLabelText('Skill trader')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('tab', { name: 'Bankr' }))
+
+    const card = await screen.findByLabelText('Catalog skill bankr-token-scam-analysis')
+    expect(within(card).getByRole('presentation')).toHaveAttribute('src', bankrSymbolUrl)
   })
 
   // ── Install (per-item busy, correct RPC + params + invalidation) ─────────
