@@ -790,6 +790,8 @@ describe('ChatPage', () => {
   it('opens the complete tool output from View full and closes the dialog (chat.js:7311)', async () => {
     mockRpc = makeRpc()
     renderPage()
+    const thread = document.querySelector('.chat-thread') as HTMLElement
+    await waitFor(() => expect(thread).toHaveAttribute('data-history-ready', 'true'))
     const fullOutput = `exit_code=0 ${'provider output '.repeat(20)}<not-html>`
 
     await act(async () => {

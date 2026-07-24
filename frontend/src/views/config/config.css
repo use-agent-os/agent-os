@@ -412,20 +412,27 @@
   color: var(--danger);
 }
 
-.cfg-stage--embedded .cfg-group {
+.control-surface .cfg-stage--embedded .cfg-group {
+  grid-template-columns: minmax(0, 1fr);
   border: 0;
   border-top: 1px solid var(--hairline);
   background: transparent;
   box-shadow: none;
 }
 
-.cfg-stage--embedded .cfg-group__head {
+.control-surface .cfg-stage--embedded .cfg-group__head {
+  padding-inline: 0;
+  border-right: 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.control-surface .cfg-stage--embedded .cfg-group__fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   padding-inline: 0;
 }
 
-.cfg-stage--embedded .cfg-group__fields {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  padding-inline: 0;
+.control-surface .cfg-stage .cfg-yaml__area {
+  min-height: 60vh;
 }
 
 /* Sticky save bar. */
@@ -529,7 +536,7 @@
     width: 100%;
   }
 
-  .cfg-stage--embedded .cfg-group__fields {
+  .control-surface .cfg-stage--embedded .cfg-group__fields {
     grid-template-columns: 1fr;
   }
 

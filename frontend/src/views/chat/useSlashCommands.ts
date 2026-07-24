@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import { normalizeSlashCommand, slashCommandKey, type SlashCommand } from './logic'
+import { resetSession } from './resetSession'
 
 /**
  * Slash-command catalog + execution (React).
@@ -151,12 +152,7 @@ export function useSlashCommands(opts?: {
         case 'reset_session':
         case 'sessions.reset':
         case '/reset': {
-          rpc
-            .call('sessions.reset', { key })
-            .then(() => toast.info('Session reset'))
-            .catch((err: unknown) =>
-              toast.error('Reset failed: ' + (err instanceof Error ? err.message : String(err))),
-            )
+          void resetSession(rpc, key)
           return
         }
         // chat.js:2738-2763 — manual compaction. The RPC is fired; the in-thread
