@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- A variable reported as missing is now checked against the places a
+  credential may already live. If `gh auth login` has been run, `GITHUB_TOKEN`
+  is reported as available from the GitHub CLI and can be imported with
+  `agentos env import GITHUB_TOKEN` or a button on the Environment screen.
+  Checking runs `gh auth status`, never `gh auth token`, so nothing reads a
+  secret to decide whether one exists; importing only happens when asked for.
+- When a skill's requirements are unmet, `skill_view` appends a setup note
+  saying what is missing and what to do about it — and what to do depends on
+  who is listening. A chat channel is told a secret must not be collected
+  there because it would be stored in the conversation; an unattended run is
+  told to continue and state what does not work; an interactive session gets
+  the actual command. The skill still loads either way.
 - Environment variables can be managed from AgentOS instead of by hand-editing
   `~/.agentos/.env` and restarting. Every surface that could already *detect* a
   missing variable can now *fix* it: a new **Environment** screen in the Web UI
@@ -83,6 +95,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- `env_key` is not always a variable name: providers that authenticate by
+  OAuth carry the literal string `"OAuth"`, which put a variable called
+  `OAuth` on the Environment screen that nobody could set.
+- `skill_list` no longer tells the model to call `env_set`, which is hidden by
+  default and so usually not callable — the same dead-end this feature exists
+  to remove.
 - A `.env` value with significant leading or trailing whitespace was written
   unquoted and then silently trimmed when read back. The OpenClaw migration
   carries a command allowlist across, and its entries are prefix patterns:

@@ -104,7 +104,7 @@ Top-level: `init`, `onboard`, `configure`, `doctor`, `upgrade`, `chat`,
 | --- | --- |
 | `gateway` | `run`, `start`, `status`, `stop`, `restart` (`--port`, `--bind`, `--listen`, `--config`, `--json`, `--debug`) |
 | `config` | `get [key]` (empty key = show all), `set <dot.key> <value>` |
-| `env` | `list [--missing] [--category]`, `get <NAME> [--reveal]`, `set <NAME> --stdin`, `unset <NAME>` |
+| `env` | `list [--missing] [--category]`, `get <NAME> [--reveal]`, `set <NAME> --stdin`, `import <NAME>`, `unset <NAME>` |
 | `providers` | `list`, `status`, `configure <id> [-m MODEL] [-k API_KEY] [--base-url] [--proxy]` |
 | `models` | `list` |
 | `skills` | `list`, `search`, `view`, `install`, `uninstall`, `update`, `publish`, `tap add/list/remove` |

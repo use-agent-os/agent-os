@@ -369,8 +369,17 @@ agentos env list --category skill      # provider | search | image | audio | mem
 agentos env get OPENAI_API_KEY         # state and description, value masked
 agentos env get OPENAI_API_KEY --reveal
 agentos env set OPENAI_API_KEY --stdin # value read from stdin
+agentos env import GITHUB_TOKEN         # copy from a tool that already has it
 agentos env unset OPENAI_API_KEY
 ```
+
+`agentos env import` covers the case where the credential is not really
+missing. If you have run `gh auth login`, AgentOS can see that the GitHub CLI
+holds a token and copy it in rather than asking you to go find one; `agentos
+env list` marks such variables. Nothing is imported without you asking — a
+token you granted to another tool is not automatically something an agent
+should get. The copy does not follow that tool's own rotation, so re-run the
+import after rotating.
 
 Values are never printed unless you ask for them with `--reveal`, which
 prompts first. Prefer `--stdin` or the interactive prompt over `--value`: a

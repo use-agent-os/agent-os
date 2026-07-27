@@ -77,6 +77,22 @@ ordinary credentials such as `AGENTOS_LLM_API_KEY` remain writable.
 The gate applies on *write* only. Values you set in your shell or by editing
 `~/.agentos/.env` by hand keep working exactly as before.
 
+### Credentials that already exist elsewhere
+
+Before telling you a variable is missing, AgentOS checks whether it is already
+obtainable. Today that means the GitHub CLI: if `gh auth login` has been run,
+`GITHUB_TOKEN` and `GH_TOKEN` are reported as available and can be imported
+with one command or one click.
+
+Two properties are deliberate. Checking never reads the credential — it runs
+`gh auth status`, not `gh auth token` — so a listing that mentions a source has
+not touched a secret. And importing only ever happens when you ask for it,
+because a token you granted to another tool becoming available to an agent
+should not be something that happens quietly.
+
+An imported value is a copy. It stays as it was when imported and will not
+follow the source's own rotation; re-import to refresh it.
+
 ### Skill settings are not secrets
 
 A skill may also declare ordinary settings — a directory, a format, a default —

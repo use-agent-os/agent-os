@@ -185,6 +185,92 @@ async def _run_install_argv(argv: list[str]) -> tuple[int, str, str, bool]:
     return proc.returncode or 0, _cap_output(stdout), _cap_output(stderr), False
 
 
+def _setup_surface() -> str:
+    """Return where this call is coming from: ``channel``, ``unattended``, or ``interactive``.
+
+    A missing credential is answerable in very different ways depending on who
+    is on the other end, and the tool is the only place that knows.
+    """
+    from agentos.tools.types import CallerKind, InteractionMode, current_tool_context
+
+    ctx = current_tool_context.get()
+    if ctx is None:
+        return "interactive"
+    if ctx.caller_kind is CallerKind.CHANNEL:
+        return "channel"
+    if ctx.interaction_mode is InteractionMode.UNATTENDED:
+        return "unattended"
+    return "interactive"
+
+
+def _import_offer(name: str) -> str:
+    """Return an import suggestion when the credential already exists elsewhere."""
+    try:
+        from agentos import credential_sources
+
+        source = credential_sources.available_for(name)
+    except Exception:  # pragma: no cover - discovery must never break a skill load
+        return ""
+    if source is None:
+        return ""
+    return f"{name} is already available from {source.label} — `agentos env import {name}`."
+
+
+def _skill_setup_note(skill: Any) -> str:
+    """Return a ``[Skill setup note: ...]`` block when a requirement is unmet.
+
+    The skill still loads. An agent that knows what is missing can do the parts
+    that work and say plainly which parts cannot — more useful than refusing to
+    open the skill at all.
+
+    What the note tells it to do depends on who is listening. A secret cannot
+    be collected over Telegram without landing in a chat log, and an unattended
+    cron run has nobody to collect it from; in both cases promising an action
+    would be a lie.
+    """
+    from agentos.skills.eligibility import EligibilityContext, diagnose_eligibility
+
+    report = diagnose_eligibility(skill, EligibilityContext.auto())
+    if report.eligible:
+        return ""
+
+    lines: list[str] = []
+    for declared in report.missing_env_detail:
+        detail = f" — {declared.description}" if declared.description else ""
+        where = f" Obtain one at {declared.url}." if declared.url else ""
+        lines.append(f"{declared.name} is not set{detail}.{where}")
+        offer = _import_offer(declared.name)
+        if offer:
+            lines.append(offer)
+    for binary in report.missing_bins:
+        lines.append(f"{binary} is not installed.")
+    if not lines:
+        # Ineligible for a reason the operator cannot act on here (wrong OS,
+        # explicitly disabled). Saying nothing beats inventing an instruction.
+        return ""
+
+    surface = _setup_surface()
+    if surface == "channel":
+        lines.append(
+            "This is a chat channel, so a secret cannot be entered here — it would "
+            "be stored in the conversation. Ask the operator to set it from the "
+            "AgentOS Environment screen or with `agentos env set <NAME>`."
+        )
+    elif surface == "unattended":
+        lines.append(
+            "This run is unattended, so nothing can be entered now. Continue with "
+            "what works and state clearly which parts do not."
+        )
+    else:
+        lines.append(
+            "Ask the user to set it from the AgentOS Environment screen or with "
+            "`agentos env set <NAME>`, then retry. Continue meanwhile with "
+            "whatever does not depend on it, and say what will not work."
+        )
+    body = " ".join(lines)
+    return f"\n\n[Skill setup note: {body}]"
+
+
 def _skill_config_block(skill: Any) -> str:
     """Return the skill's configured settings as a trailing block, or ``""``.
 
@@ -246,14 +332,13 @@ def create_skill_tools(loader: SkillLoader) -> None:
                 for hint in report.install_hints:
                     lines.append(f"      Install: {hint.command}")
                 for declared in report.missing_env_detail:
-                    # Name what the variable is for and where to get it when
-                    # the manifest says, and point at the tool that can
-                    # actually set it — a hint with no corresponding action
-                    # just hands the work back to the user.
+                    # What the variable is for and where a value comes from.
+                    # How to set it belongs in skill_view, where the agent is
+                    # actually trying to use the skill — a listing of fifty
+                    # skills does not need fifty sets of instructions.
                     detail = f" — {declared.description}" if declared.description else ""
                     source = f" (get one at {declared.url})" if declared.url else ""
                     lines.append(f"      Needs {declared.name}{detail}{source}")
-                    lines.append(f'      Fix: env_set(name="{declared.name}", value=...)')
         return "\n".join(lines)
 
     @tool(
@@ -300,6 +385,7 @@ def create_skill_tools(loader: SkillLoader) -> None:
             return content
 
         body = skill.content or f"(Skill '{name}' has no body content)"
+        body += _skill_setup_note(skill)
         # Append whatever the operator configured for this skill, so the agent
         # starts from the values in effect rather than asking the user or
         # going to read the config file itself. Skills that declare no
