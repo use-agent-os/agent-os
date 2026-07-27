@@ -247,6 +247,13 @@ skill declared one, a link to where the credential is obtained. A skill listed
 as needing setup can be fixed from its own dialog on the Skills screen too: the
 Missing block offers **Set &lt;VAR&gt;** next to the existing install action.
 
+A variable that is not set but is already obtainable elsewhere shows a **Use
+&lt;source&gt;** button instead of asking you to go find a value — today that is
+the GitHub CLI for `GITHUB_TOKEN` and `GH_TOKEN`, when `gh auth login` has been
+run. Deciding whether to offer it never reads the credential, and importing
+only happens when you click. The imported value is a copy and will not follow
+that tool's own rotation.
+
 Values are masked. **Reveal** asks for confirmation, is rate limited, writes an
 audit line, and hides the value again after thirty seconds. Setting a variable
 applies it to the running gateway, so a skill that was ineligible becomes
