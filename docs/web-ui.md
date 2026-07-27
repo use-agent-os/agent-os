@@ -70,21 +70,21 @@ non-root mounts such as `/console/` work without rebuilding. Root, `/api`, and
 | --- | --- |
 | Chat | Run and resume chat sessions, inspect tool activity, publish artifacts, and use manual compact controls. |
 | Overview / Health | See readiness, provider state, memory state, sandbox posture, and recovery hints. |
-| Channels | Inspect configured channel adapter status and jump to Agent setup for configuration changes. |
+| Channels | Inspect configured channel adapter status and jump to Agent Setup for configuration changes. |
 | Skills | Browse installed skills grouped by where they came from, see whether the agent is actually being offered each one, and install more from a hub. |
 | Sessions | Inspect durable conversations and operational state. |
 | Agents | Manage durable agent entries. |
 | Usage | Inspect token and estimated-cost rollups. |
 | Cron | View and manage scheduled runs. |
 | MCP Servers | Add local or remote MCP servers, connect tools live, and complete OAuth authorization. |
-| Agent setup | Configure the agent through Guided capability setup or the complete Advanced Form/YAML editor. |
+| Agent Setup | Configure the agent through Guided capability setup or the complete Advanced Form/YAML editor. |
 | Environment | Set, replace, and remove the environment variables skills and providers read. |
 | Logs | Inspect runtime logs and diagnostics. |
 | Approvals | Respond to sensitive tool-call approval requests. |
 
 ## Agent Setup
 
-Open **Settings > Agent setup**, or go directly to:
+Open **Settings > Agent Setup**, or go directly to:
 
 ```text
 http://127.0.0.1:18791/control/settings
@@ -110,7 +110,7 @@ implemented, not when the snapshot call fails or returns an invalid payload.
 
 Existing bookmarks remain valid: `/control/setup` opens Guided mode and
 `/control/config` opens Advanced mode. Both are compatibility paths into the
-same Agent setup workspace, not separate sidebar destinations. Guided and
+same Agent Setup workspace, not separate sidebar destinations. Guided and
 Advanced stay mounted while you switch between them so in-progress drafts are
 not discarded merely by changing modes.
 
@@ -138,7 +138,7 @@ reason instead of reporting the change as fully live.
 
 An external edit to the active config file is fail-closed. In that state,
 `config.snapshot` returns `revision: null`, `diskDiverged: true`, and
-`writeBlocked: true`; Agent setup shows **Out of sync** and disables both Guided
+`writeBlocked: true`; Agent Setup shows **Out of sync** and disables both Guided
 and Advanced writes. Reload or restart the gateway with that file before
 editing again. Refreshing only the browser cannot reconcile a stale running
 configuration.

@@ -44,7 +44,7 @@ export function SettingsPage() {
   }
 
   useEffect(() => {
-    document.title = 'Agent Settings - AgentOS Control'
+    document.title = 'Agent Setup - AgentOS Control'
   }, [])
 
   useEffect(() => {

@@ -245,13 +245,13 @@ def test_react_control_deep_link_loads_public_settings_surface(
             playwright_node_modules,
             target_url=f"http://127.0.0.1:{port}/control/settings",
             expected_base="/control",
-            heading="Agent settings",
+            heading="Agent Setup",
         )
     finally:
         _stop_process(server)
 
     _assert_clean_react_surface(payload)
-    assert payload["title"] == "Agent Settings - AgentOS Control"
+    assert payload["title"] == "Agent Setup - AgentOS Control"
     assert payload["baseHref"] == "/control/static/dist/"
     assert payload["bootstrap"]["status"] == 200
     assert payload["bootstrap"]["body"]["base_path"] == "/control"
