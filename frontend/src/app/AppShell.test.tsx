@@ -464,24 +464,24 @@ describe('app shell chrome', () => {
       'Agents',
       'Usage',
       'Cron',
-      'Agent setup',
+      'Agent Setup',
       'Environment',
       'Logs',
       'Approvals',
     ])
   })
 
-  it('keeps legacy setup and config deep links on the single Agent setup nav item', () => {
+  it('keeps legacy setup and config deep links on the single Agent Setup nav item', () => {
     stubMatchMedia(false)
     const setup = renderShellAt('/setup')
-    expect(screen.getByRole('link', { name: 'Agent setup' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Agent Setup' })).toHaveAttribute(
       'aria-current',
       'page',
     )
     setup.unmount()
 
     renderShellAt('/config')
-    expect(screen.getByRole('link', { name: 'Agent setup' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Agent Setup' })).toHaveAttribute(
       'aria-current',
       'page',
     )

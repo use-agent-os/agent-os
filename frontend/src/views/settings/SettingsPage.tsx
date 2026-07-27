@@ -136,7 +136,7 @@ export function SettingsPage() {
       <header className="settings-stage__header">
         <div className="settings-stage__title-block">
           <span className="t-label">Control · Settings</span>
-          <h1 className="t-display">Agent settings</h1>
+          <h1 className="t-display">Agent Setup</h1>
           <p className="settings-stage__subtitle">
             Choose the model, routing, and tools this agent can use.
           </p>

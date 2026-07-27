@@ -93,7 +93,7 @@ describe('SettingsPage', () => {
     renderPage('/setup')
 
     expect(screen.getByText('Control · Settings')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Agent settings' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Agent Setup' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Refresh agent state' })).toHaveTextContent('Refresh')
     expect(screen.getByRole('tab', { name: /Guided/ })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('tabpanel', { name: /Guided/ })).toBeVisible()
