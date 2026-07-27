@@ -524,32 +524,41 @@ export function ChatPage() {
     toast.info('Exported as Markdown')
   }, [containerRef, sessionKey])
 
-  // chat.js:2518-2539 `_onDocKeydown` — the from-anywhere ESC priority chain:
-  //   1. streaming        → abort the turn (which recovers pending).
+  // chat.js:2518-2539 `_onDocKeydown` — document-level keyboard shortcuts.
+  // Cmd/Ctrl+Shift+O mirrors the New chat button from anywhere in the app,
+  // while Escape keeps the legacy priority chain:
+  //   1. streaming         → abort the turn (which recovers pending).
   //   2. pending non-empty → recover the whole queue into the composer.
-  // Visible overlays own their ESC, as do other editable targets (an ESC inside
-  // a different input is theirs). The composer's
-  // own ESC (Composer.tsx) handles the focused-composer case + the clear rung; a
-  // guard here skips when the composer is the target so it isn't double-handled.
+  // Visible overlays own their shortcuts, and Escape inside other editable
+  // targets remains handled by those elements. Unlike Escape, the New chat
+  // shortcut intentionally works even when focus is inside the composer or
+  // another editable field.
   useEffect(() => {
     const onDocKeydown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
       if (e.defaultPrevented) return
-      // A visible overlay's own dismiss handler takes priority (chat.js:8583-8588).
-      if (
-        document.querySelector('.modal-backdrop, .chat-session-popover, .chat-session-actions-menu')
+
+      const hasOverlay = !!document.querySelector(
+        '.modal-backdrop, .chat-session-popover, .chat-session-actions-menu',
       )
+      const isNewChatShortcut =
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        e.code === 'KeyO'
+      if (isNewChatShortcut) {
+        if (hasOverlay) return
+        e.preventDefault()
+        startNewChat()
         return
+      }
+      if (e.key !== 'Escape') return
+      if (hasOverlay) return
       const target = e.target as HTMLElement | null
       const isEditable =
         !!target &&
         (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
-      // An ESC inside ANY editable (incl. the composer) is handled by that
-      // element's own handler — the composer runs the full chain there.
       if (isEditable) return
       if (busy) {
         e.preventDefault()
-        // chat.js:8448 — the stop path also recovers pending into the composer.
         abortAndRecover('webui_escape')
         return
       }
@@ -560,7 +569,7 @@ export function ChatPage() {
     }
     document.addEventListener('keydown', onDocKeydown)
     return () => document.removeEventListener('keydown', onDocKeydown)
-  }, [busy, abortAndRecover, pending])
+  }, [busy, abortAndRecover, pending, startNewChat])
 
   return (
     <div className="chat-stage" onDrop={onDrop} onDragOver={onDragOver} onPaste={onPaste}>
@@ -571,7 +580,7 @@ export function ChatPage() {
         <button
           type="button"
           className="chat-new-button"
-          title="New chat"
+          title="New chat (⌘⇧O)"
           aria-label="New chat"
           onClick={startNewChat}
         >
