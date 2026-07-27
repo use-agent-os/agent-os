@@ -172,3 +172,22 @@ class TestCatalog:
 
         catalog = env_catalog.build_catalog(ExplodingLoader())  # type: ignore[arg-type]
         assert "OPENAI_API_KEY" in catalog
+
+
+class TestSentinelEnvKeys:
+    def test_oauth_providers_do_not_become_a_variable(self) -> None:
+        """``env_key`` is not always a variable name.
+
+        Providers that authenticate by OAuth carry the literal string
+        ``"OAuth"`` there, meaning "no API key involved". Taking it at face
+        value put a variable called ``OAuth`` on the Environment screen that
+        nobody could ever set.
+        """
+        catalog = env_catalog.build_catalog()
+        assert "OAuth" not in catalog
+        assert not [name for name in catalog if not name.isupper()]
+
+    def test_every_provider_that_does_use_a_key_is_still_listed(self) -> None:
+        catalog = env_catalog.build_catalog()
+        for name in ("OPENAI_API_KEY", "GEMINI_API_KEY", "BRAVE_SEARCH_API_KEY"):
+            assert name in catalog

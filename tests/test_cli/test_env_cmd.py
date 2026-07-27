@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from agentos import env_store
+from agentos import credential_sources, env_store
 from agentos.cli.main import app
 
 runner = CliRunner()
@@ -225,3 +225,63 @@ class TestMachineReadableOutput:
         assert result.returncode == 0, result.stderr
         payload = json_module.loads(result.stdout)
         assert payload["totalCount"] >= 1
+
+
+class TestImport:
+    @pytest.fixture(autouse=True)
+    def _clear_probe_cache(self):
+        credential_sources.reset_probe_cache()
+        yield
+        credential_sources.reset_probe_cache()
+
+    def test_picks_the_usable_source_when_none_is_named(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(credential_sources.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(
+            credential_sources,
+            "_run",
+            lambda argv, timeout: (0, "gho_from_cli" if "token" in argv else "Logged in"),
+        )
+        result = runner.invoke(app, ["env", "import", "GITHUB_TOKEN"])
+
+        assert result.exit_code == 0, result.output
+        assert env_store.read_env_file()["GITHUB_TOKEN"] == "gho_from_cli"
+
+    def test_says_the_copy_goes_stale_on_rotation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(credential_sources.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(
+            credential_sources,
+            "_run",
+            lambda argv, timeout: (0, "gho_from_cli" if "token" in argv else "Logged in"),
+        )
+        result = runner.invoke(app, ["env", "import", "GITHUB_TOKEN"])
+        assert "rotates" in result.output
+
+    def test_no_known_source_says_so(self) -> None:
+        result = runner.invoke(app, ["env", "import", "SOME_RANDOM_KEY"])
+        assert result.exit_code != 0
+        assert "No known source" in result.output
+
+    def test_a_known_but_unusable_source_gives_the_login_hint(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(credential_sources.shutil, "which", lambda _: None)
+        result = runner.invoke(app, ["env", "import", "GITHUB_TOKEN"])
+        assert result.exit_code != 0
+        assert "gh auth login" in result.output
+
+    def test_listing_flags_a_variable_that_could_be_imported(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(credential_sources.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(credential_sources, "_run", lambda argv, timeout: (0, "Logged in"))
+        # Present in the file, then removed: still catalogued, now unset.
+        env_store.set_env_var("GITHUB_TOKEN", "x")
+        result = runner.invoke(app, ["env", "list", "--json"])
+        env_store.unset_env_var("GITHUB_TOKEN")
+
+        rows = json.loads(result.output)["vars"]
+        row = next(r for r in rows if r["name"] == "GITHUB_TOKEN")
+        # It is set here, so no offer — the field exists and is correct.
+        assert row["availableFrom"] is None

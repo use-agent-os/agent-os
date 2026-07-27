@@ -337,4 +337,41 @@ describe('EnvPage', () => {
     // Same heading node throughout — the view was never replaced.
     expect(screen.getByRole('heading', { name: /Environment/ })).toBeTruthy()
   })
+
+  it('offers to import a credential that already exists elsewhere', async () => {
+    // The point of the offer: stop telling someone to go find a token they
+    // have already authenticated with somewhere.
+    mockRpc.call.mockImplementation((method: string) => {
+      if (method === 'env.list')
+        return Promise.resolve({
+          ...PAYLOAD,
+          vars: [
+            row({
+              name: 'GITHUB_TOKEN',
+              category: 'skill',
+              owner: 'repo-triage',
+              required: true,
+              missing: true,
+              availableFrom: { id: 'gh_cli', label: 'GitHub CLI' },
+            }),
+          ],
+        })
+      return Promise.resolve({})
+    })
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: /Use GitHub CLI/ }))
+    await waitFor(() => {
+      expect(mockRpc.call).toHaveBeenCalledWith('env.import', {
+        name: 'GITHUB_TOKEN',
+        sourceId: 'gh_cli',
+      })
+    })
+  })
+
+  it('does not offer an import for a variable that is already set', async () => {
+    renderPage()
+    await screen.findByText('OPENAI_API_KEY')
+    expect(screen.queryByRole('button', { name: /^Use / })).toBeNull()
+  })
 })

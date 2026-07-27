@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from agentos import env_policy
+from agentos.env_policy import ENV_NAME_RE
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from agentos.skills.loader import SkillLoader
@@ -75,6 +76,21 @@ class EnvVarSpec:
         return self.category in _BOOT_CONSUMED_CATEGORIES
 
 
+def _is_env_var_name(value: str) -> bool:
+    """Return whether *value* is a real variable name rather than a sentinel.
+
+    ``env_key`` is not always one. Providers that authenticate by OAuth carry
+    the literal string ``"OAuth"`` there, meaning "no API key involved" — and
+    taking that at face value put a variable called ``OAuth`` in the catalog,
+    and on the Environment screen, that no one could ever set.
+
+    Requiring upper case is what separates the two: environment variables are
+    conventionally shouted, sentinels are prose. It also holds for any future
+    sentinel without this needing to know its name.
+    """
+    return bool(value) and value.isupper() and ENV_NAME_RE.match(value) is not None
+
+
 def _provider_specs() -> list[EnvVarSpec]:
     """Return catalog entries derived from the onboarding provider families."""
     from agentos.onboarding.audio_specs import list_audio_provider_setup_specs
@@ -107,7 +123,7 @@ def _provider_specs() -> list[EnvVarSpec]:
     for category, kind, specs in families:
         for spec in specs:
             env_key = str(getattr(spec, "env_key", "") or "").strip()
-            if not env_key:
+            if not _is_env_var_name(env_key):
                 continue
             label = str(getattr(spec, "label", "") or getattr(spec, "provider_id", "") or env_key)
             entries.append(

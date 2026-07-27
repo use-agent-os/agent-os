@@ -118,6 +118,19 @@ export function EnvPage() {
     }
   }
 
+  async function importFrom(name: string, sourceId: string) {
+    setBusy(name)
+    try {
+      await rpc.call('env.import', { name, sourceId })
+      await refresh()
+      toast.success(`${name} imported. It will not follow that source's own rotation.`)
+    } catch (error) {
+      toast.error(errorMessage(error))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   async function remove(name: string) {
     setBusy(name)
     try {
@@ -383,6 +396,17 @@ export function EnvPage() {
                           >
                             {row.isSet ? 'Edit' : 'Set'}
                           </Button>
+                          {!row.isSet && row.availableFrom ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={busy === row.name}
+                              onClick={() => void importFrom(row.name, row.availableFrom!.id)}
+                            >
+                              Use {row.availableFrom.label}
+                            </Button>
+                          ) : null}
                           {row.isSet && row.secret ? (
                             <Button
                               type="button"

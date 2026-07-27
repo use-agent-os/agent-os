@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from agentos import env_store
+from agentos import credential_sources, env_catalog, env_store
 from agentos.gateway import rpc_env
 from agentos.gateway.access import CONTROL_ONLY, ConnectionSurface
 from agentos.gateway.auth import AccessContext
@@ -226,3 +226,127 @@ class TestReveal:
         # The log exists so someone can tell which secrets were read — not to
         # make a second copy of them.
         assert SECRET not in json.dumps(emitted)
+
+
+class TestCredentialAvailability:
+    """A variable is often not missing — it is authenticated somewhere else."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_probe_cache(self):
+        credential_sources.reset_probe_cache()
+        yield
+        credential_sources.reset_probe_cache()
+
+    @pytest.fixture
+    def gh_authenticated(self, monkeypatch: pytest.MonkeyPatch):
+        """Pretend `gh auth status` succeeds, without shelling out."""
+        monkeypatch.setattr(credential_sources.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(
+            credential_sources, "_run", lambda argv, timeout: (0, "Logged in to github.com")
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_unset_variable_reports_where_it_can_come_from(
+        self, gh_authenticated, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A skill declaring the variable is what puts it in the catalog while
+        # it is unset — which is exactly the case worth reporting on.
+        monkeypatch.setattr(
+            env_catalog,
+            "build_catalog",
+            lambda *a, **k: {
+                "GITHUB_TOKEN": env_catalog.EnvVarSpec(
+                    name="GITHUB_TOKEN",
+                    description="Required by the repo-triage skill.",
+                    category=env_catalog.CATEGORY_SKILL,
+                    owner="repo-triage",
+                    required=True,
+                )
+            },
+        )
+        res = await call("env.list")
+        row = next(v for v in res.payload["vars"] if v["name"] == "GITHUB_TOKEN")
+        assert row["isSet"] is False
+        assert row["availableFrom"] == {"id": "gh_cli", "label": "GitHub CLI"}
+
+    @pytest.mark.asyncio
+    async def test_a_variable_already_set_is_not_offered_an_import(self, gh_authenticated) -> None:
+        env_store.set_env_var("GITHUB_TOKEN", "already-here")
+        res = await call("env.list")
+        row = next(v for v in res.payload["vars"] if v["name"] == "GITHUB_TOKEN")
+        # Nothing to import: it is already configured.
+        assert row["availableFrom"] is None
+
+    @pytest.mark.asyncio
+    async def test_listing_never_reads_a_credential(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Probing answers "could this supply it", never "what is it". The
+        # commands a listing is allowed to run are asserted here by name.
+        ran: list[list[str]] = []
+
+        def record(argv, timeout):
+            ran.append(argv)
+            return 0, "Logged in"
+
+        monkeypatch.setattr(credential_sources.shutil, "which", lambda _: "/usr/bin/gh")
+        monkeypatch.setattr(credential_sources, "_run", record)
+        # Put the unset variable in the catalog so the probe actually fires.
+        monkeypatch.setattr(
+            env_catalog,
+            "build_catalog",
+            lambda *a, **k: {"GITHUB_TOKEN": env_catalog.EnvVarSpec(name="GITHUB_TOKEN")},
+        )
+        await call("env.list")
+
+        assert ran, "the probe should have run at least once"
+        assert ran == [["gh", "auth", "status"]]
+
+
+class TestImport:
+    @pytest.fixture(autouse=True)
+    def _clear_probe_cache(self):
+        credential_sources.reset_probe_cache()
+        yield
+        credential_sources.reset_probe_cache()
+
+    @pytest.mark.asyncio
+    async def test_copies_the_value_in_without_returning_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(credential_sources, "read_from", lambda n, s: "gho_imported")
+        res = await call("env.import", {"name": "GITHUB_TOKEN", "sourceId": "gh_cli"})
+
+        assert res.error is None, res.error
+        assert "gho_imported" not in json.dumps(res.payload)
+        assert res.payload["isSet"] is True
+        assert env_store.read_env_file()["GITHUB_TOKEN"] == "gho_imported"
+
+    @pytest.mark.asyncio
+    async def test_says_the_copy_will_not_follow_rotation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A copied token goes stale when the source rotates; better said once
+        # here than discovered as a mystery 401 later.
+        monkeypatch.setattr(credential_sources, "read_from", lambda n, s: "gho_imported")
+        res = await call("env.import", {"name": "GITHUB_TOKEN", "sourceId": "gh_cli"})
+        assert "rotates" in res.payload["note"]
+
+    @pytest.mark.asyncio
+    async def test_requires_a_source(self) -> None:
+        res = await call("env.import", {"name": "GITHUB_TOKEN"})
+        assert res.error is not None
+
+    @pytest.mark.asyncio
+    async def test_an_unusable_source_explains_how_to_fix_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(credential_sources.shutil, "which", lambda _: None)
+        res = await call("env.import", {"name": "GITHUB_TOKEN", "sourceId": "gh_cli"})
+        assert res.error is not None
+        assert "gh auth login" in res.error.message
+
+    @pytest.mark.asyncio
+    async def test_the_policy_gate_still_applies(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # An import is still a write; a denylisted name cannot sneak in by it.
+        monkeypatch.setattr(credential_sources, "read_from", lambda n, s: "/tmp/evil.so")
+        res = await call("env.import", {"name": "LD_PRELOAD", "sourceId": "gh_cli"})
+        assert res.error is not None

@@ -10,6 +10,12 @@ export const ENV_QUERY_KEY = ['env', 'list'] as const
 
 export type EnvSource = 'process' | 'cwd_file' | 'home_file' | 'unset'
 
+/** A place a credential already lives, offered instead of asking for it. */
+export interface EnvSourceOffer {
+  id: string
+  label: string
+}
+
 export interface EnvVarRow {
   name: string
   isSet: boolean
@@ -25,6 +31,8 @@ export interface EnvVarRow {
   writable: boolean
   restartRequired: boolean
   missing: boolean
+  /** Set only when the variable is unset and a source can supply it. */
+  availableFrom?: EnvSourceOffer | null
 }
 
 export interface EnvListResponse {

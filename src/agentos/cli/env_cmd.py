@@ -94,6 +94,16 @@ def _offline_loader() -> Any:
         return None
 
 
+def _available_from(name: str, is_set: bool) -> dict[str, str] | None:
+    """Mirror the gateway's availability field for the offline listing."""
+    if is_set:
+        return None
+    from agentos import credential_sources
+
+    source = credential_sources.available_for(name)
+    return None if source is None else {"id": source.id, "label": source.label}
+
+
 def _offline_payload() -> dict[str, Any]:
     """Produce the same shape as ``env.list`` without a gateway."""
     from agentos import env_catalog, env_store
@@ -119,6 +129,7 @@ def _offline_payload() -> dict[str, Any]:
                 "writable": entry.writable,
                 "restartRequired": spec.restart_required,
                 "missing": spec.required and not entry.is_set,
+                "availableFrom": _available_from(name, entry.is_set),
             }
         )
     return {
@@ -170,6 +181,9 @@ def env_list_cmd(
         status = "set" if row.get("isSet") else ("MISSING" if row.get("missing") else "unset")
         if not row.get("writable"):
             status = f"{status} (locked)"
+        available = row.get("availableFrom")
+        if available:
+            status = f"{status} · in {available.get('label', available.get('id'))}"
         table.add_row(
             str(row.get("name", "")),
             status,
@@ -234,6 +248,66 @@ def env_get_cmd(
         console.print(f"value: {row['masked']}")
     if row.get("url"):
         console.print(f"obtain: {row['url']}")
+
+
+@env_app.command("import")
+def env_import_cmd(
+    name: str = typer.Argument(..., help="Variable name"),
+    source: str = typer.Option("", "--source", help="Source id (default: the usable one)"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Copy a credential in from a tool that already holds it.
+
+    Nothing is imported without this command being run: a token you granted to
+    the GitHub CLI is not automatically something an agent should get.
+    """
+    from agentos import credential_sources
+
+    source_id = source.strip()
+    if not source_id:
+        found = credential_sources.available_for(name, refresh=True)
+        if found is None:
+            candidates = credential_sources.sources_for(name)
+            if not candidates:
+                emit_error(f"No known source supplies {name}.", json_output=json_output)
+            else:
+                emit_error(
+                    f"No usable source for {name}. " + " ".join(c.hint for c in candidates),
+                    json_output=json_output,
+                )
+            raise typer.Exit(1)
+        source_id = found.id
+
+    payload = _run(
+        _try_gateway("env.import", {"name": name, "sourceId": source_id}, json_output=json_output)
+    )
+    applied_live = payload is not None
+    if payload is None:
+        from agentos import env_store
+        from agentos.env_policy import EnvPolicyError
+
+        try:
+            value = credential_sources.read_from(name, source_id)
+            entry = env_store.set_env_var(name, value)
+        except (EnvPolicyError, LookupError, RuntimeError) as exc:
+            emit_error(str(exc), json_output=json_output)
+            raise typer.Exit(2) from exc
+        payload = {"name": entry.name, "isSet": entry.is_set, "importedFrom": source_id}
+
+    if json_output:
+        print_json({**payload, "appliedLive": applied_live})
+        return
+
+    console.print(f"Imported {name} from {source_id}.")
+    console.print(
+        "[yellow]This is a copy — it will not update when that source rotates "
+        "its credential. Re-import to refresh.[/yellow]"
+    )
+    if not applied_live:
+        console.print(
+            "[yellow]No gateway is running — the value applies the next time "
+            "AgentOS starts.[/yellow]"
+        )
 
 
 @env_app.command("set")
