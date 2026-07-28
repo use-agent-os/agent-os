@@ -280,7 +280,9 @@ describe('app shell chrome', () => {
     expect(nav).not.toContainElement(action)
     expect(document.querySelector('.chat-composer')).not.toContainElement(action)
     expect(screen.getAllByRole('button', { name: 'New chat' })).toHaveLength(1)
-    expect(action).toHaveAttribute('title', 'New chat')
+    // The tooltip carries a platform-dependent shortcut hint (⌘⇧O vs
+    // Ctrl+Shift+O), so match the stable prefix instead of the literal string.
+    expect(action.getAttribute('title')).toMatch(/^New chat/)
     expect(action.querySelector('svg')).not.toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'Collapse navigation' }))
