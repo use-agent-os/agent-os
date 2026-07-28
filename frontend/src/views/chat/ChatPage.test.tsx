@@ -1051,30 +1051,28 @@ describe('ChatPage', () => {
     it('starts a new chat from the keyboard', async () => {
       mockRpc = makeRpc()
       renderPage()
-  
+
       const composer = screen.getByRole('textbox', { name: 'Message' })
       composer.focus()
-  
+
       fireEvent.keyDown(document, {
         ...modifier,
         shiftKey: true,
         code: 'KeyO',
       })
-  
+
       await waitFor(() => {
         const sessions = mockRpc.call.mock.calls
           .filter(([method]) => method === 'sessions.messages.subscribe')
           .map(([, params]) => (params as { key: string }).key)
-  
+
         expect(
           sessions.some(
-            key =>
-              key.startsWith('agent:main:webchat:') &&
-              key !== 'agent:main:webchat:default',
+            (key) => key.startsWith('agent:main:webchat:') && key !== 'agent:main:webchat:default',
           ),
         ).toBe(true)
       })
-  
+
       expect(composer).toHaveFocus()
     })
   })
@@ -1082,7 +1080,7 @@ describe('ChatPage', () => {
   it('prevents browser default for Cmd/Ctrl+Shift+O shortcut', () => {
     mockRpc = makeRpc()
     renderPage()
-  
+
     const event = new KeyboardEvent('keydown', {
       bubbles: true,
       cancelable: true,
@@ -1090,106 +1088,101 @@ describe('ChatPage', () => {
       shiftKey: true,
       code: 'KeyO',
     })
-  
+
     const preventDefault = vi.spyOn(event, 'preventDefault')
-  
+
     document.dispatchEvent(event)
-  
+
     expect(preventDefault).toHaveBeenCalled()
   })
-  
+
   it('ignores new chat shortcut when event is already prevented', () => {
     mockRpc = makeRpc()
-  
+
     document.addEventListener(
       'keydown',
-      event => {
+      (event) => {
         if (event.code === 'KeyO') {
           event.preventDefault()
         }
       },
       { once: true },
     )
-  
+
     renderPage()
-  
+
     const before = mockRpc.call.mock.calls.length
-  
+
     fireEvent.keyDown(document, {
       ctrlKey: true,
       shiftKey: true,
       code: 'KeyO',
     })
-  
+
     expect(mockRpc.call.mock.calls.length).toBe(before)
   })
-  
+
   it('does not start new chat when a modal is open', () => {
     mockRpc = makeRpc()
     renderPage()
-  
+
     const before = mockRpc.call.mock.calls.length
-  
+
     const modal = document.createElement('div')
     modal.className = 'modal-backdrop'
-  
+
     document.body.appendChild(modal)
-  
+
     fireEvent.keyDown(document, {
       ctrlKey: true,
       shiftKey: true,
       code: 'KeyO',
     })
-  
+
     expect(mockRpc.call.mock.calls.length).toBe(before)
-  
+
     modal.remove()
   })
-  
+
   it('shows the keyboard shortcut in the New chat tooltip', () => {
     mockRpc = makeRpc()
     renderPage()
-  
+
     const button = screen.getByRole('button', {
       name: 'New chat',
     })
-  
-    expect(button).toHaveAttribute(
-      'title',
-      expect.stringMatching(/⌘⇧O|Ctrl\+Shift\+O/),
-    )
+
+    expect(button).toHaveAttribute('title', expect.stringMatching(/⌘⇧O|Ctrl\+Shift\+O/))
   })
 
   it('starts a new chat while composer is focused', async () => {
     mockRpc = makeRpc()
     renderPage()
-  
+
     const composer = screen.getByRole('textbox', {
       name: 'Message',
     })
-  
+
     composer.focus()
-  
+
     fireEvent.keyDown(composer, {
       ctrlKey: true,
       shiftKey: true,
       code: 'KeyO',
     })
-  
+
     await waitFor(() => {
       const subscriptions = mockRpc.call.mock.calls
         .filter(([method]) => method === 'sessions.messages.subscribe')
         .map(([, params]) => (params as { key: string }).key)
-  
+
       expect(
         subscriptions.some(
-          key =>
-            key.startsWith('agent:main:webchat:') &&
-            key !== 'agent:main:webchat:default',
+          (key) => key.startsWith('agent:main:webchat:') && key !== 'agent:main:webchat:default',
         ),
       ).toBe(true)
     })
-  
+
     expect(composer).toHaveFocus()
   })
 

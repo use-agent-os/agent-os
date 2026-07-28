@@ -524,6 +524,8 @@ export function ChatPage() {
     toast.info('Exported as Markdown')
   }, [containerRef, sessionKey])
 
+  const shortcutHint = /mac/i.test(navigator.userAgent) ? '⌘⇧O' : 'Ctrl+Shift+O'
+
   // chat.js:2518-2539 `_onDocKeydown` — document-level keyboard shortcuts.
   // Cmd/Ctrl+Shift+O mirrors the New chat button from anywhere in the app,
   // while Escape keeps the legacy priority chain:
@@ -536,22 +538,18 @@ export function ChatPage() {
   useEffect(() => {
     const onDocKeydown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return
-
+      const isNewChatShortcut = (e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'KeyO'
+      const isEscape = e.key === 'Escape'
+      if (!isNewChatShortcut && !isEscape) return
       const hasOverlay = !!document.querySelector(
         '.modal-backdrop, .chat-session-popover, .chat-session-actions-menu',
       )
-      const isNewChatShortcut =
-        (e.metaKey || e.ctrlKey) &&
-        e.shiftKey &&
-        e.code === 'KeyO'
+      if (hasOverlay) return
       if (isNewChatShortcut) {
-        if (hasOverlay) return
         e.preventDefault()
         startNewChat()
         return
       }
-      if (e.key !== 'Escape') return
-      if (hasOverlay) return
       const target = e.target as HTMLElement | null
       const isEditable =
         !!target &&
@@ -580,7 +578,7 @@ export function ChatPage() {
         <button
           type="button"
           className="chat-new-button"
-          title="New chat (⌘⇧O)"
+          title={`New chat (${shortcutHint})`}
           aria-label="New chat"
           onClick={startNewChat}
         >
