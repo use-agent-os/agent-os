@@ -424,6 +424,19 @@ English-optimized (Pilot)** (`pilot-v1`, the default), **Smart routing
 only appears for the LLM-based strategy; the "Pilot safety net" field only
 appears for the Pilot strategy.
 
+#### Provider-switch profiles
+
+When onboarding switches to another LLM provider, AgentOS saves a profile for
+the provider being left and restores it when you return. A profile contains the
+active model, router mode and settings (including text/image tiers, Smart
+Routing judge model and endpoint, and Pilot settings), plus non-secret
+connection settings such as `base_url`, `proxy`, `api_key_env`, and provider
+routing preferences. Profiles are persisted in `config.toml`.
+
+Literal `api_key` values and local `judge_api_key` values are not copied into a
+profile. Prefer environment-variable references for credentials you need to
+survive a provider switch.
+
 #### Upgrading from v4_phase3
 
 Historical onboarding persisted `strategy = "v4_phase3"` explicitly in

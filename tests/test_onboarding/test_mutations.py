@@ -516,6 +516,158 @@ def test_local_to_cloud_switch_restores_tier_profile():
     assert router.tiers["c0"]["provider"] == "deepseek"
 
 
+def test_cloud_to_local_switch_reenables_router_and_repins_profile_tiers():
+    # A cloud profile creates machine-written provider tiers. Switching back to
+    # a local provider must clear that profile and pin every tier to the local
+    # model, just like a first-time local setup.
+    ollama = upsert_llm_provider(GatewayConfig(), provider_id="ollama", model="qwen3.5:9b").config
+    deepseek = upsert_llm_provider(
+        ollama,
+        provider_id="deepseek",
+        model="deepseek-chat",
+        api_key_env="DEEPSEEK_API_KEY",
+    ).config
+
+    res = upsert_llm_provider(deepseek, provider_id="ollama", model="qwen3.5:9b")
+    router = res.config.agentos_router
+
+    assert router.enabled is True
+    assert router.tier_profile is None
+    for tier in router.tiers.values():
+        assert tier["provider"] == "ollama"
+        assert tier["model"] == "qwen3.5:9b"
+
+
+def test_ollama_opencap_ollama_switch_restores_provider_model_and_router_profile():
+    import tomllib
+
+    import tomli_w
+
+    ollama_model = "qwen3.5:9b"
+    opencap_model = "glm-5.2"
+    ollama = upsert_llm_provider(
+        GatewayConfig(),
+        provider_id="ollama",
+        model=ollama_model,
+        base_url="http://ollama.example:11434",
+        proxy="http://ollama-proxy.example:8080",
+        provider_routing={"qwen3.5:14b": "local-fast"},
+    ).config
+    ollama.llm.max_tokens = 8_192
+    ollama.llm.thinking = "high"
+    ollama_router = upsert_router(
+        ollama,
+        mode="recommended",
+        strategy="pilot-v1",
+        default_tier="c2",
+        safety_net_threshold=0.65,
+        tiers={
+            "c0": {"provider": "ollama", "model": "qwen3.5:2b", "thinking_level": "off"},
+            "c1": {"provider": "ollama", "model": ollama_model, "thinking_level": "low"},
+            "c2": {"provider": "ollama", "model": "qwen3.5:14b", "thinking_level": "high"},
+            "c3": {"provider": "ollama", "model": "qwen3.5:32b", "thinking_level": "xhigh"},
+            "image_model": {
+                "provider": "ollama",
+                "model": "qwen2.5-vl:7b",
+                "supports_image": True,
+                "image_only": True,
+            },
+        },
+    ).config
+    configured_ollama_model = ollama_router.llm.model
+    opencap = upsert_llm_provider(
+        ollama_router,
+        provider_id="opencap",
+        model=opencap_model,
+        api_key_env="OPENCAP_API_KEY",
+        base_url="https://opencap.example/v1",
+        proxy="http://opencap-proxy.example:8080",
+        provider_routing={"glm-5.2": "surplus"},
+    ).config
+
+    restored_ollama = upsert_llm_provider(opencap, provider_id="ollama").config
+
+    assert restored_ollama.llm.provider == "ollama"
+    assert restored_ollama.llm.model == configured_ollama_model
+    assert restored_ollama.llm.base_url == "http://ollama.example:11434"
+    assert restored_ollama.llm.proxy == "http://ollama-proxy.example:8080"
+    assert restored_ollama.llm.max_tokens == 8_192
+    assert restored_ollama.llm.thinking == "high"
+    assert restored_ollama.llm.provider_routing == {"qwen3.5:14b": "local-fast"}
+    assert restored_ollama.provider_profiles["ollama"].model == configured_ollama_model
+    assert restored_ollama.provider_profiles["opencap"].model == opencap_model
+    assert restored_ollama.provider_profiles["opencap"].api_key_env == "OPENCAP_API_KEY"
+    assert restored_ollama.provider_profiles["opencap"].base_url == "https://opencap.example/v1"
+    assert restored_ollama.provider_profiles["opencap"].proxy == "http://opencap-proxy.example:8080"
+    assert restored_ollama.provider_profiles["opencap"].provider_routing == {
+        "glm-5.2": "surplus"
+    }
+    assert restored_ollama.provider_profiles["opencap"].agentos_router.model_dump(
+        mode="python"
+    ) == opencap.agentos_router.model_dump(mode="python")
+    assert (
+        restored_ollama.to_toml_dict()["provider_profiles"]["ollama"]["model"]
+        == configured_ollama_model
+    )
+    assert restored_ollama.agentos_router.model_dump(mode="python") == (
+        ollama_router.agentos_router.model_dump(mode="python")
+    )
+    assert restored_ollama.agentos_router.default_tier == "c2"
+    assert restored_ollama.agentos_router.pilot.safety_net_threshold == 0.65
+    assert restored_ollama.agentos_router.tiers["c0"]["model"] == "qwen3.5:2b"
+    assert restored_ollama.agentos_router.tiers["c1"]["model"] == ollama_model
+    assert restored_ollama.agentos_router.tiers["c2"]["model"] == "qwen3.5:14b"
+    assert restored_ollama.agentos_router.tiers["c3"]["model"] == "qwen3.5:32b"
+    assert restored_ollama.agentos_router.tiers["image_model"]["model"] == "qwen2.5-vl:7b"
+
+    reloaded = GatewayConfig(**tomllib.loads(tomli_w.dumps(restored_ollama.to_toml_dict())))
+    assert reloaded.provider_profiles["ollama"].agentos_router.tiers == (
+        ollama_router.agentos_router.tiers
+    )
+
+    restored_opencap = upsert_llm_provider(reloaded, provider_id="opencap").config
+    assert restored_opencap.llm.model == opencap_model
+    assert restored_opencap.llm.api_key_env == "OPENCAP_API_KEY"
+    assert restored_opencap.llm.base_url == "https://opencap.example/v1"
+    assert restored_opencap.llm.proxy == "http://opencap-proxy.example:8080"
+    assert restored_opencap.llm.provider_routing == {"glm-5.2": "surplus"}
+    assert restored_opencap.agentos_router.model_dump(mode="python") == (
+        opencap.agentos_router.model_dump(mode="python")
+    )
+
+
+def test_provider_switch_restores_smart_routing_settings_without_judge_secret():
+    ollama = upsert_llm_provider(
+        GatewayConfig(), provider_id="ollama", model="qwen3.5:9b"
+    ).config
+    smart_routing = upsert_router(
+        ollama,
+        mode="recommended",
+        strategy="llm_judge",
+        default_tier="c2",
+        judge_model="qwen3.5:2b",
+        judge_base_url="http://ollama.example:11434/v1",
+        judge_api_key="sk-local-judge-secret",
+    ).config
+    opencap = upsert_llm_provider(
+        smart_routing,
+        provider_id="opencap",
+        model="glm-5.2",
+        api_key_env="OPENCAP_API_KEY",
+    ).config
+
+    restored = upsert_llm_provider(opencap, provider_id="ollama").config
+    router = restored.agentos_router
+
+    assert router.enabled is True
+    assert router.strategy == "llm_judge"
+    assert router.default_tier == "c2"
+    assert router.judge_model == "qwen3.5:2b"
+    assert router.judge_base_url == "http://ollama.example:11434/v1"
+    assert router.judge_provider is None
+    assert router.judge_api_key is None
+
+
 def test_upsert_router_recommended_writes_profile_without_expanded_tiers():
     cfg = GatewayConfig(llm={"provider": "deepseek", "model": "deepseek-chat"})
 

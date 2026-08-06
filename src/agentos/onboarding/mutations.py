@@ -16,6 +16,7 @@ from agentos.gateway.config import (
     GatewayConfig,
     LlmProviderConfig,
     MemoryEmbeddingConfig,
+    ProviderProfileConfig,
     _bankr_tiers,
     _opencap_tiers,
     _openrouter_tiers,
@@ -72,6 +73,13 @@ def _clone(cfg: GatewayConfig) -> GatewayConfig:
     return new_cfg
 
 
+def _provider_router_snapshot(router: AgentOSRouterConfig) -> AgentOSRouterConfig:
+    """Copy router settings for a provider switch without duplicating secrets."""
+    payload = router.model_dump(mode="python")
+    payload.pop("judge_api_key", None)
+    return AgentOSRouterConfig(**payload)
+
+
 def _clean_optional_str(value: str | None) -> str:
     if value is None:
         return ""
@@ -125,8 +133,8 @@ def _tiers_are_machine_written_defaults(
     """True when ``tiers`` are safe to rewrite (not operator-customised).
 
     Two shapes count as machine-written:
-      * the shipped default tier sets (openrouter or bankr), matched exactly,
-        exactly as :meth:`GatewayConfig._default_agentos_router_profile_for_direct_provider`
+      * the shipped tier profiles, matched exactly, exactly as
+        :meth:`GatewayConfig._default_agentos_router_profile_for_direct_provider`
         detects "not custom"; and
       * tiers this reconcile already local-pinned — every entry's provider equals
         the OLD llm provider AND every entry's model equals the OLD llm model
@@ -134,7 +142,12 @@ def _tiers_are_machine_written_defaults(
     Anything else is treated as a custom, operator-authored tier set and left
     untouched.
     """
-    if tiers in (_openrouter_tiers(), _bankr_tiers(), _opencap_tiers()):
+    if tiers in (
+        _openrouter_tiers(),
+        _bankr_tiers(),
+        _opencap_tiers(),
+        *(_router_tier_profile_defaults(profile) for profile in ROUTER_TIER_PROFILE_IDS),
+    ):
         return True
     old_provider = str(old_provider or "").strip().lower()
     old_model = str(old_model or "").strip()
@@ -165,26 +178,24 @@ def _reconcile_router_profile_for_provider(
         return []
     if current_profile and str(current_profile).strip().lower() == provider_id:
         return []
-    if is_local_provider(provider_id) and not current_profile:
+    if is_local_provider(provider_id):
         # Local providers have no tier profile and build no per-tier client.
         # When the current tiers are the untouched shipped defaults OR tiers a
         # previous reconcile local-pinned, rewrite them to this provider+model so
         # the persisted config is self-consistent (the runtime degrade guard then
         # becomes a no-op).
-        if _tiers_are_machine_written_defaults(
-            cfg.agentos_router.tiers, old_provider, old_model
-        ):
-            router_payload = cfg.agentos_router.model_dump(mode="python")
-            router_payload["tier_profile"] = None
+        router_payload = cfg.agentos_router.model_dump(mode="python")
+        router_payload["enabled"] = True
+        router_payload["tier_profile"] = None
+        if _tiers_are_machine_written_defaults(cfg.agentos_router.tiers, old_provider, old_model):
             router_payload["tiers"] = _local_provider_tiers(
                 cfg.agentos_router.tiers, provider_id, model
             )
-            cfg.agentos_router = AgentOSRouterConfig(**router_payload)
-            return []
-        # Operator-customised tiers: leave the router exactly as the operator
-        # authored it (enabled + custom tiers). The runtime degrade guard pins
-        # any mismatched-provider tier to llm.model per turn, so custom local
-        # tiers stay safe without being clobbered here.
+        # Operator-customised tiers are preserved, but a local provider cannot
+        # retain a cloud tier profile. The runtime degrade guard pins any
+        # mismatched-provider tier to llm.model per turn, so custom local tiers
+        # stay safe without being clobbered here.
+        cfg.agentos_router = AgentOSRouterConfig(**router_payload)
         return []
     if (
         not current_profile
@@ -360,7 +371,13 @@ def upsert_llm_provider(
         raise ValueError(
             f"provider {provider_id!r} is not runtime-supported and cannot be configured"
         )
+    saved_profile = config.provider_profiles.get(provider_id)
+    active_provider = str(config.llm.provider or "").strip().lower()
     model_clean = _clean_optional_str(model)
+    if not model_clean and saved_profile is not None:
+        model_clean = _clean_optional_str(saved_profile.model)
+    if not model_clean and active_provider == provider_id:
+        model_clean = _clean_optional_str(config.llm.model)
     if not model_clean:
         model_clean = _router_default_model_for_provider(
             provider_id,
@@ -376,41 +393,97 @@ def upsert_llm_provider(
     if api_key and api_key_env.strip():
         raise ValueError("configure either api_key or api_key_env, not both")
     effective_api_key_env = "" if api_key else api_key_env.strip()
-    if not api_key and not effective_api_key_env and config.llm.provider == provider_id:
-        effective_api_key_env = getattr(config.llm, "api_key_env", "").strip()
+    if not api_key and not effective_api_key_env:
+        if active_provider == provider_id:
+            effective_api_key_env = getattr(config.llm, "api_key_env", "").strip()
+        elif saved_profile is not None:
+            effective_api_key_env = saved_profile.api_key_env
     if (
         not effective_api_key
         and spec.requires_api_key
         and not api_key_env
-        and config.llm.provider == provider_id
+        and active_provider == provider_id
         and config.llm.api_key
     ):
         effective_api_key = config.llm.api_key
     if spec.requires_api_key and not effective_api_key and not effective_api_key_env:
         raise ValueError(f"provider {provider_id!r} requires an api_key")
-    effective_base_url = base_url or spec.default_base_url
+    saved_base_url = (
+        saved_profile.base_url
+        if saved_profile is not None
+        else (config.llm.base_url if active_provider == provider_id else "")
+    )
+    effective_base_url = base_url or saved_base_url or spec.default_base_url
     if spec.requires_base_url and not effective_base_url:
         raise ValueError(f"provider {provider_id!r} requires a base_url")
+    saved_proxy = (
+        saved_profile.proxy
+        if saved_profile is not None
+        else (config.llm.proxy if active_provider == provider_id else "")
+    )
+    effective_proxy = proxy or saved_proxy
+    saved_provider_routing = (
+        saved_profile.provider_routing
+        if saved_profile is not None
+        else (config.llm.provider_routing if active_provider == provider_id else {})
+    )
+    effective_provider_routing = (
+        dict(provider_routing) if provider_routing is not None else dict(saved_provider_routing)
+    )
+    saved_max_tokens = (
+        saved_profile.max_tokens
+        if saved_profile is not None
+        else (config.llm.max_tokens if active_provider == provider_id else 0)
+    )
+    saved_thinking = (
+        saved_profile.thinking
+        if saved_profile is not None
+        else (config.llm.thinking if active_provider == provider_id else None)
+    )
 
     old_provider = str(config.llm.provider or "")
     old_model = str(config.llm.model or "")
+    provider_profiles = {
+        str(provider).strip().lower(): profile.model_copy(deep=True)
+        for provider, profile in config.provider_profiles.items()
+        if str(provider).strip()
+    }
+    if old_provider and old_model:
+        provider_profiles[old_provider.strip().lower()] = ProviderProfileConfig(
+            model=old_model.strip(),
+            api_key_env=str(config.llm.api_key_env or "").strip(),
+            base_url=str(config.llm.base_url or "").strip(),
+            proxy=str(config.llm.proxy or "").strip(),
+            max_tokens=config.llm.max_tokens,
+            thinking=config.llm.thinking,
+            provider_routing=dict(config.llm.provider_routing),
+            agentos_router=_provider_router_snapshot(config.agentos_router),
+        )
+    restored_profile = provider_profiles.get(provider_id) if provider_id != old_provider else None
     new_cfg = _clone(config)
+    new_cfg.provider_profiles = provider_profiles
     new_cfg.llm = LlmProviderConfig(
         provider=provider_id,
         model=model_clean,
         api_key=effective_api_key,
         api_key_env=effective_api_key_env,
         base_url=effective_base_url,
-        proxy=proxy,
-        provider_routing=dict(provider_routing or {}),
+        proxy=effective_proxy,
+        max_tokens=saved_max_tokens,
+        thinking=saved_thinking,
+        provider_routing=effective_provider_routing,
     )
-    reconcile_warnings = _reconcile_router_profile_for_provider(
-        new_cfg,
-        provider_id,
-        model=model_clean,
-        old_provider=old_provider,
-        old_model=old_model,
-    )
+    if restored_profile is not None:
+        new_cfg.agentos_router = restored_profile.agentos_router.model_copy(deep=True)
+        reconcile_warnings: list[str] = []
+    else:
+        reconcile_warnings = _reconcile_router_profile_for_provider(
+            new_cfg,
+            provider_id,
+            model=model_clean,
+            old_provider=old_provider,
+            old_model=old_model,
+        )
     if api_key:
         new_cfg.clear_runtime_secret("llm.api_key")
 
@@ -423,8 +496,8 @@ def upsert_llm_provider(
             "explicit" if effective_api_key else ("env" if effective_api_key_env else "none")
         ),
         "base_url": effective_base_url,
-        "proxy": proxy,
-        "provider_routing": dict(provider_routing or {}),
+        "proxy": effective_proxy,
+        "provider_routing": effective_provider_routing,
     }
     return MutationResult(
         config=new_cfg,

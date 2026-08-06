@@ -1218,6 +1218,24 @@ class AgentOSRouterConfig(BaseSettings):
 AgentOSRouterConfig.model_rebuild()
 
 
+class ProviderProfileConfig(BaseModel):
+    """Restorable non-secret LLM and router settings for one provider.
+
+    Literal API credentials deliberately remain outside this snapshot. An
+    ``api_key_env`` reference is safe to preserve; direct API keys continue to
+    use the active provider configuration and existing secret-handling paths.
+    """
+
+    model: str
+    api_key_env: str = ""
+    base_url: str = ""
+    proxy: str = ""
+    max_tokens: int = 0
+    thinking: str | None = None
+    provider_routing: dict[str, str] = Field(default_factory=dict)
+    agentos_router: AgentOSRouterConfig
+
+
 class AgentTokenSavingConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENTOS_AGENT_TOKEN_SAVING_")
 
@@ -1691,6 +1709,7 @@ class GatewayConfig(BaseSettings):
     prompt: PromptConfig = Field(default_factory=PromptConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     agentos_router: AgentOSRouterConfig = Field(default_factory=AgentOSRouterConfig)
+    provider_profiles: dict[str, ProviderProfileConfig] = Field(default_factory=dict)
     agent_token_saving: AgentTokenSavingConfig = Field(default_factory=AgentTokenSavingConfig)
     compaction: CompactionLlmConfig = Field(default_factory=CompactionLlmConfig)
     auxiliary: AuxiliaryConfig = Field(default_factory=AuxiliaryConfig)
