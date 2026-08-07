@@ -17,9 +17,8 @@ from agentos.gateway.config import (
     LlmProviderConfig,
     MemoryEmbeddingConfig,
     ProviderProfileConfig,
-    _bankr_tiers,
-    _opencap_tiers,
-    _openrouter_tiers,
+    ProviderRouterProfileConfig,
+    _router_tier_overrides,
     _router_tier_profile_defaults,
 )
 from agentos.onboarding.audio_specs import get_audio_provider_setup_spec
@@ -73,11 +72,46 @@ def _clone(cfg: GatewayConfig) -> GatewayConfig:
     return new_cfg
 
 
-def _provider_router_snapshot(router: AgentOSRouterConfig) -> AgentOSRouterConfig:
-    """Copy router settings for a provider switch without duplicating secrets."""
-    payload = router.model_dump(mode="python")
-    payload.pop("judge_api_key", None)
-    return AgentOSRouterConfig(**payload)
+_SHIPPED_ROUTER_TIER_DEFAULTS = tuple(
+    _router_tier_profile_defaults(profile) for profile in ROUTER_TIER_PROFILE_IDS
+)
+
+
+def _provider_router_snapshot(
+    router: AgentOSRouterConfig,
+    *,
+    provider_id: str,
+    model: str,
+) -> ProviderRouterProfileConfig:
+    """Capture only router state that is specific to one provider.
+
+    Router strategy and tuning remain global. Shipped tier profiles are reduced
+    to operator-authored overrides so a later release can update their model
+    identifiers. A local provider's generated all-tier pin is also derived on
+    restore instead of persisting another copy of the active model.
+    """
+    tier_profile = str(router.tier_profile or "").strip().lower() or None
+    if tier_profile:
+        tiers = _router_tier_overrides(router.tiers, tier_profile)
+    elif is_local_provider(provider_id) and _tiers_are_machine_written_defaults(
+        router.tiers, provider_id, model
+    ):
+        tiers = {}
+    elif provider_id in ROUTER_TIER_PROFILE_IDS:
+        tiers = _router_tier_overrides(router.tiers, provider_id)
+    else:
+        tiers = {
+            name: dict(tier) if isinstance(tier, dict) else tier
+            for name, tier in router.tiers.items()
+        }
+    return ProviderRouterProfileConfig(
+        tier_profile=tier_profile,
+        tiers=tiers,
+        default_tier=router.default_tier,
+        judge_model=router.judge_model,
+        judge_provider=router.judge_provider,
+        judge_base_url=router.judge_base_url,
+    )
 
 
 def _clean_optional_str(value: str | None) -> str:
@@ -142,12 +176,7 @@ def _tiers_are_machine_written_defaults(
     Anything else is treated as a custom, operator-authored tier set and left
     untouched.
     """
-    if tiers in (
-        _openrouter_tiers(),
-        _bankr_tiers(),
-        _opencap_tiers(),
-        *(_router_tier_profile_defaults(profile) for profile in ROUTER_TIER_PROFILE_IDS),
-    ):
+    if tiers in _SHIPPED_ROUTER_TIER_DEFAULTS:
         return True
     old_provider = str(old_provider or "").strip().lower()
     old_model = str(old_model or "").strip()
@@ -185,7 +214,6 @@ def _reconcile_router_profile_for_provider(
         # the persisted config is self-consistent (the runtime degrade guard then
         # becomes a no-op).
         router_payload = cfg.agentos_router.model_dump(mode="python")
-        router_payload["enabled"] = True
         router_payload["tier_profile"] = None
         if _tiers_are_machine_written_defaults(cfg.agentos_router.tiers, old_provider, old_model):
             router_payload["tiers"] = _local_provider_tiers(
@@ -228,6 +256,99 @@ def _reconcile_router_profile_for_provider(
         )
     cfg.agentos_router = AgentOSRouterConfig(**router_payload)
     return warnings
+
+
+def _restore_provider_router_profile(
+    cfg: GatewayConfig,
+    profile: ProviderProfileConfig,
+    *,
+    provider_id: str,
+    model: str,
+) -> list[str]:
+    """Restore provider-specific router state without reverting global tuning."""
+    saved_router = profile.agentos_router
+    router_payload = cfg.agentos_router.model_dump(mode="python")
+    router_payload["default_tier"] = saved_router.default_tier
+
+    if is_local_provider(provider_id):
+        router_payload["tier_profile"] = None
+        router_payload["tiers"] = (
+            _merge_router_tiers(saved_router.tiers, None)
+            if saved_router.tiers
+            else _local_provider_tiers(
+                _router_tier_profile_defaults("openrouter"), provider_id, model
+            )
+        )
+    elif provider_id in ROUTER_TIER_PROFILE_IDS:
+        # OpenRouter's recommended mix intentionally has no explicit profile;
+        # direct providers always restore their own current shipped profile.
+        router_payload["tier_profile"] = (
+            saved_router.tier_profile if provider_id == "openrouter" else provider_id
+        )
+        router_payload["tiers"] = _merge_router_tiers(
+            _router_tier_profile_defaults(provider_id), saved_router.tiers
+        )
+    else:
+        return _reconcile_router_profile_for_provider(
+            cfg,
+            provider_id,
+            model=model,
+            old_provider="",
+            old_model="",
+        )
+
+    # A profile intentionally has no literal judge credential. Clear any value
+    # carried by the provider being left before restoring its target fields.
+    router_payload["judge_api_key"] = None
+    if router_payload.get("enabled"):
+        warnings = _apply_router_judge_fields(
+            router_payload,
+            llm_provider=provider_id,
+            judge_model=saved_router.judge_model or "",
+            judge_provider=saved_router.judge_provider,
+            judge_base_url=saved_router.judge_base_url,
+            # A profile never carries a literal judge key. Clear the previous
+            # provider's value when restoring a saved local endpoint.
+            judge_api_key=None,
+        )
+    else:
+        warnings = []
+        router_payload["judge_model"] = saved_router.judge_model
+        router_payload["judge_provider"] = saved_router.judge_provider
+        router_payload["judge_base_url"] = saved_router.judge_base_url
+        router_payload["judge_api_key"] = None
+    cfg.agentos_router = AgentOSRouterConfig(**router_payload)
+    return warnings
+
+
+def _should_snapshot_active_provider(
+    config: GatewayConfig,
+    *,
+    provider_id: str,
+    model: str,
+) -> bool:
+    """Avoid inventing a profile for GatewayConfig's unconfigured defaults."""
+    defaults = LlmProviderConfig()
+    if getattr(config, "config_path", None):
+        return True
+    if provider_id != defaults.provider or model != defaults.model:
+        return True
+    llm = config.llm
+    if any(
+        (
+            llm.api_key,
+            llm.api_key_env,
+            llm.base_url != defaults.base_url,
+            llm.proxy,
+            llm.max_tokens,
+            llm.thinking,
+            llm.provider_routing,
+        )
+    ):
+        return True
+    return config.agentos_router.model_dump(mode="python") != AgentOSRouterConfig().model_dump(
+        mode="python"
+    )
 
 
 def _default_text_tier(default_tier: str | None) -> str:
@@ -366,6 +487,7 @@ def upsert_llm_provider(
     proxy: str = "",
     provider_routing: dict[str, str] | None = None,
 ) -> MutationResult:
+    provider_id = str(provider_id).strip().lower()
     spec = get_provider_setup_spec(provider_id)
     if not spec.runtime_supported:
         raise ValueError(
@@ -407,6 +529,11 @@ def upsert_llm_provider(
     ):
         effective_api_key = config.llm.api_key
     if spec.requires_api_key and not effective_api_key and not effective_api_key_env:
+        if saved_profile is not None and active_provider != provider_id:
+            raise ValueError(
+                f"provider {provider_id!r} has a saved profile but no stored credential; "
+                "re-enter the API key"
+            )
         raise ValueError(f"provider {provider_id!r} requires an api_key")
     saved_base_url = (
         saved_profile.base_url
@@ -448,8 +575,17 @@ def upsert_llm_provider(
         for provider, profile in config.provider_profiles.items()
         if str(provider).strip()
     }
-    if old_provider and old_model:
-        provider_profiles[old_provider.strip().lower()] = ProviderProfileConfig(
+    if (
+        old_provider
+        and old_model
+        and active_provider != provider_id
+        and _should_snapshot_active_provider(
+            config,
+            provider_id=active_provider,
+            model=old_model.strip(),
+        )
+    ):
+        provider_profiles[active_provider] = ProviderProfileConfig(
             model=old_model.strip(),
             api_key_env=str(config.llm.api_key_env or "").strip(),
             base_url=str(config.llm.base_url or "").strip(),
@@ -457,9 +593,15 @@ def upsert_llm_provider(
             max_tokens=config.llm.max_tokens,
             thinking=config.llm.thinking,
             provider_routing=dict(config.llm.provider_routing),
-            agentos_router=_provider_router_snapshot(config.agentos_router),
+            agentos_router=_provider_router_snapshot(
+                config.agentos_router,
+                provider_id=active_provider,
+                model=old_model.strip(),
+            ),
         )
-    restored_profile = provider_profiles.get(provider_id) if provider_id != old_provider else None
+    restored_profile = (
+        provider_profiles.get(provider_id) if provider_id != active_provider else None
+    )
     new_cfg = _clone(config)
     new_cfg.provider_profiles = provider_profiles
     new_cfg.llm = LlmProviderConfig(
@@ -474,8 +616,12 @@ def upsert_llm_provider(
         provider_routing=effective_provider_routing,
     )
     if restored_profile is not None:
-        new_cfg.agentos_router = restored_profile.agentos_router.model_copy(deep=True)
-        reconcile_warnings: list[str] = []
+        reconcile_warnings = _restore_provider_router_profile(
+            new_cfg,
+            restored_profile,
+            provider_id=provider_id,
+            model=model_clean,
+        )
     else:
         reconcile_warnings = _reconcile_router_profile_for_provider(
             new_cfg,

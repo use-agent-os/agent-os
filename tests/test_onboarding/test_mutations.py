@@ -602,9 +602,14 @@ def test_ollama_opencap_ollama_switch_restores_provider_model_and_router_profile
     assert restored_ollama.provider_profiles["opencap"].provider_routing == {
         "glm-5.2": "surplus"
     }
-    assert restored_ollama.provider_profiles["opencap"].agentos_router.model_dump(
-        mode="python"
-    ) == opencap.agentos_router.model_dump(mode="python")
+    opencap_profile_router = restored_ollama.provider_profiles["opencap"].agentos_router
+    assert opencap_profile_router.tier_profile == "opencap"
+    assert opencap_profile_router.tiers == {}
+    assert opencap_profile_router.default_tier == "c2"
+    assert (
+        "tiers"
+        not in restored_ollama.to_toml_dict()["provider_profiles"]["opencap"]["agentos_router"]
+    )
     assert (
         restored_ollama.to_toml_dict()["provider_profiles"]["ollama"]["model"]
         == configured_ollama_model
@@ -666,6 +671,102 @@ def test_provider_switch_restores_smart_routing_settings_without_judge_secret():
     assert router.judge_base_url == "http://ollama.example:11434/v1"
     assert router.judge_provider is None
     assert router.judge_api_key is None
+
+
+def test_provider_profile_keeps_global_router_tuning_and_compacts_shipped_tiers():
+    ollama = upsert_llm_provider(GatewayConfig(), provider_id="ollama", model="qwen3.5:9b").config
+    deepseek = upsert_llm_provider(
+        ollama,
+        provider_id="deepseek",
+        model="deepseek-chat",
+        api_key_env="DEEPSEEK_API_KEY",
+    ).config
+
+    ollama_profile = deepseek.provider_profiles["ollama"].agentos_router
+    assert ollama_profile.tiers == {}
+    assert "tiers" not in deepseek.to_toml_dict()["provider_profiles"]["ollama"]["agentos_router"]
+
+    deepseek.agentos_router.strategy = "llm_judge"
+    deepseek.agentos_router.pilot.safety_net_threshold = 0.9
+    restored = upsert_llm_provider(deepseek, provider_id="ollama").config
+
+    assert restored.agentos_router.strategy == "llm_judge"
+    assert restored.agentos_router.pilot.safety_net_threshold == 0.9
+    assert all(tier["model"] == "qwen3.5:9b" for tier in restored.agentos_router.tiers.values())
+
+
+def test_restored_local_profile_honors_an_explicit_model():
+    ollama = upsert_llm_provider(GatewayConfig(), provider_id="ollama", model="qwen3.5:9b").config
+    deepseek = upsert_llm_provider(
+        ollama,
+        provider_id="deepseek",
+        model="deepseek-chat",
+        api_key_env="DEEPSEEK_API_KEY",
+    ).config
+
+    restored = upsert_llm_provider(deepseek, provider_id="ollama", model="llama4:70b").config
+
+    assert restored.llm.model == "llama4:70b"
+    assert all(tier["provider"] == "ollama" for tier in restored.agentos_router.tiers.values())
+    assert all(tier["model"] == "llama4:70b" for tier in restored.agentos_router.tiers.values())
+
+
+def test_provider_switch_normalizes_active_provider_before_restoring_profile():
+    cfg = GatewayConfig(
+        llm={
+            "provider": "OpenCap",
+            "model": "glm-5.2",
+            "api_key_env": "OPENCAP_API_KEY",
+        }
+    )
+
+    result = upsert_llm_provider(cfg, provider_id="opencap", model="glm-5.3-new")
+
+    assert result.config.llm.model == "glm-5.3-new"
+    assert result.config.agentos_router.tier_profile == "opencap"
+    assert result.config.agentos_router.tiers["c1"]["provider"] == "opencap"
+    assert result.config.provider_profiles == {}
+
+
+def test_first_provider_switch_does_not_snapshot_unconfigured_defaults():
+    result = upsert_llm_provider(GatewayConfig(), provider_id="ollama", model="qwen3.5:9b")
+
+    assert result.config.provider_profiles == {}
+
+
+def test_saved_literal_key_profile_requires_reentry_with_actionable_error():
+    deepseek = upsert_llm_provider(
+        GatewayConfig(),
+        provider_id="deepseek",
+        model="deepseek-chat",
+        api_key="sk-literal-secret",
+    ).config
+    ollama = upsert_llm_provider(deepseek, provider_id="ollama", model="qwen3.5:9b").config
+
+    with pytest.raises(
+        ValueError,
+        match="has a saved profile but no stored credential; re-enter the API key",
+    ):
+        upsert_llm_provider(ollama, provider_id="deepseek")
+
+    assert "sk-literal-secret" not in str(ollama.to_toml_dict())
+
+
+def test_provider_profiles_accept_partial_entries_and_drop_invalid_ones(
+    caplog: pytest.LogCaptureFixture,
+):
+    with caplog.at_level("WARNING"):
+        cfg = GatewayConfig(
+            provider_profiles={
+                "ollama": {"model": "qwen3.5:9b"},
+                "bad": {"agentos_router": {"tiers": []}},
+            }
+        )
+
+    assert cfg.provider_profiles["ollama"].model == "qwen3.5:9b"
+    assert cfg.provider_profiles["ollama"].agentos_router.tiers == {}
+    assert "bad" not in cfg.provider_profiles
+    assert "provider_profile_invalid_ignored provider=bad" in caplog.text
 
 
 def test_upsert_router_recommended_writes_profile_without_expanded_tiers():

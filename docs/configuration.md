@@ -428,14 +428,19 @@ appears for the Pilot strategy.
 
 When onboarding switches to another LLM provider, AgentOS saves a profile for
 the provider being left and restores it when you return. A profile contains the
-active model, router mode and settings (including text/image tiers, Smart
-Routing judge model and endpoint, and Pilot settings), plus non-secret
+active model; provider-specific router settings (text/image-tier overrides,
+default tier, and Smart Routing judge target/endpoint); and non-secret
 connection settings such as `base_url`, `proxy`, `api_key_env`, and provider
-routing preferences. Profiles are persisted in `config.toml`.
+routing preferences. Router strategy and tuning (including Pilot settings) are
+global preferences and remain unchanged while switching providers. Shipped tier
+tables are re-derived on restore, so new recommended model IDs reach existing
+installs instead of being frozen in `config.toml`.
 
 Literal `api_key` values and local `judge_api_key` values are not copied into a
-profile. Prefer environment-variable references for credentials you need to
-survive a provider switch.
+profile. Returning to a provider originally configured with a literal API key
+requires entering that key again; the setup flow reports this explicitly.
+Prefer environment-variable references for credentials you need to survive a
+provider switch.
 
 #### Upgrading from v4_phase3
 

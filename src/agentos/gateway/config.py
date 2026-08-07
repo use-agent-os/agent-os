@@ -17,6 +17,7 @@ from pydantic import (
     Field,
     PrivateAttr,
     SerializeAsAny,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -796,6 +797,28 @@ def _merge_tier_dicts(defaults: dict, overrides: object) -> dict:
     return merged
 
 
+def _router_tier_overrides(tiers: dict[str, Any], profile: str) -> dict[str, Any]:
+    """Return only tier values that differ from a shipped provider profile.
+
+    Provider-switch profiles must not serialize a fully-expanded copy of a
+    shipped tier table: keeping the defaults implicit allows later model-table
+    updates to reach an existing installation. This helper intentionally keeps
+    an entire tier when it is not mapping-shaped, so malformed-but-loadable
+    custom values are not silently discarded while the caller validates them.
+    """
+    defaults = _router_tier_profile_defaults(profile)
+    overrides: dict[str, Any] = {}
+    for tier_name, tier in tiers.items():
+        default_tier = defaults.get(tier_name)
+        if isinstance(tier, dict) and isinstance(default_tier, dict):
+            changed = {key: value for key, value in tier.items() if default_tier.get(key) != value}
+            if changed:
+                overrides[tier_name] = changed
+        elif tier != default_tier:
+            overrides[tier_name] = tier
+    return overrides
+
+
 def _router_tier_profile_defaults(profile: str | None) -> dict:
     normalized = (profile or "openrouter").strip().lower()
     if normalized not in ROUTER_TIER_PROFILE_IDS:
@@ -1218,6 +1241,43 @@ class AgentOSRouterConfig(BaseSettings):
 AgentOSRouterConfig.model_rebuild()
 
 
+class ProviderRouterProfileConfig(BaseModel):
+    """The router settings that are specific to one LLM provider.
+
+    Router strategy and tuning are gateway-wide preferences. Only the model
+    selection table, default tier, and explicit LLM-judge target change when
+    returning to another provider.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    tier_profile: str | None = None
+    tiers: dict[str, Any] = Field(default_factory=dict)
+    default_tier: str = DEFAULT_TEXT_TIER
+    judge_model: str | None = None
+    judge_provider: str | None = None
+    judge_base_url: str | None = None
+
+    @field_validator("tier_profile")
+    @classmethod
+    def _validate_tier_profile(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip().lower()
+        if normalized not in ROUTER_TIER_PROFILE_IDS:
+            allowed = ", ".join(sorted(ROUTER_TIER_PROFILE_IDS))
+            raise ValueError(
+                f"unknown provider-profile tier_profile {value!r}; expected one of {allowed}"
+            )
+        return normalized
+
+    @model_validator(mode="after")
+    def _compact_shipped_tier_profile(self) -> ProviderRouterProfileConfig:
+        if self.tier_profile:
+            self.tiers = _router_tier_overrides(self.tiers, self.tier_profile)
+        return self
+
+
 class ProviderProfileConfig(BaseModel):
     """Restorable non-secret LLM and router settings for one provider.
 
@@ -1226,14 +1286,14 @@ class ProviderProfileConfig(BaseModel):
     use the active provider configuration and existing secret-handling paths.
     """
 
-    model: str
+    model: str = ""
     api_key_env: str = ""
     base_url: str = ""
     proxy: str = ""
     max_tokens: int = 0
     thinking: str | None = None
     provider_routing: dict[str, str] = Field(default_factory=dict)
-    agentos_router: AgentOSRouterConfig
+    agentos_router: ProviderRouterProfileConfig = Field(default_factory=ProviderRouterProfileConfig)
 
 
 class AgentTokenSavingConfig(BaseSettings):
@@ -1729,6 +1789,40 @@ class GatewayConfig(BaseSettings):
     control_ui: ControlUiConfig = Field(default_factory=ControlUiConfig)
     diagnostics_enabled: bool = False
 
+    @model_validator(mode="before")
+    @classmethod
+    def _discard_invalid_provider_profiles(cls, values: Any) -> Any:
+        """Ignore malformed provider-switch cache entries instead of blocking boot."""
+        if not isinstance(values, dict):
+            return values
+        raw_profiles = values.get("provider_profiles")
+        if raw_profiles is None:
+            return values
+        values = dict(values)
+        if not isinstance(raw_profiles, dict):
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "provider_profiles_invalid_ignored reason=not_a_mapping"
+            )
+            values.pop("provider_profiles", None)
+            return values
+        profiles: dict[str, ProviderProfileConfig] = {}
+        for provider, raw_profile in raw_profiles.items():
+            provider_id = str(provider).strip().lower()
+            if not provider_id:
+                continue
+            try:
+                profiles[provider_id] = ProviderProfileConfig.model_validate(raw_profile)
+            except ValidationError:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "provider_profile_invalid_ignored provider=%s", provider_id
+                )
+        values["provider_profiles"] = profiles
+        return values
+
     @model_validator(mode="after")
     def _default_agentos_router_profile_for_direct_provider(self) -> GatewayConfig:
         router = self.agentos_router
@@ -2040,6 +2134,27 @@ class GatewayConfig(BaseSettings):
                 defaults = None
             if defaults is not None and router.get("tiers") == defaults:
                 router.pop("tiers", None)
+        provider_profiles = data.get("provider_profiles")
+        if isinstance(provider_profiles, dict):
+            for provider, profile in provider_profiles.items():
+                if not isinstance(profile, dict):
+                    continue
+                profile_router = profile.get("agentos_router")
+                if not isinstance(profile_router, dict):
+                    continue
+                profile_tiers = profile_router.get("tiers")
+                if not profile_tiers:
+                    profile_router.pop("tiers", None)
+                    continue
+                profile_id = str(profile_router.get("tier_profile") or provider).strip().lower()
+                if profile_id not in ROUTER_TIER_PROFILE_IDS:
+                    continue
+                if isinstance(profile_tiers, dict):
+                    compact_tiers = _router_tier_overrides(profile_tiers, profile_id)
+                    if compact_tiers:
+                        profile_router["tiers"] = compact_tiers
+                    else:
+                        profile_router.pop("tiers", None)
         for path in sorted(self._runtime_secret_paths):
             _delete_path(data, path)
         return data
