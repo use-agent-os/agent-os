@@ -427,15 +427,40 @@ appears for the Pilot strategy.
 #### Provider-switch profiles
 
 When onboarding switches to another LLM provider, AgentOS saves a profile for
-the provider being left and restores it when you return. A profile contains the
-active model, router mode and settings (including text/image tiers, Smart
-Routing judge model and endpoint, and Pilot settings), plus non-secret
-connection settings such as `base_url`, `proxy`, `api_key_env`, and provider
-routing preferences. Profiles are persisted in `config.toml`.
+the provider being left and restores it when you return. Profiles live under
+`[provider_profiles]` in `config.toml`.
 
-Literal `api_key` values and local `judge_api_key` values are not copied into a
-profile. Prefer environment-variable references for credentials you need to
+A profile holds only what belongs to that provider:
+
+- the active model and the non-secret connection settings — `base_url`,
+  `proxy`, `api_key_env`, `max_tokens`, `thinking`, and provider routing
+  preferences;
+- the provider's router slice — whether the router is enabled, its tier
+  profile, any tiers you authored yourself, and the Smart Routing judge target
+  (`judge_model`, `judge_provider`, `judge_base_url`).
+
+Install-wide router settings are deliberately **not** part of a profile:
+`strategy`, `default_tier`, `rollout_phase`, `auto_thinking`, the Pilot
+thresholds and the judge short-circuit tuning all stay on `[agentos_router]`.
+Retuning any of them while another provider is active is kept, not reverted by
+the next switch.
+
+Tier tables that AgentOS wrote itself — the shipped per-provider defaults, or
+the pinned tiers of a local provider — are not stored in the profile. They are
+re-derived when you switch back, so upgrading AgentOS still moves you onto the
+current recommended models. Tiers you edited yourself are stored verbatim and
+restored unchanged.
+
+Passing an explicit model when you switch back always wins over the remembered
+one, and a local provider's tiers are re-pinned to it.
+
+Credentials are never copied into a profile: neither a literal `api_key` nor a
+local `judge_api_key`. Returning to a provider you configured with a literal
+key asks you to re-enter it. Use `api_key_env` for credentials you want to
 survive a provider switch.
+
+A profile is only saved for a provider you actually configured, and a profile
+that no longer parses is dropped on load rather than blocking gateway startup.
 
 #### Upgrading from v4_phase3
 

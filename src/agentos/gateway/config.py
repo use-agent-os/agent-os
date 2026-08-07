@@ -17,6 +17,7 @@ from pydantic import (
     Field,
     PrivateAttr,
     SerializeAsAny,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -1218,22 +1219,53 @@ class AgentOSRouterConfig(BaseSettings):
 AgentOSRouterConfig.model_rebuild()
 
 
+class ProviderRouterProfileConfig(BaseModel):
+    """The slice of router settings that belongs to one provider.
+
+    Deliberately NOT the whole :class:`AgentOSRouterConfig`. Most of that model
+    is install-wide behaviour — ``strategy``, ``rollout_phase``,
+    ``auto_thinking``, ``default_tier``, the Pilot thresholds, the judge
+    short-circuit tuning — and snapshotting it per provider means retuning any
+    of it while another provider is active is silently reverted on the next
+    switch. Only what a provider genuinely owns is stored here.
+
+    ``tiers`` stays empty whenever the tier table is machine-written (the
+    shipped profile defaults, or a local pin). Those are re-derived on restore,
+    so a release that bumps the shipped model ids still reaches installs that
+    have switched providers — mirroring the elision
+    :meth:`GatewayConfig.to_toml_dict` already applies to the live router. Only
+    operator-authored tiers are stored verbatim.
+    """
+
+    enabled: bool = True
+    tier_profile: str | None = None
+    tiers: dict[str, Any] = Field(default_factory=dict)
+    # Judge target only. judge_api_key is a secret and is never snapshotted.
+    judge_model: str | None = None
+    judge_provider: str | None = None
+    judge_base_url: str | None = None
+
+
 class ProviderProfileConfig(BaseModel):
     """Restorable non-secret LLM and router settings for one provider.
 
     Literal API credentials deliberately remain outside this snapshot. An
     ``api_key_env`` reference is safe to preserve; direct API keys continue to
     use the active provider configuration and existing secret-handling paths.
+
+    Every field is defaulted on purpose: this is machine-written state living in
+    a file operators hand-edit, so a half-written profile must cost a lost
+    preference, never a gateway that refuses to start.
     """
 
-    model: str
+    model: str = ""
     api_key_env: str = ""
     base_url: str = ""
     proxy: str = ""
     max_tokens: int = 0
     thinking: str | None = None
     provider_routing: dict[str, str] = Field(default_factory=dict)
-    agentos_router: AgentOSRouterConfig
+    router: ProviderRouterProfileConfig = Field(default_factory=ProviderRouterProfileConfig)
 
 
 class AgentTokenSavingConfig(BaseSettings):
@@ -1729,6 +1761,34 @@ class GatewayConfig(BaseSettings):
     control_ui: ControlUiConfig = Field(default_factory=ControlUiConfig)
     diagnostics_enabled: bool = False
 
+    @field_validator("provider_profiles", mode="before")
+    @classmethod
+    def _drop_unparseable_provider_profiles(cls, value: Any) -> Any:
+        """Skip malformed saved profiles instead of refusing to start.
+
+        ``provider_profiles`` is machine-written restore state that lives in a
+        file operators edit by hand. A profile that no longer parses costs the
+        operator a remembered preference; it must never cost them a gateway that
+        boots. Anything unusable is dropped and re-created on the next switch.
+        """
+        if not isinstance(value, dict):
+            return value
+        kept: dict[str, Any] = {}
+        for provider, payload in value.items():
+            key = str(provider or "").strip().lower()
+            if not key:
+                continue
+            if isinstance(payload, ProviderProfileConfig):
+                kept[key] = payload
+                continue
+            if not isinstance(payload, dict):
+                continue
+            try:
+                kept[key] = ProviderProfileConfig(**payload)
+            except ValidationError:
+                continue
+        return kept
+
     @model_validator(mode="after")
     def _default_agentos_router_profile_for_direct_provider(self) -> GatewayConfig:
         router = self.agentos_router
@@ -2040,6 +2100,16 @@ class GatewayConfig(BaseSettings):
                 defaults = None
             if defaults is not None and router.get("tiers") == defaults:
                 router.pop("tiers", None)
+        profiles = data.get("provider_profiles")
+        if isinstance(profiles, dict):
+            for profile in profiles.values():
+                # Empty means "machine-written, re-derive on restore"; writing an
+                # empty TOML table would only add noise.
+                profile_router = profile.get("router") if isinstance(profile, dict) else None
+                if isinstance(profile_router, dict) and not profile_router.get("tiers"):
+                    profile_router.pop("tiers", None)
+            if not profiles:
+                data.pop("provider_profiles", None)
         for path in sorted(self._runtime_secret_paths):
             _delete_path(data, path)
         return data

@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Switching from a cloud LLM provider back to a local one no longer disables the
+  router or leaves it pinned to the cloud provider's tier profile. (Fixes #189)
+
+### Added
+
+- Onboarding remembers a per-provider profile when you switch LLM providers and
+  restores it when you return: the model, the non-secret connection settings
+  (`base_url`, `proxy`, `api_key_env`, `max_tokens`, `thinking`, provider
+  routing), and that provider's router slice (enabled, tier profile, tiers you
+  authored, Smart Routing judge target). Install-wide router settings —
+  `strategy`, `default_tier`, the Pilot thresholds, judge tuning — stay global
+  and are never reverted by a switch. Machine-written tier tables are re-derived
+  rather than frozen, so upgrades still move you onto the current recommended
+  models. Credentials are never copied into a profile. See
+  [docs/configuration.md](docs/configuration.md). (Refs #188)
+
 ## [2026.8.6] - 2026-08-06
 
 ### Added
