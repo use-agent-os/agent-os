@@ -16,6 +16,7 @@ from agentos.gateway.rpc_system import _handle_doctor_memory_status
 from agentos.gateway.rpc_tools import _handle_providers_status, _handle_search_status
 from agentos.health.evaluator import (
     evaluate_channels,
+    evaluate_control_ui,
     evaluate_image_generation,
     evaluate_logs,
     evaluate_memory,
@@ -486,6 +487,28 @@ def _memory_embedding_payload(ctx: RpcContext) -> dict[str, Any]:
     }
 
 
+def _control_ui_payload() -> dict[str, Any]:
+    from agentos.control_ui_check import (
+        DIST_REL,
+        control_ui_is_stale,
+        frontend_input_mtime,
+        repo_root,
+    )
+
+    source_mtime = frontend_input_mtime()
+    bundle_mtime: float | None = None
+    try:
+        bundle_mtime = (repo_root() / DIST_REL).stat().st_mtime
+    except OSError:
+        pass
+    return {
+        "stale": control_ui_is_stale(),
+        "sourceMtime": source_mtime,
+        "bundleMtime": bundle_mtime,
+        "wheelInstall": source_mtime is None,
+    }
+
+
 async def _evaluate_collection(
     surface: str,
     collect: Collector,
@@ -543,6 +566,11 @@ async def _handle_doctor_status(params: dict | None, ctx: RpcContext) -> dict[st
             "image_generation",
             lambda: _image_generation_payload(ctx),
             evaluate_image_generation,
+        ),
+        (
+            "control_ui",
+            lambda: _control_ui_payload(),
+            evaluate_control_ui,
         ),
     ]
 

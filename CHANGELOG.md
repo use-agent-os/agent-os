@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Gateway boot and `agentos doctor` now warn when the bundled React Control UI
+  is older than the frontend sources in a checkout (`gateway.control_ui.dist_stale`),
+  instead of reporting a clean bill of health while serving a stale web UI.
+  Wheel installs are unaffected. (Fixes #200)
 ## [2026.8.6] - 2026-08-06
 
 ### Added
