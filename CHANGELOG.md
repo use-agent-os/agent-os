@@ -10,6 +10,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - Switching from a cloud LLM provider back to a local one no longer disables the
   router or leaves it pinned to the cloud provider's tier profile. (Fixes #189)
+- Gateway boot and `agentos doctor` now warn when the bundled React Control UI is
+  older than the frontend sources in a checkout (`gateway.control_ui.dist_stale`),
+  instead of reporting a clean bill of health while serving a stale web UI. The
+  warning is advisory and never gates readiness — source mtimes are a hint, not
+  an oracle. Wheel installs ship no frontend sources and are never flagged.
+  (Fixes #200)
 
 ### Added
 
