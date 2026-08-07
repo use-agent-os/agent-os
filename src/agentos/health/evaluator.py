@@ -3,7 +3,7 @@ from __future__ import annotations
 import shlex
 from typing import Any
 
-from agentos.control_ui_check import BUILD_CMD
+from agentos.health.control_ui import BUILD_CMD
 from agentos.health.model import FixStep, HealthFinding
 
 _LEGACY_PROVIDER_REPLACEMENTS = {
@@ -1462,8 +1462,14 @@ def evaluate_sandbox(payload: dict[str, Any]) -> list[HealthFinding]:
 def evaluate_control_ui(payload: dict[str, Any]) -> list[HealthFinding]:
     """Warn when the bundled Control UI predates the frontend sources.
 
-    ``payload["stale"]`` is ``None`` for wheel installs or a missing bundle —
-    nothing to compare, so the doctor stays clean. Never gates readiness.
+    ``payload["stale"]`` is ``None`` for wheel installs, a disabled Control UI,
+    or a missing bundle — nothing to compare, so the doctor stays clean.
+
+    ``optional`` rather than the ``degrades`` a warn defaults to: source mtimes
+    are a hint, and ``git checkout`` / ``git pull`` rewrite them, so this can
+    flag a legitimately fresh bundle. A heuristic that noisy must not turn the
+    whole report yellow — the finding stays visible with its rebuild step while
+    overall status stays ``ready``.
     """
     if not payload.get("stale"):
         return []
@@ -1476,19 +1482,16 @@ def evaluate_control_ui(payload: dict[str, Any]) -> list[HealthFinding]:
             detail=(
                 "The packaged React console predates the frontend sources "
                 "in this checkout. Rebuild it so the web UI matches the "
-                "current source tree."
+                "current source tree. Switching branches also rewrites source "
+                "timestamps, so a freshly built bundle can be flagged."
             ),
-            readiness_impact="degrades",
-            evidence={
-                key: value
-                for key, value in payload.items()
-                if key not in {"stale"}
-            },
+            readiness_impact="optional",
+            evidence={key: value for key, value in payload.items() if key != "stale"},
             fix_steps=[
                 FixStep(
                     label="Rebuild the Control UI bundle",
                     command=BUILD_CMD,
-                    detail="Restart the gateway to clear the boot-time warning.",
+                    detail="Restart the gateway to clear the boot-time warning too.",
                 )
             ],
         )

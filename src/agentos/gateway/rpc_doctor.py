@@ -487,25 +487,21 @@ def _memory_embedding_payload(ctx: RpcContext) -> dict[str, Any]:
     }
 
 
-def _control_ui_payload() -> dict[str, Any]:
-    from agentos.control_ui_check import (
-        DIST_REL,
-        control_ui_is_stale,
-        frontend_input_mtime,
-        repo_root,
-    )
+def _control_ui_payload(ctx: RpcContext) -> dict[str, Any]:
+    from agentos.gateway.control_ui import _DIST_DIR
+    from agentos.health.control_ui import inspect_control_ui_bundle
 
-    source_mtime = frontend_input_mtime()
-    bundle_mtime: float | None = None
-    try:
-        bundle_mtime = (repo_root() / DIST_REL).stat().st_mtime
-    except OSError:
-        pass
+    config = getattr(ctx, "config", None)
+    if config is not None and not config.control_ui.enabled:
+        # Boot skips the check entirely when the Control UI is disabled; there
+        # is no point telling an operator a bundle nobody serves is out of date.
+        return {"stale": None, "sourceMtime": None, "bundleMtime": None, "wheelInstall": False}
+    report = inspect_control_ui_bundle(_DIST_DIR / "index.html")
     return {
-        "stale": control_ui_is_stale(),
-        "sourceMtime": source_mtime,
-        "bundleMtime": bundle_mtime,
-        "wheelInstall": source_mtime is None,
+        "stale": report.stale,
+        "sourceMtime": report.source_mtime,
+        "bundleMtime": report.bundle_mtime,
+        "wheelInstall": report.wheel_install,
     }
 
 
@@ -567,11 +563,7 @@ async def _handle_doctor_status(params: dict | None, ctx: RpcContext) -> dict[st
             lambda: _image_generation_payload(ctx),
             evaluate_image_generation,
         ),
-        (
-            "control_ui",
-            lambda: _control_ui_payload(),
-            evaluate_control_ui,
-        ),
+        ("control_ui", lambda: _control_ui_payload(ctx), evaluate_control_ui),
     ]
 
     for surface, collect, evaluate in collectors:

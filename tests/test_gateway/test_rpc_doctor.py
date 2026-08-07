@@ -72,6 +72,10 @@ def _optional_image_generation(ctx: RpcContext) -> dict[str, Any]:
     }
 
 
+def _fresh_control_ui(ctx: RpcContext) -> dict[str, Any]:
+    return {"stale": None, "sourceMtime": None, "bundleMtime": None, "wheelInstall": False}
+
+
 def _patch_ready_support_surfaces(monkeypatch: pytest.MonkeyPatch, rpc_doctor: Any) -> None:
     monkeypatch.setattr(rpc_doctor, "_handle_doctor_memory_status", _ready_memory)
     monkeypatch.setattr(rpc_doctor, "_handle_channels_status", _ready_channels)
@@ -82,6 +86,10 @@ def _patch_ready_support_surfaces(monkeypatch: pytest.MonkeyPatch, rpc_doctor: A
         "_image_generation_payload",
         _optional_image_generation,
     )
+    # Reads the real repo, so a plain `git checkout` (which rewrites frontend
+    # source mtimes without touching the gitignored dist/) would otherwise leak
+    # a finding into tests that assert exact counts.
+    monkeypatch.setattr(rpc_doctor, "_control_ui_payload", _fresh_control_ui)
 
 
 @pytest.mark.asyncio
@@ -344,6 +352,7 @@ async def test_doctor_status_reports_unknown_search_provider_as_reconfigurable(
         "_image_generation_payload",
         _optional_image_generation,
     )
+    monkeypatch.setattr(rpc_doctor, "_control_ui_payload", _fresh_control_ui)
 
     cfg = GatewayConfig()
     cfg.config_path = "/tmp/custom-agentos.toml"

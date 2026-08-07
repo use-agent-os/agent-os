@@ -1942,21 +1942,12 @@ async def start_gateway_server(
 
     # Gateway-specific: resolve the built React Control UI (boot order 17)
     if config.control_ui.enabled:
-        from agentos.control_ui_check import build_hint, control_ui_is_stale
         from agentos.gateway.control_ui import _DIST_DIR
+        from agentos.health.control_ui import build_hint, control_ui_boot_warning
 
-        if not (_DIST_DIR / "index.html").is_file():
-            log.warning(
-                "gateway.control_ui.dist_missing",
-                path=str(_DIST_DIR),
-                hint=build_hint(),
-            )
-        elif control_ui_is_stale():
-            log.warning(
-                "gateway.control_ui.dist_stale",
-                path=str(_DIST_DIR),
-                hint=build_hint(),
-            )
+        bundle_warning = control_ui_boot_warning(_DIST_DIR / "index.html")
+        if bundle_warning is not None:
+            log.warning(bundle_warning, path=str(_DIST_DIR), hint=build_hint())
         log.info(
             "gateway.control_ui.resolved",
             base_path=config.control_ui.base_path,

@@ -52,12 +52,15 @@ license ledger. The source-install scripts perform it automatically. If a
 checkout is started without a bundle, the Control UI returns an actionable
 `503` instead of a blank page or a different interface.
 
-Gateway boot and `agentos doctor` also warn when a checkout's bundle is
-older than its frontend sources (`gateway.control_ui.dist_stale`); the
-warning is advisory and never blocks serving the existing bundle. Rebuild
-with `python scripts/build_control_ui.py build`, then restart the gateway
-to clear it. Wheel installs ship no frontend sources, so they are never
-flagged.
+Gateway boot and `agentos doctor` also warn when a checkout's bundle is older
+than its frontend sources (`gateway.control_ui.dist_stale`). The warning is
+advisory: it never blocks serving the existing bundle and never degrades
+overall health status, because source mtimes are a hint rather than an oracle —
+`git checkout` and `git pull` rewrite them, so a freshly built bundle can be
+flagged. Rebuild with `python scripts/build_control_ui.py build`; `agentos
+doctor` clears on the next run, and a gateway restart clears the boot-time log
+line. Wheel installs ship no frontend sources and are never flagged, and the
+check is skipped entirely when the Control UI is disabled.
 
 For hot reload during frontend work, run the gateway and Vite together:
 
