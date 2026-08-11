@@ -227,9 +227,16 @@ class ModelCatalog:
                     ("minimax-m3", "gemini-", "kimi-", "claude-", "grok-", "gpt-5.5")
                 )
             )
+            # DeepSeek V4 through these gateways honors the DeepSeek-native
+            # thinking payload and streams reasoning_content deltas (verified
+            # live against OpenCAP). Without this, tier thinking_level settings
+            # silently no-op for gateway DeepSeek routes.
+            supports_reasoning = basename.startswith("deepseek-v4")
             return ModelCapabilities(
+                supports_reasoning=supports_reasoning,
                 supports_tools=True,
                 supports_vision=supports_vision,
+                reasoning_format="deepseek" if supports_reasoning else "none",
             )
         if provider_id == "dashscope":
             supports_reasoning = model_l.startswith(

@@ -271,3 +271,25 @@ def test_opencap_gateway_uses_conservative_shared_id_limits() -> None:
 
     assert catalog.resolve_max_tokens("deepseek-v4-flash", provider_name="opencap") == 128_000
     assert catalog.resolve_context_window("deepseek-v4-flash", provider_name="opencap") == 1_000_000
+
+
+def test_opencap_deepseek_v4_models_resolve_deepseek_reasoning() -> None:
+    # DeepSeek V4 via the OpenCAP/Bankr gateways honors the DeepSeek-native
+    # thinking payload and streams reasoning_content (verified live); the
+    # capability gate must say so or tier thinking_level silently no-ops.
+    catalog = ModelCatalog()
+
+    for provider in ("opencap", "bankr"):
+        caps = catalog.get_capabilities("deepseek-v4-flash", provider_name=provider)
+        assert caps.supports_reasoning is True
+        assert caps.reasoning_format == "deepseek"
+
+    pro = catalog.get_capabilities("deepseek-v4-pro", provider_name="opencap")
+    assert pro.supports_reasoning is True
+
+    # Non-DeepSeek gateway ids stay reasoning-off: OpenAI/Anthropic never
+    # expose chain-of-thought through these OpenAI-compat gateways.
+    for model in ("gpt-5.6-terra", "gpt-5.6-luna", "claude-opus-5"):
+        caps = catalog.get_capabilities(model, provider_name="opencap")
+        assert caps.supports_reasoning is False
+        assert caps.reasoning_format == "none"
