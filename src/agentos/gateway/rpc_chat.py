@@ -10,7 +10,7 @@ import structlog
 from agentos.chat.conversation import ChatSendRequest, sessions_send_params
 from agentos.chat.history import transcript_entries_to_chat_messages
 from agentos.chat.source import chat_source_metadata
-from agentos.gateway.access import CONTROL_AND_CHANNEL
+from agentos.gateway.access import CONTROL_AND_CHANNEL, CONTROL_ONLY
 from agentos.gateway.config import GatewayConfig
 from agentos.gateway.context_overflow import apply_context_overflow_policy
 from agentos.gateway.rpc import RpcContext, RpcUnavailableError, get_dispatcher
@@ -458,6 +458,46 @@ async def _handle_chat_abort(params: dict | None, ctx: RpcContext) -> dict:
     return {"sessionKey": session_key, **result}
 
 
+def _control_ui_show_thinking(ctx: RpcContext) -> bool:
+    control_ui_cfg = getattr(getattr(ctx, "config", None), "control_ui", None)
+    return bool(getattr(control_ui_cfg, "show_thinking", True))
+
+
+@_d.method("chat.thinking", CONTROL_ONLY)
+async def _handle_chat_thinking(params: dict | None, ctx: RpcContext) -> dict:
+    """Serve one message's reasoning on demand (WebUI fetch-on-expand).
+
+    Deliberately CONTROL_ONLY: reasoning never flows to channel surfaces.
+    """
+    raw_params = params or {}
+    session_key = _canonical_webchat_session_key(raw_params.get("sessionKey"))
+    message_id = raw_params.get("messageId") or raw_params.get("message_id")
+    if not message_id:
+        raise ValueError("params.messageId is required")
+    payload: dict[str, Any] = {
+        "sessionKey": session_key,
+        "messageId": message_id,
+        "reasoning": None,
+    }
+    if not _control_ui_show_thinking(ctx) or ctx.session_manager is None:
+        return payload
+    mgr = _require_chat_session_manager(ctx)
+    try:
+        transcript, _ = await _chat_history_transcript(
+            mgr,
+            session_key,
+            include_canonical=True,
+        )
+    except KeyError:
+        return payload
+    for entry in reversed(transcript):
+        if str(getattr(entry, "message_id", "")) == str(message_id):
+            reasoning = getattr(entry, "reasoning_content", None)
+            payload["reasoning"] = reasoning or None
+            break
+    return payload
+
+
 @_d.method("chat.history", CONTROL_AND_CHANNEL)
 async def _handle_chat_history(params: dict | None, ctx: RpcContext) -> dict:
     raw_params = params or {}
@@ -507,6 +547,9 @@ async def _handle_chat_history(params: dict | None, ctx: RpcContext) -> dict:
         history_scope = "complete"
 
     messages = transcript_entries_to_chat_messages(page_entries, limit=None)
+    if not _control_ui_show_thinking(ctx):
+        for message in messages:
+            message.pop("has_thinking", None)
     return {
         "messages": _annotate_transcript_attachment_downloads(
             messages,

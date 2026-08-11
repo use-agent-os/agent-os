@@ -211,7 +211,7 @@ class HeartbeatService:
             if kind == "done":
                 done_text = getattr(event, "text", "")
                 continue
-            if kind not in {"state_change", "tool_use_start", "tool_result"}:
+            if kind not in {"state_change", "thinking", "tool_use_start", "tool_result"}:
                 text = getattr(event, "text", "")
                 if text:
                     parts.append(text)

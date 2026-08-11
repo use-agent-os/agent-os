@@ -36,6 +36,7 @@ import {
   type CompactionRenderer,
   type CompactionSummary,
 } from './compaction'
+import { createThinkingBlock } from './thinking'
 
 /* ── Constants (ported verbatim from chat.js) ───────────────────────────── */
 
@@ -512,6 +513,12 @@ export function createStreamController(
   let _thinkingTimerInterval: ReturnType<typeof setInterval> | null = null
   let _thinkingStartTime = 0
 
+  // live thinking block — streamed model reasoning (session.event.thinking)
+  let _thinkingBlockRow: HTMLElement | null = null
+  let _thinkingBlockDetails: HTMLDetailsElement | null = null
+  let _thinkingBlockContent: HTMLElement | null = null
+  let _thinkingBlockRaw = ''
+
   // finalize/reconcile bookkeeping (chat.js:59-60)
   let _pendingFinalizedAssistantBubble: HTMLElement | null = null
   let _pendingFinalizedAssistantFallbackId = ''
@@ -776,6 +783,62 @@ export function createStreamController(
     if (hadThinking) diag('thinking.hide', {})
   }
 
+  /* ── live thinking block — streamed model reasoning ────────────────────── */
+
+  function appendThinkingDelta(text: string): void {
+    if (!text || isAborted()) return
+    if (!_isStreaming) startStreaming()
+    // Real reasoning replaces the synthetic indicator.
+    hideThinkingIndicator()
+    if (!_thinkingBlockRow || !_thinkingBlockRow.isConnected) {
+      const th = thread()
+      if (!th) return
+      const row = document.createElement('div')
+      row.className = 'msg assistant thinking-live'
+      row.dataset.sessionKey = _streamSessionKey || getSessionKey() || ''
+      const body = document.createElement('div')
+      body.className = 'msg-body'
+      const parts = createThinkingBlock({ open: true })
+      body.appendChild(parts.details)
+      row.appendChild(body)
+      // Reasoning precedes reply text: keep the block above the live bubble.
+      if (_streamBubble && _streamBubble.isConnected) th.insertBefore(row, _streamBubble)
+      else th.appendChild(row)
+      _thinkingBlockRow = row
+      _thinkingBlockDetails = parts.details
+      _thinkingBlockContent = parts.content
+      _thinkingBlockRaw = ''
+      diag('thinking.block.show', {})
+    }
+    _thinkingBlockRaw += text
+    if (_thinkingBlockContent) _thinkingBlockContent.textContent = _thinkingBlockRaw
+    if (_autoScroll) scrollToBottom()
+  }
+
+  function collapseLiveThinkingBlock(): void {
+    // Reply text started (or the turn ended): fold the reasoning away. Later
+    // reasoning in the same turn keeps accumulating into the collapsed block.
+    if (_thinkingBlockDetails?.open) {
+      _thinkingBlockDetails.open = false
+      diag('thinking.block.collapse', {})
+    }
+  }
+
+  function releaseLiveThinkingBlock(): void {
+    // Turn is over: the row stays in the DOM until the history resync
+    // reconciles it away (the persisted turn re-renders it via has_thinking).
+    collapseLiveThinkingBlock()
+    _thinkingBlockRow = null
+    _thinkingBlockDetails = null
+    _thinkingBlockContent = null
+    _thinkingBlockRaw = ''
+  }
+
+  function removeLiveThinkingBlock(): void {
+    if (_thinkingBlockRow?.parentNode) _thinkingBlockRow.remove()
+    releaseLiveThinkingBlock()
+  }
+
   /* ── awaiting-model hint + stream-active reveal (chat.js:6503-6551) ────── */
 
   function clearAwaitingModelHint(): void {
@@ -874,6 +937,7 @@ export function createStreamController(
       activeTextRawLen: _activeTextRaw.length,
     })
     hideThinkingIndicator()
+    collapseLiveThinkingBlock()
     routerFxSettleForOutput()
     if (!_streamBubble) {
       const th = thread()
@@ -1015,6 +1079,7 @@ export function createStreamController(
       streamRawLen: _streamRaw.length,
     })
     hideThinkingIndicator()
+    releaseLiveThinkingBlock()
     cancelPendingRouterFxScan('stream_end')
     clearAwaitingModelHint()
     _lastVisibleStreamEvent = ''
@@ -1178,7 +1243,8 @@ export function createStreamController(
       _streamArtifacts.length ||
       currentSessionLiveRouterStrips(_streamSessionKey || getSessionKey() || '').length ||
       _thinkingEl ||
-      _thinkingDelayTimer
+      _thinkingDelayTimer ||
+      _thinkingBlockRow
     )
   }
 
@@ -1211,6 +1277,7 @@ export function createStreamController(
     }
     liveStreamStateBySession.set(key, state)
     hideThinkingIndicator()
+    removeLiveThinkingBlock()
     clearHistorySyncTimer()
     if (_renderRafId) {
       cancelAnimationFrame(_renderRafId)
@@ -1311,6 +1378,7 @@ export function createStreamController(
     const hadPendingFinalized = !!_pendingFinalizedAssistantBubble
     const routerStrips = currentSessionLiveRouterStrips(_streamSessionKey || getSessionKey() || '')
     hideThinkingIndicator()
+    removeLiveThinkingBlock()
     cancelPendingRouterFxScan(reason || 'clear_view_state')
     clearHistorySyncTimer()
     if (_renderRafId) {
@@ -1484,6 +1552,8 @@ export function createStreamController(
     // thinking
     showThinkingIndicator,
     hideThinkingIndicator,
+    appendThinkingDelta,
+    getLiveThinkingBlock: () => _thinkingBlockRow,
     // hints
     markVisibleStreamEvent,
     showAwaitingModelHintAfterToolResult,

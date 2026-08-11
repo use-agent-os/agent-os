@@ -172,6 +172,7 @@ than as a save failure.
 The chat UI supports:
 
 - streaming assistant output;
+- live model reasoning ("thinking") as a collapsible block;
 - tool-call cards;
 - artifact cards;
 - pending message queue behavior while compaction or runtime work is in flight;
@@ -182,6 +183,20 @@ The chat UI supports:
 Use the session selector to switch between existing sessions. Copy the session
 key when reporting a bug or asking another AgentOS surface to inspect the
 same session.
+
+### Model reasoning (thinking)
+
+When the routed model streams reasoning (Anthropic thinking blocks, DeepSeek
+`reasoning_content`, or local `<think>` models), the WebUI shows it live in a
+collapsible block that folds away as soon as the reply text starts. Replies
+whose reasoning was persisted show a collapsed **Thinking** block in history;
+the reasoning body loads on first expand (it is not shipped with history
+pages).
+
+Turn it off with `control_ui.show_thinking = false` (or
+`AGENTOS_CONTROL_UI_SHOW_THINKING=false`) — the gateway then neither streams
+thinking events nor serves reasoning bodies. This is WebUI-only either way:
+channel adapters (Slack, Telegram, …) never receive thinking.
 
 ## Manual Compaction
 

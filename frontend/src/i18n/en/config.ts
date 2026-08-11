@@ -178,5 +178,7 @@ export const config = defineNamespace('config', {
     'Gateway auth scheme. "token" requires a static bearer token; "none" is open (loopback only); other modes per deployment.',
   helpControlUiAllowedOrigins:
     'Extra browser origins allowed to open the Control UI WebSocket, call the HTTP API, and send Host headers, beyond loopback (which is always allowed). Add your reverse-proxy origin here (e.g. https://agent.example.com) when serving the UI off another host; default ports 80/443 are normalized. Cross-origin requests are otherwise rejected to block cross-site WebSocket hijacking and DNS rebinding.',
+  helpControlUiShowThinking:
+    'Stream model reasoning ("thinking") into the WebUI live and expose it in chat history as collapsible blocks. WebUI-only: channel adapters (Slack, Telegram, …) never receive thinking regardless of this flag.',
   helpNone: 'No description yet — see the docs.',
 } as const)

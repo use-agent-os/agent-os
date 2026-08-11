@@ -21,6 +21,14 @@ class TextDeltaEvent:
 
 
 @dataclass
+class ThinkingDeltaEvent:
+    """A chunk of model reasoning/thinking text (never user-facing reply text)."""
+
+    kind: Literal["thinking_delta"] = field(default="thinking_delta", init=False)
+    text: str = ""
+
+
+@dataclass
 class ToolUseStartEvent:
     """LLM begins a tool call."""
 
@@ -121,6 +129,7 @@ class ModelCapabilities:
 
 StreamEvent = (
     TextDeltaEvent
+    | ThinkingDeltaEvent
     | ToolUseStartEvent
     | ToolUseDeltaEvent
     | ToolUseEndEvent

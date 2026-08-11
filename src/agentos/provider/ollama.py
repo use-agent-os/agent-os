@@ -10,6 +10,7 @@ import httpx
 
 from agentos.env import trust_env as _trust_env
 
+from .reasoning import ThinkTagStreamSplitter
 from .types import (
     ChatConfig,
     DoneEvent,
@@ -18,6 +19,7 @@ from .types import (
     ModelInfo,
     StreamEvent,
     TextDeltaEvent,
+    ThinkingDeltaEvent,
     ToolDefinition,
     ToolUseDeltaEvent,
     ToolUseEndEvent,
@@ -210,6 +212,15 @@ class OllamaProvider:
         response_model = self._model
         # Ollama tool calls accumulate in the full response (not streamed per-chunk)
         pending_tool_calls: list[dict[str, Any]] = []
+        reasoning_parts: list[str] = []
+        # think_tags models interleave reasoning into content; the splitter keeps
+        # it out of user-visible text even when a tag spans chunks.
+        caps = cfg.model_capabilities
+        think_splitter = (
+            ThinkTagStreamSplitter()
+            if caps is not None and caps.reasoning_format == "think_tags"
+            else None
+        )
 
         try:
             async with httpx.AsyncClient(
@@ -247,10 +258,24 @@ class OllamaProvider:
                         if isinstance(chunk_model, str) and chunk_model:
                             response_model = chunk_model
 
+                        # Native thinking channel (Ollama `think` support)
+                        thinking = msg_chunk.get("thinking", "")
+                        if isinstance(thinking, str) and thinking:
+                            reasoning_parts.append(thinking)
+                            yield ThinkingDeltaEvent(text=thinking)
+
                         # Text content
                         text = msg_chunk.get("content", "")
                         if isinstance(text, str) and text:
-                            yield TextDeltaEvent(text=text)
+                            if think_splitter is not None:
+                                visible, think_text = think_splitter.feed(text)
+                                if visible:
+                                    yield TextDeltaEvent(text=visible)
+                                if think_text:
+                                    reasoning_parts.append(think_text)
+                                    yield ThinkingDeltaEvent(text=think_text)
+                            else:
+                                yield TextDeltaEvent(text=text)
 
                         # Ollama delivers tool_calls in a single chunk (non-streaming)
                         raw_tool_calls = msg_chunk.get("tool_calls", [])
@@ -271,6 +296,15 @@ class OllamaProvider:
                             if isinstance(raw_done_reason, str) and raw_done_reason:
                                 done_reason = raw_done_reason
 
+                    # Resolve any partial <think> tag held back at end of stream.
+                    if think_splitter is not None:
+                        visible, think_text = think_splitter.flush()
+                        if visible:
+                            yield TextDeltaEvent(text=visible)
+                        if think_text:
+                            reasoning_parts.append(think_text)
+                            yield ThinkingDeltaEvent(text=think_text)
+
                     # Emit tool events after streaming completes
                     for call in pending_tool_calls:
                         yield ToolUseStartEvent(tool_use_id=call["id"], tool_name=call["name"])
@@ -286,6 +320,7 @@ class OllamaProvider:
                         stop_reason="tool_use" if pending_tool_calls else done_reason,
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
+                        reasoning_content="".join(reasoning_parts) or None,
                         model=response_model,
                     )
 

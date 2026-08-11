@@ -402,6 +402,9 @@ class AuxiliaryClient:
                 output_tokens = int(getattr(event, "output_tokens", 0) or 0)
                 self._record(task, session_key, event, cfg.model)
                 continue
+            if kind == "thinking_delta":
+                # Reasoning is never part of an auxiliary task's answer.
+                continue
             text = getattr(event, "text", None)
             if isinstance(text, str):
                 parts.append(text)

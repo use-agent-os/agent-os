@@ -524,6 +524,52 @@
   cursor: help;
 }
 
+/* ── Thinking block — streamed/persisted model reasoning ────────────────── */
+.thinking-block {
+  margin: 2px 0 6px;
+  border-left: 2px solid color-mix(in srgb, var(--primary) 40%, var(--border));
+  padding-left: 10px;
+}
+.thinking-block-summary {
+  cursor: pointer;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  user-select: none;
+}
+.thinking-block-summary::-webkit-details-marker {
+  display: none;
+}
+.thinking-block-summary::before {
+  content: '▸';
+  color: var(--primary);
+  transition: transform 120ms ease;
+}
+.thinking-block[open] > .thinking-block-summary::before {
+  transform: rotate(90deg);
+}
+.thinking-block-content {
+  margin-top: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+  color: var(--muted-foreground);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+@media (prefers-reduced-motion: reduce) {
+  .thinking-block-summary::before {
+    transition: none;
+  }
+}
+
 /* ── Thinking indicator (chat.js:6379-6501) ─────────────────────────────── */
 .msg.thinking .thinking-body {
   padding: 4px 0 4px 10px;

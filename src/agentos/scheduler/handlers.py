@@ -419,7 +419,8 @@ def make_agent_run_handler(
                                 }
                             )
                     elif (
-                        event_kind not in {"done", "state_change", "tool_use_start", "tool_result"}
+                        event_kind
+                        not in {"done", "state_change", "thinking", "tool_use_start", "tool_result"}
                         and hasattr(event, "text")
                         and event.text
                     ):

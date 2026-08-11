@@ -811,6 +811,14 @@ export function useTranscript(opts: {
       shouldAutoScroll: () => controller.isAutoScrollEnabled(),
       getStreamBubble: () => controller.getStreamBubble(),
       getThinkingIndicator: () => controller.getThinkingIndicator(),
+      getLiveThinkingBlock: () => controller.getLiveThinkingBlock(),
+      fetchThinking: async (messageId: string) => {
+        const res = (await rpc.call('chat.thinking', {
+          sessionKey: sessionKeyRef.current,
+          messageId,
+        })) as { reasoning?: string | null } | null
+        return res?.reasoning ?? null
+      },
       getCurrentSessionLiveUserAnchor: () => controller.getCurrentSessionLiveUserAnchor(),
       getPendingFinalizedAssistantBubble: () => controller.getPendingFinalizedAssistantBubble(),
       isPendingFinalizedAssistantBubble: (row) => controller.isPendingFinalizedAssistantBubble(row),
@@ -1377,6 +1385,15 @@ export function useTranscript(opts: {
         if (!gateStreamFrame('event.text_delta', payload)) return
         controller.resetStreamIdleTimer()
         controller.appendDelta((payload as { text?: string }).text || '')
+      }),
+    )
+
+    // session.event.thinking — streamed model reasoning → live collapsible block.
+    unsubs.push(
+      onEvent('session.event.thinking', (payload: StreamEventPayload) => {
+        if (!gateStreamFrame('event.thinking', payload)) return
+        controller.resetStreamIdleTimer()
+        controller.appendThinkingDelta((payload as { text?: string }).text || '')
       }),
     )
 

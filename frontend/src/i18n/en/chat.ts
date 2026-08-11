@@ -208,6 +208,12 @@ export const chat = defineNamespace('chat', {
   verbPolishing: 'Polishing',
   stillWaiting: 'Still waiting for agent response…',
 
+  // Transcript: collapsible model-reasoning block.
+  thinkingBlockLabel: 'Thinking',
+  thinkingBlockLoading: 'Loading reasoning…',
+  thinkingBlockEmpty: 'No reasoning recorded for this reply.',
+  thinkingBlockError: 'Failed to load reasoning. Expand again to retry.',
+
   // Transcript: tool cards.
   toolRunning: 'Running',
   toolCompleted: 'Completed',

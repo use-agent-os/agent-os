@@ -683,3 +683,65 @@ describe('createHistoryRenderer chart artifacts', () => {
     expect(() => renderer.renderHistoryMessages(messages, pagingState(messages))).not.toThrow()
   })
 })
+
+describe('history thinking block (has_thinking → chat.thinking fetch-on-expand)', () => {
+  it('renders a collapsed thinking block at the top of a flagged assistant body', () => {
+    const thread = document.createElement('div')
+    document.body.appendChild(thread)
+    const messages = [
+      { role: 'assistant', text: 'the reply', message_id: 'msg-9', has_thinking: true },
+    ] as unknown as ChatMessage[]
+    const fetchThinking = vi.fn().mockResolvedValue('why I said that')
+    const renderer = createHistoryRenderer(historyDeps(thread, { fetchThinking }))
+
+    renderer.renderHistoryMessages(messages, pagingState(messages))
+
+    const details = thread.querySelector<HTMLDetailsElement>('.msg-body > .thinking-block')
+    expect(details).not.toBeNull()
+    expect(details!.open).toBe(false)
+    expect(details!.previousElementSibling).toBeNull()
+    expect(fetchThinking).not.toHaveBeenCalled()
+  })
+
+  it('fetches the reasoning body once on first expand', async () => {
+    const thread = document.createElement('div')
+    document.body.appendChild(thread)
+    const messages = [
+      { role: 'assistant', text: 'the reply', message_id: 'msg-9', has_thinking: true },
+    ] as unknown as ChatMessage[]
+    const fetchThinking = vi.fn().mockResolvedValue('why I said that')
+    const renderer = createHistoryRenderer(historyDeps(thread, { fetchThinking }))
+    renderer.renderHistoryMessages(messages, pagingState(messages))
+
+    const details = thread.querySelector<HTMLDetailsElement>('.thinking-block')!
+    details.open = true
+    details.dispatchEvent(new Event('toggle'))
+    details.dispatchEvent(new Event('toggle'))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(fetchThinking).toHaveBeenCalledTimes(1)
+    expect(fetchThinking).toHaveBeenCalledWith('msg-9')
+    expect(details.querySelector('.thinking-block-content')!.textContent).toBe('why I said that')
+  })
+
+  it('skips the block for unflagged rows and when no fetcher is wired', () => {
+    const thread = document.createElement('div')
+    document.body.appendChild(thread)
+    const unflagged = [
+      { role: 'assistant', text: 'plain reply', message_id: 'msg-1' },
+    ] as unknown as ChatMessage[]
+    const renderer = createHistoryRenderer(
+      historyDeps(thread, { fetchThinking: vi.fn().mockResolvedValue(null) }),
+    )
+    renderer.renderHistoryMessages(unflagged, pagingState(unflagged))
+    expect(thread.querySelector('.thinking-block')).toBeNull()
+
+    const flagged = [
+      { role: 'assistant', text: 'reply', message_id: 'msg-2', has_thinking: true },
+    ] as unknown as ChatMessage[]
+    const noFetcher = createHistoryRenderer(historyDeps(thread))
+    noFetcher.renderHistoryMessages(flagged, pagingState(flagged))
+    expect(thread.querySelector('.thinking-block')).toBeNull()
+  })
+})

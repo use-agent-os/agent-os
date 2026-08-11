@@ -81,6 +81,9 @@ from agentos.provider import (
     TextDeltaEvent as ProviderTextDelta,
 )
 from agentos.provider import (
+    ThinkingDeltaEvent as ProviderThinkingDelta,
+)
+from agentos.provider import (
     ToolUseStartEvent as ProviderToolUseStart,
 )
 from agentos.provider.failures import ProviderFailureKind, classify_provider_error
@@ -125,6 +128,7 @@ from .types import (
     RunHeartbeatEvent,
     StateChangeEvent,
     TextDeltaEvent,
+    ThinkingEvent,
     ThinkingLevel,
     ToolCall,
     ToolResult,
@@ -2239,6 +2243,12 @@ class Agent:
                                 if raw_ev.text:
                                     attempt_user_visible_emitted = True
                                 yield TextDeltaEvent(text=raw_ev.text)
+
+                            elif isinstance(raw_ev, ProviderThinkingDelta):
+                                # Reasoning is display-only: never mixed into the
+                                # reply text, never counted as user-visible output.
+                                if raw_ev.text:
+                                    yield ThinkingEvent(text=raw_ev.text)
 
                             elif isinstance(raw_ev, ProviderToolUseStart):
                                 if not tools_supported_for_call:

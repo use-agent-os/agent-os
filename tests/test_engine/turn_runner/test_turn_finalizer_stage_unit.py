@@ -472,7 +472,9 @@ async def test_reasoning_content_included_for_deepseek_model() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reasoning_content_excluded_for_non_deepseek_model() -> None:
+async def test_reasoning_content_persisted_for_any_model() -> None:
+    # Persistence is provider-agnostic (the WebUI renders reasoning from
+    # history); only provider-side REPLAY stays model-gated.
     stage, recs = _make_stage()
     done = DoneEvent(
         text="hi",
@@ -487,7 +489,7 @@ async def test_reasoning_content_excluded_for_non_deepseek_model() -> None:
         resolved_model="synthetic-long-model-4",
     )
     await stage.run(inp)
-    assert recs["transcript_append"].calls[0]["reasoning_content"] is None
+    assert recs["transcript_append"].calls[0]["reasoning_content"] == "thinking..."
 
 
 @pytest.mark.asyncio

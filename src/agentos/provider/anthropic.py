@@ -25,6 +25,7 @@ from .types import (
     ModelInfo,
     StreamEvent,
     TextDeltaEvent,
+    ThinkingDeltaEvent,
     ToolDefinition,
     ToolUseDeltaEvent,
     ToolUseEndEvent,
@@ -518,7 +519,10 @@ class AnthropicProvider:
                                 else:
                                     log.debug("anthropic.unknown_delta_index", index=index)
                             elif dtype == "thinking_delta":
-                                thinking_parts.append(delta.get("thinking", ""))
+                                thinking_text = delta.get("thinking", "")
+                                thinking_parts.append(thinking_text)
+                                if thinking_text:
+                                    yield ThinkingDeltaEvent(text=thinking_text)
                             elif dtype == "signature_delta":
                                 thinking_signature = delta.get("signature") or thinking_signature
 

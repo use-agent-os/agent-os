@@ -18,6 +18,7 @@ import type { TurnMeta, TurnUsage } from './message'
 import type { TranscriptHeaderStateRef } from './stream'
 import { historyFallbackMessageIdentity, historyStableMessageIdentity } from '../logic'
 import { routerFxRequestKindFromAttachments, type RouterFxHistoryOptions } from './routerFx'
+import { createThinkingBlock, wireLazyThinkingBlock } from './thinking'
 
 /** chat.js:350 — history page size for `chat.history` reads. */
 export const CHAT_HISTORY_PAGE_SIZE = 50
@@ -218,6 +219,10 @@ export interface HistoryRenderDeps {
   /** Live nodes preserved/reordered during a history refresh (chat.js:5554-5587/5753-5777). */
   getStreamBubble: () => HTMLElement | null
   getThinkingIndicator: () => HTMLElement | null
+  /** Live reasoning block row (AgentOS-native; kept alongside the stream bubble). */
+  getLiveThinkingBlock?: () => HTMLElement | null
+  /** `chat.thinking` fetch-on-expand for history rows flagged `has_thinking`. */
+  fetchThinking?: (messageId: string) => Promise<string | null>
   getCurrentSessionLiveUserAnchor: () => HTMLElement | null
   getPendingFinalizedAssistantBubble: () => HTMLElement | null
   isPendingFinalizedAssistantBubble: (el: HTMLElement | null) => boolean
@@ -450,12 +455,20 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
       const streamBubble = deps.getStreamBubble()
       const liveUserAnchor = deps.getCurrentSessionLiveUserAnchor()
       const thinking = deps.getThinkingIndicator()
+      const liveThinkingBlock = deps.getLiveThinkingBlock?.() || null
       if (deps.isStreaming() && (streamBubble || liveUserAnchor || thinking)) {
         th.querySelectorAll<HTMLElement>('.msg').forEach((el) => {
-          if (el !== streamBubble && el !== liveUserAnchor && el !== thinking) el.remove()
+          if (
+            el !== streamBubble &&
+            el !== liveUserAnchor &&
+            el !== thinking &&
+            el !== liveThinkingBlock
+          )
+            el.remove()
         })
         th.querySelectorAll('.chat-day-sep, .chat-empty').forEach((el) => el.remove())
         if (liveUserAnchor && !liveUserAnchor.isConnected) th.appendChild(liveUserAnchor)
+        if (liveThinkingBlock && !liveThinkingBlock.isConnected) th.appendChild(liveThinkingBlock)
         if (streamBubble && !streamBubble.isConnected) th.appendChild(streamBubble)
         if (thinking && !thinking.isConnected) th.appendChild(thinking)
         if (deps.shouldAutoScroll()) th.scrollTop = th.scrollHeight
@@ -572,6 +585,23 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
         deps.reconstructToolCalls(div, toolCalls)
       }
 
+      // Collapsed reasoning block at the top of the body; the reasoning text
+      // itself is fetched from `chat.thinking` on first expand.
+      const hasThinking = Boolean((msg as { has_thinking?: boolean }).has_thinking)
+      if (msg.role === 'assistant' && hasThinking && deps.fetchThinking) {
+        const messageId = String(
+          (msg as { message_id?: string | number | null }).message_id ??
+            (msg as { id?: string | number | null }).id ??
+            '',
+        )
+        const body = div.querySelector<HTMLElement>('.msg-body')
+        if (body && messageId && !body.querySelector('.thinking-block')) {
+          const parts = createThinkingBlock({ open: false })
+          wireLazyThinkingBlock(parts, () => deps.fetchThinking!(messageId))
+          body.insertAdjacentElement('afterbegin', parts.details)
+        }
+      }
+
       const attachments = historyMessageRecords(msg, 'attachments')
       if (attachments.length > 0) {
         const body = div.querySelector<HTMLElement>('.msg-body')
@@ -645,9 +675,11 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
     const streamBubble = deps.getStreamBubble()
     const thinking = deps.getThinkingIndicator()
     const liveUserAnchor = deps.getCurrentSessionLiveUserAnchor()
+    const liveThinkingBlock = deps.getLiveThinkingBlock?.() || null
     th.querySelectorAll<HTMLElement>('.msg').forEach((el) => {
       if (deps.isStreaming() && el === streamBubble) return
       if (deps.isStreaming() && el === thinking) return
+      if (deps.isStreaming() && el === liveThinkingBlock) return
       if (deps.isStreaming() && el === liveUserAnchor) return
       if (deps.isPendingFinalizedAssistantBubble(el) && historyStillWaitingForAssistant(messages))
         return

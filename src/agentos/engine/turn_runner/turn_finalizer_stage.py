@@ -425,7 +425,6 @@ class TurnFinalizerStage:
         import json as _json
 
         from agentos.engine.runtime import (
-            _is_deepseek_model_id,
             _normalize_heartbeat_text,
         )
         from agentos.engine.turn_runner.outcome import StageOutcome
@@ -473,12 +472,12 @@ class TurnFinalizerStage:
                 if inp.turn_artifacts
                 else final_text
             )
+            # Persist reasoning for every provider: the WebUI renders it from
+            # history (fetch-on-expand). Whether it is REPLAYED to a provider on
+            # later turns stays a per-provider decision
+            # (``_should_replay_reasoning_content``), not a persistence one.
             reasoning_content: str | None = None
-            if (
-                inp.done_event is not None
-                and inp.done_event.reasoning_content
-                and _is_deepseek_model_id(inp.done_event.model or inp.resolved_model or "")
-            ):
+            if inp.done_event is not None and inp.done_event.reasoning_content:
                 reasoning_content = inp.done_event.reasoning_content
             token_count = inp.done_event.output_tokens if inp.done_event is not None else None
             transcript_appended = await self._transcript_append.append_message(

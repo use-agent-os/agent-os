@@ -202,6 +202,7 @@ function helpMap(): Record<string, string> {
     context_overflow_policy: t('config.helpContextOverflowPolicy'),
     auth_mode: t('config.helpAuthMode'),
     'control_ui.allowed_origins': t('config.helpControlUiAllowedOrigins'),
+    'control_ui.show_thinking': t('config.helpControlUiShowThinking'),
   }
 }
 

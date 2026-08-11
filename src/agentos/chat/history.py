@@ -59,6 +59,10 @@ def transcript_entries_to_chat_messages(
         transcript_id = getattr(entry, "id", None)
         if transcript_id is not None:
             msg["transcript_id"] = transcript_id
+        # Cheap flag only — the reasoning body itself is served on demand by
+        # ``chat.thinking`` so history pages don't balloon with thinking text.
+        if getattr(entry, "reasoning_content", None):
+            msg["has_thinking"] = True
         if attachments:
             msg["attachments"] = attachments
         if artifacts:

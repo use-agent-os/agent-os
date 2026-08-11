@@ -103,6 +103,9 @@ class ControlUiConfig(BaseSettings):
     enabled: bool = True
     base_path: str = "/control"
     allowed_origins: list[str] = Field(default_factory=list)
+    # Stream model reasoning to the WebUI and expose it in chat history.
+    # WebUI-only: channel adapters never receive thinking, regardless of this flag.
+    show_thinking: bool = True
 
     @field_validator("base_path")
     @classmethod

@@ -26,6 +26,7 @@ from .error_body import read_bounded_body, summarize_error_body
 from .minimax_compat import contains_minimax_protocol, parse_minimax_tool_calls
 from .openrouter_attribution import openrouter_app_headers
 from .protocol import ProviderConnectionConfig, ProviderMetadata
+from .reasoning import ThinkTagStreamSplitter
 from .request_proof import (
     ProviderRequestBudgetExceededError,
     prove_provider_payload_from_env,
@@ -40,6 +41,7 @@ from .types import (
     ProviderHeartbeatEvent,
     StreamEvent,
     TextDeltaEvent,
+    ThinkingDeltaEvent,
     ToolDefinition,
     ToolUseDeltaEvent,
     ToolUseEndEvent,
@@ -905,6 +907,13 @@ class OpenAIProvider:
         pending_calls: dict[int, dict[str, Any]] = {}
         reasoning_parts: list[str] = []
         assistant_text_parts: list[str] = []
+        # think_tags models interleave reasoning into the content stream; the
+        # splitter routes it to reasoning_parts so it never reaches user text.
+        think_splitter = (
+            ThinkTagStreamSplitter()
+            if caps is not None and caps.reasoning_format == "think_tags"
+            else None
+        )
         input_tokens = 0
         output_tokens = 0
         reasoning_tokens = 0
@@ -1042,8 +1051,17 @@ class OpenAIProvider:
                             text = delta.get("content")
                             if text:
                                 emitted_stream_event = True
-                                yield TextDeltaEvent(text=text)
-                                assistant_text_parts.append(text)
+                                if think_splitter is not None:
+                                    visible, thinking = think_splitter.feed(text)
+                                    if visible:
+                                        yield TextDeltaEvent(text=visible)
+                                        assistant_text_parts.append(visible)
+                                    if thinking:
+                                        reasoning_parts.append(thinking)
+                                        yield ThinkingDeltaEvent(text=thinking)
+                                else:
+                                    yield TextDeltaEvent(text=text)
+                                    assistant_text_parts.append(text)
 
                             # Reasoning content (always parsed, not gated on thinking)
                             reasoning_details = delta.get("reasoning_details")
@@ -1053,9 +1071,11 @@ class OpenAIProvider:
                                         text_val = detail.get("text", "")
                                         if text_val:
                                             reasoning_parts.append(text_val)
+                                            yield ThinkingDeltaEvent(text=text_val)
                             reasoning_str = delta.get("reasoning_content")
                             if reasoning_str:
                                 reasoning_parts.append(reasoning_str)
+                                yield ThinkingDeltaEvent(text=reasoning_str)
 
                             # Tool calls (may stream over multiple chunks)
                             for tc in delta.get("tool_calls") or []:
@@ -1092,6 +1112,17 @@ class OpenAIProvider:
                                         tool_use_id=pending_calls[idx]["id"],
                                         json_fragment=fragment,
                                     )
+
+                    # Resolve any partial <think> tag held back at end of stream.
+                    if think_splitter is not None:
+                        visible, thinking = think_splitter.flush()
+                        if visible:
+                            emitted_stream_event = True
+                            yield TextDeltaEvent(text=visible)
+                            assistant_text_parts.append(visible)
+                        if thinking:
+                            reasoning_parts.append(thinking)
+                            yield ThinkingDeltaEvent(text=thinking)
 
                     # Emit ToolUseEnd for each completed call
                     for call in pending_calls.values():

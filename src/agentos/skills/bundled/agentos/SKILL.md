@@ -189,7 +189,7 @@ Main `agentos.toml` sections (full commented reference:
 | `[sandbox]` | `sandbox`, `default_level` (DISABLED/STANDARD/STRICT/LOCKED), `backend`, network/mounts |
 | `[permissions]` | `default_mode` = `off` \| `on` \| `bypass` \| `full` (pair with `agentos sandbox …`) |
 | `[auth]` | gateway admission: `mode` (`none` on loopback or `token`), `token` |
-| `[control_ui]` | `allowed_origins` for reverse-proxy setups |
+| `[control_ui]` | `allowed_origins` for reverse-proxy setups; `show_thinking` (default true) streams model reasoning to the WebUI as collapsible blocks — WebUI-only, channels never receive it |
 | `[updates]` | `notify` (default true) — the once-per-24h "new release available" notice |
 | `[channels]` | messaging channels (`[[channels.channels]]` entries) |
 | `[auxiliary]` | model for work AgentOS runs itself, not the agent's turn (document analysis, image description): `provider`, `model`, `timeout_seconds`, `[auxiliary.tasks.<task>]`. Empty = reuse `[llm]` |

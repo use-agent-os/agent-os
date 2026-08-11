@@ -518,6 +518,10 @@ default_mode = "bypass"                 # off | on | bypass | full
 # default ports 80/443 are normalized, so "https://agent.example.com" and
 # "https://agent.example.com:443" are equivalent):
 # allowed_origins = ["https://agent.example.com"]
+# Stream model reasoning ("thinking") into the WebUI live and expose it in chat
+# history as collapsible blocks. WebUI-only: channel adapters (Slack, Telegram,
+# ...) never receive thinking regardless of this flag. Default: true.
+# show_thinking = true
 
 # [channels]
 # [[channels.channels]]

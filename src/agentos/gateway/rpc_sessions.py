@@ -1251,6 +1251,8 @@ async def _handle_sessions_send(params: dict | None, ctx: RpcContext) -> dict:
             heartbeat_interval = _optional_positive_timeout(
                 ctx.config, "agent_stream_heartbeat_interval_seconds", 15.0
             )
+            control_ui_cfg = getattr(ctx.config, "control_ui", None)
+            show_thinking = bool(getattr(control_ui_cfg, "show_thinking", True))
             async for event in wrap_stream(
                 raw_stream,
                 idle_timeout=stream_idle_timeout,
@@ -1259,6 +1261,10 @@ async def _handle_sessions_send(params: dict | None, ctx: RpcContext) -> dict:
             ):
                 event_dict = asdict(event)
                 event_kind = event_dict.pop("kind", event.__class__.__name__)
+                if event_kind == "thinking" and not show_thinking:
+                    continue
+                if event_kind == "done" and not show_thinking:
+                    event_dict.pop("reasoning_content", None)
                 if event_kind in ("done", "error"):
                     await _emit_terminal_once(f"session.event.{event_kind}", event_dict)
                 else:
