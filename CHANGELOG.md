@@ -6,8 +6,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.8.11] - 2026-08-11
+
 ### Added
 
+- A built-in `x_search` tool searches X (Twitter) through xAI's server-side
+  search on the Responses API, returning a synthesized answer with citations
+  rather than the ranked pages a web search provider returns — so it is its own
+  tool, not a `web_search` backend. It joins `group:web`, so denying that group
+  also cuts the route to `api.x.ai`, and it is allowed for cron agents next to
+  `web_fetch`/`web_search` because it is read-only. Visibility follows the
+  `image_generation` pattern: an install with no xAI credential never pays the
+  tool's schema on a provider call. Retries are deadline-aware —
+  `timeout_seconds` bounds one attempt and `total_timeout_seconds` the whole
+  call — and `base_url` must be HTTPS and is refused if it resolves to a
+  metadata endpoint. `x_search` bills xAI directly and does not appear in
+  `agentos cost`. Configure it at `[x_search]` with hot-apply, from the Setup
+  page, or with `agentos configure x-search`. (Fixes #277)
+- SuperGrok and X Premium+ subscribers can now sign in to xAI instead of pasting
+  an API key, which is the only way to spend a subscription on `x_search` — xAI
+  sells API credit and subscriptions separately, and a subscriber holds no key.
+  `agentos auth login xai` runs the device-code flow, tokens land in
+  `~/.agentos/auth.json` (0600) and refresh themselves, `agentos auth status`
+  reports the login without printing a token, and `agentos auth logout xai`
+  forgets it. OAuth is preferred over `XAI_API_KEY` at call time, and
+  `credential_source` says which one ran. Discovery and inference origins are
+  pinned to HTTPS on `x.ai`/`*.x.ai` on both the login and refresh paths, a
+  `403` on refresh is reported as a tier gate rather than a re-login prompt, a
+  terminal refusal quarantines the dead tokens, and refresh is serialized by a
+  lock because xAI's refresh tokens are single-use. The Setup page can drive the
+  same flow without blocking, over a split `start`/`poll` pair, and offers
+  "Sign out of xAI" once signed in; the device code never crosses to the
+  browser. Signing out forgets local tokens only — nothing is revoked at xAI,
+  and `x_search` falls back to `XAI_API_KEY` if one is set.
+- Every Web UI view now resolves its copy through the i18n seam. The shell and
+  all sixteen views — chat, setup, config, settings, agents, sessions, usage,
+  skills, channels, mcp, cron and the rest — read from per-namespace catalogs
+  instead of carrying hardcoded English, with an `I18N_MIGRATED` ESLint ledger
+  guarding each migrated file against regressions. Two rules back it:
+  user-facing copy must come from `t()`, and `t()` must be called at render
+  time, since a module-scope call freezes the locale at boot. Catalogs are
+  registered per namespace so a view's copy stays out of the entry chunk,
+  numeric placeholders format through `Intl.NumberFormat`, and malformed locale
+  tags are rejected at registration rather than throwing later in `tPlural()`.
+  The visible language is unchanged. (Fixes #138, #257, #258, #259, #260, #261)
 - Translation requests now route to the cheapest tier. The router scores
   reasoning difficulty rather than task type, so an ordinary "translate this"
   landed on `c1` even in English — and because the Pilot corpus is English-only,
@@ -39,6 +81,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   rather than either suppressing it for the run or letting it flicker back under
   a message that is already being edited. `typing_final` and `final_only`
   adapters are unchanged. (Fixes #255)
+- External links in the Web UI transcript open in a new tab instead of replacing
+  the chat, and a rejected sign-out is reported as a sign-out failure rather
+  than "Sign-in failed" — both paths used to render through one label, pointing
+  the operator at the wrong thing right after a successful sign-in.
+- Writing the auth token store no longer fails on platforms without POSIX mode
+  bits.
 
 ## [2026.8.9] - 2026-08-09
 

@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-default_version="v2026.8.9"
+default_version="v2026.8.11"
 repo_slug="${AGENTOS_REPOSITORY:-use-agent-os/agent-os}"
 python_version="${AGENTOS_PYTHON_VERSION:-3.12}"
 original_path="${PATH:-}"
@@ -18,10 +18,10 @@ cli_extras=""
 
 usage() {
     cat <<HELP
-Usage: bash install.sh [--version v2026.8.9|latest] [--profile recommended|core] [--extras name[,name]]
+Usage: bash install.sh [--version v2026.8.11|latest] [--profile recommended|core] [--extras name[,name]]
 
 Environment equivalents:
-  AGENTOS_VERSION=v2026.8.9
+  AGENTOS_VERSION=v2026.8.11
   AGENTOS_INSTALL_PROFILE=recommended|core
   AGENTOS_INSTALL_EXTRAS=document-extras
   AGENTOS_INSTALL_DRY_RUN=1
