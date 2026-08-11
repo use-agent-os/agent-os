@@ -530,6 +530,63 @@
     0 18px 46px color-mix(in srgb, var(--background) 42%, transparent);
 }
 
+/* ── Busy composer: brighter border + a light sweeping around it ────────── */
+@property --chat-composer-sweep {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.chat-surface .chat-composer--busy {
+  position: relative;
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--primary) 8%, transparent),
+    0 0 22px color-mix(in srgb, var(--primary) 14%, transparent),
+    0 18px 46px color-mix(in srgb, var(--background) 42%, transparent);
+}
+
+/* The ring: a conic highlight orbiting the border, masked to a 2px outline.
+   Later than (and same specificity as) the ::before/::after neutralizer above,
+   so this rule wins while busy. */
+.chat-surface .chat-composer--busy::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: calc(var(--chat-composer-radius) + 2px);
+  padding: 2px;
+  background: conic-gradient(
+    from var(--chat-composer-sweep),
+    transparent 0deg 268deg,
+    color-mix(in srgb, var(--primary) 45%, transparent) 300deg,
+    color-mix(in srgb, var(--primary) 95%, #fff) 332deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: chat-composer-sweep 2.4s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes chat-composer-sweep {
+  to {
+    --chat-composer-sweep: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-surface .chat-composer--busy::after {
+    animation: none;
+    opacity: 0.55;
+  }
+}
+
 .chat-surface .chat-composer__input {
   min-height: 2.75rem;
   padding: 0.7rem 0.5rem;

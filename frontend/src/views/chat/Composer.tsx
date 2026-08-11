@@ -485,7 +485,7 @@ export function Composer({
       {routerFxDock}
       {tray}
       {slashMenu}
-      <div className="chat-composer">
+      <div className={busy ? 'chat-composer chat-composer--busy' : 'chat-composer'}>
         {toolbar ? (
           <div className="chat-toolbar-wrap" ref={toolbarWrapRef}>
             <button
