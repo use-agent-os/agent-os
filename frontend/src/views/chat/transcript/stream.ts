@@ -790,21 +790,34 @@ export function createStreamController(
     if (!_isStreaming) startStreaming()
     // Real reasoning replaces the synthetic indicator.
     hideThinkingIndicator()
-    if (!_thinkingBlockRow || !_thinkingBlockRow.isConnected) {
-      const th = thread()
-      if (!th) return
-      const row = document.createElement('div')
-      row.className = 'msg assistant thinking-live'
-      row.dataset.sessionKey = _streamSessionKey || getSessionKey() || ''
-      const body = document.createElement('div')
-      body.className = 'msg-body'
+    // A collapsed block means its reasoning round is over (reply text already
+    // started). New reasoning — e.g. between tool rounds — opens a FRESH block
+    // so the user always sees live streaming while the model thinks.
+    const needNewBlock =
+      !_thinkingBlockDetails || !_thinkingBlockDetails.isConnected || !_thinkingBlockDetails.open
+    if (needNewBlock) {
       const parts = createThinkingBlock({ open: true })
-      body.appendChild(parts.details)
-      row.appendChild(body)
-      // Reasoning precedes reply text: keep the block above the live bubble.
-      if (_streamBubble && _streamBubble.isConnected) th.insertBefore(row, _streamBubble)
-      else th.appendChild(row)
-      _thinkingBlockRow = row
+      const bubbleBody = _streamBubble?.isConnected
+        ? _streamBubble.querySelector<HTMLElement>('.msg-body')
+        : null
+      if (bubbleBody) {
+        // Mid-turn reasoning: ride inside the stream bubble so the block sits
+        // chronologically after the text/tool segments already rendered.
+        bubbleBody.appendChild(parts.details)
+        _thinkingBlockRow = null
+      } else {
+        const th = thread()
+        if (!th) return
+        const row = document.createElement('div')
+        row.className = 'msg assistant thinking-live'
+        row.dataset.sessionKey = _streamSessionKey || getSessionKey() || ''
+        const body = document.createElement('div')
+        body.className = 'msg-body'
+        body.appendChild(parts.details)
+        row.appendChild(body)
+        th.appendChild(row)
+        _thinkingBlockRow = row
+      }
       _thinkingBlockDetails = parts.details
       _thinkingBlockContent = parts.content
       _thinkingBlockRaw = ''
@@ -816,8 +829,8 @@ export function createStreamController(
   }
 
   function collapseLiveThinkingBlock(): void {
-    // Reply text started (or the turn ended): fold the reasoning away. Later
-    // reasoning in the same turn keeps accumulating into the collapsed block.
+    // Reply text started (or the turn ended): fold this reasoning round away.
+    // Later reasoning in the same turn opens a fresh block (appendThinkingDelta).
     if (_thinkingBlockDetails?.open) {
       _thinkingBlockDetails.open = false
       diag('thinking.block.collapse', {})
