@@ -235,9 +235,9 @@ agentos upgrade --timeout 900   # bound the upgrade subprocess (default 600s)
 
 Per install method:
 
-- **uv tool** — delegated automatically as `uv tool install --force --python
-  <running major.minor> "use-agent-os[recommended]"`, resolving `uv` to an
-  absolute path over a hardened PATH. `install` rather than `upgrade` is
+- **uv tool** — delegated automatically as
+  `uv tool install --force --python <running major.minor> "use-agent-os[recommended]"`,
+  resolving `uv` to an absolute path over a hardened PATH. `install` rather than `upgrade` is
   load-bearing: `uv tool upgrade` takes only a bare tool name and re-resolves
   whatever uv's receipt recorded, so an install laid down from a checkout
   (`install_source.sh` passes `.`) keeps rebuilding the wheel from the working
