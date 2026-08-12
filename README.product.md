@@ -4,8 +4,9 @@
 
 # AgentOS Product Guide
 
-AgentOS is a token-efficient AI agent with on-device Pilot Router, for
-the terminal, a local Web UI, and messaging channels. It is designed for users who want one
+AgentOS is an AI agent with native agentic trading, for
+the terminal, a local Web UI, and messaging channels. An on-device Pilot Router
+classifies each task locally and routes it to the cheapest capable model. It is designed for users who want one
 agent surface that can chat, use tools, remember useful context, run scheduled
 work, publish artifacts, and route work across multiple LLM providers without
 rewriting their workflow for each provider.

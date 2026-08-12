@@ -1,12 +1,13 @@
-# AgentOS — Token-Efficient AI Agent with On-Device Pilot Router
+# AgentOS — Native Agentic Trading AI Agent, Token-Efficient by Design
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/use-agent-os/agent-os/main/assets/agentos-hero-banner.png" alt="AgentOS — The Open Agent Operating System">
+  <img src="https://raw.githubusercontent.com/use-agent-os/agent-os/main/assets/agentos-hero-banner.png" alt="AgentOS — Native agentic trading, minimum tokens.">
 </p>
 
 <p align="center">
-  <b>Stop overpaying for AI. Let the router cook.</b><br>
-  A token-efficient AI agent with on-device Pilot Router for your CLI, Web UI, and chat channels.
+  <b>Native agentic trading, minimum tokens.</b><br>
+  An AI agent with native agentic trading, across CLI, Web UI, and chat channels.<br>
+  An on-device Pilot Router classifies each task locally and routes it to the cheapest capable model.
 </p>
 
 <p align="center">

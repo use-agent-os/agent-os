@@ -15,6 +15,15 @@ channels, scheduling, and reusable skills.
 
 ## Distinctive Features
 
+### Agentic Trading
+
+Trading is a first-class capability. A featured Robinhood Trading MCP preset and
+bundled skills cover market research, portfolio analysis, order execution, and
+liquidity management, behind explicit confirmation and the standard approval
+layers.
+
+Read: [`features/agentic-trading.md`](features/agentic-trading.md)
+
 ### Pilot Router
 
 Local routing for model tier selection. It is designed to keep easy turns cheap
