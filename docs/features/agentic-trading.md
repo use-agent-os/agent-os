@@ -116,15 +116,14 @@ while a look-alike dropped on disk does not — see
 | Skill | Publisher | What it does |
 | --- | --- | --- |
 | `bankr` | Bankr | Natural-language crypto trading, tokenized stocks and ETFs (spot or leveraged), portfolio balances with P&L, transfers, token deploys, and automated trading across Base, Ethereum, Polygon, Solana, Unichain, Arbitrum, BNB Chain, and Robinhood Chain. Also fronts the Bankr LLM gateway. |
-| `bankr-token-scam-analysis` | Bankr | Forensic on-chain rug and soft-rug analysis for EVM tokens: deployer behaviour, holder concentration, migration narratives, and a written risk verdict. Installs as `token-scam-analysis`. |
 | `capminal` | Capminal | Cap Wallet operations: deploy tokens via Clanker, Liquid, or Virtuals, claim rewards, manage limit, stop-loss, TWAP, and DCA orders, bridge between Base and Robinhood Chain, and discover x402 APIs. |
-| `contract-interaction` | Capminal | Read, batch-read (multicall), and write any contract on Base or Robinhood Chain from a supplied ABI, address, function, and parameters. |
-| `morse-launch-b20` | Capminal | Launch a B20 token on Base through the B20 factory precompile — encode, create, mint, and verify. |
 
-The Bankr skills need the `@bankr/cli` install and a Bankr login; the Capminal
-skills need `CAP_API_KEY`. Both authorize spending — treat them as credentials
-and read [`skills.md`](skills.md) for how requirements are surfaced before an
-install.
+Each publisher carries further skills in the same catalog; browse the Community
+tab to see the current list.
+
+`bankr` needs the `@bankr/cli` install and a Bankr login; `capminal` needs
+`CAP_API_KEY`. Both authorize spending — treat them as credentials and read
+[`skills.md`](skills.md) for how requirements are surfaced before an install.
 
 ## Local by default
 
