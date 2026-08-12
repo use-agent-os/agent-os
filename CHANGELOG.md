@@ -6,8 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.8.12] - 2026-08-12
+
 ### Added
 
+- The Web UI now shows the model thinking. Reasoning arrives as a typed
+  `ThinkingDeltaEvent` from the Anthropic, OpenAI-compatible and Ollama
+  providers — including models that emit `<think>` tags inline, split back out
+  of the text stream as it arrives — and renders as a live collapsible block
+  that folds itself the moment the reply text starts. A fresh block opens per
+  reasoning round, so mid-turn work stays visible rather than being appended to
+  the first one. History carries a `has_thinking` flag so a reloaded thread
+  still offers the block. `control_ui.show_thinking` (default true) gates the
+  whole surface.
+- Thinking is web-only by construction. It travels on a `session.event.thinking`
+  emit path and a CONTROL_ONLY `chat.thinking` RPC, so channel adapters never
+  receive it — reasoning is not something to page a Telegram or Discord thread
+  with.
 - The chat composer now carries a route picker, so choosing which model answers
   no longer means remembering a slash command. It lists the text tiers your
   `[agentos_router]` config actually defines — labelled with the model each
@@ -58,6 +73,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   turn), and a pinned turn skips the large-context tier floor, so it fails at
   the provider rather than being upgraded if the conversation outgrows the
   pinned model's context window.
+
+### Fixed
+
+- A hub skill whose `SKILL.md` renames itself no longer renders as a local one.
+  The lockfile is keyed by the install directory but was read back by the name
+  the frontmatter declares, and published skills do rename themselves — hub
+  `ytdlp-transcript` ships a manifest named `youtube-transcript`. The lookup
+  missed, so an ordinary hub install appeared under "Your local skills" with no
+  source, no version, no scan facts and neither a Remove nor an Update button,
+  the same wrong row reaching `agentos skills list` and the agent's
+  `skill_list`. Entries now join by the resolved path they already record,
+  falling back to the name for entries written before `path` existed. The
+  removability guard read the manifest name too and so reported a removable
+  install as an orphan; `skills.uninstall` and `skills.update` — and the CLI's
+  no-gateway uninstall path — now translate to the install key the same way.
+  The wire contract is unchanged and existing installs heal themselves: no
+  lockfile migration, no re-install.
+- OpenCAP and Bankr routes reported `supports_reasoning=False` for every model,
+  which silently no-oped a tier's `thinking_level`.
 
 ## [2026.8.11] - 2026-08-11
 
