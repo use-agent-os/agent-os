@@ -5,12 +5,14 @@ analysis, and order execution reach the agent through partner-authorized
 connections and skills that ship with the product, so you do not have to wire up
 an unofficial API or paste credentials into a chat window.
 
-Two mechanisms provide it:
+Three mechanisms provide it:
 
 - **MCP connections** — a featured Robinhood Trading preset in the Web UI, and
   any other MCP server you choose to add.
 - **Bundled skills** — trading, research, and liquidity skills installed with
   AgentOS and loaded only when a task needs them.
+- **Partner skills** — Bankr and Capminal skills you install in one click from
+  the Community hub.
 
 Both run behind the same approval and sandbox layers as every other tool.
 
@@ -101,6 +103,28 @@ The GMGN skills require a `gmgn-cli` install plus `GMGN_API_KEY` and
 `GMGN_PRIVATE_KEY`. The signing key authorizes orders — treat it as a
 credential. See [`skills.md`](skills.md) for how skill requirements and secrets
 are declared and surfaced.
+
+## Partner trading skills from the Community hub
+
+These do not ship in the wheel. They are published by partners on the
+allowlist below and install in one click from **Skills > Community** (or with
+`agentos skills install <name>`). Because their publisher id arrives from the
+catalog row rather than from the skill text, they keep their brand on the card
+while a look-alike dropped on disk does not — see
+[Safety model](#safety-model).
+
+| Skill | Publisher | What it does |
+| --- | --- | --- |
+| `bankr` | Bankr | Natural-language crypto trading, tokenized stocks and ETFs (spot or leveraged), portfolio balances with P&L, transfers, token deploys, and automated trading across Base, Ethereum, Polygon, Solana, Unichain, Arbitrum, BNB Chain, and Robinhood Chain. Also fronts the Bankr LLM gateway. |
+| `bankr-token-scam-analysis` | Bankr | Forensic on-chain rug and soft-rug analysis for EVM tokens: deployer behaviour, holder concentration, migration narratives, and a written risk verdict. Installs as `token-scam-analysis`. |
+| `capminal` | Capminal | Cap Wallet operations: deploy tokens via Clanker, Liquid, or Virtuals, claim rewards, manage limit, stop-loss, TWAP, and DCA orders, bridge between Base and Robinhood Chain, and discover x402 APIs. |
+| `contract-interaction` | Capminal | Read, batch-read (multicall), and write any contract on Base or Robinhood Chain from a supplied ABI, address, function, and parameters. |
+| `morse-launch-b20` | Capminal | Launch a B20 token on Base through the B20 factory precompile — encode, create, mint, and verify. |
+
+The Bankr skills need the `@bankr/cli` install and a Bankr login; the Capminal
+skills need `CAP_API_KEY`. Both authorize spending — treat them as credentials
+and read [`skills.md`](skills.md) for how requirements are surfaced before an
+install.
 
 ## Local by default
 
