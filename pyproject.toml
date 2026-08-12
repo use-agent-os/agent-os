@@ -1,7 +1,7 @@
 [project]
 name = "use-agent-os"
 version = "2026.8.11"
-description = "Native agentic trading AI agent with on-device Pilot Router"
+description = "Local-first agentic trading AI agent with on-device Pilot Router"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]
 readme = "README.md"

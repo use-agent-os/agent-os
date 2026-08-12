@@ -1,6 +1,6 @@
 # AgentOS
 
-AgentOS is an AI agent with native agentic trading, an on-device Pilot Router,
+AgentOS is a local-first AI agent with native agentic trading, an on-device Pilot Router,
 MCP-native tools, durable sessions, local memory, multi-channel messaging,
 and a local web control UI.
 

@@ -1,12 +1,12 @@
-# AgentOS — Native Agentic Trading AI Agent, Token-Efficient by Design
+# AgentOS — Local-First Agentic Trading AI Agent, Token-Efficient by Design
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/use-agent-os/agent-os/main/assets/agentos-hero-banner.png" alt="AgentOS — Native agentic trading, minimum tokens.">
+  <img src="https://raw.githubusercontent.com/use-agent-os/agent-os/main/assets/agentos-hero-banner.png" alt="AgentOS — Local-first agentic trading, minimum tokens.">
 </p>
 
 <p align="center">
-  <b>Native agentic trading, minimum tokens.</b><br>
-  An AI agent with native agentic trading, across CLI, Web UI, and chat channels.<br>
+  <b>Local-first agentic trading, minimum tokens.</b><br>
+  An AI agent with native agentic trading that runs on your own machine, across CLI, Web UI, and chat channels.<br>
   An on-device Pilot Router classifies each task locally and routes it to the cheapest capable model.
 </p>
 

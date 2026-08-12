@@ -4,7 +4,7 @@
 
 # AgentOS Product Guide
 
-AgentOS is an AI agent with native agentic trading, for
+AgentOS is a local-first AI agent with native agentic trading, for
 the terminal, a local Web UI, and messaging channels. An on-device Pilot Router
 classifies each task locally and routes it to the cheapest capable model. It is designed for users who want one
 agent surface that can chat, use tools, remember useful context, run scheduled

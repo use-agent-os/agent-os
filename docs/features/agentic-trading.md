@@ -102,6 +102,32 @@ The GMGN skills require a `gmgn-cli` install plus `GMGN_API_KEY` and
 credential. See [`skills.md`](skills.md) for how skill requirements and secrets
 are declared and surfaced.
 
+## Local by default
+
+AgentOS runs on your own machine. For trading, that changes three things.
+
+**Credentials stay on the device.** MCP authorization tokens are written to a
+`0700` directory on POSIX systems; Windows uses the current user's
+state-directory ACL. The GMGN request-signing key (`GMGN_PRIVATE_KEY`) and the
+Uniswap LP signing key (`UNIV4_LP_PRIVATE_KEY`) are local environment values.
+Nothing is escrowed with a hosted service, and the agent never asks you to paste
+a credential into chat.
+
+**The routing decision never leaves the machine.** The Pilot Router classifies
+each turn on-device, so a strategy prompt is not shipped to a third party merely
+to decide which model should handle it. Only the turn that actually runs reaches
+your chosen model provider. See
+[`agentos-router.md`](agentos-router.md) for the classifier and its
+alternatives.
+
+**Always-on work runs on hardware you already have.** Scheduled and recurring
+trading tasks execute through the local gateway rather than a rented agent
+cloud — see [`../scheduling.md`](../scheduling.md). Combined with router-driven
+model selection, running an agent continuously stays inexpensive.
+
+What still leaves the machine is exactly what has to: the broker or exchange API
+calls themselves, and the model turns you route to a remote provider.
+
 ## Safety model
 
 Trading skills are held to a stricter standard than ordinary tools.
