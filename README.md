@@ -1,7 +1,7 @@
 # AgentOS — Local-First Agentic Trading AI Agent, Token-Efficient by Design
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/use-agent-os/agent-os/main/assets/agentos-hero-banner.png" alt="AgentOS — Local-first agentic trading, minimum tokens.">
+  <img src="https://raw.githubusercontent.com/use-agent-os/agent-os/main/assets/agentos-hero-banner.jpg" alt="AgentOS — Local-first agentic trading, minimum tokens.">
 </p>
 
 <p align="center">
