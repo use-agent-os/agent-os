@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.8.13] - 2026-08-13
+
+### Added
+
+- A bundled `poolsdotfun-token-launcher` crypto skill launches a token on
+  pools.fun through the `PartyFactory` on Robinhood Chain (4663) and manages the
+  creator fees on the `PartyLocker` afterwards. A launch is one irreversible
+  transaction: it CREATE2-deploys a fixed-supply ERC20 with no owner and no mint
+  function, opens a SushiSwap V3 pool at the 1% fee tier, and mints the whole
+  supply as a single-sided full-range position whose LP NFT goes to the locker
+  permanently — the launcher never holds it. The chain and RPC endpoint are
+  built in, so there is nothing to configure beyond `POOLSFUN_PRIVATE_KEY`.
+- The skill separates reading from signing. `pools_read.py` quotes cost, opening
+  price and pool state, simulates a launch and mines a launch salt using only a
+  `--from` address; `pools_write.py` is the only script that can sign. A launch
+  plan is hashed, so the transaction that broadcasts is provably the one that
+  was quoted.
+- `PINATA_JWT` is optional and needed only to attach a token image. It is
+  deliberately not declared as a skill requirement, so a launch without a logo
+  still works on a machine where Pinata was never configured.
+
+### Fixed
+
+- The launcher can now find a logo the user attached in chat. Chat attachments
+  arrive in two shapes — staged to disk under a sha256 name, or inlined as
+  base64 in the transcript — and the skill previously looked only at the media
+  directory, so an inlined image was missed and a stale disk blob could be
+  uploaded in its place. A `find-image` read command now resolves the image from
+  the transcript first, materializes it, and warns when the only candidate is
+  older than the request.
+
 ## [2026.8.12] - 2026-08-12
 
 ### Added
