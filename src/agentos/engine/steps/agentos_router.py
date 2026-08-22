@@ -775,9 +775,15 @@ def _get_cheapest_compatible_tier(target_tier: str, tiers: dict, valid_tiers: li
         if not model:
             continue
         provider = str(tier_cfg.get("provider") or "").strip().lower()
-        price = lookup_price(model, provider_id=provider)
-        # Primary cost metric: input_per_m + output_per_m
-        cost_signal = price.input_per_m + price.output_per_m
+        from agentos.provider.registry import is_local_provider
+
+        if is_local_provider(provider):
+            cost_signal = 0.0
+        else:
+            price = lookup_price(model, provider_id=provider)
+            # Primary cost metric: input_per_m + output_per_m
+            cost_signal = price.input_per_m + price.output_per_m
+
         if cost_signal < cheapest_price:
             cheapest_price = cost_signal
             cheapest_tier = tier
@@ -1002,9 +1008,14 @@ def _apply_large_context_floor(
     if _tier_index(decision.tier, valid_tiers) >= _tier_index(min_tier, valid_tiers):
         return decision
 
-    cheapest_tier = _get_cheapest_compatible_tier(min_tier, tiers, valid_tiers)
-    if cheapest_tier != min_tier:
-        min_tier = cheapest_tier
+    cost_aware = True
+    if ctx.config and ctx.config.agentos_router:
+        cost_aware = getattr(ctx.config.agentos_router, "cost_aware", True)
+
+    if cost_aware:
+        cheapest_tier = _get_cheapest_compatible_tier(min_tier, tiers, valid_tiers)
+        if cheapest_tier != min_tier:
+            min_tier = cheapest_tier
     floored = RoutingDecision(
         tier=min_tier,
         model=tiers[min_tier].get("model", decision.model),
@@ -1213,16 +1224,21 @@ def _finalize_decision(
         }
     )
 
-    cheapest_tier = _get_cheapest_compatible_tier(final_tier, tiers, valid_tiers)
-    if cheapest_tier != final_tier:
-        log.info(
-            "router.cost_aware_override",
-            original_tier=final_tier,
-            cheapest_tier=cheapest_tier,
-            original_model=tiers[final_tier].get("model"),
-            cheapest_model=tiers[cheapest_tier].get("model"),
-        )
-        final_tier = cheapest_tier
+    cost_aware = True
+    if router_cfg is not None:
+        cost_aware = getattr(router_cfg, "cost_aware", True)
+
+    if cost_aware:
+        cheapest_tier = _get_cheapest_compatible_tier(final_tier, tiers, valid_tiers)
+        if cheapest_tier != final_tier:
+            log.info(
+                "router.cost_aware_override",
+                original_tier=final_tier,
+                cheapest_tier=cheapest_tier,
+                original_model=tiers[final_tier].get("model"),
+                cheapest_model=tiers[cheapest_tier].get("model"),
+            )
+            final_tier = cheapest_tier
 
     return RoutingDecision(
         tier=final_tier,
@@ -1503,9 +1519,14 @@ async def apply_agentos_router(ctx: TurnContext) -> TurnContext:
         source = "default"
         probs = synthetic_one_hot(tier_name)
 
-    cheapest_tier = _get_cheapest_compatible_tier(tier_name, tiers, valid_tiers)
-    if cheapest_tier != tier_name:
-        tier_name = cheapest_tier
+    cost_aware = True
+    if ctx.config and ctx.config.agentos_router:
+        cost_aware = getattr(ctx.config.agentos_router, "cost_aware", True)
+
+    if cost_aware:
+        cheapest_tier = _get_cheapest_compatible_tier(tier_name, tiers, valid_tiers)
+        if cheapest_tier != tier_name:
+            tier_name = cheapest_tier
     decision = RoutingDecision(
         tier=tier_name,
         model=tiers[tier_name].get("model", ctx.model),

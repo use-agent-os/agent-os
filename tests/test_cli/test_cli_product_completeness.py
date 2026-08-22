@@ -58,8 +58,8 @@ class FakeGatewayClient:
         type(self).calls.append(("sessions.abort", {"key": key}))
         return type(self).rpc_payloads.get("sessions.abort", {"aborted": False, "key": key})
 
-    async def usage_cost(self) -> dict[str, Any]:
-        type(self).calls.append(("usage.cost", {}))
+    async def usage_cost(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        type(self).calls.append(("usage.cost", params or {}))
         return type(self).cost_payload
 
 

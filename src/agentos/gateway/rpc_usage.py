@@ -653,28 +653,103 @@ async def _handle_usage_cost(params: dict | None, ctx: RpcContext) -> dict[str, 
             or params.get("key"),
         }
 
+    rows = []
     if ctx.usage_tracker is not None:
         rows = ctx.usage_tracker.query_usage(**query_params)
+
+    if not rows and ctx.session_manager is not None:
+        try:
+            sessions = await ctx.session_manager.list_sessions()
+            for s in sessions:
+                s_key = _field(s, "session_key", "unknown")
+                agent_id, channel = (
+                    ctx.usage_tracker.get_session_scope(s_key)
+                    if ctx.usage_tracker
+                    else ("unknown", "unknown")
+                )
+                if query_params.get("session_key") and query_params["session_key"] != s_key:
+                    continue
+                if query_params.get("agent_id") and query_params["agent_id"] != agent_id:
+                    continue
+                if query_params.get("channel_type") and query_params["channel_type"] != channel:
+                    continue
+                if (
+                    query_params.get("tool_name")
+                    or query_params.get("skill")
+                    or query_params.get("start_date")
+                    or query_params.get("end_date")
+                ):
+                    continue
+
+                input_tokens = _first_field(s, "input_tokens", "total_input_tokens", default=0) or 0
+                output_tokens = (
+                    _first_field(s, "output_tokens", "total_output_tokens", default=0) or 0
+                )
+                cache_read = _field(s, "cache_read", 0) or 0
+                cache_write = _field(s, "cache_write", 0) or 0
+                cost_fields = _resolved_session_cost_fields(
+                    s,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cache_read_tokens=cache_read,
+                    cache_write_tokens=cache_write,
+                )
+                rows.append(
+                    {
+                        "sessionKey": s_key,
+                        "model": _field(s, "model", "unknown"),
+                        "provider": "unknown",
+                        "agentId": agent_id,
+                        "channelType": channel,
+                        "toolName": None,
+                        "skill": None,
+                        "inputTokens": input_tokens,
+                        "outputTokens": output_tokens,
+                        "cacheReadTokens": cache_read,
+                        "cacheWriteTokens": cache_write,
+                        "costUsd": cost_fields.get("cost_usd", 0.0),
+                        "billedCostUsd": cost_fields.get("billed_cost_usd", 0.0),
+                        "estimatedCostUsd": cost_fields.get("estimated_cost_usd", 0.0),
+                        "costSource": cost_fields.get("cost_source", "spend_ledger"),
+                        "missingCostEntries": cost_fields.get("missing_cost_entries", 0),
+                        "costEphemeral": cost_fields.get("cost_ephemeral", False),
+                        "createdAt": _field(s, "created_at"),
+                        "updatedAt": _field(s, "updated_at"),
+                        "startedAt": _field(s, "started_at"),
+                        "endedAt": _field(s, "ended_at"),
+                    }
+                )
+        except Exception:
+            pass
+
+    if rows or ctx.usage_tracker is not None or ctx.session_manager is not None:
         formatted_rows = []
         for r in rows:
             cost = round(r["costUsd"] or 0.0, 6)
             billed_cost = round(r["billedCostUsd"] or 0.0, 6)
+            cost_source = r.get("costSource", "spend_ledger")
+            estimated_cost = round(
+                r.get("estimatedCostUsd") if r.get("estimatedCostUsd") is not None else cost, 6
+            )
+            missing_entries = r.get("missingCostEntries", 0)
+            cost_ephemeral = r.get("costEphemeral", False)
+
             row = {
                 "sessionKey": r["sessionKey"],
                 "inputTokens": r["inputTokens"],
                 "outputTokens": r["outputTokens"],
                 "costUsd": cost,
                 "billedCostUsd": billed_cost,
-                "estimatedCostUsd": cost,
-                "costSource": "spend_ledger",
-                "missingCostEntries": 0,
-                "costEphemeral": False,
+                "estimatedCostUsd": estimated_cost,
+                "costSource": cost_source,
+                "missingCostEntries": missing_entries,
+                "costEphemeral": cost_ephemeral,
                 "cacheReadTokens": r["cacheReadTokens"],
                 "cacheWriteTokens": r["cacheWriteTokens"],
                 "createdAt": r["createdAt"],
-                "updatedAt": r["createdAt"],
-                "startedAt": r["createdAt"],
-                "endedAt": r["createdAt"],
+                "updatedAt": r.get("updatedAt", r["createdAt"]),
+                "startedAt": r.get("startedAt", r["createdAt"]),
+                "endedAt": r.get("endedAt", r["createdAt"]),
                 "model": r["model"],
                 "provider": r["provider"],
                 "agentId": r["agentId"],
@@ -689,16 +764,16 @@ async def _handle_usage_cost(params: dict | None, ctx: RpcContext) -> dict[str, 
                 "output_tokens": r["outputTokens"],
                 "cost_usd": cost,
                 "billed_cost_usd": billed_cost,
-                "estimated_cost_usd": cost,
-                "cost_source": "spend_ledger",
-                "missing_cost_entries": 0,
-                "cost_ephemeral": False,
+                "estimated_cost_usd": estimated_cost,
+                "cost_source": cost_source,
+                "missing_cost_entries": missing_entries,
+                "cost_ephemeral": cost_ephemeral,
                 "cache_read_tokens": r["cacheReadTokens"],
                 "cache_write_tokens": r["cacheWriteTokens"],
                 "created_at": r["createdAt"],
-                "updated_at": r["createdAt"],
-                "started_at": r["createdAt"],
-                "ended_at": r["createdAt"],
+                "updated_at": r.get("updatedAt", r["createdAt"]),
+                "started_at": r.get("startedAt", r["createdAt"]),
+                "ended_at": r.get("endedAt", r["createdAt"]),
                 "agent_id": r["agentId"],
                 "channel_type": r["channelType"],
                 "channel": r["channelType"],

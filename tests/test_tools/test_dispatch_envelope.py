@@ -102,7 +102,7 @@ async def test_dispatch_missing_tool_returns_five_field_error_envelope() -> None
     handler = build_tool_handler(
         _build_registry(),
         ToolContext(
-                        caller_kind=CallerKind.CLI,
+            caller_kind=CallerKind.CLI,
             agent_id="main",
             session_key="cli:main:envelope",
         ),
@@ -136,7 +136,7 @@ async def test_dispatch_unknown_bash_tool_points_to_exec_command() -> None:
     handler = build_tool_handler(
         _build_registry(),
         ToolContext(
-                        caller_kind=CallerKind.CLI,
+            caller_kind=CallerKind.CLI,
             agent_id="main",
             session_key="cli:main:envelope",
         ),
@@ -241,7 +241,7 @@ async def test_dispatch_unsupported_surface_approval_payload_is_pending_status()
     handler = build_tool_handler(_build_registry())
     token = current_tool_context.set(
         ToolContext(
-                        caller_kind=CallerKind.CHANNEL,
+            caller_kind=CallerKind.CHANNEL,
             interaction_mode=InteractionMode.UNATTENDED,
             session_key="agent:main:demo",
             agent_id="main",
@@ -264,10 +264,9 @@ async def test_dispatch_unsupported_surface_approval_payload_is_pending_status()
     assert result.execution_status["reason"] == "approval_pending"
     assert result.execution_status["preservation_class"] == "ephemeral"
     payload = json.loads(result.content)
-    assert payload["status"] == "error"
-    assert payload["tool"] == "pending"
-    assert payload["error_class"] == "UnsupportedSurface"
-    assert payload["retry_allowed"] is False
+    assert payload["status"] == "approval_required"
+    assert payload["approval_id"] == "abc123"
+    assert payload["command"] == "rm secret"
 
 
 @pytest.mark.asyncio
@@ -275,7 +274,7 @@ async def test_dispatch_unattended_cli_approval_payload_is_pending_status() -> N
     handler = build_tool_handler(_build_registry())
     token = current_tool_context.set(
         ToolContext(
-                        caller_kind=CallerKind.CLI,
+            caller_kind=CallerKind.CLI,
             interaction_mode=InteractionMode.UNATTENDED,
             session_key="agent:main:demo",
             agent_id="main",
@@ -320,7 +319,7 @@ async def test_dispatch_unknown_tool_in_skill_name_context_raises_unsupported_su
     handler = build_tool_handler(
         _build_registry(),
         ToolContext(
-                        caller_kind=CallerKind.CLI,
+            caller_kind=CallerKind.CLI,
             agent_id="main",
             session_key="cli:main:envelope",
         ),
@@ -418,9 +417,7 @@ async def test_dispatch_does_not_rewrite_artifact_result_text_when_over_budget()
         ),
     )
 
-    result = await handler(
-        ToolCall(tool_use_id="tc-art-large", tool_name="publish", arguments={})
-    )
+    result = await handler(ToolCall(tool_use_id="tc-art-large", tool_name="publish", arguments={}))
 
     assert result.content == "x" * 1000
     assert result.artifacts == [artifact]
@@ -437,9 +434,7 @@ async def test_dispatch_leaves_under_budget_result_unchanged() -> None:
     handler = build_tool_handler(
         registry,
         ToolContext(
-            tool_result_budget_policy=ToolResultBudgetPolicy(
-                max_single_tool_result_chars=10_000
-            )
+            tool_result_budget_policy=ToolResultBudgetPolicy(max_single_tool_result_chars=10_000)
         ),
     )
 
@@ -609,9 +604,7 @@ async def test_dispatch_clamps_web_fetch_max_chars_before_handler() -> None:
     )
     handler = build_tool_handler(
         registry,
-        ToolContext(
-            tool_run_budget_policy=ToolRunBudgetPolicy(max_single_fetch_chars=12_000)
-        ),
+        ToolContext(tool_run_budget_policy=ToolRunBudgetPolicy(max_single_fetch_chars=12_000)),
     )
 
     result = await handler(
@@ -647,9 +640,7 @@ async def test_dispatch_clamps_web_search_results_before_handler() -> None:
     )
     handler = build_tool_handler(
         registry,
-        ToolContext(
-            tool_run_budget_policy=ToolRunBudgetPolicy(max_web_search_results=10)
-        ),
+        ToolContext(tool_run_budget_policy=ToolRunBudgetPolicy(max_web_search_results=10)),
     )
 
     result = await handler(
@@ -896,8 +887,7 @@ async def test_dispatch_run_budget_limits_concurrent_external_calls_atomically()
             control_payloads.append(payload)
     assert len(control_payloads) == 1
     assert any(
-        result.execution_status
-        and result.execution_status["reason"] == "tool_run_budget_exhausted"
+        result.execution_status and result.execution_status["reason"] == "tool_run_budget_exhausted"
         for result in results
     )
 
@@ -1292,14 +1282,10 @@ async def test_dispatch_tracker_budget_is_fresh_for_reused_tool_context() -> Non
     )
 
     first_handler = build_tool_handler(registry, ctx)
-    first = await first_handler(
-        ToolCall(tool_use_id="tc-first", tool_name="huge", arguments={})
-    )
+    first = await first_handler(ToolCall(tool_use_id="tc-first", tool_name="huge", arguments={}))
 
     second_handler = build_tool_handler(registry, ctx)
-    second = await second_handler(
-        ToolCall(tool_use_id="tc-second", tool_name="huge", arguments={})
-    )
+    second = await second_handler(ToolCall(tool_use_id="tc-second", tool_name="huge", arguments={}))
 
     assert _strict_preview_chars(first.content) == _strict_preview_chars(second.content)
     assert _strict_preview_chars(first.content) > 0

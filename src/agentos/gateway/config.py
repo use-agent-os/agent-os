@@ -1104,6 +1104,7 @@ class AgentOSRouterConfig(BaseSettings):
     )
 
     enabled: bool = True
+    cost_aware: bool = True
     auto_thinking: bool = True
     rollout_phase: str = "full"  # "observe" | "prompt_only" | "full"
     # "pilot-v1" (default: local ONNX+MiniLM router, English-optimized, no LLM
