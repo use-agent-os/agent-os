@@ -28,9 +28,7 @@ SCRIPT_HANDLER_KEY = "script_run"
 
 
 _WEBHOOK_TIMEOUT_SECONDS = 10.0
-_REPLY_DIRECTIVE_RE = re.compile(
-    r"\[\[\s*(?:reply_to_current|reply_to\s*:\s*[^\]\n]+)\s*\]\]\s*"
-)
+_REPLY_DIRECTIVE_RE = re.compile(r"\[\[\s*(?:reply_to_current|reply_to\s*:\s*[^\]\n]+)\s*\]\]\s*")
 
 
 def strip_reply_directives(text: str | None) -> str | None:
@@ -48,9 +46,7 @@ def validate_webhook_url(url: str) -> None:
     except ValueError as exc:
         raise ValueError(f"invalid webhook URL: {url!r}") from exc
     if parsed.scheme not in ("http", "https"):
-        raise ValueError(
-            f"webhook URL must use http or https scheme, got {parsed.scheme!r}"
-        )
+        raise ValueError(f"webhook URL must use http or https scheme, got {parsed.scheme!r}")
     if not parsed.hostname:
         raise ValueError(f"webhook URL is missing a hostname: {url!r}")
 
@@ -327,6 +323,11 @@ class DeliveryChain:
             session_key=session_key,
         ):
             return await self._deliver_origin_webchat_to_session(job, text, session_key)
+        account_id = (
+            target.account_id
+            if target is not None and target.kind == "channel" and target.account_id
+            else job.delivery.account_id
+        )
         if not self._channel_manager_ref:
             return "skipped"
         return await self._post_to_channel(
@@ -334,6 +335,7 @@ class DeliveryChain:
             text=text,
             channel_name=channel_name,
             channel_id=channel_id,
+            account_id=account_id,
             thread_id=thread_id,
         )
 
@@ -413,7 +415,8 @@ class DeliveryChain:
         text: str,
         channel_name: str,
         channel_id: str,
-        thread_id: str,
+        account_id: str = "",
+        thread_id: str = "",
     ) -> str:
         """Send ``text`` via the registered channel adapter for ``channel_name``."""
         text = strip_reply_directives(text) or ""
@@ -422,7 +425,29 @@ class DeliveryChain:
         cm = self._channel_manager_ref()
         if cm is None:
             return "skipped"
-        adapter = cm.get(channel_name)
+
+        if hasattr(cm, "resolve_delivery_target"):
+            resolved = cm.resolve_delivery_target(
+                target=channel_name or "",
+                to=channel_id or "",
+                account_id=account_id or "",
+                thread_id=thread_id or "",
+            )
+            if not resolved.ok:
+                log.warning(
+                    "delivery.resolution_failed",
+                    job_id=job_id,
+                    channel=channel_name,
+                    reason=resolved.reason,
+                )
+                return _failed(f"delivery target resolution failed: {resolved.reason}")
+            adapter = resolved.adapter
+            channel_name = resolved.channel_type
+            channel_id = resolved.to
+            thread_id = resolved.thread_id
+        else:
+            adapter = cm.get(channel_name)
+
         if adapter is None:
             log.warning(
                 "delivery.adapter_not_found",

@@ -315,14 +315,14 @@ def _cron_job_view(job: Any) -> dict[str, Any]:
         "last_run_at": last_run_at.isoformat() if last_run_at is not None else "",
         "elevated": (
             cron_tool_policy_elevated(job.tool_policy)
-            if isinstance(getattr(job, "tool_policy", None), dict)
-            and "elevated" in job.tool_policy
+            if isinstance(getattr(job, "tool_policy", None), dict) and "elevated" in job.tool_policy
             else (
                 configured_cron_default_elevated(_gateway_config)
                 if getattr(job, "handler_key", None) == "agent_run"
                 else None
             )
-        ) or "",
+        )
+        or "",
     }
 
 
@@ -445,11 +445,7 @@ def _parse_cron_delivery(raw: Any) -> dict[str, Any] | None:
         # was already promoted to mode='channel' above, so the only way to land
         # here is an explicitly contradictory mode: nothing legitimate is lost
         # by refusing it.
-        stray = [
-            f
-            for f in ("channel_name", "channel_id", "account_id", "thread_id")
-            if parsed[f]
-        ]
+        stray = [f for f in ("channel_name", "channel_id", "account_id", "thread_id") if parsed[f]]
         if stray:
             raise SafeToolError(
                 f"delivery.{stray[0]} conflicts with delivery.mode='{mode}' — "
@@ -492,12 +488,9 @@ def _validate_cron_delivery_channel(channel_name: str) -> None:
     if not known:
         # A live manager with nothing in it is a real answer, not a missing one:
         # no channel delivery can succeed at all.
-        raise SafeToolError(
-            "no channels are configured, so a cron job cannot deliver to one"
-        )
+        raise SafeToolError("no channels are configured, so a cron job cannot deliver to one")
     raise SafeToolError(
-        f"no channel named '{channel_name}' is configured; "
-        f"available: {', '.join(sorted(known))}"
+        f"no channel named '{channel_name}' is configured; available: {', '.join(sorted(known))}"
     )
 
 
@@ -865,10 +858,7 @@ def _session_storage_or_none() -> Any:
                 },
                 "account_id": {
                     "type": "string",
-                    "description": (
-                        "Optional account binding for multi-account channels. "
-                        "Stored on the job but not yet honoured by channel delivery."
-                    ),
+                    "description": ("Optional account binding for multi-account channels."),
                 },
                 "thread_id": {
                     "type": "string",
@@ -929,9 +919,7 @@ async def cron(
     if action in ("get", "update", "remove", "run", "runs") and not job_id:
         raise SafeToolError(f"'job_id' required for {action}")
     if action != "update" and enabled is not None:
-        raise SafeToolError(
-            "'enabled' is only accepted by update; a new job always starts enabled"
-        )
+        raise SafeToolError("'enabled' is only accepted by update; a new job always starts enabled")
 
     # Dispatch to injected scheduler
     if _scheduler is None:
@@ -1010,7 +998,8 @@ async def cron(
                         if getattr(j, "handler_key", None) == "agent_run"
                         else None
                     )
-                ) or "",
+                )
+                or "",
             }
             for j in jobs
         ]
