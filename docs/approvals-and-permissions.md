@@ -31,10 +31,10 @@ For automation, prefer the narrowest profile that can complete the task.
 
 These profiles apply to interactive CLI and Web turns. For cron turns (unattended automation),
 the default elevated execution posture is controlled by `permissions.cron_default_mode` (which
-defaults to `bypass`). By default, cron jobs of kind `agent_run` run elevated (under `bypass`),
+defaults to `bypass`). By default, cron jobs of kind `agent_turn` run elevated (under `bypass`),
 whereas other job kinds (like reminders and script runs) are never elevated. You can explicitly
-override this default for any individual job by passing `--elevated=off` (or another mode)
-during job creation or update. See [`cli.md`](cli.md#letting-a-cron-job-run-shell-based-skills)
+override this default for any individual job by passing `--no-elevated` (or `--elevated-mode <mode>`)
+from the CLI, or `{"elevated": "off"}` in `tool_policy` via the tool/RPC. See [`cli.md`](cli.md#letting-a-cron-job-run-shell-based-skills)
 for details and security implications.
 
 ## Workspace Containment

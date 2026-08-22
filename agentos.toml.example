@@ -524,6 +524,11 @@ security_grading = false
 # paths. Use `agentos sandbox on|bypass|full|reset` to update this together
 # with the sandbox section.
 default_mode = "bypass"                 # off | on | bypass | full
+# Default permission mode for scheduled unattended agent_turn cron jobs.
+# Shipped default is "bypass", which lets scheduled jobs run shell-based tools
+# without interactive approval prompts while maintaining sensitive path checks.
+# Pass --no-elevated on the CLI or {"elevated": "off"} in tool_policy to opt out.
+# cron_default_mode = "bypass"          # off | bypass | full
 
 # [auth]
 # mode = "none"         # none | token | password

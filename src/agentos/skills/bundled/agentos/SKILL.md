@@ -486,10 +486,10 @@ agentos cron output <id> [--run <run-id>] [--json]
 agentos cron add --every 10m --job-kind agent_turn --script watch_rss.py \
   --script-arg --url --script-arg https://example.com/feed.xml \
   --text "Summarize anything urgent."
-# Cron turns are read-only by default, so a job cannot run a shell-based skill.
-# --elevated opts one agent-turn job out of that: no approval, no sandbox, host
-# shell as the user. See docs/cli.md before suggesting it.
-agentos cron add --every 6h --agent main --elevated --name "LP check" --text "..."
+# Agent-turn cron jobs run elevated by default (`cron_default_mode = "bypass"`).
+# Pass --no-elevated to opt out and keep a job sandboxed / read-only.
+# See docs/cli.md and docs/approvals-and-permissions.md for details.
+agentos cron add --every 6h --agent main --no-elevated --name "LP check" --text "..."
 agentos cost                   # usage + estimated spend
 agentos diagnostics on         # runtime diagnostics logging
 agentos migrate hermes --source <dir> [--apply]   # dry-run first, then --apply

@@ -683,7 +683,7 @@ delivery and failure destinations stay CLI/Web/RPC-only. See
 
 ### Letting a cron job run shell-based skills
 
-By default, cron jobs of kind `agent_run` run elevated under the `bypass` mode
+By default, cron jobs of kind `agent_turn` run elevated under the `bypass` mode
 (controlled globally by `permissions.cron_default_mode`). This allows them to
 run shell-based commands (like those in skills) without interactive approval prompts.
 
