@@ -144,6 +144,13 @@ class SandboxSettings(BaseSettings):
             if not self.allow_legacy_mode:
                 notes.append("legacy_flag_missing")
 
+        if self.network_default == "proxy_allowlist":
+            log.warning(
+                "sandbox.network_default_reserved: network_default='proxy_allowlist' is "
+                "reserved and not yet implemented on sandbox backends"
+            )
+            notes.append("network_default_proxy_allowlist_reserved")
+
         return EffectiveMode(
             sandbox_enabled=sandbox_enabled,
             grading_enabled=grading_enabled,

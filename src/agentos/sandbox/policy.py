@@ -145,13 +145,19 @@ def _resolve_limits(level: SecurityLevel, settings: SandboxSettings) -> Resource
     )
 
 
-def _resolve_network(level: SecurityLevel, action_kind: str) -> NetworkMode:
+def _resolve_network(
+    level: SecurityLevel,
+    action_kind: str,
+    settings: SandboxSettings | None = None,
+) -> NetworkMode:
     if level == SecurityLevel.DISABLED:
         return NetworkMode.HOST
     if action_kind in _NETWORK_TAGS and level == SecurityLevel.STANDARD:
         # STANDARD + explicit network tag: operators running `web.fetch` at
         # L1 expect egress; isolation still applies to FS/process state.
         return NetworkMode.HOST
+    if settings is not None and settings.network_default == "proxy_allowlist":
+        return NetworkMode.PROXY_ALLOWLIST
     return NetworkMode.NONE
 
 
@@ -221,7 +227,7 @@ def build_policy(
 
     mounts, workspace_rw = _collect_mounts(level, workspace, settings)
     limits = _resolve_limits(level, settings)
-    network = _resolve_network(level, action_kind)
+    network = _resolve_network(level, action_kind, settings)
     tmp_writable = level != SecurityLevel.LOCKED
 
     require_approval = level >= SecurityLevel.STRICT and (
