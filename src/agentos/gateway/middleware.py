@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import secrets
 import time
 from collections import defaultdict
 from collections.abc import Callable
 from urllib.parse import urlsplit
 
+import structlog
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
@@ -14,6 +16,8 @@ from starlette.types import ASGIApp
 
 from agentos.gateway.access import is_loopback_address
 from agentos.gateway.config import GatewayConfig
+
+log = structlog.get_logger(__name__)
 
 # Endpoints that carry no credentials and expose no Control surface; exempt from
 # both token auth and the cross-origin guard. Kept module-level so the origin
@@ -122,9 +126,7 @@ class LoopbackOriginMiddleware(BaseHTTPMiddleware):
     RPC surface — the drive-by target — is gated.
     """
 
-    def __init__(
-        self, app: ASGIApp, config: GatewayConfig, bind_is_loopback: bool
-    ) -> None:
+    def __init__(self, app: ASGIApp, config: GatewayConfig, bind_is_loopback: bool) -> None:
         super().__init__(app)
         self._config = config
         self._cors_origins = [o for o in config.cors.allowed_origins if o != "*"]
@@ -156,9 +158,7 @@ class LoopbackOriginMiddleware(BaseHTTPMiddleware):
             )
 
             if not (
-                is_allowed_ws_origin(
-                    origin, self._config, bind_is_loopback=self._bind_is_loopback
-                )
+                is_allowed_ws_origin(origin, self._config, bind_is_loopback=self._bind_is_loopback)
                 or origin_in_allowlist(origin, self._cors_origins)
             ):
                 return PlainTextResponse("Origin not allowed", status_code=403)
@@ -179,9 +179,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._config = config
         base_path = (
-            config.control_ui.base_path
-            if control_ui_base_path is None
-            else control_ui_base_path
+            config.control_ui.base_path if control_ui_base_path is None else control_ui_base_path
         )
         self._ui_prefix = _safe_ui_exempt_prefix(base_path)
 
@@ -242,9 +240,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._config = config
         base_path = (
-            config.control_ui.base_path
-            if control_ui_base_path is None
-            else control_ui_base_path
+            config.control_ui.base_path if control_ui_base_path is None else control_ui_base_path
         )
         self._ui_prefix = _safe_ui_exempt_prefix(base_path)
         # {ip: [(timestamp, count), ...]}
@@ -298,12 +294,40 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 class ErrorHandlingMiddleware(BaseHTTPMiddleware):
     """Catch unhandled exceptions and return structured JSON errors."""
 
+    def __init__(self, app: ASGIApp, debug: bool = False) -> None:
+        super().__init__(app)
+        self._debug = debug
+
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         try:
             return await call_next(request)  # type: ignore[no-any-return]
         except Exception as exc:
+            error_id = secrets.token_hex(6)
+            log.error(
+                "gateway.unhandled_exception",
+                error_id=error_id,
+                path=request.url.path,
+                method=request.method,
+                error=str(exc),
+                exc_info=True,
+            )
+            from agentos.redact import redact_sensitive_text
+
+            if self._debug:
+                return JSONResponse(
+                    {
+                        "error": redact_sensitive_text(str(exc)),
+                        "code": "INTERNAL_ERROR",
+                        "error_id": error_id,
+                    },
+                    status_code=500,
+                )
             return JSONResponse(
-                {"error": str(exc), "code": "INTERNAL_ERROR"},
+                {
+                    "error": "Internal server error",
+                    "code": "INTERNAL_ERROR",
+                    "error_id": error_id,
+                },
                 status_code=500,
             )
 

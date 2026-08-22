@@ -210,7 +210,11 @@ class RpcRegistry:
         except KeyError as exc:
             return make_error_res(req_id, "NOT_FOUND", str(exc))
         except Exception as exc:
-            return make_error_res(req_id, "INTERNAL_ERROR", str(exc))
+            from agentos.redact import redact_sensitive_text
+
+            return make_error_res(
+                req_id, "INTERNAL_ERROR", redact_sensitive_text(str(exc)) or str(exc)
+            )
 
 
 # Backwards-compatible alias: the historical class name remains importable.

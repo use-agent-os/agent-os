@@ -544,7 +544,7 @@ def create_gateway_app(
     # ── Middleware ───────────────────────────────────────────────────────────
 
     middleware = [
-        Middleware(ErrorHandlingMiddleware),
+        Middleware(ErrorHandlingMiddleware, debug=config.debug),
         # DNS-rebinding guard: reject foreign Host headers on a loopback bind
         # (no-op ["*"] on a public bind, which is already auth-gated).
         Middleware(LoopbackHostMiddleware, allowed_hosts=resolve_trusted_hosts(config)),

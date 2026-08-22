@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import secrets
 from collections.abc import Callable
 from typing import Any, cast
 
+import structlog
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -17,6 +19,8 @@ from agentos.provider.audio import (
     ElevenLabsSpeechToTextRequest,
     ElevenLabsSpeechToTextResult,
 )
+
+log = structlog.get_logger(__name__)
 
 MAX_TRANSCRIPTION_BYTES = 30 * 1024 * 1024
 _MAX_TRANSCRIPTION_BYTES = MAX_TRANSCRIPTION_BYTES
@@ -92,7 +96,14 @@ def register_audio_transcription_routes(
         try:
             form = await request.form()
         except Exception as exc:
-            return JSONResponse({"error": f"multipart/form-data required: {exc}"}, status_code=400)
+            if config.debug:
+                from agentos.redact import redact_sensitive_text
+
+                return JSONResponse(
+                    {"error": f"multipart/form-data required: {redact_sensitive_text(str(exc))}"},
+                    status_code=400,
+                )
+            return JSONResponse({"error": "multipart/form-data required"}, status_code=400)
 
         upload = form.get("file")
         if upload is None or not hasattr(upload, "read"):
@@ -138,8 +149,30 @@ def register_audio_transcription_routes(
                 provider_factory=provider_factory,
             )
         except Exception as exc:
+            error_id = secrets.token_hex(6)
+            log.error(
+                "audio.transcription_failed",
+                error_id=error_id,
+                error=str(exc),
+                exc_info=True,
+            )
+            from agentos.redact import redact_sensitive_text
+
+            if config.debug:
+                return JSONResponse(
+                    {
+                        "error": redact_sensitive_text(str(exc)),
+                        "code": "PROVIDER_ERROR",
+                        "error_id": error_id,
+                    },
+                    status_code=502,
+                )
             return JSONResponse(
-                {"error": str(exc), "code": "PROVIDER_ERROR"},
+                {
+                    "error": "Audio transcription failed",
+                    "code": "PROVIDER_ERROR",
+                    "error_id": error_id,
+                },
                 status_code=502,
             )
 
