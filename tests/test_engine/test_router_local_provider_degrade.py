@@ -55,6 +55,7 @@ def _pin_strategy(monkeypatch: pytest.MonkeyPatch, tier: str) -> None:
 
 def _make_context(config: GatewayConfig, message: str = "Do something.") -> TurnContext:
     config.agentos_router.rollout_phase = "full"
+    config.agentos_router.cost_aware = False
     return TurnContext(
         message=message,
         session_key="degrade-session",

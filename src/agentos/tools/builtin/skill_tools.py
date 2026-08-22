@@ -808,51 +808,63 @@ def create_skill_tools(loader: SkillLoader) -> None:
         file_path: str | None = None,
         section: str | None = None,
     ) -> str:
-        if _loader is None:
-            return "No skill loader available."
-        skill = _loader.get_by_name(name)
-        if skill is None:
-            return _skill_not_found(name)
+        from agentos.engine.usage import _current_skill_name, _global_usage_tracker
+        from agentos.tools.types import current_tool_context
 
-        _register_skill_env_passthrough(skill)
+        skill_token = _current_skill_name.set(name)
+        try:
+            if _global_usage_tracker is not None:
+                ctx_val = current_tool_context.get()
+                if ctx_val and ctx_val.session_key:
+                    _global_usage_tracker._session_active_skill[ctx_val.session_key] = name
 
-        from agentos.skills.resources import expand_skill_placeholders
+            if _loader is None:
+                return "No skill loader available."
+            skill = _loader.get_by_name(name)
+            if skill is None:
+                return _skill_not_found(name)
 
-        if file_path:
-            normalized_path = file_path.strip().lstrip("./")
-            if normalized_path in {"", "SKILL.md"}:
-                if not skill.content:
-                    return f"(Skill '{name}' has no body content)"
-                return expand_skill_placeholders(skill.content, skill.base_dir)
+            _register_skill_env_passthrough(skill)
 
-            from pathlib import Path
+            from agentos.skills.resources import expand_skill_placeholders
 
-            from agentos.skills.resources import SkillResources
+            if file_path:
+                normalized_path = file_path.strip().lstrip("./")
+                if normalized_path in {"", "SKILL.md"}:
+                    if not skill.content:
+                        return f"(Skill '{name}' has no body content)"
+                    return expand_skill_placeholders(skill.content, skill.base_dir)
 
-            resources = SkillResources(Path(skill.base_dir))
-            content = resources.read_resource(normalized_path)
-            if content is None:
-                return f"File not found in skill '{name}': {file_path}"
-            # Scripts and references come back verbatim: they are source, not a
-            # playbook, and a placeholder inside one is that file's own business.
-            return content
+                from pathlib import Path
 
-        # Expand before slicing or budgeting, so an outline's character offsets
-        # and a section lookup both run over the exact text the model receives.
-        raw = expand_skill_placeholders(skill.content or "", skill.base_dir)
-        note = _skill_dir_note(skill)
-        if section:
-            return note + _skill_section(skill, raw, section)
+                from agentos.skills.resources import SkillResources
 
-        body = raw or f"(Skill '{name}' has no body content)"
-        if raw:
-            body = _skill_body_within_budget(skill, raw)
-        body += _skill_setup_note(skill)
-        # Append whatever the operator configured for this skill, so the agent
-        # starts from the values in effect rather than asking the user or
-        # going to read the config file itself. Skills that declare no
-        # settings pay nothing for this.
-        return note + body + _skill_config_block(skill)
+                resources = SkillResources(Path(skill.base_dir))
+                content = resources.read_resource(normalized_path)
+                if content is None:
+                    return f"File not found in skill '{name}': {file_path}"
+                # Scripts and references come back verbatim: they are source, not a
+                # playbook, and a placeholder inside one is that file's own business.
+                return content
+
+            # Expand before slicing or budgeting, so an outline's character offsets
+            # and a section lookup both run over the exact text the model receives.
+            raw = expand_skill_placeholders(skill.content or "", skill.base_dir)
+            note = _skill_dir_note(skill)
+            if section:
+                return note + _skill_section(skill, raw, section)
+
+            body = raw or f"(Skill '{name}' has no body content)"
+            if raw:
+                body = _skill_body_within_budget(skill, raw)
+            body += _skill_setup_note(skill)
+            # Append whatever the operator configured for this skill, so the agent
+            # starts from the values in effect rather than asking the user or
+            # going to read the config file itself. Skills that declare no
+            # settings pay nothing for this.
+            return note + body + _skill_config_block(skill)
+        finally:
+            _current_skill_name.reset(skill_token)
 
     @tool(
         name="skill_search_community",

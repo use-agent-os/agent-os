@@ -312,9 +312,7 @@ _COMPLAINT_WORD_TERMS: tuple[str, ...] = tuple(
     term for term in _COMPLAINT_TERMS if _is_ascii_wordish(term)
 )
 _COMPLAINT_WORD_RE = (
-    re.compile(
-        r"\b(?:" + "|".join(re.escape(term) for term in _COMPLAINT_WORD_TERMS) + r")\b"
-    )
+    re.compile(r"\b(?:" + "|".join(re.escape(term) for term in _COMPLAINT_WORD_TERMS) + r")\b")
     if _COMPLAINT_WORD_TERMS
     else None
 )
@@ -695,6 +693,10 @@ def _compute_savings(routed_model: str, tiers: dict, routed_tier: str = "") -> d
         routed_model,
         provider_id=str(routed_cfg.get("provider") or ""),
     ).input_per_m
+    routed_price_output = lookup_price(
+        routed_model,
+        provider_id=str(routed_cfg.get("provider") or ""),
+    ).output_per_m
     pct = (
         0.0
         if max_price <= 0 or routed_price >= max_price
@@ -704,6 +706,7 @@ def _compute_savings(routed_model: str, tiers: dict, routed_tier: str = "") -> d
         "savings_pct": pct,
         "savings_max_price_per_m": max_price,
         "savings_routed_price_per_m": routed_price,
+        "effective_cost_per_m": routed_price + routed_price_output,
     }
 
 
@@ -753,6 +756,41 @@ def _tier_index(tier: str, valid_tiers: list[str]) -> int:
     return valid_tiers.index(normalized) if normalized in valid_tiers else -1
 
 
+def _get_cheapest_compatible_tier(target_tier: str, tiers: dict, valid_tiers: list[str]) -> str:
+    """Find the cheapest tier (based on model pricing) that is at or above target_tier."""
+    target_idx = _tier_index(target_tier, valid_tiers)
+    if target_idx < 0:
+        return target_tier
+
+    cheapest_tier = target_tier
+    cheapest_price = float("inf")
+
+    # Check all tiers at or above the target tier capability
+    for idx in range(target_idx, len(valid_tiers)):
+        tier = valid_tiers[idx]
+        tier_cfg = tiers.get(tier)
+        if not tier_cfg:
+            continue
+        model = tier_cfg.get("model")
+        if not model:
+            continue
+        provider = str(tier_cfg.get("provider") or "").strip().lower()
+        from agentos.provider.registry import is_local_provider
+
+        if is_local_provider(provider):
+            cost_signal = 0.0
+        else:
+            price = lookup_price(model, provider_id=provider)
+            # Primary cost metric: input_per_m + output_per_m
+            cost_signal = price.input_per_m + price.output_per_m
+
+        if cost_signal < cheapest_price:
+            cheapest_price = cost_signal
+            cheapest_tier = tier
+
+    return cheapest_tier
+
+
 def _token_estimate(value: object) -> int | None:
     if isinstance(value, bool):
         return None
@@ -798,9 +836,8 @@ def _large_context_min_tier(
 ) -> tuple[str, int] | None:
     material_tokens = _material_estimated_tokens(ctx, semantic_message)
     context_window = _context_window_tokens(ctx, router_cfg)
-    if (
-        material_tokens >= _LARGE_CONTEXT_T3_FLOOR_TOKENS
-        or material_tokens >= int(context_window * _LARGE_CONTEXT_T3_CONTEXT_RATIO)
+    if material_tokens >= _LARGE_CONTEXT_T3_FLOOR_TOKENS or material_tokens >= int(
+        context_window * _LARGE_CONTEXT_T3_CONTEXT_RATIO
     ):
         return HIGHEST_TEXT_TIER, material_tokens
     if material_tokens >= _LARGE_CONTEXT_T2_FLOOR_TOKENS:
@@ -971,6 +1008,14 @@ def _apply_large_context_floor(
     if _tier_index(decision.tier, valid_tiers) >= _tier_index(min_tier, valid_tiers):
         return decision
 
+    cost_aware = True
+    if ctx.config and ctx.config.agentos_router:
+        cost_aware = getattr(ctx.config.agentos_router, "cost_aware", True)
+
+    if cost_aware:
+        cheapest_tier = _get_cheapest_compatible_tier(min_tier, tiers, valid_tiers)
+        if cheapest_tier != min_tier:
+            min_tier = cheapest_tier
     floored = RoutingDecision(
         tier=min_tier,
         model=tiers[min_tier].get("model", decision.model),
@@ -1159,8 +1204,7 @@ def _finalize_decision(
     extra.update(
         {
             "base_tier": base_tier,
-            "pre_confidence_tier": normalize_text_tier(pre_confidence_tier)
-            or pre_confidence_tier,
+            "pre_confidence_tier": normalize_text_tier(pre_confidence_tier) or pre_confidence_tier,
             "confidence_threshold": confidence_threshold,
             "confidence_default_tier": confidence_default_tier,
             "confidence_gate_applied": confidence_gate_applied,
@@ -1179,6 +1223,22 @@ def _finalize_decision(
             "kv_cache_window_seconds": window,
         }
     )
+
+    cost_aware = True
+    if router_cfg is not None:
+        cost_aware = getattr(router_cfg, "cost_aware", True)
+
+    if cost_aware:
+        cheapest_tier = _get_cheapest_compatible_tier(final_tier, tiers, valid_tiers)
+        if cheapest_tier != final_tier:
+            log.info(
+                "router.cost_aware_override",
+                original_tier=final_tier,
+                cheapest_tier=cheapest_tier,
+                original_model=tiers[final_tier].get("model"),
+                cheapest_model=tiers[cheapest_tier].get("model"),
+            )
+            final_tier = cheapest_tier
 
     return RoutingDecision(
         tier=final_tier,
@@ -1459,6 +1519,14 @@ async def apply_agentos_router(ctx: TurnContext) -> TurnContext:
         source = "default"
         probs = synthetic_one_hot(tier_name)
 
+    cost_aware = True
+    if ctx.config and ctx.config.agentos_router:
+        cost_aware = getattr(ctx.config.agentos_router, "cost_aware", True)
+
+    if cost_aware:
+        cheapest_tier = _get_cheapest_compatible_tier(tier_name, tiers, valid_tiers)
+        if cheapest_tier != tier_name:
+            tier_name = cheapest_tier
     decision = RoutingDecision(
         tier=tier_name,
         model=tiers[tier_name].get("model", ctx.model),

@@ -195,9 +195,7 @@ class GatewayClient:
         """
 
         if self._http_base is None:
-            raise ConnectionError(
-                "GatewayClient has no HTTP base URL — call connect() first"
-            )
+            raise ConnectionError("GatewayClient has no HTTP base URL — call connect() first")
         try:
             import httpx
         except ImportError as exc:  # pragma: no cover
@@ -219,8 +217,7 @@ class GatewayClient:
 
         if response.status_code != 200:
             raise ConnectionError(
-                f"upload {url} failed: HTTP {response.status_code} "
-                f"{response.text[:200]}"
+                f"upload {url} failed: HTTP {response.status_code} {response.text[:200]}"
             )
         body = response.json()
         if not isinstance(body, dict) or "file_uuid" not in body:
@@ -385,8 +382,8 @@ class GatewayClient:
     async def usage_status(self) -> dict[str, Any]:
         return cast(dict[str, Any], await self._call("usage.status", {}))
 
-    async def usage_cost(self) -> dict[str, Any]:
-        return cast(dict[str, Any], await self._call("usage.cost", {}))
+    async def usage_cost(self, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        return cast(dict[str, Any], await self._call("usage.cost", params or {}))
 
     async def diagnostics_status(self) -> dict[str, Any]:
         return cast(dict[str, Any], await self._call("diagnostics.status", {}))
@@ -499,24 +496,39 @@ class GatewayClient:
                     continue
                 break
             group_id = payload.get("group_id")
-            if event_name in (
-                "session.event.task_group.waiting",
-                "session.event.task_group.synthesizing",
-            ) and isinstance(group_id, str) and group_id:
+            if (
+                event_name
+                in (
+                    "session.event.task_group.waiting",
+                    "session.event.task_group.synthesizing",
+                )
+                and isinstance(group_id, str)
+                and group_id
+            ):
                 active_task_groups.add(group_id)
-            elif event_name in (
-                "session.event.task_group.done",
-                "session.event.task_group.failed",
-            ) and isinstance(group_id, str) and group_id:
+            elif (
+                event_name
+                in (
+                    "session.event.task_group.done",
+                    "session.event.task_group.failed",
+                )
+                and isinstance(group_id, str)
+                and group_id
+            ):
                 was_active_group = group_id in active_task_groups
                 active_task_groups.discard(group_id)
             else:
                 was_active_group = False
             yield {"event": event_name, **payload}
-            if event_name in (
-                "session.event.task_group.done",
-                "session.event.task_group.failed",
-            ) and was_active_group and not active_task_groups:
+            if (
+                event_name
+                in (
+                    "session.event.task_group.done",
+                    "session.event.task_group.failed",
+                )
+                and was_active_group
+                and not active_task_groups
+            ):
                 break
             if event_name in ("session.event.done", "session.event.error"):
                 if active_task_groups:
@@ -605,8 +617,7 @@ def _normalize_session_error_payload(payload: dict) -> dict[str, Any]:
     is_timeout = "timeout" in code_text or "stream idle" in raw_text.lower()
     terminal_payload = {
         "status": "timeout" if is_timeout else "failed",
-        "terminal_reason": payload.get("terminal_reason")
-        or ("timeout" if is_timeout else "error"),
+        "terminal_reason": payload.get("terminal_reason") or ("timeout" if is_timeout else "error"),
         "error_class": code,
         "error_message": raw_text,
         **payload,

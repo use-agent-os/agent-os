@@ -156,8 +156,7 @@ def _resolved_session_cost_fields(
         source_name = _field(source, "cost_source")
         estimated_component = (
             float(total_cost or 0.0)
-            if source_name in {None, "", "none", "agentos_estimate"}
-            and not billed_cost
+            if source_name in {None, "", "none", "agentos_estimate"} and not billed_cost
             else 0.0
         )
 
@@ -354,8 +353,10 @@ def _row_can_overlay_tracker_totals(row: Mapping[str, Any], tracker_row: Mapping
     """
 
     source = str(row.get("cost_source") or row.get("costSource") or "none")
-    return source in {"none", "unavailable"} and not _row_has_usage(row) and _row_has_usage(
-        tracker_row
+    return (
+        source in {"none", "unavailable"}
+        and not _row_has_usage(row)
+        and _row_has_usage(tracker_row)
     )
 
 
@@ -514,11 +515,7 @@ def _append_tracker_only_rows(
     for row in rows:
         seen.add(row["session"])
         tracker_row = tracker_by_key.get(row["session"])
-        if (
-            tracker_row
-            and tracker_row.get("modelBreakdown")
-            and not row.get("modelBreakdown")
-        ):
+        if tracker_row and tracker_row.get("modelBreakdown") and not row.get("modelBreakdown"):
             row["modelBreakdown"] = tracker_row["modelBreakdown"]
         if tracker_row and _row_can_overlay_tracker_totals(row, tracker_row):
             _overlay_tracker_totals(row, tracker_row)
@@ -638,51 +635,159 @@ async def _handle_usage_status(params: dict | None, ctx: RpcContext) -> dict[str
 
 @_d.method("usage.cost")
 async def _handle_usage_cost(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
-    now_ms = _now_ms()
-    tracker_rows = _tracker_rows(ctx, now_ms=now_ms)
+    from collections.abc import Mapping
 
-    if ctx.session_manager is None:
-        return {
-            "breakdown": tracker_rows,
-            "totalCostUsd": round(float(_usage_totals(tracker_rows)["cost"]), 6),
+    query_params = {}
+    if isinstance(params, Mapping):
+        query_params = {
+            "start_date": params.get("startDate") or params.get("start_date"),
+            "end_date": params.get("endDate") or params.get("end_date"),
+            "agent_id": params.get("agentId") or params.get("agent_id"),
+            "channel_type": params.get("channelType")
+            or params.get("channel_type")
+            or params.get("channel"),
+            "tool_name": params.get("toolName") or params.get("tool_name") or params.get("tool"),
+            "skill": params.get("skill"),
+            "session_key": params.get("sessionKey")
+            or params.get("session_key")
+            or params.get("key"),
         }
-    try:
-        sessions = await ctx.session_manager.list_sessions()
-        breakdown = []
-        for s in sessions:
-            input_tokens = _first_field(s, "input_tokens", "total_input_tokens", default=0) or 0
-            output_tokens = _first_field(s, "output_tokens", "total_output_tokens", default=0) or 0
-            cache_read = _field(s, "cache_read", 0) or 0
-            cache_write = _field(s, "cache_write", 0) or 0
-            cost_fields = _resolved_session_cost_fields(
-                s,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                cache_read_tokens=cache_read,
-                cache_write_tokens=cache_write,
-            )
-            breakdown.append(
-                _usage_row(
-                    session_key=_field(s, "session_key", "unknown"),
-                    model=_field(s, "model", "unknown"),
+
+    rows = []
+    if ctx.usage_tracker is not None:
+        rows = ctx.usage_tracker.query_usage(**query_params)
+
+    if not rows and ctx.session_manager is not None:
+        try:
+            sessions = await ctx.session_manager.list_sessions()
+            for s in sessions:
+                s_key = _field(s, "session_key", "unknown")
+                agent_id, channel = (
+                    ctx.usage_tracker.get_session_scope(s_key)
+                    if ctx.usage_tracker
+                    else ("unknown", "unknown")
+                )
+                if query_params.get("session_key") and query_params["session_key"] != s_key:
+                    continue
+                if query_params.get("agent_id") and query_params["agent_id"] != agent_id:
+                    continue
+                if query_params.get("channel_type") and query_params["channel_type"] != channel:
+                    continue
+                if (
+                    query_params.get("tool_name")
+                    or query_params.get("skill")
+                    or query_params.get("start_date")
+                    or query_params.get("end_date")
+                ):
+                    continue
+
+                input_tokens = _first_field(s, "input_tokens", "total_input_tokens", default=0) or 0
+                output_tokens = (
+                    _first_field(s, "output_tokens", "total_output_tokens", default=0) or 0
+                )
+                cache_read = _field(s, "cache_read", 0) or 0
+                cache_write = _field(s, "cache_write", 0) or 0
+                cost_fields = _resolved_session_cost_fields(
+                    s,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
-                    **cost_fields,
                     cache_read_tokens=cache_read,
                     cache_write_tokens=cache_write,
-                    created_at=_field(s, "created_at"),
-                    updated_at=_field(s, "updated_at"),
-                    started_at=_field(s, "started_at"),
-                    ended_at=_field(s, "ended_at"),
                 )
+                rows.append(
+                    {
+                        "sessionKey": s_key,
+                        "model": _field(s, "model", "unknown"),
+                        "provider": "unknown",
+                        "agentId": agent_id,
+                        "channelType": channel,
+                        "toolName": None,
+                        "skill": None,
+                        "inputTokens": input_tokens,
+                        "outputTokens": output_tokens,
+                        "cacheReadTokens": cache_read,
+                        "cacheWriteTokens": cache_write,
+                        "costUsd": cost_fields.get("cost_usd", 0.0),
+                        "billedCostUsd": cost_fields.get("billed_cost_usd", 0.0),
+                        "estimatedCostUsd": cost_fields.get("estimated_cost_usd", 0.0),
+                        "costSource": cost_fields.get("cost_source", "spend_ledger"),
+                        "missingCostEntries": cost_fields.get("missing_cost_entries", 0),
+                        "costEphemeral": cost_fields.get("cost_ephemeral", False),
+                        "createdAt": _field(s, "created_at"),
+                        "updatedAt": _field(s, "updated_at"),
+                        "startedAt": _field(s, "started_at"),
+                        "endedAt": _field(s, "ended_at"),
+                    }
+                )
+        except Exception:
+            pass
+
+    if rows or ctx.usage_tracker is not None or ctx.session_manager is not None:
+        formatted_rows = []
+        for r in rows:
+            cost = round(r["costUsd"] or 0.0, 6)
+            billed_cost = round(r["billedCostUsd"] or 0.0, 6)
+            cost_source = r.get("costSource", "spend_ledger")
+            estimated_cost = round(
+                r.get("estimatedCostUsd") if r.get("estimatedCostUsd") is not None else cost, 6
             )
-        breakdown = _append_tracker_only_rows(breakdown, tracker_rows)
+            missing_entries = r.get("missingCostEntries", 0)
+            cost_ephemeral = r.get("costEphemeral", False)
+
+            row = {
+                "sessionKey": r["sessionKey"],
+                "inputTokens": r["inputTokens"],
+                "outputTokens": r["outputTokens"],
+                "costUsd": cost,
+                "billedCostUsd": billed_cost,
+                "estimatedCostUsd": estimated_cost,
+                "costSource": cost_source,
+                "missingCostEntries": missing_entries,
+                "costEphemeral": cost_ephemeral,
+                "cacheReadTokens": r["cacheReadTokens"],
+                "cacheWriteTokens": r["cacheWriteTokens"],
+                "createdAt": r["createdAt"],
+                "updatedAt": r.get("updatedAt", r["createdAt"]),
+                "startedAt": r.get("startedAt", r["createdAt"]),
+                "endedAt": r.get("endedAt", r["createdAt"]),
+                "model": r["model"],
+                "provider": r["provider"],
+                "agentId": r["agentId"],
+                "channelType": r["channelType"],
+                "toolName": r["toolName"],
+                "skill": r["skill"],
+                "contextStatus": None,
+                # Compatibility fields
+                "session": r["sessionKey"],
+                "key": r["sessionKey"],
+                "input_tokens": r["inputTokens"],
+                "output_tokens": r["outputTokens"],
+                "cost_usd": cost,
+                "billed_cost_usd": billed_cost,
+                "estimated_cost_usd": estimated_cost,
+                "cost_source": cost_source,
+                "missing_cost_entries": missing_entries,
+                "cost_ephemeral": cost_ephemeral,
+                "cache_read_tokens": r["cacheReadTokens"],
+                "cache_write_tokens": r["cacheWriteTokens"],
+                "created_at": r["createdAt"],
+                "updated_at": r.get("updatedAt", r["createdAt"]),
+                "started_at": r.get("startedAt", r["createdAt"]),
+                "ended_at": r.get("endedAt", r["createdAt"]),
+                "agent_id": r["agentId"],
+                "channel_type": r["channelType"],
+                "channel": r["channelType"],
+                "tool_name": r["toolName"],
+            }
+            formatted_rows.append(row)
+
+        total_cost = sum(float(r["costUsd"] or 0.0) for r in formatted_rows)
         return {
-            "breakdown": breakdown,
-            "totalCostUsd": round(float(_usage_totals(breakdown)["cost"]), 6),
+            "breakdown": formatted_rows,
+            "totalCostUsd": round(total_cost, 6),
         }
-    except (AttributeError, NotImplementedError):
-        return {
-            "breakdown": tracker_rows,
-            "totalCostUsd": round(float(_usage_totals(tracker_rows)["cost"]), 6),
-        }
+
+    return {
+        "breakdown": [],
+        "totalCostUsd": 0.0,
+    }

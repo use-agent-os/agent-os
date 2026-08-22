@@ -1104,6 +1104,7 @@ class AgentOSRouterConfig(BaseSettings):
     )
 
     enabled: bool = True
+    cost_aware: bool = True
     auto_thinking: bool = True
     rollout_phase: str = "full"  # "observe" | "prompt_only" | "full"
     # "pilot-v1" (default: local ONNX+MiniLM router, English-optimized, no LLM
@@ -1783,6 +1784,25 @@ class TlsConfig(BaseSettings):
     certfile: str = ""
 
 
+class BudgetsConfig(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="AGENTOS_BUDGETS_",
+        extra="ignore",
+    )
+
+    session_limit: float | None = None
+    session_warn: float | None = None
+
+    daily_limit: float | None = None
+    daily_warn: float | None = None
+
+    agent_daily_limit: dict[str, float] = Field(default_factory=dict)
+    agent_daily_warn: dict[str, float] = Field(default_factory=dict)
+
+    channel_daily_limit: dict[str, float] = Field(default_factory=dict)
+    channel_daily_warn: dict[str, float] = Field(default_factory=dict)
+
+
 class GatewayConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="AGENTOS_GATEWAY_",
@@ -1818,6 +1838,7 @@ class GatewayConfig(BaseSettings):
     auth: AuthConfig = Field(default_factory=AuthConfig)
     cors: CorsConfig = Field(default_factory=CorsConfig)
     attachments: AttachmentsConfig = Field(default_factory=AttachmentsConfig)
+    budgets: BudgetsConfig = Field(default_factory=BudgetsConfig)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     permissions: PermissionsConfig = Field(default_factory=PermissionsConfig)
