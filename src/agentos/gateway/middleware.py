@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections import defaultdict
+from collections import OrderedDict
 from collections.abc import Callable
 from urllib.parse import urlsplit
 
@@ -122,9 +122,7 @@ class LoopbackOriginMiddleware(BaseHTTPMiddleware):
     RPC surface — the drive-by target — is gated.
     """
 
-    def __init__(
-        self, app: ASGIApp, config: GatewayConfig, bind_is_loopback: bool
-    ) -> None:
+    def __init__(self, app: ASGIApp, config: GatewayConfig, bind_is_loopback: bool) -> None:
         super().__init__(app)
         self._config = config
         self._cors_origins = [o for o in config.cors.allowed_origins if o != "*"]
@@ -156,9 +154,7 @@ class LoopbackOriginMiddleware(BaseHTTPMiddleware):
             )
 
             if not (
-                is_allowed_ws_origin(
-                    origin, self._config, bind_is_loopback=self._bind_is_loopback
-                )
+                is_allowed_ws_origin(origin, self._config, bind_is_loopback=self._bind_is_loopback)
                 or origin_in_allowlist(origin, self._cors_origins)
             ):
                 return PlainTextResponse("Origin not allowed", status_code=403)
@@ -179,9 +175,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._config = config
         base_path = (
-            config.control_ui.base_path
-            if control_ui_base_path is None
-            else control_ui_base_path
+            config.control_ui.base_path if control_ui_base_path is None else control_ui_base_path
         )
         self._ui_prefix = _safe_ui_exempt_prefix(base_path)
 
@@ -238,22 +232,60 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         app: ASGIApp,
         config: GatewayConfig,
         control_ui_base_path: str | None = None,
+        max_tracked_clients: int = 10_000,
     ) -> None:
         super().__init__(app)
         self._config = config
         base_path = (
-            config.control_ui.base_path
-            if control_ui_base_path is None
-            else control_ui_base_path
+            config.control_ui.base_path if control_ui_base_path is None else control_ui_base_path
         )
         self._ui_prefix = _safe_ui_exempt_prefix(base_path)
-        # {ip: [(timestamp, count), ...]}
-        self._windows: dict[str, list[float]] = defaultdict(list)
+        # {ip: [timestamp, ...]} with LRU eviction ordering
+        self._windows: OrderedDict[str, list[float]] = OrderedDict()
+        self._max_tracked_clients = max_tracked_clients
+        self._last_sweep: float = 0.0
 
     def _is_ui_path(self, path: str) -> bool:
         if self._ui_prefix is None:
             return False
         return path == self._ui_prefix or path.startswith(self._ui_prefix + "/")
+
+    def _is_trusted_proxy(self, peer_ip: str | None) -> bool:
+        if not peer_ip:
+            return False
+        trusted = self._config.auth.trusted_proxy
+        if not trusted:
+            return False
+        trusted_set = {p.strip().lower().strip("[]") for p in trusted.split(",") if p.strip()}
+        peer = peer_ip.strip().lower().strip("[]")
+        return peer in trusted_set
+
+    def _get_client_ip(self, request: Request) -> str:
+        peer_ip = request.client.host if request.client else None
+        if self._is_trusted_proxy(peer_ip):
+            forwarded = request.headers.get("x-forwarded-for")
+            if forwarded:
+                first_ip = forwarded.split(",")[0].strip()
+                if first_ip:
+                    return first_ip
+        if peer_ip:
+            return peer_ip
+        return "unknown"
+
+    def _sweep_expired(self, now: float, window: float) -> None:
+        self._last_sweep = now
+        expired = [
+            ip
+            for ip, timestamps in self._windows.items()
+            if not timestamps or (now - timestamps[-1] >= window)
+        ]
+        for ip in expired:
+            self._windows.pop(ip, None)
+
+    def _evict_excess(self, now: float, window: float) -> None:
+        self._sweep_expired(now, window)
+        while len(self._windows) > self._max_tracked_clients:
+            self._windows.popitem(last=False)
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         if not self._config.rate_limit.enabled:
@@ -272,27 +304,32 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         client_ip = self._get_client_ip(request)
         now = time.time()
-        window = self._config.rate_limit.window_seconds
+        window = float(self._config.rate_limit.window_seconds)
         max_req = self._config.rate_limit.max_requests
+        sweep_interval = min(window, 60.0)
+
+        # Periodic sweep of expired windows
+        if now - self._last_sweep >= sweep_interval:
+            self._sweep_expired(now, window)
 
         # Prune old timestamps
-        self._windows[client_ip] = [t for t in self._windows[client_ip] if now - t < window]
+        timestamps = [t for t in self._windows.get(client_ip, []) if now - t < window]
 
-        if len(self._windows[client_ip]) >= max_req:
+        if len(timestamps) >= max_req:
+            self._windows[client_ip] = timestamps
+            self._windows.move_to_end(client_ip)
             return JSONResponse(
                 {"error": "Too Many Requests", "code": "RATE_LIMITED"}, status_code=429
             )
 
-        self._windows[client_ip].append(now)
-        return await call_next(request)  # type: ignore[no-any-return]
+        timestamps.append(now)
+        self._windows[client_ip] = timestamps
+        self._windows.move_to_end(client_ip)
 
-    def _get_client_ip(self, request: Request) -> str:
-        forwarded = request.headers.get("x-forwarded-for")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        if request.client:
-            return request.client.host
-        return "unknown"
+        if len(self._windows) > self._max_tracked_clients:
+            self._evict_excess(now, window)
+
+        return await call_next(request)  # type: ignore[no-any-return]
 
 
 class ErrorHandlingMiddleware(BaseHTTPMiddleware):
