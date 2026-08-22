@@ -366,6 +366,29 @@ your install to see the current catalog.
 
 Read: [`providers-and-models.md`](providers-and-models.md)
 
+## Prompt Cache Configuration
+
+Controls prompt prefix caching for LLM providers that support it (Anthropic, OpenAI, DeepSeek, OpenRouter, etc.):
+
+```toml
+[prompt_cache]
+mode = "auto"   # "auto" | "on" | "off"
+```
+
+- `auto` (default): Enables prompt caching when the active provider and model support prefix caching.
+- `on`: Forces prompt caching on.
+- `off`: Disables prompt caching.
+
+Environment variable override:
+```sh
+export AGENTOS_CACHE_MODE="auto"   # auto | on | off
+```
+
+> [!NOTE]
+> The legacy `prompt_cache.enabled` key and `AGENTOS_CACHE_ENABLED` environment variable are deprecated and mapped automatically to `mode` (`on`/`off`) with a deprecation warning.
+
+## Router Configuration
+
 ### OpenCAP
 
 See [Providers and Models — OpenCAP routing](providers-and-models.md#opencap-routing)
@@ -793,6 +816,28 @@ agentos agent \
 ```
 
 Read: [`tools-and-sandbox.md`](tools-and-sandbox.md)
+
+## Safety Configuration
+
+Controls prompt-ingress safety scanning and untrusted workspace containment:
+
+```toml
+[safety]
+wrap_untrusted_workspace = true
+injection_scan_mode = "report"   # "report" | "enforce" | "off"
+```
+
+- `wrap_untrusted_workspace` (default `true`): Wraps files read from untrusted workspace directories with safety bounding markers to mitigate prompt-injection framing in workspace files.
+- `injection_scan_mode`:
+  - `report` (default): Runs injection scanning on ingress text and reports detected patterns to telemetry/diagnostics without halting execution.
+  - `enforce`: Actively blocks and rejects turns where prompt injection or adversarial framing is detected.
+  - `off`: Disables prompt-injection scanning.
+
+Environment variable overrides:
+```sh
+export AGENTOS_SAFETY__WRAP_UNTRUSTED_WORKSPACE=true
+export AGENTOS_SAFETY__INJECTION_SCAN_MODE="report"   # report | enforce | off
+```
 
 ## Gateway Binding
 

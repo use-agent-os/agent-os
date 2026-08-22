@@ -7,8 +7,8 @@
 
 # Assistant speaker label shown on the ◢ marker, the pre-token waiting
 # row, and the queued-turn marker in `agentos chat`. Defaults to "agentos".
-# Env override: AGENTOS_ASSISTANT_LABEL="Hani"
-# assistant_label = "agentos"
+# Configured via environment variable (not a TOML key):
+# export AGENTOS_ASSISTANT_LABEL="Hani"
 
 # Workspace/state defaults
 # Defaults:
@@ -22,8 +22,8 @@
 # events while a run is active; stream idle timeout is the real upstream stall
 # detector. Keep browser grace above stream idle so server terminal errors win.
 # agent_stream_heartbeat_interval_seconds = 15.0
-# agent_stream_idle_timeout_seconds = 180.0
-# webui_stream_idle_grace_seconds = 210.0
+# agent_stream_idle_timeout_seconds = 600.0
+# webui_stream_idle_grace_seconds = 630.0
 # Keep a positive cap for smaller local models so repeated tool calls cannot
 # run forever. Zero means unlimited.
 # agent_max_iterations = 8
@@ -160,6 +160,20 @@ base_url = "https://openrouter.ai/api/v1"
 # table to keep gateway auto-routing.
 # [llm.provider_routing]
 # "glm-5.2" = "provider-id-from-live-catalog"
+
+# Prompt caching controls. Enables prefix caching for supported providers
+# (Anthropic, OpenAI, DeepSeek, OpenRouter, etc.).
+# mode: "auto" (default; on where supported), "on" (force on), "off" (disabled).
+# Env override: AGENTOS_CACHE_MODE=auto|on|off (legacy AGENTOS_CACHE_ENABLED is deprecated).
+# [prompt_cache]
+# mode = "auto"
+
+# Prompt-ingress safety controls.
+# wrap_untrusted_workspace: wrap untrusted workspace files with safety bounding markers.
+# injection_scan_mode: "report" (default; log scan results), "enforce" (block turns on injection), "off".
+# [safety]
+# wrap_untrusted_workspace = true
+# injection_scan_mode = "report"
 
 [memory]
 # "workspace" stores MEMORY.md and memory/*.md under workspace_dir.
@@ -570,3 +584,70 @@ default_mode = "bypass"                 # off | on | bypass | full
 # group_mention_required = true
 # transcribe_voice = false
 # max_voice_duration_s = 120
+
+# Image generation configuration.
+# [image_generation]
+# provider = ""               # "openai", "openrouter", etc.
+# model = "dall-e-3"
+# api_key = ""                # env OPENAI_API_KEY / OPENROUTER_API_KEY also works
+# base_url = ""
+
+# Audio transcription and text-to-speech configuration.
+# [audio]
+# transcribe_provider = ""    # "openai", "groq", etc.
+# transcribe_model = "whisper-1"
+# transcribe_api_key = ""
+# tts_provider = ""           # "openai", "elevenlabs", etc.
+# tts_model = "tts-1"
+# tts_voice = "alloy"
+# tts_api_key = ""
+
+# Periodic background heartbeat.
+# [heartbeat]
+# enabled = false
+# interval_seconds = 300
+# prompt = "Periodic health check. Report your status."
+# target = "last"             # "last" | "none" | specific channel
+
+# MCP (Model Context Protocol) external servers.
+# [[mcp.servers]]
+# name = "fetch"
+# transport = "stdio"
+# command = "uvx"
+# args = ["mcp-server-fetch"]
+# env = {}
+
+# Default agent settings and multi-agent defaults.
+# [agents_defaults]
+# model = ""
+# thinking_level = ""
+# workspace_dir = ""
+
+# Subagent hierarchy limits.
+# [subagents]
+# max_depth = 2
+# max_children_per_agent = 8
+# max_total_subagents = 32
+# execution_timeout_seconds = 300.0
+
+# CORS settings for HTTP API endpoints.
+# [cors]
+# enabled = false
+# allow_origins = ["*"]
+# allow_methods = ["*"]
+# allow_headers = ["*"]
+# allow_credentials = true
+# max_age = 600
+
+# Rate limiting for API requests.
+# [rate_limit]
+# enabled = false
+# requests_per_minute = 60
+# burst = 10
+
+# Inbound turn file attachment constraints.
+# [attachments]
+# max_file_size_bytes = 10485760   # 10 MB per file
+# max_total_bytes = 20971520       # 20 MB total per turn
+# max_files_per_turn = 5
+# allowed_mime_types = []          # empty = allow all supported types

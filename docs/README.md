@@ -31,6 +31,8 @@ root release README with task-oriented guides.
 - [`features/memory.md`](features/memory.md) - durable memory and recall.
 - [`features/skills.md`](features/skills.md) - skill discovery, install, and
   authoring.
+- [`features/browser.md`](features/browser.md) - browser automation and
+  Chrome attachment.
 - [`features/compaction-and-cache.md`](features/compaction-and-cache.md) -
   long-session compaction and prompt-cache continuity.
 

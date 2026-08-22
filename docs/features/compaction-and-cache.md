@@ -82,6 +82,21 @@ tries to keep:
 Cache continuity is best-effort. Routing, tools, attachments, provider changes,
 or a large new context can reduce cache reuse.
 
+### Prompt Cache Configuration
+
+Control prompt caching behavior via `agentos.toml`:
+
+```toml
+[prompt_cache]
+mode = "auto"   # "auto" | "on" | "off"
+```
+
+- `auto` (default): Enables prompt prefix caching when supported by the provider and model.
+- `on`: Forces prompt caching on for all requests.
+- `off`: Disables prompt caching.
+
+Environment variable override: `AGENTOS_CACHE_MODE=auto|on|off`. The legacy `prompt_cache.enabled` config key and `AGENTOS_CACHE_ENABLED` environment variable are deprecated and mapped to `mode` (`on`/`off`) automatically.
+
 ## Related Commands and Surfaces
 
 Manual compaction is primarily surfaced in chat and Web UI flows. For

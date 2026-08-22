@@ -211,6 +211,8 @@ Main `agentos.toml` sections (full commented reference:
 | `[channels]` | messaging channels (`[[channels.channels]]` entries) |
 | `[auxiliary]` | model for work AgentOS runs itself, not the agent's turn (document analysis, image description): `provider`, `model`, `timeout_seconds`, `[auxiliary.tasks.<task>]`. Empty = reuse `[llm]` |
 | `[prompt]` | prompt-layer flags: `platform_hint_enabled`, `env_probe_enabled` (local-toolchain block, names only) |
+| `[prompt_cache]` | Prompt-cache continuity: `mode` = `auto` (default) \| `on` \| `off`. Env override: `AGENTOS_CACHE_MODE` (legacy `prompt_cache.enabled` / `AGENTOS_CACHE_ENABLED` deprecated) |
+| `[safety]` | Prompt-ingress safety: `wrap_untrusted_workspace` (default true), `injection_scan_mode` (`report` default, `enforce` to reject injection turns, `off`) |
 | `[compaction]`, `[agent_token_saving]`, `[task_runtime]` | context compaction, tool-result projection, concurrency |
 
 Slack native commands auto-sync when a Slack channel entry provides `app_id`,
@@ -279,8 +281,9 @@ agentos gateway status --json  # machine-readable status
 agentos gateway stop
 ```
 
-Default port **18791**, loopback bind. `--listen HOST:PORT` overrides
-`--bind`/`--port` together. `gateway status` (and `--json`) reports **both**
+Default port **18791**, loopback bind. `--listen HOST` overrides
+`--bind` (use `--port PORT` to specify port, e.g. `--listen 0.0.0.0 --port 18791`).
+`gateway status` (and `--json`) reports **both**
 the installed CLI version (`cliVersion`) and the running gateway's version
 (`gatewayVersion`); a `versionMismatch` diagnostic means the gateway is running
 old code — restart it.
@@ -444,9 +447,11 @@ agentos agent --workspace /path --workspace-strict -m "Inspect this repo"
 ```
 
 Bounding flags: `--timeout` (wall-clock seconds), `--max-iterations`,
-`--iteration-timeout-seconds`, `--tool-timeout-seconds`; containment:
-`--workspace-strict` (reads), `--workspace-lockdown` (writes),
-`--scratch-dir`.
+`--iteration-timeout-seconds`, `--tool-timeout-seconds`, `--request-timeout-seconds`;
+containment: `--workspace-strict` (reads), `--workspace-lockdown` (writes),
+`--scratch-dir`; execution control: `--file`/`-f`, `--unattended`/`--interactive`,
+`--stateless`/`--clean-room`, `--stateless-keep-project-rules`, `--no-memory-capture`,
+`--session-id`.
 
 ### Day-two operations
 
@@ -559,4 +564,5 @@ Full reference: `docs/http-api.md` (https://useagentos.dev/docs/http-api).
 `gateway`, `http-api`, `providers-and-models`, `channels`, `operations`,
 `scheduling`, `sessions`, `usage-and-cost`, `tools-and-sandbox`,
 `approvals-and-permissions`, `mcp-server`, `troubleshooting`, and
-`features/skills`, `features/agentos-router`, `features/memory`.
+`features/skills`, `features/agentos-router`, `features/memory`,
+`features/browser`, `features/compaction-and-cache`.

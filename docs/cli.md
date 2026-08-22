@@ -221,15 +221,25 @@ Useful automation flags:
 | `--workspace-strict` | Restrict read-side file tools to the workspace. |
 | `--workspace-lockdown` | Contain writes to workspace or scratch directory. |
 | `--scratch-dir` | Place temporary scripts/logs/candidate patches in a known directory. |
-| `--timeout` | Set total agent wall-clock timeout. |
+| `--file` / `-f` | Attach a local file; repeat for multiple files. |
+| `--unattended` / `--interactive` | Run without a live approval surface (unattended is default). |
+| `--stateless` / `--clean-room` | Use clean-room prompt bootstrap. |
+| `--stateless-keep-project-rules` | With clean-room bootstrap, keep `AGENTS.md` project rules only. |
+| `--no-memory-capture` | Do not write this invocation to durable searchable memory. |
+| `--session-id` | Target a specific session key/id for cross-invocation continuity. |
+| `--timeout` / `-T` | Set total agent wall-clock timeout in seconds. |
 | `--max-iterations` | Bound the model/tool loop. |
+| `--iteration-timeout-seconds` | Per-iteration timeout in seconds (one LLM call + tool executions). |
+| `--tool-timeout-seconds` | Per-tool execution timeout in seconds. |
+| `--request-timeout-seconds` | Single LLM HTTP/streaming request timeout in seconds. |
 | `--max-provider-retries` | Bound transient provider retries. |
 | `--length-capped-continuations` | Bound automatic continuations after length-limited provider output. |
-| `--thinking` | Override reasoning level. |
+| `--thinking` | Override reasoning level (off, minimal, low, medium, high, xhigh, adaptive). |
 | `--permissions` | Select restricted, bypass, or full permission posture. |
 | `--transcript-path` | Write a JSONL transcript for automation. |
 | `--usage-path` | Write usage JSON. |
 | `--session-db-path` | Persist session replay across invocations. |
+| `--json` | Emit machine-readable JSON output. |
 
 ## Upgrade
 
@@ -674,7 +684,7 @@ from a channel.
 ### Announcing to a specific channel
 
 `--announce --channel telegram --to <chat-id>` pins where a job reports, and
-`--account`, `--no-deliver`, `--best-effort`, and `--webhook-url` cover the rest.
+`--account`, `--no-deliver`, `--best-effort-deliver`, and `--webhook-url` cover the rest.
 The in-agent `cron` tool accepts the channel case too, through a `delivery`
 object — also restricted to an interactive CLI or Web caller, so a chat
 participant cannot redirect a job into a room they were never in. Webhook
