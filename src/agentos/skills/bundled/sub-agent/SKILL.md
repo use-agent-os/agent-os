@@ -20,14 +20,14 @@ metadata:
           [
             {
               "id": "node-claude",
-              "kind": "node",
+              "kind": "npm",
               "package": "@anthropic-ai/claude-code",
               "bins": ["claude"],
               "label": "Install Claude Code CLI (npm)",
             },
             {
               "id": "node-codex",
-              "kind": "node",
+              "kind": "npm",
               "package": "@openai/codex",
               "bins": ["codex"],
               "label": "Install Codex CLI (npm)",

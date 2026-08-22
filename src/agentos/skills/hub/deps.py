@@ -16,6 +16,9 @@ log = structlog.get_logger(__name__)
 _BREW_FORMULA_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9/_@.-]*$")
 _UV_PACKAGE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*(\[[a-zA-Z0-9,._-]+\])?$")
 _URL_RE = re.compile(r"^https://[a-zA-Z0-9._/-]+$")
+_NPM_PACKAGE_RE = re.compile(r"^(?:@[a-zA-Z0-9][a-zA-Z0-9._-]*/)?[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+_GO_MODULE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._~/-]*(?:@[a-zA-Z0-9][a-zA-Z0-9._~+-]*)?$")
+_APT_PACKAGE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
 
 
 @dataclass
@@ -103,10 +106,56 @@ async def install_download(spec: SkillInstallSpec) -> DepResult:
     )
 
 
+async def install_npm(spec: SkillInstallSpec) -> DepResult:
+    """Install a Node package via npm."""
+    package = spec.package or spec.id
+    if not package or not _NPM_PACKAGE_RE.match(package):
+        return DepResult(
+            kind="npm", identifier=package, success=False, message=f"Invalid package: {package}"
+        )
+
+    code, out, err = await _run(["npm", "install", "-g", "--ignore-scripts", package])
+    if code == 0:
+        return DepResult(kind="npm", identifier=package, success=True, message="Installed")
+    return DepResult(kind="npm", identifier=package, success=False, message=err.strip()[:200])
+
+
+async def install_go(spec: SkillInstallSpec) -> DepResult:
+    """Install a Go module."""
+    module = spec.module or spec.package or spec.id
+    if not module or not _GO_MODULE_RE.match(module):
+        return DepResult(
+            kind="go", identifier=module, success=False, message=f"Invalid module: {module}"
+        )
+    if "@" not in module:
+        module = f"{module}@latest"
+    code, out, err = await _run(["go", "install", module])
+    if code == 0:
+        return DepResult(kind="go", identifier=module, success=True, message="Installed")
+    return DepResult(kind="go", identifier=module, success=False, message=err.strip()[:200])
+
+
+async def install_apt(spec: SkillInstallSpec) -> DepResult:
+    """Install a system package via apt."""
+    package = spec.package or spec.id
+    if not package or not _APT_PACKAGE_RE.match(package):
+        return DepResult(
+            kind="apt", identifier=package, success=False, message=f"Invalid package: {package}"
+        )
+
+    code, out, err = await _run(["sudo", "apt-get", "install", "-y", package])
+    if code == 0:
+        return DepResult(kind="apt", identifier=package, success=True, message="Installed")
+    return DepResult(kind="apt", identifier=package, success=False, message=err.strip()[:200])
+
+
 _INSTALLERS = {
     "brew": install_brew,
     "uv": install_uv,
     "download": install_download,
+    "npm": install_npm,
+    "go": install_go,
+    "apt": install_apt,
 }
 
 
@@ -132,7 +181,7 @@ async def install_deps(specs: list[SkillInstallSpec]) -> list[DepResult]:
                 kind=spec.kind,
                 identifier=spec.id,
                 success=False,
-                message=f"Tool not found for kind '{spec.kind}' (brew/uv/curl)",
+                message=f"Tool not found for kind '{spec.kind}' (brew/uv/curl/npm/go)",
             )
         except Exception as exc:
             result = DepResult(

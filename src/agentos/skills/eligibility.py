@@ -160,6 +160,10 @@ def _render_install_command(spec: SkillInstallSpec) -> str:
         return f"npm install -g {spec.package}" if spec.package else ""
     if spec.kind == "go":
         return f"go install {spec.module}@latest" if spec.module else ""
+    if spec.kind == "apt":
+        return (
+            f"sudo apt-get update && sudo apt-get install -y {spec.package}" if spec.package else ""
+        )
     if spec.kind == "download" and spec.url:
         bin_name = spec.bins[0] if spec.bins else spec.id
         return (

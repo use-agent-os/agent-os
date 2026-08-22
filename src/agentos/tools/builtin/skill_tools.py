@@ -44,9 +44,10 @@ _SKILL_VIEW_PERSIST_HEADROOM = 4_000
 _INSTALL_TIMEOUT_SECONDS = 120.0
 
 _BREW_FORMULA_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9/_@.+-]*$")
-_NODE_PACKAGE_RE = re.compile(r"^(?:@[A-Za-z0-9][A-Za-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*$")
+_NPM_PACKAGE_RE = re.compile(r"^(?:@[A-Za-z0-9][A-Za-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*$")
 _GO_MODULE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~/-]*(?:@[A-Za-z0-9][A-Za-z0-9._~+-]*)?$")
 _UV_PACKAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9,._-]+\])?$")
+_APT_PACKAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 def _sanitize_yaml_value(value: str) -> str:
@@ -103,10 +104,10 @@ def _argv_for_install_spec(spec: SkillInstallSpec) -> list[str]:
             "formula",
         )
         return ["brew", "install", formula]
-    if kind == "node":
+    if kind == "npm":
         package = _validate_install_value(
             spec.package,
-            _NODE_PACKAGE_RE,
+            _NPM_PACKAGE_RE,
             "package",
         )
         return ["npm", "install", "-g", "--ignore-scripts", package]
@@ -126,6 +127,13 @@ def _argv_for_install_spec(spec: SkillInstallSpec) -> list[str]:
             "package",
         )
         return ["uv", "tool", "install", package]
+    if kind == "apt":
+        package = _validate_install_value(
+            spec.package,
+            _APT_PACKAGE_RE,
+            "package",
+        )
+        return ["sudo", "apt-get", "install", "-y", package]
     raise ToolError(f"Unsupported install kind: {kind}")
 
 
