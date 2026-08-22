@@ -1748,6 +1748,24 @@ class SubagentsGatewayConfig(BaseModel):
     """When enabled, subagent bootstrap prompts keep only AGENTS.md and TOOLS.md."""
 
 
+class ObservabilityConfig(BaseModel):
+    """Observability, Prometheus metrics, OTLP trace export, and log retention configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    metrics_enabled: bool = True
+    metrics_path: str = "/metrics"
+
+    otlp_enabled: bool = False
+    otlp_endpoint: str = ""
+    otlp_headers: dict[str, str] = Field(default_factory=dict)
+    otlp_service_name: str = "agentos"
+
+    log_retention_days: int = Field(default=14, ge=0)
+    log_retention_max_total_mb: int = Field(default=500, ge=0)
+    log_retention_sweep_interval_s: float = Field(default=3600.0, gt=0)
+
+
 class UpdatesConfig(BaseModel):
     """Update-notice preferences.
 
@@ -1844,6 +1862,7 @@ class GatewayConfig(BaseSettings):
     agents: list[AgentEntryConfig] = Field(default_factory=list)
     agents_defaults: AgentDefaults = Field(default_factory=AgentDefaults)
     subagents: SubagentsGatewayConfig = Field(default_factory=SubagentsGatewayConfig)
+    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
 
     updates: UpdatesConfig = Field(default_factory=UpdatesConfig)
 

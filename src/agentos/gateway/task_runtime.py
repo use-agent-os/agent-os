@@ -58,6 +58,12 @@ def _emit_metric(name: str, value: int = 1, **labels: Any) -> None:
     Grep pattern: ``metric=<name>``
     """
     log.info(name, metric=name, value=value, **labels)
+    try:
+        from agentos.observability.metrics import record_metric
+
+        record_metric(name, value, **labels)
+    except Exception:
+        pass
 
 
 TERMINAL_STATUSES = frozenset(

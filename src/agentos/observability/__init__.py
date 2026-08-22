@@ -1,4 +1,4 @@
-"""Observability baseline: decision log + safety event log + replay.
+"""Observability baseline: decision log + safety event log + replay + metrics + OTLP + retention.
 
 This package defines:
 
@@ -10,6 +10,9 @@ This package defines:
   ``~/.agentos/logs/turn-calls-YYYYMMDD.jsonl``.
 * :class:`TraceEvent` / :class:`JsonlTraceSink` — safe trace correlation stream
   appended to ``~/.agentos/logs/traces-YYYYMMDD.jsonl``.
+* :class:`OtlpTraceSink` — OpenTelemetry OTLP trace and span exporter.
+* :class:`MetricsRegistry` / :func:`format_prometheus_metrics` — Prometheus metrics.
+* :class:`LogRetentionSweeper` / :func:`prune_expired_log_files` — retention sweeper.
 * :class:`PromptReport` — structured prompt-composition report for a turn.
 * :func:`load_turn` / :func:`format_transcript` — read-only replay API that
   never re-executes tools.
@@ -28,8 +31,24 @@ from agentos.observability.decision_log import (
     load_entries,
     write_decision_entry,
 )
+from agentos.observability.metrics import (
+    Counter,
+    Gauge,
+    Histogram,
+    MetricsRegistry,
+    MetricType,
+    format_prometheus_metrics,
+    get_metrics_registry,
+    record_metric,
+)
+from agentos.observability.otlp import OtlpTraceSink
 from agentos.observability.prompt_report import PromptReport, ToolEntry, build_prompt_report
 from agentos.observability.replay import format_transcript, load_turn
+from agentos.observability.retention import (
+    LogPruneResult,
+    LogRetentionSweeper,
+    prune_expired_log_files,
+)
 from agentos.observability.safety_log import (
     SafetyEvent,
     SafetyEventType,
@@ -42,6 +61,7 @@ from agentos.observability.trace import (
     PrivacyGuardSink,
     TraceContext,
     TraceEvent,
+    TraceSink,
     load_trace_events,
     write_trace_event,
 )
@@ -50,9 +70,17 @@ from agentos.observability.turn_call_log import TurnCallLogger, is_turn_call_log
 __all__ = [
     "SCHEMA_VERSION",
     "TRACE_SCHEMA_VERSION",
+    "Counter",
     "DecisionEntry",
+    "Gauge",
+    "Histogram",
     "JsonlTraceSink",
+    "LogPruneResult",
+    "LogRetentionSweeper",
     "MemoryTraceSink",
+    "MetricType",
+    "MetricsRegistry",
+    "OtlpTraceSink",
     "PipelineStepRecord",
     "PrivacyGuardSink",
     "PromptReport",
@@ -61,14 +89,19 @@ __all__ = [
     "ToolEntry",
     "TraceContext",
     "TraceEvent",
+    "TraceSink",
     "TurnCallLogger",
     "build_prompt_report",
     "compute_hashes",
+    "format_prometheus_metrics",
     "format_transcript",
+    "get_metrics_registry",
     "is_turn_call_log_enabled",
-    "load_trace_events",
     "load_entries",
+    "load_trace_events",
     "load_turn",
+    "prune_expired_log_files",
+    "record_metric",
     "write_decision_entry",
     "write_safety_event",
     "write_trace_event",

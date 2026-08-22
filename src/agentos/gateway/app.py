@@ -13,7 +13,7 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, RedirectResponse
+from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket
 
@@ -128,6 +128,15 @@ def create_gateway_app(
 
     async def health(request: Request) -> JSONResponse:
         return JSONResponse({"ok": True, "status": "live"})
+
+    async def metrics_endpoint(request: Request) -> Response:
+        from agentos.observability.metrics import format_prometheus_metrics
+
+        content = format_prometheus_metrics()
+        return Response(
+            content,
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
 
     async def root(request: Request) -> RedirectResponse:
         return RedirectResponse(url=f"{config.control_ui.base_path}/")
@@ -517,6 +526,7 @@ def create_gateway_app(
         Route("/healthz", health, methods=["GET"]),
         Route("/ready", ready, methods=["GET"]),
         Route("/readyz", ready, methods=["GET"]),
+        Route("/metrics", metrics_endpoint, methods=["GET"]),
         Route("/api/config", api_config, methods=["GET"]),
         Route("/api/sessions", api_sessions, methods=["GET"]),
         Route("/api/chat", api_chat, methods=["POST"]),
