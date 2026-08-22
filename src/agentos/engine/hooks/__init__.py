@@ -23,6 +23,8 @@ from agentos.engine.hooks.defaults import (
     NoopToolHook,
     NoopTurnHook,
     build_default_turn_hooks,
+    fire_after_compact,
+    fire_before_compact,
 )
 from agentos.engine.hooks.types import (
     CompactionHook,
@@ -53,4 +55,6 @@ __all__ = [
     "TurnHookContext",
     "TurnHookResult",
     "build_default_turn_hooks",
+    "fire_after_compact",
+    "fire_before_compact",
 ]

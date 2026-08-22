@@ -61,6 +61,7 @@ _SUPPRESS: Final = object()
 # Ports -- five narrow Protocols + one callable
 # ---------------------------------------------------------------------------
 
+
 @runtime_checkable
 class AgentRunPort(Protocol):
     """Wrap ``agent.run_turn(turn_input, extra_messages=..., **kwargs)``.
@@ -80,6 +81,7 @@ class AgentRunPort(Protocol):
         extra_messages: list[Any] | None,
         semantic_message: str | None,
     ) -> AsyncIterator[AgentEvent]: ...
+
 
 @runtime_checkable
 class CompactionPersistPort(Protocol):
@@ -107,6 +109,7 @@ class CompactionPersistPort(Protocol):
         compaction_id: str | None = None,
     ) -> None: ...
 
+
 @runtime_checkable
 class MemorySnapshotRefreshPort(Protocol):
     """Refresh ``_memory_snapshots[(agent_id, session_key)]`` after compaction.
@@ -129,6 +132,7 @@ class MemorySnapshotRefreshPort(Protocol):
         session_key: str,
         private_memory_allowed: bool,
     ) -> None: ...
+
 
 @runtime_checkable
 class SystemPromptRefreshPort(Protocol):
@@ -155,6 +159,7 @@ class SystemPromptRefreshPort(Protocol):
         bootstrap_context_mode: str | None,
     ) -> None: ...
 
+
 @runtime_checkable
 class MemorySyncNotifyPort(Protocol):
     """Notify ``sync_manager.notify_message(byte_count)`` post-stream.
@@ -170,6 +175,7 @@ class MemorySyncNotifyPort(Protocol):
         runtime_message: str,
     ) -> None: ...
 
+
 # Callable signature for runtime warning transformation. Implemented as a
 # plain callable rather than a Protocol because it is a single-method
 # contract and the recording-fake discipline applies identically.
@@ -178,6 +184,7 @@ WarningTransformer = Callable[["WarningEvent"], "WarningEvent"]
 # ---------------------------------------------------------------------------
 # Stream state -- four owned + four pass-by-reference accumulators
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class _StreamState:
@@ -201,9 +208,7 @@ class _StreamState:
     error_message: str | None = None
     pending_error_event: ErrorEvent | None = None
     done_event: DoneEvent | None = None
-    protocol_text_guard: ProtocolTextLeakGuard = field(
-        default_factory=ProtocolTextLeakGuard
-    )
+    protocol_text_guard: ProtocolTextLeakGuard = field(default_factory=ProtocolTextLeakGuard)
 
     # PASSED IN by the harness -- references, not copies.
     final_text_parts: list[str] = field(default_factory=list)
@@ -211,9 +216,11 @@ class _StreamState:
     turn_artifacts: list[dict[str, Any]] = field(default_factory=list)
     artifact_delivery_failures: list[str] = field(default_factory=list)
 
+
 # ---------------------------------------------------------------------------
 # Stage I/O dataclass
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class StreamConsumerStageInput:
@@ -260,9 +267,11 @@ class StreamConsumerStageInput:
     # Original input provenance for runtime-generated disclosures.
     input_provenance: dict[str, Any] | None = None
 
+
 # ---------------------------------------------------------------------------
 # Per-event handler classes
 # ---------------------------------------------------------------------------
+
 
 class _TextDeltaHandler:
     """Accumulate streamed text deltas into the final-text and current-text buffers."""
@@ -277,6 +286,7 @@ class _TextDeltaHandler:
             state.final_text_parts.append(cleaned_delta)
             state.current_text_parts.append(cleaned_delta)
         return replace(event, text=cleaned_delta)
+
 
 class _ToolUseStartHandler:
     """Strip synthetic-tool-call text, flush the current text segment, append tool_use segment.
@@ -322,13 +332,9 @@ class _ToolUseStartHandler:
                             event.tool_name,
                         )
                     ]
-                state.current_text_parts[:] = (
-                    [cleaned_current_text] if cleaned_current_text else []
-                )
+                state.current_text_parts[:] = [cleaned_current_text] if cleaned_current_text else []
         if state.current_text_parts:
-            state.turn_segments.append(
-                {"type": "text", "text": "".join(state.current_text_parts)}
-            )
+            state.turn_segments.append({"type": "text", "text": "".join(state.current_text_parts)})
             state.current_text_parts[:] = []
         state.turn_segments.append(
             {
@@ -339,6 +345,7 @@ class _ToolUseStartHandler:
             }
         )
         return event
+
 
 class _ToolResultHandler:
     """Capture artifact-delivery failures and append the tool_result segment."""
@@ -374,6 +381,7 @@ class _ToolResultHandler:
         state.turn_segments.append(_persisted_tool_result_segment(event))
         return event
 
+
 class _ArtifactHandler:
     """Append an artifact payload to the per-turn artifact list."""
 
@@ -386,6 +394,7 @@ class _ArtifactHandler:
 
         state.turn_artifacts.append(artifact_payload(event))
         return event
+
 
 class _ErrorHandler:
     """Rewrite timeout envelopes, drop unpaired tool_use, capture pending error.
@@ -412,12 +421,11 @@ class _ErrorHandler:
                 code=_LLM_TIMEOUT_ENVELOPE["error_class"],
             )
         if event.code in {"incomplete_tool_stream", "provider_output_truncated"}:
-            state.turn_segments[:] = _drop_unpaired_tool_use_segments(
-                state.turn_segments
-            )
+            state.turn_segments[:] = _drop_unpaired_tool_use_segments(state.turn_segments)
         state.error_message = event.message or "Unknown error"
         state.pending_error_event = event
         return _SUPPRESS
+
 
 class _WarningHandler:
     """Forward warnings to the runner's runtime-warning transformer."""
@@ -427,6 +435,7 @@ class _WarningHandler:
 
     def handle(self, event: WarningEvent) -> WarningEvent:
         return self._transformer(event)
+
 
 class _DoneHandler:
     """Apply routing-tier metadata, savings, normalize text, emit notices.
@@ -545,9 +554,7 @@ class _DoneHandler:
             artifact_event = _ArtifactEvent(**artifact)
             state.turn_artifacts.append(artifact)
             extra_yields.append(artifact_event)
-        state.artifact_delivery_failures.extend(
-            omitted_publish_result.failure_summaries
-        )
+        state.artifact_delivery_failures.extend(omitted_publish_result.failure_summaries)
 
         if _should_add_artifact_delivery_failure_notice(
             failure_summaries=state.artifact_delivery_failures,
@@ -574,9 +581,7 @@ class _DoneHandler:
             extra_yields.append(notice_event)
 
         accumulated_text = "".join(state.final_text_parts)
-        if _claims_image_without_tool_use(
-            accumulated_text, turn.tool_defs, state.turn_segments
-        ):
+        if _claims_image_without_tool_use(accumulated_text, turn.tool_defs, state.turn_segments):
             extra_yields.append(
                 _WarningEvent(
                     code="image_generate_claimed_without_call",
@@ -682,6 +687,7 @@ def _int_value(value: Any) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
+
 
 class _CompactionHandler:
     """Persist compaction and refresh memory snapshot + system prompt.
@@ -792,26 +798,24 @@ class _CompactionHandler:
         )
 
     async def _fire_before_compact(self, state: CompactionState) -> None:
-        for hook in self._compaction_hooks:
-            try:
-                await hook.before_compact(state)
-            except Exception:  # noqa: BLE001 - hook isolation contract
-                pass
+        from agentos.engine.hooks import fire_before_compact
+
+        await fire_before_compact(self._compaction_hooks, state)
 
     async def _fire_after_compact(
         self,
         state: CompactionState,
         outcome: dict[str, Any],
     ) -> None:
-        for hook in self._compaction_hooks:
-            try:
-                await hook.after_compact(state, outcome)
-            except Exception:  # noqa: BLE001 - hook isolation contract
-                pass
+        from agentos.engine.hooks import fire_after_compact
+
+        await fire_after_compact(self._compaction_hooks, state, outcome)
+
 
 # ---------------------------------------------------------------------------
 # Outer stage class
 # ---------------------------------------------------------------------------
+
 
 class StreamConsumerStage:
     """Consume the agent stream and yield events; persist mid-stream side effects.
@@ -913,9 +917,7 @@ class StreamConsumerStage:
             elif isinstance(event, WarningEvent):
                 transformed = self._warning_handler.handle(event)
             elif isinstance(event, DoneEvent):
-                transformed, extra_yields = self._done_handler.handle(
-                    event, inp, state
-                )
+                transformed, extra_yields = self._done_handler.handle(event, inp, state)
             elif isinstance(event, CompactionEvent):
                 await self._compaction_handler.handle(event, inp)
                 transformed = _SUPPRESS

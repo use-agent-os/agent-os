@@ -123,14 +123,36 @@ def _hook_emit(
 @pytest.mark.parametrize(
     ("kind", "seq", "attrs", "payload"),
     [
-        ("turn_start", 1, {"input_mode": "user", "run_kind": "default"},
-         {"message_chars": 12, "attachment_count": 0}),
-        ("turn_error", 2, None,
-         {"error_type": "ProviderResolutionError", "error_code": "no_provider", "error_chars": 19}),
-        ("turn_end", 2, {"provider": "openrouter", "model": "gpt-x"},
-         {"final_text_chars": 5, "segment_count": 0, "artifact_count": 0,
-          "error": False, "tool_projection_applied": False,
-          "tool_projection_calls": 0, "tool_projection_tokens_saved": 0}),
+        (
+            "turn_start",
+            1,
+            {"input_mode": "user", "run_kind": "default"},
+            {"message_chars": 12, "attachment_count": 0},
+        ),
+        (
+            "turn_error",
+            2,
+            None,
+            {
+                "error_type": "ProviderResolutionError",
+                "error_code": "no_provider",
+                "error_chars": 19,
+            },
+        ),
+        (
+            "turn_end",
+            2,
+            {"provider": "openrouter", "model": "gpt-x"},
+            {
+                "final_text_chars": 5,
+                "segment_count": 0,
+                "artifact_count": 0,
+                "error": False,
+                "tool_projection_applied": False,
+                "tool_projection_calls": 0,
+                "tool_projection_tokens_saved": 0,
+            },
+        ),
         ("turn_cancelled", 2, None, {"partial_text_chars": 3}),
     ],
 )
@@ -312,13 +334,15 @@ def _emit_through_runtime(
 @pytest.mark.parametrize(
     ("kind", "seq", "attrs", "payload"),
     [
-        ("turn_start", 1, {"input_mode": "user", "run_kind": "default"},
-         {"message_chars": 12, "attachment_count": 0}),
-        ("turn_end", 2, {"provider": "p", "model": "m"},
-         {"final_text_chars": 5}),
+        (
+            "turn_start",
+            1,
+            {"input_mode": "user", "run_kind": "default"},
+            {"message_chars": 12, "attachment_count": 0},
+        ),
+        ("turn_end", 2, {"provider": "p", "model": "m"}, {"final_text_chars": 5}),
         ("turn_cancelled", 2, None, {"partial_text_chars": 3}),
-        ("turn_error", 2, None,
-         {"error_type": "RuntimeError", "error_chars": 7}),
+        ("turn_error", 2, None, {"error_type": "RuntimeError", "error_chars": 7}),
     ],
 )
 def test_emit_turn_event_legacy_matches_new(
@@ -335,15 +359,11 @@ def test_emit_turn_event_legacy_matches_new(
     runner = _make_runtime_with_default_hook()
 
     monkeypatch.setenv("AGENTOS_HOOKS", "legacy")
-    _emit_through_runtime(
-        runner, trace_context, kind=kind, seq=seq, attrs=attrs, payload=payload
-    )
+    _emit_through_runtime(runner, trace_context, kind=kind, seq=seq, attrs=attrs, payload=payload)
     legacy = captured_events.pop()
 
     monkeypatch.setenv("AGENTOS_HOOKS", "new")
-    _emit_through_runtime(
-        runner, trace_context, kind=kind, seq=seq, attrs=attrs, payload=payload
-    )
+    _emit_through_runtime(runner, trace_context, kind=kind, seq=seq, attrs=attrs, payload=payload)
     new = captured_events.pop()
 
     assert legacy.kind == new.kind
@@ -414,9 +434,94 @@ def test_runtime_hook_failure_does_not_break_emission(
         provider_selector=None,
         turn_hooks=(_RaisingHook(), DefaultTraceEmitterHook()),
     )
-    _emit_through_runtime(
-        runner, trace_context, kind="turn_start", seq=1, attrs=None, payload=None
-    )
+    _emit_through_runtime(runner, trace_context, kind="turn_start", seq=1, attrs=None, payload=None)
     # The default emitter still wrote the event despite the prior hook raising.
     event = captured_events.pop()
     assert event.kind == "turn_start"
+
+
+@pytest.mark.asyncio
+async def test_compaction_hooks_failure_logged(monkeypatch: pytest.MonkeyPatch) -> None:
+    import agentos.engine.hooks.defaults as hooks_defaults
+    from agentos.engine.hooks import CompactionState
+    from agentos.engine.hooks.defaults import fire_after_compact, fire_before_compact
+
+    warnings = []
+
+    def mock_warn(event, **kwargs):
+        warnings.append((event, kwargs))
+
+    monkeypatch.setattr(hooks_defaults.log, "warning", mock_warn)
+
+    class BuggyCompactionHook:
+        name = "buggy"
+
+        async def before_compact(self, state: CompactionState) -> None:
+            raise ValueError("before fail")
+
+        async def after_compact(self, state: CompactionState, outcome: Any) -> None:
+            raise ValueError("after fail")
+
+    state = CompactionState(session_key="sess-1", agent_id="agent-1")
+
+    await fire_before_compact([BuggyCompactionHook()], state)
+    await fire_after_compact([BuggyCompactionHook()], state, {"ok": True})
+
+    assert len(warnings) == 2
+    assert warnings[0][0] == "compaction_hook.before_compact_failed"
+    assert warnings[0][1]["hook_name"] == "buggy"
+    assert warnings[0][1]["error"] == "before fail"
+
+    assert warnings[1][0] == "compaction_hook.after_compact_failed"
+    assert warnings[1][1]["hook_name"] == "buggy"
+    assert warnings[1][1]["error"] == "after fail"
+
+
+def test_turn_runner_wires_tool_hooks() -> None:
+    from agentos.engine.hooks import NoopToolHook
+
+    my_hook = NoopToolHook()
+    runner = TurnRunner(
+        provider_selector=None,
+        tool_hooks=(my_hook,),
+    )
+
+    assert runner._tool_hooks == (my_hook,)
+
+
+@pytest.mark.asyncio
+async def test_build_services_wires_hooks(tmp_path) -> None:
+    from agentos.engine.hooks import NoopCompactionHook, NoopToolHook, NoopTurnHook
+    from agentos.gateway.boot import build_services, build_turn_runner_from_services
+    from agentos.gateway.config import GatewayConfig
+
+    th = NoopTurnHook()
+    ch = NoopCompactionHook()
+    toh = NoopToolHook()
+
+    config = GatewayConfig(
+        state_dir=str(tmp_path / "state"),
+        workspace_dir=str(tmp_path / "workspace"),
+        control_ui={"enabled": False},
+        channels={"channels": []},
+        mcp={"enabled": False},
+    )
+
+    svc = await build_services(
+        config=config,
+        turn_hooks=[th],
+        compaction_hooks=[ch],
+        tool_hooks=[toh],
+        seed_agent_workspaces=False,
+    )
+    try:
+        assert svc.turn_hooks == [th]
+        assert svc.compaction_hooks == [ch]
+        assert svc.tool_hooks == [toh]
+
+        runner = build_turn_runner_from_services(svc, config=config)
+        assert th in runner._turn_hooks
+        assert runner._compaction_hooks == (ch,)
+        assert runner._tool_hooks == (toh,)
+    finally:
+        await svc.close()

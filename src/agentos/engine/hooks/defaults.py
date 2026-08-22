@@ -8,6 +8,9 @@ hook path with these defaults registered.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import Any
+
 import structlog
 
 from agentos.engine.hooks.types import (
@@ -29,6 +32,7 @@ log = structlog.get_logger("agentos.engine.hooks")
 # No-op hooks — used in tests + as the safe registration default
 # ---------------------------------------------------------------------------
 
+
 class NoopTurnHook:
     """TurnHook that does nothing. Useful as a base class or test double."""
 
@@ -46,6 +50,7 @@ class NoopTurnHook:
     def on_event(self, ctx: TurnHookContext, event: TurnEvent) -> None:
         return None
 
+
 class NoopToolHook:
     """ToolHook that does nothing."""
 
@@ -56,6 +61,7 @@ class NoopToolHook:
 
     def after_tool(self, call: ToolHookCall, outcome: ToolHookResult) -> None:
         return None
+
 
 class NoopCompactionHook:
     """CompactionHook that does nothing."""
@@ -68,9 +74,11 @@ class NoopCompactionHook:
     async def after_compact(self, state: CompactionState, outcome: object) -> None:
         return None
 
+
 # ---------------------------------------------------------------------------
 # Default trace emitter — reproduces TurnRunner._write_trace_event verbatim
 # ---------------------------------------------------------------------------
+
 
 class DefaultTraceEmitterHook:
     """``TurnHook.on_event`` implementation that emits a trace event.
@@ -110,9 +118,11 @@ class DefaultTraceEmitterHook:
         except Exception as exc:  # pragma: no cover — observability must not break turns
             log.debug("trace_event.write_failed", kind=event.kind, error=str(exc))
 
+
 # ---------------------------------------------------------------------------
 # Default transcript hook — placeholder; production persistence stays inline
 # ---------------------------------------------------------------------------
+
 
 class DefaultTranscriptHook:
     """``TurnHook.after_turn`` implementation reserved for transcript persist.
@@ -138,9 +148,11 @@ class DefaultTranscriptHook:
     def on_event(self, ctx: TurnHookContext, event: TurnEvent) -> None:
         return None
 
+
 # ---------------------------------------------------------------------------
 # Default memory flush hook — placeholder; production flush stays inline
 # ---------------------------------------------------------------------------
+
 
 class DefaultMemoryFlushHook:
     """``TurnHook.after_turn`` implementation reserved for memory flush.
@@ -164,9 +176,11 @@ class DefaultMemoryFlushHook:
     def on_event(self, ctx: TurnHookContext, event: TurnEvent) -> None:
         return None
 
+
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
+
 
 def build_default_turn_hooks() -> tuple[TurnHook, ...]:
     """Return the canonical default ``TurnHook`` chain.
@@ -183,6 +197,7 @@ def build_default_turn_hooks() -> tuple[TurnHook, ...]:
         DefaultMemoryFlushHook(),
     )
 
+
 __all__ = [
     "DefaultMemoryFlushHook",
     "DefaultTraceEmitterHook",
@@ -191,6 +206,8 @@ __all__ = [
     "NoopToolHook",
     "NoopTurnHook",
     "build_default_turn_hooks",
+    "fire_before_compact",
+    "fire_after_compact",
 ]
 
 # Static checks: defaults satisfy the protocols.
@@ -208,3 +225,33 @@ del (
     _check_tool,
     _check_compact,
 )
+
+
+async def fire_before_compact(hooks: Sequence[CompactionHook], state: CompactionState) -> None:
+    for hook in hooks:
+        try:
+            await hook.before_compact(state)
+        except Exception as exc:  # noqa: BLE001 — hook isolation contract
+            log.warning(
+                "compaction_hook.before_compact_failed",
+                hook_name=getattr(hook, "name", type(hook).__name__),
+                session_key=state.session_key,
+                agent_id=state.agent_id,
+                error=str(exc),
+            )
+
+
+async def fire_after_compact(
+    hooks: Sequence[CompactionHook], state: CompactionState, outcome: Any
+) -> None:
+    for hook in hooks:
+        try:
+            await hook.after_compact(state, outcome)
+        except Exception as exc:  # noqa: BLE001 — hook isolation contract
+            log.warning(
+                "compaction_hook.after_compact_failed",
+                hook_name=getattr(hook, "name", type(hook).__name__),
+                session_key=state.session_key,
+                agent_id=state.agent_id,
+                error=str(exc),
+            )

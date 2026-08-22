@@ -52,6 +52,7 @@ from agentos.engine.cache_break_monitor import notify_compaction
 from agentos.engine.hooks import (
     CompactionHook,
     DefaultTraceEmitterHook,
+    ToolHook,
     TurnEvent,
     TurnHook,
     TurnHookContext,
@@ -608,8 +609,9 @@ def _summarize_memory_write(arguments: Any) -> str:
     target = str(arguments.get("target") or "memory")
     operations = arguments.get("operations")
     if isinstance(operations, list) and operations:
-        actions = ",".join(sorted({str(op.get("action", "?")) for op in operations
-                                   if isinstance(op, dict)}))
+        actions = ",".join(
+            sorted({str(op.get("action", "?")) for op in operations if isinstance(op, dict)})
+        )
         return f"{target}/batch[{len(operations)} ops: {actions or '?'}]"
     action = str(arguments.get("action") or "?")
     content = str(arguments.get("content") or arguments.get("old_text") or "").strip()
@@ -1477,6 +1479,7 @@ class TurnRunner:
         diagnostics_state: Any | None = None,
         turn_hooks: Sequence[TurnHook] | None = None,
         compaction_hooks: Sequence[CompactionHook] | None = None,
+        tool_hooks: Sequence[ToolHook] | None = None,
     ) -> None:
         self._provider_selector = provider_selector
         self._tool_registry = tool_registry
@@ -1508,6 +1511,8 @@ class TurnRunner:
         self._compaction_hooks: tuple[CompactionHook, ...] = (
             tuple(compaction_hooks) if compaction_hooks else ()
         )
+        # ToolHook surface. build_tool_handler uses these to wrap tool execution.
+        self._tool_hooks: tuple[ToolHook, ...] = tuple(tool_hooks) if tool_hooks else ()
         # Per-session lock provider.
         # Gateway path: task_runtime._get_session_lock_for_turn (wired in boot.py).
         # CLI/standalone path: _standalone_lock_provider from build_turn_runner_from_services.
@@ -2830,9 +2835,7 @@ class TurnRunner:
 
             # 11. Observability: best-effort DecisionEntry for this turn.
             #     Must never break turn execution — wrap in try/except.
-            turn.metadata.update(
-                {}
-            )
+            turn.metadata.update({})
             prompt_report_for_decision = build_prompt_report(
                 turn_id=turn_id,
                 session_key=session_key,
@@ -3670,6 +3673,7 @@ class TurnRunner:
             self._tool_registry,
             ctx,
             known_skill_names=known_skill_names,
+            tool_hooks=self._tool_hooks,
         )
         return tool_defs, tool_handler
 
@@ -4060,9 +4064,7 @@ class TurnRunner:
         # heartbeat config are boot-time) or for the session kind
         # (bootstrap_context_mode keys the snapshot), so gating on them does
         # not churn the cacheable base.
-        channels_enabled = bool(
-            getattr(getattr(self._config, "channels", None), "channels", None)
-        )
+        channels_enabled = bool(getattr(getattr(self._config, "channels", None), "channels", None))
         unattended_context = bool(
             getattr(getattr(self._config, "heartbeat", None), "enabled", False)
         ) or bootstrap_context_mode in {"heartbeat_light", "unattended"}
@@ -4521,7 +4523,6 @@ class TurnRunner:
             final_prompt = "\n\n".join(final_prompt)
 
         return final_prompt, cache_breakpoints, request_context_prompt
-
 
     async def _record_checkpoint_before_compaction(
         self,
@@ -5374,8 +5375,6 @@ class TurnRunner:
                 ),
             )
 
-
-
     def _pre_compaction_flush_timeout_seconds(self) -> float:
         memory_cfg = getattr(self._config, "memory", None)
         raw_timeout = getattr(memory_cfg, "flush_timeout_seconds", 15.0)
@@ -5393,7 +5392,6 @@ class TurnRunner:
         except (TypeError, ValueError):
             return 120.0
         return max(timeout, 0.0)
-
 
     def _consume_pre_compaction_flush_task(
         self,

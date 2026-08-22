@@ -47,7 +47,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from agentos.engine.agent import Agent
-    from agentos.engine.hooks.types import CompactionHook
+    from agentos.engine.hooks.types import CompactionHook, CompactionState
     from agentos.engine.turn_runner.outcome import StageOutcome
 
 # Internal sentinels mirroring the runtime.py module-level constants. The
@@ -59,6 +59,7 @@ _T3_FLUSH_FAILED: str = "flush_failed"
 # ---------------------------------------------------------------------------
 # Ports — four narrow Protocols
 # ---------------------------------------------------------------------------
+
 
 @runtime_checkable
 class T3UpgradeCompactionPort(Protocol):
@@ -93,6 +94,7 @@ class T3UpgradeCompactionPort(Protocol):
         compaction_model: str | None,
     ) -> str: ...
 
+
 @runtime_checkable
 class PreflightCompactionPort(Protocol):
     """Wraps ``TurnRunner._maybe_preflight_compact``.
@@ -116,6 +118,7 @@ class PreflightCompactionPort(Protocol):
         compaction_provider: Any | None,
         compaction_model: str | None,
     ) -> None: ...
+
 
 @runtime_checkable
 class HistoryLoaderPort(Protocol):
@@ -142,6 +145,7 @@ class HistoryLoaderPort(Protocol):
         trim_last_user: bool,
     ) -> str | None: ...
 
+
 @runtime_checkable
 class RequestContextPrependPort(Protocol):
     """Wraps ``_prepend_request_context_prompt`` (module-level pure helper).
@@ -164,9 +168,11 @@ class RequestContextPrependPort(Protocol):
         prepended: str | None,
     ) -> str | None: ...
 
+
 # ---------------------------------------------------------------------------
 # Stage I/O dataclasses (frozen)
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class CompactionAndHistoryStageInput:
@@ -191,6 +197,7 @@ class CompactionAndHistoryStageInput:
     session_key: str
     agent_id: str
     history_has_persisted_user: bool
+
 
 @dataclass(frozen=True)
 class CompactionAndHistoryStageOutput:
@@ -219,9 +226,11 @@ class CompactionAndHistoryStageOutput:
     compaction_summary_context: str | None
     final_request_context_prompt: str | None
 
+
 # ---------------------------------------------------------------------------
 # Stage
 # ---------------------------------------------------------------------------
+
 
 class CompactionAndHistoryStage:
     """Compact (if needed), load history, prepend compaction context.
@@ -334,18 +343,12 @@ class CompactionAndHistoryStage:
             )
         )
 
-    async def _fire_before_compact(self, state: Any) -> None:
-        for hook in self._compaction_hooks:
-            try:
-                await hook.before_compact(state)
-            except Exception:  # noqa: BLE001 — hook isolation contract
-                # A buggy hook MUST NOT break the turn. Swallow per
-                # protocol; observability is the runtime's concern.
-                pass
+    async def _fire_before_compact(self, state: CompactionState) -> None:
+        from agentos.engine.hooks import fire_before_compact
 
-    async def _fire_after_compact(self, state: Any, outcome: Any) -> None:
-        for hook in self._compaction_hooks:
-            try:
-                await hook.after_compact(state, outcome)
-            except Exception:  # noqa: BLE001 — hook isolation contract
-                pass
+        await fire_before_compact(self._compaction_hooks, state)
+
+    async def _fire_after_compact(self, state: CompactionState, outcome: Any) -> None:
+        from agentos.engine.hooks import fire_after_compact
+
+        await fire_after_compact(self._compaction_hooks, state, outcome)
