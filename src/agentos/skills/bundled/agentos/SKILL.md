@@ -524,7 +524,10 @@ Full reference: `docs/http-api.md` (https://useagentos.dev/docs/http-api).
 - **Gateway won't bind publicly** → intentional auth guard; see the
   public-bind recipe above.
 - **Provider/model errors** → `agentos providers status`,
-  `agentos models list`, then `agentos providers configure …`.
+  `agentos models list`, then `agentos providers configure …`. The `circuit`
+  column shows the failover circuit breaker: `open (42s)` means recent
+  provider-health failures parked it and turns are on the fallback chain; it
+  re-probes itself, so tune `[llm.circuit_breaker]` rather than restarting.
 - **Skill missing from prompt** → do not guess from the layer. Ask the
   surface that knows: the `availability.reason` on a `skills.list` row, or the
   `[not offered] …` line the agent's own `skill_list` prints. Then act on the

@@ -149,6 +149,46 @@ agentos configure router --router recommended
 For routing details, see
 [`features/agentos-router.md`](features/agentos-router.md).
 
+## Provider Health Circuit Breaker
+
+Failover is health-aware. When the active provider returns consecutive
+provider-health failures — overload / gateway 5xx, transport errors, or rate
+limits — AgentOS opens a circuit breaker for that provider and sends the next
+turns straight down the fallback chain instead of paying the dead provider's
+timeout on every turn.
+
+- `failure_threshold` consecutive failures open the breaker (default `3`).
+  Request-shaped failures (unknown model, bad request, context overflow, auth,
+  billing) never count — they say nothing about provider health.
+- While open, the provider is skipped for `cooldown_seconds` (default `60`).
+  Each consecutive trip doubles the window up to `max_cooldown_seconds`
+  (default `600`).
+- After the cooldown, exactly one turn is admitted as a half-open probe. A
+  clean turn closes the breaker; another failure re-opens it with the longer
+  window.
+- If every provider in the chain is in cooldown, the primary is used anyway —
+  a provider in cooldown still beats no provider at all.
+
+Tune or disable it in `agentos.toml`:
+
+```toml
+[llm.circuit_breaker]
+enabled = true
+failure_threshold = 3
+cooldown_seconds = 60
+max_cooldown_seconds = 600
+```
+
+Inspect the current state:
+
+```sh
+agentos providers status          # "circuit" column: closed | half_open | open (42s)
+agentos doctor                    # provider.circuit.open / provider.circuit.half_open
+curl localhost:8787/api/system/status   # circuitBreaker / circuitBreakers
+```
+
+Breaker state lives in the running gateway only; restarting clears it.
+
 ## Provider Troubleshooting
 
 Start with:
@@ -166,6 +206,7 @@ Check:
 - the base URL is correct for compatible APIs;
 - proxy settings match your network;
 - router is disabled when debugging one exact provider/model;
+- the provider's circuit breaker is not open (`agentos providers status`);
 - the gateway was restarted after config changes.
 
 ---

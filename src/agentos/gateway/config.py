@@ -258,6 +258,21 @@ class TaskRuntimeConfig(BaseModel):
         return value
 
 
+class LlmCircuitBreakerConfig(BaseModel):
+    """Provider health breaker: skip a failing provider instead of retrying it.
+
+    ``failure_threshold`` consecutive provider-health failures (overload,
+    transport, rate limit) open the breaker for ``cooldown_seconds``; the
+    window doubles per consecutive trip up to ``max_cooldown_seconds``. One
+    half-open probe per window re-closes it when the provider recovers.
+    """
+
+    enabled: bool = True
+    failure_threshold: int = Field(default=3, ge=1)
+    cooldown_seconds: float = Field(default=60.0, gt=0)
+    max_cooldown_seconds: float = Field(default=600.0, gt=0)
+
+
 class LlmProviderConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENTOS_LLM_")
 
@@ -275,6 +290,8 @@ class LlmProviderConfig(BaseSettings):
     # provider name. Mapped models send provider.order=[name] so the provider
     # is preferred without disabling OpenRouter fallback.
     provider_routing: dict[str, str] = Field(default_factory=dict)
+    # Health-aware failover: see LlmCircuitBreakerConfig.
+    circuit_breaker: LlmCircuitBreakerConfig = Field(default_factory=LlmCircuitBreakerConfig)
 
     @model_validator(mode="after")
     def _normalize_direct_deepseek_model(self) -> LlmProviderConfig:

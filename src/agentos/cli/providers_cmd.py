@@ -53,6 +53,17 @@ def providers_list(
     console.print(table)
 
 
+def _circuit_cell(breaker: object) -> str:
+    """Render the failover breaker state, with cooldown left when open."""
+    if not isinstance(breaker, dict):
+        return "-"
+    state = str(breaker.get("state") or "closed")
+    remaining = breaker.get("cooldownRemainingSeconds")
+    if state == "open" and isinstance(remaining, int | float) and remaining > 0:
+        return f"open ({round(float(remaining))}s)"
+    return state
+
+
 @providers_app.command("status")
 def providers_status(
     provider: str | None = typer.Argument(None, help="Optional provider id"),
@@ -84,6 +95,7 @@ def providers_status(
     table.add_column("configured", no_wrap=True)
     table.add_column("buildable", no_wrap=True)
     table.add_column("model")
+    table.add_column("circuit", no_wrap=True)
     table.add_column("error")
     for row in payload.get("providers", []):
         table.add_row(
@@ -92,6 +104,7 @@ def providers_status(
             "yes" if row.get("configured") else "no",
             "yes" if row.get("buildable") else "no",
             str(row.get("model") or ""),
+            _circuit_cell(row.get("circuitBreaker")),
             str(row.get("error") or ""),
         )
     console.print(table)

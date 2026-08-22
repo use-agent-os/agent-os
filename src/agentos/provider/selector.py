@@ -5,6 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .anthropic import AnthropicProvider
+from .circuit_breaker import (
+    BreakerState,
+    ProviderBreakerStatus,
+    ProviderCircuitBreaker,
+)
+from .failures import ProviderFailureKind
 from .ollama import OllamaProvider
 from .openai import OpenAIProvider
 from .openai_responses import OpenAIResponsesProvider
@@ -130,15 +136,52 @@ class ModelSelector:
         self,
         config: SelectorConfig,
         plugin: ProviderPlugin | None = None,
+        breaker: ProviderCircuitBreaker | None = None,
     ) -> None:
         self._config = config
         self._chain: list[ProviderConfig] = [config.primary, *config.fallbacks]
         self._index = 0
         self._plugin = plugin
+        # Breaker state has to outlive a single turn — ``clone()`` shares this
+        # instance so every turn sees the failures the previous ones recorded.
+        self._breaker = breaker if breaker is not None else ProviderCircuitBreaker()
+        # Chain index this selector already holds breaker admission for. A turn
+        # may call ``resolve()`` more than once (e.g. again after
+        # ``override_model``); re-asking the breaker would find the half-open
+        # probe this very turn was granted already in flight and wrongly skip
+        # to the fallback, burning a probe per turn so the primary never
+        # recovers.
+        self._admitted_index: int | None = None
+
+    @property
+    def circuit_breaker(self) -> ProviderCircuitBreaker:
+        """Shared per-provider health breaker (also shared with clones)."""
+        return self._breaker
 
     def resolve(self) -> LLMProvider:
-        """Return the current provider (primary on first call)."""
+        """Return the current provider, skipping links whose breaker is open.
+
+        This is the health-aware half of failover: during a provider outage a
+        fresh turn starts on the first chain link the breaker still admits
+        instead of paying the dead primary's timeout again.
+        """
+        self._index = self._first_admitted_index(self._index)
         return _build_provider(self._chain[self._index])
+
+    def _first_admitted_index(self, start: int) -> int:
+        """First index at or after ``start`` the breaker admits.
+
+        Falls back to ``start`` when every remaining link is in cooldown —
+        a provider in cooldown still beats no provider at all.
+        """
+        if self._admitted_index is not None and self._admitted_index >= start:
+            return self._admitted_index
+        for index in range(start, len(self._chain)):
+            if self._breaker.allow(self._chain[index].provider):
+                self._admitted_index = index
+                return index
+        self._admitted_index = start
+        return start
 
     @property
     def active_provider_id(self) -> str:
@@ -163,8 +206,28 @@ class ModelSelector:
         """
         if not self.has_fallback():
             raise IndexError("No more provider fallbacks available")
-        self._index += 1
+        self._index = self._first_admitted_index(self._index + 1)
         return _build_provider(self._chain[self._index])
+
+    def record_provider_failure(
+        self,
+        kind: ProviderFailureKind | None = None,
+        reason: str = "",
+    ) -> BreakerState:
+        """Count a failure against the currently-active chain link."""
+        return self._breaker.record_failure(self.active_provider_id, kind=kind, reason=reason)
+
+    def record_provider_success(self) -> None:
+        """Clear the currently-active chain link's failure history."""
+        self._breaker.record_success(self.active_provider_id)
+
+    def circuit_breaker_status(self, provider: str) -> ProviderBreakerStatus:
+        """Side-effect-free breaker snapshot for one provider id."""
+        return self._breaker.status(provider)
+
+    def circuit_breaker_snapshot(self) -> list[ProviderBreakerStatus]:
+        """Side-effect-free breaker snapshot for every tracked provider."""
+        return self._breaker.snapshot()
 
     def next_fallback_after_failure(self, primary_failure: Exception) -> LLMProvider:
         """Advance to the next fallback, consulting ``plugin.failover_hook``.
@@ -177,7 +240,7 @@ class ModelSelector:
         if not chain:
             raise IndexError("No fallback chain available")
         self._chain = [self._chain[0], *chain]
-        self._index = 1
+        self._index = self._first_admitted_index(1)
         return _build_provider(self._chain[self._index])
 
     def override_model(self, model: str) -> None:
@@ -200,16 +263,19 @@ class ModelSelector:
         self.reset()
 
     def reset(self) -> None:
-        """Reset to primary provider."""
+        """Reset to primary provider and drop any held breaker admission."""
         self._index = 0
+        self._admitted_index = None
 
     def clone(self) -> ModelSelector:
         """Return an independent copy for concurrent use.
 
         The clone starts at index 0 with its own chain list, so mutations
-        (override_model, next_fallback) don't affect the original.
+        (override_model, next_fallback) don't affect the original. The circuit
+        breaker is deliberately *shared*: provider health is a property of the
+        outage, not of one turn.
         """
-        return ModelSelector(self._config, plugin=self._plugin)
+        return ModelSelector(self._config, plugin=self._plugin, breaker=self._breaker)
 
     async def list_models(self) -> list[dict]:
         """Aggregate models from all configured providers in the chain."""

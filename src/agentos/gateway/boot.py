@@ -1498,6 +1498,10 @@ async def build_services(
     proxy = llm_runtime.proxy
     if provider_selector is None:
         if _should_build_provider_selector(provider=llm_runtime.provider, api_key=api_key):
+            from agentos.provider.circuit_breaker import (
+                BreakerSettings,
+                ProviderCircuitBreaker,
+            )
             from agentos.provider.selector import (
                 ModelSelector,
                 ProviderConfig,
@@ -1506,6 +1510,9 @@ async def build_services(
 
             if resolved_base.endswith("/v1"):
                 resolved_base = resolved_base[:-3]
+            breaker_settings = BreakerSettings.from_config(
+                getattr(getattr(config, "llm", None), "circuit_breaker", None)
+            )
             provider_selector = ModelSelector(
                 SelectorConfig(
                     primary=ProviderConfig(
@@ -1516,7 +1523,8 @@ async def build_services(
                         proxy=proxy,
                         provider_routing=llm_runtime.provider_routing,
                     )
-                )
+                ),
+                breaker=ProviderCircuitBreaker(breaker_settings),
             )
             log.info(
                 "build_services.provider_ready",

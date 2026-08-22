@@ -93,6 +93,18 @@ def _provider_base_url(provider_id: str, default_base_url: str, ctx: RpcContext)
     return default_base_url
 
 
+def _circuit_breaker_row(provider_id: str, ctx: RpcContext) -> dict[str, Any] | None:
+    """Side-effect-free breaker snapshot for one provider (None when absent)."""
+    selector = getattr(ctx, "provider_selector", None)
+    status_fn = getattr(selector, "circuit_breaker_status", None)
+    if status_fn is None:
+        return None
+    try:
+        return dict(status_fn(provider_id).to_dict())
+    except Exception:  # noqa: BLE001 - diagnostic surface
+        return None
+
+
 async def _model_probe(provider_id: str, ctx: RpcContext) -> dict[str, Any]:
     selector = getattr(ctx, "provider_selector", None)
     if selector is None:
@@ -182,6 +194,9 @@ async def _handle_providers_status(params: dict | None, ctx: RpcContext) -> dict
                 "baseUrlConfigured": base_url_configured,
                 "error": error,
                 "modelProbe": probe,
+                "circuitBreaker": _circuit_breaker_row(spec.provider_id, ctx)
+                if is_active
+                else None,
             }
         )
     return {"activeProvider": active, "providers": rows, "count": len(rows)}
