@@ -122,9 +122,7 @@ class LoopbackOriginMiddleware(BaseHTTPMiddleware):
     RPC surface — the drive-by target — is gated.
     """
 
-    def __init__(
-        self, app: ASGIApp, config: GatewayConfig, bind_is_loopback: bool
-    ) -> None:
+    def __init__(self, app: ASGIApp, config: GatewayConfig, bind_is_loopback: bool) -> None:
         super().__init__(app)
         self._config = config
         self._cors_origins = [o for o in config.cors.allowed_origins if o != "*"]
@@ -156,9 +154,7 @@ class LoopbackOriginMiddleware(BaseHTTPMiddleware):
             )
 
             if not (
-                is_allowed_ws_origin(
-                    origin, self._config, bind_is_loopback=self._bind_is_loopback
-                )
+                is_allowed_ws_origin(origin, self._config, bind_is_loopback=self._bind_is_loopback)
                 or origin_in_allowlist(origin, self._cors_origins)
             ):
                 return PlainTextResponse("Origin not allowed", status_code=403)
@@ -179,9 +175,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._config = config
         base_path = (
-            config.control_ui.base_path
-            if control_ui_base_path is None
-            else control_ui_base_path
+            config.control_ui.base_path if control_ui_base_path is None else control_ui_base_path
         )
         self._ui_prefix = _safe_ui_exempt_prefix(base_path)
 
@@ -209,16 +203,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 return JSONResponse(
                     {"error": "Unauthorized", "code": "UNAUTHORIZED"}, status_code=401
                 )
+            return await call_next(request)  # type: ignore[no-any-return]
 
-        elif auth_mode == "trusted-proxy":
+        if auth_mode == "trusted-proxy":
             proxy = self._config.auth.trusted_proxy
             forwarded_for = request.headers.get("x-forwarded-for", "")
             if proxy and proxy not in forwarded_for:
                 return JSONResponse(
                     {"error": "Unauthorized", "code": "UNAUTHORIZED"}, status_code=401
                 )
+            return await call_next(request)  # type: ignore[no-any-return]
 
-        return await call_next(request)  # type: ignore[no-any-return]
+        return JSONResponse({"error": "Unauthorized", "code": "UNAUTHORIZED"}, status_code=401)
 
     def _extract_token(self, request: Request) -> str | None:
         auth_header = request.headers.get("authorization", "")
@@ -242,9 +238,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._config = config
         base_path = (
-            config.control_ui.base_path
-            if control_ui_base_path is None
-            else control_ui_base_path
+            config.control_ui.base_path if control_ui_base_path is None else control_ui_base_path
         )
         self._ui_prefix = _safe_ui_exempt_prefix(base_path)
         # {ip: [(timestamp, count), ...]}

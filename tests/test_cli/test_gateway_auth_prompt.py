@@ -86,17 +86,15 @@ def test_warning_names_the_specific_lan_host_not_only_wildcard(tmp_path) -> None
     config = _config(tmp_path, host="192.168.1.50")
     emitted: list[str] = []
 
-    provision_public_bind_auth(
-        config, interactive=True, prompt=lambda _m: "2", emit=emitted.append
-    )
+    provision_public_bind_auth(config, interactive=True, prompt=lambda _m: "2", emit=emitted.append)
 
     output = "\n".join(emitted)
     assert "192.168.1.50" in output
     assert "non-loopback" in output
 
 
-def test_unsupported_auth_mode_can_only_be_cancelled_or_replaced(tmp_path) -> None:
-    config = _config(tmp_path, auth=AuthConfig(mode="password"))
+def test_trusted_proxy_auth_mode_can_only_be_cancelled_or_replaced(tmp_path) -> None:
+    config = _config(tmp_path, auth=AuthConfig(mode="trusted-proxy"))
 
     outcome, result = provision_public_bind_auth(
         config, interactive=True, prompt=lambda _m: "2", emit=lambda _m: None
@@ -104,7 +102,7 @@ def test_unsupported_auth_mode_can_only_be_cancelled_or_replaced(tmp_path) -> No
 
     assert outcome is AuthProvisionOutcome.CANCEL
     assert result is config
-    assert result.auth.mode == "password"
+    assert result.auth.mode == "trusted-proxy"
 
 
 def test_public_bind_with_token_mode_is_unchanged(tmp_path) -> None:
@@ -287,7 +285,7 @@ def test_choice_2_cancels_without_mutating_or_persisting(tmp_path) -> None:
 
 
 def test_choice_2_cancel_does_not_add_auth_runtime_overrides(tmp_path) -> None:
-    config = _config(tmp_path, auth=AuthConfig(mode="password"))
+    config = _config(tmp_path, auth=AuthConfig(mode="trusted-proxy"))
     set_runtime_overrides({"host": "127.0.0.1", "port": 18791, "debug": False})
 
     outcome, _ = provision_public_bind_auth(

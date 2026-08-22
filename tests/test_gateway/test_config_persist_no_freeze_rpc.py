@@ -215,17 +215,17 @@ async def test_config_apply_baseline_diff_persists_deliberate_auth_mode_edit(tmp
     impossible; the snapshot-baseline diff restores the ability to persist a
     deliberate YAML edit of an overridden field.
 
-    Distinguishing setup: the on-disk original (password), the running echo
+    Distinguishing setup: the on-disk original (trusted-proxy), the running echo
     (none, runtime override), and the deliberate edit (token) are all different, so
-    the two strategies give different final states — round-2 restores password
+    the two strategies give different final states — round-2 restores trusted-proxy
     (wrong), baseline-diff persists token (correct)."""
     import yaml
 
     cfg_path = tmp_path / "config.toml"
-    _seed_disk(cfg_path, {"auth": {"mode": "password", "token": "existing-token"}})
+    _seed_disk(cfg_path, {"auth": {"mode": "trusted-proxy", "token": "existing-token"}})
 
     # The runtime map recorded the on-disk auth original; running is mode=none.
-    set_runtime_overrides({"auth.mode": "password"})
+    set_runtime_overrides({"auth.mode": "trusted-proxy"})
     cfg = _running_config(
         cfg_path,
         auth=AuthConfig(
