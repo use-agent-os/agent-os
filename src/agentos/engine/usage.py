@@ -866,7 +866,7 @@ class UsageTracker:
             )
 
         clauses = []
-        params = []
+        params: list[Any] = []
 
         if start_date:
             try:

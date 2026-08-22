@@ -906,7 +906,7 @@ class TelegramChannel:
         is_group = chat_type in {"group", "supergroup", "channel"}
         message_id = msg.get("message_id", "")
 
-        metadata: dict[str, Any] = {
+        metadata = {
             "is_group": is_group,
             "chat_type": chat_type,
             "chat_id": str(chat.get("id", self.config.default_chat_id)),

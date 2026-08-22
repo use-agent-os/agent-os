@@ -736,7 +736,15 @@ class SlackChannel:
             form = await request.form()
             if "payload" in form:
                 try:
-                    payload = json.loads(form["payload"])
+                    payload_str = form["payload"]
+                    if not isinstance(payload_str, str):
+                        payload_str_bytes = await payload_str.read()
+                        payload_str = (
+                            payload_str_bytes.decode("utf-8")
+                            if isinstance(payload_str_bytes, bytes)
+                            else str(payload_str_bytes)
+                        )
+                    payload = json.loads(payload_str)
                 except Exception:
                     return Response(status_code=400)
                 asyncio.create_task(self._handle_slack_interactive(payload))
