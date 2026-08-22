@@ -21,6 +21,12 @@ from agentos.skills.hub.defaults import (
     installed_skill_identifiers,
     installed_skill_names,
 )
+from agentos.skills.install_kinds import (
+    MANUAL_INSTALL_KINDS,
+    InstallSpecError,
+    build_install_argv,
+    normalize_install_kind,
+)
 from agentos.skills.types import SkillInstallSpec, SkillLayer
 from agentos.tools.registry import tool
 from agentos.tools.types import ToolError
@@ -42,11 +48,6 @@ _INSTALL_OUTPUT_LIMIT = 4_000
 # Room after the view ceiling for the outline index and the trailing notes.
 _SKILL_VIEW_PERSIST_HEADROOM = 4_000
 _INSTALL_TIMEOUT_SECONDS = 120.0
-
-_BREW_FORMULA_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9/_@.+-]*$")
-_NODE_PACKAGE_RE = re.compile(r"^(?:@[A-Za-z0-9][A-Za-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*$")
-_GO_MODULE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._~/-]*(?:@[A-Za-z0-9][A-Za-z0-9._~+-]*)?$")
-_UV_PACKAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9,._-]+\])?$")
 
 
 def _sanitize_yaml_value(value: str) -> str:
@@ -84,49 +85,19 @@ def _cap_output(value: bytes | str, limit: int = _INSTALL_OUTPUT_LIMIT) -> str:
     return f"{text[:limit]}\n... truncated {omitted} characters"
 
 
-def _validate_install_value(value: str, pattern: re.Pattern[str], label: str) -> str:
-    if not value:
-        raise ToolError(f"Missing install value: {label}")
-    if value.startswith("-") or not pattern.match(value):
-        raise ToolError(f"Unsafe install value for {label}: {value}")
-    return value
-
-
 def _argv_for_install_spec(spec: SkillInstallSpec) -> list[str]:
-    kind = spec.kind
-    if kind == "download":
-        raise ToolError("Install kind 'download' is deferred and cannot be executed")
-    if kind == "brew":
-        formula = _validate_install_value(
-            spec.formula or spec.package,
-            _BREW_FORMULA_RE,
-            "formula",
-        )
-        return ["brew", "install", formula]
-    if kind == "node":
-        package = _validate_install_value(
-            spec.package,
-            _NODE_PACKAGE_RE,
-            "package",
-        )
-        return ["npm", "install", "-g", "--ignore-scripts", package]
-    if kind == "go":
-        module = _validate_install_value(
-            spec.module or spec.package,
-            _GO_MODULE_RE,
-            "module",
-        )
-        if "@" not in module:
-            module = f"{module}@latest"
-        return ["go", "install", module]
-    if kind == "uv":
-        package = _validate_install_value(
-            spec.package or spec.module,
-            _UV_PACKAGE_RE,
-            "package",
-        )
-        return ["uv", "tool", "install", package]
-    raise ToolError(f"Unsupported install kind: {kind}")
+    """The command for an install spec, or a ToolError explaining why not.
+
+    The command itself comes from :mod:`agentos.skills.install_kinds`, the same
+    builder the Skills page runs and renders.
+    """
+    kind = normalize_install_kind(spec.kind)
+    if kind in MANUAL_INSTALL_KINDS:
+        raise ToolError(f"Install kind '{kind}' needs elevated privileges and cannot be run here")
+    try:
+        return build_install_argv(spec)
+    except InstallSpecError as exc:
+        raise ToolError(str(exc)) from exc
 
 
 def _find_install_spec(skill_name: str, install_id: str) -> SkillInstallSpec:
@@ -988,7 +959,7 @@ def create_skill_tools(loader: SkillLoader) -> None:
         name="install_skill_deps",
         description=(
             "Preview or install a skill dependency declared in skill metadata. "
-            "Supports brew, node, go, and uv install specs. This does not install "
+            "Supports brew, npm, go, and uv install specs. This does not install "
             "Community skills; use skill_install_community for ClawHub installs."
         ),
         params={

@@ -167,7 +167,9 @@ class SkillRequires:
 class SkillInstallSpec:
     """How to install a skill's dependencies."""
 
-    kind: str = ""  # brew | node | go | uv | download
+    #: One of ``agentos.skills.install_kinds.INSTALL_KINDS``:
+    #: brew | npm | go | uv | download | apt (``node`` is an alias for ``npm``).
+    kind: str = ""
     id: str = ""
     label: str = ""
     bins: list[str] = field(default_factory=list)

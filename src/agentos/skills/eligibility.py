@@ -7,6 +7,7 @@ import platform
 import shutil
 from dataclasses import dataclass, field
 
+from agentos.skills.install_kinds import normalize_install_kind, render_install_command
 from agentos.skills.types import SkillEnvVar, SkillInstallSpec, SkillSpec
 
 
@@ -106,7 +107,8 @@ def check_eligibility(spec: SkillSpec, ctx: EligibilityContext) -> bool:
 class InstallHint:
     """Display-only install command, decoupled from dependency execution logic."""
 
-    kind: str  # "brew", "uv", "npm", "go", "download"
+    #: Canonical kind — see :data:`agentos.skills.install_kinds.INSTALL_KINDS`.
+    kind: str
     label: str  # "Install himalaya (brew)"
     command: str  # "brew install himalaya"
 
@@ -150,22 +152,13 @@ def _is_declared(spec: SkillSpec) -> bool:
 
 
 def _render_install_command(spec: SkillInstallSpec) -> str:
-    """Render a display-only shell command from an install spec."""
-    name = spec.formula or spec.package or spec.id
-    if spec.kind == "brew":
-        return f"brew install {name}" if name else ""
-    if spec.kind == "uv":
-        return f"uv pip install {spec.package}" if spec.package else ""
-    if spec.kind == "npm":
-        return f"npm install -g {spec.package}" if spec.package else ""
-    if spec.kind == "go":
-        return f"go install {spec.module}@latest" if spec.module else ""
-    if spec.kind == "download" and spec.url:
-        bin_name = spec.bins[0] if spec.bins else spec.id
-        return (
-            f"curl -fsSL -o ~/.local/bin/{bin_name} {spec.url} && chmod +x ~/.local/bin/{bin_name}"
-        )
-    return ""
+    """Render a display-only shell command from an install spec.
+
+    Thin alias for :func:`~agentos.skills.install_kinds.render_install_command`
+    — the hints and the executors read one builder, so what the operator is
+    shown is what would run.
+    """
+    return render_install_command(spec)
 
 
 def diagnose_eligibility(spec: SkillSpec, ctx: EligibilityContext) -> EligibilityReport:
@@ -228,7 +221,7 @@ def diagnose_eligibility(spec: SkillSpec, ctx: EligibilityContext) -> Eligibilit
                 if cmd:
                     install_hints.append(
                         InstallHint(
-                            kind=ispec.kind,
+                            kind=normalize_install_kind(ispec.kind),
                             label=ispec.label or f"Install via {ispec.kind}",
                             command=cmd,
                         )

@@ -1,21 +1,30 @@
-"""Dependency installation for skills — brew, uv, download."""
+"""Dependency installation for skills — brew, npm, go, uv, download.
+
+Which kinds exist and what each one runs lives in
+:mod:`agentos.skills.install_kinds`, shared with the agent tool and with
+the display-only hints so the three can't drift apart again.
+"""
 
 from __future__ import annotations
 
 import asyncio
-import re
 from dataclasses import dataclass
 
 import structlog
 
+from agentos.skills.install_kinds import (
+    ARGV_INSTALL_KINDS,
+    DOWNLOAD_URL_RE,
+    MANUAL_INSTALL_KINDS,
+    InstallSpecError,
+    build_install_argv,
+    is_supported_install_kind,
+    normalize_install_kind,
+    render_install_command,
+)
 from agentos.skills.types import SkillInstallSpec
 
 log = structlog.get_logger(__name__)
-
-# Strict allowlists to prevent arbitrary shell execution
-_BREW_FORMULA_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9/_@.-]*$")
-_UV_PACKAGE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*(\[[a-zA-Z0-9,._-]+\])?$")
-_URL_RE = re.compile(r"^https://[a-zA-Z0-9._/-]+$")
 
 
 @dataclass
@@ -43,32 +52,19 @@ async def _run(cmd: list[str], timeout: float = 120.0) -> tuple[int, str, str]:
     return proc.returncode or 0, stdout.decode(), stderr.decode()
 
 
-async def install_brew(spec: SkillInstallSpec) -> DepResult:
-    """Install via Homebrew."""
-    formula = spec.formula or spec.package or spec.id
-    if not formula or not _BREW_FORMULA_RE.match(formula):
-        return DepResult(
-            kind="brew", identifier=formula, success=False, message=f"Invalid formula: {formula}"
-        )
+async def _install_via_argv(spec: SkillInstallSpec) -> DepResult:
+    """Run the shared command for an argv-shaped install kind."""
+    kind = normalize_install_kind(spec.kind)
+    identifier = spec.formula or spec.package or spec.module or spec.id
+    try:
+        argv = build_install_argv(spec)
+    except InstallSpecError as exc:
+        return DepResult(kind=kind, identifier=identifier, success=False, message=str(exc))
 
-    code, out, err = await _run(["brew", "install", formula])
+    code, out, err = await _run(argv)
     if code == 0:
-        return DepResult(kind="brew", identifier=formula, success=True, message="Installed")
-    return DepResult(kind="brew", identifier=formula, success=False, message=err.strip()[:200])
-
-
-async def install_uv(spec: SkillInstallSpec) -> DepResult:
-    """Install a Python package via uv."""
-    package = spec.package or spec.module or spec.id
-    if not package or not _UV_PACKAGE_RE.match(package):
-        return DepResult(
-            kind="uv", identifier=package, success=False, message=f"Invalid package: {package}"
-        )
-
-    code, out, err = await _run(["uv", "pip", "install", package])
-    if code == 0:
-        return DepResult(kind="uv", identifier=package, success=True, message="Installed")
-    return DepResult(kind="uv", identifier=package, success=False, message=err.strip()[:200])
+        return DepResult(kind=kind, identifier=identifier, success=True, message="Installed")
+    return DepResult(kind=kind, identifier=identifier, success=False, message=err.strip()[:200])
 
 
 async def install_download(spec: SkillInstallSpec) -> DepResult:
@@ -77,7 +73,7 @@ async def install_download(spec: SkillInstallSpec) -> DepResult:
     from pathlib import Path
 
     url = spec.url
-    if not url or not _URL_RE.match(url):
+    if not url or not DOWNLOAD_URL_RE.match(url):
         return DepResult(
             kind="download", identifier=url or "", success=False, message=f"Invalid URL: {url}"
         )
@@ -103,9 +99,9 @@ async def install_download(spec: SkillInstallSpec) -> DepResult:
     )
 
 
+# Keyed by canonical kind — see agentos.skills.install_kinds.
 _INSTALLERS = {
-    "brew": install_brew,
-    "uv": install_uv,
+    **{kind: _install_via_argv for kind in ARGV_INSTALL_KINDS},
     "download": install_download,
 }
 
@@ -114,33 +110,37 @@ async def install_deps(specs: list[SkillInstallSpec]) -> list[DepResult]:
     """Install all dependencies for a skill. Returns results per spec."""
     results = []
     for spec in specs:
-        handler = _INSTALLERS.get(spec.kind)
+        kind = normalize_install_kind(spec.kind)
+        handler = _INSTALLERS.get(kind)
         if handler is None:
-            results.append(
-                DepResult(
-                    kind=spec.kind,
-                    identifier=spec.id,
-                    success=False,
-                    message=f"Unsupported install kind: {spec.kind}",
-                )
-            )
+            if kind in MANUAL_INSTALL_KINDS:
+                # Spell the command out: nothing else on this path shows it,
+                # and telling the operator to go find it is a dead end.
+                command = render_install_command(spec)
+                message = f"Install kind '{kind}' needs elevated privileges"
+                message += f" — run: {command}" if command else " and cannot be run here"
+            elif is_supported_install_kind(kind):  # pragma: no cover - defensive
+                message = f"No installer wired for kind: {kind}"
+            else:
+                message = f"Unsupported install kind: {spec.kind}"
+            results.append(DepResult(kind=kind, identifier=spec.id, success=False, message=message))
             continue
         try:
             result = await handler(spec)
         except FileNotFoundError:
             result = DepResult(
-                kind=spec.kind,
+                kind=kind,
                 identifier=spec.id,
                 success=False,
-                message=f"Tool not found for kind '{spec.kind}' (brew/uv/curl)",
+                message=f"Tool not found for kind '{kind}' (brew/npm/go/uv/curl)",
             )
         except Exception as exc:
             result = DepResult(
-                kind=spec.kind,
+                kind=kind,
                 identifier=spec.id,
                 success=False,
                 message=f"Error: {exc}",
             )
         results.append(result)
-        log.info("deps.install", kind=spec.kind, id=spec.id, success=result.success)
+        log.info("deps.install", kind=kind, id=spec.id, success=result.success)
     return results

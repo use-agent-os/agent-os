@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Skill dependency installs work for every kind a skill can declare. Three
+  code paths carried their own idea of what `install.kind` meant — the Skills
+  page executor knew `brew`/`uv`/`download`, the `install_skill_deps` tool knew
+  `brew`/`node`/`go`/`uv`, and the install hints rendered a third, different set — so the
+  seven bundled gmgn skills, which declare `kind: npm`, were uninstallable
+  through both executors ("Unsupported install kind: npm"), and `apt` failed
+  the same way. All three now read one canonical vocabulary and one command
+  builder in `agentos/skills/install_kinds.py`: `brew`, `npm`, `go`, `uv`,
+  `download`, and `apt`, with `node` kept working as an alias for `npm`. The
+  command shown as an install hint is now literally the command that runs.
+  `apt` (needs root) and `download` (needs a fetch plus a chmod) stay
+  hint-only, and say so instead of reading as unsupported. A `uv` spec that
+  declares `bins` installs with `uv tool install`; one that doesn't — a library
+  like `openpyxl` — keeps using `uv pip install`, which the agent tool used to
+  get wrong. Pinned versions (`gmgn-cli@1.2.3`, `openpyxl>=3.1`) now survive the
+  value allowlists instead of losing their install hint, an `apt` package can no
+  longer end in the `-` that turns an install line into a removal, and the
+  `download` hint validates and quotes its URL rather than interpolating it
+  raw. (#358)
+
 ## [2026.8.21] - 2026-08-21
 
 ### Added
