@@ -142,10 +142,12 @@ from agentos.provider import (
     ErrorEvent as ProviderErrorEvent,
 )
 from agentos.provider import (
+    ProviderFailureKind,
     ProviderRecoveryAction,
     classify_provider_error,
     decide_recovery_action,
 )
+from agentos.provider.circuit_breaker import trips_breaker
 from agentos.result_budget import persisted_result_max_chars
 from agentos.router_control import (
     RouterControlHoldStore,
@@ -1025,17 +1027,24 @@ _SUBAGENT_TASK_PROTOCOL: Final[str] = (
 )
 
 
-def _should_use_selector_fallback(provider_name: str, event: ProviderErrorEvent) -> bool:
-    kind = classify_provider_error(
+def _classify_provider_event(provider_name: str, event: ProviderErrorEvent) -> ProviderFailureKind:
+    return classify_provider_error(
         provider_name=provider_name,
         status_code=int(event.code) if str(event.code).isdigit() else None,
         raw_code=event.code,
         message=event.message,
     )
+
+
+def _kind_uses_selector_fallback(kind: ProviderFailureKind) -> bool:
     return decide_recovery_action(kind) in {
         ProviderRecoveryAction.FALLBACK_PROVIDER,
         ProviderRecoveryAction.RETRY_THEN_FALLBACK,
     }
+
+
+def _should_use_selector_fallback(provider_name: str, event: ProviderErrorEvent) -> bool:
+    return _kind_uses_selector_fallback(_classify_provider_event(provider_name, event))
 
 
 def _normalize_heartbeat_text(
@@ -1085,7 +1094,12 @@ def _drop_unpaired_tool_use_segments(segments: list[dict[str, Any]]) -> list[dic
 
 
 class _SelectorFallbackProvider:
-    """Provider wrapper that switches to selector fallback on pre-content errors."""
+    """Provider wrapper that switches to selector fallback on pre-content errors.
+
+    Also feeds the selector's circuit breaker: provider-health failures are
+    counted so a sustained outage opens the breaker, and the first byte of
+    real content closes it again.
+    """
 
     def __init__(self, provider: Any, selector: Any) -> None:
         self._provider = provider
@@ -1097,6 +1111,24 @@ class _SelectorFallbackProvider:
     @property
     def provider_name(self) -> str:
         return getattr(self._provider, "provider_name", "")
+
+    def _record_failure(self, kind: ProviderFailureKind, reason: str) -> None:
+        recorder = getattr(self._selector, "record_provider_failure", None)
+        if recorder is None:
+            return
+        try:
+            recorder(kind, reason)
+        except Exception:  # pragma: no cover - breaker must never break a turn
+            log.debug("selector_fallback.breaker_failure_record_failed", exc_info=True)
+
+    def _record_success(self) -> None:
+        recorder = getattr(self._selector, "record_provider_success", None)
+        if recorder is None:
+            return
+        try:
+            recorder()
+        except Exception:  # pragma: no cover - breaker must never break a turn
+            log.debug("selector_fallback.breaker_success_record_failed", exc_info=True)
 
     def fallback_after_invalid_response(self, reason: str) -> bool:
         try:
@@ -1120,6 +1152,9 @@ class _SelectorFallbackProvider:
         config: Any = None,
     ) -> AsyncIterator[Any]:
         emitted_user_visible_content = False
+        saw_provider_error = False
+        recorded_success = False
+        recorded_failure = False
         pre_text_buffer: list[Any] = []
 
         def drain_pre_text_buffer() -> list[Any]:
@@ -1132,42 +1167,50 @@ class _SelectorFallbackProvider:
                 yield event
                 continue
 
-            if isinstance(event, ProviderErrorEvent) and _should_use_selector_fallback(
-                self.provider_name, event
-            ):
-                try:
-                    self._provider = self._selector.next_fallback_after_failure(
-                        RuntimeError(event.message)
-                    )
-                except Exception:
-                    for buffered_event in drain_pre_text_buffer():
-                        yield buffered_event
-                    yield event
+            if isinstance(event, ProviderErrorEvent):
+                saw_provider_error = True
+                kind = _classify_provider_event(self.provider_name, event)
+                if not recorded_failure:
+                    # One vote per stream: a provider that emits several error
+                    # events for one request is still a single failed turn.
+                    recorded_failure = trips_breaker(kind)
+                    self._record_failure(kind, event.message)
+                if _kind_uses_selector_fallback(kind):
+                    try:
+                        self._provider = self._selector.next_fallback_after_failure(
+                            RuntimeError(event.message)
+                        )
+                    except Exception:
+                        for buffered_event in drain_pre_text_buffer():
+                            yield buffered_event
+                        yield event
+                        return
+                    async for fallback_event in self._fallback_chat(messages, tools, config):
+                        yield fallback_event
                     return
-                async for fallback_event in self._provider.chat(
-                    messages,
-                    tools=tools,
-                    config=config,
-                ):
-                    yield fallback_event
-                return
+                for buffered_event in drain_pre_text_buffer():
+                    yield buffered_event
+                yield event
+                continue
 
             if _is_non_empty_provider_text_delta(event):
                 for buffered_event in drain_pre_text_buffer():
                     yield buffered_event
                 emitted_user_visible_content = True
+                if not recorded_success:
+                    recorded_success = True
+                    self._record_success()
                 yield event
                 continue
 
             if getattr(event, "kind", "") == "done":
                 for buffered_event in drain_pre_text_buffer():
                     yield buffered_event
-                yield event
-                continue
-
-            if isinstance(event, ProviderErrorEvent):
-                for buffered_event in drain_pre_text_buffer():
-                    yield buffered_event
+                # A clean stream proves the provider is healthy — including a
+                # tool-use-only turn that never emits user-visible text.
+                if not saw_provider_error and not recorded_success:
+                    recorded_success = True
+                    self._record_success()
                 yield event
                 continue
 
@@ -1175,6 +1218,31 @@ class _SelectorFallbackProvider:
 
         for buffered_event in drain_pre_text_buffer():
             yield buffered_event
+
+    async def _fallback_chat(
+        self,
+        messages: list[Any],
+        tools: Any,
+        config: Any,
+    ) -> AsyncIterator[Any]:
+        """Stream the post-failover provider, recording its own breaker outcome."""
+        saw_provider_error = False
+        recorded_success = False
+        recorded_failure = False
+        async for event in self._provider.chat(messages, tools=tools, config=config):
+            if isinstance(event, ProviderErrorEvent):
+                saw_provider_error = True
+                if not recorded_failure:
+                    kind = _classify_provider_event(self.provider_name, event)
+                    recorded_failure = trips_breaker(kind)
+                    self._record_failure(kind, event.message)
+            elif not recorded_success and (
+                _is_non_empty_provider_text_delta(event)
+                or (getattr(event, "kind", "") == "done" and not saw_provider_error)
+            ):
+                recorded_success = True
+                self._record_success()
+            yield event
 
     async def list_models(self) -> list[Any]:
         return list(await self._provider.list_models())

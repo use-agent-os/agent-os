@@ -340,6 +340,10 @@ agentos providers configure openrouter
 agentos providers status
 ```
 
+`providers status` includes a `circuit` column with the active provider's
+failover circuit-breaker state (`closed`, `half_open`, or `open (42s)`); see
+[`providers-and-models.md`](providers-and-models.md#provider-health-circuit-breaker).
+
 Provider-specific setup examples, including OpenCAP, live in
 [`providers-and-models.md`](providers-and-models.md).
 

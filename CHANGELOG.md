@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Provider failover is now health-aware. A circuit breaker counts consecutive
+  provider-health failures (overload / gateway 5xx, transport errors, rate
+  limits) per configured provider id; after
+  `llm.circuit_breaker.failure_threshold` failures (default 3) the provider is
+  skipped for a cooldown window (default 60s, doubling per consecutive trip up to
+  `max_cooldown_seconds`), and one half-open probe per window re-closes it when
+  the provider recovers. Failover used to be purely reactive and per-request —
+  every turn during an outage paid the full timeout on the dead primary before
+  falling back, because `ModelSelector` reset to the primary each turn. Breaker
+  state is shared across per-turn selector clones, so detection is paid once
+  per outage instead of once per turn. Request-shaped failures (unknown model,
+  bad request, context overflow, auth, billing) never trip the breaker, and if
+  every link in the chain is in cooldown the primary is still used. State is
+  surfaced in `agentos providers status` (new `circuit` column),
+  `agentos doctor` (`provider.circuit.open` / `provider.circuit.half_open`), and
+  `GET /api/system/status` (`circuitBreaker` / `circuitBreakers`). (#365)
+
 ## [2026.8.21] - 2026-08-21
 
 ### Added

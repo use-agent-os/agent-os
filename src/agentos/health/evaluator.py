@@ -268,7 +268,86 @@ def evaluate_provider(payload: dict[str, Any]) -> list[HealthFinding]:
                 evidence={"providerId": provider_id, "model": active_row.get("model")},
             )
         )
+    findings.extend(_circuit_breaker_findings(provider_id, active_row))
     return findings
+
+
+def _circuit_breaker_findings(
+    provider_id: str,
+    active_row: dict[str, Any],
+) -> list[HealthFinding]:
+    """Report the active provider's failover breaker when it is not closed."""
+    breaker = active_row.get("circuitBreaker")
+    if not isinstance(breaker, dict):
+        return []
+    state = str(breaker.get("state") or "closed")
+    if state == "closed":
+        return []
+    failures = _int_from_payload(breaker, "consecutiveFailures")
+    threshold = _int_from_payload(breaker, "failureThreshold")
+    evidence = {
+        "providerId": provider_id,
+        "state": state,
+        "consecutiveFailures": failures,
+        "failureThreshold": threshold,
+        "cooldownRemainingSeconds": breaker.get("cooldownRemainingSeconds"),
+        "lastFailureKind": str(breaker.get("lastFailureKind") or ""),
+        "lastFailureReason": str(breaker.get("lastFailureReason") or ""),
+    }
+    if state == "half_open":
+        return [
+            HealthFinding(
+                id="provider.circuit.half_open",
+                severity="info",
+                readiness_impact="optional",
+                surface="provider",
+                title="Active provider is being probed after a cooldown",
+                detail=(
+                    f"{provider_id} tripped its failover circuit breaker and is now "
+                    "serving a single probe request. A successful turn closes the "
+                    "breaker; another failure re-opens it with a longer cooldown."
+                ),
+                evidence=evidence,
+                fix_steps=[
+                    FixStep(
+                        label="Inspect provider status",
+                        command="agentos providers status --json",
+                    )
+                ],
+            )
+        ]
+    remaining = breaker.get("cooldownRemainingSeconds")
+    cooldown_text = ""
+    if isinstance(remaining, int | float) and remaining > 0:
+        cooldown_text = f" Turns skip it for another {round(float(remaining))}s."
+    return [
+        HealthFinding(
+            id="provider.circuit.open",
+            severity="warn",
+            readiness_impact="degrades",
+            surface="provider",
+            title="Active provider is in failover cooldown",
+            detail=(
+                f"{provider_id} failed {failures} consecutive health checks "
+                f"(threshold {threshold}), so its circuit breaker is open."
+                f"{cooldown_text} Turns run on the fallback chain until it recovers."
+            ),
+            evidence=evidence,
+            fix_steps=[
+                FixStep(
+                    label="Inspect provider status",
+                    command="agentos providers status --json",
+                ),
+                FixStep(
+                    label="Check the provider's own status page",
+                    detail=(
+                        "The breaker re-probes automatically; it only stays open "
+                        "while the provider keeps failing."
+                    ),
+                ),
+            ],
+        )
+    ]
 
 
 def evaluate_memory(payload: dict[str, Any]) -> list[HealthFinding]:

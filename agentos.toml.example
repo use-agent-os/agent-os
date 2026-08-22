@@ -114,6 +114,16 @@ model = "openai/gpt-5.6-luna"
 base_url = "https://openrouter.ai/api/v1"
 # proxy = ""            # e.g. http://127.0.0.1:7890
 
+# Health-aware failover. Consecutive provider-health failures (overload,
+# transport, rate limit) open a circuit breaker so turns skip the dead
+# provider for a cooldown window instead of paying its timeout every turn.
+# One half-open probe per window re-closes it when the provider recovers.
+# [llm.circuit_breaker]
+# enabled = true
+# failure_threshold = 3       # consecutive failures before the breaker opens
+# cooldown_seconds = 60       # skip window; doubles per consecutive trip
+# max_cooldown_seconds = 600  # cap on the doubling
+
 # Provider quick reference. Support levels marked compat_mock_verified are
 # verified by local mocked-contract tests, not by live vendor calls.
 #
