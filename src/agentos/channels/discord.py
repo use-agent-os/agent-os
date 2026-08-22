@@ -390,7 +390,11 @@ class DiscordChannel:
                 return
             self._enqueue_reaction(self._annotate_channel_context(data))
         elif event_type == "INTERACTION_CREATE":
-            if data.get("type") != _DISCORD_APPLICATION_COMMAND_INTERACTION_TYPE:
+            interaction_type = data.get("type")
+            if interaction_type == 3:  # Message Component (button click)
+                await self._handle_discord_component_interaction(data)
+                return
+            if interaction_type != _DISCORD_APPLICATION_COMMAND_INTERACTION_TYPE:
                 return
             interaction_id = str(data.get("id") or "")
             if interaction_id and not self._dedupe.check_and_add(f"interaction:{interaction_id}"):
@@ -497,6 +501,61 @@ class DiscordChannel:
             return False
         log.debug("discord.interaction_deferred", interaction_id=interaction_id)
         return True
+
+    async def _handle_discord_component_interaction(self, data: dict[str, Any]) -> None:
+        interaction_data = data.get("data", {})
+        custom_id = interaction_data.get("custom_id", "")
+        if not custom_id.startswith("approve:") and not custom_id.startswith("deny:"):
+            return
+
+        act, approval_id = custom_id.split(":", 1)
+        approved = act == "approve"
+
+        from agentos.gateway.approval_queue import get_approval_queue
+
+        get_approval_queue().resolve(approval_id, approved)
+
+        interaction_id = data.get("id")
+        interaction_token = data.get("token")
+        orig_message = data.get("message", {})
+        orig_content = orig_message.get("content", "")
+        decision_text = "Approved ✅" if approved else "Denied ❌"
+        new_content = f"{orig_content}\n\n**{decision_text}**"
+
+        client = self._get_client()
+        try:
+            resp = await client.post(
+                f"/interactions/{interaction_id}/{interaction_token}/callback",
+                json={
+                    "type": 7,  # UPDATE_MESSAGE
+                    "data": {
+                        "content": new_content,
+                        "components": [],
+                    },
+                },
+            )
+            resp.raise_for_status()
+        except Exception as exc:
+            log.warning("discord.component_response_failed", error=str(exc))
+
+        member = data.get("member")
+        member_user = member.get("user") if isinstance(member, dict) else None
+        direct_user = data.get("user")
+        user = member_user if isinstance(member_user, dict) else direct_user
+        user_id = str(user.get("id") if isinstance(user, dict) else "unknown")
+        channel_id = str(data.get("channel_id") or "unknown")
+
+        msg = IncomingMessage(
+            sender_id=user_id,
+            channel_id=channel_id,
+            content="Approve" if approved else "Deny",
+            metadata={
+                "interaction_type": "component_click",
+                "guild_id": data.get("guild_id"),
+                "is_group": False,
+            },
+        )
+        self.enqueue(msg)
 
     async def _handle_interaction(self, data: dict[str, Any]) -> None:
         """Parse a slash command interaction into IncomingMessage."""
@@ -791,6 +850,9 @@ class DiscordChannel:
 
         if message.metadata.get("embeds"):
             payload["embeds"] = message.metadata["embeds"]
+
+        if message.metadata.get("components"):
+            payload["components"] = message.metadata["components"]
 
         if message.metadata.get("reply_to_message_id"):
             payload["message_reference"] = {

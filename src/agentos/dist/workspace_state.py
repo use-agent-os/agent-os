@@ -47,6 +47,7 @@ SCHEMA_VERSION = 1
 # are intentionally excluded — they are infra, not channels.
 BUNDLED_CHANNELS: tuple[str, ...] = (
     "discord",
+    "email",
     "slack",
     "telegram",
     "terminal",

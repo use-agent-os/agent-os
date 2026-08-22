@@ -689,6 +689,10 @@ class SlackChannel:
             if isinstance(payload, dict):
                 self._ingest_slash_command(payload)
             return
+        if mtype == "interactive":
+            if isinstance(payload, dict):
+                asyncio.create_task(self._handle_slack_interactive(payload))
+            return
         if mtype != "events_api":
             return
         if isinstance(payload, dict) and payload.get("type") == "event_callback":
@@ -730,6 +734,21 @@ class SlackChannel:
         content_type = request.headers.get("content-type", "")
         if content_type.startswith("application/x-www-form-urlencoded"):
             form = await request.form()
+            if "payload" in form:
+                try:
+                    payload_str = form["payload"]
+                    if not isinstance(payload_str, str):
+                        payload_str_bytes = await payload_str.read()
+                        payload_str = (
+                            payload_str_bytes.decode("utf-8")
+                            if isinstance(payload_str_bytes, bytes)
+                            else str(payload_str_bytes)
+                        )
+                    payload = json.loads(payload_str)
+                except Exception:
+                    return Response(status_code=400)
+                asyncio.create_task(self._handle_slack_interactive(payload))
+                return Response(status_code=200)
             if not self._ingest_slash_command(form):
                 return Response(status_code=400)
             return Response(status_code=200)
@@ -768,6 +787,70 @@ class SlackChannel:
             )
         )
         return True
+
+    async def _handle_slack_interactive(self, payload: dict[str, Any]) -> None:
+        actions = payload.get("actions", [])
+        if not actions:
+            return
+        action = actions[0]
+        value = action.get("value", "")
+        if not value.startswith("approve:") and not value.startswith("deny:"):
+            return
+
+        act, approval_id = value.split(":", 1)
+        approved = act == "approve"
+
+        from agentos.gateway.approval_queue import get_approval_queue
+
+        get_approval_queue().resolve(approval_id, approved)
+
+        response_url = payload.get("response_url")
+        orig_message = payload.get("message", {})
+        orig_text = orig_message.get("text", "")
+        new_blocks = []
+        for block in orig_message.get("blocks", []):
+            if block.get("block_id") != "approval_actions":
+                new_blocks.append(block)
+
+        decision_text = "Approved ✅" if approved else "Denied ❌"
+        new_blocks.append(
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*{decision_text}*",
+                },
+            }
+        )
+
+        if response_url:
+            try:
+                async with httpx.AsyncClient() as client:
+                    await client.post(
+                        response_url,
+                        json={
+                            "text": orig_text,
+                            "blocks": new_blocks,
+                            "replace_original": True,
+                        },
+                    )
+            except Exception as exc:
+                log.warning("slack.interactive_response_post_failed", error=str(exc))
+
+        user_id = payload.get("user", {}).get("id", "unknown")
+        channel_id = payload.get("channel", {}).get("id", "unknown")
+        team_id = payload.get("team", {}).get("id")
+
+        msg = self.parse_event(
+            {
+                "user": user_id,
+                "channel": channel_id,
+                "text": "Approve" if approved else "Deny",
+                "team": team_id,
+                "thread_ts": orig_message.get("thread_ts"),
+            }
+        )
+        self.enqueue(msg)
 
     def _ingest_event_callback(self, data: dict[str, Any]) -> None:
         """Shared inbound path for an Events API ``event_callback`` payload,

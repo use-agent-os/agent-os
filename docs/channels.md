@@ -19,6 +19,7 @@ This build exposes the following channel families:
 | Type | Label | Transport | Public URL needed |
 | --- | --- | --- | :---: |
 | `discord` | Discord | websocket | no |
+| `email` | Email | polling | no |
 | `slack` | Slack | mixed | depends on mode |
 | `telegram` | Telegram | mixed | depends on mode |
 

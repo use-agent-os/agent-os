@@ -1781,7 +1781,10 @@ async def build_services(
 
     # ── Usage tracker ───────────────────────────────────────────────
     if usage_tracker is None:
-        usage_tracker = _UsageTracker(default_provider_id=config.llm.provider)
+        usage_tracker = _UsageTracker(
+            default_provider_id=config.llm.provider,
+            db_path=session_db_path,
+        )
 
     # ── Auxiliary LLM client (needs the tracker above to bill side tasks) ──
     try:

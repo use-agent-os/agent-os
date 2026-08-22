@@ -26,6 +26,7 @@ PUBLIC_VENDOR_ADAPTERS: tuple[str, ...] = (
     "slack",
     "discord",
     "telegram",
+    "email",
 )
 
 #: Capability tier values declared by adapters via ``CAPABILITY_TIER``.
@@ -439,8 +440,7 @@ class ChannelPlatformManifest:
         return {
             "channel_type": self.channel_type,
             "capabilities": {
-                category: self.get(category).to_dict()
-                for category in CHANNEL_PLATFORM_CATEGORIES
+                category: self.get(category).to_dict() for category in CHANNEL_PLATFORM_CATEGORIES
             },
         }
 

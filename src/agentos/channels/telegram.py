@@ -76,7 +76,13 @@ _TRANSPORT_FAILURE_MARKERS = (
     "returned an invalid response",
 )
 _DEDUPE_SIZE = 4096
-_ALLOWED_UPDATES = ("message", "edited_message", "channel_post", "edited_channel_post")
+_ALLOWED_UPDATES = (
+    "message",
+    "edited_message",
+    "channel_post",
+    "edited_channel_post",
+    "callback_query",
+)
 #: Hard ceiling Telegram enforces on ``sendMessage``/``editMessageText`` text.
 #: Measured on the *rendered* HTML, which is longer than the markdown it came from.
 _MESSAGE_TEXT_LIMIT = 4096
@@ -817,7 +823,75 @@ class TelegramChannel:
             metadata={**attachment.metadata, "telegram_file_path": file_path},
         )
 
+    async def _handle_telegram_callback(self, cb: dict[str, Any]) -> None:
+        cb_id = cb.get("id")
+        data = cb.get("data", "")
+        if not data.startswith("approve:") and not data.startswith("deny:"):
+            return
+
+        act, approval_id = data.split(":", 1)
+        approved = act == "approve"
+
+        from agentos.gateway.approval_queue import get_approval_queue
+
+        get_approval_queue().resolve(approval_id, approved)
+
+        try:
+            await self._api("answerCallbackQuery", {"callback_query_id": cb_id})
+        except Exception as exc:
+            log.warning("telegram.callback_query_answer_failed", error=str(exc))
+
+        msg = cb.get("message", {})
+        chat_id = msg.get("chat", {}).get("id")
+        message_id = msg.get("message_id")
+        orig_text = msg.get("text", "")
+        decision_text = "Approved ✅" if approved else "Denied ❌"
+        new_text = f"{orig_text}\n\n<b>{decision_text}</b>"
+
+        if chat_id and message_id:
+            try:
+                await self._api(
+                    "editMessageText",
+                    {
+                        "chat_id": str(chat_id),
+                        "message_id": message_id,
+                        "text": new_text,
+                        "parse_mode": "HTML",
+                        "reply_markup": None,
+                    },
+                )
+            except Exception as exc:
+                log.warning("telegram.callback_message_edit_failed", error=str(exc))
+
     def parse_incoming(self, update: dict[str, Any]) -> IncomingMessage:
+        if "callback_query" in update:
+            cb = update["callback_query"]
+            data = cb.get("data", "")
+            act = "Approve" if data.startswith("approve:") else "Deny"
+            asyncio.create_task(self._handle_telegram_callback(cb))
+
+            sender = cb.get("from", {})
+            msg = cb.get("message", {})
+            chat = msg.get("chat", {})
+            chat_type = chat.get("type", "")
+            is_group = chat_type in {"group", "supergroup", "channel"}
+
+            metadata = {
+                "is_group": is_group,
+                "chat_type": chat_type,
+                "chat_id": str(chat.get("id", self.config.default_chat_id)),
+                "message_id": str(msg.get("message_id", "")),
+            }
+            username = sender.get("username")
+            if username:
+                metadata["sender_username"] = str(username)
+            return IncomingMessage(
+                sender_id=str(sender.get("id") or "unknown"),
+                channel_id=str(chat.get("id", self.config.default_chat_id)),
+                content=act,
+                metadata=metadata,
+            )
+
         msg = (
             update.get("message")
             or update.get("edited_message")
@@ -832,7 +906,7 @@ class TelegramChannel:
         is_group = chat_type in {"group", "supergroup", "channel"}
         message_id = msg.get("message_id", "")
 
-        metadata: dict[str, Any] = {
+        metadata = {
             "is_group": is_group,
             "chat_type": chat_type,
             "chat_id": str(chat.get("id", self.config.default_chat_id)),
@@ -1285,6 +1359,8 @@ class TelegramChannel:
         else:
             payload["text"] = render_telegram_html(message.content)
             payload["parse_mode"] = "HTML"
+        if "reply_markup" in metadata:
+            payload["reply_markup"] = metadata["reply_markup"]
         return payload
 
     async def edit(self, message_id: str, content: str) -> None:
