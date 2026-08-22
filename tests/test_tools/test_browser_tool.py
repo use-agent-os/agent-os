@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from test_tools.browser_fake_engine import posix_only, write_fake_engine
+from test_tools.browser_fake_engine import write_fake_engine
 
 from agentos.tools import agent_browser
 from agentos.tools.browser_supervisor import SUPERVISOR_REGISTRY
@@ -165,19 +165,25 @@ class TestSsrf:
         assert result["success"] is False
         assert "file:" in result["error"]
 
-    @posix_only
     @pytest.mark.asyncio
-    async def test_data_url_allowed(self, fake_binary: str) -> None:
+    async def test_data_url_refused(self, fake_binary: str) -> None:
         browser_mod.configure_browser(_config(fake_binary))
         result = await _call(action="navigate", url="data:text/html,<h1>hi</h1>")
-        assert result["success"] is True
+        assert result["success"] is False
+        assert "data:" in result["error"]
 
     @pytest.mark.asyncio
-    async def test_data_url_bypasses_allowlist(self, fake_binary: str) -> None:
-        # A data: URL has no host, so an allowlist must not block it.
+    async def test_about_blank_bypasses_allowlist(self, fake_binary: str) -> None:
         browser_mod.configure_browser(_config(fake_binary, allowed_domains=["example.com"]))
         result = await _call(action="navigate", url="about:blank")
         assert result["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_redirect_to_data_url_blocked(self, fake_binary: str, no_dns: None) -> None:
+        browser_mod.configure_browser(_config(fake_binary))
+        assert browser_mod._url_is_private("data:text/html,<script></script>") is True
+        assert browser_mod._url_is_private("file:///etc/passwd") is True
+        assert browser_mod._url_is_private("about:blank") is False
 
 
 class TestAllowlist:

@@ -173,22 +173,25 @@ def _domain_allowed(url: str) -> bool:
 
 
 #: Hostless schemes a browser may open safely — no network, no local files.
-_SAFE_HOSTLESS_SCHEMES = ("data:", "about:")
+_SAFE_HOSTLESS_SCHEMES = ("about:",)
 
 
 def _check_navigable(url: str) -> None:
     """Allowlist + SSRF gate for a navigation target. Raises ToolError.
 
-    ``data:`` and ``about:`` targets carry inline/empty content — no host, no
-    network — and bypass both the allowlist and the SSRF check. ``file:`` is
-    refused (local-file exfiltration). Everything else must be a public http(s)
-    URL: the allowlist is checked first (cheap, no DNS), then the full SSRF check.
+    ``about:`` targets (e.g. ``about:blank``) carry empty content — no host, no
+    network — and bypass both the allowlist and the SSRF check. ``file:`` and
+    ``data:`` URLs are refused (local-file exfiltration and script-execution
+    SSRF/allowlist bypass). Everything else must be a public http(s) URL: the
+    allowlist is checked first (cheap, no DNS), then the full SSRF check.
     """
     lowered = url.lower().strip()
     if lowered.startswith(_SAFE_HOSTLESS_SCHEMES):
         return
     if lowered.startswith("file:"):
         raise ToolError("Refused to navigate: file:// URLs are not allowed.")
+    if lowered.startswith("data:"):
+        raise ToolError("Refused to navigate: data: URLs are not allowed.")
     if not _domain_allowed(url):
         raise ToolError(
             f"Refused to navigate to {_host_of(url)!r}: not in browser.allowed_domains "
@@ -233,13 +236,18 @@ async def _current_page_url_async(session_key: str) -> str:
 
 
 def _url_is_private(url: str) -> bool:
-    """True when *url* is a well-formed http(s) URL resolving to a blocked address.
+    """True when *url* targets a private/internal, file://, or data: address.
 
-    Fail-open on anything that is not a clear http(s) URL: an empty or
-    unparseable probe result must not block a read (Hermes does the same — a
-    probe failure is not evidence of a private page).
+    Fail-open on harmless hostless schemes (like about:blank) and unparseable
+    probe results; fail-closed on file:// and data: schemes that could exfiltrate
+    local content or execute inline script after a redirect.
     """
-    if not url or not url.lower().startswith(("http://", "https://")):
+    if not url:
+        return False
+    lowered = url.lower().strip()
+    if lowered.startswith(("file:", "data:")):
+        return True
+    if not lowered.startswith(("http://", "https://")):
         return False
     try:
         validate_http_url_for_fetch(url)

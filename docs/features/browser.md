@@ -122,8 +122,8 @@ bubblewrap/seatbelt — so these controls are enforced in AgentOS instead:
   provider API keys are unreachable from the browser process. (Lesson from a real
   Hermes incident, GHSA-m4m8-xjp4-5rmm.)
 - **SSRF.** `navigate` refuses private ranges, loopback, and cloud-metadata hosts
-  (`169.254.169.254`, …), and re-checks the final URL after redirects. `data:`
-  and `about:` targets are allowed (no host, no network); `file://` is refused.
+  (`169.254.169.254`, …), and re-checks the final URL after redirects. `about:`
+  targets (like `about:blank`) are allowed; `file://` and `data:` URLs are refused.
 - **Private-page read guard.** In managed mode, a read action re-checks the live
   page URL — a JavaScript redirect onto a private address after navigation does
   not let the next snapshot exfiltrate it. Relaxed in attach mode (your Chrome
