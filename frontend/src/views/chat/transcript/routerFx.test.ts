@@ -462,6 +462,58 @@ describe('createRouterFxRenderer route-pin suppression', () => {
     }
   })
 
+  it('sweeps a settled strip from an earlier turn when a pin decides the next turn', async () => {
+    // Regression for issue #345: the previous turn's SETTLED strip (data-live
+    // absent) used to survive the route_pinned early-return, because that
+    // branch only swept live strips. The pinned turn renders no strip of its
+    // own, so the stale settled strip stayed above the composer and read as
+    // this turn's selection.
+    const h = pinnedHarness(true)
+    try {
+      // Simulate a settled strip from the previous turn sitting in the dock.
+      const stale = document.createElement('div')
+      stale.className = 'router-fx'
+      stale.dataset.state = 'settled'
+      stale.dataset.sessionKey = 's'
+      stale.dataset.turnIndex = '1'
+      stale.dataset.renderMode = 'history'
+      stale.innerHTML =
+        '<div class="router-fx-header"><span class="glyph">←</span><span class="title">Model selected</span><span class="glyph">→</span></div>' +
+        '<div class="router-fx-grid"><div class="router-fx-cell win">gpt-5.6-luna</div></div>'
+      h.dock.appendChild(stale)
+
+      await h.renderer.handleRouterDecision({ tier: 'c1', model: 'z-ai/glm-5.2' })
+      expect(h.dock.querySelector('.router-fx')).toBeNull()
+    } finally {
+      h.cleanup()
+    }
+  })
+
+  it('keeps a settled strip from another session when a pin decides a turn', async () => {
+    // The pinned-turn sweep is session-scoped: strips belonging to a different
+    // session must not be removed by this turn's pin.
+    const h = pinnedHarness(true)
+    try {
+      const other = document.createElement('div')
+      other.className = 'router-fx'
+      other.dataset.state = 'settled'
+      other.dataset.sessionKey = 'other-session'
+      other.dataset.turnIndex = '1'
+      other.dataset.renderMode = 'history'
+      other.innerHTML =
+        '<div class="router-fx-header"><span class="glyph">←</span><span class="title">Model selected</span><span class="glyph">→</span></div>' +
+        '<div class="router-fx-grid"><div class="router-fx-cell win">gpt-5.6-luna</div></div>'
+      h.dock.appendChild(other)
+
+      await h.renderer.handleRouterDecision({ tier: 'c1', model: 'z-ai/glm-5.2' })
+      const kept = h.dock.querySelector<HTMLElement>('.router-fx')
+      expect(kept).not.toBeNull()
+      expect(kept!.dataset.sessionKey).toBe('other-session')
+    } finally {
+      h.cleanup()
+    }
+  })
+
   it('does not learn a tier→model pair from a pinned turn', async () => {
     // A directly-named model rides on a HOST tier: the decision reports c1
     // (where the settings came from) with the user's model. Learning that pair

@@ -1486,13 +1486,14 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
       // tier that lends it settings (say c1) alongside the chosen model (say
       // glm-5.2), so learning it would rewrite c1's model in the registry and
       // mislabel later strips for a tier that never ran that model.
-      // Also sweep a live strip already on screen: the pin may have been set
-      // mid-turn, after the scan began.
+      // A pinned turn renders no strip of its own, so sweep the dock of ANY
+      // strip for this session — a live one if the pin landed mid-scan, and a
+      // settled one from an earlier turn that would otherwise linger above the
+      // composer and read as this turn's selection (issue #345).
       if (thread()) {
-        strips('.router-fx[data-live="true"]').forEach((el) => {
-          if (!el.dataset.turnIndex || el.dataset.turnIndex === String(turnIndex)) {
-            removeStrip(el)
-          }
+        strips('.router-fx').forEach((el) => {
+          if (el.dataset.sessionKey && el.dataset.sessionKey !== sessionKey()) return
+          removeStrip(el)
         })
       }
       diag('router_decision.skip.route_pinned', summarizePayload(payload))
