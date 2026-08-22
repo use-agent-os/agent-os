@@ -25,30 +25,39 @@ Both run behind the same approval and sandbox layers as every other tool.
 
 The Web UI ships a featured preset for Robinhood Agentic Trading.
 
+> [!IMPORTANT]
+> **US Residency Requirement**: Opening a Robinhood account is restricted to US residents. You must have a valid Robinhood account to authenticate and connect this MCP server.
+
+### Setup Guide
+
+To connect the Robinhood MCP server to AgentOS:
+
+1. **Via the Web UI (Recommended)**:
+   - Navigate to **Settings > MCP Servers** in the Control UI.
+   - Select the **Robinhood Trading** preset.
+   - Click **Save**. This will automatically initiate the provider-hosted OAuth authorization flow in your browser.
+   - Complete the authentication on the Robinhood website to authorize AgentOS.
+2. **Via Configuration File**:
+   - For headless or scripted deployments, declare the server in your `agentos.toml` configuration:
+     ```toml
+     [mcp]
+     enabled = true
+     connect_timeout_seconds = 10
+
+     [[mcp.servers]]
+     name = "robinhood-trading"
+     transport = "streamable_http"
+     url = "https://agent.robinhood.com/mcp/trading"
+     oauth = true
+     tool_timeout_seconds = 30
+     ```
+   - When the gateway starts, open the Web UI or check the terminal to complete the pending OAuth authorization challenge.
+
 | Setting | Value |
 | --- | --- |
 | Endpoint | `https://agent.robinhood.com/mcp/trading` |
 | Transport | Streamable HTTP |
 | Authorization | Provider-hosted OAuth flow |
-
-Open **Settings > MCP Servers**, select the Robinhood Trading preset, and save
-it. Saving opens the provider authorization flow and loads the server's tools
-without a gateway restart.
-
-For scripted deployments, declare the same server in TOML:
-
-```toml
-[mcp]
-enabled = true
-connect_timeout_seconds = 10
-
-[[mcp.servers]]
-name = "robinhood-trading"
-transport = "streamable_http"
-url = "https://agent.robinhood.com/mcp/trading"
-oauth = true
-tool_timeout_seconds = 30
-```
 
 See [`../configuration.md`](../configuration.md) for the full MCP configuration
 reference and [`../web-ui.md`](../web-ui.md) for the connection UI.
