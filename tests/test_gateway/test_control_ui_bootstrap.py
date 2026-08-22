@@ -148,10 +148,63 @@ def test_bootstrap_includes_config_path(dist_dir: Path, tmp_path: Path) -> None:
     config = GatewayConfig()
     config.config_path = str(tmp_path / "AgentOS Config.toml")
 
+    # Default auth.mode="none", so it should return config_path
     response = _client(config).get("/control/api/bootstrap")
-
     assert response.status_code == 200
     assert response.json()["config_path"] == str(config.config_path)
+
+    # auth.mode="token"
+    config_token = GatewayConfig(auth={"mode": "token", "token": "secret-token"})
+    config_token.config_path = str(tmp_path / "AgentOS Config.toml")
+    client_token = _client(config_token)
+
+    # 1. Unauthenticated request -> config_path should be empty
+    response = client_token.get("/control/api/bootstrap")
+    assert response.status_code == 200
+    assert response.json()["config_path"] == ""
+
+    # 2. Authenticated request with Bearer token -> config_path should be returned
+    response = client_token.get(
+        "/control/api/bootstrap", headers={"authorization": "Bearer secret-token"}
+    )
+    assert response.status_code == 200
+    assert response.json()["config_path"] == str(config_token.config_path)
+
+    # 3. Authenticated request with custom header -> config_path should be returned
+    response = client_token.get(
+        "/control/api/bootstrap", headers={"x-agentos-token": "secret-token"}
+    )
+    assert response.status_code == 200
+    assert response.json()["config_path"] == str(config_token.config_path)
+
+    # 4. Authenticated request with query parameter -> config_path should be returned
+    response = client_token.get("/control/api/bootstrap?token=secret-token")
+    assert response.status_code == 200
+    assert response.json()["config_path"] == str(config_token.config_path)
+
+    # 5. Invalid token request -> config_path should be empty
+    response = client_token.get(
+        "/control/api/bootstrap", headers={"authorization": "Bearer bad-token"}
+    )
+    assert response.status_code == 200
+    assert response.json()["config_path"] == ""
+
+    # auth.mode="trusted-proxy"
+    config_proxy = GatewayConfig(auth={"mode": "trusted-proxy", "trusted_proxy": "10.0.0.1"})
+    config_proxy.config_path = str(tmp_path / "AgentOS Config.toml")
+    client_proxy = _client(config_proxy)
+
+    # 1. Non-matching proxy -> config_path empty
+    response = client_proxy.get("/control/api/bootstrap")
+    assert response.status_code == 200
+    assert response.json()["config_path"] == ""
+
+    # 2. Matching proxy -> config_path returned
+    response = client_proxy.get(
+        "/control/api/bootstrap", headers={"x-forwarded-for": "10.0.0.1, 192.168.1.1"}
+    )
+    assert response.status_code == 200
+    assert response.json()["config_path"] == str(config_proxy.config_path)
 
 
 def test_bootstrap_ws_url_uses_client_reachable_wildcard_host(dist_dir: Path) -> None:

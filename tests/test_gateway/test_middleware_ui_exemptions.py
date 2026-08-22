@@ -86,3 +86,28 @@ def test_http_token_auth_without_configured_token_fails_closed(tmp_path) -> None
         response = client.get("/api/config")
 
     assert response.status_code == 401
+
+
+def test_origin_guard_enforced_on_bootstrap_but_exempts_other_ui_paths(tmp_path) -> None:
+    config = GatewayConfig(
+        config_path=str(tmp_path / "config.toml"),
+        auth={"mode": "none"},
+        control_ui={"base_path": "/control"},
+    )
+    # create_gateway_app sets up the full middleware stack including LoopbackOriginMiddleware.
+    # LoopbackOriginMiddleware is active on loopback binds (TestClient has localhost
+    # base_url which triggers it). Since auth.mode="none", bootstrap is accessible.
+    with TestClient(create_gateway_app(config), base_url="http://localhost") as client:
+        # 1. Accessing control UI shell with foreign origin is allowed (exempt)
+        response_ui = client.get("/control/", headers={"origin": "http://evil.com"})
+        # (It returns 200 or 503 depending on whether dist dir is built, but not 403)
+        assert response_ui.status_code != 403
+
+        # 2. Accessing bootstrap endpoint with same-origin or loopback origin is allowed
+        response_bootstrap_ok = client.get("/control/api/bootstrap", headers={"origin": "http://localhost"})
+        assert response_bootstrap_ok.status_code == 200
+
+        # 3. Accessing bootstrap endpoint with foreign origin is rejected with 403
+        response_bootstrap_evil = client.get("/control/api/bootstrap", headers={"origin": "http://evil.com"})
+        assert response_bootstrap_evil.status_code == 403
+        assert response_bootstrap_evil.text == "Origin not allowed"

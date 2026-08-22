@@ -138,6 +138,10 @@ class LoopbackOriginMiddleware(BaseHTTPMiddleware):
     def _is_ui_path(self, path: str) -> bool:
         if self._ui_prefix is None:
             return False
+        # The bootstrap JSON API is not a served UI page/asset, so it must
+        # not be exempt from the origin guard.
+        if path == f"{self._ui_prefix}/api/bootstrap":
+            return False
         # Exact shell ("/control") or anything under it ("/control/..."),
         # never a bare-prefix match that would swallow sibling routes.
         return path == self._ui_prefix or path.startswith(self._ui_prefix + "/")

@@ -81,14 +81,44 @@ def _request_ws_url(request: Request, config: GatewayConfig) -> str:
     return f"{ws_scheme}://{host}/ws"
 
 
-def _build_bootstrap_context(config: GatewayConfig, request: Request) -> dict:
+def _is_authenticated_request(request: Request, config: GatewayConfig) -> bool:
+    """Check if the request is authenticated based on config settings."""
+    auth_mode = config.auth.mode
+    if auth_mode == "none":
+        return True
+
+    if auth_mode == "token":
+        auth_header = request.headers.get("authorization", "")
+        token = None
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+        else:
+            token = request.headers.get("x-agentos-token")
+            if not token:
+                token = request.query_params.get("token")
+        configured_token = config.auth.token
+        return bool(configured_token and token == configured_token)
+
+    if auth_mode == "trusted-proxy":
+        proxy = config.auth.trusted_proxy
+        forwarded_for = request.headers.get("x-forwarded-for", "")
+        if proxy and proxy not in forwarded_for:
+            return False
+        return True
+
+    return False
+
+
+def _build_bootstrap_context(
+    config: GatewayConfig, request: Request, *, authenticated: bool = False
+) -> dict:
     """Build the public bootstrap payload consumed by the React application."""
     return {
         "version": f"{__version__}+{_TEMPLATE_VERSION_SUFFIX}",
         "ws_url": _request_ws_url(request, config),
         "auth_mode": config.auth.mode,
         "base_path": config.control_ui.base_path,
-        "config_path": config.config_path or "",
+        "config_path": (config.config_path or "") if authenticated else "",
         "features": {
             "diagnostics": config.diagnostics_enabled,
         },
@@ -156,7 +186,8 @@ def create_control_ui_routes(config: GatewayConfig) -> list[Route | Mount]:
         )
 
     async def serve_bootstrap(request: Request) -> JSONResponse:
-        ctx = _build_bootstrap_context(config, request)
+        authenticated = _is_authenticated_request(request, config)
+        ctx = _build_bootstrap_context(config, request, authenticated=authenticated)
         return JSONResponse(ctx, headers={"Cache-Control": _INDEX_CACHE_CONTROL})
 
     routes: list[Route | Mount] = []

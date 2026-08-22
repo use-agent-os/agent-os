@@ -1,4 +1,5 @@
 import { controlBasePath, controlPath } from './control-base'
+import { authenticatedHeaders } from './http-auth'
 
 export interface Bootstrap {
   version: string
@@ -15,7 +16,9 @@ export function bootstrapUrl(basePath = controlBasePath()): string {
 }
 
 export async function fetchBootstrap(): Promise<Bootstrap> {
-  const resp = await fetch(bootstrapUrl())
+  const resp = await fetch(bootstrapUrl(), {
+    headers: authenticatedHeaders(),
+  })
   if (!resp.ok) throw new Error(`bootstrap failed: ${resp.status}`)
   return (await resp.json()) as Bootstrap
 }
