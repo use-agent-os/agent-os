@@ -16,6 +16,7 @@ from xml.etree import ElementTree as ET
 import structlog
 
 from agentos.identity.workspace import BOOTSTRAP_FILENAMES
+from agentos.redact import redact_sensitive_text
 from agentos.sandbox.integration import get_runtime, sandboxed
 from agentos.tools.fuzzy_match import (
     AmbiguousMatchError,
@@ -512,10 +513,11 @@ async def read_file(path: str, offset: int | None = None, limit: int | None = No
     if binary_reason:
         raise _binary_file_error(path, p, reason=binary_reason)
 
-    return await loop.run_in_executor(
+    raw = await loop.run_in_executor(
         None,
         lambda: _stream_numbered_lines_from_file(p, path, offset=offset, limit=limit),
     )
+    return redact_sensitive_text(raw, file_read=True) or ""
 
 
 @tool(
@@ -574,7 +576,8 @@ async def read_spreadsheet(
         )
 
     selected = _select_spreadsheet_sheets(sheets, sheet)
-    return _format_spreadsheet(path=p, sheets=selected, offset=row_offset, limit=row_limit)
+    formatted = _format_spreadsheet(path=p, sheets=selected, offset=row_offset, limit=row_limit)
+    return redact_sensitive_text(formatted, file_read=True) or ""
 
 
 def _read_delimited_rows(path: Path, delimiter: str) -> list[tuple[str, list[list[str]]]]:
@@ -1032,4 +1035,4 @@ async def grep_search(
     matches = await loop.run_in_executor(None, _search)
     if not matches:
         return f"No matches for '{pattern}'"
-    return "\n".join(matches)
+    return redact_sensitive_text("\n".join(matches), file_read=True) or ""
