@@ -34,13 +34,12 @@ from agentos.result_budget import (
 from agentos.router_control import router_control_payload_terminates_turn
 from agentos.tool_boundary import ToolCall, ToolResult
 from agentos.tools.envelope import build_tool_failure_envelope, is_denial_payload
-from agentos.tools.types import InteractionMode, ToolContext
+from agentos.tools.types import CallerKind, InteractionMode, ToolContext
 
 log = structlog.get_logger("agentos.tools.dispatch")
 
-_PENDING_APPROVAL_STATUSES: frozenset[str] = frozenset(
-    {"approval_required", "approval_pending"}
-)
+_PENDING_APPROVAL_STATUSES: frozenset[str] = frozenset({"approval_required", "approval_pending"})
+
 
 def _extract_pending_approval(content: Any) -> dict[str, Any] | None:
     """Return the payload when ``content`` carries a pending-approval status."""
@@ -57,6 +56,7 @@ def _extract_pending_approval(content: Any) -> dict[str, Any] | None:
         return None
     return payload if payload.get("status") in _PENDING_APPROVAL_STATUSES else None
 
+
 def _denial_reason(content: Any) -> str:
     payload: Any = content
     if isinstance(content, str):
@@ -68,8 +68,16 @@ def _denial_reason(content: Any) -> str:
         return "approval_denied"
     return "denied"
 
+
 def _has_live_approval_surface(ctx: ToolContext | None) -> bool:
-    return ctx is None or ctx.interaction_mode is InteractionMode.INTERACTIVE
+    if ctx is None:
+        return True
+    if ctx.interaction_mode is InteractionMode.INTERACTIVE:
+        return True
+    if ctx.caller_kind is CallerKind.CHANNEL:
+        return True
+    return False
+
 
 async def finalize(
     call: ToolCall,
@@ -236,9 +244,7 @@ async def finalize(
     status_is_error = derive_is_error(execution_status) if execution_status else False
     is_error = denial or status_is_error
 
-    artifacts = (
-        list(ctx.published_artifacts[artifact_start:]) if ctx is not None else []
-    )
+    artifacts = list(ctx.published_artifacts[artifact_start:]) if ctx is not None else []
     if artifacts:
         content = result
     else:
@@ -263,8 +269,7 @@ async def finalize(
         artifacts=artifacts,
         execution_status=execution_status,
         terminates_turn=(
-            call.tool_name == "router_control"
-            and router_control_payload_terminates_turn(content)
+            call.tool_name == "router_control" and router_control_payload_terminates_turn(content)
         )
         or (
             # ask_user follows an end-turn-and-resume contract: presenting
@@ -279,5 +284,11 @@ async def finalize(
             call.tool_name == "exit_plan_mode"
             and not is_error
             and exit_plan_payload_terminates_turn(content)
+        )
+        or (
+            # Gated tool approval on unattended surface also terminates the turn
+            _extract_pending_approval(content) is not None
+            and ctx is not None
+            and ctx.interaction_mode is InteractionMode.UNATTENDED
         ),
     )

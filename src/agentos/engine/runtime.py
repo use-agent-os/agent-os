@@ -122,6 +122,7 @@ from agentos.engine.types import (
     ToolResultEvent,
     WarningEvent,
 )
+from agentos.engine.usage import BudgetExceededError
 from agentos.execution_status import (
     mark_execution_status_truncated,
     normalize_execution_status,
@@ -608,8 +609,9 @@ def _summarize_memory_write(arguments: Any) -> str:
     target = str(arguments.get("target") or "memory")
     operations = arguments.get("operations")
     if isinstance(operations, list) and operations:
-        actions = ",".join(sorted({str(op.get("action", "?")) for op in operations
-                                   if isinstance(op, dict)}))
+        actions = ",".join(
+            sorted({str(op.get("action", "?")) for op in operations if isinstance(op, dict)})
+        )
         return f"{target}/batch[{len(operations)} ops: {actions or '?'}]"
     action = str(arguments.get("action") or "?")
     content = str(arguments.get("content") or arguments.get("old_text") or "").strip()
@@ -2419,6 +2421,14 @@ class TurnRunner:
             },
         )
         try:
+            if self._usage_tracker:
+                budgets_cfg = getattr(self._config, "budgets", None)
+                exceeded, msg = self._usage_tracker.check_budget_limits(session_key, budgets_cfg)
+                if exceeded:
+                    raise BudgetExceededError(msg or "Spend budget limit exceeded.")
+                elif msg:
+                    yield WarningEvent(code="BUDGET_WARNING", message=msg)
+
             input_out = await self._input_stage.run(
                 InputStageInput(
                     message=message,
@@ -2702,6 +2712,8 @@ class TurnRunner:
                 session_manager_present=self._session_manager is not None,
                 state=stream_state,
                 tool_context=tool_context,
+                usage_tracker=self._usage_tracker,
+                budgets_cfg=getattr(self._config, "budgets", None),
             )
             router_control_replay_event: RouterControlReplayEvent | None = None
             async for event in self._stream_consumer_stage.run(stream_inp):
@@ -2830,9 +2842,7 @@ class TurnRunner:
 
             # 11. Observability: best-effort DecisionEntry for this turn.
             #     Must never break turn execution — wrap in try/except.
-            turn.metadata.update(
-                {}
-            )
+            turn.metadata.update({})
             prompt_report_for_decision = build_prompt_report(
                 turn_id=turn_id,
                 session_key=session_key,
@@ -2919,6 +2929,47 @@ class TurnRunner:
                     payload={"partial_text_chars": len(partial_text)},
                 )
             raise
+
+        except BudgetExceededError as exc:
+            error_message = str(exc)
+            event_code = "BUDGET_EXCEEDED"
+            log.error(
+                "turn_runner.budget_exceeded",
+                session_key=session_key,
+                error=error_message,
+            )
+            if self._session_manager is not None:
+                await self._append_session_message(
+                    session_key, role="system", content=f"Error: {error_message}"
+                )
+            if turn_call_logger is not None:
+                turn_call_logger.write(
+                    "turn_error",
+                    {
+                        "error_type": "BudgetExceededError",
+                        "error": error_message,
+                    },
+                )
+            if trace_context is not None:
+                self._emit_turn_event(
+                    "turn_error",
+                    trace_context,
+                    session_key=session_key,
+                    agent_id=agent_id,
+                    turn_id=turn_id,
+                    run_kind=run_kind,
+                    input_mode=input_mode,
+                    seq=2,
+                    payload={
+                        "error_type": "BudgetExceededError",
+                        "error_chars": len(error_message),
+                    },
+                )
+            await self._persist_turn_error(
+                session_key,
+                ErrorEvent(message=error_message, code=event_code),
+            )
+            yield ErrorEvent(message=error_message, code=event_code)
 
         except Exception as exc:
             error_code, error_message = sanitize_agent_error(
@@ -4060,9 +4111,7 @@ class TurnRunner:
         # heartbeat config are boot-time) or for the session kind
         # (bootstrap_context_mode keys the snapshot), so gating on them does
         # not churn the cacheable base.
-        channels_enabled = bool(
-            getattr(getattr(self._config, "channels", None), "channels", None)
-        )
+        channels_enabled = bool(getattr(getattr(self._config, "channels", None), "channels", None))
         unattended_context = bool(
             getattr(getattr(self._config, "heartbeat", None), "enabled", False)
         ) or bootstrap_context_mode in {"heartbeat_light", "unattended"}
@@ -4521,7 +4570,6 @@ class TurnRunner:
             final_prompt = "\n\n".join(final_prompt)
 
         return final_prompt, cache_breakpoints, request_context_prompt
-
 
     async def _record_checkpoint_before_compaction(
         self,
@@ -5374,8 +5422,6 @@ class TurnRunner:
                 ),
             )
 
-
-
     def _pre_compaction_flush_timeout_seconds(self) -> float:
         memory_cfg = getattr(self._config, "memory", None)
         raw_timeout = getattr(memory_cfg, "flush_timeout_seconds", 15.0)
@@ -5393,7 +5439,6 @@ class TurnRunner:
         except (TypeError, ValueError):
             return 120.0
         return max(timeout, 0.0)
-
 
     def _consume_pre_compaction_flush_task(
         self,
