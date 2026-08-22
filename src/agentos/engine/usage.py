@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -49,6 +50,16 @@ def parse_session_key_scope(session_key: str) -> tuple[str, str]:
 
 _current_usage_scope: ContextVar[str | None] = ContextVar(
     "agentos_usage_scope",
+    default=None,
+)
+
+_current_tool_name: ContextVar[str | None] = ContextVar(
+    "agentos_current_tool_name",
+    default=None,
+)
+
+_current_skill_name: ContextVar[str | None] = ContextVar(
+    "agentos_current_skill_name",
     default=None,
 )
 
@@ -347,16 +358,22 @@ class SessionTotalsSnapshot:
         )
 
 
+_global_usage_tracker: UsageTracker | None = None
+
+
 class UsageTracker:
     """Tracks per-session token usage and cost with database persistence and budgets."""
 
     def __init__(self, default_provider_id: str = "", db_path: str | None = None) -> None:
+        global _global_usage_tracker
         self._sessions: dict[str, SessionUsage] = {}
         self._scopes: dict[tuple[str, str], SessionUsage] = {}
         self._default_provider_id = str(default_provider_id or "").strip().lower()
         self._db_path = db_path
         self._session_metadata: dict[str, tuple[str, str]] = {}
         self._warned_keys: set[str] = set()
+        self._session_active_skill: dict[str, str] = {}
+        _global_usage_tracker = self
 
         if self._db_path:
             self._init_db()
@@ -375,6 +392,27 @@ class UsageTracker:
                         scope_id TEXT,
                         cost_usd REAL NOT NULL DEFAULT 0.0,
                         PRIMARY KEY (day, scope_kind, scope_id)
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS usage_records (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_key TEXT NOT NULL,
+                        agent_id TEXT,
+                        channel_type TEXT,
+                        tool_name TEXT,
+                        skill TEXT,
+                        model TEXT NOT NULL,
+                        provider TEXT NOT NULL,
+                        input_tokens INTEGER NOT NULL DEFAULT 0,
+                        output_tokens INTEGER NOT NULL DEFAULT 0,
+                        cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                        cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+                        cost_usd REAL NOT NULL DEFAULT 0.0,
+                        billed_cost_usd REAL NOT NULL DEFAULT 0.0,
+                        created_at INTEGER NOT NULL
                     )
                     """
                 )
@@ -631,13 +669,60 @@ class UsageTracker:
         )
         effective_cost = billed_cost if billed_cost > 0.0 else cost
 
-        # Persistence to Daily Ledger
-        if self._db_path and effective_cost > 0.0:
+        # Persistence to Daily Ledger & usage records
+        if self._db_path:
             agent_id, channel = self.get_session_scope(session_key)
             day = datetime.now(UTC).strftime("%Y-%m-%d")
-            self._update_spend_ledger(day, "gateway", "global", effective_cost)
-            self._update_spend_ledger(day, "agent", agent_id, effective_cost)
-            self._update_spend_ledger(day, "channel", channel, effective_cost)
+            if effective_cost > 0.0:
+                self._update_spend_ledger(day, "gateway", "global", effective_cost)
+                self._update_spend_ledger(day, "agent", agent_id, effective_cost)
+                self._update_spend_ledger(day, "channel", channel, effective_cost)
+
+            # Record detailed usage row
+            tool_name = _current_tool_name.get()
+            scope_key = _current_usage_scope.get()
+            if not tool_name and scope_key:
+                tool_name = scope_key
+
+            skill = _current_skill_name.get()
+            if not skill:
+                skill = self._session_active_skill.get(session_key)
+
+            created_at = int(time.time() * 1000)
+
+            conn = sqlite3.connect(self._db_path)
+            try:
+                with conn:
+                    conn.execute(
+                        """
+                        INSERT INTO usage_records (
+                            session_key, agent_id, channel_type, tool_name, skill,
+                            model, provider, input_tokens, output_tokens,
+                            cache_read_tokens, cache_write_tokens, cost_usd, billed_cost_usd,
+                            created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            session_key,
+                            agent_id,
+                            channel,
+                            tool_name,
+                            skill,
+                            model_id,
+                            effective_provider_id,
+                            input_tokens,
+                            output_tokens,
+                            cache_read_tokens,
+                            cache_write_tokens,
+                            cost,
+                            billed_cost,
+                            created_at,
+                        ),
+                    )
+            except Exception as e:
+                log.warning("usage_tracker.insert_usage_record_failed", error=str(e))
+            finally:
+                conn.close()
 
     def get(self, session_key: str) -> SessionUsage | None:
         """Return accumulated usage for a session, or None."""
@@ -757,3 +842,143 @@ class UsageTracker:
         if usage.cost >= threshold:
             return f"Session cost ${usage.cost:,.2f} has exceeded the ${threshold:,.2f} threshold."
         return None
+
+    def query_usage(
+        self,
+        *,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        agent_id: str | None = None,
+        channel_type: str | None = None,
+        tool_name: str | None = None,
+        skill: str | None = None,
+        session_key: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if not self._db_path:
+            return self._query_in_memory(
+                start_date=start_date,
+                end_date=end_date,
+                agent_id=agent_id,
+                channel_type=channel_type,
+                tool_name=tool_name,
+                skill=skill,
+                session_key=session_key,
+            )
+
+        clauses = []
+        params = []
+
+        if start_date:
+            try:
+                dt = datetime.strptime(start_date, "%Y-%m-%d")
+                ts = int(dt.replace(tzinfo=UTC).timestamp() * 1000)
+                clauses.append("created_at >= ?")
+                params.append(ts)
+            except ValueError:
+                pass
+
+        if end_date:
+            try:
+                dt = datetime.strptime(end_date, "%Y-%m-%d")
+                ts = int((dt.replace(tzinfo=UTC).timestamp() + 86400) * 1000) - 1
+                clauses.append("created_at <= ?")
+                params.append(ts)
+            except ValueError:
+                pass
+
+        if agent_id:
+            clauses.append("agent_id = ?")
+            params.append(agent_id)
+
+        if channel_type:
+            clauses.append("channel_type = ?")
+            params.append(channel_type)
+
+        if tool_name:
+            clauses.append("tool_name = ?")
+            params.append(tool_name)
+
+        if skill:
+            clauses.append("skill = ?")
+            params.append(skill)
+
+        if session_key:
+            clauses.append("session_key = ?")
+            params.append(session_key)
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        sql = f"""
+            SELECT session_key, agent_id, channel_type, tool_name, skill,
+                   model, provider, input_tokens, output_tokens,
+                   cache_read_tokens, cache_write_tokens, cost_usd, billed_cost_usd,
+                   created_at
+            FROM usage_records
+            {where}
+            ORDER BY created_at DESC
+        """
+
+        conn = sqlite3.connect(self._db_path)
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql, params)
+            rows = cursor.fetchall()
+            return [
+                {
+                    "sessionKey": r[0],
+                    "agentId": r[1],
+                    "channelType": r[2],
+                    "toolName": r[3],
+                    "skill": r[4],
+                    "model": r[5],
+                    "provider": r[6],
+                    "inputTokens": r[7],
+                    "outputTokens": r[8],
+                    "cacheReadTokens": r[9],
+                    "cacheWriteTokens": r[10],
+                    "costUsd": r[11],
+                    "billedCostUsd": r[12],
+                    "createdAt": r[13],
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            log.warning("usage_tracker.query_failed", error=str(e))
+            return []
+        finally:
+            conn.close()
+
+    def _query_in_memory(self, **kwargs) -> list[dict[str, Any]]:
+        rows = []
+        for session_key, usage in self._sessions.items():
+            agent_id, channel = self.get_session_scope(session_key)
+            if kwargs.get("agent_id") and kwargs["agent_id"] != agent_id:
+                continue
+            if kwargs.get("channel_type") and kwargs["channel_type"] != channel:
+                continue
+            if kwargs.get("session_key") and kwargs["session_key"] != session_key:
+                continue
+            skill = self._session_active_skill.get(session_key)
+            if kwargs.get("skill") and kwargs["skill"] != skill:
+                continue
+
+            for model_key, mu in (usage._per_model or {}).items():
+                provider_id, model_id = model_key
+                rows.append(
+                    {
+                        "sessionKey": session_key,
+                        "agentId": agent_id,
+                        "channelType": channel,
+                        "toolName": None,
+                        "skill": skill,
+                        "model": model_id,
+                        "provider": provider_id,
+                        "inputTokens": mu.input_tokens,
+                        "outputTokens": mu.output_tokens,
+                        "cacheReadTokens": mu.cache_read_tokens,
+                        "cacheWriteTokens": mu.cache_write_tokens,
+                        "costUsd": mu.cost,
+                        "billedCostUsd": mu.billed_cost,
+                        "createdAt": int(time.time() * 1000),
+                    }
+                )
+        return rows

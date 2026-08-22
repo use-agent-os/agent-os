@@ -545,9 +545,7 @@ def build_tool_handler(
         decision = run_chain_with_emit(dispatch_input, emit=_emit_policy_log)
         if not decision.allowed:
             if decision.envelope is None:
-                raise RuntimeError(
-                    "PolicyCheck returned a denial without an envelope"
-                )
+                raise RuntimeError("PolicyCheck returned a denial without an envelope")
             if hook_call is not None:
                 for hook in hooks:
                     try:
@@ -592,12 +590,13 @@ def build_tool_handler(
             return envelope
 
         token = current_tool_context.set(effective_ctx)
+        from agentos.engine.usage import _current_tool_name
+
+        tool_token = _current_tool_name.set(tool_call.tool_name)
         tool_started_at = time.monotonic()
         raw_result: Any = None
         exception: BaseException | None = None
-        artifact_start = (
-            len(effective_ctx.published_artifacts) if effective_ctx is not None else 0
-        )
+        artifact_start = len(effective_ctx.published_artifacts) if effective_ctx is not None else 0
         settled_result: ToolResult | None = None
         try:
             raw_result = await registered.handler(**reservation.arguments)
@@ -651,6 +650,9 @@ def build_tool_handler(
                         registered,
                     )
             finally:
+                from agentos.engine.usage import _current_tool_name
+
+                _current_tool_name.reset(tool_token)
                 current_tool_context.reset(token)
         # Reached only when no exception is propagating (CancelledError
         # re-raises above), so finalize has always run by this point.
