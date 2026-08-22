@@ -1,4 +1,8 @@
-"""Canvas and node helper functions for deployments with a node runtime."""
+"""Reserved node runtime and canvas tool stubs.
+
+These built-ins are unexposed by default (`exposed_by_default=False`) and serve
+as reserved tool signatures for environments with an external node execution runtime.
+"""
 
 from __future__ import annotations
 

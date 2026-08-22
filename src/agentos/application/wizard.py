@@ -171,11 +171,13 @@ _ONBOARD_AGENT_STEPS: list[WizardStep] = [
                 field_type="select",
                 required=True,
                 choices=[
-                    "anthropic/claude-3-5-sonnet",
-                    "anthropic/claude-3-5-haiku",
-                    "openai/gpt-4o",
-                    "openai/gpt-4o-mini",
+                    "openai/gpt-5.6-luna",
+                    "openai/gpt-5.6-luna-pro",
+                    "anthropic/claude-3-7-sonnet",
+                    "deepseek/deepseek-chat",
+                    "deepseek/deepseek-reasoner",
                 ],
+                default="openai/gpt-5.6-luna",
                 description="Provider/model pair used when a turn does not override it.",
             ),
             WizardField(

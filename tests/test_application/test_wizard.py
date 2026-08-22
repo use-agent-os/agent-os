@@ -34,7 +34,7 @@ def test_wizard_registry_advances_and_applies_schema_defaults() -> None:
     assert second.next_step is not None
     assert second.next_step.step_id == "defaults"
 
-    final = registry.advance(wizard_id, {"default_model": "openai/gpt-4o-mini"})
+    final = registry.advance(wizard_id, {"default_model": "openai/gpt-5.6-luna"})
     assert final.completed is True
     assert final.next_step is None
     assert final.result == {
@@ -43,7 +43,7 @@ def test_wizard_registry_advances_and_applies_schema_defaults() -> None:
             "agent_name": "cora",
             "system_prompt": "Help with release work",
             "persona_tone": "professional",
-            "default_model": "openai/gpt-4o-mini",
+            "default_model": "openai/gpt-5.6-luna",
             "temperature": 7,
         },
     }

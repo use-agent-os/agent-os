@@ -34,6 +34,11 @@ def filter_by_profile(
     profile: ToolProfile | str,
     ctx: ToolContext | None = None,
 ) -> list[ToolDefinition]:
+    """Compatibility pass-through for tool definitions under a profile.
+
+    Fine-grained tool visibility and filtering are centrally enforced by
+    :func:`is_tool_visible` and :mod:`agentos.tools.policy_config`.
+    """
     del ctx
     ToolProfile(profile)
     return list(tools)
@@ -45,6 +50,11 @@ def profile_allows_tool(
     *,
     explicitly_allowed: set[str] | frozenset[str] | None = None,
 ) -> bool:
+    """Compatibility check for tool allowance under a profile.
+
+    Fine-grained tool policy evaluation is centrally handled in
+    :mod:`agentos.tools.policy_config` and :mod:`agentos.tools.policy.checks`.
+    """
     del tool_name, explicitly_allowed
     ToolProfile(profile)
     return True
