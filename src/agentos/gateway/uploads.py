@@ -278,11 +278,9 @@ class UploadStore:
 def _extract_authorization_token(request: Request) -> str | None:
     """Header-only token extraction.
 
-    The multipart upload endpoint deliberately rejects query-string token auth
-    (which the existing JSON-RPC routes accept for legacy convenience). A
-    cross-origin attacker can craft a multipart POST with a forged ``?token=…``
-    query but cannot set arbitrary headers on a plain ``<form>`` submission, so
-    requiring the ``Authorization`` header closes that surface.
+    Like all gateway endpoints, the multipart upload endpoint requires
+    header-based token auth (``Authorization: Bearer <token>`` or
+    ``x-agentos-token: <token>``) and rejects query-string tokens.
     """
 
     auth_header = request.headers.get("authorization", "")

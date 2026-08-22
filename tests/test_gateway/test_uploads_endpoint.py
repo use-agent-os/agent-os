@@ -550,13 +550,7 @@ def test_upload_unauthenticated_rejected() -> None:
 
 
 def test_upload_rejects_query_token_when_disallowed_for_multipart() -> None:
-    """Query-string tokens are rejected for the multipart upload endpoint.
-
-    The existing JSON-RPC routes accept ``?token=…`` as a convenience for
-    browser-side consumers, but a multipart POST is the kind of request a
-    malicious cross-origin page can craft, so we force the Authorization header
-    for /api/v1/files/upload specifically.
-    """
+    """Query-string tokens are rejected for all endpoints including multipart uploads."""
     pytest.importorskip("starlette.testclient")
     from starlette.applications import Starlette
     from starlette.testclient import TestClient
@@ -572,12 +566,11 @@ def test_upload_rejects_query_token_when_disallowed_for_multipart() -> None:
     app.add_middleware(AuthMiddleware, config=config)
 
     with TestClient(app) as client:
-        # Auth mode passes the AuthMiddleware via the query token (legacy
-        # convenience) but the upload handler MUST refuse it.
+        # Query-string token is rejected by AuthMiddleware with 401
         response = client.post(
             "/api/v1/files/upload?token=secret",
             files={"file": ("x.pdf", b"%PDF-1.4\n", "application/pdf")},
         )
     assert response.status_code == 401, response.text
     body: dict[str, Any] = response.json()
-    assert "Authorization" in body.get("error", "") or "header" in body.get("error", "").lower()
+    assert body.get("code") == "UNAUTHORIZED" or "Authorization" in body.get("error", "")
