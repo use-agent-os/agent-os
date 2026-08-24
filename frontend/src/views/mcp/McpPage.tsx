@@ -30,12 +30,12 @@ import '@/i18n/en/mcp'
 import { MotionListItem } from '@/lib/motion'
 import trustNetworkUrl from '@/assets/mcp-trust-network.webp'
 import robinhoodSymbolUrl from '@/assets/robinhood-symbol.png'
+import baseSymbolUrl from '@/assets/base-symbol.png'
 import {
-  ROBINHOOD_HELP_URL,
-  ROBINHOOD_MCP_URL,
+  MCP_PARTNERS,
   createServerDraft,
   normalizeWorkspace,
-  robinhoodPresentation,
+  partnerPresentation,
   serverDetail,
   serverFromDraft,
   serverPresentation,
@@ -43,12 +43,19 @@ import {
   validateServerDraft,
   type McpConfigResponse,
   type McpDraftErrors,
+  type McpPartner,
   type McpServerConfig,
   type McpServerDraft,
   type McpServerStatus,
   type McpStatusResponse,
   type McpTransport,
+  type PartnerPresentation,
 } from './logic'
+
+const PARTNER_LOGOS: Record<McpPartner['id'], string> = {
+  robinhood: robinhoodSymbolUrl,
+  base: baseSymbolUrl,
+}
 
 interface McpConnectResponse {
   connected?: boolean
@@ -444,6 +451,143 @@ function OAuthCallback() {
   )
 }
 
+interface PartnerCardCopy {
+  landmark: string
+  logoAlt: string
+  headline: string
+  body: string
+  flowLandmark: string
+  flowRemoteName: string
+  noticeLead: string
+  noticeBody: string
+}
+
+function partnerCardCopy(partner: McpPartner): PartnerCardCopy {
+  if (partner.id === 'base') {
+    return {
+      landmark: t('mcp.basePartnerLandmark'),
+      logoAlt: t('mcp.basePartnerLogoAlt'),
+      headline: t('mcp.basePartnerHeadline'),
+      body: t('mcp.basePartnerBody'),
+      flowLandmark: t('mcp.basePartnerFlowLandmark'),
+      flowRemoteName: t('mcp.basePartnerFlowRemoteName'),
+      noticeLead: t('mcp.basePartnerNoticeLead'),
+      noticeBody: t('mcp.basePartnerNoticeBody'),
+    }
+  }
+  return {
+    landmark: t('mcp.partnerLandmark'),
+    logoAlt: t('mcp.partnerLogoAlt'),
+    headline: t('mcp.partnerHeadline'),
+    body: t('mcp.partnerBody'),
+    flowLandmark: t('mcp.partnerFlowLandmark'),
+    flowRemoteName: t('mcp.partnerFlowRemoteName'),
+    noticeLead: t('mcp.partnerNoticeLead'),
+    noticeBody: t('mcp.partnerNoticeBody'),
+  }
+}
+
+function PartnerCard({
+  partner,
+  presentation,
+  onOpen,
+}: {
+  partner: McpPartner
+  presentation: PartnerPresentation
+  onOpen: () => void
+}) {
+  const logoUrl = PARTNER_LOGOS[partner.id]
+  const copy = partnerCardCopy(partner)
+  return (
+    <article className={`mcp-partner is-${presentation.tone}`} aria-label={copy.landmark}>
+      <img className="mcp-partner__network" src={trustNetworkUrl} alt="" aria-hidden="true" />
+      <div className="mcp-partner__content">
+        <div className="mcp-partner__brand">
+          <img src={logoUrl} alt={copy.logoAlt} width="48" height="48" />
+          <div>
+            <span>{t('mcp.partnerEyebrow')}</span>
+            <h2>
+              {partner.name} <small>{t('mcp.partnerForAgentos')}</small>
+            </h2>
+          </div>
+        </div>
+        <span className={`mcp-partner__state is-${presentation.tone}`}>
+          <span aria-hidden="true" />
+          {presentation.label}
+        </span>
+        <h3>{copy.headline}</h3>
+        <p>{copy.body}</p>
+        <div className="mcp-partner__capabilities" aria-label={t('mcp.partnerCapabilities')}>
+          <span>
+            <ShieldCheckIcon /> {t('mcp.partnerCapOauth')}
+          </span>
+          <span>
+            <Globe2Icon /> {t('mcp.partnerCapTransport')}
+          </span>
+          <span>
+            <NetworkIcon /> {t('mcp.partnerCapRegistration')}
+          </span>
+        </div>
+        <div className="mcp-partner__actions">
+          <Button type="button" onClick={onOpen}>
+            <Link2Icon />
+            {presentation.action}
+          </Button>
+          <Button asChild variant="ghost">
+            <a href={partner.helpUrl} target="_blank" rel="noopener noreferrer">
+              {t('mcp.partnerSetupGuide')} <ExternalLinkIcon />
+            </a>
+          </Button>
+        </div>
+      </div>
+
+      <div className="mcp-partner__connection">
+        <div className="mcp-partner__connection-head">
+          <span>{t('mcp.partnerArchitecture')}</span>
+          <strong>{presentation.detail}</strong>
+        </div>
+        <div className="mcp-flow" aria-label={copy.flowLandmark}>
+          <div className="mcp-flow__node">
+            <span aria-hidden="true">
+              <NetworkIcon />
+            </span>
+            <small>{t('mcp.partnerFlowLocal')}</small>
+            <strong>{'AgentOS'}</strong>
+          </div>
+          <div className="mcp-flow__rail" aria-hidden="true">
+            <span>{t('mcp.partnerFlowOauth')}</span>
+          </div>
+          <div className="mcp-flow__node">
+            <img src={logoUrl} alt="" width="32" height="32" />
+            <small>{t('mcp.partnerFlowRemote')}</small>
+            <strong>{copy.flowRemoteName}</strong>
+          </div>
+        </div>
+        <dl className="mcp-partner__specs">
+          <div>
+            <dt>{t('mcp.partnerSpecEndpoint')}</dt>
+            <dd title={partner.url}>{partner.url}</dd>
+          </div>
+          <div>
+            <dt>{t('mcp.partnerSpecAuthorization')}</dt>
+            <dd>{t('mcp.partnerSpecAuthorizationValue')}</dd>
+          </div>
+          <div>
+            <dt>{t('mcp.partnerSpecTools')}</dt>
+            <dd>{presentation.tools}</dd>
+          </div>
+        </dl>
+      </div>
+      <div className="mcp-partner__notice" role="note">
+        <AlertTriangleIcon aria-hidden="true" />
+        <span>
+          <strong>{copy.noticeLead}</strong> {copy.noticeBody}
+        </span>
+      </div>
+    </article>
+  )
+}
+
 export function McpPage() {
   const rpc = useRpc()
   const bootstrap = useBootstrap()
@@ -486,13 +630,17 @@ export function McpPage() {
   const workspace = workspaceQuery.data?.workspace ?? normalizeWorkspace({}, {})
   const statusError = workspaceQuery.data?.statusError ?? null
   const statusAvailable = !statusError
-  const robinhood = robinhoodPresentation(
-    workspace.servers,
-    workspace.statusByName,
-    workspace.enabled,
-    statusAvailable,
-  )
-  const robinhoodServer = workspace.servers.find((server) => server.url === ROBINHOOD_MCP_URL)
+  const partnerStates = MCP_PARTNERS.map((partner) => ({
+    partner,
+    presentation: partnerPresentation(
+      partner,
+      workspace.servers,
+      workspace.statusByName,
+      workspace.enabled,
+      statusAvailable,
+    ),
+    server: workspace.servers.find((server) => server.url === partner.url),
+  }))
   const connectedCount = Object.values(workspace.statusByName).filter(
     (status) => status.connected,
   ).length
@@ -622,13 +770,13 @@ export function McpPage() {
     setEditor(createServerDraft({ ...server, originalName: server.name }))
   }
 
-  const openRobinhood = () => {
-    if (robinhoodServer) editServer(robinhoodServer)
+  const openPartner = (partner: McpPartner, existing: McpServerConfig | undefined) => {
+    if (existing) editServer(existing)
     else {
       setEditor(
         createServerDraft({
-          name: 'robinhood-trading',
-          url: ROBINHOOD_MCP_URL,
+          name: partner.serverName,
+          url: partner.url,
           oauth: true,
         }),
       )
@@ -740,92 +888,14 @@ export function McpPage() {
         </div>
       </div>
 
-      <article className={`mcp-partner is-${robinhood.tone}`} aria-label={t('mcp.partnerLandmark')}>
-        <img className="mcp-partner__network" src={trustNetworkUrl} alt="" aria-hidden="true" />
-        <div className="mcp-partner__content">
-          <div className="mcp-partner__brand">
-            <img src={robinhoodSymbolUrl} alt={t('mcp.partnerLogoAlt')} width="48" height="48" />
-            <div>
-              <span>{t('mcp.partnerEyebrow')}</span>
-              <h2>
-                {'Robinhood'} <small>{t('mcp.partnerForAgentos')}</small>
-              </h2>
-            </div>
-          </div>
-          <span className={`mcp-partner__state is-${robinhood.tone}`}>
-            <span aria-hidden="true" />
-            {robinhood.label}
-          </span>
-          <h3>{t('mcp.partnerHeadline')}</h3>
-          <p>{t('mcp.partnerBody')}</p>
-          <div className="mcp-partner__capabilities" aria-label={t('mcp.partnerCapabilities')}>
-            <span>
-              <ShieldCheckIcon /> {t('mcp.partnerCapOauth')}
-            </span>
-            <span>
-              <Globe2Icon /> {t('mcp.partnerCapTransport')}
-            </span>
-            <span>
-              <NetworkIcon /> {t('mcp.partnerCapRegistration')}
-            </span>
-          </div>
-          <div className="mcp-partner__actions">
-            <Button type="button" onClick={openRobinhood}>
-              <Link2Icon />
-              {robinhood.action}
-            </Button>
-            <Button asChild variant="ghost">
-              <a href={ROBINHOOD_HELP_URL} target="_blank" rel="noopener noreferrer">
-                {t('mcp.partnerSetupGuide')} <ExternalLinkIcon />
-              </a>
-            </Button>
-          </div>
-        </div>
-
-        <div className="mcp-partner__connection">
-          <div className="mcp-partner__connection-head">
-            <span>{t('mcp.partnerArchitecture')}</span>
-            <strong>{robinhood.detail}</strong>
-          </div>
-          <div className="mcp-flow" aria-label={t('mcp.partnerFlowLandmark')}>
-            <div className="mcp-flow__node">
-              <span aria-hidden="true">
-                <NetworkIcon />
-              </span>
-              <small>{t('mcp.partnerFlowLocal')}</small>
-              <strong>{'AgentOS'}</strong>
-            </div>
-            <div className="mcp-flow__rail" aria-hidden="true">
-              <span>{t('mcp.partnerFlowOauth')}</span>
-            </div>
-            <div className="mcp-flow__node">
-              <img src={robinhoodSymbolUrl} alt="" width="32" height="32" />
-              <small>{t('mcp.partnerFlowRemote')}</small>
-              <strong>{t('mcp.partnerFlowRemoteName')}</strong>
-            </div>
-          </div>
-          <dl className="mcp-partner__specs">
-            <div>
-              <dt>{t('mcp.partnerSpecEndpoint')}</dt>
-              <dd title={ROBINHOOD_MCP_URL}>{ROBINHOOD_MCP_URL}</dd>
-            </div>
-            <div>
-              <dt>{t('mcp.partnerSpecAuthorization')}</dt>
-              <dd>{t('mcp.partnerSpecAuthorizationValue')}</dd>
-            </div>
-            <div>
-              <dt>{t('mcp.partnerSpecTools')}</dt>
-              <dd>{robinhood.tools}</dd>
-            </div>
-          </dl>
-        </div>
-        <div className="mcp-partner__notice" role="note">
-          <AlertTriangleIcon aria-hidden="true" />
-          <span>
-            <strong>{t('mcp.partnerNoticeLead')}</strong> {t('mcp.partnerNoticeBody')}
-          </span>
-        </div>
-      </article>
+      {partnerStates.map(({ partner, presentation, server }) => (
+        <PartnerCard
+          key={partner.id}
+          partner={partner}
+          presentation={presentation}
+          onOpen={() => openPartner(partner, server)}
+        />
+      ))}
 
       <div className="mcp-security-note" role="note">
         <ShieldCheckIcon aria-hidden="true" />

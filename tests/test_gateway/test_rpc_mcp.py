@@ -159,6 +159,44 @@ async def test_oauth_rpc_completes_pending_browser_flow(
 
 
 @pytest.mark.asyncio
+async def test_mcp_status_reports_base_mcp_server(tmp_path) -> None:
+    config = GatewayConfig(
+        config_path=str(tmp_path / "agentos.toml"),
+        state_dir=str(tmp_path),
+        mcp={
+            "enabled": True,
+            "servers": [
+                {
+                    "name": "base-mcp",
+                    "transport": "streamable_http",
+                    "url": "https://mcp.base.org",
+                    "oauth": True,
+                }
+            ],
+        },
+    )
+    ctx = RpcContext(conn_id="test", config=config, tool_registry=ToolRegistry())
+
+    result = await get_dispatcher().dispatch("r1", "mcp.status", {}, ctx)
+
+    assert result.error is None
+    assert result.payload == {
+        "enabled": True,
+        "servers": [
+            {
+                "name": "base-mcp",
+                "transport": "streamable_http",
+                "url": "https://mcp.base.org",
+                "oauth": True,
+                "authenticated": False,
+                "connected": False,
+                "tools": [],
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
 async def test_mcp_config_patch_preserves_redacted_headers_after_removal(tmp_path) -> None:
     ctx = _ctx(tmp_path)
     ctx.config.mcp.servers.insert(

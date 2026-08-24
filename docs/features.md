@@ -24,6 +24,14 @@ layers.
 
 Read: [`features/agentic-trading.md`](features/agentic-trading.md)
 
+### Base MCP
+
+A featured Base MCP preset gives the agent a Base Account wallet over a
+provider-hosted OAuth connection — balances, transfers, swaps, signing, and
+x402 payments, with every write action approved explicitly in the Base Account.
+
+Read: [`features/base-mcp.md`](features/base-mcp.md)
+
 ### Pilot Router
 
 Local routing for model tier selection. It is designed to keep easy turns cheap

@@ -27,6 +27,23 @@ def _oauth_config(tmp_path) -> GatewayConfig:
     )
 
 
+def _base_oauth_config(tmp_path) -> GatewayConfig:
+    return GatewayConfig(
+        state_dir=str(tmp_path),
+        mcp={
+            "enabled": True,
+            "servers": [
+                {
+                    "name": "base-mcp",
+                    "transport": "streamable_http",
+                    "url": "https://mcp.base.org",
+                    "oauth": True,
+                }
+            ],
+        },
+    )
+
+
 @pytest.mark.asyncio
 async def test_boot_skips_oauth_server_until_user_authenticates(
     tmp_path,
@@ -55,5 +72,37 @@ async def test_boot_reconnects_oauth_server_after_authentication(
     monkeypatch.setattr(FileOAuthStorage, "is_authenticated", AsyncMock(return_value=True))
 
     await _discover_configured_mcp_servers(_oauth_config(tmp_path), ToolRegistry())
+
+    discover.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_boot_skips_base_mcp_until_user_authenticates(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentos.mcp import discovery
+
+    discover = AsyncMock(return_value=[])
+    monkeypatch.setattr(discovery, "discover_and_register", discover)
+    monkeypatch.setattr(FileOAuthStorage, "is_authenticated", AsyncMock(return_value=False))
+
+    await _discover_configured_mcp_servers(_base_oauth_config(tmp_path), ToolRegistry())
+
+    discover.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_boot_reconnects_base_mcp_after_authentication(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentos.mcp import discovery
+
+    discover = AsyncMock(return_value=["mcp_send_calls"])
+    monkeypatch.setattr(discovery, "discover_and_register", discover)
+    monkeypatch.setattr(FileOAuthStorage, "is_authenticated", AsyncMock(return_value=True))
+
+    await _discover_configured_mcp_servers(_base_oauth_config(tmp_path), ToolRegistry())
 
     discover.assert_awaited_once()

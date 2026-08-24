@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  BASE_MCP_URL,
+  MCP_PARTNERS,
   ROBINHOOD_MCP_URL,
   createServerDraft,
   normalizeWorkspace,
+  partnerPresentation,
   robinhoodPresentation,
   serverFromDraft,
   serverPresentation,
@@ -88,6 +91,41 @@ describe('MCP view logic', () => {
         true,
       ),
     ).toMatchObject({ tone: 'connected', detail: '1 live tool', tools: '1 registered' })
+  })
+
+  it('derives Base partner presentation through the same state machine', () => {
+    const basePartner = MCP_PARTNERS.find((partner) => partner.id === 'base')
+    expect(basePartner).toBeDefined()
+    if (!basePartner) return
+
+    expect(partnerPresentation(basePartner, [], {}, true)).toMatchObject({
+      tone: 'ready',
+      label: 'Ready to connect',
+      action: 'Connect Base',
+    })
+
+    const base = { ...HTTP_SERVER, name: 'base-mcp', url: BASE_MCP_URL }
+    expect(partnerPresentation(basePartner, [base], {}, false)).toMatchObject({
+      tone: 'paused',
+      action: 'Review connection',
+    })
+    expect(
+      partnerPresentation(basePartner, [base], { 'base-mcp': { name: 'base-mcp' } }, true),
+    ).toMatchObject({
+      tone: 'authorization',
+      action: 'Authorize Base',
+    })
+    expect(
+      partnerPresentation(
+        basePartner,
+        [base],
+        { 'base-mcp': { name: 'base-mcp', connected: true, tools: ['send', 'swap'] } },
+        true,
+      ),
+    ).toMatchObject({ tone: 'connected', detail: '2 live tools', tools: '2 registered' })
+    expect(partnerPresentation(basePartner, [base], {}, true, false)).toMatchObject({
+      tone: 'unavailable',
+    })
   })
 
   it('does not claim a connection state when live MCP status is unavailable', () => {

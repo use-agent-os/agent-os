@@ -315,6 +315,18 @@ provider authorization flow and loads its tools without requiring a gateway
 restart. Agentic trading involves significant risk. Review the server's access
 and action permissions before authorizing it.
 
+The featured Base connection uses:
+
+```text
+https://mcp.base.org
+```
+
+It is also configured as Streamable HTTP with OAuth. Connecting opens the Base
+Account authorization flow; every write action is approved explicitly in your
+Base Account before any value moves. Onchain transactions are irreversible, so
+review each approval carefully. See
+[Base MCP](features/base-mcp.md) for the full setup walkthrough.
+
 ## Skills
 
 Open **Skills** to see what is installed and what the agent can actually reach:

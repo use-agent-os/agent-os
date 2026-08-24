@@ -192,4 +192,39 @@ export const mcp = defineNamespace('mcp', {
   rhOauthTools: 'Loads after authorization',
   rhAuthorizeAction: 'Authorize Robinhood',
   rhSavedDetail: 'Configuration saved',
+
+  // Base partner card copy. "Base" is a proper noun.
+  basePartnerLandmark: 'Base MCP',
+  basePartnerLogoAlt: 'Base logo',
+  basePartnerHeadline: 'A controlled path from your agent to onchain.',
+  basePartnerBody:
+    'Connect a Base Account wallet with secure authorization, per-action approval, and live tool discovery.',
+  basePartnerFlowLandmark: 'AgentOS connects securely to Base MCP',
+  basePartnerFlowRemoteName: 'Base MCP',
+  basePartnerNoticeLead: 'Human-controlled by design.',
+  basePartnerNoticeBody:
+    'Every write action is approved explicitly in your Base Account. Onchain transactions are irreversible.',
+
+  // Base presentation (logic.ts).
+  baseReady: 'Ready to connect',
+  baseReadyDetail: 'Secure setup ready',
+  baseReadyTools: 'Discovered on connect',
+  baseReadyAction: 'Connect Base',
+  basePaused: 'Runtime paused',
+  basePausedDetail: 'Configured and paused',
+  basePausedTools: 'Available when enabled',
+  baseReviewAction: 'Review connection',
+  baseUnavailable: 'Status unavailable',
+  baseUnavailableDetail: 'Configuration is still available',
+  baseUnavailableTools: 'Live discovery unavailable',
+  baseConnected: 'Connected',
+  baseConnectedDetail_one: '{count} live tool',
+  baseConnectedDetail_other: '{count} live tools',
+  baseConnectedTools: '{count} registered',
+  baseManageAction: 'Manage connection',
+  baseOauthRequired: 'OAuth required',
+  baseOauthDetail: 'Ready for authorization',
+  baseOauthTools: 'Loads after authorization',
+  baseAuthorizeAction: 'Authorize Base',
+  baseSavedDetail: 'Configuration saved',
 } as const)

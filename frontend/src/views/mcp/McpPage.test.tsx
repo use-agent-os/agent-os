@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
 import { McpPage } from './McpPage'
-import { ROBINHOOD_MCP_URL } from './logic'
+import { BASE_MCP_URL, ROBINHOOD_MCP_URL } from './logic'
 
 vi.mock('sonner', () => ({
   toast: {
@@ -220,6 +220,59 @@ describe('McpPage', () => {
     expect(within(dialog).getByLabelText('Name')).toHaveValue('robinhood-trading')
     expect(within(dialog).getByLabelText('Server URL')).toHaveValue(ROBINHOOD_MCP_URL)
     expect(within(dialog).getByLabelText('Authenticate with OAuth')).toBeChecked()
+  })
+
+  it('renders the Base partner card and seeds a one-click Base connection', async () => {
+    wireRpc()
+    renderPage()
+    const card = await screen.findByLabelText('Base MCP')
+    expect(card).toHaveTextContent('Ready to connect')
+
+    fireEvent.click(within(card).getByRole('button', { name: 'Connect Base' }))
+    const dialog = screen.getByRole('dialog', { name: 'Add server' })
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('base-mcp')
+    expect(within(dialog).getByLabelText('Server URL')).toHaveValue(BASE_MCP_URL)
+    expect(within(dialog).getByLabelText('Authenticate with OAuth')).toBeChecked()
+  })
+
+  it('shows the Base card state from live status when configured', async () => {
+    mockRpc.call.mockImplementation((method: string) => {
+      switch (method) {
+        case 'config.get':
+          return Promise.resolve({
+            mcp: {
+              enabled: true,
+              servers: [
+                {
+                  name: 'base-mcp',
+                  transport: 'streamable_http',
+                  url: BASE_MCP_URL,
+                  command: null,
+                  args: [],
+                  env: {},
+                  headers: {},
+                  oauth: true,
+                  tool_timeout_seconds: 30,
+                },
+              ],
+            },
+          })
+        case 'mcp.status':
+          return Promise.resolve({
+            enabled: true,
+            servers: [
+              { name: 'base-mcp', authenticated: true, connected: true, tools: ['send', 'swap'] },
+            ],
+          })
+        default:
+          return Promise.resolve({})
+      }
+    })
+
+    renderPage()
+    const card = await screen.findByLabelText('Base MCP')
+    expect(card).toHaveTextContent('2 live tools')
+    expect(within(card).getByRole('button', { name: 'Manage connection' })).toBeInTheDocument()
   })
 
   it('cleans up the old runtime registration before connecting a renamed server', async () => {
