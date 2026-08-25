@@ -56,13 +56,53 @@ class ContextOverflowPolicy(StrEnum):
     REFUSE = "refuse"
 
 
+# The auth modes the gateway actually implements. Every entry here has an
+# enforcement branch in ``AuthMiddleware.dispatch``; anything else — the
+# never-implemented ``"password"``, or a typo like ``"tokenn"`` — is rejected at
+# validation time so a mode can never silently no-op into an unauthenticated
+# gateway (#352). Enforced end-to-end is a stricter bar still: see
+# ``_mode_protects_public_bind``, which admits only ``token`` on a public bind.
+SUPPORTED_AUTH_MODES: tuple[str, ...] = ("none", "token", "trusted-proxy")
+
+
 class AuthConfig(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="AGENTOS_AUTH_")
+    model_config = SettingsConfigDict(env_prefix="AGENTOS_AUTH_", validate_assignment=True)
 
     token: str | None = None
+    # Reserved: no auth mode consumes this today. ``auth.mode="password"`` is
+    # rejected (see the ``mode`` validator); the field is kept so an existing
+    # config that carries the value still loads.
     password: str | None = None
-    mode: str = "none"  # none | token | password | trusted-proxy
+    mode: str = "none"  # none | token | trusted-proxy
     trusted_proxy: str | None = None
+
+    @field_validator("mode")
+    @classmethod
+    def _validate_mode(cls, value: str) -> str:
+        """Fail closed on any mode the middleware does not enforce.
+
+        ``"password"`` was advertised and env-bound but never implemented: it
+        fell through ``AuthMiddleware.dispatch`` and admitted every non-RPC
+        request unauthenticated. Refusing it (and every typo) at load time is
+        the only posture that cannot be mistaken for "auth is on".
+        """
+        normalized = value.strip().lower()
+        if normalized in SUPPORTED_AUTH_MODES:
+            return normalized
+        supported = ", ".join(repr(mode) for mode in SUPPORTED_AUTH_MODES)
+        extra = (
+            " It was advertised but never implemented: it admitted every request "
+            "unauthenticated instead of asking for a credential."
+            if normalized == "password"
+            else ""
+        )
+        raise ValueError(
+            f"auth.mode={value!r} is not an implemented auth mode; supported modes are "
+            f"{supported}.{extra} Fix it in the [auth] section of your agentos.toml "
+            "(or in AGENTOS_AUTH_MODE / AGENTOS_GATEWAY_AUTH__MODE if the value comes "
+            'from the environment): mode = "token" enforces a credential, mode = "none" '
+            "accepts an unauthenticated loopback-only gateway."
+        )
 
 
 class CorsConfig(BaseSettings):
@@ -2314,7 +2354,8 @@ def _mode_protects_public_bind(auth: AuthConfig) -> bool:
     has a resolver in ``resolve_auth``. Every other mode is treated as
     unauthenticated for the public-bind guard:
 
-    * ``password`` has no HTTP-surface enforcement yet.
+    * ``password`` is refused outright by ``AuthConfig`` — it was advertised
+      but never implemented (#352).
     * ``trusted-proxy`` only string-matches the client-supplied
       ``X-Forwarded-For`` header (trivially spoofable) and has no resolver in
       ``resolve_auth``, so it is not enforced end-to-end. Re-admit it here

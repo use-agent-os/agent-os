@@ -77,9 +77,19 @@ class TestEnforcePublicBindAuthGuard:
     def test_refuses_public_bind_with_unenforced_auth_mode(self, mode: str) -> None:
         """[P1b] Only token is enforced end-to-end. password/trusted-proxy are
         not enforced on the HTTP surface, and a typo must never be read as
-        "auth is on"."""
+        "auth is on".
+
+        ``AuthConfig`` now refuses every one of these but ``trusted-proxy`` at
+        validation time (#352), so the unvalidated ``model_construct`` posture
+        is what actually exercises this guard — it must stay closed even if a
+        mode reaches it by some other path.
+        """
+        config = GatewayConfig(
+            host="0.0.0.0",
+            auth=AuthConfig.model_construct(mode=mode, trusted_proxy=None),
+        )
         with pytest.raises(ValueError, match="auth.mode"):
-            enforce_public_bind_auth_guard(_config("0.0.0.0", auth_mode=mode))
+            enforce_public_bind_auth_guard(config)
 
     def test_refuses_trusted_proxy_even_with_proxy_configured(self) -> None:
         """[P1] AuthMiddleware only string-matches the client-controlled

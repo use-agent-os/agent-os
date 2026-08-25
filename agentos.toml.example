@@ -557,7 +557,7 @@ default_mode = "bypass"                 # off | on | bypass | full
 cron_default_mode = "bypass"            # off | bypass | full
 
 # [auth]
-# mode = "none"         # none | token | password
+# mode = "none"         # none | token | trusted-proxy
 # token = ""
 # Startup guard: with mode = "none" the gateway refuses to bind a non-loopback
 # host (0.0.0.0, a LAN IP, ...). Enable token auth or keep the loopback bind.

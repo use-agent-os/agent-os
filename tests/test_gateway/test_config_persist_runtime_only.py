@@ -102,11 +102,11 @@ def test_explicit_change_without_overrides_persists_verbatim(tmp_path):
 def test_local_auth_mode_override_is_restorable(tmp_path):
     cfg_path = tmp_path / "config.toml"
     with open(cfg_path, "wb") as f:
-        tomli_w.dump({"auth": {"mode": "password"}}, f)
+        tomli_w.dump({"auth": {"mode": "trusted-proxy"}}, f)
 
     # A local run forced mode=none; boot recorded the on-disk auth value so a
     # later writer cannot freeze the transient posture.
-    set_runtime_overrides({"auth.mode": "password"})
+    set_runtime_overrides({"auth.mode": "trusted-proxy"})
     runtime = GatewayConfig(
         auth=AuthConfig(mode="none"),
         config_path=str(cfg_path),
@@ -114,7 +114,7 @@ def test_local_auth_mode_override_is_restorable(tmp_path):
     persist_config(runtime)
 
     saved = _read(cfg_path)
-    assert saved["auth"]["mode"] == "password"
+    assert saved["auth"]["mode"] == "trusted-proxy"
 
 
 def test_missing_original_drops_the_field_so_defaults_apply(tmp_path):

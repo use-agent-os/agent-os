@@ -35,6 +35,11 @@ X-Agentos-Token: <token>
 
 > **Note:** Query-string tokens (`?token=<token>`) are rejected (`401 Unauthorized`). Passing tokens in URL query parameters is not supported to prevent token leaks in access logs, browser history, and HTTP referrers.
 
+The gateway implements exactly three auth modes — `none`, `token`, and
+`trusted-proxy`. Any other value (including the never-implemented `"password"`,
+or a typo like `"tokenn"`) is refused when the config loads rather than silently
+admitting every request; the startup error names the supported modes.
+
 `/health` and `/ready` never require a token. Cross-origin browser requests are
 governed by CORS configuration regardless of auth mode.
 

@@ -182,6 +182,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
             config.control_ui.base_path if control_ui_base_path is None else control_ui_base_path
         )
         self._ui_prefix = _safe_ui_exempt_prefix(base_path)
+        # Modes already reported by the fail-closed branch. A gateway stuck in
+        # that posture would otherwise log once per request.
+        self._reported_unsupported_modes: set[str] = set()
 
     def _is_ui_path(self, path: str) -> bool:
         if self._ui_prefix is None:
@@ -215,6 +218,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 return JSONResponse(
                     {"error": "Unauthorized", "code": "UNAUTHORIZED"}, status_code=401
                 )
+
+        else:
+            # Fail closed on any mode without an enforcement branch above
+            # (#352). ``AuthConfig`` rejects those at validation time, but this
+            # middleware reads the config object live — a runtime mutation must
+            # never fall through to an unauthenticated pass, which is exactly
+            # how ``auth.mode="password"`` silently admitted every request.
+            if auth_mode not in self._reported_unsupported_modes:
+                self._reported_unsupported_modes.add(auth_mode)
+                log.warning("gateway.auth.unsupported_mode", mode=auth_mode)
+            return JSONResponse({"error": "Unauthorized", "code": "UNAUTHORIZED"}, status_code=401)
 
         return await call_next(request)  # type: ignore[no-any-return]
 

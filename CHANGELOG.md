@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `auth.mode = "password"` no longer admits the gateway unauthenticated. The
+  mode was advertised and env-bound (`AGENTOS_AUTH_PASSWORD`) but had no branch
+  in `AuthMiddleware.dispatch`, so it fell through to the unauthenticated pass
+  and left the whole non-RPC surface — `/api/system/status`, `/api/config`,
+  `/api/v1/files/upload`, `/api/audio/transcribe` — open on a loopback bind. Any
+  typo'd mode did the same. `auth.mode` now validates against the modes the
+  gateway actually implements (`none`, `token`, `trusted-proxy`) and refuses
+  anything else at load time with a message naming the fix, and the middleware
+  fails closed with `401` on any mode without an enforcement branch — the config
+  object is read live, so a runtime mutation cannot reopen the hole. `auth.mode`
+  is also case- and whitespace-normalized now (`" TOKEN "` loads as `token`), and
+  `agentos.toml.example` plus the setup guide no longer list `password` as a
+  choice. Closes #352.
+
 ## [2026.8.24] - 2026-08-24
 
 ### Added

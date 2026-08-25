@@ -189,7 +189,8 @@ configuration.
 in Advanced. The WebSocket config mutation RPCs reject attempts to retarget the
 active config file or replace runtime-owned authentication credentials. Other
 authentication settings, such as `auth.mode`, remain editable and may require a
-gateway restart.
+gateway restart — `auth.mode` accepts only `none`, `token`, or `trusted-proxy`,
+and any other value is rejected by the mutation RPC rather than saved.
 
 Restart reporting is deliberately conservative. Mutation responses expose
 `restartRequired`; subsequent snapshots expose cumulative `pendingRestart` and
