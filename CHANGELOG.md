@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security
+
+- `read_file`, `read_spreadsheet` and `grep_search` now mask credentials in the
+  content they hand back to the model, and so do the two channels that quote
+  file content alongside them: `edit_file`'s closest-match hint, and terminal
+  output from a command that reads a credential file (`cat ~/.aws/credentials`).
+  Previously the sensitive-path denylist was the only thing protecting a secrets
+  file, and that denylist is lifted entirely under elevated-full mode — which
+  cron `agent_turn` jobs run by default — so `read_file ~/.aws/credentials`
+  returned the raw keys into the persisted transcript. Masking uses a
+  non-reusable `«redacted:…»` sentinel, DSN and URL passwords included, so a
+  value read out of a config file cannot be written back over the working one.
+
+  How much of the pass runs depends on the file. Shape-matched credentials
+  (`sk-…`, JWTs, PEM blocks) are masked everywhere; the name-driven pass, the
+  only one that catches a shapeless secret like `aws_secret_access_key`, runs
+  everywhere except source code, where it would mask identifiers and hand back
+  code that no longer matches the file. Closes #355.
+
+### Fixed
+
+- Credential masking no longer rewrites ordinary source code. The
+  `Authorization` / `x-api-key` header names matched as substrings
+  (`"requiresApiKey": False`), their value ran past the closing bracket
+  (`{"xi-api-key": api_key}` lost its `}`), a bare number was masked as a
+  credential, a vendor prefix matched mid-base64 (`AKIA…` inside an embedded
+  font blob), and a PEM block spanning two adjacent string literals swallowed
+  the code between them. Header names now match on a segment boundary, values
+  stop at the punctuation that closes them and skip numbers and `<placeholder>`
+  forms, prefixes need a left boundary, and a PEM span must have a base64 body.
+  A PEM block in a `read_file` window is masked line by line, so the line
+  numbers the reader computes its next `offset=` from stay correct.
+
+- The `NAME=value` pass now recognises quoted keys (`"client_secret": "…"`), so
+  credentials in JSON and YAML config are masked as the docstring always said
+  they were.
+
 ## [2026.8.24] - 2026-08-24
 
 ### Added

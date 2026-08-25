@@ -17,6 +17,7 @@ from xml.etree import ElementTree as ET
 import structlog
 
 from agentos.identity.workspace import BOOTSTRAP_FILENAMES
+from agentos.redact import redact_file_output
 from agentos.sandbox.integration import get_runtime, sandboxed
 from agentos.tools.fuzzy_match import (
     AmbiguousMatchError,
@@ -313,8 +314,7 @@ def _workspace_strict_read_block(
             "workspace": str(roots[0]),
             "allowed_roots": [str(root) for root in roots],
             "message": (
-                f"{tool_name} blocked: {candidate} is outside active read roots "
-                f"({root_labels})."
+                f"{tool_name} blocked: {candidate} is outside active read roots ({root_labels})."
             ),
             "retryable": False,
         }
@@ -515,7 +515,9 @@ async def read_file(path: str, offset: int | None = None, limit: int | None = No
 
     return await loop.run_in_executor(
         None,
-        lambda: _stream_numbered_lines_from_file(p, path, offset=offset, limit=limit),
+        lambda: redact_file_output(
+            _stream_numbered_lines_from_file(p, path, offset=offset, limit=limit), path=p
+        ),
     )
 
 
@@ -575,7 +577,13 @@ async def read_spreadsheet(
         )
 
     selected = _select_spreadsheet_sheets(sheets, sheet)
-    return _format_spreadsheet(path=p, sheets=selected, offset=row_offset, limit=row_limit)
+    return await loop.run_in_executor(
+        None,
+        lambda: redact_file_output(
+            _format_spreadsheet(path=p, sheets=selected, offset=row_offset, limit=row_limit),
+            path=p,
+        ),
+    )
 
 
 def _read_delimited_rows(path: Path, delimiter: str) -> list[tuple[str, list[list[str]]]]:
@@ -738,8 +746,7 @@ def _format_spreadsheet(
         if start + limit < len(rows):
             end = start + len(selected)
             parts.append(
-                f"(Showing rows {offset}-{end} of {len(rows)}. "
-                f"Use offset={end + 1} to continue.)"
+                f"(Showing rows {offset}-{end} of {len(rows)}. Use offset={end + 1} to continue.)"
             )
     return "\n".join(parts)
 
@@ -801,7 +808,10 @@ def _locate_edit(original: str, old_text: str, new_text: str, *, path: str) -> F
             " be more specific"
         ) from exc
     except FuzzyMatchError as exc:
-        detail = f" Closest match: {exc.hint}" if exc.hint else ""
+        # The hint quotes real file lines back at the model, so it is a file-read
+        # channel like any other and gets the same mask.
+        hint = redact_file_output(exc.hint, path=path) if exc.hint else ""
+        detail = f" Closest match: {hint}" if hint else ""
         raise ValueError(f"old_text not found in {path}.{detail}") from exc
 
 
@@ -828,9 +838,7 @@ def _locate_edit(original: str, old_text: str, new_text: str, *, path: str) -> F
     argv_factory=lambda a: ("fs.edit", str(a.get("path", ""))),
     record_payload=False,
 )
-async def edit_file(
-    path: str, old_text: str, new_text: str, approval_id: str | None = None
-) -> str:
+async def edit_file(path: str, old_text: str, new_text: str, approval_id: str | None = None) -> str:
     p = _resolve_path(path)
     approval = await _gate_out_of_workspace_write("edit_file", p, path, approval_id)
     if approval is not None:
@@ -1008,7 +1016,8 @@ async def grep_search(
                 text = fp.read_text(encoding="utf-8", errors="replace")
                 for lineno, line in enumerate(text.splitlines(), 1):
                     if regex.search(line):
-                        results.append(f"{fp}:{lineno}: {line.rstrip()}")
+                        shown = redact_file_output(line.rstrip(), path=fp)
+                        results.append(f"{fp}:{lineno}: {shown}")
                         if len(results) >= max_results:
                             return
             except (PermissionError, OSError):

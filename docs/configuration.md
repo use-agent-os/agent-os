@@ -110,6 +110,27 @@ headers, JWTs, private keys and DSN passwords are masked. Set
 `AGENTOS_REDACT_SECRETS=0` before starting AgentOS to turn this off; it is read
 once at startup, so a command the agent runs cannot switch it off mid-session.
 
+File content is scanned the same way: `read_file`, `read_spreadsheet`,
+`grep_search` and `edit_file`'s closest-match hint mask credentials on their way
+back to the model, using a `«redacted:sk-…»` sentinel that cannot be mistaken
+for a usable key and written back over the real one. This layer stays on even
+under `/elevated full`, where the sensitive-path denylist is lifted, so an
+elevated read of a secrets file does not put the secrets verbatim into the
+persisted transcript. Reading one through the shell (`cat ~/.aws/credentials`)
+gets the same treatment.
+
+How hard the pass looks depends on the file. Credentials recognisable from their
+own text — vendor-prefixed keys, JWTs, PEM private keys — are masked in every
+file, source code included. The name-driven pass (`NAME=value`, `"name": value`,
+`Authorization:` headers, DSN and URL passwords) is the only one that catches a
+shapeless secret such as `aws_secret_access_key`, and it runs everywhere
+**except** source code, where `api_key=self._api_key` is an identifier and
+`apiKey: NotRequired[str]` a type: masking those would hand back code that no
+longer matches the file. Configuration data — `.env`, `~/.aws/credentials`,
+`~/.kube/config`, `.netrc`, `.ini`, JSON and YAML — gets the full pass.
+`grep_search` judges each matched line by the path it came from, so one search
+can span both kinds of file.
+
 ### What the outbound guard refuses
 
 `http_request`, `exec_command` and `execute_code` refuse to put credential

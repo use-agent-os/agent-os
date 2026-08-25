@@ -41,11 +41,13 @@ from __future__ import annotations
 import os
 import re
 import shlex
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 
 __all__ = [
     "is_env_dump_command",
     "mask_secret",
+    "reads_credential_file",
+    "redact_file_output",
     "redact_sensitive_text",
     "redact_terminal_output",
     "secret_literal_marker",
@@ -109,7 +111,14 @@ _PREFIX_PATTERNS: tuple[str, ...] = (
     r"ntn_[A-Za-z0-9]{16,}",  # Notion
     r"SG\.[A-Za-z0-9_-]{16,}",  # SendGrid
 )
-_PREFIX_RE = re.compile("|".join(_PREFIX_PATTERNS))
+#: Anchored on the left so ``AKIA…`` inside a base64 blob is not mistaken for
+#: a key — masking it corrupts the blob on a read-then-write round trip.
+_PREFIX_RE = re.compile(r"(?<![A-Za-z0-9])(?:" + "|".join(_PREFIX_PATTERNS) + ")")
+
+#: ``https://user:token@host`` — userinfo in a web URL is a credential the
+#: same way a DSN password is. Redaction-only: the payload guard keeps its
+#: narrower connection-string vocabulary.
+_URL_USERINFO_RE = re.compile(r"(https?://[^:\s/]+:)([^@\s/]+)(@)", re.IGNORECASE)
 
 _PEM_PRIVATE_KEY_RE = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----", re.IGNORECASE)
 _PEM_PRIVATE_KEY_BLOCK_RE = re.compile(
@@ -270,6 +279,7 @@ _ASSIGNMENT_RE = re.compile(
     (?:^|[\s"'{,(])                     # start of a token
     (?:\d+\t)?                          # grep -n line prefix
     ([A-Za-z][A-Za-z0-9_.\-]{0,64})     # name
+    ['\"]?                              # closing quote of a JSON/YAML key
     \s*[:=]\s*
     (?:
         "([^"\n]{1,4096})"
@@ -279,15 +289,24 @@ _ASSIGNMENT_RE = re.compile(
     """
 )
 
+#: A header value ends at whitespace, at a quote, or at the punctuation that
+#: closes the structure carrying it. Running past ``}``/``)``/``]``/``;`` is
+#: what turned ``{"xi-api-key": api_key}`` into unbalanced source code.
+_HEADER_VALUE = r"[^\s\"',;)}\]`]+"
+#: Names are matched on a segment boundary, never as a substring, for the same
+#: reason as :func:`_is_credential_name`: ``requiresApiKey`` is a field name.
+_NAME_START = r"(?<![A-Za-z0-9_])"
 _AUTH_HEADER_RE = re.compile(
-    r"((?:Proxy-)?Authorization['\"]?\s*:\s*['\"]?)([A-Za-z][\w.+-]*\s+)?([^\s\"',]+)",
+    rf"({_NAME_START}(?:Proxy-)?Authorization['\"]?\s*:\s*['\"]?)"
+    rf"([A-Za-z][\w.+-]*\s+)?({_HEADER_VALUE})",
     re.IGNORECASE,
 )
 _SECRET_HEADER_NAMES = (
     r"(?:x-api-key|x-goog-api-key|api-key|apikey|x-api-token|x-auth-token|x-access-token)"
 )
 _SECRET_HEADER_RE = re.compile(
-    rf"({_SECRET_HEADER_NAMES}['\"]?\s*:\s*['\"]?)([^\s\"',]+)", re.IGNORECASE
+    rf"({_NAME_START}{_SECRET_HEADER_NAMES}['\"]?\s*:\s*['\"]?)({_HEADER_VALUE})",
+    re.IGNORECASE,
 )
 
 
@@ -446,6 +465,8 @@ def redact_sensitive_text(
     and ``"apiKey": "test"`` fixtures are not leaks. ``file_read=True`` is for
     file content handed back to the agent: secrets are still masked, but with
     the non-reusable sentinel so the agent cannot write a corrupted value back.
+    The two are orthogonal — file content is often source code, and
+    :func:`redact_file_output` decides which of the two a given path is.
     """
     if text is None:
         return None
@@ -454,31 +475,153 @@ def redact_sensitive_text(
     if not text or not (force or _REDACT_ENABLED):
         return text
 
-    if file_read:
-        code_file = True
+    mask = _mask_nonreusable if file_read else _mask_token
+    text = _redact_value_shapes(text, mask=mask)
+    return _redact_named_credentials(text, mask=mask, assignments=not code_file)
 
+
+def _redact_value_shapes(text: str, *, mask: Callable[[str], str], line_safe: bool = False) -> str:
+    """Mask credentials recognisable from their own text alone.
+
+    PEM blocks, vendor-prefixed keys and JWTs carry the match without any help
+    from a surrounding name, which makes this pass safe to run on anything —
+    source code included. ``line_safe`` keeps a collapsed PEM block from
+    swallowing the line numbers around it in a ``read_file`` window.
+    """
     if "-----BEGIN" in text:
-        text = _PEM_PRIVATE_KEY_BLOCK_RE.sub("«redacted:private-key»", text)
-
-    mask_value = _mask_nonreusable if file_read else _mask_token
+        text = _redact_pem_blocks(text, line_safe=line_safe)
     if _has_known_prefix(text):
-        text = _PREFIX_RE.sub(lambda m: mask_value(m.group(0)), text)
+        text = _PREFIX_RE.sub(lambda m: mask(m.group(0)), text)
     if "eyJ" in text:
-        text = _JWT_RE.sub(lambda m: mask_value(m.group(0)), text)
-    if "://" in text:
-        text = _DB_CONNSTR_RE.sub(lambda m: f"{m.group(1)}{_MASK}{m.group(3)}", text)
-    if ":" in text:
-        text = _AUTH_HEADER_RE.sub(
-            lambda m: f"{m.group(1)}{m.group(2) or ''}{_mask_token(m.group(3))}", text
-        )
-        text = _SECRET_HEADER_RE.sub(lambda m: f"{m.group(1)}{_mask_token(m.group(2))}", text)
-
-    if not code_file and ("=" in text or ":" in text):
-        text = _redact_assignments(text)
+        text = _JWT_RE.sub(lambda m: mask(m.group(0)), text)
     return text
 
 
-def _redact_assignments(text: str) -> str:
+def _redact_named_credentials(
+    text: str,
+    *,
+    mask: Callable[[str], str],
+    assignments: bool,
+    dsn_mask: str = _MASK,
+) -> str:
+    """Mask values that are credentials because of the *name* next to them.
+
+    Unlike :func:`_redact_value_shapes` this pass reads structure, not shape,
+    so it cannot tell ``apiKey: NotRequired[str]`` from ``apiKey: <secret>``.
+    Callers holding source code keep it off.
+    """
+    if "://" in text:
+        text = _URL_USERINFO_RE.sub(
+            lambda m: (
+                f"{m.group(1)}{dsn_mask}{m.group(3)}"
+                if not _is_reference_value(m.group(2))
+                else m.group(0)
+            ),
+            text,
+        )
+        text = _DB_CONNSTR_RE.sub(
+            lambda m: (
+                f"{m.group(1)}{dsn_mask}{m.group(3)}"
+                if not _is_reference_value(m.group(2))
+                else m.group(0)
+            ),
+            text,
+        )
+    if ":" in text:
+        text = _AUTH_HEADER_RE.sub(
+            lambda m: (
+                f"{m.group(1)}{m.group(2) or ''}{mask(m.group(3))}"
+                if _is_maskable_header_value(m.group(3))
+                else m.group(0)
+            ),
+            text,
+        )
+        text = _SECRET_HEADER_RE.sub(
+            lambda m: (
+                f"{m.group(1)}{mask(m.group(2))}"
+                if _is_maskable_header_value(m.group(2))
+                else m.group(0)
+            ),
+            text,
+        )
+    if assignments and ("=" in text or ":" in text):
+        text = _redact_assignments(text, mask=mask)
+    return text
+
+
+#: A bare integer is a count or an id, never a credential. ``"authorization":
+#: 20104`` is a token-vocabulary entry in a tokenizer, not a header.
+_NUMERIC_VALUE_RE = re.compile(r"^[-+]?\d+(?:\.\d+)?$")
+
+
+def _is_maskable_header_value(value: str) -> bool:
+    """Return whether a header value is worth masking.
+
+    Deliberately *not* :func:`_is_secret_literal_value`: a short opaque session
+    token is still a credential, and applying that predicate's length floor here
+    would un-mask values this has always masked. This only drops the two shapes
+    that provably carry nothing — a number, and a placeholder like
+    ``Bearer <token>`` in documentation.
+    """
+    stripped = value.strip().strip("\"'")
+    if not stripped or _NUMERIC_VALUE_RE.match(stripped):
+        return False
+    return not _is_reference_value(stripped)
+
+
+#: ``12\tMIIEow…`` — the line-number prefix ``read_file`` puts on every line.
+_LINE_NUMBER_PREFIX_RE = re.compile(r"^(\d+\t)?")
+
+
+#: A PEM body is base64, optionally preceded by ``Proc-Type:``-style headers.
+#: Anything else between the markers means they are two string literals in a
+#: source file, not one key — masking that span destroys the code between them.
+_PEM_BODY_LINE_RE = re.compile(r"^(?:\d+\t)?(?:[A-Za-z0-9+/=.…]*|[A-Za-z][A-Za-z-]*: .*)$")
+
+
+def _is_pem_key_block(block: str) -> bool:
+    """Return whether a BEGIN/END span is one key rather than two literals.
+
+    A ``_SK_START = b"…OPENSSH PRIVATE KEY…"`` marker constant on one line and
+    ``_SK_END = …`` on the next is a match with no body: real code that masking
+    would eat. A key on a single line is the JSON-escaped form
+    (``"private_key": "…BEGIN…\\nMIIE…"``) and does carry a secret.
+    """
+    lines = block.split("\n")
+    if len(lines) == 1:
+        return True
+    body = [line.strip("\r") for line in lines[1:-1]]
+    if not any(body):
+        return False
+    return all(_PEM_BODY_LINE_RE.match(line) for line in body)
+
+
+def _redact_pem_blocks(text: str, *, line_safe: bool) -> str:
+    """Mask PEM private-key blocks, optionally one line at a time.
+
+    Collapsing the block to a single token is right for a log line and wrong
+    for a numbered file window: the reader sees line 12 followed by line 41 and
+    computes the next ``offset=`` from a file that looks shorter than it is.
+    """
+    if not line_safe:
+        return _PEM_PRIVATE_KEY_BLOCK_RE.sub(
+            lambda m: "«redacted:private-key»" if _is_pem_key_block(m.group(0)) else m.group(0),
+            text,
+        )
+
+    def _mask_block(match: re.Match[str]) -> str:
+        if not _is_pem_key_block(match.group(0)):
+            return match.group(0)
+        masked = []
+        for line in match.group(0).split("\n"):
+            prefix = _LINE_NUMBER_PREFIX_RE.match(line)
+            masked.append(f"{prefix.group(1) or '' if prefix else ''}«redacted:private-key»")
+        return "\n".join(masked)
+
+    return _PEM_PRIVATE_KEY_BLOCK_RE.sub(_mask_block, text)
+
+
+def _redact_assignments(text: str, *, mask: Callable[[str], str] = _mask_token) -> str:
     """Mask the value half of ``NAME=secret`` / ``"name": "secret"`` pairs."""
 
     def _replace(match: re.Match[str]) -> str:
@@ -486,7 +629,7 @@ def _redact_assignments(text: str) -> str:
         value = match.group(2) or match.group(3) or match.group(4) or ""
         if not _is_credential_name(name) or not _is_secret_literal_value(value):
             return match.group(0)
-        return match.group(0).replace(value, _mask_token(value))
+        return match.group(0).replace(value, mask(value))
 
     return _ASSIGNMENT_RE.sub(_replace, text)
 
@@ -539,21 +682,170 @@ def is_env_dump_command(command: str | None) -> bool:
     return False
 
 
+def reads_credential_file(command: str | None) -> bool:
+    """Return whether *command* names a credential file as an operand.
+
+    ``cat ~/.aws/credentials`` is the same disclosure as ``read_file`` on it,
+    and blocking only the tool just moves the agent to the shell. Any operand
+    that is not source code by :func:`_is_source_code_path` and is either a
+    known credential file or lives in a credential directory counts.
+    """
+    if not command or not isinstance(command, str):
+        return False
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+    for token in tokens:
+        if token.startswith("-"):
+            continue
+        name = os.path.basename(token).lower()
+        parts = {part.lower() for part in token.replace("\\", "/").split("/")[:-1]}
+        if name in _CREDENTIAL_FILE_NAMES or name.startswith(".env"):
+            return True
+        if parts & _CREDENTIAL_DIR_NAMES:
+            return True
+    return False
+
+
 def redact_terminal_output(output: str, command: str | None = None, *, force: bool = False) -> str:
     """Mask credentials in command output before it reaches the model.
 
     One policy for every terminal surface — foreground ``exec_command`` and
     background process polling alike — so the two cannot drift. ``env`` and
     friends get the assignment pass, because that is exactly the shape their
-    output has; everything else skips it, because ordinary output is source
-    code and config dumps where the assignment pass is mostly false positives.
+    output has, and so does a command that reads a credential file, whose
+    output is that file. Everything else skips it, because ordinary output is
+    source code and config dumps where the assignment pass is mostly false
+    positives.
     """
     if not output:
         return output
-    redacted = redact_sensitive_text(
-        output, force=force, code_file=not is_env_dump_command(command or "")
-    )
+    assignments = is_env_dump_command(command or "") or reads_credential_file(command)
+    redacted = redact_sensitive_text(output, force=force, code_file=not assignments)
     return redacted if redacted is not None else output
+
+
+#: Suffixes whose content is source code. The name-driven pass is kept off
+#: these: it cannot tell ``apiKey: NotRequired[str]`` or
+#: ``api_key=self._api_key`` from a real secret, and a masked identifier is
+#: code the agent can no longer match with ``edit_file`` — or worse, writes
+#: back with the sentinel in it. Shape-matched credentials (``sk-…``, JWTs, PEM
+#: blocks) are still masked here; those carry their own evidence.
+_SOURCE_CODE_SUFFIXES: frozenset[str] = frozenset(
+    {
+        ".bash",
+        ".c",
+        ".cc",
+        ".cjs",
+        ".cpp",
+        ".cs",
+        ".css",
+        ".dart",
+        ".erl",
+        ".ex",
+        ".exs",
+        ".fish",
+        ".go",
+        ".h",
+        ".hpp",
+        ".hs",
+        ".java",
+        ".js",
+        ".jsx",
+        ".kt",
+        ".kts",
+        ".lua",
+        ".m",
+        ".mjs",
+        ".mm",
+        ".php",
+        ".pl",
+        ".proto",
+        ".ps1",
+        ".py",
+        ".pyi",
+        ".r",
+        ".rb",
+        ".rs",
+        ".scala",
+        ".sh",
+        ".sql",
+        ".svelte",
+        ".swift",
+        ".ts",
+        ".tsx",
+        ".vue",
+        ".zsh",
+    }
+)
+
+#: Files that are nothing but credentials, matched whole because they carry no
+#: suffix. ``~/.aws/credentials`` is the case #355 was filed about.
+_CREDENTIAL_FILE_NAMES: frozenset[str] = frozenset(
+    {
+        ".dockercfg",
+        ".git-credentials",
+        ".htpasswd",
+        ".netrc",
+        ".npmrc",
+        ".pgpass",
+        ".pypirc",
+        "_netrc",
+        "credentials",
+    }
+)
+
+#: Directories whose every file is credential material, for the ones that name
+#: their config plainly (``~/.kube/config``, ``~/.docker/config.json``).
+_CREDENTIAL_DIR_NAMES: frozenset[str] = frozenset(
+    {".aws", ".docker", ".gnupg", ".kube", ".ssh", "gcloud"}
+)
+
+
+def _is_source_code_path(path: str | os.PathLike[str] | None) -> bool:
+    """Return whether *path* is source code rather than configuration data."""
+    if path is None:
+        return False
+    text = os.fspath(path)
+    name = os.path.basename(text).lower()
+    if name in _CREDENTIAL_FILE_NAMES or name.startswith(".env"):
+        return False
+    parts = {part.lower() for part in text.replace("\\", "/").split("/")[:-1]}
+    if parts & _CREDENTIAL_DIR_NAMES:
+        return False
+    return os.path.splitext(name)[1] in _SOURCE_CODE_SUFFIXES
+
+
+def redact_file_output(text: str, *, path: str | os.PathLike[str] | None = None) -> str:
+    """Mask credentials in file content before it reaches the model.
+
+    One policy for every file-read surface — ``read_file``, ``read_spreadsheet``,
+    ``grep_search`` and ``edit_file``'s closest-match hint alike — so they
+    cannot drift. This sits *behind* the sensitive-path denylist rather than
+    replacing it: the denylist is switched off entirely under elevated-full
+    mode, so it cannot be the only thing standing between ``~/.aws/credentials``
+    and the persisted transcript.
+
+    Masking uses the non-reusable sentinel (see :func:`_mask_nonreusable`): an
+    agent that reads a config file and writes it back must not silently replace
+    a working key with a truncated one that fails a request hours later.
+
+    *path* decides how much of the pass runs. Shape-matched credentials — PEM
+    blocks, vendor-prefixed keys, JWTs — are masked in every file. The
+    name-driven pass, which is the only one that catches a shapeless secret like
+    ``aws_secret_access_key``, runs everywhere **except** source code, where it
+    would mask identifiers and hand back code that no longer matches the file.
+    Without a path, the conservative source-code reading applies.
+    """
+    if not text or not _REDACT_ENABLED:
+        return text
+    masked = _redact_value_shapes(text, mask=_mask_nonreusable, line_safe=True)
+    if _is_source_code_path(path) or path is None:
+        return masked
+    return _redact_named_credentials(
+        masked, mask=_mask_nonreusable, assignments=True, dsn_mask="«redacted»"
+    )
 
 
 #: CDP endpoint URLs (``ws(s)://…/devtools/browser/<token>``) carry a
