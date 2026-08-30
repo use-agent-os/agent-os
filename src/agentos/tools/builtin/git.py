@@ -145,11 +145,16 @@ async def git_status(workdir: str | None = None) -> str:
 )
 @sandboxed(
     kind="git.read",
-    argv_factory=lambda a: (
-        "git",
-        "diff",
-        "--cached" if a.get("staged") else "--unstaged",
-        str(a.get("path", "")),
+    argv_factory=lambda a: tuple(
+        x
+        for x in (
+            "git",
+            "diff",
+            "--cached" if a.get("staged") else None,
+            "--" if a.get("path") else None,
+            a.get("path"),
+        )
+        if x is not None
     ),
     record_payload=False,
 )
