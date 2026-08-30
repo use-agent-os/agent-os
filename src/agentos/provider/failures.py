@@ -87,9 +87,14 @@ def _is_context_overflow(text: str) -> bool:
             "input exceeds",
             "provider_request_budget_exhausted",
             "too many tokens",
+            # Gemini's canonical input-token-limit error, e.g. "The input token
+            # count (5911388) exceeds the maximum number of tokens allowed
+            # (1048576)." — does not contain "input exceeds" or "maximum
+            # context" since the token counts sit between the fixed phrases.
+            "input token count",
+            "exceeds the maximum number of tokens allowed",
         )
     )
-
 
 def _is_policy_refusal(text: str) -> bool:
     return any(
