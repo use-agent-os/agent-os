@@ -36,6 +36,66 @@ async def test_telegram_api_retries_connect_error_before_sending() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "transient_error",
+    [
+        httpx.ConnectTimeout("tls handshake timed out"),
+        httpx.PoolTimeout("no pooled connection became available"),
+    ],
+)
+async def test_telegram_api_retries_pre_send_timeouts_like_connect_error(
+    transient_error: httpx.TimeoutException,
+) -> None:
+    """ConnectTimeout/PoolTimeout also fail before a request is sent, so they
+    should get the same retry-with-backoff treatment as ConnectError.
+
+    ConnectTimeout is not a subclass of ConnectError (they're siblings under
+    TransportError/TimeoutException respectively), so catching only
+    ConnectError silently skips retrying these and raises immediately.
+    """
+    channel = TelegramChannel(TelegramChannelConfig(token="token"))
+    client = AsyncMock()
+    client.post = AsyncMock(side_effect=[transient_error, _Response()])
+    channel._client = client
+    channel._owns_client = False
+
+    with patch("agentos.channels.telegram.asyncio.sleep", new=AsyncMock()) as sleep:
+        result = await channel._api("sendMessage", {"chat_id": "1", "text": "hello"})
+
+    assert result == {"id": 1}
+    assert client.post.await_count == 2
+    sleep.assert_awaited_once_with(0.25)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "post_send_error",
+    [
+        httpx.WriteTimeout("timed out sending request body"),
+        httpx.ReadTimeout("timed out waiting for response"),
+    ],
+)
+async def test_telegram_api_does_not_retry_post_send_timeouts(
+    post_send_error: httpx.TimeoutException,
+) -> None:
+    """WriteTimeout/ReadTimeout can occur after Telegram already received the
+    request, so retrying risks duplicate sends (e.g. sendMessage firing
+    twice). These must raise immediately rather than retry.
+    """
+    channel = TelegramChannel(TelegramChannelConfig(token="token"))
+    client = AsyncMock()
+    client.post = AsyncMock(side_effect=[post_send_error])
+    channel._client = client
+    channel._owns_client = False
+
+    with pytest.raises(TelegramApiError) as exc_info:
+        await channel._api("sendMessage", {"chat_id": "1", "text": "hello"})
+
+    assert str(exc_info.value) == "Telegram sendMessage request failed"
+    assert client.post.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_telegram_long_poll_timeout_has_network_headroom() -> None:
     channel = TelegramChannel(TelegramChannelConfig(token="token", poll_timeout_s=30))
     client = AsyncMock()

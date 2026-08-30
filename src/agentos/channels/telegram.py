@@ -514,7 +514,13 @@ class TelegramChannel:
                     request_kwargs["timeout"] = request_timeout
                 response = await client.post(f"/bot{self.config.token}/{method}", **request_kwargs)
                 break
-            except httpx.ConnectError:
+            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout):
+                # These three all fail before any request bytes reach Telegram
+                # (DNS/TLS handshake, or waiting for a pooled connection), so
+                # retrying is safe. WriteTimeout/ReadTimeout are deliberately
+                # excluded below: the request may already have been sent, and
+                # blindly retrying it risks Telegram acting on it twice (e.g.
+                # sending the same message twice).
                 if retry_delay is None:
                     raise TelegramApiError(f"Telegram {method} connection failed") from None
                 log.warning(
