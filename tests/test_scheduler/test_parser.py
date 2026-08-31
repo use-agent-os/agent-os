@@ -77,6 +77,68 @@ def test_parse_cron_dow_7_matches_sunday_not_monday() -> None:
     assert expr.matches(sunday)
     assert not expr.matches(monday)
 
+def test_parse_cron_dom_and_dow_both_restricted_use_or_not_and() -> None:
+    # POSIX: "if both fields are restricted (i.e., aren't *), the command
+    # will be run when either field matches the current time." Before this
+    # fix, matches() ANDed all five fields unconditionally, so a schedule
+    # like "1st of the month OR every Friday" instead required the 1st to
+    # *also* be a Friday -- true almost never, silently breaking the
+    # schedule for the entire month in most cases.
+    expr = parse_cron("0 0 1,15 * 5")
+
+    # A Friday that is neither the 1st nor the 15th: should fire because
+    # day-of-week matches, even though day-of-month does not.
+    friday_not_1_or_15 = datetime(2026, 8, 7, 0, 0)
+    assert friday_not_1_or_15.weekday() == 4  # sanity: is a Friday
+    assert expr.matches(friday_not_1_or_15)
+
+    # The 1st of a month that is not a Friday: should fire because
+    # day-of-month matches, even though day-of-week does not.
+    first_not_friday = datetime(2026, 9, 1, 0, 0)
+    assert first_not_friday.weekday() != 4  # sanity: not a Friday
+    assert expr.matches(first_not_friday)
+
+    # Neither the 1st/15th nor a Friday: should not fire.
+    neither = datetime(2026, 8, 4, 0, 0)  # a Tuesday
+    assert neither.weekday() != 4
+    assert neither.day not in (1, 15)
+    assert not expr.matches(neither)
+
+
+def test_parse_cron_dom_wildcard_dow_restricted_uses_and() -> None:
+    # When only day-of-week is restricted (day-of-month is "*"), the
+    # combination is a plain AND: this reduces to "every Friday", not
+    # "every day OR every Friday".
+    expr = parse_cron("0 0 * * 5")
+    friday = datetime(2026, 8, 7, 0, 0)
+    saturday = datetime(2026, 8, 8, 0, 0)
+    assert expr.matches(friday)
+    assert not expr.matches(saturday)
+
+
+def test_parse_cron_dow_wildcard_dom_restricted_uses_and() -> None:
+    # When only day-of-month is restricted (day-of-week is "*"), the
+    # combination is a plain AND: this reduces to "the 1st of the month".
+    expr = parse_cron("0 0 1 * *")
+    first = datetime(2026, 9, 1, 0, 0)
+    second = datetime(2026, 9, 2, 0, 0)
+    assert expr.matches(first)
+    assert not expr.matches(second)
+
+
+def test_parse_cron_dom_explicit_full_range_is_not_a_wildcard() -> None:
+    # POSIX ties the OR-vs-AND rule to a literal "*" in the source text, not
+    # to whether the resolved value set happens to span the whole range.
+    # An explicit "1-31" is "restricted" even though it matches every day.
+    expr = parse_cron("0 0 1-31 * 5")
+    assert not expr.day_of_month.is_wildcard
+    # OR semantics still apply: any day matches via day_of_month regardless
+    # of day_of_week, since 1-31 covers every possible day number.
+    tuesday = datetime(2026, 8, 4, 0, 0)
+    assert tuesday.weekday() != 4
+    assert expr.matches(tuesday)
+
+
 
 def test_parse_cron_rejects_unknown_preset() -> None:
     with pytest.raises(CronParseError, match="Unknown preset"):
