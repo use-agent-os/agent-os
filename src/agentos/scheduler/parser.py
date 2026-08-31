@@ -68,6 +68,7 @@ _PRESETS: dict[str, str] = {
 @dataclass(frozen=True)
 class CronField:
     values: frozenset[int]
+    is_wildcard: bool = False
 
     def matches(self, value: int) -> bool:
         return value in self.values
@@ -82,19 +83,34 @@ class CronExpression:
     day_of_week: CronField
     raw: str
 
+
+
     def matches(self, dt: datetime) -> bool:
-        return (
+        if not (
             self.minute.matches(dt.minute)
             and self.hour.matches(dt.hour)
-            and self.day_of_month.matches(dt.day)
             and self.month.matches(dt.month)
-            and self.day_of_week.matches((dt.weekday() + 1) % 7)  # Python Mon=0 → cron Sun=0
-        )
-
+        ):
+            return False
+        dow_value = (dt.weekday() + 1) % 7  # Python Mon=0 → cron Sun=0
+        # POSIX: when day-of-month and day-of-week are BOTH restricted
+        # (neither is a literal "*"), the command fires when EITHER field
+        # matches, not when both do. When at most one is restricted, the AND
+        # form below still gives the right answer, since the wildcard side
+        # always matches trivially.
+        if not self.day_of_month.is_wildcard and not self.day_of_week.is_wildcard:
+            return self.day_of_month.matches(dt.day) or self.day_of_week.matches(dow_value)
+        return self.day_of_month.matches(dt.day) and self.day_of_week.matches(dow_value)
 
 def _parse_field(token: str, field_name: str, names: dict[str, int] | None = None) -> CronField:
     lo, hi = _FIELD_RANGES[field_name]
     values: set[int] = set()
+    # POSIX ties the day-of-month/day-of-week OR-vs-AND rule to whether the
+    # field is a literal "*", not to whether its resolved value set happens
+    # to span the whole range (e.g. an explicit "0-6" for day_of_week is
+    # "restricted" even though it covers every value). Capture that from the
+    # raw, un-split token before any comma/name processing below.
+    is_wildcard = token.strip() == "*"
 
     for part in token.split(","):
         part = part.strip()
@@ -157,7 +173,7 @@ def _parse_field(token: str, field_name: str, names: dict[str, int] | None = Non
         values.remove(7)
         values.add(0)
 
-    return CronField(frozenset(values))
+    return CronField(frozenset(values), is_wildcard=is_wildcard)
 
 
 def _to_int(s: str, field_name: str, lo: int, hi: int) -> int:
