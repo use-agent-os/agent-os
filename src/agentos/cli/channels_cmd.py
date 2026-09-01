@@ -60,7 +60,7 @@ def _print_restart_notice() -> None:
 
 def _print_channel_verification_next_step(name: str) -> None:
     typer.echo("Next: agentos gateway restart")
-    typer.echo(f"Verify: uv run agentos channels status {name} --json")
+    typer.echo(f"Verify: agentos channels status {name} --json")
 
 
 _SOURCE_LABEL = {
