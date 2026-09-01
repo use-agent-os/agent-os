@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
@@ -14,14 +13,11 @@ from rich.console import Console
 from rich.table import Table
 
 from agentos.agents.registry import AgentRegistry
+from agentos.cli.output import print_json
 from agentos.onboarding.config_store import default_config_path, load_config, persist_config
 from agentos.session.keys import normalize_agent_id
 
 agents_app = typer.Typer(help="Manage durable agents.")
-
-
-def _print_json(payload: Any) -> None:
-    typer.echo(json.dumps(payload, ensure_ascii=False, default=str))
 
 
 def _print_restart_notice() -> None:
@@ -59,7 +55,7 @@ def agents_list(
     agents = asyncio.run(registry.list_agents(include_builtin=True))
 
     if json_output:
-        _print_json(agents)
+        print_json(agents)
         return
 
     console = Console(width=200, force_terminal=False)
@@ -109,7 +105,7 @@ def agents_add(
 
     persist = _persist_agents_config(cfg, target, quiet=json_output)
     if json_output:
-        _print_json(agent)
+        print_json(agent)
         return
 
     typer.echo(f"Agent saved: {agent['id']}")
@@ -144,7 +140,7 @@ def agents_delete(
         "stateDeleted": False,
     }
     if json_output:
-        _print_json(payload)
+        print_json(payload)
         return
 
     typer.echo(f"Agent deleted: {agent_id}")
