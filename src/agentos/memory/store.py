@@ -133,7 +133,9 @@ def _l2_normalize_vector(vector: list[float]) -> list[float]:
 
 
 def _vector_distance_to_score(distance: float) -> float:
-    return max(0.0, 1.0 - distance / 2.0)
+    if not math.isfinite(distance):
+        return 0.0
+    return min(1.0, max(0.0, 1.0 - distance / 2.0))
 
 
 def _chunk_id(

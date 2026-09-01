@@ -214,7 +214,12 @@ def test_vector_distance_to_score_clamping() -> None:
     assert _vector_distance_to_score(0.0) == 1.0
     assert _vector_distance_to_score(1.0) == 0.5
     assert _vector_distance_to_score(2.0) == 0.0
-    # Clamping ensures negative scores are prevented
+    # Clamping ensures upper and lower bounds [0.0, 1.0] are strictly preserved
+    assert _vector_distance_to_score(-0.1) == 1.0
     assert _vector_distance_to_score(3.0) == 0.0
     assert _vector_distance_to_score(100.0) == 0.0
+    # Non-finite distances return 0.0 score safely
+    assert _vector_distance_to_score(float("nan")) == 0.0
+    assert _vector_distance_to_score(float("inf")) == 0.0
+    assert _vector_distance_to_score(float("-inf")) == 0.0
 
