@@ -654,18 +654,21 @@ def _search_payload(
     fallback_from: str = "",
     attempts: list[dict[str, str]] | None = None,
 ) -> dict:
+    from agentos.safety.injection_guard import wrap_untrusted_boundary
+
+    def _build_result(r: SearchResult) -> dict:
+        source_url = r.url or "unknown-source"
+        return {
+            "title": wrap_untrusted_boundary(r.title, source_url),
+            "url": r.url,
+            "snippet": wrap_untrusted_boundary(r.snippet, source_url),
+            "source": r.source or provider_name,
+        }
+
     payload = {
         "query": query,
         "provider": provider_name,
-        "results": [
-            {
-                "title": r.title,
-                "url": r.url,
-                "snippet": r.snippet,
-                "source": r.source or "",
-            }
-            for r in results
-        ],
+        "results": [_build_result(r) for r in results],
     }
     if fallback_from:
         payload["fallback_from"] = fallback_from
