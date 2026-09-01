@@ -11,6 +11,8 @@ from agentos.memory.store import (
     VECTOR_NORMALIZATION_META_KEY,
     VECTOR_NORMALIZATION_META_VALUE,
     LongTermMemoryStore,
+    _l2_normalize_vector,
+    _vector_distance_to_score,
 )
 from agentos.memory.types import MemorySource
 
@@ -191,3 +193,28 @@ async def test_normalization_meta_still_rebuilds_missing_vec_table(tmp_path: Pat
         assert row[0] == 1
     finally:
         await store.close()
+
+
+def test_l2_normalize_vector_edge_cases() -> None:
+    # Empty vector
+    assert _l2_normalize_vector([]) == []
+
+    # Zero vector (norm == 0.0) returns unchanged vector without ZeroDivisionError
+    assert _l2_normalize_vector([0.0, 0.0, 0.0]) == [0.0, 0.0, 0.0]
+
+    # Non-finite values (inf / nan) return unchanged vector
+    inf_vec = [float("inf"), 1.0]
+    assert _l2_normalize_vector(inf_vec) == inf_vec
+
+    nan_vec = [float("nan"), 2.0]
+    assert _l2_normalize_vector(nan_vec) == nan_vec
+
+
+def test_vector_distance_to_score_clamping() -> None:
+    assert _vector_distance_to_score(0.0) == 1.0
+    assert _vector_distance_to_score(1.0) == 0.5
+    assert _vector_distance_to_score(2.0) == 0.0
+    # Clamping ensures negative scores are prevented
+    assert _vector_distance_to_score(3.0) == 0.0
+    assert _vector_distance_to_score(100.0) == 0.0
+
