@@ -29,7 +29,8 @@ _VERSION_RE = re.compile(
     r"(?:[._-]?post[._-]?(?P<post>\d+)?)?"
     r"(?:[._-]?dev[._-]?(?P<dev>\d+)?)?"
     r"(?:\+(?P<local>[a-zA-Z0-9.]+))?"
-    r"\s*$"
+    r"\s*$",
+    re.IGNORECASE,
 )
 
 # Ordering weight for the pre-release phase (lower = earlier).
@@ -63,7 +64,7 @@ class Version:
         if self.dev is not None and self.pre is None and self.post is None:
             phase: tuple[int, ...] = (0, self.dev)
         elif self.pre is not None:
-            dev_tie = -1 if self.dev is None else self.dev
+            dev_tie = 1_000_000_000 if self.dev is None else self.dev
             phase = (1, self.pre[0], self.pre[1], dev_tie)
         elif self.post is not None:
             dev_tie = -1 if self.dev is None else self.dev
@@ -96,11 +97,14 @@ def parse_version(value: str | None) -> Version:
     release = tuple(int(part) for part in match.group("release").split("."))
     pre: tuple[int, int] | None = None
     if match.group("pre_l"):
-        pre = (_PRE_ORDER.get(match.group("pre_l"), 2), int(match.group("pre_n") or 0))
+        pre_tag = match.group("pre_l").lower()
+        pre = (_PRE_ORDER.get(pre_tag, 2), int(match.group("pre_n") or 0))
     post = int(match.group("post")) if match.group("post") is not None else None
-    if post is None and re.search(r"[._-]?post", raw):
+    if post is None and re.search(r"[._-]?post", raw, re.IGNORECASE):
         post = 0
     dev = int(match.group("dev")) if match.group("dev") is not None else None
+    if dev is None and re.search(r"[._-]?dev", raw, re.IGNORECASE):
+        dev = 0
     return Version(raw=raw, release=release, pre=pre, post=post, dev=dev, parsed=True)
 
 
