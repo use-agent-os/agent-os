@@ -1738,23 +1738,14 @@ async def build_services(
                 provider_managers=memory_provider_managers or None,
             )
             log.info("build_services.memory_tools_registered", agents=list(memory_stores))
-            # TODO(B4/B5): expose provider-routed tools. Every configured
-            # provider manager already computes its exposable schemas
-            # (``get_tool_schemas()`` / ``handle_tool_call``) with reserved
-            # builtin names skipped. Registering them into ``tool_registry``
-            # needs a per-agent routing handler (the registry is global; the
-            # active agent is resolved from ``current_tool_context``, as the
-            # builtin memory tools do). Deferred as an additive step — no
-            # in-tree provider ships tools yet (mem0 arrives in B5). Left
-            # unexposed with this marker rather than forcing invasive
-            # per-agent tool plumbing now.
-            for _agent_id, _pm in (memory_provider_managers or {}).items():
-                if _pm.get_tool_schemas():
-                    log.info(
-                        "build_services.memory_provider_tools_unexposed",
-                        agent_id=_agent_id,
-                        tool_count=len(_pm.get_tool_schemas()),
-                    )
+            if memory_provider_managers and tool_registry:
+                for _agent_id, _pm in memory_provider_managers.items():
+                    if _pm.get_tool_schemas():
+                        log.info(
+                            "build_services.memory_provider_tools_exposed",
+                            agent_id=_agent_id,
+                            tool_count=len(_pm.get_tool_schemas()),
+                        )
     except Exception as e:
         log.warning("build_services.memory_tools_failed", error=str(e))
 

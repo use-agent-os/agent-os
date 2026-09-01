@@ -41,7 +41,7 @@ from agentos.memory.types import (
     normalize_memory_source_filter,
 )
 from agentos.tools.registry import tool
-from agentos.tools.types import ToolError, current_tool_context
+from agentos.tools.types import ToolError, ToolSpec, current_tool_context
 
 if TYPE_CHECKING:
     from agentos.memory.retrieval import MemoryRetriever
@@ -1235,3 +1235,67 @@ def create_memory_tools(
             "memory_delete",
         ],
     )
+
+    if provider_managers and registry:
+        register_provider_memory_tools(provider_managers, registry)
+
+
+def register_provider_memory_tools(
+    provider_managers: dict[str, Any] | None,
+    registry: ToolRegistry | None = None,
+) -> list[str]:
+    """Register provider-routed memory tools into the global ToolRegistry.
+
+    Routes tool calls at call time based on the active agent_id from ToolContext.
+    Returns the list of tool names registered.
+    """
+    if not provider_managers or not registry:
+        return []
+
+    reserved = set(registry.list_names())
+    tool_schemas: dict[str, dict[str, Any]] = {}
+    for _aid, pm in provider_managers.items():
+        if pm is None:
+            continue
+        for schema in pm.get_tool_schemas():
+            name = schema.get("name")
+            if name and name not in reserved and name not in tool_schemas:
+                tool_schemas[name] = schema
+
+    registered_names: list[str] = []
+    for name, schema in tool_schemas.items():
+        spec = ToolSpec(
+            name=name,
+            description=schema.get("description", ""),
+            parameters=schema.get("parameters", {}),
+            required=schema.get("required", []),
+            exposed_by_default=True,
+        )
+
+        def _make_handler(tool_name: str) -> Any:
+            async def _handler(**kwargs: Any) -> str:
+                ctx = current_tool_context.get()
+                from agentos.session.keys import normalize_agent_id
+
+                agent_id = normalize_agent_id((ctx.agent_id if ctx else None) or "main")
+                pm = provider_managers.get(agent_id) or provider_managers.get("main")
+                if pm is None or not pm.has_tool(tool_name):
+                    return (
+                        f'{{"error": "No memory provider handles tool \'{tool_name}\' '
+                        f"for agent '{agent_id}'\"}}"
+                    )
+                res = await pm.handle_tool_call(tool_name, kwargs)
+                return str(res)
+
+            return _handler
+
+        registry.register(spec, _make_handler(name))
+        registered_names.append(name)
+
+    if registered_names:
+        logger.info(
+            "memory_provider_tools_registered",
+            tools=registered_names,
+            agents=list(provider_managers.keys()),
+        )
+    return registered_names
