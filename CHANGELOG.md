@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- `send_file` in all channel adapters now rejects files larger than 25 MB
+  before any data is sent, preventing resource exhaustion from oversized
+  uploads.
+  ([#683](https://github.com/use-agent-os/agent-os/issues/683))
 - Telegram Bot API calls now retry `ConnectTimeout` and `PoolTimeout` alongside
   `ConnectError`. All three happen before any request bytes reach Telegram — a
   DNS/TLS handshake that never completed, or a wait for a pooled connection —

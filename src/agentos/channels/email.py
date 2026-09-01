@@ -60,6 +60,7 @@ from agentos.channels._util import (
     AccessDecision,
     ChannelAccessPolicy,
     EventDedupeCache,
+    _check_file_size,
 )
 from agentos.channels.contract import (
     ChannelCapabilities,
@@ -776,6 +777,8 @@ class EmailChannel:
         await asyncio.to_thread(self._smtp_send, outbound)
         log.info("email.outbound_sent", name=self.config.name, thread_id=message.reply_to)
 
+    _SEND_FILE_SIZE_LIMIT = 25 * 1024 * 1024
+
     async def send_file(
         self,
         thread_id: str,
@@ -786,6 +789,7 @@ class EmailChannel:
 
         path = Path(file_path)
         try:
+            _check_file_size(path, self._SEND_FILE_SIZE_LIMIT)
             payload = path.read_bytes()
             to_address, subject, in_reply_to, references = self._resolve_target(
                 OutgoingMessage(content="", reply_to=thread_id)

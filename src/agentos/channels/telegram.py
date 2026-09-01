@@ -30,6 +30,7 @@ from agentos.channels._util import (
     EventDedupeCache,
     FloodStrikeBackoff,
     StreamThrottle,
+    _check_file_size,
 )
 from agentos.channels.contract import (
     ChannelCapabilities,
@@ -187,6 +188,7 @@ class TelegramChannel:
 
     supports_slash_commands: bool = True
     typing_keepalive_interval_s: ClassVar[float] = 4.0
+    _SEND_FILE_SIZE_LIMIT: ClassVar[int] = 25 * 1024 * 1024
     policy: ChannelAccessPolicy = field(
         default_factory=lambda: ChannelAccessPolicy(
             dm_allowed=True,
@@ -1424,6 +1426,7 @@ class TelegramChannel:
         if not self.config.token:
             raise ValueError("telegram.send_file requires token")
         path = Path(file_path)
+        _check_file_size(path, self._SEND_FILE_SIZE_LIMIT)
         payload = {"chat_id": str(chat_id)}
         if content:
             payload["caption"] = render_telegram_html(content)
