@@ -2543,7 +2543,7 @@ class TurnRunner:
         # Checked before any provider work so a runaway loop or fan-out stops
         # costing money at the ceiling rather than one turn past it. Subagent
         # turns run through this same path, so a fan-out is bounded too.
-        budget_stop, budget_message = self._check_spend_budget(session_key)
+        budget_stop, budget_message = await self._check_spend_budget(session_key)
         if budget_stop:
             # The refusal hinges on the decision, never on the presentation
             # string: a tracker that reports a stop without a message must
@@ -3287,7 +3287,7 @@ class TurnRunner:
         cloned = self._provider_selector.clone()
         return cloned.resolve(), cloned
 
-    def _check_spend_budget(self, session_key: str) -> tuple[bool, str | None]:
+    async def _check_spend_budget(self, session_key: str) -> tuple[bool, str | None]:
         """Evaluate configured ``[budgets]`` ceilings for this session.
 
         Returns ``(hard_stop, message)``. A budget check must never be the
@@ -3304,7 +3304,10 @@ class TurnRunner:
         if not callable(check):
             return False, None
         try:
-            hard_stop, message = check(session_key, budgets)
+            result = check(session_key, budgets)
+            if inspect.isawaitable(result):
+                result = await result
+            hard_stop, message = result
         except Exception as exc:  # noqa: BLE001 - budget checks must fail open
             log.warning(
                 "turn_runner.budget_check_failed",

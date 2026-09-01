@@ -11,7 +11,7 @@ import hashlib
 import json
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -676,7 +676,7 @@ class Agent:
         memory_sync_manager: Any | None = None,
         tool_registry: ToolRegistry | None = None,
         tool_context: ToolContext | None = None,
-        spend_budget_guard: Callable[[str], tuple[bool, str | None]] | None = None,
+        spend_budget_guard: Callable[[str], Awaitable[tuple[bool, str | None]]] | None = None,
     ) -> None:
         self.provider = provider
         self.config = config or AgentConfig()
@@ -1971,19 +1971,6 @@ class Agent:
                     ),
                     code="turn_billed_cost_budget_exceeded",
                 )
-            if self._spend_budget_guard is not None and self._session_key:
-                try:
-                    spend_stop, spend_message = self._spend_budget_guard(self._session_key)
-                except Exception as exc:  # noqa: BLE001 - a budget check never fails a turn
-                    logger.warning("agent.spend_budget_check_failed", error=str(exc))
-                else:
-                    if spend_stop:
-                        return ErrorEvent(
-                            message=(
-                                spend_message or "A configured spend budget limit has been reached."
-                            ),
-                            code="budget_exceeded",
-                        )
             max_tool_errors = self._positive_int(getattr(self.config, "max_turn_tool_errors", 0))
             if max_tool_errors is not None and turn_tool_errors >= max_tool_errors:
                 return ErrorEvent(
@@ -1992,6 +1979,27 @@ class Agent:
                         f"(max_turn_tool_errors={max_tool_errors})."
                     ),
                     code="turn_tool_error_budget_exceeded",
+                )
+            return None
+
+        async def _spend_guard_error() -> ErrorEvent | None:
+            # The cumulative spend ceiling is the one budget check that needs
+            # to await: check_budget_limits places a reservation under an
+            # asyncio lock so concurrent subagent turns cannot each clear the
+            # same pre-reservation ceiling. Kept out of the sync
+            # _turn_budget_error helper (which only does local arithmetic) so
+            # that helper stays synchronous.
+            if self._spend_budget_guard is None or not self._session_key:
+                return None
+            try:
+                spend_stop, spend_message = await self._spend_budget_guard(self._session_key)
+            except Exception as exc:  # noqa: BLE001 - a budget check never fails a turn
+                logger.warning("agent.spend_budget_check_failed", error=str(exc))
+                return None
+            if spend_stop:
+                return ErrorEvent(
+                    message=(spend_message or "A configured spend budget limit has been reached."),
+                    code="budget_exceeded",
                 )
             return None
 
@@ -2481,7 +2489,7 @@ class Agent:
                         self._write_turn_call_log("llm_response", **response_payload)
 
                     # -- after async for (retry loop level) --
-                    terminal_error = _turn_budget_error()
+                    terminal_error = _turn_budget_error() or await _spend_guard_error()
                     if terminal_error is not None:
                         if artifact_delivery_final_response_pending:
                             yield _finish_artifact_delivery_degraded(
@@ -3614,7 +3622,7 @@ class Agent:
                         details=watchdog_decision.details,
                         guidance=guidance_for(watchdog_decision),
                     )
-                terminal_error = _turn_budget_error()
+                terminal_error = _turn_budget_error() or await _spend_guard_error()
                 if terminal_error is not None:
                     if artifact_delivery_final_response_pending:
                         yield _finish_artifact_delivery_degraded(

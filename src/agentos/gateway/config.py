@@ -1904,6 +1904,19 @@ class BudgetsConfig(BaseModel):
     channel_daily_warn: dict[str, float] = Field(default_factory=dict)
     """Per-channel daily warn thresholds, keyed by channel name."""
 
+    reservation_usd: float | None = Field(default=None, ge=0.0)
+    """Placeholder charged against a ceiling the instant a turn is admitted,
+    before its real cost is known. Prevents concurrent turns (subagent
+    fan-out) from each clearing the same pre-spend ceiling. ``None`` uses the
+    built-in default. Set to ``0`` to disable reservations entirely (restores
+    the pre-reservation behaviour, where concurrent admissions can overshoot
+    the ceiling by up to the fan-out width)."""
+
+    reservation_ttl_seconds: float | None = Field(default=None, ge=0.0)
+    """How long an admission's reservation is held before it expires, so a
+    hung or crashed turn cannot permanently consume budget headroom. ``None``
+    uses the built-in default."""
+
     @staticmethod
     def _normalized_keys(value: Any, normalize: Any) -> Any:
         """Rewrite scope keys to their canonical form, refusing collisions.

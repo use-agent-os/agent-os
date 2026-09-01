@@ -47,7 +47,8 @@ def test_daily_ledger_accumulates_without_a_database() -> None:
     assert tracker.get_spend(day, "channel", "telegram") == pytest.approx(2.0)
 
 
-def test_daily_ledger_survives_a_restart(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_daily_ledger_survives_a_restart(tmp_path: Path) -> None:
     db = str(tmp_path / "spend_ledger.db")
     first = UsageTracker(ledger_db_path=db)
     _spend(first, SESSION, 3.0)
@@ -56,11 +57,12 @@ def test_daily_ledger_survives_a_restart(tmp_path: Path) -> None:
     # whole point of the ledger is that a crash cannot reset a daily ceiling.
     restarted = UsageTracker(ledger_db_path=db)
     assert restarted.get_spend(_today(), "gateway", "global") == pytest.approx(3.0)
-    hard_stop, _ = restarted.check_budget_limits(SESSION, BudgetsConfig(daily_limit=3.0))
+    hard_stop, _ = await restarted.check_budget_limits(SESSION, BudgetsConfig(daily_limit=3.0))
     assert hard_stop is True
 
 
-def test_session_ceiling_survives_a_restart(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_session_ceiling_survives_a_restart(tmp_path: Path) -> None:
     """A crash-and-respawn must not hand a session a fresh allowance."""
     db = str(tmp_path / "spend_ledger.db")
     first = UsageTracker(ledger_db_path=db)
@@ -70,14 +72,15 @@ def test_session_ceiling_survives_a_restart(tmp_path: Path) -> None:
     assert restarted.get_effective_session_cost(SESSION) == pytest.approx(4.0)
 
     config = BudgetsConfig(session_limit=5.0)
-    assert restarted.check_budget_limits(SESSION, config) == (False, None)
+    assert await restarted.check_budget_limits(SESSION, config) == (False, None)
     # The post-restart turn's own spend adds to the pre-restart total rather
     # than starting the count over.
     _spend(restarted, SESSION, 1.0)
-    assert restarted.check_budget_limits(SESSION, config)[0] is True
+    assert (await restarted.check_budget_limits(SESSION, config))[0] is True
 
 
-def test_a_dropped_ledger_write_cannot_retire_a_ceiling(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_a_dropped_ledger_write_cannot_retire_a_ceiling(tmp_path: Path) -> None:
     """The persisted row can only under-report; reads take the larger value."""
     db = str(tmp_path / "spend_ledger.db")
     tracker = UsageTracker(ledger_db_path=db)
@@ -89,7 +92,7 @@ def test_a_dropped_ledger_write_cannot_retire_a_ceiling(tmp_path: Path) -> None:
         conn.execute("UPDATE spend_ledger SET cost_usd = 1.0")
 
     assert tracker.get_spend(_today(), "gateway", "global") == pytest.approx(6.0)
-    assert tracker.check_budget_limits(SESSION, BudgetsConfig(daily_limit=5.0))[0] is True
+    assert (await tracker.check_budget_limits(SESSION, BudgetsConfig(daily_limit=5.0)))[0] is True
 
 
 def test_ledger_ignores_zero_cost_usage() -> None:
@@ -102,98 +105,108 @@ def test_ledger_ignores_zero_cost_usage() -> None:
 # ── Ceiling evaluation ──────────────────────────────────────────────────
 
 
-def test_no_config_and_empty_config_enforce_nothing() -> None:
+@pytest.mark.asyncio
+async def test_no_config_and_empty_config_enforce_nothing() -> None:
     tracker = UsageTracker()
     _spend(tracker, SESSION, 100.0)
 
-    assert tracker.check_budget_limits(SESSION, None) == (False, None)
-    assert tracker.check_budget_limits(SESSION, BudgetsConfig()) == (False, None)
+    assert await tracker.check_budget_limits(SESSION, None) == (False, None)
+    assert await tracker.check_budget_limits(SESSION, BudgetsConfig()) == (False, None)
 
 
-def test_disabled_switch_suspends_configured_ceilings() -> None:
+@pytest.mark.asyncio
+async def test_disabled_switch_suspends_configured_ceilings() -> None:
     tracker = UsageTracker()
     _spend(tracker, SESSION, 10.0)
 
     config = BudgetsConfig(enabled=False, session_limit=1.0, session_warn=0.5)
-    assert tracker.check_budget_limits(SESSION, config) == (False, None)
+    assert await tracker.check_budget_limits(SESSION, config) == (False, None)
 
 
-def test_session_limit_hard_stops_at_the_ceiling() -> None:
+@pytest.mark.asyncio
+async def test_session_limit_hard_stops_at_the_ceiling() -> None:
     tracker = UsageTracker()
     config = BudgetsConfig(session_limit=2.0)
 
     _spend(tracker, SESSION, 1.5)
-    assert tracker.check_budget_limits(SESSION, config) == (False, None)
+    assert await tracker.check_budget_limits(SESSION, config) == (False, None)
 
     _spend(tracker, SESSION, 0.5)
-    hard_stop, message = tracker.check_budget_limits(SESSION, config)
+    hard_stop, message = await tracker.check_budget_limits(SESSION, config)
     assert hard_stop is True
     assert message is not None
     assert "Session cost" in message
     assert "$2.0000" in message
 
 
-def test_session_warning_fires_once_and_does_not_stop_the_turn() -> None:
+@pytest.mark.asyncio
+async def test_session_warning_fires_once_and_does_not_stop_the_turn() -> None:
     tracker = UsageTracker()
     config = BudgetsConfig(session_warn=1.0, session_limit=10.0)
 
     _spend(tracker, SESSION, 1.0)
-    hard_stop, message = tracker.check_budget_limits(SESSION, config)
+    hard_stop, message = await tracker.check_budget_limits(SESSION, config)
     assert hard_stop is False
     assert message is not None
     assert "warning threshold" in message
 
     _spend(tracker, SESSION, 1.0)
-    assert tracker.check_budget_limits(SESSION, config) == (False, None)
+    assert await tracker.check_budget_limits(SESSION, config) == (False, None)
 
 
-def test_daily_limit_hard_stops_across_sessions() -> None:
+@pytest.mark.asyncio
+async def test_daily_limit_hard_stops_across_sessions() -> None:
     tracker = UsageTracker()
     config = BudgetsConfig(daily_limit=5.0)
 
     _spend(tracker, "agent:main:telegram:a:1", 3.0)
     _spend(tracker, "agent:main:webchat:b:2", 2.0)
 
-    hard_stop, message = tracker.check_budget_limits("agent:main:webchat:b:2", config)
+    hard_stop, message = await tracker.check_budget_limits("agent:main:webchat:b:2", config)
     assert hard_stop is True
     assert message is not None
     assert "Daily gateway cost" in message
 
 
-def test_agent_and_channel_daily_ceilings_are_scoped() -> None:
+@pytest.mark.asyncio
+async def test_agent_and_channel_daily_ceilings_are_scoped() -> None:
     tracker = UsageTracker()
     _spend(tracker, "agent:trader:telegram:a:1", 4.0)
     _spend(tracker, "agent:writer:webchat:b:2", 1.0)
 
     config = BudgetsConfig(agent_daily_limit={"trader": 3.0})
-    assert tracker.check_budget_limits("agent:trader:telegram:a:1", config)[0] is True
-    assert tracker.check_budget_limits("agent:writer:webchat:b:2", config) == (False, None)
+    assert (await tracker.check_budget_limits("agent:trader:telegram:a:1", config))[0] is True
+    assert await tracker.check_budget_limits("agent:writer:webchat:b:2", config) == (False, None)
 
     channel_config = BudgetsConfig(channel_daily_limit={"telegram": 3.0})
-    assert tracker.check_budget_limits("agent:trader:telegram:a:1", channel_config)[0] is True
-    assert tracker.check_budget_limits("agent:writer:webchat:b:2", channel_config) == (False, None)
+    trader = await tracker.check_budget_limits("agent:trader:telegram:a:1", channel_config)
+    assert trader[0] is True
+    writer = await tracker.check_budget_limits("agent:writer:webchat:b:2", channel_config)
+    assert writer == (False, None)
 
 
-def test_subagent_spend_is_attributed_to_the_parent_agent() -> None:
+@pytest.mark.asyncio
+async def test_subagent_spend_is_attributed_to_the_parent_agent() -> None:
     """A fan-out must count against the spawning agent's daily ceiling."""
     tracker = UsageTracker()
     _spend(tracker, "subagent:agent:trader:subagent:child-1", 2.0)
     _spend(tracker, "subagent:agent:trader:subagent:child-2", 2.0)
 
     config = BudgetsConfig(agent_daily_limit={"trader": 3.0})
-    hard_stop, message = tracker.check_budget_limits("agent:trader:telegram:a:1", config)
+    hard_stop, message = await tracker.check_budget_limits("agent:trader:telegram:a:1", config)
     assert hard_stop is True
     assert message is not None
     assert "agent 'trader'" in message
 
 
-def test_hard_stop_wins_over_an_earlier_scope_warning() -> None:
+@pytest.mark.asyncio
+async def test_hard_stop_wins_over_an_earlier_scope_warning() -> None:
     tracker = UsageTracker()
     _spend(tracker, SESSION, 6.0)
 
     # Session is only at its warn threshold, but the daily ceiling is breached.
     config = BudgetsConfig(session_warn=5.0, session_limit=20.0, daily_limit=6.0)
-    hard_stop, message = tracker.check_budget_limits(SESSION, config)
+    hard_stop, message = await tracker.check_budget_limits(SESSION, config)
     assert hard_stop is True
     assert message is not None
     assert "Daily gateway cost" in message
@@ -319,7 +332,9 @@ async def test_hard_stop_without_a_message_still_refuses_the_turn() -> None:
     """The refusal must hinge on the decision, not on the presentation text."""
 
     class _TerseTracker:
-        def check_budget_limits(self, session_key: str, config: Any) -> tuple[bool, str | None]:
+        async def check_budget_limits(
+            self, session_key: str, config: Any
+        ) -> tuple[bool, str | None]:
             return True, None
 
     runner = _runner(_TerseTracker(), BudgetsConfig(session_limit=1.0), None)
@@ -337,7 +352,9 @@ async def test_budget_check_failure_fails_open() -> None:
     """A broken budget check must never be the reason a turn is refused."""
 
     class _ExplodingTracker:
-        def check_budget_limits(self, session_key: str, config: Any) -> tuple[bool, str | None]:
+        async def check_budget_limits(
+            self, session_key: str, config: Any
+        ) -> tuple[bool, str | None]:
             raise RuntimeError("ledger unavailable")
 
     runner = _runner(_ExplodingTracker(), BudgetsConfig(session_limit=0.0), None)
@@ -393,7 +410,7 @@ async def test_spend_guard_stops_a_runaway_loop_inside_one_turn() -> None:
 
     seen: list[str] = []
 
-    def guard(session_key: str) -> tuple[bool, str | None]:
+    async def guard(session_key: str) -> tuple[bool, str | None]:
         seen.append(session_key)
         # Under the ceiling for the first iteration, over it after that.
         return len(seen) > 1, "Daily gateway cost $50.0000 has reached the $50.0000 budget limit."
@@ -431,7 +448,7 @@ async def test_spend_guard_stops_a_runaway_loop_inside_one_turn() -> None:
 async def test_a_broken_guard_does_not_stop_the_turn() -> None:
     from agentos.engine import Agent, AgentConfig
 
-    def guard(session_key: str) -> tuple[bool, str | None]:
+    async def guard(session_key: str) -> tuple[bool, str | None]:
         raise RuntimeError("ledger unavailable")
 
     provider = _LoopingToolProvider()
@@ -445,3 +462,59 @@ async def test_a_broken_guard_does_not_stop_the_turn() -> None:
     events = [event async for event in agent.run_turn("go")]
 
     assert not any(getattr(event, "code", "") == "budget_exceeded" for event in events)
+
+
+# ── Concurrent admission (reservation race) ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_concurrent_checks_near_ceiling_do_not_all_pass() -> None:
+    """The reservation race: N turns admitted at once must not each clear the
+    same pre-reservation ceiling.
+
+    Spend sits just under a session ceiling, then several checks run
+    concurrently — the shape of a subagent fan-out, where every child calls
+    the budget check before any of them has recorded a cent. Without
+    reservations every check reads the same stale spend and all pass; with
+    them, only the ones that still fit under the ceiling once siblings'
+    reservations are counted are admitted.
+    """
+    import asyncio
+
+    tracker = UsageTracker()
+    # $9.90 spent, $10 ceiling, default $0.50 reservation → only the first
+    # admission fits (9.90 + 0.50 = 10.40 > 10 blocks the rest, but the very
+    # first sees 9.90 < 10 and is let through).
+    _spend(tracker, SESSION, 9.90)
+    config = BudgetsConfig(session_limit=10.0)
+
+    results = await asyncio.gather(
+        *(tracker.check_budget_limits(SESSION, config) for _ in range(8))
+    )
+    hard_stops = [hard_stop for hard_stop, _ in results]
+
+    # At least one must be refused — the pre-fix code would pass all eight.
+    assert any(hard_stops), "expected at least one concurrent check to be refused"
+    # And at least one is admitted (the first, before any reservation lands).
+    assert not all(hard_stops), "the first admission under the ceiling should pass"
+
+
+@pytest.mark.asyncio
+async def test_reservation_expires_so_a_stalled_turn_frees_headroom() -> None:
+    """A crashed/hung turn's reservation must not permanently eat the budget."""
+    import time as _time
+
+    tracker = UsageTracker()
+    _spend(tracker, SESSION, 9.90)
+    # Tiny TTL so the reservation from the first check has expired by the second.
+    config = BudgetsConfig(session_limit=10.0, reservation_ttl_seconds=0.01)
+
+    first_stop, _ = await tracker.check_budget_limits(SESSION, config)
+    assert first_stop is False  # admitted, places a reservation
+
+    _time.sleep(0.05)  # let the reservation expire
+
+    # Real spend never landed (turn hung), so a later check sees only the
+    # $9.90 real spend again, not a stuck reservation on top of it.
+    second_stop, _ = await tracker.check_budget_limits(SESSION, config)
+    assert second_stop is False

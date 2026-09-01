@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import time
 from collections.abc import Iterator
@@ -18,6 +19,16 @@ from agentos.session.keys import normalize_agent_id
 from .pricing import calculate_cost_usd, lookup_price
 
 log = structlog.get_logger(__name__)
+
+# A turn's real cost is only known once it finishes, but concurrent turns
+# (subagent fan-out in particular) can each be admitted before any of them
+# has recorded a cent -- see check_budget_limits. This is the conservative
+# placeholder charged against a scope's ceiling the instant a turn is
+# admitted, expiring after _DEFAULT_RESERVATION_TTL_S so a hung or crashed
+# turn cannot permanently eat into the budget's headroom. Overridable per
+# deployment via budgets.reservation_usd / budgets.reservation_ttl_seconds.
+_DEFAULT_RESERVATION_USD = 0.50
+_DEFAULT_RESERVATION_TTL_S = 300.0
 
 
 def parse_session_key_scope(session_key: str) -> tuple[str, str]:
@@ -404,6 +415,10 @@ class UsageTracker:
         self._daily_spend_day = ""
         self._session_spend: dict[str, float] = {}
         self._session_active_skill: dict[str, str] = {}
+        # Guards the read-check-reserve sequence in check_budget_limits so two
+        # concurrent turns can never both observe pre-reservation spend.
+        self._budget_lock = asyncio.Lock()
+        self._reservations: dict[str, list[tuple[float, float]]] = {}
         _global_usage_tracker = self
 
         if self._db_path:
@@ -579,7 +594,24 @@ class UsageTracker:
             self._session_metadata[session_key] = meta
         return meta
 
-    def check_budget_limits(self, session_key: str, config: Any) -> tuple[bool, str | None]:
+    def _reserved_for(self, warn_key: str, now: float) -> float:
+        """Sum of not-yet-expired reservations for one scope, pruning as it goes.
+
+        Must be called with ``_budget_lock`` held: pruning mutates the shared
+        dict, and an unguarded prune racing a concurrent reserve could drop an
+        entry the other coroutine just added.
+        """
+        bucket = self._reservations.get(warn_key)
+        if not bucket:
+            return 0.0
+        live = [(amount, expires_at) for amount, expires_at in bucket if expires_at > now]
+        if live:
+            self._reservations[warn_key] = live
+        else:
+            self._reservations.pop(warn_key, None)
+        return sum(amount for amount, _ in live)
+
+    async def check_budget_limits(self, session_key: str, config: Any) -> tuple[bool, str | None]:
         """Evaluate every configured spend ceiling for ``session_key``.
 
         Returns ``(hard_stop, message)``. ``hard_stop`` True means the caller
@@ -590,6 +622,21 @@ class UsageTracker:
         breached ceiling is never masked by a warning from an earlier scope.
         Warnings fire at most once per scope per day/session so a long-running
         session does not repeat the same alert on every turn.
+
+        Concurrent admission race: ``spend`` alone is a stale read once more
+        than one turn can be in flight for the same scope — subagent fan-out
+        spawns up to ``max_concurrent`` turns as concurrent asyncio tasks, and
+        none of them has recorded a cent until it finishes. Reading spend
+        without accounting for siblings already admitted-but-unspent would
+        let every one of them pass the same check simultaneously. Each
+        admission for a scope with a configured limit places a short-lived
+        reservation (see ``_DEFAULT_RESERVATION_USD`` /
+        ``_DEFAULT_RESERVATION_TTL_S``) that counts toward the ceiling for
+        every other concurrent check; the whole read-check-reserve sequence
+        is atomic under ``_budget_lock``. A reservation is never released
+        early just because the turn's real cost turns out lower — that is the
+        safe direction of error for a financial control: it can make the
+        ceiling trip a little early, never a little late.
         """
         if config is None or not getattr(config, "enabled", True):
             return False, None
@@ -658,19 +705,43 @@ class UsageTracker:
                 )
             )
 
-        for scope, label, _warn_key, spend, limit, _warn in checks:
-            if limit is not None and spend >= limit:
-                log.warning(
-                    "budget.limit_exceeded",
-                    scope=scope,
-                    session_key=session_key,
-                    spend=spend,
-                    limit=limit,
-                )
-                return (
-                    True,
-                    f"{label} ${spend:,.4f} has reached the ${limit:,.4f} budget limit.",
-                )
+        reservation_usd = float(
+            getattr(config, "reservation_usd", None) or _DEFAULT_RESERVATION_USD
+        )
+        reservation_ttl_s = float(
+            getattr(config, "reservation_ttl_seconds", None) or _DEFAULT_RESERVATION_TTL_S
+        )
+
+        async with self._budget_lock:
+            now = time.monotonic()
+
+            for scope, label, warn_key, spend, limit, _warn in checks:
+                if limit is None:
+                    continue
+                reserved = self._reserved_for(warn_key, now)
+                if spend + reserved >= limit:
+                    log.warning(
+                        "budget.limit_exceeded",
+                        scope=scope,
+                        session_key=session_key,
+                        spend=spend,
+                        reserved=reserved,
+                        limit=limit,
+                    )
+                    return (
+                        True,
+                        f"{label} ${spend:,.4f} has reached the ${limit:,.4f} budget limit.",
+                    )
+
+            # Every scope cleared the ceiling check above -- reserve against
+            # all of them now, inside the same lock acquisition, so a
+            # concurrent check starting the instant after this one releases
+            # the lock sees these reservations rather than racing them.
+            for scope, label, warn_key, spend, limit, _warn in checks:
+                if limit is not None:
+                    self._reservations.setdefault(warn_key, []).append(
+                        (reservation_usd, now + reservation_ttl_s)
+                    )
 
         for scope, label, warn_key, spend, _limit, warn in checks:
             if warn is None or spend < warn:
