@@ -158,10 +158,11 @@ def _quote_value(value: str) -> str:
     if value == "":
         return '""'
     needs_quote = value != value.strip()
-    self_quoted = len(value) >= 2 and value[0] == value[-1] and value[0] in _QUOTE_CHARS
-    if not needs_quote and not self_quoted:
+    starts_with_quote = len(value) > 0 and value[0] in _QUOTE_CHARS
+    ends_with_quote = len(value) >= 2 and value[0] == value[-1] and value[0] in _QUOTE_CHARS
+    if not needs_quote and not starts_with_quote:
         return value
-    wrapper = "'" if self_quoted and value[0] == '"' else '"'
+    wrapper = "'" if (starts_with_quote and value[0] == '"') else '"'
     return f"{wrapper}{value}{wrapper}"
 
 
