@@ -835,7 +835,9 @@ async def test_search_status_and_query_return_structured_payloads():
     assert status.payload["apiKeyConfigured"] is False
     assert query.error is None, query.error
     assert query.payload["ok"] is True
-    assert query.payload["results"][0]["snippet"] == "hello"
+    assert query.payload["results"][0]["snippet"] == (
+        "<untrusted source='https://example.com'>hello</untrusted>"
+    )
 
 
 @pytest.mark.asyncio
