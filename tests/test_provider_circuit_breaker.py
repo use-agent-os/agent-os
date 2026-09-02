@@ -5,6 +5,9 @@ from __future__ import annotations
 import pytest
 
 from agentos.provider.circuit_breaker import (
+    DEFAULT_COOLDOWN_SECONDS,
+    DEFAULT_FAILURE_THRESHOLD,
+    DEFAULT_MAX_COOLDOWN_SECONDS,
     BreakerSettings,
     BreakerState,
     ProviderCircuitBreaker,
@@ -476,3 +479,33 @@ def test_failover_from_the_primary_still_starts_at_the_first_fallback() -> None:
 
     selector.next_fallback_after_failure(RuntimeError("503"))
     assert selector.active_provider_id == "deepseek"
+
+
+def test_settings_degrade_to_defaults_on_non_numeric_config() -> None:
+    settings = BreakerSettings(
+        failure_threshold="not-a-number",  # type: ignore[arg-type]
+        cooldown_seconds=None,  # type: ignore[arg-type]
+        max_cooldown_seconds="also-bad",  # type: ignore[arg-type]
+    )
+    assert settings.failure_threshold == DEFAULT_FAILURE_THRESHOLD
+    assert settings.cooldown_seconds == DEFAULT_COOLDOWN_SECONDS
+    assert settings.max_cooldown_seconds == DEFAULT_MAX_COOLDOWN_SECONDS
+
+
+def test_settings_still_clamp_out_of_range_numeric_config() -> None:
+    settings = BreakerSettings(failure_threshold=-5, cooldown_seconds=0.0)
+    assert settings.failure_threshold == 1
+    assert settings.cooldown_seconds == 1.0
+
+
+def test_from_config_degrades_to_defaults_on_non_numeric_attrs() -> None:
+    class BadConfig:
+        enabled = True
+        failure_threshold = "oops"
+        cooldown_seconds = "oops"
+        max_cooldown_seconds = "oops"
+
+    settings = BreakerSettings.from_config(BadConfig())
+    assert settings.failure_threshold == DEFAULT_FAILURE_THRESHOLD
+    assert settings.cooldown_seconds == DEFAULT_COOLDOWN_SECONDS
+    assert settings.max_cooldown_seconds == DEFAULT_MAX_COOLDOWN_SECONDS

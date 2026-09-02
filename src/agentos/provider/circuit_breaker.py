@@ -36,6 +36,22 @@ class BreakerState(StrEnum):
     HALF_OPEN = "half_open"
 
 
+def _coerce_int(value: Any, default: int) -> int:
+    """Best-effort int conversion; falls back to ``default`` instead of raising."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_float(value: Any, default: float) -> float:
+    """Best-effort float conversion; falls back to ``default`` instead of raising."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 #: Failure kinds that mean *this provider is unhealthy right now*.
 #:
 #: Deliberately narrow. ``MODEL_NOT_FOUND`` / ``UNSUPPORTED_FEATURE`` /
@@ -74,9 +90,11 @@ class BreakerSettings:
     max_cooldown_seconds: float = DEFAULT_MAX_COOLDOWN_SECONDS
 
     def __post_init__(self) -> None:
-        threshold = max(1, int(self.failure_threshold))
-        cooldown = max(1.0, float(self.cooldown_seconds))
-        max_cooldown = max(cooldown, float(self.max_cooldown_seconds))
+        threshold = max(1, _coerce_int(self.failure_threshold, DEFAULT_FAILURE_THRESHOLD))
+        cooldown = max(1.0, _coerce_float(self.cooldown_seconds, DEFAULT_COOLDOWN_SECONDS))
+        max_cooldown = max(
+            cooldown, _coerce_float(self.max_cooldown_seconds, DEFAULT_MAX_COOLDOWN_SECONDS)
+        )
         object.__setattr__(self, "failure_threshold", threshold)
         object.__setattr__(self, "cooldown_seconds", cooldown)
         object.__setattr__(self, "max_cooldown_seconds", max_cooldown)
@@ -86,20 +104,19 @@ class BreakerSettings:
         """Build settings from a config object exposing the same field names.
 
         Missing attributes fall back to the defaults, so this accepts both the
-        real ``llm.circuit_breaker`` config model and ``None``.
+        real ``llm.circuit_breaker`` config model and ``None``. Values are
+        passed through unconverted -- ``__post_init__`` does the coercion, so
+        a non-numeric value degrades to the default there instead of raising
+        here before construction even completes.
         """
         if config is None:
             return cls()
         return cls(
             enabled=bool(getattr(config, "enabled", True)),
-            failure_threshold=int(
-                getattr(config, "failure_threshold", DEFAULT_FAILURE_THRESHOLD)
-            ),
-            cooldown_seconds=float(
-                getattr(config, "cooldown_seconds", DEFAULT_COOLDOWN_SECONDS)
-            ),
-            max_cooldown_seconds=float(
-                getattr(config, "max_cooldown_seconds", DEFAULT_MAX_COOLDOWN_SECONDS)
+            failure_threshold=getattr(config, "failure_threshold", DEFAULT_FAILURE_THRESHOLD),
+            cooldown_seconds=getattr(config, "cooldown_seconds", DEFAULT_COOLDOWN_SECONDS),
+            max_cooldown_seconds=getattr(
+                config, "max_cooldown_seconds", DEFAULT_MAX_COOLDOWN_SECONDS
             ),
         )
 
