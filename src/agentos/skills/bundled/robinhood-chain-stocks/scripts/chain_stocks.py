@@ -318,7 +318,24 @@ def inspect_token(
         if isinstance(onchain_symbol, str) and onchain_symbol:
             feed = find_feed(onchain_symbol, feeds)
 
-    if feed is not None:
+        # Prefer the ticker the contract reports over any caller-supplied hint, so
+    # an address-only run resolves its own feed.
+    if feed is None and feeds:
+        onchain_symbol = out.get("onchainSymbol")
+        if isinstance(onchain_symbol, str) and onchain_symbol:
+            feed = find_feed(onchain_symbol, feeds)
+
+    # `isStockToken: False` is documented (and tested) as "the caller should
+    # refuse this address" -- but attaching a real company's live Chainlink
+    # price to a contract already proven fake does the opposite: an
+    # impersonator can self-report a real ticker via symbol() (this lookup
+    # trusts that string, not the contract identity) and walk away wearing a
+    # genuine, accurate quote. Unverified (None) still gets a price -- only a
+    # *confirmed* impersonator is refused, per the same "unverified is not
+    # disproven" rule already applied to isStockToken itself above.
+    is_confirmed_fake = out["isStockToken"] is False
+
+    if feed is not None and not is_confirmed_fake:
         price = _try(
             lambda: _read_price(rpc_url, str(feed["proxyAddress"]), timeout, now), errors, "price"
         )
@@ -332,8 +349,10 @@ def inspect_token(
             beyond = isinstance(age, int) and isinstance(heartbeat, int) and age > heartbeat
             price["stale"] = bool(beyond or out.get("oraclePaused"))
             out["price"] = price
+    elif feed is not None and is_confirmed_fake:
+        errors["price"] = "withheld: uiMultiplier() proved this is not a Stock Token"
 
-    if holder:
+    if holder and not is_confirmed_fake:
         balance = _try(
             lambda: _word(
                 _eth_call(rpc_url, address, _encode_address_arg(SEL_BALANCE_OF, holder), timeout), 0
@@ -352,7 +371,6 @@ def inspect_token(
             if usd is not None:
                 holding["valueUsd"] = tokens_held * usd
             out["holding"] = holding
-
     if errors:
         out["readErrors"] = errors
     return out

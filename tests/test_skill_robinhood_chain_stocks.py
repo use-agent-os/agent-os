@@ -265,11 +265,50 @@ def test_feed_lookup_is_skipped_when_the_symbol_is_unreadable(
     assert "price" not in state
 
 
+def test_confirmed_impersonator_does_not_get_a_real_tickers_price(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A proven-fake contract must not be decorated with a genuine quote.
+
+    `isStockToken: False` is documented (see the test above) as "the caller
+    should refuse the address". Nothing stopped an impersonator from
+    self-reporting a real ticker via `symbol()` and having that string
+    resolve a legitimate Chainlink feed anyway -- the price is fetched by
+    ticker, not by cross-checking the contract's identity, so a proven fake
+    could still walk away wearing an accurate, credible-looking quote.
+    """
+    proxy = str(_FEEDS[0]["proxyAddress"]).lower()
+    chain = _FakeChain(
+        {
+            # The impersonator self-reports AAPL's real ticker...
+            (FAKE_GME, chain_stocks.SEL_SYMBOL): "0x"
+            + _word_hex(32)
+            + _word_hex(4)
+            + b"AAPL".hex().ljust(64, "0"),
+            # ...but uiMultiplier() reverts: it is not a genuine Stock Token.
+            (proxy, chain_stocks.SEL_LATEST_ROUND_DATA): "0x"
+            + "".join(_word_hex(v) for v in (1, 31747461437, 0, 1788206389, 1)),
+            (proxy, chain_stocks.SEL_DECIMALS): "0x" + _word_hex(8),
+        }
+    )
+    monkeypatch.setattr(chain_stocks, "_eth_call", chain)
+
+    state = chain_stocks.inspect_token("rpc", FAKE_GME, 5.0, feeds=_FEEDS, now=1788206389 + 60)
+
+    assert state["isStockToken"] is False
+    assert "price" not in state
+    assert "withheld" in state["readErrors"]["price"]
+
+
 def _price_chain(answer: int, updated_at: int, paused: int = 0) -> _FakeChain:
     proxy = str(_FEEDS[0]["proxyAddress"]).lower()
     return _FakeChain(
         {
             (AAPL, chain_stocks.SEL_ORACLE_PAUSED): "0x" + _word_hex(paused),
+            # A genuine Stock Token answers uiMultiplier(); these tests are
+            # exercising price-parsing math, not impersonator detection, so
+            # AAPL must resolve as real or price gets correctly withheld.
+            (AAPL, chain_stocks.SEL_UI_MULTIPLIER): "0x" + _word_hex(chain_stocks.WAD),
             (proxy, chain_stocks.SEL_LATEST_ROUND_DATA): "0x"
             + "".join(_word_hex(v) for v in (1, answer, 0, updated_at, 1)),
             (proxy, chain_stocks.SEL_DECIMALS): "0x" + _word_hex(8),
