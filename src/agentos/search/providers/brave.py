@@ -96,6 +96,7 @@ class BraveSearchProvider:
                     title=item.get("title", ""),
                     url=item.get("url", ""),
                     snippet=item.get("description", ""),
+                    source=self.name,
                 )
             )
 

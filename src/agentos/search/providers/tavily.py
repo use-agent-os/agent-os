@@ -100,6 +100,7 @@ class TavilySearchProvider:
                     title=item.get("title", ""),
                     url=item.get("url", ""),
                     snippet=item.get("content", ""),
+                    source=self.name,
                 )
             )
 

@@ -83,7 +83,9 @@ class DuckDuckGoProvider:
             snippet_elem = elem.select_one(".result__snippet")
             snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
 
-            results.append(SearchResult(title=title, url=href, snippet=snippet))
+            results.append(
+                SearchResult(title=title, url=href, snippet=snippet, source=self.name)
+            )
             if len(results) >= max_results:
                 break
 

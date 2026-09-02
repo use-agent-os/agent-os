@@ -654,10 +654,27 @@ def _search_payload(
     fallback_from: str = "",
     attempts: list[dict[str, str]] | None = None,
 ) -> dict:
+    # Issue #688: search snippets and titles are third-party content
+    # (attacker-controllable meta descriptions and indexed page text) and
+    # reach the model on the same channel as trusted output. ``web_fetch``
+    # already wraps the body in ``wrap_untrusted_boundary`` for exactly
+    # this reason; ``web_search`` was the one door that skipped it.
+    # Wrap both fields per-result so a snippet that contains prompt
+    # injection is visibly marked when it lands in the model context.
+    from agentos.safety.injection_guard import wrap_untrusted_boundary
+
     payload = {
         "query": query,
         "provider": provider_name,
-        "results": [{"title": r.title, "url": r.url, "snippet": r.snippet} for r in results],
+        "results": [
+            {
+                "title": wrap_untrusted_boundary(r.title, provider_name),
+                "url": r.url,
+                "snippet": wrap_untrusted_boundary(r.snippet, provider_name),
+                "source": r.source or provider_name,
+            }
+            for r in results
+        ],
     }
     if fallback_from:
         payload["fallback_from"] = fallback_from
