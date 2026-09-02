@@ -73,25 +73,31 @@ class _StdoutOnlyProcess:
         self.stdin = None
 
 
-def _framed(payload: bytes) -> bytes:
-    return f"Content-Length: {len(payload)}\r\n\r\n".encode() + payload
+def _line(payload: bytes) -> bytes:
+    return payload + b"\n"
+
+
+def test_encode_request_uses_newline_delimited_json() -> None:
+    encoded = MCPStdioClient._encode_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+
+    assert encoded.endswith(b"\n")
+    assert encoded.count(b"\n") == 1
+    assert b"Content-Length" not in encoded
+    assert json.loads(encoded) == {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/list",
+    }
 
 
 @pytest.mark.asyncio
-async def test_read_response_handles_body_split_across_reads() -> None:
-    """A body delivered in multiple pipe writes must not be truncated.
-
-    ``StreamReader.read(n)`` returns as soon as *any* data is buffered, so the
-    pre-fix code truncated bodies that did not arrive in a single read and then
-    failed ``json.loads``. The fix uses ``readexactly`` to honor the
-    Content-Length frame.
-    """
+async def test_read_response_handles_line_split_across_reads() -> None:
+    """A newline-delimited response may arrive in multiple pipe writes."""
     payload = json.dumps(
         {"jsonrpc": "2.0", "id": 1, "result": {"tools": [{"name": "x"} for _ in range(50)]}}
     ).encode()
-    frame = _framed(payload)
-    # Split mid-body so the first read cannot see the whole payload.
-    split = len(frame) - (len(payload) // 2)
+    line = _line(payload)
+    split = len(line) - (len(payload) // 2)
 
     reader = asyncio.StreamReader()
     process = _StdoutOnlyProcess(reader)
@@ -99,9 +105,9 @@ async def test_read_response_handles_body_split_across_reads() -> None:
     client._process = process  # type: ignore[assignment]
 
     async def feed() -> None:
-        reader.feed_data(frame[:split])
+        reader.feed_data(line[:split])
         await asyncio.sleep(0)  # force a scheduler yield between chunks
-        reader.feed_data(frame[split:])
+        reader.feed_data(line[split:])
         reader.feed_eof()
 
     feeder = asyncio.create_task(feed())
@@ -113,17 +119,16 @@ async def test_read_response_handles_body_split_across_reads() -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_response_raises_on_truncated_body() -> None:
-    """Premature EOF must surface as a clear ValueError, not a JSON error."""
+async def test_read_response_raises_when_eof_precedes_newline() -> None:
+    """EOF before the newline delimiter must surface as a clear error."""
     payload = b'{"jsonrpc":"2.0","id":1,"result":{}}'
-    frame = _framed(payload)[:-5]  # drop the tail so EOF arrives early
 
     reader = asyncio.StreamReader()
-    reader.feed_data(frame)
+    reader.feed_data(payload)
     reader.feed_eof()
     process = _StdoutOnlyProcess(reader)
     client = MCPStdioClient(MCPServerConfig(name="demo", transport="stdio", command="demo"))
     client._process = process  # type: ignore[assignment]
 
-    with pytest.raises(ValueError, match="Truncated body"):
+    with pytest.raises(ValueError, match="missing newline delimiter"):
         await client._read_response()

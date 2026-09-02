@@ -13,7 +13,7 @@ from agentos.mcp.types import MCPServerConfig, MCPToolDef, MCPToolResult
 
 
 class MCPStdioClient(MCPClient):
-    """MCP client using stdio transport (subprocess + Content-Length framing)."""
+    """MCP client using newline-delimited JSON-RPC over a subprocess."""
 
     _CLOSE_TIMEOUT_SECONDS = 2.0
 
@@ -24,33 +24,19 @@ class MCPStdioClient(MCPClient):
 
     @staticmethod
     def _encode_request(request: dict[str, Any]) -> bytes:
-        """Encode a JSON-RPC request with Content-Length framing."""
-        body = json.dumps(request)
-        header = f"Content-Length: {len(body)}\r\n\r\n"
-        return header.encode() + body.encode()
+        """Encode one compact newline-delimited JSON-RPC message."""
+        return json.dumps(request, separators=(",", ":")).encode() + b"\n"
 
     @staticmethod
     def _decode_response(data: bytes) -> dict[str, Any]:
-        """Decode a Content-Length framed response."""
-        if b"\r\n\r\n" not in data:
-            raise ValueError("Missing header/body separator in response")
+        """Decode one newline-delimited JSON-RPC response."""
+        if not data.endswith(b"\n"):
+            raise ValueError("Truncated response: missing newline delimiter")
 
-        header_part, body = data.split(b"\r\n\r\n", 1)
-        headers = header_part.decode()
-
-        content_length: int | None = None
-        for line in headers.splitlines():
-            if line.lower().startswith("content-length:"):
-                content_length = int(line.split(":", 1)[1].strip())
-                break
-
-        if content_length is None:
-            raise ValueError("Missing Content-Length header")
-
-        if len(body) < content_length:
-            raise ValueError(f"Truncated body: expected {content_length} bytes, got {len(body)}")
-
-        return cast(dict[str, Any], json.loads(body[:content_length].decode()))
+        body = data[:-1]
+        if b"\n" in body:
+            raise ValueError("Response contains an embedded newline")
+        return cast(dict[str, Any], json.loads(body.decode()))
 
     def _next_id(self) -> int:
         self._request_id += 1
@@ -135,40 +121,14 @@ class MCPStdioClient(MCPClient):
         await self._process.stdin.drain()
 
     async def _read_response(self) -> dict[str, Any]:
-        """Read and decode a Content-Length framed response from stdout."""
+        """Read and decode one newline-delimited response from stdout."""
         assert self._process is not None
         assert self._process.stdout is not None
 
-        # Read header lines until blank line
-        header_lines: list[str] = []
-        while True:
-            line = await self._process.stdout.readline()
-            decoded = line.decode().rstrip("\r\n")
-            if decoded == "":
-                break
-            header_lines.append(decoded)
-
-        content_length: int | None = None
-        for h in header_lines:
-            if h.lower().startswith("content-length:"):
-                content_length = int(h.split(":", 1)[1].strip())
-                break
-
-        if content_length is None:
-            raise ValueError("Missing Content-Length header in response")
-
-        # ``StreamReader.read(n)`` returns *up to* n bytes and yields as soon as
-        # any data is buffered, so a body split across pipe writes (large tool
-        # results, chunked flushes) would be truncated and fail ``json.loads``.
-        # ``readexactly`` enforces the Content-Length framing contract, matching
-        # the guard in the sibling ``_decode_response`` helper.
-        try:
-            body = await self._process.stdout.readexactly(content_length)
-        except asyncio.IncompleteReadError as exc:
-            raise ValueError(
-                f"Truncated body: expected {content_length} bytes, got {len(exc.partial)}"
-            ) from exc
-        return cast(dict[str, Any], json.loads(body.decode()))
+        line = await self._process.stdout.readline()
+        if not line:
+            raise ValueError("Unexpected EOF while reading response")
+        return self._decode_response(line)
 
     async def list_tools(self) -> list[MCPToolDef]:
         """List tools from the MCP server."""
