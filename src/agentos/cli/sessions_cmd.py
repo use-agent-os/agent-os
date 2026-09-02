@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -377,7 +378,7 @@ def sessions_export(
     if result is None:
         console.print("[red]Session export returned no data.[/red]")
         return
-    target = output or Path(f"{session_id.replace(':', '-')}.{format}")
+    target = output or Path(f"{re.sub(r'[^a-zA-Z0-9_-]', '_', session_id)}.{format}")
     if format == "json":
         target.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     else:
