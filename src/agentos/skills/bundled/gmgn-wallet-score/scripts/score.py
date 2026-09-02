@@ -35,6 +35,12 @@ def _b(v):
     if isinstance(v, str): return v.strip().lower() in ('1', 'true', 'yes')
     return False
 
+def _or_default(x, default):
+    # `x or default` also replaces a legitimate 0.0 with `default`, which is
+    # wrong when 0.0 is a real, meaningful value (e.g. a wallet at exactly
+    # break-even ROI) rather than missing data. Only None is "missing" here.
+    return default if x is None else x
+
 def fmt_dur(sec):
     sec = _f(sec)
     if sec < 60:    return f"{int(sec)}{_(' 秒','s')}"
@@ -287,7 +293,7 @@ copy_disp  = round(copy_score  * SELF_DEAL_DISCOUNT) if self_dealing else copy_s
 
 # ── 7. Copy-trade backtest ───────────────────────────────────
 wallet_pct = (w['realized_profit'] / w['bought_cost']) if w['bought_cost'] > 0 else w['roi']
-wallet_pct = _clamp(wallet_pct or 0.0001, -0.9, 3.0)   # clamp: dev wallets have near-zero bought_cost, ratio blows up
+wallet_pct = _clamp(_or_default(wallet_pct, 0.0001), -0.9, 3.0)   # clamp: dev wallets have near-zero bought_cost, ratio blows up
 LOW_MCAP_DRIFT_PER_S = 0.015
 drift_per_s = LOW_MCAP_DRIFT_PER_S * (0.3 + 0.7 * summ['entry_under_100k'])
 drift = LATENCY_S * drift_per_s
