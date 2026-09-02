@@ -20,6 +20,7 @@ from agentos.env import trust_env as _trust_env
 from agentos.mcp.client import MCPClient
 from agentos.mcp.types import MCPServerConfig, MCPToolDef, MCPToolResult
 from agentos.paths import state_dir as default_state_dir
+from agentos.tools.ssrf_client import ssrf_guarded_client, validate_metadata_only_address
 
 
 class MCPDependencyError(RuntimeError):
@@ -145,6 +146,8 @@ class MCPStreamableHTTPClient(MCPClient):
     async def connect(self) -> None:
         if not self.config.url:
             raise ValueError("Streamable HTTP MCP server requires a URL")
+        if not self.config.url.startswith(("http://", "https://")):
+            raise ValueError("MCP server URL must use http or https scheme")
 
         try:
             from mcp.client.auth import OAuthClientProvider
@@ -178,11 +181,12 @@ class MCPStreamableHTTPClient(MCPClient):
         stack = AsyncExitStack()
         try:
             http_client = await stack.enter_async_context(
-                httpx.AsyncClient(
+                ssrf_guarded_client(
                     auth=auth,
                     headers=self.config.headers,
                     timeout=httpx.Timeout(self.config.tool_timeout_seconds),
                     trust_env=_trust_env(),
+                    validator=validate_metadata_only_address
                 )
             )
             read_stream, write_stream, _ = await stack.enter_async_context(

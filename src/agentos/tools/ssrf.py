@@ -34,6 +34,8 @@ _METADATA_HOSTNAMES: frozenset[str] = frozenset(
         "metadata.google.internal",
         "metadata.goog",
         "instance-data",
+        "metadata.azure.com",
+        "metadata.azure.net",
     }
 )
 
@@ -46,6 +48,7 @@ _METADATA_ADDRESSES: frozenset[IPAddress] = frozenset(
         ipaddress.ip_address("169.254.169.253"),  # Azure IMDS wire server
         ipaddress.ip_address("169.254.170.2"),  # AWS ECS task role credentials
         ipaddress.ip_address("100.100.100.200"),  # Alibaba Cloud
+        ipaddress.ip_address("192.0.0.192"),  # Azure IMDS (legacy wire server)
         ipaddress.ip_address("fd00:ec2::254"),  # AWS metadata over IPv6
     }
 )
