@@ -308,8 +308,9 @@ class DiscordChannel:
 
     async def _do_reconnect(self) -> None:
         log.info("discord.reconnecting", session_id=self._state.session_id)
-        if self._heartbeat_task is not None:
-            self._heartbeat_task.cancel()
+        heartbeat_task = self._heartbeat_task
+        if heartbeat_task is not None and heartbeat_task is not asyncio.current_task():
+            heartbeat_task.cancel()
             self._heartbeat_task = None
         await self._close_ws()
 
