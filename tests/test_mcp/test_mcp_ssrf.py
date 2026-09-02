@@ -70,19 +70,43 @@ def _resolver(mapping: dict[str, str]):
 async def test_sse_client_installs_the_connect_time_guard(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def _noop(self: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return {}
+    from mcp.client import session as session_module
+    from mcp.client import sse as transport_module
 
-    monkeypatch.setattr(MCPSSEClient, "_send_and_receive", _noop)
-    monkeypatch.setattr(MCPSSEClient, "_send_notification", _noop)
+    captured: dict[str, Any] = {}
+
+    @asynccontextmanager
+    async def fake_transport(
+        _url: str,
+        *,
+        httpx_client_factory: Any = None,
+        **_kwargs: Any,
+    ):
+        captured["httpx_client_factory"] = httpx_client_factory
+        yield object(), object()
+
+    class FakeSession:
+        async def __aenter__(self) -> FakeSession:
+            return self
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        async def initialize(self) -> None:
+            return None
+
+    monkeypatch.setattr(transport_module, "sse_client", fake_transport)
+    monkeypatch.setattr(session_module, "ClientSession", lambda *_a, **_k: FakeSession())
 
     client = MCPSSEClient(_sse_config("http://localhost:9999/sse"))
     await client.connect()
+    guarded_client = captured["httpx_client_factory"]()
     try:
-        backend = _installed_backend(client._client)
+        backend = _installed_backend(guarded_client)
         assert isinstance(backend, ValidatingNetworkBackend)
         assert backend._validator is validate_metadata_only_address
     finally:
+        await guarded_client.aclose()
         await client.close()
 
 
