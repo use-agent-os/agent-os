@@ -13,12 +13,14 @@ two approaches.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
 import threading
 from contextlib import asynccontextmanager
 from typing import Any
 
+import httpcore
 import pytest
 
 from agentos.mcp.http import assert_supported_mcp_url, mcp_http_client
@@ -108,6 +110,76 @@ async def test_sse_client_installs_the_connect_time_guard(
     finally:
         await guarded_client.aclose()
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_real_sse_sdk_revalidates_the_advertised_post_connection(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Keep the SDK and network validator real; no socket is opened."""
+    from agentos.mcp import sse as client_module
+
+    class EventStream(httpcore.AsyncNetworkStream):
+        def __init__(self) -> None:
+            self.first_read = True
+            self.closed = False
+
+        async def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
+            if self.first_read:
+                self.first_read = False
+                return (
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"
+                    b"event: endpoint\ndata: /messages?session_id=test\n\n"
+                )
+            await asyncio.Event().wait()
+            return b""  # pragma: no cover
+
+        async def write(self, buffer: bytes, timeout: float | None = None) -> None:
+            pass
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    stream = EventStream()
+    answers = {"mcp.example": "203.0.113.10"}
+    resolver = _resolver(answers)
+    monkeypatch.setattr(socket, "getaddrinfo", resolver)
+    dialed: list[str] = []
+
+    class NetworkBackend:
+        async def connect_tcp(self, host: str, port: int, **_kwargs: Any) -> EventStream:
+            dialed.append(host)
+            # The GET occupies the first connection. Its relative endpoint
+            # needs a second connection whose new DNS answer must be checked.
+            answers["mcp.example"] = METADATA_IP
+            return stream
+
+    def guarded_factory(url: str, **kwargs: Any) -> Any:
+        http_client = mcp_http_client(url, trust_env=False, **kwargs)
+        backend = _installed_backend(http_client)
+        assert isinstance(backend, ValidatingNetworkBackend)
+        backend._backend = NetworkBackend()
+        return http_client
+
+    monkeypatch.setattr(client_module, "mcp_http_client", guarded_factory)
+    config = _sse_config("http://mcp.example/sse")
+    config.tool_timeout_seconds = 1.0
+    client = MCPSSEClient(config)
+
+    async with asyncio.timeout(3):
+        try:
+            with pytest.raises(TimeoutError, match="MCP SSE handshake timed out"):
+                await client.connect()
+        finally:
+            await client.close()
+
+    assert resolver.calls == ["mcp.example", "mcp.example"]
+    assert dialed == ["203.0.113.10"]
+    assert METADATA_IP in caplog.text
+    assert "SSRFBlockedError" in caplog.text
+    assert stream.closed
+    assert client._stack is None
+    assert client._session is None
 
 
 @pytest.mark.asyncio

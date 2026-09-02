@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 
 from agentos.mcp.discovery import create_client
@@ -151,3 +154,147 @@ async def test_tools_use_the_connected_mcp_session() -> None:
     ]
     assert result.content == "found"
     assert result.is_error is False
+
+
+class _EventStream(httpx.AsyncByteStream):
+    """An in-memory server stream; the real SDK parses and consumes its events."""
+
+    def __init__(self, endpoint: str) -> None:
+        self.messages: asyncio.Queue[bytes] = asyncio.Queue()
+        self.messages.put_nowait(f"event: endpoint\ndata: {endpoint}\n\n".encode())
+        self.closed = False
+        self.reader_stopped = False
+
+    def respond(self, request_id: int, result: dict[str, Any]) -> None:
+        payload = {"jsonrpc": "2.0", "id": request_id, "result": result}
+        self.messages.put_nowait(f"event: message\ndata: {json.dumps(payload)}\n\n".encode())
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        try:
+            while True:
+                yield await self.messages.get()
+        finally:
+            self.reader_stopped = True
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class _SSEServer:
+    def __init__(self, endpoint: str) -> None:
+        self.stream = _EventStream(endpoint)
+        self.requests: list[httpx.Request] = []
+        self.calls: list[dict[str, Any]] = []
+
+    async def handle(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if request.method == "GET":
+            return httpx.Response(
+                200, headers={"content-type": "text/event-stream"}, stream=self.stream
+            )
+        payload = json.loads(request.content)
+        if payload["method"] == "initialize":
+            self.stream.respond(
+                payload["id"],
+                {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "test", "version": "1"},
+                },
+            )
+        elif payload["method"] == "tools/list":
+            self.stream.respond(
+                payload["id"],
+                {
+                    "tools": [
+                        {"name": name, "inputSchema": {"type": "object"}}
+                        for name in ("first", "second")
+                    ]
+                },
+            )
+        elif payload["method"] == "tools/call":
+            self.calls.append(payload)
+            if len(self.calls) == 2:
+                # Reverse arrival order: responses must match ids, not readers.
+                for call in reversed(self.calls):
+                    self.stream.respond(
+                        call["id"],
+                        {"content": [{"type": "text", "text": call["params"]["name"]}]},
+                    )
+        return httpx.Response(202)
+
+
+def _install_sse_server(monkeypatch: pytest.MonkeyPatch, server: _SSEServer) -> None:
+    from agentos.mcp import sse as client_module
+
+    def client_factory(_url: str, **kwargs: Any) -> httpx.AsyncClient:
+        return httpx.AsyncClient(transport=httpx.MockTransport(server.handle), **kwargs)
+
+    # Mock only the HTTP boundary; keep sse_client and ClientSession real.
+    monkeypatch.setattr(client_module, "mcp_http_client", client_factory)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "endpoint",
+    ["../messages?session_id=test", "https://example.test/messages?session_id=test"],
+)
+async def test_real_sdk_uses_advertised_endpoint_and_correlates_responses(
+    monkeypatch: pytest.MonkeyPatch, endpoint: str
+) -> None:
+    server = _SSEServer(endpoint)
+    _install_sse_server(monkeypatch, server)
+    config = _config()
+    config.url = "https://example.test/legacy/sse"
+    client = MCPSSEClient(config)
+
+    async with asyncio.timeout(3):
+        try:
+            await client.connect()
+            assert len(await client.list_tools()) == 2
+            first, second = await asyncio.gather(
+                client.call_tool("first", {}), client.call_tool("second", {})
+            )
+            assert first.content == "first"
+            assert second.content == "second"
+            assert not server.stream.closed
+            assert [r.method for r in server.requests] == ["GET"] + ["POST"] * 5
+            assert all(
+                str(r.url) == "https://example.test/messages?session_id=test"
+                for r in server.requests[1:]
+            )
+            assert json.loads(server.requests[1].content)["method"] == "initialize"
+            assert json.loads(server.requests[2].content)["method"] == "notifications/initialized"
+        finally:
+            await client.close()
+
+    assert server.stream.closed
+    assert server.stream.reader_stopped
+    assert client._session is None
+    assert client._stack is None
+
+
+@pytest.mark.asyncio
+async def test_real_sdk_refuses_an_endpoint_on_another_origin(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    server = _SSEServer("https://other.test/messages")
+    _install_sse_server(monkeypatch, server)
+    config = _config()
+    config.tool_timeout_seconds = 1.0
+    client = MCPSSEClient(config)
+
+    async with asyncio.timeout(3):
+        try:
+            # The SDK rejects the origin before POSTing, but can wait on its
+            # error stream before yielding. Our handshake deadline bounds it.
+            with pytest.raises(TimeoutError, match="MCP SSE handshake timed out"):
+                await client.connect()
+        finally:
+            await client.close()
+
+    assert [r.method for r in server.requests] == ["GET"]
+    assert "Endpoint origin does not match connection origin" in caplog.text
+    assert server.stream.closed
+    assert client._session is None
+    assert client._stack is None

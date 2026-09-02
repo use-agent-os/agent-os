@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import AsyncExitStack
 from datetime import timedelta
@@ -47,28 +48,33 @@ class MCPSSEClient(MCPClient):
 
         stack = AsyncExitStack()
         try:
-            read_stream, write_stream = await stack.enter_async_context(
-                sse_client(
-                    self.config.url,
-                    headers=self.config.headers,
-                    timeout=self.config.tool_timeout_seconds,
-                    sse_read_timeout=self.config.tool_timeout_seconds,
-                    httpx_client_factory=httpx_client_factory,
+            # HTTP read timeouts alone do not bound waiting for the SDK's
+            # endpoint event or initialization on its internal streams.
+            async with asyncio.timeout(self.config.tool_timeout_seconds):
+                read_stream, write_stream = await stack.enter_async_context(
+                    sse_client(
+                        self.config.url,
+                        headers=self.config.headers,
+                        timeout=self.config.tool_timeout_seconds,
+                        sse_read_timeout=self.config.tool_timeout_seconds,
+                        httpx_client_factory=httpx_client_factory,
+                    )
                 )
-            )
-            session = await stack.enter_async_context(
-                ClientSession(
-                    read_stream,
-                    write_stream,
-                    read_timeout_seconds=timedelta(seconds=self.config.tool_timeout_seconds),
+                session = await stack.enter_async_context(
+                    ClientSession(
+                        read_stream,
+                        write_stream,
+                        read_timeout_seconds=timedelta(seconds=self.config.tool_timeout_seconds),
+                    )
                 )
-            )
-            await session.initialize()
+                await session.initialize()
         except BaseException as exc:
             await stack.aclose()
             failure = exc
             while isinstance(failure, BaseExceptionGroup) and len(failure.exceptions) == 1:
                 failure = failure.exceptions[0]
+            if isinstance(failure, TimeoutError):
+                raise TimeoutError("MCP SSE handshake timed out") from failure
             if failure is exc:
                 raise
             raise failure from exc
