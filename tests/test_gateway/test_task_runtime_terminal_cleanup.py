@@ -20,7 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentos.gateway import task_runtime
-from agentos.gateway.routing import RouteEnvelope, SourceKind
+from agentos.gateway.routing import ReplyTarget, RouteEnvelope, SourceKind
 from agentos.gateway.task_runtime import TaskRuntime
 from agentos.session.models import AgentTaskRecord
 
@@ -183,6 +183,70 @@ async def test_session_lock_kept_during_pending() -> None:
 
     # _session_locks is intentionally retained after all tasks complete;
     # do not assert its absence here.
+
+
+@pytest.mark.asyncio
+async def test_terminal_keeps_route_envelope_while_same_session_has_work() -> None:
+    """A completed task must not erase routing needed by queued follow-ups."""
+    first_started = asyncio.Event()
+    first_release = asyncio.Event()
+    remaining_release = asyncio.Event()
+
+    async def _blocking_handler(run: Any) -> None:
+        if run.message == "first":
+            first_started.set()
+            await first_release.wait()
+            return
+        await remaining_release.wait()
+
+    rt = _make_runtime(turn_handler=_blocking_handler, max_concurrency=1)
+    session_key = "agent-1::sess-channel"
+    reply_target = ReplyTarget(
+        kind="channel",
+        channel_name="slack-work",
+        channel_type="slack",
+        to="C123",
+        account_id="work",
+        thread_id="1712345.6789",
+    )
+    envelope = RouteEnvelope(
+        source_kind=SourceKind.CHANNEL,
+        source_name="slack",
+        agent_id="agent-1",
+        session_key=session_key,
+        account_id="work",
+        channel_type="slack",
+        channel_name="slack-work",
+        channel_id="C123",
+        thread_id="1712345.6789",
+        reply_target=reply_target,
+        input_provenance={"kind": "channel_message", "source": "slack"},
+    )
+
+    first = await rt.enqueue(envelope, "first")
+    await asyncio.wait_for(first_started.wait(), timeout=2.0)
+    second = await rt.enqueue(envelope, "second")
+
+    first_release.set()
+    await rt.wait(first.task_id, timeout=2.0)
+    cached_after_first = rt._last_envelope_by_session.get(session_key)
+
+    followup = await rt.send(session_key, "follow-up")
+    routed_followup = rt._tasks[followup.task_id].envelope
+
+    remaining_release.set()
+    await rt.wait(second.task_id, timeout=2.0)
+    await rt.wait(followup.task_id, timeout=2.0)
+
+    assert cached_after_first == envelope
+    assert routed_followup.source_kind is SourceKind.CHANNEL
+    assert routed_followup.account_id == "work"
+    assert routed_followup.channel_name == "slack-work"
+    assert routed_followup.channel_id == "C123"
+    assert routed_followup.thread_id == "1712345.6789"
+    assert routed_followup.reply_target == reply_target
+    assert routed_followup.input_provenance == {"kind": "channel_message", "source": "slack"}
+    assert session_key not in rt._last_envelope_by_session
 
 
 # ---------------------------------------------------------------------------

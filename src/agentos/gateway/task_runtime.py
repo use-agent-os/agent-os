@@ -1160,7 +1160,6 @@ class TaskRuntime:
             if self._running_by_session.get(task.envelope.session_key) is task:
                 self._running_by_session.pop(task.envelope.session_key, None)
             self._tasks.pop(task.task_id, None)
-            self._last_envelope_by_session.pop(task.envelope.session_key, None)
             # Keep the short write lock stable for this session. Popping it can
             # split callers across old/new lock objects while callbacks or
             # late lifecycle events still reference the old one. The dict grows
@@ -1171,6 +1170,7 @@ class TaskRuntime:
                 not self._pending_by_session.get(session_key)
                 and self._running_by_session.get(session_key) is None
             ):
+                self._last_envelope_by_session.pop(session_key, None)
                 agent_id = task.envelope.agent_id
                 active = self._agent_active_sessions.get(agent_id)
                 if active is not None:
