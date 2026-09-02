@@ -1025,8 +1025,8 @@ class DiscordChannel:
         file_path: str,
         content: str = "",
     ) -> ChannelSendResult:
-        await self._rate_limiter.acquire()
         _check_file_size(file_path, self._SEND_FILE_SIZE_LIMIT)
+        await self._rate_limiter.acquire()
         client = self._get_client()
         with open(file_path, "rb") as f:
             resp = await retry_request(
