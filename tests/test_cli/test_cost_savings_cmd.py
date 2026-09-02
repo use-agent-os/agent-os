@@ -153,3 +153,40 @@ def test_bare_cost_still_queries_the_gateway(monkeypatch: pytest.MonkeyPatch) ->
 
     assert result.exit_code == 0, result.output
     assert calls == [True]
+
+
+def test_cost_export_creates_parent_directories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fake_run(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "breakdown": [
+                {
+                    "session": "s1",
+                    "model": "gpt-5.6-luna",
+                    "provider": "openrouter",
+                    "input_tokens": 100,
+                    "output_tokens": 50,
+                    "cost_usd": 0.01,
+                    "created_at": 1700000000,
+                }
+            ],
+            "totalCostUsd": 0.01,
+        }
+
+    monkeypatch.setattr("agentos.cli.cost_cmd.run_gateway_sync", _fake_run)
+
+    json_export = tmp_path / "nested" / "reports" / "cost.json"
+    result_json = runner.invoke(app, ["cost", "--export", str(json_export)])
+    assert result_json.exit_code == 0, result_json.output
+    assert json_export.exists()
+    payload = json.loads(json_export.read_text(encoding="utf-8"))
+    assert payload["totalCostUsd"] == 0.01
+
+    csv_export = tmp_path / "deep" / "nested" / "cost.csv"
+    result_csv = runner.invoke(app, ["cost", "--export", str(csv_export)])
+    assert result_csv.exit_code == 0, result_csv.output
+    assert csv_export.exists()
+    assert "gpt-5.6-luna" in csv_export.read_text(encoding="utf-8")
+

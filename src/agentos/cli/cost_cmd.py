@@ -66,6 +66,7 @@ def cost(
 
     if export_path:
         path = Path(export_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
         is_csv = csv_output or path.suffix.lower() == ".csv"
         if is_csv:
             import io
