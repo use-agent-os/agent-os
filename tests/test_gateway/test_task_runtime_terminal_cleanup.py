@@ -231,14 +231,20 @@ async def test_terminal_keeps_route_envelope_while_same_session_has_work() -> No
     await rt.wait(first.task_id, timeout=2.0)
     cached_after_first = rt._last_envelope_by_session.get(session_key)
 
+    override = {"kind": "runtime_send", "source_tool": "test"}
+    overridden = await rt.send(session_key, "override", provenance=override)
+    overridden_envelope = rt._tasks[overridden.task_id].envelope
     followup = await rt.send(session_key, "follow-up")
     routed_followup = rt._tasks[followup.task_id].envelope
 
     remaining_release.set()
     await rt.wait(second.task_id, timeout=2.0)
+    await rt.wait(overridden.task_id, timeout=2.0)
     await rt.wait(followup.task_id, timeout=2.0)
 
     assert cached_after_first == envelope
+    assert overridden_envelope.input_provenance == override
+    assert overridden_envelope.reply_target == reply_target
     assert routed_followup.source_kind is SourceKind.CHANNEL
     assert routed_followup.account_id == "work"
     assert routed_followup.channel_name == "slack-work"
@@ -247,6 +253,25 @@ async def test_terminal_keeps_route_envelope_while_same_session_has_work() -> No
     assert routed_followup.reply_target == reply_target
     assert routed_followup.input_provenance == {"kind": "channel_message", "source": "slack"}
     assert session_key not in rt._last_envelope_by_session
+
+    # Once the last task finishes, sends must not reuse the old channel route
+    # or the earlier one-shot provenance override.
+    remaining_release.clear()
+    try:
+        later = await rt.send(session_key, "after-terminal")
+        generic = rt._tasks[later.task_id].envelope
+        assert generic.source_kind is SourceKind.SYSTEM
+        assert generic.source_name == "task_runtime"
+        assert generic.account_id is None
+        assert generic.channel_type is None
+        assert generic.channel_name is None
+        assert generic.channel_id is None
+        assert generic.thread_id is None
+        assert generic.reply_target is None
+        assert generic.input_provenance == {"kind": "runtime_send"}
+    finally:
+        remaining_release.set()
+        await rt.shutdown(cancel=False)
 
 
 # ---------------------------------------------------------------------------

@@ -1165,7 +1165,8 @@ class TaskRuntime:
             # late lifecycle events still reference the old one. The dict grows
             # at most by unique session_keys, which is acceptable.
             session_key = task.envelope.session_key
-            # Clean up RR deque entry when session has no more work.
+            # Drop cached routing and RR state only when both pending and
+            # running work are gone, so later sends cannot reuse stale routing.
             if (
                 not self._pending_by_session.get(session_key)
                 and self._running_by_session.get(session_key) is None
