@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from unittest.mock import Mock
 
 import pytest
 
@@ -121,6 +122,43 @@ async def test_sync_force_overrides_search_clean_fast_path(tmp_path):
     assert first_count == 1
     assert search_count == first_count
     assert sync_calls == [{"force": True}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["search", "search:tool", "search:control"])
+@pytest.mark.parametrize("byte_count", [20, 150_000])
+async def test_search_consumes_delta_without_session_indexer(
+    tmp_path, monkeypatch, reason, byte_count
+):
+    manager = MemorySyncManager(
+        store=NoopStore(), workspace_dir=tmp_path, memory_dir=tmp_path / "memory"
+    )
+    scan = Mock(wraps=manager._scan_files)
+    monkeypatch.setattr(manager, "_scan_files", scan)
+    manager.notify_message(byte_count)
+
+    await manager.sync(reason=reason)
+
+    assert scan.call_count == 1
+    assert not manager._delta.has_pending()
+    assert manager._dirty is False
+
+    for search_reason in ("search", "search:tool", "search:control"):
+        await manager.sync(reason=search_reason)
+    assert scan.call_count == 1
+
+    manager.notify_message(20)
+    await manager.sync(reason=reason)
+    assert scan.call_count == 2
+    assert not manager._delta.has_pending()
+
+    manager.mark_dirty()
+    await manager.sync(reason=reason)
+    assert scan.call_count == 3
+    assert manager._dirty is False
+
+    await manager.sync(reason=reason, force=True)
+    assert scan.call_count == 4
 
 
 @pytest.mark.asyncio
