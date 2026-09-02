@@ -423,6 +423,7 @@ def test_channels_add_prints_status_verification_next_step(tmp_path, monkeypatch
     out = result.stdout.lower()
     assert "agentos gateway restart" in out
     assert "agentos channels status w --json" in out
+    assert "uv run agentos" not in out
 
 
 def test_channels_add_echoes_resolved_path_and_source(tmp_path, monkeypatch):

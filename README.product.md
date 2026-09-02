@@ -135,7 +135,7 @@ agentos configure router --router recommended
 agentos configure search --search-provider brave --api-key-env BRAVE_SEARCH_API_KEY
 agentos configure channels
 agentos config get llm.provider
-agentos config set gateway.port 18791
+agentos config set port 18791 --config ~/.agentos/config.toml
 ```
 
 See [`docs/configuration.md`](docs/configuration.md) for details.
