@@ -3151,6 +3151,29 @@ class TurnRunner:
                 )
             yield ErrorEvent(message=error_message, code=event_code)
 
+        finally:
+            # Release this turn's budget admission reservation on every exit
+            # path -- normal completion, error, and cancellation alike. add()
+            # reconciles the reservation against real recorded spend on the
+            # success path; this finally guarantees a turn that ends WITHOUT
+            # ever recording spend (errored or cancelled before any provider
+            # call) still frees its reservation immediately, rather than
+            # leaving it to expire on the TTL and hold headroom that a
+            # concurrent sibling could have used. Releasing by this session's
+            # own reservation ids never touches a sibling's reservation.
+            tracker = self._usage_tracker
+            if tracker is not None:
+                release = getattr(tracker, "release_session_reservations", None)
+                if callable(release):
+                    try:
+                        release(session_key)
+                    except Exception as exc:  # noqa: BLE001 - teardown must not raise
+                        log.warning(
+                            "turn_runner.reservation_release_failed",
+                            session_key=session_key,
+                            error=str(exc),
+                        )
+
     @staticmethod
     def _write_trace_event(
         kind: str,

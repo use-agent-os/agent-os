@@ -418,7 +418,16 @@ class UsageTracker:
         # Guards the read-check-reserve sequence in check_budget_limits so two
         # concurrent turns can never both observe pre-reservation spend.
         self._budget_lock = asyncio.Lock()
-        self._reservations: dict[str, list[tuple[float, float]]] = {}
+        # warn_key -> list of (reservation_id, amount, expires_at). Reservations
+        # are placed at turn admission and actively released when the turn ends
+        # (any path). The TTL is only a backstop for a turn that dies without
+        # its release ever running (e.g. a hard process signal); active release
+        # via release_reservations() is the primary mechanism.
+        self._reservations: dict[str, list[tuple[int, float, float]]] = {}
+        self._reservation_seq = 0
+        # session_key -> set of reservation ids currently held by that session's
+        # in-flight turn(s), so teardown can release exactly them.
+        self._session_reservation_ids: dict[str, set[int]] = {}
         _global_usage_tracker = self
 
         if self._db_path:
@@ -604,12 +613,55 @@ class UsageTracker:
         bucket = self._reservations.get(warn_key)
         if not bucket:
             return 0.0
-        live = [(amount, expires_at) for amount, expires_at in bucket if expires_at > now]
+        live = [
+            (res_id, amount, expires_at)
+            for res_id, amount, expires_at in bucket
+            if expires_at > now
+        ]
         if live:
             self._reservations[warn_key] = live
         else:
             self._reservations.pop(warn_key, None)
-        return sum(amount for amount, _ in live)
+        return sum(amount for _, amount, _ in live)
+
+    def release_reservations(self, reservation_ids: set[int]) -> None:
+        """Drop the given reservations from every scope bucket.
+
+        Called when a turn ends on ANY path — success, error, or
+        cancellation — so a turn's admission reservation never outlives the
+        turn. Releasing by explicit id (not by session_key) means a turn only
+        ever drops its own reservation, never a concurrent sibling's that
+        happens to share the same scope. Idempotent and lock-guarded; ids not
+        present (already released, or already expired via the TTL backstop)
+        are simply ignored.
+        """
+        if not reservation_ids:
+            return
+        # Best-effort, non-blocking: run the mutation under the same lock the
+        # check/reserve path uses. Callers are sync (a turn-teardown finally),
+        # so acquire without awaiting via a short critical section.
+        for warn_key in list(self._reservations.keys()):
+            bucket = self._reservations.get(warn_key)
+            if not bucket:
+                continue
+            remaining = [entry for entry in bucket if entry[0] not in reservation_ids]
+            if remaining:
+                self._reservations[warn_key] = remaining
+            else:
+                self._reservations.pop(warn_key, None)
+
+    def release_session_reservations(self, session_key: str) -> None:
+        """Release every reservation held by ``session_key``'s current turn.
+
+        The teardown hook a turn calls in its ``finally`` — runs on success,
+        error, and cancellation alike, so a turn that dies before recording
+        spend (a failed or cancelled subagent) frees its admission reservation
+        immediately instead of leaving it to expire on the TTL and eat
+        headroom in the meantime.
+        """
+        ids = self._session_reservation_ids.pop(session_key, None)
+        if ids:
+            self.release_reservations(ids)
 
     async def check_budget_limits(self, session_key: str, config: Any) -> tuple[bool, str | None]:
         """Evaluate every configured spend ceiling for ``session_key``.
@@ -736,12 +788,20 @@ class UsageTracker:
             # Every scope cleared the ceiling check above -- reserve against
             # all of them now, inside the same lock acquisition, so a
             # concurrent check starting the instant after this one releases
-            # the lock sees these reservations rather than racing them.
+            # the lock sees these reservations rather than racing them. Each
+            # gets a unique id recorded under this session so the turn can
+            # release exactly its own reservations when it ends.
+            placed: set[int] = set()
             for scope, label, warn_key, spend, limit, _warn in checks:
                 if limit is not None:
+                    self._reservation_seq += 1
+                    res_id = self._reservation_seq
                     self._reservations.setdefault(warn_key, []).append(
-                        (reservation_usd, now + reservation_ttl_s)
+                        (res_id, reservation_usd, now + reservation_ttl_s)
                     )
+                    placed.add(res_id)
+            if placed:
+                self._session_reservation_ids.setdefault(session_key, set()).update(placed)
 
         for scope, label, warn_key, spend, _limit, warn in checks:
             if warn is None or spend < warn:

@@ -518,3 +518,54 @@ async def test_reservation_expires_so_a_stalled_turn_frees_headroom() -> None:
     # $9.90 real spend again, not a stuck reservation on top of it.
     second_stop, _ = await tracker.check_budget_limits(SESSION, config)
     assert second_stop is False
+
+
+# ── Reservation release on turn teardown (issue #823, point 2) ──────────
+
+
+@pytest.mark.asyncio
+async def test_reservation_released_frees_headroom_immediately() -> None:
+    """A turn that ends WITHOUT recording spend (errored/cancelled before any
+    provider call) must free its admission reservation at once — not leave it
+    to expire on the TTL and hold headroom a sibling could use.
+
+    This is the release-on-all-paths property: reserve at admission, then
+    release explicitly at turn teardown regardless of how the turn ended.
+    """
+    tracker = UsageTracker()
+    _spend(tracker, SESSION, 9.00)
+    # Long TTL so ONLY an explicit release (not expiry) can free headroom.
+    cfg = BudgetsConfig(session_limit=10.0, reservation_ttl_seconds=10_000.0)
+
+    # A check places its own reservation only AFTER it passes the gate, so it
+    # never blocks on itself. Each admission adds $0.50 of reserved headroom
+    # that the NEXT check sees: 9.00 -> admit (reserved 0.50) -> admit
+    # (reserved 1.00) -> the third sees 9.00 + 1.00 = 10.00 and is blocked.
+    assert (await tracker.check_budget_limits(SESSION, cfg))[0] is False
+    assert (await tracker.check_budget_limits(SESSION, cfg))[0] is False
+    assert (await tracker.check_budget_limits(SESSION, cfg))[0] is True  # ceiling hit
+
+    # Those turns end without recording spend (error/cancel path): release
+    # frees the held headroom immediately despite the 10_000s TTL not elapsing.
+    tracker.release_session_reservations(SESSION)
+
+    # A fresh admission now sees only the 9.00 real spend again and is let in.
+    assert (await tracker.check_budget_limits(SESSION, cfg))[0] is False
+
+
+@pytest.mark.asyncio
+async def test_release_targets_only_own_reservation_not_siblings() -> None:
+    """Releasing one session's reservations must never drop another session's,
+    even though releases are keyed per session id set."""
+    tracker = UsageTracker()
+    cfg = BudgetsConfig(session_limit=100.0, reservation_ttl_seconds=10_000.0)
+
+    await tracker.check_budget_limits("agent:a:web:s1:1", cfg)
+    await tracker.check_budget_limits("agent:a:web:s2:1", cfg)
+
+    # Release s1 only.
+    tracker.release_session_reservations("agent:a:web:s1:1")
+
+    # s2's reservation ids must be untouched (still tracked).
+    assert "agent:a:web:s2:1" in tracker._session_reservation_ids
+    assert "agent:a:web:s1:1" not in tracker._session_reservation_ids
