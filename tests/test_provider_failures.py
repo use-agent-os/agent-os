@@ -93,3 +93,32 @@ def test_anthropic_request_size_exceeds_is_context_overflow() -> None:
         )
         is ProviderFailureKind.CONTEXT_OVERFLOW
     )
+
+
+def test_bankr_provider_error_classification() -> None:
+    """Verify bankr errors use OpenAI-compatible classification."""
+    assert (
+        classify_provider_error(
+            provider_name="bankr",
+            status_code=401,
+            message="Unauthorized",
+        )
+        is ProviderFailureKind.AUTH_INVALID
+    )
+    assert (
+        classify_provider_error(
+            provider_name="bankr",
+            status_code=402,
+            message="Insufficient credits",
+        )
+        is ProviderFailureKind.INSUFFICIENT_CREDITS
+    )
+    assert (
+        classify_provider_error(
+            provider_name="bankr",
+            status_code=429,
+            message="Rate limit exceeded",
+        )
+        is ProviderFailureKind.RATE_LIMITED
+    )
+
