@@ -105,7 +105,9 @@ async def publish_skill(
     branch = f"skill/{skill_name}"
 
     try:
-        # Fork + clone + add skill + push + create PR
+        # Fork the target so a PR can be opened from the contributor fork.
+        # Clone/add/push/PR remain manual; this step must not claim success
+        # when `gh` fails (missing repo, auth, network).
         proc = await asyncio.create_subprocess_exec(
             "gh",
             "repo",
@@ -115,7 +117,20 @@ async def publish_skill(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await proc.wait()
+        _stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            detail = (stderr or b"").decode("utf-8", errors="replace").strip() or f"exit {proc.returncode}"
+            log.warning(
+                "publish.fork_failed",
+                repo=target_repo,
+                skill=skill_name,
+                returncode=proc.returncode,
+            )
+            return PublishResult(
+                success=False,
+                message=f"Failed to fork {target_repo}: {detail}",
+                skill_name=skill_name,
+            )
 
         log.info("publish.fork_created", repo=target_repo, skill=skill_name)
         return PublishResult(
