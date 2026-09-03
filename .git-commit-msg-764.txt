@@ -1,0 +1,14 @@
+fix(cli): survive non-UTF-8 terminal encoding when emitting JSON (#764)
+
+`json.dumps(..., ensure_ascii=False)` produces raw non-ASCII characters.
+On Windows code pages (cp1252, cp437) or other non-UTF-8 default
+encodings, ``sys.stdout.write`` raises ``UnicodeEncodeError``.
+
+New ``_write_json_text`` helper:
+- Writes UTF-8 bytes to the underlying binary buffer when one exists
+  (lossless, keeps the JSON contract intact for pipes/files).
+- Falls back to the text layer with ``errors="backslashreplace"`` — data
+  survives as round-trippable ``\\uXXXX`` escapes instead of being silently
+  destroyed by ``errors="replace"`` (which would turn an em-dash into ``?``).
+
+Fixes #764

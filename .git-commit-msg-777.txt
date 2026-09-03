@@ -1,0 +1,24 @@
+fix(provider): classify bankr + credit exhaustion errors correctly (#775, #777)
+
+Two related classification defects in `classify_provider_error`:
+
+1. **#775 — bankr not in the OpenAI-compat set.** `bankr`,
+   `volcengine_coding_plan`, and `byteplus_coding_plan` all use the
+   `openai_compat` backend (registry.py) but were missing from
+   `_OPENAI_COMPAT_PROVIDERS`, so their HTTP 401/402/429 errors fell
+   through to `UNKNOWN` instead of `AUTH_INVALID` / `INSUFFICIENT_CREDITS`
+   / `RATE_LIMITED`.
+
+2. **#777 — credit/quota exhaustion misclassified.** `insufficient_quota`
+   from OpenAI-compat providers arrives with HTTP 429, which the rate-limit
+   branch caught first, tripping the circuit breaker for a billing fault a
+   cooldown can never heal. Anthropic billing errors (`billing_error`, 402)
+   fell through to `UNKNOWN`.
+
+Fix: a provider-agnostic `_is_insufficient_credits` check (plus `status_code
+== 402`) placed BEFORE the provider-specific blocks — mirroring the existing
+classification-order rule used for context overflow — so credit exhaustion
+wins over the 429 rate-limit branch for every provider.
+
+Fixes #775
+Fixes #777

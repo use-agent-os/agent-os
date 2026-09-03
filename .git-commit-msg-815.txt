@@ -1,0 +1,15 @@
+fix(skills): validate rpc-url scheme in robinhood chain stocks reader (#815)
+
+`chain_stocks.py` passed `--rpc-url` and all target URLs straight into
+`urllib.request.urlopen` without validating the URL scheme, allowing
+`file:///etc/passwd` to leak local file contents through the JSON output.
+
+New `_validate_http_url(url)` validator:
+- Uses `urlsplit` for robust scheme detection (not a fragile `startswith`
+  prefix check — see #818) — rejects `file://`, `ftp://`, `javascript:`,
+  empty, and bare scheme (`http://` with no host).
+- Applied at the `_http_json` level so ALL URL entry points are covered
+  (RPC, feed list, token list), not just `--rpc-url`.
+- Clean JSON error returned from `main()` when `--rpc-url` is invalid.
+
+Fixes #815

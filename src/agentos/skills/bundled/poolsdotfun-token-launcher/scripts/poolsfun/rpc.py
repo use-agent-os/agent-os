@@ -34,19 +34,34 @@ from typing import Any
 from .abi_codec import decode, encode, encode_function_data
 from .chains import CHAIN, resolve_rpc_url
 
-_AGG3_IN = [{"type": "tuple[]", "components": [
-    {"name": "target", "type": "address"},
-    {"name": "allowFailure", "type": "bool"},
-    {"name": "callData", "type": "bytes"},
-]}]
-_AGG3_OUT = [{"type": "tuple[]", "components": [
-    {"name": "success", "type": "bool"},
-    {"name": "returnData", "type": "bytes"},
-]}]
-_AGGREGATE3_ABI = [{
-    "type": "function", "name": "aggregate3", "stateMutability": "payable",
-    "inputs": _AGG3_IN, "outputs": _AGG3_OUT,
-}]
+_AGG3_IN = [
+    {
+        "type": "tuple[]",
+        "components": [
+            {"name": "target", "type": "address"},
+            {"name": "allowFailure", "type": "bool"},
+            {"name": "callData", "type": "bytes"},
+        ],
+    }
+]
+_AGG3_OUT = [
+    {
+        "type": "tuple[]",
+        "components": [
+            {"name": "success", "type": "bool"},
+            {"name": "returnData", "type": "bytes"},
+        ],
+    }
+]
+_AGGREGATE3_ABI = [
+    {
+        "type": "function",
+        "name": "aggregate3",
+        "stateMutability": "payable",
+        "inputs": _AGG3_IN,
+        "outputs": _AGG3_OUT,
+    }
+]
 
 # Chunking for multicall. viem chunked on 1024 bytes of calldata and let the HTTP
 # transport re-batch; larger chunks and fewer round trips win over a remote RPC.
@@ -69,18 +84,26 @@ USER_AGENT = "poolsdotfun-token-launcher/1.0"
 class RpcError(RuntimeError):
     """A JSON-RPC error response. ``data`` carries the revert blob when present."""
 
-    def __init__(self, method: str, error: dict) -> None:
-        super().__init__(f"{method}: {error.get('message', error)}")
-        self.code = error.get("code")
-        self.data = error.get("data")
-        self.raw = error
+    def __init__(self, method: str, error: dict | str) -> None:
+        super().__init__(
+            f"{method}: {error.get('message', str(error)) if isinstance(error, dict) else str(error)}"
+        )
+        self.code = error.get("code") if isinstance(error, dict) else None
+        self.data = error.get("data") if isinstance(error, dict) else None
+        self.raw = error if isinstance(error, dict) else {"message": str(error)}
 
 
 class RpcClient:
     """A minimal, synchronous JSON-RPC client over ``urllib``."""
 
-    def __init__(self, chain: dict | None = None, rpc_url: str | None = None,
-                 timeout: int = 60, debug: bool = False, allow_batch: bool = True) -> None:
+    def __init__(
+        self,
+        chain: dict | None = None,
+        rpc_url: str | None = None,
+        timeout: int = 60,
+        debug: bool = False,
+        allow_batch: bool = True,
+    ) -> None:
         # Single-chain skill: `chain` defaults to the only one there is. The
         # parameter survives so the vendored tx.py helpers keep working unchanged.
         self.chain = chain or CHAIN
@@ -99,7 +122,9 @@ class RpcClient:
         while True:
             attempt += 1
             request = urllib.request.Request(
-                self.url, data=body, method="POST",
+                self.url,
+                data=body,
+                method="POST",
                 headers={
                     "content-type": "application/json",
                     "accept": "application/json",
@@ -170,7 +195,7 @@ class RpcClient:
             return out
 
         for start in range(0, len(calls), chunk_size):
-            window = calls[start:start + chunk_size]
+            window = calls[start : start + chunk_size]
             if not self._allow_batch:
                 for offset, call in enumerate(window):
                     try:
@@ -180,8 +205,12 @@ class RpcClient:
                 continue
 
             payload = [
-                {"jsonrpc": "2.0", "id": start + offset,
-                 "method": call["method"], "params": call.get("params") or []}
+                {
+                    "jsonrpc": "2.0",
+                    "id": start + offset,
+                    "method": call["method"],
+                    "params": call.get("params") or [],
+                }
                 for offset, call in enumerate(window)
             ]
             body = self._post(payload, "batch")
@@ -214,15 +243,22 @@ class RpcClient:
 
     # -- convenience wrappers ---------------------------------------------
 
-    def call(self, to: str, data: str, block: str = "latest",
-             from_address: str | None = None) -> str:
+    def call(
+        self, to: str, data: str, block: str = "latest", from_address: str | None = None
+    ) -> str:
         params: dict[str, str] = {"to": to, "data": data}
         if from_address:
             params["from"] = from_address
         return self.request("eth_call", [params, block])
 
-    def read(self, address: str, abi: list, function_name: str,
-             args: list | None = None, block: str = "latest") -> Any:
+    def read(
+        self,
+        address: str,
+        abi: list,
+        function_name: str,
+        args: list | None = None,
+        block: str = "latest",
+    ) -> Any:
         from .abi_codec import decode_function_result
 
         data = encode_function_data(abi, function_name, args or [])
@@ -254,8 +290,9 @@ class RpcClient:
 
     # -- multicall ---------------------------------------------------------
 
-    def multicall(self, calls: list[dict], allow_failure: bool = True,
-                  block: str = "latest") -> list[dict]:
+    def multicall(
+        self, calls: list[dict], allow_failure: bool = True, block: str = "latest"
+    ) -> list[dict]:
         """Multicall3 ``aggregate3``.
 
         Each call is ``{"address", "abi", "functionName", "args"}``. Returns one
@@ -266,12 +303,14 @@ class RpcClient:
             return []
         prepared = []
         for call in calls:
-            prepared.append({
-                "call": call,
-                "data": encode_function_data(
-                    call["abi"], call["functionName"], call.get("args") or []
-                ),
-            })
+            prepared.append(
+                {
+                    "call": call,
+                    "data": encode_function_data(
+                        call["abi"], call["functionName"], call.get("args") or []
+                    ),
+                }
+            )
 
         results: list[dict] = []
         for chunk in self._chunk(prepared):
@@ -296,13 +335,21 @@ class RpcClient:
             chunks.append(current)
         return chunks
 
-    def _multicall_chunk(self, chunk: list[dict], allow_failure: bool,
-                         block: str) -> list[dict]:
-        payload = encode_function_data(_AGGREGATE3_ABI, "aggregate3", [[
-            {"target": entry["call"]["address"], "allowFailure": True,
-             "callData": entry["data"]}
-            for entry in chunk
-        ]])
+    def _multicall_chunk(self, chunk: list[dict], allow_failure: bool, block: str) -> list[dict]:
+        payload = encode_function_data(
+            _AGGREGATE3_ABI,
+            "aggregate3",
+            [
+                [
+                    {
+                        "target": entry["call"]["address"],
+                        "allowFailure": True,
+                        "callData": entry["data"],
+                    }
+                    for entry in chunk
+                ]
+            ],
+        )
         try:
             raw = self.call(self.chain["multicall3"], payload, block)
         except (RpcError, RuntimeError):
@@ -310,14 +357,16 @@ class RpcClient:
             # single call that still fails is reported as a failure, not dropped.
             if len(chunk) == 1:
                 if allow_failure:
-                    return [{"status": "failure", "result": None,
-                             "error": "call failed on its own"}]
+                    return [
+                        {"status": "failure", "result": None, "error": "call failed on its own"}
+                    ]
                 raise
             midpoint = len(chunk) // 2
             if self.debug:
                 print(f"  [rpc] multicall chunk of {len(chunk)} failed; bisecting")
-            return (self._multicall_chunk(chunk[:midpoint], allow_failure, block)
-                    + self._multicall_chunk(chunk[midpoint:], allow_failure, block))
+            return self._multicall_chunk(
+                chunk[:midpoint], allow_failure, block
+            ) + self._multicall_chunk(chunk[midpoint:], allow_failure, block)
 
         decoded = decode(_AGG3_OUT, raw)[0]
         out: list[dict] = []
@@ -327,8 +376,11 @@ class RpcClient:
             if not item["success"] or return_data in ("0x", ""):
                 # Empty returnData on a "successful" call means no code at the
                 # target. Decoding it as zeros would invent a value.
-                reason = ("reverted" if not item["success"]
-                          else "empty return — no contract at that address")
+                reason = (
+                    "reverted"
+                    if not item["success"]
+                    else "empty return — no contract at that address"
+                )
                 if not allow_failure:
                     raise RuntimeError(
                         f"multicall {call['functionName']} on {call['address']}: {reason}"
@@ -336,6 +388,7 @@ class RpcClient:
                 out.append({"status": "failure", "result": None, "error": reason})
                 continue
             from .abi_codec import decode_function_result
+
             try:
                 value = decode_function_result(call["abi"], call["functionName"], return_data)
             except Exception as exc:  # noqa: BLE001 — a decode failure is a call failure

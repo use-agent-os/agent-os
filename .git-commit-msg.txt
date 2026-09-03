@@ -1,0 +1,21 @@
+fix(channels): return 429 response on exhaustion and parse HTTP-date Retry-After (#718)
+
+Two defects in `retry_request` when handling HTTP 429 rate limits:
+
+1. **429 response dropped on retry exhaustion.** The 429 branch slept and
+   continued unconditionally, so on the final attempt the loop fell through
+   to `raise RuntimeError("retry_request exhausted")` with `last_exc=None`,
+   discarding the actual 429 response, headers, and provider error body.
+
+2. **Crash on HTTP-date Retry-After headers.** `float(resp.headers.get(...))`
+   assumed a numeric string. RFC 7231 / RFC 9110 servers emitting standard
+   HTTP-dates (e.g. `Wed, 21 Oct 2026 07:28:00 GMT`) crashed with
+   `ValueError: could not convert string to float`.
+
+The new `_parse_retry_after` helper parses both integer/float seconds and
+HTTP-date formats, clamps the result to `[0.0, 300.0]` (5-minute cap) so a
+malicious or far-future Retry-After cannot trigger an unbounded sleep, and
+gracefully falls back to exponential backoff on any unparseable value.
+
+Fixes #718
+Refs #599
