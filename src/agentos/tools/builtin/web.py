@@ -662,7 +662,7 @@ def _search_payload(
             "title": wrap_untrusted_boundary(r.title, source_url),
             "url": r.url,
             "snippet": wrap_untrusted_boundary(r.snippet, source_url),
-            "source": r.source or provider_name,
+            "source": r.source,
         }
 
     payload = {
