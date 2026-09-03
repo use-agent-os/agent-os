@@ -640,20 +640,24 @@ class TelegramChannel:
                 if not isinstance(update, dict):
                     continue
                 update_id = update.get("update_id")
-                if isinstance(update_id, int):
-                    self._update_offset = update_id + 1
                 if "callback_query" in update:
                     try:
                         await self._handle_telegram_callback(update["callback_query"])
                     except Exception as exc:
                         log.warning("telegram.callback_query_handle_failed", error=str(exc))
-                    continue
-                try:
-                    msg = self.parse_incoming(update)
-                except ValueError:
-                    log.debug("telegram.unsupported_update_ignored", update_id=update_id)
-                    continue
-                self.enqueue(msg)
+                        # Do not acknowledge this update or process later ones in
+                        # the batch. Telegram will return it again next poll.
+                        await asyncio.sleep(self.config.poll_idle_sleep_s)
+                        break
+                else:
+                    try:
+                        msg = self.parse_incoming(update)
+                    except ValueError:
+                        log.debug("telegram.unsupported_update_ignored", update_id=update_id)
+                    else:
+                        self.enqueue(msg)
+                if isinstance(update_id, int):
+                    self._update_offset = update_id + 1
             if not updates:
                 await asyncio.sleep(self.config.poll_idle_sleep_s)
 
