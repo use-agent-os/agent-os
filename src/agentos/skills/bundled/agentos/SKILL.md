@@ -149,6 +149,12 @@ Built-in channel types are `discord`, `email`, `slack`, and `telegram`; use
 `agentos channels types` as the authoritative catalog. Config migration backs up the
 file before removing entries for retired built-in channel types.
 
+Slack webhook entries use `webhook_path` (default `/slack/events`). For multiple
+accounts, set distinct paths with `channels add slack --field webhook_path=…`,
+configure each Slack app's Events API, Interactivity, and slash-command Request
+URLs to match, then restart the gateway. Duplicate webhook paths with overlapping
+HTTP methods cause a startup error; Socket Mode does not register webhook routes.
+
 Telegram direct messages always require pairing. Use `agentos channels pairing
 list <name>`, `approve <name> <code>`, `deny <name> <sender-id>`, or `revoke
 <name> <sender-id>`. Pairing is binary and has no admin/owner tier. Telegram
