@@ -119,7 +119,9 @@ async def publish_skill(
         )
         _stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
-            detail = (stderr or b"").decode("utf-8", errors="replace").strip() or f"exit {proc.returncode}"
+            detail = (stderr or b"").decode("utf-8", errors="replace").strip()
+            if not detail:
+                detail = f"exit {proc.returncode}"
             log.warning(
                 "publish.fork_failed",
                 repo=target_repo,
