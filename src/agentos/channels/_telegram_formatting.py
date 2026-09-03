@@ -127,7 +127,8 @@ def _render_table(headers: list[str], rows: list[list[str]]) -> list[str]:
             f"<b>{html.escape(clean_headers[0])} — {html.escape(clean_headers[1])}</b>"
         ]
         for row in rows:
-            label, value = row
+            label = row[0] if len(row) > 0 else ""
+            value = row[1] if len(row) > 1 else ""
             clean_label = _plain_inline(label)
             if clean_label:
                 rendered.append(f"<b>{html.escape(clean_label)}:</b> {_render_inline(value)}")
@@ -139,7 +140,7 @@ def _render_table(headers: list[str], rows: list[list[str]]) -> list[str]:
     for row in rows:
         cells = [
             f"<b>{html.escape(header)}:</b> {_render_inline(value)}"
-            for header, value in zip(clean_headers, row, strict=True)
+            for header, value in zip(clean_headers, row)
             if value
         ]
         if cells:
@@ -177,8 +178,6 @@ def render_telegram_html(markdown: str) -> str:
             index += 2
             while index < len(lines) and "|" in lines[index] and lines[index].strip():
                 row = _split_table_row(lines[index])
-                if len(row) != len(headers):
-                    break
                 rows.append(row)
                 index += 1
             rendered.extend(_render_table(headers, rows))
