@@ -22,7 +22,7 @@ from agentos.skills.hub.defaults import (
     installed_skill_identifiers,
     installed_skill_names,
 )
-from agentos.skills.hub.deps import install_deps
+from agentos.skills.hub.installer import InstallResult
 from agentos.skills.hub.lockfile import LockEntry, Lockfile, default_lockfile_path
 from agentos.skills.inventory import (
     SkillRow,
@@ -624,8 +624,16 @@ async def _handle_skills_update(params: dict | None, ctx: RpcContext) -> dict[st
         }
     if any(r.success for r in results):
         _invalidate_loader(ctx)
+
+    def _result_payload(r: InstallResult) -> dict[str, Any]:
+        payload: dict[str, Any] = {"success": r.success, "name": r.name, "message": r.message}
+        if r.scan:
+            payload["scan_verdict"] = r.scan.verdict
+            payload["scan_findings"] = [finding.__dict__ for finding in r.scan.findings]
+        return payload
+
     return {
-        "results": [{"success": r.success, "name": r.name, "message": r.message} for r in results]
+        "results": [_result_payload(r) for r in results]
     }
 
 
