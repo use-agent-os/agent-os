@@ -636,25 +636,42 @@ class TelegramChannel:
                 continue
             if not isinstance(updates, list):
                 updates = []
+            retry_pending = False
             for update in updates:
                 if not isinstance(update, dict):
                     continue
                 update_id = update.get("update_id")
-                if isinstance(update_id, int):
-                    self._update_offset = update_id + 1
                 if "callback_query" in update:
                     try:
                         await self._handle_telegram_callback(update["callback_query"])
                     except Exception as exc:
+                        # Do not acknowledge the failed callback: point the next
+                        # getUpdates at this update_id so Telegram redelivers it,
+                        # and stop the batch so nothing is confirmed past it.
                         log.warning("telegram.callback_query_handle_failed", error=str(exc))
+                        if isinstance(update_id, int):
+                            self._update_offset = update_id
+                            retry_pending = True
+                            break
+                        continue
+                    if isinstance(update_id, int):
+                        self._update_offset = update_id + 1
                     continue
                 try:
                     msg = self.parse_incoming(update)
                 except ValueError:
                     log.debug("telegram.unsupported_update_ignored", update_id=update_id)
+                    if isinstance(update_id, int):
+                        self._update_offset = update_id + 1
                     continue
                 self.enqueue(msg)
-            if not updates:
+                if isinstance(update_id, int):
+                    self._update_offset = update_id + 1
+            if retry_pending:
+                # The failed callback is retried on the next poll; honor the
+                # idle delay so a persistently failing handler does not spin.
+                await asyncio.sleep(self.config.poll_idle_sleep_s)
+            elif not updates:
                 await asyncio.sleep(self.config.poll_idle_sleep_s)
 
     def _get_updates_payload(self) -> dict[str, Any]:
