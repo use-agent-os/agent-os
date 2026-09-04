@@ -3,9 +3,16 @@ import json, subprocess, sys, time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
-TOKEN_ADDR = sys.argv[1]
-CHAIN      = sys.argv[2]
+TOKEN_ADDR = sys.argv[1] if len(sys.argv) > 1 else None
+CHAIN      = sys.argv[2] if len(sys.argv) > 2 else None
 LANG       = sys.argv[3] if len(sys.argv) > 3 else 'zh'
+
+if not TOKEN_ADDR or TOKEN_ADDR in ('-h', '--help', '-help'):
+    print(f"Usage: {sys.argv[0]} <token_address> <chain> [zh|en]", file=sys.stderr)
+    sys.exit(2)
+if not CHAIN:
+    print(f"Usage: {sys.argv[0]} <token_address> <chain> [zh|en]", file=sys.stderr)
+    sys.exit(2)
 
 # EVM 地址自动探测链（0x... 且 chain 传入 'auto' 或未明确指定时）
 KNOWN_CHAINS = ('bsc', 'eth', 'base', 'sol', 'robinhood', 'arc', 'stable')
