@@ -82,3 +82,35 @@ def test_allowed_whitespace_controls_remain_allowed(character: str) -> None:
 
     assert blocked is False
     assert reason == ""
+
+
+class TestForkBombHardBlock:
+    """Fork-bomb regex must match literal parens and tolerate whitespace."""
+
+    @pytest.mark.parametrize(
+        "task",
+        [
+            ":(){ :|:& };:",
+            ":(){:|:&};:",
+            ":() { :|:& };:",
+            ":(){: | :&};:",
+            ":() { : | :& } ; :",
+        ],
+    )
+    def test_fork_bomb_forms_are_blocked(self, task: str) -> None:
+        blocked, reason = scan_cron_prompt(task)
+        assert blocked is True, f"{task!r} should be blocked"
+        assert "dangerous pattern" in reason
+
+    @pytest.mark.parametrize(
+        "task",
+        [
+            "echo hello",
+            "ls -la",
+            "Schedule my tasks",
+            "",
+        ],
+    )
+    def test_harmless_tasks_are_not_blocked(self, task: str) -> None:
+        blocked, reason = scan_cron_prompt(task)
+        assert blocked is False, f"{task!r} should not be blocked: {reason}"
