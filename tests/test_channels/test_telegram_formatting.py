@@ -120,3 +120,24 @@ async def test_telegram_send_falls_back_to_plain_text_on_entity_parse_error() ->
         "chat_id": "42",
         "text": "**Ready**: `agentos status`",
     }
+
+
+def test_telegram_markdown_handles_table_row_column_mismatch() -> None:
+    # 2-column table with 1-item row
+    markdown_2col = """| Header A | Header B |
+| --- | --- |
+| Row 1 Only |
+"""
+    rendered_2col = render_telegram_html(markdown_2col)
+    assert "<b>Header A — Header B</b>" in rendered_2col
+    assert "<b>Row 1 Only:</b>" in rendered_2col
+
+    # 3-column table with 2-item row
+    markdown_3col = """| Col 1 | Col 2 | Col 3 |
+| --- | --- | --- |
+| Val 1 | Val 2 |
+"""
+    rendered_3col = render_telegram_html(markdown_3col)
+    assert "<b>Col 1 · Col 2 · Col 3</b>" in rendered_3col
+    assert "<b>Col 1:</b> Val 1 · <b>Col 2:</b> Val 2" in rendered_3col
+
