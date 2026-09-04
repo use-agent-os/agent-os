@@ -121,14 +121,25 @@ class MCPStdioClient(MCPClient):
         await self._process.stdin.drain()
 
     async def _read_response(self) -> dict[str, Any]:
-        """Read and decode one newline-delimited response from stdout."""
+        """Read one response even when it exceeds the stream's buffer limit."""
         assert self._process is not None
         assert self._process.stdout is not None
 
-        line = await self._process.stdout.readline()
-        if not line:
-            raise ValueError("Unexpected EOF while reading response")
-        return self._decode_response(line)
+        reader = self._process.stdout
+        line = bytearray()
+        while True:
+            try:
+                line.extend(await reader.readuntil(b"\n"))
+                break
+            except asyncio.LimitOverrunError as exc:
+                # Consume only bytes before the delimiter, leaving later
+                # responses buffered for the next request.
+                line.extend(await reader.readexactly(exc.consumed))
+            except asyncio.IncompleteReadError as exc:
+                if line or exc.partial:
+                    raise ValueError("Truncated response: missing newline delimiter") from exc
+                raise ValueError("Unexpected EOF while reading response") from exc
+        return self._decode_response(bytes(line))
 
     async def list_tools(self) -> list[MCPToolDef]:
         """List tools from the MCP server."""

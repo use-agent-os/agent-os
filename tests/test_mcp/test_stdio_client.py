@@ -119,16 +119,58 @@ async def test_read_response_handles_line_split_across_reads() -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_response_raises_when_eof_precedes_newline() -> None:
+@pytest.mark.parametrize("chunk_size", [8192, 262144])
+async def test_read_large_response_preserves_following_message(chunk_size: int) -> None:
+    response = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {"content": [{"type": "text", "text": "é" * 100_000}]},
+    }
+    following = {"jsonrpc": "2.0", "id": 2, "result": {"tools": []}}
+    data = _line(json.dumps(response, ensure_ascii=False).encode()) + _line(
+        json.dumps(following).encode()
+    )
+    reader = asyncio.StreamReader(limit=65536)
+    client = MCPStdioClient(MCPServerConfig(name="demo", transport="stdio", command="demo"))
+    client._process = _StdoutOnlyProcess(reader)  # type: ignore[assignment]
+
+    async def feed() -> None:
+        for start in range(0, len(data), chunk_size):
+            reader.feed_data(data[start : start + chunk_size])
+            await asyncio.sleep(0)
+        reader.feed_eof()
+
+    feeder = asyncio.create_task(feed())
+    try:
+        assert await client._read_response() == response
+        assert await client._read_response() == following
+    finally:
+        await feeder
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text_size", [0, 200_000])
+async def test_read_response_raises_when_eof_precedes_newline(text_size: int) -> None:
     """EOF before the newline delimiter must surface as a clear error."""
-    payload = b'{"jsonrpc":"2.0","id":1,"result":{}}'
+    payload = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"text": "x" * text_size}})
 
     reader = asyncio.StreamReader()
-    reader.feed_data(payload)
+    reader.feed_data(payload.encode())
     reader.feed_eof()
     process = _StdoutOnlyProcess(reader)
     client = MCPStdioClient(MCPServerConfig(name="demo", transport="stdio", command="demo"))
     client._process = process  # type: ignore[assignment]
 
     with pytest.raises(ValueError, match="missing newline delimiter"):
+        await client._read_response()
+
+
+@pytest.mark.asyncio
+async def test_read_response_raises_on_empty_eof() -> None:
+    reader = asyncio.StreamReader()
+    reader.feed_eof()
+    client = MCPStdioClient(MCPServerConfig(name="demo", transport="stdio", command="demo"))
+    client._process = _StdoutOnlyProcess(reader)  # type: ignore[assignment]
+
+    with pytest.raises(ValueError, match="Unexpected EOF while reading response"):
         await client._read_response()
