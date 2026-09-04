@@ -440,7 +440,7 @@ def test_ci_restores_git_lfs_objects_from_cache_instead_of_refetching() -> None:
             f"{job} must hydrate the weights before installing dependencies"
         )
 
-    assert "actions/cache@v4" in text
+    assert "actions/cache@v6" in text
     assert "path: .git/lfs/objects" in text
     # Cache hit must take the offline path; only a miss touches the network.
     assert "git lfs checkout" in text

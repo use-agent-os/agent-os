@@ -27,7 +27,7 @@ jobs:
       release_changed: ${{ steps.classify.outputs.release_changed }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -57,7 +57,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Run actionlint
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -color=false
@@ -76,7 +76,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -95,7 +95,7 @@ jobs:
 
       - name: Restore Git LFS objects cache
         id: lfs-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .git/lfs/objects
           key: git-lfs-${{ runner.os }}-${{ steps.lfs-key.outputs.oids }}
@@ -138,19 +138,19 @@ jobs:
           printf 'AGENTOS_LOG_DIR=%s/agentos-logs\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
 
@@ -215,7 +215,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -234,7 +234,7 @@ jobs:
 
       - name: Restore Git LFS objects cache
         id: lfs-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .git/lfs/objects
           key: git-lfs-${{ runner.os }}-${{ steps.lfs-key.outputs.oids }}
@@ -277,19 +277,19 @@ jobs:
           printf 'AGENTOS_LOG_DIR=%s/agentos-logs\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
 
@@ -319,7 +319,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           lfs: false
 
@@ -338,7 +338,7 @@ jobs:
 
       - name: Restore Git LFS objects cache
         id: lfs-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .git/lfs/objects
           key: git-lfs-${{ runner.os }}-${{ steps.lfs-key.outputs.oids }}
@@ -375,19 +375,19 @@ jobs:
           exit "${status}"
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
 
