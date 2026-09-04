@@ -25,6 +25,15 @@ Both run behind the same approval and sandbox layers as every other tool.
 
 The Web UI ships a featured preset for Robinhood Agentic Trading.
 
+> [!IMPORTANT]
+> **US-residency requirement.** Opening a Robinhood account is restricted to
+> US residents — a valid US address, SSN/ITIN, and a US bank account are
+> required for signup and KYC. AgentOS connects to the endpoint your Robinhood
+> account already authorizes; it cannot bypass Robinhood's account-eligibility
+> rules. Teams outside the US that want to trial agentic trading should use the
+> docs and skill as a reference and rely on a US-based colleague for the
+> authenticated trial.
+
 | Setting | Value |
 | --- | --- |
 | Endpoint | `https://agent.robinhood.com/mcp/trading` |

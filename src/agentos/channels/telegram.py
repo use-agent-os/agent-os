@@ -17,6 +17,7 @@ from starlette.responses import Response
 from starlette.routing import Route
 
 from agentos.channel_pairing import ChannelPairingStore, PairingStoreError
+import hmac
 from agentos.channels._attachment_io import (
     attachment_limit_for_mime,
     ensure_declared_size_within_limit,
@@ -693,7 +694,7 @@ class TelegramChannel:
         secret = self.config.webhook_secret_token
         if not secret:
             return Response(status_code=503)
-        if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != secret:
+        if not hmac.compare_digest(secret, request.headers.get("X-Telegram-Bot-Api-Secret-Token")):
             return Response(status_code=401)
         try:
             update = await request.json()
