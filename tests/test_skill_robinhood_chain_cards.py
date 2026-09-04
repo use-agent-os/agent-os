@@ -12,6 +12,8 @@ import importlib.util
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 _SCRIPT = (
     Path(__file__).resolve().parents[1]
     / "src/agentos/skills/bundled/robinhood-chain-stocks/scripts/chain_cards.py"
@@ -129,3 +131,21 @@ def test_a_result_without_a_token_renders_nothing() -> None:
 def test_onchain_symbol_is_used_when_the_list_symbol_is_missing() -> None:
     card = chain_cards.build_cards(_result(token=_token(symbol="", onchainSymbol="TSLA")))[0]
     assert card["title"] == "TSLA"
+
+
+def test_chain_cards_cli_creates_parent_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+    import sys
+    from io import StringIO
+
+    dummy_input = json.dumps(_result())
+    monkeypatch.setattr(sys, "stdin", StringIO(dummy_input))
+
+    out_file = tmp_path / "nested" / "cards" / "chain_cards.json"
+    monkeypatch.setattr(sys, "argv", ["chain_cards.py", "--output", str(out_file)])
+
+    rc = chain_cards.main()
+    assert rc == 0
+    assert out_file.exists()
