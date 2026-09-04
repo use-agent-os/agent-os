@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Bundled crypto skills (`poolsdotfun-token-launcher`, `senior-unilp-manager`,
+  `robinhood-rwa-addresses`) handle non-dict and string RPC error payloads without
+  crashing with `AttributeError`.
+
 ## [2026.9.4] - 2026-09-04
 
 ### Fixed

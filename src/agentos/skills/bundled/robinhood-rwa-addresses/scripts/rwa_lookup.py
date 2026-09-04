@@ -200,6 +200,13 @@ def _rpc_batch(rpc_url: str, calls: list[dict[str, Any]], timeout: float) -> dic
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
         body = json.loads(resp.read().decode("utf-8", errors="replace"))
+    if isinstance(body, dict) and "error" in body:
+        error_val = body["error"]
+        if isinstance(error_val, dict):
+            message = str(error_val.get("message", error_val))
+        else:
+            message = str(error_val)
+        raise RpcError(message)
     if not isinstance(body, list):
         raise RpcError("expected a batched JSON-RPC response")
     out: dict[str, str] = {}
