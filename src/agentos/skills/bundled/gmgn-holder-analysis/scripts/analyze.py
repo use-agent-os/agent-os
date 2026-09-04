@@ -3,6 +3,10 @@ import json, subprocess, sys, time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
+if len(sys.argv) < 3 or any(arg in ("-h", "--help") for arg in sys.argv[1:]):
+    print("Usage: analyze.py <token_address> <chain> [zh|en]")
+    sys.exit(2)
+
 TOKEN_ADDR = sys.argv[1]
 CHAIN      = sys.argv[2]
 LANG       = sys.argv[3] if len(sys.argv) > 3 else 'zh'
