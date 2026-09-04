@@ -393,3 +393,18 @@ async def test_sensitive_path_priority_over_workspace_strict(
     assert dir_result["reason"] == "sensitive_path"
     assert "workspace_strict" not in file_result.get("message", "")
     assert "workspace_strict" not in dir_result.get("message", "")
+
+
+@pytest.mark.asyncio
+async def test_read_spreadsheet_multiline_csv_fields(tmp_path: Path) -> None:
+    csv_file = tmp_path / "multiline.csv"
+    csv_file.write_text(
+        'id,name,description\n1,"Widget A","Line 1\nLine 2"\n2,"Widget B","Single line"\n',
+        encoding="utf-8",
+    )
+    with tool_context(tmp_path):
+        content = await fs.read_spreadsheet(str(csv_file))
+    assert "Sheet: multiline.csv (3 rows x 3 columns)" in content
+    assert "1\tid\tname\tdescription" in content
+    assert "2\t1\tWidget A\tLine 1\nLine 2" in content
+    assert "3\t2\tWidget B\tSingle line" in content
