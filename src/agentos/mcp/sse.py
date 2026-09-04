@@ -56,7 +56,8 @@ class MCPSSEClient(MCPClient):
                         self.config.url,
                         headers=self.config.headers,
                         timeout=self.config.tool_timeout_seconds,
-                        sse_read_timeout=self.config.tool_timeout_seconds,
+                        # Keep the SDK's idle-stream timeout independent of
+                        # the per-operation timeout between agent turns.
                         httpx_client_factory=httpx_client_factory,
                     )
                 )

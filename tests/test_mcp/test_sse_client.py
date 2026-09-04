@@ -70,7 +70,7 @@ async def test_connect_keeps_one_sse_transport_open_until_close(
     assert captured["url"] == "https://example.test/sse"
     assert captured["headers"] == {"Authorization": "Bearer test"}
     assert captured["timeout"] == 17.0
-    assert captured["sse_read_timeout"] == 17.0
+    assert "sse_read_timeout" not in captured
     assert callable(captured["httpx_client_factory"])
 
     await client.close()
@@ -246,6 +246,7 @@ async def test_real_sdk_uses_advertised_endpoint_and_correlates_responses(
     _install_sse_server(monkeypatch, server)
     config = _config()
     config.url = "https://example.test/legacy/sse"
+    config.message_endpoint = "/ignored-legacy-endpoint"
     client = MCPSSEClient(config)
 
     async with asyncio.timeout(3):
@@ -272,6 +273,38 @@ async def test_real_sdk_uses_advertised_endpoint_and_correlates_responses(
     assert server.stream.reader_stopped
     assert client._session is None
     assert client._stack is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_timeout", [30.0, 600.0])
+async def test_real_sdk_separates_stream_idle_timeout_from_tool_timeout(
+    monkeypatch: pytest.MonkeyPatch, tool_timeout: float
+) -> None:
+    server = _SSEServer("/messages")
+    _install_sse_server(monkeypatch, server)
+    config = _config()
+    config.tool_timeout_seconds = tool_timeout
+    client = MCPSSEClient(config)
+
+    async with asyncio.timeout(3):
+        try:
+            await client.connect()
+            assert len(await client.list_tools()) == 2
+            # Inspect the real SDK's HTTP request, not a fake transport's kwargs.
+            stream_request = server.requests[0]
+            assert stream_request.method == "GET"
+            assert stream_request.extensions["timeout"] == {
+                "connect": tool_timeout,
+                "read": 300.0,
+                "write": tool_timeout,
+                "pool": tool_timeout,
+            }
+            assert not server.stream.closed
+        finally:
+            await client.close()
+
+    assert server.stream.closed
+    assert server.stream.reader_stopped
 
 
 @pytest.mark.asyncio
