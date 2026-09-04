@@ -69,11 +69,17 @@ USER_AGENT = "senior-unilp-manager/1.0"
 class RpcError(RuntimeError):
     """A JSON-RPC error response. ``data`` carries the revert blob when present."""
 
-    def __init__(self, method: str, error: dict) -> None:
-        super().__init__(f"{method}: {error.get('message', error)}")
-        self.code = error.get("code")
-        self.data = error.get("data")
-        self.raw = error
+    def __init__(self, method: str, error: dict | str) -> None:
+        if isinstance(error, dict):
+            super().__init__(f"{method}: {error.get('message', error)}")
+            self.code = error.get("code")
+            self.data = error.get("data")
+            self.raw = error
+        else:
+            super().__init__(f"{method}: {error}")
+            self.code = None
+            self.data = None
+            self.raw = error
 
 
 class RpcClient:
