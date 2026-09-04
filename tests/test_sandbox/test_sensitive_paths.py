@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from agentos.sandbox.sensitive_paths import (
     _is_root_target,
     is_sensitive_path,
@@ -239,3 +241,34 @@ def test_root_target_detection_covers_windows_drive_roots() -> None:
         "relative/path",
     ):
         assert _is_root_target(target) is False, target
+
+
+@pytest.mark.parametrize(
+    "command,expected",
+    [
+        # ~-form already worked; env-var forms were bypasses
+        ("cat ~/.ssh/config", "~/.ssh"),
+        ("cat $HOME/.ssh/config", "~/.ssh"),
+        ("cat ${HOME}/.ssh/config", "~/.ssh"),
+        ("cp $HOME/.aws/credentials /tmp/leak.txt", "~/.aws"),
+        ("cat $HOME/.kube/config", "~/.kube"),
+        ("cat $HOME/.gnupg/secring.gpg", "~/.gnupg"),
+        ("cat ${HOME}/.azure/az.json", "~/.azure"),
+        ("rm $HOME/.ssh", "~/.ssh"),
+        ("rm -rf $HOME/.aws", "~/.aws"),
+        ("cat $HOME/.ssh/id_rsa", "~/.ssh"),
+        # Non-sensitive (no env-var, no sensitive path)
+        ("echo hello", None),
+        ("ls /tmp", None),
+    ],
+)
+def test_env_var_forms_are_caught_by_sensitive_path_in_text(
+    command: str, expected: str | None
+) -> None:
+    """$HOME/.ssh/config bypassed the denylist before env-var expansion."""
+    marker = sensitive_path_in_text(command)
+    if expected is None:
+        assert marker is None, f"expected None got {marker!r}"
+    else:
+        assert marker is not None, f"expected {expected!r} got None"
+        assert marker.startswith(expected), f"{marker!r} does not start with {expected!r}"

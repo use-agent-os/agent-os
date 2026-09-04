@@ -285,16 +285,19 @@ def sensitive_path_marker(
     """
 
     text = str(path).strip()
-    raw = Path(text).expanduser()
+    # Expand $HOME, ${HOME}, $USER etc. so env-var forms are caught
+    # by _SENSITIVE_PREFIXES (e.g. $HOME/.ssh -> expanded home path).
+    expanded = os.path.expandvars(text)
+    raw = Path(expanded).expanduser()
     if (
-        text
-        and not text.startswith("~")
+        expanded
+        and not expanded.startswith("~")
         and not raw.is_absolute()
-        and not _looks_like_rooted_path_text(text)
+        and not _looks_like_rooted_path_text(expanded)
     ):
-        return _sensitive_leaf_marker(text)
+        return _sensitive_leaf_marker(expanded)
 
-    marker = is_sensitive_path(path)
+    marker = is_sensitive_path(expanded)
     if marker is None:
         return None
     if _workspace_contains(path, workspace) and _workspace_nested_under_marker(
@@ -341,7 +344,10 @@ def sensitive_path_in_text(
     for raw in candidates:
         if "://" in raw:
             continue
-        candidate = raw.strip(_TOKEN_EDGE_CHARS)
+        # Expand env vars BEFORE stripping edge chars — $HOME→expanded path
+        # so the dollar sign is not lost when _TOKEN_EDGE_CHARS strips it.
+        raw_expanded = os.path.expandvars(raw)
+        candidate = raw_expanded.strip(_TOKEN_EDGE_CHARS)
         if not candidate:
             continue
         marker = sensitive_path_marker(candidate, workspace=workspace)
@@ -349,7 +355,9 @@ def sensitive_path_in_text(
             return marker
 
     for raw, start in with_context:
-        candidate = raw.strip(_TOKEN_EDGE_CHARS)
+        # Expand env vars BEFORE stripping edge chars
+        raw_expanded = os.path.expandvars(raw)
+        candidate = raw_expanded.strip(_TOKEN_EDGE_CHARS)
         if not candidate or candidate.startswith("//") or "://" in candidate:
             continue
         if start >= 2 and text[max(0, start - 3) : start] == "://":
