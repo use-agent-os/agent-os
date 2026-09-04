@@ -187,7 +187,7 @@ async def execute_with_timeout(job: CronJob, handler: HandlerFn) -> JobExecution
     return execution
 
 
-def _next_run(job: CronJob, after: datetime) -> datetime:
+def _next_run(job: CronJob, after: datetime, *, apply_jitter: bool = False) -> datetime:
     """Compute the next execution time for a recurring job after *after*.
 
     When ``job.tz`` is a valid IANA name, cron field matching evaluates the
@@ -197,6 +197,12 @@ def _next_run(job: CronJob, after: datetime) -> datetime:
     EVERY+interval schedules align to ``job.anchor_at`` when set:
     next_run = anchor + ceil((after-anchor)/interval) * interval. This keeps
     fire times stable across restarts and slow ticks.
+
+    ``apply_jitter`` must be ``True`` only on the **initial** scheduling call
+    (i.e. ``ops.add``).  Post-execution rescheduling passes the default
+    ``False`` so that ``job.jitter_seconds`` is not baked into ``next_run_at``
+    on every successful run, which would otherwise cause the schedule to drift
+    forward by one jitter window per execution.
     """
     if job.schedule_kind == ScheduleKind.EVERY and job.cron_expr.isdigit():
         interval_seconds = int(job.cron_expr)
@@ -220,7 +226,8 @@ def _next_run(job: CronJob, after: datetime) -> datetime:
     for _ in range(2_102_400):
         wall = candidate.astimezone(tz) if tz is not None else candidate
         if expr.matches(wall):
-            return candidate + timedelta(seconds=job.jitter_seconds)
+            jitter = job.jitter_seconds if apply_jitter else 0.0
+            return candidate + timedelta(seconds=jitter)
         candidate += timedelta(minutes=1)
     raise ValueError(f"No valid next run found for expression '{job.cron_expr}'")
 

@@ -329,8 +329,11 @@ class SchedulerOps:
             job.anchor_at = now
             job.next_run_at = now + timedelta(seconds=int(cron_expr))
         else:
-            # CRON or EVERY with cron expression: scan forward
-            job.next_run_at = _next_run(job, now)
+            # CRON or EVERY with cron expression: scan forward.
+            # apply_jitter=True so the stagger offset is baked into the very
+            # first next_run_at only; post-execution reschedules use the
+            # default apply_jitter=False to avoid cumulative drift.
+            job.next_run_at = _next_run(job, now, apply_jitter=True)
 
         _resolve_script_placeholder(job)
         await self._store.save(job)
