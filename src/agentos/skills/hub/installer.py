@@ -299,7 +299,7 @@ class SkillInstaller:
                 )
                 continue
             old_sha = entry.sha256
-            result = await self.install(entry.identifier, entry.source, force=True)
+            result = await self.install(entry.identifier, entry.source, force=False)
             if result.success:
                 if old_sha and result.sha256 == old_sha:
                     result.message = f"'{result.name}' is already up to date"

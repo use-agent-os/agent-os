@@ -624,9 +624,18 @@ async def _handle_skills_update(params: dict | None, ctx: RpcContext) -> dict[st
         }
     if any(r.success for r in results):
         _invalidate_loader(ctx)
-    return {
-        "results": [{"success": r.success, "name": r.name, "message": r.message} for r in results]
-    }
+    result_list = []
+    for r in results:
+        item: dict[str, Any] = {
+            "success": r.success,
+            "name": r.name,
+            "message": r.message,
+        }
+        if r.scan:
+            item["scan_verdict"] = r.scan.verdict
+            item["scan_findings"] = [finding.__dict__ for finding in r.scan.findings]
+        result_list.append(item)
+    return {"results": result_list}
 
 
 @_d.method("skills.uninstall")
