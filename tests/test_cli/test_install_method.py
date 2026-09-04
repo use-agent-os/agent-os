@@ -146,6 +146,45 @@ def test_hardened_path_no_duplicates() -> None:
     assert parts.count("/opt/homebrew/bin") == 1
 
 
+def test_hardened_path_windows_case_insensitivity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Windows environment dicts with 'Path' or 'path' must preserve existing entries."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(os, "pathsep", ";")
+    env = {"Path": f"C:\\Program Files\\uv\\bin{os.pathsep}C:\\Windows\\System32"}
+    out = im.hardened_path_env(env)
+    assert "Path" not in out
+    assert "PATH" in out
+    parts = out["PATH"].split(os.pathsep)
+    assert "C:\\Program Files\\uv\\bin" in parts
+    assert "C:\\Windows\\System32" in parts
+
+
+def test_hardened_path_windows_merges_mixed_case_duplicates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When both 'Path' and 'PATH' are present, merge and deduplicate into 'PATH'."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(os, "pathsep", ";")
+    env = {"Path": "C:\\uv\\bin", "PATH": "C:\\Windows\\System32"}
+    out = im.hardened_path_env(env)
+    assert "Path" not in out
+    assert "PATH" in out
+    parts = out["PATH"].split(os.pathsep)
+    assert "C:\\uv\\bin" in parts
+    assert "C:\\Windows\\System32" in parts
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-specific Path resolution")
+def test_resolve_tool_finds_tool_with_windows_path_casing(tmp_path: Path) -> None:
+    """resolve_tool must locate tools even when the input environment uses 'Path'."""
+    uv_dir = tmp_path / "custom_tool_dir"
+    uv_dir.mkdir()
+    tool_file = uv_dir / "fake_uv.exe"
+    tool_file.write_text("")
+    resolved = im.resolve_tool("fake_uv", {"Path": str(uv_dir)})
+    assert resolved == str(tool_file.resolve())
+
+
 @pytest.mark.skipif(
     sys.platform == "win32",
     reason="hardened login-dir PATH semantics are POSIX-specific; "

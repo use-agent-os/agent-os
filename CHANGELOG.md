@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `hardened_path_env` performs case-insensitive `PATH` resolution on Windows,
+  preserving existing directories when passed as `Path` or `path` and preventing
+  duplicate conflicting environment keys.
+
 ## [2026.9.4] - 2026-09-04
 
 ### Fixed

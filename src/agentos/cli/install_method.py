@@ -260,10 +260,25 @@ def hardened_path_env(base_env: dict[str, str] | None = None) -> dict[str, str]:
     """
 
     env = dict(base_env if base_env is not None else os.environ)
-    current = env.get("PATH", "")
+
+    # On Windows, environment variable names are case-insensitive. If base_env
+    # had "Path" or "path", resolve it to avoid duplicate keys and preserve
+    # the operator's existing PATH entries.
+    existing_paths: list[str] = []
+    keys_to_remove: list[str] = []
+    for k, v in env.items():
+        if (sys.platform == "win32" and k.upper() == "PATH") or k == "PATH":
+            if v:
+                existing_paths.append(v)
+            if k != "PATH":
+                keys_to_remove.append(k)
+    for k in keys_to_remove:
+        del env[k]
+
+    current = os.pathsep.join(existing_paths)
     entries = [p for p in current.split(os.pathsep) if p]
     seen = set(entries)
-    home = env.get("HOME") or str(Path.home())
+    home = env.get("HOME") or env.get("USERPROFILE") or str(Path.home())
     login_dirs = list(_LOGIN_PATH_DIRS) + [str(Path(home) / ".local" / "bin")]
     for extra in login_dirs:
         if extra not in seen:
