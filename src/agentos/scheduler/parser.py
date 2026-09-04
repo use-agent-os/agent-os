@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -122,6 +123,11 @@ def _parse_field(token: str, field_name: str, names: dict[str, int] | None = Non
             # separators are unaffected by lower().
             part = part.lower()
             sub_parts = part.replace("/", "§").replace("-", "¶")
+            if field_name == "day_of_week":
+                # In day-of-week ranges, Sunday as the upper bound (e.g. SAT-SUN,
+                # WED-SUN, MON-SUN) represents 7 (hi) rather than 0 (lo),
+                # so the range does not invert into start > 0 and reject.
+                sub_parts = re.sub(r"¶sun\b", "¶7", sub_parts)
             for name, val in names.items():
                 sub_parts = sub_parts.replace(name, str(val))
             part = sub_parts.replace("§", "/").replace("¶", "-")
@@ -201,9 +207,7 @@ def parse_iso_at(raw: str) -> datetime:
     except ValueError as exc:
         raise CronParseError(f"Invalid ISO-8601 timestamp: {raw!r}") from exc
     if dt.tzinfo is None or dt.utcoffset() is None:
-        raise CronParseError(
-            f"ISO-8601 timestamp must include a timezone offset: {raw!r}"
-        )
+        raise CronParseError(f"ISO-8601 timestamp must include a timezone offset: {raw!r}")
     return dt
 
 

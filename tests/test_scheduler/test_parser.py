@@ -65,6 +65,17 @@ def test_parse_cron_dow_ranges_may_end_at_7() -> None:
     assert expr.day_of_week.values == frozenset({0, 3, 4, 5, 6})
 
 
+def test_parse_cron_dow_ranges_ending_in_named_sunday() -> None:
+    # Sunday at the end of a named day-of-week range represents 7 (POSIX),
+    # resolving into the full range without inverting into start > 0.
+    assert parse_cron("0 0 * * WED-SUN").day_of_week.values == frozenset({0, 3, 4, 5, 6})
+    assert parse_cron("0 0 * * SAT-SUN").day_of_week.values == frozenset({0, 6})
+    assert parse_cron("0 0 * * Sat-Sun").day_of_week.values == frozenset({0, 6})
+    assert parse_cron("0 0 * * MON-SUN").day_of_week.values == frozenset({0, 1, 2, 3, 4, 5, 6})
+    assert parse_cron("0 0 * * FRI-SUN/2").day_of_week.values == frozenset({0, 5})
+    assert parse_cron("0 0 * * SUN-SUN").day_of_week.values == frozenset({0, 1, 2, 3, 4, 5, 6})
+
+
 def test_parse_cron_dow_7_dedups_with_0_and_names() -> None:
     assert parse_cron("0 0 * * 0,7").day_of_week.values == frozenset({0})
     assert parse_cron("0 0 * * MON,7").day_of_week.values == frozenset({0, 1})
