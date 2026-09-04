@@ -77,14 +77,14 @@ class DuckDuckGoProvider:
                 continue
 
             # Clean DDG redirect URLs
-            if "//duckduckgo.com/l/?uddg=" in href:
-                href = urllib.parse.unquote(href.split("uddg=")[1].split("&")[0])
-
-            snippet_elem = elem.select_one(".result__snippet")
-            snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
+            if "/l/?uddg=" in href:
+                uddg = href.split("uddg=", 1)[1]
+                if "&" in uddg:
+                    uddg = uddg.split("&")[0]
+                href = urllib.parse.unquote(uddg)
 
             results.append(
-                SearchResult(title=title, url=href, snippet=snippet, source="duckduckgo")
+                SearchResult(title=title, url=href, snippet="", source="duckduckgo")
             )
             if len(results) >= max_results:
                 break
