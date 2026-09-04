@@ -299,9 +299,16 @@ class SkillInstaller:
                 )
                 continue
             old_sha = entry.sha256
-            result = await self.install(entry.identifier, entry.source, force=True)
+            # Update must NOT force=True — that would bypass the security scan
+            # verdict, allowing a compromised upstream to push dangerous content
+            # through 'skills update'. The scan verdict is honored here; the
+            # operator can still override with 'skills install --force'.
+            result = await self.install(entry.identifier, entry.source, force=False)
             if result.success:
-                if old_sha and result.sha256 == old_sha:
+                if result.scan and result.scan.verdict == "dangerous":
+                    # Scan rejected the update; surface findings.
+                    pass
+                elif old_sha and result.sha256 == old_sha:
                     result.message = f"'{result.name}' is already up to date"
                 else:
                     result.message = f"Updated '{result.name}' to the latest version"
