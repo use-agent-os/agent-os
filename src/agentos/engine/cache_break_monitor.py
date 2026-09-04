@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -151,11 +152,18 @@ class _CacheBaseline:
 class CacheBreakMonitor:
     """Track cache-read drops and attribute them to prompt-state changes."""
 
-    def __init__(self, *, min_drop_tokens: int = 2000, min_drop_ratio: float = 0.05) -> None:
-        self._baselines: dict[str, _CacheBaseline] = {}
+    def __init__(
+        self,
+        *,
+        min_drop_tokens: int = 2000,
+        min_drop_ratio: float = 0.05,
+        max_baselines: int = 2000,
+    ) -> None:
+        self._baselines: OrderedDict[str, _CacheBaseline] = OrderedDict()
         self._reset_pending: set[str] = set()
         self._min_drop_tokens = max(0, int(min_drop_tokens))
         self._min_drop_ratio = max(0.0, float(min_drop_ratio))
+        self._max_baselines = max(1, int(max_baselines))
 
     def record_prompt_state(
         self,
@@ -197,6 +205,10 @@ class CacheBreakMonitor:
         previous = self._baselines.get(session_key)
         reset_pending = session_key in self._reset_pending
         self._baselines[session_key] = _CacheBaseline(snapshot, current_tokens)
+        self._baselines.move_to_end(session_key)
+        while len(self._baselines) > self._max_baselines:
+            evicted_session, _ = self._baselines.popitem(last=False)
+            self._reset_pending.discard(evicted_session)
         if reset_pending:
             self._reset_pending.discard(session_key)
             return CacheBreakReport(
@@ -234,7 +246,13 @@ class CacheBreakMonitor:
 
     def notify_compaction(self, session_key: str) -> None:
         """Treat the next provider response for this session as a new baseline."""
-        self._reset_pending.add(session_key)
+        if session_key in self._baselines:
+            self._reset_pending.add(session_key)
+
+    def purge_session(self, session_key: str) -> None:
+        """Discard all cache-break state for one session."""
+        self._baselines.pop(session_key, None)
+        self._reset_pending.discard(session_key)
 
     def clear(self) -> None:
         self._baselines.clear()

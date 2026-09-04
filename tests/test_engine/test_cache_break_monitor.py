@@ -13,6 +13,15 @@ def _tool(name: str) -> ToolDefinition:
     )
 
 
+def _snapshot(monitor: CacheBreakMonitor, system: str = "stable system"):
+    return monitor.record_prompt_state(
+        messages=[Message(role="user", content="old"), Message(role="user", content="now")],
+        tools=None,
+        config=ChatConfig(system=system),
+        model="model-a",
+    )
+
+
 def test_cache_break_monitor_initializes_then_detects_attributed_drop() -> None:
     monitor = CacheBreakMonitor(min_drop_tokens=10, min_drop_ratio=0.05)
     first = monitor.record_prompt_state(
@@ -125,6 +134,63 @@ def test_cache_break_monitor_resets_baseline_after_compaction() -> None:
     assert report.break_detected is False
     assert report.reason == "baseline_reset_after_compaction"
     assert report.baseline_reset is True
+
+
+def test_cache_break_monitor_evicts_the_least_recently_updated_baseline() -> None:
+    monitor = CacheBreakMonitor(max_baselines=2)
+    snapshot = _snapshot(monitor)
+
+    monitor.check_response_for_cache_break("first", snapshot, 100)
+    monitor.check_response_for_cache_break("second", snapshot, 100)
+    assert len(monitor._baselines) == 2
+
+    monitor.check_response_for_cache_break("first", snapshot, 90)
+    monitor.check_response_for_cache_break("third", snapshot, 100)
+
+    assert list(monitor._baselines) == ["first", "third"]
+
+
+def test_cache_break_monitor_eviction_removes_pending_reset_marker() -> None:
+    monitor = CacheBreakMonitor(max_baselines=2)
+    snapshot = _snapshot(monitor)
+    monitor.check_response_for_cache_break("first", snapshot, 100)
+    monitor.check_response_for_cache_break("second", snapshot, 100)
+    monitor.notify_compaction("first")
+
+    monitor.check_response_for_cache_break("third", snapshot, 100)
+
+    assert "first" not in monitor._baselines
+    assert "first" not in monitor._reset_pending
+
+
+def test_cache_break_monitor_ignores_compaction_for_unknown_session() -> None:
+    monitor = CacheBreakMonitor(max_baselines=2)
+
+    for index in range(10):
+        monitor.notify_compaction(f"unknown-{index}")
+
+    assert monitor._reset_pending == set()
+
+
+def test_cache_break_monitor_purge_session_removes_baseline_and_marker() -> None:
+    monitor = CacheBreakMonitor()
+    monitor.check_response_for_cache_break("session", _snapshot(monitor), 100)
+    monitor.notify_compaction("session")
+
+    monitor.purge_session("session")
+
+    assert "session" not in monitor._baselines
+    assert "session" not in monitor._reset_pending
+
+
+def test_cache_break_monitor_normalizes_non_positive_capacity() -> None:
+    monitor = CacheBreakMonitor(max_baselines=0)
+    snapshot = _snapshot(monitor)
+
+    monitor.check_response_for_cache_break("first", snapshot, 100)
+    monitor.check_response_for_cache_break("second", snapshot, 100)
+
+    assert list(monitor._baselines) == ["second"]
 
 
 def test_notify_compaction_notifies_registered_listeners() -> None:
