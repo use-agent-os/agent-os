@@ -115,7 +115,19 @@ async def publish_skill(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await proc.wait()
+        stdout, stderr = await proc.communicate()
+
+        if proc.returncode != 0:
+            error_msg = (
+                stderr.decode().strip()
+                if stderr
+                else f"gh exited with code {proc.returncode}"
+            )
+            return PublishResult(
+                success=False,
+                message=f"Fork failed: {error_msg}",
+                skill_name=skill_name,
+            )
 
         log.info("publish.fork_created", repo=target_repo, skill=skill_name)
         return PublishResult(
