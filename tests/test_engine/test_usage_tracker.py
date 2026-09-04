@@ -10,7 +10,7 @@ from agentos.engine.pricing import (
     reset_live_price_cache_for_tests,
     seed_opencap_price_cache,
 )
-from agentos.engine.usage import ModelUsage, SessionUsage, UsageTracker
+from agentos.engine.usage import ModelUsage, SessionUsage, UsageTracker, usage_scope
 
 
 @pytest.fixture(autouse=True)
@@ -186,6 +186,61 @@ def test_usage_tracker_isolates_sessions() -> None:
     assert a.cache_write_tokens == 5
     assert b.cache_read_tokens == 70
     assert b.cache_write_tokens == 15
+
+
+def test_usage_scope_cache_evicts_the_least_recently_updated_entry() -> None:
+    tracker = UsageTracker(max_scope_entries=2)
+
+    with usage_scope("first"):
+        tracker.add("session-a", 1, 0)
+    with usage_scope("second"):
+        tracker.add("session-a", 1, 0)
+
+    assert len(tracker._scopes) == 2
+
+    with usage_scope("first"):
+        tracker.add("session-a", 1, 0)
+    with usage_scope("third"):
+        tracker.add("session-a", 1, 0)
+
+    first = tracker.get_scope("session-a", "first")
+    total = tracker.get("session-a")
+    assert first is not None
+    assert first.input_tokens == 2
+    assert tracker.get_scope("session-a", "second") is None
+    assert tracker.get_scope("session-a", "third") is not None
+    assert len(tracker._scopes) == 2
+    assert total is not None
+    assert total.input_tokens == 4
+
+
+def test_usage_scope_cache_reads_refresh_recency() -> None:
+    tracker = UsageTracker(max_scope_entries=2)
+
+    with usage_scope("first"):
+        tracker.add("session-a", 1, 0)
+    with usage_scope("second"):
+        tracker.add("session-a", 1, 0)
+
+    assert tracker.get_scope("session-a", "first") is not None
+
+    with usage_scope("third"):
+        tracker.add("session-a", 1, 0)
+
+    assert tracker.get_scope("session-a", "first") is not None
+    assert tracker.get_scope("session-a", "second") is None
+    assert tracker.get_scope("session-a", "third") is not None
+
+
+def test_usage_scope_cache_normalizes_non_positive_capacity() -> None:
+    tracker = UsageTracker(max_scope_entries=0)
+
+    with usage_scope("first"):
+        tracker.add("session-a", 1, 0)
+    with usage_scope("second"):
+        tracker.add("session-a", 1, 0)
+
+    assert list(tracker._scopes) == [("session-a", "second")]
 
 
 # ---------------------------------------------------------------------------

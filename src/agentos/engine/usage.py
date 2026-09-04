@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -377,6 +378,7 @@ class UsageTracker:
         db_path: str | None = None,
         *,
         ledger_db_path: str | None = None,
+        max_scope_entries: int = 2000,
     ) -> None:
         """
         ``db_path`` backs the detailed ``usage_records`` history.
@@ -391,7 +393,8 @@ class UsageTracker:
         """
         global _global_usage_tracker
         self._sessions: dict[str, SessionUsage] = {}
-        self._scopes: dict[tuple[str, str], SessionUsage] = {}
+        self._scopes: OrderedDict[tuple[str, str], SessionUsage] = OrderedDict()
+        self._max_scope_entries = max(1, int(max_scope_entries))
         self._default_provider_id = str(default_provider_id or "").strip().lower()
         self._db_path = db_path
         self._ledger_db_path = ledger_db_path
@@ -728,10 +731,11 @@ class UsageTracker:
             usage.model_id = model_id
         scope_key = _current_usage_scope.get()
         if scope_key:
-            scoped = self._scopes.get((session_key, scope_key))
+            cache_key = (session_key, scope_key)
+            scoped = self._scopes.get(cache_key)
             if scoped is None:
                 scoped = SessionUsage(model_id=model_id, provider_id=effective_provider_id)
-                self._scopes[(session_key, scope_key)] = scoped
+                self._scopes[cache_key] = scoped
             scoped.add(
                 input_tokens,
                 output_tokens,
@@ -743,6 +747,9 @@ class UsageTracker:
             )
             if model_id:
                 scoped.model_id = model_id
+            self._scopes.move_to_end(cache_key)
+            while len(self._scopes) > self._max_scope_entries:
+                self._scopes.popitem(last=False)
 
         # Calculate incremental cost
         price = lookup_price(model_id, provider_id=effective_provider_id)
@@ -877,7 +884,11 @@ class UsageTracker:
 
     def get_scope(self, session_key: str, scope_key: str) -> SessionUsage | None:
         """Return accumulated usage for a session within one attribution scope."""
-        return self._scopes.get((session_key, scope_key))
+        cache_key = (session_key, scope_key)
+        usage = self._scopes.get(cache_key)
+        if usage is not None:
+            self._scopes.move_to_end(cache_key)
+        return usage
 
     def session_snapshot(self, session_key: str) -> SessionTotalsSnapshot | None:
         """Return the current SessionTotalsSnapshot for *session_key*, or None if unknown."""
