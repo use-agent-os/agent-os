@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import glob
 import os
 import stat
 import sys
@@ -69,3 +70,25 @@ def test_code_exec_workspace_exception_keeps_leaf_secret_blocks(
 
     assert result is not None
     assert result[0] == "sensitive_path"
+
+
+@pytest.mark.asyncio
+async def test_code_exec_cleans_up_tempdir_on_sandbox_denial() -> None:
+    """Regression test for #1010: tempdir leaks on denied sandbox calls.
+
+    When no workspace_dir is set and runtime is None, execute_code creates a
+    tempdir via mkdtemp but immediately enters the sandbox block where
+    gate_action returns DenialResult (no runtime configured). The outer
+    try/finally must clean up that tempdir even on the early return.
+    """
+    from agentos.tools.builtin.code_exec import execute_code
+
+    before = set(glob.glob("/tmp/agentos_exec_*"))
+    try:
+        result = await execute_code("print('hello')")
+        assert "denied" in result or "denial" in result
+    finally:
+        after = set(glob.glob("/tmp/agentos_exec_*"))
+    assert after == before, (
+        f"Tempdirs leaked: {after - before}"
+    )

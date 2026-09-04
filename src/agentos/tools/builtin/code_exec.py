@@ -563,78 +563,32 @@ async def execute_code(
         workdir = tempfile.mkdtemp(prefix="agentos_exec_")
         workdir_path = Path(workdir)
         cleanup_dir = workdir
-    start_ns = time.monotonic_ns()
+    try:
+        start_ns = time.monotonic_ns()
 
-    safe_env = _build_safe_env()
+        safe_env = _build_safe_env()
 
-    from agentos.tools.builtin.shell import _elevated_mode
+        from agentos.tools.builtin.shell import _elevated_mode
 
-    elevated_bypass = _elevated_mode() in ("on", "bypass", "full")
-    if runtime is None or (runtime.effective.sandbox_enabled and not elevated_bypass):
-        decision, _policy, request = await gate_action(
-            action_kind="code.exec",
-            argv=(python_bin, "-c", code),
-            cwd=workdir_path,
-            env=safe_env,
-        )
-        if isinstance(decision, DenialResult):
-            return json.dumps(decision.to_dict())
-        backend_request = SandboxRequest(
-            argv=(python_bin, "-c", code),
-            cwd=request.cwd,
-            action_kind=request.action_kind,
-            policy=request.policy,
-            env=safe_env,
-        )
-        try:
-            sandbox_result = await run_under_backend(backend_request, runtime=runtime)
-        except Exception as exc:
-            return _execution_result_json(
-                returncode=-1,
-                stdout="",
-                stderr=f"Execution error: {exc}",
-                timed_out=False,
-                elapsed_ms=0,
+        elevated_bypass = _elevated_mode() in ("on", "bypass", "full")
+        if runtime is None or (runtime.effective.sandbox_enabled and not elevated_bypass):
+            decision, _policy, request = await gate_action(
+                action_kind="code.exec",
+                argv=(python_bin, "-c", code),
+                cwd=workdir_path,
+                env=safe_env,
             )
-        if sandbox_result.backend_notes:
-            escalation = await escalate_backend_denial(
-                sandbox_result, request, _policy, runtime=runtime
+            if isinstance(decision, DenialResult):
+                return json.dumps(decision.to_dict())
+            backend_request = SandboxRequest(
+                argv=(python_bin, "-c", code),
+                cwd=request.cwd,
+                action_kind=request.action_kind,
+                policy=request.policy,
+                env=safe_env,
             )
-            if isinstance(escalation, DenialResult):
-                return json.dumps(escalation.to_dict())
             try:
-                proc = await asyncio.create_subprocess_exec(
-                    python_bin,
-                    "-c",
-                    code,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=str(workdir_path),
-                    env=safe_env,
-                )
-                try:
-                    stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                        proc.communicate(), timeout=timeout
-                    )
-                except TimeoutError:
-                    proc.kill()
-                    await proc.communicate()
-                    elapsed_ms = (time.monotonic_ns() - start_ns) // 1_000_000
-                    return _execution_result_json(
-                        returncode=-1,
-                        stdout="",
-                        stderr=f"Execution timed out after {timeout}s",
-                        timed_out=True,
-                        elapsed_ms=elapsed_ms,
-                    )
-                elapsed_ms = (time.monotonic_ns() - start_ns) // 1_000_000
-                return _execution_result_json(
-                    returncode=proc.returncode if proc.returncode is not None else -1,
-                    stdout=stdout_bytes.decode("utf-8", errors="replace"),
-                    stderr=stderr_bytes.decode("utf-8", errors="replace"),
-                    timed_out=False,
-                    elapsed_ms=elapsed_ms,
-                )
+                sandbox_result = await run_under_backend(backend_request, runtime=runtime)
             except Exception as exc:
                 return _execution_result_json(
                     returncode=-1,
@@ -643,61 +597,110 @@ async def execute_code(
                     timed_out=False,
                     elapsed_ms=0,
                 )
-        elapsed_ms = (time.monotonic_ns() - start_ns) // 1_000_000
-        stdout = sandbox_result.stdout
-        stderr = sandbox_result.stderr
-        stderr = _append_code_exec_sandbox_network_hint(stdout=stdout, stderr=stderr)
-        return _execution_result_json(
-            returncode=sandbox_result.returncode,
-            stdout=stdout,
-            stderr=stderr,
-            timed_out=sandbox_result.timed_out,
-            elapsed_ms=elapsed_ms,
-        )
-
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            python_bin,
-            "-c",
-            code,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(workdir_path),
-            env=safe_env,
-        )
-        try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except TimeoutError:
-            proc.kill()
-            await proc.communicate()
+            if sandbox_result.backend_notes:
+                escalation = await escalate_backend_denial(
+                    sandbox_result, request, _policy, runtime=runtime
+                )
+                if isinstance(escalation, DenialResult):
+                    return json.dumps(escalation.to_dict())
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        python_bin,
+                        "-c",
+                        code,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        cwd=str(workdir_path),
+                        env=safe_env,
+                    )
+                    try:
+                        stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                            proc.communicate(), timeout=timeout
+                        )
+                    except TimeoutError:
+                        proc.kill()
+                        await proc.communicate()
+                        elapsed_ms = (time.monotonic_ns() - start_ns) // 1_000_000
+                        return _execution_result_json(
+                            returncode=-1,
+                            stdout="",
+                            stderr=f"Execution timed out after {timeout}s",
+                            timed_out=True,
+                            elapsed_ms=elapsed_ms,
+                        )
+                    elapsed_ms = (time.monotonic_ns() - start_ns) // 1_000_000
+                    return _execution_result_json(
+                        returncode=proc.returncode if proc.returncode is not None else -1,
+                        stdout=stdout_bytes.decode("utf-8", errors="replace"),
+                        stderr=stderr_bytes.decode("utf-8", errors="replace"),
+                        timed_out=False,
+                        elapsed_ms=elapsed_ms,
+                    )
+                except Exception as exc:
+                    return _execution_result_json(
+                        returncode=-1,
+                        stdout="",
+                        stderr=f"Execution error: {exc}",
+                        timed_out=False,
+                        elapsed_ms=0,
+                    )
             elapsed_ms = (time.monotonic_ns() - start_ns) // 1_000_000
+            stdout = sandbox_result.stdout
+            stderr = sandbox_result.stderr
+            stderr = _append_code_exec_sandbox_network_hint(stdout=stdout, stderr=stderr)
             return _execution_result_json(
-                returncode=-1,
-                stdout="",
-                stderr=f"Execution timed out after {timeout}s",
-                timed_out=True,
+                returncode=sandbox_result.returncode,
+                stdout=stdout,
+                stderr=stderr,
+                timed_out=sandbox_result.timed_out,
                 elapsed_ms=elapsed_ms,
             )
 
-        elapsed_ms = (time.monotonic_ns() - start_ns) // 1_000_000
-        stdout = stdout_bytes.decode("utf-8", errors="replace")
-        stderr = stderr_bytes.decode("utf-8", errors="replace")
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                python_bin,
+                "-c",
+                code,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(workdir_path),
+                env=safe_env,
+            )
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    proc.communicate(), timeout=timeout
+                )
+            except TimeoutError:
+                proc.kill()
+                await proc.communicate()
+                elapsed_ms = (time.monotonic_ns() - start_ns) // 1_000_000
+                return _execution_result_json(
+                    returncode=-1,
+                    stdout="",
+                    stderr=f"Execution timed out after {timeout}s",
+                    timed_out=True,
+                    elapsed_ms=elapsed_ms,
+                )
 
-        return _execution_result_json(
-            returncode=proc.returncode if proc.returncode is not None else -1,
-            stdout=stdout,
-            stderr=stderr,
-            timed_out=False,
-            elapsed_ms=elapsed_ms,
-        )
-    except Exception as exc:
-        return _execution_result_json(
-            returncode=-1,
-            stdout="",
-            stderr=f"Execution error: {exc}",
-            timed_out=False,
-            elapsed_ms=0,
-        )
+            elapsed_ms = (time.monotonic_ns() - start_ns) // 1_000_000
+            stdout = stdout_bytes.decode("utf-8", errors="replace")
+            stderr = stderr_bytes.decode("utf-8", errors="replace")
+
+            return _execution_result_json(
+                returncode=proc.returncode if proc.returncode is not None else -1,
+                stdout=stdout,
+                stderr=stderr,
+                timed_out=False,
+                elapsed_ms=elapsed_ms,
+            )
+        except Exception as exc:
+            return _execution_result_json(
+                returncode=-1,
+                stdout="",
+                stderr=f"Execution error: {exc}",
+                timed_out=False,
+                elapsed_ms=0,
+            )
     finally:
         if cleanup_dir:
             shutil.rmtree(cleanup_dir, ignore_errors=True)
