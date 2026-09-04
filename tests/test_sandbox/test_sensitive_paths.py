@@ -239,3 +239,35 @@ def test_root_target_detection_covers_windows_drive_roots() -> None:
         "relative/path",
     ):
         assert _is_root_target(target) is False, target
+
+
+def test_shell_delete_commands_root_and_sensitive_paths_are_hard_blocked() -> None:
+    workspace = Path("/workspace")
+
+    # Root deletes via rmdir, rd, del, erase, Remove-Item
+    assert sensitive_target_in_command("rmdir /s /q /", workspace=workspace) == "/"
+    assert sensitive_target_in_command("rd /s /q /", workspace=workspace) == "/"
+    assert sensitive_target_in_command("del /f /q /", workspace=workspace) == "/"
+    assert sensitive_target_in_command("erase /f /q /", workspace=workspace) == "/"
+    assert sensitive_target_in_command("Remove-Item -Recurse -Force /", workspace=workspace) == "/"
+    assert (
+        sensitive_target_in_command(
+            "remove-item -path / -force -recurse",
+            workspace=workspace,
+        )
+        == "/"
+    )
+
+    # Sensitive targets
+    assert sensitive_target_in_command("del /f /q ~/.ssh/id_rsa", workspace=workspace) == "~/.ssh"
+    assert sensitive_target_in_command("erase /f /q /etc/shadow", workspace=workspace) == "/etc"
+    assert sensitive_target_in_command("rmdir /s /q /etc", workspace=workspace) == "/etc"
+    assert sensitive_target_in_command("unlink /etc/passwd", workspace=workspace) == "/etc"
+    assert (
+        sensitive_target_in_command(
+            "Remove-Item -Force ~/.ssh/id_rsa",
+            workspace=workspace,
+        )
+        == "~/.ssh"
+    )
+

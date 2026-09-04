@@ -96,3 +96,35 @@ class TestRecordAndCheck:
         cache.clear()
         assert cache.check("rm /a") is False
         assert cache.check("rm /b") is False
+
+
+class TestMultiCommandDeletes:
+    """Intent extraction and caching for rmdir, rd, del, erase, unlink, Remove-Item."""
+
+    def test_rmdir_and_rd_extraction(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record("rmdir /s /q /a/b")
+        assert cache.check("rmdir /s /q /a/b") is True
+        assert cache.check("rd /s /q /a/b") is True
+        assert cache.check("rmdir /s /q /a/c") is False
+
+    def test_del_and_erase_extraction(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record("del /f /q /tmp/file.txt")
+        assert cache.check("del /f /q /tmp/file.txt") is True
+        assert cache.check("erase /f /q /tmp/file.txt") is True
+        assert cache.check("del /f /q /tmp/other.txt") is False
+
+    def test_unlink_extraction(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record("unlink /tmp/socket.sock")
+        assert cache.check("unlink /tmp/socket.sock") is True
+        assert cache.check("unlink /tmp/diff.sock") is False
+
+    def test_powershell_remove_item_extraction(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record("Remove-Item -Path /var/log/app.log -Force")
+        assert cache.check("Remove-Item -Path /var/log/app.log -Force") is True
+        assert cache.check("remove-item /var/log/app.log") is True
+        assert cache.check("Remove-Item -Path /var/log/other.log") is False
+

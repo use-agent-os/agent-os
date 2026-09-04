@@ -54,23 +54,50 @@ _PY_DELETE_PATTERNS: tuple[re.Pattern[str], ...] = (
     ),
 )
 
-# Shell command separators that terminate a single ``rm`` invocation.
+# Shell command separators that terminate a single delete command invocation.
 _SHELL_SEPARATORS = (";", "&&", "||", "|", "&")
+
+_SHELL_DELETE_PATTERNS = re.compile(
+    r"(?i)\b(rm|rmdir|rd|del|erase|unlink|Remove-Item)\b([^;\n&|]*)",
+)
+_CMD_SWITCH_RE = re.compile(
+    r"^/(?:[sqfpa]|a:[a-z-]+)(?:/(?:[sqfpa]|a:[a-z-]+))*$",
+    re.IGNORECASE,
+)
+_POWERSHELL_PARAM_NAMES = frozenset(
+    {
+        "-path",
+        "-literalpath",
+        "-target",
+        "-filter",
+        "-include",
+        "-exclude",
+    }
+)
+_WINDOWS_CMD_NAMES = frozenset({"del", "erase", "rmdir", "rd"})
+
+
+def _is_flag_or_switch(cmd_name: str, token: str) -> bool:
+    """Return True if token is a flag/switch rather than a target path."""
+    if not token or token == "-":
+        return False
+    if token.startswith("-"):
+        return token.lower() not in _POWERSHELL_PARAM_NAMES
+    if cmd_name.lower() in _WINDOWS_CMD_NAMES and _CMD_SWITCH_RE.match(token):
+        return True
+    return False
 
 
 def _extract_rm_targets(command: str) -> list[str]:
-    """Pull every non-flag argument out of every ``rm`` invocation.
+    """Pull every non-flag argument out of every shell delete invocation.
 
-    Handles ``rm a b c``, ``rm -rf /a /b``, quoted paths, and stops at shell
-    separators. Uses ``finditer`` so ``rm foo; rm -rf /bar`` yields targets
+    Handles ``rm a b c``, ``rm -rf /a /b``, ``rmdir /s /q /a``, ``del /f /q /b``,
+    ``Remove-Item -Recurse -Force /c``, ``unlink /d``, quoted paths, and stops at shell
+    separators. Uses ``finditer`` so ``rm foo; del /bar`` yields targets
     from both invocations independently. Does not try to be a full shell
     parser — falls back to whitespace split on shlex errors (unbalanced quotes).
     """
-    # Match each ``rm`` invocation, stopping at shell separators.
-    # ``[^;\n&|]*`` captures everything from ``rm`` up to the next separator
-    # or end-of-expression, so each ``rm`` is tokenized independently.
-    pattern = re.compile(r"\brm\b([^;\n&|]*)")
-    matches = list(pattern.finditer(command))
+    matches = list(_SHELL_DELETE_PATTERNS.finditer(command))
     if not matches:
         return []
 
@@ -78,7 +105,8 @@ def _extract_rm_targets(command: str) -> list[str]:
     seen: set[str] = set()
 
     for match in matches:
-        tail = match.group(1).strip()
+        cmd_name = match.group(1).strip()
+        tail = match.group(2).strip()
         if not tail:
             continue
 
@@ -95,7 +123,7 @@ def _extract_rm_targets(command: str) -> list[str]:
 
         for tokens in token_sets:
             for token in tokens:
-                if not token or token.startswith("-") or token in seen:
+                if not token or _is_flag_or_switch(cmd_name, token) or token in seen:
                     continue
                 seen.add(token)
                 targets.append(token)
