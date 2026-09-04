@@ -52,6 +52,21 @@ _SENSITIVE_PREFIXES: tuple[str, ...] = (
     "/usr/lib/systemd",
 )
 
+# Regex matching shell-style env-var references used to escape sensitive-path
+# scanning (e.g. ``$HOME/.ssh``, ``${HOME}/.ssh``, ``$USER/.config``).
+# Matched references are expanded to their runtime values so the scan can
+# still catch the underlying sensitive path.
+_HOME_VAR_RE = re.compile(r"\$\{?(?P<var>HOME|USER|LOGNAME)}?")
+
+# Common env-var names mapped to their typical shell expansion so the
+# prefix scanner can detect sensitive paths written with unexpanded
+# references instead of literal paths.
+_HOME_VAR_MAP: dict[str, str] = {
+    "HOME": "~",
+    "USER": "/home/",
+    "LOGNAME": "/home/",
+}
+
 # Exact filename tails we never want mutated, regardless of parent directory.
 # Covers cases like moving an id_rsa out of ~/.ssh into /tmp.
 _SENSITIVE_SUFFIXES: tuple[str, ...] = (
@@ -122,6 +137,29 @@ def _comparison_path_candidates(path: str) -> list[str]:
     raw = str(path).strip().replace("\\", "/")
     if raw:
         candidates.append(raw.casefold() if os.name == "nt" else raw)
+
+    # Expand known env-var references (e.g. ``$HOME/.ssh`` → ``~/.ssh``) so the
+    # prefix scanner matches the underlying sensitive path.
+    if "$" in raw:
+        env_match = _HOME_VAR_RE.search(raw)
+        if env_match:
+            var = env_match.group("var")
+            resolved = _HOME_VAR_MAP.get(var, "")
+            if resolved:
+                # Strip trailing slash from resolved prefix before joining to
+                # avoid double-slash artifacts (e.g. ``/home//.ssh``).
+                resolved_stripped = resolved.rstrip("/")
+                expanded = raw.replace(env_match.group(0), resolved_stripped, 1)
+                candidates.append(expanded.casefold() if os.name == "nt" else expanded)
+                # For USER/LOGNAME, also add a ``~`` substitution so it hits
+                # home-prefixed patterns without needing a real UID lookup.
+                if var in ("USER", "LOGNAME"):
+                    tilde_expanded = expanded.replace(resolved_stripped, "~", 1)
+                    if os.name == "nt":
+                        candidates.append(tilde_expanded.casefold())
+                    else:
+                        candidates.append(tilde_expanded)
+
     if raw.startswith("~/"):
         expanded_home = str(Path.home()).replace("\\", "/") + raw[1:]
         candidates.append(expanded_home.casefold() if os.name == "nt" else expanded_home)
