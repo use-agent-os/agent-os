@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security
+
+- Bundled crypto skills (`robinhood-rwa-addresses`, `poolsdotfun-token-launcher`,
+  `senior-unilp-manager`) reject non-`http(s)` RPC URLs, closing the `file://`
+  local-file-read vulnerability.
+
 ## [2026.9.4] - 2026-09-04
 
 ### Fixed

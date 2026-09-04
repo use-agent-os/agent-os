@@ -82,7 +82,7 @@ class RpcClient:
     def __init__(self, chain: dict, rpc_url: str | None = None, timeout: int = 60,
                  debug: bool = False, allow_batch: bool = True) -> None:
         self.chain = chain
-        self.url = rpc_url or resolve_rpc_url(chain)
+        self.url = resolve_rpc_url(chain, rpc_url)
         self.timeout = timeout
         self.debug = debug
         self._allow_batch = allow_batch

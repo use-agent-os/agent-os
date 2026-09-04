@@ -18,6 +18,8 @@ import importlib.util
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 _SCRIPT = (
     Path(__file__).resolve().parents[1]
     / "src/agentos/skills/bundled/robinhood-rwa-addresses/scripts/rwa_lookup.py"
@@ -317,3 +319,65 @@ def test_skipped_verification_is_not_reported_as_a_network_fault() -> None:
 
 def _warning(statuses: list[str]) -> str | None:
     return rwa_lookup._warning_for([{"status": s} for s in statuses])
+
+
+# --------------------------------------------------------------------------
+# --rpc-url validation
+# --------------------------------------------------------------------------
+
+
+def test_validate_http_url_rejects_non_http_schemes() -> None:
+    """file://, ftp://, gopher://, javascript: are all rejected."""
+    for invalid in [
+        "file:///etc/passwd",
+        "file:///c:/windows/system32/drivers/etc/hosts",
+        "ftp://rpc.example.com",
+        "gopher://example.com",
+        "javascript:alert(1)",
+    ]:
+        with pytest.raises(ValueError, match="must be http:// or https://"):
+            rwa_lookup._validate_http_url(invalid)
+    for empty in ["", "   "]:
+        with pytest.raises(ValueError, match="empty URL"):
+            rwa_lookup._validate_http_url(empty)
+    assert rwa_lookup._validate_http_url("http://127.0.0.1:8545") == "http://127.0.0.1:8545"
+    assert (
+        rwa_lookup._validate_http_url("https://rpc.mainnet.chain.robinhood.com")
+        == "https://rpc.mainnet.chain.robinhood.com"
+    )
+
+
+def test_validate_http_url_rejects_missing_host() -> None:
+    with pytest.raises(ValueError, match="missing host"):
+        rwa_lookup._validate_http_url("http://")
+
+
+def test_validate_http_url_accepts_valid_variants() -> None:
+    assert rwa_lookup._validate_http_url("http://example.com") == "http://example.com"
+    assert (
+        rwa_lookup._validate_http_url("https://user:pass@host.com:8545")
+        == "https://user:pass@host.com:8545"
+    )
+    assert rwa_lookup._validate_http_url("http://[::1]:7545") == "http://[::1]:7545"
+    assert rwa_lookup._validate_http_url(rwa_lookup.DEFAULT_RPC_URL)
+
+
+def test_main_rejects_invalid_rpc_url(capsys: pytest.CaptureFixture[str]) -> None:
+    import json
+
+    code = rwa_lookup.main(["--query", "AAPL", "--rpc-url", "file:///etc/passwd"])
+    assert code == 0
+    out, _ = capsys.readouterr()
+    payload = json.loads(out)
+    assert "invalid rpc-url" in payload.get("error", "")
+    assert "must be http:// or https://" in payload.get("error", "")
+
+
+def test_main_rejects_missing_host_url(capsys: pytest.CaptureFixture[str]) -> None:
+    import json
+
+    code = rwa_lookup.main(["--query", "AAPL", "--rpc-url", "http://"])
+    assert code == 0
+    out, _ = capsys.readouterr()
+    payload = json.loads(out)
+    assert "missing host" in payload.get("error", "")

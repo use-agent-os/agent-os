@@ -73,6 +73,29 @@ class RpcError(RuntimeError):
     """A JSON-RPC call returned an error or an unusable result."""
 
 
+def _validate_http_url(url: str) -> str:
+    """Validate and return a URL that must be http:// or https://.
+
+    Rejects ``file://``, ``ftp://``, and any custom scheme that could leak
+    local data or be abused as an SSRF oracle. Uses ``urlsplit`` for robust
+    scheme detection (not a fragile ``startswith`` prefix check).
+    """
+    cleaned = (url or "").strip()
+    if not cleaned:
+        raise ValueError(f"empty URL: {url!r}")
+    try:
+        parsed = urllib.parse.urlsplit(cleaned)
+    except ValueError as exc:
+        raise ValueError(f"invalid URL {url!r}: {exc}") from exc
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError(
+            f"invalid URL scheme {parsed.scheme!r} in {url!r}: must be http:// or https://"
+        )
+    if not parsed.netloc:
+        raise ValueError(f"URL missing host {url!r}: must be http:// or https://")
+    return cleaned
+
+
 def _fetch_tokens(timeout: float) -> list[dict[str, Any]]:
     req = urllib.request.Request(  # noqa: S310 - fixed trusted CoinGecko endpoint
         TOKEN_LIST_URL,
@@ -189,8 +212,9 @@ def _rpc_batch(rpc_url: str, calls: list[dict[str, Any]], timeout: float) -> dic
     Batching keeps verification to a single HTTP round-trip no matter how many
     candidates are being checked.
     """
+    rpc_url = _validate_http_url(rpc_url)
     payload = json.dumps(calls).encode("utf-8")
-    req = urllib.request.Request(  # noqa: S310 - operator-supplied RPC endpoint
+    req = urllib.request.Request(  # noqa: S310 - validated http/https above
         rpc_url,
         data=payload,
         headers={
@@ -313,7 +337,7 @@ def _warning_for(
     return None
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Robinhood RWA contract-address lookup")
     parser.add_argument("--query", required=True, help="Company name or ticker (e.g. Apple, AAPL)")
     parser.add_argument("--limit", type=int, default=5, help="Max matches to return")
@@ -343,7 +367,19 @@ def main() -> int:
         action="store_true",
         help="Do not write the card artifact (JSON on stdout only).",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    if not args.no_verify:
+        try:
+            args.rpc_url = _validate_http_url(args.rpc_url)
+        except ValueError as exc:
+            print(
+                json.dumps(
+                    {"query": args.query, "matches": [], "error": f"invalid rpc-url: {exc}"},
+                    ensure_ascii=False,
+                )
+            )
+            return 0
 
     try:
         tokens = _fetch_tokens(args.timeout)
