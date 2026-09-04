@@ -113,13 +113,29 @@ class SkillInstaller:
         )
         self._lockfile_path = lockfile_path if lockfile_path is not None else _default_lockfile()
 
+
     async def install(
         self,
         identifier: str,
         source_id: str,
         force: bool = False,
+        *,
+        allow_shadow: bool | None = None,
     ) -> InstallResult:
-        """Full install lifecycle: fetch → quarantine → scan → install → lockfile."""
+        """Full install lifecycle: fetch → quarantine → scan → install → lockfile.
+
+        ``force`` overrides both gates below — the "shadows a bundled skill"
+        refusal and the "dangerous scan verdict" refusal — for callers (CLI
+        ``--force``, RPC ``force=True``) where a human has explicitly asked
+        to proceed past whatever was reported.
+
+        ``allow_shadow`` overrides only the shadow-bundled-skill gate,
+        independent of ``force``. Defaults to ``force`` when not given.
+        ``update()`` uses this: a reinstall of an already-shadowing skill
+        isn't a new decision (see the comment below), but that must not
+        also silently waive the dangerous-content scan on every update.
+        """
+        allow_shadow = force if allow_shadow is None else allow_shadow
         # 1. Fetch
         bundle = await self._router.fetch(identifier, source_id)
         if bundle is None:
@@ -141,7 +157,7 @@ class SkillInstaller:
         # without touching it on disk — nothing in the old flow said so. Refuse
         # the *first* such install; a reinstall or update of an already-shadowing
         # skill is not a new decision and passes through.
-        if not force and name in bundled_skill_names() and not (self._managed_dir / name).is_dir():
+        if not allow_shadow and name in bundled_skill_names() and not (self._managed_dir / name).is_dir():
             return InstallResult(
                 success=False,
                 name=name,
@@ -299,7 +315,13 @@ class SkillInstaller:
                 )
                 continue
             old_sha = entry.sha256
-            result = await self.install(entry.identifier, entry.source, force=True)
+            # allow_shadow=True: reinstalling an already-shadowing skill isn't a
+            # new decision. force stays False: an update whose upstream now
+            # scans dangerous must be blocked exactly like a fresh install would
+            # be, not silently pushed through — see installer.install() docstring.
+            result = await self.install(
+                entry.identifier, entry.source, force=False, allow_shadow=True
+            )
             if result.success:
                 if old_sha and result.sha256 == old_sha:
                     result.message = f"'{result.name}' is already up to date"

@@ -356,6 +356,16 @@ def skills_update(
                 str(row.get("message") or ""),
             )
         console.print(table)
+        for row in results:
+            if not isinstance(row, dict):
+                continue
+            verdict = row.get("scan_verdict")
+            if row.get("success") and verdict and verdict != "safe":
+                findings = row.get("scan_findings") or []
+                console.print(
+                    f"[yellow]Security: {row.get('name')} — {verdict} "
+                    f"({len(findings)} findings)[/]"
+                )
         message = payload.get("message") if isinstance(payload, dict) else None
         if message:
             console.print(str(message))
