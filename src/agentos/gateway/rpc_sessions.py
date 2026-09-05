@@ -2354,12 +2354,18 @@ async def _handle_sessions_preview(params: dict | None, ctx: RpcContext) -> dict
         )
         last_msg = ""
         try:
-            transcript = await storage.get_transcript(s.session_id, limit=-1)
+            recent_getter = getattr(storage, "get_recent_transcript", None)
+            if callable(recent_getter):
+                transcript = await recent_getter(s.session_id, 10)
+            else:
+                transcript = await storage.get_transcript(s.session_id, limit=10)
             if transcript:
-                # Find the last user or assistant message for preview
                 for entry in reversed(transcript):
-                    if entry.role in ("user", "assistant") and entry.content:
-                        last_msg = entry.content[:120]
+                    if (
+                        getattr(entry, "role", None) in ("user", "assistant")
+                        and getattr(entry, "content", None)
+                    ):
+                        last_msg = str(entry.content)[:120]
                         break
         except Exception:
             pass

@@ -1039,6 +1039,15 @@ class SessionManager:
             raise KeyError(f"Session not found: {session_key}")
         return await self._storage.get_transcript(node.session_id, limit=limit)
 
+    async def get_recent_transcript(
+        self, session_key: str, n: int = 10
+    ) -> list[TranscriptEntry]:
+        session_key = canonicalize_session_key(session_key)
+        node = await self._storage.get_session(session_key)
+        if node is None:
+            raise KeyError(f"Session not found: {session_key}")
+        return await self._storage.get_recent_transcript(node.session_id, n=n)
+
     async def record_memory_checkpoint(
         self,
         session_key: str,

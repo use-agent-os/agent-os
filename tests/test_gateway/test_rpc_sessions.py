@@ -85,6 +85,20 @@ class FakeStorage:
     async def delete_transcript(self, session_id: str) -> None:
         self._transcripts.pop(session_id, None)
 
+    async def get_transcript(
+        self, session_id: str, limit: int | None = None, offset: int = 0
+    ) -> list:
+        entries = list(self._transcripts.get(session_id, []))
+        if offset:
+            entries = entries[offset:]
+        if limit is not None and limit != -1:
+            entries = entries[:limit]
+        return entries
+
+    async def get_recent_transcript(self, session_id: str, n: int = 10) -> list:
+        entries = list(self._transcripts.get(session_id, []))
+        return entries[-n:] if entries else []
+
     async def list_agent_tasks(
         self,
         session_key: str | None = None,
@@ -2714,6 +2728,45 @@ class TestSessionsPreview:
         res = await dispatcher.dispatch("r1", "sessions.preview", None, ctx_no_manager)
         assert res.ok is True
         assert res.payload["previews"] == []
+
+    @pytest.mark.asyncio
+    async def test_preview_extracts_last_message_via_recent_transcript(
+        self, dispatcher, ctx_with_sessions, session
+    ):
+        storage = ctx_with_sessions.session_manager._storage
+        storage._transcripts[session.session_id] = [
+            SimpleNamespace(role="user", content="hello first message"),
+            SimpleNamespace(role="assistant", content="hello assistant response"),
+            SimpleNamespace(role="tool", content="tool output ignored"),
+            SimpleNamespace(role="assistant", content="final assistant response to display"),
+        ]
+        res = await dispatcher.dispatch(
+            "r1", "sessions.preview", {"keys": [session.session_key]}, ctx_with_sessions
+        )
+        assert res.ok is True
+        assert len(res.payload["previews"]) == 1
+        assert res.payload["previews"][0]["lastMessage"] == "final assistant response to display"
+
+    @pytest.mark.asyncio
+    async def test_preview_fallback_storage_without_recent_method(
+        self, dispatcher, ctx_with_sessions, session
+    ):
+        storage = ctx_with_sessions.session_manager._storage
+        storage._transcripts[session.session_id] = [
+            SimpleNamespace(role="user", content="msg 1"),
+            SimpleNamespace(role="assistant", content="msg 2"),
+        ]
+        # Temporarily shadow get_recent_transcript from storage
+        storage.get_recent_transcript = None
+        try:
+            res = await dispatcher.dispatch(
+                "r1", "sessions.preview", {"keys": [session.session_key]}, ctx_with_sessions
+            )
+            assert res.ok is True
+            assert len(res.payload["previews"]) == 1
+            assert res.payload["previews"][0]["lastMessage"] == "msg 2"
+        finally:
+            del storage.get_recent_transcript
 
 
 class TestSessionsResolve:

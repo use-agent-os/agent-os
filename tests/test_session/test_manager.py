@@ -332,6 +332,22 @@ def test_get_transcript_query_uses_id_tiebreaker() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_recent_transcript(manager):
+    node = await manager.create("agent:main:main")
+    for i in range(10):
+        await manager.append_message("agent:main:main", "user", f"msg-{i}")
+
+    recent = await manager.get_recent_transcript("agent:main:main", n=5)
+    assert len(recent) == 5
+    # Order is oldest-first of the recent 5 messages
+    assert [entry.content for entry in recent] == ["msg-5", "msg-6", "msg-7", "msg-8", "msg-9"]
+
+    # Storage direct call
+    storage_recent = await manager._storage.get_recent_transcript(node.session_id, n=3)
+    assert [entry.content for entry in storage_recent] == ["msg-7", "msg-8", "msg-9"]
+
+
+@pytest.mark.asyncio
 async def test_truncate_zero_removes_all_entries(manager):
     await manager.create("agent:main:main")
     await manager.append_message("agent:main:main", "user", "msg1")

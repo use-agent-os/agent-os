@@ -1436,7 +1436,9 @@ class SessionStorage:
         await self.conn.execute("DELETE FROM session_summaries WHERE session_id = ?", (session_id,))
         await self.conn.commit()
 
-    async def get_recent_transcript(self, session_id: str, n: int) -> list[TranscriptEntry]:
+    async def get_recent_transcript(
+        self, session_id: str, n: int = 10
+    ) -> list[TranscriptEntry]:
         """Return the most recent n entries, ordered oldest-first."""
         sql = (
             "SELECT * FROM (SELECT * FROM transcript_entries WHERE session_id = ? "
