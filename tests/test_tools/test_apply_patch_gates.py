@@ -574,3 +574,47 @@ def test_parse_hunk_header_rejects_malformed_input(header: str) -> None:
 
     with pytest.raises(ValueError, match="Invalid hunk header"):
         _parse_hunk_header(header)
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_prepends_at_line_zero(tmp_path: Path) -> None:
+    target = tmp_path / "document.txt"
+    target.write_text("line1\nline2\nline3\n", encoding="utf-8")
+    token = current_tool_context.set(ToolContext(workspace_dir=str(tmp_path)))
+    apply_patch = _original_async(patch_tool.apply_patch)
+    try:
+        result = await apply_patch(
+            """*** Begin Patch
+*** Update File: document.txt
+@@@ -0,0 +1,1 @@@
++header
+*** End Patch"""
+        )
+    finally:
+        current_tool_context.reset(token)
+
+    assert result == "Applied patch: 1 file(s) modified"
+    assert target.read_text(encoding="utf-8") == "header\nline1\nline2\nline3\n"
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_applies_to_empty_file(tmp_path: Path) -> None:
+    target = tmp_path / "empty.txt"
+    target.write_text("", encoding="utf-8")
+    token = current_tool_context.set(ToolContext(workspace_dir=str(tmp_path)))
+    apply_patch = _original_async(patch_tool.apply_patch)
+    try:
+        result = await apply_patch(
+            """*** Begin Patch
+*** Update File: empty.txt
+@@@ -0,0 +1,2 @@@
++alpha
++beta
+*** End Patch"""
+        )
+    finally:
+        current_tool_context.reset(token)
+
+    assert result == "Applied patch: 1 file(s) modified"
+    assert target.read_text(encoding="utf-8") == "alpha\nbeta\n"
+
