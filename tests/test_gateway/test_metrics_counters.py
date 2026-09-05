@@ -288,3 +288,26 @@ async def test_agentos_queue_depth_decrements_to_zero() -> None:
     assert qd_events[-1]["value"] == 0, (
         f"Final agentos_queue_depth should be 0, got {qd_events[-1]['value']}"
     )
+
+
+def test_emit_metric_logs_debug_on_record_metric_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentos.gateway.task_runtime import _emit_metric
+
+    def _broken_record_metric(*args: Any, **kwargs: Any) -> None:
+        raise ValueError("Invalid metric label type")
+
+    import agentos.observability.metrics
+
+    monkeypatch.setattr(agentos.observability.metrics, "record_metric", _broken_record_metric)
+
+    with _capture_metric_logs() as captured:
+        _emit_metric("test_metric_failure", value=1, label_a="val")
+
+    # The metric event was logged at info level
+    assert any(e.get("metric") == "test_metric_failure" for e in captured)
+
+    # The failure was captured at debug level
+    debug_events = [e for e in captured if e.get("event") == "record_metric_failed"]
+    assert len(debug_events) == 1
+    assert debug_events[0]["metric"] == "test_metric_failure"
+    assert "Invalid metric label type" in debug_events[0]["error"]

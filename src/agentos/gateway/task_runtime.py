@@ -66,8 +66,8 @@ def _emit_metric(name: str, value: int = 1, **labels: Any) -> None:
             k: v for k, v in labels.items() if k not in {"session_key", "session_id", "turn_id"}
         }
         record_metric(name, value, **metric_labels)
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001
+        log.debug("record_metric_failed", metric=name, error=str(exc), exc_info=True)
 
 
 TERMINAL_STATUSES = frozenset(
