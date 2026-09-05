@@ -57,25 +57,40 @@ _SUBPROCESS_CALL_NAMES: frozenset[str] = frozenset(
 )
 
 
-def _eval_const_str(node: ast.AST) -> str | None:
-    """Evaluate a statically resolvable string expression (literals, concat, f-strings)."""
+def _eval_const_str(node: ast.AST, compile_aliases: frozenset[str] | None = None) -> str | None:
+    """Evaluate a statically resolvable string expression (literals, concat, f-strings).
+
+    ``compile(...)`` calls resolve to their source argument: ``compile`` is a
+    code *carrier*, so ``exec(compile("os.remove('/etc')", "", "exec"))`` must
+    hand the same inner source to the destructive scan that
+    ``exec("os.remove('/etc')")`` does. *compile_aliases* carries any local name
+    bound to the builtin (``c = compile``) and always includes ``compile``.
+    """
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
     if isinstance(node, ast.FormattedValue):
-        return _eval_const_str(node.value)
+        return _eval_const_str(node.value, compile_aliases)
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        left = _eval_const_str(node.left)
-        right = _eval_const_str(node.right)
+        left = _eval_const_str(node.left, compile_aliases)
+        right = _eval_const_str(node.right, compile_aliases)
         if left is not None and right is not None:
             return left + right
     if isinstance(node, ast.JoinedStr):
         parts: list[str] = []
         for val in node.values:
-            part = _eval_const_str(val)
+            part = _eval_const_str(val, compile_aliases)
             if part is None:
                 return None
             parts.append(part)
         return "".join(parts)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        names = compile_aliases if compile_aliases is not None else frozenset({"compile"})
+        if node.func.id in names:
+            if node.args:
+                return _eval_const_str(node.args[0], compile_aliases)
+            for keyword in node.keywords:
+                if keyword.arg == "source":
+                    return _eval_const_str(keyword.value, compile_aliases)
     return None
 
 
@@ -89,14 +104,46 @@ def _resolve_module_from_node(node: ast.AST, aliases: dict[str, str]) -> str | N
             mod = _eval_const_str(node.args[0])
             if mod:
                 return aliases.get(mod, mod)
-        # importlib.import_module("os")
-        if isinstance(node.func, ast.Attribute) and node.func.attr == "import_module":
-            mod_val = _resolve_module_from_node(node.func.value, aliases)
-            if mod_val == "importlib" and node.args:
+        if isinstance(node.func, ast.Attribute):
+            # importlib.import_module("os")
+            if node.func.attr == "import_module":
+                mod_val = _resolve_module_from_node(node.func.value, aliases)
+                if mod_val == "importlib" and node.args:
+                    mod = _eval_const_str(node.args[0])
+                    if mod:
+                        return aliases.get(mod, mod)
+            # builtins.__import__("os") — same import, spelled through the module.
+            if node.func.attr == "__import__" and node.args:
+                mod = _eval_const_str(node.args[0])
+                if mod:
+                    return aliases.get(mod, mod)
+        # getattr(builtins, "__import__")("os") — the importer itself fetched
+        # dynamically, so the callee is a Call rather than a Name/Attribute.
+        if isinstance(node.func, ast.Call) and node.args:
+            _target_mod, target_attr = _resolve_getattr_target(node.func, aliases)
+            if target_attr == "__import__":
                 mod = _eval_const_str(node.args[0])
                 if mod:
                     return aliases.get(mod, mod)
     return None
+
+
+def _resolve_getattr_target(
+    node: ast.AST, aliases: dict[str, str]
+) -> tuple[str | None, str | None]:
+    """Return ``(module, attr)`` when *node* is a ``getattr(<module>, "attr")`` call.
+
+    Both halves are resolved statically, so ``getattr(__import__("os"), "sys" +
+    "tem")`` reports ``("os", "system")``. ``(None, None)`` means *node* is not a
+    statically resolvable ``getattr`` call.
+    """
+    if not isinstance(node, ast.Call):
+        return None, None
+    if not (isinstance(node.func, ast.Name) and node.func.id == "getattr"):
+        return None, None
+    if len(node.args) < 2:
+        return None, None
+    return _resolve_module_from_node(node.args[0], aliases), _eval_const_str(node.args[1])
 
 
 class _DestructiveCodeVisitor(ast.NodeVisitor):
@@ -112,6 +159,16 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
             "importlib": "importlib",
         }
         self.destructive_funcs: dict[str, str] = {}
+        #: Local names bound to the ``compile`` builtin (``c = compile``), so a
+        #: renamed carrier resolves the same as the builtin spelling.
+        self.compile_aliases: set[str] = {"compile"}
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        if isinstance(node.value, ast.Name) and node.value.id in self.compile_aliases:
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    self.compile_aliases.add(target.id)
+        self.generic_visit(node)
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
@@ -158,7 +215,7 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
 
             # 2. Dynamic getattr: getattr(os, "rem"+"ove"), getattr(Path, "unlink"), etc.
             if func_name == "getattr" and len(node.args) >= 2:
-                attr_name = _eval_const_str(node.args[1])
+                attr_name = _eval_const_str(node.args[1], frozenset(self.compile_aliases))
                 if attr_name in _ALL_DESTRUCTIVE_NAMES:
                     mod = _resolve_module_from_node(node.args[0], self.module_aliases)
                     if mod == "os" and attr_name in _OS_DESTRUCTIVE_ATTRS:
@@ -182,9 +239,11 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
                     )
                     return
 
-            # 3. eval() or exec() with embedded destructive code
+            # 3. eval() or exec() with embedded destructive code. `compile(...)`
+            #    resolves to its source argument, so a compiled carrier is scanned
+            #    exactly like a string literal.
             if func_name in ("eval", "exec") and node.args:
-                inner_code = _eval_const_str(node.args[0])
+                inner_code = _eval_const_str(node.args[0], frozenset(self.compile_aliases))
                 if inner_code:
                     inner_warning = _check_code_destructive(inner_code)
                     if inner_warning:
@@ -194,7 +253,17 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
                         )
                         return
 
-        # 4. Method call on an attribute: obj.method()
+        # 4. Shell-exec and destructive attrs reached through getattr:
+        #    `getattr(os, "sys"+"tem")("rm -rf /")`. The callee is a Call, so the
+        #    ast.Attribute branch below never sees it.
+        target_mod, target_attr = _resolve_getattr_target(node.func, self.module_aliases)
+        if target_attr is not None:
+            reason = self._indirect_call_reason(target_mod, target_attr, node)
+            if reason is not None:
+                self.warning = reason
+                return
+
+        # 5. Method call on an attribute: obj.method()
         if isinstance(node.func, ast.Attribute):
             attr_name = node.func.attr
             mod = _resolve_module_from_node(node.func.value, self.module_aliases)
@@ -210,29 +279,41 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
                 return
 
             if mod == "os" and attr_name in ("system", "popen") and node.args:
-                cmd_str = _eval_const_str(node.args[0])
+                cmd_str = _eval_const_str(node.args[0], frozenset(self.compile_aliases))
                 if cmd_str and re.search(r"\b(rm|rmdir)\b", cmd_str):
                     self.warning = f"destructive Python operation detected: os.{attr_name} with rm"
                     return
 
             if mod == "subprocess" and attr_name in _SUBPROCESS_CALL_NAMES and node.args:
-                first_arg = node.args[0]
-                if isinstance(first_arg, ast.List):
-                    parts = [_eval_const_str(elt) for elt in first_arg.elts]
-                    if any(p in ("rm", "rmdir") for p in parts if p is not None):
-                        self.warning = (
-                            "destructive Python operation detected: subprocess invoking rm"
-                        )
-                        return
-                else:
-                    cmd_str = _eval_const_str(first_arg)
-                    if cmd_str and re.search(r"\b(rm|rmdir)\b", cmd_str):
-                        self.warning = (
-                            "destructive Python operation detected: subprocess invoking rm"
-                        )
-                        return
+                if self._subprocess_argv_removes(node.args[0]):
+                    self.warning = "destructive Python operation detected: subprocess invoking rm"
+                    return
 
         self.generic_visit(node)
+
+    def _indirect_call_reason(self, module: str | None, attr: str, node: ast.Call) -> str | None:
+        """Reason when a ``getattr``-resolved callee is a destructive operation."""
+        if module == "os" and attr in _OS_DESTRUCTIVE_ATTRS:
+            return f"destructive Python operation detected: os.{attr}() via getattr"
+        if module == "shutil" and attr in _SHUTIL_DESTRUCTIVE_ATTRS:
+            return f"destructive Python operation detected: shutil.{attr}() via getattr"
+        if module == "os" and attr in ("system", "popen") and node.args:
+            cmd_str = _eval_const_str(node.args[0], frozenset(self.compile_aliases))
+            if cmd_str and re.search(r"\b(rm|rmdir)\b", cmd_str):
+                return f"destructive Python operation detected: os.{attr} with rm via getattr"
+        if module == "subprocess" and attr in _SUBPROCESS_CALL_NAMES and node.args:
+            if self._subprocess_argv_removes(node.args[0]):
+                return "destructive Python operation detected: subprocess invoking rm via getattr"
+        return None
+
+    def _subprocess_argv_removes(self, first_arg: ast.expr) -> bool:
+        """True when a subprocess argv (list or string form) invokes rm/rmdir."""
+        aliases = frozenset(self.compile_aliases)
+        if isinstance(first_arg, ast.List):
+            parts = [_eval_const_str(elt, aliases) for elt in first_arg.elts]
+            return any(part in ("rm", "rmdir") for part in parts if part is not None)
+        cmd_str = _eval_const_str(first_arg, aliases)
+        return bool(cmd_str and re.search(r"\b(rm|rmdir)\b", cmd_str))
 
 
 def _check_code_destructive(code: str) -> str | None:
