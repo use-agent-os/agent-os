@@ -475,8 +475,6 @@ async def test_doctor_memory_status_unavailable_includes_split_health_fields():
     }
 
 
-
-
 @pytest.mark.asyncio
 async def test_doctor_memory_status_health_is_agent_scoped(tmp_path):
     storage = await SessionStorage.open(tmp_path / "sessions.db")
@@ -560,7 +558,6 @@ async def test_doctor_memory_status_includes_curated_section(tmp_path):
         "memory": {"entries": 2, "usage": "48/4,000"},
         "user": {"entries": 1, "usage": "11/2,000"},
     }
-
 
 
 @pytest.mark.asyncio
@@ -724,14 +721,6 @@ class FakeRepairFlushService:
         )
 
 
-
-
-
-
-
-
-
-
 @pytest.mark.asyncio
 async def test_providers_status_redacts_keys_and_rejects_unknown_provider():
     cfg = GatewayConfig(
@@ -835,7 +824,9 @@ async def test_search_status_and_query_return_structured_payloads():
     assert status.payload["apiKeyConfigured"] is False
     assert query.error is None, query.error
     assert query.payload["ok"] is True
-    assert query.payload["results"][0]["snippet"] == "hello"
+    assert query.payload["results"][0]["snippet"] == (
+        "<untrusted source='https://example.com'>hello</untrusted>"
+    )
 
 
 @pytest.mark.asyncio
