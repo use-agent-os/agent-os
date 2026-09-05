@@ -129,3 +129,25 @@ def test_text_escapes_formula(tmp_path: Path) -> None:
     cell_value = sheet["rows"][1][0]["value"]
     assert isinstance(cell_value, str)
     assert cell_value.lstrip("'") == "=hello"
+
+
+def test_inspect_cli_creates_parent_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import create_xlsx  # type: ignore[import-not-found]
+        import inspect_xlsx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    src = tmp_path / "book.xlsx"
+    create_xlsx.build({"sheets": [{"name": "S", "rows": [["a"]]}]}).save(str(src))
+
+    out_file = tmp_path / "nested" / "analysis" / "inspect.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["inspect_xlsx.py", str(src), "--out", str(out_file)],
+    )
+    rc = inspect_xlsx.main()
+    assert rc == 0
+    assert out_file.exists()

@@ -160,3 +160,22 @@ def test_unknown_engine_recorded() -> None:
     )
     assert payload["results"] == []
     assert any("unknown engine" in e["reason"] for e in payload["errors"])
+
+
+def test_search_cli_creates_parent_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import search  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    monkeypatch.setitem(search.ENGINES, "fake", lambda _query, _limit: [])
+    out_file = tmp_path / "nested" / "output" / "search_results.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["search.py", "--query", "test", "--engines", "fake", "--out", str(out_file)],
+    )
+    rc = search.main()
+    assert rc == 0
+    assert out_file.exists()

@@ -107,3 +107,24 @@ def test_merge_range_parsing() -> None:
     assert merge.parse_ranges("1-3", 5) == [1, 2, 3]
     # Out-of-range pages are filtered.
     assert merge.parse_ranges("1,99", 4) == [1]
+
+
+def test_extract_cli_creates_parent_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import extract  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    pdf_path = tmp_path / "doc.pdf"
+    _make_one_page_pdf(pdf_path, "TEST")
+
+    out_file = tmp_path / "nested" / "output" / "extracted.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["extract.py", str(pdf_path), "--out", str(out_file)],
+    )
+    rc = extract.main()
+    assert rc == 0
+    assert out_file.exists()

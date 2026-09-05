@@ -14,9 +14,7 @@ from pathlib import Path
 import httpx
 from bs4 import BeautifulSoup
 
-USER_AGENT = (
-    "Mozilla/5.0 (compatible; AgentOS-multi-search-engine/0.1)"
-)
+USER_AGENT = "Mozilla/5.0 (compatible; AgentOS-multi-search-engine/0.1)"
 TIMEOUT_S = 8.0
 
 
@@ -76,8 +74,7 @@ def _brave_search(query: str, limit: int) -> list[Result]:
     effective_count = min(max(limit, 1), _BRAVE_MAX_COUNT)
     if limit > _BRAVE_MAX_COUNT:
         print(
-            f"[multi-search-engine] brave count clamped {limit}→{_BRAVE_MAX_COUNT} "
-            f"(API hard-cap)",
+            f"[multi-search-engine] brave count clamped {limit}→{_BRAVE_MAX_COUNT} (API hard-cap)",
             file=sys.stderr,
         )
     with _client() as client:
@@ -225,6 +222,7 @@ def main() -> int:
     payload = search_all(args.query, engines, args.limit, args.strict)
     encoded = json.dumps(payload, ensure_ascii=False, indent=2)
     if args.out is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(encoded, encoding="utf-8")
     else:
         sys.stdout.write(encoded)

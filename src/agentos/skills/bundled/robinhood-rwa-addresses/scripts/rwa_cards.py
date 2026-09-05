@@ -112,7 +112,8 @@ def main() -> int:
         print("rwa_cards: no matches to render", file=sys.stderr)
         return 1
 
-    output = Path(args.output)
+    output = Path(args.output).expanduser()
+    output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     print(f"publish_artifact path={output} mime={CARDS_MIME}")
     return 0
