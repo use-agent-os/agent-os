@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import platform
 import shlex
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -164,10 +165,23 @@ def _missing_env_warning(surface: str, env_key: str) -> str:
     )
 
 
+def quote_cli_arg(value: str | Path) -> str:
+    """Return a shell-quoted token appropriate for the current platform.
+
+    On Windows, uses ``subprocess.list2cmdline`` to generate double-quoted
+    arguments compatible with ``cmd.exe`` and PowerShell. On POSIX systems,
+    delegates to ``shlex.quote``.
+    """
+    text = str(value)
+    if platform.system().lower().startswith("win"):
+        return subprocess.list2cmdline([text])
+    return shlex.quote(text)
+
+
 def _config_cli_arg(config_path: str | Path | None) -> str:
     if not config_path:
         return ""
-    return f" --config {shlex.quote(str(config_path))}"
+    return f" --config {quote_cli_arg(config_path)}"
 
 
 def _image_generation_provider_id(config: Any) -> str:

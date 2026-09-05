@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 import json
-import shlex
 from typing import Any
 
 from typer.testing import CliRunner
 
 from agentos.cli.main import app
+from agentos.onboarding.next_steps import quote_cli_arg
 
 runner = CliRunner()
 
 
 def _config_arg(path: Any) -> str:
-    return shlex.quote(str(path))
+    return quote_cli_arg(path)
 
 
 class _FakeGatewayClient:
@@ -34,8 +34,7 @@ class _FakeGatewayClient:
                     {
                         "label": "Configure provider",
                         "command": (
-                            "agentos providers configure openrouter "
-                            "--api-key YOUR_API_KEY"
+                            "agentos providers configure openrouter --api-key YOUR_API_KEY"
                         ),
                     }
                 ],
@@ -143,9 +142,7 @@ def test_doctor_config_derived_gateway_recovery_preserves_config_target(
     assert result.exit_code == 1
     payload = json.loads(result.stdout)
     finding = next(
-        finding
-        for finding in payload["findings"]
-        if finding["id"] == "gateway.unavailable"
+        finding for finding in payload["findings"] if finding["id"] == "gateway.unavailable"
     )
     commands = [step["command"] for step in finding["fixSteps"] if "command" in step]
     assert commands[:2] == [
@@ -308,9 +305,7 @@ def test_doctor_bad_config_reports_config_recovery(tmp_path, monkeypatch) -> Non
     assert _FakeGatewayClient.calls == []
 
 
-def test_doctor_bad_gateway_config_env_reports_config_recovery(
-    tmp_path, monkeypatch
-) -> None:
+def test_doctor_bad_gateway_config_env_reports_config_recovery(tmp_path, monkeypatch) -> None:
     _FakeGatewayClient.calls = []
     target = tmp_path / "broken-env.toml"
     target.write_text("[llm\n", encoding="utf-8")
@@ -322,17 +317,13 @@ def test_doctor_bad_gateway_config_env_reports_config_recovery(
     assert result.exit_code == 1
     payload = json.loads(result.stdout)
     config_finding = next(
-        finding
-        for finding in payload["findings"]
-        if finding["id"] == "config.local.unreadable"
+        finding for finding in payload["findings"] if finding["id"] == "config.local.unreadable"
     )
     assert config_finding["evidence"]["configPath"] == str(target)
     assert _FakeGatewayClient.calls == []
 
 
-def test_doctor_explicit_gateway_context_ignores_env_config_path(
-    tmp_path, monkeypatch
-) -> None:
+def test_doctor_explicit_gateway_context_ignores_env_config_path(tmp_path, monkeypatch) -> None:
     _ReadyGatewayClient.calls = []
     target = tmp_path / "env.toml"
     target.write_text('host = "127.0.0.1"\nport = 20004\n', encoding="utf-8")
@@ -452,19 +443,14 @@ def test_doctor_config_reports_running_gateway_config_mismatch(
     assert payload["requestedConfigPath"] == str(requested)
     assert payload["configPath"] == str(running)
     finding = next(
-        finding
-        for finding in payload["findings"]
-        if finding["id"] == "gateway.config.mismatch"
+        finding for finding in payload["findings"] if finding["id"] == "gateway.config.mismatch"
     )
     assert finding["readinessImpact"] == "blocks_ready"
     assert finding["evidence"]["requestedConfigPath"] == str(requested)
     assert finding["evidence"]["runningConfigPath"] == str(running)
     commands = [step["command"] for step in finding["fixSteps"] if "command" in step]
     assert f"agentos gateway restart --config {_config_arg(requested)}" in commands
-    assert (
-        f"agentos gateway status --json --config {_config_arg(requested)}"
-        in commands
-    )
+    assert f"agentos gateway status --json --config {_config_arg(requested)}" in commands
 
 
 def test_doctor_config_mismatch_prioritizes_requested_gateway_recovery(
@@ -532,9 +518,7 @@ def test_doctor_config_mismatch_keeps_running_findings_scoped_to_running_config(
         f"--config {_config_arg(running)}"
     ]
     mismatch_finding = next(
-        finding
-        for finding in payload["findings"]
-        if finding["id"] == "gateway.config.mismatch"
+        finding for finding in payload["findings"] if finding["id"] == "gateway.config.mismatch"
     )
     mismatch_commands = [
         step["command"] for step in mismatch_finding["fixSteps"] if "command" in step
@@ -918,16 +902,13 @@ def test_doctor_gateway_unavailable_uses_requested_config_path(
     assert result.exit_code == 1
     payload = json.loads(result.stdout)
     gateway_finding = next(
-        finding
-        for finding in payload["findings"]
-        if finding["id"] == "gateway.unavailable"
+        finding for finding in payload["findings"] if finding["id"] == "gateway.unavailable"
     )
     gateway_commands = [
         step["command"] for step in gateway_finding["fixSteps"] if "command" in step
     ]
     assert gateway_commands[:2] == [
-        "agentos gateway start --bind 127.0.0.1 --port 19999 "
-        f"--config {_config_arg(target)}",
+        f"agentos gateway start --bind 127.0.0.1 --port 19999 --config {_config_arg(target)}",
         (
             "agentos gateway status --bind 127.0.0.1 --port 19999 "
             f"--json --config {_config_arg(target)}"
@@ -996,9 +977,7 @@ def test_doctor_gateway_unavailable_does_not_start_remote_gateway(monkeypatch) -
     assert finding["evidence"]["gatewayUrl"] == "wss://cap.example.com/ws"
     commands = [step["command"] for step in finding["fixSteps"] if "command" in step]
     assert all("gateway start" not in command for command in commands)
-    assert commands[0] == (
-        "agentos gateway status --gateway wss://cap.example.com/ws --json"
-    )
+    assert commands[0] == ("agentos gateway status --gateway wss://cap.example.com/ws --json")
     details = [step.get("detail", "") for step in finding["fixSteps"]]
     assert any("remote" in detail.lower() for detail in details)
 
@@ -1085,10 +1064,7 @@ def test_local_config_findings_explain_missing_llm_env(monkeypatch) -> None:
     assert finding.readiness_impact == "blocks_ready"
     assert finding.evidence["sections"]["llm"] == "degraded"
     assert "CUSTOM_LLM_KEY" in finding.detail
-    assert any(
-        step.detail and "CUSTOM_LLM_KEY" in step.detail
-        for step in finding.fix_steps
-    )
+    assert any(step.detail and "CUSTOM_LLM_KEY" in step.detail for step in finding.fix_steps)
     assert [step.command for step in finding.fix_steps if step.command][-2:] == [
         "agentos onboard status --json",
         "agentos onboard --if-needed",

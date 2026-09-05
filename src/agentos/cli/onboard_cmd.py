@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json as _json
-import shlex
 import tomllib
 from pathlib import Path
 
@@ -29,6 +28,7 @@ from agentos.onboarding.flow import (
     run_noninteractive_provider_configure,
 )
 from agentos.onboarding.next_steps import (
+    _config_cli_arg,
     env_recovery_commands,
     env_reference_warnings,
     format_next_steps,
@@ -224,12 +224,6 @@ def _status_cockpit_summary(status: OnboardingStatus) -> str:
         f"Blocking setup: {_format_section_names(status, blocking)}"
         f" · Optional later: {_format_section_names(status, optional_later)}"
     )
-
-
-def _config_cli_arg(config_path: Path | None) -> str:
-    if config_path is None:
-        return ""
-    return f" --config {shlex.quote(str(config_path))}"
 
 
 def _headless_section_paths(

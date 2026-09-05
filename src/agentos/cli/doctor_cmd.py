@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import copy
 import os
-import shlex
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -19,15 +18,11 @@ from agentos.cli.output import print_json
 from agentos.cli.url_utils import normalize_gateway_url
 from agentos.health.model import FixStep, HealthFinding, build_report
 from agentos.health.recovery_commands import command_with_config as _command_with_config
+from agentos.onboarding.next_steps import _config_cli_arg as _config_option
+from agentos.onboarding.next_steps import quote_cli_arg
 
 _LOCAL_GATEWAY_HOSTS = {"127.0.0.1", "::1", "localhost", "0.0.0.0"}
 _API_KEY_PLACEHOLDER = "YOUR_API_KEY"
-
-
-def _config_option(config_path: str | Path | None) -> str:
-    if config_path is None:
-        return ""
-    return f" --config {shlex.quote(str(config_path))}"
 
 
 def _onboard_status_command(config_path: str | Path | None) -> str:
@@ -48,7 +43,7 @@ def _gateway_commands(
     host = parsed.hostname or "127.0.0.1"
     port = parsed.port or (443 if parsed.scheme == "wss" else 18791)
     if host not in _LOCAL_GATEWAY_HOSTS:
-        remote_target = shlex.quote(gateway_url)
+        remote_target = quote_cli_arg(gateway_url)
         return [
             {
                 "label": "Inspect remote gateway",

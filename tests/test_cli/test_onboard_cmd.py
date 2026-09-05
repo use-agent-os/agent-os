@@ -5,13 +5,13 @@ from __future__ import annotations
 import json as _json
 import platform
 import re
-import shlex
 import tomllib
 
 import pytest
 from typer.testing import CliRunner
 
 from agentos.cli.main import app
+from agentos.onboarding.next_steps import quote_cli_arg
 
 runner = CliRunner()
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
@@ -32,7 +32,11 @@ def _env_hint(env_key: str) -> str:
 
 
 def _config_arg(path) -> str:
-    return shlex.quote(str(path))
+    return quote_cli_arg(path)
+
+
+def _compact_arg(path) -> str:
+    return "".join(_config_arg(path).split())
 
 
 def test_onboard_noninteractive_provider(tmp_path, monkeypatch):
@@ -42,10 +46,14 @@ def test_onboard_noninteractive_provider(tmp_path, monkeypatch):
         app,
         [
             "onboard",
-            "--provider", "openrouter",
-            "--model", "deepseek/deepseek-v4-flash",
-            "--api-key", "sk",
-            "--skip-channels", "--skip-search",
+            "--provider",
+            "openrouter",
+            "--model",
+            "deepseek/deepseek-v4-flash",
+            "--api-key",
+            "sk",
+            "--skip-channels",
+            "--skip-search",
         ],
     )
     assert result.exit_code == 0, result.stdout
@@ -88,10 +96,7 @@ def test_onboard_finish_commands_remain_copyable_with_long_config_path(
     assert result.exit_code == 0, result.stdout
     assert f"agentos gateway run --config {_config_arg(target)}" in result.stdout
     assert f"agentos gateway start --json --config {_config_arg(target)}" in result.stdout
-    assert (
-        f"agentos gateway restart --json --config {_config_arg(target)}"
-        in result.stdout
-    )
+    assert f"agentos gateway restart --json --config {_config_arg(target)}" in result.stdout
 
 
 def test_onboard_status_paths_remain_copyable_with_long_config_path(
@@ -107,14 +112,12 @@ def test_onboard_status_paths_remain_copyable_with_long_config_path(
 
     assert result.exit_code == 0, result.stdout
     assert (
-        f"Guided CLI: agentos onboard --if-needed --config {_config_arg(target)}"
-        in result.stdout
+        f"Guided CLI: agentos onboard --if-needed --config {_config_arg(target)}" in result.stdout
     )
     assert f"Web UI: agentos gateway run --config {_config_arg(target)}" in result.stdout
     assert (
         "Provider recipes: "
-        f"agentos onboard catalog providers --config {_config_arg(target)}"
-        in result.stdout
+        f"agentos onboard catalog providers --config {_config_arg(target)}" in result.stdout
     )
 
 
@@ -287,9 +290,14 @@ def test_onboard_if_needed_skips_when_configured(tmp_path, monkeypatch):
         app,
         [
             "onboard",
-            "--provider", "openrouter",
-            "--model", "x", "--api-key", "k",
-            "--skip-channels", "--skip-search",
+            "--provider",
+            "openrouter",
+            "--model",
+            "x",
+            "--api-key",
+            "k",
+            "--skip-channels",
+            "--skip-search",
         ],
     )
     mtime_before = target.stat().st_mtime
@@ -306,7 +314,7 @@ def test_onboard_if_needed_uses_explicit_config_path(tmp_path, monkeypatch):
     default_target = tmp_path / "default.toml"
     target = tmp_path / "custom.toml"
     target.write_text(
-        '[llm]\n'
+        "[llm]\n"
         'provider = "openrouter"\n'
         'model = "deepseek/deepseek-v4-flash"\n'
         'api_key_env = "CUSTOM_LLM_KEY"\n',
@@ -320,14 +328,14 @@ def test_onboard_if_needed_uses_explicit_config_path(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert "core setup is ready" in result.stdout.lower()
     assert "Optional next moves:" in result.stdout
-    assert f"--config{_config_arg(target)}" in "".join(result.stdout.split())
+    assert f"--config{_compact_arg(target)}" in "".join(result.stdout.split())
     assert not default_target.exists()
 
 
 def test_onboard_if_needed_skips_when_key_comes_from_env(tmp_path, monkeypatch):
     target = tmp_path / "c.toml"
     target.write_text(
-        '[llm]\n'
+        "[llm]\n"
         'provider = "openrouter"\n'
         'model = "deepseek/deepseek-v4-flash"\n'
         'api_key_env = "OPENROUTER_API_KEY"\n',
@@ -362,9 +370,7 @@ def test_onboard_if_needed_does_not_treat_env_as_config_without_config_file(
 def test_onboard_if_needed_requires_config_to_reference_env_key(tmp_path, monkeypatch):
     target = tmp_path / "c.toml"
     target.write_text(
-        '[llm]\n'
-        'provider = "openrouter"\n'
-        'model = "deepseek/deepseek-v4-flash"\n',
+        '[llm]\nprovider = "openrouter"\nmodel = "deepseek/deepseek-v4-flash"\n',
         encoding="utf-8",
     )
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-from-env")
@@ -383,9 +389,7 @@ def test_onboard_if_needed_does_not_accept_settings_env_without_config_reference
 ):
     target = tmp_path / "c.toml"
     target.write_text(
-        '[llm]\n'
-        'provider = "openrouter"\n'
-        'model = "deepseek/deepseek-v4-flash"\n',
+        '[llm]\nprovider = "openrouter"\nmodel = "deepseek/deepseek-v4-flash"\n',
         encoding="utf-8",
     )
     monkeypatch.setenv("AGENTOS_LLM_API_KEY", "sk-from-settings-env")
@@ -420,7 +424,7 @@ def test_onboard_if_needed_requires_referenced_env_even_with_settings_env(
 ):
     target = tmp_path / "c.toml"
     target.write_text(
-        '[llm]\n'
+        "[llm]\n"
         'provider = "openrouter"\n'
         'model = "deepseek/deepseek-v4-flash"\n'
         'api_key_env = "OPENROUTER_API_KEY"\n',
@@ -441,7 +445,7 @@ def test_onboard_status_uses_explicit_config_path(tmp_path, monkeypatch):
     default_target = tmp_path / "default.toml"
     target = tmp_path / "custom.toml"
     target.write_text(
-        '[llm]\n'
+        "[llm]\n"
         'provider = "openrouter"\n'
         'model = "deepseek/deepseek-v4-flash"\n'
         'api_key_env = "CUSTOM_LLM_KEY"\n',
@@ -462,7 +466,7 @@ def test_onboard_status_uses_explicit_config_path(tmp_path, monkeypatch):
 def test_onboard_status_json_exposes_provider_section_alias(tmp_path, monkeypatch):
     target = tmp_path / "custom.toml"
     target.write_text(
-        '[llm]\n'
+        "[llm]\n"
         'provider = "openrouter"\n'
         'model = "deepseek/deepseek-v4-flash"\n'
         'api_key_env = "CUSTOM_LLM_KEY"\n',
@@ -498,9 +502,8 @@ def test_onboard_status_reports_invalid_config_without_traceback(tmp_path):
     assert _compact_text(str(target)) in _compact_text(result.stderr)
     assert "search" in result.stderr
     assert "Fix:" in result.stderr
-    assert (
-        f"agentosonboard--if-needed--config{_config_arg(target)}"
-        in "".join(result.stderr.split())
+    assert f"agentosonboard--if-needed--config{_compact_arg(target)}" in "".join(
+        result.stderr.split()
     )
     assert "Traceback" not in result.stderr
     assert "pydantic_core" not in result.stderr
@@ -513,7 +516,7 @@ def test_onboard_status_table_keeps_explicit_config_path_in_next_step(
     default_target = tmp_path / "default.toml"
     target = tmp_path / "custom.toml"
     target.write_text(
-        '[llm]\n'
+        "[llm]\n"
         'provider = "openrouter"\n'
         'model = "deepseek/deepseek-v4-flash"\n'
         'api_key_env = "CUSTOM_LLM_KEY"\n',
@@ -525,9 +528,8 @@ def test_onboard_status_table_keeps_explicit_config_path_in_next_step(
     result = runner.invoke(app, ["onboard", "status", "--config", str(target)])
 
     assert result.exit_code == 0, result.stdout
-    assert (
-        f"agentosonboard--if-needed--config{_config_arg(target)}"
-        in "".join(result.stdout.split())
+    assert f"agentosonboard--if-needed--config{_compact_arg(target)}" in "".join(
+        result.stdout.split()
     )
     assert not default_target.exists()
 
@@ -546,28 +548,15 @@ def test_onboard_status_table_offers_cli_web_and_recipe_setup_paths(
     collapsed = "".join(result.stdout.split()).replace("│", "")
     assert "Setup paths:" in result.stdout
     assert "Guided CLI:" in result.stdout
-    assert (
-        f"agentosonboard--if-needed--config{_config_arg(target)}"
-        in collapsed
-    )
+    assert f"agentosonboard--if-needed--config{_compact_arg(target)}" in collapsed
     assert "Web UI:" in result.stdout
-    assert (
-        f"agentosgatewayrun--config{_config_arg(target)}"
-        in collapsed
-    )
+    assert f"agentosgatewayrun--config{_compact_arg(target)}" in collapsed
     assert "http://127.0.0.1:18791/control/setup" in result.stdout
     assert "Explore options:" in result.stdout
-    assert (
-        f"agentosonboardcatalog--config{_config_arg(target)}"
-        in collapsed
-    )
+    assert f"agentosonboardcatalog--config{_compact_arg(target)}" in collapsed
     assert "agentos onboard catalog --json" not in result.stdout
     assert "Provider recipes:" in result.stdout
-    assert (
-        "agentosonboardcatalogproviders"
-        f"--config{_config_arg(target)}"
-        in collapsed
-    )
+    assert f"agentosonboardcatalogproviders--config{_compact_arg(target)}" in collapsed
     assert "--provider<id>" not in collapsed
     assert "--model<model>" not in collapsed
     assert "--api-key-env<ENV_NAME>" not in collapsed
@@ -587,10 +576,7 @@ def test_onboard_status_points_missing_provider_to_provider_recipes(
     assert result.exit_code == 0, result.stdout
     collapsed = "".join(result.stdout.split()).replace("│", "")
     assert "Provider recipes:" in result.stdout
-    assert (
-        f"agentosonboardcatalogproviders--config{_config_arg(target)}"
-        in collapsed
-    )
+    assert f"agentosonboardcatalogproviders--config{_compact_arg(target)}" in collapsed
     assert "Headless provider:" not in result.stdout
     assert "--provider <id>" not in result.stdout
     assert "--model <model>" not in result.stdout
@@ -609,14 +595,9 @@ def test_onboard_status_leads_with_recommended_next_move(tmp_path, monkeypatch):
     collapsed = "".join(result.stdout.split()).replace("│", "")
     assert "Recommended next move:" in result.stdout
     assert "Guided CLI:" in result.stdout
-    assert (
-        f"GuidedCLI:agentosonboard--if-needed--config{_config_arg(target)}"
-        in collapsed
-    )
+    assert f"GuidedCLI:agentosonboard--if-needed--config{_compact_arg(target)}" in collapsed
     assert result.stdout.count("Guided CLI:") == 1
-    assert result.stdout.index("Recommended next move:") < result.stdout.index(
-        "Setup paths:"
-    )
+    assert result.stdout.index("Recommended next move:") < result.stdout.index("Setup paths:")
     assert not default_target.exists()
 
 
@@ -626,11 +607,7 @@ def test_onboard_status_web_path_uses_gateway_and_control_ui_config(
 ):
     target = tmp_path / "custom.toml"
     target.write_text(
-        'host = "0.0.0.0"\n'
-        "port = 19999\n"
-        "\n"
-        "[control_ui]\n"
-        'base_path = "/ops"\n',
+        'host = "0.0.0.0"\nport = 19999\n\n[control_ui]\nbase_path = "/ops"\n',
         encoding="utf-8",
     )
     monkeypatch.setenv("AGENTOS_GATEWAY_CONFIG_PATH", str(tmp_path / "default.toml"))
@@ -649,8 +626,7 @@ def test_onboard_status_does_not_offer_disabled_web_ui_path(
 ):
     target = tmp_path / "custom.toml"
     target.write_text(
-        "[control_ui]\n"
-        "enabled = false\n",
+        "[control_ui]\nenabled = false\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("AGENTOS_GATEWAY_CONFIG_PATH", str(tmp_path / "default.toml"))
@@ -671,7 +647,7 @@ def test_onboard_status_table_uses_product_labels_and_scope_column(
     default_target = tmp_path / "default.toml"
     target = tmp_path / "custom.toml"
     target.write_text(
-        '[llm]\n'
+        "[llm]\n"
         'provider = "openrouter"\n'
         'model = "deepseek/deepseek-v4-flash"\n'
         'api_key_env = "CUSTOM_LLM_KEY"\n',
@@ -706,7 +682,7 @@ def test_onboard_status_prioritizes_missing_env_recovery(
 ):
     target = tmp_path / "custom.toml"
     target.write_text(
-        '[llm]\n'
+        "[llm]\n"
         'provider = "openrouter"\n'
         'model = "deepseek/deepseek-v4-flash"\n'
         'api_key_env = "CUSTOM_LLM_KEY"\n',
@@ -717,9 +693,7 @@ def test_onboard_status_prioritizes_missing_env_recovery(
     result = runner.invoke(app, ["onboard", "status", "--config", str(target)])
 
     assert result.exit_code == 0, result.stdout
-    assert f"Set provider key: {_env_hint('CUSTOM_LLM_KEY')}" in _plain_text(
-        result.stdout
-    )
+    assert f"Set provider key: {_env_hint('CUSTOM_LLM_KEY')}" in _plain_text(result.stdout)
     assert result.stdout.index("Set provider key:") < result.stdout.index("Guided CLI:")
 
 
@@ -729,7 +703,7 @@ def test_onboard_status_prints_action_guide_without_squeezing_detail(
 ):
     target = tmp_path / "custom.toml"
     target.write_text(
-        '[llm]\n'
+        "[llm]\n"
         'provider = "openrouter"\n'
         'model = "deepseek/deepseek-v4-flash"\n'
         'api_key_env = "CUSTOM_LLM_KEY"\n',
@@ -757,10 +731,7 @@ def test_onboard_help_exposes_configure_command():
     compact = _compact_text(result.stdout)
     assert "Listonboardingsetupoptionsforeveryconfigurablesection." in compact
     assert "configure" in result.stdout
-    assert (
-        "Reconfigureprovider,router,channels,search,imagegeneration,ormemory."
-        in compact
-    )
+    assert "Reconfigureprovider,router,channels,search,imagegeneration,ormemory." in compact
 
 
 def test_onboard_catalog_json_exposes_all_setup_options(tmp_path, monkeypatch):
@@ -860,9 +831,7 @@ def test_onboard_catalog_provider_rows_name_agentos_router_tier_support():
     assert openrouter_row.index("route Pilot Router ready") < openrouter_row.index(
         "key OPENROUTER_API_KEY"
     )
-    assert anthropic_row.index("route Direct only") < anthropic_row.index(
-        "key ANTHROPIC_API_KEY"
-    )
+    assert anthropic_row.index("route Direct only") < anthropic_row.index("key ANTHROPIC_API_KEY")
     assert "Pilot Router tiers yes" not in result.stdout
     assert "Pilot Router tiers no" not in result.stdout
     assert "router yes" not in result.stdout
@@ -999,9 +968,7 @@ def test_onboard_catalog_focused_capability_examples_match_key_requirements(
     duckduckgo_line = next(
         line
         for line in search.stdout.splitlines()
-        if line.startswith(
-            "  Try: agentos onboard configure search --search-provider duckduckgo"
-        )
+        if line.startswith("  Try: agentos onboard configure search --search-provider duckduckgo")
     )
     assert "--api-key-env" not in duckduckgo_line
 
@@ -1018,9 +985,7 @@ def test_onboard_catalog_focused_capability_examples_match_key_requirements(
     auto_line = next(
         line
         for line in memory.stdout.splitlines()
-        if line.startswith(
-            "  Try: agentos onboard configure memory --memory-provider auto"
-        )
+        if line.startswith("  Try: agentos onboard configure memory --memory-provider auto")
     )
     assert "--api-key-env" not in auto_line
     assert "--model" not in auto_line
@@ -1076,9 +1041,7 @@ def test_onboard_catalog_focused_image_and_metadata_search_examples_are_specific
 
     assert search.exit_code == 0, search.stdout
     assert "- exa: Exa | metadata only" in search.stdout
-    assert "Try: agentos onboard configure search --search-provider exa" not in (
-        search.stdout
-    )
+    assert "Try: agentos onboard configure search --search-provider exa" not in (search.stdout)
     assert "Try: not configurable in this build" in search.stdout
     assert not target.exists()
 
@@ -1094,38 +1057,12 @@ def test_onboard_catalog_overview_commands_keep_active_config_path(
 
     assert result.exit_code == 0, result.stdout
     compact = result.stdout.replace(" ", "").replace("\n", "")
-    assert (
-        f"agentosonboardcatalogproviders--config{_config_arg(target)}".replace(
-            " ", ""
-        )
-        in compact
-    )
-    assert (
-        f"agentosonboardcatalogchannels--config{_config_arg(target)}".replace(
-            " ", ""
-        )
-        in compact
-    )
-    assert (
-        f"agentosonboardcatalogrouter--config{_config_arg(target)}".replace(" ", "")
-        in compact
-    )
-    assert (
-        f"agentosonboardcatalogsearch--config{_config_arg(target)}".replace(" ", "")
-        in compact
-    )
-    assert (
-        f"agentosonboardcatalogimage--config{_config_arg(target)}".replace(
-            " ", ""
-        )
-        in compact
-    )
-    assert (
-        f"agentosonboardcatalogmemory--config{_config_arg(target)}".replace(
-            " ", ""
-        )
-        in compact
-    )
+    assert f"agentosonboardcatalogproviders--config{_compact_arg(target)}" in compact
+    assert f"agentosonboardcatalogchannels--config{_compact_arg(target)}" in compact
+    assert f"agentosonboardcatalogrouter--config{_compact_arg(target)}" in compact
+    assert f"agentosonboardcatalogsearch--config{_compact_arg(target)}" in compact
+    assert f"agentosonboardcatalogimage--config{_compact_arg(target)}" in compact
+    assert f"agentosonboardcatalogmemory--config{_compact_arg(target)}" in compact
     assert "Open section" in result.stdout
     assert "option-specific Try commands" in result.stdout
     assert not target.exists()
@@ -1195,7 +1132,7 @@ def test_onboard_status_summarizes_blocking_and_optional_sections(
 ):
     target = tmp_path / "custom.toml"
     target.write_text(
-        '[llm]\n'
+        "[llm]\n"
         'provider = "openrouter"\n'
         'model = "deepseek/deepseek-v4-flash"\n'
         'api_key_env = "CUSTOM_LLM_KEY"\n',
@@ -1235,10 +1172,7 @@ def test_onboard_status_explains_router_ready_before_provider_setup(
     )
     assert json_result.exit_code == 0, json_result.stdout
     payload = _json.loads(json_result.stdout)
-    assert (
-        payload["sectionDetails"]["router"]["detail"]
-        == "uses Pilot Router after provider setup"
-    )
+    assert payload["sectionDetails"]["router"]["detail"] == "uses Pilot Router after provider setup"
 
 
 def test_onboard_status_table_hides_image_generation_internal_source(
@@ -1247,13 +1181,13 @@ def test_onboard_status_table_hides_image_generation_internal_source(
 ):
     target = tmp_path / "custom.toml"
     target.write_text(
-        '[llm]\n'
+        "[llm]\n"
         'provider = "openrouter"\n'
         'model = "deepseek/deepseek-v4-flash"\n'
         'api_key = "sk-or"\n'
-        '\n'
-        '[image_generation]\n'
-        'enabled = true\n'
+        "\n"
+        "[image_generation]\n"
+        "enabled = true\n"
         'primary = "openrouter/google/gemini-3.1-flash-image-preview"\n',
         encoding="utf-8",
     )
@@ -1314,9 +1248,7 @@ def test_onboard_status_table_names_missing_env_keys_for_optional_capabilities(
     stdout_plain = _plain_text(result.stdout)
     assert f"Set search key: {_env_hint('BRAVE_SEARCH_API_KEY')}" in stdout_plain
     assert f"Set image key: {_env_hint('OPENAI_IMAGE_KEY')}" in stdout_plain
-    assert (
-        f"Set memory key: {_env_hint('OPENAI_EMBEDDINGS_API_KEY')}" in stdout_plain
-    )
+    assert f"Set memory key: {_env_hint('OPENAI_EMBEDDINGS_API_KEY')}" in stdout_plain
     assert "Fix now:" in result.stdout
     assert result.stdout.index("Fix now:") < result.stdout.index("Set memory key:")
     assert result.stdout.index("Set image key:") < result.stdout.index("Setup paths:")
@@ -1341,10 +1273,7 @@ def test_onboard_status_offers_optional_capability_paths_when_core_ready(
 ):
     target = tmp_path / "custom.toml"
     target.write_text(
-        "[llm]\n"
-        'provider = "openrouter"\n'
-        'model = "deepseek/deepseek-v4-flash"\n'
-        'api_key = "sk-or"\n',
+        '[llm]\nprovider = "openrouter"\nmodel = "deepseek/deepseek-v4-flash"\napi_key = "sk-or"\n',
         encoding="utf-8",
     )
 
@@ -1359,17 +1288,14 @@ def test_onboard_status_offers_optional_capability_paths_when_core_ready(
     assert "agentos onboard catalog --json" not in result.stdout
     assert "Channel recipes:" in result.stdout
     compact = "".join(result.stdout.split())
-    assert f"agentosonboardcatalog--config{_config_arg(target)}" in compact
-    assert f"agentosonboardcatalogchannels--config{_config_arg(target)}" in compact
+    assert f"agentosonboardcatalog--config{_compact_arg(target)}" in compact
+    assert f"agentosonboardcatalogchannels--config{_compact_arg(target)}" in compact
     assert "agentoschannelsdescribe<type>--json" not in compact
     assert "agentosonboardconfigurechannels--channel-type<type>" not in compact
     assert "Image recipes:" in result.stdout
-    assert (
-        f"agentosonboardcatalogimage--config{_config_arg(target)}"
-        in compact
-    )
+    assert f"agentosonboardcatalogimage--config{_compact_arg(target)}" in compact
     assert "agentosonboardconfigureimage--image-provider<provider>" not in compact
-    assert f"--config{_config_arg(target)}" in compact
+    assert f"--config{_compact_arg(target)}" in compact
     assert "Provider recipes:" not in result.stdout
 
 
@@ -1520,10 +1446,7 @@ def test_onboard_if_needed_non_tty_hint_targets_blocking_memory_section(
     assert result.exit_code == 2
     assert "Use a runnable setup path from this shell:" in result.stdout
     assert "Headless memory embedding:" in result.stdout
-    assert (
-        "agentos onboard configure memory --memory-provider auto"
-        in result.stdout
-    )
+    assert "agentos onboard configure memory --memory-provider auto" in result.stdout
     assert f"--config {_config_arg(target)}" in result.stdout
     assert "Provider recipes:" not in result.stdout
 
@@ -1778,9 +1701,8 @@ def test_configure_provider_reports_invalid_config_without_schema_traceback(tmp_
     assert "AgentOS config error" in result.stderr
     assert _compact_text(str(target)) in _compact_text(result.stderr)
     assert "search" in result.stderr
-    assert (
-        f"agentosonboard--if-needed--config{_config_arg(target)}"
-        in "".join(result.stderr.split())
+    assert f"agentosonboard--if-needed--config{_compact_arg(target)}" in "".join(
+        result.stderr.split()
     )
     assert "pydantic.dev" not in result.stderr
     assert "Traceback" not in result.stderr
@@ -1821,9 +1743,7 @@ def test_configure_router_noninteractive_can_set_default_tier(tmp_path, monkeypa
     assert data["agentos_router"]["default_tier"] == "c2"
 
 
-def test_configure_router_rejects_invalid_default_tier_without_writing(
-    tmp_path, monkeypatch
-):
+def test_configure_router_rejects_invalid_default_tier_without_writing(tmp_path, monkeypatch):
     target = tmp_path / "c.toml"
     target.write_text(
         '[llm]\nprovider = "ollama"\nmodel = "llama3"\n',
@@ -2278,3 +2198,26 @@ def test_onboard_without_tty_prints_hint_without_writing_config(tmp_path, monkey
 def test_init_help_mentions_onboard():
     result = runner.invoke(app, ["init", "--help"])
     assert "onboard" in result.stdout.lower()
+
+
+def test_quote_cli_arg_platform_behavior(monkeypatch):
+    from agentos.onboarding.next_steps import _config_cli_arg, quote_cli_arg
+
+    # On Windows: paths with spaces must use double quotes for cmd.exe / PowerShell compatibility
+    monkeypatch.setattr(platform, "system", lambda: "Windows")
+    assert quote_cli_arg(r"C:\Users\John Doe\custom.toml") == r'"C:\Users\John Doe\custom.toml"'
+    assert (
+        _config_cli_arg(r"C:\Users\John Doe\custom.toml")
+        == r' --config "C:\Users\John Doe\custom.toml"'
+    )
+    # On Windows: paths without spaces remain unquoted
+    assert quote_cli_arg(r"C:\Users\John\custom.toml") == r"C:\Users\John\custom.toml"
+    assert _config_cli_arg(r"C:\Users\John\custom.toml") == r" --config C:\Users\John\custom.toml"
+    assert _config_cli_arg(None) == ""
+
+    # On POSIX: shlex.quote standard behavior
+    monkeypatch.setattr(platform, "system", lambda: "Linux")
+    assert quote_cli_arg("/home/john doe/custom.toml") == "'/home/john doe/custom.toml'"
+    assert _config_cli_arg("/home/john doe/custom.toml") == " --config '/home/john doe/custom.toml'"
+    assert quote_cli_arg("/home/john/custom.toml") == "/home/john/custom.toml"
+    assert _config_cli_arg("/home/john/custom.toml") == " --config /home/john/custom.toml"
