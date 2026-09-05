@@ -67,6 +67,7 @@ FATAL_ERROR_CLASSES: tuple[str, ...] = (
 _DEFAULT_TIMEOUT_S = 30.0
 _POLL_TIMEOUT_HEADROOM_S = 5.0
 _CONNECT_RETRY_DELAYS_S = (0.25, 0.5)
+_MAX_CALLBACK_RETRIES = 3
 #: Transport failures that happen before any request bytes are written, and so
 #: can be retried without risking a duplicate Bot API call.
 _PRE_SEND_CONNECT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
@@ -203,6 +204,7 @@ class TelegramChannel:
     _owns_client: bool = field(default=False, init=False, repr=False)
     _poll_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
     _update_offset: int | None = field(default=None, init=False, repr=False)
+    _callback_retries: dict[int, int] = field(default_factory=dict, init=False, repr=False)
     _dedupe: EventDedupeCache = field(init=False, repr=False)
     _connected: bool = field(default=False, init=False, repr=False)
     _last_message_at: datetime | None = field(default=None, init=False, repr=False)
@@ -640,20 +642,77 @@ class TelegramChannel:
                 if not isinstance(update, dict):
                     continue
                 update_id = update.get("update_id")
-                if isinstance(update_id, int):
-                    self._update_offset = update_id + 1
                 if "callback_query" in update:
+                    cb = update["callback_query"]
+                    cb_id = str(cb.get("id") or "") if isinstance(cb, dict) else ""
+                    dedupe_key = (
+                        f"cb:{cb_id}"
+                        if cb_id
+                        else (f"cb_up:{update_id}" if isinstance(update_id, int) else "")
+                    )
+                    if dedupe_key and dedupe_key in self._dedupe:
+                        log.debug("telegram.callback_duplicate_dropped", key=dedupe_key)
+                        if isinstance(update_id, int):
+                            self._callback_retries.pop(update_id, None)
+                            self._update_offset = update_id + 1
+                        continue
+
                     try:
-                        await self._handle_telegram_callback(update["callback_query"])
+                        await self._handle_telegram_callback(cb)
                     except Exception as exc:
-                        log.warning("telegram.callback_query_handle_failed", error=str(exc))
+                        retries = (
+                            self._callback_retries.get(update_id, 0) + 1
+                            if isinstance(update_id, int)
+                            else 1
+                        )
+                        if isinstance(update_id, int):
+                            self._callback_retries[update_id] = retries
+                        if retries <= _MAX_CALLBACK_RETRIES:
+                            log.warning(
+                                "telegram.callback_query_handle_failed",
+                                update_id=update_id,
+                                attempt=retries,
+                                error=str(exc),
+                            )
+                            await asyncio.sleep(self.config.poll_idle_sleep_s)
+                            break
+                        log.error(
+                            "telegram.callback_query_retries_exhausted",
+                            update_id=update_id,
+                            attempts=retries,
+                            error=str(exc),
+                        )
+                        if isinstance(update_id, int):
+                            self._callback_retries.pop(update_id, None)
+                            self._update_offset = update_id + 1
+                        continue
+
+                    if dedupe_key:
+                        self._dedupe.check_and_add(dedupe_key)
+                    if isinstance(update_id, int):
+                        self._callback_retries.pop(update_id, None)
+                        self._update_offset = update_id + 1
                     continue
+
                 try:
                     msg = self.parse_incoming(update)
                 except ValueError:
                     log.debug("telegram.unsupported_update_ignored", update_id=update_id)
+                    if isinstance(update_id, int):
+                        self._update_offset = update_id + 1
+                    continue
+                except Exception as exc:
+                    log.warning(
+                        "telegram.update_parse_failed",
+                        update_id=update_id,
+                        error=str(exc),
+                    )
+                    if isinstance(update_id, int):
+                        self._update_offset = update_id + 1
                     continue
                 self.enqueue(msg)
+                if isinstance(update_id, int):
+                    self._update_offset = update_id + 1
             if not updates:
                 await asyncio.sleep(self.config.poll_idle_sleep_s)
 
@@ -702,10 +761,19 @@ class TelegramChannel:
         if not isinstance(update, dict):
             return Response(status_code=400)
         if "callback_query" in update:
+            cb = update["callback_query"]
+            cb_id = str(cb.get("id") or "") if isinstance(cb, dict) else ""
+            dedupe_key = f"cb:{cb_id}" if cb_id else ""
+            if dedupe_key and dedupe_key in self._dedupe:
+                log.debug("telegram.callback_duplicate_dropped", key=dedupe_key)
+                return Response(status_code=200)
             try:
-                await self._handle_telegram_callback(update["callback_query"])
+                await self._handle_telegram_callback(cb)
             except Exception as exc:
                 log.warning("telegram.callback_query_handle_failed", error=str(exc))
+            else:
+                if dedupe_key:
+                    self._dedupe.check_and_add(dedupe_key)
             return Response(status_code=200)
         try:
             msg = self.parse_incoming(update)

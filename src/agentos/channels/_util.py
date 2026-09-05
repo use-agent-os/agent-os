@@ -117,6 +117,9 @@ class EventDedupeCache:
             self._seen.popitem(last=False)
         return True
 
+    def __contains__(self, event_id: object) -> bool:
+        return event_id in self._seen
+
 
 @dataclass
 class RateLimiter:
