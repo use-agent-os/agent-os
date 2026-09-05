@@ -3,6 +3,16 @@ import json, subprocess, sys, time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
+USAGE = f"Usage: {sys.argv[0]} <token_address> <chain> [zh|en]"
+
+if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
+    print(USAGE)
+    sys.exit(0)
+
+if len(sys.argv) < 3:
+    print(USAGE, file=sys.stderr)
+    sys.exit(2)
+
 TOKEN_ADDR = sys.argv[1]
 CHAIN      = sys.argv[2]
 LANG       = sys.argv[3] if len(sys.argv) > 3 else 'zh'
