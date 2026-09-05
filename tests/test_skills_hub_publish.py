@@ -34,13 +34,18 @@ async def test_publish_skill_fails_when_gh_fork_returns_nonzero(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     skill_dir = _write_skill(tmp_path)
+    seen_returncode: dict[str, int] = {}
 
     class FakeProc:
         def __init__(self) -> None:
             self.returncode = 1
 
         async def communicate(self) -> tuple[bytes, bytes]:
+            seen_returncode["code"] = self.returncode
             return b"", b"failed to fork: HTTP 404: Not Found\n"
+
+        async def wait(self) -> int:
+            raise AssertionError("use communicate(), not wait()")
 
     async def fake_exec(*_args, **_kwargs):
         return FakeProc()
@@ -52,6 +57,7 @@ async def test_publish_skill_fails_when_gh_fork_returns_nonzero(
 
     result = await publish_skill(skill_dir, target_repo="use-agent-os/missing-repo")
     assert result.success is False
+    assert seen_returncode.get("code") == 1
     assert "Failed to fork" in result.message
     assert "404" in result.message
 
@@ -69,6 +75,9 @@ async def test_publish_skill_succeeds_when_gh_fork_returns_zero(
         async def communicate(self) -> tuple[bytes, bytes]:
             return b"", b""
 
+        async def wait(self) -> int:
+            raise AssertionError("use communicate(), not wait()")
+
     async def fake_exec(*_args, **_kwargs):
         return FakeProc()
 
@@ -76,7 +85,10 @@ async def test_publish_skill_succeeds_when_gh_fork_returns_zero(
 
     result = await publish_skill(skill_dir, target_repo="use-agent-os/agent-os")
     assert result.success is True
-    assert "Fork created" in result.message
+    assert "fork of use-agent-os/agent-os created" in result.message
+    # Do not claim a branch that was never created.
+    assert "use branch" not in result.message.lower()
+    assert "skill/demo-skill" not in result.message
 
 
 def test_skills_publish_cli_exits_nonzero_on_validation_failure(tmp_path: Path) -> None:
