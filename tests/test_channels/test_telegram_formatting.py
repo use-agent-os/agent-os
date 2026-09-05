@@ -120,3 +120,54 @@ async def test_telegram_send_falls_back_to_plain_text_on_entity_parse_error() ->
         "chat_id": "42",
         "text": "**Ready**: `agentos status`",
     }
+
+
+# ── Ragged / mismatched table rows ─────────────────────────────────────
+
+
+def test_two_column_table_with_single_cell_row_does_not_crash() -> None:
+    """Single-cell rows in a 2-col table pad the missing column."""
+    markdown = """| Header A | Header B |
+| --- | --- |
+| Row 1 Only |
+"""
+    rendered = render_telegram_html(markdown)
+    assert "Header A — Header B" in rendered
+    assert "Row 1 Only" in rendered
+
+
+def test_three_column_table_with_mismatched_row_length_does_not_crash() -> None:
+    """Mismatched column count in a 3-col table pads missing cells."""
+    markdown = """| H1 | H2 | H3 |
+| --- | --- | --- |
+| A | B |
+| C | D | E | F |
+"""
+    rendered = render_telegram_html(markdown)
+    assert rendered
+
+
+def test_three_column_table_with_extra_cells_truncated() -> None:
+    """Extra cells beyond header count are truncated instead of crashing."""
+    markdown = """| Head | Tail |
+| --- | --- |
+| A | B | C | D |
+"""
+    rendered = render_telegram_html(markdown)
+    assert "Head" in rendered
+    assert "Tail" in rendered
+    assert "A" in rendered
+
+
+def test_ragged_rows_preserve_prior_content() -> None:
+    """Mismatched rows after valid rows keep prior parsed content."""
+    markdown = """| Name | Value |
+| --- | --- |
+| **OK** | ✅ Pass |
+| Orphan |
+| **Crit** | ❌ Fail |
+"""
+    rendered = render_telegram_html(markdown)
+    assert "✅ Pass" in rendered
+    assert "❌ Fail" in rendered
+    assert "Orphan" in rendered
