@@ -670,6 +670,19 @@ class _FakeIMAP:
         self.stored.append((uid, command, flags))
         return "OK", [b""]
 
+    def uid(self, command: str, *args: Any) -> tuple[str, list[Any]]:
+        """Dispatch UID-prefixed commands to the underlying methods."""
+        cmd = command.upper()
+        if cmd == "SEARCH":
+            if len(args) == 1:
+                return self.search(None, args[0])
+            return self.search(*args)
+        if cmd == "FETCH":
+            return self.fetch(*args)
+        if cmd == "STORE":
+            return self.store(*args)
+        raise ValueError(f"unsupported UID command: {command}")
+
     def close(self) -> None:
         self.closed = True
 
