@@ -217,6 +217,13 @@ class ToolResultStore:
 
     def _prune_to_fit(self, incoming_bytes: int, disk_budget_bytes: int) -> None:
         budget = max(0, int(disk_budget_bytes))
+        # An oversized incoming payload can never fit, no matter how much is
+        # pruned; reject it before destroying any existing records.
+        if incoming_bytes > budget:
+            raise ToolResultStoreBudgetError(
+                "tool result snapshot exceeds disk budget "
+                f"({incoming_bytes} > {budget})"
+            )
         records = sorted(self._iter_records(), key=lambda item: item.created_at)
         current = sum(record.size_bytes for record in records)
         if current + incoming_bytes <= budget:
@@ -226,11 +233,9 @@ class ToolResultStore:
             current = max(0, current - record.size_bytes)
             if current + incoming_bytes <= budget:
                 return
-        if incoming_bytes > budget:
-            raise ToolResultStoreBudgetError(
-                "tool result snapshot exceeds disk budget "
-                f"({incoming_bytes} > {budget})"
-            )
+        raise ToolResultStoreBudgetError(
+            f"tool results exceed disk budget ({current} + {incoming_bytes} > {budget})"
+        )
 
 
 def _parse_created_at(value: str) -> datetime:
