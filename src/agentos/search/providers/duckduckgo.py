@@ -19,6 +19,26 @@ _HEADERS = {
 }
 
 
+def _clean_ddg_url(href: str) -> str:
+    """Extract and unquote the target URL from DuckDuckGo redirect hrefs."""
+    if not href:
+        return ""
+    if "uddg=" in href:
+        try:
+            parsed = urllib.parse.urlsplit(href)
+            qs = urllib.parse.parse_qs(parsed.query)
+            if "uddg" in qs and qs["uddg"]:
+                return qs["uddg"][0]
+        except Exception:
+            pass
+        try:
+            part = href.split("uddg=")[1].split("&")[0]
+            return urllib.parse.unquote(part)
+        except Exception:
+            pass
+    return href
+
+
 class DuckDuckGoProvider:
     """Search provider using DuckDuckGo HTML endpoint."""
 
@@ -77,8 +97,7 @@ class DuckDuckGoProvider:
                 continue
 
             # Clean DDG redirect URLs
-            if "//duckduckgo.com/l/?uddg=" in href:
-                href = urllib.parse.unquote(href.split("uddg=")[1].split("&")[0])
+            href = _clean_ddg_url(href)
 
             snippet_elem = elem.select_one(".result__snippet")
             snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
