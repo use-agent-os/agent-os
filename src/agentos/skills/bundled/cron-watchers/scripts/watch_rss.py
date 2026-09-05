@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -25,6 +26,29 @@ sys.path.insert(0, str(Path(__file__).parent))
 from _watermark import select_new  # noqa: E402
 
 USER_AGENT = "AgentOS-cron-watcher/1.0"
+
+
+def validate_http_url(url: str) -> str:
+    """Validate and return a URL that must be http:// or https://.
+
+    Rejects ``file://``, ``ftp://``, and any custom scheme that could leak
+    local data or be abused as an SSRF oracle. Uses ``urlsplit`` for robust
+    scheme detection (not a fragile ``startswith`` prefix check).
+    """
+    cleaned = (url or "").strip()
+    if not cleaned:
+        raise ValueError(f"empty URL: {url!r}")
+    try:
+        parsed = urllib.parse.urlsplit(cleaned)
+    except ValueError as exc:
+        raise ValueError(f"invalid URL {url!r}: {exc}") from exc
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError(
+            f"invalid URL scheme {parsed.scheme!r} in {url!r}: must be http:// or https://"
+        )
+    if not parsed.netloc:
+        raise ValueError(f"URL missing host {url!r}: must be http:// or https://")
+    return cleaned
 
 
 def _text(node: ET.Element | None) -> str:
@@ -69,7 +93,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    request = urllib.request.Request(args.url, headers={"User-Agent": USER_AGENT})
+    try:
+        validated_url = validate_http_url(args.url)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    request = urllib.request.Request(validated_url, headers={"User-Agent": USER_AGENT})
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             body = response.read()
