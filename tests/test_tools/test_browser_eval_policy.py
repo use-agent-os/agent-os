@@ -97,6 +97,33 @@ class TestUrlPreScan:
     def test_no_url_literal(self) -> None:
         assert expression_targets_private_url("document.title") is None
 
+    def test_flags_protocol_relative_metadata(self) -> None:
+        # `//host/path` inherits the page's scheme — same target, no scheme word
+        # for the plain-text scanner to see (issue #1092).
+        blocked = expression_targets_private_url("fetch('//169.254.169.254/latest/meta-data/')")
+        assert blocked is not None
+        assert "169.254.169.254" in blocked
+
+    def test_flags_protocol_relative_loopback(self) -> None:
+        blocked = expression_targets_private_url("fetch('//127.0.0.1:8080/admin')")
+        assert blocked is not None
+
+    def test_flags_split_string_scheme(self) -> None:
+        # `'htt' + 'p://…'` hides the scheme across two literals; the
+        # concatenation of decoded literals must reconstruct it (issue #1092).
+        blocked = expression_targets_private_url(
+            "fetch('htt' + 'p://169.254.169.254/latest/meta-data/')"
+        )
+        assert blocked is not None
+        assert "169.254.169.254" in blocked
+
+    def test_ignores_public_protocol_relative(self) -> None:
+        # A public protocol-relative target stays allowed, same as `https://`.
+        assert expression_targets_private_url("fetch('//example.com/api')") is None
+
+    def test_ignores_concatenated_public_url(self) -> None:
+        assert expression_targets_private_url("fetch('htt' + 'ps://example.com/api')") is None
+
 
 class TestRedaction:
     def test_masks_string_secret(self) -> None:

@@ -88,6 +88,15 @@ _JS_STRING_LITERAL_RE = re.compile(
 #: a direct fetch that never touches ``location.href``, so pre-screen here.
 _JS_URL_LITERAL_RE = re.compile(r"""https?://[^\s'"`)\]<>]+""", re.IGNORECASE)
 
+#: Protocol-relative targets — ``//host/path`` inherits the page's scheme and
+#: reaches the network exactly like an ``http(s)://`` spelling. The host must
+#: look like a hostname or IP (dotted, or ``localhost``) so a JavaScript line
+#: comment such as ``//todo`` is not mistaken for a URL.
+_JS_PROTOCOL_RELATIVE_RE = re.compile(
+    r"""//(?:localhost|[0-9A-Za-z_-]+(?:\.[0-9A-Za-z_-]+)+)(?::\d+)?(?:/[^\s'"`)\]<>]*)?""",
+    re.IGNORECASE,
+)
+
 
 def _decode_js_string_literal(literal: str) -> str:
     """Best-effort decode of a single quoted JS string literal to its value."""
@@ -188,11 +197,33 @@ def expression_targets_private_url(expression: str) -> str | None:
     Best-effort scan for ``http(s)://…`` literals; returns the first that targets
     a private/internal address or the always-blocked cloud-metadata floor, else
     ``None``.
+
+    Obfuscated spellings are covered too:
+
+    * protocol-relative — ``fetch('//169.254.169.254/…')`` is normalized to an
+      ``http://`` candidate before the same private/internal checks run;
+    * split-string — ``fetch('htt' + 'p://169.254.169.254/…')`` hides the
+      scheme across two literals, so the concatenation of every decoded string
+      literal is scanned the same way
+      ``_sensitive_eval_token_reason`` reconstructs ``document["coo" + "kie"]``.
     """
     if not isinstance(expression, str):
         return None
-    for match in _JS_URL_LITERAL_RE.findall(expression):
-        candidate = str(match).rstrip(".,;")
+    # Scan the raw expression and, separately, the concatenation of every
+    # decoded string literal. The latter reconstructs a scheme split across
+    # literals (`'htt' + 'p://host'`), the same technique
+    # `_sensitive_eval_token_reason` uses for `document["coo" + "kie"]`.
+    haystacks = (expression, "".join(_decoded_js_string_literals(expression)))
+    candidates: list[str] = []
+    for haystack in haystacks:
+        for match in _JS_URL_LITERAL_RE.findall(haystack):
+            candidates.append(str(match).rstrip(".,;"))
+        # Normalize protocol-relative targets to a scheme-bearing URL so the
+        # shared private/internal checks (which require http/https) can judge
+        # them instead of rejecting them on scheme alone.
+        for match in _JS_PROTOCOL_RELATIVE_RE.findall(haystack):
+            candidates.append("http:" + str(match).rstrip(".,;"))
+    for candidate in candidates:
         if _url_is_blocked(candidate):
             return candidate
     return None
