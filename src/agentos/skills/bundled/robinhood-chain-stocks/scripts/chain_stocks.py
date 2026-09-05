@@ -551,7 +551,9 @@ def _write_cards(result: dict[str, Any], output: str) -> None:
         payload = chain_cards.build_payload(result)
         if not payload["cards"]:
             return
-        Path(output).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         print(
             f"publish_artifact path={output} mime={chain_cards.CARDS_MIME}",
             file=sys.stderr,

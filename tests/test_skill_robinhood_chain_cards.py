@@ -129,3 +129,31 @@ def test_a_result_without_a_token_renders_nothing() -> None:
 def test_onchain_symbol_is_used_when_the_list_symbol_is_missing() -> None:
     card = chain_cards.build_cards(_result(token=_token(symbol="", onchainSymbol="TSLA")))[0]
     assert card["title"] == "TSLA"
+
+
+def test_main_creates_nested_parent_dirs_for_output(tmp_path: Path) -> None:
+    """main() must create parent directories when the output path is nested.
+
+    Without ``parent.mkdir(parents=True, exist_ok=True)``, ``Path.write_text``
+    raises ``FileNotFoundError`` when the parent directory does not exist —
+    the same gap fixed for the CLI cost exporter in PR #923.
+    """
+    import json
+    import subprocess
+    import sys
+
+    nested = tmp_path / "nested" / "deep" / "cards.json"
+    payload_in = _result()  # a valid chain_stocks object with a token
+
+    result = subprocess.run(
+        [sys.executable, str(_SCRIPT), "--output", str(nested)],
+        input=json.dumps(payload_in),
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert nested.exists()
+    written = json.loads(nested.read_text(encoding="utf-8"))
+    assert written["type"] == "cards"
+    assert len(written["cards"]) == 1
