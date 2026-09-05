@@ -652,6 +652,9 @@ class _FakeIMAP:
         self._size = len(raw) if size is None else size
         self.stored: list[tuple[str, str, str]] = []
         self.selected: list[str] = []
+        self.uid_calls: list[tuple[Any, ...]] = []
+        self.direct_sequence_calls: list[str] = []
+        self._in_uid = False
         self.closed = False
 
     def select(self, folder: str) -> tuple[str, list[bytes]]:
@@ -659,16 +662,39 @@ class _FakeIMAP:
         return "OK", [b"1"]
 
     def search(self, charset: Any, criteria: str) -> tuple[str, list[bytes]]:
+        if not self._in_uid:
+            self.direct_sequence_calls.append("search")
         return "OK", [b"7"]
 
     def fetch(self, uid: str, spec: str) -> tuple[str, list[Any]]:
+        if not self._in_uid:
+            self.direct_sequence_calls.append("fetch")
         if "RFC822.SIZE" in spec:
-            return "OK", [f"7 (RFC822.SIZE {self._size})".encode()]
-        return "OK", [(b"7 (BODY[] {%d}" % len(self._raw), self._raw), b")"]
+            return "OK", [f"{uid} (RFC822.SIZE {self._size})".encode()]
+        return "OK", [(b"%s (BODY[] {%d}" % (uid.encode(), len(self._raw)), self._raw), b")"]
 
     def store(self, uid: str, command: str, flags: str) -> tuple[str, list[bytes]]:
+        if not self._in_uid:
+            self.direct_sequence_calls.append("store")
         self.stored.append((uid, command, flags))
         return "OK", [b""]
+
+    def uid(self, command: str, *args: Any) -> tuple[str, list[Any]]:
+        self.uid_calls.append((command.upper(), *args))
+        cmd = command.upper()
+        self._in_uid = True
+        try:
+            if cmd == "SEARCH":
+                search_args = args[1:] if args and args[0] is None else args
+                criteria = search_args[0] if search_args else ""
+                return self.search(None, criteria)
+            if cmd == "FETCH":
+                return self.fetch(args[0], args[1])
+            if cmd == "STORE":
+                return self.store(args[0], args[1], args[2])
+        finally:
+            self._in_uid = False
+        raise NotImplementedError(f"Fake IMAP does not implement UID {command}")
 
     def close(self) -> None:
         self.closed = True
@@ -688,6 +714,86 @@ def test_poll_parses_and_marks_seen(monkeypatch: pytest.MonkeyPatch) -> None:
     assert [m.sender_id for m in messages] == ["owner@example.com"]
     assert fake.stored == [("7", "+FLAGS", "\\Seen")]
     assert fake.closed is True
+
+
+def test_poll_uses_imap_uid_commands_not_sequence_numbers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel = EmailChannel(config=_config())
+    fake = _FakeIMAP(_raw().as_bytes())
+    monkeypatch.setattr(channel, "_imap_connect", lambda: fake)
+
+    messages = channel._fetch_unseen()
+
+    assert len(messages) == 1
+    # Ensure client.uid was called for SEARCH, FETCH size, FETCH body, and STORE seen
+    assert fake.uid_calls == [
+        ("SEARCH", "UNSEEN"),
+        ("FETCH", "7", "(RFC822.SIZE)"),
+        ("FETCH", "7", "(BODY.PEEK[])"),
+        ("STORE", "7", "+FLAGS", "\\Seen"),
+    ]
+    # Ensure ephemeral sequence-number IMAP commands were NOT called directly
+    assert fake.direct_sequence_calls == []
+
+
+def test_poll_handles_multiple_uids_via_uid_commands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel = EmailChannel(config=_config())
+    fake = _FakeIMAP(_raw().as_bytes())
+    monkeypatch.setattr(channel, "_imap_connect", lambda: fake)
+    monkeypatch.setattr(fake, "search", lambda charset, criteria: ("OK", [b"1001 1002"]))
+
+    messages = channel._fetch_unseen()
+
+    assert len(messages) == 2
+    assert fake.stored == [
+        ("1001", "+FLAGS", "\\Seen"),
+        ("1002", "+FLAGS", "\\Seen"),
+    ]
+    assert fake.direct_sequence_calls == []
+    # Verify both UIDs went through UID FETCH and UID STORE
+    assert ("FETCH", "1001", "(RFC822.SIZE)") in fake.uid_calls
+    assert ("FETCH", "1001", "(BODY.PEEK[])") in fake.uid_calls
+    assert ("STORE", "1001", "+FLAGS", "\\Seen") in fake.uid_calls
+    assert ("FETCH", "1002", "(RFC822.SIZE)") in fake.uid_calls
+    assert ("FETCH", "1002", "(BODY.PEEK[])") in fake.uid_calls
+    assert ("STORE", "1002", "+FLAGS", "\\Seen") in fake.uid_calls
+
+
+def test_poll_oversized_message_marked_seen_via_uid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel = EmailChannel(config=_config(max_message_bytes=50))
+    fake = _FakeIMAP(_raw().as_bytes(), size=5000)
+    monkeypatch.setattr(channel, "_imap_connect", lambda: fake)
+
+    messages = channel._fetch_unseen()
+
+    assert messages == []
+    assert fake.uid_calls == [
+        ("SEARCH", "UNSEEN"),
+        ("FETCH", "7", "(RFC822.SIZE)"),
+        ("STORE", "7", "+FLAGS", "\\Seen"),
+    ]
+    assert fake.stored == [("7", "+FLAGS", "\\Seen")]
+    assert fake.direct_sequence_calls == []
+
+
+def test_poll_oversized_body_marked_seen_via_uid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel = EmailChannel(config=_config(max_message_bytes=50))
+    fake = _FakeIMAP(_raw().as_bytes(), size=10)
+    monkeypatch.setattr(channel, "_imap_connect", lambda: fake)
+
+    messages = channel._fetch_unseen()
+
+    assert messages == []
+    assert ("STORE", "7", "+FLAGS", "\\Seen") in fake.uid_calls
+    assert fake.stored == [("7", "+FLAGS", "\\Seen")]
+    assert fake.direct_sequence_calls == []
 
 
 def test_poll_retries_message_after_transient_conversion_failure(
