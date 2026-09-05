@@ -248,6 +248,18 @@ is mandatory, not advisory: without it the endpoint answers Slack's
 `url_verification` handshake and rejects everything else with `401`, because an
 unsigned POST cannot be attributed to Slack.
 
+The default webhook path is `/slack/events`. For multiple Slack webhook
+accounts, set a distinct `webhook_path` on each channel entry, for example
+`/slack/team-a/events` and `/slack/team-b/events`. You can supply it with
+`agentos channels add slack --name team-a --field webhook_path=/slack/team-a/events`
+alongside the token and signing-secret fields above. Configure each Slack app's
+Events API and Interactivity Request URLs to use its matching public URL; use
+the same URL for slash commands (`command_request_url` or the exported manifest).
+Restart the gateway after changing paths. Duplicate channel webhook paths with
+overlapping HTTP methods cause a startup error naming the conflicting entries,
+instead of silently routing every request to the first account. Socket Mode
+does not register a webhook route and is unaffected.
+
 Leave `slack_channel_id` empty when the adapter should reply to the incoming
 conversation. Set it only when you want a default fallback channel. Enable
 `reply_in_thread` when replies should stay in Slack threads.

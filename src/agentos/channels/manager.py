@@ -146,13 +146,26 @@ class ChannelManager:
 
         Slack adapters expose ``create_webhook_route()``;
         Discord uses a persistent WebSocket and has no webhook.
+        Conflicting paths/methods are rejected instead of shadowing an account.
         """
         routes: list[Route] = []
+        owners: dict[str, list[tuple[str, Route]]] = {}
         for name, adapter in self._channels.items():
             if getattr(adapter, "transport_name", "webhook") != "webhook":
                 continue
             if hasattr(adapter, "create_webhook_route"):
                 route = adapter.create_webhook_route()
+                for other_name, other_route in owners.get(route.path, []):
+                    if (
+                        not route.methods
+                        or not other_route.methods
+                        or route.methods & other_route.methods
+                    ):
+                        raise ValueError(
+                            f"Webhook route {route.path!r} conflicts between channel entries "
+                            f"{other_name!r} and {name!r}; configure distinct webhook_path values"
+                        )
+                owners.setdefault(route.path, []).append((name, route))
                 routes.append(route)
                 log.info("channel.webhook_route_collected", channel=name, path=route.path)
         return routes

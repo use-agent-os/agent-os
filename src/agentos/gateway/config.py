@@ -1753,6 +1753,7 @@ class SlackChannelEntry(ConfiguredChannelEntry):
     token: str
     slack_channel_id: str = ""
     signing_secret: str | None = None
+    webhook_path: str = "/slack/events"
     reply_in_thread: bool = False
     # ``socket`` uses Slack Socket Mode (an outbound websocket long-connection)
     # and needs no public Request URL; ``webhook`` keeps the Events API
