@@ -144,6 +144,9 @@ class SlackChannel:
     )
     _socket_task: asyncio.Task | None = field(default=None, init=False, repr=False)
     _socket_stop: asyncio.Event | None = field(default=None, init=False, repr=False)
+    _interactive_tasks: set[asyncio.Task[Any]] = field(
+        default_factory=set, init=False, repr=False
+    )
     supports_slash_commands: bool = True
 
     @property
@@ -640,11 +643,29 @@ class SlackChannel:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._socket_task
             self._socket_task = None
+        if self._interactive_tasks:
+            pending = list(self._interactive_tasks)
+            for task in pending:
+                task.cancel()
+            for task in pending:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+            self._interactive_tasks.clear()
         if self._client is not None:
             await self._client.aclose()
             self._client = None
         self._connected = False
         log.info("slack.stopped")
+
+    def _spawn_interactive_task(self, payload: dict[str, Any]) -> asyncio.Task[Any]:
+        """Spawn and retain a strong reference to an interactive approval task."""
+        task = asyncio.create_task(
+            self._handle_slack_interactive(payload),
+            name=f"slack-interactive-{id(payload)}",
+        )
+        self._interactive_tasks.add(task)
+        task.add_done_callback(self._interactive_tasks.discard)
+        return task
 
     # ------------------------------------------------------------------
     # Socket Mode transport (no public Request URL required)
@@ -722,7 +743,7 @@ class SlackChannel:
             return
         if mtype == "interactive":
             if isinstance(payload, dict):
-                asyncio.create_task(self._handle_slack_interactive(payload))
+                self._spawn_interactive_task(payload)
             return
         if mtype != "events_api":
             return
@@ -794,7 +815,7 @@ class SlackChannel:
                     payload = json.loads(payload_str)
                 except Exception:
                     return Response(status_code=400)
-                asyncio.create_task(self._handle_slack_interactive(payload))
+                self._spawn_interactive_task(payload)
                 return Response(status_code=200)
             if not self._ingest_slash_command(form):
                 return Response(status_code=400)

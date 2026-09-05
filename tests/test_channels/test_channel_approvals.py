@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 from typing import Any
@@ -533,3 +534,46 @@ async def test_channel_turn_survives_approval_prompt_rendering_failure() -> None
     assert "ls -l" in sent[0].content
     assert "reply_markup" not in sent[0].metadata
     assert "waiting for approval" in sent[-1].content
+
+
+@pytest.mark.asyncio
+async def test_slack_interactive_task_retained_and_cleaned_up() -> None:
+    channel = SlackChannel(token="xoxb-test", slack_channel_id="C123")
+    proceed = asyncio.Event()
+
+    async def _mock_interactive(_payload: dict[str, Any]) -> None:
+        await proceed.wait()
+
+    channel._handle_slack_interactive = _mock_interactive  # type: ignore[method-assign]
+    payload = {"type": "interactive", "id": 1}
+    task = channel._spawn_interactive_task(payload)
+
+    assert task in channel._interactive_tasks
+    assert len(channel._interactive_tasks) == 1
+
+    proceed.set()
+    await task
+
+    assert task not in channel._interactive_tasks
+    assert len(channel._interactive_tasks) == 0
+
+
+@pytest.mark.asyncio
+async def test_slack_channel_stop_drains_interactive_tasks() -> None:
+    channel = SlackChannel(token="xoxb-test", slack_channel_id="C123")
+
+    async def _mock_interactive(_payload: dict[str, Any]) -> None:
+        await asyncio.Event().wait()
+
+    channel._handle_slack_interactive = _mock_interactive  # type: ignore[method-assign]
+    task = channel._spawn_interactive_task({"type": "interactive"})
+
+    assert task in channel._interactive_tasks
+    assert not task.done()
+
+    await channel.stop()
+
+    assert task.done()
+    assert task.cancelled()
+    assert len(channel._interactive_tasks) == 0
+
