@@ -46,7 +46,8 @@ class AgentTaskRegistry:
         self._tasks[session_key] = task
 
         def _on_done(t: asyncio.Task) -> None:
-            self._tasks.pop(session_key, None)
+            if self._tasks.get(session_key) is t:
+                self._tasks.pop(session_key, None)
             try:
                 if t.cancelled():
                     log.info("agent_task.cancelled", session_key=session_key)
