@@ -837,6 +837,64 @@ async def test_turn_runner_auto_publishes_deliverable_file_when_model_omits_publ
 
 
 @pytest.mark.asyncio
+async def test_turn_runner_auto_publishes_overwritten_deliverable_file(tmp_path) -> None:
+    storage = SessionStorage(":memory:")
+    await storage.connect()
+    manager = SessionManager(storage)
+    session_key = "agent:main:webchat:artifact-overwrite-omitted"
+    session = await manager.create(session_key)
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    (workspace / "manual-big-write.html").write_text(
+        "<!doctype html><title>Old</title>", encoding="utf-8"
+    )
+
+    runner = TurnRunner(
+        provider_selector=_ProviderSelector(_OmittedPublishProvider()),
+        tool_registry=_write_file_registry(),
+        session_manager=manager,
+        config=GatewayConfig(
+            attachments=AttachmentsConfig(media_root=str(tmp_path / "media")),
+            agentos_router=AgentOSRouterConfig(enabled=False),
+        ),
+    )
+    tool_context = ToolContext(
+        caller_kind=CallerKind.WEB,
+        workspace_dir=str(workspace),
+        allowed_tools={"write_file"},
+        elevated="full",
+    )
+
+    try:
+        events = [
+            event
+            async for event in runner.run(
+                "update the html page",
+                session_key,
+                tool_context=tool_context,
+                history_has_persisted_user=False,
+                no_memory_capture=True,
+            )
+        ]
+
+        artifact_events = [event for event in events if isinstance(event, ArtifactEvent)]
+        assert len(artifact_events) == 1
+        assert artifact_events[0].name == "manual-big-write.html"
+        assert artifact_events[0].mime == "text/html"
+        assert artifact_events[0].session_id == session.session_id
+
+        transcript = await manager.get_transcript(session_key)
+        assistant = [entry for entry in transcript if entry.role == "assistant"][-1]
+        payload = json.loads(assistant.content)
+        assert payload["text"] == "Created manual-big-write.html for you."
+        assert payload["artifacts"][0]["name"] == "manual-big-write.html"
+        assert payload["artifacts"][0]["source"] == "auto_publish_omitted"
+    finally:
+        await storage.close()
+
+
+@pytest.mark.asyncio
 async def test_turn_runner_does_not_auto_publish_edited_config_json(tmp_path) -> None:
     storage = SessionStorage(":memory:")
     await storage.connect()

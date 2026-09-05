@@ -410,3 +410,28 @@ async def test_list_dir_broken_symlink_does_not_crash(tmp_path: Path) -> None:
     assert "[file] valid.txt" in output
     assert "broken_link.txt" in output
 
+
+@pytest.mark.asyncio
+async def test_write_file_records_workspace_write_on_both_create_and_overwrite(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ctx = ToolContext(workspace_dir=str(workspace))
+    token = current_tool_context.set(ctx)
+    raw_write_file = fs.write_file.__wrapped__.__wrapped__
+    target = workspace / "report.html"
+    try:
+        # First write: file is created
+        await raw_write_file(str(target), "<h1>Initial</h1>")
+        assert len(ctx.workspace_file_writes) == 1
+        assert ctx.workspace_file_writes[0]["name"] == "report.html"
+
+        # Second write: file already exists and is overwritten
+        await raw_write_file(str(target), "<h1>Updated</h1>")
+        assert len(ctx.workspace_file_writes) == 2
+        assert ctx.workspace_file_writes[1]["name"] == "report.html"
+    finally:
+        current_tool_context.reset(token)
+
+
