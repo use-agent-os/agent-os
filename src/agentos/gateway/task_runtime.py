@@ -1,3 +1,4 @@
+
 """In-process task runtime for agent turns.
 
 Lock ordering invariant:
@@ -38,6 +39,7 @@ from agentos.session.terminal_reply import (
     is_context_payload_too_large,
     sanitize_agent_error,
 )
+from agentos.util.bounded_registry import BoundedRegistry
 
 log = structlog.get_logger(__name__)
 
@@ -322,11 +324,13 @@ class TaskRuntime:
         # Per-session write locks shared with TurnRunner and RPC ingress on
         # gateway-dispatched turns. These guard short transcript/session state
         # mutations only.
-        self._session_locks: dict[str, asyncio.Lock] = {}
+        self._session_locks: BoundedRegistry[str, asyncio.Lock] = BoundedRegistry(max_entries=5000)
         # Per-session execution locks serialize whole turn lifecycles without
         # blocking transcript writes, browser queue acknowledgements, or approval
         # status updates behind external I/O.
-        self._session_execution_locks: dict[str, asyncio.Lock] = {}
+        self._session_execution_locks: BoundedRegistry[str, asyncio.Lock] = BoundedRegistry(
+            max_entries=5000
+        )
         self._tasks: dict[str, _RuntimeTask] = {}
         self._pending_by_session: dict[str, list[_RuntimeTask]] = {}
         self._running_by_session: dict[str, _RuntimeTask] = {}
@@ -792,8 +796,8 @@ class TaskRuntime:
 
     async def _execute(self, task: _RuntimeTask) -> None:
         session_key = task.envelope.session_key
-        write_lock = self._session_locks.setdefault(session_key, asyncio.Lock())
-        execution_lock = self._session_execution_locks.setdefault(session_key, asyncio.Lock())
+        write_lock = self._session_locks.get_or_create(session_key, asyncio.Lock)
+        execution_lock = self._session_execution_locks.get_or_create(session_key, asyncio.Lock)
         try:
             async with execution_lock:
                 if task.cancel_requested:
@@ -1071,7 +1075,7 @@ class TaskRuntime:
 
         ``setdefault`` is atomic in CPython — avoids TOCTOU race on insertion.
         """
-        return self._session_locks.setdefault(session_key, asyncio.Lock())
+        return self._session_locks.get_or_create(session_key, asyncio.Lock)
 
     def _start_running_heartbeat(self, task: _RuntimeTask) -> asyncio.Task[None] | None:
         interval = self._running_heartbeat_interval_s

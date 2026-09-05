@@ -1,3 +1,4 @@
+
 """Heartbeat runner — event coalescing, priority bands, active-hours mask.
 
 The heartbeat runner turns a burst of in-process events into a small number of
@@ -31,7 +32,6 @@ import asyncio
 import json
 import re
 import uuid
-from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -41,6 +41,7 @@ from typing import Any
 import yaml
 
 from agentos.compat import aiosqlite
+from agentos.util.bounded_registry import BoundedRegistry
 
 __all__ = [
     "HEARTBEAT_TEMPLATE_PATH",
@@ -152,7 +153,7 @@ class HeartbeatRunner:
 
     def __init__(self, config: HeartbeatConfig | None = None) -> None:
         self._config = config or HeartbeatConfig()
-        self._buffers: dict[str, list[HeartbeatEvent]] = defaultdict(list)
+        self._buffers: BoundedRegistry[str, list[HeartbeatEvent]] = BoundedRegistry(max_entries=50)
         self._last_tick: dict[str, datetime] = {}
 
     @property
@@ -164,7 +165,11 @@ class HeartbeatRunner:
         self._config = config
 
     def ingest(self, event: HeartbeatEvent) -> None:
-        self._buffers[event.priority].append(event)
+        buf = self._buffers.get(event.priority)
+        if buf is None:
+            buf = []
+            self._buffers.set(event.priority, buf)
+        buf.append(event)
 
     def pending_counts(self) -> dict[str, int]:
         return {band: len(events) for band, events in self._buffers.items() if events}
@@ -177,7 +182,7 @@ class HeartbeatRunner:
         emitted: list[HeartbeatTick] = []
         window_ms = self._config.coalesce_window_ms
 
-        for band, events in list(self._buffers.items()):
+        for band, events in self._buffers.items():
             if not events:
                 continue
 
@@ -198,7 +203,7 @@ class HeartbeatRunner:
             )
             emitted.append(tick)
             self._last_tick[band] = moment
-            self._buffers[band] = []
+            self._buffers.set(band, [])
 
         return emitted
 

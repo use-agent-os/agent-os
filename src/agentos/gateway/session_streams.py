@@ -6,6 +6,8 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
+from agentos.util.bounded_registry import BoundedRegistry
+
 
 @dataclass(frozen=True)
 class BufferedSessionEvent:
@@ -29,10 +31,12 @@ class SessionStreamRegistry:
     session and survives reconnects long enough to replay recent run events.
     """
 
-    def __init__(self, *, max_events_per_session: int = 500) -> None:
+    def __init__(self, *, max_events_per_session: int = 500, max_sessions: int = 1000) -> None:
         self._max_events_per_session = max_events_per_session
-        self._seq_by_session: dict[str, int] = {}
-        self._events_by_session: dict[str, deque[BufferedSessionEvent]] = {}
+        self._seq_by_session: BoundedRegistry[str, int] = BoundedRegistry(max_entries=max_sessions)
+        self._events_by_session: BoundedRegistry[str, deque[BufferedSessionEvent]] = (
+            BoundedRegistry(max_entries=max_sessions)
+        )
 
     @staticmethod
     def _is_replay_lossy(event_name: str) -> bool:
@@ -52,7 +56,8 @@ class SessionStreamRegistry:
                 events.popleft()
 
     def current_seq(self, session_key: str) -> int:
-        return self._seq_by_session.get(session_key, 0)
+        val = self._seq_by_session.get(session_key)
+        return val if val is not None else 0
 
     def record(
         self,
@@ -61,14 +66,14 @@ class SessionStreamRegistry:
         payload: dict[str, Any] | None,
     ) -> dict[str, Any]:
         stream_seq = self.current_seq(session_key) + 1
-        self._seq_by_session[session_key] = stream_seq
+        self._seq_by_session.set(session_key, stream_seq)
 
         enriched = dict(payload or {})
         enriched["session_key"] = session_key
         enriched["stream_seq"] = stream_seq
 
         event = BufferedSessionEvent(event_name=event_name, payload=enriched, stream_seq=stream_seq)
-        events = self._events_by_session.setdefault(session_key, deque())
+        events = self._events_by_session.get_or_create(session_key, deque)
         events.append(event)
         self._trim_session_events(events)
         return enriched
@@ -78,7 +83,8 @@ class SessionStreamRegistry:
         if since_stream_seq is None:
             return ReplayResult(current_stream_seq=current, replay_complete=True, events=[])
 
-        events = list(self._events_by_session.get(session_key, ()))
+        raw_events = self._events_by_session.get(session_key)
+        events = list(raw_events) if raw_events is not None else []
         if current == 0:
             return ReplayResult(
                 current_stream_seq=0,
@@ -115,6 +121,12 @@ class SessionStreamRegistry:
             events=replay_events,
             gap_reason=None if replay_complete else "buffer_window_missed",
         )
+
+
+    def purge_session(self, session_key: str) -> None:
+        """Drop all state for a finished session."""
+        self._seq_by_session.discard(session_key)
+        self._events_by_session.discard(session_key)
 
 
 _session_streams = SessionStreamRegistry()

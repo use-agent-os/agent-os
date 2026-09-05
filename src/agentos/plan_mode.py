@@ -25,6 +25,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from agentos.util.bounded_registry import BoundedRegistry
+
 EXIT_PLAN_TOOL_NAME = "exit_plan_mode"
 
 # Status stamped on a successful exit_plan_mode payload. The dispatch
@@ -93,18 +95,22 @@ class PlanModeStore:
     explicit disable (approval, ``/plan off``) or a gateway restart clears it.
     """
 
-    def __init__(self) -> None:
-        self._sessions: dict[str, PlanModeState] = {}
+    def __init__(self, max_entries: int = 500) -> None:
+        self._sessions: BoundedRegistry[str, PlanModeState] = BoundedRegistry(
+            max_entries=max_entries, ttl_seconds=0.0
+        )
 
     def enable(self, session_key: str) -> None:
         key = (session_key or "").strip()
         if not key:
             raise ValueError("session_key is required")
-        self._sessions.setdefault(key, PlanModeState(enabled_at=time.time()))
+        existing = self._sessions.get(key)
+        if existing is None:
+            self._sessions.set(key, PlanModeState(enabled_at=time.time()))
 
     def disable(self, session_key: str) -> bool:
         """Turn plan mode off. Returns True when it was on."""
-        return self._sessions.pop((session_key or "").strip(), None) is not None
+        return self._sessions.discard((session_key or "").strip())
 
     def is_enabled(self, session_key: str) -> bool:
         return (session_key or "").strip() in self._sessions

@@ -1,3 +1,4 @@
+
 """Per-session token usage tracking and cost estimation."""
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from typing import Any
 import structlog
 
 from agentos.session.keys import normalize_agent_id
+from agentos.util.bounded_registry import BoundedRegistry
 
 from .pricing import calculate_cost_usd, lookup_price
 
@@ -429,11 +431,15 @@ class UsageTracker:
         """
         global _global_usage_tracker
         self._sessions: dict[str, SessionUsage] = {}
-        self._scopes: dict[tuple[str, str], SessionUsage] = {}
+        self._scopes: BoundedRegistry[tuple[str, str], SessionUsage] = BoundedRegistry(
+            max_entries=2000
+        )
         self._default_provider_id = str(default_provider_id or "").strip().lower()
         self._db_path = db_path
         self._ledger_db_path = ledger_db_path
-        self._session_metadata: dict[str, tuple[str, str]] = {}
+        self._session_metadata: BoundedRegistry[str, tuple[str, str]] = BoundedRegistry(
+            max_entries=5000
+        )
         self._warned_keys: set[str] = set()
         # In-process mirror of the persisted ledger. Reads take the larger of
         # the two: a dropped write (sqlite busy, disk full) must not be able to
@@ -620,7 +626,7 @@ class UsageTracker:
         meta = self._session_metadata.get(session_key)
         if meta is None:
             meta = parse_session_key_scope(session_key)
-            self._session_metadata[session_key] = meta
+            self._session_metadata.set(session_key, meta)
         return meta
 
     def check_budget_limits(self, session_key: str, config: Any) -> tuple[bool, str | None]:
@@ -911,7 +917,7 @@ class UsageTracker:
             scoped = self._scopes.get((session_key, scope_key))
             if scoped is None:
                 scoped = SessionUsage(model_id=model_id, provider_id=effective_provider_id)
-                self._scopes[(session_key, scope_key)] = scoped
+                self._scopes.set((session_key, scope_key), scoped)
             scoped.add(
                 input_tokens,
                 output_tokens,

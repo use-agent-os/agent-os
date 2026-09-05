@@ -188,6 +188,7 @@ from agentos.session.keys import (
 )
 from agentos.session.terminal_reply import build_terminal_reply, sanitize_agent_error
 from agentos.tools.types import CallerKind, ToolContext
+from agentos.util.bounded_registry import BoundedRegistry
 
 # Stable user-facing envelope for LLM timeouts.
 _LLM_TIMEOUT_ENVELOPE: dict[str, Any] = {
@@ -1719,11 +1720,15 @@ class TurnRunner:
         self._session_lock_provider = session_lock_provider
         # Frozen memory snapshots keyed by (agent_id, session_key).
         # Captured at session start, refreshed on write/compaction.
-        self._memory_snapshots: dict[tuple[str, str], MemorySnapshot] = {}
+        self._memory_snapshots: BoundedRegistry[
+            tuple[str, str], MemorySnapshot
+        ] = BoundedRegistry(max_entries=500)
         # Frozen bootstrap snapshots keyed by (agent_id, session_key, context_mode).
         # Captured on first prompt assembly so bootstrap-source edits do not
         # churn the cacheable prefix mid-session.
-        self._bootstrap_snapshots: dict[tuple[str, str, str], BootstrapSnapshot] = {}
+        self._bootstrap_snapshots: BoundedRegistry[
+            tuple[str, str, str], BootstrapSnapshot
+        ] = BoundedRegistry(max_entries=500)
         # User turns since the last memory review, keyed (agent_id, session_key).
         self._memory_nudge_counters: dict[tuple[str, str], int] = {}
         self._compaction_failures: dict[str, _CompactionFailureState] = {}
@@ -1850,7 +1855,7 @@ class TurnRunner:
         )
         for key in list(self._memory_snapshots):
             if key[0] == agent_id:
-                self._memory_snapshots[key] = new_snap
+                self._memory_snapshots.set(key, new_snap)
 
     def _handle_memory_source_write(self, agent_id: str, path: str) -> None:
         """Refresh memory index/snapshots after a source Markdown file write."""
@@ -4295,10 +4300,10 @@ class TurnRunner:
                 report for report in bootstrap_report if report.filename in workspace_files
             ]
             if bootstrap_snap_key is not None:
-                self._bootstrap_snapshots[bootstrap_snap_key] = BootstrapSnapshot(
+                self._bootstrap_snapshots.set(bootstrap_snap_key, BootstrapSnapshot(
                     workspace_files=dict(workspace_files),
                     report=list(visible_bootstrap_report),
-                )
+                ))
         memory_source_dir = self._resolve_memory_source_dir(agent_id)
         stateless_prompt = bootstrap_context_mode in {
             "stateless",

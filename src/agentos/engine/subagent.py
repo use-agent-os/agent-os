@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agentos.agents.limits import MAX_SPAWN_DEPTH
+from agentos.util.bounded_registry import BoundedRegistry
 
 if TYPE_CHECKING:
     from .agent import Agent
@@ -51,7 +52,7 @@ class SubagentRegistry:
 
     def __init__(self) -> None:
         self._runs: dict[str, SubagentHandle] = {}
-        self._archived: dict[str, SubagentHandle] = {}
+        self._archived: BoundedRegistry[str, SubagentHandle] = BoundedRegistry(max_entries=1000)
         self._parent_tasks: dict[str, asyncio.Task[Any]] = {}
 
     def register(
@@ -85,7 +86,7 @@ class SubagentRegistry:
         handle = self._runs.pop(run_id, None)
         if handle is None:
             return False
-        self._archived[run_id] = handle
+        self._archived.set(run_id, handle)
         self._parent_tasks.pop(run_id, None)
         return True
 

@@ -155,6 +155,13 @@ APPROVED_PACKAGE_IMPORTS: frozenset[tuple[str, str]] = frozenset({
     ("tools", "search"),
     ("tools", "session"),
     ("tools", "skills"),
+    # util package — shared BoundedRegistry primitive (#1131)
+    ("application", "util"),
+    ("engine", "util"),
+    ("gateway", "util"),
+    ("plan_mode.py", "util"),
+    ("sandbox", "util"),
+    ("tools", "util"),
 })
 
 APPROVED_CYCLIC_PACKAGES: frozenset[str] = frozenset({

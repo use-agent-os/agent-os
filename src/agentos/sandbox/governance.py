@@ -1,3 +1,4 @@
+
 """Approval gate, denial ledger, and post-denial guard.
 
 This module is the bridge between :class:`~agentos.sandbox.types.SandboxPolicy`
@@ -46,6 +47,7 @@ from agentos.sandbox.types import (
     SecurityLevel,
     SuggestedNextStep,
 )
+from agentos.util.bounded_registry import BoundedRegistry
 
 log = logging.getLogger(__name__)
 
@@ -132,7 +134,7 @@ class DenialLedger:
         if threshold < 1:
             raise ValueError(f"threshold must be >= 1, got {threshold}")
         self._threshold = threshold
-        self._sessions: dict[str, _SessionState] = {}
+        self._sessions: BoundedRegistry[str, _SessionState] = BoundedRegistry(max_entries=5000)
         self._cache = (
             stale_output_cache if stale_output_cache is not None else get_stale_output_cache()
         )
@@ -146,7 +148,7 @@ class DenialLedger:
         state = self._sessions.get(session_id)
         if state is None:
             state = _SessionState()
-            self._sessions[session_id] = state
+            self._sessions.set(session_id, state)
         return state
 
     async def record_denial(
@@ -200,7 +202,7 @@ class DenialLedger:
     async def reset_session(self, session_id: str) -> None:
         """Drop all ledger state for a session (e.g. on session end)."""
         async with self._lock:
-            self._sessions.pop(session_id, None)
+            self._sessions.discard(session_id)
 
     async def purge_stale_outputs(self, session_id: str, fingerprint: str) -> bool:
         """Expose the §8.3 purge as a direct public call for integration."""
