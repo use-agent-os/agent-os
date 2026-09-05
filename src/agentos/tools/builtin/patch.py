@@ -450,7 +450,14 @@ def _gate_patch_ops(
 # ---------------------------------------------------------------------------
 
 
-def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
+def _detect_newline(lines: list[str]) -> str:
+    for line in lines:
+        if line.endswith("\r\n"):
+            return "\r\n"
+    return "\n"
+
+
+def _apply_hunk(file_lines: list[str], hunk: Hunk, newline: str = "\n") -> list[str]:
     """Apply a single hunk to file_lines (0-indexed list of lines with newlines).
 
     Returns the new list of lines.
@@ -469,8 +476,8 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
         if prefix in (" ", "-"):
             if check_pos >= len(result):
                 raise ValueError(f"Hunk context/delete at line {check_pos + 1} exceeds file length")
-            actual = result[check_pos].rstrip("\n")
-            expected = content.rstrip("\n")
+            actual = result[check_pos].rstrip("\r\n")
+            expected = content.rstrip("\r\n")
             if actual != expected:
                 raise ValueError(
                     f"Context mismatch at line {check_pos + 1}: "
@@ -492,11 +499,9 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
         elif prefix == "-":
             src_pos += 1  # skip (delete)
         elif prefix == "+":
-            # Preserve newline style: add \n if original lines have it
-            if content.endswith("\n"):
-                new_lines.append(content)
-            else:
-                new_lines.append(content + "\n")
+            # Preserve newline style: use file's newline convention
+            clean = content.rstrip("\r\n")
+            new_lines.append(clean + newline)
 
     # Splice: replace [pos : pos + old_count] with new_lines
     return result[:pos] + new_lines + result[pos + hunk.old_count :]
@@ -507,14 +512,15 @@ def _apply_update(path: str, hunks: list[Hunk], root: Path | None = None) -> Non
     if not resolved.exists():
         raise FileNotFoundError(f"File not found for update: {path}")
 
-    text = resolved.read_text(encoding="utf-8")
+    text = resolved.read_bytes().decode("utf-8")
     lines = text.splitlines(keepends=True)
+    newline = _detect_newline(lines)
 
     # Apply hunks in reverse order so earlier line numbers stay valid
     for hunk in sorted(hunks, key=lambda h: h.old_start, reverse=True):
-        lines = _apply_hunk(lines, hunk)
+        lines = _apply_hunk(lines, hunk, newline=newline)
 
-    resolved.write_text("".join(lines), encoding="utf-8")
+    resolved.write_bytes("".join(lines).encode("utf-8"))
 
 
 def _apply_add(path: str, content: str, root: Path | None = None) -> None:
@@ -522,7 +528,7 @@ def _apply_add(path: str, content: str, root: Path | None = None) -> None:
     if resolved.exists():
         raise FileExistsError(f"File already exists: {path}")
     resolved.parent.mkdir(parents=True, exist_ok=True)
-    resolved.write_text(content, encoding="utf-8")
+    resolved.write_bytes(content.encode("utf-8"))
 
 
 def _apply_delete(path: str, root: Path | None = None) -> None:
@@ -582,7 +588,7 @@ def _apply_ops(ops: list[PatchOp], root: Path | None = None) -> tuple[int, int, 
     record_payload=False,
 )
 async def apply_patch(patch: str, approval_id: str | None = None) -> str:
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     root = _default_patch_root()
     ops = _parse_patch(patch)
     blocked = _gate_patch_ops(patch, ops, root, approval_id)
