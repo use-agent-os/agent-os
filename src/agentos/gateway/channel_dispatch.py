@@ -620,7 +620,15 @@ async def run_channel_dispatch(
 
                 def _reply_done(t: asyncio.Task[Any], _sk: str = session_key) -> None:
                     _in_flight.discard(t)
-                    exc = t.exception() if not t.cancelled() else None
+                    if t.cancelled():
+                        _emit_metric(
+                            "turn_cancellations_total",
+                            value=1,
+                            reason="reply_task_cancelled",
+                            session_key=_sk,
+                        )
+                        return
+                    exc = t.exception()
                     if exc is not None:
                         log.error(
                             "channel_dispatch.reply_task_error",

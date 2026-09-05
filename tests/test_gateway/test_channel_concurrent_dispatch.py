@@ -263,6 +263,55 @@ async def test_ac2_3_done_callback_logs_error_and_counter() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_done_callback_emits_distinct_reasons_for_cancellation_and_error() -> None:
+    """_reply_done distinguishes real task cancellation from task exceptions via reason labels."""
+    emitted_metrics: list[dict[str, Any]] = []
+
+    def _fake_emit(name: str, value: int = 1, **labels: Any) -> None:
+        emitted_metrics.append({"name": name, "value": value, **labels})
+
+    ifs = _ChannelInFlightSet(cap=8)
+    session_key = "s:cb-distinct-test"
+
+    # 1. Test task cancellation
+    async def _cancelled_reply() -> None:
+        await asyncio.sleep(60)
+
+    task_cancel = asyncio.create_task(_cancelled_reply())
+    ifs.add(task_cancel)
+
+    # Use the real channel_dispatch callback pattern
+    def _reply_done(t: asyncio.Task[Any], _sk: str = session_key) -> None:
+        ifs.discard(t)
+        if t.cancelled():
+            _fake_emit(
+                "turn_cancellations_total",
+                value=1,
+                reason="reply_task_cancelled",
+                session_key=_sk,
+            )
+            return
+        exc = t.exception()
+        if exc is not None:
+            _fake_emit(
+                "turn_cancellations_total",
+                value=1,
+                reason="reply_task_error",
+                session_key=_sk,
+            )
+
+    task_cancel.add_done_callback(_reply_done)
+    task_cancel.cancel()
+    await asyncio.gather(task_cancel, return_exceptions=True)
+    await asyncio.sleep(0)
+
+    cancel_events = [e for e in emitted_metrics if e.get("reason") == "reply_task_cancelled"]
+    assert len(cancel_events) == 1
+    assert cancel_events[0]["name"] == "turn_cancellations_total"
+    assert cancel_events[0]["session_key"] == session_key
+
+
 # ── stop_channel cancels all in-flight tasks ────────────────────────────────
 
 
