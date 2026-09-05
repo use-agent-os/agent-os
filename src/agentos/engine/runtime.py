@@ -1689,6 +1689,7 @@ class TurnRunner:
         self._memory_provider_managers = memory_provider_managers
         self._diagnostics_state = diagnostics_state
         self._router_control_hold_store = RouterControlHoldStore()
+        self._background_tasks: set[asyncio.Task] = set()
         # TurnHook surface. The default trace hook reproduces the inline trace
         # event behavior while keeping the event sink replaceable at construction.
         if turn_hooks is None:
@@ -5769,7 +5770,7 @@ class TurnRunner:
         mark_status = getattr(self._session_manager, "mark_compaction_flush_receipt_status", None)
         if not callable(mark_status):
             return
-        asyncio.create_task(
+        task = asyncio.create_task(
             mark_compaction_flush_status_with_retry(
                 mark_status,
                 session_key=session_key,
@@ -5781,6 +5782,8 @@ class TurnRunner:
                 skipped_event=f"{event_prefix}.flush_status_update_skipped",
             )
         )
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     def _log_pre_compaction_flush_receipt(
         self,

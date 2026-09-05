@@ -206,6 +206,9 @@ class WsConnection:
     _writer_queue_maxsize: int = field(default=512, init=False, repr=False)
     _outbox: asyncio.Queue[Any] | None = field(default=None, init=False, repr=False)
     _writer_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
+    _background_tasks: set[asyncio.Task] = field(
+        default_factory=set, init=False, repr=False
+    )
     _closing: bool = field(default=False, init=False, repr=False)
 
     @property
@@ -492,10 +495,12 @@ class WsConnection:
             stream_seq=_payload_field(frame.payload, "stream_seq"),
             queue_depth=self._outbox.qsize(),
         )
-        asyncio.create_task(
+        task = asyncio.create_task(
             self._force_close(reason="writer_backpressure", code=1011),
             name=f"ws-force-close-{self.conn_id}",
         )
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     def _evict_oldest_same_kind(self, kind: str) -> bool:
         """Evict the oldest queued frame whose ``kind`` matches.
