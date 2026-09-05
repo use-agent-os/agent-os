@@ -6,6 +6,7 @@ Chromium required.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -16,6 +17,7 @@ from agentos.tools.browser_supervisor import (
     DEFAULT_DIALOG_TIMEOUT_S,
     CDPSupervisor,
     SupervisorRegistry,
+    _WebSocketTransport,
     parse_dialog_policy,
 )
 
@@ -348,3 +350,25 @@ class TestDialogWatchdog:
         transport.push_dialog("alert", "hi")
         sup.stop()
         assert sup._watchdogs == {}
+
+
+@pytest.mark.asyncio
+async def test_close_async_does_not_stop_running_event_loop() -> None:
+    """_WebSocketTransport._close_async() must not stop the active asyncio event loop."""
+    transport = _WebSocketTransport("ws://127.0.0.1:9222")
+    loop = asyncio.get_running_loop()
+
+    # Calling _close_async in an async context must execute without stopping the running loop
+    await transport._close_async()
+
+    # Verify loop is still running by yielding and scheduling work
+    called = False
+
+    def _callback() -> None:
+        nonlocal called
+        called = True
+
+    loop.call_soon(_callback)
+    await asyncio.sleep(0.01)
+    assert called is True
+    assert loop.is_running() is True
