@@ -535,6 +535,7 @@ def skills_publish(
             console.print(f"[green]OK:[/] {result.message}")
         else:
             console.print(f"[red]Failed:[/] {result.message}")
+            raise typer.Exit(1)
 
     asyncio.run(_publish())
 

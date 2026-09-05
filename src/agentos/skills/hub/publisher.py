@@ -67,10 +67,11 @@ async def publish_skill(
     skill_dir: Path,
     target_repo: str | None = None,
 ) -> PublishResult:
-    """Validate and publish a skill.
+    """Validate a skill and optionally fork the target repo via ``gh``.
 
-    If target_repo is provided (owner/repo), creates a fork and PR.
-    Otherwise just validates.
+    With ``target_repo`` (owner/repo), this step only runs ``gh repo fork``.
+    Clone, add the skill, push a branch, and open a PR remain manual.
+    Without ``target_repo``, validation only.
     """
     errors = validate_skill_dir(skill_dir)
     if errors:
@@ -101,11 +102,9 @@ async def publish_skill(
     if len(parts) != 2:
         return PublishResult(success=False, message=f"Invalid repo format: {target_repo}")
 
-    owner, repo = parts
-    branch = f"skill/{skill_name}"
-
     try:
-        # Fork + clone + add skill + push + create PR
+        # Only forks. Do not claim clone/add/push/PR happened.
+        # communicate() drains pipes so a large gh error cannot deadlock.
         proc = await asyncio.create_subprocess_exec(
             "gh",
             "repo",
@@ -115,13 +114,30 @@ async def publish_skill(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await proc.wait()
+        _stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            detail = (stderr or b"").decode("utf-8", errors="replace").strip()
+            if not detail:
+                detail = f"exit {proc.returncode}"
+            log.warning(
+                "publish.fork_failed",
+                repo=target_repo,
+                skill=skill_name,
+                returncode=proc.returncode,
+            )
+            return PublishResult(
+                success=False,
+                message=f"Failed to fork {target_repo}: {detail}",
+                skill_name=skill_name,
+            )
 
         log.info("publish.fork_created", repo=target_repo, skill=skill_name)
         return PublishResult(
             success=True,
-            message=f"Skill '{skill_name}' ready for PR to {target_repo}. "
-            f"Fork created, use branch '{branch}' to submit.",
+            message=(
+                f"Skill '{skill_name}' validated; fork of {target_repo} created. "
+                "Next: clone your fork, add the skill, push a branch, and open a PR."
+            ),
             skill_name=skill_name,
         )
     except FileNotFoundError:
