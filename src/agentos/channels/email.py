@@ -493,7 +493,7 @@ class EmailChannel:
         client = self._imap_connect()
         try:
             client.select(_quote_imap_mailbox(self.config.imap_folder))
-            status, data = client.search(None, "UNSEEN")
+            status, data = client.uid("SEARCH", "UNSEEN")
             if status != "OK":
                 raise RuntimeError(f"IMAP search failed: {status}")
             raw_uids = (data[0] or b"").split()[: max(1, self.config.max_messages_per_poll)]
@@ -522,7 +522,7 @@ class EmailChannel:
     def _fetch_one(self, client: imaplib.IMAP4, uid: str) -> EmailMessage | None:
         """Fetch one message, refusing oversized bodies before downloading them."""
 
-        status, size_data = client.fetch(uid, "(RFC822.SIZE)")
+        status, size_data = client.uid("FETCH", uid, "(RFC822.SIZE)")
         if status == "OK" and size_data:
             declared = _parse_rfc822_size(size_data)
             if declared is not None and declared > self.config.max_message_bytes:
@@ -535,7 +535,7 @@ class EmailChannel:
                 self._mark_seen(client, uid)
                 return None
 
-        status, body_data = client.fetch(uid, "(BODY.PEEK[])")
+        status, body_data = client.uid("FETCH", uid, "(BODY.PEEK[])")
         if status != "OK":
             return None
         raw = _first_literal(body_data)
@@ -558,7 +558,7 @@ class EmailChannel:
         if not self.config.mark_seen:
             return
         with contextlib.suppress(Exception):
-            client.store(uid, "+FLAGS", "\\Seen")
+            client.uid("STORE", uid, "+FLAGS", "\\Seen")
 
     def _reply_target(self, sender: str, reply_to_header: str) -> str:
         """Return the address replies should go to, honouring the allowlist.
