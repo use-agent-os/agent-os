@@ -23,12 +23,12 @@ The three policies:
 
 from __future__ import annotations
 
-import inspect
 from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
 
+from agentos.compat.inspect_utils import _accepts_keyword_arg
 from agentos.engine.cache_break_monitor import notify_compaction
 from agentos.gateway.config import ContextOverflowPolicy, GatewayConfig
 from agentos.session.compaction import (
@@ -52,19 +52,6 @@ from agentos.session.context_view import build_compaction_context_records
 from agentos.session.tokenizer import estimate_tokens
 
 log = structlog.get_logger(__name__)
-
-
-def _accepts_keyword_arg(func: Any, name: str) -> bool:
-    try:
-        signature = inspect.signature(func)
-    except (TypeError, ValueError):
-        return False
-    if name in signature.parameters:
-        return True
-    return any(
-        param.kind is inspect.Parameter.VAR_KEYWORD
-        for param in signature.parameters.values()
-    )
 
 
 @dataclass

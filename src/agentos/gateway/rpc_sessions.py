@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import time
 import uuid
 from dataclasses import asdict, replace
@@ -11,6 +10,7 @@ from typing import Any, cast
 
 import structlog
 
+from agentos.compat.inspect_utils import _accepts_keyword_arg
 from agentos.engine.cache_break_monitor import notify_compaction
 from agentos.engine.start_turn import start_turn_via_runtime
 from agentos.gateway import attachment_ingest as _attachment_ingest
@@ -60,16 +60,6 @@ _MAX_STAGED_PDF_BYTES = _attachment_ingest.MAX_STAGED_PDF_BYTES
 _MAX_TEXT_ATTACHMENT_BYTES = _attachment_ingest.TEXT_ATTACHMENT_BYTES
 _MAX_TOTAL_ATTACHMENT_BYTES = _attachment_ingest.MAX_TOTAL_ATTACHMENT_BYTES
 _MAX_ATTACHMENTS = _attachment_ingest.MAX_ATTACHMENTS
-
-
-def _accepts_keyword_arg(func: Any, name: str) -> bool:
-    try:
-        params = inspect.signature(func).parameters
-    except (TypeError, ValueError):
-        return True
-    return name in params or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
-    )
 
 
 def _clean_cancel_source(value: Any, default: str) -> str:
