@@ -664,6 +664,11 @@ def _read_xlsx_worksheet(raw_xml: bytes, shared_strings: list[str]) -> list[list
     root = ET.fromstring(raw_xml)
     rows: list[list[str]] = []
     for row_el in root.findall(f".//{{{_XLSX_MAIN_NS}}}row"):
+        row_r = row_el.attrib.get("r")
+        if row_r and row_r.isdigit():
+            target_row_idx = max(0, int(row_r) - 1)
+            while len(rows) < target_row_idx:
+                rows.append([])
         row: list[str] = []
         for cell_el in row_el.findall(f"{{{_XLSX_MAIN_NS}}}c"):
             column_index = _xlsx_column_index(cell_el.attrib.get("r", ""))
