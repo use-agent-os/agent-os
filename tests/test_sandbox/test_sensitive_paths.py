@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from unittest.mock import patch
 
 from agentos.sandbox.sensitive_paths import (
     _is_root_target,
@@ -239,3 +241,67 @@ def test_root_target_detection_covers_windows_drive_roots() -> None:
         "relative/path",
     ):
         assert _is_root_target(target) is False, target
+
+
+def test_env_var_references_expand_to_sensitive_prefix() -> None:
+    """``$HOME/.ssh/config`` must trigger the same block as ``~/.ssh/config``.
+
+    The static text scanner cannot rely on ``Path.is_absolute()`` to gate the
+    full prefix matcher because ``$HOME`` is plain text to pathlib. Expand the
+    environment first so the denylist applies, mirroring what the shell does
+    at real-execution time.  HOME is mocked so the test is platform-independent
+    (Windows CI does not set HOME).
+    """
+    env = {
+        "HOME": "/home/testuser",
+        "USERPROFILE": "/home/testuser",
+        "USER": "testuser",
+    }
+    with patch.dict(os.environ, env):
+        sensitive_paths = [
+            "$HOME/.ssh/config",
+            "${HOME}/.ssh/id_rsa",
+            "$HOME/.aws/credentials",
+            "$HOME/.kube/config",
+            "$HOME/.gnupg/secring.gpg",
+            "$HOME/.config/gcloud/application_default_credentials.json",
+            "$HOME/.password-store/secrets.gpg-id",
+        ]
+        for path in sensitive_paths:
+            # structured caller (the shell-command path through
+            # sensitive_path_marker) must catch every prefix entry.
+            assert sensitive_path_marker(path) is not None, path
+
+        sensitive_commands = [
+            "cat $HOME/.ssh/config",
+            "cp $HOME/.aws/credentials /tmp/leak.txt",
+            "rm -rf $HOME/.ssh",
+            "rm $HOME/.aws",
+            "ls ${HOME}/.ssh",
+        ]
+        for cmd in sensitive_commands:
+            # text scanner (the regex/token path) must also catch the same
+            # commands after shell-style expansion runs on the whole text.
+            assert sensitive_path_in_text(cmd) is not None, cmd
+
+        # Sanity inside the mocked env: a non-sensitive path stays clean.
+        assert sensitive_path_marker("$HOME/projects/notes.md") is None
+        assert sensitive_path_in_text("$HOME/projects/notes.md") is None
+
+    # Sanity outside the mock (real env): a plain non-sensitive path is clean.
+    assert sensitive_path_marker("notes.md") is None
+
+
+def test_env_var_with_unknown_variable_falls_through_safely() -> None:
+    """An env-var token that cannot be expanded must not break the gate.
+
+    ``_shell_style_expand`` leaves ``$UNDEFINED_VAR/...`` unchanged when the
+    variable is not in ``os.environ``. The denylist then runs on the literal
+    text, which is a pure-fail (no marker) — better than a crash.
+    """
+    with patch.dict(os.environ, {}, clear=False):
+        # Make sure HOME is absent so the expand falls through.
+        os.environ.pop("HOME", None)
+        os.environ.pop("USER", None)
+        assert sensitive_path_marker("$NOPE/.ssh/config") is None
+        assert sensitive_path_in_text("cat $NOPE/.ssh/config") is None
