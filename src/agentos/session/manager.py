@@ -825,6 +825,12 @@ class SessionManager:
         avoid import cycles with engine/gateway packages.
         """
         try:
+            from agentos.util.bounded_registry import _discard_from_all
+
+            _discard_from_all(session_key)
+        except Exception:
+            pass
+        try:
             from agentos.gateway.subagent_announce import _tracker as _spawn_tracker
 
             _spawn_tracker.evict(session_key)

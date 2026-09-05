@@ -188,6 +188,7 @@ from agentos.session.keys import (
 )
 from agentos.session.terminal_reply import build_terminal_reply, sanitize_agent_error
 from agentos.tools.types import CallerKind, ToolContext
+from agentos.util.bounded_registry import BoundedSessionRegistry
 
 # Stable user-facing envelope for LLM timeouts.
 _LLM_TIMEOUT_ENVELOPE: dict[str, Any] = {
@@ -1719,11 +1720,15 @@ class TurnRunner:
         self._session_lock_provider = session_lock_provider
         # Frozen memory snapshots keyed by (agent_id, session_key).
         # Captured at session start, refreshed on write/compaction.
-        self._memory_snapshots: dict[tuple[str, str], MemorySnapshot] = {}
+        self._memory_snapshots: BoundedSessionRegistry[tuple[str, str], MemorySnapshot] = (
+            BoundedSessionRegistry(max_entries=500, ttl_seconds=3600, session_scoped=True)
+        )
         # Frozen bootstrap snapshots keyed by (agent_id, session_key, context_mode).
         # Captured on first prompt assembly so bootstrap-source edits do not
         # churn the cacheable prefix mid-session.
-        self._bootstrap_snapshots: dict[tuple[str, str, str], BootstrapSnapshot] = {}
+        self._bootstrap_snapshots: BoundedSessionRegistry[
+            tuple[str, str, str], BootstrapSnapshot
+        ] = BoundedSessionRegistry(max_entries=500, ttl_seconds=3600, session_scoped=True)
         # User turns since the last memory review, keyed (agent_id, session_key).
         self._memory_nudge_counters: dict[tuple[str, str], int] = {}
         self._compaction_failures: dict[str, _CompactionFailureState] = {}
@@ -1848,7 +1853,7 @@ class TurnRunner:
             memory_md=self._load_memory_md(ws),
             daily_notes={},  # dropped before injection; see the omit block below
         )
-        for key in list(self._memory_snapshots):
+        for key in list(self._memory_snapshots.snapshot()):
             if key[0] == agent_id:
                 self._memory_snapshots[key] = new_snap
 
@@ -1864,7 +1869,7 @@ class TurnRunner:
 
     def _handle_bootstrap_source_write(self, agent_id: str, path: str) -> None:
         """Drop frozen bootstrap snapshots after a bootstrap workspace file write."""
-        for key in list(self._bootstrap_snapshots):
+        for key in list(self._bootstrap_snapshots.snapshot()):
             if key[0] == agent_id:
                 del self._bootstrap_snapshots[key]
 

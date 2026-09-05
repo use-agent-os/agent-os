@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agentos.provider import ChatConfig, Message, ToolDefinition
+from agentos.util.bounded_registry import BoundedSessionRegistry
 
 
 def _jsonable(value: Any) -> Any:
@@ -152,7 +153,9 @@ class CacheBreakMonitor:
     """Track cache-read drops and attribute them to prompt-state changes."""
 
     def __init__(self, *, min_drop_tokens: int = 2000, min_drop_ratio: float = 0.05) -> None:
-        self._baselines: dict[str, _CacheBaseline] = {}
+        self._baselines: BoundedSessionRegistry[str, _CacheBaseline] = (
+            BoundedSessionRegistry(max_entries=2000, ttl_seconds=600, session_scoped=True)
+        )
         self._reset_pending: set[str] = set()
         self._min_drop_tokens = max(0, int(min_drop_tokens))
         self._min_drop_ratio = max(0.0, float(min_drop_ratio))

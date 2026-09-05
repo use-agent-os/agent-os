@@ -25,6 +25,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from agentos.util.bounded_registry import BoundedSessionRegistry
+
 EXIT_PLAN_TOOL_NAME = "exit_plan_mode"
 
 # Status stamped on a successful exit_plan_mode payload. The dispatch
@@ -94,7 +96,9 @@ class PlanModeStore:
     """
 
     def __init__(self) -> None:
-        self._sessions: dict[str, PlanModeState] = {}
+        self._sessions: BoundedSessionRegistry[str, PlanModeState] = (
+            BoundedSessionRegistry(max_entries=5000, session_scoped=True)
+        )
 
     def enable(self, session_key: str) -> None:
         key = (session_key or "").strip()
