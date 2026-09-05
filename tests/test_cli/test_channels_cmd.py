@@ -423,6 +423,24 @@ def test_channels_add_prints_status_verification_next_step(tmp_path, monkeypatch
     out = result.stdout.lower()
     assert "agentos gateway restart" in out
     assert "agentos channels status w --json" in out
+    # The verify hint must be runnable on a pipx/pip install, where `uv` is not
+    # present and `uv run agentos ...` exits 127.
+    assert "uv run" not in out
+
+
+def test_channels_edit_prints_status_verification_next_step(tmp_path, monkeypatch):
+    _setenv(monkeypatch, tmp_path)
+    add = runner.invoke(
+        app,
+        ["channels", "add", "slack", "--name", "w", "--token", "x", "--field", "signing_secret=ss"],
+    )
+    assert add.exit_code == 0, add.stdout
+    result = runner.invoke(app, ["channels", "edit", "w", "--field", "signing_secret=ss2"])
+    assert result.exit_code == 0, result.stdout
+    out = result.stdout.lower()
+    assert "agentos gateway restart" in out
+    assert "agentos channels status w --json" in out
+    assert "uv run" not in out
 
 
 def test_channels_add_echoes_resolved_path_and_source(tmp_path, monkeypatch):

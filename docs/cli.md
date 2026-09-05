@@ -446,7 +446,7 @@ Raw config:
 
 ```sh
 agentos config get llm.provider
-agentos config set gateway.port 18791
+agentos config set port 18791
 ```
 
 For Ollama models that do not reliably support native tool calls, set

@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Two commands AgentOS printed or documented now work when followed.
+  `docs/cli.md` and `README.product.md` told users to run `agentos config set
+  gateway.port 18791`; there is no `[gateway]` table — the listen port is
+  top-level `port` on `GatewayConfig`, which is `extra = forbid` — so the
+  copy-pasted line exited 1 with `Key not found` and never changed the port.
+  Both examples now say `agentos config set port 18791`. They deliberately do
+  not pass `--config ~/.agentos/config.toml`: `resolve_config_path()` loads the
+  *first* of `AGENTOS_GATEWAY_CONFIG_PATH`, `./agentos.toml` and
+  `~/.agentos/config.toml` that exists, so hardcoding the last of the three
+  writes to a file the gateway may not read — exiting 0 and printing "Restart
+  the gateway to apply this setting" while the port silently does not change,
+  which is harder to debug than the original error. Separately, `channels add`
+  and `channels edit` printed `Verify: uv run agentos channels status <name>
+  --json`; `uv` is not present on a pipx or pip install — both documented
+  install methods — so that hint exited 127, while the line directly above it
+  already printed a plain `agentos gateway restart`. The `uv run ` prefix is
+  dropped. A test now runs every `agentos config set` example in both docs
+  files through the CLI and fails if one does not exit 0
+  ([#840](https://github.com/use-agent-os/agent-os/issues/840),
+  [#835](https://github.com/use-agent-os/agent-os/issues/835)).
+
 ## [2026.9.5] - 2026-09-05
 
 ### Added
