@@ -148,6 +148,11 @@ class DiscordChannel:
     # snapshot this before taking the lock so a second waiter does not IDENTIFY
     # again on a socket the first waiter already replaced.
     _reconnect_generation: int = field(default=0, init=False, repr=False)
+    # Consecutive failed reconnect attempts. Reset on a successful reconnect;
+    # when it reaches config.reconnect_max_retries the channel goes dead
+    # (_connected=False) instead of spinning forever or dying with an
+    # unobserved task exception.
+    _reconnect_failures: int = field(default=0, init=False, repr=False)
     _dedupe: EventDedupeCache = field(
         default_factory=lambda: EventDedupeCache(max_size=10_000),
         init=False,
@@ -274,10 +279,38 @@ class DiscordChannel:
         while self._connected:
             if not self._state.last_heartbeat_ack:
                 log.warning("discord.heartbeat_timeout")
-                await self._reconnect()
+                try:
+                    await self._reconnect()
+                except Exception as exc:  # noqa: BLE001
+                    # Reconnect budget exhausted; _connected is already
+                    # False. The while-guard exits on the next iteration
+                    # without sending another heartbeat into a dead
+                    # socket.
+                    log.warning(
+                        "discord.heartbeat_reconnect_contained",
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                    )
                 return
             self._state.last_heartbeat_ack = False
-            await self._ws_send({"op": 1, "d": self._state.sequence})
+            try:
+                await self._ws_send({"op": 1, "d": self._state.sequence})
+            except Exception as exc:  # noqa: BLE001
+                # A send failure into a dead socket means the connection is
+                # gone; treat it like a missed ACK so the reconnect path
+                # runs instead of this loop dying with an unobserved
+                # exception.
+                log.warning(
+                    "discord.heartbeat_send_failed",
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
+                self._state.last_heartbeat_ack = False
+                try:
+                    await self._reconnect()
+                except Exception:  # noqa: BLE001
+                    pass  # reconnect already logs; exit on the while-guard
+                return
             await asyncio.sleep(self._state.heartbeat_interval_ms / 1000.0)
 
     # ------------------------------------------------------------------
@@ -292,6 +325,14 @@ class DiscordChannel:
         reconnect and must not race past a still-closed socket. A second
         waiter that arrived after the socket was already replaced skips
         a duplicate IDENTIFY.
+
+        Exceptions from ``_do_reconnect`` are contained so a single bad
+        resume/fetch/connect cannot kill the dispatch loop with an
+        unobserved task exception. Bounded backoff between attempts;
+        after ``config.reconnect_max_retries`` consecutive failures the
+        channel goes ``dead`` (``_connected=False``) so the
+        ``ChannelManager`` retry budget can take over and operators see a
+        stuck channel.
         """
         generation = self._reconnect_generation
         async with self._reconnect_lock:
@@ -302,8 +343,51 @@ class DiscordChannel:
                 return
             self._reconnecting = True
             try:
-                await self._do_reconnect()
+                try:
+                    await self._do_reconnect()
+                except Exception as exc:  # noqa: BLE001
+                    # Bounded backoff between attempts; cap on the failure
+                    # count transitions the channel to "dead" so the
+                    # dispatch loop can exit cleanly and the operator sees
+                    # a stuck channel rather than a silent kill.
+                    self._reconnect_failures += 1
+                    backoff = self.config.reconnect_base_delay_s * (
+                        2 ** max(0, self._reconnect_failures - 1)
+                    )
+                    log.warning(
+                        "discord.reconnect_attempt_connect_failed",
+                        attempt=self._reconnect_failures,
+                        max_retries=self.config.reconnect_max_retries,
+                        backoff_s=round(backoff, 3),
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                    )
+                    if self._reconnect_failures >= self.config.reconnect_max_retries:
+                        log.error(
+                            "discord.reconnect_exhausted",
+                            attempts=self._reconnect_failures,
+                            max_retries=self.config.reconnect_max_retries,
+                        )
+                        # Flip _connected so the dispatch loop exits on its
+                        # next check. Re-raise to caller so op-7/op-9 paths
+                        # that wrap the call can decide whether to keep
+                        # trying; the dispatch loop catches here, so this
+                        # primarily affects heartbeat-initiated reconnects.
+                        self._connected = False
+                        raise
+                    # Sleep INSIDE the lock so concurrent reconnect callers
+                    # serialize their backoffs and don't compound the storm.
+                    await asyncio.sleep(backoff)
+                    return
                 self._reconnect_generation += 1
+                # A clean reconnect resets the failure budget so a brief
+                # blip doesn't permanently lower the bar for the next storm.
+                if self._reconnect_failures:
+                    log.info(
+                        "discord.reconnect_recovered",
+                        after_failures=self._reconnect_failures,
+                    )
+                    self._reconnect_failures = 0
             finally:
                 self._reconnecting = False
 
@@ -351,7 +435,20 @@ class DiscordChannel:
                 websockets.exceptions.ConnectionClosedOK,
             ):
                 if self._connected:
-                    await self._reconnect()
+                    try:
+                        await self._reconnect()
+                    except Exception as exc:  # noqa: BLE001
+                        # _reconnect re-raises when the retry budget is
+                        # exhausted (and flips _connected=False). Anything
+                        # else is contained: the dispatch loop must not
+                        # die silently.
+                        log.warning(
+                            "discord.connection_closed_reconnect_contained",
+                            error_type=type(exc).__name__,
+                            error=str(exc),
+                        )
+                    if not self._connected:
+                        return
                     continue
                 return
 
@@ -364,7 +461,19 @@ class DiscordChannel:
             elif op == 1:  # Heartbeat request
                 await self._ws_send({"op": 1, "d": self._state.sequence})
             elif op == 7:  # Reconnect
-                await self._reconnect()
+                try:
+                    await self._reconnect()
+                except Exception as exc:  # noqa: BLE001
+                    # _reconnect re-raises when it has exhausted the retry
+                    # budget (and flipped _connected=False). Anything else
+                    # is contained: the dispatch loop must not die silently.
+                    log.warning(
+                        "discord.op7_reconnect_contained",
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                    )
+                if not self._connected:
+                    return
                 continue
             elif op == 9:  # Invalid Session
                 resumable = raw.get("d", False)
@@ -372,7 +481,16 @@ class DiscordChannel:
                     self._state.session_id = None
                     self._state.sequence = None
                 await asyncio.sleep(1 + random.random() * 4)
-                await self._reconnect()
+                try:
+                    await self._reconnect()
+                except Exception as exc:  # noqa: BLE001
+                    log.warning(
+                        "discord.op9_reconnect_contained",
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                    )
+                if not self._connected:
+                    return
                 continue
             elif op == 11:  # Heartbeat ACK
                 self._state.last_heartbeat_ack = True

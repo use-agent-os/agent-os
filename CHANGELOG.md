@@ -24,6 +24,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `SessionStorage.list_stale_session_keys()` before deleting, since the
   storage-level prune returned only a count
   ([#750](https://github.com/use-agent-os/agent-os/issues/750)).
+- `DiscordChannel` reconnect is now bounded and cannot silently kill the gateway
+  pump. All three `_reconnect()` call sites in `_dispatch_loop`
+  (`channels/discord.py`) ran unguarded inside a bare task, so a raising
+  `_reconnect()` killed the pump while `_connected` stayed `True` — the channel
+  looked healthy while no events were dispatched. `_reconnect()` now contains
+  `_do_reconnect()` failures, retries with exponential backoff bounded by
+  `reconnect_max_retries` / `reconnect_base_delay_s`, and marks the channel dead
+  (`_connected = False`) once the budget is exhausted so the `ChannelManager`
+  retry path takes over
+  ([#1133](https://github.com/use-agent-os/agent-os/issues/1133)).
 
 ## [2026.9.5] - 2026-09-05
 
