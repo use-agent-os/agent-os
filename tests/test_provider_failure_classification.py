@@ -26,6 +26,8 @@ from agentos.provider.failures import ProviderFailureKind, classify_provider_err
         "vllm",
         "lm_studio",
         "ovms",
+        "bankr",
+        "openai_responses",
     ],
 )
 def test_openai_compatible_providers_share_common_failure_classification(provider: str) -> None:
