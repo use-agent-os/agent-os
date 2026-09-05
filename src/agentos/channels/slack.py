@@ -144,6 +144,7 @@ class SlackChannel:
     )
     _socket_task: asyncio.Task | None = field(default=None, init=False, repr=False)
     _socket_stop: asyncio.Event | None = field(default=None, init=False, repr=False)
+    _background_tasks: set[asyncio.Task] = field(default_factory=set, init=False, repr=False)
     supports_slash_commands: bool = True
 
     @property
@@ -640,6 +641,11 @@ class SlackChannel:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._socket_task
             self._socket_task = None
+        for task in list(self._background_tasks):
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+        self._background_tasks.clear()
         if self._client is not None:
             await self._client.aclose()
             self._client = None
@@ -722,7 +728,9 @@ class SlackChannel:
             return
         if mtype == "interactive":
             if isinstance(payload, dict):
-                asyncio.create_task(self._handle_slack_interactive(payload))
+                task = asyncio.create_task(self._handle_slack_interactive(payload))
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
             return
         if mtype != "events_api":
             return
@@ -794,7 +802,9 @@ class SlackChannel:
                     payload = json.loads(payload_str)
                 except Exception:
                     return Response(status_code=400)
-                asyncio.create_task(self._handle_slack_interactive(payload))
+                task = asyncio.create_task(self._handle_slack_interactive(payload))
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
                 return Response(status_code=200)
             if not self._ingest_slash_command(form):
                 return Response(status_code=400)

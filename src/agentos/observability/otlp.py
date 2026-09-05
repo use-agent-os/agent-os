@@ -12,6 +12,7 @@ from typing import Any
 import structlog
 
 from agentos import __version__
+from agentos.asyncio_utils import retain_task
 from agentos.env import trust_env as _trust_env
 from agentos.observability.trace import TraceEvent, TraceSink
 
@@ -96,6 +97,7 @@ class OtlpTraceSink(TraceSink):
         self._queue_lock = threading.Lock()
         self._flush_lock = asyncio.Lock()
         self._flush_task: asyncio.Task[None] | None = None
+        self._background_tasks: set[asyncio.Task[Any]] = set()
         self._closed = False
 
     def start(self) -> None:
@@ -146,7 +148,7 @@ class OtlpTraceSink(TraceSink):
             try:
                 loop = asyncio.get_running_loop()
                 if loop.is_running():
-                    loop.create_task(self.flush())
+                    retain_task(loop.create_task(self.flush()), self._background_tasks)
             except RuntimeError:
                 pass
 
@@ -283,4 +285,9 @@ class OtlpTraceSink(TraceSink):
             except Exception:
                 pass
             self._flush_task = None
+        for task in list(self._background_tasks):
+            task.cancel()
+        if self._background_tasks:
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
+        self._background_tasks.clear()
         await self.flush()

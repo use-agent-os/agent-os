@@ -298,8 +298,7 @@ async def test_otlp_concurrent_flush_serialized(monkeypatch: pytest.MonkeyPatch)
 
     assert all(results), "every concurrent flush should report success"
     assert max_in_flight == 1, (
-        "flush() calls must be serialized by _flush_lock; "
-        f"observed {max_in_flight} posts in flight"
+        f"flush() calls must be serialized by _flush_lock; observed {max_in_flight} posts in flight"
     )
     assert sink._queue == [], "queue must be fully drained after serialized flush"
 

@@ -1730,6 +1730,7 @@ class TurnRunner:
         self._turn_compaction_attempted_sessions: set[str] = set()
         self._turn_compacted_sessions: set[str] = set()
         self._active_pre_compaction_flush_tasks: dict[str, asyncio.Task] = {}
+        self._background_tasks: set[asyncio.Task] = set()
         self._emergency_compaction_overrides: dict[str, _EmergencyCompactionOverride] = {}
         # TurnRunner stage decomposition InputStage instance. Holds no per-turn state;
         # constructed once. Active unconditionally as of.
@@ -5825,7 +5826,7 @@ class TurnRunner:
         mark_status = getattr(self._session_manager, "mark_compaction_flush_receipt_status", None)
         if not callable(mark_status):
             return
-        asyncio.create_task(
+        task = asyncio.create_task(
             mark_compaction_flush_status_with_retry(
                 mark_status,
                 session_key=session_key,
@@ -5837,6 +5838,8 @@ class TurnRunner:
                 skipped_event=f"{event_prefix}.flush_status_update_skipped",
             )
         )
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     def _log_pre_compaction_flush_receipt(
         self,

@@ -37,6 +37,7 @@ async def run_tui_runtime(
         if hooks.expose_surface is not None:
             hooks.expose_surface(tui_surface)
         turn_task: asyncio.Task[bool] | None = None
+        _background_tasks: set[asyncio.Task] = set()
 
         async def _schedule_abort(abort_turn: Awaitable[None]) -> None:
             with contextlib.suppress(Exception):
@@ -47,7 +48,9 @@ async def run_tui_runtime(
             if task is not None and not task.done():
                 with contextlib.suppress(Exception):
                     abort_turn = hooks.on_cancel_active_turn()
-                    asyncio.create_task(_schedule_abort(abort_turn))
+                    t = asyncio.create_task(_schedule_abort(abort_turn))
+                    _background_tasks.add(t)
+                    t.add_done_callback(_background_tasks.discard)
                 task.cancel()
 
         tui_surface.set_cancel_callback(_cancel_inflight_turn)
