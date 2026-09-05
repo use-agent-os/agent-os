@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security
+
+- **`robinhood-rwa-addresses` now validates `--rpc-url` scheme via `_validate_rpc_url`**
+  and rejects any URL outside `{http, https}`, preventing local file reads
+  ([#968](https://github.com/use-agent-os/agent-os/issues/968)).
+
 ## [2026.9.5] - 2026-09-05
 
 ### Added

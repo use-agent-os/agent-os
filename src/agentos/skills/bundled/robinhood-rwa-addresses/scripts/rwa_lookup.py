@@ -32,6 +32,7 @@ import sys
 import urllib.error
 import urllib.request
 from typing import Any
+from urllib.parse import urlsplit
 
 TOKEN_LIST_URL = "https://tokens.coingecko.com/robinhood/all.json"
 DEFAULT_RPC_URL = "https://rpc.mainnet.chain.robinhood.com"
@@ -69,6 +70,31 @@ _STATUS_RANK = {
 }
 
 
+def _validate_rpc_url(url: str) -> None:
+    """Reject --rpc-url values that are not http:// or https://.
+
+    Raises ``ValueError`` with a clear message when the scheme is missing,
+    invalid, or absent (e.g. a bare filesystem path or a ``file://`` URL).
+    """
+    if not url:
+        raise ValueError("RPC URL must use http or https, got empty string")
+    try:
+        parsed = urlsplit(url)
+    except ValueError as exc:
+        raise ValueError(
+            f"RPC URL must use http or https, got unparsable: {url!r}"
+        ) from exc
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https"):
+        raise ValueError(
+            f"RPC URL must use http or https, got scheme={scheme!r} in {url!r}"
+        )
+    if parsed.hostname is None:
+        raise ValueError(
+            f"RPC URL must use http or https, got no host in {url!r}"
+        )
+
+
 class RpcError(RuntimeError):
     """A JSON-RPC call returned an error or an unusable result."""
 
@@ -78,7 +104,7 @@ def _fetch_tokens(timeout: float) -> list[dict[str, Any]]:
         TOKEN_LIST_URL,
         headers={"User-Agent": "AgentOS-robinhood-rwa-skill/0.2"},
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - fixed trusted CoinGecko endpoint
         data = json.loads(resp.read().decode("utf-8", errors="replace"))
     tokens = data.get("tokens")
     return tokens if isinstance(tokens, list) else []
@@ -188,9 +214,12 @@ def _rpc_batch(rpc_url: str, calls: list[dict[str, Any]], timeout: float) -> dic
 
     Batching keeps verification to a single HTTP round-trip no matter how many
     candidates are being checked.
+
+    Validates ``rpc_url`` at the call site before using it in ``urlopen``.
     """
+    _validate_rpc_url(rpc_url)
     payload = json.dumps(calls).encode("utf-8")
-    req = urllib.request.Request(  # noqa: S310 - operator-supplied RPC endpoint
+    req = urllib.request.Request(  # noqa: S310 - validated http/https in _validate_rpc_url
         rpc_url,
         data=payload,
         headers={
@@ -198,7 +227,7 @@ def _rpc_batch(rpc_url: str, calls: list[dict[str, Any]], timeout: float) -> dic
             "User-Agent": "AgentOS-robinhood-rwa-skill/0.2",
         },
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - validated http/https in _validate_rpc_url
         body = json.loads(resp.read().decode("utf-8", errors="replace"))
     if not isinstance(body, list):
         raise RpcError("expected a batched JSON-RPC response")
@@ -344,6 +373,11 @@ def main() -> int:
         help="Do not write the card artifact (JSON on stdout only).",
     )
     args = parser.parse_args()
+
+    try:
+        _validate_rpc_url(args.rpc_url)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     try:
         tokens = _fetch_tokens(args.timeout)
