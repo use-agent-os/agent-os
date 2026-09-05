@@ -21,6 +21,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from agentos._background_tasks import BackgroundTaskTracker
 from agentos.channels._reactions import NULL_STATUS_REACTOR, SlackStatusReactor
 from agentos.channels._util import (
     ChannelAccessPolicy,
@@ -144,6 +145,14 @@ class SlackChannel:
     )
     _socket_task: asyncio.Task | None = field(default=None, init=False, repr=False)
     _socket_stop: asyncio.Event | None = field(default=None, init=False, repr=False)
+    # Retains strong references to fire-and-forget interactive handlers so
+    # they cannot be garbage collected mid-flight under event loop pressure.
+    # See https://docs.python.org/3/library/asyncio-task.html#creating-tasks.
+    _background_tasks: BackgroundTaskTracker = field(
+        default_factory=lambda: BackgroundTaskTracker(label="slack-interactives"),
+        init=False,
+        repr=False,
+    )
     supports_slash_commands: bool = True
 
     @property
@@ -640,6 +649,9 @@ class SlackChannel:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._socket_task
             self._socket_task = None
+        # Drain any in-flight interactive handlers so we do not leave
+        # orphan tasks referencing a closed httpx client.
+        await self._background_tasks.cancel_and_await(timeout=2.0)
         if self._client is not None:
             await self._client.aclose()
             self._client = None
@@ -722,7 +734,10 @@ class SlackChannel:
             return
         if mtype == "interactive":
             if isinstance(payload, dict):
-                asyncio.create_task(self._handle_slack_interactive(payload))
+                self._background_tasks.create(
+                    self._handle_slack_interactive(payload),
+                    name="slack-interactive-socket",
+                )
             return
         if mtype != "events_api":
             return
@@ -794,7 +809,10 @@ class SlackChannel:
                     payload = json.loads(payload_str)
                 except Exception:
                     return Response(status_code=400)
-                asyncio.create_task(self._handle_slack_interactive(payload))
+                self._background_tasks.create(
+                    self._handle_slack_interactive(payload),
+                    name="slack-interactive-webhook",
+                )
                 return Response(status_code=200)
             if not self._ingest_slash_command(form):
                 return Response(status_code=400)

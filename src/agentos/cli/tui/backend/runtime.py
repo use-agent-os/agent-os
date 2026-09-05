@@ -7,6 +7,7 @@ import contextlib
 from collections.abc import Awaitable
 from typing import Any
 
+from agentos._background_tasks import BackgroundTaskTracker
 from agentos.cli.tui.backend.contracts import (
     TuiDispatch,
     TuiInputKind,
@@ -37,6 +38,11 @@ async def run_tui_runtime(
         if hooks.expose_surface is not None:
             hooks.expose_surface(tui_surface)
         turn_task: asyncio.Task[bool] | None = None
+        # Retain strong references to fire-and-forget abort schedule tasks
+        # so they cannot be garbage collected under event loop pressure.
+        # Without this, an abort that races with high scheduling activity
+        # can be silently dropped before reaching the abort hook.
+        background_tasks = BackgroundTaskTracker(label="tui-backend-background")
 
         async def _schedule_abort(abort_turn: Awaitable[None]) -> None:
             with contextlib.suppress(Exception):
@@ -47,7 +53,10 @@ async def run_tui_runtime(
             if task is not None and not task.done():
                 with contextlib.suppress(Exception):
                     abort_turn = hooks.on_cancel_active_turn()
-                    asyncio.create_task(_schedule_abort(abort_turn))
+                    background_tasks.create(
+                        _schedule_abort(abort_turn),
+                        name="tui-cancel-abort",
+                    )
                 task.cancel()
 
         tui_surface.set_cancel_callback(_cancel_inflight_turn)
@@ -228,6 +237,9 @@ async def run_tui_runtime(
             if hooks.clear_exposed_surface is not None:
                 hooks.clear_exposed_surface()
             tui_surface.set_cancel_callback(None)
+            # Drain any in-flight abort schedule tasks so we do not leave
+            # them referencing a closed surface after shutdown.
+            await background_tasks.cancel_and_await(timeout=2.0)
             tui_surface.set_shutdown_callback(None)
             await _drop_next_line()
             with contextlib.suppress(Exception):

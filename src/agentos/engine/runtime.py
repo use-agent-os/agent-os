@@ -28,6 +28,7 @@ from typing import Any, Final, Literal, SupportsInt, TypeGuard, cast
 
 import structlog
 
+from agentos._background_tasks import BackgroundTaskTracker
 from agentos.artifacts import artifact_marker
 from agentos.attachment_refs import (
     is_attachment_ref,
@@ -1731,6 +1732,13 @@ class TurnRunner:
         self._turn_compacted_sessions: set[str] = set()
         self._active_pre_compaction_flush_tasks: dict[str, asyncio.Task] = {}
         self._emergency_compaction_overrides: dict[str, _EmergencyCompactionOverride] = {}
+        # Retains strong references to fire-and-forget background tasks
+        # (status updates, retries) so they cannot be garbage collected
+        # mid-flight. See:
+        # https://docs.python.org/3/library/asyncio-task.html#creating-tasks
+        self._background_tasks: BackgroundTaskTracker = BackgroundTaskTracker(
+            label="turn-runner-background"
+        )
         # TurnRunner stage decomposition InputStage instance. Holds no per-turn state;
         # constructed once. Active unconditionally as of.
         self._input_stage = InputStage(extra_ctx=_TurnRunnerExtraContextAdapter())
@@ -5825,7 +5833,10 @@ class TurnRunner:
         mark_status = getattr(self._session_manager, "mark_compaction_flush_receipt_status", None)
         if not callable(mark_status):
             return
-        asyncio.create_task(
+        # Track the task so it cannot be garbage collected mid-flight. Without
+        # this, a status update for a slow session can disappear under event
+        # loop pressure and the receipt log will be silently lost.
+        self._background_tasks.create(
             mark_compaction_flush_status_with_retry(
                 mark_status,
                 session_key=session_key,
@@ -5835,7 +5846,8 @@ class TurnRunner:
                 failed_event=f"{event_prefix}.flush_status_update_failed",
                 updated_event=f"{event_prefix}.flush_status_updated",
                 skipped_event=f"{event_prefix}.flush_status_update_skipped",
-            )
+            ),
+            name=f"flush-status-{compaction_id[:8]}",
         )
 
     def _log_pre_compaction_flush_receipt(

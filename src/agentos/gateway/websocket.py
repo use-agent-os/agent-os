@@ -13,6 +13,7 @@ import structlog
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
 from agentos import __version__
+from agentos._background_tasks import BackgroundTaskTracker
 from agentos.gateway.access import ConnectionSurface
 from agentos.gateway.auth import AccessContext
 from agentos.gateway.config import GatewayConfig
@@ -207,6 +208,14 @@ class WsConnection:
     _outbox: asyncio.Queue[Any] | None = field(default=None, init=False, repr=False)
     _writer_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
     _closing: bool = field(default=False, init=False, repr=False)
+    # Retains strong references to background tasks (force-close drain,
+    # overflow shutdown) so they cannot be garbage collected before they
+    # finish draining the writer queue.
+    _background_tasks: BackgroundTaskTracker = field(
+        default_factory=lambda: BackgroundTaskTracker(label="ws-connection-background"),
+        init=False,
+        repr=False,
+    )
 
     @property
     def authenticated(self) -> bool:
@@ -492,7 +501,10 @@ class WsConnection:
             stream_seq=_payload_field(frame.payload, "stream_seq"),
             queue_depth=self._outbox.qsize(),
         )
-        asyncio.create_task(
+        # Track the task so it cannot be garbage collected under event loop
+        # pressure. Without this, the force-close can be silently dropped
+        # under load and the slow client will hang on a stale socket.
+        self._background_tasks.create(
             self._force_close(reason="writer_backpressure", code=1011),
             name=f"ws-force-close-{self.conn_id}",
         )
