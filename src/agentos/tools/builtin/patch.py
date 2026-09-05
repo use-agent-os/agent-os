@@ -450,11 +450,24 @@ def _gate_patch_ops(
 # ---------------------------------------------------------------------------
 
 
+def _detect_line_ending(file_lines: list[str]) -> str:
+    """Return the dominant newline style used in file_lines.
+
+    Returns "\r\n" when any line uses CRLF, otherwise "\n". Falls back to "\n"
+    for empty input (newly added files).
+    """
+    return "\r\n" if any(line.endswith("\r\n") for line in file_lines) else "\n"
+
+
 def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
     """Apply a single hunk to file_lines (0-indexed list of lines with newlines).
 
-    Returns the new list of lines.
+    Returns the new list of lines. Tolerates CRLF/LF mismatches in the target
+    file by stripping any trailing newline from both actual and expected lines
+    before comparison, and uses the file's dominant newline style when
+    appending newly added lines.
     """
+    newline = _detect_line_ending(file_lines)
     # old_start is 1-indexed; convert to 0-indexed
     pos = hunk.old_start - 1
     result = list(file_lines)
@@ -469,8 +482,8 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
         if prefix in (" ", "-"):
             if check_pos >= len(result):
                 raise ValueError(f"Hunk context/delete at line {check_pos + 1} exceeds file length")
-            actual = result[check_pos].rstrip("\n")
-            expected = content.rstrip("\n")
+            actual = result[check_pos].rstrip("\r\n")
+            expected = content.rstrip("\r\n")
             if actual != expected:
                 raise ValueError(
                     f"Context mismatch at line {check_pos + 1}: "
@@ -492,11 +505,12 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
         elif prefix == "-":
             src_pos += 1  # skip (delete)
         elif prefix == "+":
-            # Preserve newline style: add \n if original lines have it
+            # Preserve newline style: if the line already ends with \n use as-is,
+            # otherwise append the file's dominant line ending.
             if content.endswith("\n"):
                 new_lines.append(content)
             else:
-                new_lines.append(content + "\n")
+                new_lines.append(content + newline)
 
     # Splice: replace [pos : pos + old_count] with new_lines
     return result[:pos] + new_lines + result[pos + hunk.old_count :]
@@ -507,14 +521,17 @@ def _apply_update(path: str, hunks: list[Hunk], root: Path | None = None) -> Non
     if not resolved.exists():
         raise FileNotFoundError(f"File not found for update: {path}")
 
-    text = resolved.read_text(encoding="utf-8")
+    # Read with newline="" so that CRLF line endings are preserved verbatim and
+    # the hunk applier can detect and respect the file's native newline style.
+    raw = resolved.read_bytes()
+    text = raw.decode("utf-8")
     lines = text.splitlines(keepends=True)
 
     # Apply hunks in reverse order so earlier line numbers stay valid
     for hunk in sorted(hunks, key=lambda h: h.old_start, reverse=True):
         lines = _apply_hunk(lines, hunk)
 
-    resolved.write_text("".join(lines), encoding="utf-8")
+    resolved.write_bytes("".join(lines).encode("utf-8"))
 
 
 def _apply_add(path: str, content: str, root: Path | None = None) -> None:

@@ -551,6 +551,58 @@ async def test_apply_patch_supports_hunk_header_without_explicit_counts(
     assert existing.read_text(encoding="utf-8") == "line1\nline2\n"
 
 
+@pytest.mark.asyncio
+async def test_apply_patch_handles_crlf_line_endings(tmp_path: Path) -> None:
+    """apply_patch must match context and preserve CRLF when the target file uses CRLF."""
+    existing = tmp_path / "hello.txt"
+    existing.write_bytes(b"line1\r\nline2\r\n")
+    token = current_tool_context.set(ToolContext(workspace_dir=str(tmp_path)))
+    apply_patch = _original_async(patch_tool.apply_patch)
+    try:
+        result = await apply_patch(
+            """*** Begin Patch
+*** Update File: hello.txt
+@@@ -2 +2,2 @@@
+ line2
++inserted
+*** End Patch"""
+        )
+    finally:
+        current_tool_context.reset(token)
+
+    assert result == "Applied patch: 1 file(s) modified"
+    assert existing.read_bytes() == b"line1\r\nline2\r\ninserted\r\n"
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_added_line_uses_crlf_when_target_file_is_crlf(
+    tmp_path: Path,
+) -> None:
+    """Added lines written by apply_patch should use the target file's native line ending.
+
+    When the target file uses CRLF, an added line that lacks a trailing newline in
+    the patch text must be appended with CRLF rather than LF.
+    """
+    existing = tmp_path / "hello.txt"
+    existing.write_bytes(b"line1\r\nline2\r\n")
+    token = current_tool_context.set(ToolContext(workspace_dir=str(tmp_path)))
+    apply_patch = _original_async(patch_tool.apply_patch)
+    try:
+        result = await apply_patch(
+            "*** Begin Patch\n"
+            "*** Update File: hello.txt\n"
+            "@@@ -2 +2,2 @@@\n"
+            " line2\n"
+            "+line3-without-newline\n"
+            "*** End Patch"
+        )
+    finally:
+        current_tool_context.reset(token)
+
+    assert result == "Applied patch: 1 file(s) modified"
+    assert existing.read_bytes() == b"line1\r\nline2\r\nline3-without-newline\r\n"
+
+
 @pytest.mark.parametrize(
     "header",
     [
