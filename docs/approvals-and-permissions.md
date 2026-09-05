@@ -81,6 +81,31 @@ The terminal chat supports:
 Use these commands when you need to inspect or reset cached approval decisions
 during a chat.
 
+### Cached Intents
+
+Approving a destructive action caches the *intent* — kind plus target path —
+rather than the literal command, so a paraphrased retry (`rm /tmp/x` followed by
+`os.remove("/tmp/x")`) proceeds without a second prompt.
+
+The kind carries a set of *escalation capabilities*, and a cached approval
+covers a retry only when its capability set is a superset of the retry's. The
+capabilities are independent — they are not a single ladder:
+
+| Capability | Meaning | Granted by |
+|---|---|---|
+| *(none)* | delete this one path | `rm X`, `os.remove`, `os.unlink`, `os.rmdir`, `Path(X).unlink()`, `Path(X).rmdir()` |
+| `recursive` | delete the whole tree below it | `rm -r`/`-R`/`--recursive`, `shutil.rmtree(X)` |
+| `parents` | may also delete empty *ancestors* | `os.removedirs(X)` |
+| `force` | `rm`'s `-f`/`--force` | `rm -f`/`--force` |
+
+So a `delete:recursive` approval covers a plain `rm X`, but a `delete:force`
+approval does **not** cover `shutil.rmtree(X)` — `force` says nothing about
+recursion. Escalation always re-prompts: approving `rm /tmp/logs` does **not**
+authorize `rm -rf /tmp/logs`.
+
+`/approvals` lists cached entries as `scope kind:target`, and `/forget <path>`
+drops every grade recorded for that path.
+
 The Web UI also provides an approvals surface for reviewing pending actions
 outside the message scrollback.
 
