@@ -124,7 +124,8 @@ async def _handle_env_list(params: dict | None, ctx: RpcContext) -> dict[str, An
 async def _handle_env_set(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     """Write one variable. Returns its new state, without echoing the value."""
     name = _require_name(params)
-    assert isinstance(params, dict)
+    if not isinstance(params, dict):
+        raise ValueError("params must be a dictionary")
     if "value" not in params:
         raise ValueError("params.value is required")
     value = params["value"]
@@ -169,7 +170,8 @@ async def _handle_env_import(params: dict | None, ctx: RpcContext) -> dict[str, 
     get. The value goes source → store; it is not returned here.
     """
     name = _require_name(params)
-    assert isinstance(params, dict)
+    if not isinstance(params, dict):
+        raise ValueError("params must be a dictionary")
     source_id = str(params.get("sourceId") or "").strip()
     if not source_id:
         raise ValueError("params.sourceId is required")

@@ -1849,6 +1849,17 @@ class TestSessionsPatch:
         assert res.ok is False
         assert res.error.code == "NOT_FOUND"
 
+    @pytest.mark.asyncio
+    async def test_patch_invalid_params(self, dispatcher, ctx_with_sessions):
+        res = await dispatcher.dispatch(
+            "r1",
+            "sessions.patch",
+            None,
+            ctx_with_sessions,
+        )
+        assert res.ok is False
+        assert res.error.code == "INVALID_REQUEST"
+
 
 class TestSessionsReset:
     @pytest.mark.asyncio

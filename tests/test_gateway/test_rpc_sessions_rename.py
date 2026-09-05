@@ -237,3 +237,11 @@ async def test_an_exact_name_wins_over_session_key_prefix_matches(dispatcher, ma
     other = await manager.get_session("agent:main:cli:other")
     assert other is not None
     assert other.display_name is None
+
+
+@pytest.mark.asyncio
+async def test_rename_with_invalid_params(dispatcher, manager):
+    ctx = make_ctx(manager)
+    res = await dispatcher.dispatch("r1", "sessions.rename", None, ctx)
+    assert res.ok is False
+    assert res.error.code == "INVALID_REQUEST"

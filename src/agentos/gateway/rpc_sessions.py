@@ -1522,7 +1522,8 @@ async def _handle_sessions_patch(params: dict | None, ctx: RpcContext) -> dict:
         raise KeyError(f"Session not found: {key}")
 
     update_values: dict[str, Any] = {}
-    assert isinstance(params, dict)
+    if not isinstance(params, dict):
+        raise ValueError("params must be a dictionary")
     field_map = {
         "displayName": "display_name",
         "model": "model",
@@ -1602,7 +1603,8 @@ async def _handle_sessions_rename(params: dict | None, ctx: RpcContext) -> dict:
     custom name and lets ``derived_title`` fall back to the short session id.
     """
     key = _require_key(params)
-    assert isinstance(params, dict)
+    if not isinstance(params, dict):
+        raise ValueError("params must be a dictionary")
     if "name" not in params and "displayName" not in params:
         raise ValueError("sessions.rename requires a 'name'")
     name = normalize_session_name(params.get("name", params.get("displayName")))
