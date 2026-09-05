@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The legacy MCP `sse` transport follows the 2024-11-05 HTTP+SSE lifecycle
+  instead of inverting it. `MCPSSEClient.connect()` POSTed the `initialize`
+  request before any stream existed, sent it to a guessed `/message` path, and
+  then opened a fresh `GET` per request — so a compliant server, which picks its
+  own message URI and announces it in an `endpoint` event on a stream the client
+  must open first, either rejected the handshake or emitted the response into a
+  window with nothing listening. The client now drives `mcp.client.sse`, the
+  sibling of the SDK transport the Streamable HTTP client already uses: the
+  stream opens first, the advertised endpoint is resolved against the configured
+  URL and is the only POST target, one receive stream serves the connection with
+  responses correlated by JSON-RPC id, and `close()` cancels the reader task. An
+  endpoint pointing at a different origin is refused before anything is posted,
+  and both channels — the stream and the POST — dial through the same
+  connect-time SSRF guard as before, which matters more now that the server
+  chooses the POST target. The handshake is bounded by `tool_timeout_seconds`,
+  so a server that opens the stream and never advertises an endpoint fails
+  instead of hanging the caller. The unused `MCPServerConfig.message_endpoint`
+  field, which no configuration surface ever set, is gone
+  ([#922](https://github.com/use-agent-os/agent-os/issues/922)).
+- Both SDK-backed MCP HTTP transports open and unwind their transport in a task
+  the client owns. The SDK transports and `ClientSession` are built on anyio
+  task groups, and an anyio cancel scope may only be exited by the task that
+  entered it — but nothing closes an MCP client from the task that opened it:
+  `discover_and_register` runs during boot or in an RPC handler while
+  `close_active_clients` runs from gateway shutdown or a later `mcp.disconnect`.
+  Closing therefore raised `RuntimeError: Attempted to exit cancel scope in a
+  different task`, which `close_active_clients` swallows, leaking the stream and
+  its connection for the life of the process. This was already reachable on
+  `streamable_http`; the shared `MCPSessionClient` base fixes it for both
+  ([#922](https://github.com/use-agent-os/agent-os/issues/922)).
+
 ## [2026.9.5] - 2026-09-05
 
 ### Added

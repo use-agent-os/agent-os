@@ -770,6 +770,15 @@ Supported transports are `stdio`, `sse`, and `streamable_http`. The MCP SDK is
 included in the standard AgentOS installation, so Streamable HTTP and OAuth work
 without installing an additional package extra.
 
+`sse` is the legacy HTTP+SSE transport from the 2024-11-05 spec revision; prefer
+`streamable_http` for new servers. On `sse`, `url` is the endpoint AgentOS opens
+the event stream against — the URI it POSTs JSON-RPC to is chosen by the server
+and announced in the stream's `endpoint` event, so there is nothing to configure
+for it. A relative endpoint resolves against `url`; one pointing at a different
+scheme or host is refused and nothing is posted to it. If the server opens the
+stream but never advertises an endpoint, the connection fails after
+`tool_timeout_seconds`.
+
 The HTTP transports accept `http://` and `https://` URLs only, and both connect
 through the same SSRF guard the built-in HTTP tools use. `http://localhost:PORT`
 and LAN-hosted servers keep working — the guard blocks cloud metadata endpoints

@@ -13,7 +13,6 @@ class MCPServerConfig:
     command: str | None = None  # for stdio
     args: list[str] = field(default_factory=list)  # for stdio
     url: str | None = None  # for HTTP transports
-    message_endpoint: str | None = None  # for sse, default "/message"
     env: dict[str, str] = field(default_factory=dict)
     headers: dict[str, str] = field(default_factory=dict)
     oauth: bool = False
