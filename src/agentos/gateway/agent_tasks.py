@@ -46,7 +46,11 @@ class AgentTaskRegistry:
         self._tasks[session_key] = task
 
         def _on_done(t: asyncio.Task) -> None:
-            self._tasks.pop(session_key, None)
+            # Only remove the entry if it still points to this task: a
+            # cancelled predecessor's late callback must not evict the
+            # replacement registered under the same session key.
+            if self._tasks.get(session_key) is t:
+                self._tasks.pop(session_key, None)
             try:
                 if t.cancelled():
                     log.info("agent_task.cancelled", session_key=session_key)
