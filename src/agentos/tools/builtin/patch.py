@@ -459,6 +459,9 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
     pos = hunk.old_start - 1
     result = list(file_lines)
 
+    # Detect newline style of the file (defaulting to \n if empty or no CRLF)
+    newline = "\r\n" if any(line.endswith("\r\n") for line in result) else "\n"
+
     # Verify context and deleted lines match
     check_pos = pos
     for raw in hunk.lines:
@@ -469,8 +472,8 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
         if prefix in (" ", "-"):
             if check_pos >= len(result):
                 raise ValueError(f"Hunk context/delete at line {check_pos + 1} exceeds file length")
-            actual = result[check_pos].rstrip("\n")
-            expected = content.rstrip("\n")
+            actual = result[check_pos].rstrip("\r\n")
+            expected = content.rstrip("\r\n")
             if actual != expected:
                 raise ValueError(
                     f"Context mismatch at line {check_pos + 1}: "
@@ -492,11 +495,8 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
         elif prefix == "-":
             src_pos += 1  # skip (delete)
         elif prefix == "+":
-            # Preserve newline style: add \n if original lines have it
-            if content.endswith("\n"):
-                new_lines.append(content)
-            else:
-                new_lines.append(content + "\n")
+            # Preserve newline style: add newline if original lines have it
+            new_lines.append(content.rstrip("\r\n") + newline)
 
     # Splice: replace [pos : pos + old_count] with new_lines
     return result[:pos] + new_lines + result[pos + hunk.old_count :]
@@ -507,14 +507,15 @@ def _apply_update(path: str, hunks: list[Hunk], root: Path | None = None) -> Non
     if not resolved.exists():
         raise FileNotFoundError(f"File not found for update: {path}")
 
-    text = resolved.read_text(encoding="utf-8")
+    raw = resolved.read_bytes()
+    text = raw.decode("utf-8")
     lines = text.splitlines(keepends=True)
 
     # Apply hunks in reverse order so earlier line numbers stay valid
     for hunk in sorted(hunks, key=lambda h: h.old_start, reverse=True):
         lines = _apply_hunk(lines, hunk)
 
-    resolved.write_text("".join(lines), encoding="utf-8")
+    resolved.write_text("".join(lines), encoding="utf-8", newline="")
 
 
 def _apply_add(path: str, content: str, root: Path | None = None) -> None:
@@ -522,7 +523,7 @@ def _apply_add(path: str, content: str, root: Path | None = None) -> None:
     if resolved.exists():
         raise FileExistsError(f"File already exists: {path}")
     resolved.parent.mkdir(parents=True, exist_ok=True)
-    resolved.write_text(content, encoding="utf-8")
+    resolved.write_text(content, encoding="utf-8", newline="")
 
 
 def _apply_delete(path: str, root: Path | None = None) -> None:

@@ -574,3 +574,66 @@ def test_parse_hunk_header_rejects_malformed_input(header: str) -> None:
 
     with pytest.raises(ValueError, match="Invalid hunk header"):
         _parse_hunk_header(header)
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_handles_crlf_file_line_endings(tmp_path: Path) -> None:
+    target = tmp_path / "crlf_file.txt"
+    target.write_bytes(b"first line\r\nsecond line\r\n")
+    token = current_tool_context.set(ToolContext(workspace_dir=str(tmp_path)))
+    apply_patch = _original_async(patch_tool.apply_patch)
+    try:
+        result = await apply_patch(
+            """*** Begin Patch
+*** Update File: crlf_file.txt
+@@@ -1,2 +1,3 @@@
+ first line
+-second line
++modified line
++added line
+*** End Patch"""
+        )
+    finally:
+        current_tool_context.reset(token)
+
+    assert result == "Applied patch: 1 file(s) modified"
+    assert target.read_bytes() == b"first line\r\nmodified line\r\nadded line\r\n"
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_preserves_lf_file_line_endings_on_all_platforms(tmp_path: Path) -> None:
+    target = tmp_path / "lf_file.txt"
+    target.write_bytes(b"first line\nsecond line\n")
+    token = current_tool_context.set(ToolContext(workspace_dir=str(tmp_path)))
+    apply_patch = _original_async(patch_tool.apply_patch)
+    try:
+        result = await apply_patch(
+            """*** Begin Patch
+*** Update File: lf_file.txt
+@@@ -1,2 +1,3 @@@
+ first line
+-second line
++modified line
++added line
+*** End Patch"""
+        )
+    finally:
+        current_tool_context.reset(token)
+
+    assert result == "Applied patch: 1 file(s) modified"
+    assert target.read_bytes() == b"first line\nmodified line\nadded line\n"
+
+
+def test_apply_hunk_crlf_matching_and_preservation() -> None:
+    from agentos.tools.builtin.patch import Hunk, _apply_hunk
+
+    file_lines = ["header\r\n", "remove_me\r\n", "footer\r\n"]
+    hunk = Hunk(
+        old_start=1,
+        old_count=3,
+        new_start=1,
+        new_count=3,
+        lines=[" header", "-remove_me", "+added_line", " footer"],
+    )
+    result = _apply_hunk(file_lines, hunk)
+    assert result == ["header\r\n", "added_line\r\n", "footer\r\n"]
