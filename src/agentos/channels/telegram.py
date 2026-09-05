@@ -81,6 +81,7 @@ _TRANSPORT_FAILURE_MARKERS = (
     "returned an invalid response",
 )
 _DEDUPE_SIZE = 4096
+_CALLBACK_MAX_ATTEMPTS = 3
 _ALLOWED_UPDATES = (
     "message",
     "edited_message",
@@ -618,6 +619,9 @@ class TelegramChannel:
         )
 
     async def _poll_loop(self) -> None:
+        callback_dedupe = EventDedupeCache(max_size=self.config.event_dedupe_size)
+        failed_update_id: int | None = None
+        callback_failures = 0
         while True:
             try:
                 updates = await self._api(
@@ -640,15 +644,41 @@ class TelegramChannel:
                 if not isinstance(update, dict):
                     continue
                 update_id = update.get("update_id")
+                if (
+                    isinstance(update_id, int)
+                    and self._update_offset is not None
+                    and update_id < self._update_offset
+                ):
+                    continue
                 if "callback_query" in update:
+                    callback = update["callback_query"]
+                    callback_id = callback.get("id") if isinstance(callback, dict) else None
+                    dedupe_key = callback_id if isinstance(callback_id, str) else ""
                     try:
-                        await self._handle_telegram_callback(update["callback_query"])
+                        if not dedupe_key or callback_dedupe.check_and_add(dedupe_key):
+                            await self._handle_telegram_callback(callback)
                     except Exception as exc:
-                        log.warning("telegram.callback_query_handle_failed", error=str(exc))
-                        # Do not acknowledge this update or process later ones in
-                        # the batch. Telegram will return it again next poll.
-                        await asyncio.sleep(self.config.poll_idle_sleep_s)
-                        break
+                        callback_failures = (
+                            callback_failures + 1 if update_id == failed_update_id else 1
+                        )
+                        failed_update_id = update_id if isinstance(update_id, int) else None
+                        if callback_failures < _CALLBACK_MAX_ATTEMPTS:
+                            callback_dedupe.discard(dedupe_key)
+                            log.warning(
+                                "telegram.callback_query_handle_failed",
+                                update_id=update_id,
+                                attempts=callback_failures,
+                                error=str(exc),
+                            )
+                            # Retry this update before processing the rest of the batch.
+                            await asyncio.sleep(self.config.poll_idle_sleep_s)
+                            break
+                        log.error(
+                            "telegram.callback_query_retries_exhausted",
+                            update_id=update_id,
+                            attempts=callback_failures,
+                            error=str(exc),
+                        )
                 else:
                     try:
                         msg = self.parse_incoming(update)
@@ -656,6 +686,8 @@ class TelegramChannel:
                         log.debug("telegram.unsupported_update_ignored", update_id=update_id)
                     else:
                         self.enqueue(msg)
+                failed_update_id = None
+                callback_failures = 0
                 if isinstance(update_id, int):
                     self._update_offset = update_id + 1
             if not updates:

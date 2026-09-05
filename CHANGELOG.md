@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Telegram polling retries failed callbacks before acknowledging their updates,
+  with at most three handling attempts per update. Exhausted updates are logged
+  at error level and skipped so later messages can proceed; repeated callback
+  IDs are deduplicated before approval handling.
+  ([#1027](https://github.com/use-agent-os/agent-os/issues/1027))
+
 ## [2026.9.3] - 2026-09-03
 
 ### Added

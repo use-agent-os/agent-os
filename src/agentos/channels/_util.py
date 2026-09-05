@@ -117,6 +117,10 @@ class EventDedupeCache:
             self._seen.popitem(last=False)
         return True
 
+    def discard(self, event_id: str) -> None:
+        """Allow an event whose handling failed to be retried."""
+        self._seen.pop(event_id, None)
+
 
 @dataclass
 class RateLimiter:
