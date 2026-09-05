@@ -32,6 +32,8 @@ from agentos.gateway.session_services import (
 from agentos.gateway.session_streams import get_session_streams
 from agentos.paths import media_root_from_config
 from agentos.session.compaction import (
+    _effective_compaction_model,
+    _resolve_compaction_provider,
     build_compaction_config_from_provider,
     call_compact_with_optional_config,
 )
@@ -412,43 +414,6 @@ def _context_window_tokens(params: dict | None, ctx: RpcContext) -> int:
     if value <= 0:
         raise ValueError("contextWindowTokens must be a positive integer")
     return value
-
-
-def _effective_compaction_model(session: Any | None) -> str | None:
-    if session is None:
-        return None
-    return getattr(session, "model_override", None) or getattr(session, "model", None)
-
-
-def _resolve_compaction_provider(ctx: RpcContext, session: Any | None) -> Any | None:
-    selector = getattr(ctx, "provider_selector", None)
-    if selector is None:
-        return None
-
-    resolved_selector = selector
-    clone = getattr(selector, "clone", None)
-    if callable(clone):
-        try:
-            resolved_selector = clone()
-        except Exception:  # noqa: BLE001
-            resolved_selector = selector
-
-    model = _effective_compaction_model(session)
-    if model and resolved_selector is not selector:
-        override = getattr(resolved_selector, "override_model", None)
-        if callable(override):
-            try:
-                override(model)
-            except Exception:  # noqa: BLE001
-                pass
-
-    resolver = getattr(resolved_selector, "resolve", None)
-    if not callable(resolver):
-        return None
-    try:
-        return resolver()
-    except Exception:  # noqa: BLE001
-        return None
 
 
 def _enum_value(value: Any) -> Any:

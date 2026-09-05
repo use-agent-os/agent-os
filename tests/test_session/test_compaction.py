@@ -367,3 +367,61 @@ async def test_custom_instructions_are_user_scoped_and_identifier_policy_stays_s
     assert "Focus on deployment decisions." not in messages[0]["content"]
     assert messages[1]["role"] == "user"
     assert "Focus on deployment decisions." in messages[1]["content"]
+
+
+def test_effective_compaction_model() -> None:
+    from agentos.session.compaction import effective_compaction_model
+
+    assert effective_compaction_model(None) is None
+
+    class FakeSession:
+        def __init__(self, model: str | None = None, model_override: str | None = None) -> None:
+            self.model = model
+            self.model_override = model_override
+
+    assert effective_compaction_model(FakeSession(model="claude-3-5-sonnet")) == "claude-3-5-sonnet"
+    assert (
+        effective_compaction_model(
+            FakeSession(model="claude-3-5-sonnet", model_override="gpt-4o")
+        )
+        == "gpt-4o"
+    )
+
+
+def test_resolve_compaction_provider() -> None:
+    from types import SimpleNamespace
+
+    from agentos.session.compaction import resolve_compaction_provider
+
+    # No selector on context
+    ctx = SimpleNamespace(provider_selector=None)
+    assert resolve_compaction_provider(ctx, None) is None
+
+    # Selector with clone and override_model
+    class FakeProvider:
+        def __init__(self, model: str) -> None:
+            self.model = model
+
+    class FakeSelector:
+        def __init__(self, model: str = "default-model") -> None:
+            self.model = model
+
+        def clone(self) -> "FakeSelector":
+            return FakeSelector(self.model)
+
+        def override_model(self, model: str) -> None:
+            self.model = model
+
+        def resolve(self) -> FakeProvider:
+            return FakeProvider(self.model)
+
+    selector = FakeSelector()
+    ctx = SimpleNamespace(provider_selector=selector)
+    session = SimpleNamespace(model=None, model_override="custom-override")
+
+    provider = resolve_compaction_provider(ctx, session)
+    assert provider is not None
+    assert provider.model == "custom-override"
+    # Original selector should remain unmodified
+    assert selector.model == "default-model"
+
