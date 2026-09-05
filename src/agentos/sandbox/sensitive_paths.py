@@ -34,6 +34,9 @@ _SENSITIVE_PREFIXES: tuple[str, ...] = (
     "~/.aws",
     "~/.azure",
     "~/.config/gcloud",
+    "~/.config/gh",
+    "~/.anthropic",
+    "~/.openai",
     "~/.docker/config",
     "~/.kube",
     "~/.npmrc",
@@ -41,6 +44,7 @@ _SENSITIVE_PREFIXES: tuple[str, ...] = (
     "~/.netrc",
     "~/.gnupg",
     "~/.password-store",
+    "~/.vault-token",
     "/etc",
     "/boot",
     "/sys",
@@ -70,6 +74,7 @@ _SENSITIVE_SUFFIXES: tuple[str, ...] = (
     "/.zsh_history",
     "/.mysql_history",
     "/.psql_history",
+    "/.vault-token",
 )
 
 _WORKSPACE_PARENT_EXCEPTION_MARKERS: tuple[str, ...] = ("/root",)
