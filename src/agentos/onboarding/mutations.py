@@ -599,11 +599,15 @@ def upsert_llm_provider(
         model_clean = _clean_optional_str(saved_profile.model)
     if not model_clean and active_provider == provider_id:
         model_clean = _clean_optional_str(config.llm.model)
+    if not model_clean and provider_id == "gemini":
+        model_clean = os.getenv("GEMINI_MODEL") or "gemini-3.1-pro-preview"
     if not model_clean:
         model_clean = _router_default_model_for_provider(
             provider_id,
             getattr(config.agentos_router, "default_tier", "c1"),
         )
+    if provider_id == "gemini" and (not model_clean or model_clean == "gemini-2.5-pro"):
+        model_clean = os.getenv("GEMINI_MODEL") or "gemini-3.1-pro-preview"
     if not model_clean:
         raise ValueError("model is required")
     # When the operator omits an api_key while reconfiguring the same

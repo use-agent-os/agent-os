@@ -696,6 +696,14 @@ class OpenAIProvider:
         self._org_id = org_id
         inferred_kind = "openrouter" if "openrouter.ai" in self._base_url else "openai"
         self._provider_kind = provider_kind or inferred_kind
+        resolved_model = model
+        if self._provider_kind == "gemini":
+            gemini_env = os.getenv("GEMINI_MODEL")
+            if gemini_env:
+                resolved_model = gemini_env
+            elif not resolved_model or resolved_model == "gemini-2.5-pro":
+                resolved_model = "gemini-3.1-pro-preview"
+        self._model = resolved_model
         self._provider_routing: Mapping[str, str] = provider_routing or {}
 
     @property

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -137,6 +138,8 @@ def _what_you_need(spec: ProviderSpec) -> tuple[str, ...]:
 
 
 def _default_direct_model(provider_id: str) -> str:
+    if provider_id == "gemini":
+        return os.getenv("GEMINI_MODEL") or "gemini-3.1-pro-preview"
     if provider_id in ROUTER_TIER_PROFILE_IDS:
         tiers = _router_tier_profile_defaults(provider_id)
         tier = tiers.get("c1") or tiers.get("c0") or {}

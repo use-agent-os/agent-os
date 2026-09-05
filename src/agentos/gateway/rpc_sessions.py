@@ -786,12 +786,18 @@ async def _handle_sessions_list(params: dict | None, ctx: RpcContext) -> dict:
             except Exception:
                 pass
 
+        session_model = getattr(s, "model", None) or getattr(s, "model_override", None)
+        if not session_model:
+            session_model = _agent_registry_model(ctx, getattr(s, "agent_id", "main"))
+        if not session_model and ctx.config and getattr(ctx.config, "llm", None):
+            session_model = getattr(ctx.config.llm, "model", None)
+
         row = {
             "key": s.session_key,
             "agent_id": getattr(s, "agent_id", None),
             "agentId": getattr(s, "agent_id", None),
             "status": getattr(s, "status", "unknown"),
-            "model": getattr(s, "model", None),
+            "model": session_model,
             "updated_at": getattr(s, "updated_at", now_ms),
             "updatedAt": getattr(s, "updated_at", now_ms),
             "display_name": getattr(s, "display_name", None),
@@ -844,6 +850,8 @@ async def _handle_sessions_create(params: dict | None, ctx: RpcContext) -> dict:
     display_name = params.get("displayName")
     message = params.get("message")
     model = _model_value(params.get("model")) or _agent_registry_model(ctx, agent_id)
+    if not model and ctx.config and getattr(ctx.config, "llm", None):
+        model = getattr(ctx.config.llm, "model", None)
     kind = params.get("kind") or params.get("sessionKind")
     project_id = params.get("projectId") or params.get("project_id")
     if message is not None and not isinstance(message, str):

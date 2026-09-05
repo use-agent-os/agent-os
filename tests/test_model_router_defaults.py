@@ -366,7 +366,7 @@ def test_profile_tier_override_merges_keys_inside_tier() -> None:
     )
 
     assert cfg.tiers["c2"]["provider"] == "gemini"
-    assert cfg.tiers["c2"]["model"] == "gemini-2.5-pro"
+    assert cfg.tiers["c2"]["model"] == "gemini-3.1-pro-preview"
     assert cfg.tiers["c2"]["thinking_level"] == "high"
 
 

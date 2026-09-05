@@ -374,10 +374,14 @@ async def _handle_chat_send(params: dict | None, ctx: RpcContext) -> dict:
         if intent != "new_chat":
             # Ensure session exists — auto-create if needed
             try:
+                active_model = None
+                if ctx.config and getattr(ctx.config, "llm", None):
+                    active_model = getattr(ctx.config.llm, "model", None)
                 await mgr.get_or_create(
                     session_key=session_key,
                     agent_id=agent_id,
                     display_name="WebChat",
+                    model=active_model,
                 )
             except Exception as exc:
                 raise RpcUnavailableError(

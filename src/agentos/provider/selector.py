@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 
 from .anthropic import AnthropicProvider
@@ -76,9 +77,16 @@ def _build_provider(cfg: ProviderConfig) -> LLMProvider:
             return AnthropicProvider(**kwargs)
 
         case "openai_compat":
+            model = cfg.model
+            if spec.provider_id == "gemini":
+                gemini_env = os.getenv("GEMINI_MODEL")
+                if gemini_env:
+                    model = gemini_env
+                elif not model or model == "gemini-2.5-pro":
+                    model = "gemini-3.1-pro-preview"
             kwargs = {
                 "api_key": cfg.api_key,
-                "model": cfg.model,
+                "model": model,
                 "provider_kind": spec.provider_kind,
             }
             if base_url:

@@ -357,6 +357,17 @@ class LlmProviderConfig(BaseSettings):
             self.model = aliases[model]
         return self
 
+    @model_validator(mode="after")
+    def _normalize_direct_gemini_model(self) -> LlmProviderConfig:
+        if str(self.provider or "").strip().lower() != "gemini":
+            return self
+        gemini_env = os.getenv("GEMINI_MODEL")
+        if gemini_env:
+            self.model = gemini_env
+        elif not self.model or self.model == "gemini-2.5-pro":
+            self.model = "gemini-3.1-pro-preview"
+        return self
+
 
 # Module-level dedupe state for the legacy ``enabled`` deprecation warning.
 # A plain ``bool`` flag guarded by a ``Lock`` makes the check-and-set atomic
@@ -1141,19 +1152,17 @@ def _router_tier_profile_defaults(profile: str | None) -> dict:
             ),
             "c2": _tier(
                 provider="gemini",
-                model="gemini-2.5-pro",
+                model="gemini-3.1-pro-preview",
                 description=(
-                    "Gemini strong route: 2.5 Pro for complex coding and reasoning; 3.x Pro "
-                    "remains preview-only."
+                    "Gemini strong route: 3.1 Pro preview for complex coding and reasoning."
                 ),
                 thinking_level="medium",
             ),
             "c3": _tier(
                 provider="gemini",
-                model="gemini-2.5-pro",
+                model="gemini-3.1-pro-preview",
                 description=(
-                    "Gemini highest route: 2.5 Pro with high thinking; 3.1 Pro preview remains "
-                    "opt-in."
+                    "Gemini highest route: 3.1 Pro preview with high thinking."
                 ),
                 thinking_level="high",
             ),

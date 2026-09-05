@@ -401,8 +401,16 @@ def _ask_provider_fields(
     questionary, spec, options: OnboardOptions
 ) -> dict[str, Any]:
     answers: dict[str, Any] = {}
+    provider_id = getattr(spec, "provider_id", "")
     if options.model:
         answers["model"] = options.model
+    elif provider_id == "gemini":
+        default_gemini_model = os.getenv("GEMINI_MODEL") or "gemini-3.1-pro-preview"
+        gemini_model = _ask_or_cancel(
+            questionary.text("Model id", default=default_gemini_model),
+            section="provider",
+        )
+        answers["model"] = (gemini_model or "").strip() or default_gemini_model
     elif getattr(spec, "router_supported", False):
         answers["model"] = ""
     else:

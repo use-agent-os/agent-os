@@ -305,11 +305,15 @@ async def _sessions_get(params: Any, ctx: RpcContext) -> dict[str, Any]:
     session = await storage.get_session(params["key"])
     if session is None:
         raise KeyError(f"Session not found: {params['key']}")
+    model = getattr(session, "model", None) or getattr(session, "model_override", None)
+    if not model and ctx.config and getattr(ctx.config, "llm", None):
+        model = getattr(ctx.config.llm, "model", None)
     return {
         "session_key": session.session_key,
         "session_id": session.session_id,
         "status": session.status,
         "agent_id": session.agent_id,
+        "model": model,
         "created_at": session.created_at,
         "updated_at": session.updated_at,
     }
