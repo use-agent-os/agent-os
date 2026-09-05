@@ -62,6 +62,7 @@ from agentos.execution_status import normalize_execution_status
 from agentos.gateway.attachment_ingest import AttachmentIngestResult, ingest_attachments
 from agentos.gateway.audio_transcription import MAX_TRANSCRIPTION_BYTES
 from agentos.gateway.session_events import build_sessions_changed_payload
+from agentos.observability.metrics import _emit_metric
 from agentos.paths import media_root_from_config
 from agentos.permissions import configured_default_elevated
 from agentos.plan_mode import format_plan_as_text, plan_from_tool_result
@@ -99,17 +100,6 @@ def _terminal_payload_from_error_event(event: ErrorEvent) -> dict[str, str | Non
 
 def _terminal_reply_suffix(message: str) -> str:
     return f"\n\n({message})"
-
-
-def _emit_metric(name: str, value: int = 1, **labels: Any) -> None:
-    """Emit a structured log line for a core metric (mirrors task_runtime._emit_metric).
-
-    Format: event=<name> metric=<name> value=<int> [labels...]
-    Used here for channel-adapter-level counters (queue_full_errors_total,
-    turn_cancellations_total) that originate outside task_runtime.  Kept as a
-    local copy to avoid a routing→task_runtime→channel_dispatch import cycle.
-    """
-    log.info(name, metric=name, value=value, **labels)
 
 
 def _resolve_channel_overflow_policy(channel: Any, config: Any) -> str | None:

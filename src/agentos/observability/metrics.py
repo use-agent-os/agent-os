@@ -395,3 +395,23 @@ def record_metric(name: str, value: float = 1.0, **labels: Any) -> None:
 def format_prometheus_metrics() -> str:
     """Return Prometheus text exposition for all registered metrics."""
     return get_metrics_registry().format_prometheus()
+
+
+def emit_metric(name: str, value: int = 1, **labels: Any) -> None:
+    """Emit a structured log line and Prometheus recording for a core metric.
+
+    Format: event=<name> metric=<name> value=<int> [labels...]
+    Grep pattern: ``metric=<name>``
+    """
+    log.info(name, metric=name, value=value, **labels)
+    try:
+        # Drop session_key and unbounded session identifiers from exported Prometheus labels
+        metric_labels = {
+            k: v for k, v in labels.items() if k not in {"session_key", "session_id", "turn_id"}
+        }
+        record_metric(name, value, **metric_labels)
+    except Exception as exc:
+        log.debug("record_metric_failed", metric=name, error=str(exc), exc_info=True)
+
+
+_emit_metric = emit_metric

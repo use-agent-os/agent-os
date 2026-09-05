@@ -161,3 +161,20 @@ def test_gateway_config_rejects_metrics_path_under_control_ui_base_path() -> Non
                 "observability": {"metrics_path": "/control/metrics"},
             }
         )
+
+
+def test_emit_metric_records_and_strips_session_identifiers() -> None:
+    from agentos.observability.metrics import _emit_metric, get_metrics_registry
+
+    _emit_metric(
+        "turn_cancellations_total",
+        value=1,
+        reason="reply_task_error",
+        session_key="agent:main:123",
+        session_id="sess-456",
+        turn_id="turn-789",
+    )
+    formatted = get_metrics_registry().format_prometheus()
+    assert 'turn_cancellations_total{reason="reply_task_error"}' in formatted
+    assert "session_key" not in formatted
+    assert "session_id" not in formatted

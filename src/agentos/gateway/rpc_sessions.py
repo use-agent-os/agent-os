@@ -2397,7 +2397,8 @@ async def _handle_sessions_preview(params: dict | None, ctx: RpcContext) -> dict
         title = (
             getattr(s, "display_name", None)
             or getattr(s, "derived_title", None)
-            or s.session_id[:8]
+            or getattr(s, "session_id", None)
+            or getattr(s, "session_key", "")
         )
         last_msg = ""
         try:

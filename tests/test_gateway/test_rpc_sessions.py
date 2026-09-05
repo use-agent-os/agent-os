@@ -2769,6 +2769,17 @@ class TestSessionsPreview:
         assert res.ok is True
         assert res.payload["previews"] == []
 
+    @pytest.mark.asyncio
+    async def test_preview_fallback_title_preserves_full_identifier(self, dispatcher):
+        mock_sess = FakeSession()
+        mock_sess.session_id = "uuid-1234-5678-abcdef"
+        mock_sess.display_name = None
+        mock_sess.derived_title = None
+        ctx = make_ctx(session_manager=FakeSessionManager([mock_sess]))
+        res = await dispatcher.dispatch("r1", "sessions.preview", None, ctx)
+        assert res.ok is True
+        assert res.payload["previews"][0]["title"] == "uuid-1234-5678-abcdef"
+
 
 class TestSessionsResolve:
     @pytest.mark.asyncio

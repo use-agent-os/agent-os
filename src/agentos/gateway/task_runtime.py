@@ -31,6 +31,7 @@ import structlog
 from agentos.engine.outcome import completed_outcome, outcome_from_error
 from agentos.gateway.routing import RouteEnvelope, SourceKind
 from agentos.gateway.session_lifecycle import TaskLifecycleEvent, TaskLifecycleListener
+from agentos.observability.metrics import _emit_metric
 from agentos.session.keys import canonicalize_session_key, normalize_agent_id, parse_agent_id
 from agentos.session.models import AgentTaskRecord, AgentTaskStatus
 from agentos.session.terminal_reply import (
@@ -49,25 +50,6 @@ log = structlog.get_logger(__name__)
 #   turn_cancellations_total  (counter) — cumulative cancel/interrupt/timeout
 #   queue_full_errors_total   (counter) — cumulative TaskQueueFullError raises
 # ---------------------------------------------------------------------------
-
-
-def _emit_metric(name: str, value: int = 1, **labels: Any) -> None:
-    """Emit a structured log line for a core metric.
-
-    Format: event=<name> metric=<name> value=<int> [labels...]
-    Grep pattern: ``metric=<name>``
-    """
-    log.info(name, metric=name, value=value, **labels)
-    try:
-        from agentos.observability.metrics import record_metric
-
-        # Drop session_key and unbounded session identifiers from exported Prometheus labels
-        metric_labels = {
-            k: v for k, v in labels.items() if k not in {"session_key", "session_id", "turn_id"}
-        }
-        record_metric(name, value, **metric_labels)
-    except Exception:
-        pass
 
 
 TERMINAL_STATUSES = frozenset(
