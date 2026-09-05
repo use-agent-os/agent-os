@@ -196,7 +196,8 @@ async def test_sync_manager_indexes_session_source_on_session_delta(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_sync_manager_search_indexes_pending_session_delta(tmp_path):
+@pytest.mark.parametrize("fail_first", [False, True])
+async def test_sync_manager_search_indexes_pending_session_delta(tmp_path, fail_first):
     class NoopStore:
         async def index_file(self, **_kwargs):
             return 0
@@ -210,6 +211,8 @@ async def test_sync_manager_search_indexes_pending_session_delta(tmp_path):
 
         async def sync(self, *, force: bool = False):
             self.calls.append(force)
+            if fail_first and len(self.calls) == 1:
+                raise RuntimeError("temporary session indexing failure")
             return SimpleNamespace(indexed=1, removed=0)
 
     indexer = FakeSessionIndexer()
@@ -221,10 +224,17 @@ async def test_sync_manager_search_indexes_pending_session_delta(tmp_path):
     )
     manager.notify_message(20)
 
+    if fail_first:
+        await manager.sync(reason="search:tool")
+        assert manager._delta.has_pending()
+        assert manager._dirty is True
+
     await manager.sync(reason="search:tool")
     await manager.sync(reason="search:tool")
 
-    assert indexer.calls == [False]
+    assert indexer.calls == [False] * (2 if fail_first else 1)
+    assert not manager._delta.has_pending()
+    assert manager._dirty is False
 
 
 @pytest.mark.asyncio

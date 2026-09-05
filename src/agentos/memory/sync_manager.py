@@ -204,11 +204,9 @@ class MemorySyncManager:
                 self._pending_changes or self._pending_deletes or session_sync_failed
             )
 
+        # Disabled session indexing is a successful no-op, not a pending retry.
         if reason == "session-delta" or (
-            is_search_reason
-            and session_delta_pending
-            and self._session_indexer is not None
-            and not session_sync_failed
+            is_search_reason and session_delta_pending and not session_sync_failed
         ):
             self._delta.reset()
 
