@@ -14,7 +14,8 @@ _HARD_BLOCK_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"(curl|wget)\s+.*(\{\{|\\$[\w{])", re.IGNORECASE),
     re.compile(r"rm\s+-rf\s+/", re.IGNORECASE),
     re.compile(r"mkfs\.", re.IGNORECASE),
-    re.compile(r":(){ :\|:& };:", re.IGNORECASE),
+    re.compile(r":\s*\(\s*\)\s*\{\s*:\s*\|\s*:&\s*\}\s*;\s*:", re.IGNORECASE),
+    re.compile(r":\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:", re.IGNORECASE),
 ]
 
 _BLOCKED_INVISIBLE_MARKS: frozenset[int] = frozenset(
