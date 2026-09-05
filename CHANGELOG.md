@@ -312,6 +312,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Added `bankr`, `volcengine_coding_plan`, and `byteplus_coding_plan`
+  to `_OPENAI_COMPAT_PROVIDERS` so that HTTP 401/402/429 errors from
+  these providers are classified correctly.
+  ([#831](https://github.com/use-agent-os/agent-os/issues/831))
 - Telegram Bot API calls now retry `ConnectTimeout` and `PoolTimeout` alongside
   `ConnectError`. All three happen before any request bytes reach Telegram — a
   DNS/TLS handshake that never completed, or a wait for a pooled connection —
