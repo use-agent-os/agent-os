@@ -571,13 +571,20 @@ async def execute_code(
 
     elevated_bypass = _elevated_mode() in ("on", "bypass", "full")
     if runtime is None or (runtime.effective.sandbox_enabled and not elevated_bypass):
-        decision, _policy, request = await gate_action(
-            action_kind="code.exec",
-            argv=(python_bin, "-c", code),
-            cwd=workdir_path,
-            env=safe_env,
-        )
+        try:
+            decision, _policy, request = await gate_action(
+                action_kind="code.exec",
+                argv=(python_bin, "-c", code),
+                cwd=workdir_path,
+                env=safe_env,
+            )
+        except Exception:
+            if cleanup_dir:
+                shutil.rmtree(cleanup_dir, ignore_errors=True)
+            raise
         if isinstance(decision, DenialResult):
+            if cleanup_dir:
+                shutil.rmtree(cleanup_dir, ignore_errors=True)
             return json.dumps(decision.to_dict())
         backend_request = SandboxRequest(
             argv=(python_bin, "-c", code),
@@ -589,6 +596,8 @@ async def execute_code(
         try:
             sandbox_result = await run_under_backend(backend_request, runtime=runtime)
         except Exception as exc:
+            if cleanup_dir:
+                shutil.rmtree(cleanup_dir, ignore_errors=True)
             return _execution_result_json(
                 returncode=-1,
                 stdout="",
@@ -601,6 +610,8 @@ async def execute_code(
                 sandbox_result, request, _policy, runtime=runtime
             )
             if isinstance(escalation, DenialResult):
+                if cleanup_dir:
+                    shutil.rmtree(cleanup_dir, ignore_errors=True)
                 return json.dumps(escalation.to_dict())
             try:
                 proc = await asyncio.create_subprocess_exec(
@@ -620,6 +631,8 @@ async def execute_code(
                     proc.kill()
                     await proc.communicate()
                     elapsed_ms = (time.monotonic_ns() - start_ns) // 1_000_000
+                    if cleanup_dir:
+                        shutil.rmtree(cleanup_dir, ignore_errors=True)
                     return _execution_result_json(
                         returncode=-1,
                         stdout="",
@@ -628,6 +641,8 @@ async def execute_code(
                         elapsed_ms=elapsed_ms,
                     )
                 elapsed_ms = (time.monotonic_ns() - start_ns) // 1_000_000
+                if cleanup_dir:
+                    shutil.rmtree(cleanup_dir, ignore_errors=True)
                 return _execution_result_json(
                     returncode=proc.returncode if proc.returncode is not None else -1,
                     stdout=stdout_bytes.decode("utf-8", errors="replace"),
@@ -636,6 +651,8 @@ async def execute_code(
                     elapsed_ms=elapsed_ms,
                 )
             except Exception as exc:
+                if cleanup_dir:
+                    shutil.rmtree(cleanup_dir, ignore_errors=True)
                 return _execution_result_json(
                     returncode=-1,
                     stdout="",
@@ -647,6 +664,8 @@ async def execute_code(
         stdout = sandbox_result.stdout
         stderr = sandbox_result.stderr
         stderr = _append_code_exec_sandbox_network_hint(stdout=stdout, stderr=stderr)
+        if cleanup_dir:
+            shutil.rmtree(cleanup_dir, ignore_errors=True)
         return _execution_result_json(
             returncode=sandbox_result.returncode,
             stdout=stdout,
