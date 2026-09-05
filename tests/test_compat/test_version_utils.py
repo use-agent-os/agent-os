@@ -44,6 +44,12 @@ from agentos.compat.version_utils import compare_versions, is_newer, parse_versi
         ("2026.7.18.POST1", "2026.7.18.post1", 0),
         ("2026.7.18.DEV1", "2026.7.18.dev1", 0),
         ("2026.7.18.DEV", "2026.7.18", -1),
+        # local labels are ignored for ordering even when containing dev or post substrings
+        ("2026.7.18+dev", "2026.7.18", 0),
+        ("2026.7.18+postgres", "2026.7.18", 0),
+        ("2026.7.18+device", "2026.7.18", 0),
+        ("2026.7.18+local.post1", "2026.7.18", 0),
+        ("2026.7.18+unknown", "2026.7.18", 0),
     ],
 )
 def test_compare_versions(a: str, b: str, expected: int) -> None:
@@ -52,6 +58,10 @@ def test_compare_versions(a: str, b: str, expected: int) -> None:
 
 def test_local_label_ignored_for_ordering() -> None:
     assert compare_versions("2026.7.18+abc", "2026.7.18") == 0
+    assert compare_versions("2026.7.18+dev", "2026.7.18") == 0
+    assert compare_versions("2026.7.18+postgres", "2026.7.18") == 0
+    assert compare_versions("2026.7.18+device", "2026.7.18") == 0
+    assert compare_versions("2026.7.18+local.post1", "2026.7.18") == 0
 
 
 def test_unparsable_sorts_below_real_release() -> None:
@@ -81,6 +91,23 @@ def test_parse_version_fields() -> None:
     assert v_dev.release == (2026, 7, 18)
     assert v_dev.dev == 0
     assert v_dev.parsed is True
+
+    v_post = parse_version("2026.7.18.post")
+    assert v_post.release == (2026, 7, 18)
+    assert v_post.post == 0
+    assert v_post.parsed is True
+
+    v_local_dev = parse_version("2026.7.18+dev")
+    assert v_local_dev.release == (2026, 7, 18)
+    assert v_local_dev.dev is None
+    assert v_local_dev.post is None
+    assert v_local_dev.parsed is True
+
+    v_local_post = parse_version("2026.7.18+postgres")
+    assert v_local_post.release == (2026, 7, 18)
+    assert v_local_post.dev is None
+    assert v_local_post.post is None
+    assert v_local_post.parsed is True
 
     v_upper = parse_version("V2026.7.18RC2.POST1.DEV0")
     assert v_upper.release == (2026, 7, 18)
