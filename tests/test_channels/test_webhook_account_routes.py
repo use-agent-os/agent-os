@@ -188,7 +188,10 @@ def test_socket_and_polling_entries_do_not_conflict_with_webhooks() -> None:
 @pytest.mark.parametrize("channel_type", ["slack", "telegram"])
 def test_duplicate_webhook_paths_are_rejected(channel_type: str) -> None:
     if channel_type == "slack":
-        entries = [SlackChannelEntry(name=name, token="test-token") for name in ("one", "two")]
+        entries = [
+            SlackChannelEntry(name=name, token="test-token", webhook_path="/slack/events")
+            for name in ("one", "two")
+        ]
     else:
         entries = [
             TelegramChannelEntry(
@@ -221,3 +224,96 @@ def test_same_path_with_disjoint_methods_is_not_a_collision() -> None:
         {"get": WebhookChannel("GET"), "post": WebhookChannel("POST")}, None, None
     )
     assert len(manager.collect_webhook_routes()) == 2
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("roundtrip", [False, True])
+async def test_automatic_slack_routes_are_account_named_and_survive_config_reload(
+    monkeypatch: pytest.MonkeyPatch, reverse: bool, roundtrip: bool
+) -> None:
+    monkeypatch.setattr("agentos.channels.slack.time.time", lambda: _NOW)
+    entries = [
+        SlackChannelEntry(name=name, token="test-token", signing_secret=f"secret-{name}")
+        for name in ("team-a", "team-b")
+    ]
+    if reverse:
+        entries.reverse()
+    if roundtrip:
+        entries = [
+            SlackChannelEntry.model_validate_json(entry.model_dump_json()) for entry in entries
+        ]
+    manager = ChannelManager.from_config(entries, turn_runner=None, session_manager=None)
+    try:
+        routes = manager.collect_webhook_routes()
+        assert {route.path for route in routes} == {"/slack/events/team-a", "/slack/events/team-b"}
+        assert [route.path for route in manager.collect_webhook_routes()] == [
+            route.path for route in routes
+        ]
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=Starlette(routes=routes)),
+            base_url="https://example.test",
+        ) as client:
+            for name in ("team-a", "team-b"):
+                body = json.dumps(
+                    {
+                        "type": "event_callback",
+                        "event": {
+                            "type": "message",
+                            "channel": "D_TEST",
+                            "user": "U_TEST",
+                            "text": name,
+                        },
+                    }
+                ).encode()
+                headers = {**_headers(body, f"secret-{name}"), "content-type": "application/json"}
+                response = await client.post(f"/slack/events/{name}", content=body, headers=headers)
+                assert response.status_code == 200
+                channel = manager.get(name)
+                assert isinstance(channel, SlackChannel)
+                assert channel._queue.get_nowait().content == name
+                assert all(adapter._queue.empty() for adapter in manager._channels.values())
+        # Derivation must not persist a computed default into the user's config.
+        assert all(not entry.webhook_path for entry in entries)
+    finally:
+        for entry in entries:
+            manager._unregister_tool_channel(entry.name, manager.get(entry.name))
+
+
+def test_explicit_slack_path_is_preserved_alongside_an_automatic_account() -> None:
+    entries = [
+        SlackChannelEntry(name="legacy", token="test-token", webhook_path="/slack/events"),
+        SlackChannelEntry(name="second", token="test-token"),
+    ]
+    manager = ChannelManager.from_config(entries, turn_runner=None, session_manager=None)
+    try:
+        assert {route.path for route in manager.collect_webhook_routes()} == {
+            "/slack/events",
+            "/slack/events/second",
+        }
+    finally:
+        for entry in entries:
+            manager._unregister_tool_channel(entry.name, manager.get(entry.name))
+
+
+def test_explicit_slack_path_cannot_shadow_an_automatic_account() -> None:
+    entries = [
+        SlackChannelEntry(name="first", token="test-token", webhook_path="/slack/events/second"),
+        SlackChannelEntry(name="second", token="test-token"),
+    ]
+    manager = ChannelManager.from_config(entries, turn_runner=None, session_manager=None)
+    try:
+        with pytest.raises(ValueError, match="first.*second.*webhook_path"):
+            manager.collect_webhook_routes()
+    finally:
+        for entry in entries:
+            manager._unregister_tool_channel(entry.name, manager.get(entry.name))
+
+
+@pytest.mark.parametrize("name", ["team/a", "{account}", "..", ""])
+def test_automatic_slack_paths_reject_names_that_change_url_routing(name: str) -> None:
+    entries = [
+        SlackChannelEntry(name=name, token="test-token"),
+        SlackChannelEntry(name="second", token="test-token"),
+    ]
+    with pytest.raises(ValueError, match="explicit webhook_path"):
+        ChannelManager.from_config(entries, turn_runner=None, session_manager=None)

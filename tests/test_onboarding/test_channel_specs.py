@@ -112,7 +112,7 @@ def test_slack_mode_specific_fields_are_conditional():
     assert fields["signing_secret"].show_when == {"connection_mode": "webhook"}
     assert fields["signing_secret"].required is True
     assert fields["webhook_path"].show_when == {"connection_mode": "webhook"}
-    assert fields["webhook_path"].default == "/slack/events"
+    assert fields["webhook_path"].default == ""
     assert fields["slack_channel_id"].required is False
 
 

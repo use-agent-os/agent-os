@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Multiple Slack webhook accounts use stable account-named URLs by default,
+  preserving `/slack/events` for a single webhook account and explicit
+  `webhook_path` overrides. Conflicting webhook paths are rejected instead of
+  silently routing another account's events to the first adapter.
+  ([#1022](https://github.com/use-agent-os/agent-os/issues/1022))
+
 ## [2026.9.3] - 2026-09-03
 
 ### Added
