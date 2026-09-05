@@ -105,7 +105,7 @@ async def publish_skill(
     branch = f"skill/{skill_name}"
 
     try:
-        # Fork + clone + add skill + push + create PR
+        # Fork target repository via GitHub CLI so the contributor has a fork to submit PR from
         proc = await asyncio.create_subprocess_exec(
             "gh",
             "repo",
@@ -115,13 +115,31 @@ async def publish_skill(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        await proc.wait()
+        stdout, stderr = await proc.communicate()
+
+        if proc.returncode != 0:
+            err_text = (stderr or stdout or b"").decode("utf-8", errors="replace").strip()
+            detail = f": {err_text}" if err_text else f" (exit code {proc.returncode})"
+            log.warning(
+                "publish.fork_failed",
+                repo=target_repo,
+                skill=skill_name,
+                returncode=proc.returncode,
+                stderr=err_text,
+            )
+            return PublishResult(
+                success=False,
+                message=f"Failed to fork {target_repo}{detail}",
+                skill_name=skill_name,
+            )
 
         log.info("publish.fork_created", repo=target_repo, skill=skill_name)
         return PublishResult(
             success=True,
-            message=f"Skill '{skill_name}' ready for PR to {target_repo}. "
-            f"Fork created, use branch '{branch}' to submit.",
+            message=(
+                f"Fork of {target_repo} created via GitHub CLI. "
+                f"Clone your fork, push to branch '{branch}', and submit your PR."
+            ),
             skill_name=skill_name,
         )
     except FileNotFoundError:
