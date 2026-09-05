@@ -90,9 +90,9 @@ def test_edit_replace_text(tmp_path: Path) -> None:
         sys.path.pop(0)
 
     src = tmp_path / "src.docx"
-    create_docx.build(
-        {"body": [{"kind": "paragraph", "text": "Hello {{NAME}}, welcome."}]}
-    ).save(str(src))
+    create_docx.build({"body": [{"kind": "paragraph", "text": "Hello {{NAME}}, welcome."}]}).save(
+        str(src)
+    )
 
     from docx import Document
 
@@ -123,3 +123,22 @@ def test_inspect_cli_outputs_json(tmp_path: Path) -> None:
     encoded = json.dumps(payload, ensure_ascii=False)
     assert "paragraphs" in encoded
     assert "tables" in encoded
+
+
+def test_inspect_docx_creates_parent_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import create_docx  # type: ignore[import-not-found]
+        import inspect_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    src = tmp_path / "src.docx"
+    create_docx.build({"body": [{"kind": "paragraph", "text": "x"}]}).save(str(src))
+
+    out = tmp_path / "nested" / "dir" / "out.json"
+    monkeypatch.setattr(sys, "argv", ["inspect_docx.py", str(src), "--out", str(out)])
+    assert inspect_docx.main() == 0
+    assert out.is_file()

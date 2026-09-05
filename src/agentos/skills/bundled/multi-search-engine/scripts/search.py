@@ -225,6 +225,7 @@ def main() -> int:
     payload = search_all(args.query, engines, args.limit, args.strict)
     encoded = json.dumps(payload, ensure_ascii=False, indent=2)
     if args.out is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(encoded, encoding="utf-8")
     else:
         sys.stdout.write(encoded)

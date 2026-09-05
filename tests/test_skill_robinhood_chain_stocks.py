@@ -573,9 +573,15 @@ def test_http_json_rejects_empty_url() -> None:
 
 def test_main_rejects_invalid_rpc_url(capsys: pytest.CaptureFixture[str]) -> None:
     import json
-    code = chain_stocks.main(["--address",
-        "0x0000000000000000000000000000000000000000",
-        "--rpc-url", "file:///etc/passwd"])
+
+    code = chain_stocks.main(
+        [
+            "--address",
+            "0x0000000000000000000000000000000000000000",
+            "--rpc-url",
+            "file:///etc/passwd",
+        ]
+    )
     assert code == 0
     out, _ = capsys.readouterr()
     payload = json.loads(out)
@@ -585,9 +591,10 @@ def test_main_rejects_invalid_rpc_url(capsys: pytest.CaptureFixture[str]) -> Non
 
 def test_main_rejects_missing_host_url(capsys: pytest.CaptureFixture[str]) -> None:
     import json
-    code = chain_stocks.main(["--address",
-        "0x0000000000000000000000000000000000000000",
-        "--rpc-url", "http://"])
+
+    code = chain_stocks.main(
+        ["--address", "0x0000000000000000000000000000000000000000", "--rpc-url", "http://"]
+    )
     assert code == 0
     out, _ = capsys.readouterr()
     payload = json.loads(out)
@@ -603,8 +610,9 @@ def test_eth_call_handle_nondict_error() -> None:
 
     with patch.object(chain_stocks, "_http_json", side_effect=mock_http_json):
         with pytest.raises(chain_stocks.RpcError) as exc:
-            chain_stocks._eth_call("http://127.0.0.1:8545",
-                "0x0000000000000000000000000000000000000000", "0x", 5.0)
+            chain_stocks._eth_call(
+                "http://127.0.0.1:8545", "0x0000000000000000000000000000000000000000", "0x", 5.0
+            )
         assert "something went wrong" in str(exc.value)
 
 
@@ -617,6 +625,30 @@ def test_eth_call_handle_dict_error() -> None:
 
     with patch.object(chain_stocks, "_http_json", side_effect=mock_http_json):
         with pytest.raises(chain_stocks.RpcError) as exc:
-            chain_stocks._eth_call("http://127.0.0.1:8545",
-                "0x0000000000000000000000000000000000000000", "0x", 5.0)
+            chain_stocks._eth_call(
+                "http://127.0.0.1:8545", "0x0000000000000000000000000000000000000000", "0x", 5.0
+            )
         assert "execution reverted" in str(exc.value)
+
+
+def test_write_cards_creates_parent_directory(tmp_path: Path) -> None:
+    sys.path.insert(0, str(_SCRIPT.parent))
+    try:
+        out = tmp_path / "nested" / "dir" / "cards.json"
+        result = {
+            "query": "Apple",
+            "chainId": 4663,
+            "token": {
+                "address": AAPL,
+                "chainId": 4663,
+                "onchainSymbol": "AAPL",
+                "symbol": "AAPL",
+                "name": "Apple",
+                "decimals": 18,
+                "isStockToken": True,
+            },
+        }
+        chain_stocks._write_cards(result, str(out))
+        assert out.is_file()
+    finally:
+        sys.path.remove(str(_SCRIPT.parent))

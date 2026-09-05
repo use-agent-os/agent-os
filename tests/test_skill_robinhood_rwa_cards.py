@@ -13,6 +13,8 @@ import importlib.util
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 _SCRIPT = (
     Path(__file__).resolve().parents[1]
     / "src/agentos/skills/bundled/robinhood-rwa-addresses/scripts/rwa_cards.py"
@@ -121,3 +123,18 @@ def test_match_order_is_preserved() -> None:
         )
     )
     assert [c["title"] for c in cards] == ["AAPL", "JPM"]
+
+
+def test_rwa_cards_creates_parent_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import io
+    import json
+    import sys
+
+    out = tmp_path / "nested" / "dir" / "cards.json"
+    payload = _result(_match())
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    monkeypatch.setattr(sys, "argv", ["rwa_cards.py", "--output", str(out)])
+    assert rwa_cards.main() == 0
+    assert out.is_file()
