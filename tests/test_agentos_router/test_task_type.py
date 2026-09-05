@@ -115,6 +115,24 @@ class TestProgrammingLanguageTarget:
         assert verdict.task_type is None
         assert verdict.blocked_by == BLOCK_CODE_TARGET
 
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "Translate this Python function to C++.",
+            "Translate this algorithm to C++, preserving performance.",
+            "Translate this class to C#.",
+            "Translate this code to C# with async/await.",
+            "Translate this service to .NET.",
+            "Translate this module to .NET Core.",
+            "Dịch đoạn code này sang C++ giúp tôi.",
+            "Dịch code này sang C# nhé.",
+        ],
+    )
+    def test_programming_language_targets_with_symbols_block(self, prompt: str) -> None:
+        verdict = detect_task_type(prompt)
+        assert verdict.task_type is None
+        assert verdict.blocked_by == BLOCK_CODE_TARGET
+
     def test_language_named_only_in_the_body_does_not_block(self) -> None:
         """A document mentioning Python is not a porting request."""
         body = ("The team migrated the Python service last quarter. " * 40) + ("z" * 1500)

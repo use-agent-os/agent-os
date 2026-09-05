@@ -126,8 +126,10 @@ _TRANSLATE_RES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
 _CODE_TARGET_RE = re.compile(
     r"\b(?:python|javascript|typescript|golang|rust|java|kotlin|swift|scala"
     r"|haskell|ruby|php|perl|sql|bash|powershell|matlab|fortran|cobol"
-    r"|c\+\+|c#|\.net|react|vue|svelte|jquery|regex|assembly|solidity"
-    r"|dart|elixir|erlang|clojure|lua|zig)\b",
+    r"|react|vue|svelte|jquery|regex|assembly|solidity"
+    r"|dart|elixir|erlang|clojure|lua|zig)\b"
+    r"|\b(?:c\+\+|c#)(?!\w)"
+    r"|(?<!\w)\.net\b",
     re.IGNORECASE,
 )
 
