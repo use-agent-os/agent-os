@@ -450,6 +450,19 @@ def _gate_patch_ops(
 # ---------------------------------------------------------------------------
 
 
+def _lines_match_tolerant(actual: str, expected: str) -> bool:
+    """Compare an actual file line with an expected hunk context/delete line.
+
+    Matches strictly without line endings, or flexibly by stripping trailing
+    whitespace (handling trailing spaces/tabs differences from editors/LLMs).
+    """
+    actual_clean = actual.rstrip("\r\n")
+    expected_clean = expected.rstrip("\r\n")
+    if actual_clean == expected_clean:
+        return True
+    return actual_clean.rstrip() == expected_clean.rstrip()
+
+
 def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
     """Apply a single hunk to file_lines (0-indexed list of lines with newlines).
 
@@ -458,6 +471,16 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
     # old_start is 1-indexed; convert to 0-indexed
     pos = hunk.old_start - 1
     result = list(file_lines)
+
+    # Detect file newline style from first non-empty line or default to "\n"
+    newline = "\n"
+    for line in file_lines:
+        if line.endswith("\r\n"):
+            newline = "\r\n"
+            break
+        elif line.endswith("\n"):
+            newline = "\n"
+            break
 
     # Verify context and deleted lines match
     check_pos = pos
@@ -469,12 +492,11 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
         if prefix in (" ", "-"):
             if check_pos >= len(result):
                 raise ValueError(f"Hunk context/delete at line {check_pos + 1} exceeds file length")
-            actual = result[check_pos].rstrip("\n")
-            expected = content.rstrip("\n")
-            if actual != expected:
+            actual = result[check_pos]
+            if not _lines_match_tolerant(actual, content):
                 raise ValueError(
                     f"Context mismatch at line {check_pos + 1}: "
-                    f"expected {expected!r}, got {actual!r}"
+                    f"expected {content.rstrip('\r\n')!r}, got {actual.rstrip('\r\n')!r}"
                 )
             check_pos += 1
 
@@ -492,11 +514,11 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
         elif prefix == "-":
             src_pos += 1  # skip (delete)
         elif prefix == "+":
-            # Preserve newline style: add \n if original lines have it
-            if content.endswith("\n"):
+            # Preserve newline style: add newline if original lines have it
+            if content.endswith("\r\n") or content.endswith("\n"):
                 new_lines.append(content)
             else:
-                new_lines.append(content + "\n")
+                new_lines.append(content + newline)
 
     # Splice: replace [pos : pos + old_count] with new_lines
     return result[:pos] + new_lines + result[pos + hunk.old_count :]
