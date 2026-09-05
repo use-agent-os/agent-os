@@ -296,10 +296,10 @@ async def _config_get(params: Any, ctx: RpcContext) -> Any:
 
 async def _sessions_get(params: Any, ctx: RpcContext) -> dict[str, Any]:
     if ctx.session_manager is None:
-        raise KeyError("No session manager available")
+        raise RpcUnavailableError("No session manager available")
     storage = get_session_storage(ctx.session_manager)
     if storage is None:
-        raise KeyError("No session storage available")
+        raise RpcUnavailableError("No session storage available")
     if not isinstance(params, dict) or "key" not in params:
         raise ValueError("params.key is required")
     session = await storage.get_session(params["key"])

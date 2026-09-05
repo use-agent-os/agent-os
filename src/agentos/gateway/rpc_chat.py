@@ -581,7 +581,7 @@ async def _handle_chat_inject(params: dict | None, ctx: RpcContext) -> dict:
     session_key = _canonical_webchat_session_key(params["sessionKey"])
 
     if ctx.session_manager is None:
-        raise KeyError("No session manager available")
+        raise RpcUnavailableError("No session manager available")
 
     storage = getattr(ctx.session_manager, "_storage", None)
     if storage is not None:

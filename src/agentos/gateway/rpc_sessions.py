@@ -959,11 +959,11 @@ async def _handle_sessions_send(params: dict | None, ctx: RpcContext) -> dict:
         raise ValueError(f"Invalid session intent: {params.get('intent')}") from exc
 
     if ctx.session_manager is None:
-        raise KeyError("No session manager available")
+        raise RpcUnavailableError("No session manager available")
 
     storage = get_session_storage(ctx.session_manager)
     if storage is None:
-        raise KeyError("No session storage available")
+        raise RpcUnavailableError("No session storage available")
 
     session = await storage.get_session(key)
     if session is None and session_intent is SessionIntent.CONTINUE:
@@ -1511,11 +1511,11 @@ async def _handle_sessions_patch(params: dict | None, ctx: RpcContext) -> dict:
     key = _require_key(params)
 
     if ctx.session_manager is None:
-        raise KeyError("No session manager available")
+        raise RpcUnavailableError("No session manager available")
 
     storage = get_session_storage(ctx.session_manager)
     if storage is None:
-        raise KeyError("No session storage available")
+        raise RpcUnavailableError("No session storage available")
 
     session = await storage.get_session(key)
     if session is None:
@@ -1608,11 +1608,11 @@ async def _handle_sessions_rename(params: dict | None, ctx: RpcContext) -> dict:
     name = normalize_session_name(params.get("name", params.get("displayName")))
 
     if ctx.session_manager is None:
-        raise KeyError("No session manager available")
+        raise RpcUnavailableError("No session manager available")
 
     storage = get_session_storage(ctx.session_manager)
     if storage is None:
-        raise KeyError("No session storage available")
+        raise RpcUnavailableError("No session storage available")
 
     session = await _resolve_session_node(storage, key)
     resolved_key = str(getattr(session, "session_key", "") or key)
@@ -1710,11 +1710,11 @@ async def _handle_sessions_reset(params: dict | None, ctx: RpcContext) -> dict[s
     key = _require_key(params)
 
     if ctx.session_manager is None:
-        raise KeyError("No session manager available")
+        raise RpcUnavailableError("No session manager available")
 
     storage = get_session_storage(ctx.session_manager)
     if storage is None:
-        raise KeyError("No session storage available")
+        raise RpcUnavailableError("No session storage available")
 
     task_runtime = getattr(ctx, "task_runtime", None)
     # Drain MUST run before any branch that clears session state — including the
@@ -1953,11 +1953,11 @@ def _reset_response(
 async def _handle_sessions_delete(params: dict | None, ctx: RpcContext) -> dict:
     """Delete one or more sessions. Accepts {key} for single or {keys} for bulk."""
     if ctx.session_manager is None:
-        raise KeyError("No session manager available")
+        raise RpcUnavailableError("No session manager available")
 
     storage = get_session_storage(ctx.session_manager)
     if storage is None:
-        raise KeyError("No session storage available")
+        raise RpcUnavailableError("No session storage available")
 
     # Support both single key and bulk keys
     keys: list[str] = []
@@ -2009,7 +2009,7 @@ async def _handle_sessions_delete(params: dict | None, ctx: RpcContext) -> dict:
 async def _handle_sessions_context_compact(params: dict | None, ctx: RpcContext) -> dict:
     key = _require_key(params)
     if ctx.session_manager is None:
-        raise KeyError("No session manager available")
+        raise RpcUnavailableError("No session manager available")
 
     context_window_tokens = _context_window_tokens(params, ctx)
     custom_instructions = (params or {}).get("instructions")
@@ -2249,7 +2249,7 @@ async def _handle_sessions_truncate(params: dict | None, ctx: RpcContext) -> dic
 
     key = _require_key(params)
     if ctx.session_manager is None:
-        raise KeyError("No session manager available")
+        raise RpcUnavailableError("No session manager available")
 
     max_messages = (params or {}).get("maxMessages", 20)
     force = bool((params or {}).get("force", False))
@@ -2427,11 +2427,11 @@ async def _handle_sessions_resolve(params: dict | None, ctx: RpcContext) -> dict
     key = _require_key(params)
 
     if ctx.session_manager is None:
-        raise KeyError("No session manager available")
+        raise RpcUnavailableError("No session manager available")
 
     storage = get_session_storage(ctx.session_manager)
     if storage is None:
-        raise KeyError("No session storage available")
+        raise RpcUnavailableError("No session storage available")
 
     session = await _resolve_session_node(storage, key)
 

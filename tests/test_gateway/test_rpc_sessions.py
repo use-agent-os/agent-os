@@ -2852,3 +2852,40 @@ class TestSessionsResolve:
         res = await dispatcher.dispatch("r1", "sessions.create", {"agentId": "test"}, ctx)
         assert res.ok is False
         assert res.error.code == "UNAUTHORIZED"
+
+    @pytest.mark.asyncio
+    async def test_sessions_send_missing_session_manager_returns_unavailable(
+        self, dispatcher, ctx_no_manager
+    ):
+        res = await dispatcher.dispatch(
+            "r1", "sessions.send", {"key": "agent:main:s1", "message": "hello"}, ctx_no_manager
+        )
+        assert res.ok is False
+        assert res.error.code == "UNAVAILABLE"
+        assert res.error.retryable is True
+        assert "No session manager available" in res.error.message
+
+    @pytest.mark.asyncio
+    async def test_sessions_patch_missing_session_manager_returns_unavailable(
+        self, dispatcher, ctx_no_manager
+    ):
+        res = await dispatcher.dispatch(
+            "r1",
+            "sessions.patch",
+            {"key": "agent:main:s1", "displayName": "Renamed"},
+            ctx_no_manager,
+        )
+        assert res.ok is False
+        assert res.error.code == "UNAVAILABLE"
+        assert res.error.retryable is True
+
+    @pytest.mark.asyncio
+    async def test_sessions_delete_missing_session_manager_returns_unavailable(
+        self, dispatcher, ctx_no_manager
+    ):
+        res = await dispatcher.dispatch(
+            "r1", "sessions.delete", {"key": "agent:main:s1"}, ctx_no_manager
+        )
+        assert res.ok is False
+        assert res.error.code == "UNAVAILABLE"
+        assert res.error.retryable is True
