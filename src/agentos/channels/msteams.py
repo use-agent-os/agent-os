@@ -531,8 +531,12 @@ class MSTeamsChannel:
             if message_id is None:
                 holder: dict[str, str | None] = {"id": None}
 
-                async def _send(turn_context: Any, _holder: dict[str, str | None] = holder) -> None:
-                    response = await turn_context.send_activity(accumulated)
+                async def _send(
+                    turn_context: Any,
+                    _holder: dict[str, str | None] = holder,
+                    _text: str = accumulated,
+                ) -> None:
+                    response = await turn_context.send_activity(_text)
                     if response is not None and getattr(response, "id", None):
                         _holder["id"] = response.id
 
