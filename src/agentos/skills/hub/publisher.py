@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -95,7 +96,6 @@ async def publish_skill(
         )
 
     # GitHub publish via gh CLI
-    import asyncio
 
     parts = target_repo.split("/")
     if len(parts) != 2:
@@ -116,14 +116,6 @@ async def publish_skill(
             stderr=asyncio.subprocess.PIPE,
         )
         await proc.wait()
-
-        log.info("publish.fork_created", repo=target_repo, skill=skill_name)
-        return PublishResult(
-            success=True,
-            message=f"Skill '{skill_name}' ready for PR to {target_repo}. "
-            f"Fork created, use branch '{branch}' to submit.",
-            skill_name=skill_name,
-        )
     except FileNotFoundError:
         return PublishResult(
             success=False,
@@ -131,3 +123,32 @@ async def publish_skill(
         )
     except Exception as exc:
         return PublishResult(success=False, message=f"Publish failed: {exc}")
+
+    if proc.returncode != 0:
+        stderr_bytes = await proc.stderr.read() if proc.stderr is not None else b""
+        stderr = stderr_bytes.decode("utf-8", errors="replace").strip() or "(no stderr)"
+        log.warning(
+            "publish.fork_failed",
+            repo=target_repo,
+            skill=skill_name,
+            returncode=proc.returncode,
+            stderr=stderr,
+        )
+        return PublishResult(
+            success=False,
+            message=(
+                f"Failed to fork {target_repo} (gh exit {proc.returncode}): {stderr}. "
+                "Check gh auth (`gh auth status`) and that the repo exists and is forkable."
+            ),
+            skill_name=skill_name,
+        )
+
+    log.info("publish.fork_created", repo=target_repo, skill=skill_name)
+    return PublishResult(
+        success=True,
+        message=(
+            f"Skill '{skill_name}' ready for PR to {target_repo}. "
+            f"Fork created, use branch '{branch}' to submit."
+        ),
+        skill_name=skill_name,
+    )
