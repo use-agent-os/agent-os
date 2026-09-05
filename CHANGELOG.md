@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `_OPENAI_COMPAT_PROVIDERS` now includes `bankr`, `byteplus_coding_plan`,
+  `openai_responses`, and `volcengine_coding_plan` so HTTP 401/402/429
+  errors from these providers are classified correctly instead of
+  falling through to `UNKNOWN`.
+
+### Security
+
+- **`robinhood-rwa-addresses` now validates `--rpc-url` scheme via `_validate_rpc_url`**
+  and rejects any URL outside `{http, https}`, preventing local file reads
+  ([#968](https://github.com/use-agent-os/agent-os/issues/968)).
+
+
+### Fixed
+
+-  now includes , ,
+  , and  so HTTP 401/402/429
+  errors from these providers are classified correctly instead of
+  falling through to .
+
 ## [2026.9.5] - 2026-09-05
 
 ### Added
