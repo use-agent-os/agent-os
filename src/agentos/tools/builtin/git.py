@@ -204,10 +204,11 @@ async def git_commit(
     workdir: str | None = None,
 ) -> str:
     cwd = _effective_workdir(workdir)
-    if files:
-        for file_path in files:
-            _reject_foreign_git_path(file_path)
-        await _run_git("add", "--", *files, cwd=cwd)
+    if files is not None:
+        if files:
+            for file_path in files:
+                _reject_foreign_git_path(file_path)
+            await _run_git("add", "--", *files, cwd=cwd)
     else:
         await _run_git("add", "-A", cwd=cwd)
     return await _run_git("commit", "-m", message, cwd=cwd)
