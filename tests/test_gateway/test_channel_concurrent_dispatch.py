@@ -296,6 +296,43 @@ async def test_close_cancels_inflight() -> None:
     assert all(t.done() for t in tasks), "all tasks must be done after cancel_all"
 
 
+@pytest.mark.asyncio
+async def test_cancel_all_handles_mixed_tasks_and_reservation_tokens() -> None:
+    """_ChannelInFlightSet.cancel_all() handles both asyncio.Task and bare object reservation
+    tokens without AttributeError.
+    """
+    ifs = _ChannelInFlightSet(cap=8)
+
+    cancelled_tasks: list[str] = []
+
+    async def _worker(label: str) -> None:
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            cancelled_tasks.append(label)
+            raise
+
+    # Add real tasks
+    t1 = asyncio.create_task(_worker("task1"))
+    t2 = asyncio.create_task(_worker("task2"))
+    ifs.add(t1)
+    ifs.add(t2)
+
+    # Acquire slot with bare object reservation token
+    token = object()
+    assert ifs.try_acquire(token) is True
+    assert ifs.full() is False
+
+    await asyncio.sleep(0)
+
+    # cancel_all should safely cancel real tasks and not crash on token
+    await ifs.cancel_all()
+
+    assert set(cancelled_tasks) == {"task1", "task2"}
+    assert t1.done() and t2.done()
+    assert len(ifs._tasks) == 0
+
+
 # ── typing_keepalive lifecycle bound to reply task ──────────────────────────
 
 

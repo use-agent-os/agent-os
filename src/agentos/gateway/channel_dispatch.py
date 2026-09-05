@@ -155,7 +155,7 @@ class _ChannelInFlightSet:
 
     def __init__(self, cap: int) -> None:
         self._cap = cap
-        self._tasks: set[asyncio.Task[Any]] = set()
+        self._tasks: set[asyncio.Task[Any] | object] = set()
 
     @property
     def cap(self) -> int:
@@ -178,18 +178,18 @@ class _ChannelInFlightSet:
         runs on a single thread, this check-then-add pair is atomic — no await
         occurs between the guard and the mutation.
         """
-        if len(self._tasks) >= self._cap:  # type: ignore[arg-type]
+        if len(self._tasks) >= self._cap:
             return False
-        self._tasks.add(token)  # type: ignore[arg-type]
+        self._tasks.add(token)
         return True
 
     def release(self, token: object) -> None:
         """Release a reservation previously acquired via try_acquire."""
-        self._tasks.discard(token)  # type: ignore[arg-type]
+        self._tasks.discard(token)
 
     async def cancel_all(self) -> None:
         """Cancel every in-flight task and await completion (for shutdown)."""
-        tasks = list(self._tasks)
+        tasks = [t for t in self._tasks if isinstance(t, asyncio.Task)]
         for t in tasks:
             t.cancel()
         if tasks:
