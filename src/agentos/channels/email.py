@@ -540,6 +540,13 @@ class EmailChannel:
             return None
         raw = _first_literal(body_data)
         if raw is None:
+            log.warning(
+                "email.message_unparseable",
+                name=self.config.name,
+                uid=uid,
+                reason="empty_or_missing_literal",
+            )
+            self._mark_seen(client, uid)
             return None
         if len(raw) > self.config.max_message_bytes:
             log.warning(
@@ -552,7 +559,16 @@ class EmailChannel:
             return None
 
         parsed = BytesParser(policy=email_policy).parsebytes(raw)
-        return parsed if isinstance(parsed, EmailMessage) else None
+        if not isinstance(parsed, EmailMessage):
+            log.warning(
+                "email.message_unparseable",
+                name=self.config.name,
+                uid=uid,
+                reason="not_an_email_message",
+            )
+            self._mark_seen(client, uid)
+            return None
+        return parsed
 
     def _mark_seen(self, client: imaplib.IMAP4, uid: str) -> None:
         if not self.config.mark_seen:

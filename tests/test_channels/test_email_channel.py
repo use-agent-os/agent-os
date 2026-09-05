@@ -738,6 +738,39 @@ def test_poll_skips_a_message_larger_than_the_cap(monkeypatch: pytest.MonkeyPatc
     assert fake.stored == [("7", "+FLAGS", "\\Seen")]
 
 
+def test_poll_skips_and_marks_seen_message_with_missing_literal_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel = EmailChannel(config=_config())
+    fake = _FakeIMAP(_raw().as_bytes())
+    monkeypatch.setattr(channel, "_imap_connect", lambda: fake)
+
+    def _fetch(uid: str, spec: str) -> tuple[str, list[Any]]:
+        if "RFC822.SIZE" in spec:
+            return "OK", [b"7 (RFC822.SIZE 100)"]
+        return "OK", [b")"]
+
+    monkeypatch.setattr(fake, "fetch", _fetch)
+
+    assert channel._fetch_unseen() == []
+    assert fake.stored == [("7", "+FLAGS", "\\Seen")]
+
+
+def test_poll_skips_and_marks_seen_non_email_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel = EmailChannel(config=_config())
+    fake = _FakeIMAP(_raw().as_bytes())
+    monkeypatch.setattr(channel, "_imap_connect", lambda: fake)
+
+    import email.parser
+
+    monkeypatch.setattr(email.parser.BytesParser, "parsebytes", lambda self, raw: "not_a_message")
+
+    assert channel._fetch_unseen() == []
+    assert fake.stored == [("7", "+FLAGS", "\\Seen")]
+
+
 def test_one_unreadable_message_does_not_sink_the_poll(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
