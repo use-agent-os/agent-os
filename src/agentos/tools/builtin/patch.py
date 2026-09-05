@@ -455,8 +455,8 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
 
     Returns the new list of lines.
     """
-    # old_start is 1-indexed; convert to 0-indexed
-    pos = hunk.old_start - 1
+    # old_start is 1-indexed (or 0 for prepending/empty files); convert to 0-indexed
+    pos = max(0, hunk.old_start - 1)
     result = list(file_lines)
 
     # Verify context and deleted lines match
@@ -533,18 +533,58 @@ def _apply_delete(path: str, root: Path | None = None) -> None:
 
 
 def _apply_ops(ops: list[PatchOp], root: Path | None = None) -> tuple[int, int, int]:
-    """Execute all patch operations. Returns (added, modified, deleted) counts."""
-    added = modified = deleted = 0
+    """Execute all patch operations atomically. Returns (added, modified, deleted) counts."""
+    staged: dict[Path, str | None] = {}
+
+    # Phase 1: Dry-run validation and in-memory staging
     for op in ops:
         if isinstance(op, AddFile):
-            _apply_add(op.path, op.content, root)
-            added += 1
+            resolved = _validate_path(op.path, root)
+            if resolved in staged:
+                if staged[resolved] is not None:
+                    raise FileExistsError(f"File already exists: {op.path}")
+            elif resolved.exists():
+                raise FileExistsError(f"File already exists: {op.path}")
+            staged[resolved] = op.content
+
         elif isinstance(op, UpdateFile):
-            _apply_update(op.path, op.hunks, root)
-            modified += 1
+            resolved = _validate_path(op.path, root)
+            if resolved in staged:
+                staged_content = staged[resolved]
+                if staged_content is None:
+                    raise FileNotFoundError(f"File not found for update: {op.path}")
+                text = staged_content
+            else:
+                if not resolved.exists():
+                    raise FileNotFoundError(f"File not found for update: {op.path}")
+                text = resolved.read_text(encoding="utf-8")
+
+            lines = text.splitlines(keepends=True)
+            for hunk in sorted(op.hunks, key=lambda h: h.old_start, reverse=True):
+                lines = _apply_hunk(lines, hunk)
+            staged[resolved] = "".join(lines)
+
         elif isinstance(op, DeleteFile):
-            _apply_delete(op.path, root)
-            deleted += 1
+            resolved = _validate_path(op.path, root)
+            if resolved in staged:
+                if staged[resolved] is None:
+                    raise FileNotFoundError(f"File not found for deletion: {op.path}")
+            elif not resolved.exists():
+                raise FileNotFoundError(f"File not found for deletion: {op.path}")
+            staged[resolved] = None
+
+    # Phase 2: Atomic commit to disk once all operations have validated
+    for path, content in staged.items():
+        if content is None:
+            if path.exists():
+                path.unlink()
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+
+    added = sum(1 for op in ops if isinstance(op, AddFile))
+    modified = sum(1 for op in ops if isinstance(op, UpdateFile))
+    deleted = sum(1 for op in ops if isinstance(op, DeleteFile))
     return added, modified, deleted
 
 

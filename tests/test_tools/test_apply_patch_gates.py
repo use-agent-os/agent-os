@@ -574,3 +574,88 @@ def test_parse_hunk_header_rejects_malformed_input(header: str) -> None:
 
     with pytest.raises(ValueError, match="Invalid hunk header"):
         _parse_hunk_header(header)
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_atomic_failure_leaves_workspace_unmodified(tmp_path: Path) -> None:
+    file2 = tmp_path / "file2.txt"
+    file2.write_text("original line\n", encoding="utf-8")
+    file1 = tmp_path / "file1.txt"
+
+    token = current_tool_context.set(ToolContext(workspace_dir=str(tmp_path)))
+    apply_patch = _original_async(patch_tool.apply_patch)
+    try:
+        with pytest.raises(ValueError, match="Context mismatch"):
+            await apply_patch(
+                """*** Begin Patch
+*** Add File: file1.txt
++staged content
+*** Update File: file2.txt
+@@@ -1,1 +1,1 @@@
+-wrong context line
++replacement line
+*** End Patch"""
+            )
+    finally:
+        current_tool_context.reset(token)
+
+    # file1 must not have been created on disk
+    assert not file1.exists()
+    # file2 must retain its original untouched content
+    assert file2.read_text(encoding="utf-8") == "original line\n"
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_atomic_failure_on_missing_target(tmp_path: Path) -> None:
+    file1 = tmp_path / "file1.txt"
+
+    token = current_tool_context.set(ToolContext(workspace_dir=str(tmp_path)))
+    apply_patch = _original_async(patch_tool.apply_patch)
+    try:
+        with pytest.raises(FileNotFoundError, match="File not found for update"):
+            await apply_patch(
+                """*** Begin Patch
+*** Add File: file1.txt
++should not be on disk
+*** Update File: nonexistent.txt
+@@@ -1,1 +1,1 @@@
+-foo
++bar
+*** End Patch"""
+            )
+    finally:
+        current_tool_context.reset(token)
+
+    assert not file1.exists()
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_atomic_multi_op_success(tmp_path: Path) -> None:
+    file_del = tmp_path / "to_delete.txt"
+    file_del.write_text("delete me\n", encoding="utf-8")
+    file_mod = tmp_path / "to_modify.txt"
+    file_mod.write_text("old text\n", encoding="utf-8")
+    file_add = tmp_path / "to_add.txt"
+
+    token = current_tool_context.set(ToolContext(workspace_dir=str(tmp_path)))
+    apply_patch = _original_async(patch_tool.apply_patch)
+    try:
+        result = await apply_patch(
+            """*** Begin Patch
+*** Add File: to_add.txt
++new file content
+*** Update File: to_modify.txt
+@@@ -1,1 +1,1 @@@
+-old text
++new text
+*** Delete File: to_delete.txt
+*** End Patch"""
+        )
+    finally:
+        current_tool_context.reset(token)
+
+    assert "1 file(s) added, 1 file(s) modified, 1 file(s) deleted" in result
+    assert file_add.read_text(encoding="utf-8") == "new file content"
+    assert file_mod.read_text(encoding="utf-8") == "new text\n"
+    assert not file_del.exists()
+
