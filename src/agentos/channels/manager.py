@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
@@ -91,10 +92,30 @@ class ChannelManager:
         channels: dict[str, ManagedChannel] = {}
         agent_ids: dict[str, str] = {}
         channel_types: dict[str, str] = {}
+        slack_webhook_count = sum(
+            entry.enabled
+            and entry.type == "slack"
+            and getattr(entry, "connection_mode", "webhook") == "webhook"
+            for entry in entries
+        )
         for entry in entries:
             if not entry.enabled:
                 log.info("channel.skipped_disabled", name=entry.name)
                 continue
+
+            if (
+                slack_webhook_count > 1
+                and entry.type == "slack"
+                and getattr(entry, "connection_mode", "webhook") == "webhook"
+                and not getattr(entry, "webhook_path", "")
+            ):
+                if entry.name in {".", ".."} or not re.fullmatch(r"[A-Za-z0-9._~-]+", entry.name):
+                    raise ValueError(
+                        f"Slack channel {entry.name!r} needs an explicit webhook_path: "
+                        "its name is not a safe URL path segment"
+                    )
+                # Copy rather than persisting a derived default into the user's config.
+                entry = entry.model_copy(update={"webhook_path": f"/slack/events/{entry.name}"})
 
             adapter = build_managed_channel(entry)
             if adapter is None:
@@ -146,13 +167,26 @@ class ChannelManager:
 
         Slack adapters expose ``create_webhook_route()``;
         Discord uses a persistent WebSocket and has no webhook.
+        Conflicting paths/methods are rejected instead of shadowing an account.
         """
         routes: list[Route] = []
+        owners: dict[str, list[tuple[str, Route]]] = {}
         for name, adapter in self._channels.items():
             if getattr(adapter, "transport_name", "webhook") != "webhook":
                 continue
             if hasattr(adapter, "create_webhook_route"):
                 route = adapter.create_webhook_route()
+                for other_name, other_route in owners.get(route.path, []):
+                    if (
+                        not route.methods
+                        or not other_route.methods
+                        or route.methods & other_route.methods
+                    ):
+                        raise ValueError(
+                            f"Webhook route {route.path!r} conflicts between channel entries "
+                            f"{other_name!r} and {name!r}; configure distinct webhook_path values"
+                        )
+                owners.setdefault(route.path, []).append((name, route))
                 routes.append(route)
                 log.info("channel.webhook_route_collected", channel=name, path=route.path)
         return routes

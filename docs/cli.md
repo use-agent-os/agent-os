@@ -397,6 +397,17 @@ channels types` is the authoritative catalog. On upgrade, config entries for
 retired built-in channel types are removed only after AgentOS creates the
 normal secure config backup.
 
+Slack webhook entries accept `--field webhook_path=/slack/team-a/events`
+when added with `channels add slack`. An omitted or empty field selects
+`/slack/events` for one enabled webhook account, or
+`/slack/events/<account_name>` for multiple enabled webhook accounts. Automatic
+paths are stable across restarts and config reordering; disabled and Socket Mode
+entries do not count. An explicit path takes precedence. To preserve an existing
+Request URL when adding another account, set `--field webhook_path=/slack/events`
+on the existing account. Configure each Slack app's Request URLs to match its
+path. Duplicate webhook paths with overlapping HTTP methods are rejected at
+gateway startup. See [Slack modes](channels.md#slack-modes).
+
 ```sh
 agentos channels types
 agentos channels describe telegram

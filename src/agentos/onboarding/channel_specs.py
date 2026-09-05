@@ -100,6 +100,11 @@ def _slack_spec() -> ChannelSetupSpec:
                               required=True, secret=True, group="credentials",
                               advanced=True,
                               show_when={"connection_mode": "webhook"}),
+            ChannelSetupField("webhook_path", "Webhook path", "text",
+                              required=False, default="", advanced=True,
+                              description="Blank uses /slack/events for one webhook account, "
+                              "or /slack/events/<account_name> for multiple accounts.",
+                              show_when={"connection_mode": "webhook"}),
             ChannelSetupField("reply_in_thread", "Reply in thread", "bool",
                               required=False, default=False),
             ChannelSetupField("connection_mode", "Connection mode", "select",
