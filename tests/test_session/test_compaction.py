@@ -367,3 +367,46 @@ async def test_custom_instructions_are_user_scoped_and_identifier_policy_stays_s
     assert "Focus on deployment decisions." not in messages[0]["content"]
     assert messages[1]["role"] == "user"
     assert "Focus on deployment decisions." in messages[1]["content"]
+
+
+def test_effective_compaction_model():
+    from types import SimpleNamespace
+
+    from agentos.session.compaction import effective_compaction_model
+
+    assert effective_compaction_model(None) is None
+    assert effective_compaction_model(SimpleNamespace()) is None
+    assert effective_compaction_model(SimpleNamespace(model="gpt-4o")) == "gpt-4o"
+    assert (
+        effective_compaction_model(
+            SimpleNamespace(model="gpt-4o", model_override="anthropic/claude-3-5-sonnet")
+        )
+        == "anthropic/claude-3-5-sonnet"
+    )
+
+
+def test_resolve_compaction_provider():
+    from types import SimpleNamespace
+
+    from agentos.session.compaction import resolve_compaction_provider
+
+    assert resolve_compaction_provider(SimpleNamespace(), None) is None
+
+    class FakeSelector:
+        def __init__(self, model="default"):
+            self.model = model
+
+        def clone(self):
+            return FakeSelector(self.model)
+
+        def override_model(self, model):
+            self.model = model
+
+        def resolve(self):
+            return f"provider:{self.model}"
+
+    ctx = SimpleNamespace(provider_selector=FakeSelector())
+    session = SimpleNamespace(model="anthropic/claude-3-5-sonnet")
+    resolved = resolve_compaction_provider(ctx, session)
+    assert resolved == "provider:anthropic/claude-3-5-sonnet"
+

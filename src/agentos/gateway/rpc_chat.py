@@ -14,7 +14,11 @@ from agentos.gateway.access import CONTROL_AND_CHANNEL, CONTROL_ONLY
 from agentos.gateway.config import GatewayConfig
 from agentos.gateway.context_overflow import apply_context_overflow_policy
 from agentos.gateway.rpc import RpcContext, RpcUnavailableError, get_dispatcher
-from agentos.session.compaction import build_compaction_config_from_provider
+from agentos.session.compaction import (
+    _effective_compaction_model,
+    _resolve_compaction_provider,
+    build_compaction_config_from_provider,
+)
 from agentos.session.keys import build_webchat_key, canonicalize_session_key, parse_agent_id
 
 _d = get_dispatcher()
@@ -225,43 +229,6 @@ async def _chat_history_summaries(
     except Exception:  # noqa: BLE001 - summaries are optional display metadata
         return []
     return [_session_summary_to_chat_payload(summary) for summary in summaries or []]
-
-
-def _effective_compaction_model(session: object | None) -> str | None:
-    if session is None:
-        return None
-    return getattr(session, "model_override", None) or getattr(session, "model", None)
-
-
-def _resolve_compaction_provider(ctx: RpcContext, session: object | None) -> object | None:
-    selector = getattr(ctx, "provider_selector", None)
-    if selector is None:
-        return None
-
-    resolved_selector = selector
-    clone = getattr(selector, "clone", None)
-    if callable(clone):
-        try:
-            resolved_selector = clone()
-        except Exception:  # noqa: BLE001
-            resolved_selector = selector
-
-    model = _effective_compaction_model(session)
-    if model and resolved_selector is not selector:
-        override = getattr(resolved_selector, "override_model", None)
-        if callable(override):
-            try:
-                override(model)
-            except Exception:  # noqa: BLE001
-                pass
-
-    resolver = getattr(resolved_selector, "resolve", None)
-    if not callable(resolver):
-        return None
-    try:
-        return cast(object | None, resolver())
-    except Exception:  # noqa: BLE001
-        return None
 
 
 async def _build_context_overflow_compaction_config(ctx: RpcContext, session_key: str):

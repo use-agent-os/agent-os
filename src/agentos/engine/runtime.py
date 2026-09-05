@@ -35,6 +35,7 @@ from agentos.attachment_refs import (
     transcript_material_path,
 )
 from agentos.bootstrap_types import BootstrapFileReport
+from agentos.compat.inspect_utils import _accepts_keyword_arg
 from agentos.contracts.attachments import (
     ALLOWED_MEDIA_TYPES as _ALLOWED_ENGINE_MEDIA_TYPES,
 )
@@ -640,14 +641,6 @@ _SAFETY_MODULES: Final[tuple[Any, ...]] = (
 )
 
 log = structlog.get_logger(__name__)
-
-
-def _accepts_keyword_arg(callable_obj: Any, name: str) -> bool:
-    """Return True when callable accepts `name` explicitly or via `**kwargs`."""
-    params = inspect.signature(callable_obj).parameters
-    if name in params:
-        return True
-    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
 def _strip_context_summary_marker(content: str) -> str:

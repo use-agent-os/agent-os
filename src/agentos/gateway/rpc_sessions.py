@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import time
 import uuid
 from dataclasses import asdict, replace
@@ -11,6 +10,7 @@ from typing import Any, cast
 
 import structlog
 
+from agentos.compat.inspect_utils import _accepts_keyword_arg
 from agentos.engine.cache_break_monitor import notify_compaction
 from agentos.engine.start_turn import start_turn_via_runtime
 from agentos.gateway import attachment_ingest as _attachment_ingest
@@ -32,6 +32,8 @@ from agentos.gateway.session_services import (
 from agentos.gateway.session_streams import get_session_streams
 from agentos.paths import media_root_from_config
 from agentos.session.compaction import (
+    _effective_compaction_model,
+    _resolve_compaction_provider,
     build_compaction_config_from_provider,
     call_compact_with_optional_config,
 )
@@ -61,16 +63,6 @@ _MAX_STAGED_PDF_BYTES = _attachment_ingest.MAX_STAGED_PDF_BYTES
 _MAX_TEXT_ATTACHMENT_BYTES = _attachment_ingest.TEXT_ATTACHMENT_BYTES
 _MAX_TOTAL_ATTACHMENT_BYTES = _attachment_ingest.MAX_TOTAL_ATTACHMENT_BYTES
 _MAX_ATTACHMENTS = _attachment_ingest.MAX_ATTACHMENTS
-
-
-def _accepts_keyword_arg(func: Any, name: str) -> bool:
-    try:
-        params = inspect.signature(func).parameters
-    except (TypeError, ValueError):
-        return True
-    return name in params or any(
-        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
-    )
 
 
 def _clean_cancel_source(value: Any, default: str) -> str:
@@ -436,43 +428,6 @@ def _context_window_tokens(params: dict | None, ctx: RpcContext) -> int:
     if value <= 0:
         raise ValueError("contextWindowTokens must be a positive integer")
     return value
-
-
-def _effective_compaction_model(session: Any | None) -> str | None:
-    if session is None:
-        return None
-    return getattr(session, "model_override", None) or getattr(session, "model", None)
-
-
-def _resolve_compaction_provider(ctx: RpcContext, session: Any | None) -> Any | None:
-    selector = getattr(ctx, "provider_selector", None)
-    if selector is None:
-        return None
-
-    resolved_selector = selector
-    clone = getattr(selector, "clone", None)
-    if callable(clone):
-        try:
-            resolved_selector = clone()
-        except Exception:  # noqa: BLE001
-            resolved_selector = selector
-
-    model = _effective_compaction_model(session)
-    if model and resolved_selector is not selector:
-        override = getattr(resolved_selector, "override_model", None)
-        if callable(override):
-            try:
-                override(model)
-            except Exception:  # noqa: BLE001
-                pass
-
-    resolver = getattr(resolved_selector, "resolve", None)
-    if not callable(resolver):
-        return None
-    try:
-        return resolver()
-    except Exception:  # noqa: BLE001
-        return None
 
 
 def _enum_value(value: Any) -> Any:

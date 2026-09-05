@@ -48,6 +48,7 @@ from agentos.channels.artifact_delivery import (
 )
 from agentos.channels.stream_policy import resolve_channel_stream_policy
 from agentos.channels.types import IncomingMessage, OutgoingMessage
+from agentos.compat.inspect_utils import _accepts_keyword_arg
 from agentos.engine.start_turn import start_turn_via_runtime
 from agentos.engine.types import (
     ArtifactEvent,
@@ -292,16 +293,6 @@ class _DirectiveTagStreamSanitizer:
         pending = self._pending
         self._pending = ""
         return _strip_internal_compaction_markers(_strip_inline_directive_tags(pending))
-
-
-def _accepts_keyword_arg(callable_obj: Any, name: str) -> bool:
-    try:
-        params = inspect.signature(callable_obj).parameters
-    except (TypeError, ValueError):
-        return False
-    if name in params:
-        return True
-    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
 
 @contextlib.asynccontextmanager
