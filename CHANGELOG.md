@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The MCP `stdio` client speaks the transport's newline framing instead of
+  LSP-style `Content-Length` headers. `MCPStdioClient` wrote
+  `Content-Length: N\r\n\r\n<body>` to the server's stdin and rejected any
+  reply that did not carry the same header (`Missing Content-Length header in
+  response`), so no spec-compliant MCP stdio server could be used at all —
+  the reference `@modelcontextprotocol/server-*` implementations included.
+  Requests now go out as one compact JSON-RPC object per line, and a reply is
+  read up to the newline delimiter and matched to its request id, so a server
+  that interleaves `notifications/message` or `notifications/tools/list_changed`
+  with its replies is followed rather than being reported as the result of
+  whichever request was in flight. The existing short-read guarantees are kept:
+  a message split across pipe writes is reassembled rather than truncated, and
+  EOF before the delimiter raises a clear error instead of reaching
+  `json.loads` as a partial line. A message past the 64 KiB asyncio pipe
+  buffer — a large tool result, or a `tools/list` from a large catalog — is
+  read whole, where `readline` would raise and discard it, and a server that
+  never sends a delimiter is cut off at 16 MiB rather than buffered without
+  bound ([#894](https://github.com/use-agent-os/agent-os/issues/894)).
+
 ## [2026.9.5] - 2026-09-05
 
 ### Added

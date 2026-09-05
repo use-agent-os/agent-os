@@ -13,9 +13,18 @@ from agentos.mcp.types import MCPServerConfig, MCPToolDef, MCPToolResult
 
 
 class MCPStdioClient(MCPClient):
-    """MCP client using stdio transport (subprocess + Content-Length framing)."""
+    """MCP client using stdio transport (subprocess + newline-delimited JSON-RPC).
+
+    The MCP stdio transport frames messages by newline: each JSON-RPC message is
+    written as a single line on stdin and read back as a single line from
+    stdout. ``Content-Length`` headers are the Language Server Protocol
+    convention, not this one, and a spec-compliant server never sends them.
+    """
 
     _CLOSE_TIMEOUT_SECONDS = 2.0
+    # A message is read until its delimiter, so a server that never sends one
+    # would otherwise grow the buffer without bound.
+    _MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 
     def __init__(self, config: MCPServerConfig) -> None:
         super().__init__(config)
@@ -23,34 +32,67 @@ class MCPStdioClient(MCPClient):
         self._request_id = 0
 
     @staticmethod
-    def _encode_request(request: dict[str, Any]) -> bytes:
-        """Encode a JSON-RPC request with Content-Length framing."""
-        body = json.dumps(request)
-        header = f"Content-Length: {len(body)}\r\n\r\n"
-        return header.encode() + body.encode()
+    def _encode_message(message: dict[str, Any]) -> bytes:
+        """Encode one JSON-RPC message as a single newline-terminated line.
+
+        ``json.dumps`` escapes newlines inside strings, so the payload cannot
+        contain the delimiter no matter what a tool argument holds. Compact
+        separators keep the frame to what the transport needs.
+        """
+        return json.dumps(message, separators=(",", ":")).encode() + b"\n"
 
     @staticmethod
     def _decode_response(data: bytes) -> dict[str, Any]:
-        """Decode a Content-Length framed response."""
-        if b"\r\n\r\n" not in data:
-            raise ValueError("Missing header/body separator in response")
+        """Decode one newline-delimited JSON-RPC message."""
+        try:
+            decoded = json.loads(data.decode().strip())
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ValueError(f"MCP server sent a line that is not valid JSON: {exc}") from exc
+        if not isinstance(decoded, dict):
+            raise ValueError(
+                f"MCP server response is not a JSON-RPC object: {type(decoded).__name__}"
+            )
+        return cast(dict[str, Any], decoded)
 
-        header_part, body = data.split(b"\r\n\r\n", 1)
-        headers = header_part.decode()
+    @classmethod
+    async def _read_line(cls, stream: asyncio.StreamReader) -> bytes:
+        """Read one newline-terminated line of any length.
 
-        content_length: int | None = None
-        for line in headers.splitlines():
-            if line.lower().startswith("content-length:"):
-                content_length = int(line.split(":", 1)[1].strip())
-                break
+        ``StreamReader.readline`` raises *and drops the data* once a line
+        exceeds the stream buffer limit — 64 KiB for an asyncio subprocess
+        pipe, which a real ``tools/list`` or tool result passes easily. Draining
+        ``readuntil``'s ``LimitOverrunError`` instead keeps the frame whole.
 
-        if content_length is None:
-            raise ValueError("Missing Content-Length header")
-
-        if len(body) < content_length:
-            raise ValueError(f"Truncated body: expected {content_length} bytes, got {len(body)}")
-
-        return cast(dict[str, Any], json.loads(body[:content_length].decode()))
+        Returns a non-empty, newline-terminated line, or raises ``ValueError``:
+        EOF before the delimiter is a short read, reported as one rather than
+        handed to ``json.loads`` as a partial line, and a server that keeps
+        sending without ever delimiting is cut off at ``_MAX_MESSAGE_BYTES``.
+        """
+        chunks: list[bytes] = []
+        size = 0
+        while True:
+            try:
+                chunks.append(await stream.readuntil(b"\n"))
+            except asyncio.LimitOverrunError as exc:
+                # No delimiter within the buffer yet: take what is buffered and
+                # keep looking. ``exc.consumed`` never exceeds what is buffered,
+                # so this cannot block.
+                chunks.append(await stream.readexactly(exc.consumed))
+                size += len(chunks[-1])
+                if size > cls._MAX_MESSAGE_BYTES:
+                    raise ValueError(
+                        f"MCP server message exceeds {cls._MAX_MESSAGE_BYTES} bytes "
+                        "with no newline delimiter"
+                    ) from exc
+                continue
+            except asyncio.IncompleteReadError as exc:
+                partial = b"".join([*chunks, exc.partial])
+                if not partial:
+                    raise ValueError("MCP server closed stdout without sending a response") from exc
+                raise ValueError(
+                    f"Truncated message: EOF after {len(partial)} bytes with no newline delimiter"
+                ) from exc
+            return b"".join(chunks)
 
     def _next_id(self) -> int:
         self._request_id += 1
@@ -118,11 +160,10 @@ class MCPStdioClient(MCPClient):
         if params is not None:
             request["params"] = params
 
-        encoded = self._encode_request(request)
-        self._process.stdin.write(encoded)
+        self._process.stdin.write(self._encode_message(request))
         await self._process.stdin.drain()
 
-        return await self._read_response()
+        return await self._read_response(req_id)
 
     async def _send_notification(self, method: str) -> None:
         """Send a JSON-RPC notification (no response expected)."""
@@ -130,45 +171,33 @@ class MCPStdioClient(MCPClient):
         assert self._process.stdin is not None
 
         notification = {"jsonrpc": "2.0", "method": method}
-        encoded = self._encode_request(notification)
-        self._process.stdin.write(encoded)
+        self._process.stdin.write(self._encode_message(notification))
         await self._process.stdin.drain()
 
-    async def _read_response(self) -> dict[str, Any]:
-        """Read and decode a Content-Length framed response from stdout."""
+    async def _read_response(self, req_id: int) -> dict[str, Any]:
+        """Read newline-delimited messages until the reply to ``req_id`` arrives.
+
+        A server may interleave its own traffic with the reply — a
+        ``notifications/message`` log line, ``notifications/tools/list_changed``
+        after a catalog change, or a request of its own. Returning whatever
+        arrived first would hand a notification back as the result and leave
+        every later read one message behind, so replies are matched on their
+        JSON-RPC id the way the SSE client does. Each iteration consumes at
+        least one byte and EOF raises, so this cannot spin.
+        """
         assert self._process is not None
         assert self._process.stdout is not None
 
-        # Read header lines until blank line
-        header_lines: list[str] = []
         while True:
-            line = await self._process.stdout.readline()
-            decoded = line.decode().rstrip("\r\n")
-            if decoded == "":
-                break
-            header_lines.append(decoded)
-
-        content_length: int | None = None
-        for h in header_lines:
-            if h.lower().startswith("content-length:"):
-                content_length = int(h.split(":", 1)[1].strip())
-                break
-
-        if content_length is None:
-            raise ValueError("Missing Content-Length header in response")
-
-        # ``StreamReader.read(n)`` returns *up to* n bytes and yields as soon as
-        # any data is buffered, so a body split across pipe writes (large tool
-        # results, chunked flushes) would be truncated and fail ``json.loads``.
-        # ``readexactly`` enforces the Content-Length framing contract, matching
-        # the guard in the sibling ``_decode_response`` helper.
-        try:
-            body = await self._process.stdout.readexactly(content_length)
-        except asyncio.IncompleteReadError as exc:
-            raise ValueError(
-                f"Truncated body: expected {content_length} bytes, got {len(exc.partial)}"
-            ) from exc
-        return cast(dict[str, Any], json.loads(body.decode()))
+            line = await self._read_line(self._process.stdout)
+            # Servers occasionally flush a bare newline between messages.
+            if not line.strip():
+                continue
+            message = self._decode_response(line)
+            # A server-originated request carries ``method`` next to an id from
+            # the server's own id space; only a reply can match ours.
+            if "method" not in message and message.get("id") == req_id:
+                return message
 
     async def list_tools(self) -> list[MCPToolDef]:
         """List tools from the MCP server."""

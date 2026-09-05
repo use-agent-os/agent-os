@@ -770,6 +770,13 @@ Supported transports are `stdio`, `sse`, and `streamable_http`. The MCP SDK is
 included in the standard AgentOS installation, so Streamable HTTP and OAuth work
 without installing an additional package extra.
 
+`stdio` servers are spoken to with the framing the MCP stdio transport defines:
+one compact JSON-RPC message per line on the subprocess's stdin and stdout.
+AgentOS neither sends nor expects the LSP-style `Content-Length` header, so the
+reference `@modelcontextprotocol/server-*` servers work unmodified. Replies are
+matched to their request id, so notifications a server interleaves with them are
+skipped rather than mistaken for a result.
+
 The HTTP transports accept `http://` and `https://` URLs only, and both connect
 through the same SSRF guard the built-in HTTP tools use. `http://localhost:PORT`
 and LAN-hosted servers keep working — the guard blocks cloud metadata endpoints
