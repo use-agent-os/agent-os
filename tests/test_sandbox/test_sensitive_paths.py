@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentos.sandbox.sensitive_paths import (
+    _SENSITIVE_PREFIXES,
+    _SENSITIVE_SUFFIXES,
     _is_root_target,
     is_sensitive_path,
     sensitive_path_in_text,
@@ -49,13 +51,10 @@ def test_active_workspace_exception_keeps_leaf_secret_blocks() -> None:
         "/.env*",
     }
     assert sensitive_path_marker(str(workspace / "id_rsa"), workspace=workspace) == "/id_rsa"
-    assert (
-        sensitive_path_in_text(
-            f"cat {workspace / '.env.local'}",
-            workspace=workspace,
-        )
-        in {"/.env.local", "/.env*"}
-    )
+    assert sensitive_path_in_text(
+        f"cat {workspace / '.env.local'}",
+        workspace=workspace,
+    ) in {"/.env.local", "/.env*"}
 
 
 def test_sensitive_command_targets_honor_active_workspace_exception() -> None:
@@ -68,13 +67,10 @@ def test_sensitive_command_targets_honor_active_workspace_exception() -> None:
         )
         is None
     )
-    assert (
-        sensitive_target_in_command(
-            f"rm {workspace / '.env'}",
-            workspace=workspace,
-        )
-        in {"/.env", "/.env*"}
-    )
+    assert sensitive_target_in_command(
+        f"rm {workspace / '.env'}",
+        workspace=workspace,
+    ) in {"/.env", "/.env*"}
 
 
 def test_windows_rooted_workspace_targets_keep_leaf_secret_blocks() -> None:
@@ -87,23 +83,17 @@ def test_windows_rooted_workspace_targets_keep_leaf_secret_blocks() -> None:
         )
         is None
     )
-    assert (
-        sensitive_target_in_command(
-            r"rm \root\.agentos\workspace\.env",
-            workspace=workspace,
-        )
-        in {"/.env", "/.env*"}
-    )
+    assert sensitive_target_in_command(
+        r"rm \root\.agentos\workspace\.env",
+        workspace=workspace,
+    ) in {"/.env", "/.env*"}
 
 
 def test_posix_sensitive_paths_stay_blocked_on_windows_runners() -> None:
     workspace = Path("/root/.agentos/workspace")
 
     assert sensitive_path_in_text("cat /dev/sda 2>/dev/null") == "/dev"
-    assert (
-        sensitive_path_in_text("cat /root/.ssh/id_rsa", workspace=workspace)
-        == "~/.ssh"
-    )
+    assert sensitive_path_in_text("cat /root/.ssh/id_rsa", workspace=workspace) == "~/.ssh"
 
 
 def test_every_rm_in_a_compound_command_is_checked() -> None:
@@ -239,3 +229,76 @@ def test_root_target_detection_covers_windows_drive_roots() -> None:
         "relative/path",
     ):
         assert _is_root_target(target) is False, target
+
+
+def test_host_credential_files_are_hard_blocked_as_sensitive_paths() -> None:
+    home = Path.home()
+    for filename, marker in (
+        (".git-credentials", "~/.git-credentials"),
+        (".pgpass", "~/.pgpass"),
+        (".dockercfg", "~/.dockercfg"),
+        (".htpasswd", "~/.htpasswd"),
+    ):
+        path = str(home / filename)
+        assert is_sensitive_path(path) == marker, path
+        assert is_sensitive_path(path.replace("/", "\\")) == marker, path
+
+    # Suffixes matching in arbitrary directories
+    for filename in (
+        ".git-credentials",
+        ".pgpass",
+        ".dockercfg",
+        ".htpasswd",
+        ".netrc",
+        ".npmrc",
+        ".pypirc",
+    ):
+        tmp_path = f"/tmp/{filename}"
+        expected_suffix = f"/{filename}"
+        assert is_sensitive_path(tmp_path) == expected_suffix, tmp_path
+
+
+def test_host_credential_files_in_commands_are_blocked() -> None:
+    workspace = Path("/workspace")
+    home = Path.home()
+
+    for command, expected_marker in (
+        (f"cat {home / '.git-credentials'}", "~/.git-credentials"),
+        (f"cat {home / '.pgpass'}", "~/.pgpass"),
+        (f"rm {home / '.git-credentials'}", "~/.git-credentials"),
+        ("cat /tmp/.git-credentials", "/.git-credentials"),
+        ("rm -rf /tmp/.pgpass", "/.pgpass"),
+        ("head -n 5 /tmp/.dockercfg", "/.dockercfg"),
+        ("cat /var/www/.htpasswd", "/.htpasswd"),
+    ):
+        assert sensitive_path_in_text(command, workspace=workspace) == expected_marker, command
+
+    for command, expected_marker in (
+        (f"rm {home / '.git-credentials'}", "~/.git-credentials"),
+        ("rm /tmp/.git-credentials", "/.git-credentials"),
+        ("rm -rf /tmp/.pgpass", "/.pgpass"),
+    ):
+        assert sensitive_target_in_command(command, workspace=workspace) == expected_marker, command
+
+
+def test_active_workspace_exception_keeps_host_credential_blocks() -> None:
+    workspace = Path("/root/.agentos/workspace")
+
+    for filename in (".git-credentials", ".pgpass", ".dockercfg", ".htpasswd"):
+        target = str(workspace / filename)
+        assert sensitive_path_marker(target, workspace=workspace) == f"/{filename}"
+        assert sensitive_target_in_command(f"rm {target}", workspace=workspace) == f"/{filename}"
+        assert sensitive_path_in_text(f"cat {target}", workspace=workspace) == f"/{filename}"
+
+
+def test_sensitive_paths_synchronizes_with_redact_credential_file_names() -> None:
+    """Issue #981: Ensure sensitive_paths stays in lockstep with redact._CREDENTIAL_FILE_NAMES."""
+    from agentos.redact import _CREDENTIAL_FILE_NAMES
+
+    for name in _CREDENTIAL_FILE_NAMES:
+        if name == "credentials":
+            continue
+        assert f"~/{name}" in _SENSITIVE_PREFIXES, f"Missing prefix for {name}"
+        assert f"/{name}" in _SENSITIVE_SUFFIXES, f"Missing suffix for {name}"
+        assert is_sensitive_path(f"/tmp/{name}") == f"/{name}"
+        assert is_sensitive_path(str(Path.home() / name)) == f"~/{name}"

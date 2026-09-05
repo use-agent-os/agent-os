@@ -796,6 +796,7 @@ _CREDENTIAL_FILE_NAMES: frozenset[str] = frozenset(
         "credentials",
     }
 )
+CREDENTIAL_FILE_NAMES = _CREDENTIAL_FILE_NAMES
 
 #: Directories whose every file is credential material, for the ones that name
 #: their config plainly (``~/.kube/config``, ``~/.docker/config.json``).
