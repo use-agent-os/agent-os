@@ -369,7 +369,7 @@ def _normalize_memory_capture_controls(params: dict[str, Any]) -> dict[str, Any]
     return {
         "no_memory_capture": bool(no_memory_capture),
         "input_provenance": input_provenance,
-        "run_kind": str(run_kind) if run_kind is not None and str(run_kind) else None,
+        "run_kind": str(run_kind) if run_kind is not None and run_kind != "" else None,
     }
 
 

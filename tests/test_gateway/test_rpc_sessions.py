@@ -2798,3 +2798,26 @@ class TestSessionsResolve:
         res = await dispatcher.dispatch("r1", "sessions.create", {"agentId": "test"}, ctx)
         assert res.ok is False
         assert res.error.code == "UNAUTHORIZED"
+
+
+class TestNormalizeMemoryCaptureControls:
+    def test_run_kind_none_returns_none(self) -> None:
+        controls = rpc_sessions._normalize_memory_capture_controls({})
+        assert controls["run_kind"] is None
+
+    def test_run_kind_empty_string_returns_none(self) -> None:
+        controls = rpc_sessions._normalize_memory_capture_controls({"run_kind": ""})
+        assert controls["run_kind"] is None
+
+    def test_run_kind_valid_string_preserved(self) -> None:
+        controls = rpc_sessions._normalize_memory_capture_controls({"run_kind": "subagent"})
+        assert controls["run_kind"] == "subagent"
+
+    def test_run_kind_camel_case_and_source_fallback(self) -> None:
+        controls = rpc_sessions._normalize_memory_capture_controls({"_source": {"runKind": "cron"}})
+        assert controls["run_kind"] == "cron"
+
+    def test_run_kind_numeric_zero_preserved_as_string(self) -> None:
+        controls = rpc_sessions._normalize_memory_capture_controls({"run_kind": 0})
+        assert controls["run_kind"] == "0"
+
