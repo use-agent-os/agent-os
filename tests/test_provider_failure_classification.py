@@ -9,6 +9,8 @@ from agentos.provider.failures import ProviderFailureKind, classify_provider_err
 @pytest.mark.parametrize(
     "provider",
     [
+        "bankr",
+        "openai_responses",
         "deepseek",
         "gemini",
         "dashscope",
@@ -19,7 +21,9 @@ from agentos.provider.failures import ProviderFailureKind, classify_provider_err
         "zhipu",
         "siliconflow",
         "volcengine",
+        "volcengine_coding_plan",
         "byteplus",
+        "byteplus_coding_plan",
         "qianfan",
         "aihubmix",
         "minimax_openai",

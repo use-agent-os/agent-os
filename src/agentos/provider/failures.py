@@ -32,10 +32,12 @@ class ProviderRecoveryAction(StrEnum):
 
 
 _OPENAI_COMPAT_PROVIDERS = {
+    "bankr",
     "opencap",
     "surplus",
     "openrouter",
     "openai",
+    "openai_responses",
     "azure",
     "deepseek",
     "gemini",
@@ -50,7 +52,9 @@ _OPENAI_COMPAT_PROVIDERS = {
     "aihubmix",
     "minimax_openai",
     "volcengine",
+    "volcengine_coding_plan",
     "byteplus",
+    "byteplus_coding_plan",
     "vllm",
     "lm_studio",
     "ovms",
