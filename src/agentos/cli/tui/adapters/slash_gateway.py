@@ -745,7 +745,7 @@ async def _handle_approvals_command(cmd: str, client: object | None = None) -> N
             return
         entries = [
             f"  [dim]{scope}[/dim] {k}:{t}"
-            for (k, t), (_exp, scope) in cache._entries.items()  # noqa: SLF001
+            for (k, t), (_exp, scope) in cache._entries.snapshot().items()  # noqa: SLF001
         ]
         console.print(f"[{ACCENT}]mode:[/] {queue.get_settings().mode}")
         console.print(f"[{ACCENT}]cached intents ({len(entries)}):[/]")

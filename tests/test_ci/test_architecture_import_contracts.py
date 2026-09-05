@@ -155,6 +155,14 @@ APPROVED_PACKAGE_IMPORTS: frozenset[tuple[str, str]] = frozenset({
     ("tools", "search"),
     ("tools", "session"),
     ("tools", "skills"),
+    ("application", "util"),
+    ("engine", "util"),
+    ("gateway", "util"),
+    ("plan_mode.py", "util"),
+    ("sandbox", "util"),
+    ("scheduler", "util"),
+    ("session", "util"),
+    ("tools", "util"),
 })
 
 APPROVED_CYCLIC_PACKAGES: frozenset[str] = frozenset({

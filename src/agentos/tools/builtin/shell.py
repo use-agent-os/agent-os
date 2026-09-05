@@ -51,6 +51,7 @@ from agentos.tools.types import (
     UnsupportedSurfaceError,
     current_tool_context,
 )
+from agentos.util.bounded_registry import BoundedSessionRegistry
 
 log = structlog.get_logger(__name__)
 
@@ -90,7 +91,9 @@ PROCESS_ACTIONS: frozenset[str] = frozenset(
 )
 
 # Background process session store
-_bg_sessions: dict[str, _BgSession] = {}
+_bg_sessions: BoundedSessionRegistry[str, _BgSession] = BoundedSessionRegistry(
+    max_entries=100, ttl_seconds=3600
+)
 
 
 @dataclass
@@ -544,7 +547,7 @@ def _current_bg_context_allows(session: _BgSession) -> bool:
 
 def _iter_visible_bg_sessions() -> list[_BgSession]:
     visible: list[_BgSession] = []
-    for session in _bg_sessions.values():
+    for session in _bg_sessions.snapshot().values():
         if session.session_key is None:
             log.warning("shell.bg_session_untagged", session_id=session.session_id)
         if _current_bg_context_allows(session):

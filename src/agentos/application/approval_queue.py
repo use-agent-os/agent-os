@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import cast
 
 from agentos.paths import state_dir
+from agentos.util.bounded_registry import BoundedSessionRegistry, _register_session_scoped
 
 VALID_APPROVAL_MODES = frozenset({"auto-approve", "auto-deny", "prompt"})
 VALID_ELEVATED_MODES = frozenset({"on", "bypass", "full"})
@@ -52,8 +53,14 @@ class ApprovalQueue:
         self._timeout = default_timeout
         self._poll_interval = max(0.01, float(poll_interval))
         self._global_settings = ApprovalSettings()
-        self._node_settings: dict[str, ApprovalSettings] = {}
-        self._session_elevated_modes: dict[str, str] = {}
+        self._node_settings: BoundedSessionRegistry[str, ApprovalSettings] = (
+            BoundedSessionRegistry(max_entries=5000)
+        )
+        self._session_elevated_modes: BoundedSessionRegistry[str, str] = (
+            BoundedSessionRegistry(max_entries=5000)
+        )
+        _register_session_scoped(self._node_settings)
+        _register_session_scoped(self._session_elevated_modes)
 
         self._db_path = Path(db_path or os.fspath(_DEFAULT_APPROVAL_QUEUE_PATH))
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
