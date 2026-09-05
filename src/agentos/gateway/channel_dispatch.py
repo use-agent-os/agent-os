@@ -1561,15 +1561,16 @@ class _RuntimeChannelStreamRelay:
             return first_text, None
         buffer = [first_text]
         size = len(first_text)
+        loop = asyncio.get_running_loop()
         deadline = (
-            asyncio.get_event_loop().time() + self._coalesce_window_s
+            loop.time() + self._coalesce_window_s
             if self._coalesce_window_s > 0
             else None
         )
         while True:
             if self._coalesce_chars and size >= self._coalesce_chars:
                 return "".join(buffer), None
-            remaining = deadline - asyncio.get_event_loop().time() if deadline is not None else None
+            remaining = deadline - loop.time() if deadline is not None else None
             if remaining is not None and remaining <= 0:
                 return "".join(buffer), None
             try:

@@ -688,7 +688,7 @@ class _WebSocketTransport:
             raise RuntimeError("websocket not connected")
         call_id = self._next_id
         self._next_id += 1
-        future: Any = asyncio.get_event_loop().create_future()
+        future: Any = asyncio.get_running_loop().create_future()
         self._pending[call_id] = future
         payload: dict[str, Any] = {"id": call_id, "method": method, "params": params}
         default_session = self._session_id if method != "Target.setAutoAttach" else None
@@ -714,7 +714,7 @@ class _WebSocketTransport:
         if self._ws is not None:
             with contextlib.suppress(Exception):
                 await self._ws.close()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         loop.call_soon(loop.stop)
 
 

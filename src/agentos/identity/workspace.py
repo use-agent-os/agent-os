@@ -239,7 +239,8 @@ def filter_workspace_files_for_session(
 
 async def load_workspace_files_async(workspace_dir: str | Path) -> dict[str, str]:
     """Async wrapper for workspace file loading."""
-    return await asyncio.get_event_loop().run_in_executor(None, load_workspace_files, workspace_dir)
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, load_workspace_files, workspace_dir)
 
 
 def load_daily_notes(

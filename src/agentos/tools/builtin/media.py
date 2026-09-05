@@ -182,7 +182,7 @@ async def _read_image_file(path: str) -> tuple[bytes, str]:
         )
     ext = p.suffix.lstrip(".").lower()
     if ext == "pdf":
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         rendered_bytes = await loop.run_in_executor(None, _render_pdf_first_page_png, p)
         if len(rendered_bytes) > _IMAGE_SIZE_LIMIT:
             raise SafeToolError("Rendered PDF page exceeds 20MB image size limit")
@@ -192,7 +192,7 @@ async def _read_image_file(path: str) -> tuple[bytes, str]:
             f"Unsupported image format: {ext}. "
             f"Supported: {', '.join(sorted(_SUPPORTED_IMAGE_FORMATS))}"
         )
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     image_bytes: bytes = await loop.run_in_executor(None, p.read_bytes)
     if len(image_bytes) > _IMAGE_SIZE_LIMIT:
         raise SafeToolError("Image exceeds 20MB size limit")
@@ -680,7 +680,7 @@ async def pdf(
     except ImportError as exc:
         raise SafeToolError("pdfplumber is not installed") from exc
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def _extract() -> dict[str, Any]:
         try:
@@ -971,7 +971,7 @@ async def _resolve_supported_audio_file_for_tool(
             f"Unsupported audio format: {ext}. "
             f"Supported: {', '.join(sorted(_SUPPORTED_AUDIO_FORMATS))}"
         )
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     audio_bytes: bytes = await loop.run_in_executor(None, resolved.read_bytes)
     if len(audio_bytes) > _AUDIO_SIZE_LIMIT:
         raise ToolError("Audio file exceeds 100MB size limit")
@@ -1494,7 +1494,8 @@ async def dubbing_download(
     provider = _elevenlabs_provider(config)
     final_status = "unknown"
     if wait_for_completion:
-        deadline = asyncio.get_event_loop().time() + max(timeout_seconds, 0.0)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + max(timeout_seconds, 0.0)
         while True:
             status_result = await provider.get_dubbing_status(
                 DubbingStatusRequest(dubbing_id=dubbing_id.strip())
@@ -1505,7 +1506,7 @@ async def dubbing_download(
                 break
             if normalized in _DUBBING_FAILED_STATUSES:
                 raise ToolError(f"Dubbing job {dubbing_id} failed with status {final_status}")
-            if asyncio.get_event_loop().time() >= deadline:
+            if loop.time() >= deadline:
                 raise ToolError(
                     f"Dubbing job {dubbing_id} was not ready before timeout; "
                     f"last status={final_status}"

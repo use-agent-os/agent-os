@@ -418,7 +418,7 @@ class MemorySyncManager:
                     break
 
                 current = self._scan_files()
-                now = asyncio.get_event_loop().time()
+                now = asyncio.get_running_loop().time()
 
                 for path, mtime in current.items():
                     old = self._mtimes.get(path)

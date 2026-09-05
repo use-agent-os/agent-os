@@ -582,7 +582,7 @@ def _apply_ops(ops: list[PatchOp], root: Path | None = None) -> tuple[int, int, 
     record_payload=False,
 )
 async def apply_patch(patch: str, approval_id: str | None = None) -> str:
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     root = _default_patch_root()
     ops = _parse_patch(patch)
     blocked = _gate_patch_ops(patch, ops, root, approval_id)
