@@ -30,6 +30,8 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
+from agentos.util.bounded_registry import BoundedRegistry
+
 
 @dataclass
 class _CacheEntry:
@@ -48,8 +50,10 @@ class StaleOutputCache:
     and purged on denial by :class:`DenialLedger`.
     """
 
-    def __init__(self) -> None:
-        self._entries: dict[tuple[str, str], _CacheEntry] = {}
+    def __init__(self, max_entries: int = 100) -> None:
+        self._entries: BoundedRegistry[tuple[str, str], _CacheEntry] = BoundedRegistry(
+            max_entries=max_entries, ttl_seconds=0.0
+        )
         self._lock = asyncio.Lock()
 
     async def record_success(self, session_id: str, fingerprint: str, payload: Any) -> None:
@@ -60,11 +64,14 @@ class StaleOutputCache:
         """
         async with self._lock:
             loop = asyncio.get_running_loop()
-            self._entries[(session_id, fingerprint)] = _CacheEntry(
-                fingerprint=fingerprint,
-                session_id=session_id,
-                payload=payload,
-                stored_at_monotonic=loop.time(),
+            self._entries.set(
+                (session_id, fingerprint),
+                _CacheEntry(
+                    fingerprint=fingerprint,
+                    session_id=session_id,
+                    payload=payload,
+                    stored_at_monotonic=loop.time(),
+                ),
             )
 
     async def purge(self, session_id: str, fingerprint: str) -> bool:
@@ -75,7 +82,7 @@ class StaleOutputCache:
         idempotent by design.
         """
         async with self._lock:
-            return self._entries.pop((session_id, fingerprint), None) is not None
+            return self._entries.discard((session_id, fingerprint))
 
     async def get(self, session_id: str, fingerprint: str) -> Any | None:
         """Return the stored payload or ``None`` if not cached."""
@@ -88,7 +95,7 @@ class StaleOutputCache:
         async with self._lock:
             keys = [k for k in self._entries if k[0] == session_id]
             for k in keys:
-                del self._entries[k]
+                self._entries.discard(k)
             return len(keys)
 
     def snapshot(self) -> list[dict[str, object]]:

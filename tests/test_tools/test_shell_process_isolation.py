@@ -72,11 +72,12 @@ def _ctx(
 
 @pytest.fixture(autouse=True)
 def _reset_bg_sessions():
-    previous = dict(shell._bg_sessions)
+    previous = list(shell._bg_sessions.items())
     shell._bg_sessions.clear()
     yield
     shell._bg_sessions.clear()
-    shell._bg_sessions.update(previous)
+    for k, v in previous:
+        shell._bg_sessions.set(k, v)
 
 
 def _session(

@@ -51,6 +51,7 @@ from agentos.tools.types import (
     UnsupportedSurfaceError,
     current_tool_context,
 )
+from agentos.util.bounded_registry import BoundedRegistry
 
 log = structlog.get_logger(__name__)
 
@@ -90,7 +91,7 @@ PROCESS_ACTIONS: frozenset[str] = frozenset(
 )
 
 # Background process session store
-_bg_sessions: dict[str, _BgSession] = {}
+_bg_sessions: BoundedRegistry[str, _BgSession] = BoundedRegistry(max_entries=200, ttl_seconds=0.0)
 
 
 @dataclass
@@ -963,7 +964,7 @@ async def background_process(
             local_urls=_local_server_urls_from_command(command),
             cleanup_callbacks=spawned.cleanup_callbacks,
         )
-        _bg_sessions[session_id] = session
+        _bg_sessions.set(session_id, session)
         effective_timeout = _resolve_background_timeout(timeout)
 
         async def _collect_restricted() -> None:
@@ -1015,7 +1016,7 @@ async def background_process(
         agent_id=ctx.agent_id if ctx is not None else None,
         local_urls=_local_server_urls_from_command(command),
     )
-    _bg_sessions[session_id] = session
+    _bg_sessions.set(session_id, session)
     effective_timeout = _resolve_background_timeout(timeout)
 
     async def _collect_host() -> None:
@@ -1227,7 +1228,7 @@ async def process(
     if action == "remove":
         if not session.done:
             raise ToolError(f"Cannot remove running session: {session.session_id}")
-        del _bg_sessions[session.session_id]
+        _bg_sessions.discard(session.session_id)
         return json.dumps({"status": "removed", "action": action, "session_id": session.session_id})
 
     if action in {"write", "submit"}:
