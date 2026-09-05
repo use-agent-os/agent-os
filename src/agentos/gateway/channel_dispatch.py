@@ -903,6 +903,8 @@ async def _dispatch_combined_message_after_debounce(channel: Any, combined: Any,
             return
         log.exception("channel_dispatch.debounce_enqueue_failed", session_key=session_key, reason="unexpected")  # noqa: E501
         await status_reactor.failed(msg)
+        with contextlib.suppress(Exception):
+            await channel.send(_route_envelope_reply_message("An unexpected error occurred while processing your message. Please retry.", route_envelope))  # noqa: E501
         return
 
     # Enqueue succeeded — release the placeholder reservation now that the real
