@@ -6,7 +6,6 @@ import importlib
 import importlib.util
 import os
 import re
-import shlex
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,6 +43,7 @@ from agentos.onboarding.mutations import (
     upsert_search_provider,
 )
 from agentos.onboarding.next_steps import (
+    _config_cli_arg,
     headless_setup_command,
     headless_setup_commands,
     setup_catalog_command,
@@ -200,12 +200,6 @@ def run_noninteractive_search_configure(
         diagnostics=bool(values.get("diagnostics", False)),
     )
     return persist_config(result.config, path=path, restart_required=False)
-
-
-def _config_cli_arg(config_path: str | Path | None) -> str:
-    if config_path is None:
-        return ""
-    return f" --config {shlex.quote(str(config_path))}"
 
 
 def _first_blocking_setup_section(cfg: Any) -> str:

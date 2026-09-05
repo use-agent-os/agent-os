@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import shlex
 from pathlib import Path
+
+from agentos.onboarding.next_steps import _config_cli_arg
 
 CONFIG_AWARE_COMMAND_PREFIXES = (
     "agentos gateway restart",
@@ -36,4 +37,4 @@ def supports_config_option(command: str) -> bool:
 def command_with_config(command: str, config_path: str | Path | None) -> str:
     if not config_path or " --config " in command or not supports_config_option(command):
         return command
-    return f"{command} --config {shlex.quote(str(config_path))}"
+    return f"{command}{_config_cli_arg(config_path)}"
