@@ -58,6 +58,8 @@ _OPENAI_COMPAT_PROVIDERS = {
     "vllm",
     "lm_studio",
     "ovms",
+    "openai_codex",
+    "github_copilot",
 }
 
 _GATEWAY_TRANSIENT_STATUS_CODES = {499, 500, 502, 503, 504, 520, 521, 522, 523, 524, 529}
