@@ -96,3 +96,100 @@ class TestRecordAndCheck:
         cache.clear()
         assert cache.check("rm /a") is False
         assert cache.check("rm /b") is False
+
+
+class TestDestructiveCommands:
+    """Non-rm deletion commands must be recognised by the intent cache (#1015)."""
+
+    def test_rmdir_recognised(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record("rmdir /s /q /")
+        assert cache.check("rmdir /s /q /") is True
+
+    def test_rmdir_separator_bypass(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record("rmdir /a")
+        assert cache.check("rmdir /a") is True
+        assert cache.check("rmdir /a; rmdir /b") is False
+
+    def test_rd_recognised(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record("rd /s /q /")
+        assert cache.check("rd /s /q /") is True
+
+    def test_del_recognised(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record("del /f /q ~/.ssh/id_rsa")
+        assert cache.check("del /f /q ~/.ssh/id_rsa") is True
+
+    def test_del_separator_bypass(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record("del /f /tmp/foo")
+        assert cache.check("del /f /tmp/foo") is True
+        assert cache.check("del /f /tmp/foo; del /f /etc/passwd") is False
+
+    def test_erase_recognised(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record("erase /f /q C:\\")
+        assert cache.check("erase /f /q C:\\") is True
+
+    def test_unlink_recognised(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record("unlink target.txt")
+        assert cache.check("unlink target.txt") is True
+
+    def test_remove_item_recognised(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record("Remove-Item -Recurse -Force /")
+        assert cache.check("Remove-Item -Recurse -Force /") is True
+
+    def test_remove_item_separator_bypass(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record("Remove-Item /a")
+        assert cache.check("Remove-Item /a") is True
+        assert cache.check("Remove-Item /a; Remove-Item /b") is False
+
+    def test_mixed_commands_independent(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record("rm /a")
+        assert cache.check("rm /a; rmdir /b") is False
+        cache.record("rmdir /b")
+        assert cache.check("rm /a; rmdir /b") is True
+
+    def test_bare_command_no_target(self) -> None:
+        cache = IntentApprovalCache()
+        assert cache.check("rmdir") is False
+        assert cache.check("del") is False
+        assert cache.check("echo hello") is False
+        assert cache.check("") is False
+
+    def test_case_insensitive(self) -> None:
+        """DEL, Del, RMDIR etc. must also be matched."""
+        cache = IntentApprovalCache()
+        cache.record("DEL /f /tmp/x")
+        assert cache.check("del /f /tmp/x") is True
+        cache.record("RMDIR /s /q /tmp/y")
+        assert cache.check("rmdir /s /q /tmp/y") is True
+
+
+class TestSensitiveTargetIntegration:
+    """sensitive_target_in_command must block non-rm destructive commands (#1015)."""
+
+    def test_rmdir_root_blocked(self) -> None:
+        from agentos.sandbox.sensitive_paths import sensitive_target_in_command
+
+        result = sensitive_target_in_command("rmdir /s /q /")
+        assert result is not None, "rmdir /s /q / must be blocked as root target"
+
+    def test_del_sensitive_path_blocked(self) -> None:
+        from agentos.sandbox.sensitive_paths import sensitive_target_in_command
+
+        result = sensitive_target_in_command("del /f /q ~/.ssh/id_rsa")
+        assert result is not None, "del targeting ~/.ssh must be blocked"
+
+    def test_remove_item_root_blocked(self) -> None:
+        from agentos.sandbox.sensitive_paths import sensitive_target_in_command
+
+        result = sensitive_target_in_command("Remove-Item -Recurse -Force /")
+        assert result is not None, "Remove-Item / must be blocked as root target"
+
