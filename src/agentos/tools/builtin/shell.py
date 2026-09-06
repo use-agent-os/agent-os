@@ -259,14 +259,30 @@ def _sensitive_shell_block(
     if _context_elevated_mode() == "full":
         return None
 
-    from agentos.sandbox.sensitive_paths import build_block_envelope, sensitive_path_in_text
+    from agentos.sandbox.sensitive_paths import (
+        build_block_envelope,
+        sensitive_path_in_text,
+        sensitive_path_marker,
+    )
 
     checked_command = _without_shell_null_redirections(command)
-    include_workdir = bool(workdir) and not _workdir_is_configured_workspace(workdir)
-    checked_text = f"{workdir} {checked_command}" if include_workdir else checked_command
     ctx = current_tool_context.get()
     workspace = ctx.workspace_dir if ctx is not None else None
-    marker = sensitive_path_in_text(checked_text, workspace=workspace)
+    include_workdir = bool(workdir) and not _workdir_is_configured_workspace(workdir)
+    checked_text = f"{workdir} {checked_command}" if include_workdir else checked_command
+    if include_workdir and workdir is not None:
+        # The workdir is a resolved filesystem path, not free-form shell text:
+        # check it structurally so Windows backslashes and spaces survive.
+        # Gluing it into the command text and re-tokenizing mangles paths like
+        # ``C:\Users\John Doe\.ssh\id_rsa`` into fragments whose only match is
+        # a misleading file-suffix marker.
+        workdir_marker = sensitive_path_marker(workdir, workspace=workspace)
+        if workdir_marker is not None:
+            return json.dumps(
+                build_block_envelope(checked_text, workdir_marker, tool_name=tool_name),
+                ensure_ascii=False,
+            )
+    marker = sensitive_path_in_text(checked_command, workspace=workspace)
     if marker is not None:
         return json.dumps(
             build_block_envelope(checked_text, marker, tool_name=tool_name),

@@ -35,6 +35,38 @@ async def test_exec_command_blocks_nested_sensitive_workdir() -> None:
 
 
 @pytest.mark.asyncio
+async def test_exec_command_spaced_home_reports_directory_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #1232 — the workdir used to be glued into the command text and
+    re-tokenized, so a home directory containing spaces split the path at the
+    space and mis-reported the ``/id_rsa`` file-suffix marker instead of the
+    ``~/.ssh`` directory prefix. The workdir is now checked structurally."""
+    spaced_home = tmp_path / "John Doe"
+    monkeypatch.setattr(Path, "home", lambda: spaced_home)
+    sensitive_dir = spaced_home / ".ssh" / "id_rsa"
+
+    result = await shell.exec_command("echo ok", workdir=str(sensitive_dir))
+
+    payload = json.loads(result)
+    assert payload["status"] == "blocked"
+    assert payload["sensitive_path"] == "~/.ssh"
+
+
+def test_tokenize_text_preserves_backslashes_on_windows_hosts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #1232 — POSIX shlex.split() eats backslashes, so a Windows path
+    could never survive tokenization as a matchable token. Windows hosts must
+    tokenize non-POSIX."""
+    from agentos.sandbox.sensitive_paths import _tokenize_text
+
+    windows_path = "C:\\Users\\John\\.ssh\\id_rsa"
+    monkeypatch.setattr(os, "name", "nt")
+    assert windows_path in _tokenize_text(f"type {windows_path}")
+
+
+@pytest.mark.asyncio
 @pytest.mark.skipif(os.name != "posix", reason="/dev/null redirection is POSIX-specific")
 async def test_exec_command_allows_dev_null_redirection() -> None:
     result = await shell.exec_command("printf ok 2>/dev/null")

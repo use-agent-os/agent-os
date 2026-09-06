@@ -305,6 +305,21 @@ def sensitive_path_marker(
     return marker
 
 
+def _tokenize_text(text: str) -> list[str]:
+    """Tokenize free-form text for path scanning, keeping Windows paths intact.
+
+    POSIX ``shlex`` treats ``\\`` as an escape character, mangling Windows
+    paths (``C:\\Users\\me\\.ssh\\id_rsa`` → ``C:Usersme.sshid_rsa``) so no
+    prefix rule can ever match them. On Windows hosts tokenize non-POSIX so
+    backslashes survive; the retained quote characters are removed by the
+    edge-char trim applied to each candidate downstream.
+    """
+    try:
+        return shlex.split(text, posix=os.name != "nt")
+    except ValueError:
+        return text.split()
+
+
 def sensitive_path_in_text(
     text: str,
     *,
@@ -325,10 +340,7 @@ def sensitive_path_in_text(
 
     candidates: list[str] = []
     with_context: list[tuple[str, int]] = []
-    try:
-        candidates.extend(shlex.split(text))
-    except ValueError:
-        candidates.extend(text.split())
+    candidates.extend(_tokenize_text(text))
     candidates.extend(text.split())
     with_context.extend(
         (match.group(0), match.start()) for match in _ABSOLUTE_OR_TILDE_PATH_RE.finditer(text)
