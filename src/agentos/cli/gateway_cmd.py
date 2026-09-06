@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shlex
 import sys
 
 import typer
@@ -166,9 +167,8 @@ def run_gateway(
         for entry in recovery_entries:
             console.print(f"{entry['label']}: {entry['command']}")
         if config.config_path:
-            console.print(
-                f"Inspect onboarding: agentos onboard status --config {config.config_path}"
-            )
+            quoted_path = shlex.quote(str(config.config_path))
+            console.print(f"Inspect onboarding: agentos onboard status --config {quoted_path}")
         raise typer.Exit(code=1) from exc
     except KeyboardInterrupt:
         console.print("\n[yellow]Gateway stopped.[/yellow]")

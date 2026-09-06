@@ -136,6 +136,34 @@ def test_gateway_run_turns_missing_onboarding_env_into_recovery_hint(
     assert "Traceback" not in output
 
 
+def test_gateway_run_recovery_hint_quotes_config_path_with_spaces(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Issue #1231 — the startup-failure hint must be copy-pasteable when the
+    config path contains spaces, so it is emitted shell-quoted."""
+    spaced_dir = tmp_path / "John Doe"
+    spaced_dir.mkdir()
+    target = spaced_dir / "custom.toml"
+    target.write_text("", encoding="utf-8")
+    monkeypatch.setenv("AGENTOS_STATE_DIR", str(tmp_path / "home"))
+
+    async def fail_start_gateway_server(**_kwargs):
+        raise ValueError("startup boom")
+
+    monkeypatch.setattr(gateway_cmd, "start_gateway_server", fail_start_gateway_server)
+
+    result = runner.invoke(app, ["gateway", "run", "--config", str(target)])
+
+    assert result.exit_code == 1
+    output = result.stdout + (result.stderr or "")
+    compact = "".join(output.split())
+    assert "Gateway could not start" in output
+    # The hint must be shell-quoted so the path survives copy-paste. The rich
+    # console wraps long lines, so compare with all whitespace removed.
+    assert f"--config '{str(target)}'".replace(" ", "") in compact
+
+
 def test_gateway_run_refuses_wildcard_bind_without_auth(tmp_path, monkeypatch) -> None:
     """auth.mode="none" + non-loopback bind fails closed at startup (issue #18, V3)."""
     target = tmp_path / "agentos.toml"
