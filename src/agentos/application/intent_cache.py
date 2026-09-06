@@ -58,18 +58,25 @@ _PY_DELETE_PATTERNS: tuple[re.Pattern[str], ...] = (
 _SHELL_SEPARATORS = (";", "&&", "||", "|", "&")
 
 
-def _extract_rm_targets(command: str) -> list[str]:
-    """Pull every non-flag argument out of every ``rm`` invocation.
+def _extract_destructive_targets(command: str) -> list[str]:
+    """Pull every non-flag argument from common shell / PowerShell deletion commands.
 
-    Handles ``rm a b c``, ``rm -rf /a /b``, quoted paths, and stops at shell
-    separators. Uses ``finditer`` so ``rm foo; rm -rf /bar`` yields targets
+    Recognises ``rm``, ``rmdir``, ``rd``, ``del``, ``erase``, ``unlink``,
+    and ``Remove-Item`` (PowerShell), then extracts their target paths.
+
+    Handles ``rm a b c``, ``rm -rf /a /b``, ``rmdir /s /q /``,
+    ``del /f /q ~/.ssh/id_rsa``, ``Remove-Item -Recurse -Force /``,
+    quoted paths, and stops at shell separators.
+    Uses ``finditer`` so ``rm foo; rmdir /s /q /bar`` yields targets
     from both invocations independently. Does not try to be a full shell
     parser — falls back to whitespace split on shlex errors (unbalanced quotes).
     """
-    # Match each ``rm`` invocation, stopping at shell separators.
-    # ``[^;\n&|]*`` captures everything from ``rm`` up to the next separator
-    # or end-of-expression, so each ``rm`` is tokenized independently.
-    pattern = re.compile(r"\brm\b([^;\n&|]*)")
+    # Match each destructive command invocation, stopping at shell separators.
+    # Group 1 captures the command name, group 2 the arguments.
+    pattern = re.compile(
+        r"\b(rm|rmdir|rd|del|erase|unlink|Remove\-Item)\b([^;\n&|]*)",
+        re.IGNORECASE,
+    )
     matches = list(pattern.finditer(command))
     if not matches:
         return []
@@ -78,8 +85,9 @@ def _extract_rm_targets(command: str) -> list[str]:
     seen: set[str] = set()
 
     for match in matches:
-        tail = match.group(1).strip()
+        tail = match.group(2).strip()
         if not tail:
+            # ``rm`` alone or ``del`` alone — no target to extract
             continue
 
         token_sets: list[list[str]] = []
@@ -116,7 +124,7 @@ def _extract_intents(
     if not command:
         return []
     paths: list[str] = []
-    paths.extend(_extract_rm_targets(command))
+    paths.extend(_extract_destructive_targets(command))
     for pattern in _PY_DELETE_PATTERNS:
         paths.extend(m.group(1) for m in pattern.finditer(command))
 

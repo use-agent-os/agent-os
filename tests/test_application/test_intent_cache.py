@@ -96,3 +96,80 @@ class TestRecordAndCheck:
         cache.clear()
         assert cache.check("rm /a") is False
         assert cache.check("rm /b") is False
+
+
+class TestDestructiveCommands:
+    """Non-rm deletion commands must be recognised by the intent cache."""
+
+    def test_rmdir_recognised(self) -> None:
+        """rmdir /s /q / extracts root target."""
+        cache = IntentApprovalCache()
+        cache.record("rmdir /s /q /")
+        assert cache.check("rmdir /s /q /") is True
+
+    def test_rmdir_separator_bypass(self) -> None:
+        """rmdir /a approved -> rmdir /a; rmdir /b is blocked."""
+        cache = IntentApprovalCache()
+        cache.record("rmdir /a")
+        assert cache.check("rmdir /a") is True
+        assert cache.check("rmdir /a; rmdir /b") is False
+
+    def test_rd_recognised(self) -> None:
+        """rd /s /q / extracts root target."""
+        cache = IntentApprovalCache()
+        cache.record("rd /s /q /")
+        assert cache.check("rd /s /q /") is True
+
+    def test_del_recognised(self) -> None:
+        """del /f /q ~/.ssh/id_rsa extracts sensitive path."""
+        cache = IntentApprovalCache()
+        cache.record("del /f /q ~/.ssh/id_rsa")
+        assert cache.check("del /f /q ~/.ssh/id_rsa") is True
+
+    def test_del_sensitive_path_blocked(self) -> None:
+        """del /f approved -> del /f; del /f /etc/passwd not approved."""
+        cache = IntentApprovalCache()
+        cache.record("del /f /tmp/foo")
+        assert cache.check("del /f /tmp/foo") is True
+        assert cache.check("del /f /tmp/foo; del /f /etc/passwd") is False
+
+    def test_erase_recognised(self) -> None:
+        """erase /f /q C:\\ extracts target (Windows)."""
+        cache = IntentApprovalCache()
+        cache.record("erase /f /q C:\\")
+        assert cache.check("erase /f /q C:\\") is True
+
+    def test_unlink_recognised(self) -> None:
+        """unlink target.txt extracts target."""
+        cache = IntentApprovalCache()
+        cache.record("unlink target.txt")
+        assert cache.check("unlink target.txt") is True
+
+    def test_remove_item_recognised(self) -> None:
+        """Remove-Item -Recurse -Force / extracts root target."""
+        cache = IntentApprovalCache()
+        cache.record("Remove-Item -Recurse -Force /")
+        assert cache.check("Remove-Item -Recurse -Force /") is True
+
+    def test_remove_item_separator_bypass(self) -> None:
+        """Remove-Item /a -> Remove-Item /a; Remove-Item /b blocked."""
+        cache = IntentApprovalCache()
+        cache.record("Remove-Item /a")
+        assert cache.check("Remove-Item /a") is True
+        assert cache.check("Remove-Item /a; Remove-Item /b") is False
+
+    def test_mixed_commands_independent(self) -> None:
+        """rm /a; rmdir /b; Remove-Item /c each parsed independently."""
+        cache = IntentApprovalCache()
+        cache.record("rm /a")
+        assert cache.check("rm /a; rmdir /b") is False  # /b not approved
+        cache.record("rmdir /b")
+        assert cache.check("rm /a; rmdir /b") is True  # both now approved
+
+    def test_non_rm_returns_false(self) -> None:
+        """Commands without destructive intent still return False."""
+        cache = IntentApprovalCache()
+        assert cache.check("rmdir") is False  # rmdir alone, no target
+        assert cache.check("del \n") is False  # del alone, no target
+        assert cache.check("echo hello") is False
+        assert cache.check("") is False
