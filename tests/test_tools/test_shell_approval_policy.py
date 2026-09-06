@@ -524,6 +524,63 @@ def test_shell_write_targets_ignores_words_ending_in_tee(command: str) -> None:
     assert shell._shell_write_targets(command) == []
 
 
+@pytest.mark.parametrize(
+    "command,expected",
+    [
+        ('echo payload > "/tmp/my custom folder/outside.txt"', "/tmp/my custom folder/outside.txt"),
+        ("echo payload > '/tmp/other dir/outside.txt'", "/tmp/other dir/outside.txt"),
+        ('echo payload | tee "/tmp/John Doe/outside.txt"', "/tmp/John Doe/outside.txt"),
+        ("echo payload | tee '/tmp/a b/c.txt'", "/tmp/a b/c.txt"),
+    ],
+)
+def test_shell_write_targets_captures_quoted_paths_with_spaces(
+    command: str,
+    expected: str,
+) -> None:
+    """Issue #1230 — quoted targets containing spaces used to be dropped by
+    the ``[^\\s...]`` character class, silently bypassing workspace lockdown."""
+    assert shell._shell_write_targets(command) == [expected]
+
+
+@pytest.mark.parametrize(
+    "command,expected",
+    [
+        ("echo payload > /tmp/my folder/outside.txt", "/tmp/my folder/outside.txt"),
+        ("echo payload | tee /tmp/John Doe/outside.txt", "/tmp/John Doe/outside.txt"),
+    ],
+)
+def test_shell_write_targets_captures_unquoted_paths_with_spaces(
+    command: str,
+    expected: str,
+) -> None:
+    assert shell._shell_write_targets(command) == [expected]
+
+
+def test_shell_write_targets_skips_empty_targets() -> None:
+    assert shell._shell_write_targets('echo payload > ""') == []
+
+
+@pytest.mark.asyncio
+async def test_workspace_lockdown_blocks_quoted_spaced_write_outside_workspace(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "my custom folder"
+    ctx = current_tool_context.get()
+    assert ctx is not None
+    ctx.interaction_mode = InteractionMode.UNATTENDED
+    ctx.elevated = "bypass"
+    ctx.workspace_dir = str(workspace)
+    ctx.workspace_lockdown = True  # type: ignore[attr-defined]
+
+    result = await shell.exec_command(
+        f'echo payload > "{outside}/outside.txt"',
+        workdir=str(workspace),
+    )
+
+    assert "workspace lockdown" in result
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "template",

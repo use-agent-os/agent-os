@@ -339,7 +339,7 @@ _FD_DUP_PATTERN = re.compile(r"\d*>&\s*(?:\d+-?|-)(?=$|[\s|&;<>)])")
 # ``n>>``, ``&>``, ``&>>``, ``>&file`` and the noclobber override ``>|``. The
 # operator is deliberately *not* anchored to a word boundary — ``echo x>file`` is
 # valid shell and must be caught just like ``echo x > file``.
-_REDIRECTION_PATTERN = re.compile(r"(?:&>{1,2}|\d*>{1,2}&?)\|?\s*(['\"]?)([^'\"\s|&;<>()]+)\1")
+_REDIRECTION_PATTERN = re.compile(r"(?:&>{1,2}|\d*>{1,2}&?)\|?\s*(['\"]?)([^'\"|&;<>()]*)\1")
 
 # ``tee`` is the other write primitive this parser covers, and it needs the same
 # treatment as the redirection operators: ``echo x|tee /etc/passwd`` is valid
@@ -349,14 +349,25 @@ _REDIRECTION_PATTERN = re.compile(r"(?:&>{1,2}|\d*>{1,2}&?)\|?\s*(['\"]?)([^'\"\
 # (``--append``) or long with a value (``--output-error=warn``); all of them are
 # skipped so the first non-option word is the real target.
 _TEE_PATTERN = re.compile(
-    r"(?<![\w-])tee(?:\s+-{1,2}[A-Za-z][\w-]*(?:=[^\s|&;]+)?)*\s+(['\"]?)([^'\"\s|&;]+)\1"
+    r"(?<![\w-])tee(?:\s+-{1,2}[A-Za-z][\w-]*(?:=[^\s|&;]+)?)*\s+(['\"]?)([^'\"|&;]*)\1"
 )
 
 
 def _shell_write_targets(command: str) -> list[str]:
     scanned = _FD_DUP_PATTERN.sub(" ", command)
-    targets: list[str] = [match.group(2) for match in _REDIRECTION_PATTERN.finditer(scanned)]
-    targets.extend(match.group(2) for match in _TEE_PATTERN.finditer(scanned))
+    # Quoted targets may contain spaces (the quote group pins the extent),
+    # and unquoted targets are read greedily up to the next shell
+    # metacharacter, so a spaced path is never truncated at its first
+    # whitespace token. Empty captures (bare operator, ``> ""``) are skipped.
+    targets: list[str] = []
+    for match in _REDIRECTION_PATTERN.finditer(scanned):
+        target = match.group(2).strip()
+        if target:
+            targets.append(target)
+    for match in _TEE_PATTERN.finditer(scanned):
+        target = match.group(2).strip()
+        if target:
+            targets.append(target)
     return targets
 
 
