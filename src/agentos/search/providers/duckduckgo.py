@@ -47,18 +47,33 @@ class DuckDuckGoProvider:
                     headers=_HEADERS,
                 )
                 response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise SearchProviderError(
+                provider=self.name,
+                kind="timeout",
+                message=str(exc) or "DuckDuckGo search request timed out.",
+                retryable=True,
+            ) from exc
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            if status_code == 429:
+                kind: SearchErrorKind = "rate_limit"
+            else:
+                kind = "http"
+            raise SearchProviderError(
+                provider=self.name,
+                kind=kind,
+                message=str(exc) or f"DuckDuckGo search failed with HTTP {status_code}.",
+                retryable=kind == "rate_limit",
+                status_code=status_code,
+            ) from exc
         except httpx.HTTPError as exc:
-            if self._diagnostics:
-                kind: SearchErrorKind = (
-                    "timeout" if isinstance(exc, httpx.TimeoutException) else "network"
-                )
-                raise SearchProviderError(
-                    provider=self.name,
-                    kind=kind,
-                    message=str(exc) or "DuckDuckGo search network request failed.",
-                    retryable=True,
-                ) from exc
-            return []
+            raise SearchProviderError(
+                provider=self.name,
+                kind="network",
+                message=str(exc) or "DuckDuckGo search network request failed.",
+                retryable=True,
+            ) from exc
 
         soup = BeautifulSoup(response.text, "html.parser")
         results: list[SearchResult] = []
