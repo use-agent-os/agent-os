@@ -330,3 +330,116 @@ class TestDocumentedAsymmetries:
         cache.record("rm /tmp/d")
         assert cache.check("rm -d /tmp/d") is True
         assert cache.check('os.rmdir("/tmp/d")') is True
+
+
+class TestMultiCommandDeletes:
+    """Intent extraction, grading, and caching for rmdir, rd, del, erase, unlink, Remove-Item."""
+
+    def test_rmdir_and_rd_extraction_and_grading(self) -> None:
+        cache = IntentApprovalCache()
+        # rmdir /s is recursive
+        assert _extract_intents("rmdir /s /q /a/b")[0][0] == "delete:recursive"
+        assert _extract_intents("rd /s /q /a/b")[0][0] == "delete:recursive"
+        # plain rmdir is plain delete
+        assert _extract_intents("rmdir /a/b")[0][0] == "delete"
+
+        cache.record("rmdir /s /q /a/b")
+        assert cache.check("rmdir /s /q /a/b") is True
+        assert cache.check("rd /s /q /a/b") is True
+        assert cache.check("rmdir /a/b") is True  # de-escalation
+        assert cache.check("rmdir /s /q /a/c") is False
+
+        # Plain approval does not cover recursive
+        plain_cache = IntentApprovalCache()
+        plain_cache.record("rmdir /a/b")
+        assert plain_cache.check("rmdir /a/b") is True
+        assert plain_cache.check("rmdir /s /q /a/b") is False
+
+    def test_rmdir_and_rd_paths_not_swallowed_as_switches(self) -> None:
+        """/a, /p, /f as path targets must not be dropped as switches for rmdir/rd."""
+        intents_a = _extract_intents("rmdir /a")
+        assert len(intents_a) == 1
+        assert intents_a[0][1].endswith("a")
+
+        intents_p = _extract_intents("rd /p")
+        assert len(intents_p) == 1
+        assert intents_p[0][1].endswith("p")
+
+        intents_f = _extract_intents("rmdir /f")
+        assert len(intents_f) == 1
+        assert intents_f[0][1].endswith("f")
+
+    def test_del_and_erase_extraction_and_grading(self) -> None:
+        cache = IntentApprovalCache()
+        # del /f is force, del /s is recursive, del /f /s is recursive+force
+        assert _extract_intents("del /f /q /tmp/file.txt")[0][0] == "delete:force"
+        assert _extract_intents("erase /f /q /tmp/file.txt")[0][0] == "delete:force"
+        assert _extract_intents("del /s /tmp/file.txt")[0][0] == "delete:recursive"
+        assert _extract_intents("del /f /s /tmp/file.txt")[0][0] == "delete:recursive+force"
+        assert _extract_intents("del /tmp/file.txt")[0][0] == "delete"
+
+        cache.record("del /f /q /tmp/file.txt")
+        assert cache.check("del /f /q /tmp/file.txt") is True
+        assert cache.check("erase /f /q /tmp/file.txt") is True
+        assert cache.check("del /tmp/file.txt") is True  # de-escalation
+        assert cache.check("del /s /tmp/file.txt") is False  # force does not cover recursive
+        assert cache.check("del /f /q /tmp/other.txt") is False
+
+    def test_unlink_extraction(self) -> None:
+        cache = IntentApprovalCache()
+        assert _extract_intents("unlink /tmp/socket.sock")[0][0] == "delete"
+        cache.record("unlink /tmp/socket.sock")
+        assert cache.check("unlink /tmp/socket.sock") is True
+        assert cache.check("unlink /tmp/diff.sock") is False
+
+    def test_powershell_remove_item_extraction_and_grading(self) -> None:
+        cache = IntentApprovalCache()
+        # Parameter names (-Path, -LiteralPath) must not be extracted as targets
+        intents = _extract_intents("Remove-Item -Path /var/log/app.log -Force")
+        assert len(intents) == 1
+        assert intents[0][0] == "delete:force"
+        assert intents[0][1].endswith("app.log")
+        assert not any("-path" in t.lower() for _, t in intents)
+
+        intents_recurse = _extract_intents(
+            "Remove-Item -LiteralPath /var/log/app.log -Recurse -Force"
+        )
+        assert len(intents_recurse) == 1
+        assert intents_recurse[0][0] == "delete:recursive+force"
+
+        cache.record("Remove-Item -Path /var/log/app.log -Force")
+        assert cache.check("Remove-Item -Path /var/log/app.log -Force") is True
+        assert cache.check("remove-item /var/log/app.log") is True
+        assert cache.check("Remove-Item -Recurse -Path /var/log/app.log") is False
+        assert cache.check("Remove-Item -Path /var/log/other.log") is False
+
+    def test_command_position_anchoring_ignores_non_command_words(self) -> None:
+        """Verbs appearing inside arguments of read-only commands must not extract intents."""
+        assert _extract_intents('grep -rn "del" /etc/passwd') == []
+        assert _extract_intents('grep -rn "rd" /etc/passwd') == []
+        assert _extract_intents('grep -rn "rm" /etc/passwd') == []
+        assert _extract_intents('echo "Remove-Item" /var/log') == []
+        assert _extract_intents("cat /etc/rmdir.conf") == []
+        assert _extract_intents("cat /var/log/order_details.txt") == []
+        assert _extract_intents("cat /etc/card_reader.conf") == []
+        assert _extract_intents("python train_model.py") == []
+        assert _extract_intents("ri String#length") == []
+        assert _extract_intents("git rd branch_name") == []
+
+    def test_compound_and_chained_commands_extract_correctly(self) -> None:
+        """Command separators and subshells correctly scope delete intents."""
+        intents_semi = _extract_intents("echo hello; del /f /q C:\\test.txt")
+        assert len(intents_semi) == 1
+        assert intents_semi[0][0] == "delete:force"
+        assert intents_semi[0][1].endswith("test.txt")
+
+        intents_and = _extract_intents("cd /tmp && rmdir /s /q test_dir")
+        assert len(intents_and) == 1
+        assert intents_and[0][0] == "delete:recursive"
+        assert intents_and[0][1].endswith("test_dir")
+
+        intents_subshell = _extract_intents("(Remove-Item -Force /tmp/sub.txt)")
+        assert len(intents_subshell) == 1
+        assert intents_subshell[0][0] == "delete:force"
+        assert intents_subshell[0][1].endswith("sub.txt")
+

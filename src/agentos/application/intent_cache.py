@@ -15,6 +15,19 @@ is a no-op and the second wipes it recursively, and ``-rf`` never appeared on a
 prompt. The reverse direction still short-circuits, so ``rm -rf X`` covers
 ``shutil.rmtree("X")``: same effect, different spelling.
 
+Supported Deletion Verbs and Shell Dialects:
+- POSIX: ``rm`` (-r/-R/--recursive, -f/--force), ``rmdir`` (-p/--parents), ``unlink``.
+- Windows cmd.exe: ``rmdir`` / ``rd`` (/s -> recursive),
+  ``del`` / ``erase`` (/f -> force, /s -> recursive).
+- PowerShell: ``Remove-Item`` (case-insensitive, -Recurse, -Force).
+- PowerShell Aliases: PowerShell's built-in aliases ``del``, ``erase``, ``rd``, ``rm``,
+  and ``rmdir`` are recognized under their respective syntax and flag rules. The short
+  alias ``ri`` is intentionally excluded to avoid false-positive collisions with Unix
+  utilities (such as the Ruby documentation browser ``ri``).
+- Command-position anchoring: verbs must appear at command boundaries (beginning of input
+  or following separators ``;``, ``&&``, ``||``, ``|``, ``&``, subshell parens, or ``sudo``).
+  Occurrences inside arguments to other commands (e.g. ``grep "del"``, ``cat file.rd``) are ignored.
+
 Scope: only *delete* intents for now, since that is the bulk of user-observed
 pain. Extend ``_extract_intent`` if other classes (write-outside-workspace,
 network egress) need intent-level memory.
@@ -135,37 +148,34 @@ _RM_LONG_CAPABILITIES: dict[str, str] = {
     "--force": _FORCE,
 }
 
-# Shell command separators that terminate a single ``rm`` invocation.
+# Shell command separators that terminate a single delete command invocation.
 _SHELL_SEPARATORS = (";", "&&", "||", "|", "&")
 
+_SHELL_DELETE_PATTERN = re.compile(
+    r"(?i)(?:^|[;\n&|()])\s*(?:sudo\s+)?\b(rm|rmdir|rd|del|erase|unlink|Remove-Item)\b([^;\n&|()]*)",
+)
 
-def _rm_invocation_capabilities(tokens: list[str]) -> frozenset[str]:
-    """Grade one ``rm`` argument list by the escalating flags it carries.
+# Windows switch regexes for cmd.exe deletion commands
+_RMDIR_SWITCH_RE = re.compile(r"^/(?:[sq]+)(?:/(?:[sq]+))*$", re.IGNORECASE)
+_DEL_SWITCH_RE = re.compile(
+    r"^/(?:[pfsq]+|a(?::[a-z0-9_-]+)?)(?:/(?:[pfsq]+|a(?::[a-z0-9_-]+)?))*$",
+    re.IGNORECASE,
+)
 
-    Stops flag parsing at ``--`` so ``rm -- -rf`` treats ``-rf`` as a filename,
-    the way ``rm`` itself does.
-    """
+# PowerShell parameter names for Remove-Item
+_PWSH_PATH_PARAM_PREFIXES = ("-path", "-literalpath", "-target")
+_PWSH_OTHER_PARAM_PREFIXES = (
+    "-filter",
+    "-include",
+    "-exclude",
+    "-credential",
+    "-stream",
+)
+
+
+def _parse_rm_invocation(tokens: list[str]) -> tuple[frozenset[str], list[str]]:
+    """Grade one ``rm`` argument list by the escalating flags it carries and extract targets."""
     capabilities: set[str] = set()
-    for token in tokens:
-        if token == "--":
-            break
-        if token.startswith("--"):
-            name = token.partition("=")[0]
-            capabilities.update(
-                cap
-                for option, cap in _RM_LONG_CAPABILITIES.items()
-                if len(name) > 2 and option.startswith(name)
-            )
-        elif token.startswith("-") and len(token) > 1:
-            for char in token[1:]:
-                cap = _RM_SHORT_CAPABILITIES.get(char)
-                if cap is not None:
-                    capabilities.add(cap)
-    return frozenset(capabilities)
-
-
-def _rm_invocation_targets(tokens: list[str]) -> list[str]:
-    """Non-flag arguments of one ``rm`` invocation, honouring ``--``."""
     targets: list[str] = []
     end_of_flags = False
     for token in tokens:
@@ -177,27 +187,151 @@ def _rm_invocation_targets(tokens: list[str]) -> list[str]:
         if token == "--":
             end_of_flags = True
             continue
-        if token.startswith("-"):
+        if token.startswith("--"):
+            name = token.partition("=")[0]
+            for option, cap in _RM_LONG_CAPABILITIES.items():
+                if len(name) > 2 and option.startswith(name):
+                    capabilities.add(cap)
+            continue
+        if token.startswith("-") and len(token) > 1:
+            for char in token[1:]:
+                short_cap = _RM_SHORT_CAPABILITIES.get(char)
+                if short_cap is not None:
+                    capabilities.add(short_cap)
             continue
         targets.append(token)
-    return targets
+    return frozenset(capabilities), targets
+
+
+def _parse_rmdir_invocation(tokens: list[str]) -> tuple[frozenset[str], list[str]]:
+    """Grade one ``rmdir``/``rd`` argument list (/s -> recursive) and extract targets."""
+    capabilities: set[str] = set()
+    targets: list[str] = []
+    for token in tokens:
+        if not token:
+            continue
+        if _RMDIR_SWITCH_RE.match(token):
+            if "s" in token.lower():
+                capabilities.add(_RECURSIVE)
+            continue
+        if token.startswith("-") and len(token) > 1:
+            if token in {"-p", "--parents"} or token.startswith("--parents"):
+                capabilities.add(_PARENTS)
+            continue
+        targets.append(token)
+    return frozenset(capabilities), targets
+
+
+def _parse_del_invocation(tokens: list[str]) -> tuple[frozenset[str], list[str]]:
+    """Grade one ``del``/``erase`` argument list (/f -> force, /s -> recursive)."""
+    capabilities: set[str] = set()
+    targets: list[str] = []
+    for token in tokens:
+        if not token:
+            continue
+        if _DEL_SWITCH_RE.match(token):
+            lower = token.lower()
+            parts = [p for p in lower.split("/") if p]
+            for part in parts:
+                if part.startswith("a"):
+                    continue
+                if "f" in part:
+                    capabilities.add(_FORCE)
+                if "s" in part:
+                    capabilities.add(_RECURSIVE)
+            continue
+        targets.append(token)
+    return frozenset(capabilities), targets
+
+
+def _parse_unlink_invocation(tokens: list[str]) -> tuple[frozenset[str], list[str]]:
+    """Extract targets for ``unlink`` (plain delete without recursive/force flags)."""
+    targets = [t for t in tokens if t and not t.startswith("-")]
+    return frozenset(), targets
+
+
+def _parse_remove_item_invocation(tokens: list[str]) -> tuple[frozenset[str], list[str]]:
+    """Grade one PowerShell ``Remove-Item`` invocation (-Recurse, -Force) and extract targets."""
+    capabilities: set[str] = set()
+    targets: list[str] = []
+    skip_next = False
+    for i, token in enumerate(tokens):
+        if skip_next:
+            skip_next = False
+            continue
+        if not token:
+            continue
+        lowered = token.lower()
+        if lowered.startswith("-"):
+            if ":" in token or "=" in token:
+                sep = ":" if ":" in token else "="
+                param_name, _, param_val = token.partition(sep)
+                param_name_low = param_name.lower()
+                if any(param_name_low.startswith(p) for p in _PWSH_PATH_PARAM_PREFIXES):
+                    if param_val:
+                        targets.append(param_val)
+                elif param_name_low.startswith("-r"):
+                    capabilities.add(_RECURSIVE)
+                elif param_name_low.startswith("-f") and not param_name_low.startswith("-fil"):
+                    capabilities.add(_FORCE)
+                continue
+
+            if any(lowered.startswith(p) for p in _PWSH_PATH_PARAM_PREFIXES):
+                if i + 1 < len(tokens):
+                    next_token = tokens[i + 1]
+                    if next_token and not next_token.startswith("-"):
+                        targets.append(next_token)
+                        skip_next = True
+                continue
+
+            if any(lowered.startswith(p) for p in _PWSH_OTHER_PARAM_PREFIXES):
+                if i + 1 < len(tokens):
+                    next_token = tokens[i + 1]
+                    if next_token and not next_token.startswith("-"):
+                        skip_next = True
+                continue
+
+            if lowered.startswith("-r"):
+                capabilities.add(_RECURSIVE)
+                continue
+            if lowered.startswith("-f") and not lowered.startswith("-fil"):
+                capabilities.add(_FORCE)
+                continue
+
+            continue
+
+        targets.append(token)
+
+    return frozenset(capabilities), targets
+
+
+def _parse_invocation(cmd_name: str, tokens: list[str]) -> tuple[frozenset[str], list[str]]:
+    name = cmd_name.lower()
+    if name == "rm":
+        return _parse_rm_invocation(tokens)
+    elif name in {"rmdir", "rd"}:
+        return _parse_rmdir_invocation(tokens)
+    elif name in {"del", "erase"}:
+        return _parse_del_invocation(tokens)
+    elif name == "unlink":
+        return _parse_unlink_invocation(tokens)
+    elif name == "remove-item":
+        return _parse_remove_item_invocation(tokens)
+    return frozenset(), [t for t in tokens if t and not t.startswith("-")]
 
 
 def _extract_rm_targets(command: str) -> list[tuple[str, frozenset[str]]]:
-    """Pull every ``rm`` argument out, tagged with that invocation's flags.
+    """Pull every shell delete argument out, tagged with that invocation's flags.
 
-    Handles ``rm a b c``, ``rm -rf /a /b``, quoted paths, and stops at shell
+    Handles ``rm a b c``, ``rm -rf /a /b``, ``rmdir /s /q /a``, ``del /f /q /b``,
+    ``Remove-Item -Recurse -Force /c``, ``unlink /d``, quoted paths, and stops at shell
     separators. Uses ``finditer`` so ``rm foo; rm -rf /bar`` yields targets
     from both invocations independently — and each keeps its own capability
     set, so the ``-rf`` on the second does not leak onto the first. Does not
     try to be a full shell parser — falls back to whitespace split on shlex
     errors (unbalanced quotes).
     """
-    # Match each ``rm`` invocation, stopping at shell separators.
-    # ``[^;\n&|]*`` captures everything from ``rm`` up to the next separator
-    # or end-of-expression, so each ``rm`` is tokenized independently.
-    pattern = re.compile(r"\brm\b([^;\n&|]*)")
-    matches = list(pattern.finditer(command))
+    matches = list(_SHELL_DELETE_PATTERN.finditer(command))
     if not matches:
         return []
 
@@ -205,24 +339,32 @@ def _extract_rm_targets(command: str) -> list[tuple[str, frozenset[str]]]:
     seen: set[tuple[str, frozenset[str]]] = set()
 
     for match in matches:
-        tail = match.group(1).strip()
+        cmd_name = match.group(1).strip()
+        tail = match.group(2).strip()
         if not tail:
             continue
 
         token_sets: list[list[str]] = []
-        try:
-            token_sets.append(shlex.split(tail))
-        except ValueError:
-            token_sets.append(tail.split())
-        if "\\" in tail and (os.name == "nt" or re.search(r"(?:^|\s)\\[^\s]", tail)):
+        is_windows_cmd = cmd_name.lower() in {"del", "erase", "rd", "rmdir", "remove-item"}
+        if is_windows_cmd or (os.name == "nt" and "\\" in tail):
             try:
                 token_sets.append(shlex.split(tail, posix=False))
             except ValueError:
                 token_sets.append(tail.split())
+        else:
+            try:
+                token_sets.append(shlex.split(tail))
+            except ValueError:
+                token_sets.append(tail.split())
+            if "\\" in tail and re.search(r"(?:^|\s)\\[^\s]", tail):
+                try:
+                    token_sets.append(shlex.split(tail, posix=False))
+                except ValueError:
+                    token_sets.append(tail.split())
 
         for tokens in token_sets:
-            capabilities = _rm_invocation_capabilities(tokens)
-            for token in _rm_invocation_targets(tokens):
+            capabilities, invocation_targets = _parse_invocation(cmd_name, tokens)
+            for token in invocation_targets:
                 entry = (token, capabilities)
                 if entry in seen:
                     continue
