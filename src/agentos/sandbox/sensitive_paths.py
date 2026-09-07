@@ -427,6 +427,12 @@ def sensitive_target_in_command(
     for _kind, target in _extract_intents(command, base_dir=effective_workspace):
         if _is_root_target(target):
             return _ROOT_TARGET_MARKER
+        # /root is not a credential path on its own, but a recursive delete of
+        # the home directory is destructive — catch it on the destructive path
+        # only (sensitive_path_in_text for reads still correctly allows ls /root).
+        target = _expand_env_vars(str(target))
+        if target.rstrip("/") == "/root":
+            return "/root"
         marker = sensitive_path_marker(target, workspace=effective_workspace)
         if marker is not None:
             return marker

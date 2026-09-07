@@ -130,14 +130,23 @@ def test_every_rm_in_a_compound_command_is_checked() -> None:
 def test_sensitive_reads_in_a_later_segment_are_blocked_at_the_tool_boundary() -> None:
     """Issue #676: the delete-intent scan only sees ``rm`` targets, so a
     non-destructive second segment (``cat /root/.bash_history``) is caught by
-    the text scan ``exec_command`` runs alongside it, not by this one."""
+    the text scan ``exec_command`` runs alongside it, not by this one.
+
+    Unlike the env-var test (test_ordinary_text_with_a_dollar_sign_is_untouched),
+    ls /root is a benign read and is not a sensitive path.  rm -rf /root IS
+    caught as a destructive target (even though /root is not a credential
+    prefix on its own).
+    """
     workspace = Path("/workspace")
 
     assert sensitive_target_in_command("rm /tmp/ok; ls /root", workspace=workspace) is None
-    assert sensitive_path_in_text("rm /tmp/ok; ls /root", workspace=workspace) == "/root"
+    # ls /root is benign — not a credential path; rm -rf /root IS blocked as
+    # a destructive target even though /root is not in _SENSITIVE_PREFIXES.
+    assert sensitive_target_in_command("rm /tmp/ok; rm -rf /root", workspace=workspace) == "/root"
+    assert sensitive_path_in_text("rm /tmp/ok; ls /root", workspace=workspace) is None
     assert (
         sensitive_path_in_text("rm /tmp/ok; cat /root/.bash_history", workspace=workspace)
-        == "/root"
+        == "/.bash_history"
     )
 
 
