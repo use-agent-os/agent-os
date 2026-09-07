@@ -46,7 +46,6 @@ _SENSITIVE_PREFIXES: tuple[str, ...] = (
     "/sys",
     "/proc",
     "/dev",
-    "/root",
     "/var/log",
     "/lib/systemd",
     "/usr/lib/systemd",
