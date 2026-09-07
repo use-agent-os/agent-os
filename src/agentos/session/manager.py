@@ -816,7 +816,12 @@ class SessionManager:
         safe. See :mod:`agentos.session.runtime_state`.
         """
         evict_session_runtime_state(session_key)
+        try:
+            from agentos.util.bounded_registry import _discard_from_all
 
+            _discard_from_all(session_key)
+        except Exception:
+            pass
     async def _cancel_task_runtime(self, session_key: str, *, reason: str) -> None:
         """Cancel active/queued runtime tasks for ``session_key``, best effort.
 

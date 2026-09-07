@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agentos.agents.limits import MAX_SPAWN_DEPTH
+from agentos.util.bounded_registry import BoundedSessionRegistry
 
 if TYPE_CHECKING:
     from .agent import Agent
@@ -51,7 +52,9 @@ class SubagentRegistry:
 
     def __init__(self) -> None:
         self._runs: dict[str, SubagentHandle] = {}
-        self._archived: dict[str, SubagentHandle] = {}
+        self._archived: BoundedSessionRegistry[str, SubagentHandle] = (
+            BoundedSessionRegistry(max_entries=1000, ttl_seconds=3600)
+        )
         self._parent_tasks: dict[str, asyncio.Task[Any]] = {}
 
     def register(
@@ -90,7 +93,7 @@ class SubagentRegistry:
         return True
 
     def get_archived(self) -> list[SubagentHandle]:
-        return list(self._archived.values())
+        return list(self._archived.snapshot().values())
 
     def get_by_status(self, status: str) -> list[SubagentHandle]:
         return [h for h in self._runs.values() if h.status == status]

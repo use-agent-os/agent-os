@@ -38,6 +38,7 @@ from agentos.session.terminal_reply import (
     is_context_payload_too_large,
     sanitize_agent_error,
 )
+from agentos.util.bounded_registry import BoundedSessionRegistry, _register_session_scoped
 
 log = structlog.get_logger(__name__)
 
@@ -322,11 +323,15 @@ class TaskRuntime:
         # Per-session write locks shared with TurnRunner and RPC ingress on
         # gateway-dispatched turns. These guard short transcript/session state
         # mutations only.
-        self._session_locks: dict[str, asyncio.Lock] = {}
+        self._session_locks: BoundedSessionRegistry[str, asyncio.Lock] = (
+            BoundedSessionRegistry(max_entries=5000)
+        )
         # Per-session execution locks serialize whole turn lifecycles without
         # blocking transcript writes, browser queue acknowledgements, or approval
         # status updates behind external I/O.
-        self._session_execution_locks: dict[str, asyncio.Lock] = {}
+        self._session_execution_locks: BoundedSessionRegistry[str, asyncio.Lock] = (
+            BoundedSessionRegistry(max_entries=5000)
+        )
         self._tasks: dict[str, _RuntimeTask] = {}
         self._pending_by_session: dict[str, list[_RuntimeTask]] = {}
         self._running_by_session: dict[str, _RuntimeTask] = {}
@@ -363,6 +368,8 @@ class TaskRuntime:
         self._agent_active_sessions: dict[str, set[str]] = {}
         self._agent_in_flight: dict[str, int] = {}
         self._fair_cond: asyncio.Condition | None = None
+        _register_session_scoped(self._session_locks)
+        _register_session_scoped(self._session_execution_locks)
 
     async def enqueue(
         self,

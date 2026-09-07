@@ -46,6 +46,7 @@ from agentos.sandbox.types import (
     SecurityLevel,
     SuggestedNextStep,
 )
+from agentos.util.bounded_registry import BoundedSessionRegistry, _register_session_scoped
 
 log = logging.getLogger(__name__)
 
@@ -132,11 +133,14 @@ class DenialLedger:
         if threshold < 1:
             raise ValueError(f"threshold must be >= 1, got {threshold}")
         self._threshold = threshold
-        self._sessions: dict[str, _SessionState] = {}
+        self._sessions: BoundedSessionRegistry[str, _SessionState] = (
+            BoundedSessionRegistry(max_entries=5000)
+        )
         self._cache = (
             stale_output_cache if stale_output_cache is not None else get_stale_output_cache()
         )
         self._lock = asyncio.Lock()
+        _register_session_scoped(self._sessions)
 
     @property
     def threshold(self) -> int:
