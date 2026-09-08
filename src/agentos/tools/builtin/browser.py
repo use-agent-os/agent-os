@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import Any
 
 import structlog
@@ -104,7 +105,15 @@ def configure_browser(config: Any | None = None) -> None:
         return default if value is None else value
 
     domains = _get("allowed_domains", ()) or ()
-    _allowed_domains = tuple(str(d).strip().lower() for d in domains if str(d).strip())
+    # Normalize entries: strip scheme, trailing slash, leading dot/wildcard
+    # so that "https://example.com/", ".example.com", "*.example.com" all
+    # match the bare hostname (issue #1478).
+    raw = (str(d).strip() for d in domains if str(d) and str(d).strip())
+    _allowed_domains = tuple(
+        re.sub(r"^(https?://)?(\*\.)?\.?", "", d.lower()).rstrip("./")
+        for d in raw
+        if d
+    )
     _restrict_evaluate = bool(_get("restrict_evaluate", False))
     _allow_unsafe_evaluate = bool(_get("allow_unsafe_evaluate", False))
     _snapshot_max_chars = max(1000, int(_get("snapshot_max_chars", _DEFAULT_SNAPSHOT_MAX_CHARS)))
