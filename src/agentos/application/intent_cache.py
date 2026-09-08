@@ -135,15 +135,77 @@ _RM_LONG_CAPABILITIES: dict[str, str] = {
     "--force": _FORCE,
 }
 
-# Shell command separators that terminate a single ``rm`` invocation.
+# ``rmdir -p a/b/c`` removes the leaf and then prunes empty ancestors, reaching
+# *above* the path it was handed. That is exactly ``os.removedirs`` above, so it
+# carries the same grade and the two spellings cover each other.
+_RMDIR_SHORT_CAPABILITIES: dict[str, frozenset[str]] = {"p": frozenset({_RECURSIVE, _PARENTS})}
+_RMDIR_LONG_CAPABILITIES: dict[str, frozenset[str]] = {
+    "--parents": frozenset({_RECURSIVE, _PARENTS})
+}
+
+# cmd.exe switches. ``/s`` recurses into subdirectories and ``/f`` forces
+# read-only files; ``/q`` (quiet) and ``/p`` (prompt) change only what the user
+# is shown, so neither is graded — the same reasoning that leaves ``rm -i``
+# ungraded above.
+_CMD_SWITCH_CAPABILITIES: dict[str, str] = {"s": _RECURSIVE, "f": _FORCE}
+
+# PowerShell parameters are matched by prefix: the parser accepts any
+# unambiguous abbreviation, so ``-Recu`` is ``-Recurse``. Names are compared
+# case-insensitively because PowerShell itself is.
+_PWSH_PARAM_CAPABILITIES: dict[str, str] = {"-recurse": _RECURSIVE, "-force": _FORCE}
+# These take the target as their *next* token rather than positionally.
+_PWSH_PATH_PARAMS: tuple[str, ...] = ("-path", "-literalpath")
+
+# A cmd.exe switch is a slash plus one letter, optionally ``:value`` (``/a:h``).
+# Anything longer is a POSIX path, which keeps ``/``, ``/tmp/x`` and
+# ``/etc/passwd`` as delete *targets* rather than swallowing them as flags.
+_CMD_SWITCH_RE = re.compile(r"^/[A-Za-z](?::[^\s/]*)?$")
+
+# Deletion verbs, each mapped to the flag dialects it may be speaking. A verb
+# can speak more than one: ``rmdir`` takes ``-p`` on POSIX and ``/s /q`` on
+# Windows, and a command the model writes may target either host. Matching is
+# case-insensitive because cmd.exe and PowerShell both are.
+#
+# The PowerShell alias ``ri`` is deliberately absent: two letters collide with
+# too many unrelated binaries to be worth the false positives.
+_POSIX, _CMD, _PWSH = "posix", "cmd", "pwsh"
+_DELETE_VERBS: dict[str, tuple[str, ...]] = {
+    "rm": (_POSIX,),
+    "unlink": (_POSIX,),
+    "rmdir": (_POSIX, _CMD),
+    "rd": (_CMD,),
+    "del": (_CMD,),
+    "erase": (_CMD,),
+    "remove-item": (_PWSH,),
+}
+
+# Longest-first so ``rmdir`` is not consumed as ``rm`` followed by ``dir``.
+#
+# The verb must start a word that is not an attribute access and must be
+# followed by whitespace, end-of-string, or an attached cmd.exe switch
+# (``del/f``). That keeps the Python spellings — ``os.rmdir(...)``,
+# ``Path(x).unlink()`` — with the ``_PY_DELETE_PATTERNS`` above that grade them
+# properly, instead of double-matching them here as shell verbs, and stops
+# ``docker run --rm image`` from reading as a delete of ``image``.
+_DELETE_VERB_RE = re.compile(
+    r"(?<![.\w-])("
+    + "|".join(sorted((re.escape(v) for v in _DELETE_VERBS), key=len, reverse=True))
+    + r")\b(?=\s|$|/[A-Za-z](?:[\s:]|$))([^;\n&|]*)",
+    re.IGNORECASE,
+)
+
+# Shell command separators that terminate a single delete invocation.
 _SHELL_SEPARATORS = (";", "&&", "||", "|", "&")
 
 
-def _rm_invocation_capabilities(tokens: list[str]) -> frozenset[str]:
-    """Grade one ``rm`` argument list by the escalating flags it carries.
+def _rm_invocation_capabilities(
+    tokens: list[str], *, allow_parents: bool = False
+) -> frozenset[str]:
+    """Grade one POSIX argument list by the escalating flags it carries.
 
     Stops flag parsing at ``--`` so ``rm -- -rf`` treats ``-rf`` as a filename,
-    the way ``rm`` itself does.
+    the way ``rm`` itself does. ``allow_parents`` enables the ``rmdir``-only
+    ``-p``/``--parents`` grade.
     """
     capabilities: set[str] = set()
     for token in tokens:
@@ -151,21 +213,27 @@ def _rm_invocation_capabilities(tokens: list[str]) -> frozenset[str]:
             break
         if token.startswith("--"):
             name = token.partition("=")[0]
+            if len(name) <= 2:
+                continue
             capabilities.update(
-                cap
-                for option, cap in _RM_LONG_CAPABILITIES.items()
-                if len(name) > 2 and option.startswith(name)
+                cap for option, cap in _RM_LONG_CAPABILITIES.items() if option.startswith(name)
             )
+            if allow_parents:
+                for option, caps in _RMDIR_LONG_CAPABILITIES.items():
+                    if option.startswith(name):
+                        capabilities.update(caps)
         elif token.startswith("-") and len(token) > 1:
             for char in token[1:]:
                 cap = _RM_SHORT_CAPABILITIES.get(char)
                 if cap is not None:
                     capabilities.add(cap)
+                if allow_parents:
+                    capabilities.update(_RMDIR_SHORT_CAPABILITIES.get(char, ()))
     return frozenset(capabilities)
 
 
 def _rm_invocation_targets(tokens: list[str]) -> list[str]:
-    """Non-flag arguments of one ``rm`` invocation, honouring ``--``."""
+    """Non-flag arguments of one POSIX invocation, honouring ``--``."""
     targets: list[str] = []
     end_of_flags = False
     for token in tokens:
@@ -183,21 +251,117 @@ def _rm_invocation_targets(tokens: list[str]) -> list[str]:
     return targets
 
 
-def _extract_rm_targets(command: str) -> list[tuple[str, frozenset[str]]]:
-    """Pull every ``rm`` argument out, tagged with that invocation's flags.
+def _cmd_invocation(tokens: list[str]) -> tuple[frozenset[str], list[str]]:
+    """Split one cmd.exe argument list into (capabilities, targets).
 
-    Handles ``rm a b c``, ``rm -rf /a /b``, quoted paths, and stops at shell
-    separators. Uses ``finditer`` so ``rm foo; rm -rf /bar`` yields targets
-    from both invocations independently — and each keeps its own capability
-    set, so the ``-rf`` on the second does not leak onto the first. Does not
-    try to be a full shell parser — falls back to whitespace split on shlex
-    errors (unbalanced quotes).
+    Only slash-plus-one-letter tokens are switches, so ``rmdir /s /q /`` grades
+    as a recursive delete of ``/`` rather than deleting three paths named
+    ``/s``, ``/q`` and ``/``.
+
+    Dash-prefixed tokens are read as PowerShell parameters, because ``del``,
+    ``rd`` and ``erase`` are also PowerShell aliases for ``Remove-Item`` and
+    take ``-Recurse``/``-Force`` there.
     """
-    # Match each ``rm`` invocation, stopping at shell separators.
-    # ``[^;\n&|]*`` captures everything from ``rm`` up to the next separator
-    # or end-of-expression, so each ``rm`` is tokenized independently.
-    pattern = re.compile(r"\brm\b([^;\n&|]*)")
-    matches = list(pattern.finditer(command))
+    capabilities: set[str] = set()
+    targets: list[str] = []
+    for token in tokens:
+        if not token:
+            continue
+        if _CMD_SWITCH_RE.match(token):
+            cap = _CMD_SWITCH_CAPABILITIES.get(token[1].lower())
+            if cap is not None:
+                capabilities.add(cap)
+            continue
+        if token.startswith("-") and len(token) > 1:
+            name = token.partition(":")[0].lower()
+            capabilities.update(
+                cap for param, cap in _PWSH_PARAM_CAPABILITIES.items() if param.startswith(name)
+            )
+            continue
+        targets.append(token)
+    return frozenset(capabilities), targets
+
+
+def _select_dialect(verb: str, tokens: list[str]) -> str:
+    """Pick the one dialect an invocation is actually speaking.
+
+    Only ``rmdir`` is ambiguous — POSIX ``rmdir -p`` and cmd.exe ``rmdir /s /q``
+    share the name. A switch-shaped token settles it. Applying both dialects
+    instead would emit the cmd switches as extra bogus targets.
+    """
+    dialects = _DELETE_VERBS[verb]
+    if len(dialects) == 1:
+        return dialects[0]
+    if _CMD in dialects and any(_CMD_SWITCH_RE.match(token) for token in tokens):
+        return _CMD
+    return dialects[0]
+
+
+def _pwsh_invocation(tokens: list[str]) -> tuple[frozenset[str], list[str]]:
+    """Split one PowerShell argument list into (capabilities, targets).
+
+    ``-Recurse``/``-Force`` are matched as whole parameter names by prefix, not
+    by scanning characters: a character scan reads the ``r`` in ``-Force`` and
+    grades a forced delete as a recursive one, which would let an approval for
+    ``-Force`` silently cover ``-Recurse``.
+    """
+    capabilities: set[str] = set()
+    targets: list[str] = []
+    want_path = False
+    for token in tokens:
+        if not token:
+            continue
+        if want_path and not token.startswith("-"):
+            targets.append(token)
+            want_path = False
+            continue
+        if token.startswith("-"):
+            name = token.partition(":")[0].lower()
+            capabilities.update(
+                cap for param, cap in _PWSH_PARAM_CAPABILITIES.items() if param.startswith(name)
+            )
+            want_path = any(param.startswith(name) for param in _PWSH_PATH_PARAMS)
+            continue
+        targets.append(token)
+    return frozenset(capabilities), targets
+
+
+def _tokenize_tail(tail: str) -> list[list[str]]:
+    """Every plausible tokenization of one invocation's argument text.
+
+    Windows paths are also read with ``posix=False`` so ``C:\\Users\\me\\.ssh``
+    survives instead of collapsing to ``C:Usersme.ssh``.
+    """
+    token_sets: list[list[str]] = []
+    try:
+        token_sets.append(shlex.split(tail))
+    except ValueError:
+        token_sets.append(tail.split())
+    windows_path = re.search(r"(?:^|\s)\\[^\s]", tail) or re.search(r"[A-Za-z]:\\", tail)
+    if "\\" in tail and (os.name == "nt" or windows_path):
+        try:
+            token_sets.append(shlex.split(tail, posix=False))
+        except ValueError:
+            token_sets.append(tail.split())
+    return token_sets
+
+
+def _extract_rm_targets(command: str) -> list[tuple[str, frozenset[str]]]:
+    """Pull every delete target out, tagged with that invocation's flags.
+
+    Recognises ``rm``, ``unlink``, ``rmdir``, ``rd``, ``del``, ``erase`` and
+    PowerShell ``Remove-Item``, each parsed in the flag dialect(s) it speaks, so
+    ``rmdir /s /q /`` and ``Remove-Item -Recurse -Force /`` reach the
+    sensitive-path hard block the same way ``rm -rf /`` does.
+
+    Uses ``finditer`` so ``rm foo; rm -rf /bar`` yields targets from both
+    invocations independently, each keeping its own capability set. The verb is
+    matched wherever it appears rather than only at a command boundary: this
+    feeds a security hard block, and ``find . -exec rm -rf / {} +`` or
+    ``xargs rm -rf /`` must still be caught. Does not try to be a full shell
+    parser — falls back to whitespace split on shlex errors (unbalanced quotes).
+    """
+    matches = list(_DELETE_VERB_RE.finditer(command))
     if not matches:
         return []
 
@@ -205,24 +369,21 @@ def _extract_rm_targets(command: str) -> list[tuple[str, frozenset[str]]]:
     seen: set[tuple[str, frozenset[str]]] = set()
 
     for match in matches:
-        tail = match.group(1).strip()
+        verb = match.group(1).lower()
+        tail = match.group(2).strip()
         if not tail:
             continue
 
-        token_sets: list[list[str]] = []
-        try:
-            token_sets.append(shlex.split(tail))
-        except ValueError:
-            token_sets.append(tail.split())
-        if "\\" in tail and (os.name == "nt" or re.search(r"(?:^|\s)\\[^\s]", tail)):
-            try:
-                token_sets.append(shlex.split(tail, posix=False))
-            except ValueError:
-                token_sets.append(tail.split())
-
-        for tokens in token_sets:
-            capabilities = _rm_invocation_capabilities(tokens)
-            for token in _rm_invocation_targets(tokens):
+        for tokens in _tokenize_tail(tail):
+            dialect = _select_dialect(verb, tokens)
+            if dialect == _POSIX:
+                capabilities = _rm_invocation_capabilities(tokens, allow_parents=verb == "rmdir")
+                invocation_targets = _rm_invocation_targets(tokens)
+            elif dialect == _CMD:
+                capabilities, invocation_targets = _cmd_invocation(tokens)
+            else:
+                capabilities, invocation_targets = _pwsh_invocation(tokens)
+            for token in invocation_targets:
                 entry = (token, capabilities)
                 if entry in seen:
                     continue
