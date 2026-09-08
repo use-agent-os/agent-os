@@ -44,6 +44,15 @@ _DESTRUCTIVE_PY_PATTERNS: list[tuple[str, str]] = [
         r"\bsubprocess\.(run|call|Popen|check_output|check_call)[^\n;]{0,200}\brmdir\b",
         "subprocess invoking rmdir",
     ),
+    # Windows-specific delete commands (issue #1466)
+    (
+        r"\bos\.system\s*\([^)]*\b(?:del|erase|rd|rmdir)\b",
+        "os.system with Windows delete command",
+    ),
+    (
+        r"\bsubprocess\.(run|call|Popen|check_output|check_call)[^\n;]{0,200}\b(?:del|erase|rd|Remove-Item)\b",
+        "subprocess invoking Windows delete command",
+    ),
 ]
 
 _OS_DESTRUCTIVE_ATTRS: frozenset[str] = frozenset({"remove", "unlink", "rmdir", "removedirs"})
