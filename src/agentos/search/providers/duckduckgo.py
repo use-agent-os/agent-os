@@ -19,6 +19,26 @@ _HEADERS = {
 }
 
 
+def _clean_ddg_url(href: str) -> str:
+    """Extract and unquote the target URL from DuckDuckGo redirect hrefs."""
+    if not href:
+        return ""
+    if "/l/?" in href and "uddg=" in href:
+        try:
+            parsed = urllib.parse.urlsplit(href)
+            qs = urllib.parse.parse_qs(parsed.query)
+            if "uddg" in qs and qs["uddg"]:
+                return qs["uddg"][0]
+        except Exception:
+            pass
+        try:
+            part = href.split("uddg=")[1].split("&")[0]
+            return urllib.parse.unquote(part)
+        except Exception:
+            pass
+    return href
+
+
 class DuckDuckGoProvider:
     """Search provider using DuckDuckGo HTML endpoint."""
 
@@ -28,7 +48,7 @@ class DuckDuckGoProvider:
         self,
         proxy: str = "",
         use_env_proxy: bool = False,
-        diagnostics: bool = False,
+        diagnostics: bool = True,
     ) -> None:
         self._proxy = proxy or None
         self._trust_env = bool(use_env_proxy) and not self._proxy
@@ -47,14 +67,37 @@ class DuckDuckGoProvider:
                     headers=_HEADERS,
                 )
                 response.raise_for_status()
-        except httpx.HTTPError as exc:
+        except httpx.TimeoutException as exc:
             if self._diagnostics:
-                kind: SearchErrorKind = (
-                    "timeout" if isinstance(exc, httpx.TimeoutException) else "network"
-                )
+                raise SearchProviderError(
+                    provider=self.name,
+                    kind="timeout",
+                    message=str(exc) or "DuckDuckGo search request timed out.",
+                    retryable=True,
+                ) from exc
+            return []
+        except httpx.HTTPStatusError as exc:
+            if self._diagnostics:
+                status_code = exc.response.status_code
+                if status_code in {401, 403}:
+                    kind: SearchErrorKind = "auth"
+                elif status_code == 429:
+                    kind = "rate_limit"
+                else:
+                    kind = "http"
                 raise SearchProviderError(
                     provider=self.name,
                     kind=kind,
+                    message=str(exc) or f"DuckDuckGo search failed with HTTP {status_code}.",
+                    retryable=kind in {"rate_limit", "http"},
+                    status_code=status_code,
+                ) from exc
+            return []
+        except httpx.HTTPError as exc:
+            if self._diagnostics:
+                raise SearchProviderError(
+                    provider=self.name,
+                    kind="network",
                     message=str(exc) or "DuckDuckGo search network request failed.",
                     retryable=True,
                 ) from exc
@@ -77,8 +120,7 @@ class DuckDuckGoProvider:
                 continue
 
             # Clean DDG redirect URLs
-            if "//duckduckgo.com/l/?uddg=" in href:
-                href = urllib.parse.unquote(href.split("uddg=")[1].split("&")[0])
+            href = _clean_ddg_url(href)
 
             snippet_elem = elem.select_one(".result__snippet")
             snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
