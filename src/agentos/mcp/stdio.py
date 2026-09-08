@@ -30,6 +30,7 @@ class MCPStdioClient(MCPClient):
         super().__init__(config)
         self._process: asyncio.subprocess.Process | None = None
         self._request_id = 0
+        self._lock: asyncio.Lock = asyncio.Lock()
 
     @staticmethod
     def _encode_message(message: dict[str, Any]) -> bytes:
@@ -160,10 +161,10 @@ class MCPStdioClient(MCPClient):
         if params is not None:
             request["params"] = params
 
-        self._process.stdin.write(self._encode_message(request))
-        await self._process.stdin.drain()
-
-        return await self._read_response(req_id)
+        async with self._lock:
+            self._process.stdin.write(self._encode_message(request))
+            await self._process.stdin.drain()
+            return await self._read_response(req_id)
 
     async def _send_notification(self, method: str) -> None:
         """Send a JSON-RPC notification (no response expected)."""
