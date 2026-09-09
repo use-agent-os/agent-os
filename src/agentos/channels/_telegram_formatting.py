@@ -11,6 +11,7 @@ _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(?P<text>.+?)\s*#*\s*$")
 _ORDERED_LIST_RE = re.compile(r"^(?P<indent>\s*)(?P<number>\d+)[.)]\s+(?P<text>.+)$")
 _UNORDERED_LIST_RE = re.compile(r"^(?P<indent>\s*)[-+*]\s+(?P<text>.+)$")
 _LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://[^\s)<]+)\)")
+_BLOCKQUOTE_RE = re.compile(r"^\s{0,3}>(?: ?(.*))$")
 
 
 def _replace_code_spans(text: str) -> tuple[str, list[str]]:
@@ -229,9 +230,16 @@ def render_telegram_html(markdown: str) -> str:
             rendered.append(f"<b>{_render_inline(heading.group('text'))}</b>")
             index += 1
             continue
-        if line.startswith("> "):
-            rendered.append(f"<blockquote>{_render_inline(line[2:])}</blockquote>")
-            index += 1
+        blockquote_match = _BLOCKQUOTE_RE.match(line)
+        if blockquote_match:
+            quote_lines: list[str] = []
+            while index < len(lines):
+                match = _BLOCKQUOTE_RE.match(lines[index])
+                if not match:
+                    break
+                quote_lines.append(_render_inline(match.group(1)))
+                index += 1
+            rendered.append(f"<blockquote>{'\n'.join(quote_lines)}</blockquote>")
             continue
         ordered = _ORDERED_LIST_RE.match(line)
         if ordered:

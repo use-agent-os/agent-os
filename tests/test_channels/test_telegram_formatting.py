@@ -286,3 +286,43 @@ def test_a_url_inside_a_code_span_is_untouched() -> None:
     assert render_telegram_html("`https://x.test/a__b__c`") == (
         "<code>https://x.test/a__b__c</code>"
     )
+
+
+def test_multiline_blockquote_renders_as_single_tag() -> None:
+    markdown = "> Line 1\n> Line 2\n> Line 3"
+    rendered = render_telegram_html(markdown)
+
+    assert rendered == "<blockquote>Line 1\nLine 2\nLine 3</blockquote>"
+
+
+def test_blockquote_with_empty_quote_line_preserves_internal_paragraphs() -> None:
+    markdown = "> Paragraph 1\n>\n> Paragraph 2"
+    rendered = render_telegram_html(markdown)
+
+    assert rendered == "<blockquote>Paragraph 1\n\nParagraph 2</blockquote>"
+    assert "&gt;" not in rendered
+
+
+def test_blockquote_syntax_variations_and_inline_formatting() -> None:
+    markdown = (
+        "> **Note**: check `status`\n"
+        ">visit [AgentOS](https://agentos.dev)\n"
+        "  >   indented quote"
+    )
+    rendered = render_telegram_html(markdown)
+
+    assert rendered == (
+        "<blockquote><b>Note</b>: check <code>status</code>\n"
+        'visit <a href="https://agentos.dev">AgentOS</a>\n'
+        "  indented quote</blockquote>"
+    )
+
+
+def test_distinct_blockquotes_separated_by_blank_lines_remain_separate() -> None:
+    markdown = "> First block\n\n> Second block"
+    rendered = render_telegram_html(markdown)
+
+    assert rendered == (
+        "<blockquote>First block</blockquote>\n\n"
+        "<blockquote>Second block</blockquote>"
+    )
