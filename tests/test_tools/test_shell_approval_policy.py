@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from agentos.gateway.approval_queue import get_approval_queue, reset_approval_queue
+from agentos.gateway.approval_queue import (
+    PendingApproval,
+    get_approval_queue,
+    reset_approval_queue,
+)
 from agentos.sandbox.config import SandboxSettings
 from agentos.sandbox.integration import configure_runtime, reset_runtime
 from agentos.sandbox.intent_cache import get_intent_cache, reset_intent_cache
@@ -881,3 +885,95 @@ async def test_root_wipe_is_hard_blocked_at_the_exec_approval_boundary() -> None
         assert result["status"] == "blocked"
         assert result["reason"] == "sensitive_path"
         assert result["sensitive_path"] == "/"
+
+
+def _exec_entry(elevated_mode: str | None) -> PendingApproval:
+    params: dict = {"toolName": "exec_command", "command": "rm target.txt", "sessionKey": ""}
+    if elevated_mode is not None:
+        params["elevatedMode"] = elevated_mode
+    return PendingApproval(approval_id="a-1", namespace="exec", params=params)
+
+
+def test_agent_caller_context_receives_operator_elevated_mode() -> None:
+    """Operator-resolved elevated modes must land on agent-kind contexts (#1512).
+
+    Engine turn loops run tools with ``caller_kind=AGENT`` even when the
+    operator resolves the approval from the CLI or Web UI, so the old
+    ``{CLI, WEB}`` gate silently dropped the operator's choice.
+    """
+    ctx = ToolContext(caller_kind=CallerKind.AGENT, session_key="agent:main:test")
+    token = current_tool_context.set(ctx)
+    try:
+        shell._apply_approval_elevated_mode(_exec_entry("bypass"))
+        assert ctx.elevated == "bypass"
+    finally:
+        current_tool_context.reset(token)
+
+
+@pytest.mark.parametrize("caller_kind", [CallerKind.CLI, CallerKind.WEB, CallerKind.SUBAGENT])
+def test_operator_elevated_mode_applies_for_every_caller_kind(caller_kind: CallerKind) -> None:
+    ctx = ToolContext(caller_kind=caller_kind, session_key="agent:main:test")
+    token = current_tool_context.set(ctx)
+    try:
+        shell._apply_approval_elevated_mode(_exec_entry("on"))
+        assert ctx.elevated == "on"
+    finally:
+        current_tool_context.reset(token)
+
+
+def test_apply_elevated_mode_ignores_unresolved_and_invalid_entries() -> None:
+    ctx = ToolContext(caller_kind=CallerKind.AGENT, session_key="agent:main:test")
+    token = current_tool_context.set(ctx)
+    try:
+        shell._apply_approval_elevated_mode(_exec_entry(None))
+        assert ctx.elevated is None
+        shell._apply_approval_elevated_mode(_exec_entry("off"))
+        assert ctx.elevated is None
+        shell._apply_approval_elevated_mode(
+            PendingApproval(approval_id="a-2", namespace="exec", params={})
+        )
+        assert ctx.elevated is None
+        shell._apply_approval_elevated_mode(object())
+        assert ctx.elevated is None
+    finally:
+        current_tool_context.reset(token)
+    missing = current_tool_context.set(None)
+    try:
+        shell._apply_approval_elevated_mode(_exec_entry("bypass"))
+    finally:
+        current_tool_context.reset(missing)
+
+
+@pytest.mark.asyncio
+async def test_agent_turn_honors_bypass_for_subsequent_commands_after_operator_approval() -> None:
+    """Full agent-turn flow: approval resolved with bypass must persist (#1512).
+
+    With no session key there is no session-map fallback, so the only path
+    carrying the operator's mode forward is ``_apply_approval_elevated_mode``.
+    """
+    ctx = current_tool_context.get()
+    assert ctx is not None
+    ctx.caller_kind = CallerKind.AGENT
+    ctx.session_key = None
+    queue = get_approval_queue()
+    queue.set_settings("auto-approve")
+
+    command = "rm target.txt"
+    first = await shell._check_exec_approval(
+        "exec_command", command, None, "command requires approval", None, True
+    )
+    assert first is not None
+    assert first["status"] == "approval_required"
+    approval_id = str(first["approval_id"])
+
+    queue.resolve(approval_id, approved=True, elevated_mode="bypass")
+    retry = await shell._check_exec_approval(
+        "exec_command", command, None, "command requires approval", approval_id, True
+    )
+    assert retry is None, "approved command must run"
+    assert ctx.elevated == "bypass"
+
+    followup = await shell._check_exec_approval(
+        "exec_command", command, None, "command requires approval", None, True
+    )
+    assert followup is None, "operator bypass must silence the next warned command"

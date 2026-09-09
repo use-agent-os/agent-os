@@ -236,11 +236,18 @@ class ApprovalQueue:
                 return
             raise ValueError(f"Approval already resolved: {approval_id}")
 
+        # Persist the elevated mode together with the resolution. Tool code
+        # re-reads the entry via get() (rebuilt from this table), so keeping
+        # the mode only on the in-memory object loses it before the approved
+        # retry can apply it (#1512).
+        persisted_params = entry.params
+        if approved and elevated_mode in VALID_ELEVATED_MODES:
+            persisted_params = {**persisted_params, "elevatedMode": elevated_mode}
         cursor = self._conn.execute(
             "UPDATE approval_queue "
-            "SET resolved = 1, approved = ? "
+            "SET resolved = 1, approved = ?, params = ? "
             "WHERE approval_id = ? AND resolved = 0",
-            (1 if approved else 0, approval_id),
+            (1 if approved else 0, self._serialize_params(persisted_params), approval_id),
         )
         if cursor.rowcount != 1:
             self._conn.rollback()

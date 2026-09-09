@@ -1353,6 +1353,15 @@ def _wait_for_inline_browser_approval(background: bool) -> bool:
 
 
 def _apply_approval_elevated_mode(entry: object) -> None:
+    """Apply an operator-resolved elevated mode to the active tool context.
+
+    ``entry.params["elevatedMode"]`` is written only by the approval resolve
+    path (Web UI / control-RPC operator action) — never by the tool call that
+    requested the approval. Inside the engine turn loop the requesting
+    ToolContext runs as ``CallerKind.AGENT``, so gating this on the caller
+    kind silently dropped the operator's choice (issue #1512). Apply it to
+    whatever context requested the approval, regardless of surface.
+    """
     params = getattr(entry, "params", None)
     if not isinstance(params, dict):
         return
@@ -1360,7 +1369,7 @@ def _apply_approval_elevated_mode(entry: object) -> None:
     if mode not in ("on", "bypass", "full"):
         return
     ctx = current_tool_context.get()
-    if ctx is not None and ctx.caller_kind in {CallerKind.CLI, CallerKind.WEB}:
+    if ctx is not None:
         ctx.elevated = mode
 
 
