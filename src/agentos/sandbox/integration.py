@@ -257,10 +257,18 @@ def _resolve_session_id(runtime: SandboxRuntime, session_id: str | None) -> str:
 
 
 def _resolve_workspace(runtime: SandboxRuntime, cwd: str | None) -> Path:
-    if cwd:
-        p = Path(cwd)
-        if p.is_absolute():
-            return p
+    """Resolve ``cwd`` to an absolute path for gating/fingerprinting.
+
+    A relative ``cwd`` (e.g. from a tool's ``workdir`` argument) is joined
+    against ``ctx.workspace_dir``, not discarded — two calls that differ
+    only by which relative subdirectory they target must not collapse onto
+    the same resolved workspace, or they collapse onto the same
+    ``action_fingerprint`` too. That matters beyond logging: ``gate_execution``
+    consults the *previous* denial's fingerprint via ``post_denial_guard``
+    regardless of whether this new action even requires approval, so a
+    colliding fingerprint can auto-deny an unrelated request in a different
+    directory as a "repeated" one it never was.
+    """
     try:
         from agentos.tools.types import current_tool_context
 
@@ -268,10 +276,21 @@ def _resolve_workspace(runtime: SandboxRuntime, cwd: str | None) -> Path:
     except Exception:  # pragma: no cover - defensive
         ctx = None
     workspace_dir = getattr(ctx, "workspace_dir", None) if ctx is not None else None
+    base: Path | None = None
     if isinstance(workspace_dir, str) and workspace_dir:
         wp = Path(workspace_dir)
         if wp.is_absolute():
-            return wp
+            base = wp
+
+    if cwd:
+        p = Path(cwd)
+        if p.is_absolute():
+            return p
+        if base is not None:
+            return (base / p).resolve()
+
+    if base is not None:
+        return base
     if runtime.workspace.is_absolute():
         return runtime.workspace
     return Path.cwd()
