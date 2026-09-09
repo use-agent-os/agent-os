@@ -1243,6 +1243,31 @@ class TelegramChannel:
         )
 
     async def send(self, message: OutgoingMessage) -> dict[str, Any]:
+        segments = self._segments_for_send(message.content)
+        if len(segments) <= 1:
+            return await self._send_one(message)
+        result: dict[str, Any] = {}
+        for segment in segments:
+            result = await self._send_one(message.model_copy(update={"content": segment}))
+        return result
+
+    def _segments_for_send(self, content: str) -> list[str]:
+        """Split *content* into pieces that each fit one ``sendMessage`` payload.
+
+        Mirrors ``send_streaming``'s ``_post_segments`` loop: the cut point comes
+        from ``_split_for_limit`` so every chunk's rendered HTML stays within
+        ``_MESSAGE_TEXT_LIMIT``. Without this, a final-only reply longer than the
+        cap was posted in one call and the overflow was lost (#1544).
+        """
+        segments: list[str] = []
+        remaining = content
+        while remaining:
+            head, tail = self._split_for_limit(remaining)
+            segments.append(head)
+            remaining = tail
+        return segments
+
+    async def _send_one(self, message: OutgoingMessage) -> dict[str, Any]:
         payload = self._build_send_payload(message)
         try:
             result = await self._api("sendMessage", payload)

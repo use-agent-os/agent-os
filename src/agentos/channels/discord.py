@@ -1101,6 +1101,29 @@ class DiscordChannel:
                     kwargs[key] = value
         return kwargs
 
+    MESSAGE_TEXT_LIMIT: ClassVar[int] = 2_000
+
+    def _segments_for_send(self, content: str) -> list[str]:
+        """Split *content* into pieces that each fit one Discord message.
+
+        Discord rejects ``content`` longer than 2,000 characters, which made
+        any long final-only reply fail outright instead of delivering in
+        parts (#1544). Split on a line boundary near the cap so chunks stay
+        readable, falling back to a hard cut when a segment has no newline.
+        """
+        if len(content) <= self.MESSAGE_TEXT_LIMIT:
+            return [content]
+        segments: list[str] = []
+        remaining = content
+        while remaining:
+            cut = min(self.MESSAGE_TEXT_LIMIT, len(remaining))
+            boundary = remaining.rfind("\n", self.MESSAGE_TEXT_LIMIT // 2, cut)
+            if boundary != -1:
+                cut = boundary + 1
+            segments.append(remaining[:cut])
+            remaining = remaining[cut:]
+        return segments
+
     async def send(self, message: OutgoingMessage) -> ChannelSendResult:
         await self._rate_limiter.acquire()
         client = self._get_client()
@@ -1152,21 +1175,29 @@ class DiscordChannel:
                 provider_message_id=message_id,
             )
 
-        resp = await retry_request(
-            client.post,
-            f"/channels/{channel_id}/messages",
-            json=payload,
-            headers=self._auth_headers(),
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        self._sent_messages[data["id"]] = channel_id
-        log.debug("discord.send", channel_id=channel_id, message_id=data.get("id"))
-        return ChannelSendResult.sent(
+        last_result = ChannelSendResult.failed(
             capability=ChannelCapabilities.GROUP_CHAT,
             target_id=channel_id,
-            provider_message_id=str(data.get("id", "")),
+            reason="discord.send produced no segments",
         )
+        for segment in self._segments_for_send(message.content):
+            payload["content"] = segment
+            resp = await retry_request(
+                client.post,
+                f"/channels/{channel_id}/messages",
+                json=payload,
+                headers=self._auth_headers(),
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            self._sent_messages[data["id"]] = channel_id
+            log.debug("discord.send", channel_id=channel_id, message_id=data.get("id"))
+            last_result = ChannelSendResult.sent(
+                capability=ChannelCapabilities.GROUP_CHAT,
+                target_id=channel_id,
+                provider_message_id=str(data.get("id", "")),
+            )
+        return last_result
 
     MAX_FILE_BYTES: ClassVar[int] = 10 * 1024 * 1024
 
