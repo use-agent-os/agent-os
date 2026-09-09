@@ -1282,21 +1282,22 @@ def _sandbox_request_for(
 
     Returns ``None`` when the sandbox runtime is not configured (tests that
     don't boot the gateway) so callers skip the §8.3/§8.5 hooks cleanly.
+
+    The only current caller is :func:`_record_shell_denial`, invoked right
+    after a human has rejected a warned command — so the request this builds
+    always describes an action that needed (and did not get) approval.
     """
     runtime = get_runtime()
     if runtime is None:
         return None
     action_kind = "shell.background" if tool_name == "background_process" else "shell.exec"
     ctx = current_tool_context.get()
-    workspace = None
-    if workdir:
-        p = Path(workdir)
-        if p.is_absolute():
-            workspace = p
-    if workspace is None and ctx is not None and ctx.workspace_dir:
-        wp = Path(ctx.workspace_dir)
-        if wp.is_absolute():
-            workspace = wp
+    # Reuse the same resolution _check_exec_approval already ran on this
+    # command's workdir, so a relative path (e.g. "subproject") lands in the
+    # ledger as the directory the command actually targeted, not silently
+    # dropped in favour of the workspace root.
+    resolved_workdir = _effective_workdir(workdir)
+    workspace = Path(resolved_workdir) if resolved_workdir else None
     if workspace is None:
         workspace = runtime.workspace if runtime.workspace.is_absolute() else Path.cwd()
 
@@ -1305,7 +1306,10 @@ def _sandbox_request_for(
         if runtime.effective.grading_enabled
         else runtime.effective.default_level
     )
-    policy = build_policy(level, action_kind, workspace, runtime.settings, trusted=True)
+    # trusted=False: this function only ever records a command a human just
+    # denied, so the ledger must reflect that approval was required — not
+    # claim (as `trusted=True` would) that the action needed none.
+    policy = build_policy(level, action_kind, workspace, runtime.settings, trusted=False)
     request = build_request(
         action_kind=action_kind,
         argv=(tool_name, command),

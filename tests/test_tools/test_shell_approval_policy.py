@@ -8,8 +8,10 @@ import pytest
 
 from agentos.gateway.approval_queue import get_approval_queue, reset_approval_queue
 from agentos.sandbox.config import SandboxSettings
+from agentos.sandbox.governance import action_fingerprint
 from agentos.sandbox.integration import configure_runtime, reset_runtime
 from agentos.sandbox.intent_cache import get_intent_cache, reset_intent_cache
+from agentos.sandbox.types import SecurityLevel
 from agentos.tools.builtin import code_exec, filesystem, shell
 from agentos.tools.builtin.code_exec import execute_code
 from agentos.tools.builtin.shell_policy import PolicyResult
@@ -881,3 +883,81 @@ async def test_root_wipe_is_hard_blocked_at_the_exec_approval_boundary() -> None
         assert result["status"] == "blocked"
         assert result["reason"] == "sensitive_path"
         assert result["sensitive_path"] == "/"
+
+
+# ─── Issues #1510 / #1511: `_sandbox_request_for` denial-ledger accuracy ──
+#
+# `_sandbox_request_for` is only ever called by `_record_shell_denial`, right
+# after a human has rejected a warned command, to build the request that gets
+# fingerprinted into the sandbox denial ledger (§8.3/§8.5).
+
+
+def test_sandbox_request_for_resolves_relative_workdir_against_ctx_workspace(
+    tmp_path: Path,
+) -> None:
+    ctx = current_tool_context.get()
+    assert ctx is not None
+    ctx.workspace_dir = str(tmp_path)
+    configure_runtime(
+        SandboxSettings(
+            sandbox=True, security_grading=False, backend="noop", allow_legacy_mode=True
+        ),
+        workspace=tmp_path,
+    )
+
+    built = shell._sandbox_request_for("exec_command", "rm -rf build", "subproject")
+    assert built is not None
+    request, _, _ = built
+    assert request.cwd == (tmp_path / "subproject").resolve()
+
+
+def test_sandbox_request_for_distinguishes_denials_in_different_relative_workdirs(
+    tmp_path: Path,
+) -> None:
+    """Regression for #1510: before the fix, every relative ``workdir`` was
+    silently dropped in favour of the workspace root, so denying the same
+    command from two different subdirectories fingerprinted identically and
+    collapsed into one counter in the §8.5 denial ledger."""
+    ctx = current_tool_context.get()
+    assert ctx is not None
+    ctx.workspace_dir = str(tmp_path)
+    configure_runtime(
+        SandboxSettings(
+            sandbox=True, security_grading=False, backend="noop", allow_legacy_mode=True
+        ),
+        workspace=tmp_path,
+    )
+
+    built_a = shell._sandbox_request_for("exec_command", "rm -rf build", "subproject")
+    built_b = shell._sandbox_request_for("exec_command", "rm -rf build", "other")
+    built_root = shell._sandbox_request_for("exec_command", "rm -rf build", None)
+    assert built_a is not None
+    assert built_b is not None
+    assert built_root is not None
+
+    fingerprint_a = action_fingerprint(built_a[0])
+    fingerprint_b = action_fingerprint(built_b[0])
+    fingerprint_root = action_fingerprint(built_root[0])
+    assert len({fingerprint_a, fingerprint_b, fingerprint_root}) == 3
+
+
+def test_sandbox_request_for_marks_denied_command_as_requiring_approval(
+    tmp_path: Path,
+) -> None:
+    """Regression for #1511: the request built for a just-denied command
+    hardcoded ``trusted=True``, so at ``SecurityLevel.STRICT`` the resulting
+    policy claimed ``require_approval=False`` — the opposite of what just
+    happened."""
+    configure_runtime(
+        SandboxSettings(
+            sandbox=False,
+            security_grading=False,
+            default_level=SecurityLevel.STRICT,
+        ),
+        workspace=tmp_path,
+    )
+
+    built = shell._sandbox_request_for("exec_command", "rm -rf build", None)
+    assert built is not None
+    _, policy, _ = built
+    assert policy.require_approval is True
