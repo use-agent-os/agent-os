@@ -12,7 +12,11 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.application.intent_cache import IntentApprovalCache, _extract_intents
+from agentos.application.intent_cache import (
+    IntentApprovalCache,
+    _extract_intents,
+    _norm_path,
+)
 
 
 class TestCompoundCommandSeparatorBypass:
@@ -330,3 +334,104 @@ class TestDocumentedAsymmetries:
         cache.record("rm /tmp/d")
         assert cache.check("rm -d /tmp/d") is True
         assert cache.check('os.rmdir("/tmp/d")') is True
+
+
+class TestNonRmDeleteVerbs:
+    """Issue #1015: every deletion verb must reach the hard block, not just ``rm``.
+
+    ``_extract_intents`` feeds ``sensitive_target_in_command``, which is the
+    last line of defence before a shell command runs (ordinary approval cannot
+    override it). A verb it does not recognise is a silent bypass.
+    """
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "rmdir /s /q /",
+            "rd /s /q /",
+            "del /f /q /",
+            "erase /f /q /",
+            "unlink /",
+            "Remove-Item -Recurse -Force /",
+            "RMDIR /S /Q /",
+            "remove-item -recurse -force /",
+            "del/f /q /",
+        ],
+        ids=lambda c: c.replace(" ", "_"),
+    )
+    def test_root_target_is_extracted(self, command: str) -> None:
+        assert [target for _kind, target in _extract_intents(command)] == [_norm_path("/")]
+
+    @pytest.mark.parametrize(
+        ("command", "kind"),
+        [
+            ("rmdir /s /q /tmp/x", "delete:recursive"),
+            ("rmdir /q /tmp/x", "delete"),
+            ("rmdir -p /tmp/a/b", "delete:recursive+parents"),
+            ("del /f /tmp/x", "delete:force"),
+            ("del /s /tmp/x", "delete:recursive"),
+            ("Remove-Item -Force /tmp/x", "delete:force"),
+            ("Remove-Item -Recurse /tmp/x", "delete:recursive"),
+            ("Remove-Item -Path /tmp/x -Recurse", "delete:recursive"),
+            ("unlink /tmp/x", "delete"),
+        ],
+    )
+    def test_capability_grading_per_dialect(self, command: str, kind: str) -> None:
+        assert [k for k, _target in _extract_intents(command)] == [kind]
+
+    def test_force_approval_does_not_cover_recursive(self) -> None:
+        """``-Force`` must not grade as ``recursive``.
+
+        Reading the ``r`` out of ``-Force`` with a character scan grades a
+        forced delete as a recursive one, so approving ``-Force`` would
+        silently authorise ``-Recurse``.
+        """
+        cache = IntentApprovalCache()
+        cache.record("Remove-Item -Force /tmp/x")
+        assert cache.check("Remove-Item -Force /tmp/x") is True
+        assert cache.check("Remove-Item -Recurse /tmp/x") is False
+
+    def test_plain_windows_delete_does_not_cover_recursive(self) -> None:
+        """Approving ``rmdir /q X`` must not authorise ``rmdir /s /q X``."""
+        cache = IntentApprovalCache()
+        cache.record("rmdir /q /tmp/x")
+        assert cache.check("rmdir /s /q /tmp/x") is False
+
+    def test_cmd_switches_are_not_targets(self) -> None:
+        """``/s`` and ``/q`` are switches, not paths to delete."""
+        assert [t for _k, t in _extract_intents("rmdir /s /q /tmp/x")] == [_norm_path("/tmp/x")]
+
+    def test_posix_rmdir_target_survives(self) -> None:
+        """A POSIX ``rmdir`` with no switches keeps its path."""
+        assert [t for _k, t in _extract_intents("rmdir /tmp/empty")] == [_norm_path("/tmp/empty")]
+
+
+class TestDeleteVerbFalsePositives:
+    """Verbs must not fire on look-alikes that delete nothing."""
+
+    @pytest.mark.parametrize(
+        "command",
+        ["docker run --rm image", "echo delete", "cat notes.rd"],
+    )
+    def test_no_intent_extracted(self, command: str) -> None:
+        assert _extract_intents(command) == []
+
+    def test_verb_as_an_argument_still_over_detects(self) -> None:
+        """A verb passed as data is still read as a delete, and that is deliberate.
+
+        This detector feeds a security hard block, so it fails closed: matching
+        a verb anywhere is what keeps ``find . -exec rm -rf / {} +`` and
+        ``xargs rm -rf /`` caught. ``main`` already behaves this way for ``rm``
+        (``grep -r rm src``); the added verbs inherit the same trade-off, whose
+        usability side is tracked in #1349. Over-detection costs one approval
+        prompt, under-detection costs the host.
+        """
+        assert [k for k, _t in _extract_intents("grep -r rmdir src")] == ["delete"]
+
+    @pytest.mark.parametrize(
+        "command",
+        ['os.rmdir("/tmp/d")', 'Path("/tmp/x").unlink()', 'os.unlink("/tmp/x")'],
+    )
+    def test_python_spellings_stay_plain_deletes(self, command: str) -> None:
+        """The Python patterns own these; the shell verbs must not double-match."""
+        assert [k for k, _t in _extract_intents(command)] == ["delete"]

@@ -93,10 +93,15 @@ capabilities are independent — they are not a single ladder:
 
 | Capability | Meaning | Granted by |
 |---|---|---|
-| *(none)* | delete this one path | `rm X`, `os.remove`, `os.unlink`, `os.rmdir`, `Path(X).unlink()`, `Path(X).rmdir()` |
-| `recursive` | delete the whole tree below it | `rm -r`/`-R`/`--recursive`, `shutil.rmtree(X)` |
-| `parents` | may also delete empty *ancestors* | `os.removedirs(X)` |
-| `force` | `rm`'s `-f`/`--force` | `rm -f`/`--force` |
+| *(none)* | delete this one path | `rm X`, `unlink X`, `rmdir X`, `del X`, `erase X`, `Remove-Item X`, `os.remove`, `os.unlink`, `os.rmdir`, `Path(X).unlink()`, `Path(X).rmdir()` |
+| `recursive` | delete the whole tree below it | `rm -r`/`-R`/`--recursive`, cmd.exe `/s`, PowerShell `-Recurse`, `shutil.rmtree(X)` |
+| `parents` | may also delete empty *ancestors* | `os.removedirs(X)`, `rmdir -p`/`--parents` |
+| `force` | ignore missing files and read-only flags | `rm -f`/`--force`, cmd.exe `/f`, PowerShell `-Force` |
+
+The same verb is graded in whichever dialect it is written: `rmdir /s /q X` is a
+Windows recursive delete, while `rmdir -p X` is the POSIX ancestor-pruning one.
+Switches never count as targets, so `rmdir /s /q /` is a recursive delete of `/`
+and not of three paths named `/s`, `/q` and `/`.
 
 So a `delete:recursive` approval covers a plain `rm X`, but a `delete:force`
 approval does **not** cover `shutil.rmtree(X)` — `force` says nothing about
