@@ -524,6 +524,66 @@ def test_shell_write_targets_ignores_words_ending_in_tee(command: str) -> None:
     assert shell._shell_write_targets(command) == []
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo ok > "path with spaces.txt"',
+        "echo ok > 'path with spaces.txt'",
+        'echo ok >> "path with spaces.txt"',
+        'echo ok 2> "path with spaces.txt"',
+        'cat<in>"path with spaces.txt"',
+        'echo ok | tee "path with spaces.txt"',
+        "echo ok | tee 'path with spaces.txt'",
+        'echo ok|tee -a "path with spaces.txt"',
+        'echo ok | tee --append "path with spaces.txt"',
+    ],
+)
+def test_shell_write_targets_detects_quoted_targets_with_spaces(command: str) -> None:
+    assert "path with spaces.txt" in shell._shell_write_targets(command)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "template",
+    [
+        'echo ok > "{target}"',
+        "echo ok > '{target}'",
+        'echo ok >> "{target}"',
+        'echo ok|tee "{target}"',
+        "echo ok | tee '{target}'",
+    ],
+)
+async def test_workspace_lockdown_blocks_quoted_targets_with_spaces(
+    tmp_path: Path,
+    template: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside_dir = tmp_path / "outside dir"
+    outside_dir.mkdir()
+    outside = outside_dir / "target with spaces.txt"
+    ctx = current_tool_context.get()
+    assert ctx is not None
+    ctx.interaction_mode = InteractionMode.UNATTENDED
+    ctx.elevated = "bypass"
+    ctx.workspace_dir = str(workspace)
+    ctx.workspace_lockdown = True  # type: ignore[attr-defined]
+
+    result = await shell._check_exec_approval(
+        "exec_command",
+        template.format(target=outside),
+        str(workspace),
+        "command requires approval",
+        None,
+        False,
+    )
+
+    assert result is not None
+    assert result["status"] == "blocked"
+    assert result["reason"] == "workspace_lockdown"
+    assert result["resolved_path"] == str(outside)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "template",

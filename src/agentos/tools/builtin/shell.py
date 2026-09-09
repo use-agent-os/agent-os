@@ -339,7 +339,9 @@ _FD_DUP_PATTERN = re.compile(r"\d*>&\s*(?:\d+-?|-)(?=$|[\s|&;<>)])")
 # ``n>>``, ``&>``, ``&>>``, ``>&file`` and the noclobber override ``>|``. The
 # operator is deliberately *not* anchored to a word boundary — ``echo x>file`` is
 # valid shell and must be caught just like ``echo x > file``.
-_REDIRECTION_PATTERN = re.compile(r"(?:&>{1,2}|\d*>{1,2}&?)\|?\s*(['\"]?)([^'\"\s|&;<>()]+)\1")
+_REDIRECTION_PATTERN = re.compile(
+    r"(?:&>{1,2}|\d*>{1,2}&?)\|?\s*(?:(['\"])(.*?)\1|([^'\"|&;<>()\r\n]+))"
+)
 
 # ``tee`` is the other write primitive this parser covers, and it needs the same
 # treatment as the redirection operators: ``echo x|tee /etc/passwd`` is valid
@@ -349,14 +351,36 @@ _REDIRECTION_PATTERN = re.compile(r"(?:&>{1,2}|\d*>{1,2}&?)\|?\s*(['\"]?)([^'\"\
 # (``--append``) or long with a value (``--output-error=warn``); all of them are
 # skipped so the first non-option word is the real target.
 _TEE_PATTERN = re.compile(
-    r"(?<![\w-])tee(?:\s+-{1,2}[A-Za-z][\w-]*(?:=[^\s|&;]+)?)*\s+(['\"]?)([^'\"\s|&;]+)\1"
+    r"(?<![\w-])tee(?:\s+-{1,2}[A-Za-z][\w-]*(?:=[^\s|&;]+)?)*\s+(?:(['\"])(.*?)\1|([^'\"|&;<>()\r\n]+))"
 )
+
+
+def _clean_shell_write_target(match: re.Match[str]) -> str:
+    if match.group(2) is not None:
+        return match.group(2).strip()
+    unquoted = (match.group(3) or "").strip()
+    words = unquoted.split()
+    if len(words) <= 1:
+        return unquoted
+    for count in range(len(words), 0, -1):
+        candidate = " ".join(words[:count])
+        try:
+            p = Path(candidate).expanduser()
+            if p.is_absolute() and (
+                p.exists() or p.parent.exists() or any(parent.exists() for parent in p.parents)
+            ):
+                return candidate
+        except (OSError, ValueError):
+            pass
+    return words[0]
 
 
 def _shell_write_targets(command: str) -> list[str]:
     scanned = _FD_DUP_PATTERN.sub(" ", command)
-    targets: list[str] = [match.group(2) for match in _REDIRECTION_PATTERN.finditer(scanned)]
-    targets.extend(match.group(2) for match in _TEE_PATTERN.finditer(scanned))
+    targets: list[str] = [
+        _clean_shell_write_target(match) for match in _REDIRECTION_PATTERN.finditer(scanned)
+    ]
+    targets.extend(_clean_shell_write_target(match) for match in _TEE_PATTERN.finditer(scanned))
     return targets
 
 
