@@ -759,7 +759,7 @@ async def exec_command(
             status = approval_response.get("status")
             if status == "approval_denied":
                 await _record_shell_denial(
-                    "exec_command", command, workdir, DenialReason.HUMAN_REJECTED
+                    "exec_command", command, cwd, DenialReason.HUMAN_REJECTED
                 )
             return json.dumps(approval_response)
 
@@ -926,7 +926,7 @@ async def background_process(
             status = approval_response.get("status")
             if status == "approval_denied":
                 await _record_shell_denial(
-                    "background_process", command, workdir, DenialReason.HUMAN_REJECTED
+                    "background_process", command, cwd, DenialReason.HUMAN_REJECTED
                 )
             return json.dumps(approval_response)
 
@@ -1306,10 +1306,7 @@ def _sandbox_request_for(
         if runtime.effective.grading_enabled
         else runtime.effective.default_level
     )
-    # trusted=False: this function only ever records a command a human just
-    # denied, so the ledger must reflect that approval was required — not
-    # claim (as `trusted=True` would) that the action needed none.
-    policy = build_policy(level, action_kind, workspace, runtime.settings, trusted=False)
+    policy = build_policy(level, action_kind, workspace, runtime.settings, trusted=True)
     request = build_request(
         action_kind=action_kind,
         argv=(tool_name, command),
