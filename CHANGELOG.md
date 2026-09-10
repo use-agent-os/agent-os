@@ -825,6 +825,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   the expensive work was already done, losing the result. Each now calls
   `mkdir(parents=True, exist_ok=True)` on the parent before writing
   ([#1055](https://github.com/use-agent-os/agent-os/issues/1055)).
+- Twenty per-session registries are bounded behind one shared primitive
+  instead of growing for the life of the gateway process. Each was a bare
+  `dict` keyed by a session id (or a tuple containing one) with no `pop()` on
+  session end and no ceiling, so a gateway serving many short sessions retained
+  one entry per session per registry — task-runtime locks, stream replay
+  buffers and sequence counters, background shell sessions, stale-output and
+  intent-approval caches, archived subagent handles, memory and bootstrap
+  snapshots, approval elevations, usage scopes and metadata, plan-mode flags,
+  the denial ledger, repeat-call watchdog state, and cache-break baselines.
+  Fifteen separate reports had produced twenty competing patches, each with its
+  own eviction policy; `agentos.util.BoundedRegistry` replaces them with one
+  rule in two configurations — session-scoped state dropped on the session's
+  terminal event with an LRU ceiling as the backstop, and time-scoped caches
+  with TTL plus a ceiling. `evict_session_runtime_state()`, the choke point
+  every deletion and terminal path already runs, now sweeps every registry that
+  can identify a session, so the bound really is the backstop rather than the
+  mechanism. A value the site declares busy — a held `asyncio.Lock` — is never
+  evicted. Both ceilings and the cache TTL are config keys
+  (`registry_session_max_entries`, `registry_cache_max_entries`,
+  `registry_cache_ttl_seconds`)
+  ([#1131](https://github.com/use-agent-os/agent-os/issues/1131)).
+- `BoundedRegistry`'s TTL sweep honours the eviction veto, so a still-running
+  background process is never dropped from its registry. `_expire()` was the
+  one eviction path that did not consult `_is_evictable` — `_enforce_ceiling`,
+  `discard_session` and `discard_where` all did — so `shell._bg_sessions`, a
+  cache-shaped registry whose veto protects a running process, lost the entry
+  900 s after spawn while the OS process kept running: `process poll`, `log`,
+  `kill` and `list` all reported the session gone, and its cleanup callbacks
+  never fired. A memory-leak fix that orphans processes is a worse trade than
+  the leak. The sweep now skips a vetoed entry and expires it once the site
+  releases it
+  ([#1131](https://github.com/use-agent-os/agent-os/issues/1131)).
 
 ## [2026.9.6] - 2026-09-06
 

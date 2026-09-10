@@ -31,7 +31,7 @@ import asyncio
 import json
 import re
 import uuid
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -141,6 +141,12 @@ class HeartbeatLoopOverrides:
         )
 
 
+# Ceiling on events buffered for one priority band between ticks. Only the
+# oldest event's timestamp and the count matter to `poll()`, so a band that has
+# gone this long without ticking loses nothing a tick would have used.
+MAX_BUFFERED_EVENTS_PER_BAND = 10_000
+
+
 class HeartbeatRunner:
     """Poll-driven coalescing runner.
 
@@ -152,7 +158,14 @@ class HeartbeatRunner:
 
     def __init__(self, config: HeartbeatConfig | None = None) -> None:
         self._config = config or HeartbeatConfig()
-        self._buffers: dict[str, list[HeartbeatEvent]] = defaultdict(list)
+        # Keyed by priority band, so the *key* set is already small — the
+        # growth is inside the value: a runner that never ticks (outside active
+        # hours, or a band permanently inside its cooldown) buffers events
+        # forever. A bounded deque drops the oldest, which at that point has
+        # already lost its coalescing meaning.
+        self._buffers: defaultdict[str, deque[HeartbeatEvent]] = defaultdict(
+            lambda: deque(maxlen=MAX_BUFFERED_EVENTS_PER_BAND)
+        )
         self._last_tick: dict[str, datetime] = {}
 
     @property
@@ -198,7 +211,7 @@ class HeartbeatRunner:
             )
             emitted.append(tick)
             self._last_tick[band] = moment
-            self._buffers[band] = []
+            events.clear()
 
         return emitted
 

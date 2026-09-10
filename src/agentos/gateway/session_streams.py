@@ -6,6 +6,8 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
+from agentos.util.bounded_registry import BoundedRegistry
+
 
 @dataclass(frozen=True)
 class BufferedSessionEvent:
@@ -31,8 +33,19 @@ class SessionStreamRegistry:
 
     def __init__(self, *, max_events_per_session: int = 500) -> None:
         self._max_events_per_session = max_events_per_session
-        self._seq_by_session: dict[str, int] = {}
-        self._events_by_session: dict[str, deque[BufferedSessionEvent]] = {}
+        # Both are session-scoped: a gateway that serves many short sessions
+        # would otherwise keep one counter and one replay buffer per session
+        # for the life of the process.
+        self._seq_by_session: BoundedRegistry[str, int] = BoundedRegistry(
+            name="SessionStreamRegistry._seq_by_session",
+            session_of=lambda key, _value: key,
+        )
+        self._events_by_session: BoundedRegistry[str, deque[BufferedSessionEvent]] = (
+            BoundedRegistry(
+                name="SessionStreamRegistry._events_by_session",
+                session_of=lambda key, _value: key,
+            )
+        )
 
     @staticmethod
     def _is_replay_lossy(event_name: str) -> bool:

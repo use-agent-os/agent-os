@@ -481,6 +481,25 @@ agentos config get llm.provider
 agentos config set port 18791
 ```
 
+A long-lived gateway keeps per-session state in memory — stream replay
+buffers, usage scopes, plan-mode flags, approval elevations. Every one of
+those sits behind a shared bounded registry whose ceilings are config keys:
+
+```sh
+agentos config set registry_session_max_entries 512
+agentos config set registry_cache_max_entries 512
+agentos config set registry_cache_ttl_seconds 900
+```
+
+`registry_session_max_entries` bounds session-scoped state,
+`registry_cache_max_entries` and `registry_cache_ttl_seconds` bound the
+time-scoped caches.
+
+Session state is normally dropped the moment a session is deleted, aborted or
+completed; the ceiling is the backstop for sessions that never emit a terminal
+event. Raise `registry_session_max_entries` on a gateway that runs many
+simultaneous sessions.
+
 For Ollama models that do not reliably support native tool calls, set
 `tools.enabled = false` in the config file to run in plain-text mode. Keep it
 enabled for tool-capable cloud models such as `glm-5.2:cloud`; the Ollama

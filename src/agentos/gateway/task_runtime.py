@@ -38,6 +38,7 @@ from agentos.session.terminal_reply import (
     is_context_payload_too_large,
     sanitize_agent_error,
 )
+from agentos.util.bounded_registry import BoundedRegistry
 
 log = structlog.get_logger(__name__)
 
@@ -331,11 +332,21 @@ class TaskRuntime:
         # Per-session write locks shared with TurnRunner and RPC ingress on
         # gateway-dispatched turns. These guard short transcript/session state
         # mutations only.
-        self._session_locks: dict[str, asyncio.Lock] = {}
+        # Bounded: a lock that is currently held is never evicted, so the
+        # ceiling can only reclaim sessions that are genuinely idle.
+        self._session_locks: BoundedRegistry[str, asyncio.Lock] = BoundedRegistry(
+            name="TaskRuntime._session_locks",
+            session_of=lambda key, _value: key,
+            evictable=lambda lock: not lock.locked(),
+        )
         # Per-session execution locks serialize whole turn lifecycles without
         # blocking transcript writes, browser queue acknowledgements, or approval
         # status updates behind external I/O.
-        self._session_execution_locks: dict[str, asyncio.Lock] = {}
+        self._session_execution_locks: BoundedRegistry[str, asyncio.Lock] = BoundedRegistry(
+            name="TaskRuntime._session_execution_locks",
+            session_of=lambda key, _value: key,
+            evictable=lambda lock: not lock.locked(),
+        )
         self._tasks: dict[str, _RuntimeTask] = {}
         self._pending_by_session: dict[str, list[_RuntimeTask]] = {}
         self._running_by_session: dict[str, _RuntimeTask] = {}
@@ -1078,7 +1089,8 @@ class TaskRuntime:
         shared provider this is the only per-session lock; TurnRunner no
         longer owns an internal ``_session_locks`` dict.
 
-        ``setdefault`` is atomic in CPython — avoids TOCTOU race on insertion.
+        ``setdefault`` is atomic — ``BoundedRegistry`` holds its own lock for
+        the read-and-insert, so there is no TOCTOU race on insertion.
         """
         return self._session_locks.setdefault(session_key, asyncio.Lock())
 

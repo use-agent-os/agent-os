@@ -15,6 +15,7 @@ from typing import Any
 import structlog
 
 from agentos.session.keys import normalize_agent_id
+from agentos.util.bounded_registry import BoundedRegistry
 
 from .pricing import calculate_cost_usd, lookup_price
 
@@ -429,11 +430,17 @@ class UsageTracker:
         """
         global _global_usage_tracker
         self._sessions: dict[str, SessionUsage] = {}
-        self._scopes: dict[tuple[str, str], SessionUsage] = {}
+        self._scopes: BoundedRegistry[tuple[str, str], SessionUsage] = BoundedRegistry(
+            name="UsageTracker._scopes",
+            session_of=lambda key, _value: key[0],
+        )
         self._default_provider_id = str(default_provider_id or "").strip().lower()
         self._db_path = db_path
         self._ledger_db_path = ledger_db_path
-        self._session_metadata: dict[str, tuple[str, str]] = {}
+        self._session_metadata: BoundedRegistry[str, tuple[str, str]] = BoundedRegistry(
+            name="UsageTracker._session_metadata",
+            session_of=lambda key, _value: key,
+        )
         self._warned_keys: set[str] = set()
         # In-process mirror of the persisted ledger. Reads take the larger of
         # the two: a dropped write (sqlite busy, disk full) must not be able to

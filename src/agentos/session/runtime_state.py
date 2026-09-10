@@ -21,7 +21,13 @@ log = structlog.get_logger(__name__)
 
 
 def evict_session_runtime_state(session_key: str) -> None:
-    """Drop in-memory subagent, routing, and spawn-lock bookkeeping.
+    """Drop in-memory per-session bookkeeping: every ``BoundedRegistry`` that
+    knows how to identify a session, plus subagent, routing, and spawn-lock
+    state.
+
+    This is the single terminal-event hook the bounded registries rely on: the
+    size ceiling is the backstop for a session that never reaches here, not the
+    mechanism.
 
     Idempotent and never raises: it runs on both the terminal path
     (``SessionManager.finish``) and every deletion path, and a missing or
@@ -29,6 +35,12 @@ def evict_session_runtime_state(session_key: str) -> None:
     that fails to import (partial install, trimmed distribution) must not
     block the deletion it is attached to.
     """
+    try:
+        from agentos.util.bounded_registry import drop_session_state
+
+        drop_session_state(session_key)
+    except Exception:
+        log.debug("session.runtime_state.bounded_registry_evict_failed", session_key=session_key)
     try:
         from agentos.gateway.subagent_announce import _tracker as _spawn_tracker
 

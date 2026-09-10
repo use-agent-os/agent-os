@@ -25,6 +25,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from agentos.util.bounded_registry import BoundedRegistry
+
 EXIT_PLAN_TOOL_NAME = "exit_plan_mode"
 
 # Status stamped on a successful exit_plan_mode payload. The dispatch
@@ -87,14 +89,25 @@ class PlanModeState:
 
 
 class PlanModeStore:
-    """In-memory per-session plan-mode flags. No TTL by design: a mode that
-    silently expires mid-plan hands write tools back without the user's
-    say-so, which is the worst possible failure for this feature. Only an
-    explicit disable (approval, ``/plan off``) or a gateway restart clears it.
+    """In-memory per-session plan-mode flags.
+
+    No TTL by design: a mode that silently expires mid-plan hands write tools
+    back without the user's say-so, which is the worst possible failure for
+    this feature. An explicit disable (approval, ``/plan off``), the session's
+    terminal event, or a gateway restart clears it.
+
+    The size ceiling is a backstop for sessions that never emit a terminal
+    event, and it evicts least-recently-used: reaching it means more
+    simultaneous plan-mode sessions than the configured ceiling, at which point
+    the oldest untouched one loses the flag. Raise ``registry_session_max_entries``
+    rather than accepting that on a busy gateway.
     """
 
     def __init__(self) -> None:
-        self._sessions: dict[str, PlanModeState] = {}
+        self._sessions: BoundedRegistry[str, PlanModeState] = BoundedRegistry(
+            name="PlanModeStore._sessions",
+            session_of=lambda key, _value: key,
+        )
 
     def enable(self, session_key: str) -> None:
         key = (session_key or "").strip()

@@ -46,6 +46,7 @@ from agentos.sandbox.types import (
     SecurityLevel,
     SuggestedNextStep,
 )
+from agentos.util.bounded_registry import BoundedRegistry
 
 log = logging.getLogger(__name__)
 
@@ -132,7 +133,10 @@ class DenialLedger:
         if threshold < 1:
             raise ValueError(f"threshold must be >= 1, got {threshold}")
         self._threshold = threshold
-        self._sessions: dict[str, _SessionState] = {}
+        self._sessions: BoundedRegistry[str, _SessionState] = BoundedRegistry(
+            name="DenialLedger._sessions",
+            session_of=lambda key, _value: key,
+        )
         self._cache = (
             stale_output_cache if stale_output_cache is not None else get_stale_output_cache()
         )

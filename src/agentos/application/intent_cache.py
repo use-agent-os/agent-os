@@ -30,6 +30,8 @@ import threading
 import time
 from pathlib import Path
 
+from agentos.util.bounded_registry import BoundedRegistry
+
 _DEFAULT_TTL_SECONDS = 30 * 60
 _ALWAYS_TTL_SECONDS = 365 * 24 * 3600  # effectively never expires within a session
 
@@ -395,7 +397,11 @@ class IntentApprovalCache:
     def __init__(self, default_ttl: float = _DEFAULT_TTL_SECONDS) -> None:
         self._default_ttl = default_ttl
         # intent -> (expires_monotonic, scope)
-        self._entries: dict[tuple[str, str], tuple[float, str]] = {}
+        # Keys are (kind, target), not sessions; the TTL already lives in
+        # the value, so this only adds the missing size ceiling.
+        self._entries: BoundedRegistry[tuple[str, str], tuple[float, str]] = BoundedRegistry(
+            name="IntentApprovalCache._entries",
+        )
         self._lock = threading.Lock()
 
     def record(
@@ -475,9 +481,7 @@ class IntentApprovalCache:
     def clear_scope(self, scope: str) -> None:
         """Drop every entry whose scope matches, leaving other scopes intact."""
         with self._lock:
-            self._entries = {
-                intent: data for intent, data in self._entries.items() if data[1] != scope
-            }
+            self._entries.discard_where(lambda _intent, data: data[1] == scope)
 
 
 _cache: IntentApprovalCache | None = None

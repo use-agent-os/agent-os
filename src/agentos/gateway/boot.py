@@ -1884,6 +1884,18 @@ async def build_services(
     except Exception as e:
         log.warning("build_services.auxiliary_config_failed", error=str(e))
 
+    # ── Bounded registry ceilings ───────────────────────────────────
+    try:
+        from agentos.util.bounded_registry import configure_registry_limits
+
+        configure_registry_limits(
+            session_max_entries=config.registry_session_max_entries,
+            cache_max_entries=config.registry_cache_max_entries,
+            cache_ttl_seconds=config.registry_cache_ttl_seconds,
+        )
+    except Exception as e:
+        log.warning("build_services.registry_limits_failed", error=str(e))
+
     # ── Search provider (brave > duckduckgo fallback) ───────────────
     try:
         import agentos.search.providers.brave  # noqa: F401 — registers provider

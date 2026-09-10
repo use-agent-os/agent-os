@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import cast
 
 from agentos.paths import state_dir
+from agentos.util.bounded_registry import BoundedRegistry
 
 VALID_APPROVAL_MODES = frozenset({"auto-approve", "auto-deny", "prompt"})
 VALID_ELEVATED_MODES = frozenset({"on", "bypass", "full"})
@@ -52,8 +53,17 @@ class ApprovalQueue:
         self._timeout = default_timeout
         self._poll_interval = max(0.01, float(poll_interval))
         self._global_settings = ApprovalSettings()
-        self._node_settings: dict[str, ApprovalSettings] = {}
-        self._session_elevated_modes: dict[str, str] = {}
+        # Node ids are an operational set rather than a per-session one, so
+        # the ceiling is a backstop nothing reaches; eviction falls back to
+        # the global settings, which is the same answer an unconfigured
+        # node already gets.
+        self._node_settings: BoundedRegistry[str, ApprovalSettings] = BoundedRegistry(
+            name="ApprovalQueue._node_settings",
+        )
+        self._session_elevated_modes: BoundedRegistry[str, str] = BoundedRegistry(
+            name="ApprovalQueue._session_elevated_modes",
+            session_of=lambda key, _value: key,
+        )
 
         self._db_path = Path(db_path or os.fspath(_DEFAULT_APPROVAL_QUEUE_PATH))
         self._db_path.parent.mkdir(parents=True, exist_ok=True)

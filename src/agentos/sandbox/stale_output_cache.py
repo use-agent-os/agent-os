@@ -30,6 +30,8 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
+from agentos.util.bounded_registry import BoundedRegistry
+
 
 @dataclass
 class _CacheEntry:
@@ -49,7 +51,14 @@ class StaleOutputCache:
     """
 
     def __init__(self) -> None:
-        self._entries: dict[tuple[str, str], _CacheEntry] = {}
+        # Time-scoped: an entry is only useful for a window after it is
+        # written, and nothing guarantees a terminal event for every session
+        # that put one here.
+        self._entries: BoundedRegistry[tuple[str, str], _CacheEntry] = BoundedRegistry(
+            shape="cache",
+            name="StaleOutputCache._entries",
+            session_of=lambda key, _value: key[0],
+        )
         self._lock = asyncio.Lock()
 
     async def record_success(self, session_id: str, fingerprint: str, payload: Any) -> None:
@@ -86,10 +95,7 @@ class StaleOutputCache:
     async def clear_session(self, session_id: str) -> int:
         """Remove every entry for ``session_id``. Returns the count removed."""
         async with self._lock:
-            keys = [k for k in self._entries if k[0] == session_id]
-            for k in keys:
-                del self._entries[k]
-            return len(keys)
+            return self._entries.discard_session(session_id)
 
     def snapshot(self) -> list[dict[str, object]]:
         """Return a plain-data view of cached keys (debug/test helper).

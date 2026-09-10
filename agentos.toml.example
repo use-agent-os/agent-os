@@ -40,6 +40,18 @@
 # Env override: AGENTOS_WS_WRITER_QUEUE_MAXSIZE=512
 # ws_writer_queue_maxsize = 512
 
+# Bounded registries — how much per-session state one long-lived gateway
+# process retains in memory. Session-scoped state (stream replay buffers,
+# usage scopes, plan-mode flags, approval elevations) is normally dropped on
+# the session's terminal event; the ceiling is the backstop for sessions that
+# never emit one, and it evicts least-recently-used. Time-scoped caches
+# (background shell sessions, stale-output and repeat-call caches) also age
+# out on the TTL. Raise the session ceiling on a gateway that runs many
+# simultaneous sessions.
+# registry_session_max_entries = 512
+# registry_cache_max_entries = 512
+# registry_cache_ttl_seconds = 900
+
 # Gateway debug file logging. Raw prompt/tool call capture is separate from
 # debug.log and standard diagnostics; it is opt-in through
 # AGENTOS_TURN_CALL_LOG=1 or `agentos diagnostics on --raw`.

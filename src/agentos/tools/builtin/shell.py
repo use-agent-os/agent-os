@@ -51,6 +51,7 @@ from agentos.tools.types import (
     UnsupportedSurfaceError,
     current_tool_context,
 )
+from agentos.util.bounded_registry import BoundedRegistry
 
 log = structlog.get_logger(__name__)
 
@@ -89,8 +90,16 @@ PROCESS_ACTIONS: frozenset[str] = frozenset(
     {"eof", "kill", "list", "log", "poll", "remove", "submit", "write"}
 )
 
-# Background process session store
-_bg_sessions: dict[str, _BgSession] = {}
+# Background process session store. Time-scoped: a finished session is only
+# read back for a window after it ends, and a `process remove` is optional, so
+# without a ceiling one entry per background command survives for the life of
+# the process. A session whose process is still running is never evicted.
+_bg_sessions: BoundedRegistry[str, _BgSession] = BoundedRegistry(
+    shape="cache",
+    name="shell._bg_sessions",
+    session_of=lambda _key, session: session.session_key or "",
+    evictable=lambda session: session.done,
+)
 
 
 @dataclass
@@ -1227,7 +1236,7 @@ async def process(
     if action == "remove":
         if not session.done:
             raise ToolError(f"Cannot remove running session: {session.session_id}")
-        del _bg_sessions[session.session_id]
+        _bg_sessions.discard(session.session_id)
         return json.dumps({"status": "removed", "action": action, "session_id": session.session_id})
 
     if action in {"write", "submit"}:

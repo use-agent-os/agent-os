@@ -8,6 +8,16 @@ from pathlib import Path
 PACKAGE_ROOT = Path(__file__).resolve().parents[2] / "src" / "agentos"
 
 APPROVED_PACKAGE_IMPORTS: frozenset[tuple[str, str]] = frozenset({
+    # agentos.util holds dependency-free shared primitives (BoundedRegistry).
+    # It imports nothing from agentos, so these edges are leaves and cannot
+    # participate in a cycle.
+    ("application", "util"),
+    ("engine", "util"),
+    ("gateway", "util"),
+    ("plan_mode.py", "util"),
+    ("sandbox", "util"),
+    ("session", "util"),
+    ("tools", "util"),
     ("agents", "gateway"),
     ("agents", "identity"),
     ("agents", "onboarding"),

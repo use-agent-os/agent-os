@@ -2435,6 +2435,12 @@ class GatewayConfig(BaseSettings):
     search_fallback_policy: Literal["off", "network"] = "off"
     search_diagnostics: bool = False
 
+    # Bounded registries — ceilings for the per-session dicts a long-lived
+    # gateway keeps in memory. See agentos.util.bounded_registry.
+    registry_session_max_entries: int = Field(default=512, ge=1)
+    registry_cache_max_entries: int = Field(default=512, ge=1)
+    registry_cache_ttl_seconds: float = Field(default=900.0, gt=0)
+
     # State/config paths
     state_dir: str | None = Field(default_factory=lambda: str(default_agentos_home() / "state"))
     config_path: str | None = None
