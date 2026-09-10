@@ -107,6 +107,7 @@ class CompactionPersistPort(Protocol):
         summary: str,
         kept_entries: list[Any],
         compaction_id: str | None = None,
+        removed_count: int | None = None,
     ) -> None: ...
 
 
@@ -747,6 +748,7 @@ class _CompactionHandler:
                     summary=event.summary,
                     kept_entries=event.kept_entries,
                     compaction_id=event.compaction_id,
+                    removed_count=event.removed_count,
                 )
             except Exception as exc:  # noqa: BLE001 - preserve turn recoverability
                 log.warning("compaction_persist_failed", error=str(exc))

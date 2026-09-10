@@ -365,7 +365,7 @@ async def test_forked_compacted_archive_stays_out_of_provider_messages(
     await session_manager.persist_compaction_result(
         parent_key,
         "portable summary without archived row text",
-        [{"role": "assistant", "content": "active kept reply"}],
+        [{"role": "user", "content": "archive-only old message 3"}],
         compaction_id="cmp_provider_boundary",
     )
     await session_manager.branch(parent_key, child_key, fork_transcript=True)
@@ -376,10 +376,10 @@ async def test_forked_compacted_archive_stays_out_of_provider_messages(
         "archive-only old message 0",
         "archive-only old message 1",
         "archive-only old message 2",
-        "active kept reply",
+        "archive-only old message 3",
     ]
     assert [entry.content for entry in await session_manager.get_transcript(child_key)] == [
-        "active kept reply"
+        "archive-only old message 3"
     ]
 
     provider = _CapturingProvider()
@@ -410,9 +410,11 @@ async def test_forked_compacted_archive_stays_out_of_provider_messages(
         ],
         ensure_ascii=False,
     )
-    assert "active kept reply" in messages_payload
+    assert "archive-only old message 3" in messages_payload
     assert "portable summary without archived row text" in messages_payload
-    assert "archive-only old message" not in messages_payload
+    assert "archive-only old message 0" not in messages_payload
+    assert "archive-only old message 1" not in messages_payload
+    assert "archive-only old message 2" not in messages_payload
 
 
 @pytest.mark.asyncio

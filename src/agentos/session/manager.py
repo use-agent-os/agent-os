@@ -8,7 +8,7 @@ import json
 import os
 import re
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -166,6 +166,63 @@ def _transcript_preimage(entries: list[TranscriptEntry]) -> tuple[tuple[Any, ...
         )
         for entry in entries
     )
+
+
+def _compaction_entry_matches(raw: Mapping[str, Any], entry: TranscriptEntry) -> bool:
+    """Structural identity between an agent-side compaction payload and a DB row."""
+    return raw.get("role") == entry.role and (raw.get("content") or "") == (entry.content or "")
+
+
+def _locate_compaction_boundary(
+    entries: list[TranscriptEntry],
+    kept_entries: list[dict],
+    removed_count: int | None = None,
+) -> tuple[list[TranscriptEntry], list[TranscriptEntry], list[TranscriptEntry]] | None:
+    """Locate which persisted prefix a compaction result may replace.
+
+    The running agent compacted a snapshot of the transcript; by the time the
+    result is persisted the transcript may have grown (``sessions.send`` queues
+    the follow-up before the in-flight turn finishes). Replacing by tail length
+    would overwrite those newer entries, so the boundary is anchored instead:
+
+    1. Agent-reported ``removed_count`` — the preferred anchor: the kept window
+       is expected at ``entries[removed_count : removed_count + kept_count]``
+       and is accepted only when the rows there structurally match the kept
+       payloads. A kept tail that cannot be verified (rewritten synthetic
+       context, diverged transcript) never produces a boundary.
+    2. Content anchoring — otherwise the smallest window of ``entries`` whose
+       rows match ``kept_entries`` pairwise. The agent's kept payloads are
+       literal copies of history rows. Picking the first match means an
+       ambiguous (repeated-content) transcript can only over-keep entries,
+       never drop them.
+
+    Returns ``(removed_entries, snapshot_tail, preserved_entries)`` where
+    ``snapshot_tail`` is the matched window (for id/metadata reuse) and
+    ``preserved_entries`` are the newer entries that must survive verbatim.
+    ``None`` means no trustworthy boundary exists (reset or diverged
+    transcript) and the caller must skip persisting rather than overwrite.
+    """
+    kept_count = len(kept_entries)
+
+    def _window_matches(start: int) -> bool:
+        return all(
+            _compaction_entry_matches(kept_entries[index], entries[start + index])
+            for index in range(kept_count)
+        )
+
+    if removed_count is not None:
+        end = removed_count + kept_count
+        if 0 <= removed_count <= end <= len(entries) and _window_matches(removed_count):
+            return entries[:removed_count], entries[removed_count:end], entries[end:]
+    if kept_count:
+        for start in range(len(entries) - kept_count + 1):
+            if _window_matches(start):
+                return (
+                    entries[:start],
+                    entries[start : start + kept_count],
+                    entries[start + kept_count :],
+                )
+    return None
 
 
 class SessionManager:
@@ -1407,12 +1464,21 @@ class SessionManager:
         compaction_id: str | None = None,
         trigger_reason: str | None = None,
         flush_receipt_status: str | None = None,
+        removed_count: int | None = None,
     ) -> None:
         """Persist a pre-computed compaction result directly (no LLM re-compaction).
 
         Called by TurnRunner when Agent emits CompactionEvent. Writes the Agent's
         actual compaction output to DB, avoiding the double-compaction bug that
         would occur if we called compact() (which re-reads DB and re-runs LLM).
+
+        Re-entrant with concurrent sends: the DB transcript may have grown since
+        the agent loaded its history (``sessions.send`` queues a follow-up before
+        the in-flight turn persists). The rewrite boundary is therefore anchored
+        to the agent's snapshot (content match, else agent-reported
+        ``removed_count``) instead of the transcript tail; newer entries are
+        preserved verbatim. When no trustworthy boundary exists (reset or
+        diverged transcript) the result is skipped rather than overwriting.
         """
         session_key = canonicalize_session_key(session_key)
         import structlog as _structlog
@@ -1425,8 +1491,17 @@ class SessionManager:
             return
 
         entries = await self._storage.get_transcript(node.session_id)
-        removed_entries = entries[: max(0, len(entries) - len(kept_entries))]
-        preserved_entries = entries[len(removed_entries) :]
+        boundary = _locate_compaction_boundary(entries, kept_entries, removed_count)
+        if boundary is None:
+            _log.warning(
+                "persist_compaction.stale_transcript_skipped",
+                session_key=session_key,
+                transcript_len=len(entries),
+                kept=len(kept_entries),
+                reported_removed=removed_count,
+            )
+            return
+        removed_entries, snapshot_tail, preserved_entries = boundary
         if removed_entries and not summary:
             _log.warning(
                 "persist_compaction.empty_summary_not_persisted",
@@ -1476,8 +1551,8 @@ class SessionManager:
         # Insert kept entries, preserving original metadata where possible
         rewritten_entries: list[TranscriptEntry] = []
         for index, raw in enumerate(kept_entries):
-            if index < len(preserved_entries):
-                preserved = preserved_entries[index]
+            if index < len(snapshot_tail):
+                preserved = snapshot_tail[index]
                 if preserved.role == raw.get("role") and preserved.content == raw.get("content"):
                     rewritten_entries.append(preserved)
                     continue
@@ -1491,6 +1566,9 @@ class SessionManager:
                 turn_usage=raw.get("turn_usage"),
             )
             rewritten_entries.append(entry)
+        # Entries appended after the agent's snapshot (queued follow-ups) must
+        # survive the rewrite verbatim, with their identity and order intact.
+        rewritten_entries.extend(preserved_entries)
 
         node.compaction_count = (node.compaction_count or 0) + 1
         node.updated_at = _now_ms()

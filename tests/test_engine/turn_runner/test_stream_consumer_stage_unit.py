@@ -96,6 +96,7 @@ class _RecordingCompactionPersist:
         summary: str,
         kept_entries: list[Any],
         compaction_id: str | None = None,
+        removed_count: int | None = None,
     ) -> None:
         self.calls.append(
             {

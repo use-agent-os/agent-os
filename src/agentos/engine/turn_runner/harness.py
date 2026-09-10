@@ -727,6 +727,7 @@ class _TurnRunnerCompactionPersistAdapter(CompactionPersistPort):
         summary: str,
         kept_entries: list[Any],
         compaction_id: str | None = None,
+        removed_count: int | None = None,
     ) -> None:
         from agentos.engine.cache_break_monitor import notify_compaction
         from agentos.session.compaction_lifecycle import (
@@ -750,6 +751,10 @@ class _TurnRunnerCompactionPersistAdapter(CompactionPersistPort):
             p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
         ):
             persist_kwargs["trigger_reason"] = "agent_inline_overflow"
+        if "removed_count" in params or any(
+            p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+        ):
+            persist_kwargs["removed_count"] = removed_count
         async with self._runner._session_write_context(session_key):
             await persist_method(
                 session_key,

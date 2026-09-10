@@ -175,7 +175,7 @@ async def test_reset_same_key_archive_preserves_compacted_canonical_transcript(
     await manager.persist_compaction_result(
         "agent:main:main",
         "short summary",
-        [{"role": "assistant", "content": "latest reply"}],
+        [{"role": "user", "content": "msg 3"}],
         compaction_id="cmp_reset_archive",
     )
 
@@ -453,7 +453,7 @@ async def test_branch_fork_transcript_copies_compacted_archive(manager):
     await manager.persist_compaction_result(
         "agent:main:main",
         "short summary",
-        [{"role": "assistant", "content": "latest reply"}],
+        [{"role": "user", "content": "msg 3"}],
         compaction_id="cmp_branch_archive",
         trigger_reason="agent_inline_overflow",
     )
@@ -465,7 +465,7 @@ async def test_branch_fork_transcript_copies_compacted_archive(manager):
 
     assert child.parent_session_key == "agent:main:main"
     assert [entry.content for entry in await manager.get_transcript("agent:main:direct:u1")] == [
-        "latest reply"
+        "msg 3"
     ]
     assert [
         entry.content for entry in await manager.get_canonical_transcript("agent:main:direct:u1")
@@ -1167,7 +1167,7 @@ async def test_persist_compaction_result_rewrite_failure_keeps_session_state_ato
         await manager.persist_compaction_result(
             "agent:main:main",
             "short summary",
-            [{"role": "assistant", "content": "latest reply"}],
+            [{"role": "user", "content": "msg 3"}],
         )
 
     assert await manager.get_transcript("agent:main:main") == original_transcript
@@ -1193,20 +1193,20 @@ async def test_persist_compaction_result_stores_summary_out_of_band(manager):
     await manager.persist_compaction_result(
         "agent:main:main",
         "short summary",
-        [{"role": "assistant", "content": "latest reply"}],
+        [{"role": "user", "content": "msg 3"}],
         compaction_id="cmp_inline_1",
         trigger_reason="agent_inline_overflow",
     )
 
     transcript = await manager.get_transcript("agent:main:main")
     assert all(entry.role != "system" for entry in transcript)
-    assert transcript[-1].content == "latest reply"
+    assert transcript[-1].content == "msg 3"
     canonical = await manager.get_canonical_transcript("agent:main:main")
     assert [entry.content for entry in canonical] == [
         "msg 0",
         "msg 1",
         "msg 2",
-        "latest reply",
+        "msg 3",
     ]
     async with manager._storage.conn.execute(
         "SELECT compaction_id, compaction_index FROM compacted_transcript_entries "
@@ -1279,6 +1279,148 @@ async def test_persist_compaction_result_without_summary_does_not_rewrite_transc
     assert current_node.session_id == node.session_id
     assert current_node.compaction_count == original_node.compaction_count
     assert current_node.updated_at == original_node.updated_at
+
+
+@pytest.mark.asyncio
+async def test_persist_compaction_result_preserves_queued_followup_message(manager):
+    """Regression (#1645): a follow-up message persisted after the running agent
+    loaded its history must survive inline compaction with its identity intact."""
+    await manager.create("agent:main:main")
+    for index in range(3):
+        role = "user" if index % 2 == 0 else "assistant"
+        await manager.append_message("agent:main:main", role, f"msg {index}", token_count=5)
+    snapshot = await manager.get_transcript("agent:main:main")
+    kept_payloads = [{"role": entry.role, "content": entry.content} for entry in snapshot[1:]]
+
+    # sessions.send persists the queued follow-up before the running turn's
+    # compaction result lands; the agent never saw it.
+    followup = await manager.append_message(
+        "agent:main:main", "user", "queued follow-up", token_count=5
+    )
+
+    await manager.persist_compaction_result(
+        "agent:main:main",
+        "short summary",
+        kept_payloads,
+        compaction_id="cmp_inline_race",
+    )
+
+    transcript = await manager.get_transcript("agent:main:main")
+    assert [entry.content for entry in transcript] == ["msg 1", "msg 2", "queued follow-up"]
+    assert transcript[-1].message_id == followup.message_id
+    assert transcript[0].message_id == snapshot[1].message_id
+    canonical = await manager.get_canonical_transcript("agent:main:main")
+    assert [entry.content for entry in canonical] == [
+        "msg 0",
+        "msg 1",
+        "msg 2",
+        "queued follow-up",
+    ]
+    summaries = await manager.get_summaries("agent:main:main")
+    assert len(summaries) == 1
+    assert summaries[0].removed_count == 1
+    assert summaries[0].covered_through_id == snapshot[0].id
+
+
+@pytest.mark.asyncio
+async def test_persist_compaction_result_removed_count_anchors_boundary(manager):
+    """Agent-reported removed_count anchors the snapshot boundary so a full
+    compaction (empty kept tail) cannot swallow a queued follow-up message."""
+    await manager.create("agent:main:main")
+    for index in range(3):
+        await manager.append_message("agent:main:main", "user", f"msg {index}", token_count=5)
+    followup = await manager.append_message(
+        "agent:main:main", "user", "queued follow-up", token_count=5
+    )
+
+    await manager.persist_compaction_result(
+        "agent:main:main",
+        "short summary",
+        [],
+        compaction_id="cmp_inline_full",
+        removed_count=3,
+    )
+
+    transcript = await manager.get_transcript("agent:main:main")
+    assert [entry.content for entry in transcript] == ["queued follow-up"]
+    assert transcript[-1].message_id == followup.message_id
+    canonical = await manager.get_canonical_transcript("agent:main:main")
+    assert [entry.content for entry in canonical] == [
+        "msg 0",
+        "msg 1",
+        "msg 2",
+        "queued follow-up",
+    ]
+    summaries = await manager.get_summaries("agent:main:main")
+    assert len(summaries) == 1
+    assert summaries[0].removed_count == 3
+
+
+@pytest.mark.asyncio
+async def test_persist_compaction_result_skips_stale_transcript(manager):
+    """A compaction whose kept tail cannot be located in the transcript (reset or
+    diverged history) must not overwrite it with a stale result."""
+    await manager.create("agent:main:main")
+    for index in range(3):
+        await manager.append_message("agent:main:main", "user", f"msg {index}", token_count=5)
+    transcript_before = await manager.get_transcript("agent:main:main")
+    original_node = await manager._storage.get_session("agent:main:main")
+
+    await manager.persist_compaction_result(
+        "agent:main:main",
+        "short summary",
+        [{"role": "assistant", "content": "not in transcript"}],
+    )
+
+    # An unverifiable kept tail is not rescued by an agent-reported count either.
+    await manager.persist_compaction_result(
+        "agent:main:main",
+        "short summary",
+        [{"role": "assistant", "content": "not in transcript"}],
+        removed_count=2,
+    )
+
+    assert await manager.get_transcript("agent:main:main") == transcript_before
+    assert await manager.get_summaries("agent:main:main") == []
+    current_node = await manager._storage.get_session("agent:main:main")
+    assert current_node is not None
+    assert original_node is not None
+    assert current_node.compaction_count == original_node.compaction_count
+    assert current_node.updated_at == original_node.updated_at
+
+
+@pytest.mark.asyncio
+async def test_persist_compaction_result_repeated_content_anchors_first_window(manager):
+    """Ambiguous content matches anchor on the first window so the rewrite can
+    only over-keep, never drop, transcript entries."""
+    await manager.create("agent:main:main")
+    for content in ("msg 0", "msg 1", "msg 2", "msg 1", "msg 2"):
+        await manager.append_message("agent:main:main", "user", content, token_count=5)
+    snapshot = await manager.get_transcript("agent:main:main")
+    kept_payloads = [{"role": entry.role, "content": entry.content} for entry in snapshot[1:3]]
+    followup = await manager.append_message(
+        "agent:main:main", "user", "queued follow-up", token_count=5
+    )
+
+    await manager.persist_compaction_result(
+        "agent:main:main",
+        "short summary",
+        kept_payloads,
+        compaction_id="cmp_inline_ambiguous",
+    )
+
+    transcript = await manager.get_transcript("agent:main:main")
+    assert [entry.content for entry in transcript] == [
+        "msg 1",
+        "msg 2",
+        "msg 1",
+        "msg 2",
+        "queued follow-up",
+    ]
+    assert transcript[-1].message_id == followup.message_id
+    summaries = await manager.get_summaries("agent:main:main")
+    assert len(summaries) == 1
+    assert summaries[0].removed_count == 1
 
 
 @pytest.mark.asyncio
