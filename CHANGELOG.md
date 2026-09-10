@@ -22,6 +22,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- `apply_patch` no longer rewrites every line of a CRLF file to LF. The
+  reported symptom — `Context mismatch ... got '...\r'` — is not reachable
+  through the tool: the read path folded `\r\n` to `\n` before `_apply_hunk`
+  ever saw it. The quieter defect is at the same site: the translation was
+  one-way in memory only, so writing back re-emitted `os.linesep` and a
+  one-line patch to a CRLF file came out as a whole-file diff, with the
+  untouched lines converted too (and the mirror-image damage on Windows,
+  where an LF file came back as CRLF). Both ends of the round trip now open
+  with `newline=""`, so endings survive verbatim; `_apply_hunk` compares
+  context with `rstrip("\r\n")` so a `\r` cannot fail a match, and an added
+  line takes the file's own ending — majority convention, first-seen breaking
+  a tie — instead of a hardcoded `\n`. Added files keep the patch text as the
+  only authority on their endings, so `os.linesep` cannot leak in either.
+  ([#1124](https://github.com/use-agent-os/agent-os/issues/1124))
+
 - The chat composer's route picker now names the model a turn actually ran on
   while routing is automatic, and stops claiming an override when nothing is
   pinned. Pasting an image labelled the button `Auto · image_model` — a bare

@@ -454,8 +454,30 @@ def _gate_patch_ops(
 # ---------------------------------------------------------------------------
 
 
-def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
+def _detect_newline(file_lines: list[str]) -> str:
+    """Return the line ending an added line should use for this file.
+
+    Picks the majority convention and breaks a tie with the first ending seen,
+    so a mixed-ending file keeps whichever style already dominates it. A file
+    with no line ending at all falls back to ``"\\n"``.
+    """
+    crlf = sum(1 for line in file_lines if line.endswith("\r\n"))
+    lf = sum(1 for line in file_lines if line.endswith("\n") and not line.endswith("\r\n"))
+    if crlf == lf:
+        for line in file_lines:
+            if line.endswith("\r\n"):
+                return "\r\n"
+            if line.endswith("\n"):
+                return "\n"
+        return "\n"
+    return "\r\n" if crlf > lf else "\n"
+
+
+def _apply_hunk(file_lines: list[str], hunk: Hunk, newline: str = "\n") -> list[str]:
     """Apply a single hunk to file_lines (0-indexed list of lines with newlines).
+
+    ``newline`` is the line ending given to added lines; context and untouched
+    lines are copied verbatim so their own endings survive.
 
     Returns the new list of lines.
     """
@@ -477,8 +499,8 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
         if prefix in (" ", "-"):
             if check_pos >= len(result):
                 raise ValueError(f"Hunk context/delete at line {check_pos + 1} exceeds file length")
-            actual = result[check_pos].rstrip("\n")
-            expected = content.rstrip("\n")
+            actual = result[check_pos].rstrip("\r\n")
+            expected = content.rstrip("\r\n")
             if actual != expected:
                 raise ValueError(
                     f"Context mismatch at line {check_pos + 1}: "
@@ -500,11 +522,8 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
         elif prefix == "-":
             src_pos += 1  # skip (delete)
         elif prefix == "+":
-            # Preserve newline style: add \n if original lines have it
-            if content.endswith("\n"):
-                new_lines.append(content)
-            else:
-                new_lines.append(content + "\n")
+            # Added lines take the file's own line ending, not a hardcoded \n.
+            new_lines.append(content.rstrip("\r\n") + newline)
 
     # Splice: replace [pos : pos + old_count] with new_lines
     return result[:pos] + new_lines + result[pos + hunk.old_count :]
@@ -513,9 +532,10 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk) -> list[str]:
 def _updated_text(text: str, hunks: list[Hunk]) -> str:
     """Return *text* with every hunk applied, without touching the filesystem."""
     lines = text.splitlines(keepends=True)
+    newline = _detect_newline(lines)
     # Apply hunks in reverse order so earlier line numbers stay valid
     for hunk in sorted(hunks, key=lambda h: h.old_start, reverse=True):
-        lines = _apply_hunk(lines, hunk)
+        lines = _apply_hunk(lines, hunk, newline)
     return "".join(lines)
 
 
@@ -574,7 +594,15 @@ def _plan_ops(
                 # tool never decodes must not start failing on bad UTF-8.
                 current = pending.get(resolved) if resolved in pending else None
                 if current is None:
-                    current = resolved.read_text(encoding="utf-8")
+                    # newline="" disables universal-newline translation, so a
+                    # CRLF file arrives with its \r intact and _updated_text can
+                    # hand added lines the file's own ending instead of a bare
+                    # \n. Without it read_text() folds \r\n to \n in the kept
+                    # text, and the write below re-emits os.linesep — a
+                    # one-line patch to a CRLF file came back as a whole-file
+                    # diff with every untouched line converted too (#1124).
+                    with resolved.open("r", encoding="utf-8", newline="") as handle:
+                        current = handle.read()
                 content = _updated_text(current, op.hunks)
                 modified += 1
             else:
@@ -625,7 +653,12 @@ def _commit_staged(staged: list[_StagedOp]) -> None:
                 continue
             new_dirs.extend(reversed(_missing_ancestors(item.path)))
             item.path.parent.mkdir(parents=True, exist_ok=True)
-            item.path.write_text(item.content, encoding="utf-8")
+            # newline="" so the staged text is written verbatim: the default
+            # would translate \n to os.linesep, turning a CRLF round trip into
+            # a whole-file rewrite on every platform (and emitting CRLF on
+            # Windows for an added file the patch spelled with \n).
+            with item.path.open("w", encoding="utf-8", newline="") as handle:
+                handle.write(item.content)
     except OSError as exc:
         _restore(backups, new_dirs)
         label = current.label if current is not None else "patch"
