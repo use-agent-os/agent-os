@@ -169,17 +169,39 @@ def _validate_path(path: str, root: Path | None = None) -> Path:
     return resolved
 
 
+def _memory_source_root() -> Path | None:
+    ctx = current_tool_context.get()
+    if ctx is None or not ctx.memory_source_dir:
+        return None
+    return Path(ctx.memory_source_dir).expanduser().resolve()
+
+
+def _memory_roots(default_root: Path) -> tuple[Path, ...]:
+    roots: list[Path] = []
+    for root in (default_root, _memory_source_root()):
+        if root is None or root in roots:
+            continue
+        roots.append(root)
+    return tuple(roots)
+
+
 def _memory_source_rel_path(path: str, root: Path) -> str | None:
     resolved = _validate_path(path, root)
-    try:
-        rel = resolved.relative_to(root)
-    except ValueError:
-        return None
+    for mem_root in _memory_roots(root):
+        try:
+            rel = resolved.relative_to(mem_root)
+        except ValueError:
+            continue
 
-    if rel.parts == ("MEMORY.md",):
-        return "MEMORY.md"
-    if len(rel.parts) >= 2 and rel.parts[0] == "memory" and rel.suffix == ".md":
-        return rel.as_posix()
+        # USER.md is a curated store in its own right -- CuratedMemoryStore
+        # loads, sanitizes, and injects it alongside MEMORY.md. Editing it
+        # through a filesystem or patch tool must refresh the frozen snapshot
+        # the same way, or the change stays invisible to the model until the
+        # session ends. (It is also a bootstrap file, so it notifies both paths.)
+        if rel.parts in {("MEMORY.md",), ("memory.md",), ("USER.md",)}:
+            return rel.as_posix()
+        if len(rel.parts) >= 2 and rel.parts[0] == "memory" and rel.suffix == ".md":
+            return rel.as_posix()
     return None
 
 

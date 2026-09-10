@@ -19,7 +19,7 @@ async def test_filesystem_write_notifies_bootstrap_or_memory_sources(tmp_path) -
     bootstrap_calls: list[tuple[str, str]] = []
     token = current_tool_context.set(
         ToolContext(
-                        agent_id="main",
+            agent_id="main",
             workspace_dir=str(tmp_path),
             memory_source_dir=str(tmp_path),
             on_memory_source_write=lambda agent_id, path: memory_calls.append((agent_id, path)),
@@ -50,7 +50,7 @@ async def test_patch_notifies_bootstrap_and_memory_sources(tmp_path) -> None:
     (tmp_path / "memory" / "2026-05-01.md").write_text("old\n", encoding="utf-8")
     token = current_tool_context.set(
         ToolContext(
-                        agent_id="main",
+            agent_id="main",
             workspace_dir=str(tmp_path),
             memory_source_dir=str(tmp_path),
             on_memory_source_write=lambda agent_id, path: memory_calls.append((agent_id, path)),
@@ -77,4 +77,40 @@ async def test_patch_notifies_bootstrap_and_memory_sources(tmp_path) -> None:
         current_tool_context.reset(token)
 
     assert bootstrap_calls == [("main", "USER.md")]
-    assert memory_calls == [("main", "memory/2026-05-01.md")]
+    assert ("main", "USER.md") in memory_calls
+    assert ("main", "memory/2026-05-01.md") in memory_calls
+
+
+@pytest.mark.asyncio
+async def test_patch_notifies_memory_md_and_custom_memory_dir(tmp_path) -> None:
+    workspace_dir = tmp_path / "workspace"
+    workspace_dir.mkdir()
+    memory_dir = tmp_path / "custom_memory"
+    memory_dir.mkdir()
+
+    (workspace_dir / "memory.md").write_text("# Old Memory\n", encoding="utf-8")
+    (memory_dir / "USER.md").write_text("Name:\n", encoding="utf-8")
+
+    memory_calls: list[tuple[str, str]] = []
+    token = current_tool_context.set(
+        ToolContext(
+            agent_id="main",
+            workspace_dir=str(workspace_dir),
+            memory_source_dir=str(memory_dir),
+            on_memory_source_write=lambda agent_id, path: memory_calls.append((agent_id, path)),
+        )
+    )
+    apply_patch = _original_async(patch_tool.apply_patch)
+    try:
+        await apply_patch(
+            """*** Begin Patch
+*** Update File: memory.md
+@@@ -1,1 +1,1 @@@
+-# Old Memory
++# New Memory
+*** End Patch"""
+        )
+    finally:
+        current_tool_context.reset(token)
+
+    assert ("main", "memory.md") in memory_calls
