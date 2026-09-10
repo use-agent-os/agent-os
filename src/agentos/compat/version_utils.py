@@ -29,7 +29,7 @@ _VERSION_RE = re.compile(
     r"(?:[._-]?(?P<pre_l>a|b|c|rc|alpha|beta|pre|preview)[._-]?(?P<pre_n>\d+)?)?"
     r"(?:[._-]?(?P<post_l>post)[._-]?(?P<post>\d+)?)?"
     r"(?:[._-]?(?P<dev_l>dev)[._-]?(?P<dev>\d+)?)?"
-    r"(?:\+(?P<local>[a-zA-Z0-9.]+))?"
+    r"(?:\+(?P<local>[a-zA-Z0-9._-]+))?"
     r"\s*$",
     re.IGNORECASE,
 )

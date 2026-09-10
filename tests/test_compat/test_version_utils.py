@@ -125,6 +125,11 @@ def test_ordering_is_total_and_sortable() -> None:
         "2026.7.18+devpost",
         "2026.7.18+post.dev",
         "2026.7.18+unknown",
+        "2026.7.18+git-d9ebb22",
+        "2026.7.18+ubuntu-1",
+        "2026.7.18+build_123",
+        "2026.7.18+sha.abc-dirty",
+        "2026.7.18+2026-09-10",
     ],
 )
 def test_local_label_never_sets_post_or_dev(raw: str) -> None:
@@ -145,6 +150,10 @@ def test_local_label_never_sets_post_or_dev(raw: str) -> None:
         "2026.7.18+postgres",
         "2026.7.18+device",
         "2026.7.18+local.post1",
+        "2026.7.18+git-d9ebb22",
+        "2026.7.18+ubuntu-1",
+        "2026.7.18+build_123",
+        "2026.7.18+sha.abc-dirty",
     ],
 )
 def test_local_label_is_ignored_for_ordering(raw: str) -> None:
