@@ -257,3 +257,54 @@ def test_replace_run_still_touches_only_its_own_run() -> None:
     edit_docx._replace_run(paragraph, 1, "there")
 
     assert [(run.text, run.bold) for run in paragraph.runs] == [("Hello ", None), ("there", True)]
+
+
+def test_replace_text_in_tables(tmp_path: Path) -> None:
+    """replace_text must walk paragraphs in tables and preserve formatting."""
+    edit_docx = _edit_docx_module()
+    from docx import Document
+
+    doc = Document()
+    doc.add_paragraph("Agreement for {{CLIENT}}")
+
+    table = doc.add_table(rows=3, cols=2)
+    table.cell(0, 0).text = "Client Name:"
+    table.cell(0, 1).text = "{{CLIENT}}"
+
+    # Merged row for summary
+    merged_cell = table.cell(1, 0)
+    merged_cell.text = "Notes for {{CLIENT}}"
+    merged_cell.merge(table.cell(1, 1))
+
+    table.cell(2, 0).text = "Amount:"
+    table.cell(2, 1).text = "$5,000"
+
+    ops = [{"op": "replace_text", "find": "{{CLIENT}}", "with": "Acme Corp"}]
+    applied = edit_docx.apply_ops(doc, ops)
+
+    assert applied == 3
+    assert doc.paragraphs[0].text == "Agreement for Acme Corp"
+    assert table.cell(0, 1).text == "Acme Corp"
+    assert table.cell(1, 0).text == "Notes for Acme Corp"
+    assert table.cell(1, 1).text == "Notes for Acme Corp"
+    assert table.cell(2, 1).text == "$5,000"
+
+
+def test_apply_ops_handles_non_dict_elements() -> None:
+    """Malformed or non-dict items in ops must be safely skipped."""
+    edit_docx = _edit_docx_module()
+    from docx import Document
+
+    doc = Document()
+    doc.add_paragraph("Hello World")
+
+    ops = [
+        None,
+        "not-a-dict",
+        123,
+        [],
+        {"op": "replace_text", "find": "World", "with": "AgentOS"},
+    ]
+    applied = edit_docx.apply_ops(doc, ops)
+    assert applied == 1
+    assert doc.paragraphs[0].text == "Hello AgentOS"

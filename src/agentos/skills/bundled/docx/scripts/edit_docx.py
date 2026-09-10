@@ -75,9 +75,34 @@ def _replace_text_in_paragraph(para: Paragraph, find: str, replacement: str) -> 
     return True
 
 
+def _iter_all_paragraphs(doc: Document) -> list[Paragraph]:
+    paragraphs: list[Paragraph] = list(doc.paragraphs)
+    seen_tc: set[Any] = set()
+    for table in doc.tables:
+        paragraphs.extend(_iter_table_paragraphs(table, seen_tc))
+    return paragraphs
+
+
+def _iter_table_paragraphs(table: Any, seen_tc: set[Any]) -> list[Paragraph]:
+    paragraphs: list[Paragraph] = []
+    for row in table.rows:
+        for cell in row.cells:
+            tc = getattr(cell, "_tc", None)
+            if tc is not None:
+                if tc in seen_tc:
+                    continue
+                seen_tc.add(tc)
+            paragraphs.extend(cell.paragraphs)
+            for nested in getattr(cell, "tables", []):
+                paragraphs.extend(_iter_table_paragraphs(nested, seen_tc))
+    return paragraphs
+
+
 def apply_ops(doc: Document, ops: list[dict[str, Any]]) -> int:
     applied = 0
     for op in ops:
+        if not isinstance(op, dict):
+            continue
         kind = op.get("op")
         if kind == "replace_run":
             try:
@@ -91,7 +116,7 @@ def apply_ops(doc: Document, ops: list[dict[str, Any]]) -> int:
             replacement = str(op.get("with", ""))
             if not find:
                 continue
-            for para in doc.paragraphs:
+            for para in _iter_all_paragraphs(doc):
                 if _replace_text_in_paragraph(para, find, replacement):
                     applied += 1
     return applied
