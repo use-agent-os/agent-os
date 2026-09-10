@@ -63,6 +63,21 @@ _d = get_dispatcher()
 log = structlog.get_logger(__name__)
 _ELEVATED_MODES = frozenset({"on", "bypass", "full"})
 
+#: Ceiling for ``sessions.list``/``sessions.preview``'s ``limit`` param, which
+#: reaches ``SessionStorage.list_sessions``'s raw SQL ``LIMIT ?`` unclamped
+#: otherwise. SQLite treats a negative ``LIMIT`` as "no limit at all", so an
+#: unvalidated negative value returns every session in one response.
+_MAX_SESSIONS_LIST_LIMIT = 5000
+
+
+def _clamp_sessions_limit(raw: Any, *, default: int = 50) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return min(max(1, value), _MAX_SESSIONS_LIST_LIMIT)
+
+
 _ALLOWED_MEDIA_TYPES = _attachment_ingest.ALLOWED_MEDIA_TYPES
 _MAX_ATTACHMENT_BYTES = _attachment_ingest.MAX_ATTACHMENT_BYTES
 _MAX_STAGED_PDF_BYTES = _attachment_ingest.MAX_STAGED_PDF_BYTES
@@ -761,7 +776,7 @@ async def _handle_sessions_list(params: dict | None, ctx: RpcContext) -> dict:
     if storage is None:
         return {"sessions": [], "count": 0, "ts": now_ms}
 
-    limit = (params or {}).get("limit", 50)
+    limit = _clamp_sessions_limit((params or {}).get("limit", 50))
     project_filter = (params or {}).get("projectId") or (params or {}).get("project_id")
     if project_filter:
         sessions = await storage.list_sessions(limit=limit, project_id=str(project_filter))
@@ -2393,7 +2408,7 @@ async def _preview_last_message(storage: Any, session_id: str) -> str:
 @_d.method("sessions.preview")
 async def _handle_sessions_preview(params: dict | None, ctx: RpcContext) -> dict:
     keys = (params or {}).get("keys")
-    limit = (params or {}).get("limit", 50)
+    limit = _clamp_sessions_limit((params or {}).get("limit", 50))
     now_ms = int(time.time() * 1000)
 
     if ctx.session_manager is None:
