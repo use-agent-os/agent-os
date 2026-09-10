@@ -496,6 +496,21 @@ def _ensure_delivery_supported(
 #: provider must not hold up the form.
 _TARGET_PROBE_TIMEOUT_SECONDS = 10.0
 
+#: Ceiling for ``cron.runs``' ``limit`` param, which reaches a raw SQL
+#: ``LIMIT ?`` (persistence.py's ``list_executions``) unclamped otherwise.
+#: SQLite treats a negative ``LIMIT`` as "no limit", so an unvalidated
+#: negative value returns a job's entire run history in one response instead
+#: of the bounded preview the run-history drawer expects.
+_MAX_CRON_RUNS_LIMIT = 1000
+
+
+def _coerce_cron_runs_limit(raw: Any, *, default: int = 20) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return min(max(1, value), _MAX_CRON_RUNS_LIMIT)
+
 
 def _delivery_target_pairs(delivery_raw: Any) -> list[tuple[str, str]]:
     """The (channel, recipient) pairs a delivery block asks us to send to.
@@ -1103,7 +1118,7 @@ async def _handle_cron_runs(params: dict | None, ctx: RpcContext) -> list[dict]:
     job_id = params.get("id") or params.get("job_id")
     if not job_id:
         raise ValueError("params.id is required")
-    limit = params.get("limit", 20)
+    limit = _coerce_cron_runs_limit(params.get("limit", 20))
     scheduler = getattr(ctx, "cron_scheduler", None)
     if scheduler is None:
         return []
