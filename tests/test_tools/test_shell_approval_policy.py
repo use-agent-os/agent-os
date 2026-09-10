@@ -524,6 +524,109 @@ def test_shell_write_targets_ignores_words_ending_in_tee(command: str) -> None:
     assert shell._shell_write_targets(command) == []
 
 
+@pytest.mark.parametrize(
+    "template",
+    [
+        'echo ok > "{target}"',
+        "echo ok > '{target}'",
+        'echo ok >> "{target}"',
+        'echo ok 2> "{target}"',
+        'echo ok &> "{target}"',
+    ],
+)
+def test_shell_write_targets_detects_quoted_redirection_with_spaces(template: str) -> None:
+    target = "/tmp/my outside dir/file with spaces.txt"
+    assert shell._shell_write_targets(template.format(target=target)) == [target]
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        'echo ok|tee "{target}"',
+        "echo ok | tee -a '{target}'",
+        'echo ok | tee --output-error=warn "{target}"',
+    ],
+)
+def test_shell_write_targets_detects_quoted_tee_target_with_spaces(template: str) -> None:
+    target = "/tmp/my outside dir/file with spaces.txt"
+    assert shell._shell_write_targets(template.format(target=target)) == [target]
+
+
+def test_shell_write_targets_quoted_redirection_survives_fd_dup_scan() -> None:
+    command = 'echo ok > "AT&T report.txt"'
+    assert shell._shell_write_targets(command) == ["AT&T report.txt"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "template",
+    [
+        'echo ok > "{target}"',
+        "echo ok > '{target}'",
+    ],
+)
+async def test_workspace_lockdown_blocks_quoted_redirection_target_with_spaces(
+    tmp_path: Path,
+    template: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside_dir = tmp_path / "my outside dir"
+    outside_dir.mkdir()
+    outside = outside_dir / "file with spaces.txt"
+    ctx = current_tool_context.get()
+    assert ctx is not None
+    ctx.interaction_mode = InteractionMode.UNATTENDED
+    ctx.elevated = "bypass"
+    ctx.workspace_dir = str(workspace)
+    ctx.workspace_lockdown = True  # type: ignore[attr-defined]
+
+    result = await shell._check_exec_approval(
+        "exec_command",
+        template.format(target=outside),
+        str(workspace),
+        "command requires approval",
+        None,
+        False,
+    )
+
+    assert result is not None
+    assert result["status"] == "blocked"
+    assert result["reason"] == "workspace_lockdown"
+    assert result["resolved_path"] == str(outside)
+
+
+@pytest.mark.asyncio
+async def test_workspace_lockdown_blocks_quoted_tee_target_with_spaces(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside_dir = tmp_path / "my outside dir"
+    outside_dir.mkdir()
+    outside = outside_dir / "file with spaces.txt"
+    ctx = current_tool_context.get()
+    assert ctx is not None
+    ctx.interaction_mode = InteractionMode.UNATTENDED
+    ctx.elevated = "bypass"
+    ctx.workspace_dir = str(workspace)
+    ctx.workspace_lockdown = True  # type: ignore[attr-defined]
+
+    result = await shell._check_exec_approval(
+        "exec_command",
+        f'echo ok | tee "{outside}"',
+        str(workspace),
+        "command requires approval",
+        None,
+        False,
+    )
+
+    assert result is not None
+    assert result["status"] == "blocked"
+    assert result["reason"] == "workspace_lockdown"
+    assert result["resolved_path"] == str(outside)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "template",

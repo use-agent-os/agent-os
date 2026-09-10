@@ -339,7 +339,19 @@ _FD_DUP_PATTERN = re.compile(r"\d*>&\s*(?:\d+-?|-)(?=$|[\s|&;<>)])")
 # ``n>>``, ``&>``, ``&>>``, ``>&file`` and the noclobber override ``>|``. The
 # operator is deliberately *not* anchored to a word boundary — ``echo x>file`` is
 # valid shell and must be caught just like ``echo x > file``.
-_REDIRECTION_PATTERN = re.compile(r"(?:&>{1,2}|\d*>{1,2}&?)\|?\s*(['\"]?)([^'\"\s|&;<>()]+)\1")
+#
+# The quoted and unquoted cases need different bodies: a quoted target
+# (group 2) accepts anything but its own quote character, so a path
+# containing a space is captured whole; an unquoted target (group 3) keeps
+# the original restrictive class, since space there is a real argument
+# boundary and swallowing it would eat the rest of the command. A single
+# shared class that excludes whitespace unconditionally (the previous
+# design) made a quoted ``"/path with spaces.txt"`` invisible to this
+# scanner regardless of platform, which let workspace lockdown fail open
+# for any write target whose path happened to contain a space (#1230).
+_REDIRECTION_PATTERN = re.compile(
+    r"""(?:&>{1,2}|\d*>{1,2}&?)\|?\s*(?:(['"])([^'"]+)\1|([^'"\s|&;<>()]+))"""
+)
 
 # ``tee`` is the other write primitive this parser covers, and it needs the same
 # treatment as the redirection operators: ``echo x|tee /etc/passwd`` is valid
@@ -347,16 +359,21 @@ _REDIRECTION_PATTERN = re.compile(r"(?:&>{1,2}|\d*>{1,2}&?)\|?\s*(['\"]?)([^'\"\
 # space. The lookbehind keeps ``mytee``/``notee`` out while still matching a
 # fully qualified ``/usr/bin/tee``. Options may be short (``-a``), long
 # (``--append``) or long with a value (``--output-error=warn``); all of them are
-# skipped so the first non-option word is the real target.
+# skipped so the first non-option word is the real target. See
+# _REDIRECTION_PATTERN above for why the quoted and unquoted bodies differ.
 _TEE_PATTERN = re.compile(
-    r"(?<![\w-])tee(?:\s+-{1,2}[A-Za-z][\w-]*(?:=[^\s|&;]+)?)*\s+(['\"]?)([^'\"\s|&;]+)\1"
+    r"(?<![\w-])tee(?:\s+-{1,2}[A-Za-z][\w-]*(?:=[^\s|&;]+)?)*\s+"
+    r"""(?:(['"])([^'"]+)\1|([^'"\s|&;]+))"""
 )
 
 
 def _shell_write_targets(command: str) -> list[str]:
     scanned = _FD_DUP_PATTERN.sub(" ", command)
-    targets: list[str] = [match.group(2) for match in _REDIRECTION_PATTERN.finditer(scanned)]
-    targets.extend(match.group(2) for match in _TEE_PATTERN.finditer(scanned))
+    targets: list[str] = []
+    for pattern in (_REDIRECTION_PATTERN, _TEE_PATTERN):
+        for match in pattern.finditer(scanned):
+            target = match.group(2) if match.group(2) is not None else match.group(3)
+            targets.append(target)
     return targets
 
 
