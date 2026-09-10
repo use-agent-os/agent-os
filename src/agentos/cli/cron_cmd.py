@@ -11,8 +11,8 @@ from typing import Annotated, Any
 import typer
 from rich.table import Table
 
-from agentos.cli.gateway_rpc import confirm_or_exit, run_gateway_sync
-from agentos.cli.output import print_json
+from agentos.cli.gateway_rpc import confirm_or_exit, rpc_error_exit_code, run_gateway_sync
+from agentos.cli.output import emit_error, print_json
 from agentos.cli.ui import ACCENT_HEADER, console
 
 cron_app = typer.Typer(help="Inspect and manage scheduled AgentOS runs.")
@@ -1147,6 +1147,22 @@ def cron_run(
         return await client.call("cron.run", {"id": job_id})
 
     payload = run_gateway_sync(_run, json_output=json_output)
+    if isinstance(payload, dict) and payload.get("success") is False:
+        # cron.run returns an honest failure payload over a successful RPC;
+        # map that to a non-zero CLI exit so scripts/agents don't treat a
+        # missing (or otherwise refused) job as success. See #1684.
+        status = str(payload.get("status") or "")
+        message = str(
+            payload.get("error") or payload.get("reason") or "Cron run failed"
+        )
+        code = "NOT_FOUND" if status == "not_found" else "CRON_RUN_FAILED"
+        emit_error(
+            message,
+            json_output=json_output,
+            code=code,
+            details=payload,
+        )
+        raise typer.Exit(rpc_error_exit_code(code) if code == "NOT_FOUND" else 1)
     _emit_success(payload, json_output=json_output, title="Cron run result")
 
 
