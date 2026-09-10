@@ -219,6 +219,20 @@ class SchedulerEngine:
         )
         if isinstance(reservation, JobReservationRejected):
             return _manual_result_from_rejection(reservation)
+        job = reservation.job
+        handler = self._timer._handlers.get(job.handler_key)
+        if handler is None:
+            await self._store.finalize_reserved_missing_handler(
+                job.id,
+                reservation.token,
+                error=f"No handler registered for key '{job.handler_key}'",
+            )
+            return ManualRunResult(
+                status=ManualRunStatus.NO_HANDLER,
+                reason="no_handler",
+                error=f"No handler registered for key '{job.handler_key}'",
+                current_status=getattr(job.status, "value", str(job.status)),
+            )
         exe = await execute_with_timeout(job, handler)
         await self._store.save_execution(exe)
         await apply_reserved_result(job.id, reservation.token, exe, self._store)
