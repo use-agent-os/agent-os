@@ -712,15 +712,18 @@ def _select_spreadsheet_sheets(
     if requested is None or requested == "":
         return sheets
 
-    if isinstance(requested, int) or (isinstance(requested, str) and requested.isdigit()):
-        index = int(requested) - 1
-        if 0 <= index < len(sheets):
-            return [sheets[index]]
-
     requested_name = str(requested)
     for name, rows in sheets:
         if name == requested_name:
             return [(name, rows)]
+
+    if (isinstance(requested, int) and not isinstance(requested, bool)) or (
+        isinstance(requested, str) and requested.isdigit()
+    ):
+        index = int(requested) - 1
+        if 0 <= index < len(sheets):
+            return [sheets[index]]
+
     for name, rows in sheets:
         if name.lower() == requested_name.lower():
             return [(name, rows)]
