@@ -14,11 +14,7 @@ def coerce_schedule_from_params(params: dict[str, Any]) -> tuple[ScheduleKind, s
         schedule = dict(schedule_raw)
         top_level_tz = _top_level_tz(params)
         if top_level_tz and schedule.get("kind") == ScheduleKind.CRON.value:
-            schedule_tz = schedule.get("tz")
-            if isinstance(schedule_tz, str):
-                schedule_tz = schedule_tz.strip()
-            else:
-                schedule_tz = ""
+            schedule_tz = _extract_schedule_tz(schedule)
             if schedule_tz and schedule_tz != top_level_tz:
                 raise ValueError("schedule.tz conflicts with tz")
             schedule["tz"] = top_level_tz
@@ -50,6 +46,20 @@ def _top_level_tz(params: dict[str, Any]) -> str:
     return tz or timezone
 
 
+def _extract_schedule_tz(schedule: dict[str, Any]) -> str:
+    tz_raw = schedule.get("tz")
+    timezone_raw = schedule.get("timezone")
+    if tz_raw is not None and not isinstance(tz_raw, str):
+        raise ValueError("schedule.tz must be a string IANA timezone name")
+    if timezone_raw is not None and not isinstance(timezone_raw, str):
+        raise ValueError("schedule.tz must be a string IANA timezone name")
+    tz = tz_raw.strip() if isinstance(tz_raw, str) else ""
+    timezone = timezone_raw.strip() if isinstance(timezone_raw, str) else ""
+    if tz and timezone and tz != timezone:
+        raise ValueError("schedule.tz conflicts with schedule.timezone")
+    return tz or timezone
+
+
 def coerce_schedule(raw: dict[str, Any]) -> tuple[ScheduleKind, str, str]:
     kind_raw = raw.get("kind")
     if not isinstance(kind_raw, str) or not kind_raw:
@@ -71,20 +81,13 @@ def coerce_schedule(raw: dict[str, Any]) -> tuple[ScheduleKind, str, str]:
 def _coerce_cron(raw: dict[str, Any]) -> tuple[ScheduleKind, str, str]:
     expr = raw.get("expr")
     if not isinstance(expr, str) or not expr.strip():
-        raise ValueError(
-            "schedule.expr required when kind='cron'; expected 5-field POSIX cron"
-        )
+        raise ValueError("schedule.expr required when kind='cron'; expected 5-field POSIX cron")
     expr = expr.strip()
     try:
         parse_cron(expr)
     except CronParseError as exc:
-        raise ValueError(
-            f"schedule.expr invalid: {exc}; expected 5-field POSIX cron"
-        ) from exc
-    tz_raw = raw.get("tz") or ""
-    if not isinstance(tz_raw, str):
-        raise ValueError("schedule.tz must be a string IANA timezone name")
-    tz_value = tz_raw.strip()
+        raise ValueError(f"schedule.expr invalid: {exc}; expected 5-field POSIX cron") from exc
+    tz_value = _extract_schedule_tz(raw)
     try:
         validate_tz(tz_value)
     except ValueError as exc:
@@ -96,14 +99,10 @@ def _coerce_cron(raw: dict[str, Any]) -> tuple[ScheduleKind, str, str]:
 
 def _coerce_every(raw: dict[str, Any]) -> tuple[ScheduleKind, str, str]:
     if raw.get("anchor_at") not in (None, ""):
-        raise ValueError(
-            "schedule.anchor_at is not supported for kind='every'; omit it"
-        )
+        raise ValueError("schedule.anchor_at is not supported for kind='every'; omit it")
     every_seconds = raw.get("every_seconds")
     if not isinstance(every_seconds, int) or isinstance(every_seconds, bool):
-        raise ValueError(
-            "schedule.every_seconds required (integer >= 1) when kind='every'"
-        )
+        raise ValueError("schedule.every_seconds required (integer >= 1) when kind='every'")
     if every_seconds < 1:
         raise ValueError("schedule.every_seconds must be >= 1 second")
     return ScheduleKind.EVERY, str(every_seconds), ""
@@ -112,9 +111,7 @@ def _coerce_every(raw: dict[str, Any]) -> tuple[ScheduleKind, str, str]:
 def _coerce_at(raw: dict[str, Any]) -> tuple[ScheduleKind, str, str]:
     at_raw = raw.get("at")
     if not isinstance(at_raw, str) or not at_raw.strip():
-        raise ValueError(
-            "schedule.at required when kind='at'; expected ISO-8601 with timezone"
-        )
+        raise ValueError("schedule.at required when kind='at'; expected ISO-8601 with timezone")
     try:
         parse_iso_at(at_raw)
     except CronParseError as exc:
