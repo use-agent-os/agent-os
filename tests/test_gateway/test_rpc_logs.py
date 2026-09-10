@@ -217,3 +217,26 @@ async def test_logs_status_is_mounted_on_dispatcher(monkeypatch) -> None:
     assert response.ok is True
     assert isinstance(response.payload, dict)
     assert response.payload["raw_turn_call_log"]["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_logs_tail_clamps_limit_and_cursor(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AGENTOS_LOG_DIR", str(tmp_path))
+    log_file = tmp_path / "debug.log"
+    log_file.write_text("line1\nline2\nline3\nline4\nline5\n", encoding="utf-8")
+
+    # Negative limit clamps to 1
+    res_neg_limit = await _handle_logs_tail({"limit": -10, "cursor": 0}, None)  # type: ignore[arg-type]
+    assert res_neg_limit["lines"] == ["line5"]
+
+    # Invalid limit falls back to 100 (returns all 5 lines)
+    res_inv_limit = await _handle_logs_tail({"limit": "invalid", "cursor": 0}, None)  # type: ignore[arg-type]
+    assert len(res_inv_limit["lines"]) == 5
+
+    # Negative cursor clamps to 0
+    res_neg_cursor = await _handle_logs_tail({"limit": 2, "cursor": -50}, None)  # type: ignore[arg-type]
+    assert res_neg_cursor["lines"] == ["line4", "line5"]
+
+    # Invalid cursor clamps to 0
+    res_inv_cursor = await _handle_logs_tail({"limit": 2, "cursor": "invalid"}, None)  # type: ignore[arg-type]
+    assert res_inv_cursor["lines"] == ["line4", "line5"]
