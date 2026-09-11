@@ -54,7 +54,12 @@ from agentos.session.compaction_lifecycle import (
     durable_receipt_allows_destructive_compaction,
     new_compaction_id,
 )
-from agentos.session.keys import canonicalize_session_key, normalize_agent_id, parse_agent_id
+from agentos.session.keys import (
+    canonicalize_session_key,
+    is_subagent_key,
+    normalize_agent_id,
+    parse_agent_id,
+)
 from agentos.session.naming import normalize_session_name
 from agentos.session.runtime_state import evict_session_runtime_state
 from agentos.session.terminal_reply import build_terminal_reply, sanitize_agent_error
@@ -704,7 +709,7 @@ def _derive_source_metadata(session: Any) -> dict[str, Any]:
     elif ":cli:" in key or ":standalone:" in key:
         source_kind = source_kind or "cli"
         channel_kind = channel_kind or "cli"
-    elif ":subagent:" in key:
+    elif is_subagent_key(key):
         source_kind = source_kind or "subagent"
         channel_kind = channel_kind or "subagent"
     elif key.startswith("cron:") or ":cron:" in key:

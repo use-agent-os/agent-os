@@ -38,6 +38,7 @@ from agentos.router_tiers import (
     TIER_TO_ROUTE_CLASS,
     normalize_text_tier,
 )
+from agentos.session.keys import is_subagent_key
 
 log = structlog.get_logger(__name__)
 
@@ -1359,7 +1360,7 @@ async def apply_agentos_router(ctx: TurnContext) -> TurnContext:
         semantic_message = ctx.message
     if not semantic_message.strip():
         return ctx
-    if ":subagent:" in ctx.session_key:
+    if is_subagent_key(ctx.session_key):
         return ctx
 
     rollout_phase: str = getattr(router_cfg, "rollout_phase", "observe")

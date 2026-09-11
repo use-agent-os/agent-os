@@ -5237,7 +5237,7 @@ class TurnRunner:
         if tier_index(previous) not in {0, 1, 2}:
             return _T3_NOT_APPLICABLE
 
-        if session_key.startswith(("cron:", "subagent:")):
+        if session_key.startswith("cron:") or is_subagent_key(session_key):
             return _T3_NOT_APPLICABLE
 
         if self._session_manager is None:
@@ -5496,7 +5496,7 @@ class TurnRunner:
         if self._session_manager is None:
             return
         # Skip ephemeral sessions
-        if session_key.startswith(("cron:", "subagent:")):
+        if session_key.startswith("cron:") or is_subagent_key(session_key):
             return
         if self.has_compacted_this_turn(session_key):
             log.info(
