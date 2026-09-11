@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from types import SimpleNamespace
@@ -40,6 +41,25 @@ async def test_gateway_rpc_call_times_out_and_clears_pending_request() -> None:
     with pytest.raises(TimeoutError, match="sessions.list timed out"):
         await client.call("sessions.list", {"limit": 1})
 
+    assert client._pending == {}
+
+
+@pytest.mark.asyncio
+async def test_gateway_close_fails_pending_rpc_calls() -> None:
+    client = GatewayRPCClient(request_timeout_s=None)
+    client._ws = _SilentWebSocket()
+    call_task = asyncio.create_task(client.call("sessions.list", {"limit": 1}))
+
+    for _ in range(10):
+        if client._pending:
+            break
+        await asyncio.sleep(0)
+    assert client._pending
+
+    await client.close()
+
+    with pytest.raises(ConnectionError, match="Gateway connection closed"):
+        await asyncio.wait_for(call_task, timeout=0.1)
     assert client._pending == {}
 
 

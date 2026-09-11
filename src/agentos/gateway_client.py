@@ -179,6 +179,7 @@ class GatewayRPCClient:
 
     async def close(self) -> None:
         self._closing = True
+        self._mark_connection_failed(ConnectionError("Gateway connection closed"))
         for task in (self._heartbeat_task, self._listener_task):
             if task is None:
                 continue
