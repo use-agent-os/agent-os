@@ -35,6 +35,14 @@ from .types import (
 __all__ = ["DeliveryReport", "JobStore"]
 log = structlog.get_logger(__name__)
 
+#: Ceiling for ``list_executions``' ``limit`` param, which reaches a raw SQL
+#: ``LIMIT ?`` unclamped. SQLite treats a negative ``LIMIT`` as "no limit" and
+#: ``LIMIT 0`` as zero rows, so a caller passing an unvalidated value would
+#: return a job's entire run history (or an empty one). Both current callers
+#: clamp at their own edge (``rpc_cron`` and the control tool); this guard
+#: lives on the shared store method so the next caller cannot forget it.
+_MAX_LIST_EXECUTIONS_LIMIT = 1000
+
 _CREATE_RUNS_TABLE = """
 CREATE TABLE IF NOT EXISTS scheduler_runs (
     id TEXT PRIMARY KEY,
@@ -959,6 +967,7 @@ class JobStore:
                 await self._db().commit()
 
     async def list_executions(self, job_id: str, limit: int = 20) -> list[JobExecution]:
+        limit = min(max(1, limit), _MAX_LIST_EXECUTIONS_LIMIT)
         async with self._db().execute(
             "SELECT * FROM scheduler_runs WHERE job_id = ? ORDER BY started_at DESC LIMIT ?",
             (job_id, limit),
