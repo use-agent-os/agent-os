@@ -176,3 +176,46 @@ def test_approval_queue_consume_is_one_shot_with_stale_unconsumed_read(
         assert queue.get(approval_id).consumed is True
     finally:
         queue.close()
+
+
+def test_approval_queue_resolve_persists_elevated_mode_across_reload_and_get(tmp_path) -> None:
+    db_path = tmp_path / "approval_queue.sqlite"
+    queue = ApprovalQueue(db_path=str(db_path))
+    aid = queue.request(
+        "exec",
+        {"toolName": "exec_command", "command": "rm -rf /tmp/test", "sessionKey": "s1"},
+    )
+
+    queue.resolve(aid, True, elevated_mode="bypass")
+
+    entry = queue.get(aid)
+    assert entry.params.get("elevatedMode") == "bypass"
+    queue.close()
+
+    reloaded = ApprovalQueue(db_path=str(db_path))
+    reloaded_entry = reloaded.get(aid)
+    assert reloaded_entry.params.get("elevatedMode") == "bypass"
+    assert reloaded.get_elevated_mode("s1") is None  # session mode is in-memory, but params persist
+    reloaded.close()
+
+
+def test_approval_queue_resolve_pending_for_session_persists_elevated_mode(tmp_path) -> None:
+    db_path = tmp_path / "approval_queue.sqlite"
+    queue = ApprovalQueue(db_path=str(db_path))
+    aid = queue.request(
+        "exec",
+        {"toolName": "exec_command", "command": "ls", "sessionKey": "session-xyz"},
+    )
+
+    resolved_count = queue.resolve_pending_for_session(
+        "session-xyz",
+        approved=True,
+        elevated_mode="on",
+    )
+    assert resolved_count == 1
+    assert queue.get(aid).params.get("elevatedMode") == "on"
+    queue.close()
+
+    reloaded = ApprovalQueue(db_path=str(db_path))
+    assert reloaded.get(aid).params.get("elevatedMode") == "on"
+    reloaded.close()
