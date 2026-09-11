@@ -20,6 +20,7 @@ Exit codes:
     0 — success, output written.
     1 — failure; stderr carries the ffmpeg tail.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,30 +32,37 @@ from glob import glob
 from pathlib import Path
 
 _WINGET_FFMPEG_GLOB = (
-    "Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_*/"
-    "ffmpeg-*-full_build/bin"
+    "Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_*/ffmpeg-*-full_build/bin"
 )
 
 
 def _probe_resolution(ffmpeg_bin: str, video_path: Path) -> tuple[int, int] | None:
     """Use ffprobe (next to ffmpeg) to read the source video's W x H."""
     ffprobe = ffmpeg_bin.replace("ffmpeg.exe", "ffprobe.exe").replace(
-        "/ffmpeg", "/ffprobe",
+        "/ffmpeg",
+        "/ffprobe",
     )
     if ffprobe == ffmpeg_bin:
         # Fallback for non-Windows / non-suffixed names.
-        ffprobe = str(Path(ffmpeg_bin).with_name(
-            "ffprobe.exe" if os.name == "nt" else "ffprobe",
-        ))
+        ffprobe = str(
+            Path(ffmpeg_bin).with_name(
+                "ffprobe.exe" if os.name == "nt" else "ffprobe",
+            )
+        )
     if not Path(ffprobe).is_file() and shutil.which(ffprobe) is None:
         return None
     try:
         proc = subprocess.run(
             [
-                ffprobe, "-v", "error",
-                "-select_streams", "v:0",
-                "-show_entries", "stream=width,height",
-                "-of", "csv=s=x:p=0",
+                ffprobe,
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height",
+                "-of",
+                "csv=s=x:p=0",
                 str(video_path),
             ],
             capture_output=True,
@@ -109,17 +117,21 @@ def _escape_subtitle_path(path: str) -> str:
     libass on Windows is picky: drive-letter colons must be backslash-
     escaped, and the path uses forward slashes regardless of OS. Inside
     the filter graph, single quotes wrap the path so commas / brackets
-    in the file name don't confuse the parser.
+    in the file name don't confuse the parser, and any other colons must
+    be backslash-escaped so ffmpeg does not treat them as option separators.
     """
     # Always use forward slashes inside the filter graph.
     normalised = path.replace("\\", "/")
-    # Escape drive-letter colon ("C:" -> "C\:") to keep libass happy.
-    if len(normalised) >= 2 and normalised[1] == ":" and normalised[0].isalpha():
-        normalised = normalised[0] + r"\:" + normalised[2:]
-    # Escape any remaining colon (e.g. an unusual file name).
-    rest = normalised[3:] if len(normalised) >= 3 else ""
-    if ":" in rest:
-        normalised = normalised[:3] + rest.replace(":", r"\:")
+    has_drive = len(normalised) >= 2 and normalised[1] == ":" and normalised[0].isalpha()
+    if has_drive:
+        # Escape drive-letter colon ("C:" -> "C\:") to keep libass happy on Windows,
+        # and escape any remaining colons in the rest of the path.
+        drive = normalised[0] + r"\:"
+        rest = normalised[2:].replace(":", r"\:")
+        normalised = drive + rest
+    else:
+        # On non-drive paths, escape all colons so ffmpeg does not mistake them for option separators.
+        normalised = normalised.replace(":", r"\:")
     # Escape single quotes inside the path (rare on Windows but possible).
     normalised = normalised.replace("'", r"\'")
     return normalised
@@ -137,36 +149,56 @@ def main() -> int:
     )
     parser.add_argument("--font-size", type=int, default=42)
     parser.add_argument(
-        "--primary-colour", default="&Hffffff",
+        "--primary-colour",
+        default="&Hffffff",
         help="ASS colour code for fill (&HBBGGRR). Default white &Hffffff.",
     )
     parser.add_argument(
-        "--outline-colour", default="&H000000",
+        "--outline-colour",
+        default="&H000000",
         help="ASS colour code for outline. Default black &H000000.",
     )
     parser.add_argument(
-        "--outline", type=int, default=2, help="Outline thickness in px.",
+        "--outline",
+        type=int,
+        default=2,
+        help="Outline thickness in px.",
     )
     parser.add_argument(
-        "--margin-v", type=int, default=80,
+        "--margin-v",
+        type=int,
+        default=80,
         help="Bottom margin in PX of the source video (we set PlayResX/Y to "
-             "the source resolution so MarginV maps 1:1 to pixels).",
+        "the source resolution so MarginV maps 1:1 to pixels).",
     )
     parser.add_argument(
-        "--play-res", default="auto",
+        "--play-res",
+        default="auto",
         help="libass PlayRes as 'WxH', or 'auto' to probe the input MP4. "
-             "Setting this makes FontSize and MarginV act in source pixels.",
+        "Setting this makes FontSize and MarginV act in source pixels.",
     )
     parser.add_argument(
-        "--alignment", type=int, default=2,
+        "--alignment",
+        type=int,
+        default=2,
         help="libass alignment: 1=bottom-left, 2=bottom-center, 3=bottom-right, "
-             "7=top-left, 8=top-center, 9=top-right. Default 2.",
+        "7=top-left, 8=top-center, 9=top-right. Default 2.",
     )
     parser.add_argument("--crf", type=int, default=20)
     parser.add_argument(
-        "--preset", default="medium",
-        choices=["ultrafast", "superfast", "veryfast", "faster", "fast",
-                 "medium", "slow", "slower", "veryslow"],
+        "--preset",
+        default="medium",
+        choices=[
+            "ultrafast",
+            "superfast",
+            "veryfast",
+            "faster",
+            "fast",
+            "medium",
+            "slow",
+            "slower",
+            "veryslow",
+        ],
     )
     parser.add_argument("--ffmpeg-path", default="ffmpeg")
     args = parser.parse_args()
@@ -216,14 +248,22 @@ def main() -> int:
     cmd = [
         ffmpeg_bin,
         "-y",
-        "-i", str(in_path),
-        "-vf", vf,
-        "-c:v", "libx264",
-        "-pix_fmt", "yuv420p",
-        "-crf", str(args.crf),
-        "-preset", args.preset,
-        "-c:a", "copy",
-        "-movflags", "+faststart",
+        "-i",
+        str(in_path),
+        "-vf",
+        vf,
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-crf",
+        str(args.crf),
+        "-preset",
+        args.preset,
+        "-c:a",
+        "copy",
+        "-movflags",
+        "+faststart",
         str(out_path),
     ]
     print("==> burning subtitles", file=sys.stderr)
