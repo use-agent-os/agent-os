@@ -543,7 +543,10 @@ async def read_file(path: str, offset: int | None = None, limit: int | None = No
         },
         "limit": {
             "type": "integer",
-            "description": "Maximum rows per sheet to return (default 200).",
+            "description": (
+                "Maximum rows per sheet to return (default 200; 0 returns "
+                "headers and sheet metadata only)."
+            ),
         },
     },
     required=["path"],
@@ -566,7 +569,10 @@ async def read_spreadsheet(
 
     ext = p.suffix.lower()
     row_offset = offset if offset and offset > 0 else 1
-    row_limit = limit if limit and limit > 0 else 200
+    # limit=0 is meaningful ("headers only", consistent with read_file's
+    # limit handling) — it must not fall through the falsy-zero check to the
+    # 200-row default. Negative limits keep the old 200-row fallback.
+    row_limit = 200 if limit is None or limit < 0 else limit
     loop = asyncio.get_running_loop()
 
     if ext in {".csv", ".tsv"}:
@@ -789,6 +795,11 @@ def _format_spreadsheet(
             parts.append(
                 f"(Offset {offset} exceeds this sheet's {total_rows} rows; no rows shown.)"
             )
+            continue
+        if limit == 0:
+            # Headers-only read: the standard continuation note below would
+            # render the nonsensical "Showing rows 1-0 ... Use offset=1".
+            parts.append("(limit=0: headers only; pass a higher limit to read rows.)")
             continue
         # Window applied here, at render time, against the sparse map --
         # not by slicing a materialised prefix. A gap between real rows

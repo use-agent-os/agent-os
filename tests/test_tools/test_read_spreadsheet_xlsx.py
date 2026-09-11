@@ -437,6 +437,69 @@ async def test_read_spreadsheet_large_limit_renders_the_whole_sheet(tmp_path: Pa
     assert "1048576 rows" in out
 
 
+# ---------------------------------------------------------------------------
+# limit=0 semantics (headers-only) vs the falsy-zero fallback.
+# ---------------------------------------------------------------------------
+
+
+def _write_rich_csv(tmp_path: Path, rows: int) -> Path:
+    target = tmp_path / "data.csv"
+    lines = ["c1,c2"] + [f"r{i},v{i}" for i in range(1, rows + 1)]
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return target
+
+
+async def test_read_spreadsheet_limit_zero_returns_headers_only(tmp_path: Path) -> None:
+    """limit=0 must return 0 data rows (metadata only), consistent with
+    read_file's limit handling -- it used to hit the falsy-zero fallback
+    and silently dump the 200-row default into the LLM context."""
+    target = _write_rich_csv(tmp_path, 250)
+
+    with tool_context(tmp_path):
+        out = await fs.read_spreadsheet(str(target), limit=0)
+
+    assert "251 rows" in out  # sheet metadata is still present
+    assert "r1\t" not in out  # no data row rendered at all
+    assert "(limit=0: headers only; pass a higher limit to read rows.)" in out
+    assert "Showing rows 1-0" not in out
+
+
+async def test_read_spreadsheet_omitted_limit_still_defaults_to_200(tmp_path: Path) -> None:
+    """Anti-drift: omitting limit keeps the 200-row default."""
+    target = _write_rich_csv(tmp_path, 250)
+
+    with tool_context(tmp_path):
+        out = await fs.read_spreadsheet(str(target))
+
+    assert "\n200\tr199\tv199" in out
+    assert "\n201\tr200\tv200" not in out
+    assert "Showing rows 1-200 of 251" in out
+
+
+async def test_read_spreadsheet_negative_limit_keeps_default_fallback(tmp_path: Path) -> None:
+    """Anti-drift: a negative limit keeps the old 200-row fallback."""
+    target = _write_rich_csv(tmp_path, 250)
+
+    with tool_context(tmp_path):
+        out = await fs.read_spreadsheet(str(target), limit=-5)
+
+    assert "\n200\tr199\tv199" in out
+    assert "\n201\tr200\tv200" not in out
+
+
+async def test_read_spreadsheet_small_positive_limit_still_honored(tmp_path: Path) -> None:
+    """Anti-drift: small positive limits behave exactly as before."""
+    target = _write_rich_csv(tmp_path, 250)
+
+    with tool_context(tmp_path):
+        out = await fs.read_spreadsheet(str(target), limit=2)
+
+    assert "\n1\tc1\tc2" in out
+    assert "\n2\tr1\tv1" in out
+    assert "\n3\tr2\tv2" not in out
+    assert "Showing rows 1-2 of 251" in out
+
+
 def test_read_xlsx_sheets_reading_does_not_scale_with_sheet_count(tmp_path: Path) -> None:
     """_read_xlsx_sheets parses every sheet before a single one is selected,
     so its own cost -- independent of whatever `limit` a caller later
