@@ -90,6 +90,28 @@ async def test_several_markers_each_publish(ctx: Any, published: list[dict[str, 
     assert "publish_artifact path=" not in out
 
 
+@pytest.mark.asyncio
+async def test_marker_with_crlf_line_endings_publishes_and_preserves_crlf(
+    ctx: Any, published: list[dict[str, str]]
+) -> None:
+    """Windows processes and Python scripts on Windows emit CRLF line endings."""
+    out = await publish_inline_artifacts(f"looked up 683 tokens\r\n{marker()}\r\ndone\r\n")
+    assert published == [{"path": "apple.cards.json", "mime": CARDS_MIME}]
+    assert out.startswith("looked up 683 tokens\r\n")
+    assert out.endswith("\r\ndone\r\n")
+    assert "publish_artifact path=" not in out
+    assert "already rendered for the user" in out
+
+
+@pytest.mark.asyncio
+async def test_markers_with_crlf_and_trailing_whitespace(
+    ctx: Any, published: list[dict[str, str]]
+) -> None:
+    out = await publish_inline_artifacts(f"{marker('a.json')}  \r\n{marker('b.json')}\t\r\n")
+    assert [c["path"] for c in published] == ["a.json", "b.json"]
+    assert "publish_artifact path=" not in out
+
+
 # ── Guards ──────────────────────────────────────────────────────────────────
 
 
