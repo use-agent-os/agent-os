@@ -997,7 +997,9 @@ async def _handle_cron_update(params: dict | None, ctx: RpcContext) -> dict[str,
         effective_target = patch.get("session_target", current_job.session_target)
         _ensure_delivery_supported(session_target=effective_target, delivery_raw=delivery_raw)
         await _ensure_delivery_targets_valid(ctx, delivery_raw)
-        if isinstance(delivery_raw, dict) and delivery_raw.get("mode") == "none":
+        if delivery_raw is None or (
+            isinstance(delivery_raw, dict) and delivery_raw.get("mode") == "none"
+        ):
             patch["delivery"] = DeliveryConfig()
         elif _is_webhook_delivery(delivery_raw):
             new_delivery = _build_webhook_delivery(delivery_raw)

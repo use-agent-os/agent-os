@@ -227,8 +227,10 @@ def _parse_wake_mode(raw: object) -> CronWakeMode:
 
 def _effective_delivery_for_target(
     session_target: SessionTarget,
-    delivery: DeliveryConfig,
+    delivery: DeliveryConfig | None,
 ) -> DeliveryConfig:
+    if delivery is None:
+        return DeliveryConfig()
     if (
         session_target == SessionTarget.MAIN
         and delivery.mode != DeliveryMode.NONE
@@ -266,7 +268,9 @@ def _serialize_failure_destination(fd: FailureDestination | None) -> dict | None
     }
 
 
-def _serialize_delivery(delivery: DeliveryConfig) -> str:
+def _serialize_delivery(delivery: DeliveryConfig | None) -> str:
+    if delivery is None:
+        delivery = DeliveryConfig()
     snapshot = delivery.originating_reply_target
     return json.dumps(
         {

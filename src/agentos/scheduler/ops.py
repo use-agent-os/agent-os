@@ -155,19 +155,20 @@ def _validate_main_agent(payload: dict | None, session_target: SessionTarget) ->
 def _normalize_delivery_for_target(
     *,
     session_target: SessionTarget,
-    delivery: DeliveryConfig,
+    delivery: DeliveryConfig | None,
     explicit_delivery: bool,
 ) -> DeliveryConfig:
-    if delivery is not None and delivery.mode == DeliveryMode.WEBHOOK:
+    delivery = delivery or DeliveryConfig()
+    if delivery.mode == DeliveryMode.WEBHOOK:
         validate_webhook_url(delivery.webhook_url)
-    fd = delivery.failure_destination if delivery is not None else None
+    fd = delivery.failure_destination
     if fd is not None and fd.mode == DeliveryMode.WEBHOOK:
         validate_webhook_url(fd.webhook_url)
     if session_target != SessionTarget.MAIN:
         return delivery
     # Webhook delivery is allowed for any sessionTarget — the heartbeat
     # pipeline ignores it and the webhook POST is independent of session.
-    if delivery is not None and delivery.mode == DeliveryMode.WEBHOOK:
+    if delivery.mode == DeliveryMode.WEBHOOK:
         return delivery
     if _delivery_requested(delivery):
         if explicit_delivery:
@@ -431,7 +432,7 @@ class SchedulerOps:
             else:
                 job.payload = {**job.payload, **payload_patch}
         if "delivery" in patch:
-            job.delivery = patch.pop("delivery")
+            job.delivery = patch.pop("delivery") or DeliveryConfig()
 
         (
             job.handler_key,

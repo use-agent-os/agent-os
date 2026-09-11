@@ -193,6 +193,7 @@ async def execute_with_timeout(job: CronJob, handler: HandlerFn) -> JobExecution
     # site so all failure paths reach the FD uniformly.
     if (
         not execution.success
+        and job.delivery is not None
         and job.delivery.failure_destination is not None
         and _failure_dispatcher is not None
     ):
