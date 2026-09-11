@@ -2148,10 +2148,47 @@ class TestSessionsDelete:
 
         ctx = make_ctx(session_manager=FakeSessionManager([session]), task_runtime=_BrokenRuntime())
 
-        res = await dispatcher.dispatch(
-            "r1", "sessions.delete", {"key": session.session_key}, ctx
-        )
+        res = await dispatcher.dispatch("r1", "sessions.delete", {"key": session.session_key}, ctx)
 
+        assert res.ok is True
+        assert res.payload["deleted"] == [session.session_key]
+        assert res.payload["errors"] == []
+
+    @pytest.mark.asyncio
+    async def test_delete_rejects_non_list_keys(self, dispatcher, ctx_with_sessions):
+        res = await dispatcher.dispatch(
+            "r1", "sessions.delete", {"keys": "some-key"}, ctx_with_sessions
+        )
+        assert res.ok is False
+        assert "params.keys must be a list" in (res.error.message if res.error else "")
+
+    @pytest.mark.asyncio
+    async def test_delete_rejects_non_string_key(self, dispatcher, ctx_with_sessions):
+        res = await dispatcher.dispatch("r1", "sessions.delete", {"key": 123}, ctx_with_sessions)
+        assert res.ok is False
+        assert "params.key must be a string" in (res.error.message if res.error else "")
+
+    @pytest.mark.asyncio
+    async def test_delete_rejects_empty_key_and_blank_keys(self, dispatcher, ctx_with_sessions):
+        res1 = await dispatcher.dispatch("r1", "sessions.delete", {"key": ""}, ctx_with_sessions)
+        assert res1.ok is False
+        assert "params.key or params.keys is required" in (res1.error.message if res1.error else "")
+
+        res2 = await dispatcher.dispatch("r1", "sessions.delete", {"keys": []}, ctx_with_sessions)
+        assert res2.ok is False
+        assert "params.key or params.keys is required" in (res2.error.message if res2.error else "")
+
+        res3 = await dispatcher.dispatch(
+            "r1", "sessions.delete", {"keys": ["", "   "]}, ctx_with_sessions
+        )
+        assert res3.ok is False
+        assert "params.key or params.keys is required" in (res3.error.message if res3.error else "")
+
+    @pytest.mark.asyncio
+    async def test_delete_bulk_valid_list(self, dispatcher, ctx_with_sessions, session):
+        res = await dispatcher.dispatch(
+            "r1", "sessions.delete", {"keys": [session.session_key]}, ctx_with_sessions
+        )
         assert res.ok is True
         assert res.payload["deleted"] == [session.session_key]
         assert res.payload["errors"] == []

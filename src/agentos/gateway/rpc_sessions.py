@@ -1964,9 +1964,17 @@ async def _handle_sessions_delete(params: dict | None, ctx: RpcContext) -> dict:
     keys: list[str] = []
     if isinstance(params, dict):
         if "keys" in params:
-            keys = params["keys"]
+            raw_keys = params["keys"]
+            if not isinstance(raw_keys, list):
+                raise ValueError("params.keys must be a list")
+            keys = [str(k).strip() for k in raw_keys if isinstance(k, str) and str(k).strip()]
         elif "key" in params:
-            keys = [params["key"]]
+            raw_key = params["key"]
+            if not isinstance(raw_key, str):
+                raise ValueError("params.key must be a string")
+            key_val = raw_key.strip()
+            if key_val:
+                keys = [key_val]
 
     if not keys:
         raise ValueError("params.key or params.keys is required")
