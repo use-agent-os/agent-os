@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from agentos.gateway.access import CONTROL_AND_CHANNEL, CONTROL_AND_NODE
-from agentos.gateway.rpc import RpcContext, get_dispatcher
+from agentos.gateway.rpc import RpcContext, get_dispatcher, require_params_dict
 from agentos.skills.availability import SkillAvailability
 from agentos.skills.eligibility import (
     EligibilityContext,
@@ -364,17 +364,19 @@ async def _handle_skills_bins(params: dict | None, ctx: RpcContext) -> dict[str,
 @_d.method("skills.get")
 async def _handle_skills_get(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     """Get a single skill by name, including its full content."""
-    if not isinstance(params, dict) or "name" not in params:
-        raise ValueError("params.name is required")
+    params = require_params_dict(params)
+    name = params.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("params.name must be a non-empty string")
 
     loader = _get_loader(ctx)
     if loader is None:
         raise KeyError("No skill loader available")
 
     all_rows = _inventory(ctx)
-    row = next((item for item in all_rows if item.spec.name == params["name"]), None)
+    row = next((item for item in all_rows if item.spec.name == name), None)
     if row is None:
-        raise KeyError(f"Skill not found: {params['name']}")
+        raise KeyError(f"Skill not found: {name}")
 
     result = _rows_payload([row], index_from=all_rows)[0]
     result["content"] = row.spec.content
@@ -490,8 +492,10 @@ def _synthesized_installed_rows(
 @_d.method("skills.search")
 async def _handle_skills_search(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     """Search for skills across Community sources."""
-    if not isinstance(params, dict) or "query" not in params:
-        raise ValueError("params.query is required")
+    params = require_params_dict(params)
+    query = params.get("query")
+    if not isinstance(query, str):
+        raise ValueError("params.query must be a string")
 
     router = getattr(ctx, "_skill_router", None)
     if router is None:
@@ -570,8 +574,10 @@ def _invalidate_loader(ctx: RpcContext) -> None:
 @_d.method("skills.install")
 async def _handle_skills_install(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     """Install a skill from a Community source."""
-    if not isinstance(params, dict) or "identifier" not in params:
-        raise ValueError("params.identifier is required")
+    params = require_params_dict(params)
+    identifier = params.get("identifier")
+    if not isinstance(identifier, str) or not identifier.strip():
+        raise ValueError("params.identifier must be a non-empty string")
     loader = _get_loader(ctx)
     if loader is None:
         return {"success": False, "message": "No skill loader configured"}
@@ -580,7 +586,6 @@ async def _handle_skills_install(params: dict | None, ctx: RpcContext) -> dict[s
     if installer is None:
         return {"success": False, "message": "No skill installer configured"}
 
-    identifier = params["identifier"]
     source_id = params.get("source", "clawhub")
     force = params.get("force", False)
     result = await installer.install(identifier, source_id, force=force)
@@ -602,6 +607,14 @@ async def _handle_skills_install(params: dict | None, ctx: RpcContext) -> dict[s
 @_d.method("skills.update")
 async def _handle_skills_update(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     """Update installed skills from lockfile."""
+    name: str | None = None
+    if params is not None:
+        if not isinstance(params, dict):
+            raise ValueError("params must be an object")
+        name = params.get("name")
+        if name is not None and (not isinstance(name, str) or not name.strip()):
+            raise ValueError("params.name must be a non-empty string")
+
     loader = _get_loader(ctx)
     if loader is None:
         return {
@@ -613,7 +626,6 @@ async def _handle_skills_update(params: dict | None, ctx: RpcContext) -> dict[st
     if installer is None:
         return {"success": False, "message": "No skill installer configured"}
 
-    name = (params or {}).get("name")
     try:
         results = await installer.update(_lock_key(ctx, name) if name else None)
     except OSError as exc:
@@ -641,14 +653,16 @@ async def _handle_skills_update(params: dict | None, ctx: RpcContext) -> dict[st
 @_d.method("skills.uninstall")
 async def _handle_skills_uninstall(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     """Uninstall a managed skill."""
-    if not isinstance(params, dict) or "name" not in params:
-        raise ValueError("params.name is required")
+    params = require_params_dict(params)
+    name = params.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("params.name must be a non-empty string")
 
     installer = _get_default_installer(managed_dir=_loader_managed_dir(ctx))
     if installer is None:
         return {"success": False, "message": "No skill installer configured"}
 
-    result = await installer.uninstall(_lock_key(ctx, params["name"]))
+    result = await installer.uninstall(_lock_key(ctx, name))
     if result.success:
         _invalidate_loader(ctx)
     return {"success": result.success, "name": result.name, "message": result.message}
@@ -665,15 +679,13 @@ async def _handle_skills_deps_install(params: dict | None, ctx: RpcContext) -> d
     Note: `kind == "download"` is non-idempotent — re-running re-downloads.
     Callers should consult `missing_still` before retrying.
     """
-    if not isinstance(params, dict):
-        raise ValueError("params must be a dict")
-    if "name" not in params:
-        raise ValueError("params.name is required")
-    if "install_id" not in params:
-        raise ValueError("params.install_id is required")
-
-    name = params["name"]
-    install_id = params["install_id"]
+    params = require_params_dict(params)
+    name = params.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("params.name must be a non-empty string")
+    install_id = params.get("install_id")
+    if not isinstance(install_id, str) or not install_id.strip():
+        raise ValueError("params.install_id must be a non-empty string")
     loader = _get_loader(ctx)
     if loader is None:
         raise KeyError("No skill loader available")
