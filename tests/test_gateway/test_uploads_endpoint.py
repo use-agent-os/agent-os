@@ -80,6 +80,42 @@ def test_upload_round_trip(store: UploadStore) -> None:
     assert meta["size"] == len(payload)
 
 
+# ---------------------------------------------------------------------------
+# file_uuid traversal guards: _marker_path must never resolve outside
+# marker_dir, whatever string reaches it over an RPC boundary.
+# ---------------------------------------------------------------------------
+
+
+def test_marker_path_rejects_relative_traversal(store: UploadStore, tmp_path: Path) -> None:
+    """evict('../decoy/x') must raise ValueError, not unlink outside marker_dir."""
+    decoy_dir = tmp_path / "decoy"
+    decoy_dir.mkdir()
+    decoy = decoy_dir / "x.meta"
+    decoy.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        asyncio.run(store.evict("../decoy/x"))
+    assert decoy.exists()
+
+
+def test_marker_path_rejects_absolute_uuid(store: UploadStore, tmp_path: Path) -> None:
+    """An absolute uuid replaces the base entirely in pathlib; must be rejected."""
+    outside = tmp_path / "outside.meta"
+    outside.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        asyncio.run(store.evict(str(outside.with_suffix(""))))
+    assert outside.exists()
+
+
+def test_marker_path_keeps_internal_uuids_working(store: UploadStore) -> None:
+    """Contained-but-non-canonical uuids keep the old semantics (no over-blocking)."""
+
+    with pytest.raises(AttachmentNotFoundError):
+        asyncio.run(store.get("u-doesnotexist"))
+    assert asyncio.run(store.evict("u-doesnotexist")) is False
+
+
 def test_upload_too_large_30mb_plus_rejected(store: UploadStore) -> None:
     # 30 MB + 1 byte exceeds the locked cap.
     too_big = b"%PDF-1.4\n" + b"a" * MAX_STAGED_PDF_BYTES

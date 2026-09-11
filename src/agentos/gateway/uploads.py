@@ -176,7 +176,14 @@ class UploadStore:
     def _marker_path(self, file_uuid: str) -> Path | None:
         if self.marker_dir is None:
             return None
-        return self.marker_dir / f"{file_uuid}.meta"
+        root = self.marker_dir.resolve()
+        path = (self.marker_dir / f"{file_uuid}.meta").resolve()
+        if path.parent != root:
+            # file_uuid crosses RPC boundaries unvalidated; a traversal shape
+            # ("../x", an absolute path — pathlib replaces the base) must never
+            # resolve outside marker_dir. Markers are flat direct children.
+            raise ValueError(f"file_uuid {file_uuid!r} escapes marker_dir")
+        return path
 
     def _read_marker(self, file_uuid: str) -> dict[str, Any] | None:
         path = self._marker_path(file_uuid)
