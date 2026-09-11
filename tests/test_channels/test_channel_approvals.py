@@ -136,6 +136,89 @@ async def test_telegram_callback_query_session_mismatch() -> None:
 
 
 @pytest.mark.asyncio
+async def test_telegram_callback_query_account_and_topic_scoped_session_keys() -> None:
+    queue = get_approval_queue()
+
+    # 1. 6-part account-scoped session key (DmScope.PER_ACCOUNT_CHANNEL_PEER)
+    approval_id = queue.request(
+        "exec",
+        {
+            "argv": ["ls"],
+            "action_kind": "exec",
+            "sessionKey": "agent:main:telegram:bot-account-1:direct:12345",
+        },
+    )
+
+    channel = TelegramChannel(TelegramChannelConfig(token="test-token"))
+    calls = []
+
+    async def fake_api(method: str, payload: dict | None = None) -> Any:
+        calls.append((method, payload or {}))
+        return True
+
+    channel._api = fake_api
+
+    callback_query = {
+        "id": "cb123",
+        "from": {"id": 12345, "username": "bob"},
+        "message": {
+            "message_id": 999,
+            "chat": {"id": 12345, "type": "private"},
+            "text": "Do you want to run this command?",
+        },
+        "data": f"approve:{approval_id}",
+    }
+
+    admission_mock = ChannelAdmission("telegram", "12345", "grant1", 1)
+    with patch.object(channel.pairing_store, "admission", return_value=admission_mock):
+        await channel._handle_telegram_callback(callback_query)
+
+    entry = queue.get(approval_id)
+    assert entry.resolved is True
+    assert entry.approved is True
+    assert len(calls) == 2
+    assert calls[0][0] == "answerCallbackQuery"
+    assert calls[1][0] == "editMessageText"
+    calls.clear()
+
+    # 2. Topic-scoped group session key
+    group_channel = TelegramChannel(
+        TelegramChannelConfig(
+            token="test-token",
+            groups_enabled=True,
+            group_chat_ids=["-10012345"],
+        )
+    )
+    group_channel._api = fake_api
+    group_approval_id = queue.request(
+        "exec",
+        {
+            "argv": ["ls"],
+            "action_kind": "exec",
+            "sessionKey": "agent:main:telegram:group:-10012345:topic:99",
+        },
+    )
+    group_callback_query = {
+        "id": "cb456",
+        "from": {"id": 12345, "username": "bob"},
+        "message": {
+            "message_id": 1000,
+            "chat": {"id": -10012345, "type": "supergroup"},
+            "text": "Do you want to run this command?",
+        },
+        "data": f"approve:{group_approval_id}",
+    }
+    with patch.object(group_channel.pairing_store, "admission", return_value=admission_mock):
+        await group_channel._handle_telegram_callback(group_callback_query)
+
+    group_entry = queue.get(group_approval_id)
+    assert group_entry.resolved is True
+    assert group_entry.approved is True
+    assert calls[0][0] == "answerCallbackQuery"
+    assert calls[1][0] == "editMessageText"
+
+
+@pytest.mark.asyncio
 async def test_slack_interactive_payload_handling() -> None:
     queue = get_approval_queue()
     approval_id = queue.request("exec", {"argv": ["rm", "-rf"], "action_kind": "exec"})
@@ -403,6 +486,82 @@ async def test_discord_component_interaction_handling() -> None:
     msg = await channel.receive()
     assert msg.content == "Deny"
     assert msg.sender_id == "usr123"
+
+
+@pytest.mark.asyncio
+async def test_slack_interactive_account_and_thread_scoped_session_keys() -> None:
+    queue = get_approval_queue()
+    approval_id = queue.request(
+        "exec",
+        {
+            "argv": ["ls"],
+            "action_kind": "exec",
+            "sessionKey": "agent:ops:slack:acc1:direct:U12345",
+        },
+    )
+
+    channel = SlackChannel(token="xoxb-test", slack_channel_id="C12345")
+    channel.parse_event = lambda ev: IncomingMessage(
+        sender_id=ev["user"],
+        channel_id=ev["channel"],
+        content=ev["text"],
+    )
+
+    payload = {
+        "type": "block_actions",
+        "user": {"id": "U12345"},
+        "channel": {"id": "C12345"},
+        "response_url": "https://hooks.slack.com/actions/test",
+        "message": {"text": "Approve this execution?", "blocks": []},
+        "actions": [{"value": f"approve:{approval_id}"}],
+    }
+
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+    with patch("httpx.AsyncClient.post", return_value=FakeResponse()):
+        await channel._handle_slack_interactive(payload)
+
+    entry = queue.get(approval_id)
+    assert entry.resolved is True
+    assert entry.approved is True
+
+
+@pytest.mark.asyncio
+async def test_discord_component_account_and_guild_session_keys() -> None:
+    queue = get_approval_queue()
+    approval_id = queue.request(
+        "exec",
+        {
+            "argv": ["ls"],
+            "action_kind": "exec",
+            "sessionKey": "agent:ops:discord:acc1:direct:usr123",
+        },
+    )
+
+    channel = DiscordChannel(DiscordChannelConfig(token="test-token"))
+
+    class FakeResp:
+        def raise_for_status(self):
+            pass
+
+    channel._get_client = lambda: AsyncMock(post=AsyncMock(return_value=FakeResp()))
+
+    data = {
+        "type": 3,
+        "id": "int123",
+        "token": "token123",
+        "channel_id": "chan123",
+        "user": {"id": "usr123"},
+        "message": {"content": "Approval requested"},
+        "data": {"custom_id": f"approve:{approval_id}"},
+    }
+
+    await channel._handle_discord_component_interaction(data)
+    entry = queue.get(approval_id)
+    assert entry.resolved is True
+    assert entry.approved is True
 
 
 _PENDING_APPROVAL: dict[str, Any] = {

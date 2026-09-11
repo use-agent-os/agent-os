@@ -12,6 +12,7 @@ from agentos.session.compaction import (
 from agentos.session.keys import (
     DmScope,
     PeerKind,
+    SessionKeyComponents,
     build_channel_key,
     build_cron_key,
     build_direct_key,
@@ -24,6 +25,7 @@ from agentos.session.keys import (
     derive_chat_type,
     normalize_account_id,
     normalize_agent_id,
+    parse_session_key,
     parse_thread_suffix,
 )
 from agentos.session.manager import SessionManager
@@ -73,6 +75,8 @@ __all__ = [
     "build_cron_key",
     "canonicalize_session_key",
     "parse_thread_suffix",
+    "parse_session_key",
+    "SessionKeyComponents",
     "derive_chat_type",
     "normalize_agent_id",
     "normalize_account_id",

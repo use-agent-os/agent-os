@@ -505,7 +505,6 @@ class DiscordChannel:
             elif op == 11:  # Heartbeat ACK
                 self._state.last_heartbeat_ack = True
 
-
     async def _handle_dispatch(self, event_type: str | None, data: dict[str, Any]) -> None:
         if event_type == "READY":
             self._state.session_id = data["session_id"]
@@ -723,20 +722,22 @@ class DiscordChannel:
 
         session_key = entry.params.get("sessionKey")
         if isinstance(session_key, str) and session_key:
-            parts = session_key.split(":")
-            if parts and parts[0] == "subagent":
-                parts = parts[1:]
-            if len(parts) >= 5:
-                session_channel = parts[2]
-                session_mode = parts[3]
-                session_peer = parts[4]
-                expected_peer = channel_id if session_mode in ("group", "channel") else user_id
-                if session_channel != "discord" or session_peer != expected_peer:
+            from agentos.session.keys import parse_session_key
+
+            parsed = parse_session_key(session_key)
+            if parsed.channel and parsed.peer_id:
+                expected_peer = channel_id if parsed.chat_type in ("group", "channel") else user_id
+                peer_matches = (
+                    parsed.peer_id == expected_peer
+                    or parsed.peer_id == f"channel-{expected_peer}"
+                    or f"channel-{parsed.peer_id}" == expected_peer
+                )
+                if parsed.channel != "discord" or not peer_matches:
                     log.warning(
                         "discord.component_mismatch",
                         session_key=session_key,
                         expected_peer=expected_peer,
-                        session_peer=session_peer,
+                        session_peer=parsed.peer_id,
                     )
                     return
 
@@ -925,9 +926,7 @@ class DiscordChannel:
 
     def is_connected(self) -> bool:
         return (
-            self._connected
-            and self._dispatch_task is not None
-            and not self._dispatch_task.done()
+            self._connected and self._dispatch_task is not None and not self._dispatch_task.done()
         )
 
     async def health_check(self) -> ChannelHealth:
@@ -940,7 +939,6 @@ class DiscordChannel:
                 "sequence": self._state.sequence,
             },
         )
-
 
     # ------------------------------------------------------------------
     # Inbound

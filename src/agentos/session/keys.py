@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
 
@@ -177,6 +178,180 @@ def build_cron_key(name: str, run_id: str) -> str:
     return f"cron:{name}:run:{run_id}"
 
 
+@dataclass(frozen=True, slots=True)
+class SessionKeyComponents:
+    """Structured representation of a parsed session key."""
+
+    agent_id: str = "main"
+    channel: str | None = None
+    account_id: str | None = None
+    chat_type: str = "unknown"
+    peer_id: str | None = None
+    thread_id: str | None = None
+    is_subagent: bool = False
+
+
+def parse_session_key(session_key: str | None) -> SessionKeyComponents:
+    """Parse a canonical or legacy session key into structured components.
+
+    Handles:
+    - Standard keys: ``agent:<aid>:<channel>:<kind>:<peer_id>``
+    - Account-scoped keys: ``agent:<aid>:<channel>:<account_id>:<kind>:<peer_id>``
+    - Direct per-peer keys: ``agent:<aid>:direct:<peer_id>``
+    - Main/WebChat keys: ``agent:<aid>:main``, ``agent:<aid>:webchat:<peer_id>``
+    - Subagent keys: ``subagent:...`` or ``agent:<aid>:subagent:<run_id>``
+    - Threaded/topic keys: ``...:thread:<id>``, ``...:topic:<id>``
+    - Cron keys: ``cron:<name>:run:<run_id>``
+    - Discord guild keys: ``agent:<aid>:discord:(<acc>:)?guild-<gid>:channel-<cid>``
+    """
+    raw = str(session_key or "").strip()
+    if not raw:
+        return SessionKeyComponents()
+
+    is_sub = is_subagent_key(raw)
+    key = raw
+    if key.lower().startswith("subagent:"):
+        key = key[len("subagent:") :]
+
+    base_key, thread_id = parse_thread_suffix(key)
+
+    if base_key.lower().startswith("cron:"):
+        parts = base_key.split(":")
+        peer = parts[1] if len(parts) >= 2 else None
+        return SessionKeyComponents(
+            agent_id="main",
+            channel="cron",
+            chat_type="cron",
+            peer_id=peer,
+            thread_id=thread_id,
+            is_subagent=is_sub,
+        )
+
+    if not base_key.lower().startswith("agent:"):
+        if ":" in base_key:
+            parts = base_key.split(":")
+            return SessionKeyComponents(
+                agent_id="main",
+                channel=parts[0],
+                peer_id=parts[-1],
+                thread_id=thread_id,
+                is_subagent=is_sub,
+            )
+        return SessionKeyComponents(
+            agent_id="main",
+            peer_id=base_key,
+            thread_id=thread_id,
+            is_subagent=is_sub,
+        )
+
+    parts = base_key.split(":")
+    agent_id = normalize_agent_id(parts[1]) if len(parts) >= 2 else "main"
+    rem = parts[2:] if len(parts) >= 3 else []
+
+    if not rem:
+        return SessionKeyComponents(agent_id=agent_id, is_subagent=is_sub, thread_id=thread_id)
+
+    if rem == ["main"]:
+        return SessionKeyComponents(
+            agent_id=agent_id,
+            chat_type="main",
+            peer_id="main",
+            thread_id=thread_id,
+            is_subagent=is_sub,
+        )
+
+    if rem[0] == "webchat":
+        peer = rem[1] if len(rem) >= 2 else "default"
+        return SessionKeyComponents(
+            agent_id=agent_id,
+            channel="webchat",
+            chat_type="direct",
+            peer_id=peer,
+            thread_id=thread_id,
+            is_subagent=is_sub,
+        )
+
+    if rem[0] == "direct":
+        peer = ":".join(rem[1:]) if len(rem) >= 2 else None
+        return SessionKeyComponents(
+            agent_id=agent_id,
+            channel=None,
+            chat_type="direct",
+            peer_id=peer,
+            thread_id=thread_id,
+            is_subagent=is_sub,
+        )
+
+    if rem[0] == "subagent":
+        peer = ":".join(rem[1:]) if len(rem) >= 2 else None
+        return SessionKeyComponents(
+            agent_id=agent_id,
+            chat_type="subagent",
+            peer_id=peer,
+            thread_id=thread_id,
+            is_subagent=True,
+        )
+
+    channel = rem[0]
+    sub_rem = rem[1:]
+    if not sub_rem:
+        return SessionKeyComponents(
+            agent_id=agent_id,
+            channel=channel,
+            thread_id=thread_id,
+            is_subagent=is_sub,
+        )
+
+    if sub_rem[0] in ("direct", "group", "channel", "dm"):
+        kind = "direct" if sub_rem[0] == "dm" else sub_rem[0]
+        peer = ":".join(sub_rem[1:]) if len(sub_rem) >= 2 else None
+        return SessionKeyComponents(
+            agent_id=agent_id,
+            channel=channel,
+            chat_type=kind,
+            peer_id=peer,
+            thread_id=thread_id,
+            is_subagent=is_sub,
+        )
+
+    if len(sub_rem) >= 2 and sub_rem[1] in ("direct", "group", "channel", "dm"):
+        acc = sub_rem[0]
+        kind = "direct" if sub_rem[1] == "dm" else sub_rem[1]
+        peer = ":".join(sub_rem[2:]) if len(sub_rem) >= 3 else None
+        return SessionKeyComponents(
+            agent_id=agent_id,
+            channel=channel,
+            account_id=acc,
+            chat_type=kind,
+            peer_id=peer,
+            thread_id=thread_id,
+            is_subagent=is_sub,
+        )
+
+    if channel == "discord" and any(
+        seg.startswith("guild-") or seg.startswith("channel-") for seg in sub_rem
+    ):
+        chan_seg = next((s for s in sub_rem if s.startswith("channel-")), "")
+        guild_seg = next((s for s in sub_rem if s.startswith("guild-")), "")
+        peer = chan_seg.removeprefix("channel-") if chan_seg else guild_seg.removeprefix("guild-")
+        return SessionKeyComponents(
+            agent_id=agent_id,
+            channel="discord",
+            chat_type="channel",
+            peer_id=peer or ":".join(sub_rem),
+            thread_id=thread_id,
+            is_subagent=is_sub,
+        )
+
+    return SessionKeyComponents(
+        agent_id=agent_id,
+        channel=channel,
+        peer_id=":".join(sub_rem),
+        thread_id=thread_id,
+        is_subagent=is_sub,
+    )
+
+
 def parse_agent_id(session_key: str) -> str:
     """Extract agent_id from a session key string. Fallback 'main'.
 
@@ -184,28 +359,20 @@ def parse_agent_id(session_key: str) -> str:
     'subagent:agent:ops:...'            -> 'ops'
     'cron:foo:run:abc'                  -> 'main'
     """
-    key = session_key.strip()
-    # subagent:agent:ops:... -> strip prefix, then parse as agent key
-    if key.startswith("subagent:agent:"):
-        key = key[len("subagent:") :]
-    if key.startswith("agent:"):
-        parts = key.split(":")
-        candidate = parts[1] if len(parts) >= 2 else ""
-        return normalize_agent_id(candidate) if candidate else "main"
-    return "main"
+    return parse_session_key(session_key).agent_id
 
 
 def derive_chat_type(session_key: str) -> str:
     """Derive chat type from session key tokens."""
     from agentos.session.models import ChatType
 
-    key = session_key.lower()
-    # Discord legacy pattern
-    if re.match(r"^agent:[^:]+:discord:(?:[^:]+:)?guild-[^:]+:channel-[^:]+", key):
-        return ChatType.CHANNEL
+    parsed = parse_session_key(session_key)
+    if parsed.chat_type in ("direct", "group", "channel"):
+        return parsed.chat_type
+    key = (session_key or "").lower()
     for token in ("group", "channel", "direct", "dm"):
         if f":{token}:" in key or key.endswith(f":{token}"):
             if token in ("direct", "dm"):
                 return ChatType.DIRECT
-            return token  # "group" or "channel"
+            return token
     return ChatType.UNKNOWN

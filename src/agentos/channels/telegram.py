@@ -959,15 +959,12 @@ class TelegramChannel:
 
         session_key = entry.params.get("sessionKey")
         if isinstance(session_key, str) and session_key:
-            parts = session_key.split(":")
-            if parts and parts[0] == "subagent":
-                parts = parts[1:]
-            if len(parts) >= 5:
-                session_channel = parts[2]
-                session_mode = parts[3]
-                session_peer = parts[4]
-                expected_peer = chat_id if session_mode in ("group", "channel") else sender_id
-                if session_channel != self.config.name or session_peer != expected_peer:
+            from agentos.session.keys import parse_session_key
+
+            parsed = parse_session_key(session_key)
+            if parsed.channel and parsed.peer_id:
+                expected_peer = chat_id if parsed.chat_type in ("group", "channel") else sender_id
+                if parsed.channel != self.config.name or parsed.peer_id != expected_peer:
                     try:
                         await self._api(
                             "answerCallbackQuery",

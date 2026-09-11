@@ -908,20 +908,17 @@ class SlackChannel:
 
         session_key = entry.params.get("sessionKey")
         if isinstance(session_key, str) and session_key:
-            parts = session_key.split(":")
-            if parts and parts[0] == "subagent":
-                parts = parts[1:]
-            if len(parts) >= 5:
-                session_channel = parts[2]
-                session_mode = parts[3]
-                session_peer = parts[4]
-                expected_peer = channel_id if session_mode in ("group", "channel") else user_id
-                if session_channel != self.channel_id or session_peer != expected_peer:
+            from agentos.session.keys import parse_session_key
+
+            parsed = parse_session_key(session_key)
+            if parsed.channel and parsed.peer_id:
+                expected_peer = channel_id if parsed.chat_type in ("group", "channel") else user_id
+                if parsed.channel != self.channel_id or parsed.peer_id != expected_peer:
                     log.warning(
                         "slack.interactive_mismatch",
                         session_key=session_key,
                         expected_peer=expected_peer,
-                        session_peer=session_peer,
+                        session_peer=parsed.peer_id,
                     )
                     return
 
