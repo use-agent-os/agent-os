@@ -23,7 +23,7 @@ def _channel_artifact_context(tmp_path: Path) -> ToolContext:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
     return ToolContext(
-                caller_kind=CallerKind.CHANNEL,
+        caller_kind=CallerKind.CHANNEL,
         workspace_dir=str(workspace),
         artifact_media_root=str(tmp_path / "media"),
         artifact_session_id="session-1",
@@ -227,3 +227,37 @@ async def test_create_pdf_report_uses_unicode_fonts_for_channel_artifact(tmp_pat
 
     assert not any("ZapfDingbats" in font_name for font_name in base_fonts)
     assert any("STSong-Light" in font_name for font_name in base_fonts)
+
+
+@pytest.mark.asyncio
+async def test_create_pdf_report_preserves_cjk_punctuation_and_symbols(tmp_path: Path) -> None:
+    ctx = _channel_artifact_context(tmp_path)
+    token = current_tool_context.set(ctx)
+    try:
+        result = await create_pdf_report(
+            name="cjk-punctuation.pdf",
+            title="中文标点测试：标题！",
+            sections=[
+                {
+                    "heading": "第一节：测试《书名》与【括号】",
+                    "body": "你好，世界！这是“引号”——破折号……省略号。",
+                }
+            ],
+        )
+    finally:
+        current_tool_context.reset(token)
+
+    _, material = _published_material(ctx, result)
+    reader = PdfReader(BytesIO(material))
+    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+
+    # Fullwidth and CJK punctuation marks must not be stripped
+    assert "：" in text
+    assert "！" in text
+    assert "《" in text and "》" in text
+    assert "【" in text and "】" in text
+    assert "，" in text
+    assert "。" in text
+    assert "“" in text and "”" in text
+    assert "—" in text
+    assert "…" in text
