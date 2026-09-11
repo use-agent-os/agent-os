@@ -17,6 +17,7 @@ import asyncio
 from types import SimpleNamespace
 
 from agentos.gateway.rpc import RpcContext, get_dispatcher
+from agentos.gateway.rpc_models import _model_info_to_wire
 from agentos.router_control import RouterControlHoldStore
 
 _OPENCAP_ROWS = [
@@ -36,6 +37,7 @@ def _ctx(provider: str = "opencap", rows: list[dict] | None = None) -> RpcContex
                     "model_id": row["id"],
                     "display_name": row["id"],
                     "provider": row["provider"],
+                    **{k: v for k, v in row.items() if k not in {"id", "provider"}},
                 }
             )
             for row in catalog_rows
@@ -118,3 +120,29 @@ def test_a_model_outside_the_catalog_cannot_be_pinned() -> None:
     )
 
     assert result.error is not None
+
+
+def test_model_info_to_wire_includes_reasoning() -> None:
+    wire = _model_info_to_wire({"supports_reasoning": True, "supports_tools": True})
+    assert wire["capabilities"] == ["chat", "tools", "reasoning"]
+
+    wire_no_reasoning = _model_info_to_wire({"supports_tools": True})
+    assert wire_no_reasoning["capabilities"] == ["chat", "tools"]
+
+
+def test_models_list_includes_reasoning_capability_and_filters() -> None:
+    rows = [
+        {"id": "deepseek/deepseek-r1", "provider": "openrouter", "supports_reasoning": True},
+        {"id": "anthropic/claude-3.5-sonnet", "provider": "openrouter", "supports_tools": True},
+    ]
+    ctx = _ctx("openrouter", rows)
+    all_models = _list({}, ctx)
+    assert len(all_models) == 2
+    r1 = next(m for m in all_models if m["id"] == "deepseek/deepseek-r1")
+    assert "reasoning" in r1["capabilities"]
+    assert "chat" in r1["capabilities"]
+
+    filtered = _list({"capabilities": ["reasoning"]}, ctx)
+    assert len(filtered) == 1
+    assert filtered[0]["id"] == "deepseek/deepseek-r1"
+

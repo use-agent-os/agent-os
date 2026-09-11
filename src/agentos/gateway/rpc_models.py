@@ -13,10 +13,12 @@ _d = get_dispatcher()
 def _model_info_to_wire(m: dict[str, Any]) -> dict[str, Any]:
     """Convert a ModelInfo.model_dump() dict to the RPC wire format."""
     capabilities: list[str] = ["chat"]
-    if m.get("supports_tools"):
+    if m.get("supports_tools") or "tools" in m.get("capabilities", []):
         capabilities.append("tools")
-    if m.get("supports_vision"):
+    if m.get("supports_vision") or "vision" in m.get("capabilities", []):
         capabilities.append("vision")
+    if m.get("supports_reasoning") or "reasoning" in m.get("capabilities", []):
+        capabilities.append("reasoning")
     return {
         "id": m.get("model_id", ""),
         "name": m.get("display_name") or m.get("model_id", ""),
