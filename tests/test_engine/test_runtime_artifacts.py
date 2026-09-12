@@ -895,7 +895,8 @@ async def test_turn_runner_auto_publishes_overwritten_deliverable_file(tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_turn_runner_does_not_auto_publish_edited_config_json(tmp_path) -> None:
+async def test_turn_runner_auto_publishes_deliverable_file_edited_in_place(tmp_path) -> None:
+    """``edit_file`` is a tracked workspace write like ``write_file`` / ``apply_patch`` (#1689)."""
     storage = SessionStorage(":memory:")
     await storage.connect()
     manager = SessionManager(storage)
@@ -933,11 +934,15 @@ async def test_turn_runner_does_not_auto_publish_edited_config_json(tmp_path) ->
         ]
 
         artifact_events = [event for event in events if isinstance(event, ArtifactEvent)]
-        assert artifact_events == []
+        assert [event.name for event in artifact_events] == ["config.json"]
+        assert (workspace / "config.json").read_text(encoding="utf-8") == '{"enabled": true}\n'
 
         transcript = await manager.get_transcript(session_key)
         assistant = [entry for entry in transcript if entry.role == "assistant"][-1]
-        assert assistant.content == "Updated config.json."
+        payload = json.loads(assistant.content)
+        assert payload["text"] == "Updated config.json."
+        assert payload["artifacts"][0]["name"] == "config.json"
+        assert payload["artifacts"][0]["source"] == "auto_publish_omitted"
     finally:
         await storage.close()
 

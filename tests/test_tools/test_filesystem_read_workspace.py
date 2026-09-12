@@ -435,3 +435,49 @@ async def test_write_file_records_workspace_write_on_both_create_and_overwrite(
         current_tool_context.reset(token)
 
 
+@pytest.mark.asyncio
+async def test_edit_file_records_workspace_write(tmp_path: Path) -> None:
+    """An in-place edit is a workspace write too (#1689).
+
+    ``auto_publish_omitted_workspace_artifacts`` reads ``ctx.workspace_file_writes``
+    to find deliverables the turn touched; ``edit_file`` used to skip the record,
+    so a report edited in place was never auto-published.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = workspace / "report.md"
+    target.write_text("initial report draft", encoding="utf-8")
+    ctx = ToolContext(workspace_dir=str(workspace))
+    token = current_tool_context.set(ctx)
+    raw_edit_file = fs.edit_file.__wrapped__.__wrapped__
+    try:
+        result = await raw_edit_file(str(target), "draft", "final")
+        assert result.startswith("Edited ")
+        assert target.read_text(encoding="utf-8") == "initial report final"
+        assert len(ctx.workspace_file_writes) == 1
+        record = ctx.workspace_file_writes[0]
+        assert record["name"] == "report.md"
+        assert record["relative_path"] == "report.md"
+        assert record["suffix"] == ".md"
+        assert Path(record["path"]) == target.resolve()
+    finally:
+        current_tool_context.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_edit_file_gated_outside_workspace_records_nothing(tmp_path: Path) -> None:
+    """An edit that never wrote (out-of-workspace approval gate) leaves no record."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "elsewhere.txt"
+    outside.write_text("alpha beta", encoding="utf-8")
+    ctx = ToolContext(workspace_dir=str(workspace))
+    token = current_tool_context.set(ctx)
+    raw_edit_file = fs.edit_file.__wrapped__.__wrapped__
+    try:
+        result = await raw_edit_file(str(outside), "beta", "gamma")
+        assert not result.startswith("Edited ")
+        assert outside.read_text(encoding="utf-8") == "alpha beta"
+        assert ctx.workspace_file_writes == []
+    finally:
+        current_tool_context.reset(token)
