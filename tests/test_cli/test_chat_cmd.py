@@ -1283,6 +1283,7 @@ class _FakeGatewayClient:
         self.delete_calls: list[list[str]] = []
         self.history_calls: list[dict[str, object]] = []
         self.abort_calls: list[str] = []
+        self.discard_calls = 0
         self.reset_calls: list[str] = []
         self.compact_calls: list[dict[str, object]] = []
         self.config_get_calls: list[str | None] = []
@@ -1341,6 +1342,9 @@ class _FakeGatewayClient:
     async def abort_session(self, session_key: str) -> dict[str, object]:
         self.abort_calls.append(session_key)
         return {"aborted": True, "key": session_key}
+
+    def discard_pending_events(self) -> None:
+        self.discard_calls += 1
 
     async def reset_session(self, session_key: str) -> dict[str, object]:
         self.reset_calls.append(session_key)
@@ -1861,6 +1865,10 @@ async def test_gateway_stream_keyboard_interrupt_aborts_turn(monkeypatch) -> Non
     assert result.cancelled is True
     assert fake.abort_calls == ["agent:main:abc123"]
     assert fake.send_calls[0]["message"] == "hello"
+    # Regression for #1790: the aborted turn's own completion event can
+    # still arrive after abort_session()'s RPC response, so the queue must
+    # be discarded before the next turn starts.
+    assert fake.discard_calls == 1
 
 
 @pytest.mark.asyncio
@@ -1892,6 +1900,10 @@ async def test_gateway_stream_cancelled_error_aborts_turn(monkeypatch) -> None:
     assert result.cancelled is True
     assert fake.abort_calls == ["agent:main:abc123"]
     assert fake.send_calls[0]["message"] == "hello"
+    # Regression for #1790: the aborted turn's own completion event can
+    # still arrive after abort_session()'s RPC response, so the queue must
+    # be discarded before the next turn starts.
+    assert fake.discard_calls == 1
 
 
 @pytest.mark.asyncio

@@ -358,6 +358,21 @@ class GatewayClient:
     async def abort_session(self, key: str) -> dict[str, Any]:
         return cast(dict[str, Any], await self._call("sessions.abort", {"key": key}))
 
+    def discard_pending_events(self) -> None:
+        """Drop whatever is currently sitting in the shared event queue.
+
+        ``abort_session()``'s RPC response only confirms the abort request
+        was received, not that the turn's own async
+        ``session.event.done(reason="aborted")`` has already arrived over
+        the socket -- that event can still land in ``_recv_queue`` after
+        this call returns and, left there, would be mistaken by the next
+        ``send_message()`` call on this connection for *its* completion.
+        Callers that abort a turn and are about to start a new one on the
+        same connection should call this right after ``abort_session()``.
+        """
+        while not self._recv_queue.empty():
+            self._recv_queue.get_nowait()
+
     async def rename_session(self, key: str, name: str | None) -> dict[str, Any]:
         """Set a session's display name; an empty/``None`` name clears it."""
         return cast(

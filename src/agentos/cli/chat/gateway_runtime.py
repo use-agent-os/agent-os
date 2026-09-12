@@ -94,6 +94,8 @@ class GatewayClientLike(Protocol):
 
     async def abort_session(self, key: str) -> dict[str, Any]: ...
 
+    def discard_pending_events(self) -> None: ...
+
 
 class GatewayRunInputLoop(Protocol):
     async def __call__(
@@ -257,6 +259,11 @@ async def run_gateway_chat(
                 if turn_session_key is None:
                     return
                 await client.abort_session(turn_session_key)
+                # See GatewayClient.discard_pending_events: the turn's own
+                # aborted-completion event can still arrive after this RPC
+                # returns and must not be mistaken by the next dispatched
+                # turn for its own completion.
+                client.discard_pending_events()
 
             return _abort_captured_turn()
 

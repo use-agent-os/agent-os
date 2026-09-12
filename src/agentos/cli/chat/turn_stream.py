@@ -48,6 +48,8 @@ class GatewayStreamingClient(Protocol):
 
     async def abort_session(self, key: str) -> Any: ...
 
+    def discard_pending_events(self) -> None: ...
+
 
 @dataclass(frozen=True)
 class TurnStreamDependencies:
@@ -553,6 +555,12 @@ async def stream_response_gateway(
             except (KeyboardInterrupt, asyncio.CancelledError):
                 stream_deps.cancel_clearer()
                 await client.abort_session(session_key)
+                # The turn's own session.event.done(reason="aborted") is
+                # emitted asynchronously and can still arrive after the RPC
+                # above returns -- discard it now so the next send_message()
+                # on this connection doesn't mistake it for its own
+                # completion (see GatewayClient.discard_pending_events).
+                client.discard_pending_events()
                 cancelled = True
             await renderer_finalize(renderer, usage, cancelled=cancelled)
         finally:

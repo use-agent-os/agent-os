@@ -118,6 +118,8 @@ class GatewayClientLike(Protocol):
 
     async def abort_session(self, key: str) -> dict[str, Any]: ...
 
+    def discard_pending_events(self) -> None: ...
+
 
 class GatewayStreamResponse(Protocol):
     async def __call__(

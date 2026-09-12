@@ -218,6 +218,7 @@ async def test_gateway_abort_targets_active_turn_session_after_session_changes(
 
         def __init__(self) -> None:
             self.abort_calls: list[str] = []
+            self.discard_calls = 0
             _FakeGatewayClient.instances.append(self)
 
         async def connect(self, url: str, *, token: str | None = None) -> None:
@@ -232,6 +233,9 @@ async def test_gateway_abort_targets_active_turn_session_after_session_changes(
         async def abort_session(self, key: str) -> dict[str, object]:
             self.abort_calls.append(key)
             return {"aborted": True, "key": key}
+
+        def discard_pending_events(self) -> None:
+            self.discard_calls += 1
 
         async def close(self) -> None:
             return None
@@ -307,3 +311,7 @@ async def test_gateway_abort_targets_active_turn_session_after_session_changes(
 
     client = _FakeGatewayClient.instances[-1]
     assert client.abort_calls == ["agent:main:old"]
+    # Regression for #1790: the turn's own aborted-completion event can
+    # arrive after abort_session()'s RPC response, so the caller must
+    # discard whatever's left in the queue before the next turn starts.
+    assert client.discard_calls == 1
