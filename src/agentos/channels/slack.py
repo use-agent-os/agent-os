@@ -476,9 +476,13 @@ class SlackChannel:
 
     async def edit(self, message_id: str, content: str) -> None:
         """Update an existing Slack message via chat.update."""
+        channel_id, sep, ts = message_id.partition("|")
+        if not sep:
+            channel_id = self.slack_channel_id
+            ts = message_id
         payload: dict[str, Any] = {
-            "channel": self.slack_channel_id,
-            "ts": message_id,
+            "channel": channel_id,
+            "ts": ts,
             "text": content,
         }
         client = self._get_client()
@@ -492,9 +496,13 @@ class SlackChannel:
 
     async def delete(self, message_id: str) -> None:
         """Delete a Slack message via chat.delete."""
+        channel_id, sep, ts = message_id.partition("|")
+        if not sep:
+            channel_id = self.slack_channel_id
+            ts = message_id
         payload: dict[str, Any] = {
-            "channel": self.slack_channel_id,
-            "ts": message_id,
+            "channel": channel_id,
+            "ts": ts,
         }
         client = self._get_client()
         resp = await retry_request(client.post, "/chat.delete", json=payload)
