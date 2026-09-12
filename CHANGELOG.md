@@ -23,6 +23,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- The channel `RateLimiter` admitted roughly twice its configured rate under
+  contention. A caller that had to wait for a token slept for the shortfall but
+  left `_last_refill` at its pre-sleep reading, so the interval it had just
+  slept through was credited again as refill to the next caller — every second
+  acquisition came back for free. The limiter guards every Discord REST call
+  (send, edit, reactions, uploads) at a default 30 req/s, so a busy session
+  could push ~60 req/s and collect exactly the 429s the limiter exists to
+  avoid. The refill clock now moves past the wait it just paid for.
+
 - `ApprovalQueue.wait()` could leave an approval pending forever after its full
   default timeout had elapsed. The wait deadline was measured on the monotonic
   clock but the "has the approval's lifespan expired?" check re-read
