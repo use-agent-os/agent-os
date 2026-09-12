@@ -90,6 +90,35 @@ async def test_several_markers_each_publish(ctx: Any, published: list[dict[str, 
     assert "publish_artifact path=" not in out
 
 
+@pytest.mark.asyncio
+async def test_crlf_terminated_marker_publishes_and_keeps_its_line_ending(
+    ctx: Any, published: list[dict[str, str]]
+) -> None:
+    """Python's text stdout ends lines with ``\\r\\n`` on Windows (issue #1732)."""
+    out = await publish_inline_artifacts(f"looked up 683 tokens\r\n{marker()}\r\ndone\r\n")
+    assert published == [{"path": "apple.cards.json", "mime": CARDS_MIME}]
+    assert "publish_artifact path=" not in out
+    assert out.startswith("looked up 683 tokens\r\n")
+    assert out.endswith("Do not call publish_artifact for it.]\r\ndone\r\n")
+
+
+@pytest.mark.asyncio
+async def test_crlf_marker_with_trailing_whitespace_publishes(
+    ctx: Any, published: list[dict[str, str]]
+) -> None:
+    out = await publish_inline_artifacts(f"{marker()} \t\r\n")
+    assert [c["path"] for c in published] == ["apple.cards.json"]
+    assert out.endswith("\r\n")
+
+
+@pytest.mark.asyncio
+async def test_several_crlf_markers_each_publish(ctx: Any, published: list[dict[str, str]]) -> None:
+    out = await publish_inline_artifacts(f"{marker('a.json')}\r\n{marker('b.json')}\r\n")
+    assert [c["path"] for c in published] == ["a.json", "b.json"]
+    assert "publish_artifact path=" not in out
+    assert out.count("\r\n") == 2
+
+
 # ── Guards ──────────────────────────────────────────────────────────────────
 
 

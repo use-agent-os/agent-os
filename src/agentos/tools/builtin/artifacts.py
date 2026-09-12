@@ -315,8 +315,12 @@ async def publish_artifact(
 # charge of whether the UI draws.
 
 #: The marker a skill script prints, alone on its own line.
+# A trailing ``\r`` is tolerated but not captured: subprocess output is decoded
+# without newline normalisation and Python's text stdout ends lines with
+# ``\r\n`` on Windows, so ``[ \t]*$`` alone never matched there. Keeping the
+# ``\r`` out of the match means replacing the marker preserves the line ending.
 INLINE_ARTIFACT_MARKER_RE = re.compile(
-    r"^publish_artifact[ \t]+path=(?P<path>\S+)[ \t]+mime=(?P<mime>\S+)[ \t]*$",
+    r"^publish_artifact[ \t]+path=(?P<path>\S+)[ \t]+mime=(?P<mime>\S+)[ \t]*(?=\r?$)",
     re.MULTILINE,
 )
 
