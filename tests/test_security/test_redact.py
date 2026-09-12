@@ -211,10 +211,36 @@ class TestTerminalOutput:
             ("cat notes.txt", False),
             ("echo env", False),
             ("", False),
+            # A newline is a sequence separator, exactly like ``;``.
+            ("cd /srv/app\nprintenv", True),
+            ("cd /srv\r\nprintenv", True),
+            ("set -a\nsource .env\nenv", True),
+            ("cat a.txt\nenv\ncat b.txt", True),
+            # Grouping parentheses must not hide the command inside them.
+            ("(printenv)", True),
+            ("( printenv )", True),
+            ("(cd /srv; printenv)", True),
+            # Ordinary multi-line / parenthesised commands stay out.
+            ("git log --oneline\ngit status", False),
+            ("cat a.txt\ncat b.txt", False),
+            ('grep "(env)" notes.txt', False),
+            ("echo 'set'\nls", False),
+            ("node --env-file=.env app.js", False),
+            ("()", False),
         ],
     )
     def test_env_dump_detection(self, command: str, expected: bool) -> None:
         assert redact.is_env_dump_command(command) is expected
+
+    def test_a_multi_line_env_dump_is_masked_like_its_chained_twin(self) -> None:
+        """Opaque (non-vendor-prefixed) secrets are only caught by the assignment pass."""
+        output = "DEPLOY_API_KEY=9f2b7c41ae55d0e3bb84\nDB_PASSWORD=hunter2hunter2hunter2\n"
+        chained = redact.redact_terminal_output(output, "cd /srv/app && printenv")
+        multi_line = redact.redact_terminal_output(output, "cd /srv/app\nprintenv")
+        grouped = redact.redact_terminal_output(output, "(printenv)")
+        assert "9f2b7c41ae55d0e3bb84" not in chained
+        assert multi_line == chained
+        assert grouped == chained
 
 
 def test_the_disable_switch_is_read_once_at_import(monkeypatch: pytest.MonkeyPatch) -> None:

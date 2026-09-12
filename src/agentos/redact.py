@@ -664,13 +664,16 @@ _ENV_DUMP_COMMANDS = frozenset({"env", "printenv", "set", "export", "declare"})
 def is_env_dump_command(command: str | None) -> bool:
     """Return whether *command* prints the environment to stdout.
 
-    Checks the first token of every pipeline or sequence segment. Conservative:
+    Checks the first token of every pipeline or sequence segment. A newline
+    separates commands exactly like ``;`` does (``exec_command`` hands the
+    whole string to the shell, so multi-line scripts are routine), and
+    grouping parentheses are stripped so ``(printenv)`` is seen. Conservative:
     anything it cannot parse is reported as not-a-dump, and the caller falls
     back to the pass that has fewer false positives.
     """
     if not command or not isinstance(command, str):
         return False
-    for segment in re.split(r"[|;&]+", command):
+    for segment in re.split(r"[|;&\r\n]+", command):
         segment = segment.strip()
         if not segment:
             continue
@@ -678,7 +681,10 @@ def is_env_dump_command(command: str | None) -> bool:
             tokens = shlex.split(segment)
         except ValueError:
             tokens = segment.split()
-        if tokens and tokens[0] in _ENV_DUMP_COMMANDS:
+        # ``(printenv)`` / ``( printenv )`` keep the grouping parens glued to
+        # (or in front of) the command; a paren-only token is skipped.
+        first = next((t.strip("()") for t in tokens if t.strip("()")), "")
+        if first in _ENV_DUMP_COMMANDS:
             return True
     return False
 
