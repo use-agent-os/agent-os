@@ -39,6 +39,8 @@ from unilp.fmt import (  # noqa: E402
     die,
     fmt_units,
     heading,
+    opt_int,
+    opt_str,
     parse_args,
     render_kv,
     require_arg,
@@ -209,7 +211,7 @@ def tick_summary_line(outcome: dict) -> str:
 
 
 def _client(chain: dict, args: dict) -> RpcClient:
-    return RpcClient(chain, args.get("rpc"))
+    return RpcClient(chain, opt_str(args, "rpc"))
 
 
 def _now() -> int:
@@ -335,11 +337,12 @@ def build_mandate(client, chain: dict, args: dict, signer: dict) -> dict:
     return {
         "immutable": immutable,
         "bounds": {
-            "maxSlippageBps": int(args.get("slippage-bps") or lp_write.DEFAULT_SLIPPAGE_BPS),
+            "maxSlippageBps": opt_int(args, "slippage-bps", lp_write.DEFAULT_SLIPPAGE_BPS,
+                                      minimum=0, maximum=9_999),
             "maxDeadlineSecs": lp_write.deadline_offset(args),
-            "maxTickDrift": int(args.get("max-tick-drift") or pool_key["tickSpacing"]),
+            "maxTickDrift": opt_int(args, "max-tick-drift", pool_key["tickSpacing"], minimum=1),
             "allowHooked": bool(args.get("allow-hooked")),
-            "maxAttempts": int(args.get("max-attempts") or DEFAULT_MAX_ATTEMPTS),
+            "maxAttempts": opt_int(args, "max-attempts", DEFAULT_MAX_ATTEMPTS, minimum=1),
             "maxPrincipalRawPerFire": (
                 str(lp_write.parse_amount(max_per_fire, principal_info["decimals"]))
                 if max_per_fire else None

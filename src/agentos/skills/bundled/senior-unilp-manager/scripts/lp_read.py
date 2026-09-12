@@ -47,6 +47,7 @@ from unilp.fmt import (  # noqa: E402
     fmt_usd,
     heading,
     json_safe,
+    opt_str,
     parse_args,
     render_kv,
     render_table,
@@ -1034,10 +1035,10 @@ def resolve_owner(args: dict) -> str:
     the address, and the key never enters a variable here — see
     ``chains.resolve_signer_address`` for why that stays incapable of signing.
     """
-    given = args.get("owner")
+    given = opt_str(args, "owner")
     if given:
-        return str(given)
-    signer_env = args.get("signer-env") or ENV_SIGNER
+        return given
+    signer_env = opt_str(args, "signer-env") or ENV_SIGNER
     try:
         return resolve_signer_address(signer_env)
     except RuntimeError as exc:

@@ -154,6 +154,24 @@ class Results:
         print(f"  --   skipped ({reason})")
 
 
+def _raises(r: Results, label: str, fn, *, contains: str = "") -> None:
+    """Assert ``fn()`` raises, and (optionally) that the message names the field.
+
+    Mirrors ``poolsfun/selftest.py``'s ``raises()`` helper. Checking the message,
+    not just that *something* raised, is what catches a regression that swaps in
+    a different, opaque exception which happens to also be a ``ValueError`` —
+    ``int(str(True))``'s ``invalid literal for int() with base 10: 'True'`` is
+    exactly that: a raise with no field name in it, the failure mode this guards.
+    """
+    try:
+        fn()
+    except Exception as exc:  # noqa: BLE001 — asserting the failure itself
+        ok = not contains or contains.lower() in str(exc).lower()
+        r.check(label, ok, True)
+        return
+    r.check(label, "no exception", "raise")
+
+
 # ---------------------------------------------------------------------------
 # Tier 0 — primitives
 # ---------------------------------------------------------------------------
@@ -690,6 +708,9 @@ def tier4(g: dict, r: Results) -> None:
         fmt_band,
         fmt_units,
         fmt_usd,
+        opt_float,
+        opt_int,
+        opt_str,
         parse_args,
         render_kv,
         render_table,
@@ -730,10 +751,45 @@ def tier4(g: dict, r: Results) -> None:
     r.check("parseArgs --k=v", args["mode"], "ticks")
     r.check("parseArgs trailing value", args["ranges"], "10")
 
+    # A bare, value-taking ``--flag`` (no value, or immediately followed by
+    # another ``--flag``) parses to the boolean True — correct for a switch like
+    # --json above, and exactly the sentinel that must never reach int()/float()
+    # unguarded: ``int(True) == 1`` silently replaces the caller's real default
+    # (e.g. a 100bps slippage floor) with 1, and nothing about that looks like a
+    # crash. opt_str/opt_int/opt_float are the one place this is caught.
+    r.check("optInt: absent falls back to default", opt_int({}, "x", 42), 42)
+    r.check("optInt: parses a numeric string", opt_int({"x": "7"}, "x", 42), 7)
+    r.check("optFloat: absent falls back to default", opt_float({}, "x", 1.3), 1.3)
+    r.check("optStr: absent is None", opt_str({}, "x"), None)
+    r.check("optStr: trims whitespace", opt_str({"x": "  v  "}, "x"), "v")
+    for flag in ("slippage-bps", "deadline-secs", "max-tick-drift", "max-attempts",
+                 "expiration-days"):
+        _raises(r, f"optInt: bare --{flag} is rejected, not coerced to 1",
+                lambda f=flag: opt_int({f: True}, f, 100), contains="needs a value")
+    _raises(r, "optFloat: bare --gas-multiplier is rejected, not coerced to 1.0",
+            lambda: opt_float({"gas-multiplier": True}, "gas-multiplier", 1.3),
+            contains="needs a value")
+    _raises(r, "optStr: bare --signer-env is rejected, not coerced to True",
+            lambda: opt_str({"signer-env": True}, "signer-env"), contains="needs a value")
+    _raises(r, "optInt: non-numeric value is rejected",
+            lambda: opt_int({"slippage-bps": "lots"}, "slippage-bps", 100),
+            contains="whole number")
+    # Bounds mirror the call sites in lp_write.py/ratchet.py exactly, so a bound
+    # tightened or loosened at the call site shows up here as a broken test
+    # rather than only at broadcast time.
+    _raises(r, "optInt: slippage-bps >= 100% is rejected",
+            lambda: opt_int({"slippage-bps": "20000"}, "slippage-bps", 100,
+                             minimum=0, maximum=9_999), contains="at most 9999")
+    _raises(r, "optInt: negative slippage-bps is rejected",
+            lambda: opt_int({"slippage-bps": "-1"}, "slippage-bps", 100,
+                             minimum=0, maximum=9_999), contains="at least 0")
+    _raises(r, "optInt: deadline-secs below the 60s floor is rejected",
+            lambda: opt_int({"deadline-secs": "10"}, "deadline-secs", 1200,
+                             minimum=60), contains="at least 60")
+
 
 # ---------------------------------------------------------------------------
 # Tier 5 — planning ergonomics
-# ---------------------------------------------------------------------------
 
 def tier5(g: dict, r: Results) -> None:
     """The parts that decide whether a caller reaches a mint or goes in circles.
@@ -860,6 +916,12 @@ def tier5(g: dict, r: Results) -> None:
         os.environ.pop("UNIV4_LP_PRIVATE_KEY")
         r.check("an explicit --owner never touches the key",
                 lp_read.resolve_owner({"owner": "0x" + "cd" * 20}), "0x" + "cd" * 20)
+        # A bare `--owner` (no value) used to silently resolve to the *string*
+        # "True" — a 20-char literal that fails 30+ lines downstream inside
+        # checksum_address with "not a 20-byte address: 'True'", not here where
+        # the actual mistake was made.
+        _raises(r, "a bare --owner is rejected here, not miles downstream",
+                lambda: lp_read.resolve_owner({"owner": True}), contains="needs a value")
     finally:
         os.environ.clear()
         os.environ.update(was_env)
