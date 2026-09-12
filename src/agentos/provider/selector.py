@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .anthropic import AnthropicProvider
 from .circuit_breaker import (
@@ -268,6 +268,10 @@ class ModelSelector:
 
         When ``fallbacks`` is provided, the selector's fallback chain is also updated
         (e.g. candidate router tier models that can be tried if the primary fails).
+        The override is local to this selector: ``self._config`` is the same
+        ``SelectorConfig`` object every ``clone()`` of the base selector shares,
+        so it is replaced with a private copy instead of mutated in place --
+        otherwise one turn's tier fallbacks would leak into every later clone.
         """
         if model and model != self._chain[0].model:
             self._chain[0] = ProviderConfig(
@@ -280,7 +284,7 @@ class ModelSelector:
                 provider_routing=self._chain[0].provider_routing,
             )
         if fallbacks is not None:
-            self._config.fallbacks = list(fallbacks)
+            self._config = replace(self._config, fallbacks=list(fallbacks))
             self._chain = [self._chain[0], *fallbacks]
 
     def sync_primary(self, cfg: ProviderConfig) -> None:
