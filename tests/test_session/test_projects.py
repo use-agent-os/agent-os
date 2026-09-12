@@ -173,6 +173,12 @@ async def test_search_transcript_scoped_to_project(manager, storage):
     scoped = await storage.search_transcript("quantum widget", project_id=project["project_id"])
     assert [hit["session_key"] for hit in scoped] == [inside.session_key]
 
+    scoped_by_key = await storage.search_transcript("quantum widget", session_id=inside.session_key)
+    assert [hit["session_key"] for hit in scoped_by_key] == [inside.session_key]
+
+    scoped_by_id = await storage.search_transcript("quantum widget", session_id=inside.session_id)
+    assert [hit["session_key"] for hit in scoped_by_id] == [inside.session_key]
+
 
 @pytest.mark.asyncio
 async def test_update_project_rename_does_not_clobber_concurrent_knowledge(manager):

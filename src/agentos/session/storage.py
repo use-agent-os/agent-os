@@ -1841,8 +1841,8 @@ class SessionStorage:
         params: list[Any] = [safe_q]
         joins = ""
         if session_id:
-            clauses.append("t.session_id = ?")
-            params.append(session_id)
+            clauses.append("(t.session_id = ? OR t.session_key = ?)")
+            params.extend([session_id, canonicalize_session_key(session_id)])
         if project_id:
             joins = "JOIN sessions s ON s.session_id = t.session_id "
             clauses.append("s.project_id = ?")
