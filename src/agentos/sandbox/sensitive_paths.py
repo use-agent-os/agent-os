@@ -168,8 +168,15 @@ def _comparison_path_candidates(path: str) -> list[str]:
     if raw:
         candidates.append(raw.casefold() if os.name == "nt" else raw)
     if raw.startswith("~/"):
-        expanded_home = str(Path.home()).replace("\\", "/") + raw[1:]
-        candidates.append(expanded_home.casefold() if os.name == "nt" else expanded_home)
+        # Home may be indeterminate (minimal container, HOME/USERPROFILE
+        # unset) — the raw "~/..." candidate above still lets prefix/suffix
+        # matching work without it.
+        try:
+            expanded_home = str(Path.home()).replace("\\", "/") + raw[1:]
+        except (OSError, RuntimeError):
+            expanded_home = None
+        if expanded_home is not None:
+            candidates.append(expanded_home.casefold() if os.name == "nt" else expanded_home)
     return list(dict.fromkeys(candidates))
 
 
@@ -354,7 +361,15 @@ def sensitive_path_marker(
     # turns into an absolute sensitive path, and the narrow leaf-marker
     # fallback below would be the only check it ever faced.
     text = _expand_env_vars(str(path).strip())
-    raw = Path(text).expanduser()
+    try:
+        raw = Path(text).expanduser()
+    except (OSError, RuntimeError):
+        # `~<literal>` where <literal> isn't a resolvable user (e.g. a
+        # backslash-separated `~\.aws\credentials` on POSIX, where pathlib
+        # reads the whole tail as a username) or home is indeterminate.
+        # Fall through unexpanded rather than let a security scan crash —
+        # is_sensitive_path()'s own candidates still catch the sensitive case.
+        raw = Path(text)
     if (
         text
         and not text.startswith("~")
