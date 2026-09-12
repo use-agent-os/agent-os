@@ -149,6 +149,15 @@ class ModelSelector:
         # to the fallback, burning a probe per turn so the primary never
         # recovers.
         self._admitted_index: int | None = None
+        # Per-turn fallback override from override_model(), if any. Kept off
+        # the shared SelectorConfig on purpose: clone() passes that config by
+        # reference and __init__ rebuilds _chain from config.fallbacks, so
+        # writing the override there would leak this turn's fallbacks into
+        # every clone made afterward instead of staying local to this
+        # instance, as the clone() docstring promises. next_fallback_after_
+        # failure consults this directly so the override still actually
+        # governs within-turn failover.
+        self._fallback_override: list[ProviderConfig] | None = None
 
     @property
     def circuit_breaker(self) -> ProviderCircuitBreaker:
@@ -237,7 +246,9 @@ class ModelSelector:
         replaces the static fallback chain from ``SelectorConfig``. An
         empty chain raises ``IndexError`` exactly like ``next_fallback``.
         """
-        chain = resolve_failover_chain(primary_failure, self._config, self._plugin)
+        chain = resolve_failover_chain(
+            primary_failure, self._config, self._plugin, default=self._fallback_override
+        )
         if not chain:
             raise IndexError("No more provider fallbacks available")
         rebuilt = [self._chain[0], *chain]
@@ -266,8 +277,14 @@ class ModelSelector:
     ) -> None:
         """Update the model on the primary provider config (for runtime switching).
 
-        When ``fallbacks`` is provided, the selector's fallback chain is also updated
-        (e.g. candidate router tier models that can be tried if the primary fails).
+        When ``fallbacks`` is provided, the selector's fallback chain is also
+        updated (e.g. candidate router tier models that can be tried if the
+        primary fails). Stored on this instance only (``_fallback_override``)
+        -- never written into ``self._config`` -- because ``self._config`` is
+        the same object every ``clone()`` shares; writing there would leak
+        this turn's fallback chain into every clone made afterward.
+        ``next_fallback_after_failure`` reads ``_fallback_override`` directly
+        so the override still actually governs failover within this turn.
         """
         if model and model != self._chain[0].model:
             self._chain[0] = ProviderConfig(
@@ -280,7 +297,7 @@ class ModelSelector:
                 provider_routing=self._chain[0].provider_routing,
             )
         if fallbacks is not None:
-            self._config.fallbacks = list(fallbacks)
+            self._fallback_override = list(fallbacks)
             self._chain = [self._chain[0], *fallbacks]
 
     def sync_primary(self, cfg: ProviderConfig) -> None:

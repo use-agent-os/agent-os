@@ -179,11 +179,18 @@ def resolve_failover_chain(
     primary_failure: Exception,
     config: SelectorConfig,
     plugin: ProviderPlugin | None = None,
+    *,
+    default: list[ProviderConfig] | None = None,
 ) -> list[ProviderConfig]:
     """Return the fallback chain honoring a plugin ``failover_hook`` if set.
 
-    Default (no plugin, or plugin raising) returns the static
-    ``config.fallbacks`` chain declared on ``SelectorConfig``.
+    Default (no plugin, or plugin raising) returns *default* if given,
+    else the static ``config.fallbacks`` chain declared on
+    ``SelectorConfig``. ``default`` exists so a caller holding a per-turn
+    override (``ModelSelector.override_model``'s ``fallbacks``) can supply
+    it without writing it into the shared ``SelectorConfig`` first -- a
+    mutation a later ``clone()`` of that same config would otherwise
+    inherit.
     """
     if plugin is not None and hasattr(plugin, "failover_hook"):
         try:
@@ -192,7 +199,7 @@ def resolve_failover_chain(
             chain = None
         if chain is not None:
             return list(chain)
-    return list(config.fallbacks)
+    return list(default) if default is not None else list(config.fallbacks)
 
 
 def resolve_quota_status(
