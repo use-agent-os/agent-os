@@ -32,11 +32,36 @@ class TerminalChannel:
                 self._reader = reader
             return self._reader
 
-    async def receive(self) -> IncomingMessage:
-        """Read one line from stdin and return as IncomingMessage."""
+    async def _readline(self) -> str:
+        """One line of stdin, decoded and stripped of its trailing newline.
+
+        ``loop.connect_read_pipe`` registers ``sys.stdin`` with the event
+        loop's I/O multiplexer. On Windows, the default ``ProactorEventLoop``
+        does that via IOCP, which requires an overlapped-capable handle -- an
+        interactive console handle is not one, so the registration raises
+        ``OSError: [WinError 6] The handle is invalid`` and permanently
+        breaks the reader. ``send``/``edit`` in this same class already avoid
+        touching the loop's I/O machinery for stdio by running the blocking
+        call in a thread; reading stdin the same way sidesteps IOCP
+        registration entirely.
+
+        Reads via ``sys.stdin.buffer`` (bytes), not the text-mode
+        ``sys.stdin``, so this decodes with the same ``errors="replace"``
+        policy as the POSIX path below -- the text-mode object would use
+        Python's default (strict) handler and raise on malformed input
+        instead of substituting, which the POSIX path never does.
+        """
+        if sys.platform == "win32":
+            loop = asyncio.get_running_loop()
+            line_bytes: bytes = await loop.run_in_executor(None, sys.stdin.buffer.readline)
+            return line_bytes.decode(errors="replace").rstrip("\n")
         reader = await self._get_reader()
         line_bytes = await reader.readline()
-        content = line_bytes.decode(errors="replace").rstrip("\n")
+        return line_bytes.decode(errors="replace").rstrip("\n")
+
+    async def receive(self) -> IncomingMessage:
+        """Read one line from stdin and return as IncomingMessage."""
+        content = await self._readline()
         log.debug("terminal.receive", content=content[:80])
         return IncomingMessage(
             sender_id=self.sender_id,

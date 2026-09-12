@@ -21,6 +21,7 @@ from agentos.tools.registry import tool
 from agentos.tools.ssrf import assert_not_metadata_endpoint
 from agentos.tools.ssrf_client import ssrf_guarded_client, validate_metadata_only_address
 from agentos.tools.types import ToolError, UnsupportedURLSchemeError, current_tool_context
+from agentos.tools.write_tracking import record_workspace_file_write
 
 
 def _validate_http_url(url: str) -> None:
@@ -313,6 +314,7 @@ async def http_request(
 
     if should_save:
         saved_path, digest = _save_http_response_body(raw_body, output_path)
+        record_workspace_file_write(saved_path)
         preview = (
             wrap_untrusted_boundary(
                 raw_body[:_TEXT_BODY_LIMIT].decode(response_encoding, "replace"),

@@ -473,7 +473,8 @@ class DeliveryChain:
                         metadata={"channel": channel_id, "thread_ts": None},
                     )
             else:
-                msg = OutgoingMessage(content=text, reply_to=channel_id or None)
+                metadata = {"to": channel_id} if channel_name == "email" and channel_id else {}
+                msg = OutgoingMessage(content=text, reply_to=channel_id or None, metadata=metadata)
             await asyncio.wait_for(adapter.send(msg), timeout=30.0)
             log.info("delivery.channel_sent", job_id=job_id, channel=channel_name)
             return "delivered"

@@ -534,23 +534,55 @@ async def test_send_resolves_the_recipient_from_metadata_recipient(
     assert sent[0].get("In-Reply-To") is None
 
 
-async def test_send_resolves_the_recipient_from_reply_to_address(
+async def test_send_bare_reply_to_with_no_thread_or_metadata_is_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Scheduler and heartbeat delivery pass the address as ``reply_to`` alone."""
+    """A bare, address-shaped ``reply_to`` with no thread and no explicit
+    ``to``/``recipient`` must be refused rather than silently sent -- treating
+    ``reply_to`` as a mailbox is exactly the #1570 misdelivery vector: a
+    thread's Message-ID is syntactically indistinguishable from an address,
+    and its domain is chosen by whoever sent the original mail.
+    """
 
     channel = EmailChannel(config=_config())
     sent: list[EmailMessage] = []
     monkeypatch.setattr(channel, "_smtp_send", sent.append)
 
-    await channel.send(OutgoingMessage(content="alert", reply_to="alerts@example.com"))
+    with pytest.raises(ValueError, match="no recipient"):
+        await channel.send(OutgoingMessage(content="alert", reply_to="alerts@example.com"))
+
+    assert sent == []
+
+
+async def test_send_resolves_the_recipient_from_reply_to_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scheduler and heartbeat delivery must carry the recipient explicitly
+    in ``metadata["to"]`` -- see scheduler/delivery.py's email branch. This
+    is the corrected replacement for a bare, unauthenticated ``reply_to``.
+    """
+
+    channel = EmailChannel(config=_config())
+    sent: list[EmailMessage] = []
+    monkeypatch.setattr(channel, "_smtp_send", sent.append)
+
+    await channel.send(
+        OutgoingMessage(
+            content="alert",
+            reply_to="alerts@example.com",
+            metadata={"to": "alerts@example.com"},
+        )
+    )
 
     assert sent[0]["To"] == "alerts@example.com"
     assert sent[0].get_content().strip() == "alert"
 
 
 async def test_send_recipient_resolution_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
-    """``to`` beats ``recipient`` beats the thread cache beats ``reply_to``."""
+    """``to`` beats ``recipient`` beats the thread cache. A bare ``reply_to``
+    is no longer a valid fourth tier -- see
+    ``test_send_bare_reply_to_with_no_thread_or_metadata_is_refused``.
+    """
 
     channel = EmailChannel(config=_config())
     assert channel._to_incoming(_raw()) is not None
@@ -572,13 +604,11 @@ async def test_send_recipient_resolution_precedence(monkeypatch: pytest.MonkeyPa
         )
     )
     await channel.send(OutgoingMessage(content="x", reply_to="m1@example.com"))
-    await channel.send(OutgoingMessage(content="x", reply_to="fourth@example.com"))
 
     assert [m["To"] for m in sent] == [
         "first@example.com",
         "second@example.com",
         "owner@example.com",
-        "fourth@example.com",
     ]
 
 

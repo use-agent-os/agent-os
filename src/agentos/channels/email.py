@@ -780,16 +780,28 @@ class EmailChannel:
         reply_to = (message.reply_to or "").strip()
         thread = self._threads.get(reply_to)
         metadata = message.metadata or {}
-        # The message tool writes "recipient", channel replies write "to", and
-        # scheduler/heartbeat delivery sends the bare address as reply_to, so
-        # every producer has to be able to name the mailbox.
+        # The message tool writes "recipient", channel replies write "to",
+        # and scheduler/heartbeat delivery (scheduler/delivery.py) sets "to"
+        # explicitly for email specifically, for exactly this reason.
+        #
+        # ``reply_to`` here names a *thread* (an inbound Message-ID, tracked
+        # in self._threads) -- it must never be treated as a mailbox itself.
+        # A Message-ID is syntactically indistinguishable from an address
+        # (RFC 5322 gives both a local@domain shape), and its domain is
+        # chosen by whoever sent the original mail: falling back to
+        # "reply_to looks like an address" meant that a thread aging out of
+        # self._threads (LRU eviction, or any process restart -- the cache
+        # is in-memory only) would silently redirect the reply to whatever
+        # domain the original sender's Message-ID happened to carry, which
+        # they control.
         to_address = str(
             metadata.get("to") or metadata.get("recipient") or (thread.to_address if thread else "")
         ).strip()
-        if not to_address and is_email_address(reply_to):
-            to_address = normalize_address(reply_to)
         if not to_address:
-            raise ValueError("email.send has no recipient for reply_to")
+            raise ValueError(
+                "email.send has no recipient for reply_to "
+                f"{reply_to!r}: no known thread and no explicit to/recipient"
+            )
         subject = str(metadata.get("subject") or "").strip()
         if not subject:
             subject = reply_subject(thread.subject) if thread else _DEFAULT_OUTBOUND_SUBJECT
