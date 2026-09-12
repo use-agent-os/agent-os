@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from agentos.tools.builtin import web
-from agentos.tools.types import ToolError
+from agentos.tools.types import ToolContext, ToolError, current_tool_context
 
 HttpRequestCallable = Callable[..., Awaitable[str]]
 
@@ -465,3 +465,118 @@ async def test_http_request_env_overrides_download_limit(
 
 
 _STREAM_CHUNK = 65_536
+
+
+@pytest.mark.asyncio
+async def test_http_request_with_output_path_records_workspace_file_write(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ctx = ToolContext(workspace_dir=str(workspace))
+    token = current_tool_context.set(ctx)
+
+    pdf_content = b"%PDF-1.4 sample binary content"
+    _patch_response(
+        monkeypatch,
+        httpx.Response(
+            200,
+            content=pdf_content,
+            headers={"content-type": "application/pdf"},
+            request=httpx.Request("GET", "https://example.test/quarterly_report.pdf"),
+        ),
+    )
+
+    try:
+        raw_result = await _original_http_request()(
+            url="https://example.test/quarterly_report.pdf",
+            output_path="quarterly_report.pdf",
+        )
+        payload = json.loads(raw_result)
+
+        assert payload["body_saved"] is True
+        saved_path = Path(payload["path"])
+        assert saved_path.exists()
+        assert saved_path.read_bytes() == pdf_content
+
+        assert len(ctx.workspace_file_writes) == 1
+        record = ctx.workspace_file_writes[0]
+        assert record["name"] == "quarterly_report.pdf"
+        assert record["relative_path"] == ".fetch/quarterly_report.pdf"
+        assert record["suffix"] == ".pdf"
+        assert record["path"] == str(saved_path.resolve(strict=False))
+    finally:
+        current_tool_context.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_http_request_with_nested_output_path_records_workspace_file_write(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ctx = ToolContext(workspace_dir=str(workspace))
+    token = current_tool_context.set(ctx)
+
+    json_content = b'{"status": "ok", "items": [1, 2, 3]}'
+    _patch_response(
+        monkeypatch,
+        httpx.Response(
+            200,
+            content=json_content,
+            headers={"content-type": "application/json"},
+            request=httpx.Request("GET", "https://example.test/data.json"),
+        ),
+    )
+
+    try:
+        raw_result = await _original_http_request()(
+            url="https://example.test/data.json",
+            output_path="exports/nested/data.json",
+        )
+        payload = json.loads(raw_result)
+
+        assert payload["body_saved"] is True
+        saved_path = Path(payload["path"])
+        assert saved_path.exists()
+        assert saved_path.read_bytes() == json_content
+
+        assert len(ctx.workspace_file_writes) == 1
+        record = ctx.workspace_file_writes[0]
+        assert record["name"] == "data.json"
+        assert record["relative_path"] == ".fetch/exports/nested/data.json"
+        assert record["suffix"] == ".json"
+        assert record["path"] == str(saved_path.resolve(strict=False))
+    finally:
+        current_tool_context.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_http_request_without_output_path_does_not_record_workspace_write(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ctx = ToolContext(workspace_dir=str(workspace))
+    token = current_tool_context.set(ctx)
+
+    _patch_response(
+        monkeypatch,
+        httpx.Response(
+            200,
+            content=b'{"key": "value"}',
+            headers={"content-type": "application/json"},
+            request=httpx.Request("GET", "https://example.test/data"),
+        ),
+    )
+
+    try:
+        raw_result = await _original_http_request()(url="https://example.test/data")
+        payload = json.loads(raw_result)
+        assert payload.get("body_saved") is not True
+        assert len(ctx.workspace_file_writes) == 0
+    finally:
+        current_tool_context.reset(token)
