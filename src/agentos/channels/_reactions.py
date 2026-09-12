@@ -90,7 +90,9 @@ class SlackStatusReactor(_BaseStatusReactor):
         if resp.status_code == 403: self._disable("missing_oauth_scope"); return False
         resp.raise_for_status(); data = resp.json()
         if data.get("ok"): return True
-        if data.get("error") in {"missing_scope", "not_allowed_token_type"}: self._disable("missing_oauth_scope"); return False
-        raise RuntimeError(f"Slack API error: {data.get('error')}")
+        error = data.get("error")
+        if error in {"already_reacted", "no_reaction"}: return True
+        if error in {"missing_scope", "not_allowed_token_type"}: self._disable("missing_oauth_scope"); return False
+        raise RuntimeError(f"Slack API error: {error}")
 
 NULL_STATUS_REACTOR = NullStatusReactor()
