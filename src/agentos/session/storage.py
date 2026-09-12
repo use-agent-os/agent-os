@@ -1000,7 +1000,16 @@ class SessionStorage:
         status: str | AgentTaskStatus | None = None,
         limit: int = 100,
         offset: int = 0,
+        newest_first: bool = False,
     ) -> list[AgentTaskRecord]:
+        """List agent tasks, oldest first.
+
+        ``newest_first`` selects the newest ``limit`` rows instead of the
+        oldest ones -- what a caller watching a live session needs once a
+        session has more lifetime tasks than the limit. The rows are still
+        returned oldest-first so ``rows[-1]`` stays the latest task.
+        ``list_agent_tasks_for_sessions`` already windows this way.
+        """
         clauses: list[str] = []
         params: list[Any] = []
         if session_key is not None:
@@ -1011,12 +1020,18 @@ class SessionStorage:
             params.append(str(status))
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params += [limit, offset]
+        order = "DESC" if newest_first else "ASC"
         sql = (
             f"SELECT * FROM agent_tasks {where} "
-            "ORDER BY created_at ASC, rowid ASC LIMIT ? OFFSET ?"
+            f"ORDER BY created_at {order}, rowid {order} LIMIT ? OFFSET ?"
         )
         async with self.conn.execute(sql, params) as cur:
             rows = await cur.fetchall()
+        if newest_first:
+            # Reverse in Python rather than re-sorting in SQL: `SELECT *` does
+            # not carry `rowid`, so an outer ORDER BY would have to tie-break
+            # on another column and could reorder rows sharing a `created_at`.
+            rows = list(reversed(rows))
         return [AgentTaskRecord(**_deserialize_row(dict(row))) for row in rows]
 
     @_serialized_write
