@@ -19,6 +19,7 @@ ARTIFACT_SESSION_BUCKET = "s"
 ARTIFACT_MATERIAL_NAME = "data"
 DEFAULT_ARTIFACT_MAX_BYTES = 30 * 1024 * 1024
 DEFAULT_ARTIFACT_DISK_BUDGET_BYTES = 512 * 1024 * 1024
+DEFAULT_HASH_CHUNK_BYTES = 64 * 1024
 
 _UNSAFE_FILENAME_RE = re.compile(r'[\x00-\x1f\x7f<>:"/\\|?*]+')
 _SAFE_TOKEN_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -135,6 +136,16 @@ def artifact_download_url(artifact_id: str) -> str:
     return f"/api/v1/artifacts/{_validate_artifact_id(artifact_id)}"
 
 
+def file_sha256(path: str | Path, *, chunk_size: int = DEFAULT_HASH_CHUNK_BYTES) -> str:
+    """Compute the SHA-256 hex digest of a file in streaming chunks."""
+    p = Path(path)
+    hasher = hashlib.sha256()
+    with p.open("rb") as f:
+        while chunk := f.read(chunk_size):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
 class ArtifactStore:
     """Session-scoped artifact store rooted outside the web static tree."""
 
@@ -219,12 +230,27 @@ class ArtifactStore:
         max_bytes: int | None = DEFAULT_ARTIFACT_MAX_BYTES,
         disk_budget_bytes: int | None = DEFAULT_ARTIFACT_DISK_BUDGET_BYTES,
     ) -> ArtifactRef:
-        payload = Path(path).read_bytes()
+        target_path = Path(path)
+        file_size = target_path.stat().st_size
+        if file_size == 0:
+            raise ArtifactBudgetError("artifact payload is empty")
+        if max_bytes is not None and file_size > max_bytes:
+            raise ArtifactBudgetError(
+                f"artifact exceeds per-file budget ({file_size} > {max_bytes})"
+            )
+        if disk_budget_bytes is not None:
+            current = self._disk_usage_bytes()
+            if current + file_size > disk_budget_bytes:
+                raise ArtifactBudgetError(
+                    "artifact material exceeds disk budget "
+                    f"({current} + {file_size} > {disk_budget_bytes})"
+                )
+        payload = target_path.read_bytes()
         return self.publish_bytes(
             payload,
             session_id=session_id,
             session_key=session_key,
-            name=name or Path(path).name,
+            name=name or target_path.name,
             mime=mime,
             source=source,
             max_bytes=max_bytes,

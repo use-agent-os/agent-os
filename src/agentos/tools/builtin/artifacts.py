@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import mimetypes
 import os
@@ -16,6 +15,7 @@ from agentos.artifacts import (
     ArtifactBudgetError,
     ArtifactStore,
     artifact_payload,
+    file_sha256,
 )
 from agentos.tools.path_aliases import resolve_workspace_alias
 from agentos.tools.path_policy import reject_foreign_host_path
@@ -209,7 +209,16 @@ async def publish_artifact(
     if not target.is_file():
         raise ToolError(f"artifact path is not a file: {path}")
 
-    target_sha256 = hashlib.sha256(target.read_bytes()).hexdigest()
+    effective_max_bytes = (
+        ctx.artifact_max_bytes if ctx.artifact_max_bytes is not None else DEFAULT_ARTIFACT_MAX_BYTES
+    )
+    file_size = target.stat().st_size
+    if file_size == 0:
+        raise ToolError("artifact payload is empty")
+    if effective_max_bytes is not None and file_size > effective_max_bytes:
+        raise ToolError(f"artifact exceeds per-file budget ({file_size} > {effective_max_bytes})")
+
+    target_sha256 = file_sha256(target)
     for published in reversed(ctx.published_artifacts):
         if published.get("sha256") != target_sha256:
             continue
@@ -268,9 +277,7 @@ async def publish_artifact(
             name=artifact_name,
             mime=artifact_mime,
             source="publish_artifact",
-            max_bytes=ctx.artifact_max_bytes
-            if ctx.artifact_max_bytes is not None
-            else DEFAULT_ARTIFACT_MAX_BYTES,
+            max_bytes=effective_max_bytes,
             disk_budget_bytes=ctx.artifact_disk_budget_bytes
             if ctx.artifact_disk_budget_bytes is not None
             else DEFAULT_ARTIFACT_DISK_BUDGET_BYTES,

@@ -1223,6 +1223,11 @@ def create_memory_tools(
         await r.store.remove_file(index_path)
 
         logger.info("memory_delete.ok", path=path)
+        # Notify snapshot refresh so TurnRunner drops the stale cached content
+        if on_memory_write is not None:
+            ctx = current_tool_context.get()
+            _aid = (ctx.agent_id if ctx else None) or "main"
+            on_memory_write(_aid)
         return f"Deleted {path} and removed from index."
 
     logger.info(
