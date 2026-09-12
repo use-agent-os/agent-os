@@ -153,6 +153,23 @@ def _is_cjk(char: str) -> bool:
     )
 
 
+def _is_cjk_symbol(char: str) -> bool:
+    """Punctuation and symbol blocks that CJK text is written with.
+
+    Not ideographs, so the base font keeps them when it can render them; when
+    it cannot (Helvetica stops at U+00FF) they go to the CJK font rather than
+    being dropped, which used to silently delete every ``，。：！《》`` and
+    ``“ ” — …`` from a report on hosts without a local TTF.
+    """
+    codepoint = ord(char)
+    return (
+        0x2000 <= codepoint <= 0x206F  # General Punctuation
+        or 0x3000 <= codepoint <= 0x303F  # CJK Symbols and Punctuation
+        or 0xFE30 <= codepoint <= 0xFE4F  # CJK Compatibility Forms
+        or 0xFF00 <= codepoint <= 0xFFEF  # Halfwidth and Fullwidth Forms
+    )
+
+
 def _font_supports_char(font_name: str, char: str) -> bool:
     from reportlab.pdfbase import pdfmetrics  # type: ignore[import-untyped]
 
@@ -186,7 +203,11 @@ def _pdf_markup_text(value: Any, *, base_font: str, cjk_font: str | None) -> str
         run_font = None
 
     for char in text:
-        target_font = cjk_font if cjk_font is not None and _is_cjk(char) else None
+        target_font: str | None = None
+        if cjk_font is not None and (
+            _is_cjk(char) or (_is_cjk_symbol(char) and not _font_supports_char(base_font, char))
+        ):
+            target_font = cjk_font
         if target_font is None and not _font_supports_char(base_font, char):
             continue
         if target_font != run_font:
