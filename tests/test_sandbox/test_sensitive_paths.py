@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -23,7 +24,7 @@ def test_sensitive_path_matches_nested_home_prefixes_with_native_separators() ->
 def test_sensitive_path_in_text_matches_native_separator_paths() -> None:
     key_path = Path.home() / ".ssh" / "id_rsa"
 
-    assert sensitive_path_in_text(f"type {key_path}") == "~/.ssh"
+    assert sensitive_path_in_text(f'type "{key_path}"') == "~/.ssh"
 
 
 def test_active_workspace_under_root_is_not_blocked_by_root_prefix() -> None:
@@ -53,13 +54,10 @@ def test_active_workspace_exception_keeps_leaf_secret_blocks() -> None:
         "/.env*",
     }
     assert sensitive_path_marker(str(workspace / "id_rsa"), workspace=workspace) == "/id_rsa"
-    assert (
-        sensitive_path_in_text(
-            f"cat {workspace / '.env.local'}",
-            workspace=workspace,
-        )
-        in {"/.env.local", "/.env*"}
-    )
+    assert sensitive_path_in_text(
+        f"cat {workspace / '.env.local'}",
+        workspace=workspace,
+    ) in {"/.env.local", "/.env*"}
 
 
 def test_sensitive_command_targets_honor_active_workspace_exception() -> None:
@@ -72,13 +70,10 @@ def test_sensitive_command_targets_honor_active_workspace_exception() -> None:
         )
         is None
     )
-    assert (
-        sensitive_target_in_command(
-            f"rm {workspace / '.env'}",
-            workspace=workspace,
-        )
-        in {"/.env", "/.env*"}
-    )
+    assert sensitive_target_in_command(
+        f"rm {workspace / '.env'}",
+        workspace=workspace,
+    ) in {"/.env", "/.env*"}
 
 
 def test_windows_rooted_workspace_targets_keep_leaf_secret_blocks() -> None:
@@ -91,23 +86,17 @@ def test_windows_rooted_workspace_targets_keep_leaf_secret_blocks() -> None:
         )
         is None
     )
-    assert (
-        sensitive_target_in_command(
-            r"rm \root\.agentos\workspace\.env",
-            workspace=workspace,
-        )
-        in {"/.env", "/.env*"}
-    )
+    assert sensitive_target_in_command(
+        r"rm \root\.agentos\workspace\.env",
+        workspace=workspace,
+    ) in {"/.env", "/.env*"}
 
 
 def test_posix_sensitive_paths_stay_blocked_on_windows_runners() -> None:
     workspace = Path("/root/.agentos/workspace")
 
     assert sensitive_path_in_text("cat /dev/sda 2>/dev/null") == "/dev"
-    assert (
-        sensitive_path_in_text("cat /root/.ssh/id_rsa", workspace=workspace)
-        == "~/.ssh"
-    )
+    assert sensitive_path_in_text("cat /root/.ssh/id_rsa", workspace=workspace) == "~/.ssh"
 
 
 def test_every_rm_in_a_compound_command_is_checked() -> None:
@@ -353,33 +342,6 @@ def test_a_file_merely_named_vault_token_is_not_sensitive(path: str) -> None:
     assert is_sensitive_path(path) is None
 
 
-def test_new_credential_paths_are_caught_in_free_form_text() -> None:
-    """The text scanner is a separate code path from :func:`is_sensitive_path`.
-
-    Shell commands reach the sandbox as free-form strings, so each new entry
-    has to be reachable through the token scan as well as a resolved path.
-    """
-    home = Path.home()
-
-    assert sensitive_path_in_text(f"cat {home / '.config' / 'gh' / 'hosts.yml'}") == (
-        "~/.config/gh"
-    )
-    assert sensitive_path_in_text(f"cat {home / '.anthropic' / 'token'}") == "~/.anthropic"
-    assert sensitive_path_in_text(f"cat {home / '.openai' / 'api_key'}") == "~/.openai"
-    assert sensitive_path_in_text(f"cat {home / '.vault-token'}") == "~/.vault-token"
-    assert sensitive_path_in_text("cat /var/secrets/.vault-token") == "/.vault-token"
-
-    # ``$HOME/X`` and ``~/X`` name the same file, so they must report the same
-    # marker -- the parity property #985 exists to protect. Every spelling is
-    # scanned and the home prefix wins outright; without that the ``$`` is
-    # stripped as a token edge, the relative-looking ``HOME/.vault-token``
-    # resolves through the leaf fallback, and the two spellings disagree.
-    assert sensitive_path_in_text("cat $HOME/.vault-token") == "~/.vault-token"
-
-    assert sensitive_path_in_text(f"nvim {home / '.config' / 'nvim' / 'init.lua'}") is None
-    assert sensitive_path_in_text("cat /var/secrets/vault-token") is None
-
-
 # --- host credential files (#981) -------------------------------------------
 #
 # `Path.home()` and `expanduser()` both read the platform's home variable, so
@@ -399,6 +361,37 @@ def fixed_home(monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("HOME", _FIXED_HOME)
     monkeypatch.setenv("USERPROFILE", _FIXED_HOME)
     return Path(_FIXED_HOME)
+
+
+def test_new_credential_paths_are_caught_in_free_form_text(fixed_home: Path) -> None:
+    """The text scanner is a separate code path from :func:`is_sensitive_path`.
+
+    Shell commands reach the sandbox as free-form strings, so each new entry
+    has to be reachable through the token scan as well as a resolved path.
+    """
+    home = fixed_home
+
+    gh_hosts = home / ".config" / "gh" / "hosts.yml"
+    anthropic_token = home / ".anthropic" / "token"
+    openai_key = home / ".openai" / "api_key"
+    vault_token = home / ".vault-token"
+    nvim_init = home / ".config" / "nvim" / "init.lua"
+
+    assert sensitive_path_in_text(f'cat "{gh_hosts}"') == "~/.config/gh"
+    assert sensitive_path_in_text(f'cat "{anthropic_token}"') == "~/.anthropic"
+    assert sensitive_path_in_text(f'cat "{openai_key}"') == "~/.openai"
+    assert sensitive_path_in_text(f'cat "{vault_token}"') == "~/.vault-token"
+    assert sensitive_path_in_text("cat /var/secrets/.vault-token") == "/.vault-token"
+
+    # ``$HOME/X`` and ``~/X`` name the same file, so they must report the same
+    # marker -- the parity property #985 exists to protect. Every spelling is
+    # scanned and the home prefix wins outright; without that the ``$`` is
+    # stripped as a token edge, the relative-looking ``HOME/.vault-token``
+    # resolves through the leaf fallback, and the two spellings disagree.
+    assert sensitive_path_in_text("cat $HOME/.vault-token") == "~/.vault-token"
+
+    assert sensitive_path_in_text(f'nvim "{nvim_init}"') is None
+    assert sensitive_path_in_text("cat /var/secrets/vault-token") is None
 
 
 def test_host_credential_files_are_blocked_in_home(fixed_home: Path) -> None:
@@ -494,3 +487,58 @@ def test_env_var_and_tilde_spellings_report_the_same_marker(
 
     assert tilde == f"~/{name}"
     assert expanded == tilde
+
+
+def test_sensitive_path_marker_handles_unresolvable_home_runtimeerror() -> None:
+    """Issue: sensitive_path_marker must not raise RuntimeError on tokens like ~\\.aws\\credentials.
+
+    On POSIX systems, Path(r"~\\.aws\\credentials").expanduser() treats backslashes
+    as usernames and raises RuntimeError. The scan must catch this and return the
+    expected sensitive marker.
+    """
+    orig_expanduser = Path.expanduser
+
+    def posix_like_expanduser(self: Path) -> Path:
+        raw_str = str(self)
+        if raw_str.startswith(("~\\", "~\\\\")):
+            raise RuntimeError("Could not determine home directory.")
+        if raw_str.startswith("~/"):
+            return Path("/home/testuser") / raw_str[2:]
+        return orig_expanduser(self)
+
+    with patch.object(Path, "expanduser", posix_like_expanduser):
+        assert sensitive_path_marker(r"~\.aws\credentials") == "~/.aws"
+        assert sensitive_path_marker(r"~\.ssh\id_rsa") == "~/.ssh"
+        assert sensitive_path_marker(r"~\.env") in {"/.env", "/.env*"}
+        assert sensitive_path_marker(r"~\harmless.txt") is None
+        assert sensitive_path_marker(r"~unknownuser\foo") is None
+
+
+def test_sensitive_path_marker_and_is_sensitive_path_when_home_indeterminate() -> None:
+    """When both Path.expanduser and Path.home fail with RuntimeError, scans return a verdict."""
+    with (
+        patch.object(
+            Path,
+            "expanduser",
+            side_effect=RuntimeError("Could not determine home directory."),
+        ),
+        patch.object(
+            Path,
+            "home",
+            side_effect=RuntimeError("Could not determine home directory."),
+        ),
+    ):
+        assert sensitive_path_marker(r"~\.aws\credentials") == "~/.aws"
+        assert sensitive_path_marker("~/.aws/credentials") == "~/.aws"
+        assert is_sensitive_path(r"~\.aws\credentials") == "~/.aws"
+        assert is_sensitive_path("~/.aws/credentials") == "~/.aws"
+        assert sensitive_path_marker(r"~\harmless.txt") is None
+        assert sensitive_path_marker("~unknown/file") is None
+
+
+def test_sensitive_path_in_text_matches_embedded_backslash_tilde_path() -> None:
+    assert sensitive_path_in_text(r"cat ~\.aws\credentials") == "~/.aws"
+    assert sensitive_path_in_text(r"AWS_CONFIG_FILE=~\.aws\credentials") == "~/.aws"
+    assert sensitive_path_in_text(r"--config=~\.aws\credentials") == "~/.aws"
+    assert sensitive_path_in_text(r"cat ~\.ssh\id_rsa") == "~/.ssh"
+    assert sensitive_path_in_text(r"--key=~\.ssh\id_rsa") == "/id_rsa"

@@ -265,7 +265,7 @@ def _sensitive_shell_block(
 
     checked_command = _without_shell_null_redirections(command)
     include_workdir = bool(workdir) and not _workdir_is_configured_workspace(workdir)
-    checked_text = f"{workdir} {checked_command}" if include_workdir else checked_command
+    checked_text = f'"{workdir}" {checked_command}' if include_workdir else checked_command
     ctx = current_tool_context.get()
     workspace = ctx.workspace_dir if ctx is not None else None
     marker = sensitive_path_in_text(checked_text, workspace=workspace)
