@@ -141,15 +141,27 @@ def _register_pdf_fonts() -> tuple[str, str, str | None]:
 def _is_cjk(char: str) -> bool:
     codepoint = ord(char)
     return (
-        0x3400 <= codepoint <= 0x4DBF
-        or 0x4E00 <= codepoint <= 0x9FFF
-        or 0xF900 <= codepoint <= 0xFAFF
-        or 0x20000 <= codepoint <= 0x2A6DF
-        or 0x2A700 <= codepoint <= 0x2B73F
-        or 0x2B740 <= codepoint <= 0x2B81F
-        or 0x2B820 <= codepoint <= 0x2CEAF
-        or 0x2CEB0 <= codepoint <= 0x2EBEF
-        or 0x30000 <= codepoint <= 0x3134F
+        0x2000 <= codepoint <= 0x206F  # General Punctuation (curly quotes, dashes, ellipses)
+        or 0x3000 <= codepoint <= 0x303F  # CJK Symbols and Punctuation (、。〈〉《》【】)
+        or 0x3040 <= codepoint <= 0x309F  # Hiragana
+        or 0x30A0 <= codepoint <= 0x30FF  # Katakana
+        or 0x3100 <= codepoint <= 0x312F  # Bopomofo
+        or 0x31A0 <= codepoint <= 0x31BF  # Bopomofo Extended
+        or 0x3200 <= codepoint <= 0x32FF  # Enclosed CJK Letters and Months
+        or 0x3300 <= codepoint <= 0x33FF  # CJK Compatibility
+        or 0x3400 <= codepoint <= 0x4DBF  # CJK Unified Ideographs Extension A
+        or 0x4E00 <= codepoint <= 0x9FFF  # CJK Unified Ideographs
+        or 0xF900 <= codepoint <= 0xFAFF  # CJK Compatibility Ideographs
+        or 0xFE10 <= codepoint <= 0xFE1F  # Vertical Forms
+        or 0xFE30 <= codepoint <= 0xFE4F  # CJK Compatibility Forms
+        or 0xFE50 <= codepoint <= 0xFE6F  # Small Form Variants
+        or 0xFF00 <= codepoint <= 0xFFEF  # Halfwidth and Fullwidth Forms
+        or 0x20000 <= codepoint <= 0x2A6DF  # Extension B
+        or 0x2A700 <= codepoint <= 0x2B73F  # Extension C
+        or 0x2B740 <= codepoint <= 0x2B81F  # Extension D
+        or 0x2B820 <= codepoint <= 0x2CEAF  # Extension E
+        or 0x2CEB0 <= codepoint <= 0x2EBEF  # Extension F
+        or 0x30000 <= codepoint <= 0x3134F  # Extension I
     )
 
 
