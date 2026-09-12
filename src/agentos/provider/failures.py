@@ -177,7 +177,7 @@ def classify_provider_error(
             return ProviderFailureKind.INSUFFICIENT_CREDITS
         if status_code == 429 or "rate limit" in text or "rate_limit" in text:
             return ProviderFailureKind.RATE_LIMITED
-        if "no endpoints found" in text or "model not found" in text:
+        if "no endpoints found" in text or "model not found" in text or "is not found" in text:
             return ProviderFailureKind.MODEL_NOT_FOUND
         if "does not support" in text or "unsupported" in text:
             return ProviderFailureKind.UNSUPPORTED_FEATURE
