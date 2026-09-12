@@ -895,12 +895,12 @@ async def test_turn_runner_auto_publishes_overwritten_deliverable_file(tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_turn_runner_does_not_auto_publish_edited_config_json(tmp_path) -> None:
+async def test_turn_runner_auto_publishes_edited_deliverable_file(tmp_path) -> None:
     storage = SessionStorage(":memory:")
     await storage.connect()
     manager = SessionManager(storage)
     session_key = "agent:main:webchat:artifact-edit-config"
-    await manager.create(session_key)
+    session = await manager.create(session_key)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "config.json").write_text("{\"enabled\": false}\n", encoding="utf-8")
@@ -914,7 +914,7 @@ async def test_turn_runner_does_not_auto_publish_edited_config_json(tmp_path) ->
         ),
     )
     tool_context = ToolContext(
-                caller_kind=CallerKind.WEB,
+        caller_kind=CallerKind.WEB,
         workspace_dir=str(workspace),
         allowed_tools={"edit_file"},
         elevated="full",
@@ -933,11 +933,17 @@ async def test_turn_runner_does_not_auto_publish_edited_config_json(tmp_path) ->
         ]
 
         artifact_events = [event for event in events if isinstance(event, ArtifactEvent)]
-        assert artifact_events == []
+        assert len(artifact_events) == 1
+        assert artifact_events[0].name == "config.json"
+        assert artifact_events[0].mime == "application/json"
+        assert artifact_events[0].session_id == session.session_id
 
         transcript = await manager.get_transcript(session_key)
         assistant = [entry for entry in transcript if entry.role == "assistant"][-1]
-        assert assistant.content == "Updated config.json."
+        payload = json.loads(assistant.content)
+        assert payload["text"] == "Updated config.json."
+        assert payload["artifacts"][0]["name"] == "config.json"
+        assert payload["artifacts"][0]["source"] == "auto_publish_omitted"
     finally:
         await storage.close()
 
