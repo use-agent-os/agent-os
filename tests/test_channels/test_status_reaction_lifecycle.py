@@ -11,10 +11,11 @@ once per rejected message for the adapter's lifetime.
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentos.channels._reactions import _BaseStatusReactor
+from agentos.channels._reactions import SlackStatusReactor, _BaseStatusReactor
 from agentos.channels.types import IncomingMessage
 
 
@@ -120,3 +121,58 @@ async def test_failed_is_skipped_once_reactions_are_disabled() -> None:
     # The tracked mark is still reclaimed, but no new reaction is attempted.
     assert reactor.removed == ["received"]
     assert reactor.added == ["received"]
+
+
+@pytest.mark.asyncio
+async def test_slack_status_reactor_ignores_already_reacted_and_no_reaction() -> None:
+    mock_client = MagicMock()
+    mock_channel = MagicMock()
+    mock_channel._get_client.return_value = mock_client
+
+    # 1. already_reacted on /reactions.add
+    resp_add = MagicMock()
+    resp_add.status_code = 200
+    resp_add.raise_for_status.return_value = None
+    resp_add.json.return_value = {"ok": False, "error": "already_reacted"}
+
+    # 2. no_reaction on /reactions.remove
+    resp_remove = MagicMock()
+    resp_remove.status_code = 200
+    resp_remove.raise_for_status.return_value = None
+    resp_remove.json.return_value = {"ok": False, "error": "no_reaction"}
+
+    mock_client.post = AsyncMock(side_effect=[resp_add, resp_remove])
+
+    reactor = SlackStatusReactor(mock_channel, _SilentLog())
+    message = _message()
+
+    # received() adds reaction; already_reacted should succeed cleanly without disabling
+    await reactor.received(message)
+    assert not reactor._disabled
+    assert len(reactor._active[reactor._message_key(message)]) == 1
+
+    # completed() removes reaction; no_reaction should succeed cleanly without disabling
+    await reactor.completed(message)
+    assert not reactor._disabled
+    assert not reactor._active.get(reactor._message_key(message))
+
+
+@pytest.mark.asyncio
+async def test_slack_status_reactor_disables_on_fatal_api_error() -> None:
+    mock_client = MagicMock()
+    mock_channel = MagicMock()
+    mock_channel._get_client.return_value = mock_client
+
+    resp_error = MagicMock()
+    resp_error.status_code = 200
+    resp_error.raise_for_status.return_value = None
+    resp_error.json.return_value = {"ok": False, "error": "fatal_error"}
+
+    mock_client.post = AsyncMock(return_value=resp_error)
+
+    reactor = SlackStatusReactor(mock_channel, _SilentLog())
+    message = _message()
+
+    await reactor.received(message)
+    assert reactor._disabled
+
