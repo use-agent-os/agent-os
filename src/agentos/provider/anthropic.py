@@ -542,29 +542,37 @@ class AnthropicProvider:
                                 )
 
                         elif etype == "message_delta":
-                            usage = event.get("usage", {})
-                            (
-                                iteration_input_tokens,
-                                iteration_output_tokens,
-                            ) = _anthropic_iteration_token_counts(usage)
-                            output_tokens = iteration_output_tokens
-                            cached_tokens = max(
-                                cached_tokens,
-                                usage.get("cache_read_input_tokens", 0),
-                            )
-                            cache_creation_tokens = max(
-                                cache_creation_tokens,
-                                _cache_creation_input_tokens(usage),
-                            )
-                            if "input_tokens" in usage:
-                                base_input_tokens = _coerce_int(usage.get("input_tokens"))
-                            if isinstance(usage.get("iterations"), list):
-                                input_tokens = iteration_input_tokens
-                            else:
-                                input_tokens = (
-                                    base_input_tokens + cached_tokens + cache_creation_tokens
+                            # Last-write-wins guards: a delta that omits
+                            # ``usage`` or ``delta.stop_reason`` (some
+                            # Anthropic-compatible proxies emit trailing or
+                            # empty deltas) must not zero the counts or reset
+                            # ``tool_use`` back to ``end_turn``.
+                            usage = event.get("usage") or {}
+                            if isinstance(usage, dict) and usage:
+                                (
+                                    iteration_input_tokens,
+                                    iteration_output_tokens,
+                                ) = _anthropic_iteration_token_counts(usage)
+                                output_tokens = iteration_output_tokens
+                                cached_tokens = max(
+                                    cached_tokens,
+                                    _coerce_int(usage.get("cache_read_input_tokens")),
                                 )
-                            stop_reason = event.get("delta", {}).get("stop_reason", "end_turn")
+                                cache_creation_tokens = max(
+                                    cache_creation_tokens,
+                                    _cache_creation_input_tokens(usage),
+                                )
+                                if "input_tokens" in usage:
+                                    base_input_tokens = _coerce_int(usage.get("input_tokens"))
+                                if isinstance(usage.get("iterations"), list):
+                                    input_tokens = iteration_input_tokens
+                                else:
+                                    input_tokens = (
+                                        base_input_tokens + cached_tokens + cache_creation_tokens
+                                    )
+                            delta_stop_reason = (event.get("delta") or {}).get("stop_reason")
+                            if delta_stop_reason:
+                                stop_reason = delta_stop_reason
 
                         elif etype == "message_stop":
                             reasoning_content = "".join(thinking_parts) or None
