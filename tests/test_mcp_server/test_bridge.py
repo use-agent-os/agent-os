@@ -411,3 +411,113 @@ async def test_events_wait_preserves_max_events_below_the_cap() -> None:
     result = await bridge.events_wait("agent:main:main", timeout_ms=200, max_events=2)
 
     assert len(result["events"]) == 2
+
+
+class SilentEventClient(FakeGatewayClient):
+    """Fake client whose ``recv_event`` always times out, like an idle session."""
+
+    async def recv_event(self, timeout: float | None = None) -> dict[str, Any]:
+        raise TimeoutError
+
+
+class BurstThenSilentClient(FakeGatewayClient):
+    """Fake client that yields ``burst`` non-terminal events, then goes idle."""
+
+    def __init__(self, burst: int = 2) -> None:
+        super().__init__()
+        self.burst = burst
+        self.recv_count = 0
+
+    async def recv_event(self, timeout: float | None = None) -> dict[str, Any]:
+        self.recv_count += 1
+        if self.recv_count > self.burst:
+            raise TimeoutError
+        return {
+            "event": "session.event.text_delta",
+            "payload": {
+                "session_key": "agent:main:main",
+                "stream_seq": self.recv_count,
+                "text": "x",
+            },
+        }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("max_events", [1, 2, 5])
+async def test_events_wait_filling_max_events_is_not_a_timeout(max_events: int) -> None:
+    # A long text stream fills the default max_events=100 routinely. The wait
+    # ends because the caller's own cap was reached, not because the deadline
+    # expired, so the poll succeeded and the client should keep polling.
+    client = EndlessEventClient()
+    bridge = AgentOSMCPBridge(gateway_client_factory=lambda: client)
+
+    result = await bridge.events_wait("agent:main:main", timeout_ms=300_000, max_events=max_events)
+
+    assert len(result["events"]) == max_events
+    assert result["timed_out"] is False
+    # The cursor must still cover the last event so the caller can resume.
+    assert result["current_stream_seq"] >= max_events
+
+
+@pytest.mark.asyncio
+async def test_events_wait_reports_timeout_when_the_deadline_expires() -> None:
+    client = SilentEventClient()
+    bridge = AgentOSMCPBridge(gateway_client_factory=lambda: client)
+
+    result = await bridge.events_wait("agent:main:main", timeout_ms=50, max_events=100)
+
+    assert result["events"] == []
+    assert result["timed_out"] is True
+
+
+@pytest.mark.asyncio
+async def test_events_wait_reports_timeout_on_an_exhausted_budget() -> None:
+    # ``remaining <= 0`` is a separate exit from ``recv_event`` raising, and a
+    # zero budget must not be mistaken for a completed wait.
+    client = EndlessEventClient()
+    bridge = AgentOSMCPBridge(gateway_client_factory=lambda: client)
+
+    result = await bridge.events_wait("agent:main:main", timeout_ms=0, max_events=100)
+
+    assert result["events"] == []
+    assert result["timed_out"] is True
+    assert client.recv_count == 0
+
+
+@pytest.mark.asyncio
+async def test_events_wait_reports_timeout_after_a_partial_burst() -> None:
+    # The direction the report did not cover: events were collected but the
+    # stream then stalled, so this really is a timeout and must stay one.
+    client = BurstThenSilentClient(burst=2)
+    bridge = AgentOSMCPBridge(gateway_client_factory=lambda: client)
+
+    result = await bridge.events_wait("agent:main:main", timeout_ms=50, max_events=100)
+
+    assert len(result["events"]) == 2
+    assert result["timed_out"] is True
+
+
+@pytest.mark.asyncio
+async def test_events_wait_terminal_event_is_not_a_timeout() -> None:
+    client = RecordingEventClient()
+    bridge = AgentOSMCPBridge(gateway_client_factory=lambda: client)
+
+    result = await bridge.events_wait("agent:main:main", timeout_ms=300_000, max_events=100)
+
+    assert [event["event"] for event in result["events"]] == ["session.event.done"]
+    assert result["timed_out"] is False
+
+
+@pytest.mark.asyncio
+async def test_events_wait_terminal_only_timeout_still_reports_timed_out() -> None:
+    # ``terminal_only`` filters the collected list, so a stream of non-terminal
+    # events can never fill ``max_events`` and the wait ends at the deadline.
+    client = BurstThenSilentClient(burst=3)
+    bridge = AgentOSMCPBridge(gateway_client_factory=lambda: client)
+
+    result = await bridge.events_wait(
+        "agent:main:main", timeout_ms=50, max_events=100, terminal_only=True
+    )
+
+    assert result["events"] == []
+    assert result["timed_out"] is True

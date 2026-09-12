@@ -152,6 +152,7 @@ class AgentOSMCPBridge:
             )
 
             events: list[dict[str, Any]] = []
+            timed_out = False
             current_stream_seq = int(
                 subscription.get("current_stream_seq") or since_stream_seq or 0
             )
@@ -165,10 +166,12 @@ class AgentOSMCPBridge:
                 # above ``timeout_s``, handing ``recv_event`` more than the cap.
                 remaining = min(deadline - time.monotonic(), timeout_s)
                 if remaining <= 0:
+                    timed_out = True
                     break
                 try:
                     frame = await client.recv_event(timeout=remaining)
                 except TimeoutError:
+                    timed_out = True
                     break
                 normalized = _normalize_event_frame(frame)
                 payload = normalized.get("payload")
@@ -190,7 +193,9 @@ class AgentOSMCPBridge:
                 "current_stream_seq": current_stream_seq,
                 "replay_complete": subscription.get("replay_complete"),
                 "replay_gap_reason": subscription.get("replay_gap_reason"),
-                "timed_out": not events or (events[-1]["event"] not in _TERMINAL_EVENTS),
+                # Only an exhausted deadline is a timeout. Filling ``max_events``
+                # or seeing a terminal event both end the wait on purpose.
+                "timed_out": timed_out,
             }
         finally:
             await client.close()
