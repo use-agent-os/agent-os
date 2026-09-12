@@ -17,6 +17,8 @@ def _model_info_to_wire(m: dict[str, Any]) -> dict[str, Any]:
         capabilities.append("tools")
     if m.get("supports_vision"):
         capabilities.append("vision")
+    if m.get("supports_reasoning"):
+        capabilities.append("reasoning")
     return {
         "id": m.get("model_id", ""),
         "name": m.get("display_name") or m.get("model_id", ""),
