@@ -146,7 +146,13 @@ class RateLimiter:
             if self._tokens < 1.0:
                 wait = (1.0 - self._tokens) / self.refill_rate
                 await asyncio.sleep(wait)
+                # The waiter drains exactly the token that accrued while it
+                # slept, so the refill clock has to move past the sleep too.
+                # Leaving ``_last_refill`` at the pre-sleep reading credits
+                # that same interval again to the next caller, which lets the
+                # bucket sustain ~2x ``refill_rate`` under contention.
                 self._tokens = 0.0
+                self._last_refill = time.monotonic()
             else:
                 self._tokens -= 1.0
 
