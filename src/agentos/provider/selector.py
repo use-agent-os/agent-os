@@ -149,6 +149,13 @@ class ModelSelector:
         # to the fallback, burning a probe per turn so the primary never
         # recovers.
         self._admitted_index: int | None = None
+        # Per-turn fallback override from override_model(), if any. Kept off
+        # the shared SelectorConfig on purpose: clone() passes that config
+        # by reference, and __init__ rebuilds _chain from config.fallbacks,
+        # so writing the override there would leak this turn's fallbacks
+        # into every clone made afterward instead of staying local to this
+        # selector instance the way the clone() docstring promises.
+        self._fallback_override: list[ProviderConfig] | None = None
 
     @property
     def circuit_breaker(self) -> ProviderCircuitBreaker:
@@ -237,7 +244,9 @@ class ModelSelector:
         replaces the static fallback chain from ``SelectorConfig``. An
         empty chain raises ``IndexError`` exactly like ``next_fallback``.
         """
-        chain = resolve_failover_chain(primary_failure, self._config, self._plugin)
+        chain = resolve_failover_chain(
+            primary_failure, self._config, self._plugin, default=self._fallback_override
+        )
         if not chain:
             raise IndexError("No more provider fallbacks available")
         rebuilt = [self._chain[0], *chain]
@@ -280,7 +289,9 @@ class ModelSelector:
                 provider_routing=self._chain[0].provider_routing,
             )
         if fallbacks is not None:
-            self._config.fallbacks = list(fallbacks)
+            # Local to this selector instance, not written into self._config
+            # -- see the _fallback_override comment in __init__.
+            self._fallback_override = list(fallbacks)
             self._chain = [self._chain[0], *fallbacks]
 
     def sync_primary(self, cfg: ProviderConfig) -> None:

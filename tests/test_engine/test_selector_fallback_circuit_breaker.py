@@ -305,3 +305,59 @@ def test_next_fallback_after_failure_empty_plugin_chain_raises_clear_error(
 
     with pytest.raises(IndexError, match="No more provider fallbacks available"):
         selector.next_fallback_after_failure(RuntimeError("primary down"))
+
+
+def test_override_model_fallbacks_do_not_leak_into_later_clones_of_the_config() -> None:
+    """Regression for #1717: ``override_model``'s ``fallbacks`` used to write
+
+    into the shared ``SelectorConfig``, so a clone made *after* one turn's
+    override would silently inherit that turn's fallback chain instead of
+    the originally configured one -- breaking the ``clone()`` docstring's
+    promise that a turn's mutations don't affect the original.
+    """
+    original_fallback = ProviderConfig("ollama", "llama3")
+    config = SelectorConfig(
+        primary=ProviderConfig("openrouter", "openai/gpt-5.6-luna", api_key="k"),
+        fallbacks=[original_fallback],
+    )
+    original = ModelSelector(config)
+
+    turn_a = original.clone()
+    turn_a.override_model(
+        "openai/gpt-5.6-luna", fallbacks=[ProviderConfig("opencap", "glm-5.3")]
+    )
+
+    assert config.fallbacks == [original_fallback]
+
+    turn_b = original.clone()
+    assert [c.model for c in turn_b._chain[1:]] == ["llama3"]
+
+
+def test_next_fallback_after_failure_uses_override_model_fallbacks_within_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The per-turn override chain must still drive within-turn failover.
+
+    ``override_model``'s docstring promises the supplied ``fallbacks`` (e.g.
+    router-tier candidates) are tried if the primary fails -- moving the
+    override off the shared config must not silently drop that behavior.
+    """
+    from agentos.provider import selector as selector_module
+
+    def _fake_build(cfg: ProviderConfig) -> _StubProvider:
+        return _StubProvider(cfg.provider, [[ProviderDone(stop_reason="stop")]])
+
+    monkeypatch.setattr(selector_module, "_build_provider", _fake_build)
+
+    selector = ModelSelector(
+        SelectorConfig(
+            primary=ProviderConfig("openrouter", "openai/gpt-5.6-luna", api_key="k"),
+            fallbacks=[ProviderConfig("ollama", "llama3")],
+        ),
+    )
+    turn = selector.clone()
+    turn.override_model("openai/gpt-5.6-luna", fallbacks=[ProviderConfig("opencap", "glm-5.3")])
+
+    turn.next_fallback_after_failure(RuntimeError("primary down"))
+
+    assert turn.active_provider_id == "opencap"
