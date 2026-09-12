@@ -45,9 +45,58 @@ from agentos.tools.builtin.code_exec import _check_code_destructive
         # Path methods via getattr
         ('from pathlib import Path; getattr(Path("/tmp/x"), "unlink")()', "unlink"),
         ('from pathlib import Path; getattr(Path("/tmp/x"), "rmdir")()', "rmdir"),
-        # Subprocess list invocation of rm
-        ('import subprocess; subprocess.run(["rm", "-rf", "/tmp/x"])', "subprocess invoking rm"),
-        ('import subprocess as sp; sp.call(["rmdir", "/tmp/x"])', "subprocess invoking rm"),
+        # Subprocess list & tuple invocation of rm
+        ('import subprocess; subprocess.run(["rm", "-rf", "/tmp/x"])', "subprocess"),
+        ('import subprocess as sp; sp.call(["rmdir", "/tmp/x"])', "subprocess"),
+        ('import subprocess; subprocess.run(("rm", "-rf", "/tmp/x"))', "subprocess"),
+        ('import subprocess as sp; sp.call(("rmdir", "/tmp/x"))', "subprocess"),
+        # Windows deletion commands in subprocess and os.system
+        (
+            r'import subprocess; subprocess.run(["cmd.exe", "/c", "del", "C:\\tmp\\x"])',
+            "subprocess",
+        ),
+        (
+            r'import subprocess; subprocess.run(("cmd.exe", "/c", "del", "C:\\tmp\\x"))',
+            "subprocess",
+        ),
+        (
+            r'import subprocess; subprocess.run(["cmd.exe", "/c", "erase", "C:\\tmp\\x"])',
+            "subprocess",
+        ),
+        (
+            r'import subprocess; subprocess.run(["cmd.exe", "/c", "rd", "/s", "C:\\tmp\\x"])',
+            "subprocess",
+        ),
+        (
+            r'import subprocess; subprocess.run(["powershell", "-c", "Remove-Item", "C:\\tmp\\x"])',
+            "subprocess",
+        ),
+        (r'import os; os.system("del C:\\tmp\\x")', "os.system"),
+        (r'import os; os.system("erase C:\\tmp\\x")', "os.system"),
+        (r'import os; os.system("rd /s /q C:\\tmp\\x")', "os.system"),
+        (r'import os; os.system("powershell Remove-Item C:\\tmp\\x")', "os.system"),
+        (r'import os; os.popen("del C:\\tmp\\x")', "os.popen"),
+        # Prefixed command deletion calls (sudo, env, nohup, time, nice, xargs)
+        ('import subprocess; subprocess.run(["sudo", "rm", "-rf", "/etc"])', "subprocess"),
+        ('import os; os.system("sudo rm -rf /etc")', "os.system"),
+        ('import subprocess; subprocess.run("sudo rm -rf /etc", shell=True)', "subprocess"),
+        ('import os; os.system("env FOO=1 rm -rf /etc")', "os.system"),
+        ('import subprocess; subprocess.run(["env", "rm", "-rf", "/etc"])', "subprocess"),
+        ('import subprocess; subprocess.run(["xargs", "rm", "-rf"])', "subprocess"),
+        ('import os; os.system("time rm -rf /etc")', "os.system"),
+        ('import os; os.system("nice rm -rf /etc")', "os.system"),
+        ('import subprocess; subprocess.run(["nohup", "rm", "-rf", "/etc"])', "subprocess"),
+        ('import subprocess; subprocess.run(["sudo", "-n", "rm", "-rf", "/etc"])', "subprocess"),
+        ('import subprocess; subprocess.run(["sudo", "-i", "rm", "-rf", "/etc"])', "subprocess"),
+        ('import subprocess; subprocess.run(["sudo", "-E", "rm", "-rf", "/etc"])', "subprocess"),
+        ('import subprocess; subprocess.run(["sudo", "-S", "rm", "-rf", "/etc"])', "subprocess"),
+        ('import subprocess; subprocess.run(["sudo", "-k", "rm", "-rf", "/etc"])', "subprocess"),
+        ('import subprocess; subprocess.run(["env", "-i", "rm", "-rf", "/etc"])', "subprocess"),
+        ('import subprocess; subprocess.run(["timeout", "10", "rm", "-rf", "/etc"])', "subprocess"),
+        (
+            'import subprocess; subprocess.run(["timeout", "-k", "5", "10", "rm", "-rf", "/etc"])',
+            "subprocess",
+        ),
     ],
 )
 def test_destructive_ast_evasions_detected(code: str, expected_keyword: str) -> None:
@@ -73,6 +122,17 @@ def test_destructive_ast_evasions_detected(code: str, expected_keyword: str) -> 
         # Benign getattr
         "import os\npath_fn = getattr(os, 'getcwd')",
         "getattr(dict, 'get')",
+        # Benign non-command occurrences of rd and erase (anchoring negative matrix)
+        'import subprocess; subprocess.run(["curl", "-o", "out.bin", "https://cdn.example.com/rd"])',
+        'import subprocess; subprocess.run(["psql", "-c", "SELECT * FROM rd"])',
+        'import subprocess; subprocess.run(["git", "clone", "https://github.com/acme/rd"])',
+        'import subprocess; subprocess.run(["ls"], cwd="/data/rd")',
+        'import subprocess; subprocess.run(["node", "script.js", "--mode", "rd"])',
+        'import subprocess; subprocess.run(["helm", "install", "rd", "./chart"])',
+        'import subprocess; subprocess.check_output(["kubectl", "get", "pods", "-n", "rd"])',
+        'import subprocess; subprocess.run(["python", "train.py", "--dataset", "erase-bench"])',
+        'import os; os.system("aws s3 cp s3://bucket/rd ./")',
+        'import os; os.system("echo rd")',
     ],
 )
 def test_benign_code_does_not_trigger_warning(code: str) -> None:
@@ -101,7 +161,7 @@ def test_syntax_error_code_falls_back_to_regex() -> None:
         ("exec(compile('os.re' + 'move(\"/etc/x\")', '', 'exec'))", "remove"),
         ("eval(compile('os.re' + 'move(\"/etc/x\")', '', 'eval'))", "remove"),
         ("exec(compile('shutil.rm' + 'tree(\"/etc/x\")', '', 'exec'))", "rmtree"),
-        ("exec(compile('os.sys' + 'tem(\"rm -rf /etc/x\")', '', 'exec'))", "os.system with rm"),
+        ("exec(compile('os.sys' + 'tem(\"rm -rf /etc/x\")', '', 'exec'))", "os.system"),
         (
             "exec(compile(source='os.re' + 'move(\"/etc/x\")', filename='', mode='exec'))",
             "remove",
@@ -116,23 +176,24 @@ def test_syntax_error_code_falls_back_to_regex() -> None:
         # Shell-exec attrs via getattr: `system`, `popen`, and the subprocess
         # entrypoints are not in _ALL_DESTRUCTIVE_NAMES, so the getattr branch
         # skipped them entirely.
-        ("import os; getattr(os, 'system')('rm -rf /etc/x')", "os.system with rm"),
-        ("import os; getattr(os, 'sys' + 'tem')('rm -rf /etc/x')", "os.system with rm"),
-        ("import os; getattr(os, 'popen')('rm -rf /etc/x')", "os.popen with rm"),
+        ("import os; getattr(os, 'system')('rm -rf /etc/x')", "os.system"),
+        ("import os; getattr(os, 'sys' + 'tem')('rm -rf /etc/x')", "os.system"),
+        ("import os; getattr(os, 'popen')('rm -rf /etc/x')", "os.popen"),
         (
             "import subprocess; getattr(subprocess, 'run')(['rm', '-rf', '/etc/x'])",
-            "subprocess invoking rm",
+            "subprocess",
         ),
         (
             "import subprocess; getattr(subprocess, 'Popen')('rm -rf /etc/x')",
-            "subprocess invoking rm",
+            "subprocess",
         ),
         # Combinations of both indirections.
-        ("getattr(__import__('os'), 'system')('rm -rf /etc/x')", "os.system with rm"),
+        ("getattr(__import__('os'), 'system')('rm -rf /etc/x')", "os.system"),
         (
             "exec(compile('getattr(os, \"sys\" + \"tem\")(\"rm -rf /etc/x\")', '', 'exec'))",
-            "os.system with rm",
+            "os.system",
         ),
+        ('import os; getattr(os, "sys" + "tem")("sudo rm -rf /etc")', "os.system"),
     ],
 )
 def test_indirect_destructive_calls_detected(code: str, expected_keyword: str) -> None:

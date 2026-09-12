@@ -27,6 +27,23 @@ from agentos.tools.types import ToolError, current_tool_context
 # shell warnlist hits. Catches the "agent pivots from `rm` to `os.remove()`"
 # bypass. We scan using shallow regex (fast-path) plus AST analysis to catch
 # dynamic evasion (getattr, __import__, importlib, exec/eval, and wildcard imports).
+_PREFIX_CMD_PATTERN: str = (
+    r"(?:"
+    r"cmd(?:\.exe)?\s+/[ck]"
+    r"|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z0-9]+)*"
+    r"|sudo(?:\s+-[a-zA-Z0-9]+(?:\s+\S+)?)*"
+    r"|doas(?:\s+-[a-zA-Z0-9]+(?:\s+\S+)?)*"
+    r"|env(?:\s+-[a-zA-Z0-9]+)*(?:\s+[a-zA-Z_][a-zA-Z0-9_]*=\S*)*"
+    r"|nice(?:\s+-[a-zA-Z0-9]+(?:\s+\S+)?)*"
+    r"|time(?:\s+-[a-zA-Z0-9]+)*"
+    r"|timeout(?:\s+-[a-zA-Z0-9]+)*(?:\s+\d+[a-zA-Z]?)?"
+    r"|xargs(?:\s+-[a-zA-Z0-9]+(?:\s+\S+)?)*"
+    r"|nohup"
+    r")"
+)
+_IN_QUOTE_CMD_PREFIX: str = r"(?:" + _PREFIX_CMD_PATTERN + r"\s+)*"
+_COMMAND_PREFIX: str = r"(?:^|[;&|])\s*" + _IN_QUOTE_CMD_PREFIX
+
 _DESTRUCTIVE_PY_PATTERNS: list[tuple[str, str]] = [
     (r"\bos\.remove\s*\(", "os.remove()"),
     (r"\bos\.unlink\s*\(", "os.unlink()"),
@@ -35,14 +52,23 @@ _DESTRUCTIVE_PY_PATTERNS: list[tuple[str, str]] = [
     (r"\bshutil\.rmtree\s*\(", "shutil.rmtree()"),
     (r"\.unlink\s*\(", "Path.unlink()"),
     (r"\.rmdir\s*\(", "Path.rmdir()"),
-    (r"\bos\.system\s*\([^)]*\brm\b", "os.system with rm"),
     (
-        r"\bsubprocess\.(run|call|Popen|check_output|check_call)[^\n;]{0,200}\brm\b",
-        "subprocess invoking rm",
+        r"(?i)\bos\.system\s*\(\s*['\"]"
+        + _IN_QUOTE_CMD_PREFIX
+        + r"(?:rm|rmdir|del|erase|rd|Remove-Item)\b",
+        "os.system with delete command",
     ),
     (
-        r"\bsubprocess\.(run|call|Popen|check_output|check_call)[^\n;]{0,200}\brmdir\b",
-        "subprocess invoking rmdir",
+        r"(?i)\bos\.popen\s*\(\s*['\"]"
+        + _IN_QUOTE_CMD_PREFIX
+        + r"(?:rm|rmdir|del|erase|rd|Remove-Item)\b",
+        "os.popen with delete command",
+    ),
+    (
+        r"(?i)\bsubprocess\.(?:run|call|Popen|check_output|check_call)\s*\(\s*(?:[\[\(]\s*['\"]|['\"])"
+        + _IN_QUOTE_CMD_PREFIX
+        + r"(?:rm|rmdir|del|erase|rd|Remove-Item)\b",
+        "subprocess invoking delete command",
     ),
 ]
 
@@ -54,6 +80,66 @@ _ALL_DESTRUCTIVE_NAMES: frozenset[str] = frozenset(
 )
 _SUBPROCESS_CALL_NAMES: frozenset[str] = frozenset(
     {"run", "call", "Popen", "check_output", "check_call"}
+)
+_SHELL_DELETE_CMDS: frozenset[str] = frozenset({"rm", "rmdir", "del", "erase", "rd", "remove-item"})
+_PREFIX_COMMANDS: frozenset[str] = frozenset(
+    {
+        "sudo",
+        "doas",
+        "env",
+        "nohup",
+        "time",
+        "nice",
+        "xargs",
+        "timeout",
+        "cmd",
+        "cmd.exe",
+        "powershell",
+        "powershell.exe",
+        "pwsh",
+        "pwsh.exe",
+    }
+)
+_PREFIX_FLAGS_WITH_ARG: dict[str, frozenset[str]] = {
+    "sudo": frozenset(
+        {
+            "-u",
+            "-g",
+            "-p",
+            "-h",
+            "-C",
+            "-D",
+            "-r",
+            "-t",
+            "-T",
+            "-U",
+            "--user",
+            "--group",
+            "--host",
+        }
+    ),
+    "doas": frozenset(
+        {
+            "-u",
+            "-g",
+            "-p",
+            "-h",
+            "-C",
+            "-D",
+            "-r",
+            "-t",
+            "-T",
+            "-U",
+            "--user",
+        }
+    ),
+    "env": frozenset({"-u", "-C", "-S", "--unset", "--chdir", "--split-string"}),
+    "nice": frozenset({"-n", "--adjustment"}),
+    "timeout": frozenset({"-k", "-s", "--kill-after", "--signal"}),
+    "xargs": frozenset({"-I", "-n", "-L", "-P", "-s", "-d", "-a", "-E"}),
+}
+_SHELL_DELETE_RE: re.Pattern[str] = re.compile(
+    _COMMAND_PREFIX + r"(?:rm|rmdir|del|erase|rd|Remove-Item)\b", re.IGNORECASE
 )
 
 
@@ -280,13 +366,17 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
 
             if mod == "os" and attr_name in ("system", "popen") and node.args:
                 cmd_str = _eval_const_str(node.args[0], frozenset(self.compile_aliases))
-                if cmd_str and re.search(r"\b(rm|rmdir)\b", cmd_str):
-                    self.warning = f"destructive Python operation detected: os.{attr_name} with rm"
+                if cmd_str and _SHELL_DELETE_RE.search(cmd_str):
+                    self.warning = (
+                        f"destructive Python operation detected: os.{attr_name} with delete command"
+                    )
                     return
 
             if mod == "subprocess" and attr_name in _SUBPROCESS_CALL_NAMES and node.args:
                 if self._subprocess_argv_removes(node.args[0]):
-                    self.warning = "destructive Python operation detected: subprocess invoking rm"
+                    self.warning = (
+                        "destructive Python operation detected: subprocess invoking delete command"
+                    )
                     return
 
         self.generic_visit(node)
@@ -299,21 +389,64 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
             return f"destructive Python operation detected: shutil.{attr}() via getattr"
         if module == "os" and attr in ("system", "popen") and node.args:
             cmd_str = _eval_const_str(node.args[0], frozenset(self.compile_aliases))
-            if cmd_str and re.search(r"\b(rm|rmdir)\b", cmd_str):
-                return f"destructive Python operation detected: os.{attr} with rm via getattr"
+            if cmd_str and _SHELL_DELETE_RE.search(cmd_str):
+                return (
+                    f"destructive Python operation detected: os.{attr} "
+                    "with delete command via getattr"
+                )
         if module == "subprocess" and attr in _SUBPROCESS_CALL_NAMES and node.args:
             if self._subprocess_argv_removes(node.args[0]):
-                return "destructive Python operation detected: subprocess invoking rm via getattr"
+                return (
+                    "destructive Python operation detected: "
+                    "subprocess invoking delete command via getattr"
+                )
         return None
 
     def _subprocess_argv_removes(self, first_arg: ast.expr) -> bool:
-        """True when a subprocess argv (list or string form) invokes rm/rmdir."""
+        """True when a subprocess argv (list, tuple, or string form) invokes delete commands."""
         aliases = frozenset(self.compile_aliases)
-        if isinstance(first_arg, ast.List):
+        if isinstance(first_arg, (ast.List, ast.Tuple)):
             parts = [_eval_const_str(elt, aliases) for elt in first_arg.elts]
-            return any(part in ("rm", "rmdir") for part in parts if part is not None)
+            evaluated = [p for p in parts if p is not None]
+            if not evaluated:
+                return False
+            idx = 0
+            while idx < len(evaluated):
+                token = evaluated[idx].strip()
+                base_cmd = os.path.basename(token).lower()
+                if base_cmd in _PREFIX_COMMANDS:
+                    idx += 1
+                    flags_with_arg = _PREFIX_FLAGS_WITH_ARG.get(base_cmd, frozenset())
+                    while idx < len(evaluated):
+                        arg = evaluated[idx].strip()
+                        if arg == "--":
+                            idx += 1
+                            break
+                        if arg in flags_with_arg:
+                            idx += 2 if idx + 1 < len(evaluated) else 1
+                            continue
+                        if arg.startswith("-") or arg.startswith("/"):
+                            idx += 1
+                            continue
+                        if base_cmd == "env" and "=" in arg and not arg.startswith("="):
+                            idx += 1
+                            continue
+                        break
+                    if base_cmd == "timeout" and idx < len(evaluated):
+                        idx += 1
+                    continue
+                break
+
+            if idx < len(evaluated) and evaluated[idx].strip() == "--":
+                idx += 1
+
+            if idx < len(evaluated):
+                target = evaluated[idx].lower().strip()
+                if target in _SHELL_DELETE_CMDS or _SHELL_DELETE_RE.search(evaluated[idx]):
+                    return True
+            return False
         cmd_str = _eval_const_str(first_arg, aliases)
-        return bool(cmd_str and re.search(r"\b(rm|rmdir)\b", cmd_str))
+        return bool(cmd_str and _SHELL_DELETE_RE.search(cmd_str))
 
 
 def _check_code_destructive(code: str) -> str | None:
