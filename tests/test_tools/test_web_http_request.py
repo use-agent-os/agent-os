@@ -465,3 +465,44 @@ async def test_http_request_env_overrides_download_limit(
 
 
 _STREAM_CHUNK = 65_536
+
+
+@pytest.mark.asyncio
+async def test_http_request_output_path_records_workspace_file_write(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from agentos.tools.types import ToolContext, current_tool_context
+
+    raw = b"%PDF-1.4 sample report content"
+    monkeypatch.chdir(tmp_path)
+    _patch_response(
+        monkeypatch,
+        httpx.Response(
+            200,
+            content=raw,
+            headers={"content-type": "application/pdf"},
+            request=httpx.Request("GET", "https://example.test/report.pdf"),
+        ),
+    )
+
+    ctx = ToolContext(workspace_dir=str(tmp_path))
+    token = current_tool_context.set(ctx)
+    try:
+        payload = json.loads(
+            await _original_http_request()(
+                url="https://example.test/report.pdf",
+                output_path="report.pdf",
+            )
+        )
+        saved_path = tmp_path / ".fetch" / "report.pdf"
+        assert Path(payload["path"]) == saved_path
+        assert saved_path.read_bytes() == raw
+        assert len(ctx.workspace_file_writes) == 1
+        record = ctx.workspace_file_writes[0]
+        assert record["name"] == "report.pdf"
+        assert record["suffix"] == ".pdf"
+        assert record["relative_path"] == ".fetch/report.pdf"
+    finally:
+        current_tool_context.reset(token)
+
