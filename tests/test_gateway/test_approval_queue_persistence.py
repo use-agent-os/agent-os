@@ -191,3 +191,31 @@ def test_approval_queue_consume_is_one_shot_with_stale_unconsumed_read(
         assert queue.get(approval_id).consumed is True
     finally:
         queue.close()
+
+
+def test_approval_queue_resolve_persists_elevated_mode_across_restarts(tmp_path) -> None:
+    db_path = tmp_path / "approval_queue.sqlite"
+    queue = ApprovalQueue(db_path=str(db_path))
+    approval_id = queue.request(
+        "exec",
+        {
+            "toolName": "exec_command",
+            "command": "id",
+            "sessionKey": "agent:main:demo",
+        },
+    )
+    queue.resolve(approval_id, True, elevated_mode="full")
+
+    # Immediate status check on same instance
+    status = queue.status(approval_id)
+    assert status["params"].get("elevatedMode") == "full"
+    assert queue.get(approval_id).params.get("elevatedMode") == "full"
+    queue.close()
+
+    # Reopened from SQLite persistence
+    reloaded = ApprovalQueue(db_path=str(db_path))
+    reloaded_status = reloaded.status(approval_id)
+    assert reloaded_status["params"].get("elevatedMode") == "full"
+    assert reloaded.get(approval_id).params.get("elevatedMode") == "full"
+    reloaded.close()
+
