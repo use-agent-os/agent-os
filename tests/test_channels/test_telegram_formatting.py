@@ -338,3 +338,27 @@ def test_a_url_inside_a_code_span_is_untouched() -> None:
     assert render_telegram_html("`https://x.test/a__b__c`") == (
         "<code>https://x.test/a__b__c</code>"
     )
+
+
+def test_single_underscore_italics_renders_correctly() -> None:
+    assert render_telegram_html("This is _italic_ text.") == "This is <i>italic</i> text."
+    assert render_telegram_html("_whole line italic_") == "<i>whole line italic</i>"
+    assert render_telegram_html("(_parenthesized italic_)") == "(<i>parenthesized italic</i>)"
+    assert (
+        render_telegram_html("snake_case_variable is not italic")
+        == "snake_case_variable is not italic"
+    )
+    assert render_telegram_html("foo_bar_baz") == "foo_bar_baz"
+
+
+def test_code_span_whitespace_preserved_per_commonmark() -> None:
+    # Single space is preserved, not collapsed to empty
+    assert render_telegram_html("` `") == "<code> </code>"
+    assert render_telegram_html("`  `") == "<code>  </code>"
+    # Padded content strips only a single space from ends
+    assert render_telegram_html("` foo `") == "<code>foo</code>"
+    assert render_telegram_html("`  foo  `") == "<code> foo </code>"
+    # Asymmetric padding is not stripped
+    assert render_telegram_html("` foo`") == "<code> foo</code>"
+    assert render_telegram_html("`foo `") == "<code>foo </code>"
+

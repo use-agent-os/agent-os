@@ -36,7 +36,10 @@ def _replace_code_spans(text: str) -> tuple[str, list[str]]:
             output.append(marker)
             cursor = marker_end
             continue
-        content = text[marker_end:closing].strip()
+        raw_content = text[marker_end:closing]
+        content = raw_content.replace("\r\n", " ").replace("\n", " ")
+        if content.startswith(" ") and content.endswith(" ") and any(c != " " for c in content):
+            content = content[1:-1]
         placeholder = f"\x00TG_CODE_{len(chunks)}\x00"
         chunks.append(f"<code>{html.escape(content)}</code>")
         output.append(placeholder)
@@ -67,6 +70,7 @@ def _render_inline(text: str) -> str:
     rendered = re.sub(r"__(?=\S)(.+?)(?<=\S)__", r"<b>\1</b>", rendered)
     rendered = re.sub(r"~~(?=\S)(.+?)(?<=\S)~~", r"<s>\1</s>", rendered)
     rendered = re.sub(r"(?<!\*)\*(?=\S)(.+?)(?<=\S)\*(?!\*)", r"<i>\1</i>", rendered)
+    rendered = re.sub(r"(?<!\w)_(?=\S)(.+?)(?<=\S)_(?!\w)", r"<i>\1</i>", rendered)
     # Restore in reverse order of protection: code spans were parked first, so
     # they come back last and a restored code span is never rescanned.
     for index, href in enumerate(hrefs):
