@@ -385,3 +385,75 @@ def test_anthropic_http_error_with_non_utf8_body_yields_error_event(monkeypatch)
     assert isinstance(error, ErrorEvent)
     assert error.code == "429"
     assert error.message.startswith("HTTP 429:")
+
+
+def test_anthropic_split_message_deltas_preserve_stop_reason_and_output_tokens(monkeypatch) -> None:
+    """Split message_delta chunks must preserve stop_reason and not wipe out output_tokens."""
+    sse_events = [
+        {
+            "type": "message_start",
+            "message": {
+                "id": "msg_1",
+                "model": "claude-sonnet-4-6",
+                "usage": {
+                    "input_tokens": 15,
+                    "cache_read_input_tokens": None,
+                    "cache_creation_input_tokens": 0,
+                },
+            },
+        },
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "tool_use", "id": "tu_1", "name": "get_weather"},
+        },
+        {"type": "content_block_stop", "index": 0},
+        {
+            # Delta 1: carries tool_use stop_reason and initial output tokens
+            "type": "message_delta",
+            "delta": {"stop_reason": "tool_use"},
+            "usage": {"output_tokens": 30},
+        },
+        {
+            # Delta 2: trailing delta with usage update but no stop_reason in delta
+            "type": "message_delta",
+            "delta": {},
+            "usage": {"output_tokens": 35, "cache_read_input_tokens": None},
+        },
+        {
+            # Delta 3: delta without usage field at all
+            "type": "message_delta",
+            "delta": {},
+        },
+        {"type": "message_stop"},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=_sse_body(sse_events),
+        )
+
+    transport = httpx.MockTransport(handler)
+    real_async_client = httpx.AsyncClient
+
+    def patched_async_client(*args, **kwargs):
+        kwargs["transport"] = transport
+        return real_async_client(*args, **kwargs)
+
+    monkeypatch.setattr("agentos.provider.anthropic.httpx.AsyncClient", patched_async_client)
+    provider = AnthropicProvider(api_key="test", model="claude-sonnet-4-6")
+
+    async def _collect() -> DoneEvent:
+        done: DoneEvent | None = None
+        async for ev in provider.chat([Message(role="user", content="hi")], config=ChatConfig()):
+            if isinstance(ev, DoneEvent):
+                done = ev
+        assert done is not None
+        return done
+
+    done = asyncio.run(_collect())
+    assert done.stop_reason == "tool_use"
+    assert done.output_tokens == 35
+    assert done.input_tokens == 15
