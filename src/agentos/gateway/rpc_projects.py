@@ -123,8 +123,8 @@ async def _handle_projects_update(params: dict | None, ctx: RpcContext) -> dict:
     expected = params.get("expectedUpdatedAt", params.get("expected_updated_at"))
     if name is None and knowledge is None:
         raise ValueError("params.name or params.knowledge is required")
-    if name is not None and not isinstance(name, str):
-        raise ValueError("params.name must be a string")
+    if name is not None and (not isinstance(name, str) or not name.strip()):
+        raise ValueError("params.name must be a non-empty string")
     if knowledge is not None and not isinstance(knowledge, str):
         raise ValueError("params.knowledge must be a string")
     if expected is not None and (isinstance(expected, bool) or not isinstance(expected, int)):

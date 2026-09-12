@@ -169,6 +169,23 @@ class TestProjectsListGetUpdateDelete:
         assert fresh.payload["project"]["knowledge"] == "Shared facts."
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("bad_name", ["", "   ", "\t\n"])
+    async def test_update_rejects_empty_or_whitespace_name(self, dispatcher, ctx, bad_name):
+        project = await _create_project(dispatcher, ctx)
+        res = await dispatcher.dispatch(
+            "r1",
+            "projects.update",
+            {"projectId": project["project_id"], "name": bad_name},
+            ctx,
+        )
+        assert res.ok is False
+        assert res.error.code == "INVALID_REQUEST"
+        fresh = await dispatcher.dispatch(
+            "r2", "projects.get", {"projectId": project["project_id"]}, ctx
+        )
+        assert fresh.payload["project"]["name"] == "Research"
+
+    @pytest.mark.asyncio
     async def test_delete_reports_detached_sessions(self, dispatcher, ctx, manager):
         project = await _create_project(dispatcher, ctx)
         await manager.create(
