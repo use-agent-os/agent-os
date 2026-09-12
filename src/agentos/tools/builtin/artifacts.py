@@ -210,8 +210,15 @@ async def publish_artifact(
         raise ToolError(f"artifact path is not a file: {path}")
 
     target_sha256 = hashlib.sha256(target.read_bytes()).hexdigest()
+    artifact_name, artifact_mime = _publish_artifact_metadata(
+        target=target,
+        name=name,
+        mime=mime,
+    )
     for published in reversed(ctx.published_artifacts):
         if published.get("sha256") != target_sha256:
+            continue
+        if published.get("name") not in {artifact_name, target.name}:
             continue
         llm_artifact = _llm_artifact_payload(
             published,
@@ -227,12 +234,6 @@ async def publish_artifact(
             },
             ensure_ascii=False,
         )
-
-    artifact_name, artifact_mime = _publish_artifact_metadata(
-        target=target,
-        name=name,
-        mime=mime,
-    )
 
     store = ArtifactStore(ctx.artifact_media_root)
     existing = store.find_existing_ref(
