@@ -425,6 +425,15 @@ class _ErrorHandler:
             )
         if event.code in {"incomplete_tool_stream", "provider_output_truncated"}:
             state.turn_segments[:] = _drop_unpaired_tool_use_segments(state.turn_segments)
+        # Text still held back pending disambiguation (it merely resembled the
+        # start of a tool-protocol marker) is genuine assistant output once
+        # the stream ends here instead of continuing -- flush it the same way
+        # _DoneHandler and _ToolUseStartHandler do, or it's silently dropped
+        # from the recovered partial response.
+        pending_text = state.protocol_text_guard.flush()
+        if pending_text:
+            state.final_text_parts.append(pending_text)
+            state.current_text_parts.append(pending_text)
         state.error_message = event.message or "Unknown error"
         state.pending_error_event = event
         return _SUPPRESS
