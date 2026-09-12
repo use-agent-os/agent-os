@@ -150,6 +150,32 @@ def _is_gateway_transient(text: str) -> bool:
     return bool(_GATEWAY_TRANSIENT_RE.search(text))
 
 
+#: Phrases a provider uses to say the thing it was asked for is not there.
+#: Deliberately not a bare ``"not_found"``: that substring turns up in unrelated
+#: error codes, and every one it caught would be routed to a second provider.
+_MISSING_MARKERS: tuple[str, ...] = (
+    # OpenAI error code, and its message:
+    # "The model `gpt-5` does not exist or you do not have access to it."
+    "model_not_found",
+    "does not exist",
+    # Google: "models/gemini-2.5-pro is not found for API version v1beta"
+    "is not found",
+    "was not found",
+)
+
+
+def _names_a_missing_model(text: str) -> bool:
+    """Return whether *text* says a **model** is missing, not some other resource.
+
+    The model word is load-bearing, not decoration. OpenAI answers an ordinary
+    bad request with ``400 invalid_request_error`` and "The file you provided
+    does not exist"; on the marker alone that would classify as
+    ``MODEL_NOT_FOUND`` and earn ``FALLBACK_PROVIDER``, which burns a second
+    provider on a request that is malformed against every one of them.
+    """
+    return "model" in text and any(marker in text for marker in _MISSING_MARKERS)
+
+
 def classify_provider_error(
     provider_name: str,
     status_code: int | None,
@@ -177,7 +203,17 @@ def classify_provider_error(
             return ProviderFailureKind.INSUFFICIENT_CREDITS
         if status_code == 429 or "rate limit" in text or "rate_limit" in text:
             return ProviderFailureKind.RATE_LIMITED
-        if "no endpoints found" in text or "model not found" in text:
+        # A 404 from a chat-completions endpoint is a model or base-url problem,
+        # and falling through to the next configured model is the right recovery
+        # for both. Google answers an unavailable model with 404 and a body that
+        # matches neither literal above, so the whole turn surfaced as UNKNOWN
+        # and the fallback chain never ran (#1359).
+        if (
+            status_code == 404
+            or "no endpoints found" in text
+            or "model not found" in text
+            or _names_a_missing_model(text)
+        ):
             return ProviderFailureKind.MODEL_NOT_FOUND
         if "does not support" in text or "unsupported" in text:
             return ProviderFailureKind.UNSUPPORTED_FEATURE
