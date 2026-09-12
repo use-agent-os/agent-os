@@ -226,6 +226,28 @@ class MCPStdioClient(MCPClient):
             )
 
         result = response.get("result", {})
-        content_list = result.get("content", [])
-        text = "\n".join(c.get("text", "") for c in content_list if c.get("type") == "text")
-        return MCPToolResult(content=text)
+
+        try:
+            from mcp.types import CallToolResult
+
+            call_result = CallToolResult.model_validate(result)
+        except Exception as exc:
+            return MCPToolResult(content=str(exc), is_error=True)
+
+        chunks: list[str] = []
+        for block in call_result.content:
+            text = getattr(block, "text", None)
+            if isinstance(text, str):
+                chunks.append(text)
+                continue
+            if hasattr(block, "model_dump_json"):
+                chunks.append(block.model_dump_json())
+
+        structured = getattr(call_result, "structuredContent", None)
+        if not chunks and structured is not None:
+            chunks.append(json.dumps(structured, ensure_ascii=False))
+
+        return MCPToolResult(
+            content="\n".join(chunks),
+            is_error=bool(getattr(call_result, "isError", False)),
+        )

@@ -362,7 +362,16 @@ for line in sys.stdin:
             ]
         }
     elif method == "tools/call":
-        result = {"content": [{"type": "text", "text": message["params"]["arguments"]["text"]}]}
+        name = message["params"]["name"]
+        if name == "fail":
+            result = {
+                "isError": True,
+                "content": [{"type": "text", "text": "failed execution"}],
+            }
+        else:
+            result = {
+                "content": [{"type": "text", "text": message["params"]["arguments"]["text"]}]
+            }
     else:
         result = {}
     sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}) + "\\n")
@@ -396,6 +405,25 @@ async def test_connects_to_a_spec_compliant_newline_delimited_server(tmp_path: P
 
 
 @pytest.mark.asyncio
+async def test_tool_call_reports_is_error_flag(tmp_path: Path) -> None:
+    """MCPStdioClient propagates isError flag from server tool result."""
+    server = tmp_path / "server.py"
+    server.write_text(_SPEC_COMPLIANT_SERVER)
+    client = MCPStdioClient(
+        MCPServerConfig(name="demo", transport="stdio", command=sys.executable, args=[str(server)])
+    )
+
+    try:
+        await client.connect()
+        result = await client.call_tool("fail", {})
+    finally:
+        await client.close()
+
+    assert result.is_error is True
+    assert result.content == "failed execution"
+
+
+@pytest.mark.asyncio
 async def test_concurrent_tool_calls_serialized_safely(tmp_path: Path) -> None:
     """Concurrent tool calls on the same stdio client must be safely serialized."""
     server = tmp_path / "server.py"
@@ -416,3 +444,77 @@ async def test_concurrent_tool_calls_serialized_safely(tmp_path: Path) -> None:
     assert len(results) == 10
     assert [r.content for r in results] == [f"msg-{i}" for i in range(10)]
     assert all(not r.is_error for r in results)
+
+
+@pytest.mark.asyncio
+async def test_stdio_and_session_clients_parse_payloads_identically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mcp.types import CallToolResult
+
+    from agentos.mcp.client import MCPSessionClient
+    from agentos.mcp.types import MCPServerConfig
+
+    server_result_mixed = {
+        "content": [
+            {"type": "text", "text": "abc"},
+            {"type": "image", "data": "base64...", "mimeType": "image/png"},
+        ],
+        "isError": True,
+        "structuredContent": {"foo": "bar"},
+    }
+
+    server_result_struct_only = {
+        "content": [],
+        "isError": False,
+        "structuredContent": {"foo": "bar"},
+    }
+
+    server_result_resource = {
+        "content": [
+            {
+                "type": "resource",
+                "resource": {
+                    "uri": "memo://notes/1",
+                    "text": "note content",
+                },
+            }
+        ],
+        "isError": False,
+    }
+
+    for payload in [server_result_mixed, server_result_struct_only, server_result_resource]:
+        # 1. MCPStdioClient
+        stdio_client = MCPStdioClient(
+            MCPServerConfig(name="demo", transport="stdio", command="demo")
+        )
+
+        async def mock_send_request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            return {"result": payload}
+
+        monkeypatch.setattr(stdio_client, "_send_request", mock_send_request)
+        stdio_result = await stdio_client.call_tool("test", {})
+
+        # 2. MCPSessionClient
+        class TestSessionClient(MCPSessionClient):
+            async def _open_session(self, stack: Any) -> Any:
+                pass
+
+            async def connect(self) -> None:
+                pass
+
+            async def close(self) -> None:
+                pass
+
+        session_client = TestSessionClient(
+            MCPServerConfig(name="demo", transport="stdio", command="demo")
+        )
+
+        class MockSession:
+            async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+                return CallToolResult.model_validate(payload)
+
+        monkeypatch.setattr(session_client, "_require_session", lambda: MockSession())
+        session_result = await session_client.call_tool("test", {})
+
+        assert stdio_result == session_result
