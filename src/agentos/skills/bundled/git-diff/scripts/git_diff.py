@@ -5,6 +5,13 @@ Returns the diff text on stdout, the literal ``NO_DIFF`` when the
 diff is empty, and exits non-zero with the git error on stderr when
 git itself fails (not a repo, missing binary, etc.).
 
+git's output is carried as bytes from capture to stdout: SKILL.md
+promises the diff back raw, and the text layer cannot keep that
+promise — it decodes with the locale encoding (ASCII under a C
+locale), re-encodes with the console code page (cp936/cp1252 on
+Windows, where a piped stdout does not get the UTF-8 path), and
+translates CRLF to LF, rewriting the diff of a CRLF file.
+
 Used by workflows that need repository diffs while skipping a full
 sub-Agent loop just to call ``git diff``.
 """
@@ -15,6 +22,7 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
+from typing import TextIO
 
 _VALID_MODES = {
     "cached_fallback_worktree",
@@ -24,18 +32,42 @@ _VALID_MODES = {
 }
 
 
-def _run_git(args: list[str], cwd: Path) -> tuple[int, str, str]:
+def _emit(data: bytes, stream: TextIO) -> None:
+    """Write bytes verbatim, surviving a non-UTF-8 or wrapped stream.
+
+    The binary buffer is the primary path: it keeps UTF-8 content and CRLF
+    intact even when the stream's own encoding cannot represent them. A stream
+    without a usable ``buffer`` — a wrapper, or a captured stdout — still gets
+    the payload, escaped rather than lost or raised over.
+    """
+    buffer = getattr(stream, "buffer", None)
+    if buffer is not None:
+        try:
+            buffer.write(data)
+            buffer.flush()
+            return
+        except (AttributeError, OSError, ValueError):
+            # Buffer closed or not writable — fall through to the text layer.
+            pass
+
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    text = data.decode("utf-8", errors="backslashreplace")
+    # Lossless: unencodable chars become \\uXXXX escapes, not "?".
+    stream.write(text.encode(encoding, errors="backslashreplace").decode(encoding))
+    stream.flush()
+
+
+def _run_git(args: list[str], cwd: Path) -> tuple[int, bytes, bytes]:
     proc = subprocess.run(  # noqa: S603 — argv is constructed from a static allowlist
         ["git", *args],
         cwd=str(cwd),
         capture_output=True,
-        text=True,
         check=False,
     )
     return proc.returncode, proc.stdout, proc.stderr
 
 
-def _diff_for_mode(mode: str, cwd: Path) -> tuple[int, str, str]:
+def _diff_for_mode(mode: str, cwd: Path) -> tuple[int, bytes, bytes]:
     if mode == "cached_fallback_worktree":
         rc, out, err = _run_git(["diff", "--cached", "HEAD"], cwd)
         if rc != 0:
@@ -77,10 +109,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if rc != 0:
-        sys.stderr.write(err)
+        _emit(err, sys.stderr)
         return rc
 
-    sys.stdout.write(out if out.strip() else "NO_DIFF")
+    _emit(out if out.strip() else b"NO_DIFF", sys.stdout)
     return 0
 
 

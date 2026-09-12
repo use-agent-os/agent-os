@@ -102,6 +102,32 @@ def _notes_text(slide) -> str:
     return "\n".join(p.text for p in tf.paragraphs if p.text.strip())
 
 
+def _write(text: str) -> None:
+    """Write extracted text to stdout, surviving a non-UTF-8 stdout encoding.
+
+    Slide text is whatever the deck's author typed, so it routinely carries
+    non-Latin characters and emoji. On a Windows code page (cp936/cp1252) — which
+    is what a redirected or piped stdout falls back to — handing those to the
+    text layer raises ``UnicodeEncodeError`` before a byte is written, so the
+    binary buffer is the primary path. A stream without a usable ``buffer``
+    still gets the text, escaped rather than lost.
+    """
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is not None:
+        try:
+            buffer.write(text.encode("utf-8"))
+            buffer.flush()
+            return
+        except (AttributeError, OSError, ValueError):
+            # Buffer closed or not writable — fall through to the text layer.
+            pass
+
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    # Lossless: unencodable chars become \\uXXXX escapes, not "?".
+    sys.stdout.write(text.encode(encoding, errors="backslashreplace").decode(encoding))
+    sys.stdout.flush()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Extract slide text from a .pptx file.")
     ap.add_argument("path", type=Path, help="Path to .pptx file")
@@ -141,17 +167,16 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if args.json:
-        json.dump(slides_data, sys.stdout, ensure_ascii=False, indent=2)
-        sys.stdout.write("\n")
+        _write(json.dumps(slides_data, ensure_ascii=False, indent=2) + "\n")
         return 0
 
     for entry in slides_data:
-        sys.stdout.write(f"--- slide {entry['slide']} ---\n")
+        _write(f"--- slide {entry['slide']} ---\n")
         for line in entry["text"]:
-            sys.stdout.write(line + "\n")
+            _write(line + "\n")
         if args.include_notes and entry.get("notes"):
-            sys.stdout.write("[notes]\n")
-            sys.stdout.write(entry["notes"] + "\n")
+            _write("[notes]\n")
+            _write(entry["notes"] + "\n")
     return 0
 
 
