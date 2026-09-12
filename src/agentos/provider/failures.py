@@ -177,7 +177,15 @@ def classify_provider_error(
             return ProviderFailureKind.INSUFFICIENT_CREDITS
         if status_code == 429 or "rate limit" in text or "rate_limit" in text:
             return ProviderFailureKind.RATE_LIMITED
-        if "no endpoints found" in text or "model not found" in text:
+        if (
+            status_code == 404
+            or "no endpoints found" in text
+            or "model not found" in text
+            or "model_not_found" in text
+            or "is not found" in text
+            or "does not exist" in text
+            or "not_found" in text
+        ):
             return ProviderFailureKind.MODEL_NOT_FOUND
         if "does not support" in text or "unsupported" in text:
             return ProviderFailureKind.UNSUPPORTED_FEATURE
@@ -195,6 +203,15 @@ def classify_provider_error(
             return ProviderFailureKind.AUTH_INVALID
         if status_code == 402 or "billing_error" in text:
             return ProviderFailureKind.INSUFFICIENT_CREDITS
+        if (
+            status_code == 404
+            or "not_found_error" in text
+            or "model_not_found" in text
+            or "model not found" in text
+            or "is not found" in text
+            or "not_found" in text
+        ):
+            return ProviderFailureKind.MODEL_NOT_FOUND
         if status_code == 429 or "rate_limit_error" in text:
             return ProviderFailureKind.RATE_LIMITED
         if status_code in _GATEWAY_TRANSIENT_STATUS_CODES or "overloaded_error" in text:

@@ -183,3 +183,46 @@ def test_deepseek_insufficient_quota_is_credits() -> None:
         is ProviderFailureKind.INSUFFICIENT_CREDITS
     )
 
+
+def test_gemini_404_model_not_found_is_model_not_found() -> None:
+    """Gemini 404 with standard Google API error message is classified as MODEL_NOT_FOUND."""
+    from agentos.provider.failures import ProviderRecoveryAction, decide_recovery_action
+
+    kind = classify_provider_error(
+        provider_name="gemini",
+        status_code=404,
+        message=(
+            "models/gemini-2.5-pro is not found for API version v1beta, or is not supported "
+            "for generateContent. Call ListModels to see the list of available models."
+        ),
+    )
+    assert kind is ProviderFailureKind.MODEL_NOT_FOUND
+    assert decide_recovery_action(kind) is ProviderRecoveryAction.FALLBACK_PROVIDER
+
+
+def test_openai_compat_404_status_code_is_model_not_found() -> None:
+    """OpenAI-compatible 404 is classified as MODEL_NOT_FOUND."""
+    assert (
+        classify_provider_error(
+            provider_name="openai",
+            status_code=404,
+            message="The model `gpt-5-preview` does not exist or you do not have access to it.",
+        )
+        is ProviderFailureKind.MODEL_NOT_FOUND
+    )
+
+
+def test_gemini_format_chat_http_error_includes_model_guidance() -> None:
+    from agentos.provider.openai import _format_chat_http_error
+
+    err_msg = _format_chat_http_error(
+        "gemini",
+        404,
+        b'{"error":{"code":404,"message":"models/gemini-2.5-pro is not found"}}',
+    )
+    assert "Gemini chat request failed (HTTP 404)" in err_msg
+    assert "models/gemini-2.5-pro is not found" in err_msg
+    assert "GEMINI_MODEL=gemini-3.1-pro-preview" in err_msg
+
+
+

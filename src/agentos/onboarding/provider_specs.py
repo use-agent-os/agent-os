@@ -145,6 +145,11 @@ def _default_direct_model(provider_id: str) -> str:
 
 
 def _model_description(spec: ProviderSpec, *, router_supported: bool) -> str:
+    if spec.provider_id == "gemini":
+        return (
+            "Optional direct fallback model (e.g. gemini-2.5-pro, gemini-2.5-flash, or "
+            "gemini-3.1-pro-preview). Leave blank to use the selected Pilot Router default tier."
+        )
     if router_supported:
         return (
             "Optional direct fallback model. Leave blank to use the selected "

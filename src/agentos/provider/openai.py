@@ -119,10 +119,16 @@ def _http_error_body_text(body: bytes | str) -> str:
 
 def _format_chat_http_error(provider_kind: str, status_code: int, body: bytes | str) -> str:
     body_text = _http_error_body_text(body) or "empty response body"
-    return (
+    msg = (
         f"{_provider_display_name(provider_kind)} chat request failed "
         f"(HTTP {status_code}): {body_text}"
     )
+    if provider_kind == "gemini" and status_code == 404:
+        msg += (
+            " (Model not found. If your API key lacks access to the default tier, "
+            "set GEMINI_MODEL=gemini-3.1-pro-preview or gemini-2.5-flash.)"
+        )
+    return msg
 
 
 def _resolve_reasoning_effort(level: ThinkingLevel | None, budget: int) -> str:
