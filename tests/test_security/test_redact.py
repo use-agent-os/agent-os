@@ -211,10 +211,46 @@ class TestTerminalOutput:
             ("cat notes.txt", False),
             ("echo env", False),
             ("", False),
+            # A newline separates commands exactly like ``;`` does, and a
+            # two-line script is what an agent writes when it needs a cwd.
+            pytest.param("cd /srv/app\nprintenv", True, id="newline-separator"),
+            pytest.param("cd /srv\r\nprintenv", True, id="crlf-separator"),
+            pytest.param("cat x\nenv\ncat y", True, id="dump-on-an-inner-line"),
+            # Grouping keeps the command glued to a paren once shlex is done.
+            pytest.param("(printenv)", True, id="parenthesised"),
+            pytest.param("(cd /srv; printenv)", True, id="parenthesised-sequence"),
+            # The same shapes with no dump in them stay out.
+            pytest.param("git log --oneline\ngit status", False, id="multi-line-non-dump"),
+            pytest.param('grep "(env)" notes.txt', False, id="parens-in-a-pattern"),
+            pytest.param("echo 'set'\nls", False, id="quoted-keyword-on-a-line"),
+            pytest.param("node --env-file=.env app.js", False, id="env-inside-a-flag"),
         ],
     )
     def test_env_dump_detection(self, command: str, expected: bool) -> None:
         assert redact.is_env_dump_command(command) is expected
+
+    def test_a_multi_line_dump_is_masked_like_its_one_line_twin(self) -> None:
+        """``cd x`` + newline + ``printenv`` runs what ``cd x && printenv`` runs.
+
+        The secret here is deliberately opaque rather than vendor-prefixed:
+        ``_redact_value_shapes`` catches the prefixed shapes with no help from
+        the gate, so only an opaque value proves the assignment pass ran.
+        """
+        output = "DEPLOY_API_KEY=9f2b7c41ae55d0e3bb84\nPATH=/usr/bin\n"
+        chained = redact.redact_terminal_output(output, "cd /srv/app && printenv")
+        multi_line = redact.redact_terminal_output(output, "cd /srv/app\nprintenv")
+        assert "9f2b7c41ae55d0e3bb84" not in multi_line
+        assert multi_line == chained
+        assert "PATH=/usr/bin" in multi_line
+
+    def test_a_grouped_dump_is_masked(self) -> None:
+        out = redact.redact_terminal_output("DB_PASSWORD=hunter2hunter2hunter2\n", "(printenv)")
+        assert "hunter2hunter2hunter2" not in out
+
+    def test_a_multi_line_ordinary_command_keeps_its_assignments(self) -> None:
+        """The widened split must not drag ordinary output into the pass."""
+        out = redact.redact_terminal_output("MAX_TOKENS=4096\n", "cd /srv\ncat config.py")
+        assert out == "MAX_TOKENS=4096\n"
 
 
 def test_the_disable_switch_is_read_once_at_import(monkeypatch: pytest.MonkeyPatch) -> None:

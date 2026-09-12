@@ -660,17 +660,30 @@ def _has_known_prefix(text: str) -> bool:
 
 _ENV_DUMP_COMMANDS = frozenset({"env", "printenv", "set", "export", "declare"})
 
+#: The separators that end one command and start the next. A newline is one of
+#: them — in POSIX shell it does the same job as ``;`` — and ``exec_command``
+#: hands the whole string to ``create_subprocess_shell``, so a two-line script
+#: is an ordinary thing for an agent to run. Leaving ``\n`` out classified
+#: ``cd /srv\nprintenv`` as not-a-dump while the identical ``cd /srv &&
+#: printenv`` was masked.
+_SEGMENT_SEPARATOR_RE = re.compile(r"[|;&\n\r]+")
+
+#: ``(printenv)`` and ``(cd /srv; printenv)`` keep the grouping character glued
+#: to the command by the time ``shlex`` is done with them.
+_SHELL_GROUPING_CHARS = "(){}"
+
 
 def is_env_dump_command(command: str | None) -> bool:
     """Return whether *command* prints the environment to stdout.
 
-    Checks the first token of every pipeline or sequence segment. Conservative:
-    anything it cannot parse is reported as not-a-dump, and the caller falls
-    back to the pass that has fewer false positives.
+    Checks the first token of every pipeline or sequence segment, with shell
+    grouping characters stripped off. Conservative: anything it cannot parse is
+    reported as not-a-dump, and the caller falls back to the pass that has
+    fewer false positives.
     """
     if not command or not isinstance(command, str):
         return False
-    for segment in re.split(r"[|;&]+", command):
+    for segment in _SEGMENT_SEPARATOR_RE.split(command):
         segment = segment.strip()
         if not segment:
             continue
@@ -678,6 +691,11 @@ def is_env_dump_command(command: str | None) -> bool:
             tokens = shlex.split(segment)
         except ValueError:
             tokens = segment.split()
+        tokens = [
+            stripped
+            for stripped in (token.strip(_SHELL_GROUPING_CHARS) for token in tokens)
+            if stripped
+        ]
         if tokens and tokens[0] in _ENV_DUMP_COMMANDS:
             return True
     return False
