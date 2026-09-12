@@ -47,6 +47,9 @@ from unilp.fmt import (  # noqa: E402
     fmt_usd,
     heading,
     json_safe,
+    opt_float,
+    opt_int,
+    opt_str,
     parse_args,
     render_kv,
     render_table,
@@ -235,7 +238,8 @@ def pool_key_from_args(args: dict) -> dict | None:
     silently address the wrong pool. ``--hooks`` defaults to the zero address, which is
     the whole point: a hook-less pool is exactly the case registries cannot describe.
     """
-    present = [name for name in _POOL_KEY_ARGS if args.get(name) is not None]
+    given = {name: opt_str(args, name) for name in _POOL_KEY_ARGS}
+    present = [name for name, value in given.items() if value is not None]
     if not present:
         return None
     if len(present) != len(_POOL_KEY_ARGS):
@@ -247,19 +251,19 @@ def pool_key_from_args(args: dict) -> dict | None:
         )
     # base 0 so a dynamic-fee pool can be given as 0x800000 as well as 8388608.
     try:
-        fee = int(str(args["fee"]), 0)
-        tick_spacing = int(str(args["tick-spacing"]), 0)
+        fee = int(given["fee"], 0)
+        tick_spacing = int(given["tick-spacing"], 0)
     except ValueError as exc:
         raise RuntimeError(
             f"--fee and --tick-spacing must be integers (hex accepted with an 0x "
             f"prefix): {exc}"
         ) from exc
     return normalize_pool_key({
-        "currency0": args["currency0"],
-        "currency1": args["currency1"],
+        "currency0": given["currency0"],
+        "currency1": given["currency1"],
         "fee": fee,
         "tickSpacing": tick_spacing,
-        "hooks": args.get("hooks") or NATIVE,
+        "hooks": opt_str(args, "hooks") or NATIVE,
     })
 
 
@@ -297,8 +301,9 @@ def pool_key_for_id(client, chain: dict, pool_id: str, args: dict | None = None)
         init = get_pool_init(client, chain, pool_id)
         return init["poolKey"] if init else None
 
-    if args.get("token"):
-        token = checksum_address(args["token"])
+    raw_token = opt_str(args, "token")
+    if raw_token:
+        token = checksum_address(raw_token)
         found = resolve_launcher(client, chain, token)
         if found:
             hit = next(
@@ -506,8 +511,9 @@ def discover_vanilla_pools(client, chain: dict, token: str,
 
 def cmd_pools(client, chain: dict, args: dict) -> None:
     token = checksum_address(require_arg(args, "token", "token address"))
-    min_tvl = -1.0 if args.get("all-pools") else float(args.get("min-tvl", 1))
-    mode = args.get("mode") or chain.get("rangeMode") or "logs"
+    min_tvl = -1.0 if args.get("all-pools") else opt_float(args, "min-tvl", 1.0)
+    mode = opt_str(args, "mode") or chain.get("rangeMode") or "logs"
+    raw_quote = opt_str(args, "quote")
 
     inits: list = []
     launcher = None
@@ -515,7 +521,7 @@ def cmd_pools(client, chain: dict, args: dict) -> None:
     used_vanilla = False
     # --quote lets the hook-less probe reach a pairing currency this chain's registry
     # does not list; without it every known quote is tried.
-    vanilla_quotes = [checksum_address(args["quote"])] if args.get("quote") else None
+    vanilla_quotes = [checksum_address(raw_quote)] if raw_quote else None
 
     if no_hook_only:
         # Deliberately skips both the registry and the log scan: this asks one narrow
@@ -581,19 +587,19 @@ def cmd_pools(client, chain: dict, args: dict) -> None:
         return
 
     discovered = len(inits)
-    if args.get("quote"):
-        quote = checksum_address(args["quote"]).lower()
+    if raw_quote:
+        quote = checksum_address(raw_quote).lower()
         inits = [i for i in inits
                  if quote in (i["poolKey"]["currency0"].lower(),
                               i["poolKey"]["currency1"].lower())]
         if not inits:
             print(f"\nNone of the {discovered} v4 pools for {token} are paired with "
-                  f"{args['quote']}.")
+                  f"{raw_quote}.")
             return
 
     # Reserves cost one full log scan per pool. A quote asset like WETH sits in tens of
     # thousands of pools here, so refuse rather than grinding for an hour.
-    max_pools = int(args.get("max-pools", 60))
+    max_pools = opt_int(args, "max-pools", 60)
     if len(inits) > max_pools and mode != "ticks":
         print(f"\n{len(inits)} v4 pools reference {token} on {chain['name']}.")
         print(f"That is more than --max-pools ({max_pools}), and each pool costs a full "
@@ -741,8 +747,8 @@ def cmd_pools(client, chain: dict, args: dict) -> None:
     if hidden > 0:
         print(f"\n  {hidden} dust pool(s) below {fmt_usd(min_tvl)} omitted — pass "
               "--all-pools to see them.")
-    if args.get("quote"):
-        print(f"  filtered to pools paired with {checksum_address(args['quote'])} "
+    if raw_quote:
+        print(f"  filtered to pools paired with {checksum_address(raw_quote)} "
               f"({discovered} pools reference this token in total).")
 
     # Per-range detail for the deepest pool, which is what people actually want.
@@ -852,7 +858,7 @@ def cmd_pool(client, chain: dict, args: dict) -> None:
     m0 = token_meta(client, chain, pool["poolKey"]["currency0"])
     m1 = token_meta(client, chain, pool["poolKey"]["currency1"])
     prices = fetch_usd_prices(chain, [m0["address"], m1["address"]])
-    res = get_pool_ranges(client, chain, pool_id, pool, mode=args.get("mode"))
+    res = get_pool_ranges(client, chain, pool_id, pool, mode=opt_str(args, "mode"))
 
     # Default the mcap perspective to whichever side is not a known quote asset.
     known = chain.get("knownQuotes") or {}
@@ -906,7 +912,7 @@ def cmd_pool(client, chain: dict, args: dict) -> None:
          else f"ModifyLiquidity logs ({res['eventCount']} events)"),
     ]))
 
-    limit = int(args["ranges"]) if args.get("ranges") else len(res["ranges"])
+    limit = opt_int(args, "ranges", len(res["ranges"]))
     unit = "liquidity segments" if res["mode"] == "ticks" else "liquidity ranges"
     print(heading(f"{unit} ({min(limit, len(res['ranges']))} of {len(res['ranges'])})"))
     print_ranges({**res, "ranges": res["ranges"][:limit]}, m0, m1, ctx, chain)
@@ -1034,10 +1040,10 @@ def resolve_owner(args: dict) -> str:
     the address, and the key never enters a variable here — see
     ``chains.resolve_signer_address`` for why that stays incapable of signing.
     """
-    given = args.get("owner")
+    given = opt_str(args, "owner")
     if given:
-        return str(given)
-    signer_env = args.get("signer-env") or ENV_SIGNER
+        return given
+    signer_env = opt_str(args, "signer-env") or ENV_SIGNER
     try:
         return resolve_signer_address(signer_env)
     except RuntimeError as exc:
@@ -1265,17 +1271,20 @@ def cmd_ticks(client, chain: dict, args: dict) -> None:
     prices = fetch_usd_prices(chain, [m0["address"], m1["address"]])
 
     known = chain.get("knownQuotes") or {}
-    if args.get("token"):
-        token = checksum_address(args["token"])
+    raw_token = opt_str(args, "token")
+    if raw_token:
+        token = checksum_address(raw_token)
     else:
         token = m0["address"] if known.get(m1["address"].lower()) else m1["address"]
     ctx = mcap_context(pool["poolKey"], token, m0, m1, prices)
     token_meta_ref = m1 if ctx["tokenIsCurrency1"] else m0
     spacing = pool["poolKey"]["tickSpacing"]
 
-    if args.get("tick-lower") is not None and args.get("tick-upper") is not None:
-        tick_lower = snap_tick(int(args["tick-lower"]), spacing, "down")
-        tick_upper = snap_tick(int(args["tick-upper"]), spacing, "up")
+    raw_lower = opt_str(args, "tick-lower")
+    raw_upper = opt_str(args, "tick-upper")
+    if raw_lower is not None and raw_upper is not None:
+        tick_lower = snap_tick(int(raw_lower), spacing, "down")
+        tick_upper = snap_tick(int(raw_upper), spacing, "up")
     else:
         lo = float(require_arg(args, "mcap-lower", "lower market cap in USD"))
         hi = float(require_arg(args, "mcap-upper", "upper market cap in USD"))
@@ -1447,8 +1456,8 @@ def main() -> None:
         print(USAGE)
         sys.exit(0 if command else 1)
 
-    chain = resolve_chain(args.get("chain"))
-    client = RpcClient(chain, args.get("rpc") if isinstance(args.get("rpc"), str) else None)
+    chain = resolve_chain(opt_str(args, "chain"))
+    client = RpcClient(chain, opt_str(args, "rpc"))
 
     handler = COMMANDS.get(command)
     if handler is None:

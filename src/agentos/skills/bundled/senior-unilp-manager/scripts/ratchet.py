@@ -39,6 +39,8 @@ from unilp.fmt import (  # noqa: E402
     die,
     fmt_units,
     heading,
+    opt_int,
+    opt_str,
     parse_args,
     render_kv,
     require_arg,
@@ -209,7 +211,7 @@ def tick_summary_line(outcome: dict) -> str:
 
 
 def _client(chain: dict, args: dict) -> RpcClient:
-    return RpcClient(chain, args.get("rpc"))
+    return RpcClient(chain, opt_str(args, "rpc"))
 
 
 def _now() -> int:
@@ -303,11 +305,12 @@ def build_mandate(client, chain: dict, args: dict, signer: dict) -> dict:
             "converted, so there is nothing for a ratchet to do"
         )
 
-    steps = parse_steps(args.get("steps"))
+    steps = parse_steps(opt_str(args, "steps"))
     thresholds = milestone_thresholds(original, steps)
 
-    expires_days = args.get("expires-days")
-    max_per_fire = args.get("max-principal-per-fire")
+    expires_days = opt_str(args, "expires-days")
+    max_per_fire = opt_str(args, "max-principal-per-fire")
+    max_fee_per_gas = opt_str(args, "max-fee-per-gas")
     info0 = lp_write.token_info(client, chain, pool_key["currency0"])
     info1 = lp_write.token_info(client, chain, pool_key["currency1"])
     principal_info = info0 if principal == CURRENCY0 else info1
@@ -329,24 +332,23 @@ def build_mandate(client, chain: dict, args: dict, signer: dict) -> dict:
         "originalTickUpper": position["tickUpper"],
         "originalPrincipalRaw": str(original),
         "stepsBps": steps,
-        "label": args.get("label") or "",
+        "label": opt_str(args, "label") or "",
     }
 
     return {
         "immutable": immutable,
         "bounds": {
-            "maxSlippageBps": int(args.get("slippage-bps") or lp_write.DEFAULT_SLIPPAGE_BPS),
+            "maxSlippageBps": opt_int(args, "slippage-bps", lp_write.DEFAULT_SLIPPAGE_BPS),
             "maxDeadlineSecs": lp_write.deadline_offset(args),
-            "maxTickDrift": int(args.get("max-tick-drift") or pool_key["tickSpacing"]),
+            "maxTickDrift": opt_int(args, "max-tick-drift", pool_key["tickSpacing"]),
             "allowHooked": bool(args.get("allow-hooked")),
-            "maxAttempts": int(args.get("max-attempts") or DEFAULT_MAX_ATTEMPTS),
+            "maxAttempts": opt_int(args, "max-attempts", DEFAULT_MAX_ATTEMPTS),
             "maxPrincipalRawPerFire": (
                 str(lp_write.parse_amount(max_per_fire, principal_info["decimals"]))
                 if max_per_fire else None
             ),
             "maxFeePerGasWei": (
-                str(int(str(args["max-fee-per-gas"]).replace("_", "")))
-                if args.get("max-fee-per-gas") else None
+                str(int(max_fee_per_gas.replace("_", ""))) if max_fee_per_gas else None
             ),
             "expiresAt": _now() + int(float(expires_days) * 86_400) if expires_days else None,
         },
@@ -1482,7 +1484,7 @@ def check_replacement(client, chain: dict, mandate: dict, token_id: int) -> dict
 
 def cmd_clear_attention(client, chain: dict, args: dict, signer: dict) -> None:
     ident = require_arg(args, "id", "mandate id")
-    replacement = args.get("token-id")
+    replacement = opt_str(args, "token-id")
     store = MandateStore(state_root(), chain["key"], ident)
     with store.lock() as acquired:
         if not acquired:
@@ -1561,7 +1563,7 @@ def main() -> None:
     if handler is None:
         raise RuntimeError(f'unknown command "{command}"\n{USAGE}')
 
-    chain = resolve_chain(args.get("chain"))
+    chain = resolve_chain(opt_str(args, "chain"))
     client = _client(chain, args)
     signer = lp_write.resolve_signer(args)
     handler(client, chain, args, signer)

@@ -49,6 +49,9 @@ from unilp.fmt import (  # noqa: E402
     die,
     fmt_units,
     heading,
+    opt_float,
+    opt_int,
+    opt_str,
     parse_amount,
     parse_args,
     render_kv,
@@ -230,10 +233,11 @@ class MandateAuthorization:
 
 def resolve_signer(args: dict) -> dict:
     """Either a real key (from the environment) or a plan-only address."""
-    if args.get("from"):
-        return {"address": checksum_address(args["from"]), "privateKey": None,
+    sender = opt_str(args, "from")
+    if sender:
+        return {"address": checksum_address(sender), "privateKey": None,
                 "simulateOnly": True}
-    signer_env = args.get("signer-env") or ENV_SIGNER
+    signer_env = opt_str(args, "signer-env") or ENV_SIGNER
     private_key = resolve_private_key(signer_env)
     account = account_from_private_key(private_key)
     # Only the derived address is ever surfaced; the key itself is never logged.
@@ -525,11 +529,11 @@ def _send(client, chain: dict, args: dict, signer: dict, to: str, data: str,
     ``on_sent`` is passed straight through to :func:`send_transaction` so an unattended
     caller can persist the hash and nonce before the broadcast leaves the process.
     """
-    max_fee_cap = args.get("max-fee-per-gas")
+    max_fee_cap = opt_str(args, "max-fee-per-gas")
     tx = prepare_transaction(
         client, chain, signer["address"], to, data, value,
-        gas_multiplier=float(args.get("gas-multiplier") or DEFAULT_GAS_MULTIPLIER),
-        max_fee_cap=int(str(max_fee_cap).replace("_", "")) if max_fee_cap else None,
+        gas_multiplier=opt_float(args, "gas-multiplier", DEFAULT_GAS_MULTIPLIER),
+        max_fee_cap=int(max_fee_cap.replace("_", "")) if max_fee_cap else None,
     )
     prefix = f"  {label} " if label else "\n  "
     tx_hash = send_transaction(client, chain, tx, signer["privateKey"],
@@ -554,7 +558,7 @@ def encode_call(plan: dict, deadline: int) -> str:
 
 def deadline_offset(args: dict) -> int:
     """Seconds from now, not the absolute deadline. PLAN_HASH binds this; see plan_hash."""
-    return int(args.get("deadline-secs") or DEFAULT_DEADLINE_SECS)
+    return opt_int(args, "deadline-secs", DEFAULT_DEADLINE_SECS)
 
 
 def with_slippage_up(amount: int, bps: int) -> int:
@@ -592,10 +596,10 @@ def cmd_approve(client, chain: dict, args: dict, signer: dict) -> None:
     if info["isNative"]:
         raise RuntimeError("native ETH needs no approval")
 
-    raw_amount = args.get("amount")
-    amount = (parse_amount(str(raw_amount), info["decimals"])
+    raw_amount = opt_str(args, "amount")
+    amount = (parse_amount(raw_amount, info["decimals"])
               if raw_amount and raw_amount != "max" else MAX_UINT160)
-    expiration_days = int(args.get("expiration-days") or 30)
+    expiration_days = opt_int(args, "expiration-days", 30)
     now_secs = int(client.get_block()["timestamp"], 16)
     expiration = now_secs + expiration_days * 86400
 
@@ -666,16 +670,19 @@ def cmd_approve(client, chain: dict, args: dict, signer: dict) -> None:
 def size_liquidity(sqrt_p: int, sqrt_lower: int, sqrt_upper: int, args: dict,
                    info0: dict, info1: dict) -> int:
     """Resolve the liquidity to add from whichever sizing flag the user gave."""
-    if args.get("liquidity"):
-        return int(str(args["liquidity"]).replace("_", ""))
+    liquidity = opt_str(args, "liquidity")
+    if liquidity:
+        return int(liquidity.replace("_", ""))
 
-    has0 = args.get("amount0") is not None
-    has1 = args.get("amount1") is not None
+    raw0 = opt_str(args, "amount0")
+    raw1 = opt_str(args, "amount1")
+    has0 = raw0 is not None
+    has1 = raw1 is not None
     if not has0 and not has1:
         raise RuntimeError("need one of --amount0, --amount1 or --liquidity")
 
-    amount0 = parse_amount(str(args["amount0"]), info0["decimals"]) if has0 else 0
-    amount1 = parse_amount(str(args["amount1"]), info1["decimals"]) if has1 else 0
+    amount0 = parse_amount(raw0, info0["decimals"]) if raw0 is not None else 0
+    amount1 = parse_amount(raw1, info1["decimals"]) if raw1 is not None else 0
 
     if has0 and has1:
         return get_liquidity_for_amounts(sqrt_p, sqrt_lower, sqrt_upper, amount0, amount1)
@@ -752,18 +759,18 @@ def cmd_create_pool(client, chain: dict, args: dict, signer: dict) -> dict | Non
     # v4 does not require the initial tick to sit on the tickSpacing grid — only position
     # boundaries do — so neither branch snaps. --price still lands on the 1.0001^n grid,
     # which is why the effective price is echoed back before anything is signed.
-    # `is not None` would not do: parse_args turns a valueless `--tick` into True, and
+    # opt_str refuses a valueless `--tick` outright: parse_args turns it into True, and
     # int(True) is 1 — a silently wrong starting price is exactly the failure to avoid.
-    has_tick = args.get("tick") not in (None, True)
-    has_price = args.get("price") not in (None, True)
-    if has_tick == has_price:
+    raw_tick = opt_str(args, "tick")
+    raw_price = opt_str(args, "price")
+    if (raw_tick is None) == (raw_price is None):
         raise RuntimeError("give exactly one of --tick <t> or --price <currency1 per currency0>")
-    if has_tick:
-        tick = int(args["tick"])
+    if raw_tick is not None:
+        tick = int(raw_tick)
         price_source = "--tick"
     else:
-        tick = tick_at_price(float(args["price"]), info0["decimals"], info1["decimals"])
-        price_source = f"--price {args['price']}"
+        tick = tick_at_price(float(raw_price), info0["decimals"], info1["decimals"])
+        price_source = f"--price {raw_price}"
     sqrt_price_x96 = get_sqrt_ratio_at_tick(tick)
 
     price_1_per_0 = token_price_in_quote_at_tick(tick, False, info0["decimals"],
@@ -869,15 +876,16 @@ def cmd_mint(client, chain: dict, args: dict, signer: dict, *,
     # slippage. Doing it the other way round produces MaximumAmountExceeded reverts.
     required = get_amounts_for_liquidity(pool["sqrtPriceX96"], sqrt_lower, sqrt_upper,
                                          liquidity, True)
-    bps = int(args.get("slippage-bps") or DEFAULT_SLIPPAGE_BPS)
+    bps = opt_int(args, "slippage-bps", DEFAULT_SLIPPAGE_BPS)
     amount0_max = 0 if required["amount0"] == 0 else with_slippage_up(required["amount0"], bps)
     amount1_max = 0 if required["amount1"] == 0 else with_slippage_up(required["amount1"], bps)
 
-    recipient = checksum_address(args["recipient"]) if args.get("recipient") else signer["address"]
+    recipient = opt_str(args, "recipient")
+    recipient = checksum_address(recipient) if recipient else signer["address"]
     plan = build_mint_plan(pool_key, tick_lower, tick_upper, liquidity,
                            amount0_max, amount1_max, recipient)
 
-    max_drift = int(args.get("max-tick-drift") or pool_key["tickSpacing"])
+    max_drift = opt_int(args, "max-tick-drift", pool_key["tickSpacing"])
     now_secs = int(client.get_block()["timestamp"], 16)
     allowances = check_allowances(client, chain, signer["address"],
                                   [pool_key["currency0"], pool_key["currency1"]])
@@ -977,11 +985,12 @@ def cmd_increase(client, chain: dict, args: dict, signer: dict) -> None:
 
     required = get_amounts_for_liquidity(pool["sqrtPriceX96"], sqrt_lower, sqrt_upper,
                                          liquidity, True)
-    bps = int(args.get("slippage-bps") or DEFAULT_SLIPPAGE_BPS)
+    bps = opt_int(args, "slippage-bps", DEFAULT_SLIPPAGE_BPS)
     amount0_max = 0 if required["amount0"] == 0 else with_slippage_up(required["amount0"], bps)
     amount1_max = 0 if required["amount1"] == 0 else with_slippage_up(required["amount1"], bps)
 
-    recipient = checksum_address(args["recipient"]) if args.get("recipient") else signer["address"]
+    recipient = opt_str(args, "recipient")
+    recipient = checksum_address(recipient) if recipient else signer["address"]
     plan = build_increase_plan(pos["poolKey"], pos["tokenId"], liquidity,
                                amount0_max, amount1_max, recipient)
     deadline = int(client.get_block()["timestamp"], 16) + deadline_offset(args)
@@ -1036,8 +1045,9 @@ def cmd_decrease(client, chain: dict, args: dict, signer: dict) -> None:
     info0 = token_info(client, chain, pos["poolKey"]["currency0"])
     info1 = token_info(client, chain, pos["poolKey"]["currency1"])
 
-    if args.get("liquidity"):
-        liquidity = int(str(args["liquidity"]).replace("_", ""))
+    raw_liquidity = opt_str(args, "liquidity")
+    if raw_liquidity:
+        liquidity = int(raw_liquidity.replace("_", ""))
     else:
         pct = float(require_arg(args, "pct", "0-100"))
         if not 0 < pct <= 100:
@@ -1054,11 +1064,12 @@ def cmd_decrease(client, chain: dict, args: dict, signer: dict) -> None:
         pool["sqrtPriceX96"], get_sqrt_ratio_at_tick(pos["tickLower"]),
         get_sqrt_ratio_at_tick(pos["tickUpper"]), liquidity,
     )
-    bps = int(args.get("slippage-bps") or DEFAULT_SLIPPAGE_BPS)
+    bps = opt_int(args, "slippage-bps", DEFAULT_SLIPPAGE_BPS)
     amount0_min = with_slippage_down(expected["amount0"], bps)
     amount1_min = with_slippage_down(expected["amount1"], bps)
 
-    recipient = checksum_address(args["recipient"]) if args.get("recipient") else signer["address"]
+    recipient = opt_str(args, "recipient")
+    recipient = checksum_address(recipient) if recipient else signer["address"]
     plan = build_decrease_plan(pos["poolKey"], pos["tokenId"], liquidity,
                                amount0_min, amount1_min, recipient)
     deadline = int(client.get_block()["timestamp"], 16) + deadline_offset(args)
@@ -1108,7 +1119,8 @@ def cmd_collect(client, chain: dict, args: dict, signer: dict) -> None:
     info0 = token_info(client, chain, pos["poolKey"]["currency0"])
     info1 = token_info(client, chain, pos["poolKey"]["currency1"])
 
-    recipient = checksum_address(args["recipient"]) if args.get("recipient") else signer["address"]
+    recipient = opt_str(args, "recipient")
+    recipient = checksum_address(recipient) if recipient else signer["address"]
     plan = build_collect_plan(pos["poolKey"], pos["tokenId"], recipient)
     deadline = int(client.get_block()["timestamp"], 16) + deadline_offset(args)
 
@@ -1148,11 +1160,12 @@ def cmd_burn(client, chain: dict, args: dict, signer: dict, *,
         pool["sqrtPriceX96"], get_sqrt_ratio_at_tick(pos["tickLower"]),
         get_sqrt_ratio_at_tick(pos["tickUpper"]), pos["liquidity"],
     )
-    bps = int(args.get("slippage-bps") or DEFAULT_SLIPPAGE_BPS)
+    bps = opt_int(args, "slippage-bps", DEFAULT_SLIPPAGE_BPS)
     amount0_min = with_slippage_down(expected["amount0"], bps)
     amount1_min = with_slippage_down(expected["amount1"], bps)
 
-    recipient = checksum_address(args["recipient"]) if args.get("recipient") else signer["address"]
+    recipient = opt_str(args, "recipient")
+    recipient = checksum_address(recipient) if recipient else signer["address"]
     plan = build_burn_plan(pos["poolKey"], pos["tokenId"], pos["liquidity"],
                            amount0_min, amount1_min, recipient)
     deadline = int(client.get_block()["timestamp"], 16) + deadline_offset(args)
@@ -1195,7 +1208,7 @@ def cmd_address(args: dict) -> None:
     want the address itself — to check which wallet is configured, or to hand to another
     tool. The key is never printed.
     """
-    signer_env = args.get("signer-env") or ENV_SIGNER
+    signer_env = opt_str(args, "signer-env") or ENV_SIGNER
     address = resolve_signer_address(signer_env)
     if args.get("json"):
         print(json.dumps({"address": address, "signerEnv": signer_env}, indent=2))
@@ -1239,8 +1252,8 @@ def main() -> None:
     if not handler:
         raise RuntimeError(f'unknown command "{command}"\n{USAGE}')
 
-    chain = resolve_chain(args.get("chain"))
-    client = RpcClient(chain, args.get("rpc"))
+    chain = resolve_chain(opt_str(args, "chain"))
+    client = RpcClient(chain, opt_str(args, "rpc"))
     handler(client, chain, args, resolve_signer(args))
 
 

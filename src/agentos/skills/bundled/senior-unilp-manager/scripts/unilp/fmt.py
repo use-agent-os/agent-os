@@ -50,6 +50,59 @@ def require_arg(args: dict, name: str, hint: str = "") -> Any:
     return value
 
 
+# ``parse_args`` turns a bare ``--flag`` into the boolean ``True``. That sentinel
+# is right for switches and wrong for everything else: passed on unnoticed it
+# becomes ``int(True) == 1``, or crashes with a bare ``AttributeError`` deep in a
+# helper. These three coercers are the single place that distinction is made, so
+# a value-taking flag can never silently mean "1".
+
+
+def opt_str(args: dict, name: str) -> str | None:
+    """A flag's string value, or None when absent. Bare ``--flag`` is an error."""
+    value = args.get(name)
+    if value is None:
+        return None
+    if value is True:
+        raise ValueError(f"--{name} needs a value")
+    text = str(value).strip()
+    return text or None
+
+
+def opt_int(args: dict, name: str, default: int, *,
+            minimum: int | None = None, maximum: int | None = None) -> int:
+    """A flag's integer value with range checking, or ``default`` when absent."""
+    value = args.get(name)
+    if value is None:
+        return default
+    if value is True:
+        raise ValueError(f"--{name} needs a value")
+    try:
+        number = int(str(value).strip())
+    except ValueError:
+        raise ValueError(f"--{name} must be a whole number, got {value!r}") from None
+    if minimum is not None and number < minimum:
+        raise ValueError(f"--{name} must be at least {minimum}, got {number}")
+    if maximum is not None and number > maximum:
+        raise ValueError(f"--{name} must be at most {maximum}, got {number}")
+    return number
+
+
+def opt_float(args: dict, name: str, default: float, *,
+              minimum: float | None = None) -> float:
+    value = args.get(name)
+    if value is None:
+        return default
+    if value is True:
+        raise ValueError(f"--{name} needs a value")
+    try:
+        number = float(str(value).strip())
+    except ValueError:
+        raise ValueError(f"--{name} must be a number, got {value!r}") from None
+    if minimum is not None and number < minimum:
+        raise ValueError(f"--{name} must be at least {minimum}, got {number}")
+    return number
+
+
 # ---------------------------------------------------------------------------
 # Formatting
 # ---------------------------------------------------------------------------
