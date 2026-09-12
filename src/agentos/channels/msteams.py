@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from collections import OrderedDict
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -115,7 +116,10 @@ class MSTeamsChannel:
     _queue: asyncio.Queue[IncomingMessage] = field(
         default_factory=asyncio.Queue, init=False, repr=False
     )
-    _references: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
+    # OrderedDict so a re-touched key can be moved to the end: the
+    # most-recent-conversation fallbacks below rely on iteration order
+    # tracking last activity, not first insertion.
+    _references: OrderedDict[str, Any] = field(default_factory=OrderedDict, init=False, repr=False)
     # Tracks which cached conversation a given outbound activity id belongs
     # to, so edit()/delete() operate on the right chat instead of guessing.
     _message_conversation_keys: dict[str, str] = field(default_factory=dict, init=False, repr=False)
@@ -229,14 +233,14 @@ class MSTeamsChannel:
 
         path = self._cache_path()
         if not path.is_file():
-            self._references = {}
+            self._references = OrderedDict()
             return
 
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             log.warning("msteams.cache_load_failed", error=str(exc))
-            self._references = {}
+            self._references = OrderedDict()
             return
 
         version = data.get("schema_version") if isinstance(data, dict) else None
@@ -246,10 +250,10 @@ class MSTeamsChannel:
                 expected=_CONVERSATION_CACHE_SCHEMA_VERSION,
                 seen=version,
             )
-            self._references = {}
+            self._references = OrderedDict()
             return
 
-        loaded: dict[str, Any] = {}
+        loaded: OrderedDict[str, Any] = OrderedDict()
         for key, ref_dict in data.get("conversations", {}).items():
             try:
                 loaded[key] = ConversationReference().deserialize(ref_dict)
@@ -318,6 +322,7 @@ class MSTeamsChannel:
         cache_key = self._reference_cache_key(activity)
         if cache_key:
             self._references[cache_key] = ref
+            self._references.move_to_end(cache_key)
         if activity.recipient is not None and getattr(activity.recipient, "id", None):
             self._bot_id = activity.recipient.id
 

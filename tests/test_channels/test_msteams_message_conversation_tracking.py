@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import sys
 import types
+from collections import OrderedDict
 from collections.abc import AsyncIterator, Awaitable, Callable
 from unittest.mock import AsyncMock, MagicMock
 
@@ -45,10 +46,12 @@ def _stub_botbuilder_schema(monkeypatch: pytest.MonkeyPatch) -> None:
 def _channel_with_two_conversations() -> MSTeamsChannel:
     """A channel with conversation "A" cached before conversation "B"."""
     channel = MSTeamsChannel(config=MSTeamsChannelConfig(name="msteams"))
-    channel._references = {
-        "conversation-A": "REF_FOR_A",
-        "conversation-B": "REF_FOR_B",
-    }
+    channel._references = OrderedDict(
+        [
+            ("conversation-A", "REF_FOR_A"),
+            ("conversation-B", "REF_FOR_B"),
+        ]
+    )
     channel._adapter = MagicMock()
     channel._adapter.continue_conversation = AsyncMock()
     return channel
@@ -98,6 +101,83 @@ async def test_delete_forgets_the_message_once_deleted() -> None:
     await channel.delete(message_id="activity-in-b")
 
     assert "activity-in-b" not in channel._message_conversation_keys
+
+
+class _FakeTurnContext:
+    """Stand-in for ``botbuilder.core.TurnContext`` -- only the one static
+    method ``_on_turn`` calls."""
+
+    @staticmethod
+    def get_conversation_reference(activity: object) -> str:
+        return f"REF_FOR_{activity.conversation.id.rsplit('-', 1)[-1]}"  # type: ignore[attr-defined]
+
+
+@pytest.fixture(autouse=True)
+def _stub_botbuilder_core(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``_on_turn`` does a lazy ``from botbuilder.core import TurnContext``."""
+    core_module = types.ModuleType("botbuilder.core")
+    core_module.TurnContext = _FakeTurnContext  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "botbuilder.core", core_module)
+
+
+def _fake_message_activity(conversation_id: str, sender_id: str = "user1") -> types.SimpleNamespace:
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        type="message",
+        id=f"activity-{conversation_id}",
+        text="hi",
+        entities=[],
+        channel_data={},
+        service_url="",
+        conversation=SimpleNamespace(id=conversation_id, conversation_type="", tenant_id=""),
+        from_property=SimpleNamespace(id=sender_id),
+        recipient=SimpleNamespace(id="bot-id"),
+    )
+
+
+async def test_on_turn_reactivating_a_conversation_makes_it_the_most_recent() -> None:
+    """Regression for #1789: ``_on_turn`` re-touching an *existing* cache key
+    (a conversation that spoke again) must move it to the end of
+    ``_references``, since the "most recent" fallback in
+    ``_resolve_reference_key`` reads ``next(reversed(self._references))``.
+    Before the fix, dict reassignment of an existing key left insertion
+    order (and thus the fallback) unchanged, so B -- not the just-spoken A --
+    kept winning.
+    """
+    channel = MSTeamsChannel(config=MSTeamsChannelConfig(name="msteams"))
+    channel._adapter = MagicMock()
+    channel._adapter.continue_conversation = AsyncMock()
+
+    turn_context_a = MagicMock(activity=_fake_message_activity("conversation-A"))
+    turn_context_b = MagicMock(activity=_fake_message_activity("conversation-B"))
+    await channel._on_turn(turn_context_a)
+    await channel._on_turn(turn_context_b)
+    # A speaks again, after B -- A is now the most recently active conversation.
+    await channel._on_turn(MagicMock(activity=_fake_message_activity("conversation-A")))
+
+    msg = OutgoingMessage(content="proactive notice", metadata={}, reply_to=None)
+    await channel.send(msg)
+
+    assert _ref_passed_to_continue_conversation(channel) == "REF_FOR_A"
+
+
+async def test_delete_of_untracked_message_follows_reactivated_conversation() -> None:
+    """Same regression as above, through delete()'s untracked-message fallback
+    (``_resolve_reference_for_message``), which reads
+    ``next(reversed(self._references.values()))``.
+    """
+    channel = MSTeamsChannel(config=MSTeamsChannelConfig(name="msteams"))
+    channel._adapter = MagicMock()
+    channel._adapter.continue_conversation = AsyncMock()
+
+    await channel._on_turn(MagicMock(activity=_fake_message_activity("conversation-A")))
+    await channel._on_turn(MagicMock(activity=_fake_message_activity("conversation-B")))
+    await channel._on_turn(MagicMock(activity=_fake_message_activity("conversation-A")))
+
+    await channel.delete(message_id="never-tracked")
+
+    assert _ref_passed_to_continue_conversation(channel) == "REF_FOR_A"
 
 
 async def test_send_records_which_conversation_the_message_landed_in() -> None:
