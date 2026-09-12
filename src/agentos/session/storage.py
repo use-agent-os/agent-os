@@ -998,7 +998,7 @@ class SessionStorage:
         self,
         session_key: str | None = None,
         status: str | AgentTaskStatus | None = None,
-        limit: int = 100,
+        limit: int | None = 100,
         offset: int = 0,
     ) -> list[AgentTaskRecord]:
         clauses: list[str] = []
@@ -1010,11 +1010,19 @@ class SessionStorage:
             clauses.append("status = ?")
             params.append(str(status))
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        params += [limit, offset]
-        sql = (
-            f"SELECT * FROM agent_tasks {where} "
-            "ORDER BY created_at ASC, rowid ASC LIMIT ? OFFSET ?"
-        )
+        if limit is not None and limit >= 0:
+            params += [limit, offset]
+            sql = (
+                f"SELECT * FROM ("
+                f"  SELECT * FROM agent_tasks {where} "
+                f"  ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?"
+                f") ORDER BY created_at ASC, task_id ASC"
+            )
+        else:
+            sql = (
+                f"SELECT * FROM agent_tasks {where} "
+                "ORDER BY created_at ASC, rowid ASC"
+            )
         async with self.conn.execute(sql, params) as cur:
             rows = await cur.fetchall()
         return [AgentTaskRecord(**_deserialize_row(dict(row))) for row in rows]

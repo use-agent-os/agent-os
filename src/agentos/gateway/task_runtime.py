@@ -506,12 +506,17 @@ class TaskRuntime:
         self,
         session_key: str | None = None,
         status: str | AgentTaskStatus | None = None,
+        limit: int | None = 100,
     ) -> list[AgentTaskRecord]:
         if session_key is not None:
             session_key = canonicalize_session_key(session_key)
         return cast(
             list[AgentTaskRecord],
-            await self._storage.list_agent_tasks(session_key=session_key, status=status),
+            await self._storage.list_agent_tasks(
+                session_key=session_key,
+                status=status,
+                limit=limit,
+            ),
         )
 
     async def cancel(

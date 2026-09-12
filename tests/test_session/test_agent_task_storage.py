@@ -138,3 +138,41 @@ async def test_list_agent_tasks_for_sessions_groups_visible_session_tasks(tmp_pa
     assert set(grouped) == {"agent:main:webchat:one", "agent:main:webchat:two"}
     assert [row.task_id for row in grouped["agent:main:webchat:one"]] == ["one-new"]
     assert [row.task_id for row in grouped["agent:main:webchat:two"]] == ["two-task"]
+
+
+@pytest.mark.asyncio
+async def test_list_agent_tasks_returns_most_recent_tasks_when_truncated(tmp_path) -> None:
+    storage = SessionStorage(str(tmp_path / "sessions_truncation.db"))
+    await storage.connect()
+    key = "agent:main:webchat:many-tasks"
+    try:
+        # Create 105 tasks: tasks 0-103 are succeeded, task 104 is running
+        for i in range(105):
+            await storage.create_agent_task(
+                AgentTaskRecord(
+                    task_id=f"task-{i:03d}",
+                    session_key=key,
+                    source_kind="webui",
+                    queue_mode="followup",
+                    run_kind="web_turn",
+                    status=AgentTaskStatus.SUCCEEDED if i < 104 else AgentTaskStatus.RUNNING,
+                    created_at=1000 + i,
+                    updated_at=1000 + i,
+                )
+            )
+
+        # Truncated query with default limit 100
+        rows_100 = await storage.list_agent_tasks(session_key=key, limit=100)
+        assert len(rows_100) == 100
+        # Should contain the newest tasks (task-005 through task-104) in ASC order
+        assert rows_100[0].task_id == "task-005"
+        assert rows_100[-1].task_id == "task-104"
+        assert rows_100[-1].status == AgentTaskStatus.RUNNING
+
+        # Query without limit (limit=None)
+        all_rows = await storage.list_agent_tasks(session_key=key, limit=None)
+        assert len(all_rows) == 105
+        assert all_rows[0].task_id == "task-000"
+        assert all_rows[-1].task_id == "task-104"
+    finally:
+        await storage.close()
