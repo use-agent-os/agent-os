@@ -91,6 +91,8 @@ def _parse_patch(patch_text: str) -> list[PatchOp]:
                 raw = body[i]
                 if raw.startswith("+"):
                     content_lines.append(raw[1:])
+                elif raw == "":
+                    content_lines.append("")
                 i += 1
             ops.append(AddFile(path=path, content="\n".join(content_lines)))
 

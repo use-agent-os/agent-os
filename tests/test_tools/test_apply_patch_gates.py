@@ -574,3 +574,45 @@ def test_parse_hunk_header_rejects_malformed_input(header: str) -> None:
 
     with pytest.raises(ValueError, match="Invalid hunk header"):
         _parse_hunk_header(header)
+
+
+def test_parse_patch_preserves_blank_lines_in_add_file() -> None:
+    from agentos.tools.builtin.patch import AddFile, _parse_patch
+
+    patch_text = """*** Begin Patch
+*** Add File: sample.py
++def foo():
++    pass
+
++def bar():
++    pass
+*** End Patch"""
+
+    ops = _parse_patch(patch_text)
+    assert len(ops) == 1
+    assert isinstance(ops[0], AddFile)
+    assert ops[0].content == "def foo():\n    pass\n\ndef bar():\n    pass"
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_add_file_preserves_blank_lines(tmp_path: Path) -> None:
+    token = current_tool_context.set(ToolContext(workspace_dir=str(tmp_path)))
+    apply_patch = _original_async(patch_tool.apply_patch)
+    try:
+        result = await apply_patch(
+            """*** Begin Patch
+*** Add File: sample.py
++def foo():
++    pass
+
++def bar():
++    pass
+*** End Patch"""
+        )
+    finally:
+        current_tool_context.reset(token)
+
+    assert result == "Applied patch: 1 file(s) added"
+    target = tmp_path / "sample.py"
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == "def foo():\n    pass\n\ndef bar():\n    pass"
