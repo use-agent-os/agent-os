@@ -1539,12 +1539,29 @@ async def _check_exec_approval(
                 )
                 _elevate_current_call.set(True)
                 return None
+            if not entry.resolved:
+                return {
+                    "status": "approval_pending",
+                    "approval_id": approval_id,
+                    "command": command,
+                    "warning": warning,
+                    "message": (
+                        "Approval is still pending after waiting "
+                        f"{int(_APPROVAL_RETRY_WAIT_SECONDS)}s. Ask the user to approve."
+                    ),
+                }
+            log.warning(
+                "shell_approval_denied",
+                approval_id=approval_id,
+                command=_audit_command(command),
+                inline=True,
+            )
             return {
                 "status": "approval_denied",
                 "approval_id": approval_id,
                 "command": command,
                 "warning": warning,
-                "message": "Approval was denied or timed out.",
+                "message": "Approval was denied by the operator.",
             }
         status = "approval_required"
         message = (

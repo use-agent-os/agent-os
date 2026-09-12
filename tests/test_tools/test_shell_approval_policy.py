@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -8,9 +9,10 @@ import pytest
 
 from agentos.gateway.approval_queue import get_approval_queue, reset_approval_queue
 from agentos.sandbox.config import SandboxSettings
-from agentos.sandbox.integration import configure_runtime, reset_runtime
+from agentos.sandbox.integration import configure_runtime, get_runtime, reset_runtime
 from agentos.sandbox.intent_cache import get_intent_cache, reset_intent_cache
-from agentos.tools.builtin import code_exec, filesystem, shell
+from agentos.sandbox.types import DenialReason
+from agentos.tools.builtin import code_exec, filesystem, shell, shell_policy
 from agentos.tools.builtin.code_exec import execute_code
 from agentos.tools.builtin.shell_policy import PolicyResult
 from agentos.tools.types import (
@@ -1059,3 +1061,193 @@ def test_sandbox_request_for_populates_env_and_matches_fingerprint(tmp_path: Pat
     finally:
         current_tool_context.reset(token)
 
+
+@pytest.mark.asyncio
+async def test_inline_web_approval_timeout_returns_pending_and_no_ledger_denial(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #1563: inline browser approval timeout must return approval_pending
+    and NOT record a HUMAN_REJECTED denial into the sandbox audit ledger."""
+    ctx = current_tool_context.get()
+    assert ctx is not None
+    ctx.caller_kind = CallerKind.WEB
+    ctx.workspace_dir = str(tmp_path)
+    session_id = ctx.session_key or "default"
+
+    configure_runtime(
+        SandboxSettings(
+            sandbox=True,
+            security_grading=True,
+            backend="noop",
+            allow_legacy_mode=True,
+        ),
+        workspace=tmp_path,
+    )
+    runtime = get_runtime()
+    assert runtime is not None
+
+    monkeypatch.setattr(shell, "_APPROVAL_RETRY_WAIT_SECONDS", 0.05)
+    if sys.platform == "win32":
+        monkeypatch.setattr(
+            shell_policy,
+            "_policy",
+            shell_policy.SafeBinPolicy(denylist=[], allowlist=[], warnlist=[r"\brm\b"]),
+        )
+
+    cmd = "rm target.txt"
+    target = tmp_path / "target.txt"
+    target.write_text("keep me", encoding="utf-8")
+
+    res_json = await shell.exec_command(cmd)
+    res = json.loads(res_json)
+
+    assert res["status"] == "approval_pending"
+    assert "Approval is still pending" in res["message"]
+    approval_id = res["approval_id"]
+    assert approval_id
+
+    # The entry remains unresolved in the queue
+    queue = get_approval_queue()
+    entry = queue.get(approval_id)
+    assert entry.resolved is False
+    assert entry.approved is False
+
+    # The sandbox audit ledger recorded NO denial (operator did not reject)
+    assert await runtime.ledger.count_session(session_id) == 0
+    _, last_reason = await runtime.ledger.last_denial(session_id)
+    assert last_reason is None
+
+    # Later operator approval still works and is consumed
+    queue.resolve(approval_id, True)
+    assert queue.get(approval_id).resolved is True
+    assert queue.get(approval_id).approved is True
+
+    approval_granted = await shell._check_exec_approval(
+        "exec_command",
+        cmd,
+        None,
+        "warning",
+        approval_id=approval_id,
+        background=False,
+    )
+    assert approval_granted is None
+    assert shell._elevate_current_call.get() is True
+    assert queue.get(approval_id).consumed is True
+
+    # Ledger still has 0 denials after approval
+    assert await runtime.ledger.count_session(session_id) == 0
+
+
+@pytest.mark.asyncio
+async def test_inline_web_approval_explicit_denial_records_human_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit operator rejection during inline browser approval returns approval_denied
+    and records exactly ONE DenialReason.HUMAN_REJECTED in the audit ledger."""
+    ctx = current_tool_context.get()
+    assert ctx is not None
+    ctx.caller_kind = CallerKind.WEB
+    ctx.workspace_dir = str(tmp_path)
+    session_id = ctx.session_key or "default"
+
+    configure_runtime(
+        SandboxSettings(
+            sandbox=True,
+            security_grading=True,
+            backend="noop",
+            allow_legacy_mode=True,
+        ),
+        workspace=tmp_path,
+    )
+    runtime = get_runtime()
+    assert runtime is not None
+
+    monkeypatch.setattr(shell, "_APPROVAL_RETRY_WAIT_SECONDS", 0.5)
+    if sys.platform == "win32":
+        monkeypatch.setattr(
+            shell_policy,
+            "_policy",
+            shell_policy.SafeBinPolicy(denylist=[], allowlist=[], warnlist=[r"\brm\b"]),
+        )
+
+    cmd = "rm target.txt"
+    target = tmp_path / "target.txt"
+    target.write_text("keep me", encoding="utf-8")
+
+    async def deny_shortly():
+        queue = get_approval_queue()
+        for _ in range(50):
+            pending = queue.list_pending("exec")
+            if pending:
+                queue.resolve(pending[0]["id"], False)
+                return
+            await asyncio.sleep(0.01)
+
+    deny_task = asyncio.create_task(deny_shortly())
+    res_json = await shell.exec_command(cmd)
+    await deny_task
+    res = json.loads(res_json)
+
+    assert res["status"] == "approval_denied"
+    assert "Approval was denied" in res["message"]
+
+    # Exactly one HUMAN_REJECTED denial recorded in the audit ledger
+    assert await runtime.ledger.count_session(session_id) == 1
+    _, last_reason = await runtime.ledger.last_denial(session_id)
+    assert last_reason == DenialReason.HUMAN_REJECTED
+
+
+@pytest.mark.asyncio
+async def test_retry_approval_timeout_returns_pending_and_no_ledger_denial(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #1563/#1568: retry branch waiting for approval decision returns
+    approval_pending on timeout and does NOT record a denial in the ledger."""
+    ctx = current_tool_context.get()
+    assert ctx is not None
+    ctx.caller_kind = CallerKind.CLI
+    ctx.workspace_dir = str(tmp_path)
+    session_id = ctx.session_key or "default"
+
+    configure_runtime(
+        SandboxSettings(
+            sandbox=True,
+            security_grading=True,
+            backend="noop",
+            allow_legacy_mode=True,
+        ),
+        workspace=tmp_path,
+    )
+    runtime = get_runtime()
+    assert runtime is not None
+
+    monkeypatch.setattr(shell, "_APPROVAL_RETRY_WAIT_SECONDS", 0.05)
+    if sys.platform == "win32":
+        monkeypatch.setattr(
+            shell_policy,
+            "_policy",
+            shell_policy.SafeBinPolicy(denylist=[], allowlist=[], warnlist=[r"\brm\b"]),
+        )
+
+    cmd = "rm target.txt"
+
+    # CLI caller: initial call returns approval_required without inline waiting
+    res_json = await shell.exec_command(cmd)
+    res = json.loads(res_json)
+    assert res["status"] == "approval_required"
+    approval_id = res["approval_id"]
+
+    # Retry call with approval_id: waits inline on the retry branch
+    retry_json = await shell.exec_command(cmd, approval_id=approval_id)
+    retry_res = json.loads(retry_json)
+
+    assert retry_res["status"] == "approval_pending"
+    assert "Approval is still pending" in retry_res["message"]
+    assert await runtime.ledger.count_session(session_id) == 0
+
+    entry = get_approval_queue().get(approval_id)
+    assert entry.resolved is False
+    assert entry.approved is False
