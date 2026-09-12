@@ -38,7 +38,7 @@ class _StubSessionManager:
 
 def _ctx(session_key: str | None) -> ToolContext:
     return ToolContext(
-                caller_kind=CallerKind.AGENT,
+        caller_kind=CallerKind.AGENT,
         session_key=session_key,
         agent_id="main",
     )
@@ -86,3 +86,56 @@ async def test_subagents_mutating_action_without_session_context_raises(
     assert stub_manager.killed == []
     assert stub_manager.injected == []
     assert stub_manager.get_session_calls == []
+
+
+@pytest.mark.asyncio
+async def test_subagents_list_filters_by_current_session(
+    stub_manager: _StubSessionManager,
+) -> None:
+    token = current_tool_context.set(_ctx("agent:main:parent"))
+    try:
+        payload = json.loads(await agents_tool.subagents("list"))
+    finally:
+        current_tool_context.reset(token)
+
+    assert payload["action"] == "list"
+    assert len(payload["subagents"]) == 1
+    assert payload["subagents"][0]["session_key"] == "sub-owned"
+
+
+@pytest.mark.asyncio
+async def test_subagents_list_retrieves_beyond_100_sessions(tmp_path) -> None:
+    from agentos.session.manager import SessionManager
+    from agentos.session.storage import SessionStorage
+
+    db_path = tmp_path / "test_subagents_100.db"
+    storage = SessionStorage(str(db_path))
+    await storage.connect()
+    manager = SessionManager(storage=storage)
+    sessions_tool.set_session_manager(manager)
+
+    try:
+        # Create parent session
+        parent = await manager.create("agent:main:parent", agent_id="main")
+
+        # Create child subagent session spawned by parent
+        child = await manager.create(
+            "agent:main:child_sub", agent_id="main", spawned_by=parent.session_key
+        )
+
+        # Create 105 newer unrelated sessions that push child out of the top 100
+        for i in range(105):
+            await manager.create(f"agent:main:other_{i:03d}", agent_id="main")
+
+        token = current_tool_context.set(_ctx("agent:main:parent"))
+        try:
+            payload = json.loads(await agents_tool.subagents("list"))
+        finally:
+            current_tool_context.reset(token)
+
+        assert payload["action"] == "list"
+        found_keys = [s["session_key"] for s in payload["subagents"]]
+        assert child.session_key in found_keys
+    finally:
+        sessions_tool.set_session_manager(None)
+        await storage.close()
