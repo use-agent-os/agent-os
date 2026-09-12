@@ -435,3 +435,17 @@ async def test_write_file_records_workspace_write_on_both_create_and_overwrite(
         current_tool_context.reset(token)
 
 
+@pytest.mark.asyncio
+async def test_glob_search_and_grep_search_raise_file_not_found_on_missing_path(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    nonexistent = workspace / "nonexistent_dir"
+
+    with tool_context(workspace):
+        with pytest.raises(FileNotFoundError, match="Path not found"):
+            await fs.glob_search("*.py", path=str(nonexistent))
+
+        with pytest.raises(FileNotFoundError, match="Path not found"):
+            await fs.grep_search("needle", path=str(nonexistent))
