@@ -87,11 +87,28 @@ def _parse_patch(patch_text: str) -> list[PatchOp]:
             path = line[len("*** Add File: ") :].strip()
             i += 1
             content_lines: list[str] = []
+            trailing_bare_blanks = 0
             while i < len(body) and not body[i].startswith("*** "):
                 raw = body[i]
                 if raw.startswith("+"):
                     content_lines.append(raw[1:])
+                    trailing_bare_blanks = 0
+                elif raw.strip() == "":
+                    # Editors, log pipelines and most model output strip the
+                    # lone "+" from an empty line, so a bare blank inside the
+                    # block is an empty content line, not a line to skip.
+                    content_lines.append("")
+                    trailing_bare_blanks += 1
+                else:
+                    raise ValueError(
+                        f"Invalid line in '*** Add File: {path}' block "
+                        f"(expected a '+' prefix): {raw!r}"
+                    )
                 i += 1
+            # Bare blanks that only separate the block from the next marker
+            # are formatting, not content; an explicit "+" line is kept.
+            if trailing_bare_blanks:
+                del content_lines[-trailing_bare_blanks:]
             ops.append(AddFile(path=path, content="\n".join(content_lines)))
 
         elif line.startswith("*** Update File: "):
