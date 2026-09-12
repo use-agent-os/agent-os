@@ -126,12 +126,7 @@ async def subagents(
             if current_key is None:
                 log.warning("subagents.list_no_session_context")
                 return json.dumps({"action": "list", "subagents": []})
-            all_sessions = await mgr.list_sessions()
-            subs = [
-                s
-                for s in all_sessions
-                if isinstance(s, dict) and s.get("spawned_by") == current_key
-            ]
+            subs = await mgr.list_sessions(spawned_by=current_key)
             return json.dumps({"action": "list", "subagents": subs})
         except (ImportError, AttributeError, NotImplementedError) as exc:
             raise _manager_unavailable() from exc

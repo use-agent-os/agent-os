@@ -19,11 +19,15 @@ class _StubSessionManager:
     async def get_current_session(self):
         return None
 
-    async def list_sessions(self):
-        return [
+    async def list_sessions(self, **kwargs):
+        all_sessions = [
             {"session_key": "sub-legacy", "spawned_by": None, "status": "running"},
             {"session_key": "sub-owned", "spawned_by": "agent:main:parent", "status": "running"},
         ]
+        sb = kwargs.get("spawned_by")
+        if sb is not None:
+            return [s for s in all_sessions if s.get("spawned_by") == sb]
+        return all_sessions
 
     async def get_session(self, session_key: str):
         self.get_session_calls.append(session_key)
@@ -38,7 +42,7 @@ class _StubSessionManager:
 
 def _ctx(session_key: str | None) -> ToolContext:
     return ToolContext(
-                caller_kind=CallerKind.AGENT,
+        caller_kind=CallerKind.AGENT,
         session_key=session_key,
         agent_id="main",
     )
