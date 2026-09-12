@@ -41,7 +41,7 @@ def _outgoing_metadata(channel: str, target: str, thread_id: str | None) -> dict
 
 
 def _delete_message_id(channel: str, target: str, message_id: str) -> str:
-    if channel == "telegram" and "|" not in message_id:
+    if channel in ("telegram", "discord") and "|" not in message_id and target:
         return f"{target}|{message_id}"
     return message_id
 

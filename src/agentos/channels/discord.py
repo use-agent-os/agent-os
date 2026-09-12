@@ -506,7 +506,6 @@ class DiscordChannel:
             elif op == 11:  # Heartbeat ACK
                 self._state.last_heartbeat_ack = True
 
-
     async def _handle_dispatch(self, event_type: str | None, data: dict[str, Any]) -> None:
         if event_type == "READY":
             self._state.session_id = data["session_id"]
@@ -926,9 +925,7 @@ class DiscordChannel:
 
     def is_connected(self) -> bool:
         return (
-            self._connected
-            and self._dispatch_task is not None
-            and not self._dispatch_task.done()
+            self._connected and self._dispatch_task is not None and not self._dispatch_task.done()
         )
 
     async def health_check(self) -> ChannelHealth:
@@ -941,7 +938,6 @@ class DiscordChannel:
                 "sequence": self._state.sequence,
             },
         )
-
 
     # ------------------------------------------------------------------
     # Inbound
@@ -1244,40 +1240,53 @@ class DiscordChannel:
             provider_message_id=message_id,
         )
 
+    def _split_message_ref(self, message_id: str) -> tuple[str, str]:
+        channel_id, sep, raw_message_id = message_id.partition("|")
+        if sep:
+            return channel_id, raw_message_id
+        resolved_channel = self._sent_messages.get(message_id, self.config.default_channel_id)
+        if not resolved_channel:
+            raise ValueError(
+                "discord edit/delete requires '<channel_id>|<message_id>' "
+                "when default_channel_id is not configured"
+            )
+        return resolved_channel, message_id
+
     async def edit(self, message_id: str, content: str) -> ChannelSendResult:
         await self._rate_limiter.acquire()
         client = self._get_client()
-        channel_id = self._sent_messages.get(message_id, self.config.default_channel_id)
+        channel_id, raw_message_id = self._split_message_ref(message_id)
         resp = await retry_request(
             client.patch,
-            f"/channels/{channel_id}/messages/{message_id}",
+            f"/channels/{channel_id}/messages/{raw_message_id}",
             json={"content": content},
             headers=self._auth_headers(),
         )
         resp.raise_for_status()
-        log.debug("discord.edit", message_id=message_id)
+        log.debug("discord.edit", message_id=raw_message_id)
         return ChannelSendResult.sent(
             capability=ChannelCapabilities.EDIT,
             target_id=channel_id,
-            provider_message_id=message_id,
+            provider_message_id=raw_message_id,
         )
 
     async def delete(self, message_id: str) -> ChannelSendResult:
         await self._rate_limiter.acquire()
         client = self._get_client()
-        channel_id = self._sent_messages.get(message_id, self.config.default_channel_id)
+        channel_id, raw_message_id = self._split_message_ref(message_id)
         resp = await retry_request(
             client.delete,
-            f"/channels/{channel_id}/messages/{message_id}",
+            f"/channels/{channel_id}/messages/{raw_message_id}",
             headers=self._auth_headers(),
         )
         resp.raise_for_status()
+        self._sent_messages.pop(raw_message_id, None)
         self._sent_messages.pop(message_id, None)
-        log.debug("discord.delete", message_id=message_id)
+        log.debug("discord.delete", message_id=raw_message_id)
         return ChannelSendResult.sent(
             capability=ChannelCapabilities.DELETE,
             target_id=channel_id,
-            provider_message_id=message_id,
+            provider_message_id=raw_message_id,
         )
 
     # ------------------------------------------------------------------
