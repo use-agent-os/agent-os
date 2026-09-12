@@ -214,7 +214,11 @@ def _published_response(
 
     target_sha256 = hashlib.sha256(payload).hexdigest()
     for published in reversed(ctx.published_artifacts):
-        if published.get("sha256") != target_sha256:
+        if (
+            published.get("sha256") != target_sha256
+            or published.get("name") != name
+            or published.get("mime") != mime
+        ):
             continue
         llm_artifact = {k: v for k, v in published.items() if k != "download_url"}
         return json.dumps(

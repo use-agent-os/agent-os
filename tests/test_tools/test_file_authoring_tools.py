@@ -23,7 +23,7 @@ def _channel_artifact_context(tmp_path: Path) -> ToolContext:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
     return ToolContext(
-                caller_kind=CallerKind.CHANNEL,
+        caller_kind=CallerKind.CHANNEL,
         workspace_dir=str(workspace),
         artifact_media_root=str(tmp_path / "media"),
         artifact_session_id="session-1",
@@ -227,3 +227,32 @@ async def test_create_pdf_report_uses_unicode_fonts_for_channel_artifact(tmp_pat
 
     assert not any("ZapfDingbats" in font_name for font_name in base_fonts)
     assert any("STSong-Light" in font_name for font_name in base_fonts)
+
+
+@pytest.mark.asyncio
+async def test_file_authoring_distinct_files_with_identical_content_not_deduplicated(
+    tmp_path: Path,
+) -> None:
+    ctx = _channel_artifact_context(tmp_path)
+    token = current_tool_context.set(ctx)
+    try:
+        r1 = json.loads(await create_csv(name="first.csv", rows=[["a", "b"]]))
+        r2 = json.loads(await create_csv(name="second.csv", rows=[["a", "b"]]))
+        r3 = json.loads(await create_csv(name="first.csv", rows=[["a", "b"]]))
+    finally:
+        current_tool_context.reset(token)
+
+    assert r1["status"] == "published"
+    assert r1["artifact"]["name"] == "first.csv"
+
+    assert r2["status"] == "published"
+    assert r2["artifact"]["name"] == "second.csv"
+    assert r2["artifact"]["id"] != r1["artifact"]["id"]
+
+    assert r3["status"] == "already_published"
+    assert r3["artifact"]["name"] == "first.csv"
+    assert r3["artifact"]["id"] == r1["artifact"]["id"]
+
+    assert len(ctx.published_artifacts) == 2
+    assert ctx.published_artifacts[0]["name"] == "first.csv"
+    assert ctx.published_artifacts[1]["name"] == "second.csv"
