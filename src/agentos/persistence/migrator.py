@@ -86,12 +86,22 @@ def apply_pending(db_url: str, migrations_dir: Path) -> list[str]:
     try:
         with _yoyo_utf8_open():
             migrations = read_migrations(str(path))
-            pending = backend.to_apply(migrations)
-            ids = [m.id for m in pending]
-            if not ids:
-                return []
-
+            # to_apply() and apply_migrations() must run under the same lock
+            # acquisition: backend.lock() only serializes what happens inside
+            # it, and if to_apply() ran before the lock was even requested, a
+            # sibling process that fully completed its own apply_pending()
+            # call while we were waiting for the lock is invisible to us --
+            # we would still be holding a stale "pending" list and attempt to
+            # re-apply migrations that already landed. yoyo's apply_one()
+            # does not re-check whether a migration is already applied before
+            # running it, so that isn't caught downstream either; it's this
+            # caller's job to keep the read and the apply inside one critical
+            # section.
             with backend.lock():
+                pending = backend.to_apply(migrations)
+                ids = [m.id for m in pending]
+                if not ids:
+                    return []
                 backend.apply_migrations(pending)
         log.info("migrator.applied", extra={"count": len(ids), "ids": ids})
         return ids
