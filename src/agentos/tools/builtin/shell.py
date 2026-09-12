@@ -341,7 +341,18 @@ _FD_DUP_PATTERN = re.compile(r"\d*>&\s*(?:\d+-?|-)(?=$|[\s|&;<>)])")
 # ``n>>``, ``&>``, ``&>>``, ``>&file`` and the noclobber override ``>|``. The
 # operator is deliberately *not* anchored to a word boundary — ``echo x>file`` is
 # valid shell and must be caught just like ``echo x > file``.
-_REDIRECTION_PATTERN = re.compile(r"(?:&>{1,2}|\d*>{1,2}&?)\|?\s*(['\"]?)([^'\"\s|&;<>()]+)\1")
+#
+# The target is a three-way alternation because a quoted target and a bare one
+# need different bodies. Inside quotes only the *matching* quote ends the path,
+# so ``"/tmp/John's Notes/out.txt"`` is captured whole; outside them a space is a
+# real argument boundary and the original restrictive class still applies. The
+# previous single class excluded whitespace even inside the quotes, so a quoted
+# path containing a space matched nothing at all — the lockdown checks below then
+# iterated an empty target list and returned ``None``, allowing a write outside
+# the workspace (#1230).
+_REDIRECTION_PATTERN = re.compile(
+    r"""(?:&>{1,2}|\d*>{1,2}&?)\|?\s*(?:"([^"]+)"|'([^']+)'|([^'"\s|&;<>()]+))"""
+)
 
 # ``tee`` is the other write primitive this parser covers, and it needs the same
 # treatment as the redirection operators: ``echo x|tee /etc/passwd`` is valid
@@ -349,9 +360,11 @@ _REDIRECTION_PATTERN = re.compile(r"(?:&>{1,2}|\d*>{1,2}&?)\|?\s*(['\"]?)([^'\"\
 # space. The lookbehind keeps ``mytee``/``notee`` out while still matching a
 # fully qualified ``/usr/bin/tee``. Options may be short (``-a``), long
 # (``--append``) or long with a value (``--output-error=warn``); all of them are
-# skipped so the first non-option word is the real target.
+# skipped so the first non-option word is the real target. The target alternation
+# is the same three-way split as ``_REDIRECTION_PATTERN``; see there for why.
 _TEE_PATTERN = re.compile(
-    r"(?<![\w-])tee(?:\s+-{1,2}[A-Za-z][\w-]*(?:=[^\s|&;]+)?)*\s+(['\"]?)([^'\"\s|&;]+)\1"
+    r"(?<![\w-])tee(?:\s+-{1,2}[A-Za-z][\w-]*(?:=[^\s|&;]+)?)*\s+"
+    r"""(?:"([^"]+)"|'([^']+)'|([^'"\s|&;]+))"""
 )
 
 
@@ -363,8 +376,12 @@ def _shell_write_targets(command: str) -> list[str]:
     # covers ``tee /dev/null``, where the sink arrives as an argument rather
     # than as a redirection and so survives the stripper.
     scanned = _FD_DUP_PATTERN.sub(" ", _without_shell_null_redirections(command))
-    targets: list[str] = [match.group(2) for match in _REDIRECTION_PATTERN.finditer(scanned)]
-    targets.extend(match.group(2) for match in _TEE_PATTERN.finditer(scanned))
+    targets: list[str] = []
+    for pattern in (_REDIRECTION_PATTERN, _TEE_PATTERN):
+        for match in pattern.finditer(scanned):
+            # Exactly one of the double-quoted / single-quoted / bare groups
+            # took part in the match; the other two are None.
+            targets.append(next(group for group in match.groups() if group is not None))
     return [target for target in targets if target != _NULL_SINK_PATH]
 
 

@@ -549,6 +549,114 @@ def test_shell_write_targets_ignores_words_ending_in_tee(command: str) -> None:
     assert shell._shell_write_targets(command) == []
 
 
+# --- #1230: quoted write targets containing spaces -------------------------
+#
+# A quoted path with a space matched neither pattern, so ``_shell_write_targets``
+# returned ``[]`` and every lockdown / deny-glob check below iterated an empty
+# list and allowed the write.
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        'echo ok > "{target}"',
+        "echo ok > '{target}'",
+        'echo ok>"{target}"',
+        'echo ok >> "{target}"',
+        'echo ok 2> "{target}"',
+        'echo ok &> "{target}"',
+        '>&"{target}"',
+    ],
+)
+def test_shell_write_targets_detects_quoted_redirection_targets_with_spaces(
+    template: str,
+) -> None:
+    target = "/tmp/my custom folder/outside.txt"
+    assert shell._shell_write_targets(template.format(target=target)) == [target]
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        'echo ok | tee "{target}"',
+        "echo ok | tee '{target}'",
+        'echo ok|tee "{target}"',
+        'echo ok | tee -a "{target}"',
+        'echo ok | tee --append "{target}"',
+        'echo ok | tee --output-error=warn "{target}"',
+        'echo ok | /usr/bin/tee "{target}"',
+    ],
+)
+def test_shell_write_targets_detects_quoted_tee_targets_with_spaces(template: str) -> None:
+    target = "/tmp/my custom folder/outside.txt"
+    assert shell._shell_write_targets(template.format(target=target)) == [target]
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("""echo ok > "/tmp/John's Notes/out.txt\"""", "/tmp/John's Notes/out.txt"),
+        ("""echo ok | tee "/tmp/John's Notes/out.txt\"""", "/tmp/John's Notes/out.txt"),
+        ("""echo ok > '/tmp/say "hi"/out.txt'""", '/tmp/say "hi"/out.txt'),
+        ("""echo ok | tee '/tmp/say "hi"/out.txt'""", '/tmp/say "hi"/out.txt'),
+    ],
+)
+def test_shell_write_targets_detects_quoted_targets_holding_the_other_quote(
+    command: str,
+    expected: str,
+) -> None:
+    """Only the *matching* quote ends a quoted target.
+
+    ``~/John's Notes`` is an ordinary directory name on macOS and Windows, and a
+    body that excluded both quote characters would leave exactly the reported
+    fail-open in place for it: the closing ``"`` is never reached, the bare
+    alternative cannot start on a quote, and the parser reports no target at all.
+    """
+    assert shell._shell_write_targets(command) == [expected]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo ok > "AT&T report.txt"',
+        'echo ok | tee "AT&T report.txt"',
+    ],
+)
+def test_shell_write_targets_quoted_target_survives_the_fd_dup_prepass(command: str) -> None:
+    """``_FD_DUP_PATTERN`` runs first; a quoted ``&`` must not be blanked out."""
+    assert shell._shell_write_targets(command) == ["AT&T report.txt"]
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        # Bash redirects to the first word and passes the rest to the command:
+        # ``echo ok > /tmp/John Doe/out.txt`` writes ``/tmp/John``. Truncating at
+        # whitespace is correct for a bare target and must stay that way.
+        ("echo ok > /tmp/John Doe/out.txt", ["/tmp/John"]),
+        ("echo ok > /tmp/.env extra", ["/tmp/.env"]),
+        ("echo ok > out.txt # note", ["out.txt"]),
+        ("echo ok > out.txt 2>/dev/null", ["out.txt"]),
+        ("echo ok | tee reports/o.txt;whoami", ["reports/o.txt"]),
+        ("cat > out.txt <<'EOF'", ["out.txt"]),
+        ("echo ok 2>&1", []),
+        ("echo ok >&2", []),
+        ("echo x|mytee foo.txt", []),
+    ],
+)
+def test_shell_write_targets_leaves_unquoted_targets_unchanged(
+    command: str,
+    expected: list[str],
+) -> None:
+    """Pins the bare-target class to the behaviour it has on ``main``.
+
+    The quoted body is the only thing #1230 changes. A bare target that swallowed
+    whitespace would mis-model the shell *and* fail open: ``> reports/out.txt
+    2>/dev/null`` would resolve as one long path that matches no deny glob.
+    """
+    assert shell._shell_write_targets(command) == expected
+
+
 @pytest.mark.parametrize(
     "command",
     [
@@ -641,7 +749,7 @@ async def test_workspace_lockdown_still_blocks_a_real_target_beside_a_null_sink(
 
     result = await shell._check_exec_approval(
         "exec_command",
-        f"echo ok > {outside} 2>/dev/null",
+        f'echo ok > "{outside}" 2>/dev/null',
         str(workspace),
         "command requires approval",
         None,
@@ -658,12 +766,12 @@ async def test_workspace_lockdown_still_blocks_a_real_target_beside_a_null_sink(
 @pytest.mark.parametrize(
     "template",
     [
-        "echo ok>{target}",
-        "echo ok>>{target}",
-        "echo ok 2>{target}",
-        ">&{target}",
-        "echo ok &>{target}",
-        "cat<in>{target}",
+        'echo ok>"{target}"',
+        'echo ok>>"{target}"',
+        'echo ok 2>"{target}"',
+        '>&"{target}"',
+        'echo ok &>"{target}"',
+        'cat<in>"{target}"',
     ],
 )
 async def test_workspace_lockdown_blocks_redirection_without_whitespace(
@@ -699,10 +807,10 @@ async def test_workspace_lockdown_blocks_redirection_without_whitespace(
 @pytest.mark.parametrize(
     "template",
     [
-        "echo ok|tee {target}",
-        "echo ok|tee -a {target}",
-        "echo ok | tee --append {target}",
-        "echo ok | tee --output-error=warn {target}",
+        'echo ok|tee "{target}"',
+        'echo ok|tee -a "{target}"',
+        'echo ok | tee --append "{target}"',
+        'echo ok | tee --output-error=warn "{target}"',
     ],
 )
 async def test_workspace_lockdown_blocks_tee_without_whitespace_or_long_options(
@@ -748,6 +856,134 @@ async def test_workspace_write_deny_globs_block_tee_without_whitespace(tmp_path:
     result = await shell._check_exec_approval(
         "exec_command",
         "echo ok|tee --append reports/out.txt",
+        str(workspace),
+        "command requires approval",
+        None,
+        False,
+    )
+
+    assert result is not None
+    assert result["status"] == "blocked"
+    assert result["reason"] == "workspace_write_deny"
+    assert result["matched_pattern"] == "reports/*.txt"
+
+
+# --- #1230: the block decision, one layer past the parser -------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "template",
+    [
+        'echo ok > "{target}"',
+        "echo ok > '{target}'",
+        'echo ok >> "{target}"',
+        'echo ok | tee "{target}"',
+        "echo ok | tee -a '{target}'",
+    ],
+)
+async def test_workspace_lockdown_blocks_quoted_targets_with_spaces(
+    tmp_path: Path,
+    template: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside_dir = tmp_path / "my custom folder"
+    outside_dir.mkdir()
+    outside = outside_dir / "outside.txt"
+    ctx = current_tool_context.get()
+    assert ctx is not None
+    ctx.interaction_mode = InteractionMode.UNATTENDED
+    ctx.elevated = "bypass"
+    ctx.workspace_dir = str(workspace)
+    ctx.workspace_lockdown = True  # type: ignore[attr-defined]
+
+    result = await shell._check_exec_approval(
+        "exec_command",
+        template.format(target=outside),
+        str(workspace),
+        "command requires approval",
+        None,
+        False,
+    )
+
+    assert result is not None
+    assert result["status"] == "blocked"
+    assert result["reason"] == "workspace_lockdown"
+    assert result["target"] == str(outside)
+    assert result["resolved_path"] == str(outside)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command",
+    [
+        'echo ok > "reports/my report.txt"',
+        "echo ok > 'reports/my report.txt'",
+        'echo ok | tee --append "reports/my report.txt"',
+    ],
+)
+async def test_workspace_write_deny_globs_block_quoted_targets_with_spaces(
+    tmp_path: Path,
+    command: str,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ctx = current_tool_context.get()
+    assert ctx is not None
+    ctx.interaction_mode = InteractionMode.UNATTENDED
+    ctx.elevated = "bypass"
+    ctx.workspace_dir = str(workspace)
+    ctx.workspace_write_deny_globs = ["reports/*.txt"]  # type: ignore[attr-defined]
+
+    result = await shell._check_exec_approval(
+        "exec_command",
+        command,
+        str(workspace),
+        "command requires approval",
+        None,
+        False,
+    )
+
+    assert result is not None
+    assert result["status"] == "blocked"
+    assert result["reason"] == "workspace_write_deny"
+    assert result["matched_pattern"] == "reports/*.txt"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo ok > reports/out.txt 2>/dev/null",
+        "echo ok > reports/out.txt extra",
+        "echo ok > reports/out.txt # note",
+        "echo ok|tee --append reports/out.txt;whoami",
+    ],
+)
+async def test_workspace_write_deny_globs_block_bare_target_with_a_trailing_token(
+    tmp_path: Path,
+    command: str,
+) -> None:
+    """A bare target followed by another token must stay blocked.
+
+    This is the regression the quoted fix has to avoid re-opening: if the bare
+    body swallowed whitespace, the target would resolve to
+    ``reports/out.txt 2>/dev/null`` — one path that matches no deny glob — and
+    ordinary, non-adversarial shell would slip past the check.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ctx = current_tool_context.get()
+    assert ctx is not None
+    ctx.interaction_mode = InteractionMode.UNATTENDED
+    ctx.elevated = "bypass"
+    ctx.workspace_dir = str(workspace)
+    ctx.workspace_write_deny_globs = ["reports/*.txt"]  # type: ignore[attr-defined]
+
+    result = await shell._check_exec_approval(
+        "exec_command",
+        command,
         str(workspace),
         "command requires approval",
         None,
