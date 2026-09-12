@@ -435,3 +435,24 @@ async def test_write_file_records_workspace_write_on_both_create_and_overwrite(
         current_tool_context.reset(token)
 
 
+@pytest.mark.asyncio
+async def test_edit_file_records_workspace_file_write(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ctx = ToolContext(workspace_dir=str(workspace))
+    token = current_tool_context.set(ctx)
+    raw_write_file = fs.write_file.__wrapped__.__wrapped__
+    raw_edit_file = fs.edit_file.__wrapped__.__wrapped__
+    target = workspace / "report.md"
+    try:
+        await raw_write_file(str(target), "initial report draft")
+        assert len(ctx.workspace_file_writes) == 1
+
+        result = await raw_edit_file(str(target), "draft", "final")
+        assert "replaced 5 chars with 5 chars" in result
+        assert len(ctx.workspace_file_writes) == 2
+        assert ctx.workspace_file_writes[1]["name"] == "report.md"
+        assert ctx.workspace_file_writes[1]["relative_path"] == "report.md"
+        assert target.read_text(encoding="utf-8") == "initial report final"
+    finally:
+        current_tool_context.reset(token)
