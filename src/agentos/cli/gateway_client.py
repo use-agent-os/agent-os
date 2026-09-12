@@ -514,7 +514,15 @@ class GatewayClient:
         sensitive paths bypassed).
         """
         # Subscribe to message events for this session
-        await self._call("sessions.messages.subscribe", {"key": session_key})
+        subscription = await self._call("sessions.messages.subscribe", {"key": session_key})
+        # ``_recv_queue`` is connection-wide, so it can still hold frames from an
+        # earlier turn (a Ctrl-C leaves the server's asynchronous
+        # ``session.event.done(reason="aborted")`` behind) or from another
+        # subscribed session. The gateway stamps every ``session.event.*``
+        # payload with ``session_key`` and a per-session ``stream_seq``, and the
+        # subscribe response reports the seq reached so far, so anything at or
+        # below it predates this turn.
+        since_stream_seq = _stream_seq_of(subscription)
 
         params: dict[str, Any] = {
             "key": session_key,
@@ -542,6 +550,8 @@ class GatewayClient:
             frame = await self._recv_queue.get()
             event_name: str = frame.get("event", "")
             payload: dict = frame.get("payload") or {}
+            if _frame_is_from_another_turn(payload, session_key, since_stream_seq):
+                continue
             if event_name == "session.event.error":
                 payload = _normalize_session_error_payload(payload)
             if task_terminal := _task_terminal_as_session_event(event_name, payload):
@@ -628,6 +638,38 @@ class GatewayClient:
             if task is not None and task is not current_task and not task.done():
                 task.cancel()
         return err
+
+
+def _stream_seq_of(payload: Any) -> int | None:
+    """Return a payload's ``stream_seq``, or None when the server omits it."""
+
+    if not isinstance(payload, dict):
+        return None
+    seq = payload.get("stream_seq") or payload.get("current_stream_seq")
+    if isinstance(seq, bool) or not isinstance(seq, int):
+        return None
+    return seq
+
+
+def _frame_is_from_another_turn(
+    payload: dict,
+    session_key: str,
+    since_stream_seq: int | None,
+) -> bool:
+    """True when a queued frame belongs to another session or an earlier turn.
+
+    Correlation is best-effort: a frame without ``session_key``/``stream_seq``
+    (a server predating session stream buffers, or an event routed outside
+    them) is treated as belonging to this turn, exactly as before.
+    """
+
+    frame_key = payload.get("session_key")
+    if isinstance(frame_key, str) and frame_key and frame_key != session_key:
+        return True
+    if since_stream_seq is None:
+        return False
+    seq = _stream_seq_of(payload)
+    return seq is not None and seq <= since_stream_seq
 
 
 def _task_terminal_as_session_event(event_name: str, payload: dict) -> dict[str, Any] | None:
