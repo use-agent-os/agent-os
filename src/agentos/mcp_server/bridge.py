@@ -160,15 +160,18 @@ class AgentOSMCPBridge:
             timeout_s = timeout_ms / 1000
             deadline = time.monotonic() + timeout_s
 
+            timed_out = False
             while len(events) < max_events:
                 # Re-clamp: on coarse clocks ``deadline - now`` can round a hair
                 # above ``timeout_s``, handing ``recv_event`` more than the cap.
                 remaining = min(deadline - time.monotonic(), timeout_s)
                 if remaining <= 0:
+                    timed_out = True
                     break
                 try:
                     frame = await client.recv_event(timeout=remaining)
                 except TimeoutError:
+                    timed_out = True
                     break
                 normalized = _normalize_event_frame(frame)
                 payload = normalized.get("payload")
@@ -190,7 +193,12 @@ class AgentOSMCPBridge:
                 "current_stream_seq": current_stream_seq,
                 "replay_complete": subscription.get("replay_complete"),
                 "replay_gap_reason": subscription.get("replay_gap_reason"),
-                "timed_out": not events or (events[-1]["event"] not in _TERMINAL_EVENTS),
+                # Deadline expiry (or a hard recv_event TimeoutError) is the only
+                # thing this reports -- not "no events collected" and not "the
+                # max_events cap was reached", both of which are simply the
+                # loop's other, non-terminal exit path and say nothing about
+                # whether more events were still coming.
+                "timed_out": timed_out,
             }
         finally:
             await client.close()

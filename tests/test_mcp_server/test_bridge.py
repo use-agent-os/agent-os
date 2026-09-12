@@ -411,3 +411,36 @@ async def test_events_wait_preserves_max_events_below_the_cap() -> None:
     result = await bridge.events_wait("agent:main:main", timeout_ms=200, max_events=2)
 
     assert len(result["events"]) == 2
+    # Regression for #1798: hitting the max_events cap is a successful call,
+    # not a timeout -- the collected events arrived well within the budget.
+    assert result["timed_out"] is False
+
+
+class TimeoutRaisingEventClient(FakeGatewayClient):
+    """Fake client whose recv_event always raises TimeoutError immediately."""
+
+    async def recv_event(self, timeout: float | None = None) -> dict[str, Any]:
+        raise TimeoutError
+
+
+@pytest.mark.asyncio
+async def test_events_wait_reports_timed_out_on_genuine_deadline_expiry() -> None:
+    """A real timeout -- recv_event exhausting its deadline with no terminal
+    event seen -- must still report timed_out: True."""
+    client = TimeoutRaisingEventClient()
+    bridge = AgentOSMCPBridge(gateway_client_factory=lambda: client)
+
+    result = await bridge.events_wait("agent:main:main", timeout_ms=50, max_events=5)
+
+    assert result["events"] == []
+    assert result["timed_out"] is True
+
+
+@pytest.mark.asyncio
+async def test_events_wait_terminal_event_is_not_a_timeout() -> None:
+    client = RecordingEventClient()
+    bridge = AgentOSMCPBridge(gateway_client_factory=lambda: client)
+
+    result = await bridge.events_wait("agent:main:main", timeout_ms=2_000)
+
+    assert result["timed_out"] is False
