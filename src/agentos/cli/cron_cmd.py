@@ -11,8 +11,8 @@ from typing import Annotated, Any
 import typer
 from rich.table import Table
 
-from agentos.cli.gateway_rpc import confirm_or_exit, run_gateway_sync
-from agentos.cli.output import print_json
+from agentos.cli.gateway_rpc import confirm_or_exit, rpc_error_exit_code, run_gateway_sync
+from agentos.cli.output import emit_error, print_json
 from agentos.cli.ui import ACCENT_HEADER, console
 
 cron_app = typer.Typer(help="Inspect and manage scheduled AgentOS runs.")
@@ -1148,6 +1148,40 @@ def cron_run(
 
     payload = run_gateway_sync(_run, json_output=json_output)
     _emit_success(payload, json_output=json_output, title="Cron run result")
+    _exit_on_manual_run_failure(payload, json_output=json_output)
+
+
+def _exit_on_manual_run_failure(payload: Any, *, json_output: bool) -> None:
+    """Turn a ``success: false`` ``cron.run`` payload into a non-zero exit.
+
+    ``cron.run`` reports a missing / disabled / busy job (and a run whose
+    handler failed) as a *successful* RPC carrying ``success: false`` so the
+    Control UI can render it; the CLI has to map that onto ``$?`` itself or a
+    script would treat a job that never ran as a success. ``not_found`` exits
+    2 like ``cron status`` / ``cron update`` on the same id; every other
+    failure exits 1. The wire payload has already been printed above, so
+    ``--json`` consumers keep the full body on stdout.
+    """
+
+    if not isinstance(payload, dict) or payload.get("success") is not False:
+        return
+    status = str(payload.get("status") or "").strip().lower()
+    error = payload.get("error")
+    reason = payload.get("reason")
+    if error:
+        message = str(error)
+    elif status == "accepted":
+        message = "cron run failed"
+    else:
+        message = f"cron run rejected: {reason or status or 'unknown'}"
+    if status == "not_found":
+        code = "NOT_FOUND"
+    elif status and status != "accepted":
+        code = f"RUN_{status.upper()}"
+    else:
+        code = "RUN_FAILED"
+    emit_error(message, json_output=json_output, code=code)
+    raise typer.Exit(rpc_error_exit_code(code))
 
 
 @cron_app.command("runs")
