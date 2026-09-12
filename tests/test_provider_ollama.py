@@ -31,7 +31,8 @@ def _patch_transport(
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
-        captured["payload"] = json.loads(request.content.decode("utf-8"))
+        if request.content:
+            captured["payload"] = json.loads(request.content.decode("utf-8"))
         if isinstance(response_body, bytes):
             return httpx.Response(status_code, content=response_body)
         return httpx.Response(status_code, text=response_body)
@@ -366,3 +367,68 @@ def test_ollama_non_model_404_keeps_the_plain_http_message(
 
     assert isinstance(error, ErrorEvent)
     assert error.message == "HTTP 404: 404 page not found"
+
+
+def test_ollama_list_models_handles_null_details_and_model_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    response_payload = {
+        "models": [
+            {
+                "name": "llama3.2:latest",
+                "model": "llama3.2:latest",
+                "details": {
+                    "parent_model": "",
+                    "format": "gguf",
+                    "family": "llama",
+                    "context_length": 8192,
+                },
+            },
+            {
+                # Custom imported or manifest with null details
+                "name": "custom-model:latest",
+                "details": None,
+            },
+            {
+                # Model using only "model" field and missing "details"
+                "model": "qwen2.5:3b",
+            },
+            {
+                # Empty entry that should be skipped
+                "name": "",
+                "model": "",
+                "details": {},
+            },
+        ]
+    }
+    _patch_transport(monkeypatch, captured, json.dumps(response_payload))
+    provider = OllamaProvider()
+
+    models = asyncio.run(provider.list_models())
+
+    assert len(models) == 3
+    assert models[0].model_id == "llama3.2:latest"
+    assert models[0].display_name == "llama3.2:latest"
+    assert models[0].context_window == 8192
+    assert models[0].provider == "ollama"
+
+    assert models[1].model_id == "custom-model:latest"
+    assert models[1].display_name == "custom-model:latest"
+    assert models[1].context_window == 0
+    assert models[1].provider == "ollama"
+
+    assert models[2].model_id == "qwen2.5:3b"
+    assert models[2].display_name == "qwen2.5:3b"
+    assert models[2].context_window == 0
+    assert models[2].provider == "ollama"
+
+
+def test_ollama_list_models_returns_empty_on_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_raising_transport(monkeypatch, httpx.ConnectError("Connection refused"))
+    provider = OllamaProvider()
+
+    models = asyncio.run(provider.list_models())
+    assert models == []

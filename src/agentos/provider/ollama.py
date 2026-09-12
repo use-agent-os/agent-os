@@ -390,14 +390,20 @@ class OllamaProvider:
                 resp = await client.get(f"{self._base_url}/api/tags")
                 resp.raise_for_status()
                 data = resp.json()
-                return [
-                    ModelInfo(
-                        provider=self.provider_name,
-                        model_id=m["name"],
-                        display_name=m.get("name", ""),
-                        context_window=m.get("details", {}).get("context_length", 0),
+                models: list[ModelInfo] = []
+                for m in data.get("models", []):
+                    model_id = m.get("name") or m.get("model") or ""
+                    if not model_id:
+                        continue
+                    details = m.get("details") or {}
+                    models.append(
+                        ModelInfo(
+                            provider=self.provider_name,
+                            model_id=model_id,
+                            display_name=model_id,
+                            context_window=details.get("context_length", 0),
+                        )
                     )
-                    for m in data.get("models", [])
-                ]
+                return models
         except Exception:
             return []
