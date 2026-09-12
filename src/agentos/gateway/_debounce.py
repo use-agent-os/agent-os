@@ -103,4 +103,8 @@ class _DefaultDebounceCoordinator:
         except asyncio.CancelledError:
             raise
         except Exception:
-            log.exception("channel_dispatch.debounce_enqueue_failed", reason="unexpected")
+            log.exception(
+                "channel_dispatch.debounce_deliver_failed",
+                session_key=session_key,
+                reason="unexpected",
+            )

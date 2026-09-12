@@ -935,6 +935,15 @@ async def _dispatch_combined_message_after_debounce(channel: Any, combined: Any,
             return
         log.exception("channel_dispatch.debounce_enqueue_failed", session_key=session_key, reason="unexpected")  # noqa: E501
         await status_reactor.failed(msg)
+        try:
+            await channel.send(
+                _route_envelope_reply_message(
+                    "Your messages couldn't be processed due to an unexpected error.",
+                    route_envelope,
+                )
+            )
+        except Exception:
+            log.exception("Failed to send error notification after debounce failure")
         return
 
     # Enqueue succeeded — release the placeholder reservation now that the real
