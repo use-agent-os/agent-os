@@ -173,6 +173,9 @@ _QUALIFIED_NAME_PAIRS: frozenset[tuple[str, str]] = frozenset(
         ("secret", "key"),
         ("session", "token"),
         ("service", "key"),
+        ("signing", "key"),
+        ("encryption", "key"),
+        ("account", "key"),
     }
 )
 

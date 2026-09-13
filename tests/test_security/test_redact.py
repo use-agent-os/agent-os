@@ -136,14 +136,15 @@ class TestNameSegments:
 
     @pytest.mark.parametrize(
         "name",
-        ["api_key", "CAP_API_KEY", "x-cap-api-key", "capApiKey", "access_token", "client_secret"],
+        ["api_key", "CAP_API_KEY", "x-cap-api-key", "capApiKey", "access_token", "client_secret", "signing_key", "SIGNING_KEY", "signing-key", "signingKey",
+        "encryption_key", "ENCRYPTION_KEY", "encryptionKey", "account_key", "AccountKey", "accountKey"],
     )
     def test_credential_names(self, name: str) -> None:
         assert redact._is_credential_name(name)
 
     @pytest.mark.parametrize(
         "name",
-        ["sellToken", "buyToken", "tokenAddress", "tokenId", "token_count", "session_id", "amount"],
+        ["sellToken", "buyToken", "tokenAddress", "tokenId", "token_count", "session_id", "amount", "license_key", "sort_key", "cache_key", "partition_key", "consumer_key", "deploy_key"],
     )
     def test_ordinary_names(self, name: str) -> None:
         assert not redact._is_credential_name(name)
