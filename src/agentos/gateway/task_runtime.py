@@ -19,6 +19,7 @@ Lock ordering invariant:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -333,11 +334,22 @@ class TaskRuntime:
         # gateway-dispatched turns. These guard short transcript/session state
         # mutations only.
         # Bounded: a lock that is currently held is never evicted, so the
-        # ceiling can only reclaim sessions that are genuinely idle.
+        # ceiling can only reclaim sessions that are genuinely idle. That is
+        # not the same as "unlocked", though: ``_execute`` fetches a session's
+        # write lock once and keeps the *object* alive across awaits (it is
+        # only briefly acquired, then its identity is relied on for the rest
+        # of the turn via the write-lock-bypass contextvars in
+        # engine/runtime.py). Session churn from other sessions filling this
+        # registry could otherwise evict that idle-but-still-referenced lock
+        # mid-turn, so ``_execute`` pins it via ``_locks_pinned_for_turn`` for
+        # as long as it holds the reference. See ``_pin_write_lock``.
+        self._locks_pinned_for_turn: set[int] = set()
         self._session_locks: BoundedRegistry[str, asyncio.Lock] = BoundedRegistry(
             name="TaskRuntime._session_locks",
             session_of=lambda key, _value: key,
-            evictable=lambda lock: not lock.locked(),
+            evictable=lambda lock: (
+                not lock.locked() and id(lock) not in self._locks_pinned_for_turn
+            ),
         )
         # Per-session execution locks serialize whole turn lifecycles without
         # blocking transcript writes, browser queue acknowledgements, or approval
@@ -810,126 +822,153 @@ class TaskRuntime:
             status=AgentTaskStatus.QUEUED,
         )
 
+    @contextlib.contextmanager
+    def _pin_write_lock(self, lock: asyncio.Lock) -> Any:
+        """Keep ``lock`` in ``_session_locks`` for the life of one ``_execute`` call.
+
+        ``_execute`` only actually acquires the write lock for an instant (see
+        the no-op ``async with write_lock: pass`` below); for the rest of the
+        turn its *identity* is what matters, since ``engine.runtime`` compares
+        ``id(lock)`` against the write-lock-bypass contextvars to recognize the
+        turn's own transcript writes. An idle lock looks evictable to
+        ``BoundedRegistry`` by the ``lock.locked()`` check alone, so without
+        this pin, session churn from unrelated sessions filling the registry
+        could reclaim it mid-turn -- the next caller for this session_key
+        would then get a *different* lock object via ``setdefault``, silently
+        breaking the serialization both mechanisms exist to provide.
+        """
+        token = id(lock)
+        self._locks_pinned_for_turn.add(token)
+        try:
+            yield
+        finally:
+            self._locks_pinned_for_turn.discard(token)
+
     async def _execute(self, task: _RuntimeTask) -> None:
         session_key = task.envelope.session_key
         write_lock = self._session_locks.setdefault(session_key, asyncio.Lock())
         execution_lock = self._session_execution_locks.setdefault(session_key, asyncio.Lock())
-        try:
-            async with execution_lock:
-                if task.cancel_requested:
-                    reason = "overflow_drop" if task.overflow_dropped else "user_cancel"
-                    terminal_reason = (
-                        "dropped_by_overflow" if task.overflow_dropped else "cancelled_before_start"
-                    )
-                    _emit_metric(
-                        "turn_cancellations_total",
-                        value=1,
-                        reason=reason,
-                        session_key=task.envelope.session_key,
-                    )
-                    await self._mark_terminal(
-                        task,
-                        AgentTaskStatus.CANCELLED,
-                        terminal_reason=terminal_reason,
-                    )
-                    return
-                await self._wait_for_subagent_slot(task)
-                acquired = False
-                heartbeat_task: asyncio.Task[None] | None = None
-                try:
-                    await self._acquire_fair_slot(task)
-                    acquired = True
-                    async with write_lock:
-                        pass
-                    heartbeat_task = self._start_running_heartbeat(task)
-                    run = TaskRun(
-                        task_id=task.task_id,
-                        envelope=task.envelope,
-                        message=task.message,
-                        attachments=task.attachments,
-                        queue_mode=task.queue_mode,
-                        run_kind=task.run_kind,
-                        no_memory_capture=task.no_memory_capture,
-                        ingress_pipeline_steps=task.ingress_pipeline_steps,
-                        semantic_message=task.semantic_message,
-                        persisted_user_message_id=task.persisted_user_message_id,
-                        fresh_user_session=task.fresh_user_session,
-                        stream_event_sink=task.stream_event_sink,
-                    )
-                    await self._run_turn_handler_with_write_lock_bypass(
-                        run,
-                        write_lock=write_lock,
-                    )
-                    if heartbeat_task is not None:
-                        await self._stop_running_heartbeat(heartbeat_task)
-                        heartbeat_task = None
-                    if acquired:
-                        await self._release_slot(task)
-                        acquired = False
-                    await self._mark_terminal(
-                        task,
-                        AgentTaskStatus.SUCCEEDED,
-                        terminal_reason="completed",
-                    )
-                finally:
-                    if heartbeat_task is not None:
-                        await self._stop_running_heartbeat(heartbeat_task)
-                    if acquired:
-                        await self._release_slot(task)
-        except asyncio.CancelledError:
-            reason = "overflow_drop" if task.overflow_dropped else "interrupt"
-            terminal_reason = "dropped_by_overflow" if task.overflow_dropped else "cancelled"
-            _emit_metric(
-                "turn_cancellations_total",
-                value=1,
-                reason=reason,
-                session_key=task.envelope.session_key,
-            )
-            await self._mark_terminal(
-                task,
-                AgentTaskStatus.CANCELLED,
-                terminal_reason=terminal_reason,
-            )
-        except _TurnHardDeadlineExceeded as exc:
-            _emit_metric(
-                "turn_cancellations_total",
-                value=1,
-                reason="hard_deadline",
-                session_key=task.envelope.session_key,
-            )
-            await self._mark_terminal(
-                task,
-                AgentTaskStatus.TIMEOUT,
-                terminal_reason="hard_deadline_exceeded",
-                error_class=type(exc).__name__,
-                error_message=str(exc),
-            )
-        except TimeoutError as exc:
-            _emit_metric(
-                "turn_cancellations_total",
-                value=1,
-                reason="timeout",
-                session_key=task.envelope.session_key,
-            )
-            await self._mark_terminal(
-                task,
-                AgentTaskStatus.TIMEOUT,
-                terminal_reason="timeout",
-                error_class=type(exc).__name__,
-                error_message=str(exc),
-            )
-        except Exception as exc:  # noqa: BLE001 - runtime ledger records the class.
-            terminal_reason = str(getattr(exc, "terminal_reason", None) or "error")
-            status = (
-                AgentTaskStatus.TIMEOUT if terminal_reason == "timeout" else AgentTaskStatus.FAILED
-            )
-            await self._mark_terminal(
-                task,
-                status,
-                terminal_reason=terminal_reason,
-                error_class=str(getattr(exc, "code", None) or type(exc).__name__),
-                error_message=str(exc),
-            )
+        with self._pin_write_lock(write_lock):
+            try:
+                async with execution_lock:
+                    if task.cancel_requested:
+                        reason = "overflow_drop" if task.overflow_dropped else "user_cancel"
+                        terminal_reason = (
+                            "dropped_by_overflow"
+                            if task.overflow_dropped
+                            else "cancelled_before_start"
+                        )
+                        _emit_metric(
+                            "turn_cancellations_total",
+                            value=1,
+                            reason=reason,
+                            session_key=task.envelope.session_key,
+                        )
+                        await self._mark_terminal(
+                            task,
+                            AgentTaskStatus.CANCELLED,
+                            terminal_reason=terminal_reason,
+                        )
+                        return
+                    await self._wait_for_subagent_slot(task)
+                    acquired = False
+                    heartbeat_task: asyncio.Task[None] | None = None
+                    try:
+                        await self._acquire_fair_slot(task)
+                        acquired = True
+                        async with write_lock:
+                            pass
+                        heartbeat_task = self._start_running_heartbeat(task)
+                        run = TaskRun(
+                            task_id=task.task_id,
+                            envelope=task.envelope,
+                            message=task.message,
+                            attachments=task.attachments,
+                            queue_mode=task.queue_mode,
+                            run_kind=task.run_kind,
+                            no_memory_capture=task.no_memory_capture,
+                            ingress_pipeline_steps=task.ingress_pipeline_steps,
+                            semantic_message=task.semantic_message,
+                            persisted_user_message_id=task.persisted_user_message_id,
+                            fresh_user_session=task.fresh_user_session,
+                            stream_event_sink=task.stream_event_sink,
+                        )
+                        await self._run_turn_handler_with_write_lock_bypass(
+                            run,
+                            write_lock=write_lock,
+                        )
+                        if heartbeat_task is not None:
+                            await self._stop_running_heartbeat(heartbeat_task)
+                            heartbeat_task = None
+                        if acquired:
+                            await self._release_slot(task)
+                            acquired = False
+                        await self._mark_terminal(
+                            task,
+                            AgentTaskStatus.SUCCEEDED,
+                            terminal_reason="completed",
+                        )
+                    finally:
+                        if heartbeat_task is not None:
+                            await self._stop_running_heartbeat(heartbeat_task)
+                        if acquired:
+                            await self._release_slot(task)
+            except asyncio.CancelledError:
+                reason = "overflow_drop" if task.overflow_dropped else "interrupt"
+                terminal_reason = "dropped_by_overflow" if task.overflow_dropped else "cancelled"
+                _emit_metric(
+                    "turn_cancellations_total",
+                    value=1,
+                    reason=reason,
+                    session_key=task.envelope.session_key,
+                )
+                await self._mark_terminal(
+                    task,
+                    AgentTaskStatus.CANCELLED,
+                    terminal_reason=terminal_reason,
+                )
+            except _TurnHardDeadlineExceeded as exc:
+                _emit_metric(
+                    "turn_cancellations_total",
+                    value=1,
+                    reason="hard_deadline",
+                    session_key=task.envelope.session_key,
+                )
+                await self._mark_terminal(
+                    task,
+                    AgentTaskStatus.TIMEOUT,
+                    terminal_reason="hard_deadline_exceeded",
+                    error_class=type(exc).__name__,
+                    error_message=str(exc),
+                )
+            except TimeoutError as exc:
+                _emit_metric(
+                    "turn_cancellations_total",
+                    value=1,
+                    reason="timeout",
+                    session_key=task.envelope.session_key,
+                )
+                await self._mark_terminal(
+                    task,
+                    AgentTaskStatus.TIMEOUT,
+                    terminal_reason="timeout",
+                    error_class=type(exc).__name__,
+                    error_message=str(exc),
+                )
+            except Exception as exc:  # noqa: BLE001 - runtime ledger records the class.
+                terminal_reason = str(getattr(exc, "terminal_reason", None) or "error")
+                status = (
+                    AgentTaskStatus.TIMEOUT
+                    if terminal_reason == "timeout"
+                    else AgentTaskStatus.FAILED
+                )
+                await self._mark_terminal(
+                    task,
+                    status,
+                    terminal_reason=terminal_reason,
+                    error_class=str(getattr(exc, "code", None) or type(exc).__name__),
+                    error_message=str(exc),
+                )
 
     async def _run_turn_handler_with_write_lock_bypass(
         self,
