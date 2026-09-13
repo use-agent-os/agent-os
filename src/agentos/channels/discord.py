@@ -1244,10 +1244,31 @@ class DiscordChannel:
             provider_message_id=message_id,
         )
 
+    def _resolve_message_target(self, message_id: str) -> tuple[str, str]:
+        """Return (channel_id, message_id) for a Discord message target.
+
+        Accepts the composite "<channel_id>|<message_id>" form emitted by the
+        messaging tool (mirroring TelegramChannel), then falls back to the
+        sent-message cache and the configured default channel. An empty
+        channel_id means "unknown" and lets callers reject the request with an
+        actionable error instead of building a malformed URL.
+        """
+        if "|" in message_id:
+            channel_id, _, base_id = message_id.partition("|")
+            return channel_id, base_id if base_id else message_id
+        channel_id = self._sent_messages.get(message_id, self.config.default_channel_id)
+        return channel_id, message_id
+
     async def edit(self, message_id: str, content: str) -> ChannelSendResult:
         await self._rate_limiter.acquire()
         client = self._get_client()
-        channel_id = self._sent_messages.get(message_id, self.config.default_channel_id)
+        channel_id, message_id = self._resolve_message_target(message_id)
+        if not channel_id:
+            return ChannelSendResult.failed(
+                capability=ChannelCapabilities.EDIT,
+                target_id="",
+                reason="cannot edit message: unknown Discord channel id",
+            )
         resp = await retry_request(
             client.patch,
             f"/channels/{channel_id}/messages/{message_id}",
@@ -1265,7 +1286,13 @@ class DiscordChannel:
     async def delete(self, message_id: str) -> ChannelSendResult:
         await self._rate_limiter.acquire()
         client = self._get_client()
-        channel_id = self._sent_messages.get(message_id, self.config.default_channel_id)
+        channel_id, message_id = self._resolve_message_target(message_id)
+        if not channel_id:
+            return ChannelSendResult.failed(
+                capability=ChannelCapabilities.DELETE,
+                target_id="",
+                reason="cannot delete message: unknown Discord channel id",
+            )
         resp = await retry_request(
             client.delete,
             f"/channels/{channel_id}/messages/{message_id}",
