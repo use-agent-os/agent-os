@@ -1,0 +1,133 @@
+name: Desktop Release Assets
+
+# Builds, signs, notarizes and publishes the macOS desktop app for the same
+# `v<CalVer>` tag that releases the Python package. electron-builder uploads
+# the dmg/zip pairs plus `latest-mac.yml` to that GitHub release, which is
+# where the running app's electron-updater looks for the next version.
+#
+# Required repository secrets (Settings › Secrets and variables › Actions):
+#   MAC_CSC_LINK            base64 of the "Developer ID Application" .p12
+#   MAC_CSC_KEY_PASSWORD    the .p12 password
+#   APPLE_ID                Apple ID used for notarization
+#   APPLE_APP_SPECIFIC_PASSWORD  app-specific password for that Apple ID
+#   APPLE_TEAM_ID           the 10-character team id
+# Without the signing secrets the build still runs (ad-hoc signed, not
+# notarized) but is not published: Gatekeeper and electron-updater would
+# both refuse it.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build and upload to (e.g. v2026.9.12)
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release-${{ github.event_name == 'push' && github.ref_name || github.event.inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || github.event.inputs.tag }}
+
+jobs:
+  build-desktop:
+    name: Build macOS app
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - name: Validate tag
+        run: |
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+[.][0-9]+[.][0-9]+.*$ ]]; then
+            echo "Release tag must look like v2026.9.12: ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            desktop/package-lock.json
+            frontend/package-lock.json
+
+      - name: Check the app version matches the tag
+        run: |
+          app_version="$(node -p "require('./desktop/package.json').version")"
+          if [[ "v${app_version}" != "${RELEASE_TAG}" ]]; then
+            echo "desktop/package.json is ${app_version} but the tag is ${RELEASE_TAG}." >&2
+            echo "Run the pump-version skill so every version file agrees." >&2
+            exit 1
+          fi
+
+      # The desktop renderer imports the web console's transport and chat
+      # logic from frontend/src, so the console's dependencies must be there.
+      - name: Install console dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Quality gate
+        working-directory: desktop
+        run: npm run check
+
+      - name: Decide whether signing secrets are present
+        id: signing
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+        run: |
+          if [[ -n "${MAC_CSC_LINK}" && -n "${APPLE_ID}" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Signing/notarization secrets are missing: building an unpublished, ad-hoc signed app."
+          fi
+
+      - name: Build, sign, notarize and publish
+        if: steps.signing.outputs.enabled == 'true'
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          npm run build
+          npx electron-builder --mac --config electron-builder.yml --publish always
+
+      - name: Build without publishing (no signing secrets)
+        if: steps.signing.outputs.enabled != 'true'
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          npm run build
+          npx electron-builder --mac --config electron-builder.yml --publish never
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentos-desktop-${{ env.RELEASE_TAG }}
+          path: |
+            desktop/release/*.dmg
+            desktop/release/*.zip
+            desktop/release/latest-mac.yml
+          if-no-files-found: error

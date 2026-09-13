@@ -1,0 +1,110 @@
+/** Copy for notifications: what they say, the bell, and Settings › Notifications. */
+export const notifications = {
+  // What a notification says
+  'notify.open': 'Open',
+  'notify.reply.title': 'Reply ready',
+  'notify.reply.took': 'Took',
+  'notify.replyFailed.title': 'Reply failed',
+  'notify.replyFailed.body': 'The turn ended with an error.',
+  'notify.approval.title': 'Approval needed',
+  'notify.approval.body': 'The agent is waiting for your decision.',
+  'notify.job.title': 'Job finished',
+  'notify.jobFailed.title': 'Job failed',
+  'notify.job.unnamed': 'Scheduled job',
+  'notify.gateway.title': 'Gateway stopped',
+  'notify.gateway.body': 'The gateway exited on its own.',
+  'notify.test.title': 'AgentOS',
+  'notify.test.body': 'Notifications are working.',
+
+  // The bell
+  'bell.label': 'Notifications',
+  'bell.title': 'Notifications',
+  'bell.empty': 'Nothing yet',
+  'bell.empty.help': 'Finished replies, approvals and job runs will collect here.',
+  'bell.muted': 'Muted until',
+  'bell.unmute': 'Unmute',
+  'bell.mute': 'Do not disturb',
+  'bell.clear': 'Clear',
+  'bell.settings': 'Notification settings…',
+  'bell.off': 'Notifications are off.',
+  'bell.turnOn': 'Turn on',
+  'bell.sound.on': 'Sound on',
+  'bell.sound.off': 'Sound off',
+
+  // Do not disturb options
+  'mute.off': 'Off',
+  'mute.30m': '30 minutes',
+  'mute.1h': '1 hour',
+  'mute.3h': '3 hours',
+  'mute.tomorrow': 'Until tomorrow',
+
+  // Settings › Notifications
+  'settings.section.notifications': 'Notifications',
+  'settings.section.notifications.blurb':
+    'When the app gets your attention, how loudly, and what it says.',
+  'settings.notifications.delivery': 'Delivery',
+  'settings.notifications.enabled': 'Notify me',
+  'settings.notifications.enabled.help': 'The master switch. Off silences everything below.',
+  'settings.notifications.whenActive': 'While the window is in front',
+  'settings.notifications.whenActive.help':
+    'Events about the session on screen never notify; they only chime.',
+  'settings.notifications.whenActive.skip': 'Nothing',
+  'settings.notifications.whenActive.banner': 'Banner in app',
+  'settings.notifications.whenActive.system': 'System notification',
+  'settings.notifications.mute': 'Do not disturb',
+  'settings.notifications.mute.help': 'Events are kept in the bell and nothing shows or sounds.',
+  'settings.notifications.mute.until': 'Muted until',
+  'settings.notifications.preview': 'Show details',
+  'settings.notifications.preview.help':
+    'Session titles, reply times and job summaries in the notification. Off keeps them to a title.',
+
+  'settings.notifications.events': 'Events',
+  'settings.notifications.replyDone': 'A reply finishes',
+  'settings.notifications.replyDone.help': 'In any session, not only the one on screen.',
+  'settings.notifications.replyMin': 'Only replies longer than',
+  'settings.notifications.replyMin.any': 'Any length',
+  'settings.notifications.replyMin.10': '10 seconds',
+  'settings.notifications.replyMin.30': '30 seconds',
+  'settings.notifications.replyMin.60': '1 minute',
+  'settings.notifications.replyMin.300': '5 minutes',
+  'settings.notifications.replyFailed': 'A reply fails',
+  'settings.notifications.replyFailed.help':
+    'Errors and timeouts. Stops you asked for do not count.',
+  'settings.notifications.approvals': 'The agent needs approval',
+  'settings.notifications.approvals.help': 'A tool call is waiting for your decision.',
+  'settings.notifications.jobs': 'A scheduled job runs',
+  'settings.notifications.jobs.help': 'Every run, only the failures, or none.',
+  'settings.notifications.jobs.off': 'Never',
+  'settings.notifications.jobs.failures': 'Failures',
+  'settings.notifications.jobs.all': 'Every run',
+  'settings.notifications.gateway': 'The gateway stops on its own',
+  'settings.notifications.gateway.help': 'A crash or a lost port, not a stop you asked for.',
+
+  'settings.notifications.sound': 'Sound',
+  'settings.notifications.sound.play': 'Play a sound',
+  'settings.notifications.sound.play.help': 'Also toggled from the bell in the toolbar.',
+  'settings.notifications.sound.pick': 'Sound',
+  'settings.notifications.sound.chime': 'AgentOS chime',
+  'settings.notifications.sound.preview': 'Play',
+  'settings.notifications.sound.system': 'macOS',
+
+  'settings.notifications.dock': 'Dock',
+  'settings.notifications.badge': 'Badge the Dock icon',
+  'settings.notifications.badge.help': 'Unseen notifications plus approvals waiting.',
+  'settings.notifications.bounce': 'Bounce the Dock icon',
+  'settings.notifications.bounce.help': 'Once, when something arrives while the window is behind.',
+
+  'settings.notifications.system': 'System',
+  'settings.notifications.test': 'Send a test',
+  'settings.notifications.test.sent': 'Sent. Look at the top right of your screen.',
+  'settings.notifications.test.banner': 'Shown in the app: the window is in front.',
+  'settings.notifications.test.blocked':
+    'Nothing appeared? Allow AgentOS in System Settings › Notifications.',
+  'settings.notifications.permission': 'macOS permission',
+  'settings.notifications.permission.help':
+    'macOS decides whether AgentOS may post. If nothing appears, allow the app there.',
+  'settings.notifications.permission.open': 'Open System Settings…',
+  'settings.notifications.permission.unsupported': 'Notifications are unavailable here.',
+  'settings.notifications.browserOnly':
+    'Outside the desktop app only browser notifications work; sounds, the Dock and clicks are limited.',
+} as const

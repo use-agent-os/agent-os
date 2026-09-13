@@ -1,0 +1,162 @@
+/* Menus — NSMenu posture. One vocabulary for the anchored "…" menus, the
+   sidebar's context menu and its view menu: a popover panel, 26px rows,
+   the selection is the accent colour, submenus open to the side. Colour
+   comes only from the palette tokens. */
+
+.mac-menu {
+  display: flex;
+  min-width: 200px;
+  max-width: 300px;
+  flex-direction: column;
+  padding: 4px;
+  border-radius: var(--radius);
+  background: var(--popover);
+  box-shadow:
+    0 0 0 0.5px var(--border),
+    0 12px 32px rgba(0, 0, 0, 0.32),
+    0 2px 6px rgba(0, 0, 0, 0.16);
+  animation: mac-menu-in 120ms cubic-bezier(0.32, 0.72, 0, 1);
+  transform-origin: top right;
+  user-select: none;
+}
+/* Anchored under a control, inside its parent's flow. */
+.mac-menu[data-placement='anchor'] {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: var(--z-overlay);
+}
+.mac-menu[data-placement='anchor'][data-align='start'] {
+  right: auto;
+  left: 0;
+  transform-origin: top left;
+}
+/* Floating: at the pointer, or under a control but portalled out of a
+   scrolling ancestor. */
+.mac-menu[data-placement='float'] {
+  position: fixed;
+  z-index: var(--z-modal);
+}
+.mac-menu[data-origin='top-left'] {
+  transform-origin: top left;
+}
+.mac-menu[data-origin='bottom-left'] {
+  transform-origin: bottom left;
+}
+.mac-menu[data-origin='bottom-right'] {
+  transform-origin: bottom right;
+}
+@keyframes mac-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-3px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mac-menu {
+    animation: none;
+  }
+}
+
+.mac-menu__item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 26px;
+  padding: 0 8px 0 6px;
+  border-radius: var(--radius-compact);
+  font-size: 12.5px;
+  text-align: left;
+  color: var(--foreground);
+  cursor: default;
+}
+.mac-menu__item:hover,
+.mac-menu__item:focus-visible,
+.mac-menu__item[data-active='true'] {
+  outline: none;
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+.mac-menu__item:disabled {
+  color: var(--dim);
+  pointer-events: none;
+}
+.mac-menu__item[data-tone='danger'] {
+  color: var(--danger);
+}
+.mac-menu__item[data-tone='danger']:hover,
+.mac-menu__item[data-tone='danger']:focus-visible {
+  color: #fff;
+  background: var(--danger);
+}
+.mac-menu__item > svg {
+  justify-self: center;
+}
+.mac-menu__check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+.mac-menu__label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* The trailing column: a submenu's current value, a shortcut, a chevron. */
+.mac-menu__aside {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+}
+.mac-menu__item:hover .mac-menu__aside,
+.mac-menu__item:focus-visible .mac-menu__aside,
+.mac-menu__item[data-active='true'] .mac-menu__aside {
+  color: inherit;
+  opacity: 0.85;
+}
+.mac-menu__sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--hairline);
+}
+.mac-menu__heading {
+  padding: 6px 8px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dim);
+}
+.mac-menu__note {
+  padding: 5px 8px;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+
+/* Submenu: the trigger row plus a panel hung off its right edge. */
+.mac-menu__sub {
+  position: relative;
+}
+.mac-menu__sub > .mac-menu {
+  position: absolute;
+  top: -4px;
+  left: calc(100% + 2px);
+  z-index: 1;
+  transform-origin: top left;
+  animation-name: mac-submenu-in;
+}
+.mac-menu__sub[data-side='left'] > .mac-menu {
+  left: auto;
+  right: calc(100% + 2px);
+  transform-origin: top right;
+}
+@keyframes mac-submenu-in {
+  from {
+    opacity: 0;
+    transform: translateX(-2px);
+  }
+}

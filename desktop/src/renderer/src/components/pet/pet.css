@@ -1,0 +1,72 @@
+/* The floating mascot. Frames advance by stepping background-position-x
+   across the row: steps(6) over 1.1s, exactly petdex's own CSS. */
+
+.pet {
+  position: fixed;
+  z-index: calc(var(--z-toolbar) + 5);
+  padding: 0;
+  border: 0;
+  background-color: transparent;
+  background-repeat: no-repeat;
+  image-rendering: auto;
+  cursor: grab;
+  touch-action: none;
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35));
+  animation: pet-walk var(--pet-loop) steps(var(--pet-frames)) infinite;
+  outline: none;
+  /* Its own layer: the walk never repaints the window behind it, and the
+     drop shadow is rasterised once. */
+  will-change: background-position;
+  transform: translateZ(0);
+}
+.pet:active {
+  cursor: grabbing;
+}
+.pet:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+@keyframes pet-walk {
+  from {
+    background-position-x: 0;
+  }
+  to {
+    background-position-x: calc(var(--pet-frame-w) * -1 * var(--pet-frames));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pet {
+    animation: none;
+  }
+}
+
+/* ── Gallery tiles in Settings ────────────────────────────────────────────── */
+
+.pet-thumb {
+  position: relative;
+  display: block;
+  width: 48px;
+  height: 52px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+  flex-shrink: 0;
+}
+.pet-thumb > img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  max-width: none;
+}
+.pet-thumb--empty::after {
+  content: '';
+  position: absolute;
+  inset: 16px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--foreground) 14%, transparent);
+  border-top-color: var(--muted-foreground);
+  animation: stg-spin 0.9s linear infinite;
+}

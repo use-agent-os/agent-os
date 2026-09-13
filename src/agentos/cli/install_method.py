@@ -321,18 +321,36 @@ def resolve_tool(tool: str, env: dict[str, str] | None = None) -> str | None:
     return None
 
 
+def release_spec(dist: str = DIST_NAME, *, wheel_url: str | None = None) -> str:
+    """The requirement every managed upgrade installs.
+
+    Bare ``dist[extras]`` resolves against PyPI. With ``wheel_url`` it becomes
+    the PEP 508 direct-reference form ``dist[extras] @ <url>`` — the exact spec
+    ``install.sh`` hands to ``uv tool install`` — so the extras profile is kept
+    while the wheel comes from the GitHub release asset instead.
+    """
+
+    spec = f"{dist}[{UPGRADE_EXTRAS}]"
+    return f"{spec} @ {wheel_url}" if wheel_url else spec
+
+
 def build_upgrade_plan(
     *,
     method: InstallMethod | None = None,
     env: dict[str, str] | None = None,
     dist: str = DIST_NAME,
     python_tag: str | None = None,
+    spec: str | None = None,
 ) -> UpgradePlan:
-    """Build the :class:`UpgradePlan` for the running install."""
+    """Build the :class:`UpgradePlan` for the running install.
+
+    ``spec`` overrides the requirement installed (see :func:`release_spec`);
+    the default is the PyPI release of ``dist[recommended]``.
+    """
 
     resolved_method = method if method is not None else detect_install_method()
     python = python_tag if python_tag is not None else runtime_python_tag()
-    spec = f"{dist}[{UPGRADE_EXTRAS}]"
+    spec = spec if spec is not None else release_spec(dist)
 
     if resolved_method is InstallMethod.UV_TOOL:
         # ``install`` rather than ``upgrade``, and this is the whole point of the

@@ -12,8 +12,10 @@ import { KeyboardShortcutProvider } from '@/components/KeyboardShortcuts'
 const WS_URL_KEY = 'agentos.wsUrl'
 const WS_TOKEN_KEY = 'agentos.wsToken'
 
-const RpcContext = createContext<WsRpcClient | null>(null)
-const BootstrapContext = createContext<Bootstrap | null>(null)
+// Exported so an off-gateway host (the desktop shell) can supply its own
+// connected client to the same hooks and views.
+export const RpcContext = createContext<WsRpcClient | null>(null)
+export const BootstrapContext = createContext<Bootstrap | null>(null)
 
 export function useRpc(): WsRpcClient {
   const rpc = useContext(RpcContext)

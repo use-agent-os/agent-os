@@ -1,0 +1,1085 @@
+@import 'tailwindcss';
+
+/* Colour values are NOT declared here. They are written onto <html> as
+   --<token> custom properties by theme/apply.ts from theme/palettes.ts, so
+   there is exactly one place that knows what "primary" is per palette/mode.
+   This file owns everything that does not change with palette: fonts, shape
+   scale, z-index, the Tailwind token mapping, base element styling, and the
+   handful of macOS-native control recipes (.mac-*). */
+
+@font-face {
+  font-family: 'JetBrains Mono Variable';
+  src: url('../assets/fonts/JetBrainsMono-Variable.woff2') format('woff2');
+  font-weight: 100 800;
+  font-display: swap;
+}
+
+/* Theming keys off `data-theme` on <html>, not shadcn's `.dark` class. */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+@theme {
+  /* SF Pro through the system stack: the UI voice is macOS's own. Mono is
+     reserved for machine data (ports, URLs, pids) and code. */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'SF Mono', ui-monospace, Menlo, monospace;
+}
+
+@theme inline {
+  --radius-xs: var(--radius-compact);
+  --radius-sm: var(--radius-control);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius-surface);
+  --radius-xl: var(--radius-dialog);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-elevated: var(--elevated);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-dim: var(--dim);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-hairline: var(--hairline);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  /* macOS shape scale: controls 6, cards 10, sheets 12, panels 16. */
+  --radius-compact: 5px;
+  --radius-control: 6px;
+  --radius: 10px;
+  --radius-surface: 12px;
+  --radius-dialog: 16px;
+  --radius-pill: 999px;
+
+  /* Traffic lights sit at y=18 inside the sidebar; toolbar lines up with it. */
+  --toolbar-height: 52px;
+
+  --z-toolbar: 50;
+  --z-overlay: 100;
+  --z-modal: 200;
+  --z-toast: 300;
+  --z-critical-approval: 2000;
+
+  /* Safety net for the split second before apply.ts runs. Matches the
+     tactical dark palette and window.ts backgroundColor. */
+  --background: #060608;
+  --foreground: #ececef;
+  --grain-opacity: 0;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+  html {
+    /* Transparent so the window's vibrancy shows through the sidebar column.
+       Content panes paint their own opaque background. */
+    background: transparent;
+  }
+  body {
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.4;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    user-select: none;
+    cursor: default;
+  }
+  code,
+  kbd,
+  pre,
+  .font-mono {
+    font-family: var(--font-mono);
+    font-variant-ligatures: none;
+  }
+  [data-selectable] {
+    user-select: text;
+  }
+  /* Palette-controlled atmospheric grain over content panes only. */
+  .mac-content::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.55 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    background-size: 160px 160px;
+    opacity: var(--grain-opacity);
+    mix-blend-mode: overlay;
+  }
+  ::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border: 4px solid transparent;
+    background-clip: padding-box;
+    border-radius: var(--radius-pill);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer utilities {
+  /* Electron drag regions for the frameless chrome. */
+  .app-drag {
+    -webkit-app-region: drag;
+  }
+  .app-no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  /* Full-height source-list sidebar. The tint comes from the palette but is
+     let through at ~60% so the window vibrancy reads behind it. */
+  .mac-sidebar {
+    background: color-mix(in srgb, var(--sidebar) 62%, transparent);
+    border-right: 1px solid var(--sidebar-border);
+    color: var(--sidebar-foreground);
+  }
+  /* Settings > Appearance > Reduce transparency: the sidebar goes opaque and
+     main drops the window vibrancy to match (window.ts applyVibrancy). */
+  html[data-transparency='reduced'] .mac-sidebar {
+    background: var(--sidebar);
+  }
+  .mac-content {
+    position: relative;
+    background: var(--background);
+  }
+
+  /* Sidebar edge grip: invisible until hovered, then a hairline highlight;
+     the hit area is wider than the line so it is easy to catch. */
+  .mac-resizer {
+    position: absolute;
+    top: 0;
+    right: -4px;
+    bottom: 0;
+    z-index: 5;
+    width: 8px;
+    cursor: col-resize;
+    outline: none;
+  }
+  .mac-resizer::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 3px;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--primary);
+    opacity: 0;
+    transition: opacity 120ms ease 80ms;
+  }
+  .mac-resizer:hover::after,
+  .mac-resizer:focus-visible::after,
+  .mac-resizer[data-dragging='true']::after {
+    opacity: 0.7;
+  }
+  .mac-resizer[data-dragging='true']::after {
+    transition-delay: 0s;
+  }
+
+  /* Source-list row: 28px, 6px radius, accent tint on selection. */
+  .mac-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: var(--radius-control);
+    font-size: 13px;
+    text-align: left;
+    color: var(--sidebar-foreground);
+    transition: background-color 80ms ease-out;
+  }
+  .mac-row[aria-expanded='true'] {
+    background: var(--sidebar-accent);
+  }
+  .mac-row:hover {
+    background: color-mix(in srgb, var(--sidebar-accent) 70%, transparent);
+  }
+  .mac-row[aria-current='page'] {
+    background: var(--sidebar-accent);
+    font-weight: 500;
+  }
+  .mac-row[aria-current='page'] svg {
+    color: var(--sidebar-primary);
+  }
+  .mac-row:focus-visible {
+    outline: 2px solid var(--sidebar-ring);
+    outline-offset: -2px;
+  }
+
+  /* Section header in the source list, like Finder's "Favorites". */
+  .mac-section {
+    padding: 14px 8px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--dim);
+  }
+
+  /* System Settings-style grouped form. */
+  .mac-group {
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--card) 85%, transparent);
+    overflow: hidden;
+  }
+  .mac-group-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 44px;
+    padding: 8px 14px;
+  }
+  .mac-group-row + .mac-group-row {
+    border-top: 1px solid var(--hairline);
+  }
+  .mac-group-title {
+    margin: 0 0 6px 2px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .mac-help {
+    font-size: 11px;
+    color: var(--muted-foreground);
+  }
+
+  /* NSSegmentedControl. */
+  .mac-segmented {
+    display: inline-flex;
+    padding: 2px;
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  }
+  .mac-segment {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 22px;
+    padding: 0 10px;
+    border-radius: 5px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--foreground);
+    transition: background-color 100ms ease-out;
+  }
+  .mac-segment[aria-checked='true'] {
+    background: var(--surface);
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.25),
+      0 0 0 0.5px rgba(0, 0, 0, 0.08);
+  }
+  .mac-segment[aria-checked='true'] svg {
+    color: var(--primary);
+  }
+  .mac-segment:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+
+  /* NSButton: 22px tall, 6px radius, push style. */
+  .mac-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 24px;
+    padding: 0 12px;
+    border-radius: var(--radius-control);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--foreground);
+    background: var(--surface);
+    box-shadow:
+      0 0 0 0.5px var(--border),
+      0 1px 1px rgba(0, 0, 0, 0.12);
+    transition:
+      background-color 80ms ease-out,
+      opacity 80ms ease-out;
+  }
+  .mac-button:hover {
+    background: var(--elevated);
+  }
+  .mac-button:active {
+    background: var(--accent);
+  }
+  .mac-button:disabled {
+    opacity: 0.45;
+    pointer-events: none;
+  }
+  .mac-button:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+  .mac-button[data-variant='primary'] {
+    color: var(--primary-foreground);
+    background: var(--primary);
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
+  }
+  .mac-button[data-variant='primary']:hover {
+    background: color-mix(in srgb, var(--primary) 88%, var(--foreground));
+  }
+  .mac-button[data-variant='danger'] {
+    color: var(--destructive-foreground);
+    background: var(--destructive);
+  }
+  .mac-button[data-variant='ghost'] {
+    background: transparent;
+    box-shadow: none;
+  }
+  .mac-button[data-variant='ghost']:hover {
+    background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  }
+  .mac-button[data-size='icon'] {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+  }
+
+  /* Status light, like the dot in Xcode's activity view. */
+  .mac-light {
+    width: 8px;
+    height: 8px;
+    border-radius: var(--radius-pill);
+    box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 22%, transparent);
+    background: currentColor;
+  }
+  .mac-light[data-pulse='true'] {
+    animation: mac-light-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes mac-light-pulse {
+    50% {
+      opacity: 0.35;
+    }
+  }
+}
+
+/* Display face for the wordmark only. Variable: opsz 12-96, wdth 75-100,
+   wght 200-800. Set condensed + heavy at large optical size; never used for
+   running text. */
+@font-face {
+  font-family: 'Bricolage Grotesque';
+  src: url('../assets/fonts/BricolageGrotesque-Latin.ttf') format('truetype');
+  font-weight: 200 800;
+  font-stretch: 75% 100%;
+  font-display: swap;
+}
+
+@theme {
+  --font-display: 'Bricolage Grotesque', -apple-system, system-ui, sans-serif;
+}
+
+@layer utilities {
+  /* Search field: NSSearchField posture, sits flush in the sidebar. */
+  .mac-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 8px;
+    border-radius: var(--radius-control);
+    background: color-mix(in srgb, var(--foreground) 6%, transparent);
+    color: var(--dim);
+  }
+  .mac-search:focus-within {
+    outline: 2px solid var(--ring);
+    outline-offset: 0;
+    color: var(--foreground);
+  }
+  .mac-search input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: 0;
+    outline: 0;
+    font: inherit;
+    color: var(--foreground);
+  }
+  .mac-search input::placeholder {
+    color: var(--dim);
+  }
+
+  /* Session row: state glyph + title + age, with a "…" that surfaces on
+     hover in the age's place. The glyph at the left is the row's state: a
+     dot (filled when unread), a pin, an archive box, or the signal light. */
+  .mac-session-item {
+    position: relative;
+  }
+  .mac-session {
+    position: relative;
+    display: grid;
+    grid-template-columns: 8px 1fr auto;
+    align-items: center;
+    gap: 8px;
+    height: 26px;
+    padding: 0 8px 0 10px;
+    border-radius: var(--radius-control);
+    font-size: 12.5px;
+    color: var(--foreground);
+  }
+  .mac-session:hover,
+  .mac-session-item[data-menu='true'] .mac-session {
+    background: color-mix(in srgb, var(--sidebar-accent) 70%, transparent);
+  }
+  .mac-session[aria-current='page'] {
+    background: var(--sidebar-accent);
+  }
+  .mac-session[aria-current='page'] .mac-session-dot {
+    background: var(--primary);
+  }
+  .mac-session[data-archived='true'] {
+    color: var(--muted-foreground);
+  }
+  .mac-session[data-unread='true'] .mac-session-title {
+    font-weight: 600;
+  }
+  .mac-session-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: var(--radius-pill);
+    background: var(--dim);
+    opacity: 0.6;
+    transition:
+      background-color 160ms ease,
+      box-shadow 160ms ease,
+      opacity 160ms ease;
+  }
+  .mac-session-dot[data-unread='true'] {
+    width: 6px;
+    height: 6px;
+    margin-left: -0.5px;
+    opacity: 1;
+    background: var(--primary);
+  }
+  .mac-session-glyph {
+    width: 10px;
+    height: 10px;
+    margin-left: -1px;
+    color: var(--muted-foreground);
+  }
+  .mac-session[aria-current='page'] .mac-session-glyph {
+    color: var(--primary);
+  }
+  /* A turn is streaming in this session: the dot becomes a signal light with
+     a soft halo and a slow breath, so a busy session is findable at a glance
+     even when it is not the one on screen. */
+  .mac-session-dot[data-live='true'] {
+    opacity: 1;
+    background: var(--primary);
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--primary) 22%, transparent),
+      0 0 10px color-mix(in srgb, var(--primary) 70%, transparent);
+    animation: session-breathe 1.8s ease-in-out infinite;
+  }
+  @keyframes session-breathe {
+    50% {
+      box-shadow:
+        0 0 0 4px color-mix(in srgb, var(--primary) 12%, transparent),
+        0 0 4px color-mix(in srgb, var(--primary) 40%, transparent);
+    }
+  }
+  /* …and a light runs round the row's edge: a one-pixel ring drawn by a
+     conic gradient whose start angle spins, masked to the border so the
+     row's own background shows through. The tail fades over a third of a
+     turn; the rest of the ring is a faint rim so the row reads as framed
+     even where the light is not. */
+  @property --mac-live-angle {
+    syntax: '<angle>';
+    inherits: false;
+    initial-value: 0deg;
+  }
+  .mac-session[data-live='true']::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    padding: 1px;
+    border-radius: inherit;
+    background: conic-gradient(
+      from var(--mac-live-angle),
+      color-mix(in srgb, var(--primary) 14%, transparent) 0turn,
+      color-mix(in srgb, var(--primary) 14%, transparent) 0.6turn,
+      color-mix(in srgb, var(--primary) 55%, transparent) 0.82turn,
+      var(--primary) 0.95turn,
+      color-mix(in srgb, var(--primary) 14%, transparent) 1turn
+    );
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+    animation: mac-live-orbit 2.6s linear infinite;
+  }
+  @keyframes mac-live-orbit {
+    to {
+      --mac-live-angle: 360deg;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mac-session-dot[data-live='true'],
+    .mac-session[data-live='true']::after {
+      animation: none;
+    }
+    .mac-session[data-live='true']::after {
+      background: color-mix(in srgb, var(--primary) 45%, transparent);
+    }
+  }
+  .mac-session-title {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .mac-session-age {
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--dim);
+  }
+  /* The row's menu button: hidden until hover (or while its menu is up),
+     then it takes the age's corner. */
+  .mac-session-more {
+    position: absolute;
+    top: 50%;
+    right: 4px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    color: var(--muted-foreground);
+    background: color-mix(in srgb, var(--sidebar-accent) 70%, transparent);
+    transform: translateY(-50%);
+  }
+  .mac-session-more:hover,
+  .mac-session-more[aria-expanded='true'] {
+    color: var(--foreground);
+    background: color-mix(in srgb, var(--foreground) 10%, transparent);
+  }
+  .mac-session-item:hover .mac-session-more,
+  .mac-session-item[data-menu='true'] .mac-session-more {
+    display: inline-flex;
+  }
+  .mac-session-item:hover .mac-session-age,
+  .mac-session-item[data-menu='true'] .mac-session-age {
+    visibility: hidden;
+  }
+  /* Rename in place: the title becomes a field of the same size. */
+  .mac-session-rename {
+    grid-column: 2 / -1;
+    width: 100%;
+    min-width: 0;
+    height: 20px;
+    padding: 0 4px;
+    margin-left: -4px;
+    border: 0;
+    border-radius: 4px;
+    outline: 0;
+    font: inherit;
+    color: var(--foreground);
+    background: var(--surface);
+    box-shadow:
+      0 0 0 0.5px var(--input),
+      0 0 0 3px color-mix(in srgb, var(--ring) 32%, transparent);
+    user-select: text;
+  }
+
+  /* The list's view menu trigger beside "Sessions"; a dot while the view
+     is not the default so a filtered list is never a mystery. */
+  .mac-view-trigger {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    color: var(--dim);
+    transition:
+      background-color 80ms ease-out,
+      color 80ms ease-out;
+  }
+  .mac-view-trigger:hover,
+  .mac-view-trigger[aria-expanded='true'] {
+    color: var(--foreground);
+    background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  }
+  .mac-view-trigger[data-active='true'] {
+    color: var(--primary);
+  }
+  .mac-view-trigger[data-active='true']::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 5px;
+    height: 5px;
+    border-radius: var(--radius-pill);
+    background: var(--primary);
+    box-shadow: 0 0 0 1.5px var(--sidebar);
+  }
+  .mac-view-trigger:focus-visible {
+    outline: 2px solid var(--sidebar-ring);
+    outline-offset: 1px;
+  }
+  /* "n hidden by filters · Show all" under the list. */
+  .mac-list-hint {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 6px;
+    padding: 8px 10px 4px;
+    font-size: 11px;
+    color: var(--dim);
+  }
+  .mac-list-hint button {
+    color: var(--primary);
+  }
+  .mac-list-hint button:hover {
+    text-decoration: underline;
+  }
+
+  /* Month divider inside the session list. */
+  .mac-divider {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 8px 4px 10px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+  .mac-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--hairline);
+  }
+
+  /* Wordmark: condensed, heavy, tight. Optical size follows font-size. */
+  .wordmark {
+    /* Watermark, not a headline: sentence case, a wide geometric grotesk,
+       and a colour barely above the ground with a lime cast toward the
+       baseline, so it reads as part of the backdrop the grid sits on. */
+    font-family: var(--font-display);
+    font-weight: 640;
+    font-stretch: 100%;
+    font-size: clamp(64px, 11vw, 150px);
+    line-height: 0.95;
+    letter-spacing: -0.045em;
+    background: linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--foreground) 9%, var(--background)) 0%,
+      color-mix(
+          in srgb,
+          var(--primary) 12%,
+          color-mix(in srgb, var(--foreground) 7%, var(--background))
+        )
+        100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    user-select: none;
+  }
+  :root[data-theme='light'] .wordmark {
+    background: linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--foreground) 14%, var(--background)) 0%,
+      color-mix(
+          in srgb,
+          var(--primary) 22%,
+          color-mix(in srgb, var(--foreground) 10%, var(--background))
+        )
+        100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+  }
+  /* Wash sits lower and quieter now that there is no glowing mark. */
+  .home-wash {
+    background: radial-gradient(
+      70% 55% at 50% 100%,
+      color-mix(in srgb, var(--sidebar-accent) 55%, transparent) 0%,
+      transparent 70%
+    );
+  }
+
+  /* Composer. Same behaviour contract as the web console's chat-composer:
+     a raised panel, lime focus ring, and while a turn is streaming a
+     brighter border plus a light sweeping around the edge. */
+  @property --composer-sweep {
+    syntax: '<angle>';
+    inherits: false;
+    initial-value: 0deg;
+  }
+  .composer {
+    --composer-radius: 22px;
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    padding: 6px 6px 6px 8px;
+    border: 1px solid color-mix(in srgb, var(--foreground) 14%, var(--border));
+    border-radius: var(--composer-radius);
+    background: var(--elevated);
+    box-shadow:
+      0 18px 46px color-mix(in srgb, var(--background) 42%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--foreground) 4%, transparent);
+    transition:
+      border-color 180ms ease,
+      box-shadow 180ms ease;
+  }
+  .composer:focus-within {
+    border-color: color-mix(in srgb, var(--primary) 48%, var(--border));
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--primary) 10%, transparent),
+      0 18px 46px color-mix(in srgb, var(--background) 42%, transparent);
+  }
+  .composer[data-busy='true'] {
+    border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--primary) 8%, transparent),
+      0 0 22px color-mix(in srgb, var(--primary) 14%, transparent),
+      0 18px 46px color-mix(in srgb, var(--background) 42%, transparent);
+  }
+  .composer[data-busy='true']::after {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: calc(var(--composer-radius) + 2px);
+    padding: 2px;
+    background: conic-gradient(
+      from var(--composer-sweep),
+      transparent 0deg 268deg,
+      color-mix(in srgb, var(--primary) 45%, transparent) 300deg,
+      color-mix(in srgb, var(--primary) 95%, #fff) 332deg,
+      transparent 360deg
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    animation: composer-sweep 2.4s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes composer-sweep {
+    to {
+      --composer-sweep: 360deg;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .composer[data-busy='true']::after {
+      animation: none;
+      opacity: 0.55;
+    }
+  }
+  .composer textarea {
+    resize: none;
+    field-sizing: content;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 32px;
+    max-height: 160px;
+    padding: 6px 6px;
+    background: transparent;
+    border: 0;
+    outline: 0;
+    font: inherit;
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--foreground);
+    user-select: text;
+  }
+  .composer textarea::placeholder {
+    color: var(--dim);
+  }
+  .composer-send {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-pill);
+    background: var(--primary);
+    color: var(--primary-foreground);
+    box-shadow: 0 6px 18px color-mix(in srgb, var(--primary) 16%, transparent);
+    transition:
+      transform 80ms ease-out,
+      opacity 80ms ease-out,
+      box-shadow 120ms ease-out;
+  }
+  .composer-send:hover:not(:disabled) {
+    transform: scale(1.04);
+  }
+  .composer-send:disabled {
+    opacity: 0.35;
+    box-shadow: none;
+  }
+  .composer-send:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  /* Abort: same footprint as send so the row never reflows. */
+  .composer-send[data-abort='true'] {
+    background: color-mix(in srgb, var(--danger) 18%, var(--surface));
+    color: var(--danger);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 40%, transparent);
+  }
+  /* Route picker trigger: reads what will answer the next turn. */
+  .composer-route[data-pinned='true'] {
+    color: var(--foreground);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 24%, transparent);
+  }
+  /* Quiet inline control in the composer's action row. */
+  .composer-chip {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 4px;
+    height: 32px;
+    padding: 0 8px;
+    border-radius: var(--radius-control);
+    font-size: 12px;
+    color: var(--muted-foreground);
+  }
+  .composer-chip:hover {
+    background: color-mix(in srgb, var(--foreground) 7%, transparent);
+    color: var(--foreground);
+  }
+  .composer-chip:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+
+  /* NSTextField / NSPopUpButton / NSSwitch. Shared by every form in the app
+     so a field looks the same in Settings and in a sheet. */
+  .mac-input,
+  .mac-select,
+  .mac-textarea {
+    width: 100%;
+    min-width: 0;
+    height: 26px;
+    padding: 0 8px;
+    border-radius: var(--radius-control);
+    border: 0;
+    outline: 0;
+    background: var(--surface);
+    box-shadow:
+      0 0 0 0.5px var(--input),
+      inset 0 1px 1px rgba(0, 0, 0, 0.06);
+    font: inherit;
+    font-size: 13px;
+    color: var(--foreground);
+    user-select: text;
+    transition: box-shadow 100ms ease-out;
+  }
+  .mac-input::placeholder,
+  .mac-textarea::placeholder {
+    color: var(--dim);
+  }
+  .mac-input:focus,
+  .mac-select:focus,
+  .mac-textarea:focus {
+    box-shadow:
+      0 0 0 0.5px var(--input),
+      0 0 0 3px color-mix(in srgb, var(--ring) 32%, transparent);
+  }
+  .mac-input:disabled,
+  .mac-select:disabled,
+  .mac-textarea:disabled {
+    opacity: 0.5;
+  }
+  .mac-input[data-mono='true'],
+  .mac-textarea[data-mono='true'] {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+  }
+  .mac-input[data-invalid='true'] {
+    box-shadow:
+      0 0 0 0.5px var(--danger),
+      0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent);
+  }
+  .mac-input[type='number'] {
+    font-variant-numeric: tabular-nums;
+  }
+  .mac-input[type='time'],
+  .mac-input[type='datetime-local'] {
+    width: auto;
+    padding-right: 4px;
+  }
+  .mac-input::-webkit-calendar-picker-indicator {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .mac-textarea {
+    height: auto;
+    min-height: 72px;
+    padding: 6px 8px;
+    line-height: 1.45;
+    resize: vertical;
+  }
+  .mac-select {
+    appearance: none;
+    padding-right: 24px;
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+      linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+    background-position:
+      calc(100% - 13px) 11px,
+      calc(100% - 9px) 11px;
+    background-size:
+      4px 4px,
+      4px 4px;
+    background-repeat: no-repeat;
+  }
+  .mac-select[data-compact='true'] {
+    width: auto;
+  }
+
+  .mac-switch {
+    position: relative;
+    flex-shrink: 0;
+    width: 26px;
+    height: 15px;
+    border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--foreground) 18%, transparent);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--foreground) 10%, transparent);
+    transition: background-color 160ms ease;
+  }
+  .mac-switch::after {
+    content: '';
+    position: absolute;
+    top: 1.5px;
+    left: 1.5px;
+    width: 12px;
+    height: 12px;
+    border-radius: var(--radius-pill);
+    background: #fff;
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.3),
+      0 0 0 0.5px rgba(0, 0, 0, 0.06);
+    transition: transform 160ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .mac-switch[aria-checked='true'] {
+    background: var(--primary);
+  }
+  .mac-switch[aria-checked='true']::after {
+    transform: translateX(11px);
+  }
+  .mac-switch:disabled {
+    opacity: 0.45;
+  }
+  .mac-switch:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  /* Label above a control, System Settings sheet posture. */
+  .mac-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+  }
+  .mac-label {
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--muted-foreground);
+  }
+
+  /* Small rounded tag: kind, target, status words. */
+  .mac-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 18px;
+    padding: 0 7px;
+    border-radius: var(--radius-pill);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--muted-foreground);
+    background: color-mix(in srgb, var(--foreground) 7%, transparent);
+    white-space: nowrap;
+  }
+  .mac-chip[data-tone='primary'] {
+    color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 14%, transparent);
+  }
+  .mac-chip[data-tone='ok'] {
+    color: var(--ok);
+    background: color-mix(in srgb, var(--ok) 14%, transparent);
+  }
+  .mac-chip[data-tone='warn'] {
+    color: var(--warn);
+    background: color-mix(in srgb, var(--warn) 14%, transparent);
+  }
+  .mac-chip[data-tone='danger'] {
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 14%, transparent);
+  }
+
+  /* Keyboard shortcut caps. */
+  .kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 4px;
+    font-size: 10.5px;
+    font-family: var(--font-sans);
+    color: var(--dim);
+    background: color-mix(in srgb, var(--foreground) 7%, transparent);
+    box-shadow: inset 0 -1px 0 var(--hairline);
+  }
+}

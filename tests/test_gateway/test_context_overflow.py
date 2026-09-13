@@ -871,10 +871,11 @@ def test_chat_send_creates_webchat_session_with_agent_from_key(
     result = asyncio.run(_run())
 
     assert result["ok"] is True
+    # No client-label placeholder: the session is auto-titled from the first
+    # message, and the desktop app sends through this handler too.
     sm.get_or_create.assert_awaited_once_with(
         session_key="agent:kid-project:webchat:abc",
         agent_id="kid-project",
-        display_name="WebChat",
     )
 
 

@@ -12,6 +12,7 @@
  * persistence, the toast-on-new-pending hook, and pollNow() are preserved 1:1.
  */
 import { create } from 'zustand'
+import { apiUrl } from '@/lib/api-origin'
 import { authenticatedHeaders } from '@/lib/http-auth'
 import { toast } from 'sonner'
 
@@ -377,17 +378,17 @@ export class ApprovalMonitor {
  * comfortably under it.
  */
 export function approvalsUrl(): string {
-  return '/api/approvals'
+  return apiUrl('/api/approvals')
 }
 
 export function approvalsResolveUrl(): string {
-  return '/api/approvals/resolve'
+  return apiUrl('/api/approvals/resolve')
 }
 
 // approvals.js:291 — the approval-strategy settings endpoint. Root-absolute like
 // the poll/resolve endpoints (same rationale as approvalsUrl above).
 export function approvalsSettingsUrl(): string {
-  return '/api/approvals/settings'
+  return apiUrl('/api/approvals/settings')
 }
 
 /**

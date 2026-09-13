@@ -14,6 +14,7 @@ from agentos.gateway.access import CONTROL_AND_CHANNEL, CONTROL_ONLY
 from agentos.gateway.config import GatewayConfig
 from agentos.gateway.context_overflow import apply_context_overflow_policy
 from agentos.gateway.rpc import RpcContext, RpcUnavailableError, get_dispatcher
+from agentos.gateway.session_events import build_sessions_changed_payload
 from agentos.session.compaction import (
     build_compaction_config_from_provider,
     effective_compaction_model,
@@ -315,6 +316,34 @@ async def _enforce_context_overflow(
     return None
 
 
+def _schedule_session_title(ctx: RpcContext, session_key: str, message: Any, extra: dict) -> None:
+    """Name a placeholder-titled session from this message, off the turn path."""
+    sessions_cfg = getattr(getattr(ctx, "config", None), "sessions", None)
+    if sessions_cfg is not None and not getattr(sessions_cfg, "auto_title", True):
+        return
+    if not isinstance(message, str):
+        return
+    from agentos.gateway.rpc_sessions import _emit_to_subscribers
+    from agentos.gateway.session_titler import fast_model_hint, titler_for
+
+    async def broadcast(key: str, state: dict) -> None:
+        await _emit_to_subscribers(
+            ctx, key, "sessions.changed", build_sessions_changed_payload(key, "renamed", **state)
+        )
+
+    timeout = float(getattr(sessions_cfg, "auto_title_timeout_seconds", 30.0) or 30.0)
+    titler = titler_for(
+        ctx.session_manager,
+        broadcast=broadcast,
+        timeout=timeout,
+        hint=fast_model_hint(getattr(ctx, "config", None)),
+    )
+    run_kind = extra.get("runKind", extra.get("run_kind"))
+    titler.maybe_schedule(
+        session_key, message, run_kind=str(run_kind) if run_kind is not None else None
+    )
+
+
 @_d.method("chat.send")
 async def _handle_chat_send(params: dict | None, ctx: RpcContext) -> dict:
     if not isinstance(params, dict) or "message" not in params:
@@ -342,15 +371,16 @@ async def _handle_chat_send(params: dict | None, ctx: RpcContext) -> dict:
         if intent != "new_chat":
             # Ensure session exists — auto-create if needed
             try:
+                # No placeholder name: the session is titled from this very
+                # message a moment later (session_titler), and until then the
+                # short id is more honest than a client label — the desktop
+                # app and channel bridges send here too, not only WebChat.
                 await mgr.get_or_create(
                     session_key=session_key,
                     agent_id=agent_id,
-                    display_name="WebChat",
                 )
             except Exception as exc:
-                raise RpcUnavailableError(
-                    f"Failed to initialize chat session: {exc}"
-                ) from exc
+                raise RpcUnavailableError(f"Failed to initialize chat session: {exc}") from exc
 
         from agentos.gateway.rpc_sessions import _handle_sessions_send
 
@@ -396,6 +426,7 @@ async def _handle_chat_send(params: dict | None, ctx: RpcContext) -> dict:
             ),
         )
         result = await _handle_sessions_send(send_params, ctx)
+        _schedule_session_title(ctx, session_key, message, extra)
         return {"ok": True, "sessionKey": session_key, **result}
     except Exception:
         marker = getattr(ctx, "turn_runner", None)

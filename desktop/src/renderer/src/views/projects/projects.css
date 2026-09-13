@@ -1,0 +1,636 @@
+/* Projects — Notes/Finder posture. In the sidebar a project is a folder
+   with its chats inside; the project's own page is a document: a title you
+   click to rename, a brief that saves itself, the chats filed there. No
+   forms, no master-detail. Colour comes only from the palette tokens. */
+
+/* ── Sidebar: folders ────────────────────────────────────────────────────── */
+
+.proj-folders {
+  display: flex;
+  flex-direction: column;
+}
+.proj-folders__add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--dim);
+  transition:
+    background-color 80ms ease-out,
+    color 80ms ease-out;
+}
+.proj-folders__add:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+.proj-folders__add:focus-visible {
+  outline: 2px solid var(--sidebar-ring);
+  outline-offset: 1px;
+}
+
+.proj-folder {
+  display: flex;
+  flex-direction: column;
+}
+.proj-folder__row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  height: 28px;
+  border-radius: var(--radius-control);
+  transition: background-color 80ms ease-out;
+}
+.proj-folder__row:hover {
+  background: color-mix(in srgb, var(--sidebar-accent) 55%, transparent);
+}
+.proj-folder__row:has(.proj-folder__link[aria-current='page']) {
+  background: var(--sidebar-accent);
+}
+.proj-folder[data-drop='true'] .proj-folder__row {
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--primary);
+}
+.proj-folder__disclose {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 2px;
+  border-radius: 4px;
+  color: var(--dim);
+  transition:
+    transform 160ms cubic-bezier(0.32, 0.72, 0, 1),
+    color 80ms ease-out;
+}
+.proj-folder__disclose:hover {
+  color: var(--foreground);
+}
+.proj-folder[data-open='true'] .proj-folder__disclose {
+  transform: rotate(90deg);
+}
+.proj-folder__link {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  min-width: 0;
+  padding: 0 8px 0 4px;
+  font-size: 13px;
+  color: var(--sidebar-foreground);
+}
+.proj-folder__link svg {
+  color: var(--muted-foreground);
+}
+.proj-folder__link[aria-current='page'] {
+  font-weight: 500;
+}
+.proj-folder__link[aria-current='page'] svg,
+.proj-folder[data-drop='true'] .proj-folder__link svg {
+  color: var(--sidebar-primary);
+}
+.proj-folder__link:focus-visible {
+  outline: 2px solid var(--sidebar-ring);
+  outline-offset: -2px;
+  border-radius: var(--radius-control);
+}
+.proj-folder__name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.proj-folder__count {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+}
+.proj-folder__drop {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--primary-foreground);
+  background: var(--primary);
+  pointer-events: none;
+}
+.proj-folder__body {
+  overflow: hidden;
+}
+.proj-folder__empty {
+  padding: 3px 8px 5px 30px;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+.proj-folder__more {
+  display: block;
+  padding: 3px 8px 4px 30px;
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+  border-radius: var(--radius-control);
+}
+.proj-folder__more:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--sidebar-accent) 70%, transparent);
+}
+/* A chat filed in a folder sits one step in, under the folder's name. */
+.mac-session[data-nested='true'] {
+  padding-left: 22px;
+}
+.mac-session[draggable='true'] {
+  cursor: default;
+}
+
+/* The inline new-folder row. */
+.proj-new {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 2px;
+  padding: 4px 6px 6px;
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--sidebar-accent) 70%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent);
+}
+.proj-new[data-busy='true'] {
+  opacity: 0.6;
+}
+.proj-new__row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 22px;
+}
+.proj-new__input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 4px;
+  outline: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--foreground);
+  background: var(--surface);
+  box-shadow: 0 0 0 0.5px var(--input);
+  user-select: text;
+}
+.proj-new__input:focus {
+  box-shadow:
+    0 0 0 0.5px var(--input),
+    0 0 0 3px color-mix(in srgb, var(--ring) 32%, transparent);
+}
+.proj-new__agent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 21px;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.proj-new__agent .mac-select {
+  height: 22px;
+  font-size: 12px;
+}
+.proj-new__hint {
+  padding-left: 21px;
+  font-size: 10.5px;
+  color: var(--dim);
+}
+
+/* The loose "Sessions" header doubles as the drop target for unfiling. */
+.proj-unfiled {
+  border-radius: var(--radius-control);
+  transition:
+    background-color 80ms ease-out,
+    color 80ms ease-out;
+}
+.proj-unfiled[data-drop='true'] {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--primary);
+}
+
+/* ── Menus ───────────────────────────────────────────────────────────────── */
+/* The panels themselves are components/menu/menu.css; the page's "…" and the
+   chat's project chip only need a positioned anchor. */
+
+.proj-more,
+.proj-chip__anchor {
+  position: relative;
+}
+
+/* The chat header chip: reads where this chat is filed. */
+.proj-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  max-width: 220px;
+  padding: 0 7px 0 6px;
+  border-radius: var(--radius-pill);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  transition:
+    background-color 100ms ease-out,
+    color 100ms ease-out;
+}
+.proj-chip[data-filed='true'] {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+.proj-chip:hover,
+.proj-chip[aria-expanded='true'] {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+.proj-chip[data-filed='true']:hover,
+.proj-chip[data-filed='true'][aria-expanded='true'] {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 20%, transparent);
+}
+.proj-chip:disabled {
+  opacity: 0.5;
+}
+.proj-chip:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+.proj-chip__name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ── The project page ────────────────────────────────────────────────────── */
+
+.proj-page {
+  --proj-col: min(52rem, calc(100% - 4rem));
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  width: var(--proj-col);
+  margin: 0 auto;
+  padding: 8px 0 48px;
+}
+.proj-page__offline {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 32px;
+  text-align: center;
+  color: var(--muted-foreground);
+}
+
+.proj-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 16px;
+}
+/* Folder glyph: the name's initials in a rounded square, the way Finder
+   tags and Notes folders get an identity without an icon library. */
+.proj-head__glyph {
+  display: flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 4px;
+  border-radius: var(--radius);
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 640;
+  letter-spacing: -0.02em;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+.proj-head__text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.proj-head__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.proj-head__agent {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted-foreground);
+}
+.proj-head__dot {
+  width: 3px;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--dim);
+}
+.proj-title {
+  width: 100%;
+  min-width: 0;
+  margin-left: -6px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-control);
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  color: var(--foreground);
+  user-select: text;
+  transition: background-color 100ms ease-out;
+}
+.proj-title:hover {
+  background: color-mix(in srgb, var(--foreground) 5%, transparent);
+}
+.proj-title:focus {
+  background: var(--surface);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 32%, transparent);
+}
+.proj-title:disabled {
+  opacity: 0.6;
+}
+.proj-head__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-foreground);
+}
+.proj-head__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 10px;
+}
+
+/* The brief: a sheet of paper on the page. */
+.proj-brief {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-surface);
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+  transition: box-shadow 160ms ease;
+}
+.proj-brief:focus-within {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 10%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--hairline));
+}
+.proj-brief__head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 14px 18px 0;
+}
+.proj-brief__head h2 {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.proj-brief__head p {
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+}
+.proj-brief__text {
+  width: 100%;
+  min-height: 220px;
+  max-height: 60vh;
+  padding: 12px 18px 14px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  resize: vertical;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--foreground);
+  user-select: text;
+  field-sizing: content;
+}
+.proj-brief__text::placeholder {
+  color: var(--dim);
+}
+.proj-brief__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px 8px 16px;
+  border-top: 1px solid var(--hairline);
+  font-size: 11px;
+  color: var(--dim);
+}
+.proj-brief__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  transition: color 160ms ease;
+}
+.proj-brief__state[data-state='saved'],
+.proj-brief__state[data-state='clean'] {
+  color: var(--ok);
+}
+.proj-brief__state[data-state='clean'] {
+  color: var(--dim);
+}
+.proj-brief__state[data-state='error'] {
+  color: var(--danger);
+}
+.proj-brief__state[data-state='saving'] {
+  color: var(--primary);
+}
+.proj-brief__pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+}
+.proj-brief__state[data-state='saving'] .proj-brief__pulse {
+  animation: mac-light-pulse 1s ease-in-out infinite;
+}
+.proj-brief__retry {
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 4px;
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+.proj-brief__size {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.proj-brief__size[data-over='true'] {
+  color: var(--danger);
+}
+.proj-brief__chars {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+/* Chats filed here. */
+.proj-chats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.proj-chats__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 2px;
+}
+.proj-chats__head h2 {
+  font-size: 13px;
+  font-weight: 600;
+}
+.proj-chats__count {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+}
+.proj-chats__group + .proj-chats__group {
+  margin-top: 10px;
+}
+.proj-chats__agent {
+  padding: 0 2px 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--dim);
+}
+.proj-chats__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+}
+.proj-chats__list li + li {
+  border-top: 1px solid var(--hairline);
+}
+.proj-chat {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 0 14px;
+  font-size: 13px;
+  color: var(--foreground);
+  transition: background-color 80ms ease-out;
+}
+.proj-chat:hover {
+  background: color-mix(in srgb, var(--sidebar-accent) 60%, transparent);
+}
+.proj-chat:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.proj-chat__title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.proj-chat__age {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+}
+.proj-chats__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 18px 18px 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+.proj-chats__empty-hint {
+  font-size: 12px;
+  color: var(--dim);
+}
+.proj-chats__empty .mac-button {
+  margin-top: 8px;
+}
+
+/* ── Delete alert ────────────────────────────────────────────────────────── */
+
+.proj-alert__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 64px;
+  background: color-mix(in srgb, var(--background) 55%, transparent);
+  backdrop-filter: blur(2px);
+}
+.proj-alert {
+  display: flex;
+  width: 380px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px 20px 16px;
+  border-radius: var(--radius-dialog);
+  background: var(--popover);
+  box-shadow:
+    0 0 0 0.5px var(--border),
+    0 24px 60px rgba(0, 0, 0, 0.38);
+  outline: none;
+}
+.proj-alert__title {
+  font-size: 14px;
+  font-weight: 600;
+}
+.proj-alert__body {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+.proj-alert__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}

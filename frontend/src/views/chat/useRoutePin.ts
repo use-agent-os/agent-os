@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
   routerFxNormalizeTier,
@@ -157,14 +157,27 @@ export function useRoutePin(
   const [hold, setHold] = useState<HoldSlice>(() => ({ session: '', ...EMPTY_HOLD }))
   const [routed, setRouted] = useState<RoutedSlice>(() => ({ session: '', ...EMPTY_ROUTED }))
   const [busy, setBusy] = useState(false)
+  // Whether a read has gone out over a live socket yet. The mount read waits
+  // for the first connection itself; the reconnect listener below must not
+  // double it, only cover the connections after that one.
+  const connectedOnce = useRef(false)
 
   const live = hold.session === sessionKey ? hold : EMPTY_HOLD
   const liveRouted = routed.session === sessionKey ? routed : EMPTY_ROUTED
 
   const refresh = useCallback(() => {
     const forSession = sessionKey
+    // Wait for the socket. The chat mounts before the gateway connection is
+    // up (the desktop app opens straight onto the home chat while the gateway
+    // is still starting), and a call on a closed socket rejects at once with
+    // "Not connected" — which the catch below would file as "router off" and
+    // leave the picker disabled until the next session switch.
     rpc
-      .call('router.hold.get', { key: forSession })
+      .waitForConnection()
+      .then(() => {
+        connectedOnce.current = true
+        return rpc.call('router.hold.get', { key: forSession })
+      })
       .then((res: unknown) => {
         const result = (res ?? {}) as HoldGetResult
         // A model pin still names the tier hosting it; only `targetType` says
@@ -198,6 +211,19 @@ export function useRoutePin(
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  // Re-read after every reconnect. The hold store is gateway process memory:
+  // a restart drops every pin, so a label carried over the gap would claim a
+  // route that is no longer in force. `_state` is the client's own connection
+  // signal. The very first connection is the mount read's to handle (it is
+  // waiting on it), so only later ones trigger a read here.
+  useEffect(
+    () =>
+      rpc.on('_state', (state: unknown) => {
+        if (state === 'connected' && connectedOnce.current) refresh()
+      }),
+    [rpc, refresh],
+  )
 
   // The catalog is global, not per-session, and only worth fetching once the
   // active provider is known — it is the filter that makes the list pinnable.

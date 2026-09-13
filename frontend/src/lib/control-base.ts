@@ -1,3 +1,5 @@
+import { hostControlBase } from './api-origin'
+
 const STATIC_DIST_SUFFIX = /\/static\/dist\/?$/
 
 interface ControlBaseOptions {
@@ -72,6 +74,10 @@ export function deriveControlBasePath({
 }
 
 export function controlBasePath(options: ControlBaseOptions = {}): string {
+  // An off-gateway host (desktop) names the mount explicitly; there is no
+  // served <base> tag to derive it from.
+  const explicit = hostControlBase()
+  if (explicit) return explicit.replace(/\/+$/, '') || '/'
   const doc = options.document ?? document
   const documentUrl = options.documentUrl ?? window.location.href
   const tag = doc.querySelector<HTMLBaseElement>('base[data-agentos-control-base]')

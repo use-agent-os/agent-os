@@ -91,6 +91,7 @@ app = typer.Typer(
     pretty_exceptions_enable=False,
 )
 
+
 # ── Sub-apps ─────────────────────────────────────────────────────────────────
 
 app.add_typer(auth_app, name="auth")
@@ -133,6 +134,7 @@ def _root(
     version: bool = typer.Option(
         False,
         "--version",
+        "-V",
         help="Show the installed AgentOS version and exit.",
         callback=_version_callback,
         is_eager=True,

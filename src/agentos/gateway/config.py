@@ -1521,6 +1521,21 @@ class AuxiliaryConfig(BaseSettings):
     tasks: dict[str, AuxiliaryTaskConfig] = Field(default_factory=dict)
 
 
+class SessionsConfig(BaseSettings):
+    """Behaviour of chat sessions that is not a turn-loop concern."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="AGENTOS_SESSIONS_",
+        env_nested_delimiter="__",
+    )
+
+    #: Name a new session from its first message using the auxiliary model
+    #: (task ``session_title``; override the model with
+    #: ``[auxiliary.tasks.session_title]`` or ``AGENTOS_SESSION_TITLE_MODEL``).
+    auto_title: bool = True
+    auto_title_timeout_seconds: float = Field(default=30.0, gt=0)
+
+
 class MCPServerEntry(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENTOS_MCP_SERVER_")
 
@@ -2220,6 +2235,7 @@ class GatewayConfig(BaseSettings):
     agent_token_saving: AgentTokenSavingConfig = Field(default_factory=AgentTokenSavingConfig)
     compaction: CompactionLlmConfig = Field(default_factory=CompactionLlmConfig)
     auxiliary: AuxiliaryConfig = Field(default_factory=AuxiliaryConfig)
+    sessions: SessionsConfig = Field(default_factory=SessionsConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     image_generation: ImageGenerationConfig = Field(default_factory=ImageGenerationConfig)

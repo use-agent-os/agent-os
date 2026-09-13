@@ -627,6 +627,45 @@ describe('app shell chrome', () => {
     expect(window.localStorage.getItem(DISMISSED_VERSION_STORAGE_KEY)).toBe('2026.9.9')
   })
 
+  it('runs the upgrade from the banner and follows the job to completion', async () => {
+    stubMatchMedia(false)
+    useConnection.getState().setState('connected')
+    const calls: string[] = []
+    let polls = 0
+    mockRpcCall.mockImplementation(async (method: string) => {
+      calls.push(method)
+      if (method === 'updates.check') {
+        return { current: '2026.8.11', latest: '2026.9.9', status: 'outdated' }
+      }
+      if (method === 'updates.apply') {
+        return { started: true, status: 'running', logTail: ['Upgrading…'] }
+      }
+      if (method === 'updates.status') {
+        polls += 1
+        return polls < 2
+          ? { status: 'running', logTail: ['Restarting managed gateway…'] }
+          : { status: 'done', exitCode: 0, result: { new: '2026.9.9', verified: true } }
+      }
+      return {}
+    })
+
+    renderShellAt('/cron')
+    const banner = await screen.findByTestId('update-banner')
+    fireEvent.click(within(banner).getByRole('button', { name: 'Update now' }))
+
+    await waitFor(() => expect(calls).toContain('updates.apply'))
+    expect(calls.filter((m) => m === 'updates.apply')).toHaveLength(1)
+    expect(banner).toHaveAttribute('data-state', 'running')
+    // Dismiss is off while the installer runs: the job cannot be cancelled.
+    expect(within(banner).getByRole('button', { name: 'Dismiss' })).toBeDisabled()
+
+    await waitFor(() => expect(banner).toHaveAttribute('data-state', 'done'), {
+      timeout: 6000,
+    })
+    expect(within(banner).getByText(/Updated to 2026\.9\.9/)).toBeInTheDocument()
+    expect(within(banner).getByRole('button', { name: 'Reload' })).toBeInTheDocument()
+  })
+
   it('suppresses the update banner if the version was already dismissed', async () => {
     stubMatchMedia(false)
     window.localStorage.setItem(DISMISSED_VERSION_STORAGE_KEY, '2026.9.9')

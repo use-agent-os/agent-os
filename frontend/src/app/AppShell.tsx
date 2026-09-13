@@ -32,7 +32,6 @@ import {
   ShieldCheck,
   Sun,
   History,
-  X,
   type LucideIcon,
 } from 'lucide-react'
 import { Toaster } from '@/components/ui/sonner'
@@ -51,6 +50,7 @@ import { useApprovals } from '@/services/approval-monitor'
 import { useBootstrap, useRpc } from './providers'
 import { defaultViewPath } from './routes'
 import { ShellHeaderSlotProvider } from './ShellHeaderSlot'
+import { UpdateBanner, type UpdateCheck } from './UpdateBanner'
 import agentosMark from '@/assets/agentos-mark.png'
 
 const ApprovalPrompt = lazy(async () => ({
@@ -231,11 +231,7 @@ export function AppShell() {
   const navigate = useNavigate()
 
   const rpc = useRpc()
-  const [updateStatus, setUpdateStatus] = useState<{
-    current: string
-    latest: string | null
-    status: 'up-to-date' | 'outdated' | 'offline'
-  } | null>(null)
+  const [updateStatus, setUpdateStatus] = useState<UpdateCheck | null>(null)
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(() => {
     try {
       return localStorage.getItem(DISMISSED_VERSION_STORAGE_KEY)
@@ -248,11 +244,7 @@ export function AppShell() {
     if (connState !== 'connected') return
     let active = true
     rpc
-      .call<{
-        current: string
-        latest: string | null
-        status: 'up-to-date' | 'outdated' | 'offline'
-      }>('updates.check')
+      .call<UpdateCheck>('updates.check')
       .then((res) => {
         if (active && res) {
           setUpdateStatus(res)
@@ -696,32 +688,7 @@ export function AppShell() {
         {updateStatus &&
         updateStatus.status === 'outdated' &&
         updateStatus.latest !== dismissedVersion ? (
-          <div
-            role="status"
-            className="flex items-center justify-between gap-4 border-b border-warn/20 bg-warn/10 px-4 py-2 text-sm text-warn shrink-0"
-            data-testid="update-banner"
-          >
-            <div className="flex items-center gap-2">
-              <span className="shrink-0 font-semibold uppercase tracking-wider text-[10px] bg-warn/25 px-1.5 py-0.5 rounded-sm">
-                {t('shell.updateLabel')}
-              </span>
-              <span className="font-medium">
-                {t('shell.updateAvailable', {
-                  current: updateStatus.current,
-                  latest: updateStatus.latest ?? '',
-                })}
-              </span>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={handleDismiss}
-              title={t('shell.updateDismiss')}
-              aria-label={t('shell.updateDismiss')}
-            >
-              <X className="size-4" />
-            </Button>
-          </div>
+          <UpdateBanner check={updateStatus} onDismiss={handleDismiss} />
         ) : null}
         {isChat ? (
           <section

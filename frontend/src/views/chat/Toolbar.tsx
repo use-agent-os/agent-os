@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { ModalShell } from '@/components/ModalShell'
 import { Button } from '@/components/ui/button'
 import { useRpc } from '@/app/providers'
+import { apiUrl } from '@/lib/api-origin'
 import { authenticatedHeaders } from '@/lib/http-auth'
 import {
   approvalMonitor,
@@ -91,7 +92,7 @@ export function Toolbar({
     async (mode: string) => {
       if (!sessionKey || unavailable) return
       try {
-        const resp = await fetch('/api/elevated-mode', {
+        const resp = await fetch(apiUrl('/api/elevated-mode'), {
           method: 'POST',
           headers: authenticatedHeaders({ 'Content-Type': 'application/json' }),
           credentials: 'same-origin',

@@ -841,9 +841,9 @@ model = "openai/gpt-4o-mini"
 ```
 
 Point it at something cheap when these tasks do not need your main model. Tasks
-currently in use are `document` and `vision`; a task with a capability
-requirement wants its own entry, since a text-only model cannot describe an
-image.
+currently in use are `document`, `vision` and `session_title`; a task with a
+capability requirement wants its own entry, since a text-only model cannot
+describe an image.
 
 Resolution runs highest-first: `AGENTOS_<TASK>_MODEL` (for example
 `AGENTOS_VISION_MODEL`), then `[auxiliary.tasks.<task>]`, then a
@@ -854,6 +854,31 @@ none of this keeps using the `[llm]` model exactly as before.
 These calls are billed to the session that triggered them and are additionally
 tracked under an `aux:<task>` scope, so `agentos cost` can separate what the
 agent spent answering from what the runtime spent on its own.
+
+### Session titles
+
+A new chat session is named from its first message: the `session_title` task
+asks the auxiliary model for a 3–6 word title in the user's language, and the
+result lands in the session's `display_name`. With no task override it prefers
+the router's cheapest text tier (`c0`, else `c1`) so titling never waits on a
+slow thinking model, where the web console, the
+desktop app and `agentos sessions` all read it. It only names sessions that
+still carry a placeholder (`WebChat` or the short id); a name you typed, or one
+the agent set with `session_rename`, is never overwritten. The title is
+generated off the turn path, so sending is never slowed down, and open clients
+receive a `sessions.changed` event with `reason = "renamed"` when it lands.
+
+```toml
+[sessions]
+auto_title = true                 # AGENTOS_SESSIONS_AUTO_TITLE=false to disable
+auto_title_timeout_seconds = 30.0
+
+[auxiliary.tasks.session_title]
+model = "openai/gpt-4o-mini"      # or AGENTOS_SESSION_TITLE_MODEL
+```
+
+If the model is unreachable the first clause of the message is used instead,
+so a session still gets a readable name.
 
 ## Sandbox and Permissions
 

@@ -59,3 +59,11 @@ def test_subcommands_still_dispatch_through_the_new_callback() -> None:
     for path in (["doctor", "--help"], ["config", "--help"], ["sessions", "--help"]):
         result = runner.invoke(app, path)
         assert result.exit_code == 0, path
+
+
+def test_short_version_alias() -> None:
+    """`-V` is the conventional short form (the macOS app probes with the long one)."""
+    result = runner.invoke(app, ["-V"])
+
+    assert result.exit_code == 0
+    assert result.stdout.strip() == __version__

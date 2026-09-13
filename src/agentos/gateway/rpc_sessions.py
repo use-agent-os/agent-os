@@ -1647,6 +1647,17 @@ async def _handle_sessions_rename(params: dict | None, ctx: RpcContext) -> dict:
             "Session storage cannot persist a rename",
         )
 
+    # Other open clients (and the sidebar of the one that renamed) learn the
+    # new name now instead of on their next list poll.
+    await _emit_to_subscribers(
+        ctx,
+        resolved_key,
+        "sessions.changed",
+        build_sessions_changed_payload(
+            resolved_key, "renamed", display_name=name, displayName=name
+        ),
+    )
+
     return {
         "key": resolved_key,
         "name": name,

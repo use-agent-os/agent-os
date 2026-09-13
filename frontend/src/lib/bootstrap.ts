@@ -1,3 +1,4 @@
+import { apiOrigin, apiUrl } from './api-origin'
 import { controlBasePath, controlPath } from './control-base'
 
 export interface Bootstrap {
@@ -10,7 +11,7 @@ export interface Bootstrap {
 
 /** Resolve the API from the server-provided Control UI mount path. */
 export function bootstrapUrl(basePath = controlBasePath()): string {
-  return controlPath('api/bootstrap', basePath)
+  return apiUrl(controlPath('api/bootstrap', basePath))
 }
 
 export async function fetchBootstrap(): Promise<Bootstrap> {
@@ -21,6 +22,10 @@ export async function fetchBootstrap(): Promise<Bootstrap> {
 
 /** app.js:192-195 — location-derived default RPC URL. */
 export function defaultWsUrl(): string {
+  // Off-gateway hosts (desktop) derive the socket from the configured API
+  // origin; the served console derives it from its own location.
+  const origin = apiOrigin()
+  if (origin) return `${origin.replace(/^http/, 'ws')}/ws`
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${proto}//${location.host}/ws`
 }

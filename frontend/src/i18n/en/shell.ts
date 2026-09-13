@@ -130,4 +130,11 @@ export const shell = defineNamespace('shell', {
     'A new version of use-agent-os is available: {current} → {latest}. Run agentos upgrade.',
   updateDismiss: 'Dismiss',
   updateLabel: 'Update',
+  updateNow: 'Update now',
+  updateRetry: 'Retry',
+  updateRunning: 'Updating AgentOS… the gateway restarts when the install finishes.',
+  updateRunningShort: 'Updating…',
+  updateDone: 'Updated to {latest}. Reload to load the new console.',
+  updateFailed: 'Update failed: {detail}',
+  updateReload: 'Reload',
 } as const)

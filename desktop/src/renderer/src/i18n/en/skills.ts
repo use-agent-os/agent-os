@@ -1,0 +1,102 @@
+/**
+ * Copy for the Skills panel chrome. Catalog prose that must match the web
+ * console word for word (partner intros, empty states, toasts) is read from
+ * the console's `skills` namespace instead, the way Jobs reads `cron`.
+ */
+export const skills = {
+  'skills.title': 'Skills',
+  'skills.close': 'Close',
+  'skills.refresh': 'Refresh',
+  'skills.search': 'Search installed skills',
+  'skills.sources': 'Sources',
+  'skills.source.installed': 'Installed',
+  'skills.source.installed.hint': 'On this Mac',
+  'skills.source.robinhood.hint': 'Bundled partner',
+  'skills.source.partner.hint': 'Partner catalog',
+  'skills.source.community': 'Community',
+  'skills.source.community.hint': 'Open catalog',
+  'skills.filter': 'Filter',
+  'skills.filter.all': 'All',
+  'skills.filter.ready': 'Ready',
+  'skills.filter.needsSetup': 'Needs setup',
+  'skills.filter.disabled': 'Disabled',
+  'skills.category': 'Category',
+
+  'skills.list.loading': 'Loading skills',
+  'skills.list.error': 'Could not load skills',
+  'skills.list.retry': 'Check the gateway, then refresh.',
+  'skills.list.installed': 'Installed',
+
+  'skills.detail.select': 'Select a skill to see what it does and what it needs',
+  'skills.detail.empty': 'Nothing to show here yet',
+  'skills.detail.about': 'About this catalog',
+  'skills.detail.important': 'Important',
+
+  'skills.status.ready': 'Ready',
+  'skills.status.needsSetup': 'Needs setup',
+  'skills.status.disabled': 'Disabled',
+  'skills.status.offered': 'Offered to the agent',
+
+  'skills.action.use': 'Use in chat',
+  'skills.action.update': 'Update',
+  'skills.action.updating': 'Updating…',
+  'skills.action.remove': 'Remove',
+  'skills.action.removing': 'Removing…',
+  'skills.action.install': 'Install',
+  'skills.action.installing': 'Installing…',
+  'skills.action.forceInstall': 'Install anyway',
+  'skills.action.installed': 'Installed',
+  'skills.action.homepage': 'Homepage',
+  'skills.action.source': 'Source',
+  'skills.action.set': 'Set',
+  'skills.action.installVia': 'Install via',
+  'skills.action.whereToGet': 'Where to get it',
+  'skills.action.reveal': 'Show in Finder',
+
+  'skills.section.description': 'What it does',
+  'skills.section.availability': 'Why the agent is not offered this skill',
+  'skills.section.requirements': 'Requirements',
+  'skills.section.missing': 'Missing on this Mac',
+  'skills.section.install': 'Install dependencies',
+  'skills.section.setup': 'Setup',
+  'skills.section.demo': 'Example',
+  'skills.section.facts': 'Details',
+
+  'skills.fact.source': 'Source',
+  'skills.fact.layer': 'Loaded from',
+  'skills.fact.origin': 'Installed from',
+  'skills.fact.version': 'Version',
+  'skills.fact.installedAt': 'Installed',
+  'skills.fact.scan': 'Scan',
+  'skills.fact.trust': 'Trust',
+  'skills.fact.trust.community': 'community',
+  'skills.fact.identifier': 'Identifier',
+  'skills.fact.path': 'Path',
+  'skills.fact.category': 'Category',
+  'skills.fact.provider': 'Provider',
+  'skills.fact.triggers': 'Triggers',
+  'skills.fact.none': '—',
+
+  'skills.missing.binary': 'command',
+  'skills.missing.env': 'environment variable',
+  'skills.removeBlocked':
+    'Installed outside the managed skills folder. Remove it from the command line.',
+
+  'skills.github.title': 'Install from GitHub',
+  'skills.github.body': 'Paste a repository URL. The skill is scanned before it is enabled.',
+  'skills.github.placeholder': 'https://github.com/owner/repo',
+  'skills.github.install': 'Install',
+
+  'skills.remove.title': 'Remove this skill?',
+  'skills.remove.body':
+    'Its files are deleted from the managed skills folder. You can install it again from a catalog.',
+  'skills.remove.confirm': 'Remove',
+  'skills.remove.cancel': 'Cancel',
+
+  'skills.env.title': 'Set',
+  'skills.env.body': 'Saved to the gateway’s .env file. The skill is checked again right away.',
+  'skills.env.value': 'Value',
+  'skills.env.save': 'Save',
+  'skills.env.saving': 'Saving…',
+  'skills.env.cancel': 'Cancel',
+} as const

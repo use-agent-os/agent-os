@@ -75,6 +75,29 @@ The React console lives in `frontend/` (Node >= 22) and builds to
 - Dev loop: `agentos gateway run` + `cd frontend && npm run dev`
   (Vite proxies `/ws` and `/control/api` to the gateway).
 
+## Desktop lane (Electron shell)
+
+The macOS desktop app lives in `desktop/` (Electron + React + TypeScript,
+Node >= 22). **macOS only** for now: no Windows/Linux branches, and none
+should be added without a decision. It supervises the installed `agentos`
+CLI and talks to the same gateway over loopback. See `desktop/README.md`
+for the layout and the theme system.
+
+**It shares logic with `frontend/`, never UI.** The renderer imports the
+console's transport, chat hooks and transcript renderer through the `@/`
+alias (which points at `frontend/src`), and keeps its own components under
+`~/`. Do not import a `frontend/` stylesheet or a presentational component
+into `desktop/`: the desktop skins the shared transcript class names itself,
+and must not end up looking like the web console.
+
+- Touched `desktop/**`? Run `cd desktop && npm run check` (tsc for node + web
+  targets, eslint, prettier, vitest) before committing. Touching
+  `frontend/src` from a desktop change means running the frontend gate too.
+- Not part of the Python wheel or `build_control_ui.py`; packaging is
+  `cd desktop && npm run package:mac`.
+- The renderer must never import `electron` or Node APIs; everything crosses
+  the typed `window.agentos` bridge defined in `desktop/src/shared/ipc.ts`.
+
 ## Source layout — `src/agentos/`
 
 Every client hits one local **gateway**; the gateway runs turns through the

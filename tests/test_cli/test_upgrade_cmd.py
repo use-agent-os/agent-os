@@ -38,6 +38,24 @@ def _no_source_install(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(upgrade_cmd, "installed_from_directory", lambda *a, **k: None)
 
 
+@pytest.fixture(autouse=True)
+def _offline_release_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test may reach PyPI or GitHub: both lookups answer "unknown".
+
+    Tests that model a specific answer override the PyPI (or GitHub) stub.
+    """
+
+    monkeypatch.setattr("agentos.compat.pypi_client.latest_version", lambda **k: None)
+    monkeypatch.setattr("agentos.compat.github_releases.latest_release_version", lambda **k: None)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The pre-upgrade snapshot must never touch the developer's ~/.agentos."""
+
+    monkeypatch.setenv("AGENTOS_STATE_DIR", str(tmp_path / "home"))
+
+
 def _app() -> typer.Typer:
     app = typer.Typer()
     app.command("upgrade")(upgrade_cmd.upgrade_command)
@@ -49,7 +67,7 @@ def _app() -> typer.Typer:
     return app
 
 
-def _delegated_plan() -> UpgradePlan:
+def _delegated_plan(**_: Any) -> UpgradePlan:
     return UpgradePlan(
         method=InstallMethod.UV_TOOL,
         delegated=True,
@@ -67,7 +85,7 @@ def _delegated_plan() -> UpgradePlan:
     )
 
 
-def _pip_plan() -> UpgradePlan:
+def _pip_plan(**_: Any) -> UpgradePlan:
     return UpgradePlan(
         method=InstallMethod.PIP,
         delegated=False,
@@ -426,6 +444,242 @@ def test_upgrade_subprocess_windows_guards_stuck_communicate_after_kill(
     assert result.ok is False
     assert result.stdout == ""
     assert result.stderr == ""
+
+
+# --- release source: PyPI first, GitHub when it is ahead --------------------
+
+
+def _gh(monkeypatch: pytest.MonkeyPatch, version: str | None) -> None:
+    monkeypatch.setattr(
+        "agentos.compat.github_releases.latest_release_version", lambda **k: version
+    )
+
+
+def _pypi(monkeypatch: pytest.MonkeyPatch, version: str | None) -> None:
+    monkeypatch.setattr("agentos.compat.pypi_client.latest_version", lambda **k: version)
+
+
+def test_auto_source_prefers_pypi_when_it_is_current(monkeypatch: pytest.MonkeyPatch) -> None:
+    _pypi(monkeypatch, "2026.9.11")
+    _gh(monkeypatch, "2026.9.11")
+    choice = upgrade_cmd._choose_release("auto")
+    assert choice.source == "pypi"
+    assert choice.spec == "use-agent-os[recommended]"
+    assert choice.latest == "2026.9.11"
+
+
+def test_auto_source_falls_back_to_github_when_it_is_ahead(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The "PyPI publish failed for this tag" case: the GitHub release exists,
+    # PyPI still serves the previous version.
+    monkeypatch.delenv("AGENTOS_REPOSITORY", raising=False)
+    _pypi(monkeypatch, "2026.9.9")
+    _gh(monkeypatch, "2026.9.11")
+    choice = upgrade_cmd._choose_release("auto")
+    assert choice.source == "github"
+    assert choice.spec == (
+        "use-agent-os[recommended] @ https://github.com/use-agent-os/agent-os/releases/"
+        "download/v2026.9.11/use_agent_os-2026.9.11-py3-none-any.whl"
+    )
+    assert choice.latest == "2026.9.11"
+
+
+def test_auto_source_uses_github_when_pypi_is_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _pypi(monkeypatch, None)
+    _gh(monkeypatch, "2026.9.11")
+    assert upgrade_cmd._choose_release("auto").source == "github"
+
+
+def test_explicit_pypi_source_never_asks_github(monkeypatch: pytest.MonkeyPatch) -> None:
+    _pypi(monkeypatch, "2026.9.9")
+    _gh(monkeypatch, "2026.9.11")
+    choice = upgrade_cmd._choose_release("pypi")
+    assert choice.source == "pypi"
+    assert choice.github is None
+
+
+def test_check_json_reports_both_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    _pypi(monkeypatch, "2026.9.9")
+    _gh(monkeypatch, "99999.1.1")
+    result = runner.invoke(_app(), ["upgrade", "--check", "--json"])
+    assert result.exit_code == 0
+    payload = _json_payload(result.stdout)
+    assert payload["status"] == "outdated"
+    assert payload["latest"] == "99999.1.1"
+    assert payload["pypi"] == "2026.9.9"
+    assert payload["github"] == "99999.1.1"
+    assert payload["source"] == "github"
+
+
+def test_invalid_source_is_rejected() -> None:
+    result = runner.invoke(_app(), ["upgrade", "--source", "ftp"])
+    assert result.exit_code == 2
+
+
+def test_plan_is_built_from_the_chosen_spec(monkeypatch: pytest.MonkeyPatch) -> None:
+    _pypi(monkeypatch, None)
+    _gh(monkeypatch, "2026.9.11")
+    seen: dict[str, Any] = {}
+
+    def fake_plan(**kwargs: Any) -> UpgradePlan:
+        seen.update(kwargs)
+        return _delegated_plan()
+
+    monkeypatch.setattr(upgrade_cmd, "build_upgrade_plan", fake_plan)
+    result = runner.invoke(_app(), ["upgrade", "--dry-run", "--json"])
+    assert result.exit_code == 0
+    assert seen["spec"].startswith("use-agent-os[recommended] @ https://github.com/")
+    assert _json_payload(result.stdout)["source"] == "github"
+
+
+# --- snapshot + data verification ------------------------------------------
+
+
+def test_upgrade_snapshots_before_installing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "config.toml").write_text("a = 1\n", encoding="utf-8")
+    monkeypatch.setattr(upgrade_cmd, "build_upgrade_plan", _delegated_plan)
+    order: list[str] = []
+
+    def fake_run(*a: Any, **k: Any) -> upgrade_cmd.UpgradeRunResult:
+        order.append("install")
+        return _ok_run()
+
+    original = upgrade_cmd.upgrade_snapshot.create_snapshot
+
+    def spy_snapshot(**kwargs: Any) -> Any:
+        order.append("snapshot")
+        return original(**kwargs)
+
+    monkeypatch.setattr(upgrade_cmd.upgrade_snapshot, "create_snapshot", spy_snapshot)
+    monkeypatch.setattr(upgrade_cmd, "_run_upgrade_subprocess", fake_run)
+    monkeypatch.setattr(upgrade_cmd, "_installed_version_via", lambda *a, **k: "9.9.9")
+
+    result = runner.invoke(_app(), ["upgrade", "--no-restart", "--json"])
+    assert result.exit_code == 0
+    assert order == ["snapshot", "install"]
+    payload = _json_payload(result.stdout)
+    assert payload["snapshot"]["files"] == 1
+    assert Path(payload["snapshot"]["path"]).is_dir()
+
+
+def test_no_snapshot_flag_skips_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(upgrade_cmd, "build_upgrade_plan", _delegated_plan)
+    monkeypatch.setattr(upgrade_cmd, "_run_upgrade_subprocess", _ok_run)
+    monkeypatch.setattr(upgrade_cmd, "_installed_version_via", lambda *a, **k: "9.9.9")
+    monkeypatch.setattr(
+        upgrade_cmd.upgrade_snapshot,
+        "create_snapshot",
+        lambda **k: pytest.fail("snapshot must not run with --no-snapshot"),
+    )
+    result = runner.invoke(_app(), ["upgrade", "--no-restart", "--no-snapshot", "--json"])
+    assert result.exit_code == 0
+    assert _json_payload(result.stdout)["snapshot"] is None
+
+
+def test_data_check_runs_only_after_a_verified_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(upgrade_cmd, "build_upgrade_plan", _delegated_plan)
+    monkeypatch.setattr(upgrade_cmd, "_run_upgrade_subprocess", _ok_run)
+    monkeypatch.setattr(upgrade_cmd, "_installed_version_via", lambda *a, **k: "9.9.9")
+    monkeypatch.setattr(upgrade_cmd, "_restart_and_verify", lambda **k: True)
+    checked = {"n": 0}
+
+    def fake_verify(**kwargs: Any) -> dict[str, Any]:
+        checked["n"] += 1
+        return {"data": {"ok": True, "checked": [], "problems": []}, "restored": False}
+
+    monkeypatch.setattr(upgrade_cmd, "_verify_data_after_restart", fake_verify)
+    result = runner.invoke(_app(), ["upgrade", "--json"])
+    assert result.exit_code == 0
+    assert checked["n"] == 1
+    assert _json_payload(result.stdout)["data"]["ok"] is True
+
+    monkeypatch.setattr(upgrade_cmd, "_restart_and_verify", lambda **k: False)
+    result = runner.invoke(_app(), ["upgrade", "--json"])
+    assert result.exit_code == 1
+    assert checked["n"] == 1, "an unverified gateway has not migrated anything to check"
+
+
+def test_corrupt_data_after_upgrade_exits_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(upgrade_cmd, "build_upgrade_plan", _delegated_plan)
+    monkeypatch.setattr(upgrade_cmd, "_run_upgrade_subprocess", _ok_run)
+    monkeypatch.setattr(upgrade_cmd, "_installed_version_via", lambda *a, **k: "9.9.9")
+    monkeypatch.setattr(upgrade_cmd, "_restart_and_verify", lambda **k: True)
+    monkeypatch.setattr(
+        upgrade_cmd,
+        "_verify_data_after_restart",
+        lambda **k: {
+            "data": {
+                "ok": False,
+                "checked": ["x.db"],
+                "problems": [{"path": "x.db", "result": "bad"}],
+            },
+            "restored": False,
+        },
+    )
+    result = runner.invoke(_app(), ["upgrade", "--json"])
+    assert result.exit_code == 1
+
+
+def test_verify_data_flag_reports_and_changes_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    state = tmp_path / "home" / "state"
+    state.mkdir(parents=True)
+    (state / "broken.db").write_bytes(b"not sqlite" * 50)
+    monkeypatch.setattr(
+        upgrade_cmd,
+        "_run_upgrade_subprocess",
+        lambda *a, **k: pytest.fail("--verify-data must not install"),
+    )
+    result = runner.invoke(_app(), ["upgrade", "--verify-data", "--json"])
+    assert result.exit_code == 1
+    payload = _json_payload(result.stdout)
+    assert payload["ok"] is False
+    assert payload["problems"][0]["path"] == str(state / "broken.db")
+
+
+def test_restore_snapshot_refuses_while_gateway_runs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "config.toml").write_text("a = 1\n", encoding="utf-8")
+    snap = upgrade_cmd.upgrade_snapshot.create_snapshot(version="1")
+    monkeypatch.setattr(upgrade_cmd, "_gateway_answering", lambda config_path: True)
+    result = runner.invoke(_app(), ["upgrade", "--restore-snapshot", str(snap.path)])
+    assert result.exit_code == 1
+    assert "gateway is running" in result.stdout
+
+
+def test_restore_snapshot_latest_puts_files_back(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    config = home / "config.toml"
+    config.write_text("good = 1\n", encoding="utf-8")
+    upgrade_cmd.upgrade_snapshot.create_snapshot(version="1")
+    config.write_text("bad = 1\n", encoding="utf-8")
+    monkeypatch.setattr(upgrade_cmd, "_gateway_answering", lambda config_path: False)
+    result = runner.invoke(_app(), ["upgrade", "--restore-snapshot", "latest", "--json"])
+    assert result.exit_code == 0
+    assert config.read_text(encoding="utf-8") == "good = 1\n"
+    assert _json_payload(result.stdout)["restoredFiles"] == [str(config)]
+
+
+def test_restore_snapshot_rejects_a_non_snapshot_directory(tmp_path: Path) -> None:
+    result = runner.invoke(_app(), ["upgrade", "--restore-snapshot", str(tmp_path)])
+    assert result.exit_code == 1
+    assert "Not a snapshot" in result.stdout
 
 
 # --- Windows: stop the gateway before its files are replaced (issue #1365) ---

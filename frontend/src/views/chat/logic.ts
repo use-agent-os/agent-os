@@ -4,6 +4,7 @@
 // so each helper is unit-testable in isolation. Cited legacy line ranges are
 // against static/js/views/chat.js.
 
+import { urlBase } from '@/lib/api-origin'
 import { t } from '@/i18n'
 import '@/i18n/en/chat'
 
@@ -1226,7 +1227,7 @@ export function artifactExportDownloadUrl(
   const raw = artifactDownloadUrl(artifact || {})
   if (!raw) return ''
   try {
-    const url = new URL(raw, window.location.origin)
+    const url = new URL(raw, urlBase())
     if (sessionKey) url.searchParams.set('sessionKey', sessionKey)
     return url.href
   } catch {

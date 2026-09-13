@@ -25,7 +25,7 @@ const MODELS_OK = [
   { id: 'claude-opus-5', name: 'claude-opus-5', provider: 'opencap' },
 ]
 
-function fakeRpc(overrides: Record<string, unknown> = {}) {
+function fakeRpc(overrides: Record<string, unknown> = {}, options: { connected?: boolean } = {}) {
   const listeners = new Map<string, Set<Handler>>()
   const calls: { method: string; params: unknown }[] = []
   const responses: Record<string, unknown> = {
@@ -33,8 +33,16 @@ function fakeRpc(overrides: Record<string, unknown> = {}) {
     'models.list': MODELS_OK,
     ...overrides,
   }
+  // Mirrors the real client: `waitForConnection` resolves at once when the
+  // socket is up and otherwise on the next `_state: connected`.
+  let connected = options.connected ?? true
+  const emit = (event: string, payload: unknown) => {
+    if (event === '_state') connected = payload === 'connected'
+    listeners.get(event)?.forEach((handler) => handler(payload))
+  }
   const rpc = {
     call: vi.fn((method: string, params: unknown) => {
+      if (!connected) return Promise.reject(new Error('Not connected'))
       calls.push({ method, params })
       const value = responses[method]
       if (value instanceof Error) return Promise.reject(value)
@@ -45,9 +53,18 @@ function fakeRpc(overrides: Record<string, unknown> = {}) {
       listeners.get(event)!.add(handler)
       return () => listeners.get(event)?.delete(handler)
     }),
+    waitForConnection: vi.fn(() => {
+      if (connected) return Promise.resolve()
+      return new Promise<void>((resolve) => {
+        const unsub = rpc.on('_state', (state: unknown) => {
+          if (state === 'connected') {
+            unsub()
+            resolve()
+          }
+        })
+      })
+    }),
   }
-  const emit = (event: string, payload: unknown) =>
-    listeners.get(event)?.forEach((handler) => handler(payload))
   return { rpc: rpc as unknown as WsRpcClient, calls, emit }
 }
 
@@ -81,6 +98,39 @@ describe('useRoutePin', () => {
     await waitFor(() => expect(rpc.call).toHaveBeenCalled())
     expect(result.current.enabled).toBe(false)
     expect(result.current.tiers).toEqual([])
+  })
+
+  it('waits for the socket instead of filing "Not connected" as router off', async () => {
+    // The desktop opens onto the home chat while the gateway is still starting,
+    // so the first mount happens with no socket. The picker used to stay
+    // disabled until the next session switch.
+    const { rpc, calls, emit } = fakeRpc({}, { connected: false })
+    const { result } = renderHook(() => useRoutePin(rpc, 'agent:main:main'))
+
+    await waitFor(() => expect(rpc.waitForConnection).toHaveBeenCalled())
+    expect(calls).toHaveLength(0)
+    expect(result.current.enabled).toBe(false)
+
+    act(() => emit('_state', 'connected'))
+
+    await waitFor(() => expect(result.current.enabled).toBe(true))
+    expect(calls[0]).toEqual({ method: 'router.hold.get', params: { key: 'agent:main:main' } })
+    // The first connection is read exactly once: the mount read was waiting on
+    // it, and the reconnect listener must not add a second.
+    await new Promise((r) => setTimeout(r, 20))
+    expect(calls.filter((c) => c.method === 'router.hold.get')).toHaveLength(1)
+  })
+
+  it('re-reads the pin after a reconnect, since a restarted gateway drops every pin', async () => {
+    const { rpc, calls, emit } = fakeRpc()
+    const holdReads = () => calls.filter((c) => c.method === 'router.hold.get')
+    renderHook(() => useRoutePin(rpc, 'agent:main:main'))
+    await waitFor(() => expect(holdReads()).toHaveLength(1))
+
+    act(() => emit('_state', 'disconnected'))
+    act(() => emit('_state', 'connected'))
+
+    await waitFor(() => expect(holdReads()).toHaveLength(2))
   })
 
   it('re-reads the pin when the session changes', async () => {

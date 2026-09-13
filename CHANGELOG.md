@@ -6,6 +6,71 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `agentos upgrade` snapshots `config.toml`, `auth.json`, `skills-lock.json`
+  and every SQLite database under `~/.agentos/state/` before installing
+  (`state/snapshots/pre-upgrade-<utc>/`, newest three kept, databases copied
+  through SQLite's online-backup API), then runs `PRAGMA quick_check` on
+  every database once the restarted gateway has verifiably migrated them, and
+  restores the snapshot if a check fails. `--no-snapshot`, `--verify-data`
+  and `--restore-snapshot DIR|latest` expose the pieces.
+- `agentos upgrade --source auto|pypi|github`: the GitHub release wheel is used
+  when it is ahead of PyPI (a failed PyPI publish no longer strands the
+  upgrade) or PyPI is unreachable. `--check --json` reports both sources.
+- Gateway RPC `providers.probe`: try a provider with a key *before* it is
+  saved — list its models and send a 1-token turn — returning the verdict,
+  the model list and the error text (never the key). The macOS app's
+  provider form has a **Test key** button on it, fills the Default model menu
+  from the provider's own list, and links to the page where the key is
+  issued; the first-run "all set" screen uses the same probe.
+- Gateway RPCs `updates.apply` (runs `agentos upgrade` as a detached job that
+  survives the gateway restart), `updates.status` and `updates.verifyData`;
+  the Control UI's update banner gained an **Update now** button that follows
+  the job through the restart.
+- macOS app: first launch installs the engine. The app discovers the CLI
+  (`agentos --version`), installs this app's version when it is missing or
+  older by driving the bundled `install.sh` stage by stage (`--manifest`,
+  `--stage NAME --json`), shows per-stage progress with the installer's
+  output, and ends on the provider setup (OpenCAP first, tagged Recommended;
+  saving restarts the managed gateway by itself; Home shows a "Choose a
+  provider" card until one is set). "Connect to an existing gateway" skips
+  the install; Settings › Advanced can reinstall or remove the engine.
+- `agentos --version` / `-V` prints the installed version without loading
+  config; `install.sh --manifest` and `--stage NAME --json` expose the
+  installer's stages, each running in its own process and subshell so a
+  failure still yields a `{"ok":false}` frame.
+- macOS app: its own icon (the AgentOS mark on a dark squircle, rendered at
+  1024 px by `desktop/scripts/make-icon.py`) instead of Electron's, in the
+  DMG, Applications, the Dock and notifications.
+- macOS app: Settings › About updates the engine (runs `agentos upgrade
+  --no-restart`, restarts the gateway it spawned, confirms the version and
+  data over RPC, warns before interrupting active sessions) and the app
+  itself (`electron-updater` from the GitHub release of the same `v<CalVer>`
+  tag). Release builds are Developer ID signed and notarized by the new
+  `desktop-release.yml` workflow; `desktop/package.json` now shares the
+  project's CalVer and is bumped by the `pump-version` skill.
+
+### Fixed
+
+- Session auto-titles with reasoning models: the title call was capped at 32
+  output tokens, which a reasoning model spends thinking, so the visible
+  answer was empty and every fresh chat kept its placeholder name (or fell
+  back to the first words of the message). The cap is now 512 (the prompt
+  still keeps plain models at 3 to 6 words), and the word limit counts
+  Vietnamese syllables fairly (10 instead of 7).
+- macOS app: the managed gateway now gets its host and port as
+  `gateway run --bind/--port`. The `AGENTOS_GATEWAY__HOST/PORT` variables the
+  app used to set were never read by the gateway config (wrong prefix, and a
+  `port =` line in config.toml wins over the environment anyway), so a custom
+  port in Settings › Gateway spawned a gateway on 18791 and then waited for
+  the wrong one. The auth token env names now match `AuthConfig`
+  (`AGENTOS_AUTH_TOKEN`, `AGENTOS_AUTH_MODE`).
+- macOS app: the managed gateway's output is written to
+  `~/Library/Logs/AgentOS/gateway.log`; placeholder session names the
+  gateway seeds (`WebChat`, …) show as "New session" until the titler names
+  the chat, and the chat header re-reads a placeholder name for a while
+  after the run settles in case the rename event is missed.
 ### Changed
 
 - The `c0` router tier on the `bankr`, `opencap` and `surplus` tier profiles

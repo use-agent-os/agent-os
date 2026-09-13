@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { toast } from 'sonner'
+import { apiUrl } from '@/lib/api-origin'
 import { authenticatedHeaders } from '@/lib/http-auth'
 import {
   ATTACHMENT_ALLOWED_LABEL,
@@ -104,7 +105,7 @@ export function useAttachments(opts?: {
           : new File([file], file.name, { type: mime })
       form.append('file', uploadFile, file.name)
       form.append('mime', mime)
-      const response = await fetch('/api/v1/files/upload', {
+      const response = await fetch(apiUrl('/api/v1/files/upload'), {
         method: 'POST',
         body: form,
         headers: authenticatedHeaders(),

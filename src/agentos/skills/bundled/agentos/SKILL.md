@@ -316,28 +316,50 @@ the installed CLI version (`cliVersion`) and the running gateway's version
 (`gatewayVersion`); a `versionMismatch` diagnostic means the gateway is running
 old code — restart it.
 
+### Version
+
+`agentos --version` (or `-V`) prints the installed version and exits; it loads
+no config and probes nothing, so it is the cheap "is the engine there?" check
+(the macOS app runs it at launch). `install.sh --manifest` / `--stage NAME
+--json` expose the installer's stages for that app's first-run install.
+
 ### Upgrading AgentOS
 
 ```sh
-agentos upgrade                # upgrade, then restart + verify the gateway
+agentos upgrade                # snapshot, upgrade, then restart + verify the gateway
 agentos upgrade --check        # is a newer release available? changes nothing
 agentos upgrade --dry-run      # print the command that would run; touch nothing
 agentos upgrade --no-restart   # upgrade only; gateway keeps running OLD code
+agentos upgrade --source github            # install the GitHub release wheel
+agentos upgrade --verify-data              # quick_check every state database
+agentos upgrade --restore-snapshot latest  # put the last snapshot back (gateway stopped)
 ```
 
 `agentos upgrade` is the primary path: it detects the install method and
-installs the **published PyPI release** of `use-agent-os[recommended]` (`uv tool
-install --force --python <running> …` / `pipx install --force …`), then by
-default restarts the managed gateway and verifies it reports the new version
-before declaring success. It never installs from a local checkout — even when
-the current install came from one — because only `bash scripts/install_source.sh`
-rebuilds the React control UI before installing, and a PyPI wheel already ships
-a CI-built one. A checkout-backed install gets an informational note naming that
-directory and the script; it never blocks. For pip / editable / unknown installs
-it prints the exact manual command and exits non-zero (**exit 3**) rather than
-faking it; a failed or unverifiable upgrade is **exit 1**. Flags: `--timeout`
+installs the **published release** of `use-agent-os[recommended]` (`uv tool
+install --force --python <running> …` / `pipx install --force …`) — from PyPI,
+or with `--source auto` (default) from the GitHub release wheel when GitHub is
+ahead or PyPI is unreachable — then by default restarts the managed gateway and
+verifies it reports the new version before declaring success. It never installs
+from a local checkout — even when the current install came from one — because
+only `bash scripts/install_source.sh` rebuilds the React control UI before
+installing, and a release wheel already ships a CI-built one. A checkout-backed
+install gets an informational note naming that directory and the script; it
+never blocks. For pip / editable / unknown installs it prints the exact manual
+command and exits non-zero (**exit 3**) rather than faking it; a failed,
+unverifiable or data-check-failed upgrade is **exit 1**. Flags: `--timeout`
 (subprocess bound, default 600s; kills the process group on timeout),
-`--config`, `--json` (adds `sourceDirectory`).
+`--no-snapshot`, `--config`, `--json` (adds `source`, `snapshot`, `data`,
+`sourceDirectory`).
+
+Before installing, `config.toml`, `auth.json`, `skills-lock.json` and every
+SQLite file under `~/.agentos/state/` are snapshotted to
+`state/snapshots/pre-upgrade-<utc>/` (newest three kept). After the restarted
+gateway has run its migrations, every database gets a `PRAGMA quick_check`; on
+failure the managed gateway is stopped, the snapshot restored and the gateway
+started again. The Control UI banner's **Update now** runs the same command as
+a detached job via the `updates.apply` / `updates.status` RPCs; the macOS app
+runs it with `--no-restart` and restarts the gateway it spawned.
 
 On Windows the managed gateway is stopped before the installer runs and started
 again afterwards — Windows cannot replace files a live process holds open, and

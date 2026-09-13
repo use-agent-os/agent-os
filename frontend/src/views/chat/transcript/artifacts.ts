@@ -25,6 +25,7 @@
 // chat.js:7043) is NOT re-ported here — Task 4 already ported it into tools.ts;
 // this module re-exports it from there so there is one definition (DRY).
 
+import { urlBase } from '@/lib/api-origin'
 import { t } from '@/i18n'
 import '@/i18n/en/chat'
 
@@ -159,7 +160,7 @@ export function artifactDownloadUrl(artifact: Artifact | null | undefined): stri
   if (!raw && artifact && artifact.id) raw = `/api/v1/artifacts/${encodeURIComponent(artifact.id)}`
   if (!raw) return ''
   try {
-    const url = new URL(raw, window.location.origin)
+    const url = new URL(raw, urlBase())
     url.searchParams.delete('sessionKey')
     url.searchParams.delete('session_key')
     return url.pathname + url.search + url.hash
@@ -184,7 +185,7 @@ export function artifactPreviewUrl(
   const raw = artifactDownloadUrl(artifact)
   if (!raw) return ''
   try {
-    const url = new URL(raw, window.location.origin)
+    const url = new URL(raw, urlBase())
     if (ctx.sessionKey) url.searchParams.set('sessionKey', ctx.sessionKey)
     if (ctx.token) url.searchParams.set('token', ctx.token)
     return url.pathname + url.search + url.hash
@@ -198,7 +199,7 @@ export function artifactPreviewUrl(
 export function artifactAuthenticatedDownloadUrl(raw: string, ctx: ArtifactUrlContext): string {
   if (!raw) return ''
   try {
-    const url = new URL(raw, window.location.origin)
+    const url = new URL(raw, urlBase())
     if (ctx.sessionKey) url.searchParams.set('sessionKey', ctx.sessionKey)
     if (ctx.token) url.searchParams.set('token', ctx.token)
     return url.pathname + url.search + url.hash

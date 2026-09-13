@@ -247,6 +247,36 @@ Useful automation flags:
 | `--session-db-path` | Persist session replay across invocations. |
 | `--json` | Emit machine-readable JSON output. |
 
+## Version
+
+```sh
+agentos --version     # or -V: prints the installed version, nothing else
+```
+
+Deliberately cheap (no config load, no gateway probe): the macOS app runs it
+at every launch to decide whether the engine it ships needs installing.
+
+## Installer stage protocol
+
+`install.sh` is also the engine installer behind the macOS app, which drives it
+stage by stage so it can show real progress and retry one step:
+
+```sh
+bash install.sh --manifest            # one JSON line: {"protocol_version":1,"stages":[…]}
+bash install.sh --stage uv --json     # run ONE stage; the last stdout line is the result frame
+                                      #   {"ok":true|false,"stage":"uv","skipped":bool[,"reason":"…"]}
+```
+
+Stages, in order: `prerequisites` (platform, curl/wget, reachability of
+github.com and astral.sh), `uv` (download-then-run the astral installer if uv is
+missing), `python` (`uv python install 3.12` if needed), `package`
+(`uv tool install --force` the version-pinned wheel, then smoke-test the entry
+point), `path` (append the uv tool bin dir to the login shell's rc file once),
+`complete`. Every `--stage` call is a separate process, each stage body runs in
+a subshell so a helper's `exit 1` still yields `{"ok":false}`, and
+`--non-interactive` makes a stage that would need input report `skipped:true`
+(none do today). A plain `bash install.sh` runs all stages in order as before.
+
 ## Upgrade
 
 `agentos upgrade` is the primary upgrade path. It detects how AgentOS was
@@ -261,21 +291,68 @@ run `bash scripts/install_source.sh` — that script is the only path that
 rebuilds the React control UI (`npm ci && npm run build`) before installing.
 
 ```sh
-agentos upgrade                 # upgrade, restart the gateway, verify
+agentos upgrade                 # snapshot, upgrade, restart the gateway, verify
 agentos upgrade --check         # is a newer release available? change nothing
 agentos upgrade --dry-run       # print the exact command that would run
 agentos upgrade --no-restart    # upgrade only; leave the gateway on OLD code
+agentos upgrade --source github # install the GitHub release asset, not PyPI
 agentos upgrade --timeout 900   # bound the upgrade subprocess (default 600s)
+agentos upgrade --verify-data   # only check the state databases
+agentos upgrade --restore-snapshot latest   # put the last snapshot back
 ```
 
 | Flag | Purpose |
 | --- | --- |
-| `--check` | Query PyPI for a newer release (5s timeout); offline prints `could not check (offline)`. Changes nothing. |
-| `--dry-run` | Print the upgrade command that would run and whether the gateway would be restarted; touch nothing. |
-| `--no-restart` | Upgrade the package but do not restart the gateway. Prints an unmissable warning that it still runs the old version; run `agentos gateway restart` yourself. |
+| `--check` | Ask PyPI and GitHub Releases for a newer release (5s timeout each); offline prints `could not check (offline)`. Changes nothing. `--json` adds `pypi`, `github` and the `source` an upgrade would use. |
+| `--dry-run` | Print the upgrade command that would run, whether a snapshot would be taken and whether the gateway would be restarted; touch nothing. |
+| `--source` | `auto` (default): PyPI, or the GitHub release wheel when GitHub is ahead or PyPI is unreachable. `pypi` / `github` force one. |
+| `--no-snapshot` | Skip the pre-upgrade snapshot (default: taken). |
+| `--no-restart` | Upgrade the package but do not restart the gateway. Prints an unmissable warning that it still runs the old version; run `agentos gateway restart` yourself. The data check is skipped too — only a restarted gateway has migrated anything. |
 | `--timeout` | Upgrade-subprocess timeout in seconds (default 600). On timeout the tool's process group is killed with recovery guidance — never a half-state. |
+| `--verify-data` | Run `PRAGMA quick_check` on every SQLite file under `~/.agentos/state/` and exit; nothing else happens. Exit 1 on a problem, naming the last snapshot. |
+| `--restore-snapshot DIR\|latest` | Copy a pre-upgrade snapshot back file for file. Refuses while a gateway answers on the configured endpoint (a live database would replay its journal over the restored file). |
 | `--config` | Target a specific config file for the gateway restart. |
 | `--json` | Machine-readable output. |
+
+### Release sources
+
+Every release is published twice — a wheel on PyPI and the same wheel attached
+to the GitHub release the tag created (`install.sh` installs from the latter).
+`--source auto` prefers PyPI and falls back to the GitHub asset only when GitHub
+is *ahead* (the "PyPI publish failed for this tag" case) or PyPI cannot be
+reached; the spec then becomes
+`use-agent-os[recommended] @ https://github.com/use-agent-os/agent-os/releases/download/v<version>/use_agent_os-<version>-py3-none-any.whl`,
+which `uv tool install` / `pipx install` accept as-is. `AGENTOS_REPOSITORY`
+(`owner/name`) points both `install.sh` and the upgrade at a fork.
+
+### Snapshot and data check
+
+Before the installer runs, `config.toml`, `auth.json`, `skills-lock.json` and
+every `*.db` / `*.sqlite` under `~/.agentos/state/` are copied into
+`~/.agentos/state/snapshots/pre-upgrade-<utc>/` (databases through SQLite's
+online-backup API, so a WAL-mode file the gateway is writing still yields a
+consistent copy; files over 1 GiB are skipped and listed; `.env` is never
+copied). The newest three snapshots are kept.
+
+After the restarted gateway has verifiably reported the new version — and so
+has run its config and schema migrations — every state database gets a
+`PRAGMA quick_check`. If one fails and there is a snapshot, the managed gateway
+is stopped, the snapshot restored, the gateway started again and the check
+repeated; the JSON output carries `data` and `restored`. A gateway this command
+does not manage is left alone and the exact `--restore-snapshot` command is
+printed instead.
+
+### From the Control UI and the desktop app
+
+The web console's update banner has an **Update now** button: it calls the
+`updates.apply` RPC, which spawns `agentos upgrade --json` as a detached job
+(it survives the gateway restart it causes) and records progress under
+`~/.agentos/state/upgrade_job.{json,log}`; `updates.status` reports
+`idle | running | done | failed` plus the log tail and the final JSON, from
+whichever gateway process is up. `updates.verifyData` runs the data check on
+demand. The macOS app runs `agentos upgrade --json --no-restart` itself,
+restarts the gateway it spawned, then confirms the version and data over RPC
+(Settings › About).
 
 Per install method:
 
@@ -327,7 +404,8 @@ AgentOS process, re-run the printed command from a fresh terminal, and — if
 
 Exit codes: **0** success (upgraded + verified, or `--check`/`--dry-run`);
 **3** this install method needs a manual command (printed); **1** the upgrade
-failed, timed out, or the post-restart version could not be verified.
+failed, timed out, the post-restart version could not be verified, or the data
+check failed; **2** an invalid `--source`.
 
 Config migrations run at gateway start and write a timestamped backup before
 rewriting any file, so `~/.agentos/` config and data are safe across upgrades.

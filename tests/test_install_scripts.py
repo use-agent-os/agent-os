@@ -1,7 +1,10 @@
+import json
 import os
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE_PS1 = ROOT / "install.ps1"
@@ -171,12 +174,11 @@ def test_release_installer_rejects_non_release_selectors() -> None:
 def test_windows_installer_stops_when_native_install_command_fails() -> None:
     ps1 = SOURCE_PS1.read_text(encoding="utf-8")
 
-    assert 'if ($LASTEXITCODE -ne 0) {' in ps1
+    assert "if ($LASTEXITCODE -ne 0) {" in ps1
     assert "install_source.ps1: install command failed with exit code $LASTEXITCODE." in ps1
     assert (
         "Close any running AgentOS gateway or shell using the existing "
-        "tool environment, then retry."
-        in ps1
+        "tool environment, then retry." in ps1
     )
     assert "exit $LASTEXITCODE" in ps1
 
@@ -227,3 +229,93 @@ def test_windows_installer_bootstraps_vc_redist_for_onnx_runtime() -> None:
         assert "safe embedding fallback" in ps1
         assert "If automatic installation fails, install it manually" in ps1
         assert "After installing, reopen PowerShell and restart AgentOS" in ps1
+
+
+# --- install.sh stage protocol (drives the macOS desktop's first-run install) ---
+
+
+def _run_install_sh(
+    *args: str, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    full_env = dict(os.environ)
+    full_env["AGENTOS_INSTALL_DRY_RUN"] = "1"
+    if env:
+        full_env.update(env)
+    return subprocess.run(
+        ["bash", str(RELEASE_SH), *args],
+        capture_output=True,
+        check=False,
+        text=True,
+        env=full_env,
+    )
+
+
+def _last_json_line(stdout: str) -> dict[str, object]:
+    lines = [line for line in stdout.splitlines() if line.startswith("{")]
+    assert lines, f"no JSON frame on stdout:\n{stdout}"
+    payload = json.loads(lines[-1])
+    assert isinstance(payload, dict)
+    return payload
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="bash installer")
+def test_install_sh_manifest_lists_stages_in_install_order() -> None:
+    result = _run_install_sh("--manifest")
+    assert result.returncode == 0, result.stderr
+    manifest = json.loads(result.stdout.strip())
+    assert manifest["protocol_version"] == 1
+    names = [stage["name"] for stage in manifest["stages"]]
+    assert names == ["prerequisites", "uv", "python", "package", "path", "complete"]
+    for stage in manifest["stages"]:
+        assert set(stage) == {"name", "title", "category", "needs_user_input"}
+        assert stage["needs_user_input"] is False
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="bash installer")
+def test_install_sh_stage_emits_a_result_frame_last_on_stdout() -> None:
+    result = _run_install_sh("--stage", "package", "--json", "--non-interactive")
+    assert result.returncode == 0, result.stderr
+    # Progress prose precedes the frame; the frame is the last line.
+    assert result.stdout.strip().splitlines()[-1].startswith("{")
+    assert _last_json_line(result.stdout) == {"ok": True, "stage": "package", "skipped": False}
+    assert "use_agent_os-" in result.stdout
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="bash installer")
+def test_install_sh_unknown_stage_is_a_frame_not_a_crash() -> None:
+    result = _run_install_sh("--stage", "bogus", "--json")
+    assert result.returncode == 2
+    assert _last_json_line(result.stdout) == {
+        "ok": False,
+        "stage": "bogus",
+        "skipped": False,
+        "reason": "unknown stage",
+    }
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="bash installer")
+def test_install_sh_failed_stage_still_emits_a_frame(tmp_path: Path) -> None:
+    # The stage body calls `exit 1` inside its subshell; the caller must still
+    # get {"ok": false} rather than a process that vanished mid-run. A HOME
+    # with no uv and a PATH without it makes `package` fail at require_uv.
+    result = _run_install_sh(
+        "--stage",
+        "package",
+        "--json",
+        env={"AGENTOS_INSTALL_DRY_RUN": "0", "PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+    )
+    assert result.returncode != 0
+    frame = _last_json_line(result.stdout)
+    assert frame["ok"] is False
+    assert frame["stage"] == "package"
+    assert "failed" in str(frame["reason"])
+    assert "uv is not installed" in result.stderr
+
+
+@pytest.mark.skipif(sys.platform.startswith("win"), reason="bash installer")
+def test_install_sh_plain_run_still_walks_every_stage() -> None:
+    result = _run_install_sh()
+    assert result.returncode == 0, result.stderr
+    for text in ("would install uv", "would ensure Python", "would install AgentOS", "PATH"):
+        assert text in result.stdout + result.stderr
+    assert "{" not in result.stdout, "no JSON frames outside --json mode"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tomllib
 from pathlib import Path
 
@@ -99,22 +100,28 @@ def test_changelog_has_current_release_section_and_unreleased() -> None:
     changelog = Path("CHANGELOG.md")
     assert changelog.is_file(), "CHANGELOG.md must exist at the repository root"
     text = changelog.read_text(encoding="utf-8")
-    assert (
-        f"[{CURRENT_VERSION}]" in text
-    ), f"CHANGELOG.md must contain a [{CURRENT_VERSION}] section"
+    assert f"[{CURRENT_VERSION}]" in text, (
+        f"CHANGELOG.md must contain a [{CURRENT_VERSION}] section"
+    )
     assert "[Unreleased]" in text, "CHANGELOG.md must retain an [Unreleased] section"
+
+
+def test_desktop_app_version_matches_current_release() -> None:
+    """electron-updater reads desktop/package.json and looks for the GitHub
+    release tagged v<that version>: the wheel's tag. Drift means the app
+    either never sees an update or downloads the wrong one."""
+    package = json.loads(Path("desktop/package.json").read_text(encoding="utf-8"))
+    assert package["version"] == CURRENT_VERSION, (
+        f"desktop/package.json version must match the current release; got '{package['version']}'"
+    )
 
 
 def test_readme_release_install_uses_latest_assets_and_pinned_alternative() -> None:
     readme = Path("README.md").read_text(encoding="utf-8")
 
+    assert "releases/latest/download/AgentOS-windows-x64-portable.zip" in readme
     assert (
-        "releases/latest/download/AgentOS-windows-x64-portable.zip"
-        in readme
-    )
-    assert (
-        f"releases/download/{CURRENT_TAG}/use_agent_os-{CURRENT_VERSION}-py3-none-any.whl"
-        in readme
+        f"releases/download/{CURRENT_TAG}/use_agent_os-{CURRENT_VERSION}-py3-none-any.whl" in readme
     )
     assert "use_agent_os-latest-py3-none-any.whl" not in readme
     assert "Python wheel installs use versioned wheel filenames" in readme
@@ -139,5 +146,5 @@ def test_release_workflow_marks_preview_tags_as_prereleases() -> None:
     assert "AgentOS {match.group(1)} Preview {match.group(2)}" in workflow
     assert "is_prerelease = bool(re.search" in workflow
     assert "if not is_prerelease:" in workflow
-    assert "expected.add(\"AgentOS-windows-x64-portable.zip\")" in workflow
+    assert 'expected.add("AgentOS-windows-x64-portable.zip")' in workflow
     assert "use_agent_os-latest-py3-none-any.whl" not in workflow

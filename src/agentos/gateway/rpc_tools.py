@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+import time
 from typing import Any
 
+from agentos.gateway.access import CONTROL_ONLY
 from agentos.gateway.rpc import RpcContext, get_dispatcher
 from agentos.tools.builtin.web import (
     get_active_provider,
@@ -124,6 +127,149 @@ async def _model_probe(provider_id: str, ctx: RpcContext) -> dict[str, Any]:
         return {"attempted": True, "status": "ok", "count": len(matching), "error": None}
     except Exception as exc:  # noqa: BLE001 - diagnostic surface
         return {"attempted": True, "status": "error", "count": 0, "error": str(exc)}
+
+
+async def _probe_chat(provider: Any, model: str, timeout: float) -> str | None:
+    """One 1-token turn: the only check every provider answers honestly.
+
+    ``list_models`` is static for some providers and swallows HTTP errors for
+    others, so a wrong key can still produce a plausible list. A completion
+    cannot: the provider either answers or reports why not. Returns the error
+    text, or None when the turn went through.
+    """
+    from agentos.provider.types import ChatConfig, Message
+
+    async def _run() -> str | None:
+        stream = provider.chat(
+            messages=[Message(role="user", content="ping")],
+            config=ChatConfig(max_tokens=1, temperature=0.0),
+        )
+        async for event in stream:
+            kind = getattr(event, "kind", "")
+            if kind == "error":
+                code = str(getattr(event, "code", "") or "provider_error")
+                message = str(getattr(event, "message", "") or "provider stream failed")
+                return f"{code}: {message}"
+            if kind == "done":
+                return None
+        return None
+
+    try:
+        return await asyncio.wait_for(_run(), timeout=timeout)
+    except TimeoutError:
+        return f"no answer within {timeout:.0f}s"
+    except Exception as exc:  # noqa: BLE001 - diagnostic surface
+        return str(exc)
+
+
+@_d.method("providers.probe", CONTROL_ONLY)
+async def _handle_providers_probe(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    """Try a provider with a key BEFORE it is saved: list its models, send one token.
+
+    Params:
+        providerId: catalog id (required)
+        apiKey: the key to try; omitted → the configured key for that provider
+        apiKeyEnv: env var holding the key (used when apiKey is omitted)
+        baseUrl: override; omitted → configured / default
+        model: model for the 1-token turn; omitted → the provider's default,
+          else the first listed model
+
+    Returns ``ok`` (the turn went through), ``models`` (id, name, contextWindow),
+    ``model`` (the one tried), ``latencyMs`` and ``error``. The key is never
+    echoed back.
+    """
+    from agentos.onboarding.provider_specs import list_provider_setup_specs
+    from agentos.provider.selector import ProviderBuildError, build_provider
+
+    if not isinstance(params, dict):
+        raise ValueError("params must be an object")
+    provider_id = str(params.get("providerId") or "").strip()
+    if not provider_id:
+        raise ValueError("params.providerId is required")
+    by_id = {spec.provider_id: spec for spec in list_provider_setup_specs()}
+    spec = by_id.get(provider_id)
+    if spec is None:
+        raise ValueError(f"Unknown provider: {provider_id}")
+
+    llm_cfg = getattr(getattr(ctx, "config", None), "llm", None)
+    is_active = provider_id == _active_llm_provider(ctx)
+
+    api_key = str(params.get("apiKey") or "").strip()
+    if not api_key:
+        env_name = str(params.get("apiKeyEnv") or "").strip() or _provider_api_key_env(
+            provider_id, spec.env_key, ctx
+        )
+        if is_active:
+            api_key = str(getattr(llm_cfg, "api_key", "") or "")
+        if not api_key and env_name:
+            api_key = os.environ.get(env_name, "")
+    base_url = str(params.get("baseUrl") or "").strip() or _provider_base_url(
+        provider_id, spec.default_base_url, ctx
+    )
+    requested_model = str(params.get("model") or "").strip()
+
+    if spec.requires_api_key and not api_key:
+        return {
+            "providerId": provider_id,
+            "ok": False,
+            "models": [],
+            "model": requested_model,
+            "latencyMs": 0,
+            "error": "No API key to try.",
+        }
+
+    started = time.monotonic()
+    model = requested_model or spec.default_direct_model or "diagnostic-model"
+    try:
+        provider = build_provider(provider_id, model, api_key=api_key, base_url=base_url)
+    except ProviderBuildError as exc:
+        return {
+            "providerId": provider_id,
+            "ok": False,
+            "models": [],
+            "model": model,
+            "latencyMs": 0,
+            "error": str(exc),
+        }
+
+    models: list[dict[str, Any]] = []
+    try:
+        listed = await asyncio.wait_for(provider.list_models(), timeout=12.0)
+        models = [
+            {
+                "id": m.model_id,
+                "name": m.display_name or m.model_id,
+                "contextWindow": m.context_window,
+            }
+            for m in listed
+            if getattr(m, "model_id", "")
+        ]
+    except Exception:  # noqa: BLE001 - the chat probe below is the verdict
+        models = []
+
+    if not requested_model and not spec.default_direct_model and models:
+        model = models[0]["id"]
+        try:
+            provider = build_provider(provider_id, model, api_key=api_key, base_url=base_url)
+        except ProviderBuildError as exc:
+            return {
+                "providerId": provider_id,
+                "ok": False,
+                "models": models,
+                "model": model,
+                "latencyMs": int((time.monotonic() - started) * 1000),
+                "error": str(exc),
+            }
+
+    error = await _probe_chat(provider, model, timeout=15.0)
+    return {
+        "providerId": provider_id,
+        "ok": error is None,
+        "models": models,
+        "model": model,
+        "latencyMs": int((time.monotonic() - started) * 1000),
+        "error": error,
+    }
 
 
 @_d.method("providers.status")
