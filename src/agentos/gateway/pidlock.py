@@ -55,18 +55,47 @@ class GatewayPidLock:
         """Acquire the PID file lock.
 
         Algorithm:
-        1. If gateway.pid already exists, read it.
-           - pid alive  → SystemExit(1) with STATE_DIR + pid in message.
-           - pid dead   → log warning (stale), remove pid file, continue.
-        2. Acquire exclusive OS lock on gateway.pid.lock (separate file so
+        1. Acquire exclusive OS lock on gateway.pid.lock (separate file so
            gateway.pid stays freely readable while the lock is held).
-           - Lock fails (race) → SystemExit(1).
+           - Lock fails → SystemExit(1), reporting the pid recorded by the
+             holder. Nothing in the STATE_DIR is modified.
+        2. Holding the lock, reconcile gateway.pid.
+           - pid alive  → release the lock, SystemExit(1) with STATE_DIR + pid.
+           - pid dead   → log warning (stale), remove pid file, continue.
         3. Write pid + start_ts (ISO 8601) to gateway.pid, fsync.
         4. Register atexit + SIGTERM/SIGINT cleanup.
+
+        The lock is taken before step 2 on purpose. A process that has not
+        won exclusivity must not mutate shared state: reconciling first meant
+        a losing starter deleted the running gateway's pid file and only then
+        discovered it could not have the lock.
         """
         self._state_dir.mkdir(parents=True, exist_ok=True)
 
-        # ── Step 1: check existing pid file ──────────────────────────
+        # ── Step 1: exclusive OS lock on the lock file ────────────────
+        # Taken first so a losing starter leaves the STATE_DIR exactly as it
+        # found it. The pid file is still intact here, so the holder's pid is
+        # available for the error message rather than reading back as
+        # "unknown" because this process just deleted it.
+        lock_fh = open(str(self._lock_path), "w+b")  # noqa: WPS515
+
+        if not _try_lock(lock_fh):
+            existing_pid = _read_pid_from_path(self._pid_path)
+            lock_fh.close()
+            pid_str = str(existing_pid) if existing_pid is not None else "unknown"
+            log.error(
+                "gateway.pidlock.already_running",
+                extra={"pid": existing_pid, "state_dir": str(self._state_dir)},
+            )
+            print(
+                f"ERROR: Another gateway is already running "
+                f"(pid={pid_str}, state_dir={self._state_dir}). "
+                f"Stop it first or remove {self._pid_path}.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        # ── Step 2: holding the lock, reconcile the pid file ──────────
         if self._pid_path.exists():
             existing_pid = _read_pid_from_path(self._pid_path)
             if existing_pid is not None and _is_alive(existing_pid):
@@ -80,6 +109,8 @@ class GatewayPidLock:
                     f"Stop it first or remove {self._pid_path}.",
                     file=sys.stderr,
                 )
+                _unlock(lock_fh)
+                lock_fh.close()
                 sys.exit(1)
             elif existing_pid is not None:
                 log.warning(
@@ -90,22 +121,6 @@ class GatewayPidLock:
                 self._pid_path.unlink(missing_ok=True)
             except OSError:
                 pass
-
-        # ── Step 2: exclusive OS lock on the lock file ────────────────
-        lock_fh = open(str(self._lock_path), "w+b")  # noqa: WPS515
-
-        if not _try_lock(lock_fh):
-            # Race: another process won the lock between step 1 and now.
-            existing_pid = _read_pid_from_path(self._pid_path)
-            lock_fh.close()
-            pid_str = str(existing_pid) if existing_pid is not None else "unknown"
-            print(
-                f"ERROR: Another gateway is already running "
-                f"(pid={pid_str}, state_dir={self._state_dir}). "
-                f"Stop it first or remove {self._pid_path}.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
 
         # ── Step 3: write pid + start_ts to the pid file ─────────────
         self._lock_fh = lock_fh
