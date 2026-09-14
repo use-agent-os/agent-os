@@ -381,9 +381,7 @@ async def _handle_doctor_memory_status(params: dict | None, ctx: RpcContext) -> 
                 "memorySource": manager_status.get("memory_source"),
                 "retrievalMode": manager_status.get("retrieval_mode"),
                 "configuredRetrievalMode": manager_status.get("configured_retrieval_mode"),
-                "embeddingRequestedProvider": manager_status.get(
-                    "embedding_requested_provider"
-                ),
+                "embeddingRequestedProvider": manager_status.get("embedding_requested_provider"),
                 "embeddingEffectiveProvider": manager_status.get("embedding_effective_provider"),
                 "embeddingModel": manager_status.get("embedding_model"),
                 "vectorWeight": manager_status.get("vector_weight"),

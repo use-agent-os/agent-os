@@ -229,8 +229,7 @@ class UploadStore:
         max_bytes = min(self.max_file_bytes, mime_limit)
         if len(payload) > max_bytes:
             raise UploadOversizeError(
-                f"upload exceeds {max_bytes} byte cap for {normalized_mime} "
-                f"(got {len(payload)})"
+                f"upload exceeds {max_bytes} byte cap for {normalized_mime} (got {len(payload)})"
             )
 
         file_uuid = f"u-{_uuid.uuid4().hex}"
@@ -373,8 +372,7 @@ def register_upload_routes(
                 return JSONResponse(
                     {
                         "error": (
-                            "Authorization header (Bearer …) required for "
-                            "/api/v1/files/upload"
+                            "Authorization header (Bearer …) required for /api/v1/files/upload"
                         ),
                         "code": "UNAUTHORIZED",
                     },
@@ -394,15 +392,11 @@ def register_upload_routes(
         except RequestBodyTooLargeError:
             return _too_large(store.max_file_bytes)
         except Exception as exc:
-            return JSONResponse(
-                {"error": f"multipart/form-data required: {exc}"}, status_code=400
-            )
+            return JSONResponse({"error": f"multipart/form-data required: {exc}"}, status_code=400)
 
         upload = form.get("file")
         if upload is None or not hasattr(upload, "read"):
-            return JSONResponse(
-                {"error": "missing 'file' multipart field"}, status_code=400
-            )
+            return JSONResponse({"error": "missing 'file' multipart field"}, status_code=400)
 
         filename = getattr(upload, "filename", None) or "attachment"
         content_type = getattr(upload, "content_type", None) or form.get("mime") or ""
@@ -424,9 +418,7 @@ def register_upload_routes(
         )
         payload = await upload.read(cap + 1)
         if not isinstance(payload, bytes) or len(payload) == 0:
-            return JSONResponse(
-                {"error": "empty upload"}, status_code=400
-            )
+            return JSONResponse({"error": "empty upload"}, status_code=400)
         if len(payload) > cap:
             return _too_large(cap, mime=normalized_mime)
 
@@ -448,9 +440,7 @@ def register_upload_routes(
             }
         )
 
-    app.router.routes.append(
-        Route("/api/v1/files/upload", upload_handler, methods=["POST"])
-    )
+    app.router.routes.append(Route("/api/v1/files/upload", upload_handler, methods=["POST"]))
 
 
 # ---------------------------------------------------------------------------

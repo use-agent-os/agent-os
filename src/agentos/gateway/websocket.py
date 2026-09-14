@@ -231,11 +231,7 @@ class WsConnection:
         # one synchronous flow with no ``await`` between them, so
         # ``_force_close`` cannot flip ``_closing`` mid-flight (asyncio is
         # single-threaded; only awaits yield).
-        if (
-            self._queue_enabled
-            and self._outbox is not None
-            and not self._closing
-        ):
+        if self._queue_enabled and self._outbox is not None and not self._closing:
             classification = "lossy" if event in _LOSSY_EVENTS else "control"
             frame = _OutboundFrame(
                 kind=f"event:{event}",
@@ -257,11 +253,7 @@ class WsConnection:
         # RPC responses are always CONTROL: they carry state-bearing payloads
         # and a slow-client overflow must close the connection rather than
         # silently dropping the response.
-        if (
-            self._queue_enabled
-            and self._outbox is not None
-            and not self._closing
-        ):
+        if self._queue_enabled and self._outbox is not None and not self._closing:
             outbound = _OutboundFrame(
                 kind="res",
                 classification="control",
@@ -751,16 +743,13 @@ async def handle_ws_connection(
                 * 1000
             ),
             agent_stream_idle_timeout_ms=int(
-                max(0.0, float(getattr(config, "agent_stream_idle_timeout_seconds", 600.0)))
-                * 1000
+                max(0.0, float(getattr(config, "agent_stream_idle_timeout_seconds", 600.0))) * 1000
             ),
             webui_stream_idle_grace_ms=int(
-                max(0.0, float(getattr(config, "webui_stream_idle_grace_seconds", 630.0)))
-                * 1000
+                max(0.0, float(getattr(config, "webui_stream_idle_grace_seconds", 630.0))) * 1000
             ),
             client_ws_keepalive_timeout_ms=int(
-                max(0.0, float(getattr(config, "client_ws_keepalive_timeout_s", 120.0)))
-                * 1000
+                max(0.0, float(getattr(config, "client_ws_keepalive_timeout_s", 120.0))) * 1000
             ),
         ),
     )

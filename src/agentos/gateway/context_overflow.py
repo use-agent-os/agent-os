@@ -570,9 +570,7 @@ async def apply_context_overflow_policy(
                 emergency_ephemeral=outcome.reason == "emergency_ephemeral",
             )
             terminal_status = (
-                "emergency_ephemeral"
-                if outcome.reason == "emergency_ephemeral"
-                else "failed"
+                "emergency_ephemeral" if outcome.reason == "emergency_ephemeral" else "failed"
             )
             notify_compaction(
                 session_key,

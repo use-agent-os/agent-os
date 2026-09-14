@@ -82,8 +82,7 @@ def _align_auto_router_profile_for_provider_patch(
     if "llm.provider" not in explicit_paths:
         return
     if any(
-        path == "agentos_router" or path.startswith("agentos_router.")
-        for path in explicit_paths
+        path == "agentos_router" or path.startswith("agentos_router.") for path in explicit_paths
     ):
         return
 
@@ -385,9 +384,8 @@ def _restart_reasons(
         reasons.append("channels")
     if old_sandbox_posture_fingerprint != _sandbox_posture_restart_fingerprint(new_config):
         reasons.append("sandbox")
-    if (
-        old_bind_fingerprint is not None
-        and old_bind_fingerprint != _bind_restart_fingerprint(new_config)
+    if old_bind_fingerprint is not None and old_bind_fingerprint != _bind_restart_fingerprint(
+        new_config
     ):
         reasons.append("gateway_bind")
     if old_boot_runtime_fingerprints is not None:
@@ -798,9 +796,7 @@ async def _handle_config_patch_safe(params: dict | None, ctx: RpcContext) -> dic
 
     unsafe_paths = sorted(set(dot_patches) - _SAFE_WRITE_PATCH_PATHS)
     if unsafe_paths:
-        raise ValueError(
-            f"Path is outside the writable configuration roots: {unsafe_paths[0]}"
-        )
+        raise ValueError(f"Path is outside the writable configuration roots: {unsafe_paths[0]}")
 
     return cast(dict[str, Any], await _handle_config_patch(params, ctx))
 

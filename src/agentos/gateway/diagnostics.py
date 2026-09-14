@@ -64,9 +64,7 @@ class DiagnosticsState:
     def snapshot(self) -> DiagnosticsSnapshot:
         with self._lock:
             effective_enabled = (
-                self._configured_enabled
-                if self._runtime_enabled is None
-                else self._runtime_enabled
+                self._configured_enabled if self._runtime_enabled is None else self._runtime_enabled
             )
             runtime_raw = bool(effective_enabled and self._runtime_raw)
             env_override = env_forces_raw_turn_call()

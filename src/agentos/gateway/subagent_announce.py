@@ -678,9 +678,7 @@ async def _spawn_group_pending_count(
         parent_task_id=parent_task_id,
         session_manager=session_manager,
     )
-    return sum(
-        1 for row in rows if _session_status(row) not in _TERMINAL_SESSION_STATUSES
-    )
+    return sum(1 for row in rows if _session_status(row) not in _TERMINAL_SESSION_STATUSES)
 
 
 def _format_parent_wake_message(

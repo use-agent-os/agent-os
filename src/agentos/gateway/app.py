@@ -204,9 +204,7 @@ def create_gateway_app(
             try:
                 from agentos.provider.circuit_breaker import snapshot_payload
 
-                breakers = snapshot_payload(
-                    getattr(provider_selector, "circuit_breaker", None)
-                )
+                breakers = snapshot_payload(getattr(provider_selector, "circuit_breaker", None))
                 if provider_name:
                     active_breaker = next(
                         (row for row in breakers if row.get("provider") == provider_name),

@@ -192,9 +192,7 @@ def build_transcript_attachment_envelope(
                 }
             )
         else:
-            persisted_attachments.append(
-                {"type": media_type, "name": name, "data": data}
-            )
+            persisted_attachments.append({"type": media_type, "name": name, "data": data})
 
     envelope_payload: dict[str, Any] = {"text": text, "attachments": persisted_attachments}
     if display_text is not None:

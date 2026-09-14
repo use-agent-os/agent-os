@@ -403,8 +403,7 @@ def enforce_total_attachment_bytes(attachments: list[dict[str, Any]]) -> None:
         total += _attachment_raw_size(attachment, index)
         if total > MAX_TOTAL_ATTACHMENT_BYTES:
             raise AttachmentTotalTooLargeError(
-                "attachments total raw bytes exceed "
-                f"the {MAX_TOTAL_ATTACHMENT_BYTES} byte limit"
+                f"attachments total raw bytes exceed the {MAX_TOTAL_ATTACHMENT_BYTES} byte limit"
             )
 
 

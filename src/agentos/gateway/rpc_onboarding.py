@@ -225,9 +225,7 @@ async def _router_configure(params: Any, ctx: RpcContext) -> dict[str, Any]:
     judge_provider = params.get("judgeProvider") if isinstance(params, dict) else None
     judge_base_url = params.get("judgeBaseUrl") if isinstance(params, dict) else None
     judge_api_key = params.get("judgeApiKey") if isinstance(params, dict) else None
-    safety_net_threshold = (
-        params.get("safetyNetThreshold") if isinstance(params, dict) else None
-    )
+    safety_net_threshold = params.get("safetyNetThreshold") if isinstance(params, dict) else None
     translate_ceiling_enabled = (
         params.get("translateCeilingEnabled") if isinstance(params, dict) else None
     )

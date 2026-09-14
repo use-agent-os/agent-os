@@ -14,8 +14,7 @@ PAGE_DUMP_CHARS = 8_000
 PAGE_DUMP_MARKER_MIN_SCORE = 3
 INLINE_TEXT_ATTACHMENT_MAX_BYTES = 2 * 1000 * 1000
 TOO_LARGE_MESSAGE = (
-    "The pasted text is too large to send directly; please attach a shorter file "
-    "or summarize it."
+    "The pasted text is too large to send directly; please attach a shorter file or summarize it."
 )
 LARGE_PASTE_PLACEHOLDER = "Please process the attached pasted text."
 PAGE_DUMP_PLACEHOLDER = "Please process the attached WebChat page dump."

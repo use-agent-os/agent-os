@@ -223,9 +223,7 @@ async def _handle_agents_create(params: dict | None, ctx: RpcContext) -> dict:
     except ValueError as exc:
         msg = str(exc)
         if "already exists" in msg:
-            raise RpcHandlerError(
-                "agent.exists", msg, details={"agentId": agent_id}
-            ) from exc
+            raise RpcHandlerError("agent.exists", msg, details={"agentId": agent_id}) from exc
         if agent_id == "main" or "builtin" in msg.lower():
             raise RpcHandlerError(
                 "agent.builtin_immutable", msg, details={"agentId": agent_id}

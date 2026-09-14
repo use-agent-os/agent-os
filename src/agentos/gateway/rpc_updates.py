@@ -28,10 +28,9 @@ async def _handle_updates_check(params: dict | None, ctx: RpcContext) -> dict[st
     config = getattr(ctx, "config", None)
 
     # 1. Respect preferences: AGENTOS_NO_UPDATE_NOTICE or updates.notify == False
-    if (
-        os.environ.get("AGENTOS_NO_UPDATE_NOTICE", "").strip() == "1"
-        or not pypi_client.config_notify_enabled(config)
-    ):
+    if os.environ.get(
+        "AGENTOS_NO_UPDATE_NOTICE", ""
+    ).strip() == "1" or not pypi_client.config_notify_enabled(config):
         return {
             "current": __version__,
             "latest": None,

@@ -348,9 +348,7 @@ async def _handle_chat_send(params: dict | None, ctx: RpcContext) -> dict:
                     display_name="WebChat",
                 )
             except Exception as exc:
-                raise RpcUnavailableError(
-                    f"Failed to initialize chat session: {exc}"
-                ) from exc
+                raise RpcUnavailableError(f"Failed to initialize chat session: {exc}") from exc
 
         from agentos.gateway.rpc_sessions import _handle_sessions_send
 
