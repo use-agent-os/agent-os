@@ -34,7 +34,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
-from agentos.channels._util import ChannelAccessPolicy, EventDedupeCache
+from agentos.channels._util import ChannelAccessPolicy, EventDedupeCache, split_text_for_limit
 from agentos.channels.contract import (
     ChannelCapabilityProfile,
     ChannelPlatformCapability,
@@ -69,6 +69,18 @@ FATAL_ERROR_CLASSES: tuple[str, ...] = (
 )
 
 _CONVERSATION_CACHE_SCHEMA_VERSION = 1
+
+# Teams' documented limit is 40 KB for the whole Activity payload, encoded as
+# UTF-16 (https://github.com/microsoft/BotFramework-Services/issues/228) --
+# not just the text field, and not a simple character count the way
+# Telegram's 4096 or Discord's 2000 are. A oversized activity fails with a
+# 413 MessageSizeTooBig rather than being truncated server-side, which is
+# worse than either of those: the final reply is lost outright instead of
+# arriving cut short. 18000 characters is a conservative text-only budget
+# that leaves generous headroom for the JSON envelope (conversation,
+# recipient, from, channelData, timestamps, ...) that rides alongside the
+# text in every Activity.
+_MSTEAMS_TEXT_LIMIT = 18000
 
 
 def _default_workspace_dir() -> Path:
@@ -479,12 +491,17 @@ class MSTeamsChannel:
         if ref is None:
             raise RuntimeError("MSTeamsChannel.send has no conversation reference for reply_to")
 
+        segments = self._split_content_for_send(message.content)
         holder: dict[str, str | None] = {"id": None}
 
         async def _callback(turn_context: Any) -> None:
-            response = await turn_context.send_activity(message.content)
-            if response is not None and getattr(response, "id", None):
-                holder["id"] = response.id
+            # Each segment is its own send_activity call within the same
+            # turn context; the last one wins for edit()/delete() tracking,
+            # matching Discord's "track the last chunk" convention.
+            for segment in segments:
+                response = await turn_context.send_activity(segment)
+                if response is not None and getattr(response, "id", None):
+                    holder["id"] = response.id
 
         await self._adapter.continue_conversation(
             ref,
@@ -495,7 +512,25 @@ class MSTeamsChannel:
         log.info(
             "msteams.outbound_sent",
             conversation_id=getattr(getattr(ref, "conversation", None), "id", ""),
+            segments=len(segments),
         )
+
+    @staticmethod
+    def _split_content_for_send(content: str) -> list[str]:
+        """Split *content* into one activity per Teams' 40 KB payload cap.
+
+        Reuses the same splitter Telegram's and Discord's adapters rely on
+        (see ``_MSTEAMS_TEXT_LIMIT``) rather than a third, independently-
+        drifting length check.
+        """
+        segments: list[str] = []
+        remaining = content
+        while True:
+            head, tail = split_text_for_limit(remaining, _MSTEAMS_TEXT_LIMIT)
+            segments.append(head)
+            if not tail:
+                return segments
+            remaining = tail
 
     async def edit(self, message_id: str, content: str) -> None:
         if self._adapter is None:
