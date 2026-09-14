@@ -335,15 +335,28 @@ class TaskRuntime:
         # mutations only.
         # Bounded: a lock that is currently held is never evicted, so the
         # ceiling can only reclaim sessions that are genuinely idle. That is
-        # not the same as "unlocked", though: ``_execute`` fetches a session's
-        # write lock once and keeps the *object* alive across awaits (it is
-        # only briefly acquired, then its identity is relied on for the rest
-        # of the turn via the write-lock-bypass contextvars in
-        # engine/runtime.py). Session churn from other sessions filling this
-        # registry could otherwise evict that idle-but-still-referenced lock
-        # mid-turn, so ``_execute`` pins it via ``_locks_pinned_for_turn`` for
-        # as long as it holds the reference. See ``_pin_write_lock``.
-        self._locks_pinned_for_turn: set[int] = set()
+        # not the same as "unlocked", though, in two ways:
+        #   - ``_execute`` fetches a session's write lock once and keeps the
+        #     *object* alive across awaits (it is only briefly acquired, then
+        #     its identity is relied on for the rest of the turn via the
+        #     write-lock-bypass contextvars in engine/runtime.py).
+        #   - the execution lock's own ``locked()`` reads False in the gap
+        #     between one turn's ``release()`` and a queued turn's waiter
+        #     re-acquiring it -- ``asyncio.Lock`` wakes the waiter via a
+        #     future it resolves on a later loop iteration, not synchronously
+        #     inside ``release()``, so a queued turn is not yet "locked" for
+        #     a real window even though it already owns this exact object.
+        # Either window lets session churn from unrelated sessions evict a
+        # lock a turn (running or queued) is still relying on; the next
+        # caller for that session_key would then get a *different* lock
+        # object via ``setdefault``, silently breaking the serialization
+        # both locks exist to provide.
+        #
+        # ``_locks_pinned_for_turn`` is a refcount, not a set: several turns
+        # can be queued for the same session sharing the same lock objects,
+        # and a plain set would let the first turn to finish unpin a lock a
+        # later queued turn still needs. See ``_pin_lock``.
+        self._locks_pinned_for_turn: dict[int, int] = {}
         self._session_locks: BoundedRegistry[str, asyncio.Lock] = BoundedRegistry(
             name="TaskRuntime._session_locks",
             session_of=lambda key, _value: key,
@@ -357,7 +370,9 @@ class TaskRuntime:
         self._session_execution_locks: BoundedRegistry[str, asyncio.Lock] = BoundedRegistry(
             name="TaskRuntime._session_execution_locks",
             session_of=lambda key, _value: key,
-            evictable=lambda lock: not lock.locked(),
+            evictable=lambda lock: (
+                not lock.locked() and id(lock) not in self._locks_pinned_for_turn
+            ),
         )
         self._tasks: dict[str, _RuntimeTask] = {}
         self._pending_by_session: dict[str, list[_RuntimeTask]] = {}
@@ -823,32 +838,38 @@ class TaskRuntime:
         )
 
     @contextlib.contextmanager
-    def _pin_write_lock(self, lock: asyncio.Lock) -> Any:
-        """Keep ``lock`` in ``_session_locks`` for the life of one ``_execute`` call.
+    def _pin_lock(self, lock: asyncio.Lock) -> Any:
+        """Keep ``lock`` un-evictable for the life of one ``_execute`` call.
 
-        ``_execute`` only actually acquires the write lock for an instant (see
-        the no-op ``async with write_lock: pass`` below); for the rest of the
-        turn its *identity* is what matters, since ``engine.runtime`` compares
-        ``id(lock)`` against the write-lock-bypass contextvars to recognize the
-        turn's own transcript writes. An idle lock looks evictable to
-        ``BoundedRegistry`` by the ``lock.locked()`` check alone, so without
-        this pin, session churn from unrelated sessions filling the registry
-        could reclaim it mid-turn -- the next caller for this session_key
-        would then get a *different* lock object via ``setdefault``, silently
-        breaking the serialization both mechanisms exist to provide.
+        Refcounted rather than a plain add/discard: several turns can be
+        queued for the same session (``_max_pending_per_session``) and all
+        of them fetch the *same* lock objects for that ``session_key`` via
+        ``setdefault``. A plain set would have the first turn to finish
+        remove the pin while a later queued turn for the same session is
+        still relying on that exact object's identity.
+
+        Covers both the write lock (whose identity outlives the instant it
+        is actually held -- see the class-level comment above
+        ``_session_locks``) and the execution lock (whose ``locked()`` reads
+        False for a real window between one turn's release and the next
+        queued turn's re-acquire).
         """
         token = id(lock)
-        self._locks_pinned_for_turn.add(token)
+        self._locks_pinned_for_turn[token] = self._locks_pinned_for_turn.get(token, 0) + 1
         try:
             yield
         finally:
-            self._locks_pinned_for_turn.discard(token)
+            count = self._locks_pinned_for_turn[token] - 1
+            if count <= 0:
+                del self._locks_pinned_for_turn[token]
+            else:
+                self._locks_pinned_for_turn[token] = count
 
     async def _execute(self, task: _RuntimeTask) -> None:
         session_key = task.envelope.session_key
         write_lock = self._session_locks.setdefault(session_key, asyncio.Lock())
         execution_lock = self._session_execution_locks.setdefault(session_key, asyncio.Lock())
-        with self._pin_write_lock(write_lock):
+        with self._pin_lock(write_lock), self._pin_lock(execution_lock):
             try:
                 async with execution_lock:
                     if task.cancel_requested:

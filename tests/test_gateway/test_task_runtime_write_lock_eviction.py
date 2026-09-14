@@ -1,4 +1,4 @@
-"""A session's in-flight write lock must survive ceiling pressure from other sessions.
+"""A session's in-flight locks must survive ceiling pressure from other sessions.
 
 ``TaskRuntime._execute`` fetches ``_session_locks[session_key]`` once at the
 top of a turn but only actually holds it for an instant (see the no-op
@@ -7,8 +7,14 @@ what ``engine.runtime``'s write-lock-bypass contextvars key off of. Between
 that instant and the end of the turn, the lock sits unlocked -- which used to
 make ``BoundedRegistry`` treat it as evictable the moment enough *other*
 sessions filled the registry past its ceiling, exactly what a busy gateway
-serving many concurrent sessions does routinely. ``_pin_write_lock`` closes
-that window.
+serving many concurrent sessions does routinely.
+
+The execution lock has the same exposure in a narrower window: a queued
+turn's asyncio.Task is already running (and already pins the lock -- see
+``_pin_lock``) by the time it blocks on ``async with execution_lock:``, but
+``asyncio.Lock.locked()`` itself reads False for a real window between the
+previous turn's ``release()`` and this waiter's re-acquire, since the wakeup
+runs on a later loop iteration rather than synchronously inside ``release()``.
 """
 
 from __future__ import annotations
@@ -108,3 +114,65 @@ async def test_write_lock_survives_ceiling_pressure_during_long_turn() -> None:
     finally:
         release.set()
         await rt.wait(handle.task_id, timeout=2.0)
+
+
+@pytest.mark.asyncio
+async def test_execution_lock_survives_ceiling_pressure_across_queued_turns() -> None:
+    """The execution lock must not be evicted in the handoff between one
+    turn finishing and a queued turn for the same session re-acquiring it."""
+    first_started = asyncio.Event()
+    first_release = asyncio.Event()
+    second_started = asyncio.Event()
+    second_release = asyncio.Event()
+    calls: list[int] = []
+
+    async def _handler(_run: Any) -> None:
+        if not calls:
+            calls.append(1)
+            first_started.set()
+            await first_release.wait()
+        else:
+            second_started.set()
+            await second_release.wait()
+
+    rt = _make_runtime(turn_handler=_handler)
+    target_key = "agent-1::sess-target"
+    env = _make_envelope(target_key)
+
+    handle1 = await rt.enqueue(env, "first")
+    await asyncio.wait_for(first_started.wait(), timeout=2.0)
+
+    handle2 = await rt.enqueue(env, "second")
+    # Let the second task's coroutine actually start running (and pin the
+    # execution lock) while it queues behind the first.
+    await asyncio.sleep(0)
+
+    execution_lock = rt._session_execution_locks.get(target_key)
+    assert execution_lock is not None
+    assert execution_lock.locked()
+    assert id(execution_lock) in rt._locks_pinned_for_turn
+
+    # Finish the first turn -- this releases the lock and hands off to the
+    # queued second turn. Meanwhile flood the registry with churn to try to
+    # evict the execution lock during that handoff.
+    first_release.set()
+    await asyncio.wait_for(second_started.wait(), timeout=2.0)
+
+    ceiling = rt._session_execution_locks.max_entries
+    for i in range(ceiling + 50):
+        rt._session_execution_locks.set(f"filler-{i}", asyncio.Lock())
+
+    assert target_key in rt._session_execution_locks, (
+        "the execution lock was evicted during the handoff between the "
+        "finished turn and the still-running queued turn for the same "
+        "session -- a later caller for this session_key would get a "
+        "different Lock object, breaking whole-turn-lifecycle serialization"
+    )
+    assert rt._session_execution_locks.get(target_key) is execution_lock
+
+    second_release.set()
+    await rt.wait(handle1.task_id, timeout=2.0)
+    await rt.wait(handle2.task_id, timeout=2.0)
+
+    # The pin must not leak once both turns are done.
+    assert id(execution_lock) not in rt._locks_pinned_for_turn
