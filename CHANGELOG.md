@@ -8,6 +8,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Skills: the bundled `git-diff` and `pptx extract_text` scripts write their
+  output as UTF-8 bytes through the binary stdout buffer, and `git-diff` no
+  longer decodes git's output with the locale, so a diff or deck text
+  containing CJK or emoji reaches the caller intact on a non-UTF-8 code page
+  (cp936, cp1252, `LC_ALL=C`) instead of dying with a `UnicodeEncodeError`
+  (#1834).
+- Tools: the file-authoring in-turn dedupe (`create_csv`, `create_xlsx`,
+  `create_pptx`, `create_pdf_report`) now requires the artifact name and mime
+  to match as well as the content hash, so two distinct files that happen to
+  share bytes are both published instead of the second being reported as
+  `already_published` under the first file's name (#1836).
+- Channels: `RateLimiter` no longer credits the interval a waiter slept
+  through a second time, so a contended bucket sustains its configured
+  `refill_rate` instead of roughly twice it -- the Discord adapter no longer
+  provokes the HTTP 429s the limiter exists to prevent (#1876).
+- Discord: `edit()` and `delete()` accept `<channel_id>|<message_id>` and
+  refuse to build `/channels//messages/<id>` when no channel is known, and the
+  `message` tool encodes `target` into the id for Discord as it does for
+  Telegram, so deleting a message the process did not send itself targets the
+  right channel (#1883).
+- Skills: docx `replace_text` now walks each section's headers and footers
+  (first-page and even-page variants and their tables included), so
+  placeholders in letterheads and confidentiality banners are replaced and
+  counted (#1888).
 - Web UI: the Memory page now uses the shared Control hero header, so the
   signal background no longer overlaps the stat cards and the page matches
   Health / Overview / Usage (#1927).
