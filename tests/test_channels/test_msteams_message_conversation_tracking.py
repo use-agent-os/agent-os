@@ -151,3 +151,56 @@ async def test_send_streaming_records_which_conversation_the_message_landed_in()
 
     assert message_id == "stream-activity-id"
     assert channel._message_conversation_keys["stream-activity-id"] == "conversation-A"
+
+
+# ── Proactive-send fallback targets the most recent conversation ─────────────
+
+
+def _inbound_activity(conversation_id: str) -> types.SimpleNamespace:
+    """A minimal Teams message activity for ``_on_turn``."""
+    return types.SimpleNamespace(
+        type="message",
+        id=f"msg-in-{conversation_id}",
+        text="hello",
+        conversation=types.SimpleNamespace(
+            id=conversation_id,
+            conversation_type="personal",
+            tenant_id="tenant-1",
+        ),
+        from_property=types.SimpleNamespace(id=f"user-{conversation_id}", name="User"),
+        recipient=types.SimpleNamespace(id="bot-1", name="Bot"),
+        entities=[],
+        channel_data={},
+        attachments=[],
+        reply_to_id=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_proactive_fallback_follows_recency_not_first_seen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A re-engaging conversation becomes the newest, so it wins the fallback.
+
+    ``_on_turn`` used to re-assign an existing key, which leaves it in place
+    in a dict, so ``reversed()`` kept reporting whichever conversation was
+    cached *first* as the most recent one.
+    """
+
+    class _FakeTurnContext:
+        @staticmethod
+        def get_conversation_reference(activity: object) -> str:
+            return f"REF_FOR_{activity.conversation.id}"  # type: ignore[attr-defined]
+
+    core_module = types.ModuleType("botbuilder.core")
+    core_module.TurnContext = _FakeTurnContext  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "botbuilder.core", core_module)
+
+    channel = MSTeamsChannel(config=MSTeamsChannelConfig(name="msteams"))
+
+    await channel._on_turn(types.SimpleNamespace(activity=_inbound_activity("conv-A")))
+    await channel._on_turn(types.SimpleNamespace(activity=_inbound_activity("conv-B")))
+    await channel._on_turn(types.SimpleNamespace(activity=_inbound_activity("conv-A")))
+
+    assert channel._resolve_reference_key(None) == "conv-A"
+    assert channel._resolve_reference_for_message("never-tracked") == "REF_FOR_conv-A"

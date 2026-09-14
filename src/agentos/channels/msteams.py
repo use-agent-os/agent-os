@@ -317,6 +317,10 @@ class MSTeamsChannel:
         ref = TurnContext.get_conversation_reference(activity)
         cache_key = self._reference_cache_key(activity)
         if cache_key:
+            # Re-assigning an existing key leaves it where it was, so drop it
+            # first to move it to the end. Both proactive-send fallbacks read
+            # recency off this dict's order via reversed().
+            self._references.pop(cache_key, None)
             self._references[cache_key] = ref
         if activity.recipient is not None and getattr(activity.recipient, "id", None):
             self._bot_id = activity.recipient.id
