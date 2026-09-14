@@ -88,7 +88,7 @@ def config_set(
     data = GatewayConfig().to_toml_dict()
     parts = key.split(".")
     skill_config_map = len(parts) >= 3 and parts[0] == "skills" and parts[1] == "config"
-    if skill_config_map or _get_key(data, key) is _MISSING:
+    if skill_config_map or not (_get_key(data, key) is not _MISSING or _is_declared_key(key)):
         console.print(f"[red]Key not found: {escape(key)}[/red]")
         raise typer.Exit(1)
 
@@ -104,16 +104,37 @@ def _parse_config_value(value: str) -> Any:
         return value
 
 
+def _is_declared_key(key: str) -> bool:
+    """True when the config model declares *key*, whatever its current value.
+
+    ``to_toml_dict()`` is ``model_dump(exclude_none=True)``, so a declared key
+    that is currently null is missing from it and looks exactly like a typo.
+    The model itself is the authority on which keys exist; asking it keeps a
+    key the operator can read with ``config get`` writable with ``config set``.
+    """
+    from agentos.gateway.config import GatewayConfig
+
+    node: Any = GatewayConfig().model_dump()
+    for part in key.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return False
+        node = node[part]
+    return True
+
+
 def _set_key(data: dict[str, Any], key: str, value: Any) -> bool:
     """Set a dotted key on a TOML dict.
 
     Unknown keys are rejected so typos do not persist. ``skills.config.*`` is
     the documented free-form skill-settings map; ``to_toml_dict`` omits it when
-    empty, so this path must create missing intermediate dicts.
+    empty, so this path must create missing intermediate dicts — and so must a
+    declared key whose value is currently null, which is absent from the TOML
+    view for the same reason.
     """
     cursor: Any = data
     parts = key.split(".")
-    create = len(parts) >= 3 and parts[0] == "skills" and parts[1] == "config"
+    skill_config_map = len(parts) >= 3 and parts[0] == "skills" and parts[1] == "config"
+    create = skill_config_map or _is_declared_key(key)
     for part in parts[:-1]:
         if not isinstance(cursor, dict):
             return False

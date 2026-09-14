@@ -24,11 +24,12 @@ from typer.testing import CliRunner
 from agentos.cli.main import app
 
 ROOT = Path(__file__).resolve().parents[2]
-# Scoped to the two files issue #840 names. The bundled SKILL.md is
-# deliberately not scanned yet: it documents `config set auth.token`, which
-# also exits 1 — but because `to_toml_dict()` omits an unset secret, which is
-# the `_set_key` limitation tracked separately in #834.
-DOCS = ("docs/cli.md", "README.product.md")
+# The two files issue #840 names, plus the bundled SKILL.md the agent itself
+# reads. That third file was excluded while `config set auth.token` exited 1 —
+# `to_toml_dict()` omits a key whose value is null, so `_set_key` read a
+# declared key as a typo (#2031). With that fixed the exclusion is gone and the
+# agent-facing examples are guarded like the human-facing ones.
+DOCS = ("docs/cli.md", "README.product.md", "src/agentos/skills/bundled/agentos/SKILL.md")
 
 # Matches anywhere, so a fenced block, an inline `agentos config set x.y` in
 # prose and a `$`-prefixed shell line are all covered. Stops at the end of the
@@ -52,7 +53,16 @@ def _documented_commands() -> list[tuple[str, str]]:
             # `<dot.key>`-style placeholders are prose, not runnable examples.
             if args.startswith("<"):
                 continue
-            found.append((rel, args))
+            # SKILL.md annotates its examples with a trailing `# comment`, which
+            # is shell syntax the reader's shell would drop before running it.
+            try:
+                tokens = shlex.split(args, comments=True)
+            except ValueError:
+                # Unbalanced quotes: prose, not a runnable example.
+                continue
+            if not tokens:
+                continue
+            found.append((rel, shlex.join(tokens)))
     return found
 
 
