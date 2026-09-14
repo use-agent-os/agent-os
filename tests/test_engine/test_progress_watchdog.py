@@ -134,3 +134,57 @@ def test_guidance_is_empty_for_an_ordinary_observation() -> None:
     decision = watchdog.observe(ProgressObservation(iteration=1, successful_tool_result=True))
 
     assert guidance_for(decision) == ""
+
+
+def test_repeated_tool_errors_do_not_trigger_repeated_tool_call() -> None:
+    watchdog = ProgressWatchdog(
+        repeated_tool_call_threshold=3,
+        repeated_tool_error_threshold=3,
+    )
+    call = _call("read_file", {"path": "missing.txt"}, "FileNotFoundError", is_error=True)
+    obs = ProgressObservation(
+        iteration=1,
+        tool_error_signature="read_file:FileNotFoundError",
+        tool_calls=(call,),
+    )
+
+    d1 = watchdog.observe(obs)
+    d2 = watchdog.observe(
+        ProgressObservation(
+            iteration=2, tool_error_signature="read_file:FileNotFoundError", tool_calls=(call,)
+        )
+    )
+    d3 = watchdog.observe(
+        ProgressObservation(
+            iteration=3, tool_error_signature="read_file:FileNotFoundError", tool_calls=(call,)
+        )
+    )
+
+    assert d1.action == "observe"
+    assert d2.action == "observe"
+    assert d3.reason == "repeated_tool_error"
+    assert d3.details["count"] == 3
+    guidance = guidance_for(d3)
+    assert "The same tool error has repeated 3 times" in guidance
+    assert "use what you already have" not in guidance
+
+
+def test_failing_calls_do_not_increment_succeeding_call_repeat_count() -> None:
+    watchdog = ProgressWatchdog(repeated_tool_call_threshold=2)
+    succeeding_call = _call("read_file", {"path": "/a.py"}, "content", is_error=False)
+    failing_call = _call("read_file", {"path": "/a.py"}, "content", is_error=True)
+
+    # First call succeeds
+    d1 = watchdog.observe(
+        ProgressObservation(iteration=1, successful_tool_result=True, tool_calls=(succeeding_call,))
+    )
+    assert d1.reason == "progress"
+
+    # Second call fails with the same result string/args
+    d2 = watchdog.observe(
+        ProgressObservation(
+            iteration=2, tool_error_signature="read_file:error", tool_calls=(failing_call,)
+        )
+    )
+    # Must not be flagged as repeated_tool_call
+    assert d2.reason != "repeated_tool_call"

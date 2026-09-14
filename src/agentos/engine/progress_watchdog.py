@@ -153,6 +153,8 @@ class ProgressWatchdog:
         flagged: ToolCallSignature | None = None
         flagged_count = 0
         for signature in observation.tool_calls:
+            if signature.is_error:
+                continue
             key = signature.key
             previous = self._repeat_results.get(key)
             if previous is not None and previous == signature.result_hash:
