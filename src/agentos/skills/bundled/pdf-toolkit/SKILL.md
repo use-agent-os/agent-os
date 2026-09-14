@@ -196,6 +196,7 @@ switch back.
 | Extracted text is empty | Scanned PDF, no text layer | OCR is out of scope; use a separate OCR skill |
 | Garbled characters in extract | PDF uses a custom font encoding | Try `pdfplumber.open(path, laparams={...})` with `char_margin` adjustments |
 | Merged PDF is huge | Underlying PDFs include large embedded fonts | Subset fonts via `pypdf` `compress_content_streams()` |
+| `merge.py` exits 2 with `error: nothing was written` | No input matched: every file missing, or the page ranges select no pages | Check the paths and the `pages` spec. No file is written in this case, so an earlier `--out` is left intact |
 | Form fill silently no-ops | Field name in JSON does not match PDF field name | Run with `--list-fields` first to see exact names |
 | Pages out of order after split | Range overlap collapsed unexpectedly | Use disjoint ranges, e.g. `1-3,4-6` not `1-5,3-6` |
 
