@@ -395,7 +395,6 @@ def test_the_apostrophe_escape_is_not_consumed_without_as_text(tmp_path: Path) -
     assert sheet.cell(row=2, column=1).value == "'=hello"
 
 
-
 def _import_scripts() -> tuple[Any, Any, Any]:
     sys.path.insert(0, str(SCRIPTS))
     try:
@@ -571,3 +570,65 @@ def test_clearing_a_cell_keeps_its_style(
     cell = load_workbook(str(out))["S"].cell(row=1, column=1)
     assert cell.value is None
     assert cell.number_format == "0.00%"
+
+
+def test_build_handles_non_dict_spec() -> None:
+    """Passing non-dict or malformed specs should safely return an empty workbook."""
+    create_xlsx, _, _ = _import_scripts()
+
+    for invalid_spec in [None, [], "not-a-dict", 123]:
+        wb = create_xlsx.build(invalid_spec)
+        assert wb is not None
+        assert len(wb.sheetnames) >= 1
+
+
+def test_build_handles_empty_or_malformed_sheets_and_rows() -> None:
+    """Non-list sheets, non-dict sheet items, and scalar rows should not crash build."""
+    create_xlsx, _, inspect_xlsx = _import_scripts()
+
+    # Non-list sheets returns base workbook
+    wb1 = create_xlsx.build({"sheets": "invalid"})
+    assert wb1 is not None
+
+    # List of non-dict sheets returns base workbook
+    wb2 = create_xlsx.build({"sheets": ["invalid", 123]})
+    assert wb2 is not None
+
+    # Scalar row values should be coerced safely into single-cell rows
+    spec = {
+        "sheets": [
+            {
+                "name": "Scalars",
+                "rows": ["single string", 42, None, ["a", "b"]],
+            }
+        ]
+    }
+    wb3 = create_xlsx.build(spec)
+    ws = wb3["Scalars"]
+    assert ws.max_row == 4
+    assert ws.cell(row=1, column=1).value == "single string"
+    assert ws.cell(row=2, column=1).value == 42
+    assert ws.cell(row=3, column=1).value is None
+    assert ws.cell(row=4, column=1).value == "a"
+    assert ws.cell(row=4, column=2).value == "b"
+
+
+def test_create_xlsx_cli_errors_on_malformed_spec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLI exits with code 2 on missing, unparseable, or non-object JSON specs."""
+    create_xlsx, _, _ = _import_scripts()
+
+    non_dict_spec = tmp_path / "spec_list.json"
+    non_dict_spec.write_text("[]", encoding="utf-8")
+    out = tmp_path / "out.xlsx"
+
+    monkeypatch.setattr(sys, "argv", ["create_xlsx.py", str(non_dict_spec), "--out", str(out)])
+    assert create_xlsx.main() == 2
+    assert not out.exists()
+
+    invalid_json = tmp_path / "bad.json"
+    invalid_json.write_text("{invalid json", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["create_xlsx.py", str(invalid_json), "--out", str(out)])
+    assert create_xlsx.main() == 2
+    assert not out.exists()
