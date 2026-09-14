@@ -118,6 +118,110 @@ def test_split_text_for_limit_respects_a_raw_length_measure() -> None:
     assert head + tail == content
 
 
+# ---------------------------------------------------------------------------
+# Issue #2127: a fence that opens the segment itself (no earlier line, and
+# no text before it on its own line) left the "back up to before the fence"
+# guard with nowhere to back up to, so the cut went ahead unadjusted and the
+# first half kept a half-open fence.
+# ---------------------------------------------------------------------------
+
+
+def _split_until_empty(content: str, limit: int, max_iters: int = 1000) -> list[str]:
+    """Drive the splitter the way the adapters do: loop until the tail is
+    empty. Bounded so a non-advancing split fails the test instead of
+    hanging it."""
+    chunks: list[str] = []
+    remaining = content
+    for _ in range(max_iters):
+        head, tail = split_text_for_limit(remaining, limit)
+        assert head, "an empty head would never let the caller's loop advance"
+        chunks.append(head)
+        if not tail:
+            return chunks
+        remaining = tail
+    raise AssertionError("split_text_for_limit did not converge -- non-advancing split")
+
+
+def test_split_text_for_limit_balances_a_bare_fence_that_opens_the_segment() -> None:
+    """The issue's own repro: no info string, no newline until well past the
+    cut point, so there is nothing before the fence to back the cut up to."""
+    segment = "```" + ("a" * 100) + "```\nrest"
+
+    head, tail = split_text_for_limit(segment, 50)
+
+    assert head.count("```") % 2 == 0
+    assert tail.count("```") % 2 == 0
+    assert len(head) <= 50
+
+
+def test_split_text_for_limit_keeps_advancing_across_a_long_bare_fence() -> None:
+    """Regression guard: an earlier fix balanced the first cut but reused the
+    caller's word/line-boundary cut for the reopened tail, which could land
+    right back on the same input on the next call -- an infinite loop in any
+    caller that splits until the tail is empty, exactly the way the channel
+    adapters do."""
+    segment = "```" + ("a" * 900) + "```\ntail text"
+
+    chunks = _split_until_empty(segment, 50)
+
+    assert all(chunk.count("```") % 2 == 0 for chunk in chunks)
+    assert all(chunks)
+    assert chunks[-1].endswith("tail text") or "tail text" in "".join(chunks)
+
+
+def test_split_text_for_limit_reopens_with_the_info_string() -> None:
+    """The reopened fence on the tail keeps the original language tag."""
+    segment = "```python\n" + ("x = 1\n" * 200) + "```"
+
+    head, tail = split_text_for_limit(segment, 100)
+
+    assert head.count("```") % 2 == 0
+    assert tail.startswith("```python\n")
+    assert tail.count("```") % 2 == 0
+
+
+def test_split_text_for_limit_does_not_mistake_a_distant_newline_for_the_info_string() -> None:
+    """A bare fence's info string must not be read as everything up to
+    whatever newline happens to occur next in the document, however far
+    away -- that produced a reopener holding almost the entire remainder."""
+    segment = "```" + ("a" * 300) + "\nrest of the message with no more fences"
+
+    head, tail = split_text_for_limit(segment, 60)
+
+    assert head.count("```") % 2 == 0
+    # A bare reopener ("```\n"), not the distant newline mistaken for one:
+    # that bug produced a reopener holding almost the whole remainder.
+    assert tail.startswith("```\n")
+    assert len(tail) < len(segment)
+
+
+def test_split_text_for_limit_backs_up_to_text_before_a_first_line_fence() -> None:
+    """A fence that isn't at offset 0 but still has no preceding newline (it
+    opens partway through the segment's first line) can back the cut up to
+    just before it -- a cheaper, content-preserving fix that needs no
+    synthetic close/reopen at all."""
+    segment = "intro text ```" + ("a" * 400) + "```\nrest"
+
+    head, tail = split_text_for_limit(segment, 100)
+
+    assert head == "intro text "
+    assert head + tail == segment  # nothing invented; a real cut existed
+
+
+def test_split_text_for_limit_falls_back_to_an_unbalanced_cut_rather_than_hang() -> None:
+    """When the limit is too small to fit even a closed fence, the function
+    must still terminate -- accepting one unbalanced chunk beats an infinite
+    loop in every caller that drives this until the tail is empty."""
+    segment = "```" + ("z" * 200) + "```\nend"
+
+    chunks = _split_until_empty(segment, 3)
+
+    assert all(chunks)  # terminates, never stalls on an empty chunk
+    # No content lost, fence markers aside: every original "z" is still
+    # present somewhere across the chunks.
+    assert "".join(chunks).count("z") == segment.count("z")
+
+
 class _DiscordResponse:
     status_code = 200
 

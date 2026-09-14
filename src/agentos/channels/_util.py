@@ -385,6 +385,55 @@ async def retry_request(
 # ---------------------------------------------------------------------------
 
 
+def _rebalance_open_fence(
+    segment: str,
+    limit: int,
+    length: Callable[[str], int],
+    fence_start: int,
+) -> tuple[str, str] | None:
+    """Close the fence at *fence_start* on the head and reopen it on the tail.
+
+    Used only when there is no earlier line to back the cut up to instead
+    (see the ``candidate`` cases in :func:`split_text_for_limit`) — the
+    fence opens the segment itself, so the only way to keep both halves
+    balanced is to synthesize a closing ``` on the head and a matching
+    reopener on the tail.
+
+    The cut is a fresh binary search bounded below by ``fence_start + 3``
+    (past the opening backticks), not a reuse of the caller's word/line-
+    boundary cut: reusing it let a stray early newline right after a bare
+    fence send the cut snapping back to almost the same place on the next
+    call, reproducing the same input again — an infinite loop in any caller
+    that splits until the tail is empty. Returns ``None`` when no cut makes
+    both the closed head fit within *limit* and the tail strictly shorter
+    than *segment*, so the caller can fall back to a plain, unbalanced cut
+    rather than loop forever chasing a balance that cannot fit.
+    """
+    closer = "\n```"
+    low, high, cut = fence_start + 3, len(segment) - 1, fence_start + 3
+    while low <= high:
+        mid = (low + high) // 2
+        if length(segment[:mid] + closer) <= limit:
+            cut = mid
+            low = mid + 1
+        else:
+            high = mid - 1
+    if length(segment[:cut] + closer) > limit:
+        return None
+    # The reopener carries the fence's info string (its language tag, e.g.
+    # ```python) only when that string's own line actually ends before the
+    # cut -- otherwise the next newline in the segment could be arbitrarily
+    # far away (a bare fence with no early line break of its own) and
+    # everything up to it would be mistaken for the info string.
+    line_end = segment.find("\n", fence_start)
+    reopen = f"{segment[fence_start:line_end]}\n" if 0 <= line_end < cut else "```\n"
+    head = segment[:cut] + closer
+    tail = reopen + segment[cut:].lstrip("\n")
+    if not tail or len(tail) >= len(segment):
+        return None
+    return head, tail
+
+
 def split_text_for_limit(
     segment: str,
     limit: int,
@@ -405,10 +454,19 @@ def split_text_for_limit(
     code block (```...```) split mid-fence would leave each half with an
     unbalanced fence — some platforms reject a message whose Markdown
     entities don't parse, turning a length problem into a delivery failure —
-    so if an odd number of fences precede the cut, one is open, and the cut
-    backs up to just before that fence: the first half never contains a
-    half-open block, and the second half reopens it from its own start,
-    fully balanced.
+    so if an odd number of fences precede the cut, one is open:
+
+    * if there is a line before the fence, the cut backs up to the start of
+      that line, keeping the whole fence (and everything after it) for the
+      next chunk;
+    * otherwise, if there is at least some text on the fence's own line
+      before it, the cut backs up to just before the fence itself;
+    * otherwise the fence opens the segment with nothing to back up to, so
+      it is closed on this chunk and reopened on the next
+      (:func:`_rebalance_open_fence`) — unless no split of it fits within
+      *limit* at all, in which case this one chunk is left with an
+      unbalanced fence rather than the caller looping forever trying to
+      avoid it.
     """
     length = measure if measure is not None else len
     if length(segment) <= limit:
@@ -430,7 +488,12 @@ def split_text_for_limit(
     if segment.count("```", 0, cut) % 2 == 1:
         fence_start = segment.rfind("```", 0, cut)
         newline_before_fence = segment.rfind("\n", 0, fence_start)
-        candidate = newline_before_fence + 1 if newline_before_fence >= 0 else 0
-        if candidate > 0:
-            cut = candidate
+        if newline_before_fence >= 0:
+            cut = newline_before_fence + 1
+        elif fence_start > 0:
+            cut = fence_start
+        else:
+            rebalanced = _rebalance_open_fence(segment, limit, length, fence_start)
+            if rebalanced is not None:
+                return rebalanced
     return segment[:cut], segment[cut:]
