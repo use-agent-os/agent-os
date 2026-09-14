@@ -357,6 +357,21 @@ def make_agent_run_handler(
                 )
                 try:
                     record = await task_runtime.wait(handle.task_id, timeout=job.timeout_seconds)
+                except asyncio.CancelledError:
+                    # The outer deadline reaches us first, and always will:
+                    # ``execute_with_timeout`` wraps this whole handler in
+                    # ``wait_for(job.timeout_seconds)`` while the wait below
+                    # starts the same budget later, after session setup and any
+                    # pre-run script. So the handler is cancelled rather than
+                    # timing out, and the ``except TimeoutError`` branch never
+                    # runs — leaving the enqueued turn to keep going, or to
+                    # start later if it was still queued.
+                    #
+                    # Cancel the one task this handler submitted (never anything
+                    # else sharing the session), then let CancelledError
+                    # propagate so the scheduler still records the timeout.
+                    await _cancel_runtime_task(task_runtime, handle.task_id)
+                    raise
                 except TimeoutError:
                     await _cancel_runtime_task(task_runtime, handle.task_id)
                     success = False
@@ -680,7 +695,7 @@ def make_system_event_handler(
                     "kind": "cron",
                     "source_tool": f"cron:{job.id}",
                 },
-        )
+            )
 
         await delivery_chain.notify_start(job, text)
         heartbeat_loop = heartbeat_loop_ref() if heartbeat_loop_ref else None
@@ -732,6 +747,7 @@ def make_system_event_handler(
             heartbeat_kwargs["delivery_override"] = delivery_override
         run_once_now = getattr(heartbeat_loop, "run_once_now", None)
         if callable(run_once_now):
+
             async def _run_once():
                 run_once_kwargs: dict[str, Any] = {
                     "reason": reason,
@@ -746,6 +762,7 @@ def make_system_event_handler(
                 return await run_once_now(**run_once_kwargs)
 
         else:
+
             async def _run_once():
                 return await heartbeat_service.run_once(**heartbeat_kwargs)
 
