@@ -182,9 +182,7 @@ def test_notify_compaction_resets_cache_only_after_completed_status(
         config=ChatConfig(system="stable system"),
         model="model-a",
     )
-    started_report = monitor.check_response_for_cache_break(
-        "agent:main:s1", after_started, 0
-    )
+    started_report = monitor.check_response_for_cache_break("agent:main:s1", after_started, 0)
 
     assert started_report.reason != "baseline_reset_after_compaction"
 
@@ -198,9 +196,7 @@ def test_notify_compaction_resets_cache_only_after_completed_status(
         config=ChatConfig(system="stable system"),
         model="model-a",
     )
-    completed_report = monitor.check_response_for_cache_break(
-        "agent:main:s1", after_completed, 0
-    )
+    completed_report = monitor.check_response_for_cache_break("agent:main:s1", after_completed, 0)
 
     assert completed_report.reason == "baseline_reset_after_compaction"
 
@@ -247,3 +243,59 @@ def test_notify_compaction_can_reset_cache_without_notifying_listeners(
 
     assert events == []
     assert report.reason == "baseline_reset_after_compaction"
+
+
+# ---------------------------------------------------------------------------
+# _reset_pending lifetime (gap in the #1131 bounded-registry migration)
+# ---------------------------------------------------------------------------
+
+
+def _snapshot(monitor: CacheBreakMonitor) -> object:
+    return monitor.record_prompt_state(
+        messages=[Message(role="user", content="q")],
+        tools=[],
+        config=ChatConfig(system="s"),
+        model="m",
+    )
+
+
+def test_reset_pending_is_bounded() -> None:
+    """A compaction whose session never responds again must not leak a key."""
+    monitor = CacheBreakMonitor()
+    for index in range(5_000):
+        monitor.notify_compaction(f"session-{index}")
+
+    assert len(monitor._reset_pending) < 5_000, "reset flags must be bounded"
+
+
+def test_reset_pending_still_suppresses_the_next_report() -> None:
+    """Behaviour preserved: the flag still forces one baseline reset."""
+    monitor = CacheBreakMonitor()
+    snapshot = _snapshot(monitor)
+
+    monitor.notify_compaction("s1")
+    report = monitor.check_response_for_cache_break("s1", snapshot, 100)
+
+    assert report.baseline_reset is True
+    assert report.reason == "baseline_reset_after_compaction"
+    assert report.break_detected is False
+
+
+def test_reset_pending_is_consumed_once() -> None:
+    """The flag is cleared after it fires, not left behind for the next turn."""
+    monitor = CacheBreakMonitor()
+    snapshot = _snapshot(monitor)
+
+    monitor.notify_compaction("s1")
+    monitor.check_response_for_cache_break("s1", snapshot, 100)
+    assert "s1" not in monitor._reset_pending
+
+    second = monitor.check_response_for_cache_break("s1", snapshot, 100)
+    assert second.baseline_reset is False
+
+
+def test_clear_drops_reset_flags() -> None:
+    monitor = CacheBreakMonitor()
+    monitor.notify_compaction("s1")
+    monitor.clear()
+    assert "s1" not in monitor._reset_pending

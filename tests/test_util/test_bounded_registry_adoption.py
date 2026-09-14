@@ -40,7 +40,7 @@ def _field(owner: object, name: str) -> BoundedRegistry:
         (PlanModeStore, ["_sessions"]),
         (DenialLedger, ["_sessions"]),
         (ProgressWatchdog, ["_repeat_counts", "_repeat_results"]),
-        (CacheBreakMonitor, ["_baselines"]),
+        (CacheBreakMonitor, ["_baselines", "_reset_pending"]),
         (IntentApprovalCache, ["_entries"]),
     ],
 )
@@ -141,6 +141,8 @@ def test_evict_session_runtime_state_drops_bounded_registry_entries() -> None:
     plan.enable("doomed")
     plan.enable("kept")
     monitor._baselines["doomed"] = object()  # type: ignore[assignment]
+    monitor.notify_compaction("doomed")
+    monitor.notify_compaction("kept")
 
     evict_session_runtime_state("doomed")
 
@@ -149,6 +151,8 @@ def test_evict_session_runtime_state_drops_bounded_registry_entries() -> None:
     assert plan.is_enabled("doomed") is False
     assert plan.is_enabled("kept") is True
     assert "doomed" not in monitor._baselines
+    assert "doomed" not in monitor._reset_pending
+    assert "kept" in monitor._reset_pending
 
 
 def test_denial_ledger_session_state_is_dropped_on_teardown() -> None:
