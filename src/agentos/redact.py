@@ -176,14 +176,25 @@ _QUALIFIED_NAME_PAIRS: frozenset[tuple[str, str]] = frozenset(
     }
 )
 
-_NAME_SPLIT_RE = re.compile(r"[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])")
+#: Three boundaries: a run of separators, the lower-to-upper hump in
+#: ``apiSecret``, and the acronym-to-word edge in ``APISecret`` -- the last
+#: upper of a run that starts a new capitalised word. Without that third
+#: alternative an acronym prefix glues itself to the word after it,
+#: ``APISecret`` stays the single segment ``apisecret``, and a name whose
+#: lower-case spelling is masked leaks in its acronym spelling (Issue #2007).
+#: It splits before the *word*, not between every capital, so ``XMLHttpRequest``
+#: yields ``xml`` + ``http`` + ``request`` rather than one segment per letter.
+_NAME_SPLIT_RE = re.compile(r"[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 def _name_segments(name: str) -> list[str]:
     """Split an identifier into lower-cased word segments.
 
-    Handles the three casings a credential name arrives in: ``CAP_API_KEY``,
-    ``x-cap-api-key`` and ``capApiKey`` all reduce to the same segments.
+    Handles the casings a credential name arrives in: ``CAP_API_KEY``,
+    ``x-cap-api-key``, ``capApiKey`` and ``CAPApiKey`` all reduce to the same
+    segments. A separator-less all-caps name (``APISECRET``) has no boundary to
+    find and stays one segment; guessing at one is what the segment design
+    exists to avoid.
     """
     return [segment.lower() for segment in _NAME_SPLIT_RE.split(name) if segment]
 

@@ -148,6 +148,135 @@ class TestNameSegments:
     def test_ordinary_names(self, name: str) -> None:
         assert not redact._is_credential_name(name)
 
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "APISecret",
+            "APIToken",
+            "AUTHToken",
+            "AUTHKey",
+            "ACCESSToken",
+            "CLIENTSecret",
+            "SESSIONToken",
+            "PRIVATEKey",
+            "SECRETKey",
+            "DBPassword",
+            "DBSecret",
+            "JWTSecret",
+            "LDAPPassword",
+            "SSHPassword",
+            "SMTPPassword",
+            "GCPPrivateKey",
+            "TLSPrivateKey",
+            "IAMAccessKey",
+            "AWSAccessKeyId",
+        ],
+    )
+    def test_an_acronym_prefix_still_names_a_credential(self, name: str) -> None:
+        """An all-caps acronym followed by a capitalised word has no lower-to-upper
+        hump, so the whole name used to stay one segment and match nothing --
+        ``apiSecret`` was masked while ``APISecret`` leaked (Issue #2007)."""
+        assert redact._is_credential_name(name)
+
+    @pytest.mark.parametrize(
+        ("name", "segments"),
+        [
+            ("APISecret", ["api", "secret"]),
+            ("AWSAccessKeyId", ["aws", "access", "key", "id"]),
+            ("XMLHttpRequest", ["xml", "http", "request"]),
+            ("HTTPSProxy", ["https", "proxy"]),
+            ("getURL", ["get", "url"]),
+            ("CAP_API_KEY", ["cap", "api", "key"]),
+            ("x-cap-api-key", ["x", "cap", "api", "key"]),
+            ("capApiKey", ["cap", "api", "key"]),
+        ],
+    )
+    def test_segments_split_before_the_word_not_between_capitals(
+        self, name: str, segments: list[str]
+    ) -> None:
+        """The acronym rule breaks at the last capital of a run, so an acronym
+        stays whole instead of becoming one segment per letter."""
+        assert redact._name_segments(name) == segments
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "APIEndpoint",
+            "APIVersion",
+            "APIClient",
+            "HTTPHeader",
+            "HTTPSProxy",
+            "XMLHttpRequest",
+            "JSONEncoder",
+            "DBHost",
+            "DBConnection",
+            "AWSRegion",
+            "GCPProject",
+            "URLPath",
+            "getURL",
+            "publicKey",
+            "primaryKey",
+            "foreignKey",
+            "cacheKey",
+            "sortKey",
+            "keyId",
+            "UIComponent",
+            "CPUUsage",
+            "OSVersion",
+            "SDKVersion",
+        ],
+    )
+    def test_the_finer_split_does_not_mask_ordinary_identifiers(self, name: str) -> None:
+        """Splitting more aggressively must not turn ordinary acronym-prefixed
+        names into credentials: only a strong segment or a qualified pair does."""
+        assert not redact._is_credential_name(name)
+
+    @pytest.mark.parametrize(
+        ("first", "second"),
+        [
+            ("api", "secret"),
+            ("api", "token"),
+            ("api", "key"),
+            ("access", "token"),
+            ("access", "key"),
+            ("client", "secret"),
+            ("private", "key"),
+            ("session", "token"),
+            ("auth", "token"),
+        ],
+    )
+    def test_every_spelling_of_one_credential_agrees(self, first: str, second: str) -> None:
+        """The contract `_name_segments` documents, asserted rather than implied.
+
+        The bug was never that one spelling failed in isolation -- it was that
+        spellings disagreed, so the same credential was masked in a dump and
+        leaked two lines later. Pin the agreement, not the individual verdicts.
+        """
+        spellings = {
+            "SCREAMING_SNAKE": f"{first.upper()}_{second.upper()}",
+            "kebab": f"{first}-{second}",
+            "camel": f"{first}{second.capitalize()}",
+            "Pascal": f"{first.capitalize()}{second.capitalize()}",
+            "ACRONYM": f"{first.upper()}{second.capitalize()}",
+            "snake": f"{first}_{second}",
+        }
+        verdicts = {
+            style: redact._is_credential_name(name) for style, name in spellings.items()
+        }
+
+        assert set(verdicts.values()) == {True}, (
+            f"spellings disagree for {first}+{second}: "
+            f"{ {spellings[s]: v for s, v in verdicts.items()} }"
+        )
+
+    @pytest.mark.parametrize("name", ["APISECRET", "DBPASSWORD", "APIKEY", "apikey"])
+    def test_separator_less_all_caps_names_are_left_alone(self, name: str) -> None:
+        """``APISECRET`` has no boundary to find and guessing at one is what the
+        segment design avoids. ``APIKEY``/``apikey`` still match, but on the
+        ``apikey`` strong segment rather than on a split."""
+        expected = name.lower() in redact._STRONG_NAME_SEGMENTS
+        assert redact._is_credential_name(name) is expected
+
 
 class TestRedaction:
     def test_masks_a_vendor_key_but_keeps_it_recognisable(self) -> None:
@@ -215,6 +344,29 @@ class TestTerminalOutput:
     )
     def test_env_dump_detection(self, command: str, expected: bool) -> None:
         assert redact.is_env_dump_command(command) is expected
+
+    @pytest.mark.parametrize(
+        "name", ["API_SECRET", "api-secret", "apiSecret", "ApiSecret", "APISecret"]
+    )
+    def test_one_credential_is_masked_in_every_spelling(self, name: str) -> None:
+        """The leak was spelling-dependent: four spellings masked, the acronym
+        one not, inside the same dump (Issue #2007)."""
+        value = "9f2b7c41ae55d0e3bb84aa11"
+        out = redact.redact_terminal_output(f"{name}={value}\n", "env")
+        assert value not in out
+
+    def test_an_env_dump_masks_credentials_without_touching_neighbours(self) -> None:
+        value = "9f2b7c41ae55d0e3bb84aa11"
+        secrets = ["APISecret", "DBPassword", "JWTSecret", "AWSAccessKeyId", "LDAPPassword"]
+        ordinary = ["APIEndpoint", "HTTPSProxy", "DBHost", "AWSRegion", "sellToken"]
+        dump = "".join(f"{name}={value}\n" for name in secrets + ordinary)
+
+        out = redact.redact_terminal_output(dump, "env")
+
+        for name in secrets:
+            assert f"{name}={value}" not in out, f"{name} leaked"
+        for name in ordinary:
+            assert f"{name}={value}" in out, f"{name} was masked but is not a credential"
 
 
 def test_the_disable_switch_is_read_once_at_import(monkeypatch: pytest.MonkeyPatch) -> None:
