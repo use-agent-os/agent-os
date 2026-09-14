@@ -369,6 +369,95 @@ def test_select_new_first_run_reports_respects_the_limit_too(state_dir):
     assert second == ids[:2]
 
 
+# ── an empty first run is still a run (Issue #1946) ─────────────────────────
+
+
+def test_select_new_reports_the_first_item_on_a_feed_that_started_empty(state_dir):
+    """A watcher adopted onto an empty feed -- a fresh repo, a drained queue --
+    used to read its own empty watermark back as "never ran", so the second run
+    counted as the first and silently adopted the first real item instead of
+    reporting it. The item was gone for good: by the third run the state was no
+    longer empty."""
+    watermark = _watermark_module()
+
+    assert watermark.select_new("empty", []) == []  # adopts an empty feed, silently
+    assert watermark.select_new("empty", ["item-1"]) == ["item-1"]
+    assert watermark.select_new("empty", ["item-1"]) == []
+
+
+def test_select_new_treats_a_written_watermark_as_having_run(state_dir):
+    watermark = _watermark_module()
+    watermark.select_new("empty", [])
+
+    assert watermark.watermark_path("empty").exists()
+    assert watermark.load_seen("empty") == []
+
+
+def test_select_new_adopts_silently_when_the_watermark_is_unreadable(state_dir):
+    """Corrupt state is not a record of what was reported, so it must not be
+    read as "ran before" -- that would dump the whole feed into the chat."""
+    watermark = _watermark_module()
+    path = watermark.watermark_path("broken")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json", encoding="utf-8")
+
+    assert watermark.select_new("broken", ["a", "b"]) == []
+    assert watermark.select_new("broken", ["a", "b", "c"]) == ["c"]
+
+
+def test_select_new_deduplicates_ids_within_one_poll(state_dir):
+    """A feed that lists the same entry twice should report it once and spend
+    one slot of the remembered-ids budget, not two."""
+    watermark = _watermark_module()
+
+    assert watermark.select_new("dupes", ["a", "a", "b"], first_run_reports=True) == ["a", "b"]
+    assert watermark.load_seen("dupes") == ["a", "b"]
+    assert watermark.select_new("dupes", ["a", "b", "c", "c"]) == ["c"]
+    assert watermark.load_seen("dupes") == ["a", "b", "c"]
+
+
+def test_save_seen_collapses_duplicates_so_the_budget_is_not_wasted(state_dir):
+    """The trim keeps the newest MAX_REMEMBERED_IDS. A repeated id holding
+    several of those slots shortens the watcher's real memory, so an older id
+    falls off the end sooner and can be reported a second time."""
+    watermark = _watermark_module()
+
+    watermark.save_seen("budget", ["a", "b", "a", "c", "b"])
+
+    assert watermark.load_seen("budget") == ["a", "b", "c"]
+
+
+def test_duplicates_do_not_consume_the_limit_twice(state_dir):
+    """The cap counts distinct fresh ids: a duplicate must not push a real item
+    out of this run's report."""
+    watermark = _watermark_module()
+    watermark.select_new("cap", [])
+
+    assert watermark.select_new("cap", ["a", "a", "b"], limit=2) == ["a", "b"]
+
+
+def test_rss_reports_the_first_item_on_a_feed_that_started_empty(state_dir, base_url):
+    """The same swallowed-item bug, at the real entry point."""
+    empty = """<?xml version="1.0"?><rss><channel></channel></rss>"""
+    url = _feed(state_dir, base_url, "feed.xml", empty)
+    first = _run("watch_rss.py", "--url", url, "--name", "e", env_home=state_dir)
+
+    _feed(
+        state_dir,
+        base_url,
+        "feed.xml",
+        empty.replace(
+            "</channel>",
+            "<item><title>First real post</title><guid>1</guid></item></channel>",
+        ),
+    )
+    second = _run("watch_rss.py", "--url", url, "--name", "e", env_home=state_dir)
+
+    assert first.returncode == 0 and first.stdout == ""
+    assert second.returncode == 0
+    assert second.stdout.strip() == "- First real post"
+
+
 @pytest.mark.parametrize("limit", ["0", "-1", "ten"])
 def test_limit_must_be_a_positive_integer(limit, state_dir):
     """A cap of 0 or less would report nothing and commit nothing, forever."""
