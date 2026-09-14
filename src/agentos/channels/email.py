@@ -136,6 +136,10 @@ _HTML_BREAK_RE = re.compile(r"(?i)<\s*(?:br\s*/?|/p|/div|/tr|/li)\s*>")
 _HTML_DROP_RE = re.compile(r"(?is)<\s*(script|style)\b.*?<\s*/\s*\1\s*>")
 _HTML_TAG_RE = re.compile(r"(?s)<[^>]+>")
 _HEADER_COMMENT_RE = re.compile(r"\([^()]*\)")
+#: One msg-id: either a ``<...>`` span, or -- for clients that drop the angle
+#: brackets -- a bare run with the id separators excluded so a stray ``,`` or
+#: ``;`` between ids cannot become an id of its own.
+_MESSAGE_ID_RE = re.compile(r"<([^<>]*)>|([^\s<>,;]+)")
 _DEFAULT_OUTBOUND_SUBJECT = "Message from AgentOS"
 
 
@@ -964,11 +968,22 @@ def _message_ids(raw: Any) -> list[str]:
     """Return the bare message ids in a threading header value, in order.
 
     Clients decorate these headers with comments and drop the angle brackets, so
-    a plain ``split()`` yields tokens that are not ids at all.
+    a plain ``split()`` yields tokens that are not ids at all. RFC 5322 3.6.4
+    also makes the CFWS *between* two ids optional, so ``<a@x><b@x>`` is one
+    well-formed header that whitespace splitting collapsed into a single bogus
+    id -- taking the thread key and the outbound chain with it. Read the
+    bracketed spans first and fall back to bare tokens for the clients that drop
+    the brackets entirely.
     """
 
     text = _HEADER_COMMENT_RE.sub(" ", str(raw or ""))
-    return [token for token in (raw_id.strip().strip("<>") for raw_id in text.split()) if token]
+    return [
+        token
+        for token in (
+            (bracketed or bare).strip() for bracketed, bare in _MESSAGE_ID_RE.findall(text)
+        )
+        if token
+    ]
 
 
 def _first_literal(data: Any) -> bytes | None:
