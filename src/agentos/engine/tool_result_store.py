@@ -82,9 +82,11 @@ class ToolResultStore:
                 f"tool result snapshot exceeds per-result budget ({size_bytes} > {max_bytes})"
             )
 
-        self._remove_expired(retention_seconds)
-        if disk_budget_bytes is not None:
-            self._prune_to_fit(size_bytes, disk_budget_bytes)
+        self._maintain(
+            incoming_bytes=size_bytes,
+            retention_seconds=retention_seconds,
+            disk_budget_bytes=disk_budget_bytes,
+        )
 
         sha = hashlib.sha256(payload).hexdigest()
         created_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
@@ -207,30 +209,61 @@ class ToolResultStore:
             total += record.size_bytes
         return total
 
-    def _remove_expired(self, retention_seconds: int | None) -> None:
-        if retention_seconds is None:
+    def _maintain(
+        self,
+        *,
+        incoming_bytes: int,
+        retention_seconds: int | None,
+        disk_budget_bytes: int | None,
+    ) -> None:
+        """Run expiry and budget pruning over a single scan of the store.
+
+        Both passes need the same metadata, and ``_iter_records`` walks the
+        whole store and JSON-parses every record to produce it. Scanning once
+        and sharing the result halves that cost on a path that runs for every
+        tool result; scanning not at all when neither pass is configured
+        removes it entirely.
+        """
+        if retention_seconds is None and disk_budget_bytes is None:
             return
+
+        budget: int | None = None
+        if disk_budget_bytes is not None:
+            budget = max(0, int(disk_budget_bytes))
+            # A snapshot larger than the whole budget can never be made to fit,
+            # so pruning first only destroys unrelated records on the way to
+            # the same error. The caller records a `skipped` metric and carries
+            # on, which made that loss silent. Raise before touching anything.
+            if incoming_bytes > budget:
+                raise ToolResultStoreBudgetError(
+                    f"tool result snapshot exceeds disk budget ({incoming_bytes} > {budget})"
+                )
+
+        records = self._iter_records()
+        if retention_seconds is not None:
+            records = self._remove_expired(records, retention_seconds)
+        if budget is not None:
+            self._prune_to_fit(records, incoming_bytes, budget)
+
+    def _remove_expired(
+        self, records: list[_StoredMeta], retention_seconds: int
+    ) -> list[_StoredMeta]:
+        """Drop records past retention and return the survivors."""
         cutoff = datetime.now(UTC) - timedelta(seconds=max(0, int(retention_seconds)))
-        for record in self._iter_records():
+        survivors: list[_StoredMeta] = []
+        for record in records:
             if record.created_at < cutoff:
                 _remove_record_dir(record.record_dir)
+            else:
+                survivors.append(record)
+        return survivors
 
-    def _prune_to_fit(self, incoming_bytes: int, disk_budget_bytes: int) -> None:
-        budget = max(0, int(disk_budget_bytes))
-        # A snapshot larger than the whole budget can never be made to fit, so
-        # pruning first only destroys unrelated records on the way to the same
-        # error. The caller records a `skipped` metric and carries on, which
-        # made that loss silent.
-        if incoming_bytes > budget:
-            raise ToolResultStoreBudgetError(
-                "tool result snapshot exceeds disk budget "
-                f"({incoming_bytes} > {budget})"
-            )
-        records = sorted(self._iter_records(), key=lambda item: item.created_at)
-        current = sum(record.size_bytes for record in records)
+    def _prune_to_fit(self, records: list[_StoredMeta], incoming_bytes: int, budget: int) -> None:
+        ordered = sorted(records, key=lambda item: item.created_at)
+        current = sum(record.size_bytes for record in ordered)
         if current + incoming_bytes <= budget:
             return
-        for record in records:
+        for record in ordered:
             _remove_record_dir(record.record_dir)
             current = max(0, current - record.size_bytes)
             if current + incoming_bytes <= budget:
