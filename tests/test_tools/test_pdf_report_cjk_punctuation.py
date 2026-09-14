@@ -58,16 +58,40 @@ def test_helvetica_base_keeps_quotes_dashes_and_ellipsis() -> None:
     assert markup == f'<font name="{CJK_FONT}">{text}</font>'
 
 
-def test_latin_text_stays_on_the_base_font_and_unsupported_symbols_are_still_dropped() -> None:
+def test_latin_text_and_an_unsupported_symbol_share_the_base_font_run() -> None:
+    """A symbol neither CJK-routed nor covered by the base font's width table
+    stays in the base_font run instead of being dropped (see the
+    non-CJK-script sibling coverage below): the PDF's own missing-glyph
+    rendering for it is a visible box, not a silently shortened sentence."""
     markup = _markup("Title: ok ✅ — done")
-    assert markup.startswith("Title: ok ")
-    assert "✅" not in markup
-    assert f'<font name="{CJK_FONT}">—</font>' in markup
+    assert markup == f'Title: ok ✅ <font name="{CJK_FONT}">—</font> done'
 
 
-def test_without_a_cjk_font_the_punctuation_is_dropped_not_crashed() -> None:
+def test_without_a_cjk_font_the_punctuation_stays_on_base_font() -> None:
+    """No CJK font available means CJK punctuation (and even ideographs) have
+    nowhere else to go; keeping them on base_font is still strictly better
+    than deleting them outright."""
     _register_pdf_fonts()
-    assert _pdf_markup_text("a，b", base_font="Helvetica", cjk_font=None) == "ab"
+    assert _pdf_markup_text("a，b", base_font="Helvetica", cjk_font=None) == "a，b"
+
+
+@pytest.mark.parametrize(
+    ("text", "script"),
+    [
+        ("Привет мир", "Cyrillic"),
+        ("Γειά σου κόσμε", "Greek"),
+        ("مرحبا بالعالم", "Arabic"),
+        ("שלום עולם", "Hebrew"),
+    ],
+)
+def test_non_cjk_scripts_are_not_dropped_on_a_helvetica_only_host(text: str, script: str) -> None:
+    """The same silent-deletion bug CJK punctuation had: on a host with no
+    local TTF, Helvetica only covers Latin-1, and none of these scripts are
+    CJK -- they used to vanish from the report exactly like CJK punctuation
+    did before issue #1739's fix, just left uncovered by it."""
+    markup = _markup(text)
+    for char in text:
+        assert char in markup, f"{script} character {char!r} was dropped"
 
 
 def _channel_artifact_context(tmp_path: Path) -> ToolContext:

@@ -208,8 +208,14 @@ def _pdf_markup_text(value: Any, *, base_font: str, cjk_font: str | None) -> str
             _is_cjk(char) or (_is_cjk_symbol(char) and not _font_supports_char(base_font, char))
         ):
             target_font = cjk_font
-        if target_font is None and not _font_supports_char(base_font, char):
-            continue
+        # A character that is neither CJK-routed nor covered by base_font's
+        # width table still goes into the base_font run rather than being
+        # dropped: Cyrillic, Greek, Arabic and emoji on a host without any of
+        # the DejaVu/Arial Unicode TTF candidates (a bare Helvetica fallback
+        # only covers Latin-1) used to vanish from the report exactly the way
+        # CJK text did before that was fixed. The PDF's own missing-glyph
+        # rendering for a truly unsupported code point is a visible box, not
+        # a silently shortened sentence.
         if target_font != run_font:
             flush()
             run_font = target_font
