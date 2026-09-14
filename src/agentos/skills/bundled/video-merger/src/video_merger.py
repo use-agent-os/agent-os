@@ -62,6 +62,19 @@ class VideoMerger:
         self.ffprobe_path = _resolve_ffmpeg_binary(ffprobe_path, "ffprobe")
         self._check_dependencies()
 
+    @staticmethod
+    def concat_entry(video_path: str) -> str:
+        """构造 concat demuxer 的一行 ``file`` 指令（已转义）。
+
+        FFmpeg 的 concat 解析器按 token 读取路径：Windows 的反斜杠会被
+        当作转义符吃掉（``C:\\Users`` 变成 ``C:Users``），文件名里的单引号
+        会提前结束 ``file '...'`` 指令。反斜杠统一转成正斜杠（FFmpeg 在
+        Windows 上同样接受），单引号则先关闭引号、转义、再重新打开。
+        """
+        normalized = os.path.abspath(video_path).replace("\\", "/")
+        escaped = normalized.replace("'", "'\\''")
+        return f"file '{escaped}'\n"
+
     def _check_dependencies(self):
         """检查依赖是否安装"""
         for tool in [self.ffmpeg_path, self.ffprobe_path]:
@@ -139,7 +152,7 @@ class VideoMerger:
         # 生成concat列表
         with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
             for v in video_list:
-                f.write(f"file '{os.path.abspath(v)}'\n")
+                f.write(self.concat_entry(v))
             concat_file = f.name
 
         try:
@@ -281,7 +294,7 @@ class VideoMerger:
         # 生成concat列表
         with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
             for v in video_list:
-                f.write(f"file '{os.path.abspath(v)}'\n")
+                f.write(self.concat_entry(v))
             concat_file = f.name
 
         try:
