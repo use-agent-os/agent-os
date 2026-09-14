@@ -385,6 +385,24 @@ async def retry_request(
 # ---------------------------------------------------------------------------
 
 
+def _largest_prefix(
+    segment: str,
+    limit: int,
+    length: Callable[[str], int],
+    suffix: str = "",
+) -> int:
+    """Largest ``n`` where ``segment[:n] + suffix`` still measures within *limit*."""
+    low, high, best = 1, len(segment) - 1, 1
+    while low <= high:
+        mid = (low + high) // 2
+        if length(segment[:mid] + suffix) <= limit:
+            best = mid
+            low = mid + 1
+        else:
+            high = mid - 1
+    return best
+
+
 def split_text_for_limit(
     segment: str,
     limit: int,
@@ -409,18 +427,18 @@ def split_text_for_limit(
     backs up to just before that fence: the first half never contains a
     half-open block, and the second half reopens it from its own start,
     fully balanced.
+
+    Backing up must still leave a non-empty prefix -- callers split in a
+    loop that ends only on an empty tail, so a zero-length cut would spin
+    forever. When the open fence sits on the segment's first line the cut
+    falls back to the fence itself, and when the segment *opens* with the
+    fence there is nothing to give back: the block is closed at the cut and
+    reopened, info string and all, at the head of the remainder.
     """
     length = measure if measure is not None else len
     if length(segment) <= limit:
         return segment, ""
-    low, high, best = 1, len(segment) - 1, 1
-    while low <= high:
-        mid = (low + high) // 2
-        if length(segment[:mid]) <= limit:
-            best = mid
-            low = mid + 1
-        else:
-            high = mid - 1
+    best = _largest_prefix(segment, limit, length)
     cut = best
     for boundary in ("\n", " "):
         found = segment.rfind(boundary, 0, best)
@@ -430,7 +448,21 @@ def split_text_for_limit(
     if segment.count("```", 0, cut) % 2 == 1:
         fence_start = segment.rfind("```", 0, cut)
         newline_before_fence = segment.rfind("\n", 0, fence_start)
-        candidate = newline_before_fence + 1 if newline_before_fence >= 0 else 0
+        # Prefer the start of the fence's own line; with no newline before it
+        # the fence is on the first line, so back up to the fence instead --
+        # 0 only when the segment opens with it.
+        candidate = newline_before_fence + 1 if newline_before_fence >= 0 else fence_start
         if candidate > 0:
             cut = candidate
+        else:
+            closer = "\n```"
+            info_end = segment.find("\n", fence_start)
+            opener = segment[fence_start:info_end] if info_end != -1 else "```"
+            # Re-cut with room for the closer so the first half still fits.
+            cut = _largest_prefix(segment, limit, length, closer)
+            # Only worth it while the remainder actually shrinks; otherwise
+            # fall through and let an unbalanced half through rather than
+            # stall the caller's loop.
+            if cut > len(opener) + 1:
+                return segment[:cut] + closer, opener + "\n" + segment[cut:]
     return segment[:cut], segment[cut:]

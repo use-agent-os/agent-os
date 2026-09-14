@@ -118,6 +118,58 @@ def test_split_text_for_limit_respects_a_raw_length_measure() -> None:
     assert head + tail == content
 
 
+def _split_all(content: str, limit: int) -> list[str]:
+    """Drive the splitter the way the adapters do: loop until the tail is empty."""
+    chunks: list[str] = []
+    remaining = content
+    for _ in range(100):  # bounded, so a non-advancing split fails instead of hanging
+        head, tail = split_text_for_limit(remaining, limit)
+        chunks.append(head)
+        if not tail:
+            return chunks
+        remaining = tail
+    raise AssertionError("splitter never consumed the segment")
+
+
+def test_split_text_for_limit_balances_a_fence_that_opens_the_segment() -> None:
+    """A fence at offset 0 has no preceding line to back up to.
+
+    The backup was skipped whenever it resolved to 0, so the first chunk
+    went out with a half-open block. Cutting at 0 instead would emit an
+    empty chunk and hang the adapters' loop, so the block is closed here
+    and reopened on the remainder.
+    """
+    segment = "```python\n" + ("a" * 400) + "\n```\nrest"
+
+    head, tail = split_text_for_limit(segment, 100)
+
+    assert head
+    assert head.count("```") % 2 == 0
+    assert len(head) <= 100
+    assert tail.startswith("```python")
+
+
+def test_split_text_for_limit_cuts_before_a_fence_on_the_first_line() -> None:
+    """Text preceding the fence is a valid, non-empty place to cut."""
+    segment = "intro text ```" + ("a" * 400) + "```\nrest"
+
+    head, tail = split_text_for_limit(segment, 100)
+
+    assert head == "intro text "
+    assert head.count("```") % 2 == 0
+    assert head + tail == segment  # nothing invented when a real cut exists
+
+
+def test_split_text_for_limit_always_advances_on_fenced_content() -> None:
+    """Every chunk balanced, and the loop terminates."""
+    segment = "```python\n" + ("a" * 900) + "\n```\ntail text"
+
+    chunks = _split_all(segment, 120)
+
+    assert all(chunk.count("```") % 2 == 0 for chunk in chunks)
+    assert all(chunks)
+
+
 class _DiscordResponse:
     status_code = 200
 
