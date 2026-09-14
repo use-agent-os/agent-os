@@ -153,6 +153,15 @@ def _edit_docx_module() -> object:
     return edit_docx
 
 
+def _inspect_docx_module() -> object:
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import inspect_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+    return inspect_docx
+
+
 def _paragraph(runs: list[tuple[str, bool]]) -> object:
     """Build a one-paragraph document whose runs carry the given bold flags."""
     from docx import Document
@@ -378,3 +387,136 @@ def test_apply_ops_skips_non_dict_ops() -> None:
 
     assert applied == 1
     assert doc.paragraphs[0].text == "Hello Wei"
+
+
+# ---------------------------------------------------------------------------
+# inspect_docx: merged cells, nested tables, unreadable files (Issue #2154)
+# ---------------------------------------------------------------------------
+
+
+def test_inspect_still_reads_an_ordinary_table(tmp_path: Path) -> None:
+    """Boundary: an unmerged table's shape must not change."""
+    from docx import Document
+
+    inspect_docx = _inspect_docx_module()
+    doc_path = tmp_path / "plain.docx"
+    doc = Document()
+    tbl = doc.add_table(rows=2, cols=2)
+    for (r, c), value in {(0, 0): "A", (0, 1): "B", (1, 0): "C", (1, 1): "D"}.items():
+        tbl.cell(r, c).text = value
+    doc.save(str(doc_path))
+
+    assert inspect_docx.inspect(doc_path)["tables"][0] == [["A", "B"], ["C", "D"]]
+
+
+def test_inspect_does_not_duplicate_a_vertically_merged_cell(tmp_path: Path) -> None:
+    """``row.cells`` resolves a vertical merge against the row above, so the
+    grid-mapped API repeats the merged cell's text into a row that does not
+    hold it. Reading ``<w:tc>`` directly -- what ``edit_docx`` already does
+    -- reports each cell exactly once."""
+    from docx import Document
+
+    inspect_docx = _inspect_docx_module()
+    doc_path = tmp_path / "vmerge.docx"
+    doc = Document()
+    tbl = doc.add_table(rows=2, cols=3)
+    tbl.cell(0, 0).text = "SPAN"
+    tbl.cell(0, 1).text = "B1"
+    tbl.cell(0, 2).text = "C1"
+    tbl.cell(1, 1).text = "B2"
+    tbl.cell(1, 2).text = "C2"
+    tbl.cell(0, 0).merge(tbl.cell(1, 0))
+    doc.save(str(doc_path))
+
+    rows = inspect_docx.inspect(doc_path)["tables"][0]
+
+    assert rows[0] == ["SPAN", "B1", "C1"]
+    assert rows[1] == ["", "B2", "C2"]
+
+
+def test_inspect_does_not_repeat_a_horizontally_merged_cell(tmp_path: Path) -> None:
+    """A cell spanning two columns is one cell, not two identical ones."""
+    from docx import Document
+
+    inspect_docx = _inspect_docx_module()
+    doc_path = tmp_path / "hmerge.docx"
+    doc = Document()
+    tbl = doc.add_table(rows=1, cols=3)
+    tbl.cell(0, 0).text = "WIDE"
+    tbl.cell(0, 2).text = "Y"
+    tbl.cell(0, 0).merge(tbl.cell(0, 1))
+    doc.save(str(doc_path))
+
+    rows = inspect_docx.inspect(doc_path)["tables"][0]
+
+    assert rows[0] == ["WIDE", "Y"]
+
+
+def test_inspect_includes_a_nested_table(tmp_path: Path) -> None:
+    """A table nested inside a cell is not part of ``doc.tables`` at the top
+    level and not part of ``cell.text`` either, so it used to vanish
+    entirely. Its rows are folded into the containing cell's text instead of
+    silently dropped."""
+    from docx import Document
+
+    inspect_docx = _inspect_docx_module()
+    doc_path = tmp_path / "nested.docx"
+    doc = Document()
+    outer = doc.add_table(rows=1, cols=2)
+    outer.cell(0, 0).text = "outer A"
+    inner = outer.cell(0, 1).add_table(rows=1, cols=2)
+    inner.cell(0, 0).text = "inner X"
+    inner.cell(0, 1).text = "inner Y"
+    doc.save(str(doc_path))
+
+    payload = inspect_docx.inspect(doc_path)
+
+    assert len(payload["tables"]) == 1, "the nested table must not appear as its own entry"
+    row = payload["tables"][0][0]
+    assert row[0] == "outer A"
+    assert "inner X" in row[1]
+    assert "inner Y" in row[1]
+
+
+def test_inspect_handles_several_levels_of_nested_tables(tmp_path: Path) -> None:
+    """Boundary: nesting is not hardcoded to one level deep."""
+    from docx import Document
+
+    inspect_docx = _inspect_docx_module()
+    doc_path = tmp_path / "deep.docx"
+    doc = Document()
+    outer = doc.add_table(rows=1, cols=1)
+    mid = outer.cell(0, 0).add_table(rows=1, cols=1)
+    inner = mid.cell(0, 0).add_table(rows=1, cols=1)
+    inner.cell(0, 0).text = "deepest"
+    doc.save(str(doc_path))
+
+    payload = inspect_docx.inspect(doc_path)
+
+    assert len(payload["tables"]) == 1
+    assert "deepest" in payload["tables"][0][0][0]
+
+
+def test_inspect_reports_an_unreadable_file_as_exit_two(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A renamed or truncated file is a bad input, not an unhandled traceback."""
+    inspect_docx = _inspect_docx_module()
+    bad = tmp_path / "invalid.docx"
+    bad.write_text("not a docx at all", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", ["inspect_docx.py", str(bad)])
+
+    assert inspect_docx.main() == 2
+
+
+def test_inspect_still_reports_a_missing_file_as_exit_two(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Boundary: the pre-existing 'file not found' path is unaffected."""
+    inspect_docx = _inspect_docx_module()
+    missing = tmp_path / "does-not-exist.docx"
+
+    monkeypatch.setattr(sys, "argv", ["inspect_docx.py", str(missing)])
+
+    assert inspect_docx.main() == 2

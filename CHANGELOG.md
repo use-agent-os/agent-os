@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `docx` skill: `inspect_docx.py` read table rows via `row.cells`, which maps
+  a row onto the table's grid rather than the cells it actually holds -- a
+  horizontally merged cell was repeated once per column it spans, and a
+  vertically merged one duplicated its text into the continuation row.
+  Tables are now read straight from their `<w:tc>` elements (the same
+  approach `edit_docx.py` already uses), so each cell is visited exactly
+  once. A table nested inside a cell -- invisible both to `cell.text` and
+  to `doc.tables` at the top level -- is now folded into the containing
+  cell's text instead of silently dropped, recursing to any depth.
+  `main()` also catches `PackageNotFoundError`/`BadZipFile` for a renamed
+  or truncated file, exiting 2 with a message on stderr instead of an
+  unhandled traceback (#2154).
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added
