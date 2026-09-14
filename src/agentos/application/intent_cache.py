@@ -265,6 +265,35 @@ def _command_spans(command: str) -> list[tuple[int, int]]:
     return spans
 
 
+def _split_rm_tail(tail: str, *, posix: bool = True) -> list[str]:
+    """Tokenize an ``rm`` argument tail, tolerating an unbalanced quote.
+
+    The tail is sliced out by a regex whose terminator class does not include
+    a quote, so a wrapped command such as ``bash -c "rm -rf /etc"`` yields the
+    tail ``-rf /etc"`` -- carrying the *wrapper's* closing quote. That makes
+    ``shlex.split`` raise "No closing quotation", and the previous fallback
+    split on whitespace alone, leaving the quote glued to the path as
+    ``/etc"``. A glued quote is a different path, so
+    ``sensitive_target_in_command`` stopped recognizing ``/etc`` and the hard
+    block never fired.
+
+    Retry once with trailing quotes trimmed, and strip any that survive into
+    the whitespace fallback. A successful parse is returned untouched, so the
+    ordinary quoting cases keep their exact current behaviour.
+    """
+    try:
+        return shlex.split(tail, posix=posix)
+    except ValueError:
+        pass
+    trimmed = tail.rstrip("\"'")
+    if trimmed != tail:
+        try:
+            return shlex.split(trimmed, posix=posix)
+        except ValueError:
+            pass
+    return [stripped for token in tail.split() if (stripped := token.strip("\"'"))]
+
+
 def _extract_rm_targets(command: str) -> list[tuple[str, frozenset[str]]]:
     """Pull every ``rm`` argument out, tagged with that invocation's flags.
 
@@ -305,16 +334,9 @@ def _extract_rm_targets(command: str) -> list[tuple[str, frozenset[str]]]:
         if not tail:
             continue
 
-        token_sets: list[list[str]] = []
-        try:
-            token_sets.append(shlex.split(tail))
-        except ValueError:
-            token_sets.append(tail.split())
+        token_sets: list[list[str]] = [_split_rm_tail(tail)]
         if "\\" in tail and (os.name == "nt" or re.search(r"(?:^|\s)\\[^\s]", tail)):
-            try:
-                token_sets.append(shlex.split(tail, posix=False))
-            except ValueError:
-                token_sets.append(tail.split())
+            token_sets.append(_split_rm_tail(tail, posix=False))
 
         for tokens in token_sets:
             capabilities = _rm_invocation_capabilities(tokens)
