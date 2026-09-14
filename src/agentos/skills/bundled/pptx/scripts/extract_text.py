@@ -76,19 +76,22 @@ def _table_text(shape) -> list[str]:
 
 
 def _slide_text(slide) -> list[str]:
-    """Walk shapes (and one level of grouped shapes) collecting text."""
-    out: list[str] = []
-    for shape in slide.shapes:
+    """Walk shapes (and nested group shapes) collecting text."""
+
+    def _walk(shape, out: list[str]) -> None:
         out.extend(_shape_text(shape))
         out.extend(_table_text(shape))
-        # one level of group expansion (sufficient for most decks)
+        # recurse into grouped shapes to any nesting depth
         if getattr(shape, "shape_type", None) and getattr(shape, "shapes", None):
             try:
                 for inner in shape.shapes:
-                    out.extend(_shape_text(inner))
-                    out.extend(_table_text(inner))
+                    _walk(inner, out)
             except (AttributeError, TypeError):
                 pass
+
+    out: list[str] = []
+    for shape in slide.shapes:
+        _walk(shape, out)
     return out
 
 

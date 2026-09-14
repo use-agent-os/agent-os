@@ -68,3 +68,52 @@ def test_shape_text_and_table_text_extraction(tmp_path: Path) -> None:
     assert "Secondary point" in slide_data["text"]
     assert "Metric | Value" in slide_data["text"]
     assert "Q1 Revenue (USD) | $100M" in slide_data["text"]
+
+def test_nested_group_shapes_are_walked_recursively() -> None:
+    """Text and tables nested two+ group levels deep must not be dropped."""
+
+    class _Para:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    class _Cell:
+        def __init__(self, text: str) -> None:
+            self.text_frame = type("Tf", (), {"paragraphs": [_Para(text)]})()
+
+    class _Row:
+        def __init__(self, *texts: str) -> None:
+            self.cells = [_Cell(t) for t in texts]
+
+    class _Table:
+        def __init__(self, *rows: _Row) -> None:
+            self.rows = list(rows)
+
+    class _Frame:
+        def __init__(self, paragraphs: list[_Para]) -> None:
+            self.paragraphs = paragraphs
+
+    class _Shape:
+        def __init__(
+            self,
+            *,
+            frame: _Frame | None = None,
+            table: _Table | None = None,
+            children: tuple = (),
+        ) -> None:
+            self.has_text_frame = frame is not None
+            self.text_frame = frame
+            self.has_table = table is not None
+            self.table = table
+            self.shape_type = len(children) > 0
+            self.shapes = list(children) if children else None
+
+    leaf = _Shape(frame=_Frame([_Para("deepest leaf")]))
+    table = _Shape(table=_Table(_Row("L1C1", "L1C2")))
+    inner_group = _Shape(children=(leaf, table))
+    outer_group = _Shape(children=(inner_group,))
+    slide = type("Slide", (), {"shapes": [outer_group]})()
+
+    lines = extract_text._slide_text(slide)
+    assert "deepest leaf" in lines
+    assert "L1C1 | L1C2" in lines
+
