@@ -197,7 +197,15 @@ def sender_allowed(sender: str, allowlist: list[str] | tuple[str, ...]) -> bool:
     address = normalize_address(sender) or (sender or "").strip().lower()
     if not address:
         return False
-    domain = address.rpartition("@")[2]
+    # ``rpartition`` hands back the whole value as the tail when there is no
+    # separator, so a ``From`` carrying no ``@`` -- ``<example.com>`` -- came
+    # back as its own domain and cleared an ``@example.com`` entry. A value
+    # with no local part and no ``@`` is not an address and has no domain for a
+    # domain pattern to claim; exact entries still match it, so a local-only
+    # ``root`` on a local MTA keeps working.
+    local, at_sign, domain = address.rpartition("@")
+    if not (at_sign and local):
+        domain = ""
     for raw in allowlist:
         pattern = (raw or "").strip().lower()
         if not pattern:

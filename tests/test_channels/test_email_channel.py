@@ -112,6 +112,76 @@ def test_empty_allowlist_admits_nobody() -> None:
     assert sender_allowed("owner@example.com", []) is False
 
 
+@pytest.mark.parametrize(
+    "sender",
+    ["team.example", "TEAM.EXAMPLE", "example.com", "Ops <team.example>"],
+)
+def test_allowlist_refuses_a_sender_that_carries_no_at_sign(sender: str) -> None:
+    """A value with no ``@`` has no domain, so no ``@domain`` entry may claim it.
+
+    ``str.rpartition`` returns the whole string as the tail when the separator
+    is absent, which handed a bare ``team.example`` back as its own domain.
+    """
+
+    assert sender_allowed(sender, ["owner@example.com", "*@team.example"]) is False
+    assert sender_allowed(sender, ["owner@example.com", "@team.example"]) is False
+
+
+def test_allowlist_still_admits_a_local_only_sender_by_exact_entry() -> None:
+    """Closing the domain branch must not close the exact-address branch.
+
+    A local-only address is ordinary on a local MTA, and an operator who wrote
+    it out in full is naming that sender, not a domain.
+    """
+
+    assert sender_allowed("root", ["root"]) is True
+    assert sender_allowed("root", ["@example.com"]) is False
+
+
+def test_to_incoming_drops_a_from_whose_addr_spec_is_a_bare_domain() -> None:
+    """The poll-time gate: the display name is free text, the addr-spec is not."""
+
+    channel = EmailChannel(config=_config())
+    parsed = _raw(
+        sender='"attacker@evil.invalid" <team.example>',
+        message_id="x1@evil.invalid",
+    )
+
+    assert channel._to_incoming(parsed) is None
+
+
+def test_to_incoming_still_admits_an_allowlisted_domain_sender() -> None:
+    """Guard for the opposite direction — passes either way by design."""
+
+    channel = EmailChannel(config=_config())
+    parsed = _raw(sender="Dev <dev@team.example>", message_id="ok1@team.example")
+
+    message = channel._to_incoming(parsed)
+
+    assert message is not None
+    assert message.sender_id == "dev@team.example"
+
+
+def test_evaluate_access_denies_a_bare_domain_sender_id() -> None:
+    """The second enforcement point must reach the same verdict as the first."""
+
+    channel = EmailChannel(config=_config())
+    inbound = IncomingMessage(sender_id="team.example", channel_id="t1", content="hi")
+
+    decision = channel.evaluate_access(inbound, is_group=False, mentioned=True)
+
+    assert decision.admit is False
+    assert decision.reason == "not_in_allowlist"
+
+
+def test_reply_target_refuses_a_reply_to_that_is_a_bare_domain() -> None:
+    """The third call site: an off-list ``Reply-To`` falls back to the sender."""
+
+    channel = EmailChannel(config=_config())
+
+    assert channel._reply_target("owner@example.com", "Ops <team.example>") == "owner@example.com"
+
+
 def test_evaluate_access_denies_unknown_sender_and_any_group() -> None:
     channel = EmailChannel(config=_config())
     inbound = IncomingMessage(sender_id="stranger@elsewhere.com", channel_id="t1", content="hi")
