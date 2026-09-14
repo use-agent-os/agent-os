@@ -183,9 +183,7 @@ def _delivery_to_wire(delivery: Any) -> dict[str, Any]:
             "threadId": delivery.get("thread_id", ""),
             "webhookUrl": delivery.get("webhook_url", "") or "",
             "bestEffort": bool(delivery.get("best_effort", False)),
-            "failureDestination": _failure_destination_to_wire(
-                delivery.get("failure_destination")
-            ),
+            "failureDestination": _failure_destination_to_wire(delivery.get("failure_destination")),
         }
     return {
         "mode": (
@@ -424,9 +422,7 @@ def _build_failure_destination(raw: Any) -> FailureDestination | None:
     if mode_norm == "webhook":
         url = raw.get("webhookUrl") or raw.get("to") or ""
         if not url:
-            raise ValueError(
-                "failureDestination mode='webhook' requires webhookUrl"
-            )
+            raise ValueError("failureDestination mode='webhook' requires webhookUrl")
         validate_webhook_url(str(url))
         return FailureDestination(
             mode=DeliveryMode.WEBHOOK,
@@ -450,9 +446,7 @@ def _build_webhook_delivery(delivery_raw: dict[str, Any]) -> DeliveryConfig:
     token = delivery_raw.get("webhookToken") or delivery_raw.get("token") or ""
     best_effort = bool(delivery_raw.get("bestEffort", False))
     validate_webhook_url(str(url))
-    failure_destination = _build_failure_destination(
-        delivery_raw.get("failureDestination")
-    )
+    failure_destination = _build_failure_destination(delivery_raw.get("failureDestination"))
     return DeliveryConfig(
         mode=DeliveryMode.WEBHOOK,
         webhook_url=str(url),
@@ -462,14 +456,29 @@ def _build_webhook_delivery(delivery_raw: dict[str, Any]) -> DeliveryConfig:
     )
 
 
-def _parse_delivery_overrides(delivery_raw: Any) -> dict[str, str] | None:
-    if not isinstance(delivery_raw, dict) or not delivery_raw.get("channelName"):
+def _parse_delivery_overrides(delivery_raw: Any) -> dict[str, Any] | None:
+    if not isinstance(delivery_raw, dict):
+        return None
+    channel_name = (
+        delivery_raw.get("channelName")
+        or delivery_raw.get("channel")
+        or delivery_raw.get("channel_name")
+    )
+    if not channel_name:
         return None
     return {
-        "channel_name": delivery_raw["channelName"],
-        "channel_id": delivery_raw.get("channelId", ""),
-        "account_id": delivery_raw.get("accountId", ""),
-        "thread_id": delivery_raw.get("threadId", ""),
+        "channel_name": str(channel_name).strip().lower(),
+        "channel_id": str(
+            delivery_raw.get("channelId")
+            or delivery_raw.get("channel_id")
+            or delivery_raw.get("to")
+            or ""
+        ),
+        "account_id": str(delivery_raw.get("accountId") or delivery_raw.get("account_id") or ""),
+        "thread_id": str(delivery_raw.get("threadId") or delivery_raw.get("thread_id") or ""),
+        "best_effort": bool(
+            delivery_raw.get("bestEffort") or delivery_raw.get("best_effort", False)
+        ),
     }
 
 
@@ -509,8 +518,10 @@ def _delivery_target_pairs(delivery_raw: Any) -> list[tuple[str, str]]:
     for block in (delivery_raw, delivery_raw.get("failureDestination")):
         if not isinstance(block, dict):
             continue
-        channel = str(block.get("channelName") or block.get("channel") or "")
-        target = str(block.get("channelId") or block.get("to") or "")
+        channel = str(
+            block.get("channelName") or block.get("channel") or block.get("channel_name") or ""
+        )
+        target = str(block.get("channelId") or block.get("channel_id") or block.get("to") or "")
         if target:
             pairs.append((channel, target))
     return pairs
@@ -743,6 +754,7 @@ async def _handle_cron_add(params: dict | None, ctx: RpcContext) -> dict[str, An
             channel_id=user_overrides["channel_id"],
             account_id=user_overrides["account_id"],
             thread_id=user_overrides["thread_id"],
+            best_effort=bool(user_overrides.get("best_effort", False)),
         )
     elif (
         session_target != SessionTarget.MAIN
@@ -752,12 +764,17 @@ async def _handle_cron_add(params: dict | None, ctx: RpcContext) -> dict[str, An
         delivery = delivery or DeliveryConfig()
         delivery.originating_reply_target = snapshot
 
-    if isinstance(delivery_raw, dict) and delivery_raw.get("failureDestination") is not None:
-        if delivery is None:
-            delivery = DeliveryConfig()
-        delivery.failure_destination = _build_failure_destination(
-            delivery_raw["failureDestination"]
-        )
+    if isinstance(delivery_raw, dict):
+        if delivery is not None and ("bestEffort" in delivery_raw or "best_effort" in delivery_raw):
+            delivery.best_effort = bool(
+                delivery_raw.get("bestEffort") or delivery_raw.get("best_effort", False)
+            )
+        if delivery_raw.get("failureDestination") is not None:
+            if delivery is None:
+                delivery = DeliveryConfig()
+            delivery.failure_destination = _build_failure_destination(
+                delivery_raw["failureDestination"]
+            )
 
     return await _finalize_cron_add(
         scheduler=scheduler,
@@ -920,7 +937,8 @@ async def _handle_cron_update(params: dict | None, ctx: RpcContext) -> dict[str,
         # display), so it must not be inherited as prompt text when a job is
         # converted away from script.
         current_text = (
-            "" if current_kind == SCRIPT_KIND
+            ""
+            if current_kind == SCRIPT_KIND
             else payload_text(current_job.payload, current_job.session_target)
         )
         merged_params = {
@@ -999,29 +1017,69 @@ async def _handle_cron_update(params: dict | None, ctx: RpcContext) -> dict[str,
         effective_target = patch.get("session_target", current_job.session_target)
         _ensure_delivery_supported(session_target=effective_target, delivery_raw=delivery_raw)
         await _ensure_delivery_targets_valid(ctx, delivery_raw)
+        existing = current_job.delivery or DeliveryConfig()
         if isinstance(delivery_raw, dict) and delivery_raw.get("mode") == "none":
             patch["delivery"] = DeliveryConfig()
         elif _is_webhook_delivery(delivery_raw):
             new_delivery = _build_webhook_delivery(delivery_raw)
-            new_delivery.ws_topic = current_job.delivery.ws_topic
+            new_delivery.ws_topic = existing.ws_topic
             patch["delivery"] = new_delivery
-        elif isinstance(delivery_raw, dict) and delivery_raw.get("channelName"):
+        elif isinstance(delivery_raw, dict) and (
+            delivery_raw.get("channelName")
+            or delivery_raw.get("channel")
+            or delivery_raw.get("channel_name")
+            or (existing.channel_name if existing.mode == DeliveryMode.CHANNEL else None)
+        ):
+            channel_name = (
+                str(
+                    delivery_raw.get("channelName")
+                    or delivery_raw.get("channel")
+                    or delivery_raw.get("channel_name")
+                    or existing.channel_name
+                )
+                .strip()
+                .lower()
+            )
+            channel_id = (
+                delivery_raw.get("channelId")
+                or delivery_raw.get("channel_id")
+                or delivery_raw.get("to")
+                if any(k in delivery_raw for k in ("channelId", "channel_id", "to"))
+                else existing.channel_id
+            )
+            account_id = (
+                delivery_raw.get("accountId") or delivery_raw.get("account_id")
+                if any(k in delivery_raw for k in ("accountId", "account_id"))
+                else existing.account_id
+            )
+            thread_id = (
+                delivery_raw.get("threadId") or delivery_raw.get("thread_id")
+                if any(k in delivery_raw for k in ("threadId", "thread_id"))
+                else existing.thread_id
+            )
+            best_effort = (
+                bool(delivery_raw.get("bestEffort") or delivery_raw.get("best_effort"))
+                if any(k in delivery_raw for k in ("bestEffort", "best_effort"))
+                else existing.best_effort
+            )
+            failure_destination = (
+                _build_failure_destination(delivery_raw["failureDestination"])
+                if delivery_raw.get("failureDestination") is not None
+                else existing.failure_destination
+            )
             patch["delivery"] = DeliveryConfig(
                 mode=DeliveryMode.CHANNEL,
-                channel_name=delivery_raw["channelName"],
-                channel_id=delivery_raw.get("channelId") or delivery_raw.get("to", ""),
-                account_id=delivery_raw.get("accountId", ""),
-                thread_id=delivery_raw.get("threadId", ""),
-                ws_topic=current_job.delivery.ws_topic,
-                best_effort=bool(delivery_raw.get("bestEffort", False)),
-                failure_destination=_build_failure_destination(
-                    delivery_raw.get("failureDestination")
-                ),
+                channel_name=channel_name,
+                channel_id=str(channel_id or ""),
+                account_id=str(account_id or ""),
+                thread_id=str(thread_id or ""),
+                ws_topic=existing.ws_topic,
+                best_effort=best_effort,
+                failure_destination=failure_destination,
             )
         elif isinstance(delivery_raw, dict) and delivery_raw.get("failureDestination") is not None:
             # Standalone FD patch: keep the existing primary delivery target,
             # only update the failure_destination side.
-            existing = current_job.delivery
             patch["delivery"] = DeliveryConfig(
                 mode=existing.mode,
                 channel_name=existing.channel_name,

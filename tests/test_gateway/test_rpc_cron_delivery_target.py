@@ -245,3 +245,140 @@ def test_a_probe_that_hangs_does_not_block_the_save(monkeypatch: pytest.MonkeyPa
     ctx.channel_manager = _FakeChannelManager(SimpleNamespace(probe_target=probe_target))
     asyncio.run(_handle_cron_add(_add_params("1245463966"), ctx))
     assert scheduler.added is not None
+
+
+# ── delivery alias & best_effort preservation ───────────────────────────────
+
+
+def test_add_delivery_preserves_recipient_under_to_alias() -> None:
+    scheduler = _FakeScheduler()
+    params = {
+        "name": "watchdog",
+        "expression": "*/10 * * * *",
+        "text": "tick",
+        "sessionTarget": "isolated",
+        "delivery": {"mode": "channel", "channelName": "telegram", "to": "1245463966"},
+    }
+    asyncio.run(
+        _handle_cron_add(
+            params,
+            RpcContext(conn_id="test", cron_scheduler=scheduler),
+        )
+    )
+    assert scheduler.added is not None
+    delivery = scheduler.added.get("delivery")
+    assert delivery is not None
+    assert delivery.channel_name == "telegram"
+    assert delivery.channel_id == "1245463966"
+
+
+def test_add_delivery_preserves_best_effort() -> None:
+    scheduler = _FakeScheduler()
+    params = {
+        "name": "watchdog",
+        "expression": "*/10 * * * *",
+        "text": "tick",
+        "sessionTarget": "isolated",
+        "delivery": {
+            "mode": "channel",
+            "channel": "telegram",
+            "to": "1245463966",
+            "bestEffort": True,
+        },
+    }
+    asyncio.run(
+        _handle_cron_add(
+            params,
+            RpcContext(conn_id="test", cron_scheduler=scheduler),
+        )
+    )
+    assert scheduler.added is not None
+    delivery = scheduler.added.get("delivery")
+    assert delivery is not None
+    assert delivery.best_effort is True
+    assert delivery.channel_id == "1245463966"
+
+
+def test_update_delivery_preserves_recipient_under_to_alias() -> None:
+    scheduler = _FakeScheduler(_existing_job())
+    asyncio.run(
+        _handle_cron_update(
+            {
+                "id": "job-1",
+                "delivery": {
+                    "to": "987654321",
+                },
+            },
+            RpcContext(conn_id="test", cron_scheduler=scheduler),
+        )
+    )
+    assert scheduler.updated is not None
+    delivery = scheduler.updated.get("delivery")
+    assert delivery is not None
+    assert delivery.channel_name == "telegram"
+    assert delivery.channel_id == "987654321"
+
+
+def test_update_delivery_preserves_best_effort() -> None:
+    scheduler = _FakeScheduler(_existing_job())
+    asyncio.run(
+        _handle_cron_update(
+            {
+                "id": "job-1",
+                "delivery": {
+                    "bestEffort": True,
+                },
+            },
+            RpcContext(conn_id="test", cron_scheduler=scheduler),
+        )
+    )
+    assert scheduler.updated is not None
+    delivery = scheduler.updated.get("delivery")
+    assert delivery is not None
+    assert delivery.best_effort is True
+    assert delivery.channel_id == "1245463966"
+
+
+def test_update_delivery_safe_when_job_delivery_is_none() -> None:
+    job = _existing_job()
+    job.delivery = None  # type: ignore[assignment]
+    scheduler = _FakeScheduler(job)
+    asyncio.run(
+        _handle_cron_update(
+            {
+                "id": "job-1",
+                "delivery": {
+                    "channel": "telegram",
+                    "to": "1245463966",
+                    "best_effort": True,
+                },
+            },
+            RpcContext(conn_id="test", cron_scheduler=scheduler),
+        )
+    )
+    assert scheduler.updated is not None
+    delivery = scheduler.updated.get("delivery")
+    assert delivery is not None
+    assert delivery.channel_name == "telegram"
+    assert delivery.channel_id == "1245463966"
+    assert delivery.best_effort is True
+
+
+def test_infer_delivery_preserves_to_and_best_effort() -> None:
+    from agentos.scheduler.delivery import infer_delivery
+
+    delivery = asyncio.run(
+        infer_delivery(
+            session_storage=None,
+            session_key="any:key",
+            user_overrides={
+                "channel": "telegram",
+                "to": "1245463966",
+                "bestEffort": True,
+            },
+        )
+    )
+    assert delivery.mode == DeliveryMode.CHANNEL
+    assert delivery.channel_name == "telegram"
+    assert delivery.channel_id == "1245463966"
+    assert delivery.best_effort is True

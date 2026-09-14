@@ -743,13 +743,33 @@ async def infer_delivery(
     """
 
     # Priority 1: User explicit override -> mode=CHANNEL
-    if user_overrides and user_overrides.get("channel_name"):
+    if user_overrides and (
+        user_overrides.get("channel_name")
+        or user_overrides.get("channelName")
+        or user_overrides.get("channel")
+    ):
         return DeliveryConfig(
             mode=DeliveryMode.CHANNEL,
-            channel_name=user_overrides["channel_name"],
-            channel_id=user_overrides.get("channel_id", ""),
-            account_id=user_overrides.get("account_id", ""),
-            thread_id=user_overrides.get("thread_id", ""),
+            channel_name=str(
+                user_overrides.get("channel_name")
+                or user_overrides.get("channelName")
+                or user_overrides.get("channel")
+            )
+            .strip()
+            .lower(),
+            channel_id=str(
+                user_overrides.get("channel_id")
+                or user_overrides.get("channelId")
+                or user_overrides.get("to")
+                or ""
+            ),
+            account_id=str(
+                user_overrides.get("account_id") or user_overrides.get("accountId") or ""
+            ),
+            thread_id=str(user_overrides.get("thread_id") or user_overrides.get("threadId") or ""),
+            best_effort=bool(
+                user_overrides.get("best_effort") or user_overrides.get("bestEffort", False)
+            ),
         )
 
     # Priority 2: Infer from session routing fields -> mode=ORIGIN
