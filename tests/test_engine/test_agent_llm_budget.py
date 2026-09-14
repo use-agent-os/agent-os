@@ -873,7 +873,15 @@ async def test_iteration_timeout_caps_tool_execution() -> None:
         tool_handler=slow_tool,
     )
 
-    events = await asyncio.wait_for(_collect_events(agent.run_turn("hello")), timeout=0.25)
+    # The outer wait_for is a hang guard, not the assertion. It used to be
+    # 0.25s -- below the 0.5s the tool itself sleeps -- so on a loaded runner
+    # any scheduling slippage on the way to delivering the iteration_timeout
+    # event tripped the guard first, and a working implementation failed with
+    # a bare TimeoutError. What proves the behaviour is the ErrorEvent
+    # assertion below, bounded by the turn budget above (timeout=1.0): if the
+    # iteration timeout never fires, the turn ends on that budget instead and
+    # the assertion fails on its own, well inside this guard.
+    events = await asyncio.wait_for(_collect_events(agent.run_turn("hello")), timeout=5.0)
 
     assert any(
         isinstance(event, ErrorEvent) and event.code == "iteration_timeout" for event in events
