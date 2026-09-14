@@ -350,7 +350,13 @@ _FD_DUP_PATTERN = re.compile(r"\d*>&\s*(?:\d+-?|-)(?=$|[\s|&;<>)])")
 # ``n>>``, ``&>``, ``&>>``, ``>&file`` and the noclobber override ``>|``. The
 # operator is deliberately *not* anchored to a word boundary — ``echo x>file`` is
 # valid shell and must be caught just like ``echo x > file``.
-_REDIRECTION_PATTERN = re.compile(r"(?:&>{1,2}|\d*>{1,2}&?)\|?\s*(['\"]?)([^'\"\s|&;<>()]+)\1")
+# A quoted target may legitimately contain spaces, so the quoted and
+# unquoted forms need separate alternatives: the unquoted class must keep
+# stopping at whitespace, because that is what the shell itself does --
+# ``echo ok > a b`` redirects to ``a`` and passes ``b`` to echo.
+_REDIRECTION_PATTERN = re.compile(
+    r"""(?:&>{1,2}|\d*>{1,2}&?)\|?\s*(?:"([^"]+)"|'([^']+)'|([^'"\s|&;<>()]+))"""
+)
 
 # ``tee`` is the other write primitive this parser covers, and it needs the same
 # treatment as the redirection operators: ``echo x|tee /etc/passwd`` is valid
@@ -360,8 +366,14 @@ _REDIRECTION_PATTERN = re.compile(r"(?:&>{1,2}|\d*>{1,2}&?)\|?\s*(['\"]?)([^'\"\
 # (``--append``) or long with a value (``--output-error=warn``); all of them are
 # skipped so the first non-option word is the real target.
 _TEE_PATTERN = re.compile(
-    r"(?<![\w-])tee(?:\s+-{1,2}[A-Za-z][\w-]*(?:=[^\s|&;]+)?)*\s+(['\"]?)([^'\"\s|&;]+)\1"
+    r"""(?<![\w-])tee(?:\s+-{1,2}[A-Za-z][\w-]*(?:=[^\s|&;]+)?)*\s+"""
+    r"""(?:"([^"]+)"|'([^']+)'|([^'"\s|&;]+))"""
 )
+
+
+def _matched_target(match: re.Match[str]) -> str:
+    """Return whichever of the double-quoted, single-quoted or bare groups hit."""
+    return next(group for group in match.groups() if group is not None)
 
 
 def _shell_write_targets(command: str) -> list[str]:
@@ -372,8 +384,8 @@ def _shell_write_targets(command: str) -> list[str]:
     # covers ``tee /dev/null``, where the sink arrives as an argument rather
     # than as a redirection and so survives the stripper.
     scanned = _FD_DUP_PATTERN.sub(" ", _without_shell_null_redirections(command))
-    targets: list[str] = [match.group(2) for match in _REDIRECTION_PATTERN.finditer(scanned)]
-    targets.extend(match.group(2) for match in _TEE_PATTERN.finditer(scanned))
+    targets: list[str] = [_matched_target(m) for m in _REDIRECTION_PATTERN.finditer(scanned)]
+    targets.extend(_matched_target(m) for m in _TEE_PATTERN.finditer(scanned))
     return [target for target in targets if target != _NULL_SINK_PATH]
 
 
