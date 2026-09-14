@@ -157,7 +157,17 @@ class CacheBreakMonitor:
             name="CacheBreakMonitor._baselines",
             session_of=lambda key, _value: key,
         )
-        self._reset_pending: set[str] = set()
+        # A plain set here grew without bound: notify_compaction() adds a
+        # key, and check_response_for_cache_break() is the only remover, so a
+        # session compacted and then ended -- chat closed, channel
+        # conversation dropped, cron job finished -- left its key behind for
+        # the life of the process. #1131 bounded _baselines but did not list
+        # this field, so it survived that migration. Keys are session ids, so
+        # it takes the same shape and the same drop_session_state sweep.
+        self._reset_pending: BoundedRegistry[str, bool] = BoundedRegistry(
+            name="CacheBreakMonitor._reset_pending",
+            session_of=lambda key, _value: key,
+        )
         self._min_drop_tokens = max(0, int(min_drop_tokens))
         self._min_drop_ratio = max(0.0, float(min_drop_ratio))
 
@@ -238,7 +248,7 @@ class CacheBreakMonitor:
 
     def notify_compaction(self, session_key: str) -> None:
         """Treat the next provider response for this session as a new baseline."""
-        self._reset_pending.add(session_key)
+        self._reset_pending.set(session_key, True)
 
     def clear(self) -> None:
         self._baselines.clear()
