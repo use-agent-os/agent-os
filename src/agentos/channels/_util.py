@@ -433,4 +433,23 @@ def split_text_for_limit(
         candidate = newline_before_fence + 1 if newline_before_fence >= 0 else 0
         if candidate > 0:
             cut = candidate
+        else:
+            first_newline = segment.find("\n", fence_start)
+            lang = (
+                segment[fence_start + 3 : first_newline].strip()
+                if first_newline != -1 and first_newline < cut
+                else ""
+            )
+            close_tag = "\n```"
+            reopen_tag = f"```{lang}\n" if lang else "```\n"
+            while cut > 0 and length(segment[:cut] + close_tag) > limit:
+                prev_nl = segment.rfind("\n", 0, cut - 1)
+                if prev_nl > fence_start:
+                    cut = prev_nl
+                else:
+                    cut -= 1
+            head = segment[:cut] + close_tag
+            tail = reopen_tag + segment[cut:].lstrip("\n")
+            return head, tail
     return segment[:cut], segment[cut:]
+

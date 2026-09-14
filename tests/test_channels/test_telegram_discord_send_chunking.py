@@ -118,6 +118,19 @@ def test_split_text_for_limit_respects_a_raw_length_measure() -> None:
     assert head + tail == content
 
 
+def test_split_text_for_limit_balances_code_block_starting_at_beginning() -> None:
+    """When a fenced code block starts on line 1 and exceeds limit, it must be
+    closed on the head chunk and reopened on the tail chunk."""
+    fenced = "```python\n" + "print(1)\n" * 500 + "```"
+    head, tail = split_text_for_limit(fenced, 2000)
+    assert len(head) <= 2000
+    assert head.count("```") % 2 == 0
+    assert head.endswith("\n```")
+    assert tail.count("```") % 2 == 0
+    assert tail.startswith("```python\n")
+
+
+
 class _DiscordResponse:
     status_code = 200
 
