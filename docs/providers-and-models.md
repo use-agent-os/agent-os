@@ -27,10 +27,16 @@ agentos providers status --probe-models
 
 ## Configure a Provider
 
-Interactive:
+Interactive wizard:
 
 ```sh
-agentos providers configure openrouter
+agentos onboard
+```
+
+Direct CLI configuration:
+
+```sh
+agentos providers configure openrouter --api-key "sk-..."
 ```
 
 Non-interactive onboarding-style configuration:
