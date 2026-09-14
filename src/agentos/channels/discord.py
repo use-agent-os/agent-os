@@ -6,6 +6,7 @@ import asyncio
 import json
 import random
 import re
+from collections import OrderedDict
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -60,6 +61,12 @@ _DISCORD_THREAD_CHANNEL_TYPES = {10, 11, 12}
 _DISCORD_APPLICATION_COMMAND_INTERACTION_TYPE = 2
 _DISCORD_DEFERRED_CHANNEL_MESSAGE_RESPONSE_TYPE = 5
 _DISCORD_MESSAGE_TEXT_LIMIT = 2000
+
+#: Bound on the in-memory channel-context caches (_channel_types,
+#: _thread_parent_channels) -- same reasoning as email.py's
+#: _MAX_TRACKED_THREADS: a long-running session in an active guild would
+#: otherwise grow these dicts without limit.
+_MAX_TRACKED_CHANNELS = 1000
 
 # Gateway intents bitmask
 GATEWAY_INTENTS = (
@@ -192,8 +199,12 @@ class DiscordChannel:
     )
     _rate_limiter: RateLimiter = field(default_factory=RateLimiter, init=False, repr=False)
     _sent_messages: dict[str, str] = field(default_factory=dict, init=False, repr=False)
-    _channel_types: dict[str, int] = field(default_factory=dict, init=False, repr=False)
-    _thread_parent_channels: dict[str, str] = field(default_factory=dict, init=False, repr=False)
+    _channel_types: OrderedDict[str, int] = field(
+        default_factory=OrderedDict, init=False, repr=False
+    )
+    _thread_parent_channels: OrderedDict[str, str] = field(
+        default_factory=OrderedDict, init=False, repr=False
+    )
 
     @property
     def capability_profile(self) -> ChannelCapabilityProfile:
@@ -562,9 +573,18 @@ class DiscordChannel:
         channel_type = self._channel_type(data.get("type"))
         if isinstance(channel_id, str) and channel_id and channel_type is not None:
             self._channel_types[channel_id] = channel_type
+            self._channel_types.move_to_end(channel_id)
+            # LRU, evict oldest first: unlike _sent_messages, a miss here only
+            # skips enrichment for one message, so trimming blindly is safe.
+            while len(self._channel_types) > _MAX_TRACKED_CHANNELS:
+                self._channel_types.popitem(last=False)
         parent_id = data.get("parent_id")
         if isinstance(channel_id, str) and channel_id and isinstance(parent_id, str) and parent_id:
             self._thread_parent_channels[channel_id] = parent_id
+            self._thread_parent_channels.move_to_end(channel_id)
+            # Same reasoning as _channel_types above.
+            while len(self._thread_parent_channels) > _MAX_TRACKED_CHANNELS:
+                self._thread_parent_channels.popitem(last=False)
 
     def _annotate_channel_context(self, data: dict[str, Any]) -> dict[str, Any]:
         channel_id = data.get("channel_id")
