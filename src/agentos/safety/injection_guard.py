@@ -158,19 +158,74 @@ _EXFILTRATION_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
 #   U+2060-4    word joiner, function application, invisible operators
 #   U+2066-9    bidi isolates (first strong, pop directional)
 _INVISIBLE_CODEPOINTS_RE: Final[re.Pattern[str]] = re.compile(
-    "[\u00ad"
-    "\u200b-\u200f"
-    "\u202a-\u202e"
-    "\u2060-\u2064"
-    "\u2066-\u2069"
-    "\ufeff]"
+    "[\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]"
 )
 
 # invisible_char threat class reuses the combined pattern so there is
 # exactly one codepoint list to maintain.
-_INVISIBLE_CHAR_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
-    _INVISIBLE_CODEPOINTS_RE,
-)
+_INVISIBLE_CHAR_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (_INVISIBLE_CODEPOINTS_RE,)
+
+_ZWJ: Final[str] = "‍"
+_BOM: Final[str] = "﻿"
+
+
+def _is_emoji_adjacent(ch: str) -> bool:
+    """True when ``ch`` is the sort of codepoint a ZWJ legitimately joins."""
+    code = ord(ch)
+    return (
+        code >= 0x1F000  # pictographs, regional indicators, supplemental symbols
+        or code == 0xFE0F  # variation selector-16
+        or 0x2600 <= code <= 0x27BF  # misc symbols and dingbats
+        or 0x2B00 <= code <= 0x2BFF  # misc symbols and arrows
+    )
+
+
+def _is_benign_invisible(text: str, index: int) -> bool:
+    """True when the invisible codepoint at ``index`` is ordinary text.
+
+    Two cases occur constantly in content that has nothing to do with
+    injection, and blocking on them costs far more than it buys:
+
+    * a **leading U+FEFF** — the byte-order mark every UTF-8 file that has
+      been through Excel (and much Windows tooling) starts with;
+    * a **U+200D between two pictographs** — zero-width joiner is how every
+      compound emoji is built, from family and profession sequences to flags.
+
+    Every other occurrence, including a ZWJ anywhere else, stays suspicious.
+    """
+    ch = text[index]
+    if ch == _BOM:
+        return index == 0
+    if ch == _ZWJ:
+        return (
+            0 < index < len(text) - 1
+            and _is_emoji_adjacent(text[index - 1])
+            and _is_emoji_adjacent(text[index + 1])
+        )
+    return False
+
+
+def _suspicious_invisible_spans(text: str) -> list[int]:
+    """Indices of invisible codepoints that are not explained by ordinary text."""
+    return [
+        match.start()
+        for match in _INVISIBLE_CODEPOINTS_RE.finditer(text)
+        if not _is_benign_invisible(text, match.start())
+    ]
+
+
+def strip_suspicious_invisible(text: str) -> str:
+    """Remove smuggling-capable invisible codepoints, keeping benign ones.
+
+    Used by :func:`scan_for_injection` in ``enforce`` mode so invisible
+    characters are sanitized out of the payload instead of costing the
+    caller the whole payload.
+    """
+    suspicious = set(_suspicious_invisible_spans(text))
+    if not suspicious:
+        return text
+    return "".join(ch for index, ch in enumerate(text) if index not in suspicious)
+
 
 INJECTION_PATTERNS: Final[dict[str, tuple[re.Pattern[str], ...]]] = {
     "prompt_override": _PROMPT_OVERRIDE_PATTERNS,
@@ -220,9 +275,15 @@ def classify_injection(text: str) -> list[str]:
 
     hits: set[str] = set()
     for threat_class, patterns in INJECTION_PATTERNS.items():
-        search_text = normalized if threat_class != "invisible_char" else text
+        if threat_class == "invisible_char":
+            # Matched against the original text so the smuggling technique
+            # itself is reported — but only where the codepoint is not
+            # explained by ordinary text (see _is_benign_invisible).
+            if _suspicious_invisible_spans(text):
+                hits.add(threat_class)
+            continue
         for pattern in patterns:
-            if pattern.search(search_text):
+            if pattern.search(normalized):
                 hits.add(threat_class)
                 break
     return sorted(hits)
@@ -236,9 +297,22 @@ def scan_for_injection(
 ) -> tuple[str, list[InjectionFinding]]:
     """Scan untrusted prompt content and optionally sanitize enforce-mode hits.
 
-    ``report`` mode never changes the content. ``enforce`` mode replaces any
-    matched content with a compact blocked marker. ``off`` mode performs no
+    ``report`` mode never changes the content. ``off`` mode performs no
     scanning and returns the original content.
+
+    ``enforce`` mode distinguishes two kinds of hit:
+
+    * an **intent** class (``prompt_override``, ``role_hijack``,
+      ``exfiltration``) replaces the content with a compact blocked marker,
+      as before;
+    * ``invisible_char`` **alone** sanitizes instead — the smuggling-capable
+      codepoints are stripped and the rest of the payload is handed back.
+
+    Blanking a whole payload over an invisible codepoint costs the caller
+    everything it asked for (an entire file read, an entire tool result) to
+    remove a character that carries no instruction on its own. Stripping
+    removes the vector and keeps the content. A payload that both smuggles
+    and states intent still trips an intent class and is still blocked.
     """
 
     normalized_mode = mode if mode in {"off", "report", "enforce"} else "report"
@@ -260,7 +334,9 @@ def scan_for_injection(
         for threat_class in threat_classes
     ]
     if normalized_mode == "enforce":
-        return f"[BLOCKED: unsafe prompt content removed from {source}]", findings
+        if any(finding.threat_class != "invisible_char" for finding in findings):
+            return f"[BLOCKED: unsafe prompt content removed from {source}]", findings
+        return strip_suspicious_invisible(content), findings
     return content, findings
 
 
@@ -374,6 +450,7 @@ __all__ = [
     "extract_tool_call_refusal_reason",
     "is_untrusted_fragment",
     "scan_for_injection",
+    "strip_suspicious_invisible",
     "wrap_untrusted",
     "wrap_untrusted_boundary",
     "xml_escape",
