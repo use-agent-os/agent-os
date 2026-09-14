@@ -26,6 +26,37 @@ def test_sensitive_path_in_text_matches_native_separator_paths() -> None:
     assert sensitive_path_in_text(f"type {key_path}") == "~/.ssh"
 
 
+def test_backslash_tilde_paths_do_not_raise_and_are_recognized() -> None:
+    """Issue #1503: on POSIX, ``Path("~\\.aws\\credentials").expanduser()``
+    treats the backslash tail as a literal username and raises RuntimeError
+    ("Could not determine home directory") trying to resolve it via
+    ``pwd.getpwnam``. That must not escape the scanner as an unhandled
+    exception, and the path should still be recognized once its backslashes
+    are read as separators."""
+    assert sensitive_path_marker(r"~\.aws\credentials") == "~/.aws"
+    assert sensitive_path_marker(r"~\.ssh\id_rsa") == "~/.ssh"
+    assert sensitive_path_in_text(r"cat ~\.aws\credentials") == "~/.aws"
+
+
+def test_sensitive_path_marker_survives_an_indeterminate_home(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #1503: a minimal/headless environment where HOME/USERPROFILE is
+    unset or indeterminate makes ``Path.home()`` raise RuntimeError. That must
+    not crash the scanner — string-level candidates still catch a `~/...`
+    sensitive path even when the real home directory can't be resolved."""
+
+    def _boom() -> Path:
+        raise RuntimeError("Could not determine home directory")
+
+    monkeypatch.setattr(Path, "home", staticmethod(_boom))
+
+    assert sensitive_path_marker("~/.aws/credentials") == "~/.aws"
+    assert sensitive_path_marker("~/.ssh/id_rsa") == "~/.ssh"
+    assert sensitive_path_marker("/etc/passwd") == "/etc"
+    assert sensitive_path_marker("relative/file.txt") is None
+
+
 def test_active_workspace_under_root_is_not_blocked_by_root_prefix() -> None:
     workspace = Path("/root/.agentos/workspace")
 
