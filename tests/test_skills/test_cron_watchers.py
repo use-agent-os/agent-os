@@ -262,6 +262,56 @@ def test_json_fails_when_the_path_holds_no_list(state_dir, base_url):
     assert "Expected a list" in result.stderr
 
 
+def test_json_fails_loudly_when_the_id_field_matches_nothing(state_dir, base_url):
+    # A --id-field that names the wrong key indexed nothing, so the watcher
+    # printed no events and exited 0 forever — the operator kept trusting an
+    # empty report. A feed WITH items but zero indexable ids is now a hard
+    # error, with the actual field names in the message.
+    url = _events(state_dir, base_url, [{"id": "x1", "title": "Deploy finished"}])
+
+    result = _run(
+        "watch_http_json.py",
+        "--url",
+        url,
+        "--name",
+        "w",
+        "--id-field",
+        "event_id",
+        "--items-path",
+        "data.events",
+        "--first-run-reports",
+        env_home=state_dir,
+    )
+
+    assert result.returncode == 1
+    assert "matched none of the 1 item(s)" in result.stderr
+    assert "'id'" in result.stderr
+    assert result.stdout == ""
+
+
+def test_json_empty_feed_stays_silent_even_with_first_run_reports(state_dir, base_url):
+    # The zero-id guard must not swallow the legitimate quiet case: a feed
+    # that is genuinely empty right now still reports nothing and exits 0.
+    url = _events(state_dir, base_url, [])
+
+    result = _run(
+        "watch_http_json.py",
+        "--url",
+        url,
+        "--name",
+        "e",
+        "--id-field",
+        "event_id",
+        "--items-path",
+        "data.events",
+        "--first-run-reports",
+        env_home=state_dir,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+
+
 # ── URL scheme guard (Issue #1065) ──────────────────────────────────────────
 
 

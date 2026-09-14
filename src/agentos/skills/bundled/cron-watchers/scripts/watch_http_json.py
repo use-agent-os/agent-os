@@ -11,7 +11,10 @@ Built for an AgentOS cron script job:
 
 The response may be a top-level list, or an object holding one at a dotted
 ``--items-path`` (e.g. ``data.events``). Each item is deduped by ``--id-field``.
-Prints one line per new item and nothing when there is nothing new.
+Prints one line per new item and nothing when there is nothing new. A run
+where NO fetched item carries ``--id-field`` is a configuration error, not a
+quiet feed: it exits non-zero and names the field, leaving the watermark
+untouched, instead of looking empty forever.
 """
 
 from __future__ import annotations
@@ -118,6 +121,19 @@ def main() -> int:
         if identifier is None:
             continue
         by_id[str(identifier)] = item
+
+    if items and not by_id:
+        # Not a quiet feed — a misconfiguration. Silent-zero here is the bug:
+        # the operator would keep trusting an empty report forever.
+        sample = next((item for item in items if isinstance(item, dict)), None)
+        hint = f"; first item has fields {sorted(sample)}" if sample else ""
+        print(
+            f"Error: --id-field {args.id_field!r} matched none of the "
+            f"{len(items)} item(s) fetched from {args.url}; nothing was "
+            f"reported and the watermark was not updated{hint}.",
+            file=sys.stderr,
+        )
+        return 1
 
     fresh = select_new(
         args.name, list(by_id), first_run_reports=args.first_run_reports, limit=args.limit
