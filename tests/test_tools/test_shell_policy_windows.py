@@ -31,9 +31,16 @@ def _windows_policy_env(monkeypatch: pytest.MonkeyPatch):
         r"RD /S /Q C:\tmp\folder",
         r"erase C:\tmp\file.txt",
         r"ERASE /F C:\tmp\file.txt",
+        r"rm C:\tmp\file.txt",
+        r"RM C:\tmp\file.txt",
+        r"ri -Recurse -Force C:\tmp\folder",
+        r"RI -Recurse -Force C:\tmp\folder",
         r"echo 1 && rd /s /q C:\tmp\folder",
         r"echo 1; erase C:\tmp\file.txt",
         r"echo 1 | rd C:\tmp\folder",
+        r"echo 1 && rm C:\tmp\file.txt",
+        r"echo 1; ri C:\tmp\folder",
+        r"echo 1 | rm C:\tmp\file.txt",
         r"git push origin main --force",
         r"git push --force",
         r"git   push   origin   feature   --force",
@@ -52,6 +59,15 @@ def _windows_policy_env(monkeypatch: pytest.MonkeyPatch):
         "echo 1\nrd /s /q C:\\tmp",
         "echo 1\nrmdir /s /q C:\\d",
         "echo 1\nerase C:\\tmp\\x",
+        # Same coverage for rm/ri -- PowerShell's other two built-in
+        # Remove-Item aliases, alongside rd/erase/del/rmdir above.
+        r"cmd /c rm C:\tmp\x",
+        r"cmd /c ri /s /q C:\tmp",
+        r"cmd.exe /c rm C:\tmp\x",
+        r"powershell -c rm C:\tmp\x",
+        r"powershell -c ri C:\tmp",
+        "echo 1\nrm C:\\tmp\\x",
+        "echo 1\nri /s /q C:\\tmp",
     ],
 )
 def test_windows_destructive_commands_are_denied(command: str) -> None:
@@ -86,6 +102,18 @@ def test_windows_destructive_commands_are_denied(command: str) -> None:
         r"cd C:\data\rd",
         r"echo rd",
         r"npm run build && npm test",
+        # Same false-positive guard for rm/ri as rd/erase above.
+        r"mkdir rm",
+        r"cd rm",
+        r"cd ri",
+        r"git checkout -b rm-feature",
+        r"git branch rm",
+        r"git branch ri",
+        r"npm run primer",
+        r"terraform apply",
+        r"curl -o out.bin https://cdn.example.com/rm",
+        r"echo rm",
+        r"echo ring the bell",
     ],
 )
 def test_windows_anchored_rd_erase_negative_cases_allowed(command: str) -> None:
