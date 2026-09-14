@@ -405,10 +405,13 @@ def split_text_for_limit(
     code block (```...```) split mid-fence would leave each half with an
     unbalanced fence — some platforms reject a message whose Markdown
     entities don't parse, turning a length problem into a delivery failure —
-    so if an odd number of fences precede the cut, one is open, and the cut
-    backs up to just before that fence: the first half never contains a
-    half-open block, and the second half reopens it from its own start,
-    fully balanced.
+    so if an odd number of fences precede the cut, one is open. If there is
+    content before that fence, the cut backs up to just before it, keeping the
+    block whole for the next chunk. If the block itself exceeds the limit (or
+    starts on line 1), it cannot be moved to a boundary, so fences are
+    rebalanced across the split: the first chunk is closed and the second
+    re-opened with the same language tag/info string, with the added fence
+    measured against *limit* so the first chunk still fits.
     """
     length = measure if measure is not None else len
     if length(segment) <= limit:
@@ -433,4 +436,38 @@ def split_text_for_limit(
         candidate = newline_before_fence + 1 if newline_before_fence >= 0 else 0
         if candidate > 0:
             cut = candidate
+        else:
+            b_count = 0
+            while fence_start + b_count < len(segment) and segment[fence_start + b_count] == "`":
+                b_count += 1
+            fence_chars = segment[fence_start : fence_start + b_count]
+            fence_line_end = segment.find("\n", fence_start + b_count)
+            if fence_line_end >= 0:
+                info_str = segment[fence_start + b_count : fence_line_end].rstrip("\r")
+                min_cut = fence_line_end + 1
+            else:
+                info_str = segment[fence_start + b_count :].rstrip("\r")
+                min_cut = 1
+            open_fence = f"{fence_chars}{info_str}\n"
+
+            low, high = min_cut, len(segment) - 1
+            best_cut = min_cut
+            while low <= high:
+                mid = (low + high) // 2
+                close_suffix = fence_chars if segment[:mid].endswith("\n") else f"\n{fence_chars}"
+                if length(segment[:mid] + close_suffix) <= limit:
+                    best_cut = mid
+                    low = mid + 1
+                else:
+                    high = mid - 1
+
+            cut = best_cut
+            for boundary in ("\n", " "):
+                found = segment.rfind(boundary, min_cut, best_cut)
+                if found >= best_cut // 2:
+                    cut = found + 1
+                    break
+
+            close_suffix = fence_chars if segment[:cut].endswith("\n") else f"\n{fence_chars}"
+            return segment[:cut] + close_suffix, open_fence + segment[cut:]
     return segment[:cut], segment[cut:]

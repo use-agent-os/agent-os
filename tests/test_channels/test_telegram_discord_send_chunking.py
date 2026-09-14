@@ -118,6 +118,81 @@ def test_split_text_for_limit_respects_a_raw_length_measure() -> None:
     assert head + tail == content
 
 
+def test_split_text_for_limit_rebalances_fenced_block_on_line_1() -> None:
+    """Issue #1997: a code block starting on line 1 that exceeds the chunk limit
+    cannot back up to before the fence (candidate == 0). It must rebalance:
+    close the fence on head and reopen with the info string on tail."""
+    code_block = "```python\n" + ("print(1)\n" * 500) + "```"
+    head, tail = split_text_for_limit(code_block, 2000)
+
+    assert len(head) <= 2000
+    assert head.count("```") == 2
+    assert head.startswith("```python\n")
+    assert head.endswith("```")
+
+    assert tail.count("```") == 2
+    assert tail.startswith("```python\n")
+    assert tail.endswith("```")
+
+
+def test_split_text_for_limit_preserves_info_string_and_attributes() -> None:
+    code_block = "```python filename=example.py\n" + ("x = 1\n" * 500) + "```"
+    head, tail = split_text_for_limit(code_block, 2000)
+
+    assert len(head) <= 2000
+    assert head.startswith("```python filename=example.py\n")
+    assert head.endswith("```")
+    assert tail.startswith("```python filename=example.py\n")
+    assert tail.endswith("```")
+
+
+def test_split_text_for_limit_rebalances_bare_fence() -> None:
+    code_block = "```\n" + ("echo test\n" * 500) + "```"
+    head, tail = split_text_for_limit(code_block, 2000)
+
+    assert len(head) <= 2000
+    assert head.startswith("```\n")
+    assert head.endswith("```")
+    assert tail.startswith("```\n")
+    assert tail.endswith("```")
+
+
+@pytest.mark.asyncio
+async def test_telegram_send_balances_fenced_block_longer_than_limit() -> None:
+    """Telegram send() with a code block exceeding 4096 rendered chars ensures
+    every chunk is balanced and valid HTML."""
+    channel, calls = _telegram_channel()
+    fenced = "```python\n" + ("print('very long string output')\n" * 200) + "```"
+
+    await channel.send(OutgoingMessage(content=fenced, reply_to="123"))
+
+    assert len(calls) > 1
+    for call in calls:
+        raw_text = str(call["text"])
+        # Each payload is already rendered HTML
+        assert len(raw_text) <= 4096
+        assert '<pre><code class="language-python">' in raw_text
+        assert raw_text.endswith("</code></pre>")
+
+
+@pytest.mark.asyncio
+async def test_discord_send_balances_fenced_block_longer_than_limit() -> None:
+    """Discord send() with a code block exceeding 2000 chars ensures every
+    chunk is balanced."""
+    channel, calls = _discord_channel()
+    fenced = "```python\n" + ("print(1234567890)\n" * 200) + "```"
+
+    await channel.send(OutgoingMessage(content=fenced, reply_to="channel-1"))
+
+    assert len(calls) > 1
+    for call in calls:
+        content = str(call["content"])
+        assert len(content) <= 2000
+        assert content.count("```") % 2 == 0
+        assert content.startswith("```python\n")
+        assert content.endswith("```")
+
+
 class _DiscordResponse:
     status_code = 200
 
