@@ -378,3 +378,86 @@ def test_apply_ops_skips_non_dict_ops() -> None:
 
     assert applied == 1
     assert doc.paragraphs[0].text == "Hello Wei"
+
+
+def _inspect_module():
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import inspect_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+    return inspect_docx
+
+
+def test_inspect_does_not_duplicate_a_vertically_merged_cell(tmp_path: Path) -> None:
+    """``row.cells`` resolves a vertical merge against the row above.
+
+    The continuation row holds no text of its own, yet the grid-mapped API
+    reports the merged cell's text again, so the dump claimed content in a
+    row that does not have it. Reading ``<w:tc>`` directly -- what
+    ``edit_docx`` already does -- reports each cell exactly once.
+    """
+    from docx import Document as _Document
+
+    inspect_docx = _inspect_module()
+    doc_path = tmp_path / "merged.docx"
+    doc = _Document()
+    tbl = doc.add_table(rows=2, cols=3)
+    tbl.cell(0, 0).text = "SPAN"
+    tbl.cell(0, 1).text = "B1"
+    tbl.cell(0, 2).text = "C1"
+    tbl.cell(1, 1).text = "B2"
+    tbl.cell(1, 2).text = "C2"
+    tbl.cell(0, 0).merge(tbl.cell(1, 0))
+    doc.save(str(doc_path))
+
+    rows = inspect_docx.inspect(doc_path)["tables"][0]
+
+    assert rows[0] == ["SPAN", "B1", "C1"]
+    assert rows[1] == ["", "B2", "C2"]
+
+
+def test_inspect_does_not_repeat_a_horizontally_merged_cell(tmp_path: Path) -> None:
+    """A cell spanning two columns is one cell, not two identical ones."""
+    from docx import Document as _Document
+
+    inspect_docx = _inspect_module()
+    doc_path = tmp_path / "wide.docx"
+    doc = _Document()
+    tbl = doc.add_table(rows=1, cols=3)
+    tbl.cell(0, 0).text = "WIDE"
+    tbl.cell(0, 2).text = "Y"
+    tbl.cell(0, 0).merge(tbl.cell(0, 1))
+    doc.save(str(doc_path))
+
+    rows = inspect_docx.inspect(doc_path)["tables"][0]
+
+    assert len(rows[0]) == 2
+    assert rows[0][1] == "Y"
+
+
+def test_inspect_reports_an_unreadable_file_as_exit_two(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A renamed or truncated file is a bad input, not a crash."""
+    inspect_docx = _inspect_module()
+    bad = tmp_path / "invalid.docx"
+    bad.write_text("not a docx at all", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", ["inspect_docx.py", str(bad)])
+
+    assert inspect_docx.main() == 2
+
+
+def test_inspect_still_reads_an_ordinary_table(tmp_path: Path) -> None:
+    from docx import Document as _Document
+
+    inspect_docx = _inspect_module()
+    doc_path = tmp_path / "plain.docx"
+    doc = _Document()
+    tbl = doc.add_table(rows=2, cols=2)
+    for (r, c), value in {(0, 0): "A", (0, 1): "B", (1, 0): "C", (1, 1): "D"}.items():
+        tbl.cell(r, c).text = value
+    doc.save(str(doc_path))
+
+    assert inspect_docx.inspect(doc_path)["tables"][0] == [["A", "B"], ["C", "D"]]

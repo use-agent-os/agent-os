@@ -10,8 +10,24 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
+from zipfile import BadZipFile
 
 from docx import Document
+from docx.opc.exceptions import PackageNotFoundError
+from docx.table import Table, _Cell
+
+
+def _table_rows(tbl: Table) -> list[list[str]]:
+    """Read a table row by row, straight from its ``<w:tc>`` elements.
+
+    ``row.cells`` maps each row onto the table grid: it repeats a
+    horizontally merged cell once per column it spans and resolves a
+    vertically merged one against the row above, raising ``ValueError`` on
+    the irregular grids other generators emit. ``edit_docx`` avoids the same
+    API for the same reason. Reading ``<w:tc>`` directly visits each cell
+    exactly once and cannot raise.
+    """
+    return [[_Cell(tc, tbl).text for tc in row._tr.tc_lst] for row in tbl.rows]
 
 
 def inspect(path: Path) -> dict[str, Any]:
@@ -31,9 +47,7 @@ def inspect(path: Path) -> dict[str, Any]:
             }
         )
 
-    tables: list[list[list[str]]] = []
-    for tbl in doc.tables:
-        tables.append([[cell.text for cell in row.cells] for row in tbl.rows])
+    tables: list[list[list[str]]] = [_table_rows(tbl) for tbl in doc.tables]
 
     body_xml = doc.element.body.xml if doc.element is not None else ""
     has_tracked_changes = "<w:ins" in body_xml or "<w:del" in body_xml
@@ -60,7 +74,13 @@ def main() -> int:
     if not args.path.is_file():
         print(f"error: {args.path} not found", file=sys.stderr)
         return 2
-    payload = inspect(args.path)
+    try:
+        payload = inspect(args.path)
+    except (PackageNotFoundError, BadZipFile) as exc:
+        # Anything that is not a readable .docx package: a renamed file, a
+        # truncated download, a zip that never finished writing.
+        print(f"error: {args.path} is not a readable .docx file ({exc})", file=sys.stderr)
+        return 2
     text = json.dumps(payload, ensure_ascii=False, indent=2)
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)
