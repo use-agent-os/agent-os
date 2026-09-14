@@ -1372,62 +1372,111 @@ class DiscordChannel:
     ) -> str | None:
         """Stream a message: post first chunk, PATCH edits for subsequent.
 
-        Returns the message ID or None if iterator was empty.
+        Returns the id of the last message written -- editing ``@original``
+        for an interaction response returns its real message id, the same
+        as a regular channel message -- or ``None`` if the iterator was
+        empty.
 
         Uses ``StreamThrottle`` so two PATCH calls cannot race and a
-        single transient failure does not lose accumulated text.
+        single transient failure does not lose accumulated text. Discord
+        caps message content at 2000 characters (``_DISCORD_MESSAGE_TEXT_LIMIT``);
+        once an edit's accumulated text would exceed that, the open message
+        is frozen at the largest prefix that fits and the remainder rolls
+        over into a new message via ``_post_segments`` -- the same shape as
+        ``TelegramChannel.send_streaming``'s ``_post_segments``. This is
+        safe only because the chunks this method receives are append-only
+        deltas (``engine.types.TextDeltaEvent``, fed through
+        ``gateway/channel_dispatch.py`` -- verified no caller ever revises
+        already-yielded text or reads the id this method returns), so a
+        message frozen mid-stream never needs to be un-frozen. For an
+        interaction response, Discord's original-response slot holds
+        exactly one message: only the first segment is delivered as an edit
+        of the already-deferred ``@original``; everything past a rollover
+        is a regular channel message, the same overflow handling
+        ``send()`` already uses (see the comment there).
         """
         target = channel_id or self.config.default_channel_id
         client = self._get_client()
         throttle = StreamThrottle(interval_s=update_interval_ms / 1000.0)
         message_id: str | None = None
-        interaction_path: str | None = None
+        segment_start = 0
+        delivered = 0
+        original_path: str | None = None
+        used_original = False
         if interaction_token:
             application_id = interaction_application_id or self.config.application_id
             if not application_id:
                 raise ValueError("missing Discord application id for interaction response")
-            interaction_path = f"/webhooks/{application_id}/{interaction_token}/messages/@original"
+            original_path = f"/webhooks/{application_id}/{interaction_token}/messages/@original"
 
-        async def _post(text: str) -> None:
-            nonlocal message_id
+        async def _stream_send(text: str) -> str | None:
             await self._rate_limiter.acquire()
-            if interaction_path is not None:
-                resp = await retry_request(
-                    client.patch,
-                    interaction_path,
-                    json={"content": text},
-                )
+            resp = await retry_request(
+                client.post,
+                f"/channels/{target}/messages",
+                json={"content": text},
+                headers=self._auth_headers(),
+            )
+            resp.raise_for_status()
+            new_id = resp.json().get("id")
+            return str(new_id) if new_id else None
+
+        async def _stream_edit(current_id: str | None, text: str) -> str | None:
+            await self._rate_limiter.acquire()
+            if original_path is not None and current_id is None:
+                resp = await retry_request(client.patch, original_path, json={"content": text})
             else:
                 resp = await retry_request(
-                    client.post,
-                    f"/channels/{target}/messages",
+                    client.patch,
+                    f"/channels/{target}/messages/{current_id}",
                     json={"content": text},
                     headers=self._auth_headers(),
                 )
             resp.raise_for_status()
-            message_id = resp.json().get("id")
+            # Editing @original is the only way to learn its real message id
+            # (there is no separate create call for it); a regular channel
+            # edit echoes back the same id it was called with.
+            new_id = resp.json().get("id")
+            return str(new_id) if new_id else current_id
+
+        async def _post_segments(remaining: str) -> None:
+            """Deliver *remaining* as one or more messages, splitting at the cap."""
+            nonlocal message_id, segment_start, delivered, used_original
+            while True:
+                head, tail = split_text_for_limit(remaining, _DISCORD_MESSAGE_TEXT_LIMIT)
+                if original_path is not None and not used_original:
+                    message_id = await _stream_edit(None, head)
+                    used_original = True
+                else:
+                    message_id = await _stream_send(head)
+                delivered = segment_start + len(head)
+                if not tail:
+                    return
+                segment_start = delivered
+                remaining = tail
+
+        async def _post(text: str) -> None:
+            await _post_segments(text[segment_start:])
 
         async def _edit(text: str) -> None:
-            await self._rate_limiter.acquire()
-            if interaction_path is not None:
-                await retry_request(
-                    client.patch,
-                    interaction_path,
-                    json={"content": text},
-                )
-            else:
-                await retry_request(
-                    client.patch,
-                    f"/channels/{target}/messages/{message_id}",
-                    json={"content": text},
-                    headers=self._auth_headers(),
-                )
+            nonlocal segment_start, delivered, message_id
+            head, tail = split_text_for_limit(text[segment_start:], _DISCORD_MESSAGE_TEXT_LIMIT)
+            message_id = await _stream_edit(message_id, head)
+            delivered = segment_start + len(head)
+            if tail:
+                # This message is full: freeze it and roll over into a new one.
+                segment_start = delivered
+                await _post_segments(tail)
 
         async for chunk in chunks:
             throttle.add(chunk)
             await throttle.maybe_flush(post=_post, edit=_edit)
 
-        await throttle.force_flush(post=_post, edit=_edit)
+        # delivered < len(text) mirrors TelegramChannel.send_streaming: skip a
+        # final flush that would repeat the last one verbatim when nothing
+        # arrived after the last successful post/edit.
+        if delivered < len(throttle.text):
+            await throttle.force_flush(post=_post, edit=_edit)
         return message_id
 
     # ------------------------------------------------------------------
