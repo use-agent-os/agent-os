@@ -22,8 +22,8 @@ app = typer.Typer(help="Manage chat sessions.")
 _CLIENT_UNAVAILABLE = object()
 _ACTION_FAILED = object()
 
-# Rows pulled before a client-side --search filter runs.
-_SEARCH_FETCH_LIMIT = 500
+# Rows pulled before the client-side filters run.
+_FILTER_FETCH_LIMIT = 500
 
 
 def _resolved_key(payload: dict[str, Any], fallback: str) -> str:
@@ -160,11 +160,16 @@ def sessions_list(
 ) -> None:
     """List recent sessions."""
     since_dt = _parse_since(since)
-    # Filtering happens client-side, so a search over the default 50 most
-    # recent rows would miss the older session the user named months ago —
-    # the exact case renaming exists for. Widen the fetch when searching
-    # unless the caller pinned a larger --limit themselves.
-    fetch_limit = max(limit, _SEARCH_FETCH_LIMIT) if (search or "").strip() else limit
+    # Every filter here runs client-side, so a filter over the default 50 most
+    # recent rows would miss the older session the user is looking for — the
+    # failed run from yesterday, everything on one channel, the agent used
+    # occasionally. Those are by definition not in the most recent page, and an
+    # empty table reads as "no such sessions" rather than "not in the rows I
+    # fetched". Widen the fetch whenever any filter is active, unless the caller
+    # pinned a larger --limit themselves. An unfiltered list fetches exactly
+    # --limit, because then the page *is* the answer.
+    filtering = bool((search or "").strip() or agent or status or channel or since_dt is not None)
+    fetch_limit = max(limit, _FILTER_FETCH_LIMIT) if filtering else limit
 
     async def _run(client):
         return await client.list_sessions(limit=fetch_limit)
@@ -180,7 +185,7 @@ def sessions_list(
         search=search,
     )
     # --limit still bounds what the user sees; the widened fetch above only
-    # widens what search looks at.
+    # widens what the filters look at.
     if fetch_limit != limit:
         rows = rows[:limit]
     if json_output:

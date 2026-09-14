@@ -659,6 +659,7 @@ Read:
 ```sh
 agentos sessions list
 agentos sessions list --search api-refactor    # match name, key, subject or model
+agentos sessions list --agent ops --status error --channel slack --since 2026-09-01
 agentos sessions show <session-key>
 agentos sessions rename <session-key> "api-refactor"
 agentos sessions rename <session-key> --clear  # drop the custom name
@@ -667,6 +668,10 @@ agentos sessions abort <session-key>
 agentos sessions export <session-key>
 agentos sessions delete <session-key>
 ```
+
+Filters combine, and each one searches the whole session history rather than
+only the rows `--limit` would show — `--limit` bounds what is printed, not what
+is looked at. An unfiltered `sessions list` fetches exactly `--limit` rows.
 
 Sessions are auto-named. `rename` gives one a human-readable label that shows
 up in `sessions list`, in the chat toolbar, and in the Web UI session list, and

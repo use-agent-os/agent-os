@@ -131,7 +131,7 @@ def test_search_widens_the_fetch_beyond_the_display_limit(client: _FakeClient) -
     result = runner.invoke(sessions_cmd.app, ["list", "-n", "5", "--search", "refactor", "--json"])
 
     assert result.exit_code == 0
-    assert client.list_limits == [sessions_cmd._SEARCH_FETCH_LIMIT]
+    assert client.list_limits == [sessions_cmd._FILTER_FETCH_LIMIT]
 
     # Without --search the caller's limit is honoured verbatim.
     runner.invoke(sessions_cmd.app, ["list", "-n", "5"])
