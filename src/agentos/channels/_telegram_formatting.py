@@ -15,6 +15,37 @@ _LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://[^\s)<]+)\)")
 # one space before the content. `>quote` (no space) and `>` alone (an empty
 # quote line, used to separate paragraphs within one quote) both match.
 _BLOCKQUOTE_RE = re.compile(r"^ {0,3}>[ ]?(?P<text>.*)$")
+_BOLD_UNDERSCORE_RE = re.compile(r"__(?=\S)(.+?)(?<=\S)__")
+# Names that commonly appear as Python dunder methods/attributes. A coding
+# assistant's replies mention these constantly, and `__init__` written with
+# plain surrounding whitespace (e.g. "call __init__ method") is otherwise
+# indistinguishable from an intentional single-word `__bold__` -- both have
+# non-word characters on the outside of the delimiter run. Scoped to known
+# dunder names rather than "any bare word" so ordinary single-word emphasis
+# like `__also__` keeps rendering as bold.
+_DUNDER_NAMES = frozenset(
+    {
+        "init", "new", "del", "main", "str", "repr", "name", "doc", "dict",
+        "class", "module", "call", "enter", "exit", "len", "iter", "next",
+        "eq", "ne", "lt", "le", "gt", "ge", "hash", "bool", "all", "slots",
+        "version", "future", "getattr", "setattr", "getitem", "setitem",
+        "delitem", "contains", "add", "sub", "mul", "truediv",
+    }
+)  # fmt: skip
+
+
+def _bold_underscore_html(match: re.Match[str]) -> str:
+    content = match.group(1)
+    if content in _DUNDER_NAMES:
+        return match.group(0)
+    return f"<b>{content}</b>"
+
+
+def _bold_underscore_plain(match: re.Match[str]) -> str:
+    content = match.group(1)
+    if content in _DUNDER_NAMES:
+        return match.group(0)
+    return content
 
 
 def _replace_code_spans(text: str) -> tuple[str, list[str]]:
@@ -69,7 +100,7 @@ def _render_inline(text: str) -> str:
 
     rendered = _LINK_RE.sub(_park_href, rendered)
     rendered = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", r"<b>\1</b>", rendered)
-    rendered = re.sub(r"__(?=\S)(.+?)(?<=\S)__", r"<b>\1</b>", rendered)
+    rendered = _BOLD_UNDERSCORE_RE.sub(_bold_underscore_html, rendered)
     rendered = re.sub(r"~~(?=\S)(.+?)(?<=\S)~~", r"<s>\1</s>", rendered)
     rendered = re.sub(r"(?<!\*)\*(?=\S)(.+?)(?<=\S)\*(?!\*)", r"<i>\1</i>", rendered)
     # Word-boundary guards keep `snake_case_identifiers` intact: an opening `_`
@@ -98,8 +129,18 @@ def _plain_inline(text: str) -> str:
 
     text = _LINK_RE.sub(_park_href, text)
     text = text.replace("`", "")
-    for marker in ("**", "__", "~~"):
+    for marker in ("**", "~~"):
         text = text.replace(marker, "")
+    # `__` gets the same dunder guard as `_render_inline` (see
+    # `_BOLD_UNDERSCORE_RE`/`_DUNDER_LIKE_RE`): a naive strip here turned
+    # `__init__` into `init`, same as it would have turned it into `<b>init</b>`
+    # in the HTML path.
+    text = _BOLD_UNDERSCORE_RE.sub(_bold_underscore_plain, text)
+    # Same shape as _render_inline's single-underscore italic, minus the tag:
+    # strip the markers but keep the word-boundary guards, so
+    # `snake_case_identifiers`, `_private` names and dunder-style tokens in a
+    # table cell are left alone instead of losing their underscores.
+    text = re.sub(r"(?<!\w)_(?=[^\s_])(.+?)(?<=[^\s_])_(?!\w)", r"\1", text)
     for index, href in enumerate(hrefs):
         text = text.replace(f"\x00TG_HREF_{index}\x00", href)
     return text.strip()
