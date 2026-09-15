@@ -60,6 +60,27 @@ def resolve_ffmpeg(explicit: str) -> str:
     return explicit
 
 
+def _validate_args(args: argparse.Namespace) -> None:
+    """Raise ``ValueError`` naming the first bad numeric argument, if any.
+
+    Caught by ``main`` and printed the same way every other error here is,
+    so a bad value is reported by name instead of surfacing as an opaque
+    ffmpeg failure -- ``yuv420p`` requires even width/height, and zoompan's
+    ``d``/``fps`` expressions are undefined for a non-positive frame count
+    or rate.
+    """
+    if args.duration <= 0:
+        raise ValueError(f"--duration must be > 0, got {args.duration}")
+    if args.fps <= 0:
+        raise ValueError(f"--fps must be > 0, got {args.fps}")
+    if args.width <= 0 or args.width % 2 != 0:
+        raise ValueError(f"--width must be a positive even number, got {args.width}")
+    if args.height <= 0 or args.height % 2 != 0:
+        raise ValueError(f"--height must be a positive even number, got {args.height}")
+    if args.zoom_rate < 0:
+        raise ValueError(f"--zoom-rate must be >= 0, got {args.zoom_rate}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", "-i", required=True, help="Input PNG or JPG")
@@ -74,6 +95,12 @@ def main() -> int:
     )
     parser.add_argument("--ffmpeg-path", default="ffmpeg")
     args = parser.parse_args()
+
+    try:
+        _validate_args(args)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
     src = Path(args.input)
     if not src.is_file():
