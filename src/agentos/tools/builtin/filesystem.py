@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import bisect
 import csv
 import fnmatch
 import functools
@@ -866,13 +867,74 @@ async def write_file(path: str, content: str, approval_id: str | None = None) ->
 
     def _write() -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
+        # newline="" so the content is the sole authority on line endings;
+        # write_text() would stamp os.linesep onto every line.
+        with p.open("w", encoding="utf-8", newline="") as handle:
+            handle.write(content)
 
     await loop.run_in_executor(None, _write)
     record_workspace_file_write(p)
     _notify_memory_source_write(p)
     _notify_bootstrap_source_write(p)
     return f"Written {len(content)} bytes to {p}"
+
+
+def _read_raw_text(p: Path) -> str:
+    """Read *p* with universal-newline translation off, so CRLF survives."""
+    with p.open("r", encoding="utf-8", newline="") as handle:
+        return handle.read()
+
+
+_NEWLINE_RE = re.compile(r"\r\n|\r|\n")
+
+
+def _dominant_newline(text: str) -> str:
+    """Return the line ending a line inserted into *text* should use.
+
+    Majority convention, first ending seen breaking a tie, ``"\n"`` when the
+    text has no line ending at all — the same rule ``patch._detect_newline``
+    applies to an added hunk line, extended to a lone ``"\r"`` because this
+    tool also has to leave a CR-only file the way it found it.
+    """
+    crlf = text.count("\r\n")
+    counts = {"\r\n": crlf, "\n": text.count("\n") - crlf, "\r": text.count("\r") - crlf}
+    best = max(counts.values())
+    if best == 0:
+        return "\n"
+    for found in _NEWLINE_RE.finditer(text):
+        if counts[found.group()] == best:
+            return found.group()
+    return "\n"  # pragma: no cover — a leader exists, so the loop returns
+
+
+def _normalise_newlines(raw: str) -> str:
+    """Fold CRLF and lone CR to LF — what universal-newline mode showed before."""
+    return raw.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _splice_edit(raw: str, normalised: str, match: FuzzyMatchResult) -> str:
+    """Apply *match* (found in *normalised*) to *raw*, keeping untouched endings.
+
+    The matcher sees LF-only text because the model writes LF-separated
+    old_text; its offsets are mapped back onto the raw text, so every line the
+    edit did not name keeps its own ending byte-for-byte. The replacement
+    takes the file's dominant convention.
+    """
+    ((start, end),) = match.spans
+    replacement = match.updated[start : len(match.updated) - (len(normalised) - end)]
+    newline = _dominant_newline(raw)
+    replacement = _NEWLINE_RE.sub(newline, replacement)
+
+    # Folding CRLF to LF drops one character per CRLF (a lone CR folds in
+    # place), so a normalised offset is behind the raw one by the number of
+    # CRLFs that precede it. Record the normalised index of each folded CRLF
+    # and count them with bisect.
+    folded = [m.start() - k for k, m in enumerate(re.finditer("\r\n", raw))]
+
+    def to_raw(offset: int) -> int:
+        return offset + bisect.bisect_left(folded, offset)
+
+    return raw[: to_raw(start)] + replacement + raw[to_raw(end) :]
 
 
 def _locate_edit(original: str, old_text: str, new_text: str, *, path: str) -> FuzzyMatchResult:
@@ -932,7 +994,11 @@ async def edit_file(path: str, old_text: str, new_text: str, approval_id: str | 
         raise FileNotFoundError(f"File not found: {path}")
 
     loop = asyncio.get_running_loop()
-    original = await loop.run_in_executor(None, p.read_text, "utf-8")
+    raw = await loop.run_in_executor(None, _read_raw_text, p)
+    # Match against LF-only text — old_text from a model is LF-separated and
+    # would miss every multi-line edit on a CRLF file — then splice the result
+    # back into the raw text so the file's own endings survive.
+    original = _normalise_newlines(raw)
 
     # The matcher is the CPU-bound part of an edit, not the read or the write:
     # a miss on a large file sweeps every window in it. Run it in the same
@@ -941,10 +1007,11 @@ async def edit_file(path: str, old_text: str, new_text: str, approval_id: str | 
         None,
         functools.partial(_locate_edit, original, old_text, new_text, path=path),
     )
-    updated = match.updated
+    updated = _splice_edit(raw, original, match)
 
     def _write() -> None:
-        p.write_text(updated, encoding="utf-8")
+        with p.open("w", encoding="utf-8", newline="") as handle:
+            handle.write(updated)
 
     await loop.run_in_executor(None, _write)
     # Same bookkeeping as write_file / apply_patch: an edited deliverable is
