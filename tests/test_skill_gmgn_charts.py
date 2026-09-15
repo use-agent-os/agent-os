@@ -10,6 +10,7 @@ timestamps and its USD-vs-token-units volume fields.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -136,3 +137,116 @@ def test_the_payload_titles_itself_from_the_symbol_and_resolution() -> None:
     assert payload["title"] == "BONK · 1h"
     assert payload["subtitle"] == "SOL · 1h"
     assert payload["candles"] == candles
+
+
+def test_main_reports_missing_input_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = load_converter()
+    missing = tmp_path / "does_not_exist.json"
+    out = tmp_path / "chart.json"
+    code = module.main(["--input", str(missing), "--output", str(out)])
+
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "kline_chart: input file does not exist:" in err
+    assert str(missing) in err
+    assert not out.exists()
+
+
+def test_main_reports_directory_as_input(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = load_converter()
+    out = tmp_path / "chart.json"
+    code = module.main(["--input", str(tmp_path), "--output", str(out)])
+
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "kline_chart: input path is not a file:" in err
+    assert str(tmp_path) in err
+    assert not out.exists()
+
+
+def test_main_reports_unreadable_or_invalid_utf8_input(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = load_converter()
+    bad_file = tmp_path / "bad.json"
+    bad_file.write_bytes(b"\xff\xfe\x00\x00")
+    out = tmp_path / "chart.json"
+    code = module.main(["--input", str(bad_file), "--output", str(out)])
+
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "kline_chart: failed to read input file" in err
+    assert not out.exists()
+
+
+def test_main_reports_empty_input(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = load_converter()
+    empty_file = tmp_path / "empty.json"
+    empty_file.write_text("   \n\t  ", encoding="utf-8")
+    out = tmp_path / "chart.json"
+    code = module.main(["--input", str(empty_file), "--output", str(out)])
+
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "kline_chart: no input received" in err
+    assert not out.exists()
+
+
+def test_main_reports_invalid_json(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = load_converter()
+    invalid_file = tmp_path / "invalid.json"
+    invalid_file.write_text("{not: valid", encoding="utf-8")
+    out = tmp_path / "chart.json"
+    code = module.main(["--input", str(invalid_file), "--output", str(out)])
+
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "kline_chart: input is not valid JSON:" in err
+    assert not out.exists()
+
+
+def test_main_successful_chart_generation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    module = load_converter()
+    input_file = tmp_path / "candles.json"
+    input_file.write_text(
+        json.dumps(
+            [{"time": 1735689600, "open": "1.0", "high": "2.0", "low": "0.5", "close": "1.5"}]
+        ),
+        encoding="utf-8",
+    )
+    out = tmp_path / "nested" / "chart.json"
+    code = module.main(
+        [
+            "--input",
+            str(input_file),
+            "--output",
+            str(out),
+            "--symbol",
+            "BONK",
+            "--chain",
+            "sol",
+            "--resolution",
+            "1h",
+        ]
+    )
+
+    assert code == 0
+    cap = capsys.readouterr()
+    assert "wrote 1 candles to" in cap.out
+    assert "publish_artifact" in cap.out
+    assert out.is_file()
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data["type"] == "candlestick"
+    assert data["title"] == "BONK · 1h"
+    assert len(data["candles"]) == 1
+

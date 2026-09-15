@@ -136,7 +136,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
-    raw = sys.stdin.read() if args.input == "-" else Path(args.input).read_text(encoding="utf-8")
+    if args.input == "-":
+        raw = sys.stdin.read()
+    else:
+        input_path = Path(args.input)
+        if not input_path.exists():
+            print(f"kline_chart: input file does not exist: {input_path}", file=sys.stderr)
+            return 1
+        if not input_path.is_file():
+            print(f"kline_chart: input path is not a file: {input_path}", file=sys.stderr)
+            return 1
+        try:
+            raw = input_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            print(f"kline_chart: failed to read input file {input_path}: {exc}", file=sys.stderr)
+            return 1
+
     if not raw.strip():
         print("kline_chart: no input received", file=sys.stderr)
         return 1
