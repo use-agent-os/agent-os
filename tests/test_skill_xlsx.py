@@ -215,6 +215,56 @@ def test_inspect_xlsx_creates_parent_directory(
     assert out.is_file()
 
 
+def test_create_xlsx_rejects_invalid_json_spec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Invalid JSON must produce a structured error, not an unhandled
+    JSONDecodeError traceback (#2313)."""
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import create_xlsx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text("this is not json {{{", encoding="utf-8")
+    out = tmp_path / "out.xlsx"
+    monkeypatch.setattr(sys, "argv", ["create_xlsx.py", str(spec_path), "--out", str(out)])
+
+    exit_code = create_xlsx.main()
+
+    assert exit_code == 2
+    assert not out.exists()
+    captured = capsys.readouterr()
+    assert "not valid JSON" in captured.err
+
+
+def test_create_xlsx_rejects_non_dict_spec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Valid JSON that isn't an object (a string, a list, ...) must be
+    rejected with a clear message rather than an AttributeError from
+    ``spec.get(...)`` inside ``build()`` (#2313)."""
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import create_xlsx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps("just a string"), encoding="utf-8")
+    out = tmp_path / "out.xlsx"
+    monkeypatch.setattr(sys, "argv", ["create_xlsx.py", str(spec_path), "--out", str(out)])
+
+    exit_code = create_xlsx.main()
+
+    assert exit_code == 2
+    assert not out.exists()
+    captured = capsys.readouterr()
+    assert "must be a JSON object" in captured.err
+    assert "str" in captured.err
+
+
 def _edit_and_reload(tmp_path: Path, ops: list[dict[str, object]]) -> object:
     """Run ``ops`` against a one-cell workbook and reload the saved result."""
     sys.path.insert(0, str(SCRIPTS))
@@ -393,7 +443,6 @@ def test_the_apostrophe_escape_is_not_consumed_without_as_text(tmp_path: Path) -
     sheet = _edit_and_reload(tmp_path, [_set_cell(2, "'=hello")])
 
     assert sheet.cell(row=2, column=1).value == "'=hello"
-
 
 
 def _import_scripts() -> tuple[Any, Any, Any]:
