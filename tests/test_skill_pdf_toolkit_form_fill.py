@@ -115,3 +115,60 @@ def test_invalid_json_data_file_is_refused_with_a_clean_message(
     assert captured.err.startswith("error: data ")
     assert "not valid JSON" in captured.err
     assert not out.exists()
+
+
+@pytest.mark.parametrize(
+    ("shape", "payload"),
+    [
+        ("plain_text", b"not a pdf"),
+        ("empty", b""),
+        ("truncated", b"%PDF-1.4\n1 0 obj\n<<>>"),
+        ("random_binary", b"\x00\x01\x02\x03\xff"),
+    ],
+)
+def test_form_fill_reports_unreadable_pdf_in_fill_mode(
+    shape: str,
+    payload: bytes,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    form_fill = _form_fill_module()
+    corrupt_form = tmp_path / f"corrupt_{shape}.pdf"
+    corrupt_form.write_bytes(payload)
+    data = tmp_path / "data.json"
+    data.write_text(json.dumps({"full_name": "Ada"}), encoding="utf-8")
+    out = tmp_path / f"out_{shape}.pdf"
+
+    code = form_fill.main([str(corrupt_form), str(data), "--out", str(out)])
+    assert code == 2
+    captured = capsys.readouterr()
+    assert captured.err.startswith(f"error: input {corrupt_form} is not a readable PDF:")
+    assert "Traceback" not in captured.err
+    assert not out.exists()
+
+
+@pytest.mark.parametrize(
+    ("shape", "payload"),
+    [
+        ("plain_text", b"not a pdf"),
+        ("empty", b""),
+        ("truncated", b"%PDF-1.4\n1 0 obj\n<<>>"),
+        ("random_binary", b"\x00\x01\x02\x03\xff"),
+    ],
+)
+def test_form_fill_reports_unreadable_pdf_in_list_fields_mode(
+    shape: str,
+    payload: bytes,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    form_fill = _form_fill_module()
+    corrupt_form = tmp_path / f"corrupt_{shape}.pdf"
+    corrupt_form.write_bytes(payload)
+
+    code = form_fill.main([str(corrupt_form), "--list-fields"])
+    assert code == 2
+    captured = capsys.readouterr()
+    assert captured.err.startswith(f"error: input {corrupt_form} is not a readable PDF:")
+    assert "Traceback" not in captured.err
+

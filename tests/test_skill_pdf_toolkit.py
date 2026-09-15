@@ -199,3 +199,78 @@ def test_tables_strategy_explicit_is_rejected_with_a_clear_message(
         extract.main()
     assert exc_info.value.code == 2
     assert "invalid choice: 'explicit'" in capsys.readouterr().err
+
+
+def _corrupt_pdf_shapes(tmp_path: Path) -> dict[str, Path]:
+    good_pdf = tmp_path / "valid.pdf"
+    _make_one_page_pdf(good_pdf, "VALID")
+    good_bytes = good_pdf.read_bytes()
+
+    shapes: dict[str, Path] = {}
+    shapes["plain_text"] = tmp_path / "plain.pdf"
+    shapes["plain_text"].write_bytes(b"not a pdf file")
+
+    shapes["empty_file"] = tmp_path / "empty.pdf"
+    shapes["empty_file"].write_bytes(b"")
+
+    shapes["truncated_pdf"] = tmp_path / "cut.pdf"
+    shapes["truncated_pdf"].write_bytes(good_bytes[: len(good_bytes) // 3])
+
+    shapes["random_binary"] = tmp_path / "random.pdf"
+    shapes["random_binary"].write_bytes(b"\x00\x01\x02\x03\xff\xfe\xfd")
+    return shapes
+
+
+_CORRUPT_PDF_SHAPE_IDS = [
+    "plain_text",
+    "empty_file",
+    "truncated_pdf",
+    "random_binary",
+]
+
+
+@pytest.mark.parametrize("shape", _CORRUPT_PDF_SHAPE_IDS)
+def test_extract_reports_an_unreadable_pdf(
+    shape: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    extract = _extract_module()
+    path = _corrupt_pdf_shapes(tmp_path)[shape]
+
+    assert extract.main([str(path)]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("error: ")
+    assert str(path) in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize("shape", _CORRUPT_PDF_SHAPE_IDS)
+def test_extract_does_not_write_out_on_unreadable_pdf(
+    shape: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    extract = _extract_module()
+    path = _corrupt_pdf_shapes(tmp_path)[shape]
+    out = tmp_path / "out.json"
+
+    assert extract.main([str(path), "--out", str(out)]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("error: ")
+    assert "Traceback" not in captured.err
+    assert not out.exists()
+
+
+def test_extract_unreadable_pdf_exits_like_missing_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    extract = _extract_module()
+    corrupt = _corrupt_pdf_shapes(tmp_path)["plain_text"]
+
+    missing_code = extract.main([str(tmp_path / "absent.pdf")])
+    capsys.readouterr()
+    corrupt_code = extract.main([str(corrupt)])
+    capsys.readouterr()
+
+    assert (missing_code, corrupt_code) == (2, 2)
+

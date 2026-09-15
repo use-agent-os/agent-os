@@ -9,7 +9,13 @@ from pathlib import Path
 from typing import Any
 
 import pdfplumber
+from pdfplumber.utils.exceptions import PdfminerException
 from pypdf import PdfReader
+from pypdf.errors import PyPdfError
+
+# pypdf and pdfplumber report unreadable PDFs via PyPdfError (encompassing
+# PdfReadError, PdfStreamError, EmptyFileError, etc.) and PdfminerException.
+_UNREADABLE_PDF = (PyPdfError, PdfminerException, OSError, ValueError)
 
 # pdfplumber's third mode, ``explicit``, needs ``explicit_vertical_lines`` /
 # ``explicit_horizontal_lines`` that this script has no way to supply, so it
@@ -58,7 +64,7 @@ def extract(path: Path, tables_strategy: str | None) -> dict[str, Any]:
     }
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Extract text and tables from a PDF.")
     parser.add_argument("path", type=Path)
     parser.add_argument(
@@ -69,15 +75,19 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--json", action="store_true", help="Force JSON output (default)")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    args = _parse_args()
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
     if not args.path.is_file():
         print(f"error: {args.path} not found", file=sys.stderr)
         return 2
-    payload = extract(args.path, args.tables_strategy)
+    try:
+        payload = extract(args.path, args.tables_strategy)
+    except _UNREADABLE_PDF as exc:
+        print(f"error: {args.path} is not a readable PDF: {exc}", file=sys.stderr)
+        return 2
     text = json.dumps(payload, ensure_ascii=False, indent=2)
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)

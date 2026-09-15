@@ -14,6 +14,11 @@ from pathlib import Path
 from typing import Any
 
 from pypdf import PdfReader, PdfWriter
+from pypdf.errors import PyPdfError
+
+# pypdf reports unreadable PDFs via PyPdfError (encompassing PdfReadError,
+# PdfStreamError, EmptyFileError, etc.).
+_UNREADABLE_PDF = (PyPdfError, OSError, ValueError)
 
 
 def list_fields(path: Path) -> dict[str, Any]:
@@ -46,22 +51,27 @@ def fill(path: Path, data: dict[str, str], out: Path) -> int:
     return filled
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Fill AcroForm fields in a PDF.")
     parser.add_argument("input", type=Path)
     parser.add_argument("data", type=Path, nargs="?", default=None)
     parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--list-fields", action="store_true")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    args = _parse_args()
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
     if not args.input.is_file():
         print(f"error: input {args.input} not found", file=sys.stderr)
         return 2
     if args.list_fields:
-        print(json.dumps(list_fields(args.input), ensure_ascii=False, indent=2, default=str))
+        try:
+            fields = list_fields(args.input)
+        except _UNREADABLE_PDF as exc:
+            print(f"error: input {args.input} is not a readable PDF: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(fields, ensure_ascii=False, indent=2, default=str))
         return 0
     if args.data is None or args.out is None:
         print("error: data and --out are required unless --list-fields", file=sys.stderr)
@@ -86,7 +96,11 @@ def main() -> int:
         )
         return 2
     data = {str(k): str(v) for k, v in raw.items()}
-    pages = fill(args.input, data, args.out)
+    try:
+        pages = fill(args.input, data, args.out)
+    except _UNREADABLE_PDF as exc:
+        print(f"error: input {args.input} is not a readable PDF: {exc}", file=sys.stderr)
+        return 2
     print(json.dumps({"pages_processed": pages, "fields": len(data)}, ensure_ascii=False))
     return 0
 
