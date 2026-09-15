@@ -31,6 +31,75 @@ def _resolved_key(payload: dict[str, Any], fallback: str) -> str:
     return str(value)
 
 
+#: A compact calendar date, ``20260101``. Read as epoch seconds it would be
+#: 1970-08-23, which is not a date any session carries, so the digit count is
+#: the whole disambiguation.
+_COMPACT_DATE_LEN = 8
+
+#: Below this an all-digit value is not a plausible timestamp: 1e8 seconds is
+#: 1973. Anything shorter is a date or a year the user typed without
+#: separators, and reading it as an epoch silently lands the filter in 1970 --
+#: where it matches everything (Issue #2132).
+_MIN_EPOCH_SECONDS = 100_000_000
+
+#: Above this, seconds would be past the year 2286, so the value is milliseconds.
+_MILLIS_THRESHOLD_SECONDS = 10_000_000_000
+
+#: The upper end of what counts as a session timestamp, 2200-01-01. Bounded
+#: explicitly so the answer does not depend on the platform:
+#: ``datetime.fromtimestamp`` accepts up to year 9999 on Linux, while the
+#: Windows CRT rejects anything past roughly year 3000, so an unbounded value
+#: parsed cleanly on one and raised on the other.
+_MAX_EPOCH_SECONDS = 7_258_118_400
+
+_SINCE_HELP = (
+    "--since must be an ISO date/datetime (2026-09-14, 2026-09-14T08:00:00Z), "
+    "a compact date (20260914), or an epoch timestamp in seconds or milliseconds"
+)
+
+
+def _epoch_to_datetime(number: float) -> datetime:
+    """Seconds or milliseconds since the epoch, as an aware datetime.
+
+    ``fromtimestamp`` raises ``OSError``/``OverflowError`` -- not ``ValueError``
+    -- for an out-of-range value, so both are normalised to ``ValueError`` for
+    every caller to handle in one place.
+
+    The range is also checked here rather than left to the platform. What
+    ``fromtimestamp`` accepts differs by OS -- Linux goes to year 9999, the
+    Windows CRT stops around year 3000 -- so the same ``--since`` would be
+    rejected on one machine and silently accepted as a year-5138 filter on
+    another.
+    """
+    if number > _MILLIS_THRESHOLD_SECONDS:
+        number = number / 1000
+    if number > _MAX_EPOCH_SECONDS:
+        raise ValueError(f"{number} is beyond any plausible session timestamp")
+    try:
+        return datetime.fromtimestamp(number, tz=UTC)
+    except (OverflowError, OSError, ValueError) as exc:
+        raise ValueError(f"{number} is out of range for a timestamp") from exc
+
+
+def _datetime_from_text(raw: str) -> datetime:
+    """Parse one user- or gateway-supplied instant, or raise ``ValueError``.
+
+    Kept free of ``typer`` so ``_row_datetime`` can call it while filtering rows
+    and skip a bad value, rather than aborting the whole listing.
+    """
+    if raw.isdigit():
+        if len(raw) == _COMPACT_DATE_LEN:
+            return datetime.strptime(raw, "%Y%m%d").replace(tzinfo=UTC)
+        number = float(int(raw))
+        if number < _MIN_EPOCH_SECONDS:
+            raise ValueError(f"{raw!r} is neither a date nor a plausible epoch timestamp")
+        return _epoch_to_datetime(number)
+    parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
+
+
 def _parse_since(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -38,17 +107,9 @@ def _parse_since(value: str | None) -> datetime | None:
     if not raw:
         return None
     try:
-        if raw.isdigit():
-            number = float(int(raw))
-            if number > 10_000_000_000:
-                number = number / 1000
-            return datetime.fromtimestamp(number, tz=UTC)
-        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=UTC)
-        return parsed
+        return _datetime_from_text(raw)
     except ValueError as exc:
-        raise typer.BadParameter("--since must be an ISO date/datetime or epoch timestamp") from exc
+        raise typer.BadParameter(f"{_SINCE_HELP} (got {value!r})") from exc
 
 
 def _row_datetime(row: dict[str, Any]) -> datetime | None:
@@ -56,18 +117,15 @@ def _row_datetime(row: dict[str, Any]) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, (int, float)):
-        timestamp = float(value)
-        if timestamp > 10_000_000_000:
-            timestamp = timestamp / 1000
-        return datetime.fromtimestamp(timestamp, tz=UTC)
+        try:
+            return _epoch_to_datetime(float(value))
+        except ValueError:
+            # A row with an unusable timestamp is skipped, never fatal: one bad
+            # row must not take down the whole listing.
+            return None
     if isinstance(value, str):
         try:
-            if value.isdigit():
-                return _parse_since(value)
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=UTC)
-            return parsed
+            return _datetime_from_text(value)
         except ValueError:
             return None
     return None
