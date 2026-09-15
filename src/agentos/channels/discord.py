@@ -6,6 +6,7 @@ import asyncio
 import json
 import random
 import re
+from collections import OrderedDict
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -60,6 +61,12 @@ _DISCORD_THREAD_CHANNEL_TYPES = {10, 11, 12}
 _DISCORD_APPLICATION_COMMAND_INTERACTION_TYPE = 2
 _DISCORD_DEFERRED_CHANNEL_MESSAGE_RESPONSE_TYPE = 5
 _DISCORD_MESSAGE_TEXT_LIMIT = 2000
+
+#: Cap on the per-connection channel-context caches, matching email.py's
+#: ``_MAX_TRACKED_THREADS``. These only exist to annotate inbound messages with
+#: a channel type and thread parent, so an entry that has not been touched in
+#: the last thousand is not worth the memory.
+_MAX_TRACKED_CHANNELS = 1000
 
 # Gateway intents bitmask
 GATEWAY_INTENTS = (
@@ -192,8 +199,16 @@ class DiscordChannel:
     )
     _rate_limiter: RateLimiter = field(default_factory=RateLimiter, init=False, repr=False)
     _sent_messages: dict[str, str] = field(default_factory=dict, init=False, repr=False)
-    _channel_types: dict[str, int] = field(default_factory=dict, init=False, repr=False)
-    _thread_parent_channels: dict[str, str] = field(default_factory=dict, init=False, repr=False)
+    # Bounded like email.py's thread cache: a long-running connection on an
+    # active guild sees an unbounded number of distinct channel and thread ids,
+    # and these were plain dicts written on six different gateway events with
+    # nothing ever removing an entry (Issue #2088).
+    _channel_types: OrderedDict[str, int] = field(
+        default_factory=OrderedDict, init=False, repr=False
+    )
+    _thread_parent_channels: OrderedDict[str, str] = field(
+        default_factory=OrderedDict, init=False, repr=False
+    )
 
     @property
     def capability_profile(self) -> ChannelCapabilityProfile:
@@ -506,7 +521,6 @@ class DiscordChannel:
             elif op == 11:  # Heartbeat ACK
                 self._state.last_heartbeat_ack = True
 
-
     async def _handle_dispatch(self, event_type: str | None, data: dict[str, Any]) -> None:
         if event_type == "READY":
             self._state.session_id = data["session_id"]
@@ -557,27 +571,42 @@ class DiscordChannel:
         elif event_type == "RESUMED":
             log.info("discord.resumed")
 
+    @staticmethod
+    def _remember(cache: OrderedDict[str, Any], key: str, value: Any) -> None:
+        """Insert *key* as the most recent entry, evicting the oldest past the cap."""
+        cache[key] = value
+        cache.move_to_end(key)
+        while len(cache) > _MAX_TRACKED_CHANNELS:
+            cache.popitem(last=False)
+
     def _cache_channel_context(self, data: dict[str, Any]) -> None:
         channel_id = data.get("id")
         channel_type = self._channel_type(data.get("type"))
         if isinstance(channel_id, str) and channel_id and channel_type is not None:
-            self._channel_types[channel_id] = channel_type
+            self._remember(self._channel_types, channel_id, channel_type)
         parent_id = data.get("parent_id")
         if isinstance(channel_id, str) and channel_id and isinstance(parent_id, str) and parent_id:
-            self._thread_parent_channels[channel_id] = parent_id
+            self._remember(self._thread_parent_channels, channel_id, parent_id)
 
     def _annotate_channel_context(self, data: dict[str, Any]) -> dict[str, Any]:
         channel_id = data.get("channel_id")
         if not isinstance(channel_id, str) or not channel_id:
             return data
         enriched = dict(data)
+        # A read counts as use. This cache is consulted on every inbound
+        # message, so recency measured on writes alone would evict the busiest
+        # channel -- cached once, read constantly, never rewritten -- in favour
+        # of a thousand channels that were merely announced once and never
+        # spoken in.
         if "channel_type" not in enriched and channel_id in self._channel_types:
             enriched["channel_type"] = self._channel_types[channel_id]
+            self._channel_types.move_to_end(channel_id)
         if (
             "thread_parent_channel_id" not in enriched
             and channel_id in self._thread_parent_channels
         ):
             enriched["thread_parent_channel_id"] = self._thread_parent_channels[channel_id]
+            self._thread_parent_channels.move_to_end(channel_id)
         return enriched
 
     @staticmethod
@@ -926,9 +955,7 @@ class DiscordChannel:
 
     def is_connected(self) -> bool:
         return (
-            self._connected
-            and self._dispatch_task is not None
-            and not self._dispatch_task.done()
+            self._connected and self._dispatch_task is not None and not self._dispatch_task.done()
         )
 
     async def health_check(self) -> ChannelHealth:
@@ -941,7 +968,6 @@ class DiscordChannel:
                 "sequence": self._state.sequence,
             },
         )
-
 
     # ------------------------------------------------------------------
     # Inbound
