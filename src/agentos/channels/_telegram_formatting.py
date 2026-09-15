@@ -68,6 +68,12 @@ def _render_inline(text: str) -> str:
         return f'<a href="\x00TG_HREF_{len(hrefs) - 1}\x00">{match.group(1)}</a>'
 
     rendered = _LINK_RE.sub(_park_href, rendered)
+    # Triple markers first. Left to the passes below, `***x***` had its outer
+    # pair taken by the `**` pass and the leftover `*x*` matched across the
+    # `</b>`, giving `<b><i>x</b></i>`; Telegram enforces XML nesting and
+    # rejected the message with "can't find end tag of i".
+    rendered = re.sub(r"\*\*\*(?=\S)(.+?)(?<=\S)\*\*\*", r"<b><i>\1</i></b>", rendered)
+    rendered = re.sub(r"___(?=[^\s_])(.+?)(?<=[^\s_])___", r"<b><i>\1</i></b>", rendered)
     rendered = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", r"<b>\1</b>", rendered)
     rendered = re.sub(r"__(?=\S)(.+?)(?<=\S)__", r"<b>\1</b>", rendered)
     rendered = re.sub(r"~~(?=\S)(.+?)(?<=\S)~~", r"<s>\1</s>", rendered)

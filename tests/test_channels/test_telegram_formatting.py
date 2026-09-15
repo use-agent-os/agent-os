@@ -399,3 +399,44 @@ def test_code_span_keeps_interior_whitespace(markdown: str, expected: str) -> No
     present and the span is not all spaces; `.strip()` collapsed `` ` ` `` to
     an empty <code></code>."""
     assert render_telegram_html(markdown) == expected
+
+
+@pytest.mark.parametrize(
+    ("markdown", "expected"),
+    [
+        ("***bold italic***", "<b><i>bold italic</i></b>"),
+        ("___bold italic___", "<b><i>bold italic</i></b>"),
+        ("say ***hi*** there", "say <b><i>hi</i></b> there"),
+        ("***a*** then **b** and *c*", "<b><i>a</i></b> then <b>b</b> and <i>c</i>"),
+        ("**b** ***bi*** __u__", "<b>b</b> <b><i>bi</i></b> <b>u</b>"),
+        ("***multi word run***", "<b><i>multi word run</i></b>"),
+    ],
+)
+def test_triple_markers_render_as_nested_bold_italic(markdown: str, expected: str) -> None:
+    """`***x***` used to come out as `<b><i>x</b></i>`: the `**` pass took the
+    outer asterisks first, then the `*` pass matched across the `</b>` and
+    Telegram rejected the interleaved tags ("can't find end tag of i")."""
+    assert render_telegram_html(markdown) == expected
+
+
+@pytest.mark.parametrize(
+    "markdown",
+    ["***bold italic***", "___bold italic___", "a ***b*** c ***d*** e"],
+)
+def test_triple_marker_output_is_well_nested(markdown: str) -> None:
+    rendered = render_telegram_html(markdown)
+    assert "</b></i>" not in rendered
+    assert rendered.count("<b>") == rendered.count("</b>")
+    assert rendered.count("<i>") == rendered.count("</i>")
+
+
+def test_triple_underscore_run_after_punctuation_still_nests() -> None:
+    rendered = render_telegram_html("call foo.___private___ or ___x___")
+    assert rendered == "call foo.<b><i>private</i></b> or <b><i>x</i></b>"
+
+
+def test_triple_marker_does_not_touch_a_parked_link_or_code_span() -> None:
+    rendered = render_telegram_html("[t](https://x.test/___a___) and `***c***` and ***e***")
+    assert rendered == (
+        '<a href="https://x.test/___a___">t</a> and <code>***c***</code> and <b><i>e</i></b>'
+    )
