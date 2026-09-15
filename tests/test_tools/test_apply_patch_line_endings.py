@@ -167,3 +167,108 @@ def test_add_file_emits_lf_on_every_platform(tmp_path: Path) -> None:
     # lines are joined, not terminated) — not something the newline handling
     # chose. The assertion is about the separator being LF, not the tail.
     assert (tmp_path / "created.txt").read_bytes() == b"alpha\nbeta"
+
+
+# ---------------------------------------------------------------------------
+# #1907: a context line that stops being the file's last line must gain a
+# terminator, or the line appended after it is joined onto it.
+# ---------------------------------------------------------------------------
+
+
+def test_appending_after_an_unterminated_last_line_keeps_the_lines_apart(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "example.txt"
+    target.write_bytes(b"hello\nworld")
+
+    patch_text = """*** Begin Patch
+*** Update File: example.txt
+@@@ -2,1 +2,2 @@@
+ world
++tail
+*** End Patch"""
+    assert _apply(patch_text, tmp_path) == (0, 1, 0)
+    assert target.read_bytes() == b"hello\nworld\ntail\n"
+
+
+def test_appending_after_an_unterminated_crlf_last_line_uses_crlf(tmp_path: Path) -> None:
+    target = tmp_path / "example.txt"
+    target.write_bytes(b"hello\r\nworld")
+
+    patch_text = """*** Begin Patch
+*** Update File: example.txt
+@@@ -2,1 +2,2 @@@
+ world
++tail
+*** End Patch"""
+    assert _apply(patch_text, tmp_path) == (0, 1, 0)
+    assert target.read_bytes() == b"hello\r\nworld\r\ntail\r\n"
+
+
+def test_create_then_append_does_not_merge_lines(tmp_path: Path) -> None:
+    """``*** Add File`` writes no trailing newline, so this is the ordinary path."""
+    create = """*** Begin Patch
+*** Add File: notes.txt
++alpha
++beta
+*** End Patch"""
+    assert _apply(create, tmp_path) == (1, 0, 0)
+    assert (tmp_path / "notes.txt").read_bytes() == b"alpha\nbeta"
+
+    append = """*** Begin Patch
+*** Update File: notes.txt
+@@@ -2,1 +2,2 @@@
+ beta
++gamma
+*** End Patch"""
+    assert _apply(append, tmp_path) == (0, 1, 0)
+    assert (tmp_path / "notes.txt").read_bytes() == b"alpha\nbeta\ngamma\n"
+
+
+def test_unterminated_last_line_that_stays_last_is_left_alone(tmp_path: Path) -> None:
+    """The format has no ``\\ No newline`` marker, so the file's own shape wins."""
+    target = tmp_path / "example.txt"
+    target.write_bytes(b"hello\nworld")
+
+    patch_text = """*** Begin Patch
+*** Update File: example.txt
+@@@ -1,1 +1,1 @@@
+-hello
++HELLO
+*** End Patch"""
+    assert _apply(patch_text, tmp_path) == (0, 1, 0)
+    assert target.read_bytes() == b"HELLO\nworld"
+
+
+def test_unterminated_last_line_moved_up_by_an_insert_before_it(tmp_path: Path) -> None:
+    """The context line is not the one being appended to; it is pushed down instead."""
+    target = tmp_path / "example.txt"
+    target.write_bytes(b"hello\nworld")
+
+    patch_text = """*** Begin Patch
+*** Update File: example.txt
+@@@ -1,1 +1,2 @@@
+ hello
++middle
+*** End Patch"""
+    assert _apply(patch_text, tmp_path) == (0, 1, 0)
+    assert target.read_bytes() == b"hello\nmiddle\nworld"
+
+
+@pytest.mark.parametrize("separator", ["\f", "\v", "\x1c", "\x85", "\u2028"])
+def test_other_splitlines_boundaries_are_not_mistaken_for_unterminated_lines(
+    tmp_path: Path, separator: str
+) -> None:
+    """A form feed (or any other str.splitlines boundary) is not a missing newline."""
+    target = tmp_path / "example.txt"
+    original = f"alpha\n{separator}\nbeta\ngamma\n".encode()
+    target.write_bytes(original)
+
+    patch_text = """*** Begin Patch
+*** Update File: example.txt
+@@@ -1,1 +1,1 @@@
+-alpha
++ALPHA
+*** End Patch"""
+    assert _apply(patch_text, tmp_path) == (0, 1, 0)
+    assert target.read_bytes() == original.replace(b"alpha", b"ALPHA")

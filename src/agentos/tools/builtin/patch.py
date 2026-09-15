@@ -510,6 +510,11 @@ def _gate_patch_ops(
 # ---------------------------------------------------------------------------
 
 
+# Every character str.splitlines() treats as a line boundary. A line produced
+# by splitlines(keepends=True) is unterminated only if it ends in none of them.
+_LINE_BOUNDARIES = ("\n", "\r", "\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029")
+
+
 def _detect_newline(file_lines: list[str]) -> str:
     """Return the line ending an added line should use for this file.
 
@@ -586,6 +591,15 @@ def _updated_text(text: str, hunks: list[Hunk]) -> str:
     # Apply hunks in reverse order so earlier line numbers stay valid
     for hunk in sorted(hunks, key=lambda h: h.old_start, reverse=True):
         lines = _apply_hunk(lines, hunk, newline)
+    # Only the last line may go without a terminator. Context lines are copied
+    # verbatim, so a file whose last line had none keeps it that way even once
+    # a hunk has appended after it — and the next line lands on the same line.
+    # Terminate any such line that is no longer last; one that still is stays
+    # as it was, since the format has no "\ No newline at end of file" marker
+    # to say otherwise.
+    for index in range(len(lines) - 1):
+        if not lines[index].endswith(_LINE_BOUNDARIES):
+            lines[index] += newline
     return "".join(lines)
 
 
