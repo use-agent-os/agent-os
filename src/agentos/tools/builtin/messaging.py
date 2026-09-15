@@ -32,7 +32,18 @@ def _outgoing_metadata(channel: str, target: str, thread_id: str | None) -> dict
             metadata["thread_id"] = thread_id
         return metadata
     if channel == "slack":
-        return {"thread_ts": thread_id} if thread_id else {}
+        slack_metadata: dict[str, str] = {}
+        # SlackChannel.send() applies this same C/G/D shape check (stripped
+        # first) to reply_to, then lets metadata["channel"] win over whatever
+        # that produced -- so only a channel-shaped target should override
+        # the adapter's default; anything else (a bare user id, a channel
+        # name, an empty string) leaves it alone, same as an unrecognized
+        # reply_to already would.
+        if target.strip()[:1] in ("C", "G", "D"):
+            slack_metadata["channel"] = target.strip()
+        if thread_id:
+            slack_metadata["thread_ts"] = thread_id
+        return slack_metadata
 
     metadata = {"recipient": target}
     if thread_id:

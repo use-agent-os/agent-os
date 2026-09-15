@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Tools (`message`): the `send` action silently ignored `target` for Slack
+  and always posted to the adapter's configured default channel, while the
+  tool's response still echoed back the requested target as if it had
+  worked. `_outgoing_metadata` only ever extracted `thread_ts` from
+  `thread_id` for Slack; it now also sets `metadata["channel"]` when
+  `target` is a channel/group/DM-shaped id (`C`/`G`/`D` prefix, matching
+  the same shape check `SlackChannel.send()` already applies to
+  `reply_to`), which `send()` already treats as an override that wins over
+  its default (#2217).
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added
