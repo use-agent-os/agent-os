@@ -20,6 +20,29 @@ from pathlib import Path
 from pypdf import PdfReader, PdfWriter
 
 
+class PageSpecError(ValueError):
+    """A manifest ``pages`` value that cannot be parsed. Reported as ``error:``
+    / exit 2, never as a traceback: the caller passed bad input, the script did
+    not break."""
+
+
+def _page_number(token: str, spec: str) -> int:
+    """Parse one page number, or raise :class:`PageSpecError` naming the spec."""
+    try:
+        return int(token)
+    except ValueError:
+        hint = ""
+        if any(dash in token for dash in "–—−"):
+            # A model writes an en dash more often than one would like, and it
+            # is invisible in a diff: the token never splits, so the whole
+            # thing lands in int().
+            hint = " (that looks like an en/em dash; ranges use a plain '-')"
+        raise PageSpecError(
+            f"invalid pages value {spec!r}: {token.strip()!r} is not a page "
+            f"number{hint}; expected 1-based numbers and ranges, e.g. '1-3,5'"
+        ) from None
+
+
 def parse_ranges(spec: str | None, total: int) -> list[int]:
     if not spec:
         return list(range(1, total + 1))
@@ -30,12 +53,12 @@ def parse_ranges(spec: str | None, total: int) -> list[int]:
             continue
         if "-" in token:
             lo_s, hi_s = token.split("-", 1)
-            lo, hi = int(lo_s), int(hi_s)
+            lo, hi = _page_number(lo_s, spec), _page_number(hi_s, spec)
             if lo > hi:
                 lo, hi = hi, lo
             pages.extend(range(lo, hi + 1))
         else:
-            pages.append(int(token))
+            pages.append(_page_number(token, spec))
     return [p for p in pages if 1 <= p <= total]
 
 
@@ -83,7 +106,11 @@ def main() -> int:
             return 2
     else:
         items = [{"file": p} for p in args.inputs]
-    written = merge(items, args.out)
+    try:
+        written = merge(items, args.out)
+    except PageSpecError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     print(json.dumps({"pages_written": written, "out": str(args.out)}, ensure_ascii=False))
     return 0
 

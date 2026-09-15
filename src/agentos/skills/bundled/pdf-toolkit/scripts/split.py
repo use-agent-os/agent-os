@@ -16,6 +16,29 @@ from pathlib import Path
 from pypdf import PdfReader, PdfWriter
 
 
+class PageSpecError(ValueError):
+    """A ``--pages`` value that cannot be parsed. Reported as ``error:`` / exit
+    2, never as a traceback: the caller passed bad input, the script did not
+    break."""
+
+
+def _page_number(token: str, spec: str) -> int:
+    """Parse one page number, or raise :class:`PageSpecError` naming the flag."""
+    try:
+        return int(token)
+    except ValueError:
+        hint = ""
+        if any(dash in token for dash in "–—−"):
+            # A model writes an en dash more often than one would like, and it
+            # is invisible in a diff: the token never splits, so the whole
+            # thing lands in int().
+            hint = " (that looks like an en/em dash; ranges use a plain '-')"
+        raise PageSpecError(
+            f"invalid --pages value {spec!r}: {token.strip()!r} is not a page "
+            f"number{hint}; expected 1-based numbers and ranges, e.g. '1-3,5'"
+        ) from None
+
+
 def split_ranges(spec: str) -> list[list[int]]:
     groups: list[list[int]] = []
     for token in spec.split(","):
@@ -24,21 +47,24 @@ def split_ranges(spec: str) -> list[list[int]]:
             continue
         if "-" in token:
             lo_s, hi_s = token.split("-", 1)
-            lo, hi = int(lo_s), int(hi_s)
+            lo, hi = _page_number(lo_s, spec), _page_number(hi_s, spec)
             if lo > hi:
                 lo, hi = hi, lo
             groups.append(list(range(lo, hi + 1)))
         else:
-            groups.append([int(token)])
+            groups.append([_page_number(token, spec)])
     return groups
 
 
 def split(input_path: Path, pages_spec: str, out_dir: Path) -> list[Path]:
+    # Parse before opening the document or creating the directory: an
+    # unparseable spec should leave nothing behind at all.
+    groups = split_ranges(pages_spec)
     reader = PdfReader(str(input_path))
     total = len(reader.pages)
     out_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
-    for idx, group in enumerate(split_ranges(pages_spec), start=1):
+    for idx, group in enumerate(groups, start=1):
         valid_pages = [p for p in group if 1 <= p <= total]
         if not valid_pages:
             continue
@@ -65,7 +91,11 @@ def main() -> int:
     if not args.input.is_file():
         print(f"error: input {args.input} not found", file=sys.stderr)
         return 2
-    written = split(args.input, args.pages, args.out)
+    try:
+        written = split(args.input, args.pages, args.out)
+    except PageSpecError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     print(
         json.dumps(
             {"files": [str(p) for p in written], "count": len(written)},
