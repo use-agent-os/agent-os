@@ -586,6 +586,32 @@ class AnthropicProvider:
                                 cache_write_tokens=cache_creation_tokens,
                             )
 
+                        elif etype == "error":
+                            # A documented mid-stream event, emitted after
+                            # generation has already started -- so the
+                            # pre-stream status check above passed long ago and
+                            # never sees it. Anthropic then closes the
+                            # connection with no ``message_stop`` and no
+                            # ``[DONE]``, so with no branch here the loop simply
+                            # ran out: the turn ended having yielded neither an
+                            # ErrorEvent nor a DoneEvent, truncating silently
+                            # after whatever text had already gone out.
+                            error_body = event.get("error")
+                            if not isinstance(error_body, dict):
+                                error_body = {}
+                            # The upstream type is carried as the code because
+                            # that is what ``classify_provider_error`` matches
+                            # on: "overloaded_error" is the string that turns
+                            # this into PROVIDER_OVERLOADED, which is what lets
+                            # the circuit breaker and provider fallback see that
+                            # this provider is unhealthy. A generic code here
+                            # would surface the error to the user and still
+                            # leave the breaker blind.
+                            code = str(error_body.get("type") or "").strip() or "stream_error"
+                            detail = str(error_body.get("message") or "").strip() or "no detail"
+                            yield ErrorEvent(message=f"{code}: {detail}", code=code)
+                            return
+
         except httpx.TimeoutException as exc:
             yield ErrorEvent(message=f"Request timed out: {exc}", code="timeout")
         except httpx.RequestError as exc:
