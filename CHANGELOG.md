@@ -74,6 +74,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Web UI: the Memory page now uses the shared Control hero header, so the
   signal background no longer overlaps the stat cards and the page matches
   Health / Overview / Usage (#1927).
+- `apply_patch` no longer joins an appended line onto a file's unterminated
+  last line: a context line that stops being last now gains the file's own
+  ending, so create-then-extend keeps `beta` and `gamma` on separate lines
+  (#1907).
+- `edit_file` and `write_file` preserve the file's line endings instead of
+  rewriting every line to `os.linesep`; a one-line edit on a CRLF file is a
+  one-line diff again, and an inserted line follows the file's own convention
+  (#1909).
+- Cron: a relative `--workdir` on a script job resolves against the script's
+  own directory rather than the gateway process's CWD, so `--workdir data`
+  means `~/.agentos/scripts/data` and `.` means the script's directory (#1911).
+- pdf-toolkit: `split.py` reports the pages each output file holds and the
+  requested pages that were out of range, numbers written files without
+  holes, and exits 2 instead of reporting an empty split as success (#1902).
+- pdf-toolkit: `form_fill.py` refuses a data file that is not a JSON object
+  (or not JSON at all) with exit 2 instead of writing a blank form (#1903).
 
 ## [2026.9.13] - 2026-09-13
 
