@@ -866,13 +866,53 @@ async def write_file(path: str, content: str, approval_id: str | None = None) ->
 
     def _write() -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
+        # ``content`` is the sole authority on this file's line endings, the
+        # same rule ``apply_patch``'s ``*** Add File`` follows. Without
+        # ``newline=""`` every ``\n`` the caller sent comes back as
+        # ``os.linesep``.
+        _write_text_verbatim(p, content)
 
     await loop.run_in_executor(None, _write)
     record_workspace_file_write(p)
     _notify_memory_source_write(p)
     _notify_bootstrap_source_write(p)
     return f"Written {len(content)} bytes to {p}"
+
+
+def _dominant_newline(raw: str) -> str:
+    """Return the line ending *raw* already uses: majority, first-seen breaks a tie.
+
+    Mirrors ``patch._detect_newline`` so the two file-writing surfaces agree on
+    what a file's convention is.
+    """
+
+    crlf = raw.count("\r\n")
+    lf = raw.count("\n") - crlf
+    if crlf == lf:
+        first = raw.find("\n")
+        return "\r\n" if first > 0 and raw[first - 1] == "\r" else "\n"
+    return "\r\n" if crlf > lf else "\n"
+
+
+def _read_text_verbatim(p: Path) -> str:
+    """Read text with universal-newline translation disabled.
+
+    ``Path.read_text`` folds every ending to ``\\n``; writing that back through
+    ``write_text`` re-emits ``os.linesep`` on every line, so a one-line edit
+    rewrites the whole file. ``read_text``/``write_text`` only grew a ``newline``
+    argument in 3.13, so this goes through ``Path.open()`` to stay on the
+    project's 3.12 floor.
+    """
+
+    with p.open("r", encoding="utf-8", newline="") as handle:
+        return handle.read()
+
+
+def _write_text_verbatim(p: Path, text: str) -> None:
+    """Write *text* byte-for-byte, without rewriting its line endings."""
+
+    with p.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(text)
 
 
 def _locate_edit(original: str, old_text: str, new_text: str, *, path: str) -> FuzzyMatchResult:
@@ -932,7 +972,12 @@ async def edit_file(path: str, old_text: str, new_text: str, approval_id: str | 
         raise FileNotFoundError(f"File not found: {path}")
 
     loop = asyncio.get_running_loop()
-    original = await loop.run_in_executor(None, p.read_text, "utf-8")
+    raw = await loop.run_in_executor(None, _read_text_verbatim, p)
+    # The matcher sees the same LF-only text it always has — ``old_text`` from
+    # a model is LF-separated, so matching against raw CRLF would miss every
+    # multi-line edit. The file's own ending is restored on the way out.
+    newline = _dominant_newline(raw)
+    original = raw.replace("\r\n", "\n")
 
     # The matcher is the CPU-bound part of an edit, not the read or the write:
     # a miss on a large file sweeps every window in it. Run it in the same
@@ -942,9 +987,11 @@ async def edit_file(path: str, old_text: str, new_text: str, approval_id: str | 
         functools.partial(_locate_edit, original, old_text, new_text, path=path),
     )
     updated = match.updated
+    if newline != "\n":
+        updated = updated.replace("\n", newline)
 
     def _write() -> None:
-        p.write_text(updated, encoding="utf-8")
+        _write_text_verbatim(p, updated)
 
     await loop.run_in_executor(None, _write)
     # Same bookkeeping as write_file / apply_patch: an edited deliverable is
