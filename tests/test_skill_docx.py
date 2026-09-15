@@ -80,6 +80,84 @@ def test_create_then_inspect_round_trip(tmp_path: Path) -> None:
     assert inspected["has_tracked_changes"] is False
 
 
+def _create_docx_module() -> object:
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import create_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+    return create_docx
+
+
+def _table_texts(doc: object) -> list[list[str]]:
+    return [[cell.text for cell in row.cells] for row in doc.tables[0].rows]  # type: ignore[attr-defined]
+
+
+# A spec is model-authored JSON, so the shapes below are the ones a slightly
+# wrong spec produces. They used to crash the script instead of building a
+# document (#2018).
+
+
+def test_build_skips_a_table_whose_rows_are_all_empty() -> None:
+    create_docx = _create_docx_module()
+    doc = create_docx.build({"body": [{"kind": "table", "rows": [[], []]}]})
+    assert doc.tables == []
+
+
+def test_build_wraps_a_scalar_table_row_as_one_cell() -> None:
+    create_docx = _create_docx_module()
+    doc = create_docx.build({"body": [{"kind": "table", "rows": ["header", 42, ["a", "b"]]}]})
+    assert _table_texts(doc) == [["header", ""], ["42", ""], ["a", "b"]]
+
+
+def test_build_skips_a_table_whose_rows_are_not_a_list() -> None:
+    create_docx = _create_docx_module()
+    doc = create_docx.build({"body": [{"kind": "table", "rows": "a,b,c"}]})
+    assert doc.tables == []
+
+
+@pytest.mark.parametrize(
+    ("level", "expected"),
+    [(15, 9), (-3, 0), (None, 1), ("abc", 1), ("2", 2), (0, 0), (3, 3)],
+)
+def test_build_clamps_the_heading_level(level: object, expected: int) -> None:
+    create_docx = _create_docx_module()
+    doc = create_docx.build({"body": [{"kind": "heading", "text": "Title", "level": level}]})
+    style = doc.paragraphs[0].style.name
+    assert style == ("Title" if expected == 0 else f"Heading {expected}")
+
+
+@pytest.mark.parametrize("spec", [[], None, "spec", 42])
+def test_build_returns_an_empty_document_for_a_non_dict_spec(spec: object) -> None:
+    create_docx = _create_docx_module()
+    doc = create_docx.build(spec)
+    assert doc.paragraphs == []
+    assert doc.tables == []
+
+
+def test_build_ignores_a_body_that_is_not_a_list() -> None:
+    create_docx = _create_docx_module()
+    doc = create_docx.build({"body": {"kind": "paragraph", "text": "x"}})
+    assert doc.paragraphs == []
+
+
+@pytest.mark.parametrize("payload", ["[]", "null", '"spec"', "{not json"])
+def test_main_reports_an_unusable_spec_file_and_exits_2(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    payload: str,
+) -> None:
+    create_docx = _create_docx_module()
+    spec = tmp_path / "spec.json"
+    spec.write_text(payload, encoding="utf-8")
+    out = tmp_path / "out.docx"
+    monkeypatch.setattr(sys, "argv", ["create_docx.py", str(spec), "--out", str(out)])
+    assert create_docx.main() == 2
+    assert "error:" in capsys.readouterr().err
+    assert not out.exists()
+
+
 def test_edit_replace_text(tmp_path: Path) -> None:
     sys.path.insert(0, str(SCRIPTS))
     try:
