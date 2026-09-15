@@ -124,6 +124,13 @@ def _normalize_tool_arguments(arguments: Any) -> dict[str, Any]:
     return {"_raw": arguments}
 
 
+def _coerce_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _format_error_body(body: bytes) -> str:
     text = body.decode("utf-8", errors="replace")
     if len(text) <= _OLLAMA_ERROR_BODY_LIMIT:
@@ -336,8 +343,13 @@ class OllamaProvider:
 
                         # Final chunk carries usage stats
                         if chunk.get("done"):
-                            input_tokens = chunk.get("prompt_eval_count", 0)
-                            output_tokens = chunk.get("eval_count", 0)
+                            # The key can be present with a null value (cached
+                            # evals, a stopped generation), and ``get(key, 0)``
+                            # then returns None; the turn runner adds these
+                            # to an int, so coerce here like the OpenAI and
+                            # Anthropic providers do.
+                            input_tokens = _coerce_int(chunk.get("prompt_eval_count"))
+                            output_tokens = _coerce_int(chunk.get("eval_count"))
                             raw_done_reason = chunk.get("done_reason")
                             if isinstance(raw_done_reason, str) and raw_done_reason:
                                 done_reason = raw_done_reason

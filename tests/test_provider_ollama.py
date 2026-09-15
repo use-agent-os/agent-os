@@ -366,3 +366,53 @@ def test_ollama_non_model_404_keeps_the_plain_http_message(
 
     assert isinstance(error, ErrorEvent)
     assert error.message == "HTTP 404: 404 page not found"
+
+
+@pytest.mark.parametrize(
+    ("prompt_eval", "eval", "expected"),
+    [
+        ("null", "null", (0, 0)),
+        ("null", "7", (0, 7)),
+        ('"12"', "null", (12, 0)),
+        ('"abc"', "3.9", (0, 3)),
+    ],
+    ids=["both-null", "prompt-null", "string-count", "garbage-and-float"],
+)
+def test_ollama_coerces_null_eval_counts_to_int(
+    monkeypatch: pytest.MonkeyPatch,
+    prompt_eval: str,
+    eval: str,
+    expected: tuple[int, int],
+) -> None:
+    """A final chunk can carry ``"prompt_eval_count": null`` (cached evals, a
+    stopped generation, some proxies). ``dict.get(key, 0)`` returns the None
+    the key holds, and the turn runner then adds it to an int (#2058)."""
+    captured: dict[str, Any] = {}
+    _patch_transport(
+        monkeypatch,
+        captured,
+        (
+            '{"model":"qwen2.5:7b","message":{"role":"assistant",'
+            '"content":"hi"},"done":false}\n'
+            '{"model":"qwen2.5:7b","message":{"role":"assistant",'
+            '"content":""},"done":true,"done_reason":"stop",'
+            f'"prompt_eval_count":{prompt_eval},"eval_count":{eval}}}\n'
+        ),
+    )
+    provider = OllamaProvider(model="qwen2.5:7b")
+
+    async def _run() -> list[Any]:
+        return [
+            event
+            async for event in provider.chat(
+                [Message(role="user", content="Hi")],
+                config=ChatConfig(max_tokens=5),
+            )
+        ]
+
+    events = asyncio.run(_run())
+
+    done = next(event for event in events if isinstance(event, DoneEvent))
+    assert (done.input_tokens, done.output_tokens) == expected
+    assert isinstance(done.input_tokens, int)
+    assert isinstance(done.output_tokens, int)
