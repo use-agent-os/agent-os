@@ -12,6 +12,7 @@ import asyncio
 import math
 import os
 import random
+import re
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
@@ -395,6 +396,147 @@ async def retry_request(
 # ---------------------------------------------------------------------------
 
 
+#: A CommonMark fence line: up to three spaces of indent, then a run of at
+#: least three backticks or tildes, then the optional info string.
+#:
+#: Counting ``"```"`` occurrences instead -- what this used to do -- gets two
+#: ordinary cases wrong. A six-backtick fence (used when the code itself
+#: contains ```` ``` ````) counts as two, so an unclosed one reads as balanced;
+#: and a ``~~~`` fence, the other spelling CommonMark defines, is not seen at
+#: all. Both leave the same half-open block in the chunk this guard exists to
+#: prevent.
+#:
+#: A backtick fence's info string may not itself contain a backtick -- that is
+#: CommonMark's rule, and without it a line like ``` ```a`b``` ``` (an inline
+#: code span) reads as a fence whose "language tag" is most of the line. The
+#: tag is carried onto every reopened chunk, so a wrong one duplicates real
+#: text into the output. Tilde fences have no such restriction.
+_FENCE_LINE_RE = re.compile(
+    r"(?m)^ {0,3}(?:(?P<marker>`{3,})(?P<info>[^`\n]*)|(?P<tmarker>~{3,})(?P<tinfo>[^\n]*))$"
+)
+
+
+def _open_fence_at(segment: str, cut: int) -> tuple[int, str] | None:
+    """Start and marker of a fence still open at *cut*.
+
+    ``None`` when every fence opened before *cut* was also closed before it.
+    A closing fence must use the same character and be at least as long as the
+    one it closes, so ```` ``` ```` does not close a ```` `````` ```` block.
+    """
+    open_start: int | None = None
+    open_marker = ""
+    for match in _FENCE_LINE_RE.finditer(segment, 0, cut):
+        marker = match.group("marker") or match.group("tmarker")
+        if open_start is None:
+            open_start, open_marker = match.start(), marker
+        elif marker[0] == open_marker[0] and len(marker) >= len(open_marker):
+            open_start, open_marker = None, ""
+    if open_start is None:
+        return None
+    return open_start, open_marker
+
+
+def _fence_info_string(segment: str, fence_start: int, marker: str, cut: int) -> str:
+    """The opening fence's language tag, when its own line ends before *cut*.
+
+    A bare fence whose line never ends inside the segment has no info string to
+    carry: everything up to the next newline is body text, and treating it as a
+    language tag would both reopen the block wrongly and make the reopener
+    arbitrarily long.
+
+    Only the first word is kept. That is the part CommonMark calls the
+    language, and it is the part a renderer uses; carrying the rest would put
+    an unbounded string on the front of every chunk after the first.
+    """
+    line_end = segment.find("\n", fence_start)
+    if line_end < 0 or line_end >= cut:
+        return ""
+    info = segment[fence_start + len(marker) : line_end].strip()
+    return info.split()[0] if info else ""
+
+
+def _open_code_span_at(segment: str, cut: int) -> int | None:
+    """Start of an inline code span still open at *cut*, or ``None``.
+
+    A span is the inline sibling of a fence and the same delivery hazard: a
+    chunk ending inside ``` ``x`` ``` carries an unclosed entity, and a
+    platform that parses Markdown strictly rejects it. Only consulted once the
+    fence check has come up empty, so the backtick runs seen here belong to
+    spans or to fences that were already balanced before *cut* -- a balanced
+    pair nets out either way.
+
+    CommonMark closes a span only with a run of exactly the opening length, so
+    ``` `` ``` does not close a single backtick.
+    """
+    open_start: int | None = None
+    open_length = 0
+    cursor = 0
+    while cursor < cut:
+        if segment[cursor] != "`":
+            cursor += 1
+            continue
+        run_end = cursor
+        while run_end < len(segment) and segment[run_end] == "`":
+            run_end += 1
+        run_length = run_end - cursor
+        if open_start is None:
+            open_start, open_length = cursor, run_length
+        elif run_length == open_length:
+            open_start, open_length = None, 0
+        cursor = run_end
+    return open_start
+
+
+def _close_and_reopen_fence(
+    segment: str,
+    limit: int,
+    length: Callable[[str], int],
+    fence_start: int,
+    marker: str,
+    cut_hint: int,
+) -> tuple[str, str] | None:
+    """Close the open fence on the head and reopen it on the tail.
+
+    Only for the case where the fence opens the segment, so backing the cut up
+    to before it would empty the chunk.
+
+    The cut is a fresh binary search rather than a reuse of the caller's
+    word/line-boundary one, and it is bounded below by the end of the opening
+    fence line: a cut that landed back inside the marker would hand the next
+    call almost the same input and spin. ``None`` means no cut leaves the
+    closed head within *limit* while still making progress, and the caller
+    falls back to a plain cut -- an unbalanced chunk beats an endless loop.
+    """
+    info = _fence_info_string(segment, fence_start, marker, cut_hint)
+    closer = f"\n{marker}"
+    reopener = f"{marker}{info}\n"
+    # Just past the opening marker -- never past the info string. A bare fence
+    # whose line never ends inside the segment has no info string at all, and
+    # counting the body as one would push the floor beyond any cut that fits.
+    floor = fence_start + len(marker)
+    low, high, cut = floor, len(segment) - 1, floor
+    while low <= high:
+        mid = (low + high) // 2
+        if length(segment[:mid] + closer) <= limit:
+            cut = mid
+            low = mid + 1
+        else:
+            high = mid - 1
+    if cut <= fence_start or length(segment[:cut] + closer) > limit:
+        return None
+    # The reopener is prepended to the tail, so a cut that consumes no more
+    # than the reopener costs hands the next call a segment no shorter than
+    # this one -- the caller loops until the tail is empty, and that never
+    # happens. Under a limit that tight, a plain cut is the better trade: the
+    # chunk is unbalanced but the message goes out.
+    if cut <= len(reopener):
+        return None
+    tail = segment[cut:]
+    if not tail:
+        return None
+    return segment[:cut] + closer, reopener + tail
+
+
 def split_text_for_limit(
     segment: str,
     limit: int,
@@ -412,13 +554,28 @@ def split_text_for_limit(
 
     The cut point is found by binary search and then nudged back to the
     nearest line/word boundary so a chunk doesn't end mid-word. A fenced
-    code block (```...```) split mid-fence would leave each half with an
-    unbalanced fence — some platforms reject a message whose Markdown
-    entities don't parse, turning a length problem into a delivery failure —
-    so if an odd number of fences precede the cut, one is open, and the cut
-    backs up to just before that fence: the first half never contains a
-    half-open block, and the second half reopens it from its own start,
-    fully balanced.
+    code block split mid-fence would leave each half with an unbalanced
+    fence — some platforms reject a message whose Markdown entities don't
+    parse, turning a length problem into a delivery failure — so when a
+    fence is still open at the cut:
+
+    * if a line precedes the fence, the cut backs up to the start of that
+      line and the whole block moves to the next chunk;
+    * otherwise the fence opens the segment and there is nothing to back up
+      to — backing up to zero would emit an empty chunk and no caller's loop
+      would ever advance — so the block is closed on this chunk and reopened,
+      info string and all, on the next;
+    * unless no cut fits the closed chunk within *limit* while still
+      shortening the tail, in which case one unbalanced chunk goes out. That
+      beats a caller looping forever over a balance that cannot fit.
+
+    An unclosed inline code span at the cut is the same hazard one level
+    down, and the cut retreats to the span's start when there is one.
+
+    Fences are matched as lines (up to three spaces of indent), not by
+    counting backtick runs anywhere in the text, and a closing fence must use
+    the same character at the same length or longer — so a ``` inside a
+    `````` block is content, and a `~~~` fence is a fence.
     """
     length = measure if measure is not None else len
     if length(segment) <= limit:
@@ -437,10 +594,33 @@ def split_text_for_limit(
         if found >= best // 2:
             cut = found + 1
             break
-    if segment.count("```", 0, cut) % 2 == 1:
-        fence_start = segment.rfind("```", 0, cut)
+    open_fence = _open_fence_at(segment, cut)
+    if open_fence is not None:
+        fence_start, marker = open_fence
         newline_before_fence = segment.rfind("\n", 0, fence_start)
         candidate = newline_before_fence + 1 if newline_before_fence >= 0 else 0
         if candidate > 0:
             cut = candidate
+        else:
+            # The fence opens the segment itself, so there is no earlier line
+            # to back up to -- ``candidate`` is legitimately 0, and the old
+            # ``candidate > 0`` guard read that as "nothing to do" and emitted
+            # a half-open block (Issue #2127). Backing up to 0 is not an option
+            # either: an empty head makes every caller that splits until the
+            # tail is empty spin forever. Close the fence on this chunk and
+            # reopen it on the next instead.
+            rebalanced = _close_and_reopen_fence(segment, limit, length, fence_start, marker, cut)
+            if rebalanced is not None:
+                return rebalanced
+    else:
+        # No fence is open, but an inline code span can be: the word-boundary
+        # nudge above only fires for a boundary in the second half of the
+        # chunk, so a long span starting early is cut straight through. Back
+        # up to the span's own start -- it is a plain cut, so nothing is
+        # synthesized and nothing can be lost. A span opening the segment has
+        # nowhere to retreat to and is left alone rather than emptying the
+        # chunk.
+        span_start = _open_code_span_at(segment, cut)
+        if span_start is not None and span_start > 0:
+            cut = span_start
     return segment[:cut], segment[cut:]

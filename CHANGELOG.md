@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Channels: `split_text_for_limit` — the shared chunking primitive behind the
+  Discord, Telegram and MS Teams message-length caps — emitted a chunk
+  carrying a half-open code fence whenever the fence opened the segment. The
+  "back up to before the fence" guard only ran when the backup point was
+  greater than zero, and a fence with nothing before it backs up to exactly
+  zero. Backing up to zero is not available either (an empty chunk never lets
+  the caller's loop advance), so the block is now closed on that chunk and
+  reopened, language tag and all, on the next (#2127).
+- Channels: the same guard recognised only three-backtick fences by counting
+  occurrences of ```` ``` ````, so a ```` `````` ```` fence read as two
+  balanced fences and a `~~~` fence was not seen at all — each leaving exactly
+  the half-open block the guard exists to prevent. Fences are now matched as
+  lines, and a closing fence must use the same character at the same length or
+  longer, so a ```` ``` ```` inside a ```` `````` ```` block is content.
+- Channels: a chunk could also end inside an unclosed inline code span, the
+  same delivery failure one level down. The cut now retreats to the span's own
+  start when there is one to retreat to.
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added
