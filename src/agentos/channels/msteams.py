@@ -34,7 +34,11 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
-from agentos.channels._util import ChannelAccessPolicy, EventDedupeCache
+from agentos.channels._util import (
+    ChannelAccessPolicy,
+    EventDedupeCache,
+    split_text_for_limit,
+)
 from agentos.channels.contract import (
     ChannelCapabilityProfile,
     ChannelPlatformCapability,
@@ -49,6 +53,46 @@ from agentos.channels.types import (
 )
 
 log = structlog.get_logger(__name__)
+
+
+def _utf16_units(text: str) -> int:
+    """Length of *text* in UTF-16 code units, which is what Teams counts.
+
+    ``len()`` counts code points, and Teams measures the Activity payload in
+    UTF-16. Every astral-plane character -- emoji, most CJK extensions -- is one
+    code point but *two* UTF-16 units, so a character-counted limit under-reads
+    an emoji-heavy reply by up to half and lets it through at twice the real
+    size. Measuring the unit the platform measures means the cap can sit close
+    to the documented one instead of being halved to absorb the worst case.
+    """
+    return len(text.encode("utf-16-le")) // 2
+
+
+#: Teams caps an Activity payload at 40 KB, i.e. 20480 UTF-16 code units. The
+#: text is only part of that payload -- the JSON envelope, conversation
+#: reference and any attachments share the budget -- so the text cap leaves
+#: headroom rather than spending the whole allowance on the body.
+_MSTEAMS_TEXT_UTF16_LIMIT = 19000
+
+
+def _split_for_teams(content: str) -> list[str]:
+    """Split *content* into activities that each fit the Teams payload cap.
+
+    Reuses the splitter Telegram and Discord already share (#1544) rather than
+    a third, independently-drifting length check -- so a reply cut here keeps
+    the same line/word boundaries and balanced code fences as everywhere else.
+    """
+    segments: list[str] = []
+    remaining = content
+    while True:
+        head, tail = split_text_for_limit(
+            remaining, _MSTEAMS_TEXT_UTF16_LIMIT, measure=_utf16_units
+        )
+        segments.append(head)
+        if not tail:
+            return segments
+        remaining = tail
+
 
 # Channel-contract constants pinned by the adapter audit.
 CAPABILITY_TIER = "GREEN-shipping"
@@ -484,10 +528,16 @@ class MSTeamsChannel:
 
         holder: dict[str, str | None] = {"id": None}
 
+        segments = _split_for_teams(message.content)
+
         async def _callback(turn_context: Any) -> None:
-            response = await turn_context.send_activity(message.content)
-            if response is not None and getattr(response, "id", None):
-                holder["id"] = response.id
+            # One activity per segment, in order. The id kept is the *last*
+            # one, so a later edit or delete addresses the end of the reply --
+            # the same choice Telegram and Discord make when they chunk.
+            for segment in segments:
+                response = await turn_context.send_activity(segment)
+                if response is not None and getattr(response, "id", None):
+                    holder["id"] = response.id
 
         await self._adapter.continue_conversation(
             ref,
@@ -532,6 +582,52 @@ class MSTeamsChannel:
     # Streaming
     # ------------------------------------------------------------------
 
+    async def _write_capped(
+        self,
+        ref: Any,
+        *,
+        message_id: str | None,
+        text: str,
+        allow_edit: bool,
+    ) -> tuple[str | None, int]:
+        """Write *text* as one or more activities, none over the payload cap.
+
+        A stream accumulates into a single activity that is edited in place, so
+        the activity that was comfortably small at the first chunk is the one
+        that eventually blows the cap. When the text outgrows it, the current
+        activity keeps the part that fits and the remainder rolls into fresh
+        activities.
+
+        Returns the id of the activity now holding the tail, and how many
+        characters of *text* have been written and should no longer be resent.
+        """
+        from botbuilder.schema import Activity  # noqa: PLC0415
+
+        segments = _split_for_teams(text)
+        head, overflow = segments[0], segments[1:]
+        holder: dict[str, str | None] = {"id": message_id}
+        # Only text that has rolled into a *closed* activity is consumed. With
+        # no overflow the current activity still owns all of it and the next
+        # edit must resend the whole thing.
+        consumed = (len(text) - len(segments[-1])) if overflow else 0
+
+        async def _callback(turn_context: Any) -> None:
+            if message_id is not None and allow_edit:
+                await turn_context.update_activity(
+                    Activity(type="message", id=message_id, text=head)
+                )
+            else:
+                response = await turn_context.send_activity(head)
+                if response is not None and getattr(response, "id", None):
+                    holder["id"] = response.id
+            for segment in overflow:
+                response = await turn_context.send_activity(segment)
+                if response is not None and getattr(response, "id", None):
+                    holder["id"] = response.id
+
+        await self._adapter.continue_conversation(ref, _callback, bot_id=self._bot_id)
+        return holder["id"], consumed
+
     async def send_streaming(
         self,
         chunks: AsyncIterator[str],
@@ -555,6 +651,9 @@ class MSTeamsChannel:
             raise RuntimeError("MSTeamsChannel.send_streaming has no conversation reference cached")
 
         accumulated = ""
+        # Index into `accumulated` where the activity currently being edited
+        # begins. It only moves when text rolls into a closed activity.
+        segment_start = 0
         message_id: str | None = None
         unsupported = False
         last_edit = 0.0
@@ -566,19 +665,10 @@ class MSTeamsChannel:
             accumulated += chunk
 
             if message_id is None:
-                holder: dict[str, str | None] = {"id": None}
-
-                async def _send(
-                    turn_context: Any,
-                    _holder: dict[str, str | None] = holder,
-                    _text: str = accumulated,
-                ) -> None:
-                    response = await turn_context.send_activity(_text)
-                    if response is not None and getattr(response, "id", None):
-                        _holder["id"] = response.id
-
-                await self._adapter.continue_conversation(ref, _send, bot_id=self._bot_id)
-                message_id = holder["id"]
+                message_id, consumed = await self._write_capped(
+                    ref, message_id=None, text=accumulated, allow_edit=False
+                )
+                segment_start += consumed
                 self._remember_sent_message(message_id, ref_key)
                 last_edit = time.monotonic()
                 continue
@@ -593,14 +683,14 @@ class MSTeamsChannel:
 
             current_message_id = message_id
 
-            async def _edit(
-                turn_context: Any, _id: str = current_message_id, _text: str = accumulated
-            ) -> None:
-                updated = Activity(type="message", id=_id, text=_text)
-                await turn_context.update_activity(updated)
-
             try:
-                await self._adapter.continue_conversation(ref, _edit, bot_id=self._bot_id)
+                message_id, consumed = await self._write_capped(
+                    ref,
+                    message_id=current_message_id,
+                    text=accumulated[segment_start:],
+                    allow_edit=True,
+                )
+                segment_start += consumed
                 last_edit = now
             except Exception as exc:  # noqa: BLE001 — channel may not support edits
                 if _is_update_unsupported(exc):
@@ -618,6 +708,10 @@ class MSTeamsChannel:
         # and either the stream produced more content after the first send
         # or edits were unsupported and we never updated mid-stream.
         if message_id is not None and accumulated:
+            # Everything still owned by the open activity. With edits
+            # unsupported the whole reply is resent as fresh activities, so the
+            # cap applies to all of it rather than just the open tail.
+            pending = accumulated if unsupported else accumulated[segment_start:]
             final_callback: Any
             if unsupported:
                 # Channel doesn't support ``update_activity``. The
@@ -626,18 +720,22 @@ class MSTeamsChannel:
                 # message so the user gets the full reply (the partial
                 # first chunk stays in place but is no longer the only
                 # thing visible).
-                async def _final_send(turn_context: Any, _text: str = accumulated) -> None:
-                    await turn_context.send_activity(_text)
+                async def _final_send(turn_context: Any, _text: str = pending) -> None:
+                    for segment in _split_for_teams(_text):
+                        await turn_context.send_activity(segment)
 
                 final_callback = _final_send
             else:
                 final_message_id = message_id
 
                 async def _final_update(
-                    turn_context: Any, _id: str = final_message_id, _text: str = accumulated
+                    turn_context: Any, _id: str = final_message_id, _text: str = pending
                 ) -> None:
-                    updated = Activity(type="message", id=_id, text=_text)
+                    segments = _split_for_teams(_text)
+                    updated = Activity(type="message", id=_id, text=segments[0])
                     await turn_context.update_activity(updated)
+                    for segment in segments[1:]:
+                        await turn_context.send_activity(segment)
 
                 final_callback = _final_update
 
@@ -656,7 +754,8 @@ class MSTeamsChannel:
                 self._streams_unsupported = True
 
                 async def _retry_send(turn_context: Any, _text: str = accumulated) -> None:
-                    await turn_context.send_activity(_text)
+                    for segment in _split_for_teams(_text):
+                        await turn_context.send_activity(segment)
 
                 try:
                     await self._adapter.continue_conversation(ref, _retry_send, bot_id=self._bot_id)
