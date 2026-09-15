@@ -6,15 +6,72 @@ import html
 import re
 
 _TABLE_DELIMITER_RE = re.compile(r"^:?-{3,}:?$")
-_FENCE_RE = re.compile(r"^\s*```(?P<language>[A-Za-z0-9_+-]{0,32})\s*$")
+# A fence opens with three *or more* backticks or tildes and then an info
+# string, which CommonMark takes to be the rest of the line (its first word is
+# the language, anything after it is attributes).
+#
+# The two markers differ in one respect: a backtick info string may not contain
+# a backtick -- that is what makes ``` unambiguous -- while a tilde one may
+# contain anything, backticks included.
+#
+# Tildes were not recognised at all before this, which is the worse half of the
+# defect: the block was not merely left unrendered, its *body* fell through to
+# the inline renderer, so a code block was formatted as prose. `**x**` inside a
+# `~~~` block came out bold instead of literal.
+_FENCE_RE = re.compile(
+    r"^\s*(?:(?P<ticks>`{3,})(?P<tick_info>[^`]*?)|(?P<tildes>~{3,})(?P<tilde_info>.*?))\s*$"
+)
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(?P<text>.+?)\s*#*\s*$")
 _ORDERED_LIST_RE = re.compile(r"^(?P<indent>\s*)(?P<number>\d+)[.)]\s+(?P<text>.+)$")
 _UNORDERED_LIST_RE = re.compile(r"^(?P<indent>\s*)[-+*]\s+(?P<text>.+)$")
-_LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://[^\s)<]+)\)")
+_LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://(?:[^\s()]|\([^\s()]*\))+)\)")
 # CommonMark's blockquote marker: up to 3 leading spaces, `>`, then at most
 # one space before the content. `>quote` (no space) and `>` alone (an empty
 # quote line, used to separate paragraphs within one quote) both match.
 _BLOCKQUOTE_RE = re.compile(r"^ {0,3}>[ ]?(?P<text>.*)$")
+
+# What may survive into `class="language-..."`. The value is interpolated
+# unescaped, so this is an allowlist rather than a tidiness pass: a quote
+# reaching it would break out of the attribute. Everything the common fence
+# languages need -- `c#`, `f#`, `vb.net`, `.env`, `text/x-python` -- is here.
+_LANGUAGE_SAFE_RE = re.compile(r"[^A-Za-z0-9_.+#/-]")
+
+
+def _fence_marker(line: str) -> str | None:
+    """The opening run of a fence line, or ``None`` when it is not a fence."""
+    match = _FENCE_RE.match(line)
+    if match is None:
+        return None
+    return match.group("ticks") or match.group("tildes")
+
+
+def _closes_fence(line: str, opening: str) -> bool:
+    """Whether *line* closes a block opened by *opening*.
+
+    CommonMark requires the same marker character and at least as many of them,
+    so a backtick block is not closed by a line of tildes. One pattern used to
+    serve both ends of the block, which was harmless only while tildes were
+    unrecognised; once both markers exist it would let a stray `~~~` terminate a
+    ``` block and eat everything up to it.
+    """
+    marker = _fence_marker(line)
+    return marker is not None and marker[0] == opening[0] and len(marker) >= len(opening)
+
+
+def _fence_language(line: str) -> str:
+    """The language a fence info string declares, safe for a class attribute.
+
+    The first whitespace-delimited word is the language and the rest is
+    attributes, which this renderer has no use for. Characters outside the
+    allowlist are dropped rather than the fence being rejected, so a `c#` or
+    `.env` block still renders as code instead of leaking its backticks.
+    """
+    match = _FENCE_RE.match(line)
+    if match is None:
+        return ""
+    info = match.group("tick_info") if match.group("ticks") else match.group("tilde_info")
+    words = (info or "").split()
+    return _LANGUAGE_SAFE_RE.sub("", words[0])[:32] if words else ""
 
 
 def _replace_code_spans(text: str) -> tuple[str, list[str]]:
@@ -208,12 +265,12 @@ def render_telegram_html(markdown: str) -> str:
     index = 0
     while index < len(lines):
         line = lines[index]
-        fence = _FENCE_RE.match(line)
-        if fence:
-            language = fence.group("language")
+        opening = _fence_marker(line)
+        if opening is not None:
+            language = _fence_language(line)
             code_lines: list[str] = []
             index += 1
-            while index < len(lines) and not _FENCE_RE.match(lines[index]):
+            while index < len(lines) and not _closes_fence(lines[index], opening):
                 code_lines.append(lines[index])
                 index += 1
             if index < len(lines):
