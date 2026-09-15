@@ -115,7 +115,11 @@ class GatewayPidLock:
         self._register_cleanup()
 
     def release(self) -> None:
-        """Release the lock and remove the PID file. Safe to call multiple times."""
+        """Release the lock and remove the PID file. Safe to call multiple times.
+
+        The pid file is removed; ``gateway.pid.lock`` is left in place on
+        purpose (see the comment below).
+        """
         if self._lock_fh is None:
             return
         fh = self._lock_fh
@@ -132,10 +136,13 @@ class GatewayPidLock:
             self._pid_path.unlink(missing_ok=True)
         except OSError:
             pass
-        try:
-            self._lock_path.unlink(missing_ok=True)
-        except OSError:
-            pass
+        # The lock file is deliberately NOT unlinked. Both platform locks
+        # (fcntl.flock and msvcrt.locking) are held on the open file, not on
+        # the path, so removing the path destroys the rendezvous point: a
+        # process that opened the old file before the unlink and one that
+        # creates a fresh file after it end up holding two independent locks
+        # and both conclude they own this STATE_DIR. A stale zero-byte anchor
+        # costs nothing; removing it costs the guarantee this class provides.
 
     @property
     def pid(self) -> int | None:
