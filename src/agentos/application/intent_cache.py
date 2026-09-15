@@ -309,7 +309,16 @@ def _extract_rm_targets(command: str) -> list[tuple[str, frozenset[str]]]:
         try:
             token_sets.append(shlex.split(tail))
         except ValueError:
-            token_sets.append(tail.split())
+            # Unbalanced quotes: the tail ends at the closing quote of an
+            # outer quoted span (``bash -c "rm -rf /etc"`` captures
+            # `` -rf /etc"``). A command that executes its quoted argument
+            # is command text, not data (#2141): strip the unmatched
+            # trailing quote before tokenizing so the hard block still
+            # fires. Only when shlex failed -- a balanced tail such as
+            # ``rm -rf "/tmp/my dir"`` tokenizes cleanly and must keep its
+            # quoting, or the path splits in two.
+            stripped = tail.rstrip("\"'")
+            token_sets.append(stripped.split() if stripped else [])
         if "\\" in tail and (os.name == "nt" or re.search(r"(?:^|\s)\\[^\s]", tail)):
             try:
                 token_sets.append(shlex.split(tail, posix=False))

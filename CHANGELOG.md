@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Sandbox intent cache: a `rm` tail captured out of a `-c` quoted span
+  (`bash -c "rm -rf /etc"` captures ` -rf /etc"`) ended at the outer
+  closing quote, so `shlex` failed and the whitespace fallback left the
+  quote glued to the target (`/etc"`), which no sensitive prefix matched
+  and the hard block never fired. The unmatched trailing quote is now
+  stripped when -- and only when -- `shlex` fails, so balanced quoted
+  paths such as `rm -rf "/tmp/my dir"` keep tokenizing cleanly. (#2141)
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added

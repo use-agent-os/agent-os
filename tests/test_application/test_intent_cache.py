@@ -467,3 +467,43 @@ class TestQuotedRmIsNotACommand:
         # An unclosed quote quotes the remainder, which is what the shell does
         # with it too, so nothing after it is read as a command.
         assert _extract_intents('echo "rm -rf /etc') == []
+
+
+class TestQuotedSpanTrailingQuote:
+    """A ``rm`` tail captured out of a ``-c`` quoted span ends at the closing
+    quote, so ``shlex`` fails and the quote glues onto the target (#2141)."""
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'bash -c "rm -rf /etc"',
+            "bash -c 'rm -rf /etc'",
+            'bash -e -c "rm -rf /etc"',
+            'bash -o pipefail -c "rm -rf /etc"',
+            'sh -c "rm -rf /etc /tmp"',
+            'rm -rf /etc"',
+        ],
+    )
+    def test_trailing_quote_is_stripped_from_target(self, command: str) -> None:
+        from agentos.sandbox.sensitive_paths import sensitive_target_in_command
+
+        targets = [target for _kind, target in _extract_intents(command)]
+        assert _names_etc(targets), (command, targets)
+        assert not any(target.endswith(("'", '"')) for target in targets), (
+            command,
+            targets,
+        )
+        assert sensitive_target_in_command(command) is not None, command
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'rm -rf "/tmp/my dir"',
+            "rm -rf '/tmp/my dir'",
+            'rm -- "/tmp/-rf"',
+        ],
+    )
+    def test_balanced_quoted_paths_keep_their_quoting(self, command: str) -> None:
+        targets = [target for _kind, target in _extract_intents(command)]
+        assert len(targets) == 1, (command, targets)
+        assert "my dir" in targets[0] or "-rf" in targets[0], (command, targets)
