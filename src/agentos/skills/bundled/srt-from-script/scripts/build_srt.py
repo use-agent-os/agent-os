@@ -15,6 +15,7 @@ Usage:
 
 Output: prints the absolute path of the written SRT on stdout.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -36,6 +37,13 @@ def parse_script(text: str) -> list[tuple[int, int, str]]:
     Voiceover values of literal 'none' / empty / dashes are normalised
     to empty strings; such shots produce no SRT cue but their duration
     still advances the timestamp cursor.
+
+    A matched ``=== SHOT_N ===`` block with no ``DURATION_S`` line is a
+    malformed script, not an absent shot: silently dropping it would also
+    drop its would-be screen time from the timeline, so every later shot's
+    cues would start early by exactly that much — the SKILL.md contract
+    ("drift away from that format -> zero cues, exit 1") already promises
+    format drift is fatal, not partially tolerated.
     """
     out: list[tuple[int, int, str]] = []
     for match in _SHOT_RE.finditer(text):
@@ -44,7 +52,7 @@ def parse_script(text: str) -> list[tuple[int, int, str]]:
         dur_m = _DUR_RE.search(block)
         vo_m = _VO_RE.search(block)
         if not dur_m:
-            continue
+            raise ValueError(f"SHOT_{shot_no} has no DURATION_S field")
         duration = int(dur_m.group(1))
         voiceover = (vo_m.group(1) if vo_m else "").strip()
         if voiceover.lower() in {"", "none", "-", "--"}:
@@ -95,20 +103,25 @@ def build_srt(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--script", default="",
+        "--script",
+        default="",
         help="Path to script text file. If empty/missing, read from stdin.",
     )
     parser.add_argument("--output", "-o", required=True, help="Output .srt path")
     parser.add_argument(
-        "--gap-ms", type=int, default=200,
+        "--gap-ms",
+        type=int,
+        default=200,
         help="Tail pad subtracted from each cue's end_time so the line "
-             "vanishes ~Nms before the next shot starts. Default 200.",
+        "vanishes ~Nms before the next shot starts. Default 200.",
     )
     parser.add_argument(
-        "--leading-offset-ms", type=int, default=0,
+        "--leading-offset-ms",
+        type=int,
+        default=0,
         help="Shift every cue forward by this many milliseconds. Use to "
-             "skip past a cover/intro clip that precedes SHOT_1 in the "
-             "merged video. Default 0 (no shift).",
+        "skip past a cover/intro clip that precedes SHOT_1 in the "
+        "merged video. Default 0 (no shift).",
     )
     args = parser.parse_args()
 
@@ -128,11 +141,14 @@ def main() -> int:
         print("Error: empty script input.", file=sys.stderr)
         return 1
 
-    shots = parse_script(text)
+    try:
+        shots = parse_script(text)
+    except ValueError as exc:
+        print(f"Error: malformed script — {exc}.", file=sys.stderr)
+        return 1
     if not shots:
         print(
-            "Error: no SHOT_N blocks found in script. Did ai-video-script "
-            "emit the OUTPUT FORMAT?",
+            "Error: no SHOT_N blocks found in script. Did ai-video-script emit the OUTPUT FORMAT?",
             file=sys.stderr,
         )
         return 1
