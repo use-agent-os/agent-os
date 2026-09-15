@@ -524,3 +524,85 @@ async def test_read_spreadsheet_selects_by_position_when_no_sheet_has_that_name(
 
     assert "one-cell" in out
     assert "summary-cell" not in out
+
+
+_MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+
+
+def _phonetic_workbook_bytes() -> bytes:
+    """A workbook whose strings carry the ``<rPh>`` furigana runs Excel writes
+    for text entered through a Japanese IME, in both storage forms."""
+    import io
+
+    rel_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    pkg_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(
+            "xl/workbook.xml",
+            f'<workbook xmlns="{_MAIN_NS}"><sheets>'
+            f'<sheet name="Sheet1" sheetId="1" xmlns:r="{rel_ns}" r:id="rId1"/>'
+            "</sheets></workbook>",
+        )
+        zf.writestr(
+            "xl/_rels/workbook.xml.rels",
+            f'<Relationships xmlns="{pkg_ns}"><Relationship Id="rId1" '
+            f'Type="{rel_ns}/worksheet" Target="worksheets/sheet1.xml"/></Relationships>',
+        )
+        zf.writestr(
+            "xl/sharedStrings.xml",
+            f'<sst xmlns="{_MAIN_NS}" count="3" uniqueCount="3">'
+            "<si><t>東京都</t>"
+            '<rPh sb="0" eb="3"><t>とうきょうと</t></rPh>'
+            '<phoneticPr fontId="1"/></si>'
+            # A rich string split across runs *is* the value and must still join.
+            "<si><r><t>Hello </t></r><r><rPr><b/></rPr><t>world</t></r></si>"
+            # Runs plus a guide: the runs join, the guide stays out.
+            "<si><r><t>大</t></r><r><t>阪</t></r>"
+            '<rPh sb="0" eb="2"><t>おおさか</t></rPh></si>'
+            "</sst>",
+        )
+        zf.writestr(
+            "xl/worksheets/sheet1.xml",
+            f'<worksheet xmlns="{_MAIN_NS}"><sheetData>'
+            '<row r="1">'
+            '<c r="A1" t="s"><v>0</v></c>'
+            '<c r="B1" t="s"><v>1</v></c>'
+            '<c r="C1" t="s"><v>2</v></c>'
+            '<c r="D1" t="inlineStr"><is><t>京都</t>'
+            '<rPh sb="0" eb="2"><t>きょうと</t></rPh></is></c>'
+            # A writer that hangs <t> straight off <c> is still tolerated.
+            '<c r="E1" t="inlineStr"><t>plain</t></c>'
+            "</row></sheetData></worksheet>",
+        )
+    return buf.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_read_spreadsheet_leaves_the_phonetic_guide_out_of_the_cell_value(
+    tmp_path: Path,
+) -> None:
+    """``<rPh>`` is a furigana reading Excel adds on its own for IME-entered
+    text; ``.//t`` swept it into the value, so ``東京都`` read as
+    ``東京都とうきょうと`` with nothing marking the cell as altered (#2053)."""
+    target = tmp_path / "book.xlsx"
+    target.write_bytes(_phonetic_workbook_bytes())
+
+    with tool_context(tmp_path):
+        out = await fs.read_spreadsheet(str(target))
+
+    row = next(line for line in out.splitlines() if line.startswith("1\t"))
+    assert row == "1\t東京都\tHello world\t大阪\t京都\tplain"
+
+
+def test_xlsx_string_readers_skip_phonetic_runs_directly() -> None:
+    import io
+
+    with zipfile.ZipFile(io.BytesIO(_phonetic_workbook_bytes())) as zf:
+        shared = fs._read_xlsx_shared_strings(zf, set(zf.namelist()))
+        sheet_xml = zf.read("xl/worksheets/sheet1.xml")
+
+    assert shared == ["東京都", "Hello world", "大阪"]
+
+    rows, _ = fs._read_xlsx_worksheet(sheet_xml, shared)
+    assert rows[1] == ["東京都", "Hello world", "大阪", "京都", "plain"]

@@ -668,9 +668,27 @@ def _read_xlsx_shared_strings(zf: zipfile.ZipFile, names: set[str]) -> list[str]
     root = ET.fromstring(zf.read("xl/sharedStrings.xml"))
     shared: list[str] = []
     for si in root.findall(f".//{{{_XLSX_MAIN_NS}}}si"):
-        texts = [node.text or "" for node in si.findall(f".//{{{_XLSX_MAIN_NS}}}t")]
-        shared.append("".join(texts))
+        shared.append(_xlsx_rich_text(si))
     return shared
+
+
+def _xlsx_rich_text(rst_el: ET.Element) -> str:
+    """Join the text runs of a ``CT_Rst`` element (``<si>`` or ``<is>``).
+
+    The value lives in a direct ``<t>`` or in the ``<t>`` of each direct
+    ``<r>`` run. A sibling ``<rPh>`` is a phonetic guide -- the furigana Excel
+    records for text entered through a Japanese IME -- and carries its own
+    ``<t>``, so a ``.//t`` sweep appended the reading to the value and
+    ``東京都`` read as ``東京都とうきょうと``.
+    """
+    parts: list[str] = []
+    for child in rst_el:
+        if child.tag == f"{{{_XLSX_MAIN_NS}}}t":
+            parts.append(child.text or "")
+        elif child.tag == f"{{{_XLSX_MAIN_NS}}}r":
+            for text_el in child.findall(f"{{{_XLSX_MAIN_NS}}}t"):
+                parts.append(text_el.text or "")
+    return "".join(parts)
 
 
 def _read_xlsx_workbook_relationships(
@@ -754,8 +772,10 @@ def _xlsx_column_index(cell_ref: str) -> int:
 def _xlsx_cell_value(cell_el: ET.Element, shared_strings: list[str]) -> str:
     cell_type = cell_el.attrib.get("t")
     if cell_type == "inlineStr":
-        texts = [node.text or "" for node in cell_el.findall(f".//{{{_XLSX_MAIN_NS}}}t")]
-        return "".join(texts)
+        is_el = cell_el.find(f"{{{_XLSX_MAIN_NS}}}is")
+        # A writer that hangs <t> straight off <c> instead of wrapping it in
+        # <is> was accepted before and still is.
+        return _xlsx_rich_text(is_el if is_el is not None else cell_el)
 
     value_el = cell_el.find(f"{{{_XLSX_MAIN_NS}}}v")
     raw = value_el.text if value_el is not None else ""
