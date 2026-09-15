@@ -483,6 +483,12 @@ class AnthropicProvider:
 
                         etype = event.get("type", "")
 
+                        # Every event type Anthropic's streaming API documents is
+                        # handled below: message_start, content_block_start,
+                        # content_block_delta, content_block_stop, message_delta,
+                        # message_stop, error. ping carries no data and is a
+                        # deliberate no-op (falls through with no branch).
+                        # https://docs.anthropic.com/en/api/messages-streaming
                         if etype == "message_start":
                             usage = event.get("message", {}).get("usage", {})
                             base_input_tokens = _coerce_int(usage.get("input_tokens"))
@@ -573,6 +579,34 @@ class AnthropicProvider:
                             delta_stop_reason = (event.get("delta") or {}).get("stop_reason")
                             if delta_stop_reason:
                                 stop_reason = delta_stop_reason
+
+                        elif etype == "error":
+                            # Mid-stream failure (most commonly overloaded_error):
+                            # HTTP already returned 200, so the pre-stream status
+                            # check above never sees this. Anthropic closes the
+                            # connection right after -- no message_stop, no
+                            # [DONE] -- so this is the only chance to signal it;
+                            # falling through here (as every unhandled etype
+                            # does) would end the generator with no ErrorEvent
+                            # and no DoneEvent at all.
+                            #
+                            # code defaults to "" rather than a synthetic
+                            # sentinel like "anthropic_stream_error": the
+                            # ErrorEvent itself (checked via isinstance in
+                            # runtime.py's _chat/_fallback_chat) is what marks
+                            # this a failure, not the code string. An empty code
+                            # just means classify_provider_error has less text
+                            # to match against -- same "" default ErrorEvent.code
+                            # and classify_provider_error's raw_code already use
+                            # everywhere else, not a new sentinel vocabulary.
+                            error_payload = event.get("error") or {}
+                            error_type = error_payload.get("type") or ""
+                            error_message = error_payload.get("message") or ""
+                            yield ErrorEvent(
+                                message=error_message or "Anthropic stream error (no message)",
+                                code=error_type,
+                            )
+                            return
 
                         elif etype == "message_stop":
                             reasoning_content = "".join(thinking_parts) or None

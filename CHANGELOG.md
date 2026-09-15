@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Provider (Anthropic): a mid-stream `error` SSE event (most commonly
+  `overloaded_error`, sent after generation has already started, so the
+  pre-stream HTTP-status check never sees it) was silently dropped --
+  Anthropic closes the connection right after with no `message_stop` and no
+  `[DONE]`, so the turn ended with no error surfaced and no circuit-breaker
+  signal at all. It now yields an `ErrorEvent` the same way the pre-stream
+  HTTP-error path already does, so the existing provider-fallback and
+  circuit-breaker machinery engages (#2118).
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added

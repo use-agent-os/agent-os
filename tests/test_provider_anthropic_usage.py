@@ -16,6 +16,7 @@ from agentos.provider.types import (
     DoneEvent,
     ErrorEvent,
     Message,
+    TextDeltaEvent,
 )
 
 
@@ -385,3 +386,102 @@ def test_anthropic_http_error_with_non_utf8_body_yields_error_event(monkeypatch)
     assert isinstance(error, ErrorEvent)
     assert error.code == "429"
     assert error.message.startswith("HTTP 429:")
+
+
+def _sse_stream(*payloads: dict) -> bytes:
+    return "".join(f"data: {json.dumps(p)}\n\n" for p in payloads).encode("utf-8")
+
+
+def test_anthropic_mid_stream_overloaded_error_yields_error_event(monkeypatch) -> None:
+    """Issue #2118: a mid-stream `event: error` (HTTP already 200, generation
+    already started) used to be silently dropped -- no branch in the etype
+    dispatch matched "error", and Anthropic closes the connection right after
+    with no message_stop/[DONE], so the generator ended with no ErrorEvent and
+    no DoneEvent at all."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = _sse_stream(
+            {"type": "message_start", "message": {"usage": {"input_tokens": 10}}},
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": ""},
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "Hello"},
+            },
+            {"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}},
+        )
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=body)
+
+    transport = httpx.MockTransport(handler)
+    real_async_client = httpx.AsyncClient
+
+    def patched_async_client(*args, **kwargs):
+        kwargs["transport"] = transport
+        return real_async_client(*args, **kwargs)
+
+    monkeypatch.setattr("agentos.provider.anthropic.httpx.AsyncClient", patched_async_client)
+    provider = AnthropicProvider(api_key="test", model="claude-opus-4-7")
+
+    async def _collect() -> list[object]:
+        return [
+            event
+            async for event in provider.chat(
+                [Message(role="user", content="hi")],
+                config=ChatConfig(),
+            )
+        ]
+
+    events = asyncio.run(_collect())
+
+    assert len(events) == 2
+    assert isinstance(events[0], TextDeltaEvent)
+    assert events[0].text == "Hello"
+    error = events[1]
+    assert isinstance(error, ErrorEvent)
+    assert error.code == "overloaded_error"
+    assert error.message == "Overloaded"
+    assert not any(isinstance(e, DoneEvent) for e in events)
+
+
+def test_anthropic_malformed_mid_stream_error_event_still_yields_error_event(
+    monkeypatch,
+) -> None:
+    """Boundary case: an error event with no `error` payload at all (a
+    non-conforming proxy, say) must still surface as a failure rather than
+    silently ending the generator -- the ErrorEvent itself is the failure
+    signal, not the specific code/message text it carries."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = _sse_stream({"type": "error"})
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=body)
+
+    transport = httpx.MockTransport(handler)
+    real_async_client = httpx.AsyncClient
+
+    def patched_async_client(*args, **kwargs):
+        kwargs["transport"] = transport
+        return real_async_client(*args, **kwargs)
+
+    monkeypatch.setattr("agentos.provider.anthropic.httpx.AsyncClient", patched_async_client)
+    provider = AnthropicProvider(api_key="test", model="claude-opus-4-7")
+
+    async def _collect() -> list[object]:
+        return [
+            event
+            async for event in provider.chat(
+                [Message(role="user", content="hi")],
+                config=ChatConfig(),
+            )
+        ]
+
+    events = asyncio.run(_collect())
+
+    assert len(events) == 1
+    error = events[0]
+    assert isinstance(error, ErrorEvent)
+    assert error.code == ""
+    assert error.message == "Anthropic stream error (no message)"
