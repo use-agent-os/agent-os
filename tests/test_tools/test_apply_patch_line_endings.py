@@ -167,3 +167,70 @@ def test_add_file_emits_lf_on_every_platform(tmp_path: Path) -> None:
     # lines are joined, not terminated) — not something the newline handling
     # chose. The assertion is about the separator being LF, not the tail.
     assert (tmp_path / "created.txt").read_bytes() == b"alpha\nbeta"
+
+
+def test_append_to_file_without_final_newline_keeps_the_lines_apart(tmp_path: Path) -> None:
+    """An unterminated last line must not absorb the line appended after it."""
+    target = tmp_path / "example.txt"
+    target.write_bytes(b"hello\nworld")
+
+    patch_text = """*** Begin Patch
+*** Update File: example.txt
+@@@ -2,1 +2,2 @@@
+ world
++tail
+*** End Patch"""
+    assert _apply(patch_text, tmp_path) == (0, 1, 0)
+    assert target.read_bytes() == b"hello\nworld\ntail\n"
+
+
+def test_append_to_crlf_file_without_final_newline_uses_crlf(tmp_path: Path) -> None:
+    target = tmp_path / "example.txt"
+    target.write_bytes(b"hello\r\nworld")
+
+    patch_text = """*** Begin Patch
+*** Update File: example.txt
+@@@ -2,1 +2,2 @@@
+ world
++tail
+*** End Patch"""
+    assert _apply(patch_text, tmp_path) == (0, 1, 0)
+    assert target.read_bytes() == b"hello\r\nworld\r\ntail\r\n"
+
+
+def test_a_file_apply_patch_created_can_be_appended_to(tmp_path: Path) -> None:
+    """``*** Add File`` leaves no trailing newline, so the round trip is reachable
+    entirely through the tool: create a file, then append to it."""
+    add = """*** Begin Patch
+*** Add File: notes.txt
++alpha
++beta
+*** End Patch"""
+    assert _apply(add, tmp_path) == (1, 0, 0)
+    assert (tmp_path / "notes.txt").read_bytes() == b"alpha\nbeta"
+
+    append = """*** Begin Patch
+*** Update File: notes.txt
+@@@ -2,1 +2,2 @@@
+ beta
++gamma
+*** End Patch"""
+    assert _apply(append, tmp_path) == (0, 1, 0)
+    assert (tmp_path / "notes.txt").read_bytes() == b"alpha\nbeta\ngamma\n"
+
+
+def test_edit_above_an_unterminated_last_line_leaves_the_tail_unterminated(
+    tmp_path: Path,
+) -> None:
+    """Only the line that stops being last gains a terminator."""
+    target = tmp_path / "example.txt"
+    target.write_bytes(b"hello\nworld")
+
+    patch_text = """*** Begin Patch
+*** Update File: example.txt
+@@@ -1,1 +1,1 @@@
+-hello
++HELLO
+*** End Patch"""
+    assert _apply(patch_text, tmp_path) == (0, 1, 0)
+    assert target.read_bytes() == b"HELLO\nworld"

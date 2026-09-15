@@ -586,6 +586,13 @@ def _updated_text(text: str, hunks: list[Hunk]) -> str:
     # Apply hunks in reverse order so earlier line numbers stay valid
     for hunk in sorted(hunks, key=lambda h: h.old_start, reverse=True):
         lines = _apply_hunk(lines, hunk, newline)
+    # Only the final line may be unterminated. A file whose last line has no
+    # terminator loses that position the moment a hunk appends after it: the
+    # unterminated line is copied verbatim as context and the new line lands
+    # directly against it, joining two lines into one.
+    for index in range(len(lines) - 1):
+        if not lines[index].endswith(("\n", "\r")):
+            lines[index] += newline
     return "".join(lines)
 
 
