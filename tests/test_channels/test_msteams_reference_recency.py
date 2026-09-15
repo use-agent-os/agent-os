@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import sys
 import types
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -45,10 +47,18 @@ def _stub_botbuilder(monkeypatch: pytest.MonkeyPatch) -> None:
             self.id = id
             self.text = text
 
+    class _FakeConversationReference:
+        def deserialize(self, d: object) -> object:
+            return d
+
+        def serialize(self) -> dict[str, Any]:
+            return {}
+
     core_module = types.ModuleType("botbuilder.core")
     core_module.TurnContext = _FakeTurnContext  # type: ignore[attr-defined]
     schema_module = types.ModuleType("botbuilder.schema")
     schema_module.Activity = _FakeActivity  # type: ignore[attr-defined]
+    schema_module.ConversationReference = _FakeConversationReference  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "botbuilder.core", core_module)
     monkeypatch.setitem(sys.modules, "botbuilder.schema", schema_module)
 
@@ -128,3 +138,36 @@ async def test_on_turn_does_not_reorder_when_the_latest_speaker_speaks_again() -
 
     assert list(channel._references) == ["conversation-A", "conversation-B"]
     assert channel._resolve_reference_key(None) == "conversation-B"
+
+
+def test_load_conversation_cache_handles_null_or_invalid_conversations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    channel = MSTeamsChannel(
+        config=MSTeamsChannelConfig(name="msteams", workspace_dir=str(tmp_path))
+    )
+    cache_file = channel._cache_path()
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text('{"schema_version": 1, "conversations": null}', encoding="utf-8")
+
+    channel._load_conversation_cache()
+    assert channel._references == {}
+
+    cache_file.write_text('{"schema_version": 1, "conversations": "invalid"}', encoding="utf-8")
+    channel._load_conversation_cache()
+    assert channel._references == {}
+
+
+def test_save_conversation_cache_writes_atomically(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    channel = MSTeamsChannel(
+        config=MSTeamsChannelConfig(name="msteams", workspace_dir=str(tmp_path))
+    )
+    channel._references = {"conv-1": "REF:conv-1:1"}
+    channel._save_conversation_cache()
+
+    cache_file = channel._cache_path()
+    assert cache_file.is_file()
+    assert not cache_file.with_suffix(".json.tmp").exists()
+

@@ -250,7 +250,9 @@ class MSTeamsChannel:
             return
 
         loaded: dict[str, Any] = {}
-        for key, ref_dict in data.get("conversations", {}).items():
+        raw_conv = data.get("conversations") if isinstance(data, dict) else None
+        conv_items = raw_conv.items() if isinstance(raw_conv, dict) else ()
+        for key, ref_dict in conv_items:
             try:
                 loaded[key] = ConversationReference().deserialize(ref_dict)
             except Exception as exc:  # noqa: BLE001 — surface but skip bad entries
@@ -268,7 +270,9 @@ class MSTeamsChannel:
             "schema_version": _CONVERSATION_CACHE_SCHEMA_VERSION,
             "conversations": serialized,
         }
-        path.write_text(json.dumps(payload), encoding="utf-8")
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        tmp.replace(path)
 
     # ------------------------------------------------------------------
     # Webhook
