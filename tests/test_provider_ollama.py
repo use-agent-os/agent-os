@@ -14,6 +14,7 @@ from agentos.provider import (
     DoneEvent,
     ErrorEvent,
     Message,
+    TextDeltaEvent,
     ToolDefinition,
     ToolInputSchema,
     ToolUseEndEvent,
@@ -366,3 +367,109 @@ def test_ollama_non_model_404_keeps_the_plain_http_message(
 
     assert isinstance(error, ErrorEvent)
     assert error.message == "HTTP 404: 404 page not found"
+
+
+# ── Mid-stream `error` chunk (unclaimed sibling of #2118's Anthropic fix) ──
+
+
+def test_ollama_mid_stream_error_yields_error_event_and_keeps_partial_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ollama's documented mid-stream failure shape: HTTP already 200, and a
+    bare {"error": "..."} NDJSON line with no `done` key at all -- unlike a
+    normal terminal chunk, which always carries `done: true`. Before this
+    fix, nothing read `error`: done_reason never left its "stop" default, so
+    the loop fell through to a DoneEvent indistinguishable from a real
+    success, discarding the failure message entirely.
+    https://docs.ollama.com/api/errors
+    """
+    captured: dict[str, Any] = {}
+    _patch_transport(
+        monkeypatch,
+        captured,
+        (
+            '{"model":"qwen2.5:7b","message":{"role":"assistant","content":"Hel"},'
+            '"done":false}\n'
+            '{"model":"qwen2.5:7b","message":{"role":"assistant","content":"lo"},'
+            '"done":false}\n'
+            '{"error":"an error was encountered while running the model"}\n'
+        ),
+    )
+    provider = OllamaProvider(model="qwen2.5:7b")
+
+    async def _run() -> list[Any]:
+        return [
+            event
+            async for event in provider.chat([Message(role="user", content="Write")])
+        ]
+
+    events = asyncio.run(_run())
+
+    text = "".join(e.text for e in events if isinstance(e, TextDeltaEvent))
+    assert text == "Hello"
+    assert len(events) == 3
+    error = events[-1]
+    assert isinstance(error, ErrorEvent)
+    assert error.code == ""
+    assert error.message == "an error was encountered while running the model"
+    assert not any(isinstance(e, DoneEvent) for e in events)
+
+
+def test_ollama_malformed_error_chunk_still_yields_error_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An `error` value with an unexpected shape (a dict here, instead of the
+    documented bare string) must still surface as a failure -- a truthy
+    `error` is the failure signal regardless of the shape of its content,
+    though a falsy one (see the "error": null test below) reads as no error
+    at all."""
+    captured: dict[str, Any] = {}
+    _patch_transport(
+        monkeypatch,
+        captured,
+        '{"error":{"reason":"model crashed"}}\n',
+    )
+    provider = OllamaProvider(model="qwen2.5:7b")
+
+    error = _first_event(provider)
+
+    assert isinstance(error, ErrorEvent)
+    assert error.code == ""
+    assert json.loads(error.message) == {"reason": "model crashed"}
+
+
+def test_ollama_explicit_null_error_is_not_misread_as_a_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Overshoot guard: a normal, successful stream must not be misread as a
+    failure just because a chunk carries `"error": null` (or an empty
+    string) rather than omitting the key -- same explicit-null tolerance
+    this file's own `msg_chunk.get(..., "")` calls already rely on for
+    other fields."""
+    captured: dict[str, Any] = {}
+    _patch_transport(
+        monkeypatch,
+        captured,
+        (
+            '{"model":"qwen2.5:7b","message":{"role":"assistant","content":"Hel"},'
+            '"error":null,"done":false}\n'
+            '{"model":"qwen2.5:7b","message":{"role":"assistant","content":"lo"},'
+            '"error":"","done":true,"done_reason":"stop",'
+            '"prompt_eval_count":4,"eval_count":2}\n'
+        ),
+    )
+    provider = OllamaProvider(model="qwen2.5:7b")
+
+    async def _run() -> list[Any]:
+        return [
+            event
+            async for event in provider.chat([Message(role="user", content="Write")])
+        ]
+
+    events = asyncio.run(_run())
+
+    text = "".join(e.text for e in events if isinstance(e, TextDeltaEvent))
+    assert text == "Hello"
+    assert not any(isinstance(e, ErrorEvent) for e in events)
+    done = next(e for e in events if isinstance(e, DoneEvent))
+    assert done.stop_reason == "stop"

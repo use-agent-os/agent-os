@@ -1071,6 +1071,47 @@ class OpenAIProvider:
                         if chunk_model:
                             actual_model = chunk_model
 
+                        # Every key this loop reads from a chunk: model, usage
+                        # (final-chunk accounting), and choices[].delta /
+                        # choices[].finish_reason (text, reasoning, tool calls).
+                        # `error` is the one exception: a mid-stream provider
+                        # failure arrives in-band, HTTP already 200. OpenRouter
+                        # documents sending it with a *non-empty* choices entry
+                        # (finish_reason="error", empty delta) precisely so a
+                        # naive OpenAI-spec client doesn't crash on
+                        # choices[0].delta -- so this must be checked
+                        # independently of choices, not inferred from choices
+                        # being empty. Checked before choices are processed, so
+                        # an error chunk can never masquerade as an
+                        # empty-content success and reach the unconditional
+                        # DoneEvent below with the failure silently discarded.
+                        # https://openrouter.ai/docs/api_reference/streaming
+                        #
+                        # Truthy, not just present: same "or []" / "or {}"
+                        # convention as choices/usage above -- some
+                        # OpenAI-compatible gateways send `"error": null` on
+                        # every normal chunk rather than omitting the key, and
+                        # that must read as "no error", not as a failure with
+                        # an empty payload.
+                        if chunk.get("error"):
+                            error_payload = chunk["error"]
+                            if isinstance(error_payload, dict):
+                                error_message = error_payload.get("message") or ""
+                                error_code = error_payload.get("code") or error_payload.get(
+                                    "type"
+                                )
+                            else:
+                                error_message = str(error_payload)
+                                error_code = None
+                            yield ErrorEvent(
+                                message=(
+                                    error_message
+                                    or "OpenAI-compatible stream error (no message)"
+                                ),
+                                code=str(error_code) if error_code else "",
+                            )
+                            return
+
                         # Usage may appear in the final chunk
                         if chunk.get("usage"):
                             (

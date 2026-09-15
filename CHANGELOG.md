@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Provider (OpenAI-compatible, Ollama): a mid-stream provider failure --
+  arriving in-band after HTTP already returned 200, so the pre-stream
+  status check never sees it -- was silently discarded and reported as a
+  clean `DoneEvent`, feeding the circuit breaker a false-positive success
+  signal instead of tripping it. OpenRouter's shape keeps a populated
+  `choices` entry (`finish_reason: "error"`) alongside the `error` object,
+  which is not empty and was never read; Ollama's shape is a bare
+  `{"error": "..."}` NDJSON line with no `done` key at all, so
+  `done_reason` never left its `"stop"` default. Both now yield an
+  `ErrorEvent` the same way the pre-stream HTTP-error path already does,
+  so the existing provider-fallback and circuit-breaker machinery
+  engages -- the completion sibling of #2118's Anthropic fix (#2214).
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added

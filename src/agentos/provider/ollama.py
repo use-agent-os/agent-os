@@ -298,6 +298,35 @@ class OllamaProvider:
                         if not isinstance(chunk, dict):
                             continue
 
+                        # Every key this loop reads from a chunk: message.{content,
+                        # thinking,tool_calls}, model, done/done_reason,
+                        # prompt_eval_count/eval_count. `error` is Ollama's
+                        # documented mid-stream failure shape: a bare
+                        # {"error": "..."} NDJSON line with no `done` key at all
+                        # (HTTP already 200, so the pre-stream status check above
+                        # never sees it). Without this check, done_reason never
+                        # updates from its "stop" default and the loop falls
+                        # through to a DoneEvent indistinguishable from a real
+                        # success, with the failure message discarded entirely.
+                        # https://docs.ollama.com/api/errors
+                        #
+                        # Truthy, not just present: an explicit `"error": null`
+                        # (or an empty string) reads as "no error", matching
+                        # `msg_chunk.get(..., "")` above treating an absent or
+                        # null field the same way.
+                        if chunk.get("error"):
+                            error_payload = chunk["error"]
+                            error_message = (
+                                error_payload
+                                if isinstance(error_payload, str)
+                                else json.dumps(error_payload)
+                            )
+                            yield ErrorEvent(
+                                message=error_message or "Ollama stream error (no message)",
+                                code="",
+                            )
+                            return
+
                         raw_message = chunk.get("message", {})
                         msg_chunk = raw_message if isinstance(raw_message, dict) else {}
                         chunk_model = chunk.get("model")

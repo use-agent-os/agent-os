@@ -1847,3 +1847,140 @@ def test_stream_consumer_stage_persists_thought_signature_and_history_rebuilds_i
     assistant_msg = messages[0]
     tool_use_block = next(b for b in assistant_msg.content if b.type == "tool_use")
     assert tool_use_block.thought_signature == "gemini_sig_transcript_persist"
+
+
+# ── Mid-stream `error` chunk (unclaimed sibling of #2118's Anthropic fix) ──
+
+
+def test_openrouter_mid_stream_error_yields_error_event_and_keeps_partial_text(
+    monkeypatch: Any,
+) -> None:
+    """OpenRouter's documented mid-stream failure shape: HTTP already 200, and
+    -- deliberately, so a naive OpenAI-spec client doesn't crash on
+    choices[0].delta -- a *non-empty* choices entry (finish_reason="error",
+    empty delta) alongside the top-level `error` object. Before this fix,
+    `chunk.get("error")` was never read: the loop just processed the empty
+    delta as a normal (silent) chunk and fell through to an unconditional
+    DoneEvent, discarding the error and reporting the turn as a clean
+    success. https://openrouter.ai/docs/api_reference/streaming
+    """
+    captured: dict[str, Any] = {}
+    chunks = [
+        {"model": "openai/gpt-4o", "choices": [{"delta": {"content": "Hel"}}]},
+        {"model": "openai/gpt-4o", "choices": [{"delta": {"content": "lo"}}]},
+        {
+            "id": "cmpl-abc123",
+            "object": "chat.completion.chunk",
+            "model": "openai/gpt-4o",
+            "provider": "openai",
+            "error": {"code": "server_error", "message": "Provider disconnected unexpectedly"},
+            "choices": [{"index": 0, "delta": {"content": ""}, "finish_reason": "error"}],
+        },
+    ]
+    body = b"".join(f"data: {json.dumps(c)}\n\n".encode() for c in chunks)
+    _patch_transport_body(monkeypatch, captured, body)
+    provider = OpenAIProvider(
+        api_key="test",
+        model="openai/gpt-4o",
+        base_url="https://openrouter.ai/api/v1",
+        provider_kind="openrouter",
+    )
+
+    events = _collect_events(provider, ChatConfig())
+
+    text = "".join(e.text for e in events if isinstance(e, TextDeltaEvent))
+    assert text == "Hello"
+    assert len(events) == 3
+    error = events[-1]
+    assert isinstance(error, ErrorEvent)
+    assert error.code == "server_error"
+    assert error.message == "Provider disconnected unexpectedly"
+    assert not any(isinstance(e, DoneEvent) for e in events)
+
+
+def test_mid_stream_error_with_empty_choices_still_yields_error_event(
+    monkeypatch: Any,
+) -> None:
+    """Plain OpenAI's own spec (per OpenRouter's docs, contrasting their own
+    deliberate deviation) emits a mid-stream error chunk with an *empty*
+    choices array rather than OpenRouter's populated one. The check must not
+    assume OpenRouter's choices-populated shape -- it has to work whether or
+    not choices carries anything at all."""
+    captured: dict[str, Any] = {}
+    chunks = [
+        {"model": "gpt-5.6-luna", "choices": [{"delta": {"content": "Hi"}}]},
+        {
+            "model": "gpt-5.6-luna",
+            "error": {"message": "the server had an error processing your request"},
+            "choices": [],
+        },
+    ]
+    body = b"".join(f"data: {json.dumps(c)}\n\n".encode() for c in chunks)
+    _patch_transport_body(monkeypatch, captured, body)
+    provider = OpenAIProvider(api_key="test", model="gpt-5.6-luna")
+
+    events = _collect_events(provider, ChatConfig())
+
+    assert len(events) == 2
+    error = events[-1]
+    assert isinstance(error, ErrorEvent)
+    assert error.code == ""
+    assert error.message == "the server had an error processing your request"
+    assert not any(isinstance(e, DoneEvent) for e in events)
+
+
+def test_malformed_error_chunk_still_yields_error_event(monkeypatch: Any) -> None:
+    """A truthy `error` value with an unexpected shape (a bare string here,
+    instead of the documented {"code", "message"} object) must still surface
+    as a failure -- a truthy `error` is the failure signal regardless of the
+    shape of its content, though a falsy one (see the "error": null test
+    below) reads as no error at all. Matches #2118's Anthropic convention:
+    never silently drop, fall back to a generic message when nothing usable
+    is present."""
+    captured: dict[str, Any] = {}
+    chunks = [{"model": "test-model", "error": "rate limited"}]
+    body = b"".join(f"data: {json.dumps(c)}\n\n".encode() for c in chunks)
+    _patch_transport_body(monkeypatch, captured, body)
+    provider = OpenAIProvider(api_key="test", model="test-model")
+
+    events = _collect_events(provider, ChatConfig())
+
+    assert len(events) == 1
+    error = events[0]
+    assert isinstance(error, ErrorEvent)
+    assert error.code == ""
+    assert error.message == "rate limited"
+
+
+def test_explicit_null_error_on_every_chunk_is_not_misread_as_a_failure(
+    monkeypatch: Any,
+) -> None:
+    """Overshoot guard: several OpenAI-compatible gateways send `"error":
+    null` on every chunk of a perfectly normal, successful stream rather
+    than omitting the key -- the same explicit-null convention this file's
+    own `or []` / `or {}` idiom already exists to handle for `choices` and
+    `usage`. A truthiness check must not misread that as a failure, or every
+    successful call on such a gateway would be reported as an error."""
+    captured: dict[str, Any] = {}
+    chunks = [
+        {"model": "test-model", "error": None, "choices": [{"delta": {"content": "Hel"}}]},
+        {"model": "test-model", "error": None, "choices": [{"delta": {"content": "lo"}}]},
+        {
+            "model": "test-model",
+            "error": None,
+            "choices": [{"delta": {}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 2, "completion_tokens": 1},
+        },
+    ]
+    body = b"".join(f"data: {json.dumps(c)}\n\n".encode() for c in chunks)
+    body += b"data: [DONE]\n\n"
+    _patch_transport_body(monkeypatch, captured, body)
+    provider = OpenAIProvider(api_key="test", model="test-model")
+
+    events = _collect_events(provider, ChatConfig())
+
+    text = "".join(e.text for e in events if isinstance(e, TextDeltaEvent))
+    assert text == "Hello"
+    assert not any(isinstance(e, ErrorEvent) for e in events)
+    done = next(e for e in events if isinstance(e, DoneEvent))
+    assert done.stop_reason == "stop"
