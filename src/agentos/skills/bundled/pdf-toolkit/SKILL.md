@@ -148,8 +148,11 @@ Caveats:
   rather than `true` — inspect with `--list-fields` to discover.
 - AcroForm fills only. XFA forms (used by some legal templates) require
   Adobe-specific tooling and are out of scope.
-- Some signed PDFs invalidate the signature when fields change. Strip
-  signatures explicitly with `--clear-signatures` if that is intended.
+- Filling a signed PDF invalidates its digital signature: `pypdf` rewrites
+  the document, and the signature covers the bytes it replaces. `form_fill.py`
+  has no flag to strip signatures first — signature operations are out of
+  scope (see Boundaries) — so fill an unsigned copy when the signature has to
+  survive.
 
 ---
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib
+import re
 import sys
 from pathlib import Path
 
@@ -199,3 +201,81 @@ def test_tables_strategy_explicit_is_rejected_with_a_clear_message(
         extract.main()
     assert exc_info.value.code == 2
     assert "invalid choice: 'explicit'" in capsys.readouterr().err
+
+
+SKILL_MD = BUNDLED / "pdf-toolkit" / "SKILL.md"
+_FLAG_RE = re.compile(r"--[a-z][a-z0-9-]+")
+
+
+def _documented_flags() -> set[str]:
+    """Every long flag SKILL.md names, in prose as well as in command blocks.
+
+    The flag that prompted this guard was advertised in a Caveats bullet, not
+    in a runnable example, so scanning only the fenced blocks would miss it.
+    """
+    return set(_FLAG_RE.findall(SKILL_MD.read_text(encoding="utf-8")))
+
+
+def _accepted_flags(script: str, capsys: pytest.CaptureFixture[str]) -> set[str]:
+    """Long flags *script* actually accepts, read off its own argparse help."""
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        module = importlib.import_module(script)
+    finally:
+        sys.path.pop(0)
+    with pytest.raises(SystemExit) as exit_info:
+        module._parse_args()
+    assert exit_info.value.code == 0
+    return set(_FLAG_RE.findall(capsys.readouterr().out))
+
+
+def test_every_flag_skill_md_documents_is_accepted_by_a_script(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """SKILL.md must not advertise a flag the scripts reject.
+
+    An agent following the skill text runs the command verbatim, so a flag that
+    is documented but never declared is a hard `argparse` exit 2 rather than a
+    degraded result. Scoped to pdf-toolkit: its SKILL.md only ever invokes its
+    own four scripts, so every flag it names has to come from one of them.
+    """
+    accepted: set[str] = set()
+    for script in ("extract", "form_fill", "merge", "split"):
+        monkeypatch.setattr(sys, "argv", [f"{script}.py", "--help"])
+        accepted |= _accepted_flags(script, capsys)
+
+    assert _documented_flags() <= accepted, (
+        f"SKILL.md documents flags no pdf-toolkit script accepts: "
+        f"{sorted(_documented_flags() - accepted)}"
+    )
+
+
+def test_the_flag_scan_actually_finds_flags(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Keep the guard above from passing because a scan came back empty."""
+    monkeypatch.setattr(sys, "argv", ["form_fill.py", "--help"])
+    assert {"--list-fields", "--out"} <= _accepted_flags("form_fill", capsys)
+    assert {"--list-fields", "--tables-strategy", "--pages"} <= _documented_flags()
+
+
+def test_form_fill_rejects_the_flag_skill_md_used_to_advertise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pins why the caveat had to change: nothing implements `--clear-signatures`.
+
+    Passes either way by design — it documents the behaviour the doc fix had to
+    match, and turns into a reminder to re-document if the flag is ever added.
+    """
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import form_fill  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    monkeypatch.setattr(
+        sys, "argv", ["form_fill.py", "f.pdf", "d.json", "--out", "o.pdf", "--clear-signatures"]
+    )
+    with pytest.raises(SystemExit) as exit_info:
+        form_fill._parse_args()
+    assert exit_info.value.code == 2
