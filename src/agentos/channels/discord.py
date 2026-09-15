@@ -506,7 +506,6 @@ class DiscordChannel:
             elif op == 11:  # Heartbeat ACK
                 self._state.last_heartbeat_ack = True
 
-
     async def _handle_dispatch(self, event_type: str | None, data: dict[str, Any]) -> None:
         if event_type == "READY":
             self._state.session_id = data["session_id"]
@@ -926,9 +925,7 @@ class DiscordChannel:
 
     def is_connected(self) -> bool:
         return (
-            self._connected
-            and self._dispatch_task is not None
-            and not self._dispatch_task.done()
+            self._connected and self._dispatch_task is not None and not self._dispatch_task.done()
         )
 
     async def health_check(self) -> ChannelHealth:
@@ -941,7 +938,6 @@ class DiscordChannel:
                 "sequence": self._state.sequence,
             },
         )
-
 
     # ------------------------------------------------------------------
     # Inbound
@@ -1409,22 +1405,39 @@ class DiscordChannel:
         client = self._get_client()
         throttle = StreamThrottle(interval_s=update_interval_ms / 1000.0)
         message_id: str | None = None
+        # Where in the accumulated text the message currently being edited
+        # starts. It only moves when a message fills up and is frozen.
+        segment_start = 0
         interaction_path: str | None = None
+        followup_base: str | None = None
+        original_open = False
+        # True once the stream has rolled past @original into a follow-up,
+        # which is edited through a different route.
+        on_followup = False
         if interaction_token:
             application_id = interaction_application_id or self.config.application_id
             if not application_id:
                 raise ValueError("missing Discord application id for interaction response")
             interaction_path = f"/webhooks/{application_id}/{interaction_token}/messages/@original"
+            # Overflow past the first message cannot be another PATCH to
+            # @original -- that would replace the text already shown. A
+            # follow-up is a separate message on the same interaction.
+            followup_base = f"/webhooks/{application_id}/{interaction_token}"
 
-        async def _post(text: str) -> None:
-            nonlocal message_id
+        async def _open(text: str) -> None:
+            """Start a new message holding *text*, and make it the current one."""
+            nonlocal message_id, original_open, on_followup
             await self._rate_limiter.acquire()
-            if interaction_path is not None:
-                resp = await retry_request(
-                    client.patch,
-                    interaction_path,
-                    json={"content": text},
-                )
+            if interaction_path is not None and not original_open:
+                resp = await retry_request(client.patch, interaction_path, json={"content": text})
+                original_open = True
+            elif followup_base is not None:
+                resp = await retry_request(client.post, followup_base, json={"content": text})
+                # Edits now belong to this follow-up, not @original. Set here
+                # rather than at the roll-over site, so a first flush that is
+                # already oversized cannot leave later edits pointed at
+                # @original and overwrite the text it just published.
+                on_followup = True
             else:
                 resp = await retry_request(
                     client.post,
@@ -1435,14 +1448,28 @@ class DiscordChannel:
             resp.raise_for_status()
             message_id = resp.json().get("id")
 
-        async def _edit(text: str) -> None:
+        async def _open_segments(remaining: str) -> None:
+            """Open as many messages as *remaining* needs, each within the cap.
+
+            ``segment_start`` advances as each message is filled, so a later
+            edit only ever resends the tail that is still growing.
+            """
+            nonlocal segment_start
+            while True:
+                segments = self._split_content_for_send(remaining)
+                head = segments[0]
+                await _open(head)
+                if len(segments) == 1:
+                    return
+                segment_start += len(head)
+                remaining = remaining[len(head) :]
+
+        async def _patch_current(text: str) -> None:
             await self._rate_limiter.acquire()
-            if interaction_path is not None:
-                await retry_request(
-                    client.patch,
-                    interaction_path,
-                    json={"content": text},
-                )
+            if interaction_path is not None and followup_base is not None:
+                # @original has no message id of its own in the edit path.
+                path = f"{followup_base}/messages/{message_id}" if on_followup else interaction_path
+                await retry_request(client.patch, path, json={"content": text})
             else:
                 await retry_request(
                     client.patch,
@@ -1450,6 +1477,19 @@ class DiscordChannel:
                     json={"content": text},
                     headers=self._auth_headers(),
                 )
+
+        async def _post(text: str) -> None:
+            await _open_segments(text[segment_start:])
+
+        async def _edit(text: str) -> None:
+            nonlocal segment_start
+            pending = text[segment_start:]
+            segments = self._split_content_for_send(pending)
+            await _patch_current(segments[0])
+            if len(segments) > 1:
+                # This message is full: freeze it and roll the rest into new ones.
+                segment_start += len(segments[0])
+                await _open_segments(pending[len(segments[0]) :])
 
         async for chunk in chunks:
             throttle.add(chunk)
