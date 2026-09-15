@@ -28,12 +28,22 @@ _WIN_CMD_PREFIX: str = (
     r"(?:(?:cmd(?:\.exe)?\s+/[ck]|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+)*)\s+)?"
 )
 
+# Windows-only additions. These EXTEND ``DEFAULT_DENYLIST`` rather than replace
+# it — see ``SafeBinPolicy.from_env``.
 DEFAULT_DENYLIST_WIN: list[str] = [
     r"\bdel\b",
     r"\brmdir\b",
     r"\bRemove-Item\b",
     _WIN_CMD_PREFIX + r"rd\b",
     _WIN_CMD_PREFIX + r"erase\b",
+    # ``rm`` and ``ri`` are the remaining PowerShell aliases for Remove-Item,
+    # and ``rm`` is also the real binary under git-bash / MSYS / WSL. Without
+    # them ``rm -Recurse -Force C:\data`` ran ungated while the identical
+    # ``Remove-Item -Recurse -Force C:\data`` was denied. Anchored the way
+    # ``rd``/``erase`` are: both are short enough that a bare ``\brm\b`` would
+    # fire inside ``npm run rm-cache`` and ordinary arguments.
+    _WIN_CMD_PREFIX + r"rm\b",
+    _WIN_CMD_PREFIX + r"ri\b",
     r"\bFormat-Volume\b",
     r"\bStop-Computer\b",
     r"\bRestart-Computer\b",
@@ -107,7 +117,18 @@ class SafeBinPolicy:
         if not deny:
             deny = _legacy_denylist_if_set()
             if not deny:
-                deny = DEFAULT_DENYLIST_WIN if os.name == "nt" else DEFAULT_DENYLIST
+                # Windows gets both lists. Picking one swapped the catastrophic
+                # patterns out entirely, so ``rm -rf /``, ``mkfs``, ``dd if=``,
+                # the fork bomb, ``> /dev/sda``, ``chmod -R 777 /`` and
+                # ``shutdown`` were ungated there — reachable both as native
+                # binaries and through git-bash / MSYS / WSL. Windows is also
+                # the platform where a missed pattern means no gate at all,
+                # since ``DEFAULT_WARNLIST_WIN`` is deliberately empty.
+                deny = (
+                    [*DEFAULT_DENYLIST, *DEFAULT_DENYLIST_WIN]
+                    if os.name == "nt"
+                    else DEFAULT_DENYLIST
+                )
         if not warn and not warn_env_present:
             warn = DEFAULT_WARNLIST_WIN if os.name == "nt" else DEFAULT_WARNLIST
 

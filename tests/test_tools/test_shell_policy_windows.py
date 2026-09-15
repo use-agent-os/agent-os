@@ -141,3 +141,134 @@ def test_legacy_shell_denylist_warns_once(monkeypatch: pytest.MonkeyPatch) -> No
     assert len(warnings) == 1
     assert first.check("legacy-block").allowed is False
     assert second.check("legacy-block").allowed is False
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "rm -rf /",
+        "rm -rf /*",
+        "mkfs.ext4 /dev/sda1",
+        "dd if=/dev/zero of=/dev/sda",
+        ":(){ :|:& };:",
+        "echo x > /dev/sda",
+        "chmod -R 777 /",
+        "shutdown /s /t 0",
+        "shutdown -h now",
+        "reboot",
+        "halt",
+        "Format-Volume -DriveLetter D",
+        "Clear-Disk -Number 1",
+        "Stop-Computer -Force",
+        "Restart-Computer -Force",
+    ],
+)
+def test_windows_still_denies_the_catastrophic_posix_patterns(command: str) -> None:
+    """``DEFAULT_DENYLIST`` must apply on Windows too (#1964).
+
+    Selecting one platform list instead of combining them dropped every entry
+    above. ``shutdown`` is a native Windows binary; the rest arrive through
+    git-bash / MSYS / WSL, which are ordinary developer shells the agent calls
+    like any other. Windows has no warn tier to fall through to, so an
+    unmatched command here ran with no gate at all.
+    """
+    result = shell_policy.SafeBinPolicy.from_env().check(command)
+
+    assert result.allowed is False
+    assert result.needs_approval is False
+    assert "blocked by policy" in result.reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        r"rm -Recurse -Force C:\data",
+        r"RM -Recurse -Force C:\data",
+        r"ri -Recurse -Force C:\data",
+        r"RI -Recurse -Force C:\data",
+        r"rm -rf C:/work/project",
+        r"rm -rf ./build",
+        r"cmd /c rm C:\tmp\x",
+        r"cmd.exe /c ri C:\tmp\x",
+        r"powershell -c rm C:\tmp\x",
+        r"pwsh -NoProfile -Command ri C:\tmp\x",
+        r"echo 1 && rm -rf C:\tmp",
+        r"echo 1; ri C:\tmp\x",
+        r"echo 1 | rm C:\tmp\x",
+        "echo 1\nrm -rf C:\\tmp",
+        "echo 1\nri C:\\tmp\\x",
+    ],
+)
+def test_windows_denies_the_remaining_remove_item_aliases(command: str) -> None:
+    """``rm`` and ``ri`` are Remove-Item too, and #1464 left them ungated.
+
+    ``rm -Recurse -Force C:\\data`` and ``Remove-Item -Recurse -Force C:\\data``
+    are the same call to PowerShell; one was hard-denied and the other ran with
+    no prompt.
+    """
+    result = shell_policy.SafeBinPolicy.from_env().check(command)
+
+    assert result.allowed is False
+    assert result.needs_approval is False
+    assert "blocked by policy" in result.reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        r"npm run rm-cache",
+        r"npm run build:ri",
+        r"git commit -m 'rm old cache'",
+        r"git checkout -b rm-dead-code",
+        r"git log --grep rm",
+        r"python train.py --dataset rm-bench",
+        r"cat rm.txt",
+        r"type ri.md",
+        r"ripgrep --version",
+        r"rg --files",
+        r"cd C:\data\rm",
+        r"echo rm",
+        r"echo ri",
+        r"curl -o out.bin https://cdn.example.com/rm",
+        r"kubectl get pods -n ri",
+        r"helm install rm ./chart",
+        r"dotnet build ri.csproj",
+        r"terraform apply -target=module.ri",
+    ],
+)
+def test_windows_anchored_rm_ri_negative_cases_allowed(command: str) -> None:
+    """``rm``/``ri`` are short; the command-position anchor must hold."""
+    result = shell_policy.SafeBinPolicy.from_env().check(command)
+
+    assert result.allowed is True
+    assert result.needs_approval is False
+
+
+def test_windows_denylist_is_a_superset_of_the_posix_denylist() -> None:
+    """Structural pin: the Windows list extends the shared one, never replaces it."""
+    denylist = shell_policy.SafeBinPolicy.from_env().denylist
+
+    assert set(shell_policy.DEFAULT_DENYLIST).issubset(denylist)
+    assert set(shell_policy.DEFAULT_DENYLIST_WIN).issubset(denylist)
+
+
+def test_posix_defaults_are_untouched(monkeypatch: pytest.MonkeyPatch) -> None:
+    """POSIX keeps the deny/warn split #1464 called out as intentional.
+
+    Re-patched inside the test because the module fixture forces ``nt``.
+    """
+    monkeypatch.setattr(shell_policy.os, "name", "posix")
+
+    policy = shell_policy.SafeBinPolicy.from_env()
+
+    assert policy.denylist == shell_policy.DEFAULT_DENYLIST
+    assert policy.warnlist == shell_policy.DEFAULT_WARNLIST
+
+    # ``rm`` stays approvable on POSIX rather than inheriting the Windows deny.
+    rm_result = policy.check(r"rm -rf ~/project")
+    assert rm_result.allowed is True
+    assert rm_result.needs_approval is True
+
+    # ...and the Windows-only spellings stay out of the POSIX list.
+    assert policy.check(r"del C:\tmp\file.txt").allowed is True
+    assert policy.check(r"ri -Recurse -Force C:\data").allowed is True
