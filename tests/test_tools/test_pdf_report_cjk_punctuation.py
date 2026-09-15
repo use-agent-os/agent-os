@@ -58,10 +58,12 @@ def test_helvetica_base_keeps_quotes_dashes_and_ellipsis() -> None:
     assert markup == f'<font name="{CJK_FONT}">{text}</font>'
 
 
-def test_latin_text_stays_on_the_base_font_and_unsupported_symbols_are_still_dropped() -> None:
+def test_latin_text_stays_on_the_base_font_and_unsupported_symbols_use_fallback() -> None:
     markup = _markup("Title: ok ✅ — done")
     assert markup.startswith("Title: ok ")
-    assert "✅" not in markup
+    # Non-Latin-1 symbols (like ✅) now route to the CJK fallback font
+    # instead of being silently dropped (issue #2187).
+    assert "✅" in markup
     assert f'<font name="{CJK_FONT}">—</font>' in markup
 
 
