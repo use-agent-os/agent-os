@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The Windows shell denylist covers `rm` and `ri`, PowerShell's remaining two
+  built-in aliases for `Remove-Item` alongside `del`/`rmdir`/`rd`/`erase`/
+  `Remove-Item` itself. Anchored to a command position the same way `rd` and
+  `erase` already are, so `docker run --rm`, `git rm --cached` and
+  `npm run rm-cache` are untouched. `SafeBinPolicy.from_env` also now extends
+  the shared catastrophic denylist on Windows instead of replacing it, so
+  `rm -rf /`, `mkfs`, `dd if=`, the fork bomb and `shutdown` are gated there
+  too -- all of them reachable on a Windows host through git-bash, MSYS,
+  Cygwin or WSL, and `shutdown` is a native Windows binary besides. A
+  wrapper's payload (`powershell -c "rm -r C:\x"`) is now matched even when
+  quoted, and a script that merely starts with an alias name
+  (`rm-cache.cmd`, `rd-report.ps1`) is no longer denied
+  ([#2100](https://github.com/use-agent-os/agent-os/issues/2100),
+  [#1964](https://github.com/use-agent-os/agent-os/issues/1964)).
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added

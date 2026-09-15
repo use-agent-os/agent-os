@@ -23,17 +23,35 @@ DEFAULT_DENYLIST: list[str] = [
     r"(?i)\bRestart-Computer\b",  # PowerShell system reboot
 ]
 
+# Anchors a command name to the start of a command: line start or a shell
+# separator, optionally through a `cmd /c` / `powershell -c` wrapper. The
+# wrapper's payload is commonly quoted (`powershell -c "rm -r C:\x"` is how
+# subprocess/cmd hand PowerShell a full command string), so a single opening
+# quote is allowed there -- but only there, not after a bare separator.
 _WIN_CMD_PREFIX: str = (
     r"(?:^|[;&|\n])\s*"
-    r"(?:(?:cmd(?:\.exe)?\s+/[ck]|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+)*)\s+)?"
+    r"(?:(?:cmd(?:\.exe)?\s+/[ck]|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+)*)\s+[\"']?)?"
 )
+
+# What may follow an anchored command name: an optional `.exe`, then a
+# separator, whitespace, or end of string. Unlike a bare `\b`, this refuses
+# `rm-cache.cmd` / `rd-report.ps1` -- scripts that merely start with the
+# alias -- while still matching the real `rm.exe` / `rd.exe` binaries.
+_WIN_CMD_END: str = r"(?:\.exe)?(?![\w.\-])"
 
 DEFAULT_DENYLIST_WIN: list[str] = [
     r"\bdel\b",
     r"\brmdir\b",
     r"\bRemove-Item\b",
-    _WIN_CMD_PREFIX + r"rd\b",
-    _WIN_CMD_PREFIX + r"erase\b",
+    _WIN_CMD_PREFIX + r"rd" + _WIN_CMD_END,
+    _WIN_CMD_PREFIX + r"erase" + _WIN_CMD_END,
+    # `rm` and `ri` are PowerShell's other two built-in aliases for
+    # Remove-Item, exactly as real as del/rd/erase/rmdir/Remove-Item above.
+    # Anchored the same way rd/erase are: both are short enough that a bare
+    # `\bword\b` would fire inside `docker run --rm`, `git rm --cached`,
+    # `npm run rm-cache`, branch names, and ordinary arguments.
+    _WIN_CMD_PREFIX + r"rm" + _WIN_CMD_END,
+    _WIN_CMD_PREFIX + r"ri" + _WIN_CMD_END,
     r"\bFormat-Volume\b",
     r"\bStop-Computer\b",
     r"\bRestart-Computer\b",
@@ -107,7 +125,15 @@ class SafeBinPolicy:
         if not deny:
             deny = _legacy_denylist_if_set()
             if not deny:
-                deny = DEFAULT_DENYLIST_WIN if os.name == "nt" else DEFAULT_DENYLIST
+                # Windows EXTENDS the shared catastrophic list, it never
+                # replaces it -- `rm -rf /`, `mkfs`, `dd if=`, the fork bomb,
+                # `shutdown`, etc. are platform-independent hazards that also
+                # reach a Windows host through git-bash, MSYS, Cygwin, or WSL.
+                deny = (
+                    [*DEFAULT_DENYLIST, *DEFAULT_DENYLIST_WIN]
+                    if os.name == "nt"
+                    else list(DEFAULT_DENYLIST)
+                )
         if not warn and not warn_env_present:
             warn = DEFAULT_WARNLIST_WIN if os.name == "nt" else DEFAULT_WARNLIST
 
