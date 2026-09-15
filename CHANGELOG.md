@@ -75,6 +75,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   signal background no longer overlaps the stat cards and the page matches
   Health / Overview / Usage (#1927).
 
+- Tools: `gateway(action="config_get")` returns a key whose configured value
+  is `null` as `{"value": null}` instead of raising "Config key not found";
+  presence is now a membership test on each hop of the dot-path, and an
+  absent key or a path through a scalar still raises (#1892).
+- Skills: pptx `extract_text` recurses through group shapes at any depth, so
+  text boxes and tables nested two or more groups deep appear in the plain
+  and `--json` output instead of being silently dropped (#1894).
+- Skills: docx `edit_docx` counts a `replace_run` as applied only when the run
+  was actually written, and rejects a paragraph index outside
+  `0 <= para < len(paragraphs)` instead of letting a negative index wrap to
+  the last paragraph (#1896).
+- Provider: `ModelCatalog.get_capabilities` matches the `anthropic`, `ollama`
+  and `openai` branches on the case-folded provider id, so `llm.provider =
+  "OpenAI"` keeps GPT-5 reasoning support and the DeepSeek-behind-OpenAI
+  format instead of falling through to the generic default (#1899).
+- Security: redaction now treats `signing`, `encryption` and `account` as
+  key qualifiers, so `SIGNING_KEY`, `ENCRYPTION_KEY`, `signingKey` and
+  `AccountKey` are masked in env dumps and `.env` reads like `SECRET_KEY`
+  already was; `;` also starts an assignment token, so the `AccountKey=`
+  inside an Azure Storage connection string is reached (#1901).
+
 ## [2026.9.13] - 2026-09-13
 
 ### Changed
