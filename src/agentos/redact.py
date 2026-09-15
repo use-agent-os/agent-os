@@ -146,6 +146,10 @@ _STRONG_NAME_SEGMENTS: frozenset[str] = frozenset(
         "secret",
         "password",
         "passwd",
+        # A passphrase is the one credential no value rule can reach -- it is
+        # a sentence, and the literal-value pass wants a single opaque run --
+        # so the name is the only thing that can catch ``SSH_PASSPHRASE=…``.
+        "passphrase",
         "apikey",
         "credential",
         "credentials",
@@ -168,6 +172,11 @@ _QUALIFIED_NAME_PAIRS: frozenset[tuple[str, str]] = frozenset(
         ("auth", "token"),
         ("auth", "key"),
         ("bearer", "token"),
+        # Nothing issues a bot token but a bot. Slack's carries an ``xox?-``
+        # prefix the value pass knows; a Discord token (three dot-separated
+        # base64url runs) and a Telegram one (``<id>:<secret>``) match no
+        # vendor prefix, so this pair is the only thing that masks them.
+        ("bot", "token"),
         ("client", "secret"),
         ("private", "key"),
         ("secret", "key"),

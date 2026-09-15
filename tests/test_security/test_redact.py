@@ -333,3 +333,92 @@ def test_the_escape_hatch_is_on_the_write_denylist() -> None:
 
     assert not env_policy.is_writable("AGENTOS_REDACT_SECRETS")
     assert not env_policy.is_writable("AGENTOS_SENSITIVE_PAYLOAD_DISABLED")
+
+
+class TestBotTokenAndPassphraseNames:
+    """``bot`` + ``token`` and ``passphrase`` name credentials (#2068).
+
+    A Slack bot token carries an ``xox[baprs]-`` prefix the value pass knows,
+    but a Discord token (three dot-separated base64url runs) and a Telegram
+    one (``<id>:<secret>``) match no vendor prefix, so the name pass was the
+    only line of defence -- and ``("bot", "token")`` was not in it.
+    """
+
+    # Assembled rather than written as a literal: GitHub's push protection
+    # blocks the real Discord shape in a test file, which is itself evidence
+    # the shape is the right one to test.
+    DISCORD = f"{'A' * 24}.{'B' * 6}.{'C' * 28}"
+    TELEGRAM = "123456789:AAHfiqksKZ8WmR2zSjiQ7_v4TwpHeWm1a2c"
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "DISCORD_BOT_TOKEN",
+            "SLACK_BOT_TOKEN",
+            "TELEGRAM_BOT_TOKEN",
+            "BOT_TOKEN",
+            "bot_token",
+            "botToken",
+            "x-bot-token",
+            "SSH_PASSPHRASE",
+            "passphrase",
+            "gpgPassphrase",
+            "key-passphrase",
+        ],
+    )
+    def test_credential_names(self, name: str) -> None:
+        assert redact._is_credential_name(name)
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            # ``bot`` next to anything but ``token`` is a field name.
+            "bot_name",
+            "bot_id",
+            "bot_count",
+            "bot_status",
+            "bot_version",
+            "botHandler",
+            "MAX_BOTS",
+            "token_budget",
+            # The pair must be adjacent: these split to ``robot`` / ``chatbot``.
+            "robot_arm",
+            "chatbot_config",
+            "chatbot_model",
+            "robot_token_count",
+        ],
+    )
+    def test_ordinary_names(self, name: str) -> None:
+        assert not redact._is_credential_name(name)
+
+    @pytest.mark.parametrize(
+        ("name", "value"),
+        [
+            ("DISCORD_BOT_TOKEN", DISCORD),
+            ("TELEGRAM_BOT_TOKEN", TELEGRAM),
+            ("SLACK_BOT_TOKEN", "Xk9vQm2pLw7nRt4yZb3cVn8j"),
+            ("BOT_TOKEN", "Xk9vQm2pLw7nRt4yZb3cVn8j"),
+            ("SSH_PASSPHRASE", "Xk9vQm2pLw7nRt4y"),
+        ],
+    )
+    def test_a_dotenv_read_masks_the_value(self, name: str, value: str) -> None:
+        out = redact.redact_file_output(f"{name}={value}\n", path=".env")
+        assert value not in out
+        assert name in out
+
+    @pytest.mark.parametrize(
+        ("name", "value"),
+        [("DISCORD_BOT_TOKEN", DISCORD), ("TELEGRAM_BOT_TOKEN", TELEGRAM)],
+    )
+    def test_an_env_dump_masks_the_value(self, name: str, value: str) -> None:
+        out = redact.redact_terminal_output(f"{name}={value}\n", "printenv")
+        assert value not in out
+
+    def test_a_prose_passphrase_is_still_left_alone(self) -> None:
+        """Whitespace reads as a sentence, a command or a path, for PASSWORD
+        as much as for PASSPHRASE. Widening that is a separate decision; this
+        pins the current behaviour so a later change to it is deliberate."""
+        line = "SSH_PASSPHRASE=correct horse battery staple\n"
+        assert redact.redact_file_output(line, path=".env") == line
+        twin = "PASSWORD=correct horse battery staple\n"
+        assert redact.redact_file_output(twin, path=".env") == twin
