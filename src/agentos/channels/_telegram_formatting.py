@@ -68,6 +68,18 @@ def _render_inline(text: str) -> str:
         return f'<a href="\x00TG_HREF_{len(hrefs) - 1}\x00">{match.group(1)}</a>'
 
     rendered = _LINK_RE.sub(_park_href, rendered)
+    # `***both***` is one run, not a bold run next to an italic one, and it has
+    # to be consumed before the `**` pass gets to it. Left to the passes below,
+    # the bold pass took the first two markers and handed the capture the third
+    # (`<b>*both</b>*`), then the italic pass paired that stray marker with the
+    # trailing one *across* the closing tag: `<b><i>both</b></i>`. Telegram's
+    # parser requires properly nested entities, so the message was rejected
+    # rather than rendered -- and this adapter sends `parse_mode=HTML` with no
+    # plain-text retry, so the reply never arrived.
+    rendered = re.sub(r"\*\*\*(?=\S)(.+?)(?<=\S)\*\*\*", r"<b><i>\1</i></b>", rendered)
+    rendered = re.sub(
+        r"(?<!\w)___(?=[^\s_])(.+?)(?<=[^\s_])___(?!\w)", r"<b><i>\1</i></b>", rendered
+    )
     rendered = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", r"<b>\1</b>", rendered)
     rendered = re.sub(r"__(?=\S)(.+?)(?<=\S)__", r"<b>\1</b>", rendered)
     rendered = re.sub(r"~~(?=\S)(.+?)(?<=\S)~~", r"<s>\1</s>", rendered)

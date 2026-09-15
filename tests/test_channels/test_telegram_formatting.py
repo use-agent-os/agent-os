@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import pytest
@@ -48,8 +49,7 @@ if x < 2:
     assert "<b>Result &lt;safe&gt;</b>" in rendered
     assert "Use <b>care &amp; caution</b> with <code>x &lt; 2</code>." in rendered
     assert (
-        '<pre><code class="language-python">'
-        "if x &lt; 2:\n    print(&quot;&amp;&quot;)</code></pre>"
+        '<pre><code class="language-python">if x &lt; 2:\n    print(&quot;&amp;&quot;)</code></pre>'
     ) in rendered
 
 
@@ -179,12 +179,7 @@ async def test_telegram_send_falls_back_to_plain_text_on_entity_parse_error() ->
 
 def test_two_column_table_with_short_row_pads_missing_cell() -> None:
     """A 2-column table row with only 1 cell should be padded, not dropped."""
-    markdown = (
-        "| Header A | Header B |\n"
-        "| --- | --- |\n"
-        "| Row 1 Only |\n"
-        "| x | y |\n"
-    )
+    markdown = "| Header A | Header B |\n| --- | --- |\n| Row 1 Only |\n| x | y |\n"
     rendered = render_telegram_html(markdown)
 
     # Both rows must appear — the old `break` dropped "| x | y |".
@@ -198,12 +193,7 @@ def test_two_column_table_with_short_row_pads_missing_cell() -> None:
 
 def test_three_column_table_with_short_row_pads_missing_cells() -> None:
     """A 3-column table row missing trailing cells should be padded."""
-    markdown = (
-        "| A | B | C |\n"
-        "| --- | --- | --- |\n"
-        "| only-a |\n"
-        "| x | y | z |\n"
-    )
+    markdown = "| A | B | C |\n| --- | --- | --- |\n| only-a |\n| x | y | z |\n"
     rendered = render_telegram_html(markdown)
 
     assert "<b>A · B · C</b>" in rendered
@@ -218,12 +208,7 @@ def test_three_column_table_with_short_row_pads_missing_cells() -> None:
 
 def test_table_row_with_extra_columns_is_truncated() -> None:
     """A row with more cells than headers should be truncated, not break."""
-    markdown = (
-        "| A | B |\n"
-        "| --- | --- |\n"
-        "| 1 | 2 | 3 | 4 |\n"
-        "| x | y |\n"
-    )
+    markdown = "| A | B |\n| --- | --- |\n| 1 | 2 | 3 | 4 |\n| x | y |\n"
     rendered = render_telegram_html(markdown)
 
     assert "<b>A — B</b>" in rendered
@@ -399,3 +384,64 @@ def test_code_span_keeps_interior_whitespace(markdown: str, expected: str) -> No
     present and the span is not all spaces; `.strip()` collapsed `` ` ` `` to
     an empty <code></code>."""
     assert render_telegram_html(markdown) == expected
+
+
+def _entities_are_properly_nested(html_text: str) -> bool:
+    """Telegram rejects a message whose entities are not properly nested."""
+    stack: list[str] = []
+    for closing, name in re.findall(r"<(/?)([a-zA-Z-]+)[^>]*>", html_text):
+        if closing:
+            if not stack or stack.pop() != name:
+                return False
+        else:
+            stack.append(name)
+    return not stack
+
+
+@pytest.mark.parametrize(
+    ("markdown", "expected"),
+    [
+        ("***both***", "<b><i>both</i></b>"),
+        ("___both___", "<b><i>both</i></b>"),
+        ("a***b***c", "a<b><i>b</i></b>c"),
+        ("***a b***", "<b><i>a b</i></b>"),
+    ],
+)
+def test_triple_marker_emphasis_nests_properly(markdown: str, expected: str) -> None:
+    """``***x***`` is one run, not a bold run beside an italic one.
+
+    Consumed by the ``**`` pass first, the third marker was left behind and the
+    ``*`` pass then paired it with the trailing one across the closing tag,
+    producing ``<b><i>x</b></i>``. Telegram's parser requires properly nested
+    entities, and this adapter sends ``parse_mode=HTML`` with no plain-text
+    retry, so the reply was refused rather than rendered.
+    """
+    rendered = render_telegram_html(markdown)
+
+    assert rendered == expected
+    assert _entities_are_properly_nested(rendered)
+
+
+@pytest.mark.parametrize(
+    ("markdown", "expected"),
+    [
+        ("**bold**", "<b>bold</b>"),
+        ("*italic*", "<i>italic</i>"),
+        ("__bold__", "<b>bold</b>"),
+        ("_italic_", "<i>italic</i>"),
+        ("**a** *b*", "<b>a</b> <i>b</i>"),
+        ("**a *b* c**", "<b>a <i>b</i> c</b>"),
+        ("snake_case_name", "snake_case_name"),
+        ("`***c***`", "<code>***c***</code>"),
+    ],
+)
+def test_the_single_and_double_marker_runs_are_unchanged(markdown: str, expected: str) -> None:
+    """The new pass must not take over anything the existing passes handled."""
+    assert render_telegram_html(markdown) == expected
+
+
+def test_a_triple_marker_run_beside_a_bold_run(tmp_path: object) -> None:
+    rendered = render_telegram_html("***a*** and **b**")
+
+    assert rendered == "<b><i>a</i></b> and <b>b</b>"
+    assert _entities_are_properly_nested(rendered)
