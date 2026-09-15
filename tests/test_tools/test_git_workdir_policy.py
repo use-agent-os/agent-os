@@ -104,20 +104,33 @@ def test_git_rejects_foreign_commit_file_on_windows(
         git._reject_foreign_git_path("/Users/a1/Desktop/repo/file.py")
 
 
-def test_git_diff_argv_unstaged_without_path() -> None:
-    assert git._git_diff_argv({}) == ("git", "diff")
-    assert git._git_diff_argv({"staged": False, "path": None}) == ("git", "diff")
+def test_git_diff_argv_default_without_path() -> None:
+    """The default fingerprint carries ``HEAD`` now that the body diffs against it.
+
+    Updated with #1963: the body stopped running bare ``git diff``, and #614's
+    rule is that this tuple mirrors the body. The ``path: None`` spelling stays
+    pinned because that is the input that used to stringify to a literal
+    ``"None"``.
+    """
+    assert git._git_diff_argv({}) == ("git", "diff", "HEAD")
+    assert git._git_diff_argv({"staged": False, "path": None}) == ("git", "diff", "HEAD")
 
 
 def test_git_diff_argv_staged_without_path() -> None:
-    assert git._git_diff_argv({"staged": True}) == ("git", "diff", "--cached")
-    assert git._git_diff_argv({"staged": True, "path": None}) == ("git", "diff", "--cached")
+    assert git._git_diff_argv({"staged": True}) == ("git", "diff", "--cached", "HEAD")
+    assert git._git_diff_argv({"staged": True, "path": None}) == (
+        "git",
+        "diff",
+        "--cached",
+        "HEAD",
+    )
 
 
-def test_git_diff_argv_unstaged_with_path() -> None:
+def test_git_diff_argv_default_with_path() -> None:
     assert git._git_diff_argv({"path": "src/main.py"}) == (
         "git",
         "diff",
+        "HEAD",
         "--",
         "src/main.py",
     )
@@ -128,9 +141,17 @@ def test_git_diff_argv_staged_with_path() -> None:
         "git",
         "diff",
         "--cached",
+        "HEAD",
         "--",
         "src/main.py",
     )
+
+
+def test_git_diff_argv_never_emits_the_invalid_unstaged_flag() -> None:
+    """#614's actual defect: ``--unstaged`` is not a git flag, and never was."""
+    for args in ({}, {"staged": False}, {"staged": True}, {"path": "x"}):
+        assert "--unstaged" not in git._git_diff_argv(args)
+        assert "None" not in git._git_diff_argv(args)
 
 
 def _git_commit_impl() -> Any:

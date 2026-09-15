@@ -142,10 +142,31 @@ async def git_status(workdir: str | None = None) -> str:
     return await _run_git("status", "--short", "--branch", cwd=_effective_workdir(workdir))
 
 
+async def _diff_revision(cwd: str | None) -> str | None:
+    """``"HEAD"`` when the repository has a commit to diff against, else ``None``.
+
+    ``git diff HEAD`` is the spelling that reports staged and unstaged work in
+    one pass, but it exits 128 with ``ambiguous argument 'HEAD'`` before the
+    first commit lands. There the index is the entire change set, so the caller
+    drops the revision and lets ``--cached`` carry it rather than failing a
+    diff that plain ``git diff`` used to answer.
+    """
+    try:
+        await _run_git("rev-parse", "--verify", "--quiet", "HEAD", cwd=cwd)
+    except RuntimeError:
+        return None
+    return "HEAD"
+
+
 def _git_diff_argv(a: dict[str, Any]) -> tuple[str, ...]:
+    # Mirrors the ``git_diff`` body (#614). ``HEAD`` is spelled unconditionally
+    # here because the fingerprint is derived before the repository is
+    # inspected; the body drops it in a repository without a first commit,
+    # which is the one case this argv describes more precisely than it runs.
     argv = ["git", "diff"]
     if a.get("staged"):
         argv.append("--cached")
+    argv.append("HEAD")
     path = a.get("path")
     if path:
         argv += ["--", str(path)]
@@ -154,10 +175,13 @@ def _git_diff_argv(a: dict[str, Any]) -> tuple[str, ...]:
 
 @tool(
     name="git_diff",
-    description="Show git diff (staged + unstaged changes).",
+    description="Show git diff against HEAD (staged + unstaged changes).",
     params={
         "path": {"type": "string", "description": "Limit diff to this path."},
-        "staged": {"type": "boolean", "description": "Show only staged changes."},
+        "staged": {
+            "type": "boolean",
+            "description": "Show only staged changes (omit for staged + unstaged).",
+        },
         "workdir": {"type": "string", "description": "Git repository directory (default: cwd)."},
     },
     required=[],
@@ -172,13 +196,24 @@ async def git_diff(
     staged: bool = False,
     workdir: str | None = None,
 ) -> str:
+    cwd = _effective_workdir(workdir)
+    # Bare ``git diff`` compares the working tree against the *index*, so every
+    # staged hunk — and every staged new file — is invisible in the output the
+    # description promises. On a tree the caller has just ``git add -A``-ed
+    # that is the whole change set, returned as an empty string with no error,
+    # which reads as "nothing to review" rather than as a wrong question (#1963).
+    # ``HEAD`` is the revision that reports both halves, and is the spelling the
+    # bundled ``git-diff`` skill already uses.
+    revision = await _diff_revision(cwd)
     args = ["diff"]
-    if staged:
+    if staged or revision is None:
         args.append("--cached")
+    if revision is not None:
+        args.append(revision)
     if path:
         _reject_foreign_git_path(path)
         args += ["--", path]
-    return await _run_git(*args, cwd=_effective_workdir(workdir))
+    return await _run_git(*args, cwd=cwd)
 
 
 @tool(
