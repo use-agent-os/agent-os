@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Shell policy (security): the Windows denylist had no pattern for `rm` or
+  `ri`, two of PowerShell's six built-in `Remove-Item` aliases. Because
+  `DEFAULT_WARNLIST_WIN` is empty there was no two-step approval to fall
+  through to either, so a deletion spelled `rm important.txt` or
+  `ri -Recurse -Force C:\data` ran unblocked and unconfirmed while the
+  identical `Remove-Item` was denied. Both are now covered, anchored to a
+  command position the way `rd` and `erase` already are — `docker run --rm`,
+  `git rm --cached` and `npm run rm-cache` are untouched (#2100).
+- Shell policy (security): `SafeBinPolicy.from_env` replaced the shared
+  denylist on Windows instead of extending it, leaving `shutdown` — a native
+  Windows binary — plus `rm -rf /`, `mkfs`, `dd if=`, `chmod -R 777 /` and the
+  fork bomb ungated there, all reachable through git-bash, MSYS, Cygwin or WSL.
+- Shell policy (security): the command-position anchor recognised only `^` and
+  `; & | \n`, so an alias inside a PowerShell block or subexpression was
+  missed — `powershell -c "if ($true) { rd /s C:\x }"` was allowed. `(` and
+  `{` now open a command position, and a wrapper's quoted payload
+  (`powershell -c "rm -r C:\x"`) is matched. A script that merely starts with
+  an alias name (`rm-cache.cmd`, `rd-report.ps1`) is no longer denied, while
+  `rm.exe` still is.
+- Shell policy: `format`, the native counterpart of the already-covered
+  `Format-Volume`, is denied at a command position; `ruff format` and
+  `git log --format=%H` are unaffected.
+- Shell policy: `mkfs`, `shutdown`, `reboot` and `halt` had no leading word
+  boundary, so `echo asphalt`, `python autoshutdown.py` and `./fastreboot.sh`
+  were blocked outright. Previously a POSIX-only false positive; fixed here
+  because extending the shared list to Windows would have carried it across.
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added

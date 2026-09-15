@@ -9,11 +9,15 @@ from dataclasses import dataclass, field
 # Patterns that are always dangerous regardless of context
 DEFAULT_DENYLIST: list[str] = [
     r"rm\s+-rf\s+/\*?$",  # rm -rf / and rm -rf /*
-    r"mkfs\b",  # format filesystems
+    # Leading \b as well as trailing: without it these match inside a longer
+    # word, so `echo asphalt`, `python autoshutdown.py` and `./fastreboot.sh`
+    # were all blocked outright. That mattered only on POSIX before; this list
+    # now applies on Windows too, so the false positive would have spread.
+    r"\bmkfs\b",  # format filesystems
     r"dd\s+if=",  # raw disk writes
-    r"shutdown\b",  # system shutdown
-    r"reboot\b",  # system reboot
-    r"halt\b",  # system halt
+    r"\bshutdown\b",  # system shutdown
+    r"\breboot\b",  # system reboot
+    r"\bhalt\b",  # system halt
     r":\(\)\s*\{.*:\|:.*\}",  # fork bomb
     r">\s*/dev/sda",  # overwrite block device
     r"chmod\s+-R\s+777\s+/",  # world-writable root
@@ -23,18 +27,56 @@ DEFAULT_DENYLIST: list[str] = [
     r"(?i)\bRestart-Computer\b",  # PowerShell system reboot
 ]
 
-_WIN_CMD_PREFIX: str = (
-    r"(?:^|[;&|\n])\s*"
-    r"(?:(?:cmd(?:\.exe)?\s+/[ck]|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+)*)\s+)?"
+# Where a command name may start: the beginning of the string, a shell
+# separator, or the opening of a block or subexpression. ``(`` and ``{`` are
+# command positions too -- ``powershell -c "if (Test-Path x) { rm -r x }"`` and
+# ``cmd /c (del x)`` both run a real command that a separator-only anchor never
+# sees. Only openers are listed; a command does not begin right after ``)``.
+_WIN_CMD_START: str = r"(?:^|[;&|\n({])\s*"
+
+# An optional wrapper between the command position and the command name. The
+# wrapper's payload is usually quoted -- ``powershell -c "rm -r C:\x"`` is how
+# cmd and subprocess hand PowerShell a command string -- so one opening quote
+# is allowed here, and only here, not after a bare separator.
+_WIN_CMD_WRAPPER: str = (
+    r"(?:(?:cmd(?:\.exe)?\s+/[ck]|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+)*)\s+[\"']?)?"
 )
 
+_WIN_CMD_PREFIX: str = _WIN_CMD_START + _WIN_CMD_WRAPPER
+
+# What may follow an anchored command name: an optional ``.exe``, then anything
+# that is not a name character. A bare ``\b`` ends the match at the ``-`` in
+# ``rm-cache.cmd`` and denies a script that merely starts with an alias name;
+# this refuses that while still matching the real ``rm.exe``.
+_WIN_CMD_END: str = r"(?:\.exe)?(?![\w.\-])"
+
+
+def _win_command(name: str) -> str:
+    """Deny *name* only where it is actually being run as a command."""
+    return _WIN_CMD_PREFIX + name + _WIN_CMD_END
+
+
 DEFAULT_DENYLIST_WIN: list[str] = [
+    # del / rmdir / Remove-Item stay unanchored on purpose. They are long
+    # enough not to collide with ordinary arguments, and matching them
+    # anywhere also catches a nesting this module's anchor cannot express.
+    # Narrowing them would trade a false positive for a missed deletion.
     r"\bdel\b",
     r"\brmdir\b",
     r"\bRemove-Item\b",
-    _WIN_CMD_PREFIX + r"rd\b",
-    _WIN_CMD_PREFIX + r"erase\b",
+    # PowerShell ships six built-in aliases for Remove-Item: del, erase, rd,
+    # ri, rm and rmdir. rm and ri were the two with no pattern, so a deletion
+    # spelled either way ran unblocked and unconfirmed. They are anchored the
+    # way rd and erase are, because a bare \brm\b fires inside `docker run
+    # --rm` and `git rm --cached`, and \bri\b inside almost anything.
+    _win_command("rd"),
+    _win_command("erase"),
+    _win_command("rm"),
+    _win_command("ri"),
     r"\bFormat-Volume\b",
+    # The native counterpart of Format-Volume. Anchored, so `git log
+    # --format=%H` and `--format json` are untouched.
+    _win_command("format"),
     r"\bStop-Computer\b",
     r"\bRestart-Computer\b",
     r"\bClear-Disk\b",
@@ -107,7 +149,17 @@ class SafeBinPolicy:
         if not deny:
             deny = _legacy_denylist_if_set()
             if not deny:
-                deny = DEFAULT_DENYLIST_WIN if os.name == "nt" else DEFAULT_DENYLIST
+                # Windows *extends* the shared list rather than replacing it.
+                # Replacing dropped every catastrophic pattern that is not
+                # Windows-specific -- `shutdown` is a native Windows binary,
+                # and `rm -rf /`, `mkfs`, `dd if=`, `chmod -R 777 /` and the
+                # fork bomb all reach a Windows host through git-bash, MSYS,
+                # Cygwin or WSL. None of them were gated there.
+                deny = (
+                    [*DEFAULT_DENYLIST, *DEFAULT_DENYLIST_WIN]
+                    if os.name == "nt"
+                    else DEFAULT_DENYLIST
+                )
         if not warn and not warn_env_present:
             warn = DEFAULT_WARNLIST_WIN if os.name == "nt" else DEFAULT_WARNLIST
 
