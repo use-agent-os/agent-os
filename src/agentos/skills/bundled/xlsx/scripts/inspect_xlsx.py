@@ -74,6 +74,32 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _write(text: str) -> None:
+    """Write JSON text to stdout, surviving a non-UTF-8 stdout encoding.
+
+    Workbook cell values carry arbitrary user text including CJK scripts and
+    emojis. On a non-UTF-8 console code page (cp1252, cp936) when stdout is
+    piped, sending this text to the text stream raises UnicodeEncodeError
+    before a single byte is emitted (#1834 pattern). Writing UTF-8 bytes to
+    sys.stdout.buffer preserves the payload verbatim, falling back to
+    backslashreplace when buffer is unavailable.
+    """
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is not None:
+        try:
+            buffer.write(text.encode("utf-8"))
+            buffer.flush()
+            return
+        except (AttributeError, OSError, ValueError):
+            # Buffer closed or not writable — fall through to the text layer.
+            pass
+
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    # Lossless: unencodable chars become \\uXXXX escapes, not "?".
+    sys.stdout.write(text.encode(encoding, errors="backslashreplace").decode(encoding))
+    sys.stdout.flush()
+
+
 def main() -> int:
     args = _parse_args()
     if not args.path.is_file():
@@ -85,7 +111,7 @@ def main() -> int:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(text, encoding="utf-8")
     else:
-        print(text)
+        _write(text + "\n")
     return 0
 
 

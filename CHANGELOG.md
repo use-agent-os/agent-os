@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Bundled `xlsx` skill: keep inspection output byte-exact and resilient against
+  `UnicodeEncodeError` on non-UTF-8 stdout code pages (e.g. Windows cp1252 / cp936)
+  when emitting workbooks containing CJK characters or emoji to stdout.
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added
