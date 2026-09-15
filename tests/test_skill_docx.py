@@ -378,3 +378,86 @@ def test_apply_ops_skips_non_dict_ops() -> None:
 
     assert applied == 1
     assert doc.paragraphs[0].text == "Hello Wei"
+
+
+def _create_docx_module() -> object:
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import create_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+    return create_docx
+
+
+def test_build_handles_non_dict_spec() -> None:
+    """Passing non-dict or malformed specs should safely return an empty document."""
+    create_docx = _create_docx_module()
+
+    for invalid_spec in [None, [], "not-a-dict", 123]:
+        doc = create_docx.build(invalid_spec)  # type: ignore[attr-defined]
+        assert doc is not None
+        assert len(doc.paragraphs) == 0
+        assert len(doc.tables) == 0
+
+
+def test_build_handles_empty_or_malformed_table_rows() -> None:
+    """Zero-column tables or non-list row elements should not crash Document.add_table."""
+    create_docx = _create_docx_module()
+
+    # Empty sub-rows (ncols == 0) should be skipped without error
+    doc1 = create_docx.build({"body": [{"kind": "table", "rows": [[], []]}]})  # type: ignore[attr-defined]
+    assert len(doc1.tables) == 0
+
+    # Non-list row items should be coerced safely into cells
+    doc2 = create_docx.build({"body": [{"kind": "table", "rows": ["header", 42]}]})  # type: ignore[attr-defined]
+    assert len(doc2.tables) == 1
+    assert doc2.tables[0].rows[0].cells[0].text == "header"
+    assert doc2.tables[0].rows[1].cells[0].text == "42"
+
+    # Jagged rows should be padded up to ncols without IndexError
+    doc3 = create_docx.build(  # type: ignore[attr-defined]
+        {"body": [{"kind": "table", "rows": [["a", "b", "c"], ["1"]]}]}
+    )
+    assert len(doc3.tables) == 1
+    assert len(doc3.tables[0].columns) == 3
+    assert doc3.tables[0].rows[1].cells[0].text == "1"
+
+
+def test_build_handles_invalid_heading_levels() -> None:
+    """Out-of-range or invalid level values should be clamped safely to 0-9."""
+    create_docx = _create_docx_module()
+
+    spec = {
+        "body": [
+            {"kind": "heading", "text": "Clamped Min", "level": -5},
+            {"kind": "heading", "text": "Clamped Max", "level": 50},
+            {"kind": "heading", "text": "Non-integer", "level": "bad"},
+            {"kind": "heading", "text": "None Level", "level": None},
+        ]
+    }
+    doc = create_docx.build(spec)  # type: ignore[attr-defined]
+    assert len(doc.paragraphs) == 4
+    assert doc.paragraphs[0].text == "Clamped Min"
+    assert doc.paragraphs[1].text == "Clamped Max"
+    assert doc.paragraphs[2].text == "Non-integer"
+    assert doc.paragraphs[3].text == "None Level"
+
+
+def test_create_docx_cli_errors_on_malformed_spec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLI exits with code 2 on missing, unparseable, or non-object JSON specs."""
+    create_docx = _create_docx_module()
+
+    non_dict_spec = tmp_path / "spec_list.json"
+    non_dict_spec.write_text("[]", encoding="utf-8")
+    out = tmp_path / "out.docx"
+
+    monkeypatch.setattr(sys, "argv", ["create_docx.py", str(non_dict_spec), "--out", str(out)])
+    assert create_docx.main() == 2  # type: ignore[attr-defined]
+    assert not out.exists()
+
+    invalid_json = tmp_path / "bad.json"
+    invalid_json.write_text("{invalid json", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["create_docx.py", str(invalid_json), "--out", str(out)])
+    assert create_docx.main() == 2  # type: ignore[attr-defined]

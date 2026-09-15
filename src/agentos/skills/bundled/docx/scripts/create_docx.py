@@ -24,33 +24,58 @@ from docx import Document
 
 def build(spec: dict[str, Any]) -> Document:
     doc = Document()
+    if not isinstance(spec, dict):
+        return doc
 
-    meta = spec.get("metadata", {})
+    meta = spec.get("metadata")
     if isinstance(meta, dict):
         core = doc.core_properties
-        if "title" in meta:
+        if "title" in meta and meta["title"] is not None:
             core.title = str(meta["title"])
-        if "author" in meta:
+        if "author" in meta and meta["author"] is not None:
             core.author = str(meta["author"])
 
-    for item in spec.get("body", []):
+    body = spec.get("body")
+    if not isinstance(body, list):
+        return doc
+
+    for item in body:
         if not isinstance(item, dict):
             continue
         kind = item.get("kind")
         if kind == "heading":
-            doc.add_heading(str(item.get("text", "")), level=int(item.get("level", 1)))
+            raw_level = item.get("level", 1)
+            try:
+                level = int(raw_level)
+            except (TypeError, ValueError):
+                level = 1
+            level = max(0, min(9, level))
+            doc.add_heading(str(item.get("text", "")), level=level)
         elif kind == "paragraph":
             style = item.get("style") or "Normal"
+            if not isinstance(style, str):
+                style = "Normal"
             doc.add_paragraph(str(item.get("text", "")), style=style)
         elif kind == "table":
-            rows = item.get("rows") or []
-            if not rows:
+            raw_rows = item.get("rows")
+            if not isinstance(raw_rows, list) or not raw_rows:
                 continue
-            ncols = max(len(r) for r in rows)
-            table = doc.add_table(rows=len(rows), cols=ncols)
-            for r_idx, row in enumerate(rows):
+            valid_rows: list[list[Any]] = []
+            for r in raw_rows:
+                if isinstance(r, (list, tuple)):
+                    valid_rows.append(list(r))
+                else:
+                    valid_rows.append([r])
+            if not valid_rows:
+                continue
+            ncols = max(len(r) for r in valid_rows)
+            if ncols <= 0:
+                continue
+            table = doc.add_table(rows=len(valid_rows), cols=ncols)
+            for r_idx, row in enumerate(valid_rows):
                 for c_idx, value in enumerate(row):
-                    table.rows[r_idx].cells[c_idx].text = str(value)
+                    if c_idx < ncols:
+                        table.rows[r_idx].cells[c_idx].text = str(value)
         elif kind == "page_break":
             doc.add_page_break()
     return doc
@@ -68,7 +93,14 @@ def main() -> int:
     if not args.spec.is_file():
         print(f"error: spec {args.spec} not found", file=sys.stderr)
         return 2
-    spec = json.loads(args.spec.read_text(encoding="utf-8"))
+    try:
+        spec = json.loads(args.spec.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as err:
+        print(f"error: invalid JSON spec: {err}", file=sys.stderr)
+        return 2
+    if not isinstance(spec, dict):
+        print("error: JSON spec must be an object", file=sys.stderr)
+        return 2
     doc = build(spec)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(args.out))
