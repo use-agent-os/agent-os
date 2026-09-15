@@ -149,6 +149,100 @@ class TestNameSegments:
         assert not redact._is_credential_name(name)
 
 
+class TestBotTokensAndPassphrases:
+    """Two vocabulary holes that let a real credential through.
+
+    Both are the same shape as #1901: the pair mechanism is right, the
+    vocabulary was missing a word.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "BOT_TOKEN",
+            "bot_token",
+            "botToken",
+            "BotToken",
+            "x-bot-token",
+            "SLACK_BOT_TOKEN",
+            "DISCORD_BOT_TOKEN",
+            "TELEGRAM_BOT_TOKEN",
+        ],
+    )
+    def test_a_bot_token_is_a_credential(self, name: str) -> None:
+        """``token`` qualified by what issues it. ``bot`` was not a qualifier.
+
+        A Discord bot token is three dot-separated base64url runs and a Telegram
+        one is ``<id>:<secret>``; neither matches a vendor prefix in
+        ``_PREFIX_RE``, so for those two the name pass was the only line of
+        defence and it was not there.
+        """
+        assert redact._is_credential_name(name)
+
+    @pytest.mark.parametrize(
+        "name",
+        ["bot_name", "bot_id", "bot_count", "bot_status", "bot_version", "robot_arm",
+         "chatbot_config", "chatbot_model", "botHandler", "MAX_BOTS", "token_budget"],
+    )
+    def test_an_unqualified_bot_name_is_not_a_credential(self, name: str) -> None:
+        """The pair must be adjacent, so ``bot`` alone still means nothing."""
+        assert not redact._is_credential_name(name)
+
+    @pytest.mark.parametrize(
+        "name",
+        ["passphrase", "PASSPHRASE", "Passphrase", "ssh_passphrase", "SSH_PASSPHRASE",
+         "gpg_passphrase", "key_passphrase", "keystore_passphrase"],
+    )
+    def test_a_passphrase_is_a_credential(self, name: str) -> None:
+        """``passphrase`` belongs beside ``password`` and ``passwd``.
+
+        It is the one credential no shape rule can reach: a passphrase is a
+        sentence, and ``_is_secret_literal_value`` requires a single opaque run
+        with no whitespace. The name is the only thing that can catch it.
+        """
+        assert redact._is_credential_name(name)
+
+    @pytest.mark.parametrize("name", ["phrase", "phrasebook", "phrase_count", "keyphrase_list"])
+    def test_phrase_without_pass_is_not_a_credential(self, name: str) -> None:
+        assert not redact._is_credential_name(name)
+
+    def test_a_discord_bot_token_is_masked_in_a_config_file(self) -> None:
+        """The end-to-end case: real shape, no vendor prefix, name-only defence.
+
+        Assembled from parts rather than written as a literal, because GitHub's
+        push protection flags a Discord-shaped token in a test file. That the
+        shape trips their scanner is the point of the case: nothing in
+        ``_PREFIX_RE`` matches it, so the name pass was the only defence.
+        """
+        token = f"{'A' * 24}.{'B' * 6}.{'C' * 28}"
+
+        out = redact.redact_file_output(f"DISCORD_BOT_TOKEN={token}\n", path=".env")
+
+        assert token not in out
+        assert not redact._PREFIX_RE.search(token)
+
+    def test_a_passphrase_is_masked_in_a_config_file(self) -> None:
+        passphrase = "kQ3mZ8vT1pR7wX5yB2nL9dF4hJ6gS0aC"
+
+        out = redact.redact_file_output(f"SSH_PASSPHRASE={passphrase}\n", path=".env")
+
+        assert passphrase not in out
+
+    def test_a_passphrase_that_is_a_sentence_is_still_left_alone(self) -> None:
+        """Pre-existing, and deliberately not changed here.
+
+        ``_is_secret_literal_value`` reads whitespace as "a sentence, a command,
+        or a path", so a prose passphrase is not treated as a secret literal —
+        and ``PASSWORD`` behaves identically. Widening that rule is a separate
+        decision with its own false-positive surface, so this pins the current
+        behaviour rather than silently changing it.
+        """
+        prose = "correct horse battery staple"
+
+        assert prose in redact.redact_file_output(f"PASSWORD={prose}\n", path=".env")
+        assert prose in redact.redact_file_output(f"SSH_PASSPHRASE={prose}\n", path=".env")
+
+
 class TestRedaction:
     def test_masks_a_vendor_key_but_keeps_it_recognisable(self) -> None:
         out = redact.redact_sensitive_text("OPENAI_API_KEY=sk-proj-AAAAAAAAAAAAAAAAAAAAAAAA")
