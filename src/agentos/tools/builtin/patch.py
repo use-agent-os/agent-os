@@ -575,8 +575,21 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk, newline: str = "\n") -> list[
             # Added lines take the file's own line ending, not a hardcoded \n.
             new_lines.append(content.rstrip("\r\n") + newline)
 
-    # Splice: replace [pos : pos + old_count] with new_lines
-    return result[:pos] + new_lines + result[pos + hunk.old_count :]
+    # Splice by what the body actually consumed, not by the header's count.
+    #
+    # ``src_pos`` has just walked the body one old-side line at a time, and
+    # every one of those lines was context-matched against the file above. The
+    # header's ``old_count`` is a second, unverified opinion about the same
+    # number, and the format lets a writer omit it (``@@@ -2 +2 @@@`` defaults
+    # to 1) or simply miscount it. When the two disagreed the splice replaced a
+    # different span than the body described, silently: too small a count wrote
+    # the tail back a second time, too large a one deleted lines the hunk never
+    # mentioned -- and either way the tool reported success (Issue #2224).
+    #
+    # Reusing ``src_pos`` rather than recounting keeps the splice and the
+    # rebuild reading from one traversal, so they cannot drift apart if the
+    # body ever grows another line prefix.
+    return result[:pos] + new_lines + result[src_pos:]
 
 
 def _updated_text(text: str, hunks: list[Hunk]) -> str:
