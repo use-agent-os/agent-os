@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -199,3 +200,101 @@ def test_tables_strategy_explicit_is_rejected_with_a_clear_message(
         extract.main()
     assert exc_info.value.code == 2
     assert "invalid choice: 'explicit'" in capsys.readouterr().err
+
+
+# ── a fill that filled nothing is a failure, not a blank copy (#2131) ────────
+
+
+def _form_fill_module():
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import form_fill  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+    return form_fill
+
+
+def _make_acroform_pdf(path: Path, field: str = "full_name") -> None:
+    from reportlab.lib.pagesizes import LETTER
+    from reportlab.pdfgen import canvas
+
+    c = canvas.Canvas(str(path), pagesize=LETTER)
+    c.drawString(72, 740, "Application")
+    c.acroForm.textfield(name=field, x=72, y=700, width=200, height=20)
+    c.save()
+
+
+def test_form_fill_refuses_a_pdf_with_no_acroform(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Every page update raised, yet the output was written anyway: a complete,
+    valid, entirely unfilled copy reported as a successful fill."""
+    form_fill = _form_fill_module()
+    plain = tmp_path / "doc.pdf"
+    _make_one_page_pdf(plain, "not a form")
+    data = tmp_path / "data.json"
+    data.write_text(json.dumps({"full_name": "Ada"}), encoding="utf-8")
+    out = tmp_path / "filled.pdf"
+    monkeypatch.setattr(sys, "argv", ["form_fill.py", str(plain), str(data), "--out", str(out)])
+
+    assert form_fill.main() == 2
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("warn:") or "error:" in captured.err
+    assert "error: no page of" in captured.err
+    assert "--list-fields" in captured.err, "the message should point at the way to check"
+    assert "pages_processed" not in captured.out
+    assert not out.exists()
+
+
+def test_form_fill_does_not_destroy_an_existing_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The destructive case: --out pointed at a real filled form was replaced by
+    an unfilled copy of the input, at exit 0."""
+    form_fill = _form_fill_module()
+    plain = tmp_path / "doc.pdf"
+    _make_one_page_pdf(plain, "not a form")
+    out = tmp_path / "filled.pdf"
+    _make_acroform_pdf(out)
+    before = out.read_bytes()
+    data = tmp_path / "data.json"
+    data.write_text(json.dumps({"full_name": "Ada"}), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["form_fill.py", str(plain), str(data), "--out", str(out)])
+
+    assert form_fill.main() == 2
+    assert out.read_bytes() == before
+
+
+def test_form_fill_still_fills_a_real_form(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The guard must not disturb the working path."""
+    from pypdf import PdfReader
+
+    form_fill = _form_fill_module()
+    form = tmp_path / "form.pdf"
+    _make_acroform_pdf(form)
+    data = tmp_path / "data.json"
+    data.write_text(json.dumps({"full_name": "Ada"}), encoding="utf-8")
+    out = tmp_path / "filled.pdf"
+    monkeypatch.setattr(sys, "argv", ["form_fill.py", str(form), str(data), "--out", str(out)])
+
+    assert form_fill.main() == 0
+
+    assert json.loads(capsys.readouterr().out) == {"pages_processed": 1, "fields": 1}
+    assert (PdfReader(str(out)).get_fields() or {})["full_name"]["/V"] == "Ada"
+
+
+def test_list_fields_still_reports_an_empty_form_without_failing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--list-fields is the documented way to check, and it must stay usable on
+    exactly the documents the fill path now rejects."""
+    form_fill = _form_fill_module()
+    plain = tmp_path / "doc.pdf"
+    _make_one_page_pdf(plain, "not a form")
+    monkeypatch.setattr(sys, "argv", ["form_fill.py", str(plain), "--list-fields"])
+
+    assert form_fill.main() == 0
+    assert json.loads(capsys.readouterr().out) == {}

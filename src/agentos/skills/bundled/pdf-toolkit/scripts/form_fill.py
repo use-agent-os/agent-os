@@ -30,16 +30,35 @@ def list_fields(path: Path) -> dict[str, Any]:
     return out
 
 
+class NoFieldsError(ValueError):
+    """The input has no form to fill. Reported as ``error:`` / exit 2 rather
+    than written out: a PDF with no AcroForm is the wrong input, not an empty
+    edit."""
+
+
 def fill(path: Path, data: dict[str, str], out: Path) -> int:
+    """Fill *data* into the form at *path* and write *out*, returning the number
+    of pages updated.
+
+    Writing is the last step and only happens when at least one page accepted
+    the update. A PDF with no AcroForm raises on every page, and writing anyway
+    produced a complete, valid, entirely unfilled copy reported as a success --
+    which, pointed at an existing filled form, replaced it (Issue #2131).
+    """
     reader = PdfReader(str(path))
     writer = PdfWriter(clone_from=reader)
     filled = 0
+    failures: list[str] = []
     for page in writer.pages:
         try:
             writer.update_page_form_field_values(page, data)
             filled += 1
         except Exception as exc:  # pragma: no cover — defensive against pypdf API drift
             print(f"warn: page update failed: {exc}", file=sys.stderr)
+            failures.append(str(exc))
+    if filled == 0:
+        detail = f": {failures[0]}" if failures else ""
+        raise NoFieldsError(f"no page of {path} accepted a form fill{detail}")
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("wb") as fh:
         writer.write(fh)
@@ -71,7 +90,16 @@ def main() -> int:
         return 2
     raw = json.loads(args.data.read_text(encoding="utf-8"))
     data = {str(k): str(v) for k, v in (raw.items() if isinstance(raw, dict) else [])}
-    pages = fill(args.input, data, args.out)
+    try:
+        pages = fill(args.input, data, args.out)
+    except NoFieldsError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        print(
+            f"hint: run `form_fill.py {args.input} --list-fields` to see whether "
+            "this document has an AcroForm at all",
+            file=sys.stderr,
+        )
+        return 2
     print(json.dumps({"pages_processed": pages, "fields": len(data)}, ensure_ascii=False))
     return 0
 
