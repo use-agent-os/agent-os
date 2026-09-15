@@ -102,5 +102,7 @@ class _DefaultDebounceCoordinator:
             await on_fire(combined)
         except asyncio.CancelledError:
             raise
-        except Exception:
-            log.exception("channel_dispatch.debounce_enqueue_failed", reason="unexpected")
+        except Exception as exc:
+            # session_key is the only handle an operator has on a batch that
+            # never reached a turn; without it the traceback names no session.
+            log.exception("channel_dispatch.debounce_enqueue_failed", session_key=session_key, reason="unexpected", error=str(exc))  # noqa: E501
