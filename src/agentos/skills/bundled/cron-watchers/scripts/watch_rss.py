@@ -32,6 +32,51 @@ def _text(node: ET.Element | None) -> str:
     return (node.text or "").strip() if node is not None else ""
 
 
+def _links(item: ET.Element) -> list[ET.Element]:
+    """Return every direct ``<link>`` child of *item*, RSS or Atom, in document order."""
+    seen: set[int] = set()
+    result: list[ET.Element] = []
+    for tag in ("link", "{*}link"):
+        for el in item.findall(tag):
+            if id(el) not in seen:
+                seen.add(id(el))
+                result.append(el)
+    order = {id(child): i for i, child in enumerate(item)}
+    result.sort(key=lambda el: order.get(id(el), 0))
+    return result
+
+
+def _entry_link(item: ET.Element) -> str:
+    """Pick the entry's canonical link.
+
+    RSS 2.0 uses a single ``<link>text</link>``. Atom entries commonly carry
+    several ``<link>`` elements distinguished by ``rel`` -- ``alternate`` (the
+    human-readable page, the default when ``rel`` is omitted), ``enclosure``
+    (a media file), ``self``, etc. Taking whichever ``<link>`` happens to come
+    first in document order can silently pick an enclosure or self link
+    instead of the entry's actual page.
+    """
+    links = _links(item)
+    for el in links:
+        text = _text(el)
+        if text and not el.get("href"):
+            return text
+    for el in links:
+        rel = (el.get("rel") or "alternate").lower()
+        href = (el.get("href") or "").strip()
+        if href and rel == "alternate":
+            return href
+    for el in links:
+        href = (el.get("href") or "").strip()
+        if href:
+            return href
+    for el in links:
+        text = _text(el)
+        if text:
+            return text
+    return ""
+
+
 def _entries(root: ET.Element) -> list[tuple[str, str, str]]:
     """Return ``(id, title, link)`` for each item, RSS or Atom."""
     found: list[tuple[str, str, str]] = []
@@ -41,11 +86,7 @@ def _entries(root: ET.Element) -> list[tuple[str, str, str]]:
         if tag not in {"item", "entry"}:
             continue
         title = _text(item.find("title")) or _text(item.find("{*}title"))
-        link = _text(item.find("link")) or _text(item.find("{*}link"))
-        if not link:
-            link_el = item.find("{*}link")
-            if link_el is not None:
-                link = (link_el.get("href") or "").strip()
+        link = _entry_link(item)
         guid = (
             _text(item.find("guid"))
             or _text(item.find("id"))
