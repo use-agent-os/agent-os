@@ -104,7 +104,7 @@ class DuckDuckGoProvider:
                 continue
 
             # Clean DDG redirect URLs
-            if "//duckduckgo.com/l/?uddg=" in href:
+            if "uddg=" in href:
                 href = urllib.parse.unquote(href.split("uddg=")[1].split("&")[0])
 
             snippet_elem = elem.select_one(".result__snippet")
