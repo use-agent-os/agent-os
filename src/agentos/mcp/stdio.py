@@ -12,6 +12,30 @@ from agentos.mcp.client import MCPClient
 from agentos.mcp.types import MCPServerConfig, MCPToolDef, MCPToolResult
 
 
+def _result_from_wire(result: dict[str, Any]) -> MCPToolResult:
+    """Render a ``tools/call`` result straight from the wire dicts.
+
+    Fallback for a payload the pinned SDK cannot validate. It follows the same
+    three rules the SDK path does: a text block contributes its text, any other
+    block its JSON, and ``structuredContent`` stands in when no block produced
+    anything. ``isError`` is read either way — the server's verdict on its own
+    call is the one thing that must never be invented here.
+    """
+    chunks: list[str] = []
+    for block in result.get("content") or []:
+        if not isinstance(block, dict):
+            continue
+        text = block.get("text")
+        if block.get("type") == "text" and isinstance(text, str):
+            chunks.append(text)
+            continue
+        chunks.append(json.dumps(block, ensure_ascii=False))
+    structured = result.get("structuredContent")
+    if not chunks and structured is not None:
+        chunks.append(json.dumps(structured, ensure_ascii=False))
+    return MCPToolResult(content="\n".join(chunks), is_error=bool(result.get("isError", False)))
+
+
 class MCPStdioClient(MCPClient):
     """MCP client using stdio transport (subprocess + newline-delimited JSON-RPC).
 
@@ -231,8 +255,15 @@ class MCPStdioClient(MCPClient):
             from mcp.types import CallToolResult
 
             call_result = CallToolResult.model_validate(result)
-        except Exception as exc:
-            return MCPToolResult(content=str(exc), is_error=True)
+        except Exception:
+            # A payload this SDK cannot model is not a failed tool call. MCP
+            # content is extensible and the pinned SDK is a moving floor —
+            # `mcp>=1.2.0` predates AudioContent and ResourceLink — so a
+            # server the model just called successfully would be reported as
+            # having failed, with a pydantic dump where its answer should be.
+            # Render the raw blocks under the same rules instead; the session
+            # transports never re-validate, so this keeps them agreeing.
+            return _result_from_wire(result if isinstance(result, dict) else {})
 
         chunks: list[str] = []
         for block in call_result.content:
