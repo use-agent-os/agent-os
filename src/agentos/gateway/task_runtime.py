@@ -834,11 +834,16 @@ class TaskRuntime:
                     )
                     return
                 await self._wait_for_subagent_slot(task)
-                acquired = False
                 heartbeat_task: asyncio.Task[None] | None = None
+                # Release keys off ``task.acquired_slot`` — the flag
+                # ``_acquire_fair_slot`` sets at the moment it claims the slot
+                # and ``_release_slot`` consults — not a local mirror. The
+                # claim happens under the condition lock, but ``_mark_running``
+                # and the running metric run after it, and a storage error, a
+                # failing event emitter, or a cancellation landing there used
+                # to leave the counter raised for the life of the process.
                 try:
                     await self._acquire_fair_slot(task)
-                    acquired = True
                     async with write_lock:
                         pass
                     heartbeat_task = self._start_running_heartbeat(task)
@@ -863,9 +868,7 @@ class TaskRuntime:
                     if heartbeat_task is not None:
                         await self._stop_running_heartbeat(heartbeat_task)
                         heartbeat_task = None
-                    if acquired:
-                        await self._release_slot(task)
-                        acquired = False
+                    await self._release_slot(task)
                     await self._mark_terminal(
                         task,
                         AgentTaskStatus.SUCCEEDED,
@@ -874,7 +877,7 @@ class TaskRuntime:
                 finally:
                     if heartbeat_task is not None:
                         await self._stop_running_heartbeat(heartbeat_task)
-                    if acquired:
+                    if task.acquired_slot:
                         await self._release_slot(task)
         except asyncio.CancelledError:
             reason = "overflow_drop" if task.overflow_dropped else "interrupt"
