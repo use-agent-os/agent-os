@@ -26,18 +26,18 @@ _SHOT_RE = re.compile(
     r"===\s*SHOT_(\d+)\s*===(.*?)(?====\s*SHOT_\d+\s*===|\Z)",
     re.DOTALL,
 )
-_DUR_RE = re.compile(r"^\s*DURATION_S\s*:\s*(\d+)", re.MULTILINE)
+_DUR_RE = re.compile(r"^\s*DURATION_S\s*:\s*(\d+(?:\.\d+)?)", re.MULTILINE)
 _VO_RE = re.compile(r"^\s*VOICEOVER\s*:\s*(.+?)\s*$", re.MULTILINE)
 
 
-def parse_script(text: str) -> list[tuple[int, int, str]]:
+def parse_script(text: str) -> list[tuple[int, float, str]]:
     """Return [(shot_number, duration_s, voiceover), ...].
 
     Voiceover values of literal 'none' / empty / dashes are normalised
     to empty strings; such shots produce no SRT cue but their duration
     still advances the timestamp cursor.
     """
-    out: list[tuple[int, int, str]] = []
+    out: list[tuple[int, float, str]] = []
     for match in _SHOT_RE.finditer(text):
         shot_no = int(match.group(1))
         block = match.group(2)
@@ -45,7 +45,7 @@ def parse_script(text: str) -> list[tuple[int, int, str]]:
         vo_m = _VO_RE.search(block)
         if not dur_m:
             continue
-        duration = int(dur_m.group(1))
+        duration = float(dur_m.group(1))
         voiceover = (vo_m.group(1) if vo_m else "").strip()
         if voiceover.lower() in {"", "none", "-", "--"}:
             voiceover = ""
@@ -53,7 +53,7 @@ def parse_script(text: str) -> list[tuple[int, int, str]]:
     return out
 
 
-def fmt_ts(total_ms: int) -> str:
+def fmt_ts(total_ms: float) -> str:
     """Convert milliseconds to SRT timestamp ``HH:MM:SS,mmm``."""
     ms = max(0, int(total_ms))
     h, ms = divmod(ms, 3_600_000)
@@ -63,7 +63,7 @@ def fmt_ts(total_ms: int) -> str:
 
 
 def build_srt(
-    shots: list[tuple[int, int, str]],
+    shots: list[tuple[int, float, str]],
     gap_ms: int,
     leading_offset_ms: int = 0,
 ) -> str:
@@ -77,7 +77,7 @@ def build_srt(
     cursor_ms = max(0, leading_offset_ms)
     cue_index = 1
     for _shot_no, duration_s, voiceover in shots:
-        shot_ms = duration_s * 1000
+        shot_ms = int(duration_s * 1000)
         if voiceover:
             start = cursor_ms
             # Hold the line until ~gap_ms before the next shot starts so
