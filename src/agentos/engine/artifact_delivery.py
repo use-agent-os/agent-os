@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -42,14 +44,40 @@ class OmittedArtifactPublishResult:
     failure_summaries: list[str] = field(default_factory=list)
 
 
+#: A mention has to sit on a filename boundary. Written in terms of filename
+#: characters rather than ``\b``: ``.`` and ``-`` are non-word characters, so
+#: ``\b`` still matches ``data.json`` inside ``metadata.json``. A trailing
+#: ``.`` stays allowed so a name that ends a sentence keeps matching, while a
+#: ``.`` followed by an alphanumeric is rejected so ``out.csv`` does not match
+#: inside ``out.csv.bak``. ``/`` and ``\`` are boundaries on purpose: a bare
+#: name must still match when the text spells the path it sits in.
+_MENTION_PREFIX = r"(?<![A-Za-z0-9_.\-])"
+_MENTION_SUFFIX = r"(?![A-Za-z0-9_\-])(?!\.[A-Za-z0-9])"
+
+
+@lru_cache(maxsize=512)
+def _mention_pattern(candidate: str) -> re.Pattern[str]:
+    return re.compile(_MENTION_PREFIX + re.escape(candidate) + _MENTION_SUFFIX)
+
+
 def _text_mentions_written_file(final_text: str, record: dict[str, Any]) -> bool:
+    """Whether *final_text* names this file, on a filename boundary.
+
+    Plain containment let one filename match inside a longer one, so a reply
+    that named only ``metadata.json`` published an intermediate ``data.json``
+    the model never mentioned — the opposite of the conservative backstop this
+    is meant to be.
+    """
     text = final_text.casefold()
     candidates = {
         str(record.get("relative_path") or ""),
         str(record.get("path") or ""),
         str(record.get("name") or ""),
     }
-    return any(candidate and candidate.casefold() in text for candidate in candidates)
+    return any(
+        candidate and _mention_pattern(candidate.casefold()).search(text) is not None
+        for candidate in candidates
+    )
 
 
 def _published_artifact_keys(ctx: ToolContext) -> set[tuple[str, str]]:
