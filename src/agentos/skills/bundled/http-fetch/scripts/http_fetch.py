@@ -66,7 +66,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     # Body comes from stdin (per the SKILL.md entrypoint contract).
-    body = sys.stdin.buffer.read() if not sys.stdin.isatty() else b""
+    try:
+        body = sys.stdin.buffer.read() if not sys.stdin.isatty() else b""
+    except (OSError, ValueError, AttributeError):
+        body = b""
 
     try:
         status, raw, reason = _fetch(url, method, body, args.timeout)
@@ -81,7 +84,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if len(raw) > args.max_bytes:
-        raw = raw[: args.max_bytes - 1] + b"\xe2\x80\xa6"  # … (truncation marker)
+        if args.max_bytes <= 0:
+            raw = b""
+        elif args.max_bytes < 3:
+            raw = raw[: args.max_bytes]
+        else:
+            raw = raw[: args.max_bytes - 3] + b"\xe2\x80\xa6"  # … (3-byte truncation marker)
 
     # Lossy decode — meta-skill DAGs need string output for templating.
     text = raw.decode("utf-8", errors="replace")
