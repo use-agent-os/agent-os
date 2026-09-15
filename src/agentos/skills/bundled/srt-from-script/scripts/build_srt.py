@@ -26,18 +26,38 @@ _SHOT_RE = re.compile(
     r"===\s*SHOT_(\d+)\s*===(.*?)(?====\s*SHOT_\d+\s*===|\Z)",
     re.DOTALL,
 )
-_DUR_RE = re.compile(r"^\s*DURATION_S\s*:\s*(\d+)", re.MULTILINE)
+# Shot durations are wall-clock seconds and are routinely fractional --
+# ai-video-script emits ``DURATION_S: 3.5``. Matching only ``\d+`` truncated
+# that to 3, and the error accumulated across shots, so every later cue drifted
+# further from its shot.
+#
+# All four spellings of a decimal are accepted, because the two that a bare
+# ``\d+(?:\.\d+)?`` misses fail worse than truncation: ``.5`` and ``+3.5`` do
+# not match at all, and a block whose DURATION_S does not match is skipped
+# entirely, so the shot's whole screen time vanishes from the timeline instead
+# of losing a fraction of it.
+#
+# A leading ``-`` is deliberately not matched. A negative duration would run
+# the cursor backwards and emit cues out of order; leaving it unmatched keeps
+# the existing "skip the malformed block" behaviour rather than inventing a
+# meaning for it.
+_DUR_RE = re.compile(
+    r"^\s*DURATION_S\s*:\s*\+?(\d+(?:\.\d*)?|\.\d+)",
+    re.MULTILINE,
+)
 _VO_RE = re.compile(r"^\s*VOICEOVER\s*:\s*(.+?)\s*$", re.MULTILINE)
 
 
-def parse_script(text: str) -> list[tuple[int, int, str]]:
+def parse_script(text: str) -> list[tuple[int, float, str]]:
     """Return [(shot_number, duration_s, voiceover), ...].
+
+    Durations are seconds and may be fractional.
 
     Voiceover values of literal 'none' / empty / dashes are normalised
     to empty strings; such shots produce no SRT cue but their duration
     still advances the timestamp cursor.
     """
-    out: list[tuple[int, int, str]] = []
+    out: list[tuple[int, float, str]] = []
     for match in _SHOT_RE.finditer(text):
         shot_no = int(match.group(1))
         block = match.group(2)
@@ -45,7 +65,7 @@ def parse_script(text: str) -> list[tuple[int, int, str]]:
         vo_m = _VO_RE.search(block)
         if not dur_m:
             continue
-        duration = int(dur_m.group(1))
+        duration = float(dur_m.group(1))
         voiceover = (vo_m.group(1) if vo_m else "").strip()
         if voiceover.lower() in {"", "none", "-", "--"}:
             voiceover = ""
@@ -63,7 +83,7 @@ def fmt_ts(total_ms: int) -> str:
 
 
 def build_srt(
-    shots: list[tuple[int, int, str]],
+    shots: list[tuple[int, float, str]],
     gap_ms: int,
     leading_offset_ms: int = 0,
 ) -> str:
@@ -72,23 +92,33 @@ def build_srt(
     ``leading_offset_ms`` shifts every cue forward by that many ms — useful
     when the final merged video has a prepended cover clip before the
     shots' content actually starts.
+
+    Every boundary is rounded from the *cumulative* elapsed time rather than
+    summed from per-shot millisecond values. Rounding each shot on its own and
+    adding those up lets half-millisecond errors accumulate in one direction,
+    which is the drift this function exists to avoid; deriving each boundary
+    from the running total keeps every cue within half a millisecond of its
+    true position no matter how many shots precede it.
     """
     lines: list[str] = []
-    cursor_ms = max(0, leading_offset_ms)
+    base_ms = max(0, leading_offset_ms)
+    elapsed_s = 0.0
     cue_index = 1
     for _shot_no, duration_s, voiceover in shots:
-        shot_ms = duration_s * 1000
+        start = base_ms + round(elapsed_s * 1000)
+        elapsed_s += duration_s
+        shot_end = base_ms + round(elapsed_s * 1000)
         if voiceover:
-            start = cursor_ms
             # Hold the line until ~gap_ms before the next shot starts so
-            # the cut doesn't visually clip the text.
-            end = max(start + 800, cursor_ms + shot_ms - max(0, gap_ms))
+            # the cut doesn't visually clip the text. The 800 ms floor wins
+            # for a very short shot, so its cue outlives the shot on purpose
+            # rather than flashing by unreadably.
+            end = max(start + 800, shot_end - max(0, gap_ms))
             lines.append(str(cue_index))
             lines.append(f"{fmt_ts(start)} --> {fmt_ts(end)}")
             lines.append(voiceover)
             lines.append("")
             cue_index += 1
-        cursor_ms += shot_ms
     return "\n".join(lines).rstrip() + "\n"
 
 

@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Skills: `srt-from-script` truncated a fractional `DURATION_S`. The field was
+  matched with `\d+` and read with `int()`, so `DURATION_S: 3.5` became 3 —
+  and because shot timestamps accumulate, every later cue started early by the
+  running total of everything truncated before it. Durations are now parsed as
+  floats, including the `.5`, `3.`, `03.50` and `+3.5` spellings that a bare
+  `\d+(?:\.\d+)?` misses; those matched nothing at all, and an unmatched
+  `DURATION_S` drops the whole shot from the timeline rather than shortening
+  it. Cue boundaries are rounded from the cumulative elapsed time instead of
+  summed from per-shot milliseconds, so a value binary float lands just under
+  (`int(1.001 * 1000)` is 1000) can no longer lose a millisecond per shot in
+  one direction. A negative duration is still not matched, since it would run
+  the cursor backwards (#2070).
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added
