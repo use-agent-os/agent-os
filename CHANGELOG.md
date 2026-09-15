@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Telegram: `***bold italic***` and `___bold italic___` now render as
+  `<b><i>…</i></b>`. The double-marker bold pass ran first and took the outer
+  asterisks, the single-marker italic pass then matched across the `</b>`,
+  and the interleaved `<b><i>…</b></i>` made Telegram reject the message
+  ("can't find end tag of i") so the adapter fell back to plain text (#2032).
+- `edit_file`: a multi-line `old_text` that differed from the file only by
+  surrounding whitespace was matched by `trimmed_boundary` with a span that
+  began after the line's indentation and stopped before its newline, so the
+  shared re-indent read a landing indent of "" and dedented every line of
+  `new_text` after the first out of its body, and added a spare newline. The
+  span now grows back over the whitespace `strip()` removed and is
+  line-aligned like every other indent-blind strategy's (#2050).
+- `read_spreadsheet`: an `.xlsx` cell's furigana reading (`<rPh>`, which
+  Excel writes for text entered through a Japanese IME) was appended to the
+  cell value, so `東京都` read as `東京都とうきょうと` in both shared and inline
+  strings. Only the direct `<t>` and the `<t>` of each `<r>` run are joined
+  now; formatted rich text still joins across its runs (#2053).
+- Ollama: a final chunk carrying `"prompt_eval_count": null` or
+  `"eval_count": null` produced a `DoneEvent` with `None` token counts, and
+  the turn runner died with `TypeError` adding them to an int. Both counters
+  are coerced to `int` like the OpenAI and Anthropic providers (#2058).
+- Redaction: `bot` + `token` is now a credential pair, so `DISCORD_BOT_TOKEN`
+  and `TELEGRAM_BOT_TOKEN` -- whose values match no vendor prefix -- and
+  `SLACK_BOT_TOKEN` / `BOT_TOKEN` are masked by name; `passphrase` joins
+  `password` and `passwd` as a strong segment so `SSH_PASSPHRASE=…` is masked.
+  `bot_name`, `robot_arm`, `chatbot_config` and `token_budget` stay readable
+  (#2068).
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added
