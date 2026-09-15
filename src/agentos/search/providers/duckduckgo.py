@@ -103,9 +103,20 @@ class DuckDuckGoProvider:
             if "y.js" in href:
                 continue
 
-            # Clean DDG redirect URLs
-            if "//duckduckgo.com/l/?uddg=" in href:
-                href = urllib.parse.unquote(href.split("uddg=")[1].split("&")[0])
+            # Clean DDG redirect URLs. DuckDuckGo's HTML endpoint emits this
+            # link relative (/l/?uddg=...), protocol-relative
+            # (//duckduckgo.com/l/?uddg=...), or absolute
+            # (https://duckduckgo.com/l/?uddg=...) -- checked by path rather
+            # than a host/prefix substring so all three are handled the same
+            # way. parse_qs also decodes the target URL regardless of where
+            # `uddg` falls among the redirect's other query params, and never
+            # matches an unrelated organic result whose own query string
+            # happens to contain a `uddg` parameter.
+            parsed_href = urllib.parse.urlsplit(href)
+            if parsed_href.path == "/l/":
+                target = urllib.parse.parse_qs(parsed_href.query).get("uddg")
+                if target:
+                    href = target[0]
 
             snippet_elem = elem.select_one(".result__snippet")
             snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
