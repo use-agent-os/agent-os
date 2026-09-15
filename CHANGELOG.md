@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Skills (hub scanner): `_strip_code_blocks` only recognized exactly-
+  three-backtick fences, so a `~~~`-fenced or 4-space/tab-indented
+  example (both CommonMark-valid) was scanned as plain text and scored
+  `severity="dangerous"` -- the same outcome a real exfiltration
+  attempt produces. Confirmed `scan_result.verdict == "dangerous"`
+  hard-blocks a hub install unless the caller passes `force=True`, so a
+  legitimately-written community skill using either convention would
+  fail to install with no indication it's a false positive. Tilde
+  fences are now matched with a fully independent pattern (backtick
+  matching is byte-for-byte unchanged, to avoid a broader, unrelated
+  behavior change a generalized single-pattern approach would have
+  introduced), plus a conservative indented-code-block stripper
+  (#2324).
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added
