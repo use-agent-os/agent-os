@@ -68,6 +68,13 @@ def _render_inline(text: str) -> str:
         return f'<a href="\x00TG_HREF_{len(hrefs) - 1}\x00">{match.group(1)}</a>'
 
     rendered = _LINK_RE.sub(_park_href, rendered)
+    # Triple-marker bold-italic passes must precede double/single passes to
+    # prevent interleaved tags like '<b><i>...</b></i>', which Telegram's HTML
+    # parser rejects with "can't parse entities: can't find end tag of i".
+    rendered = re.sub(r"\*\*\*(?=\S)(.+?)(?<=\S)\*\*\*", r"<b><i>\1</i></b>", rendered)
+    rendered = re.sub(
+        r"(?<!\w)___(?=[^\s_])(.+?)(?<=[^\s_])___(?!\w)", r"<b><i>\1</i></b>", rendered
+    )
     rendered = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", r"<b>\1</b>", rendered)
     rendered = re.sub(r"__(?=\S)(.+?)(?<=\S)__", r"<b>\1</b>", rendered)
     rendered = re.sub(r"~~(?=\S)(.+?)(?<=\S)~~", r"<s>\1</s>", rendered)
@@ -98,7 +105,7 @@ def _plain_inline(text: str) -> str:
 
     text = _LINK_RE.sub(_park_href, text)
     text = text.replace("`", "")
-    for marker in ("**", "__", "~~"):
+    for marker in ("***", "___", "**", "__", "~~"):
         text = text.replace(marker, "")
     for index, href in enumerate(hrefs):
         text = text.replace(f"\x00TG_HREF_{index}\x00", href)
@@ -174,9 +181,7 @@ def _render_table(headers: list[str], rows: list[list[str]]) -> list[str]:
     clean_headers = [_plain_inline(header) for header in headers]
     column_count = len(headers)
     if column_count == 2:
-        rendered = [
-            f"<b>{html.escape(clean_headers[0])} — {html.escape(clean_headers[1])}</b>"
-        ]
+        rendered = [f"<b>{html.escape(clean_headers[0])} — {html.escape(clean_headers[1])}</b>"]
         for row in rows:
             normalised = _normalize_row(row, column_count)
             label = normalised[0]
