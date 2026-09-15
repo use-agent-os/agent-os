@@ -80,6 +80,67 @@ def test_create_then_inspect_round_trip(tmp_path: Path) -> None:
     assert inspected["has_tracked_changes"] is False
 
 
+def test_create_docx_skips_out_of_range_heading_level(tmp_path: Path) -> None:
+    """A heading level outside python-docx's 0-9 range must not crash the
+    whole script (#2312) -- it's skipped with a warning, and the rest of the
+    spec still produces a document."""
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import create_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    spec = {
+        "body": [
+            {"kind": "heading", "level": 10, "text": "Deep sub-heading"},
+            {"kind": "paragraph", "text": "Body text here"},
+        ]
+    }
+    doc = create_docx.build(spec)
+    texts = [p.text for p in doc.paragraphs]
+    assert "Deep sub-heading" not in texts
+    assert "Body text here" in texts
+
+
+def test_create_docx_skips_non_numeric_heading_level(tmp_path: Path) -> None:
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import create_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    spec = {
+        "body": [
+            {"kind": "heading", "level": "deep", "text": "Bad level"},
+            {"kind": "paragraph", "text": "Still here"},
+        ]
+    }
+    doc = create_docx.build(spec)
+    texts = [p.text for p in doc.paragraphs]
+    assert "Bad level" not in texts
+    assert "Still here" in texts
+
+
+def test_create_docx_accepts_boundary_heading_levels(tmp_path: Path) -> None:
+    """0 and 9 are the valid boundary values and must still work."""
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import create_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    spec = {
+        "body": [
+            {"kind": "heading", "level": 0, "text": "Title level"},
+            {"kind": "heading", "level": 9, "text": "Max level"},
+        ]
+    }
+    doc = create_docx.build(spec)
+    texts = [p.text for p in doc.paragraphs]
+    assert "Title level" in texts
+    assert "Max level" in texts
+
+
 def test_edit_replace_text(tmp_path: Path) -> None:
     sys.path.insert(0, str(SCRIPTS))
     try:

@@ -38,7 +38,22 @@ def build(spec: dict[str, Any]) -> Document:
             continue
         kind = item.get("kind")
         if kind == "heading":
-            doc.add_heading(str(item.get("text", "")), level=int(item.get("level", 1)))
+            raw_level = item.get("level", 1)
+            try:
+                level = int(raw_level)
+            except (TypeError, ValueError):
+                print(
+                    f"warning: skipping heading with non-numeric level {raw_level!r}",
+                    file=sys.stderr,
+                )
+                continue
+            if not 0 <= level <= 9:
+                print(
+                    f"warning: skipping heading with out-of-range level {level} (must be 0-9)",
+                    file=sys.stderr,
+                )
+                continue
+            doc.add_heading(str(item.get("text", "")), level=level)
         elif kind == "paragraph":
             style = item.get("style") or "Normal"
             doc.add_paragraph(str(item.get("text", "")), style=style)
