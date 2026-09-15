@@ -6,15 +6,41 @@ import html
 import re
 
 _TABLE_DELIMITER_RE = re.compile(r"^:?-{3,}:?$")
-_FENCE_RE = re.compile(r"^\s*```(?P<language>[A-Za-z0-9_+-]{0,32})\s*$")
+# A fence opens with three *or more* backticks and then an info string, which
+# CommonMark takes to be the rest of the line (its first word is the language,
+# anything after it is attributes). The previous pattern required exactly three
+# backticks and confined the info string to `[A-Za-z0-9_+-]`, so a `c#`, `f#`,
+# `.env`, `vb.net` or `text/x-python` block was not recognised as a fence at
+# all: the backticks were rendered as literal text and the closing fence was
+# then read as an *opening* fence with no language, which swallowed everything
+# after it into a <pre> block.
+_FENCE_RE = re.compile(r"^\s*(?P<fence>`{3,})(?P<info>[^`]*?)\s*$")
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(?P<text>.+?)\s*#*\s*$")
 _ORDERED_LIST_RE = re.compile(r"^(?P<indent>\s*)(?P<number>\d+)[.)]\s+(?P<text>.+)$")
 _UNORDERED_LIST_RE = re.compile(r"^(?P<indent>\s*)[-+*]\s+(?P<text>.+)$")
-_LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://[^\s)<]+)\)")
+_LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://(?:[^\s()]|\([^\s()]*\))+)\)")
 # CommonMark's blockquote marker: up to 3 leading spaces, `>`, then at most
 # one space before the content. `>quote` (no space) and `>` alone (an empty
 # quote line, used to separate paragraphs within one quote) both match.
 _BLOCKQUOTE_RE = re.compile(r"^ {0,3}>[ ]?(?P<text>.*)$")
+
+# What may survive into `class="language-..."`. The value is interpolated
+# unescaped, so this is an allowlist rather than a tidiness pass: a quote
+# reaching it would break out of the attribute. Everything the common fence
+# languages need -- `c#`, `f#`, `vb.net`, `.env`, `text/x-python` -- is here.
+_LANGUAGE_SAFE_RE = re.compile(r"[^A-Za-z0-9_.+#/-]")
+
+
+def _fence_language(info: str) -> str:
+    """The language a fence info string declares, safe for a class attribute.
+
+    The first whitespace-delimited word is the language and the rest is
+    attributes, which this renderer has no use for. Characters outside the
+    allowlist are dropped rather than the fence being rejected, so a `c#` or
+    `.env` block still renders as code instead of leaking its backticks.
+    """
+    words = info.split()
+    return _LANGUAGE_SAFE_RE.sub("", words[0])[:32] if words else ""
 
 
 def _replace_code_spans(text: str) -> tuple[str, list[str]]:
@@ -210,7 +236,7 @@ def render_telegram_html(markdown: str) -> str:
         line = lines[index]
         fence = _FENCE_RE.match(line)
         if fence:
-            language = fence.group("language")
+            language = _fence_language(fence.group("info"))
             code_lines: list[str] = []
             index += 1
             while index < len(lines) and not _FENCE_RE.match(lines[index]):
