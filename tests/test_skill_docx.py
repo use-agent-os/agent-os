@@ -483,3 +483,152 @@ def test_apply_ops_skips_non_dict_ops() -> None:
 
     assert applied == 1
     assert doc.paragraphs[0].text == "Hello Wei"
+
+
+# ── unusable ops and specs are reported, not swallowed (#2145, #2146) ────────
+
+
+def _create_docx_module() -> object:
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import create_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+    return create_docx
+
+
+def _one_paragraph_docx(path: Path, text: str) -> None:
+    from docx import Document
+
+    doc = Document()
+    doc.add_paragraph(text)
+    doc.save(str(path))
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ("not json at all", "is not valid JSON"),
+        ('{"op": "replace_text", "find": "a", "with": "b"}', "must be a JSON array"),
+        ('["replace_text"]', "op 0 must be an object"),
+        ('[{"op": "replace-text", "find": "a", "with": "b"}]', "unknown kind 'replace-text'"),
+        ('[{"find": "a", "with": "b"}]', "unknown kind None"),
+    ],
+)
+def test_edit_docx_reports_an_unusable_ops_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    body: str,
+    expected: str,
+) -> None:
+    """Each of these either crashed with a traceback or was silently dropped,
+    leaving an unmodified copy at --out reported as a successful edit."""
+    edit_docx = _edit_docx_module()
+    src = tmp_path / "in.docx"
+    _one_paragraph_docx(src, "Hello ORIGINAL world")
+    ops = tmp_path / "ops.json"
+    ops.write_text(body, encoding="utf-8")
+    out = tmp_path / "out.docx"
+    monkeypatch.setattr(sys, "argv", ["edit_docx.py", str(src), str(ops), "--out", str(out)])
+
+    assert edit_docx.main() == 2
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("error: ")
+    assert expected in captured.err
+    assert not out.exists()
+
+
+def test_edit_docx_leaves_an_existing_output_alone_when_the_ops_are_unusable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The destructive case: a typo'd op kind used to replace a document that
+    already held real work with an unmodified copy of the input, and exit 0."""
+    edit_docx = _edit_docx_module()
+    src = tmp_path / "in.docx"
+    _one_paragraph_docx(src, "Hello ORIGINAL world")
+    out = tmp_path / "out.docx"
+    _one_paragraph_docx(out, "PREVIOUSLY EDITED CONTENT")
+    before = out.read_bytes()
+    ops = tmp_path / "ops.json"
+    ops.write_text('[{"op": "replace-text", "find": "a", "with": "b"}]', encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["edit_docx.py", str(src), str(ops), "--out", str(out)])
+
+    assert edit_docx.main() == 2
+    assert out.read_bytes() == before
+
+
+def test_edit_docx_still_applies_a_valid_ops_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Validation must not disturb the working path."""
+    from docx import Document
+
+    edit_docx = _edit_docx_module()
+    src = tmp_path / "in.docx"
+    _one_paragraph_docx(src, "Hello ORIGINAL world")
+    ops = tmp_path / "ops.json"
+    ops.write_text(
+        json.dumps([{"op": "replace_text", "find": "ORIGINAL", "with": "PATCHED"}]),
+        encoding="utf-8",
+    )
+    out = tmp_path / "out.docx"
+    monkeypatch.setattr(sys, "argv", ["edit_docx.py", str(src), str(ops), "--out", str(out)])
+
+    assert edit_docx.main() == 0
+
+    assert json.loads(capsys.readouterr().out) == {"applied": 1}
+    assert [p.text for p in Document(str(out)).paragraphs] == ["Hello PATCHED world"]
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ("not json at all", "is not valid JSON"),
+        ('[{"kind": "paragraph", "text": "Hi"}]', 'must be a JSON object with a "body" array'),
+        ('{"body": {"kind": "paragraph"}}', '"body" must be an array'),
+        ('{"body": []}', '"body" is empty'),
+        ('{"body": [{"kind": "paragrpah", "text": "Hi"}]}', "unknown kind 'paragrpah'"),
+    ],
+)
+def test_create_docx_reports_an_unusable_spec(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    body: str,
+    expected: str,
+) -> None:
+    """A spec that is a bare array raised `AttributeError: 'list' object has no
+    attribute 'get'`; a typo'd kind produced an empty document at exit 0."""
+    create_docx = _create_docx_module()
+    spec = tmp_path / "spec.json"
+    spec.write_text(body, encoding="utf-8")
+    out = tmp_path / "new.docx"
+    monkeypatch.setattr(sys, "argv", ["create_docx.py", str(spec), "--out", str(out)])
+
+    assert create_docx.main() == 2
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("error: ")
+    assert expected in captured.err
+    assert not out.exists()
+
+
+def test_create_docx_still_builds_a_valid_spec_and_now_reports_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`create_docx` printed nothing at all on success, so a caller had no
+    signal beyond the exit code."""
+    from docx import Document
+
+    create_docx = _create_docx_module()
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps({"body": [{"kind": "paragraph", "text": "Hi"}]}), encoding="utf-8")
+    out = tmp_path / "new.docx"
+    monkeypatch.setattr(sys, "argv", ["create_docx.py", str(spec), "--out", str(out)])
+
+    assert create_docx.main() == 0
+
+    assert json.loads(capsys.readouterr().out)["entries"] == 1
+    assert [p.text for p in Document(str(out)).paragraphs] == ["Hi"]

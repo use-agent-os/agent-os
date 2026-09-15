@@ -395,7 +395,6 @@ def test_the_apostrophe_escape_is_not_consumed_without_as_text(tmp_path: Path) -
     assert sheet.cell(row=2, column=1).value == "'=hello"
 
 
-
 def _import_scripts() -> tuple[Any, Any, Any]:
     sys.path.insert(0, str(SCRIPTS))
     try:
@@ -571,3 +570,85 @@ def test_clearing_a_cell_keeps_its_style(
     cell = load_workbook(str(out))["S"].cell(row=1, column=1)
     assert cell.value is None
     assert cell.number_format == "0.00%"
+
+
+# ── unusable ops files are reported, not swallowed (#2145, #2146) ────────────
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ("not json at all", "is not valid JSON"),
+        (
+            '{"op": "set_cell", "sheet": "S", "row": 1, "col": 1, "value": "x"}',
+            "must be a JSON array",
+        ),
+        ('["set_cell"]', "op 0 must be an object"),
+        (
+            '[{"op": "set-cell", "sheet": "S", "row": 1, "col": 1, "value": "x"}]',
+            "unknown kind 'set-cell'",
+        ),
+        ('[{"sheet": "S", "row": 1, "col": 1, "value": "x"}]', "unknown kind None"),
+    ],
+)
+def test_edit_xlsx_reports_an_unusable_ops_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    body: str,
+    expected: str,
+) -> None:
+    """`json.loads` was unguarded and `ops = raw if isinstance(raw, list) else []`
+    turned a wrong-shaped file into zero ops, writing an unchanged copy at exit 0."""
+    create_xlsx, edit_xlsx, _inspect = _import_scripts()
+    src = tmp_path / "book.xlsx"
+    create_xlsx.build({"sheets": [{"name": "S", "rows": [["keep me"]]}]}).save(str(src))
+    ops = tmp_path / "ops.json"
+    ops.write_text(body, encoding="utf-8")
+    out = tmp_path / "out.xlsx"
+    monkeypatch.setattr(sys, "argv", ["edit_xlsx.py", str(src), str(ops), "--out", str(out)])
+
+    assert edit_xlsx.main() == 2
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("error: ")
+    assert expected in captured.err
+    assert not out.exists()
+
+
+def test_edit_xlsx_leaves_an_existing_output_alone_when_the_ops_are_unusable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_xlsx, edit_xlsx, _inspect = _import_scripts()
+    src = tmp_path / "book.xlsx"
+    create_xlsx.build({"sheets": [{"name": "S", "rows": [["source"]]}]}).save(str(src))
+    out = tmp_path / "out.xlsx"
+    create_xlsx.build({"sheets": [{"name": "S", "rows": [["PREVIOUS WORK"]]}]}).save(str(out))
+    before = out.read_bytes()
+    ops = tmp_path / "ops.json"
+    ops.write_text('[{"op": "set-cell", "sheet": "S", "row": 1, "col": 1}]', encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["edit_xlsx.py", str(src), str(ops), "--out", str(out)])
+
+    assert edit_xlsx.main() == 2
+    assert out.read_bytes() == before
+
+
+def test_edit_xlsx_still_applies_a_valid_ops_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    create_xlsx, edit_xlsx, _inspect = _import_scripts()
+    src = tmp_path / "book.xlsx"
+    create_xlsx.build({"sheets": [{"name": "S", "rows": [["before"]]}]}).save(str(src))
+    out = tmp_path / "out.xlsx"
+    report = _run_cli(
+        edit_xlsx,
+        monkeypatch,
+        capsys,
+        src,
+        out,
+        [{"op": "set_cell", "sheet": "S", "row": 1, "col": 1, "value": "after"}],
+        tmp_path,
+    )
+
+    assert report == {"applied": 1}
+    assert _cell(out, 1, 1) == "after"

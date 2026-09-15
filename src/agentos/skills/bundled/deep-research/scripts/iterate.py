@@ -107,8 +107,22 @@ def main() -> int:
         if not args.record.is_file():
             print(f"error: record {args.record} not found", file=sys.stderr)
             return 2
-        raw = json.loads(args.record.read_text(encoding="utf-8"))
-        evidence = raw if isinstance(raw, list) else []
+        try:
+            raw = json.loads(args.record.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            print(f"error: record {args.record} is not valid JSON: {exc}", file=sys.stderr)
+            return 2
+        if not isinstance(raw, list):
+            # `raw if isinstance(raw, list) else []` recorded nothing at all
+            # here and still saved the plan and reported success, so a round's
+            # findings were silently dropped.
+            print(
+                f"error: record {args.record} must be a JSON array of evidence, "
+                f"got {type(raw).__name__}",
+                file=sys.stderr,
+            )
+            return 2
+        evidence = raw
         added = record_evidence(plan, evidence)
         save_plan(plan, args.plan)
         sys.stdout.write(

@@ -64,6 +64,40 @@ def _coerce(value: Any, as_text: bool) -> Any:
     return value
 
 
+#: Every op kind ``apply_ops`` knows. An op outside this set is a caller
+#: mistake, not a no-op: the ops file is written by the agent one step before
+#: the call, so ``set-cell`` for ``set_cell`` is a routine slip.
+OP_KINDS = ("set_cell", "rename_sheet", "merge_cells")
+
+
+class OpsError(ValueError):
+    """An ops file that cannot be used. Reported as ``error:`` / exit 2, never
+    as a traceback: the caller passed bad input, the script did not break."""
+
+
+def load_ops(path: Path) -> list[dict[str, Any]]:
+    """Read and validate the ops file, or raise :class:`OpsError`.
+
+    Validation happens before the workbook is opened, so an unusable ops file
+    cannot leave a half-applied workbook behind.
+    """
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise OpsError(f"ops {path} is not valid JSON: {exc}") from exc
+    if not isinstance(raw, list):
+        raise OpsError(f"ops {path} must be a JSON array of operations, got {type(raw).__name__}")
+    for index, op in enumerate(raw):
+        if not isinstance(op, dict):
+            raise OpsError(f"op {index} must be an object, got {type(op).__name__}")
+        kind = op.get("op")
+        if kind not in OP_KINDS:
+            raise OpsError(
+                f"op {index} has unknown kind {kind!r}; expected one of {', '.join(OP_KINDS)}"
+            )
+    return raw
+
+
 def apply_ops(wb: Any, ops: list[dict[str, Any]]) -> int:
     applied = 0
     for op in ops:
@@ -130,8 +164,11 @@ def main() -> int:
     if not args.ops.is_file():
         print(f"error: ops {args.ops} not found", file=sys.stderr)
         return 2
-    raw = json.loads(args.ops.read_text(encoding="utf-8"))
-    ops = raw if isinstance(raw, list) else []
+    try:
+        ops = load_ops(args.ops)
+    except OpsError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     wb = load_workbook(filename=str(args.input))
     applied = apply_ops(wb, ops)
     args.out.parent.mkdir(parents=True, exist_ok=True)

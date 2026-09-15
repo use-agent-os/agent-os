@@ -21,6 +21,44 @@ from typing import Any
 
 from docx import Document
 
+#: Every body entry kind ``build`` renders. Anything else is a caller mistake:
+#: silently skipping it produced an empty document reported as a success.
+BODY_KINDS = ("heading", "paragraph", "table", "page_break")
+
+
+class SpecError(ValueError):
+    """A spec that cannot be used. Reported as ``error:`` / exit 2, never as a
+    traceback: the caller passed bad input, the script did not break."""
+
+
+def load_spec(path: Path) -> dict[str, Any]:
+    """Read and validate the spec file, or raise :class:`SpecError`."""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SpecError(f"spec {path} is not valid JSON: {exc}") from exc
+    if not isinstance(raw, dict):
+        # Passing the body array directly instead of {"body": [...]} is the
+        # obvious slip, and `spec.get` raised AttributeError on it.
+        raise SpecError(
+            f'spec {path} must be a JSON object with a "body" array, got {type(raw).__name__}'
+        )
+    body = raw.get("body", [])
+    if not isinstance(body, list):
+        raise SpecError(f'spec {path}: "body" must be an array, got {type(body).__name__}')
+    if not body:
+        raise SpecError(f'spec {path}: "body" is empty, so there is nothing to create')
+    for index, item in enumerate(body):
+        if not isinstance(item, dict):
+            raise SpecError(f"body entry {index} must be an object, got {type(item).__name__}")
+        kind = item.get("kind")
+        if kind not in BODY_KINDS:
+            raise SpecError(
+                f"body entry {index} has unknown kind {kind!r}; "
+                f"expected one of {', '.join(BODY_KINDS)}"
+            )
+    return raw
+
 
 def build(spec: dict[str, Any]) -> Document:
     doc = Document()
@@ -68,10 +106,19 @@ def main() -> int:
     if not args.spec.is_file():
         print(f"error: spec {args.spec} not found", file=sys.stderr)
         return 2
-    spec = json.loads(args.spec.read_text(encoding="utf-8"))
+    try:
+        spec = load_spec(args.spec)
+    except SpecError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     doc = build(spec)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(args.out))
+    # The sibling scripts all print a summary; this one printed nothing at all,
+    # so a caller had no signal beyond the exit code.
+    print(
+        json.dumps({"entries": len(spec.get("body", [])), "out": str(args.out)}, ensure_ascii=False)
+    )
     return 0
 
 
