@@ -465,3 +465,60 @@ def test_the_handler_has_no_way_to_reach_a_provider():
     params = inspect.signature(make_script_run_handler).parameters
 
     assert list(params) == ["delivery_chain"]
+
+
+@pytest.mark.asyncio
+async def test_relative_workdir_resolves_under_the_script_directory(agentos_home):
+    """`--workdir data` means the script's own `data/`, not the gateway's CWD."""
+    _write_script(agentos_home, "cwd.py", "import os; print(os.getcwd())")
+    wanted = agentos_home / "scripts" / "data"
+    wanted.mkdir()
+
+    ok, output = await run_job_script("cwd.py", timeout=30, workdir="data")
+
+    assert ok is True
+    assert output == str(wanted.resolve())
+
+
+@pytest.mark.asyncio
+async def test_relative_workdir_is_not_resolved_against_the_process_cwd(
+    agentos_home, tmp_path, monkeypatch
+):
+    """A same-named directory beside the gateway's CWD must not win.
+
+    The scheduler runs wherever the gateway was started, which is routinely not
+    the script's directory; resolving there ran the job somewhere the caller
+    never named.
+    """
+    _write_script(agentos_home, "cwd.py", "import os; print(os.getcwd())")
+    wanted = agentos_home / "scripts" / "data"
+    wanted.mkdir()
+    decoy_parent = tmp_path / "elsewhere"
+    (decoy_parent / "data").mkdir(parents=True)
+    monkeypatch.chdir(decoy_parent)
+
+    ok, output = await run_job_script("cwd.py", timeout=30, workdir="data")
+
+    assert ok is True
+    assert output == str(wanted.resolve())
+
+
+@pytest.mark.asyncio
+async def test_dot_workdir_matches_the_documented_default(agentos_home):
+    """`workdir="."` and an unset workdir name the same directory."""
+    _write_script(agentos_home, "cwd.py", "import os; print(os.getcwd())")
+
+    ok, output = await run_job_script("cwd.py", timeout=30, workdir=".")
+
+    assert ok is True
+    assert output == str((agentos_home / "scripts").resolve())
+
+
+@pytest.mark.asyncio
+async def test_missing_relative_workdir_falls_back_to_the_script_directory(agentos_home):
+    _write_script(agentos_home, "cwd.py", "import os; print(os.getcwd())")
+
+    ok, output = await run_job_script("cwd.py", timeout=30, workdir="no/such/dir")
+
+    assert ok is True
+    assert output == str((agentos_home / "scripts").resolve())

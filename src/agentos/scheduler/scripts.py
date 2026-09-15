@@ -185,10 +185,18 @@ def _resolve_workdir(workdir: str, fallback: Path) -> str:
     if not candidate:
         return str(fallback)
     expanded = Path(candidate).expanduser()
+    if not expanded.is_absolute():
+        # A relative workdir is relative to the script's own directory — the
+        # documented default when none is given — mirroring ``resolve_script_path``
+        # above and ``shell._effective_workdir``. Testing it as written instead
+        # resolved it against the scheduler process CWD: the job either ran in an
+        # unrelated same-named directory, or fell back here with nothing but a
+        # log line to say the caller's workdir had been dropped (#1566).
+        expanded = fallback / expanded
     if not expanded.is_dir():
-        log.warning("cron.script.workdir_missing", workdir=candidate)
+        log.warning("cron.script.workdir_missing", workdir=candidate, resolved=str(expanded))
         return str(fallback)
-    return str(expanded)
+    return str(expanded.resolve())
 
 
 def _read_pyvenv_cfg(venv_dir: Path) -> dict[str, str]:

@@ -118,7 +118,11 @@ The script path is **relative to `~/.agentos/scripts/`**. Absolute paths, `~`,
 and `..` are refused, and a symlink that leaves the directory is refused at run
 time — the directory is the trust boundary. `.sh` and `.bash` run under bash;
 every other extension runs under the same Python interpreter as the gateway.
-Pass `--workdir` to run somewhere other than the script's own directory.
+Pass `--workdir` to run somewhere other than the script's own directory. A
+relative `--workdir` is joined onto that same directory, so `--workdir data`
+names `~/.agentos/scripts/data`; an absolute one is taken as given. A workdir
+that does not exist is reported in the log and the script runs in its own
+directory.
 
 Subdirectories under `~/.agentos/scripts/` are allowed, and `{job_id}` anywhere
 in the path is replaced with the created job's own id:
