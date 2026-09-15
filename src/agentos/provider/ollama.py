@@ -56,10 +56,16 @@ def _build_ollama_message(
 
     tool_names = tool_names_by_id if tool_names_by_id is not None else {}
     parts: list[str] = []
+    images: list[str] = []
     tool_calls: list[dict[str, Any]] = []
     for block in msg.content:
         if block.type == "text":
             parts.append(block.text)
+        elif block.type == "image":
+            raw_data = block.data
+            if raw_data.startswith("data:") and ";base64," in raw_data:
+                raw_data = raw_data.split(";base64,", 1)[1]
+            images.append(raw_data)
         elif block.type == "tool_use":
             tool_names[block.id] = block.name
             tool_calls.append(
@@ -85,6 +91,8 @@ def _build_ollama_message(
     result: dict[str, Any] = {"role": msg.role, "content": " ".join(parts)}
     if tool_calls:
         result["tool_calls"] = tool_calls
+    if images:
+        result["images"] = images
     return result
 
 
@@ -106,6 +114,13 @@ def _build_ollama_messages(messages: list[Message]) -> list[dict[str, Any]]:
                     if tool_name:
                         tool_result["tool_name"] = tool_name
                     result.append(tool_result)
+
+                non_tool_blocks: list[Any] = [
+                    block for block in message.content if block.type != "tool_result"
+                ]
+                if non_tool_blocks:
+                    sub_message = Message(role=message.role, content=non_tool_blocks)
+                    result.append(_build_ollama_message(sub_message, tool_names_by_id))
                 continue
         result.append(_build_ollama_message(message, tool_names_by_id))
     return result

@@ -9,6 +9,8 @@ import pytest
 
 from agentos.provider import (
     ChatConfig,
+    ContentBlockImage,
+    ContentBlockText,
     ContentBlockToolResult,
     ContentBlockToolUse,
     DoneEvent,
@@ -366,3 +368,113 @@ def test_ollama_non_model_404_keeps_the_plain_http_message(
 
     assert isinstance(error, ErrorEvent)
     assert error.message == "HTTP 404: 404 page not found"
+
+
+def test_ollama_preserves_mixed_tool_result_and_text_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    _patch_transport(
+        monkeypatch,
+        captured,
+        '{"model":"qwen2.5:7b","message":{"role":"assistant","content":"Done"},"done":true}\n',
+    )
+    provider = OllamaProvider(model="qwen2.5:7b")
+    messages = [
+        Message(role="user", content="Lookup info"),
+        Message(
+            role="assistant",
+            content=[
+                ContentBlockToolUse(
+                    id="call_1",
+                    name="web_search",
+                    input={"query": "test query"},
+                )
+            ],
+        ),
+        Message(
+            role="user",
+            content=[
+                ContentBlockToolResult(
+                    tool_use_id="call_1",
+                    content='{"status":"ok"}',
+                ),
+                ContentBlockText(text="Please analyze the result."),
+            ],
+        ),
+    ]
+
+    async def _run() -> list[Any]:
+        return [event async for event in provider.chat(messages, tools=[_tool()])]
+
+    asyncio.run(_run())
+
+    assert captured["payload"]["messages"] == [
+        {"role": "user", "content": "Lookup info"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "web_search",
+                        "arguments": {"query": "test query"},
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "content": '{"status":"ok"}',
+            "tool_name": "web_search",
+        },
+        {"role": "user", "content": "Please analyze the result."},
+    ]
+
+
+def test_ollama_includes_images_and_strips_data_url_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    _patch_transport(
+        monkeypatch,
+        captured,
+        (
+            '{"model":"llama3.2-vision","message":{"role":"assistant",'
+            '"content":"A cat"},"done":true}\n'
+        ),
+    )
+    provider = OllamaProvider(model="llama3.2-vision")
+    messages = [
+        Message(
+            role="user",
+            content=[
+                ContentBlockText(text="What is in these images?"),
+                ContentBlockImage(
+                    source_type="base64",
+                    media_type="image/png",
+                    data="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+                ),
+                ContentBlockImage(
+                    source_type="base64",
+                    media_type="image/jpeg",
+                    data="dGVzdF9pbWFnZV9ieXRlcw==",
+                ),
+            ],
+        ),
+    ]
+
+    async def _run() -> list[Any]:
+        return [event async for event in provider.chat(messages)]
+
+    asyncio.run(_run())
+
+    assert captured["payload"]["messages"] == [
+        {
+            "role": "user",
+            "content": "What is in these images?",
+            "images": ["iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB", "dGVzdF9pbWFnZV9ieXRlcw=="],
+        }
+    ]
