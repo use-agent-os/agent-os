@@ -34,6 +34,12 @@ DEFAULT_DENYLIST_WIN: list[str] = [
     r"\bRemove-Item\b",
     _WIN_CMD_PREFIX + r"rd\b",
     _WIN_CMD_PREFIX + r"erase\b",
+    # `rm` and `ri` are PowerShell's other two built-in aliases for
+    # Remove-Item (alongside rd/erase/del/rmdir, all already covered above)
+    # -- same short-token false-positive risk as rd/erase, so anchored the
+    # same way rather than a bare \bword\b.
+    _WIN_CMD_PREFIX + r"rm\b",
+    _WIN_CMD_PREFIX + r"ri\b",
     r"\bFormat-Volume\b",
     r"\bStop-Computer\b",
     r"\bRestart-Computer\b",
@@ -107,7 +113,11 @@ class SafeBinPolicy:
         if not deny:
             deny = _legacy_denylist_if_set()
             if not deny:
-                deny = DEFAULT_DENYLIST_WIN if os.name == "nt" else DEFAULT_DENYLIST
+                deny = (
+                    [*DEFAULT_DENYLIST, *DEFAULT_DENYLIST_WIN]
+                    if os.name == "nt"
+                    else DEFAULT_DENYLIST
+                )
         if not warn and not warn_env_present:
             warn = DEFAULT_WARNLIST_WIN if os.name == "nt" else DEFAULT_WARNLIST
 
