@@ -85,7 +85,11 @@ def main() -> int:
     if not args.plan.is_file():
         print(f"error: plan {args.plan} not found", file=sys.stderr)
         return 2
-    plan = load_plan(args.plan)
+    try:
+        plan = load_plan(args.plan)
+    except (ValueError, UnicodeDecodeError) as exc:
+        print(f"error: plan {args.plan} is not valid JSON or plan schema: {exc}", file=sys.stderr)
+        return 2
     plan.rounds = max(plan.rounds, args.round_num)
 
     if args.print_fetches and not args.record:
@@ -107,8 +111,19 @@ def main() -> int:
         if not args.record.is_file():
             print(f"error: record {args.record} not found", file=sys.stderr)
             return 2
-        raw = json.loads(args.record.read_text(encoding="utf-8"))
-        evidence = raw if isinstance(raw, list) else []
+        try:
+            raw = json.loads(args.record.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            print(f"error: record {args.record} is not valid JSON: {exc}", file=sys.stderr)
+            return 2
+        if not isinstance(raw, list):
+            print(
+                f"error: record {args.record} must be a JSON list of evidence items, "
+                f"got {type(raw).__name__}",
+                file=sys.stderr,
+            )
+            return 2
+        evidence = raw
         added = record_evidence(plan, evidence)
         save_plan(plan, args.plan)
         sys.stdout.write(
