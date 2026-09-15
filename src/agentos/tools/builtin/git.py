@@ -154,7 +154,7 @@ def _git_diff_argv(a: dict[str, Any]) -> tuple[str, ...]:
 
 @tool(
     name="git_diff",
-    description="Show git diff (staged + unstaged changes).",
+    description="Show git diff (unstaged changes by default; add --cached to include staged changes).",
     params={
         "path": {"type": "string", "description": "Limit diff to this path."},
         "staged": {"type": "boolean", "description": "Show only staged changes."},
