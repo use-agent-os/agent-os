@@ -133,6 +133,29 @@ def test_git_diff_argv_staged_with_path() -> None:
     )
 
 
+def test_git_commit_argv_distinguishes_all_changes_from_staged_only() -> None:
+    """Regression: ``files=None`` and ``files=[]`` are opposite actions --
+    stage everything vs. stage nothing new -- but ``len(files or [])`` reads
+    identically ("0") for both, and this argv is what a human sees verbatim
+    in the approval modal for a STRICT-level commit.
+    """
+    all_changes = git._git_commit_argv({"message": "m"})
+    staged_only = git._git_commit_argv({"message": "m", "files": []})
+
+    assert all_changes != staged_only
+    assert all_changes == ("git", "commit", "m", "all-changes")
+    assert staged_only == ("git", "commit", "m", "staged-only")
+
+
+def test_git_commit_argv_reports_named_file_count() -> None:
+    assert git._git_commit_argv({"message": "m", "files": ["a.py", "b.py"]}) == (
+        "git",
+        "commit",
+        "m",
+        "2-files",
+    )
+
+
 def _git_commit_impl() -> Any:
     """``git_commit`` with the ``@tool``/``@sandboxed`` wrappers peeled off.
 
