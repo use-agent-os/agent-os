@@ -22,8 +22,8 @@ app = typer.Typer(help="Manage chat sessions.")
 _CLIENT_UNAVAILABLE = object()
 _ACTION_FAILED = object()
 
-# Rows pulled before a client-side --search filter runs.
-_SEARCH_FETCH_LIMIT = 500
+# Rows pulled before any client-side filter runs.
+_FILTER_FETCH_LIMIT = 500
 
 
 def _resolved_key(payload: dict[str, Any], fallback: str) -> str:
@@ -160,11 +160,14 @@ def sessions_list(
 ) -> None:
     """List recent sessions."""
     since_dt = _parse_since(since)
-    # Filtering happens client-side, so a search over the default 50 most
-    # recent rows would miss the older session the user named months ago —
-    # the exact case renaming exists for. Widen the fetch when searching
-    # unless the caller pinned a larger --limit themselves.
-    fetch_limit = max(limit, _SEARCH_FETCH_LIMIT) if (search or "").strip() else limit
+    # Every filter below runs client-side — sessions.list only narrows by
+    # project — so a filter applied over the default 50 most recent rows keeps
+    # whichever of those 50 happen to match and reports nothing about the rest.
+    # `--agent ops --limit 20` returned an empty table while the matching
+    # sessions sat just outside the fetch window. Widen the fetch whenever a
+    # filter is in play, unless the caller pinned a larger --limit themselves.
+    filters = ((search or "").strip(), agent, status, channel, (since or "").strip())
+    fetch_limit = max(limit, _FILTER_FETCH_LIMIT) if any(filters) else limit
 
     async def _run(client):
         return await client.list_sessions(limit=fetch_limit)
@@ -180,9 +183,8 @@ def sessions_list(
         search=search,
     )
     # --limit still bounds what the user sees; the widened fetch above only
-    # widens what search looks at.
-    if fetch_limit != limit:
-        rows = rows[:limit]
+    # widens what the filters look at.
+    rows = rows[:limit]
     if json_output:
         payload = dict(result) if isinstance(result, dict) else {}
         payload["sessions"] = rows

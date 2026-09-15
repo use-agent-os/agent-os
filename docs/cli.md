@@ -659,6 +659,7 @@ Read:
 ```sh
 agentos sessions list
 agentos sessions list --search api-refactor    # match name, key, subject or model
+agentos sessions list --agent main --status done   # also --channel, --since
 agentos sessions show <session-key>
 agentos sessions rename <session-key> "api-refactor"
 agentos sessions rename <session-key> --clear  # drop the custom name
@@ -667,6 +668,10 @@ agentos sessions abort <session-key>
 agentos sessions export <session-key>
 agentos sessions delete <session-key>
 ```
+
+Every filter on `sessions list` runs client-side over the recent history rather
+than over the page `--limit` would show, so `--limit` bounds how many matches
+are printed, not how far back the filter looks.
 
 Sessions are auto-named. `rename` gives one a human-readable label that shows
 up in `sessions list`, in the chat toolbar, and in the Web UI session list, and
