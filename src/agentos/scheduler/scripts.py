@@ -137,9 +137,7 @@ def resolve_script_path(script: str) -> Path:
     base_resolved = base.resolve()
 
     candidate = Path(raw).expanduser()
-    resolved = (
-        candidate.resolve() if candidate.is_absolute() else (base / candidate).resolve()
-    )
+    resolved = candidate.resolve() if candidate.is_absolute() else (base / candidate).resolve()
     try:
         resolved.relative_to(base_resolved)
     except ValueError:
@@ -260,9 +258,13 @@ def _interpreter(path: Path) -> tuple[list[str], dict[str, str], str | None]:
     if path.suffix.lower() in _SHELL_SUFFIXES:
         bash = shutil.which("bash") or ("/bin/bash" if os.path.isfile("/bin/bash") else None)
         if bash is None:
-            return [], {}, (
-                f"Cannot run {path.name!r}: bash was not found on PATH. "
-                "Rewrite the script in Python (.py) or install bash."
+            return (
+                [],
+                {},
+                (
+                    f"Cannot run {path.name!r}: bash was not found on PATH. "
+                    "Rewrite the script in Python (.py) or install bash."
+                ),
             )
         return [bash, str(path)], {}, None
     python_exe, env_overlay = _python_invocation(sys.executable)
@@ -336,7 +338,10 @@ async def run_job_script(
     try:
         raw_stdout, raw_stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except TimeoutError:
-        proc.kill()
+        try:
+            proc.kill()
+        except (ProcessLookupError, OSError):
+            pass
         # Reap the killed child so the event loop does not warn about a
         # pending transport on the next GC pass.
         try:
@@ -344,6 +349,16 @@ async def run_job_script(
         except Exception:
             pass
         return False, f"Script timed out after {timeout:g}s: {path.name}"
+    except asyncio.CancelledError:
+        try:
+            proc.kill()
+        except (ProcessLookupError, OSError):
+            pass
+        try:
+            await proc.communicate()
+        except Exception:
+            pass
+        raise
     except Exception as exc:
         return False, f"Script execution failed: {exc}"
 
