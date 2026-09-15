@@ -109,6 +109,192 @@ def test_merge_range_parsing() -> None:
     assert merge.parse_ranges("1,99", 4) == [1]
 
 
+def _merge_module():
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import merge  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+    return merge
+
+
+def test_merge_refuses_when_all_inputs_missing_and_writes_no_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    merge = _merge_module()
+    missing_a = tmp_path / "missing_a.pdf"
+    missing_b = tmp_path / "missing_b.pdf"
+    out_pdf = tmp_path / "out.pdf"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["merge.py", str(missing_a), str(missing_b), "--out", str(out_pdf)],
+    )
+    assert merge.main() == 2
+    assert not out_pdf.exists()
+    err = capsys.readouterr().err
+    assert f"warn: missing {missing_a}" in err
+    assert "error: nothing was written; check input paths and page ranges" in err
+
+
+def test_merge_refuses_when_requested_pages_produce_no_pages_and_writes_no_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import json
+
+    merge = _merge_module()
+    doc = tmp_path / "doc.pdf"
+    _make_one_page_pdf(doc, "PAGE1")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps([{"file": str(doc), "pages": "10-20"}]),
+        encoding="utf-8",
+    )
+    out_pdf = tmp_path / "out.pdf"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["merge.py", str(manifest), "--out", str(out_pdf)],
+    )
+    assert merge.main() == 2
+    assert not out_pdf.exists()
+    err = capsys.readouterr().err
+    assert "error: nothing was written; check input paths and page ranges" in err
+
+
+def test_merge_refuses_empty_manifest_and_writes_no_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    merge = _merge_module()
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("[]", encoding="utf-8")
+    out_pdf = tmp_path / "out.pdf"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["merge.py", str(manifest), "--out", str(out_pdf)],
+    )
+    assert merge.main() == 2
+    assert not out_pdf.exists()
+    err = capsys.readouterr().err
+    assert "error: nothing was written; check input paths and page ranges" in err
+
+
+def test_merge_refuses_manifest_that_is_not_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    merge = _merge_module()
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{not valid json", encoding="utf-8")
+    out_pdf = tmp_path / "out.pdf"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["merge.py", str(manifest), "--out", str(out_pdf)],
+    )
+    assert merge.main() == 2
+    assert not out_pdf.exists()
+    assert "is not valid JSON" in capsys.readouterr().err
+
+
+def test_merge_refuses_manifest_that_is_not_an_array(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    merge = _merge_module()
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('{"file": "a.pdf"}', encoding="utf-8")
+    out_pdf = tmp_path / "out.pdf"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["merge.py", str(manifest), "--out", str(out_pdf)],
+    )
+    assert merge.main() == 2
+    assert not out_pdf.exists()
+    assert "must be a JSON array, got dict" in capsys.readouterr().err
+
+
+def test_merge_refuses_manifest_items_without_file_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    merge = _merge_module()
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('[{"pages": "1-3"}]', encoding="utf-8")
+    out_pdf = tmp_path / "out.pdf"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["merge.py", str(manifest), "--out", str(out_pdf)],
+    )
+    assert merge.main() == 2
+    assert not out_pdf.exists()
+    assert "must be an object with a 'file' path" in capsys.readouterr().err
+
+
+def test_merge_refuses_manifest_items_that_are_strings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    merge = _merge_module()
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('["a.pdf"]', encoding="utf-8")
+    out_pdf = tmp_path / "out.pdf"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["merge.py", str(manifest), "--out", str(out_pdf)],
+    )
+    assert merge.main() == 2
+    assert not out_pdf.exists()
+    assert "must be an object with a 'file' path" in capsys.readouterr().err
+
+
+def test_merge_programmatic_skips_writing_file_when_no_pages(tmp_path: Path) -> None:
+    merge = _merge_module()
+    missing = tmp_path / "missing.pdf"
+    out_pdf = tmp_path / "out.pdf"
+
+    written = merge.merge([{"file": str(missing)}], out_pdf)
+    assert written == 0
+    assert not out_pdf.exists()
+
+
+def test_merge_succeeds_with_manifest_and_writes_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import json
+
+    merge = _merge_module()
+    a = tmp_path / "a.pdf"
+    b = tmp_path / "b.pdf"
+    _make_one_page_pdf(a, "DOC_A")
+    _make_one_page_pdf(b, "DOC_B")
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps([{"file": str(a), "pages": "1"}, {"file": str(b)}]),
+        encoding="utf-8",
+    )
+    out_pdf = tmp_path / "combined.pdf"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["merge.py", str(manifest), "--out", str(out_pdf)],
+    )
+    assert merge.main() == 0
+    assert out_pdf.is_file()
+    out = json.loads(capsys.readouterr().out)
+    assert out["pages_written"] == 2
+    assert out["out"] == str(out_pdf)
+
+
 def test_extract_creates_parent_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sys.path.insert(0, str(SCRIPTS))
     try:

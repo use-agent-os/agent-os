@@ -43,6 +43,9 @@ def merge(items: Iterable[dict[str, str]], out: Path) -> int:
     writer = PdfWriter()
     count = 0
     for item in items:
+        if not isinstance(item, dict) or "file" not in item:
+            print(f"warn: invalid manifest item {item}", file=sys.stderr)
+            continue
         path = Path(item["file"])
         if not path.is_file():
             print(f"warn: missing {path}", file=sys.stderr)
@@ -52,6 +55,8 @@ def merge(items: Iterable[dict[str, str]], out: Path) -> int:
         for page_num in parse_ranges(item.get("pages"), total):
             writer.add_page(reader.pages[page_num - 1])
             count += 1
+    if count == 0:
+        return 0
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("wb") as fh:
         writer.write(fh)
@@ -77,13 +82,34 @@ def main() -> int:
         if not manifest_path.is_file():
             print(f"error: manifest {manifest_path} not found", file=sys.stderr)
             return 2
-        items = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if not isinstance(items, list):
-            print("error: manifest must be a JSON array", file=sys.stderr)
+        try:
+            items = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            print(f"error: manifest {manifest_path} is not valid JSON: {exc}", file=sys.stderr)
             return 2
+        if not isinstance(items, list):
+            print(
+                f"error: manifest {manifest_path} must be a JSON array, got {type(items).__name__}",
+                file=sys.stderr,
+            )
+            return 2
+        for idx, item in enumerate(items):
+            if (
+                not isinstance(item, dict)
+                or "file" not in item
+                or not isinstance(item["file"], str)
+            ):
+                print(
+                    f"error: manifest item at index {idx} must be an object with a 'file' path",
+                    file=sys.stderr,
+                )
+                return 2
     else:
         items = [{"file": p} for p in args.inputs]
     written = merge(items, args.out)
+    if written == 0:
+        print("error: nothing was written; check input paths and page ranges", file=sys.stderr)
+        return 2
     print(json.dumps({"pages_written": written, "out": str(args.out)}, ensure_ascii=False))
     return 0
 
