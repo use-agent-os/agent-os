@@ -6,11 +6,30 @@ import html
 import re
 
 _TABLE_DELIMITER_RE = re.compile(r"^:?-{3,}:?$")
-_FENCE_RE = re.compile(r"^\s*```(?P<language>[A-Za-z0-9_+-]{0,32})\s*$")
+# A fence opens with three or more backticks or tildes followed by an info
+# string, which CommonMark takes to be the rest of the line: its first word is
+# the language, anything after it is attributes this renderer has no use for.
+# A backtick info string may not contain a backtick (that is what keeps a
+# ``` code span unambiguous); a tilde one may contain anything, backticks
+# included, which is the reason to reach for `~~~` at all. The info string is
+# otherwise free-form (`c#`, `vb.net`, `.env`, `text/x-python`), so the
+# language is sanitised for the class attribute separately rather than by
+# refusing the fence -- a refused opener left the *closing* fence to open a
+# block that swallowed the rest of the message. The closing fence must use the
+# same character, be at least as long as the opener and carry no info string,
+# so a ```` block can quote a ``` block verbatim and a ~~~ block a ``` one.
+_FENCE_OPEN_RE = re.compile(
+    r"^\s*(?:(?P<ticks>`{3,})(?P<tick_info>[^`]*)|(?P<tildes>~{3,})(?P<tilde_info>.*))$"
+)
+_FENCE_LANGUAGE_MAX_LENGTH = 32
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(?P<text>.+?)\s*#*\s*$")
 _ORDERED_LIST_RE = re.compile(r"^(?P<indent>\s*)(?P<number>\d+)[.)]\s+(?P<text>.+)$")
 _UNORDERED_LIST_RE = re.compile(r"^(?P<indent>\s*)[-+*]\s+(?P<text>.+)$")
-_LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://[^\s)<]+)\)")
+# The destination may carry one level of balanced parentheses (CommonMark), so
+# a Wikipedia disambiguator or a `#method_(args)` anchor is kept whole instead
+# of being cut at the first `)` with the remainder rendered as text after the
+# anchor. Deeper nesting is left as literal text rather than a truncated link.
+_LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://(?:[^\s()<]|\([^\s()<]*\))+)\)")
 # CommonMark's blockquote marker: up to 3 leading spaces, `>`, then at most
 # one space before the content. `>quote` (no space) and `>` alone (an empty
 # quote line, used to separate paragraphs within one quote) both match.
@@ -201,6 +220,18 @@ def _render_table(headers: list[str], rows: list[list[str]]) -> list[str]:
     return rendered
 
 
+def _fence_language(info: str) -> str:
+    """Return the language a fence info string declares, safe for a class attribute."""
+    words = info.split()
+    if not words:
+        return ""
+    return html.escape(words[0][:_FENCE_LANGUAGE_MAX_LENGTH], quote=True)
+
+
+def _closing_fence_re(fence: str) -> re.Pattern[str]:
+    return re.compile(rf"^\s*{re.escape(fence[0])}{{{len(fence)},}}\s*$")
+
+
 def render_telegram_html(markdown: str) -> str:
     """Render a safe, mobile-friendly Telegram HTML subset from Markdown."""
     lines = markdown.splitlines()
@@ -208,12 +239,17 @@ def render_telegram_html(markdown: str) -> str:
     index = 0
     while index < len(lines):
         line = lines[index]
-        fence = _FENCE_RE.match(line)
+        fence = _FENCE_OPEN_RE.match(line)
         if fence:
-            language = fence.group("language")
+            if fence.group("ticks") is not None:
+                marker, info = fence.group("ticks"), fence.group("tick_info")
+            else:
+                marker, info = fence.group("tildes"), fence.group("tilde_info")
+            language = _fence_language(info)
+            closing_fence = _closing_fence_re(marker)
             code_lines: list[str] = []
             index += 1
-            while index < len(lines) and not _FENCE_RE.match(lines[index]):
+            while index < len(lines) and not closing_fence.match(lines[index]):
                 code_lines.append(lines[index])
                 index += 1
             if index < len(lines):
