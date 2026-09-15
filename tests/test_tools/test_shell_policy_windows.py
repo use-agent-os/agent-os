@@ -123,6 +123,47 @@ def test_windows_anchored_rd_erase_negative_cases_allowed(command: str) -> None:
     assert result.needs_approval is False
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        r"rm -rf /",
+        r"rm -rf /*",
+        r"mkfs.ext4 /dev/sda1",
+        r"dd if=/dev/zero of=/dev/sda",
+        r"shutdown -h now",
+        r"reboot",
+        r"halt",
+        r":(){ :|:& };:",
+        r"echo x > /dev/sda",
+        r"chmod -R 777 /",
+    ],
+)
+def test_windows_now_enforces_the_platform_independent_denylist(command: str) -> None:
+    """Issue #1964 — ``from_env`` used to pick *one* default denylist by
+    platform, so on Windows ``DEFAULT_DENYLIST`` (the catastrophic,
+    platform-independent list) was never consulted at all. These hazards
+    reach a Windows host through git-bash/MSYS/WSL/Cygwin, and ``shutdown``
+    is a native Windows binary besides."""
+    result = shell_policy.SafeBinPolicy.from_env().check(command)
+
+    assert result.allowed is False
+    assert result.needs_approval is False
+
+
+def test_posix_denylist_is_unaffected_by_the_windows_union(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The union only widens Windows; POSIX still gets exactly DEFAULT_DENYLIST,
+    not the Windows-only patterns (``del``, ``Remove-Item``, etc.)."""
+    monkeypatch.setattr(shell_policy.os, "name", "posix")
+
+    policy = shell_policy.SafeBinPolicy.from_env()
+
+    assert policy.denylist == shell_policy.DEFAULT_DENYLIST
+    result = policy.check(r"del C:\tmp\file.txt")
+    assert result.allowed is True
+
+
 def test_windows_deny_env_overrides_platform_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENTOS_SAFE_BIN_DENY", r"\bcustom-block\b")
 

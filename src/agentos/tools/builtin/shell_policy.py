@@ -113,7 +113,11 @@ class SafeBinPolicy:
         if not deny:
             deny = _legacy_denylist_if_set()
             if not deny:
-                deny = DEFAULT_DENYLIST_WIN if os.name == "nt" else DEFAULT_DENYLIST
+                deny = (
+                    [*DEFAULT_DENYLIST, *DEFAULT_DENYLIST_WIN]
+                    if os.name == "nt"
+                    else DEFAULT_DENYLIST
+                )
         if not warn and not warn_env_present:
             warn = DEFAULT_WARNLIST_WIN if os.name == "nt" else DEFAULT_WARNLIST
 
