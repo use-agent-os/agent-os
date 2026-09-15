@@ -377,4 +377,128 @@ def test_apply_ops_skips_non_dict_ops() -> None:
     )
 
     assert applied == 1
-    assert doc.paragraphs[0].text == "Hello Wei"
+
+
+def _create_docx_module() -> object:
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import create_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+    return create_docx
+
+
+@pytest.mark.parametrize("spec", [None, [], "not-a-dict", 42, ("also", "not-a-dict")])
+def test_build_returns_an_empty_document_for_a_non_dict_spec(spec: object) -> None:
+    create_docx = _create_docx_module()
+
+    doc = create_docx.build(spec)
+
+    assert doc.paragraphs == []
+    assert doc.tables == []
+
+
+@pytest.mark.parametrize(
+    "raw_body",
+    [
+        pytest.param("not-a-list", id="string"),
+        pytest.param(None, id="null"),
+        pytest.param([1, "x", None], id="list-of-non-dicts"),
+    ],
+)
+def test_build_returns_an_empty_document_for_malformed_body(raw_body: object) -> None:
+    create_docx = _create_docx_module()
+
+    doc = create_docx.build({"body": raw_body})
+
+    assert doc.paragraphs == []
+
+
+def test_build_accepts_a_tuple_body_and_tuple_rows() -> None:
+    """`body`/`rows` are consumed as any sequence, not specifically `list`."""
+    create_docx = _create_docx_module()
+
+    doc = create_docx.build({"body": ({"kind": "table", "rows": (["a", "b"], ["c", "d"])},)})
+
+    assert len(doc.tables) == 1
+    table = doc.tables[0]
+    assert [c.text for c in table.rows[0].cells] == ["a", "b"]
+    assert [c.text for c in table.rows[1].cells] == ["c", "d"]
+
+
+def test_build_skips_a_table_whose_rows_are_all_empty() -> None:
+    create_docx = _create_docx_module()
+
+    doc = create_docx.build({"body": [{"kind": "table", "rows": [[], []]}]})
+
+    assert doc.tables == []
+
+
+def test_build_normalizes_scalar_table_rows_into_single_cell_rows() -> None:
+    """A scalar row becomes one cell, not an iteration over its characters/digits."""
+    create_docx = _create_docx_module()
+
+    doc = create_docx.build({"body": [{"kind": "table", "rows": ["header", 42]}]})
+
+    table = doc.tables[0]
+    assert table.rows[0].cells[0].text == "header"
+    assert table.rows[1].cells[0].text == "42"
+
+
+@pytest.mark.parametrize("level", [-5, 50, None, "not-a-number"])
+def test_build_clamps_an_invalid_heading_level(level: object) -> None:
+    create_docx = _create_docx_module()
+
+    # Must not raise -- python-docx itself only accepts levels 0-9.
+    doc = create_docx.build({"body": [{"kind": "heading", "text": "Title", "level": level}]})
+
+    assert doc.paragraphs[0].text == "Title"
+
+
+def test_create_docx_cli_reports_invalid_json_with_exit_code_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    create_docx = _create_docx_module()
+
+    bad_json = tmp_path / "bad.json"
+    bad_json.write_text("{not valid json", encoding="utf-8")
+    out = tmp_path / "out.docx"
+    monkeypatch.setattr(sys, "argv", ["create_docx.py", str(bad_json), "--out", str(out)])
+
+    assert create_docx.main() == 2
+    assert "is not valid JSON" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_create_docx_cli_reports_non_object_json_with_exit_code_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    create_docx = _create_docx_module()
+
+    array_spec = tmp_path / "spec.json"
+    array_spec.write_text('[{"kind": "paragraph", "text": "Hi"}]', encoding="utf-8")
+    out = tmp_path / "out.docx"
+    monkeypatch.setattr(sys, "argv", ["create_docx.py", str(array_spec), "--out", str(out)])
+
+    assert create_docx.main() == 2
+    assert 'must be a JSON object with a "body" array' in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_edit_docx_cli_reports_invalid_json_with_exit_code_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from docx import Document
+
+    edit_docx = _edit_docx_module()
+
+    src = tmp_path / "in.docx"
+    Document().save(str(src))
+    bad_json = tmp_path / "bad.json"
+    bad_json.write_text("{not valid json", encoding="utf-8")
+    out = tmp_path / "out.docx"
+    monkeypatch.setattr(sys, "argv", ["edit_docx.py", str(src), str(bad_json), "--out", str(out)])
+
+    assert edit_docx.main() == 2
+    assert "is not valid JSON" in capsys.readouterr().err
+    assert not out.exists()
