@@ -142,10 +142,37 @@ async def git_status(workdir: str | None = None) -> str:
     return await _run_git("status", "--short", "--branch", cwd=_effective_workdir(workdir))
 
 
+#: The empty tree object, which every repository can resolve even before its
+#: first commit. ``git diff HEAD`` exits 128 in an unborn repository, so the
+#: tool diffs against this instead — the same "everything" view HEAD would
+#: give once a commit exists. Keyed by object format because the hash differs.
+_EMPTY_TREE = {
+    "sha1": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+    "sha256": "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321",
+}
+
+
+async def _diff_base(cwd: str | None) -> str:
+    """Return the revision ``git_diff`` compares against: HEAD, or the empty
+    tree when the repository has no commits yet."""
+    try:
+        await _run_git("rev-parse", "--verify", "--quiet", "HEAD", cwd=cwd)
+    except RuntimeError:
+        try:
+            # ``--show-object-format`` is git >= 2.27; older gits only have
+            # SHA-1 repositories, so its absence means the SHA-1 empty tree.
+            object_format = (await _run_git("rev-parse", "--show-object-format", cwd=cwd)).strip()
+        except RuntimeError:
+            object_format = "sha1"
+        return _EMPTY_TREE.get(object_format, _EMPTY_TREE["sha1"])
+    return "HEAD"
+
+
 def _git_diff_argv(a: dict[str, Any]) -> tuple[str, ...]:
     argv = ["git", "diff"]
     if a.get("staged"):
         argv.append("--cached")
+    argv.append("HEAD")
     path = a.get("path")
     if path:
         argv += ["--", str(path)]
@@ -154,10 +181,10 @@ def _git_diff_argv(a: dict[str, Any]) -> tuple[str, ...]:
 
 @tool(
     name="git_diff",
-    description="Show git diff (staged + unstaged changes).",
+    description="Show git diff against HEAD (staged + unstaged changes).",
     params={
         "path": {"type": "string", "description": "Limit diff to this path."},
-        "staged": {"type": "boolean", "description": "Show only staged changes."},
+        "staged": {"type": "boolean", "description": "Show only staged (index) changes."},
         "workdir": {"type": "string", "description": "Git repository directory (default: cwd)."},
     },
     required=[],
@@ -172,13 +199,19 @@ async def git_diff(
     staged: bool = False,
     workdir: str | None = None,
 ) -> str:
+    cwd = _effective_workdir(workdir)
+    # A bare ``git diff`` only shows the working tree against the index, so a
+    # fully staged tree diffed as empty and a staged new file never appeared.
+    # Diffing against HEAD is the "staged + unstaged" view the description
+    # promises (and what the bundled git-diff skill already runs).
     args = ["diff"]
     if staged:
         args.append("--cached")
+    args.append(await _diff_base(cwd))
     if path:
         _reject_foreign_git_path(path)
         args += ["--", path]
-    return await _run_git(*args, cwd=_effective_workdir(workdir))
+    return await _run_git(*args, cwd=cwd)
 
 
 @tool(

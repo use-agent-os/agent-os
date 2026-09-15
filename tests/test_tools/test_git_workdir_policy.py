@@ -105,19 +105,25 @@ def test_git_rejects_foreign_commit_file_on_windows(
 
 
 def test_git_diff_argv_unstaged_without_path() -> None:
-    assert git._git_diff_argv({}) == ("git", "diff")
-    assert git._git_diff_argv({"staged": False, "path": None}) == ("git", "diff")
+    assert git._git_diff_argv({}) == ("git", "diff", "HEAD")
+    assert git._git_diff_argv({"staged": False, "path": None}) == ("git", "diff", "HEAD")
 
 
 def test_git_diff_argv_staged_without_path() -> None:
-    assert git._git_diff_argv({"staged": True}) == ("git", "diff", "--cached")
-    assert git._git_diff_argv({"staged": True, "path": None}) == ("git", "diff", "--cached")
+    assert git._git_diff_argv({"staged": True}) == ("git", "diff", "--cached", "HEAD")
+    assert git._git_diff_argv({"staged": True, "path": None}) == (
+        "git",
+        "diff",
+        "--cached",
+        "HEAD",
+    )
 
 
 def test_git_diff_argv_unstaged_with_path() -> None:
     assert git._git_diff_argv({"path": "src/main.py"}) == (
         "git",
         "diff",
+        "HEAD",
         "--",
         "src/main.py",
     )
@@ -128,6 +134,7 @@ def test_git_diff_argv_staged_with_path() -> None:
         "git",
         "diff",
         "--cached",
+        "HEAD",
         "--",
         "src/main.py",
     )
