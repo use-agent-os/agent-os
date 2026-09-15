@@ -31,6 +31,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Sequence
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -283,6 +284,15 @@ def _redact(text: str) -> str:
         return "[REDACTED — redaction failed]"
 
 
+async def _kill_and_reap_script(proc: asyncio.subprocess.Process) -> None:
+    # The process may exit between cancellation and kill(). Still drain the
+    # pipes/reap it so no subprocess transport is left behind.
+    with suppress(ProcessLookupError):
+        proc.kill()
+    with suppress(Exception):
+        await proc.communicate()
+
+
 async def run_job_script(
     script: str,
     *,
@@ -335,14 +345,13 @@ async def run_job_script(
 
     try:
         raw_stdout, raw_stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.CancelledError:
+        # The scheduler's outer timeout reaches this path before our own
+        # wait_for expires. Stop the child before propagating cancellation.
+        await _kill_and_reap_script(proc)
+        raise
     except TimeoutError:
-        proc.kill()
-        # Reap the killed child so the event loop does not warn about a
-        # pending transport on the next GC pass.
-        try:
-            await proc.communicate()
-        except Exception:
-            pass
+        await _kill_and_reap_script(proc)
         return False, f"Script timed out after {timeout:g}s: {path.name}"
     except Exception as exc:
         return False, f"Script execution failed: {exc}"
