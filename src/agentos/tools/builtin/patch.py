@@ -62,19 +62,59 @@ _APPLY_PATCH_APPROVAL_NAMESPACE = "exec"
 # ---------------------------------------------------------------------------
 
 
+def _leading_ws(line: str) -> str:
+    """The indentation *line* carries, as text."""
+    return line[: len(line) - len(line.lstrip())]
+
+
+def _marker_span(lines: list[str]) -> tuple[int, int]:
+    """Indices of the ``*** Begin Patch`` / ``*** End Patch`` lines that delimit the body.
+
+    Both markers used to be located by an independent scan from index 0, which
+    picked the wrong line in two ways, each of them silent:
+
+    * An ``*** End Patch`` quoted in a preamble -- a transcript the model echoed
+      back, say -- came *before* the begin marker, so the body slice was empty
+      and every operation in the real patch was dropped while the tool still
+      reported success.
+    * A patch that edits a line reading ``*** End Patch`` carries it as a hunk
+      context line, ``" *** End Patch"``. Stripped, that equals the marker, so
+      the body was cut mid-hunk and the rest of the patch went missing.
+
+    So the end marker is searched for after the begin marker, and a line
+    indented past it does not count. Every line of patch *content* carries a
+    diff prefix -- ``" "``/``"+"``/``"-"`` in a hunk, ``"+"`` under
+    ``*** Add File`` -- which puts it at least one column past the directive
+    lines, so a marker that closes the block can never be mistaken for one
+    quoted inside it.
+    """
+    start_idx = next(
+        (i for i, ln in enumerate(lines) if ln.strip() == "*** Begin Patch"),
+        None,
+    )
+    if start_idx is None:
+        raise ValueError("Missing '*** Begin Patch' marker")
+
+    indent = _leading_ws(lines[start_idx])
+    end_idx = next(
+        (
+            i
+            for i in range(start_idx + 1, len(lines))
+            if lines[i].strip() == "*** End Patch" and len(_leading_ws(lines[i])) <= len(indent)
+        ),
+        None,
+    )
+    if end_idx is None:
+        raise ValueError("Missing '*** End Patch' marker")
+    return start_idx, end_idx
+
+
 def _parse_patch(patch_text: str) -> list[PatchOp]:
     """Parse patch text into a list of PatchOp objects."""
     lines = patch_text.splitlines()
 
-    # Validate markers
-    if not any(line.strip() == "*** Begin Patch" for line in lines):
-        raise ValueError("Missing '*** Begin Patch' marker")
-    if not any(line.strip() == "*** End Patch" for line in lines):
-        raise ValueError("Missing '*** End Patch' marker")
-
     # Trim to content between markers
-    start_idx = next(i for i, ln in enumerate(lines) if ln.strip() == "*** Begin Patch")
-    end_idx = next(i for i, ln in enumerate(lines) if ln.strip() == "*** End Patch")
+    start_idx, end_idx = _marker_span(lines)
     body = lines[start_idx + 1 : end_idx]
 
     ops: list[PatchOp] = []
