@@ -1149,6 +1149,8 @@ async def grep_search(
             if _is_sensitive_access_path(fp.resolve(strict=False), workspace=workspace_root):
                 return
             try:
+                if _looks_binary(_read_binary_sample(fp), fp):
+                    return
                 text = fp.read_text(encoding="utf-8", errors="replace")
                 for lineno, line in enumerate(text.splitlines(), 1):
                     if regex.search(line):
