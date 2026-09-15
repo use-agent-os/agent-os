@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Skills (`subtitle-burner`): `_probe_resolution` derived `ffprobe` from the
+  resolved `ffmpeg` path with a global `str.replace`, which rewrites every
+  occurrence -- so any install whose *directory* is named `ffmpeg` (a
+  manual `/opt/ffmpeg/bin` install, Homebrew's `Cellar/ffmpeg/<version>/bin`)
+  had that directory rewritten too, producing a path that doesn't exist.
+  The existing "already correct" fallback never fired, because it only
+  triggers when *no* replacement happened -- here one did, just the wrong
+  one. The probe then silently returned `None` (no error, no log),
+  `PlayResX`/`PlayResY` were dropped from the default `force_style` chain,
+  and `font_size`/`margin_v` silently stopped being source-video pixels as
+  documented -- visible only by eye. Now derives `ffprobe` with
+  `Path(ffmpeg_bin).with_name(...)`, which only ever touches the file name
+  (#2279).
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added

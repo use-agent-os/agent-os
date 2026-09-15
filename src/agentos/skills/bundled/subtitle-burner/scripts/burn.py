@@ -37,15 +37,19 @@ _WINGET_FFMPEG_GLOB = (
 
 
 def _probe_resolution(ffmpeg_bin: str, video_path: Path) -> tuple[int, int] | None:
-    """Use ffprobe (next to ffmpeg) to read the source video's W x H."""
-    ffprobe = ffmpeg_bin.replace("ffmpeg.exe", "ffprobe.exe").replace(
-        "/ffmpeg", "/ffprobe",
+    """Use ffprobe (next to ffmpeg) to read the source video's W x H.
+
+    ffprobe sits next to ffmpeg, so only the file *name* is swapped --
+    ``Path.with_name`` touches nothing else in the path. A prior version
+    rewrote the whole string with ``.replace("/ffmpeg", "/ffprobe")``, which
+    also rewrote any parent directory named "ffmpeg" (a manual
+    ``/opt/ffmpeg/bin`` install, Homebrew's ``Cellar/ffmpeg/<version>/bin``),
+    producing a path that doesn't exist -- silently disabling the probe
+    below, not raising.
+    """
+    ffprobe = str(
+        Path(ffmpeg_bin).with_name("ffprobe.exe" if os.name == "nt" else "ffprobe")
     )
-    if ffprobe == ffmpeg_bin:
-        # Fallback for non-Windows / non-suffixed names.
-        ffprobe = str(Path(ffmpeg_bin).with_name(
-            "ffprobe.exe" if os.name == "nt" else "ffprobe",
-        ))
     if not Path(ffprobe).is_file() and shutil.which(ffprobe) is None:
         return None
     try:
