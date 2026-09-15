@@ -205,3 +205,88 @@ def test_find_closest_lines_reports_line_numbers_and_scores() -> None:
 
     assert "line 2" in hint
     assert "%" in hint
+
+
+def test_trimmed_boundary_keeps_the_block_in_its_body_on_trailing_whitespace_drift() -> None:
+    """The span used to start after the line's indent and stop before its
+    newline, so the shared re-indent read a target indent of "" and dedented
+    every line after the first, then new_text's own newline was a net
+    insertion. The result was a `return` dedented out of its `def` (#2050)."""
+    content = "class A:\n    def foo(self):\n        return 1\n"
+
+    result = fuzzy_find_and_replace(
+        content,
+        "    def foo(self):\n        return 1   \n",
+        "    def foo(self):\n        return 2\n",
+    )
+
+    assert result.strategy == "trimmed_boundary"
+    assert result.updated == "class A:\n    def foo(self):\n        return 2\n"
+
+
+def test_trimmed_boundary_span_covers_the_whole_lines_it_replaces() -> None:
+    content = "class A:\n    def foo(self):\n        return 1\n"
+
+    result = fuzzy_find_and_replace(
+        content, "    def foo(self):\n        return 1 \n", "    pass\n"
+    )
+
+    assert result.strategy == "trimmed_boundary"
+    assert result.spans == ((9, len(content)),)
+    assert result.updated == "class A:\n    pass\n"
+
+
+def test_trimmed_boundary_absorbs_trailing_whitespace_the_file_has() -> None:
+    # The file line carries trailing spaces the model did not reproduce.
+    content = "if x:\n    return 1  \nprint()\n"
+
+    result = fuzzy_find_and_replace(content, "    return 1\n", "    return 9\n")
+
+    assert result.strategy == "trimmed_boundary"
+    assert result.updated == "if x:\n    return 9\nprint()\n"
+
+
+def test_trimmed_boundary_leading_newline_does_not_consume_the_line_above() -> None:
+    content = "x = 1\n    a = 2\n    b = 3\n"
+
+    # The model's old_text opens on a blank-ish line the file does not have.
+    result = fuzzy_find_and_replace(content, "  \n    a = 2\n    b = 3\n", "    c = 4\n")
+
+    assert result.strategy == "trimmed_boundary"
+    assert result.updated == "x = 1\n    c = 4\n"
+
+
+def test_trimmed_boundary_mid_line_match_stays_mid_line() -> None:
+    content = "x = foo(1)\n"
+
+    result = fuzzy_find_and_replace(content, " 1 ", "2")
+
+    assert result.strategy == "trimmed_boundary"
+    assert result.updated == "x = foo(2)\n"
+
+
+def test_trimmed_boundary_without_leading_drift_keeps_new_text_indent_as_written() -> None:
+    # Only the trailing scrap drifted; the model's new_text already carries
+    # the file's indentation on every line, so nothing may be shifted.
+    content = "class A:\n    def foo(self):\n        return 1\n"
+
+    result = fuzzy_find_and_replace(
+        content,
+        "def foo(self):\n        return 1 \n",
+        "def foo(self):\n        return 2\n",
+    )
+
+    assert result.strategy == "trimmed_boundary"
+    assert result.updated == "class A:\n    def foo(self):\n        return 2\n"
+
+
+def test_trimmed_boundary_replace_all_on_adjacent_lines_does_not_merge_matches() -> None:
+    content = "    a\n    a\n"
+
+    # new_text is written against old_text's two-space belief; each hit lands
+    # at the file's four and the span growth must not fuse the two lines.
+    result = fuzzy_find_and_replace(content, "  a \n", "  b\n", replace_all=True)
+
+    assert result.strategy == "trimmed_boundary"
+    assert result.match_count == 2
+    assert result.updated == "    b\n    b\n"

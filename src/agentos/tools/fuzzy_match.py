@@ -372,7 +372,48 @@ def _strategy_trimmed_boundary(content: str, pattern: str) -> list[tuple[int, in
     trimmed = pattern.strip()
     if not trimmed or trimmed == pattern:
         return []
-    return _find_all(content, trimmed)
+    # ``trimmed`` starts and ends on non-whitespace, so a raw hit begins after
+    # the line's indentation and stops before its newline. This strategy is
+    # indent-blind, and ``_resolve_replacement`` reads the landing indent off
+    # the span's first line: a mid-line span reads as indent "" and every line
+    # of new_text after the first was dedented out of its body, while
+    # new_text's own trailing newline became a net insertion. Grow each span
+    # back over the whitespace ``strip()`` removed so it is line-aligned like
+    # every other indent-blind strategy's.
+    leading = pattern[: len(pattern) - len(pattern.lstrip())]
+    trailing = pattern[len(pattern.rstrip()) :]
+    spans: list[tuple[int, int]] = []
+    for start, end in _find_all(content, trimmed):
+        if leading:
+            start = _grow_to_line_start(content, start)
+        if "\n" in trailing:
+            end = _grow_over_line_end(content, end)
+        spans.append((start, end))
+    return spans
+
+
+def _grow_to_line_start(content: str, offset: int) -> int:
+    """Move *offset* back to the start of its line if only whitespace precedes it."""
+
+    cursor = offset
+    while cursor > 0 and content[cursor - 1] in " \t":
+        cursor -= 1
+    if cursor == 0 or content[cursor - 1] == "\n":
+        return cursor
+    return offset
+
+
+def _grow_over_line_end(content: str, offset: int) -> int:
+    """Move *offset* past the line's newline if only whitespace follows it."""
+
+    cursor = offset
+    while cursor < len(content) and content[cursor] in " \t":
+        cursor += 1
+    if content.startswith("\r\n", cursor):
+        return cursor + 2
+    if cursor < len(content) and content[cursor] == "\n":
+        return cursor + 1
+    return offset
 
 
 def _strategy_indent_agnostic(content: str, pattern: str) -> list[tuple[int, int]]:
