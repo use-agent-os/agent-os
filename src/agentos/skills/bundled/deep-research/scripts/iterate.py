@@ -38,7 +38,25 @@ def under_target(plan: Plan) -> list[dict[str, object]]:
     return out
 
 
-def record_evidence(plan: Plan, evidence: list[dict[str, object]]) -> int:
+def record_evidence(
+    plan: Plan,
+    evidence: list[dict[str, object]],
+    round_num: int | None = None,
+) -> int:
+    """Record this round's evidence and advance ``plan.rounds``.
+
+    ``round_num`` is ``None``, not ``0``, when the caller doesn't name a
+    round: 0 is a real round number (``Plan.rounds`` itself defaults to it,
+    before any round has run), so using it as the "unspecified" sentinel
+    would make an explicit round-0 call indistinguishable from "figure it
+    out yourself" -- collapsing a real value with "missing" is exactly the
+    class of bug this function's own dead predecessor line was. Given no
+    round_num, the round is inferred as one past whatever's already
+    recorded, matching one record_evidence call per research round (the
+    only pattern this skill documents or exercises); `max` keeps the
+    counter monotonic either way, so an out-of-order or repeated round
+    number can't move it backward.
+    """
     by_id = {sq.id: sq for sq in plan.subquestions}
     added = 0
     for item in evidence:
@@ -56,7 +74,8 @@ def record_evidence(plan: Plan, evidence: list[dict[str, object]]) -> int:
             )
         )
         added += 1
-    plan.rounds = max(plan.rounds, plan.rounds + 0)
+    target_round = round_num if round_num is not None else plan.rounds + 1
+    plan.rounds = max(plan.rounds, target_round)
     if all(sq.coverage() >= 1.0 for sq in plan.subquestions):
         plan.done = True
     return added
@@ -109,7 +128,7 @@ def main() -> int:
             return 2
         raw = json.loads(args.record.read_text(encoding="utf-8"))
         evidence = raw if isinstance(raw, list) else []
-        added = record_evidence(plan, evidence)
+        added = record_evidence(plan, evidence, round_num=args.round_num)
         save_plan(plan, args.plan)
         sys.stdout.write(
             json.dumps(

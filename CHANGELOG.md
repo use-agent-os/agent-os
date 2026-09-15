@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Skills (`deep-research`): `record_evidence` ended with
+  `plan.rounds = max(plan.rounds, plan.rounds + 0)` -- algebraically a
+  no-op for every value. The CLI path (`main()`'s `--record` branch)
+  happened to work anyway, since `main()` separately advances
+  `plan.rounds` from `--round` before calling `record_evidence` -- but the
+  function itself, callable independent of the CLI, never advanced the
+  round counter on its own. `record_evidence` now takes an optional
+  `round_num` (defaulting to `None`, not `0`: `Plan.rounds` itself starts
+  at 0 and the CLI's own `--round` default is 1, so 0 is a real, reachable
+  round number, not a safe "unspecified" placeholder); with no round_num
+  given, the round is inferred as one past whatever's already recorded
+  (#2268).
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added
