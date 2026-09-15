@@ -54,6 +54,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   but eligibility and `skills doctor` gated on every declared name regardless,
   so a skill could not declare an optional key without disappearing from
   installs that lacked it.
+- Sessions: `SessionManager.create()` and `.update()` now run `display_name`
+  through `normalize_session_name`, so a writer that bypasses the RPC layer
+  (the cron `agent_run` handler builds one from a job's unvalidated `--name`)
+  stores the same single-line, 120-character-capped shape as `/rename` and
+  `sessions.patch` instead of a raw newline or control byte (#1973).
+- Artifacts: the auto-publish backstop now requires a written file's name to
+  sit on a filename boundary in the reply before delivering it. Plain
+  substring containment let `data.json` match inside `metadata.json` and
+  `out.csv` inside `checkout.csv` or `out.csv.bak`, so an intermediate the
+  reply never named was published and delivered (#1978).
+- Gateway: a turn whose start-up failed after claiming its concurrency slot
+  (a storage error, a failing event emitter, or an abort landing while the
+  task was being marked running) leaked the slot for the life of the process;
+  at `max_concurrency=1` one such failure stopped every later turn from
+  running. The release now keys off the flag the claim itself sets (#1984).
+- Approvals: an approval whose lifespan (`created_at + default_timeout`)
+  elapsed with no caller waiting on it stayed pending forever and the Web UI
+  kept showing a prompt nothing could act on; resolved rows were never
+  deleted. The queue now denies aged-out rows at startup, on `request()` and
+  on `list_pending()`, and prunes resolved rows older than a 24-hour
+  retention window that is never shorter than `default_timeout` (#1987).
+- Telegram: a Markdown link whose destination carries balanced parentheses
+  (Wikipedia disambiguators, `#method_(args)` anchors) is no longer cut at
+  the first `)` with the remainder rendered as text after the anchor. A code
+  fence now opens on three or more backticks with any info string (`c#`,
+  `vb.net`, `.env`, `text/x-python`), the language is escaped for the class
+  attribute, and the closing fence must be at least as long as the opener,
+  so a closing fence no longer opens a block that swallows the rest of the
+  message (#2003, #2005).
 - Environment page / `agentos env list`: keys of providers the runtime cannot
   drive (`EXA_API_KEY`, `PERPLEXITY_API_KEY`, and the LLM vendors catalogued
   with `runtime_supported=False`) are no longer offered as "needed by" that
