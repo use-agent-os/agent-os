@@ -74,6 +74,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Web UI: the Memory page now uses the shared Control hero header, so the
   signal background no longer overlaps the stat cards and the page matches
   Health / Overview / Usage (#1927).
+- MS Teams: a proactive `send(reply_to=None)` -- and the `edit()`/`delete()`
+  fallback for an untracked message id -- now targets the conversation that
+  most recently spoke to the bot. The reference cache re-inserts a
+  conversation's key on every inbound turn, so a returning conversation no
+  longer stays stuck at its first-seen position behind newer ones (#1789).
+- CLI: `GatewayClient.send_message()` now correlates events to the turn in
+  flight. It drains frames left over from an earlier turn before subscribing,
+  and ignores frames tagged with another session key or with a `stream_seq`
+  at or below the position reported when it subscribed. A Ctrl-C'd turn's
+  late `done(reason="aborted")` no longer ends the next turn on its first
+  frame and misreports it as cancelled (#1790).
+- Engine: when a stream ends in an error, the tool-protocol leak guard is
+  flushed the same way it is on `done` and on tool use, so text the model
+  produced right before the error that merely resembled a marker prefix
+  (for example `<details>`) is kept in the final turn text instead of being
+  silently dropped (#1796).
+- MCP server: `events_wait` reports `timed_out: true` only when its deadline
+  actually expired. Stopping early on a terminal event or because
+  `max_events` filled up -- the common case for a text stream with the
+  default `max_events=100` -- is now `timed_out: false` (#1798).
+- Tools: `subagents(action="list")` pushes the `spawned_by` filter into the
+  session query and pages through the result, so a parent's subagents are no
+  longer silently missing once a gateway holds more than 100 sessions (#1799).
 
 ## [2026.9.13] - 2026-09-13
 
