@@ -181,6 +181,25 @@ async def git_diff(
     return await _run_git(*args, cwd=_effective_workdir(workdir))
 
 
+def _git_commit_argv(a: dict[str, Any]) -> tuple[str, ...]:
+    # ``files`` is None (stage everything via ``git add -A``), an explicit
+    # empty list (stage nothing new, commit only what's already staged), or a
+    # named subset -- three different actions that ``len(files or [])`` alone
+    # cannot tell apart: None and [] both collapse to "0". This argv feeds
+    # both the audit fingerprint and, verbatim, the approval modal a human
+    # reviews before a STRICT-level commit runs, so it must say which of the
+    # three actually happens rather than a count that reads the same for two
+    # of them.
+    files = a.get("files")
+    if files is None:
+        scope = "all-changes"
+    elif files:
+        scope = f"{len(files)}-files"
+    else:
+        scope = "staged-only"
+    return ("git", "commit", str(a.get("message", "")), scope)
+
+
 @tool(
     name="git_commit",
     description="Stage specified files (or all changes) and create a commit.",
@@ -202,12 +221,7 @@ async def git_diff(
 )
 @sandboxed(
     kind="git.write",
-    argv_factory=lambda a: (
-        "git",
-        "commit",
-        str(a.get("message", "")),
-        str(len(a.get("files") or [])),
-    ),
+    argv_factory=_git_commit_argv,
     record_payload=False,
 )
 async def git_commit(
