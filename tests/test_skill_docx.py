@@ -125,6 +125,97 @@ def test_inspect_cli_outputs_json(tmp_path: Path) -> None:
     assert "tables" in encoded
 
 
+def _inspect_docx_module() -> object:
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import inspect_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+    return inspect_docx
+
+
+def test_inspect_survives_irregular_vertical_merge(tmp_path: Path) -> None:
+    """`row.cells` resolves a `vMerge=continue` cell against the row above and
+    raises `ValueError` when no cell starts at that grid offset there -- a
+    layout non-Word generators produce. Walking the `<w:tc>` elements directly
+    never enters that path. (#2154)"""
+    from docx import Document
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    inspect_docx = _inspect_docx_module()
+    doc = Document()
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).merge(table.cell(0, 1))
+    table.cell(1, 0).text = "Cell"
+    continue_marker = OxmlElement("w:vMerge")
+    continue_marker.set(qn("w:val"), "continue")
+    table.cell(1, 1)._tc.get_or_add_tcPr().append(continue_marker)
+    src = tmp_path / "irregular.docx"
+    doc.save(str(src))
+
+    tables = inspect_docx.inspect(src)["tables"]
+
+    assert len(tables[0]) == 2
+    assert tables[0][1][0] == "Cell"
+
+
+def test_inspect_visits_a_merged_cell_once(tmp_path: Path) -> None:
+    """`row.cells` repeats a horizontally merged cell once per grid column it
+    spans, triplicating its text in the inspect output. (#2154)"""
+    from docx import Document
+
+    inspect_docx = _inspect_docx_module()
+    doc = Document()
+    table = doc.add_table(rows=1, cols=3)
+    table.cell(0, 0).merge(table.cell(0, 2)).text = "HELLO"
+    src = tmp_path / "merged.docx"
+    doc.save(str(src))
+
+    tables = inspect_docx.inspect(src)["tables"]
+
+    assert tables[0] == [["HELLO"]]
+
+
+def test_inspect_surfaces_nested_table_text(tmp_path: Path) -> None:
+    """Nested tables were silently dropped from inspect output. (#2154)"""
+    from docx import Document
+
+    inspect_docx = _inspect_docx_module()
+    doc = Document()
+    outer = doc.add_table(rows=1, cols=1)
+    outer.cell(0, 0).text = "outer"
+    outer.cell(0, 0).add_table(rows=1, cols=1).cell(0, 0).text = "inner"
+    src = tmp_path / "nested.docx"
+    doc.save(str(src))
+
+    tables = inspect_docx.inspect(src)["tables"]
+
+    assert "inner" in tables[0][0][0]
+
+
+def test_inspect_rejects_non_docx_file(tmp_path: Path) -> None:
+    """A corrupt file raised unhandled `PackageNotFoundError`; it must raise
+    `ValueError` so the CLI can exit 2 with a clean message. (#2154)"""
+    import pytest
+
+    inspect_docx = _inspect_docx_module()
+    bad = tmp_path / "invalid.docx"
+    bad.write_text("invalid")
+
+    with pytest.raises(ValueError, match="not a readable .docx file"):
+        inspect_docx.inspect(bad)
+
+
+def test_inspect_cli_rejects_non_docx_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    inspect_docx = _inspect_docx_module()
+    bad = tmp_path / "invalid.docx"
+    bad.write_text("invalid")
+
+    monkeypatch.setattr(sys, "argv", ["inspect_docx.py", str(bad)])
+    assert inspect_docx.main() == 2
+
+
 def test_inspect_docx_creates_parent_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

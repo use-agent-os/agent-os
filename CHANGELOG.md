@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `docx` skill: `inspect_docx.py` no longer walks tables through
+  `row.cells`. That API resolves vertically merged cells against the row
+  above, raising `ValueError: table has an irregular grid` on layouts
+  non-Word generators produce, and repeats a horizontally merged cell once
+  per grid column it spans. Each `<w:tc>` is now visited exactly once, nested
+  table text is included, and a corrupt file raises `ValueError` so the CLI
+  exits 2 with a clean message instead of an unhandled traceback. (#2154)
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added
