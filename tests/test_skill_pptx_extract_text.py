@@ -150,3 +150,24 @@ def test_write_falls_back_when_stdout_has_no_buffer() -> None:
     assert "季度回顾" in written
     # The emoji has no cp936 form, so it is escaped rather than dropped.
     assert "?" not in written
+
+
+def test_table_text_deduplicates_merged_cells() -> None:
+    """extract_text avoids repeating cell text for horizontally merged cells."""
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+
+    table_shape = slide.shapes.add_table(2, 3, Inches(1), Inches(1), Inches(6), Inches(2))
+    table = table_shape.table
+
+    # Merge cell (0, 0) and cell (0, 1)
+    table.cell(0, 0).merge(table.cell(0, 1))
+    table.cell(0, 0).text = "Merged Header"
+    table.cell(0, 2).text = "Col C"
+    table.cell(1, 0).text = "R2A"
+    table.cell(1, 1).text = "R2B"
+    table.cell(1, 2).text = "R2C"
+
+    lines = extract_text._table_text(table_shape)
+    assert lines == ["Merged Header | Col C", "R2A | R2B | R2C"]
+

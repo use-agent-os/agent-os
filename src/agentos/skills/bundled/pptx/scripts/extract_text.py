@@ -64,12 +64,19 @@ def _table_text(shape) -> list[str]:
     if not getattr(shape, "has_table", False):
         return []
     out: list[str] = []
+    seen: set[int] = set()
     for row in shape.table.rows:
-        cells = [
-            " ".join(para.text.strip() for para in cell.text_frame.paragraphs if para.text.strip())
-            for cell in row.cells
-        ]
-        cells = [c for c in cells if c]
+        cells: list[str] = []
+        for cell in row.cells:
+            cell_id = id(cell)
+            if cell_id in seen:
+                continue
+            seen.add(cell_id)
+            text = " ".join(
+                para.text.strip() for para in cell.text_frame.paragraphs if para.text.strip()
+            )
+            if text:
+                cells.append(text)
         if cells:
             out.append(" | ".join(cells))
     return out
