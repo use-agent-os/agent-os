@@ -751,7 +751,8 @@ def _session_storage_or_none() -> Any:
         "workdir": {
             "type": "string",
             "description": (
-                "Optional working directory for 'script' (defaults to the script's own directory)."
+                "Optional working directory for 'script' (defaults to the script's own "
+                "directory; a relative path is resolved against it)."
             ),
         },
         "session_target": {

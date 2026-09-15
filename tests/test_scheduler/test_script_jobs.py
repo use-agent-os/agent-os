@@ -255,6 +255,64 @@ async def test_missing_workdir_falls_back_to_the_script_directory(agentos_home):
 
 
 @pytest.mark.asyncio
+async def test_relative_workdir_resolves_against_the_script_directory(
+    agentos_home, tmp_path, monkeypatch
+):
+    """#1911: a relative workdir named the gateway's CWD, not the script's directory."""
+    _write_script(agentos_home, "cwd.py", "import os; print(os.getcwd())")
+    meant = agentos_home / "scripts" / "data"
+    meant.mkdir()
+    # A same-named directory beside the gateway's CWD must not be picked up.
+    decoy_parent = tmp_path / "gateway-cwd"
+    (decoy_parent / "data").mkdir(parents=True)
+    monkeypatch.chdir(decoy_parent)
+
+    ok, output = await run_job_script("cwd.py", timeout=30, workdir="data")
+
+    assert ok is True
+    assert output == str(meant.resolve())
+
+
+@pytest.mark.asyncio
+async def test_relative_workdir_in_a_subdirectory_script_is_relative_to_that_script(
+    agentos_home,
+):
+    (agentos_home / "scripts" / "jobs" / "out").mkdir(parents=True)
+    _write_script(agentos_home, "jobs/cwd.py", "import os; print(os.getcwd())")
+
+    ok, output = await run_job_script("jobs/cwd.py", timeout=30, workdir="out")
+
+    assert ok is True
+    assert output == str((agentos_home / "scripts" / "jobs" / "out").resolve())
+
+
+@pytest.mark.asyncio
+async def test_dot_workdir_names_the_script_directory(agentos_home, tmp_path, monkeypatch):
+    _write_script(agentos_home, "cwd.py", "import os; print(os.getcwd())")
+    monkeypatch.chdir(tmp_path)
+
+    ok, output = await run_job_script("cwd.py", timeout=30, workdir=".")
+
+    assert ok is True
+    assert output == str((agentos_home / "scripts").resolve())
+
+
+@pytest.mark.asyncio
+async def test_missing_relative_workdir_is_looked_up_beside_the_script(
+    agentos_home, tmp_path, monkeypatch
+):
+    """The fallback still applies, and a decoy near the gateway's CWD does not rescue it."""
+    _write_script(agentos_home, "cwd.py", "import os; print(os.getcwd())")
+    (tmp_path / "gateway-cwd" / "reports").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path / "gateway-cwd")
+
+    ok, output = await run_job_script("cwd.py", timeout=30, workdir="reports")
+
+    assert ok is True
+    assert output == str((agentos_home / "scripts").resolve())
+
+
+@pytest.mark.asyncio
 async def test_gateway_token_is_withheld_from_the_script(agentos_home, monkeypatch):
     monkeypatch.setenv("AGENTOS_GATEWAY_TOKEN", "secret-token")
     _write_script(

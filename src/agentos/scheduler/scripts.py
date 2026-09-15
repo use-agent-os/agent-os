@@ -181,12 +181,24 @@ def validate_script_path(script: str | None) -> str | None:
 
 
 def _resolve_workdir(workdir: str, fallback: Path) -> str:
+    """Return the directory a job's script runs in.
+
+    *fallback* is the script's own directory — the documented default. A
+    relative *workdir* is joined onto it, the same rule
+    :func:`resolve_script_path` applies to the script itself; tested as
+    written it would name a path under the gateway process's CWD, which is
+    wherever the operator happened to start the service. Absolute paths are
+    used as given, and a workdir that does not exist falls back with a warning
+    that names where it looked.
+    """
     candidate = (workdir or "").strip()
     if not candidate:
         return str(fallback)
     expanded = Path(candidate).expanduser()
+    if not expanded.is_absolute():
+        expanded = fallback / expanded
     if not expanded.is_dir():
-        log.warning("cron.script.workdir_missing", workdir=candidate)
+        log.warning("cron.script.workdir_missing", workdir=candidate, resolved=str(expanded))
         return str(fallback)
     return str(expanded)
 

@@ -757,7 +757,9 @@ agentos cron add --every 15m --script watch_rss.py --name hn \
 symlink out of that directory. Subdirectories are allowed, and `{job_id}`
 anywhere in the path is replaced with the created job's own id, so a job can own
 a directory named after itself in one `add`. `.sh`/`.bash` run under bash,
-anything else under python. `--script-arg` (repeatable) passes argv straight to
+anything else under python. `--workdir` sets the script's working directory; a
+relative value resolves against the script's own directory, which is also the
+default. `--script-arg` (repeatable) passes argv straight to
 the script — never through a shell. Non-empty stdout is delivered verbatim, empty stdout is a silent
 run, and a non-zero exit or `--timeout` delivers the error and fails the job.
 Secrets are masked in the output, and the gateway token is withheld from the

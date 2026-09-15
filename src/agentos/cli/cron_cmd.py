@@ -577,7 +577,10 @@ def cron_add(
     workdir: str | None = typer.Option(
         None,
         "--workdir",
-        help="Working directory for --script (defaults to the script's own directory).",
+        help=(
+            "Working directory for --script (defaults to the script's own directory;"
+            " a relative path is resolved against it)."
+        ),
     ),
     name: str | None = typer.Option(None, "--name", help="Display name"),
     agent: str | None = typer.Option(None, "--agent", help="Agent id"),
@@ -932,7 +935,10 @@ def cron_update(
     workdir: str | None = typer.Option(
         None,
         "--workdir",
-        help="Working directory for the job's script (empty string clears it).",
+        help=(
+            "Working directory for the job's script (a relative path is resolved against"
+            " the script's own directory; empty string clears it)."
+        ),
     ),
     name: str | None = typer.Option(None, "--name", help="Display name"),
     enabled: bool | None = typer.Option(None, "--enabled/--disabled", help="Enable/disable job"),
