@@ -80,7 +80,11 @@ def main() -> int:
     if not args.spec.is_file():
         print(f"error: spec {args.spec} not found", file=sys.stderr)
         return 2
-    spec = json.loads(args.spec.read_text(encoding="utf-8"))
+    try:
+        spec = json.loads(args.spec.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        print(f"error: spec {args.spec} is not valid JSON: {exc}", file=sys.stderr)
+        return 2
     wb = build(spec)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     wb.save(str(args.out))

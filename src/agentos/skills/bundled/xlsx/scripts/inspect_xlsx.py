@@ -8,9 +8,19 @@ import sys
 from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
+from zipfile import BadZipFile
 
 from openpyxl import load_workbook
 from openpyxl.cell.cell import TYPE_BOOL, TYPE_FORMULA, TYPE_NUMERIC, TYPE_STRING
+from openpyxl.utils.exceptions import InvalidFileException
+
+# openpyxl reports an unreadable workbook through four unrelated classes: a
+# file that is not a ZIP raises BadZipFile, an old .xls raises
+# InvalidFileException, a ZIP missing an OOXML part raises KeyError, and a
+# malformed part raises an XML parse error. SyntaxError is the base class
+# both XML backends share, so it covers openpyxl with and without lxml
+# without importing either.
+_UNREADABLE_WORKBOOK = (BadZipFile, InvalidFileException, KeyError, SyntaxError)
 
 
 def _serialize(value: Any) -> Any:
@@ -79,7 +89,11 @@ def main() -> int:
     if not args.path.is_file():
         print(f"error: {args.path} not found", file=sys.stderr)
         return 2
-    payload = inspect(args.path, args.data_only)
+    try:
+        payload = inspect(args.path, args.data_only)
+    except _UNREADABLE_WORKBOOK as exc:
+        print(f"error: {args.path} is not a readable .xlsx: {exc}", file=sys.stderr)
+        return 2
     text = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)

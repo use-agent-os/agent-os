@@ -25,8 +25,18 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zipfile import BadZipFile
 
 from openpyxl import load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
+
+# openpyxl reports an unreadable workbook through four unrelated classes: a
+# file that is not a ZIP raises BadZipFile, an old .xls raises
+# InvalidFileException, a ZIP missing an OOXML part raises KeyError, and a
+# malformed part raises an XML parse error. SyntaxError is the base class
+# both XML backends share, so it covers openpyxl with and without lxml
+# without importing either.
+_UNREADABLE_WORKBOOK = (BadZipFile, InvalidFileException, KeyError, SyntaxError)
 
 # Distinguishes {"value": null} from an op with no "value" key at all.
 # ``op.get("value")`` collapses both to None, which would make a malformed
@@ -130,9 +140,17 @@ def main() -> int:
     if not args.ops.is_file():
         print(f"error: ops {args.ops} not found", file=sys.stderr)
         return 2
-    raw = json.loads(args.ops.read_text(encoding="utf-8"))
+    try:
+        raw = json.loads(args.ops.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        print(f"error: ops {args.ops} is not valid JSON: {exc}", file=sys.stderr)
+        return 2
     ops = raw if isinstance(raw, list) else []
-    wb = load_workbook(filename=str(args.input))
+    try:
+        wb = load_workbook(filename=str(args.input))
+    except _UNREADABLE_WORKBOOK as exc:
+        print(f"error: input {args.input} is not a readable .xlsx: {exc}", file=sys.stderr)
+        return 2
     applied = apply_ops(wb, ops)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     wb.save(str(args.out))

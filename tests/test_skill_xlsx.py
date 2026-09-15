@@ -571,3 +571,242 @@ def test_clearing_a_cell_keeps_its_style(
     cell = load_workbook(str(out))["S"].cell(row=1, column=1)
     assert cell.value is None
     assert cell.number_format == "0.00%"
+
+
+def _write_zip(path: Path, entries: dict[str, str]) -> Path:
+    """Write a real ZIP whose contents are not a workbook."""
+    import zipfile
+
+    with zipfile.ZipFile(path, "w") as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+    return path
+
+
+def _corrupt_shapes(tmp_path: Path) -> dict[str, Path]:
+    """Every way a caller can hand these scripts something unopenable.
+
+    openpyxl answers with four unrelated exception classes across these six
+    files, which is what made the failure impossible to guard with one
+    ``except``: BadZipFile, KeyError, an XML parse error and
+    InvalidFileException.
+    """
+    from openpyxl import Workbook
+
+    good = tmp_path / "good_for_bytes.xlsx"
+    Workbook().save(str(good))
+    real = good.read_bytes()
+
+    raw_shapes = {
+        "plain_text": (tmp_path / "text.xlsx", b"this is not a real xlsx file"),
+        "empty_file": (tmp_path / "empty.xlsx", b""),
+        "truncated_workbook": (tmp_path / "cut.xlsx", real[: len(real) // 2]),
+        "html_saved_as_xlsx": (tmp_path / "page.xlsx", b"<html><body><table></table></body>"),
+        "old_xls_format": (tmp_path / "legacy.xls", b"\xd0\xcf\x11\xe0anything"),
+    }
+    out: dict[str, Path] = {}
+    for name, (path, data) in raw_shapes.items():
+        path.write_bytes(data)
+        out[name] = path
+    out["zip_without_ooxml_part"] = _write_zip(tmp_path / "bare.xlsx", {"hello.txt": "hi"})
+    out["zip_with_malformed_xml"] = _write_zip(
+        tmp_path / "broken.xlsx",
+        {"[Content_Types].xml": "<not xml", "xl/workbook.xml": "<<<"},
+    )
+    return out
+
+
+_CORRUPT_SHAPE_IDS = [
+    "plain_text",
+    "empty_file",
+    "truncated_workbook",
+    "html_saved_as_xlsx",
+    "old_xls_format",
+    "zip_without_ooxml_part",
+    "zip_with_malformed_xml",
+]
+
+
+@pytest.mark.parametrize("shape", _CORRUPT_SHAPE_IDS)
+def test_inspect_reports_an_unreadable_workbook(
+    shape: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A file openpyxl cannot open is a caller error, not a skill crash."""
+    _, _, inspect_xlsx = _import_scripts()
+    path = _corrupt_shapes(tmp_path)[shape]
+
+    monkeypatch.setattr(sys, "argv", ["inspect_xlsx.py", str(path)])
+    assert inspect_xlsx.main() == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("error: ")
+    assert str(path) in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize("shape", _CORRUPT_SHAPE_IDS)
+def test_edit_reports_an_unreadable_workbook(
+    shape: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, edit_xlsx, _ = _import_scripts()
+    path = _corrupt_shapes(tmp_path)[shape]
+    ops = tmp_path / "ops.json"
+    ops.write_text(json.dumps([{"op": "set_cell", "sheet": "S", "row": 1, "col": 1, "value": 1}]))
+    out = tmp_path / "written.xlsx"
+
+    monkeypatch.setattr(sys, "argv", ["edit_xlsx.py", str(path), str(ops), "--out", str(out)])
+    assert edit_xlsx.main() == 2
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("error: ")
+    assert "Traceback" not in captured.err
+    # An edit that could not read its input must not leave a half-written file.
+    assert not out.exists()
+
+
+def test_an_unreadable_workbook_exits_like_a_missing_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Both are bad caller input, so both are 2 -- not 1, which means failure."""
+    _, _, inspect_xlsx = _import_scripts()
+    corrupt = _corrupt_shapes(tmp_path)["plain_text"]
+
+    monkeypatch.setattr(sys, "argv", ["inspect_xlsx.py", str(tmp_path / "absent.xlsx")])
+    missing_code = inspect_xlsx.main()
+    capsys.readouterr()
+    monkeypatch.setattr(sys, "argv", ["inspect_xlsx.py", str(corrupt)])
+    corrupt_code = inspect_xlsx.main()
+    capsys.readouterr()
+
+    assert (missing_code, corrupt_code) == (2, 2)
+
+
+def test_inspect_still_reads_a_good_workbook(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Guard: passes either way, and proves the guard catches nothing valid."""
+    create_xlsx, _, inspect_xlsx = _import_scripts()
+    src = tmp_path / "book.xlsx"
+    create_xlsx.build({"sheets": [{"name": "S", "rows": [["a"]]}]}).save(str(src))
+
+    monkeypatch.setattr(sys, "argv", ["inspect_xlsx.py", str(src)])
+    assert inspect_xlsx.main() == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [sheet["name"] for sheet in payload["sheets"]] == ["S"]
+
+
+def test_a_failure_after_the_load_is_not_disguised_as_unreadable_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The guard covers opening the file, not everything the script then does.
+
+    ``KeyError`` is in the tuple because openpyxl raises it for a ZIP missing
+    an OOXML part, and it is the one class a bug of our own could also raise.
+    Scoping the ``try`` to ``load_workbook`` keeps that bug loud.
+    """
+    create_xlsx, edit_xlsx, _ = _import_scripts()
+    src = tmp_path / "book.xlsx"
+    create_xlsx.build({"sheets": [{"name": "S", "rows": [["a"]]}]}).save(str(src))
+    ops = tmp_path / "ops.json"
+    ops.write_text(json.dumps([{"op": "set_cell", "sheet": "S", "row": 1, "col": 1, "value": 1}]))
+
+    def _boom(*_args: Any, **_kwargs: Any) -> int:
+        raise KeyError("a bug in apply_ops, not a corrupt file")
+
+    monkeypatch.setattr(edit_xlsx, "apply_ops", _boom)
+    monkeypatch.setattr(
+        sys, "argv", ["edit_xlsx.py", str(src), str(ops), "--out", str(tmp_path / "o.xlsx")]
+    )
+    with pytest.raises(KeyError):
+        edit_xlsx.main()
+    capsys.readouterr()
+
+
+def test_both_scripts_agree_on_what_unreadable_means() -> None:
+    """The tuple is duplicated because bundled scripts stand alone; pin it."""
+    _, edit_xlsx, inspect_xlsx = _import_scripts()
+    assert edit_xlsx._UNREADABLE_WORKBOOK == inspect_xlsx._UNREADABLE_WORKBOOK
+    # SyntaxError, not lxml's XMLSyntaxError: it is the base both XML backends
+    # share, so the guard holds whether or not openpyxl found lxml.
+    assert SyntaxError in inspect_xlsx._UNREADABLE_WORKBOOK
+
+
+@pytest.mark.parametrize(
+    ("label", "payload"),
+    [
+        ("malformed", b"{not json"),
+        ("truncated", b'{"sheets": ['),
+        ("empty", b""),
+        ("utf16_from_powershell", '{"sheets": []}'.encode("utf-16")),
+    ],
+)
+def test_create_reports_a_spec_that_is_not_json(
+    label: str,
+    payload: bytes,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The issue's second request: the spec file is caller input too."""
+    create_xlsx, _, _ = _import_scripts()
+    spec = tmp_path / "spec.json"
+    spec.write_bytes(payload)
+    out = tmp_path / "made.xlsx"
+
+    monkeypatch.setattr(sys, "argv", ["create_xlsx.py", str(spec), "--out", str(out)])
+    assert create_xlsx.main() == 2
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("error: ")
+    assert "is not valid JSON" in captured.err
+    assert "Traceback" not in captured.err
+    assert not out.exists()
+
+
+@pytest.mark.parametrize(
+    ("label", "payload"),
+    [
+        ("malformed", b"{not json"),
+        ("truncated", b"[{"),
+        ("empty", b""),
+        ("utf16_from_powershell", "[]".encode("utf-16")),
+    ],
+)
+def test_edit_reports_ops_that_are_not_json(
+    label: str,
+    payload: bytes,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Same class as the spec file, one script over, and unreported."""
+    create_xlsx, edit_xlsx, _ = _import_scripts()
+    src = tmp_path / "book.xlsx"
+    create_xlsx.build({"sheets": [{"name": "S", "rows": [["a"]]}]}).save(str(src))
+    ops = tmp_path / "ops.json"
+    ops.write_bytes(payload)
+    out = tmp_path / "out.xlsx"
+
+    monkeypatch.setattr(sys, "argv", ["edit_xlsx.py", str(src), str(ops), "--out", str(out)])
+    assert edit_xlsx.main() == 2
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("error: ")
+    assert "is not valid JSON" in captured.err
+    assert not out.exists()
+
+
+def test_a_valid_json_spec_still_builds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Guard: the JSON gate only rejects what json.loads itself rejects."""
+    create_xlsx, _, _ = _import_scripts()
+    spec = tmp_path / "spec.json"
+    spec.write_text(json.dumps({"sheets": [{"name": "S", "rows": [["a"]]}]}), encoding="utf-8")
+    out = tmp_path / "made.xlsx"
+
+    monkeypatch.setattr(sys, "argv", ["create_xlsx.py", str(spec), "--out", str(out)])
+    assert create_xlsx.main() == 0
+    capsys.readouterr()
+    assert out.is_file()
