@@ -170,6 +170,15 @@ def _parse_field(token: str, field_name: str, names: dict[str, int] | None = Non
                 # expression parses, stores, and then matches no instant at all.
                 if start > end:
                     raise CronParseError(f"Range start > end in field '{field_name}'")
+                if start == end:
+                    # POSIX/croniter: a range whose two endpoints resolve to
+                    # the same field position ("SUN-SUN", "3-3", "0-SUN",
+                    # "SUN-0") spans the entire field, not just that one
+                    # value -- matches croniter's own
+                    # `elif low == high: whole cycle` rule exactly, and
+                    # applies to every field (month "3-3" is all 12 months,
+                    # hour "5-5" is all 24 hours), not just day_of_week.
+                    start, end = lo, hi
             else:
                 start = _to_int(range_part, field_name, lo, hi)
                 end = hi
@@ -198,6 +207,10 @@ def _parse_field(token: str, field_name: str, names: dict[str, int] | None = Non
             end = _to_int(end_str, field_name, lo, hi)
             if start > end:
                 raise CronParseError(f"Range start > end in field '{field_name}'")
+            if start == end:
+                # See the with-step dash branch above for why: matches
+                # croniter's `elif low == high: whole cycle` exactly.
+                start, end = lo, hi
             values.update(range(start, end + 1))
 
         elif part == "*":

@@ -82,12 +82,17 @@ def test_parse_cron_dow_ranges_may_end_at_sun_by_name() -> None:
 
 
 def test_parse_cron_dow_sun_at_range_start_is_still_zero() -> None:
-    # Only the upper bound flips to 7. A range that *starts* at Sunday keeps
-    # 0, so "SUN-WED" stays four days and "SUN-SUN" stays one — reading the
-    # trailing SUN as 7 there would silently turn it into the whole week.
+    # Only the upper bound flips to 7 for a *distinct*-endpoint range. A
+    # range that starts at Sunday and ends somewhere else keeps 0, so
+    # "SUN-WED" stays four days.
     assert parse_cron("0 0 * * SUN-WED").day_of_week.values == frozenset({0, 1, 2, 3})
-    assert parse_cron("0 0 * * SUN-SUN").day_of_week.values == frozenset({0})
-    assert parse_cron("0 0 * * 0-SUN").day_of_week.values == frozenset({0})
+    # SUN-SUN and 0-SUN have the *same* endpoint on both sides -- per
+    # POSIX/croniter that's the whole-field rule (see
+    # test_parse_cron_same_endpoint_range_spans_the_whole_field), not a
+    # single day. This test originally asserted {0} here; that was the bug
+    # fixed by the same-endpoint-range change.
+    assert parse_cron("0 0 * * SUN-SUN").day_of_week.values == frozenset({0, 1, 2, 3, 4, 5, 6})
+    assert parse_cron("0 0 * * 0-SUN").day_of_week.values == frozenset({0, 1, 2, 3, 4, 5, 6})
 
 
 def test_parse_cron_dow_sun_range_with_step() -> None:
@@ -192,6 +197,50 @@ def test_parse_cron_rejects_reversed_range_with_step() -> None:
         parse_cron("0 0 * * FRI-TUE/2")
     with pytest.raises(CronParseError, match="Range start > end"):
         parse_cron("0 0 * dec-feb/2 *")
+
+
+def test_parse_cron_same_endpoint_range_spans_the_whole_field() -> None:
+    # POSIX/croniter: a range whose two endpoints resolve to the same field
+    # position means the entire field, not a single value -- croniter's own
+    # source has this as an explicit `elif low == high: whole cycle` branch,
+    # confirmed empirically to apply to every field, with or without a step.
+    # #1344 (merged) partially compensated for this within day_of_week's
+    # named-Sunday handling, but only for the literal text "sun" as the
+    # *upper* bound, and excluded exactly the cases that need it most:
+    assert parse_cron("0 0 * * SUN-SUN").day_of_week.values == frozenset({0, 1, 2, 3, 4, 5, 6})
+    assert parse_cron("0 0 * * 0-SUN").day_of_week.values == frozenset({0, 1, 2, 3, 4, 5, 6})
+    assert parse_cron("0 0 * * SUN-0").day_of_week.values == frozenset({0, 1, 2, 3, 4, 5, 6})
+    assert parse_cron("0 0 * * sUn-SuN").day_of_week.values == frozenset({0, 1, 2, 3, 4, 5, 6})
+    # Not Sunday-specific at all -- any same-endpoint day-of-week range:
+    assert parse_cron("0 0 * * 3-3").day_of_week.values == frozenset({0, 1, 2, 3, 4, 5, 6})
+    assert parse_cron("0 0 * * 6-6").day_of_week.values == frozenset({0, 1, 2, 3, 4, 5, 6})
+    # With a step:
+    assert parse_cron("0 0 * * 6-6/2").day_of_week.values == frozenset({0, 2, 4, 6})
+    assert parse_cron("0 0 * * SUN-SUN/2").day_of_week.values == frozenset({0, 2, 4, 6})
+    # Not day-of-week-specific either -- every field has this rule:
+    assert parse_cron("0 5-5 * * *").hour.values == frozenset(range(24))
+    assert parse_cron("0 0 1 3-3 *").month.values == frozenset(range(1, 13))
+    assert parse_cron("30-30 * * * *").minute.values == frozenset(range(60))
+    assert parse_cron("0 0 15-15 * *").day_of_month.values == frozenset(range(1, 32))
+
+
+def test_parse_cron_same_endpoint_range_fix_does_not_affect_distinct_endpoints() -> None:
+    # Regression guard: only start == end triggers the whole-field expansion.
+    # Every already-correct #1344/#1501 case must be unaffected.
+    assert parse_cron("0 0 * * SAT-SUN").day_of_week.values == frozenset({0, 6})
+    assert parse_cron("0 0 * * WED-SUN").day_of_week.values == frozenset({0, 3, 4, 5, 6})
+    assert parse_cron("0 0 * * MON-SUN").day_of_week.values == frozenset({0, 1, 2, 3, 4, 5, 6})
+    assert parse_cron("0 0 * * FRI-SUN").day_of_week.values == frozenset({0, 5, 6})
+    assert parse_cron("0 0 * * SUN-FRI").day_of_week.values == frozenset({0, 1, 2, 3, 4, 5})
+    assert parse_cron("0 0 * * MON-FRI").day_of_week.values == frozenset({1, 2, 3, 4, 5})
+    assert parse_cron("0 0 * * FRI-SUN/2").day_of_week.values == frozenset({0, 5})
+    assert parse_cron("0 0 1 3-6 *").month.values == frozenset({3, 4, 5, 6})
+    assert parse_cron("0 9-17 * * *").hour.values == frozenset(range(9, 18))
+    # Reversed ranges must still raise, not silently become the whole field.
+    with pytest.raises(CronParseError, match="Range start > end"):
+        parse_cron("0 0 * * 5-3")
+    with pytest.raises(CronParseError, match="Range start > end"):
+        parse_cron("0 0 * * FRI-MON")
 
 
 # --- POSIX day-of-month / day-of-week OR rule ----------------------------

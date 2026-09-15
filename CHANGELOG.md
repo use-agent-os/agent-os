@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Scheduler: a cron range whose two endpoints resolve to the same field
+  position (`SUN-SUN`, `3-3`, `5-5`, `0-SUN`) returned only that single
+  value instead of spanning the entire field. Matches croniter's own
+  `elif low == high: whole cycle` rule, verified against real croniter
+  scheduling output. #1344's fix for the neighboring Sunday-as-7 issue
+  only partially compensated for this within day-of-week's named-Sunday
+  handling and explicitly excluded the cases that need it most; the gap
+  affected every field (minute, hour, day_of_month, month,
+  day_of_week), not just day-of-week (#2316).
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added
