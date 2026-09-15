@@ -8,6 +8,7 @@ from typing import Any
 
 from agentos.gateway.access import CONTROL_AND_CHANNEL
 from agentos.gateway.rpc import RpcContext, get_dispatcher
+from agentos.gateway.session_services import get_session_storage
 from agentos.provider.model_catalog import ModelCatalog
 from agentos.session.cost_rollup import rollup_cost_source
 from agentos.session.tokenizer import estimate_tokens
@@ -536,6 +537,46 @@ def _usage_totals(rows: list[dict[str, Any]]) -> dict[str, int | float]:
     }
 
 
+async def _list_all_sessions(
+    session_manager: Any,
+    *,
+    agent_id: str | None = None,
+) -> list[Any]:
+    list_fn = getattr(session_manager, "list_sessions", None)
+    if not callable(list_fn):
+        return []
+    page_size = 100
+    page = 0
+    sessions: list[Any] = []
+    seen: set[str] = set()
+    while True:
+        try:
+            kwargs: dict[str, Any] = {"limit": page_size, "offset": page * page_size}
+            if agent_id is not None:
+                kwargs["agent_id"] = agent_id
+            rows = await list_fn(**kwargs)
+        except TypeError:
+            try:
+                rows = await list_fn()
+            except Exception:
+                return sessions
+            return rows if isinstance(rows, list) else []
+        except Exception:
+            return sessions
+        if not rows:
+            return sessions
+        for row in rows:
+            key = _field(row, "session_key")
+            if isinstance(key, str):
+                if key in seen:
+                    continue
+                seen.add(key)
+            sessions.append(row)
+        if len(rows) < page_size:
+            return sessions
+        page += 1
+
+
 @_d.method("usage.status", CONTROL_AND_CHANNEL)
 async def _handle_usage_status(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     now_ms = _now_ms()
@@ -560,7 +601,20 @@ async def _handle_usage_status(params: dict | None, ctx: RpcContext) -> dict[str
             requested_session_key = (
                 params.get("sessionKey") or params.get("session_key") or params.get("key")
             )
-        sessions = await ctx.session_manager.list_sessions()
+        sessions = await _list_all_sessions(ctx.session_manager)
+        if requested_session_key and not any(
+            _field(s, "session_key", "") == requested_session_key for s in sessions
+        ):
+            storage = get_session_storage(ctx.session_manager)
+            if storage and hasattr(storage, "get_session"):
+                try:
+                    node = await storage.get_session(requested_session_key)
+                    if node is not None:
+                        sessions.append(
+                            node.model_dump(mode="json") if hasattr(node, "model_dump") else node
+                        )
+                except Exception:
+                    pass
         rows = []
         active = sum(1 for s in sessions if _field(s, "status", "") == "running")
         for s in sessions:
@@ -669,7 +723,26 @@ async def _handle_usage_cost(params: dict | None, ctx: RpcContext) -> dict[str, 
                 "cannot filter by tool name, skill, or date range."
             )
         try:
-            sessions = await ctx.session_manager.list_sessions()
+            target_key = query_params.get("session_key")
+            target_agent = query_params.get("agent_id")
+            if target_key:
+                storage = get_session_storage(ctx.session_manager)
+                single_node = None
+                if storage and hasattr(storage, "get_session"):
+                    single_node = await storage.get_session(target_key)
+                if single_node is not None:
+                    sessions = [
+                        single_node.model_dump(mode="json")
+                        if hasattr(single_node, "model_dump")
+                        else single_node
+                    ]
+                else:
+                    sessions = await _list_all_sessions(ctx.session_manager)
+            elif target_agent:
+                sessions = await _list_all_sessions(ctx.session_manager, agent_id=target_agent)
+            else:
+                sessions = await _list_all_sessions(ctx.session_manager)
+
             for s in sessions:
                 s_key = _field(s, "session_key", "unknown")
                 agent_id, channel = (
@@ -677,6 +750,11 @@ async def _handle_usage_cost(params: dict | None, ctx: RpcContext) -> dict[str, 
                     if ctx.usage_tracker
                     else ("unknown", "unknown")
                 )
+                if agent_id == "unknown":
+                    agent_id = _field(s, "agent_id") or "unknown"
+                if channel == "unknown":
+                    channel = _field(s, "channel") or _field(s, "last_channel") or "unknown"
+
                 if query_params.get("session_key") and query_params["session_key"] != s_key:
                     continue
                 if query_params.get("agent_id") and query_params["agent_id"] != agent_id:
