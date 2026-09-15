@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `apply_patch` no longer duplicates context lines when a hunk header's line
+  count disagrees with the hunk body. The splice used the header's
+  `old_count`, a count the format lets a writer omit — `@@@ -2 +2 @@@` is
+  accepted and defaults to a single old line — and that model-authored
+  patches miscount routinely. Whenever the body spelled out more old-side
+  lines than the header claimed, the splice replaced fewer lines than the
+  body described and the surplus context lines were written into the file a
+  second time: `l1 l2 l3 l4 l5` with a `-l3 +l3x` hunk came out as
+  `l1 l2 l3x l4 l3 l4 l5`, and an overcounted header deleted lines the body
+  never mentioned. The body is now the authority for how many original lines
+  a hunk consumes — every one of them is context-matched against the file
+  before the splice — which leaves `old_count` as the checksum it is.
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added

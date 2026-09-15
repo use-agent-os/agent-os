@@ -370,3 +370,83 @@ def test_separator_after_a_prepend_hunk_is_trimmed() -> None:
 
 def test_counted_trailing_blank_is_kept_and_only_the_separator_is_trimmed() -> None:
     assert _parsed_hunk_lines("@@@ -1,2 +1,2 @@@\n-bar\n+baz\n\n\n") == ["-bar", "+baz", ""]
+
+
+@pytest.mark.asyncio
+async def test_omitted_count_header_splices_every_old_line_the_body_spells(
+    tmp_path: Path,
+) -> None:
+    """A count-less header must not duplicate the context lines it follows.
+
+    ``_parse_hunk_header`` defaults an omitted count to one old line, but a
+    hunk's body is what names the lines the hunk consumes — every one of them
+    is matched against the file before the splice. Splicing by the header's
+    default replaced a single line with the whole body, so the context lines
+    around the edit were written back into the file a second time:
+
+    ``l1 l2 l3 l4 l5`` with ``-l3 +l3x`` came out as ``l1 l2 l3x l4 l3 l4 l5``.
+    """
+    target = tmp_path / "test.txt"
+    target.write_text("l1\nl2\nl3\nl4\nl5\n", encoding="utf-8")
+
+    await _apply(
+        tmp_path,
+        "*** Begin Patch\n"
+        "*** Update File: test.txt\n"
+        "@@@ -2 +2 @@@\n"
+        " l2\n"
+        "-l3\n"
+        "+l3x\n"
+        " l4\n"
+        "*** End Patch",
+    )
+
+    assert target.read_text(encoding="utf-8") == "l1\nl2\nl3x\nl4\nl5\n"
+
+
+@pytest.mark.asyncio
+async def test_miscounted_header_splices_every_old_line_the_body_spells(
+    tmp_path: Path,
+) -> None:
+    """A header count that undercounts the body must not duplicate context.
+
+    The same splice, with the count written out and simply wrong — the shape a
+    model produces when it miscounts a hunk it otherwise spelled correctly.
+    """
+    target = tmp_path / "test.txt"
+    target.write_text("l1\nl2\nl3\nl4\nl5\n", encoding="utf-8")
+
+    await _apply(
+        tmp_path,
+        "*** Begin Patch\n"
+        "*** Update File: test.txt\n"
+        "@@@ -2,1 +2,1 @@@\n"
+        " l2\n"
+        "-l3\n"
+        "+l3x\n"
+        " l4\n"
+        "*** End Patch",
+    )
+
+    assert target.read_text(encoding="utf-8") == "l1\nl2\nl3x\nl4\nl5\n"
+
+
+@pytest.mark.asyncio
+async def test_overcounted_header_does_not_delete_unmentioned_lines(tmp_path: Path) -> None:
+    """A header that claims more old lines than the body spells deletes nothing extra."""
+    target = tmp_path / "test.txt"
+    target.write_text("l1\nl2\nl3\nl4\nl5\n", encoding="utf-8")
+
+    await _apply(
+        tmp_path,
+        "*** Begin Patch\n"
+        "*** Update File: test.txt\n"
+        "@@@ -2,4 +2,4 @@@\n"
+        " l2\n"
+        "-l3\n"
+        "+l3x\n"
+        " l4\n"
+        "*** End Patch",
+    )
+
+    assert target.read_text(encoding="utf-8") == "l1\nl2\nl3x\nl4\nl5\n"

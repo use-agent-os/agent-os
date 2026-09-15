@@ -575,8 +575,16 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk, newline: str = "\n") -> list[
             # Added lines take the file's own line ending, not a hardcoded \n.
             new_lines.append(content.rstrip("\r\n") + newline)
 
-    # Splice: replace [pos : pos + old_count] with new_lines
-    return result[:pos] + new_lines + result[pos + hunk.old_count :]
+    # Splice: replace the lines the body actually consumed. ``old_count`` is
+    # the header's checksum, and the format lets a writer leave it out
+    # entirely — ``@@@ -10 +10 @@@`` is accepted and defaults to a single old
+    # line — or get it wrong, which model-authored patches do routinely.
+    # Splicing by the header therefore removed fewer lines than the body
+    # spelled out whenever the two disagreed, and the surplus context lines
+    # stayed in the file: a silently duplicated block, with every line of it
+    # already matched against the file above. The body is the authority.
+    consumed = _old_side_line_count(hunk.lines)
+    return result[:pos] + new_lines + result[pos + consumed :]
 
 
 def _updated_text(text: str, hunks: list[Hunk]) -> str:
