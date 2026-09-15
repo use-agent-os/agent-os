@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,23 @@ class OmittedArtifactPublishResult:
     failure_summaries: list[str] = field(default_factory=list)
 
 
+# A written file counts as mentioned only when its name sits on a filename
+# boundary in the reply. Plain containment is not enough: ``data.json`` is a
+# substring of ``metadata.json`` and ``out.csv`` of ``checkout.csv``, and the
+# backstop would deliver an intermediate the reply never named. ``\b`` is not
+# enough either, since ``.`` and ``-`` are non-word characters, so the guard is
+# written in terms of filename characters: nothing that could continue a
+# filename directly before the match, and nothing that could continue one
+# directly after. A trailing ``.`` stays allowed so a name that ends a sentence
+# keeps matching, while ``.`` followed by a word character is rejected so
+# ``out.csv`` does not match inside ``out.csv.bak``. ``/`` and ``\`` are
+# boundaries on purpose: a bare name still matches when the text spells the
+# path it sits in.
+_FILENAME_CHAR = r"[\w.\-]"
+_MENTION_PREFIX = rf"(?<!{_FILENAME_CHAR})"
+_MENTION_SUFFIX = r"(?![\w\-])(?!\.\w)"
+
+
 def _text_mentions_written_file(final_text: str, record: dict[str, Any]) -> bool:
     text = final_text.casefold()
     candidates = {
@@ -49,7 +67,13 @@ def _text_mentions_written_file(final_text: str, record: dict[str, Any]) -> bool
         str(record.get("path") or ""),
         str(record.get("name") or ""),
     }
-    return any(candidate and candidate.casefold() in text for candidate in candidates)
+    for candidate in candidates:
+        if not candidate:
+            continue
+        pattern = _MENTION_PREFIX + re.escape(candidate.casefold()) + _MENTION_SUFFIX
+        if re.search(pattern, text):
+            return True
+    return False
 
 
 def _published_artifact_keys(ctx: ToolContext) -> set[tuple[str, str]]:
