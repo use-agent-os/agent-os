@@ -749,6 +749,7 @@ async def pdf(
 def _parse_page_range(pages: str, total: int) -> list[int]:
     """Parse page range string to 0-based index list."""
     indices: list[int] = []
+    seen: set[int] = set()
     segments = [s.strip() for s in pages.split(",")]
     for seg in segments:
         if not seg:
@@ -763,14 +764,20 @@ def _parse_page_range(pages: str, total: int) -> list[int]:
             for n in range(start, end + 1):
                 if n > total:
                     raise SafeToolError(f"Page {n} exceeds document length ({total} pages)")
-                indices.append(n - 1)
+                idx = n - 1
+                if idx not in seen:
+                    seen.add(idx)
+                    indices.append(idx)
         elif re.match(r"^\d+$", seg):
             n = int(seg)
             if n < 1:
                 raise SafeToolError(f"Invalid page range: {pages}")
             if n > total:
                 raise SafeToolError(f"Page {n} exceeds document length ({total} pages)")
-            indices.append(n - 1)
+            idx = n - 1
+            if idx not in seen:
+                seen.add(idx)
+                indices.append(idx)
         else:
             raise SafeToolError(f"Invalid page range: {pages}")
     return indices
