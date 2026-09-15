@@ -40,6 +40,7 @@ from agentos.session.models import (
     SessionSummary,
     TranscriptEntry,
 )
+from agentos.session.naming import normalize_session_name
 from agentos.session.runtime_state import evict_session_runtime_state
 from agentos.session.storage import SessionStorage
 from agentos.session.tokenizer import estimate_tokens
@@ -288,6 +289,11 @@ class SessionManager:
         """Create a new session entry. Raises ValueError if key already exists."""
         session_key = canonicalize_session_key(session_key)
         agent_id = normalize_agent_id(agent_id)
+        if "display_name" in kwargs:
+            # The RPC layer already normalizes user-typed names, but writers that
+            # reach the manager directly (the cron agent_run handler builds one
+            # from a job's --name) must land on the same stored shape.
+            kwargs["display_name"] = normalize_session_name(kwargs["display_name"])
         existing = await self._storage.get_session(session_key)
         if existing is not None:
             raise ValueError(f"Session already exists: {session_key}")
@@ -668,6 +674,8 @@ class SessionManager:
         node = await self._storage.get_session(session_key)
         if node is None:
             raise KeyError(f"Session not found: {session_key}")
+        if "display_name" in fields:
+            fields["display_name"] = normalize_session_name(fields["display_name"])
         for k, v in fields.items():
             if hasattr(node, k):
                 setattr(node, k, v)
