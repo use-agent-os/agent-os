@@ -176,14 +176,23 @@ _QUALIFIED_NAME_PAIRS: frozenset[tuple[str, str]] = frozenset(
     }
 )
 
-_NAME_SPLIT_RE = re.compile(r"[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])")
+_NAME_SPLIT_RE = re.compile(
+    # Separators, then the two camel-case boundaries. The second one is what
+    # makes an all-caps acronym split from a Capitalised word after it:
+    # `APISecret` has no lower-to-upper transition, so without it the whole
+    # name stays one segment and matches nothing, while `apiSecret`,
+    # `ApiSecret`, `API_SECRET` and `api-secret` all match. Same credential,
+    # four spellings, one of them leaked.
+    r"[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
+)
 
 
 def _name_segments(name: str) -> list[str]:
     """Split an identifier into lower-cased word segments.
 
-    Handles the three casings a credential name arrives in: ``CAP_API_KEY``,
-    ``x-cap-api-key`` and ``capApiKey`` all reduce to the same segments.
+    Handles the casings a credential name arrives in: ``CAP_API_KEY``,
+    ``x-cap-api-key``, ``capApiKey`` and ``APISecret`` all reduce to the same
+    segments.
     """
     return [segment.lower() for segment in _NAME_SPLIT_RE.split(name) if segment]
 

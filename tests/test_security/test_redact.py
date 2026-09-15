@@ -149,6 +149,96 @@ class TestNameSegments:
         assert not redact._is_credential_name(name)
 
 
+class TestAcronymPrefixes:
+    """An all-caps acronym followed by a Capitalised word is a real identifier.
+
+    `APISecret` has no lower-to-upper transition, so a splitter that only knows
+    that boundary left the whole name as one segment and matched nothing —
+    while `apiSecret`, `ApiSecret`, `API_SECRET` and `api-secret` all matched.
+    The same credential, four spellings, one of them reaching the model.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "APISecret",
+            "APIToken",
+            "AUTHToken",
+            "AUTHKey",
+            "ACCESSToken",
+            "CLIENTSecret",
+            "SESSIONToken",
+            "PRIVATEKey",
+            "SECRETKey",
+            "SERVICEKey",
+            "DBPassword",
+            "DBSecret",
+            "LDAPPassword",
+            "JWTSecret",
+            "SSHPassword",
+            "AWSAccessKeyId",
+        ],
+    )
+    def test_an_acronym_prefixed_credential_is_recognized(self, name: str) -> None:
+        assert redact._is_credential_name(name)
+
+    @pytest.mark.parametrize(
+        ("name", "segments"),
+        [
+            ("APISecret", ["api", "secret"]),
+            ("APIKey", ["api", "key"]),
+            ("DBPassword", ["db", "password"]),
+            ("SECRETKey", ["secret", "key"]),
+            ("AWSAccessKeyId", ["aws", "access", "key", "id"]),
+            # Boundaries that already worked must keep working.
+            ("CAP_API_KEY", ["cap", "api", "key"]),
+            ("x-cap-api-key", ["x", "cap", "api", "key"]),
+            ("capApiKey", ["cap", "api", "key"]),
+            ("getURL", ["get", "url"]),
+            ("XMLHttpRequest", ["xml", "http", "request"]),
+            ("HTTPSProxy", ["https", "proxy"]),
+            ("sellToken", ["sell", "token"]),
+        ],
+    )
+    def test_segments(self, name: str, segments: list[str]) -> None:
+        assert redact._name_segments(name) == segments
+
+    @pytest.mark.parametrize(
+        "base",
+        ["api_secret", "client_secret", "db_password", "private_key", "access_token"],
+    )
+    def test_every_spelling_of_one_credential_agrees(self, base: str) -> None:
+        """The contract `_name_segments` documents, asserted rather than implied."""
+        words = base.split("_")
+        capitalized = "".join(word.capitalize() for word in words)
+        spellings = [
+            base,
+            base.upper(),
+            base.replace("_", "-"),
+            words[0] + "".join(word.capitalize() for word in words[1:]),
+            capitalized,
+            words[0].upper() + "".join(word.capitalize() for word in words[1:]),
+        ]
+        verdicts = {redact._is_credential_name(spelling) for spelling in spellings}
+
+        assert verdicts == {True}, f"{base}: {dict(zip(spellings, verdicts))}"
+
+    @pytest.mark.parametrize(
+        "name",
+        ["publicKey", "primaryKey", "cacheKey", "APIEndpoint", "DBHost", "HTTPHeader", "AWSRegion"],
+    )
+    def test_an_acronym_alone_is_not_a_credential(self, name: str) -> None:
+        """Splitting more aggressively must not make ordinary names match."""
+        assert not redact._is_credential_name(name)
+
+    def test_an_acronym_prefixed_secret_is_masked_in_a_dump(self) -> None:
+        value = "9f2b7c41ae55d0e3bb84aa11"
+        out = redact.redact_terminal_output(f"APISecret={value}\nPATH=/usr/bin\n", "printenv")
+
+        assert value not in out
+        assert "PATH=/usr/bin" in out
+
+
 class TestRedaction:
     def test_masks_a_vendor_key_but_keeps_it_recognisable(self) -> None:
         out = redact.redact_sensitive_text("OPENAI_API_KEY=sk-proj-AAAAAAAAAAAAAAAAAAAAAAAA")
