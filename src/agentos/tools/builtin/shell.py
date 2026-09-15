@@ -1565,7 +1565,7 @@ async def _check_exec_approval(
     if approval_id is None and not sandbox_off_requires_approval:
         from agentos.sandbox.intent_cache import get_intent_cache
 
-        if get_intent_cache().check(command):
+        if get_intent_cache().check(command, session_key=str(params["sessionKey"])):
             log.info(
                 "shell_approval_intent_cached",
                 command=_audit_command(command),

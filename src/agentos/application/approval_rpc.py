@@ -90,8 +90,11 @@ def approval_snapshot_rpc_payload(queue: ApprovalQueue, intent_cache: Any) -> di
         "mode": queue.get_settings().mode,
         "intent_cache_size": len(intent_cache._entries),  # noqa: SLF001 - diagnostic
         "intent_cache_entries": [
-            {"kind": kind, "target": target, "scope": scope}
-            for (kind, target), (_expires, scope) in intent_cache._entries.items()  # noqa: SLF001
+            {"session": session, "kind": kind, "target": target, "scope": scope}
+            for (session, kind, target), (
+                _expires,
+                scope,
+            ) in intent_cache._entries.items()  # noqa: SLF001
         ],
     }
 

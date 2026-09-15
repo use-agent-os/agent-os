@@ -1278,12 +1278,13 @@ async def _handle_sessions_send(params: dict | None, ctx: RpcContext) -> dict:
         try:
             _mark_started()
             # A new user turn invalidates any "once" intent approvals from the
-            # previous turn. "always" entries survive per IntentApprovalCache
-            # scope semantics.
+            # previous turn *of this session*. "always" entries survive per
+            # IntentApprovalCache scope semantics, and a concurrent session's
+            # in-flight grants are none of this turn's business.
             try:
                 from agentos.sandbox.intent_cache import get_intent_cache
 
-                get_intent_cache().clear_scope("once")
+                get_intent_cache().clear_scope("once", session_key=key)
             except Exception:  # pragma: no cover — never block turn start
                 pass
             if ctx.turn_runner is None:

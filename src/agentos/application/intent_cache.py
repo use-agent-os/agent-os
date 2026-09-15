@@ -4,9 +4,17 @@ The per-approval queue treats every tool invocation as a fresh request. That
 means approving ``rm /tmp/x`` does nothing for a subsequent
 ``os.remove("/tmp/x")`` or ``Path("/tmp/x").unlink()`` — the model can paraphrase
 its way past approval prompts and the user has to press y repeatedly. This
-module normalizes destructive actions to a semantic key (intent kind + target)
-and remembers approvals for a short window, so paraphrased retries of the same
-intent proceed without another prompt.
+module normalizes destructive actions to a semantic key — the granting session,
+plus the intent kind and its target — and remembers approvals for a short
+window, so paraphrased retries of the same intent proceed without another
+prompt.
+
+The session is part of that key because the approval it records was granted in
+one session, against one agent's workspace, and shown to whoever was sitting in
+front of that session. Sharing it would answer a prompt the next session never
+saw — and since a relative target is resolved against the gateway's working
+directory, an ``rm -rf build`` approved for one agent would otherwise cover a
+different ``build`` belonging to another.
 
 The key is graded by *destructiveness*, not spelling: an approval only covers a
 retry that is no more destructive than what the user actually saw. Approving
@@ -381,8 +389,18 @@ def _sibling_kinds(kind: str) -> tuple[str, ...]:
     return tuple(_graded_kind(caps, family) for caps in _CAPABILITY_SETS)
 
 
+def _session_scope(session_key: str | None) -> str:
+    """Normalize a session key into the cache's session dimension.
+
+    Mirrors ``shell.py:_check_exec_approval``, which files a missing session as
+    ``""`` in the approval params — so a context-less grant and a context-less
+    check meet on the same key instead of silently covering a real session.
+    """
+    return (session_key or "").strip()
+
+
 class IntentApprovalCache:
-    """In-memory cache keyed by ``(kind, target)`` with scope-aware expiry.
+    """In-memory cache keyed by ``(session, kind, target)`` with scope-aware expiry.
 
     Two scopes exist so the approval prompt's ``once`` and ``always`` mean
     what they say:
@@ -391,45 +409,66 @@ class IntentApprovalCache:
                   (rm → os.remove within one model response). Cleared at the
                   start of every new user message via :meth:`clear_scope`.
     * ``always`` — persists for the full session TTL; re-prompts won't appear
-                  for the same intent until the process restarts.
+                  for the same intent until the session ends.
+
+    Both scopes are bounded by the session that granted them. ``ApprovalQueue``
+    already files the elevated mode carried by the very same approval under its
+    session key; the intent it grants is filed the same way.
     """
 
     def __init__(self, default_ttl: float = _DEFAULT_TTL_SECONDS) -> None:
         self._default_ttl = default_ttl
         # intent -> (expires_monotonic, scope)
-        # Keys are (kind, target), not sessions; the TTL already lives in
-        # the value, so this only adds the missing size ceiling. An ``always``
-        # grant carries a year-long TTL, so a long-lived gateway can push one
-        # out under the LRU ceiling — that fails *closed* (the user is
-        # re-prompted), which is the right direction for an approval cache.
-        self._entries: BoundedRegistry[tuple[str, str], tuple[float, str]] = BoundedRegistry(
+        # Keys are (session, kind, target): the session is what an approval was
+        # granted in, so it bounds the grant, and it is what lets
+        # ``drop_session_state`` reap this registry's share of a finished
+        # session instead of leaving a year-long ``always`` grant behind. The
+        # TTL already lives in the value, so the registry only adds the missing
+        # size ceiling. An ``always`` grant carries a year-long TTL, so a
+        # long-lived gateway can push one out under the LRU ceiling — that
+        # fails *closed* (the user is re-prompted), which is the right
+        # direction for an approval cache.
+        self._entries: BoundedRegistry[tuple[str, str, str], tuple[float, str]] = BoundedRegistry(
             name="IntentApprovalCache._entries",
+            session_of=lambda key, _value: key[0],
         )
         self._lock = threading.Lock()
 
     def record(
-        self, command: str, ttl: float | None = None, *, scope: str = "once"
+        self,
+        command: str,
+        ttl: float | None = None,
+        *,
+        scope: str = "once",
+        session_key: str = "",
     ) -> list[tuple[str, str]]:
-        """Mark every intent extracted from *command* as approved.
+        """Mark every intent extracted from *command* as approved in a session.
 
         Handles multi-target commands like ``rm a b c`` — each path becomes its
         own cache entry. Returns the list of recorded intents (empty if none
-        could be extracted).
+        could be extracted); the returned tuples stay ``(kind, target)``, since
+        the session is the caller's own.
         """
         intents = _extract_intents(command)
         if not intents:
             return []
+        session = _session_scope(session_key)
         expires = time.monotonic() + (ttl if ttl is not None else self._default_ttl)
         with self._lock:
-            for intent in intents:
-                self._entries[intent] = (expires, scope)
+            for kind, target in intents:
+                self._entries[(session, kind, target)] = (expires, scope)
         return intents
 
-    def record_always(self, command: str) -> list[tuple[str, str]]:
-        """Remember every intent in *command* for the session lifetime."""
-        return self.record(command, ttl=_ALWAYS_TTL_SECONDS, scope="always")
+    def record_always(self, command: str, *, session_key: str = "") -> list[tuple[str, str]]:
+        """Remember every intent in *command* for the granting session's lifetime."""
+        return self.record(
+            command,
+            ttl=_ALWAYS_TTL_SECONDS,
+            scope="always",
+            session_key=session_key,
+        )
 
-    def check(self, command: str) -> bool:
+    def check(self, command: str, *, session_key: str = "") -> bool:
         """Return True only when **every** extracted intent is still approved.
 
         Multi-target commands must have approval for *all* targets — one
@@ -437,54 +476,72 @@ class IntentApprovalCache:
 
         An intent is satisfied by a cached approval whose capability set is a
         *superset* of its own, so ``rm -rf X`` covers ``rm X`` but never the
-        other way round.
+        other way round — and only when that approval was granted in
+        *session_key*. A grant from another session is not an answer to this
+        session's prompt, so it re-prompts rather than short-circuiting.
         """
         intents = _extract_intents(command)
         if not intents:
             return False
+        session = _session_scope(session_key)
         now = time.monotonic()
         with self._lock:
             for kind, target in intents:
-                if not self._satisfied_locked(kind, target, now):
+                if not self._satisfied_locked(session, kind, target, now):
                     return False
         return True
 
-    def _satisfied_locked(self, kind: str, target: str, now: float) -> bool:
+    def _satisfied_locked(self, session: str, kind: str, target: str, now: float) -> bool:
         """True when some live entry for *target* is at least as permissive."""
         satisfied = False
         for candidate in _covering_kinds(kind):
-            entry = self._entries.get((candidate, target))
+            key = (session, candidate, target)
+            entry = self._entries.get(key)
             if entry is None:
                 continue
             expires, _scope = entry
             if expires < now:
-                self._entries.pop((candidate, target), None)
+                self._entries.pop(key, None)
                 continue
             satisfied = True
         return satisfied
 
-    def forget(self, command: str) -> None:
+    def forget(self, command: str, *, session_key: str | None = None) -> None:
         """Drop approvals for every target in *command*, at every grade.
 
         ``/forget <path>`` builds a plain ``rm <path>``; it has to clear the
-        recursive entry too or the escalated approval would outlive it.
+        recursive entry too or the escalated approval would outlive it. It is
+        an operator command with no session of its own, so *session_key*
+        defaults to ``None`` — every session's grant for that target goes.
         """
         intents = _extract_intents(command)
         if not intents:
             return
+        doomed = {(sibling, target) for kind, target in intents for sibling in _sibling_kinds(kind)}
+        session = None if session_key is None else _session_scope(session_key)
         with self._lock:
-            for kind, target in intents:
-                for sibling in _sibling_kinds(kind):
-                    self._entries.pop((sibling, target), None)
+            self._entries.discard_where(
+                lambda key, _data: (
+                    (key[1], key[2]) in doomed and (session is None or key[0] == session)
+                )
+            )
 
     def clear(self) -> None:
         with self._lock:
             self._entries.clear()
 
-    def clear_scope(self, scope: str) -> None:
-        """Drop every entry whose scope matches, leaving other scopes intact."""
+    def clear_scope(self, scope: str, *, session_key: str | None = None) -> None:
+        """Drop every entry whose scope matches, leaving other scopes intact.
+
+        A turn starting in one session must not clear another session's
+        in-flight grants, so callers pass the session whose turn it is;
+        ``None`` keeps the process-wide sweep for callers that have no session.
+        """
+        session = None if session_key is None else _session_scope(session_key)
         with self._lock:
-            self._entries.discard_where(lambda _intent, data: data[1] == scope)
+            self._entries.discard_where(
+                lambda key, data: data[1] == scope and (session is None or key[0] == session)
+            )
 
 
 _cache: IntentApprovalCache | None = None

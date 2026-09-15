@@ -467,3 +467,169 @@ class TestQuotedRmIsNotACommand:
         # An unclosed quote quotes the remainder, which is what the shell does
         # with it too, so nothing after it is read as a command.
         assert _extract_intents('echo "rm -rf /etc') == []
+
+
+class TestSessionScopedGrants:
+    """An approval is bounded by the session it was granted in.
+
+    ``ApprovalQueue.resolve`` files the elevated mode carried by an approval
+    under its ``sessionKey`` and the intent it grants under no key at all, so a
+    prompt answered in one session used to answer the next session's prompt
+    too — silently, since the short-circuit in ``shell._check_exec_approval``
+    returns before the queue is ever asked.
+    """
+
+    def _target(self, path: str) -> str:
+        from pathlib import Path
+
+        return str(Path(path).resolve(strict=False))
+
+    def test_a_grant_does_not_reach_another_session(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record_always("rm -rf /tmp/agentos-reports", session_key="web:alice")
+
+        assert cache.check("rm -rf /tmp/agentos-reports", session_key="web:alice") is True
+        assert cache.check("rm -rf /tmp/agentos-reports", session_key="web:bob") is False
+
+    def test_a_paraphrase_crosses_spellings_but_not_sessions(self) -> None:
+        """The whole point of the cache still works — inside one session."""
+        cache = IntentApprovalCache()
+        cache.record_always("rm -rf /tmp/agentos-build", session_key="agent:alpha:main")
+
+        assert (
+            cache.check('shutil.rmtree("/tmp/agentos-build")', session_key="agent:alpha:main")
+            is True
+        )
+        assert (
+            cache.check('shutil.rmtree("/tmp/agentos-build")', session_key="agent:beta:main")
+            is False
+        )
+
+    def test_the_session_is_part_of_the_stored_key(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record("rm /tmp/agentos-one", session_key="web:alice")
+
+        assert cache._entries.keys() == [  # noqa: SLF001 - state assertion
+            ("web:alice", "delete", self._target("/tmp/agentos-one"))
+        ]
+
+    def test_two_sessions_keep_independent_grades_for_one_target(self) -> None:
+        """Neither entry may overwrite the other, nor answer for it."""
+        cache = IntentApprovalCache()
+        cache.record("rm /tmp/agentos-shared", session_key="web:alice")
+        cache.record_always("rm -rf /tmp/agentos-shared", session_key="web:bob")
+
+        assert cache.check("rm -rf /tmp/agentos-shared", session_key="web:alice") is False
+        assert cache.check("rm /tmp/agentos-shared", session_key="web:alice") is True
+        assert cache.check("rm -rf /tmp/agentos-shared", session_key="web:bob") is True
+        assert len(cache._entries) == 2  # noqa: SLF001 - state assertion
+
+    def test_a_context_less_grant_does_not_cover_a_named_session(self) -> None:
+        """A tool call with no context files as ``""`` on both sides.
+
+        The direction matters: an unattributed grant answering a real session's
+        prompt would reopen the bypass from the other end.
+        """
+        cache = IntentApprovalCache()
+        cache.record_always("rm /tmp/agentos-orphan")
+
+        assert cache.check("rm /tmp/agentos-orphan") is True
+        assert cache.check("rm /tmp/agentos-orphan", session_key="web:alice") is False
+
+    def test_blank_session_keys_normalize_to_one_scope(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record_always("rm /tmp/agentos-blank", session_key="  ")
+
+        assert cache.check("rm /tmp/agentos-blank", session_key="") is True
+
+    def test_a_new_turn_clears_only_its_own_sessions_once_grants(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record("rm /tmp/agentos-a", session_key="web:alice")
+        cache.record("rm /tmp/agentos-b", session_key="web:bob")
+
+        cache.clear_scope("once", session_key="web:bob")
+
+        assert cache.check("rm /tmp/agentos-a", session_key="web:alice") is True
+        assert cache.check("rm /tmp/agentos-b", session_key="web:bob") is False
+
+    def test_clear_scope_without_a_session_still_sweeps_every_session(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record("rm /tmp/agentos-a", session_key="web:alice")
+        cache.record("rm /tmp/agentos-b", session_key="web:bob")
+
+        cache.clear_scope("once")
+
+        assert cache.check("rm /tmp/agentos-a", session_key="web:alice") is False
+        assert cache.check("rm /tmp/agentos-b", session_key="web:bob") is False
+
+    def test_a_sibling_sessions_turn_cannot_drop_an_always_grant(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record_always("rm /tmp/agentos-keep", session_key="web:alice")
+
+        cache.clear_scope("once", session_key="web:bob")
+        cache.clear_scope("once", session_key="web:alice")
+
+        assert cache.check("rm /tmp/agentos-keep", session_key="web:alice") is True
+
+    def test_forget_is_an_operator_command_and_clears_every_session(self) -> None:
+        """``/approvals forget <path>`` has no session of its own."""
+        cache = IntentApprovalCache()
+        cache.record_always("rm -rf /tmp/agentos-gone", session_key="web:alice")
+        cache.record_always("rm -rf /tmp/agentos-gone", session_key="web:bob")
+
+        cache.forget("rm /tmp/agentos-gone")
+
+        assert cache.check("rm -rf /tmp/agentos-gone", session_key="web:alice") is False
+        assert cache.check("rm -rf /tmp/agentos-gone", session_key="web:bob") is False
+        assert len(cache._entries) == 0  # noqa: SLF001 - state assertion
+
+    def test_forget_can_be_narrowed_to_one_session(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record_always("rm -rf /tmp/agentos-narrow", session_key="web:alice")
+        cache.record_always("rm -rf /tmp/agentos-narrow", session_key="web:bob")
+
+        cache.forget("rm /tmp/agentos-narrow", session_key="web:alice")
+
+        assert cache.check("rm -rf /tmp/agentos-narrow", session_key="web:alice") is False
+        assert cache.check("rm -rf /tmp/agentos-narrow", session_key="web:bob") is True
+
+    def test_forget_still_clears_every_grade_of_the_target(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record_always("rm -rf /tmp/agentos-graded", session_key="web:alice")
+        cache.record_always("os.removedirs('/tmp/agentos-graded')", session_key="web:alice")
+
+        cache.forget("rm /tmp/agentos-graded")
+
+        assert len(cache._entries) == 0  # noqa: SLF001 - state assertion
+
+    def test_a_finished_session_takes_its_grants_with_it(self) -> None:
+        """``drop_session_state`` is the deterministic half of the contract.
+
+        Without ``session_of`` the registry could not answer the question, so a
+        year-long ``always`` grant outlived the session that made it.
+        """
+        from agentos.util.bounded_registry import drop_session_state
+
+        cache = IntentApprovalCache()
+        cache.record_always("rm -rf /tmp/agentos-ends", session_key="web:alice")
+        cache.record_always("rm -rf /tmp/agentos-ends", session_key="web:bob")
+
+        assert drop_session_state("web:alice") >= 1
+
+        assert cache.check("rm -rf /tmp/agentos-ends", session_key="web:alice") is False
+        assert cache.check("rm -rf /tmp/agentos-ends", session_key="web:bob") is True
+
+    def test_multi_target_commands_are_scoped_target_by_target(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record("rm /tmp/agentos-x /tmp/agentos-y", session_key="web:alice")
+
+        assert cache.check("rm /tmp/agentos-x /tmp/agentos-y", session_key="web:alice") is True
+        assert cache.check("rm /tmp/agentos-x /tmp/agentos-y", session_key="web:bob") is False
+        cache.record("rm /tmp/agentos-x", session_key="web:bob")
+        assert cache.check("rm /tmp/agentos-x /tmp/agentos-y", session_key="web:bob") is False
+
+    def test_expiry_is_still_honoured_within_a_session(self) -> None:
+        cache = IntentApprovalCache()
+        cache.record("rm /tmp/agentos-expired", ttl=-1.0, session_key="web:alice")
+
+        assert cache.check("rm /tmp/agentos-expired", session_key="web:alice") is False

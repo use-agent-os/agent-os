@@ -100,6 +100,57 @@ async def test_sandbox_off_forces_prompt_over_cached_intent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cached_intent_from_another_session_does_not_skip_the_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The short-circuit returns before the queue is ever asked.
+
+    So an approval leaking across sessions is not merely a stale cache entry —
+    it is a delete that runs with no prompt shown anywhere.
+    """
+    monkeypatch.setattr(shell, "_sandbox_effectively_off", lambda: False)
+    get_intent_cache().record("rm target.txt", session_key="agent:main:somebody-else")
+
+    result = await shell._check_exec_approval(
+        "exec_command",
+        "rm target.txt",
+        None,
+        "command requires approval",
+        None,
+        True,
+    )
+
+    assert result is not None
+    assert result["status"] == "approval_required"
+    assert shell._elevate_current_call.get() is False
+    assert len(get_approval_queue().list_pending("exec")) == 1
+
+
+@pytest.mark.asyncio
+async def test_cached_intent_from_this_session_still_skips_the_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The paraphrase short-circuit the cache exists for must keep working."""
+    monkeypatch.setattr(shell, "_sandbox_effectively_off", lambda: False)
+    ctx = current_tool_context.get()
+    assert ctx is not None
+    get_intent_cache().record("rm -rf target.txt", session_key=ctx.session_key)
+
+    result = await shell._check_exec_approval(
+        "exec_command",
+        'shutil.rmtree("target.txt")',
+        None,
+        "command requires approval",
+        None,
+        True,
+    )
+
+    assert result is None
+    assert shell._elevate_current_call.get() is True
+    assert get_approval_queue().list_pending("exec") == []
+
+
+@pytest.mark.asyncio
 async def test_elevated_full_remains_explicit_override_when_sandbox_off() -> None:
     ctx = current_tool_context.get()
     assert ctx is not None
