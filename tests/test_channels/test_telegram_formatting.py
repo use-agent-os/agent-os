@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 from typing import Any
 
 import pytest
@@ -399,3 +400,127 @@ def test_code_span_keeps_interior_whitespace(markdown: str, expected: str) -> No
     present and the span is not all spaces; `.strip()` collapsed `` ` ` `` to
     an empty <code></code>."""
     assert render_telegram_html(markdown) == expected
+
+
+# ---------------------------------------------------------------------------
+# Issue #2003: balanced parentheses in a link destination; fence info strings
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://en.wikipedia.org/wiki/Foo_(bar)",
+        "https://docs.python.org/3/library/stdtypes.html#str.split_(sep)",
+        "https://docs.python.org/3/library/stdtypes.html#str.split_(sep)?a=1&b=2",
+        "https://example.com/a_(b)/c",
+    ],
+)
+def test_link_href_keeps_balanced_parentheses(url: str) -> None:
+    """Issue #2003: `_LINK_RE` cut the destination at the first `)`, so a
+    Wikipedia disambiguator or a `#method_(args)` anchor produced an href to a
+    page that does not exist plus a stray `)` (and anything after it) rendered
+    as text after the anchor."""
+    rendered = render_telegram_html(f"[test]({url})")
+
+    assert rendered == f'<a href="{html.escape(url, quote=True)}">test</a>'
+
+
+def test_link_with_parentheses_keeps_surrounding_text() -> None:
+    rendered = render_telegram_html("see [x](https://en.wikipedia.org/wiki/Foo_(bar)) now")
+
+    assert rendered == 'see <a href="https://en.wikipedia.org/wiki/Foo_(bar)">x</a> now'
+
+
+def test_link_with_deeper_nesting_falls_back_to_literal_text() -> None:
+    """One level of balanced parentheses is supported; deeper nesting renders
+    the construct as literal text rather than as a truncated link."""
+    rendered = render_telegram_html("[x](https://example.com/p_(q_(r)))")
+
+    assert "<a " not in rendered
+    assert "https://example.com/p_(q_(r)))" in rendered
+
+
+def test_table_label_link_keeps_balanced_parentheses() -> None:
+    """`_plain_inline` shares `_LINK_RE`, so the table path lost the same
+    characters."""
+    markdown = "| Name | Ref |\n| --- | --- |\n| a | [w](https://en.wikipedia.org/wiki/Foo_(bar)) |"
+    rendered = render_telegram_html(markdown)
+
+    assert 'href="https://en.wikipedia.org/wiki/Foo_(bar)"' in rendered
+    assert "Foo_(bar))" not in rendered
+
+
+@pytest.mark.parametrize(
+    ("info", "expected_class"),
+    [
+        ("c#", "c#"),
+        ("f#", "f#"),
+        ("vb.net", "vb.net"),
+        (".env", ".env"),
+        ("text/x-python", "text/x-python"),
+        ("python {.numberLines startFrom=1}", "python"),
+        ("  rust  ", "rust"),
+    ],
+)
+def test_fence_with_unusual_info_string_is_recognised(info: str, expected_class: str) -> None:
+    """Issue #2005 (consolidated into #2003): `_FENCE_RE` rejected info strings
+    outside `[A-Za-z0-9_+-]`, so the opening fence rendered as literal text and
+    the *closing* fence opened a block that swallowed the rest of the message."""
+    rendered = render_telegram_html(f"```{info}\nx\n```\n\n# Heading after\n\nbody text")
+
+    assert rendered == (
+        f'<pre><code class="language-{expected_class}">x</code></pre>\n\n'
+        "<b>Heading after</b>\n\nbody text"
+    )
+
+
+def test_fence_language_is_escaped_for_the_class_attribute() -> None:
+    rendered = render_telegram_html('```a"b<c\nx\n```')
+
+    assert rendered == '<pre><code class="language-a&quot;b&lt;c">x</code></pre>'
+    assert '"language-a"' not in rendered
+
+
+def test_fence_language_is_capped_in_length() -> None:
+    rendered = render_telegram_html(f"```{'l' * 80}\nx\n```")
+
+    assert rendered == f'<pre><code class="language-{"l" * 32}">x</code></pre>'
+
+
+def test_longer_fence_can_wrap_a_shorter_one() -> None:
+    """A fence closes only on a run at least as long as the one that opened it
+    (CommonMark), so a ```` block may quote a ``` block verbatim."""
+    rendered = render_telegram_html("````md\n```\ninner\n```\n````\n\nafter")
+
+    expected = '<pre><code class="language-md">```\ninner\n```</code></pre>\n\nafter'
+    assert rendered == expected
+
+
+def test_closing_fence_with_info_string_does_not_close() -> None:
+    rendered = render_telegram_html("```\ncode\n```python\nstill code\n```\n\nafter")
+
+    assert rendered == "<pre>code\n```python\nstill code</pre>\n\nafter"
+
+
+def test_unterminated_fence_still_runs_to_the_end() -> None:
+    rendered = render_telegram_html("```c#\nx\ny")
+
+    assert rendered == '<pre><code class="language-c#">x\ny</code></pre>'
+
+
+def test_link_with_unbalanced_parenthesis_falls_back_to_literal_text() -> None:
+    """An unbalanced `(` used to yield a link truncated at it; now the whole
+    construct stays literal text, the same fallback as deeper nesting."""
+    rendered = render_telegram_html("[x](https://a.test/foo_(bar)")
+
+    assert "<a " not in rendered
+    assert "https://a.test/foo_(bar)" in rendered
+
+
+def test_fence_info_string_with_a_backtick_does_not_open_a_block() -> None:
+    """CommonMark: a backtick fence's info string may not contain a backtick."""
+    rendered = render_telegram_html("```py `x`\nstill text")
+
+    assert "<pre>" not in rendered
+    assert "<code>x</code>" in rendered
