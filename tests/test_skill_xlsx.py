@@ -395,7 +395,6 @@ def test_the_apostrophe_escape_is_not_consumed_without_as_text(tmp_path: Path) -
     assert sheet.cell(row=2, column=1).value == "'=hello"
 
 
-
 def _import_scripts() -> tuple[Any, Any, Any]:
     sys.path.insert(0, str(SCRIPTS))
     try:
@@ -571,3 +570,100 @@ def test_clearing_a_cell_keeps_its_style(
     cell = load_workbook(str(out))["S"].cell(row=1, column=1)
     assert cell.value is None
     assert cell.number_format == "0.00%"
+
+
+@pytest.mark.parametrize("spec", [None, [], "not-a-dict", 42, ("also", "not-a-dict")])
+def test_build_returns_a_base_workbook_for_a_non_dict_spec(spec: object) -> None:
+    """A non-dict spec must not crash `.get()` -- it never had a `sheets` key to read."""
+    create_xlsx, _, _ = _import_scripts()
+
+    wb = create_xlsx.build(spec)
+
+    assert wb.sheetnames == ["Sheet"]
+
+
+@pytest.mark.parametrize(
+    "raw_sheets",
+    [
+        pytest.param("not-a-list", id="string"),
+        pytest.param(None, id="null"),
+        pytest.param([1, "x", None], id="list-of-non-dicts"),
+    ],
+)
+def test_build_returns_a_base_workbook_for_malformed_sheets(raw_sheets: object) -> None:
+    create_xlsx, _, _ = _import_scripts()
+
+    wb = create_xlsx.build({"sheets": raw_sheets})
+
+    assert wb.sheetnames == ["Sheet"]
+
+
+def test_build_accepts_a_tuple_of_sheets_and_rows() -> None:
+    """`sheets`/`rows` are consumed as any sequence, not specifically `list`."""
+    create_xlsx, _, _ = _import_scripts()
+
+    wb = create_xlsx.build({"sheets": ({"name": "S", "rows": (["a", "b"], ["c", "d"])},)})
+
+    ws = wb["S"]
+    assert ws.max_row == 2
+    assert [ws.cell(row=r, column=c).value for r in (1, 2) for c in (1, 2)] == [
+        "a",
+        "b",
+        "c",
+        "d",
+    ]
+
+
+def test_build_normalizes_scalar_rows_into_single_cell_rows() -> None:
+    """A scalar row becomes one cell, not an iteration over its characters/digits."""
+    create_xlsx, _, _ = _import_scripts()
+
+    wb = create_xlsx.build({"sheets": [{"name": "S", "rows": ["header", 42, None, ["a", "b"]]}]})
+
+    ws = wb["S"]
+    assert ws.max_row == 4
+    assert ws.cell(row=1, column=1).value == "header"
+    assert ws.cell(row=1, column=2).value is None  # not fragmented into 'h','e','a',...
+    assert ws.cell(row=2, column=1).value == 42
+    assert ws.cell(row=3, column=1).value is None
+    assert ws.cell(row=4, column=1).value == "a"
+    assert ws.cell(row=4, column=2).value == "b"
+
+
+def test_build_skips_merge_entries_with_a_non_string_range() -> None:
+    """A `range` of the wrong type is skipped rather than reaching `merge_cells`."""
+    create_xlsx, _, _ = _import_scripts()
+
+    wb = create_xlsx.build({"sheets": [{"merged": [{"range": 123}, {"range": ["A1:B1"]}]}]})
+
+    assert list(wb["Sheet1"].merged_cells.ranges) == []
+
+
+def test_create_xlsx_cli_reports_invalid_json_with_exit_code_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    create_xlsx, _, _ = _import_scripts()
+
+    bad_json = tmp_path / "bad.json"
+    bad_json.write_text("{not valid json", encoding="utf-8")
+    out = tmp_path / "out.xlsx"
+    monkeypatch.setattr(sys, "argv", ["create_xlsx.py", str(bad_json), "--out", str(out)])
+
+    assert create_xlsx.main() == 2
+    assert "invalid JSON spec" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_create_xlsx_cli_reports_non_object_json_with_exit_code_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    create_xlsx, _, _ = _import_scripts()
+
+    array_spec = tmp_path / "spec.json"
+    array_spec.write_text("[1, 2, 3]", encoding="utf-8")
+    out = tmp_path / "out.xlsx"
+    monkeypatch.setattr(sys, "argv", ["create_xlsx.py", str(array_spec), "--out", str(out)])
+
+    assert create_xlsx.main() == 2
+    assert "JSON spec must be an object" in capsys.readouterr().err
+    assert not out.exists()

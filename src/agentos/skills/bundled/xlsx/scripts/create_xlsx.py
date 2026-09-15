@@ -36,30 +36,47 @@ def _coerce(value: Any) -> Any:
     return value
 
 
-def build(spec: dict[str, Any]) -> Workbook:
+def build(spec: Any) -> Workbook:
     wb = Workbook()
+    if not isinstance(spec, dict):
+        return wb
+
     default_sheet = wb.active
-    sheets = spec.get("sheets") or []
+    raw_sheets = spec.get("sheets")
+    if not isinstance(raw_sheets, (list, tuple)):
+        return wb
+    sheets = [s for s in raw_sheets if isinstance(s, dict)]
     if not sheets:
         return wb
 
     for idx, sheet_spec in enumerate(sheets):
-        if not isinstance(sheet_spec, dict):
-            continue
         if idx == 0:
             ws = default_sheet
             ws.title = str(sheet_spec.get("name") or "Sheet1")
         else:
             ws = wb.create_sheet(title=str(sheet_spec.get("name") or f"Sheet{idx + 1}"))
 
-        for row in sheet_spec.get("rows", []):
-            ws.append([_coerce(v) for v in row])
+        raw_rows = sheet_spec.get("rows")
+        if isinstance(raw_rows, (list, tuple)):
+            for row in raw_rows:
+                # A scalar row (str/int/None/...) becomes a single-cell row
+                # rather than being iterated -- a bare string would otherwise
+                # be split into one cell per character, and a non-iterable
+                # scalar like an int would raise TypeError outright.
+                values = row if isinstance(row, (list, tuple)) else [row]
+                ws.append([_coerce(v) for v in values])
 
-        for merged in sheet_spec.get("merged") or []:
-            if isinstance(merged, str):
-                ws.merge_cells(merged)
-            elif isinstance(merged, dict) and "range" in merged:
-                ws.merge_cells(str(merged["range"]))
+        raw_merged = sheet_spec.get("merged")
+        if isinstance(raw_merged, (list, tuple)):
+            for merged in raw_merged:
+                if isinstance(merged, str):
+                    ws.merge_cells(merged)
+                elif (
+                    isinstance(merged, dict)
+                    and "range" in merged
+                    and isinstance(merged["range"], str)
+                ):
+                    ws.merge_cells(merged["range"])
 
         freeze = sheet_spec.get("freeze")
         if isinstance(freeze, str) and freeze:
@@ -80,7 +97,15 @@ def main() -> int:
     if not args.spec.is_file():
         print(f"error: spec {args.spec} not found", file=sys.stderr)
         return 2
-    spec = json.loads(args.spec.read_text(encoding="utf-8"))
+    try:
+        raw_spec = args.spec.read_text(encoding="utf-8")
+        spec = json.loads(raw_spec)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        print(f"error: invalid JSON spec: {exc}", file=sys.stderr)
+        return 2
+    if not isinstance(spec, dict):
+        print("error: JSON spec must be an object", file=sys.stderr)
+        return 2
     wb = build(spec)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     wb.save(str(args.out))
