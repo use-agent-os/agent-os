@@ -333,6 +333,49 @@ def test_plain_inline_still_strips_markers_outside_a_url() -> None:
     assert _plain_inline("**bold** and __also__ and ~~gone~~") == "bold and also and gone"
 
 
+@pytest.mark.parametrize(
+    "markdown",
+    [
+        "call __init__ method",
+        "see __main__ and __all__",
+        "override __str__ and __repr__",
+    ],
+)
+def test_dunder_names_are_not_bolded_in_body_text(markdown: str) -> None:
+    """`__bold__` collides with Python dunder identifiers: `call __init__
+    method` must not render as `call <b>init</b> method`."""
+    assert render_telegram_html(markdown) == markdown
+
+
+@pytest.mark.parametrize(
+    "markdown",
+    [
+        "call __init__ method",
+        "see __main__ and __all__",
+    ],
+)
+def test_dunder_names_are_not_stripped_in_table_labels(markdown: str) -> None:
+    """`_plain_inline` (table headers/labels) must not corrupt a dunder name
+    the way a naive ``str.replace("__", "")`` did (``__init__`` -> ``init``)."""
+    assert _plain_inline(markdown) == markdown
+
+
+def test_underscore_italic_is_stripped_in_table_labels() -> None:
+    """`_plain_inline` strips `_italic_` the same way it strips `**bold**`,
+    `__bold__` and `~~strike~~` -- it was the only marker left unhandled."""
+    assert _plain_inline("_Status_") == "Status"
+    assert _plain_inline("Value is _pending_ now") == "Value is pending now"
+    assert _plain_inline("snake_case_identifier stays intact") == (
+        "snake_case_identifier stays intact"
+    )
+
+
+def test_table_with_dunder_and_italic_headers_renders_correctly() -> None:
+    markdown = "| _Status_ | __init__ |\n|---|---|\n| _active_ | see __main__ |\n"
+    rendered = render_telegram_html(markdown)
+    assert rendered == "<b>Status — __init__</b>\n<b>active:</b> see __main__"
+
+
 def test_a_url_inside_a_code_span_is_untouched() -> None:
     """Code spans were already protected; that must not regress."""
     assert render_telegram_html("`https://x.test/a__b__c`") == (
@@ -370,10 +413,13 @@ def test_single_underscore_renders_italic(markdown: str, expected: str) -> None:
 )
 def test_single_underscore_leaves_identifiers_alone(markdown: str) -> None:
     """Intraword underscores are not emphasis (CommonMark), so identifiers
-    with several underscores must not sprout <i> tags."""
+    with several underscores must not sprout <i> tags. ``__init__`` is a
+    known dunder name (see ``_DUNDER_NAMES``), so it must not sprout a <b>
+    tag either -- a coding assistant's replies mention it constantly."""
     rendered = render_telegram_html(markdown)
     assert "<i>" not in rendered
-    assert rendered == markdown.replace("__init__", "<b>init</b>")
+    assert "<b>" not in rendered
+    assert rendered == markdown
 
 
 def test_single_underscore_does_not_touch_a_parked_link_or_code_span() -> None:
