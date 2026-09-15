@@ -48,6 +48,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   reports the resolved list under `engines`.
 
 ### Fixed
+- Scheduler: a cron script is killed and reaped when the job's outer
+  `timeout_seconds` deadline (or a shutdown) cancels the run, not only on the
+  inner timeout, so a run recorded as `Timeout after Ns` can no longer keep
+  writing behind the scheduler's back or overlap the next attempt. The reap
+  tolerates a child that already exited and is bounded so an orphaned
+  grandchild holding the output pipes cannot stall the deadline (#1949).
+- Ollama: a parameterless tool call whose `function.arguments` is `null`,
+  empty or the JSON text `"null"` now dispatches with `{}` instead of an
+  unexpected `_raw` keyword, and `list_models()` no longer returns an empty
+  list when an installed tag reports `"details": null` (#1950).
+- Tools: `git_diff` diffs against `HEAD` by default (and `--cached HEAD` for
+  `staged=true`), so it reports staged work as its description promises — a
+  fully staged tree and a staged new file are no longer silently returned as
+  an empty diff. A repository with no commits yet diffs against the empty
+  tree instead of failing (#1963).
+- Tools: on Windows the shell denylist is now the shared catastrophic list
+  plus the Windows spellings rather than the Windows list alone, so `rm -rf
+  /`, `mkfs`, `dd if=`, `shutdown` and friends are refused there too, and
+  PowerShell's `rm` / `ri` aliases of `Remove-Item` are denied at command
+  position like `del`, `rd` and `erase`. The wrapper anchor now also sees
+  through a quoted `powershell -c "…"` / `cmd /c "…"` payload (#1964).
+- Gateway: a session's write and execution locks are pinned while any turn
+  for that session is queued or running, so registry churn from unrelated
+  sessions can no longer evict them mid-turn and hand a concurrent RPC or
+  channel writer a different lock object (#1965).
 
 - Skills: `requires.env` entries declared with `required: false` no longer hide
   the skill when unset. The flag was parsed and shown on the Environment page
