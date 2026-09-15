@@ -23,17 +23,36 @@ DEFAULT_DENYLIST: list[str] = [
     r"(?i)\bRestart-Computer\b",  # PowerShell system reboot
 ]
 
+# Anchors a command name to the start of a command: line start or a
+# separator, optionally through a ``cmd /c`` / ``powershell -c`` wrapper. The
+# wrapper's payload may open with a quote (``powershell -c "rm -r C:\x"`` is
+# how cmd and subprocess hand PowerShell a command), so the quote is allowed
+# only there — not after a bare separator, where ``{"rd": 1}`` in a JSON
+# payload would otherwise look like a command.
 _WIN_CMD_PREFIX: str = (
     r"(?:^|[;&|\n])\s*"
-    r"(?:(?:cmd(?:\.exe)?\s+/[ck]|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+)*)\s+)?"
+    r"(?:(?:cmd(?:\.exe)?\s+/[ck]|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+)*)\s+[\"']?)?"
 )
 
+#: What may follow an anchored command name: a separator, whitespace or the
+#: end. Unlike ``\b`` this refuses ``rm.ps1`` / ``rm-cache.cmd`` — scripts
+#: that merely start with the alias — while still catching ``rm.exe``.
+_WIN_CMD_END: str = r"(?:\.exe)?(?![\w.\-])"
+
+# Windows-only spellings. These are *added* to ``DEFAULT_DENYLIST`` on
+# Windows, never swapped in for it: the catastrophic patterns above are
+# platform-independent (``shutdown`` is a Windows binary too, and the rest
+# reach a Windows host through git-bash, MSYS, Cygwin or WSL).
 DEFAULT_DENYLIST_WIN: list[str] = [
     r"\bdel\b",
     r"\brmdir\b",
     r"\bRemove-Item\b",
     _WIN_CMD_PREFIX + r"rd\b",
     _WIN_CMD_PREFIX + r"erase\b",
+    # PowerShell's ``rm`` and ``ri`` are aliases of ``Remove-Item``; anchored
+    # like ``rd``/``erase`` so ``npm run rm-cache`` or ``terraform ri`` pass.
+    _WIN_CMD_PREFIX + r"rm" + _WIN_CMD_END,
+    _WIN_CMD_PREFIX + r"ri" + _WIN_CMD_END,
     r"\bFormat-Volume\b",
     r"\bStop-Computer\b",
     r"\bRestart-Computer\b",
@@ -107,7 +126,11 @@ class SafeBinPolicy:
         if not deny:
             deny = _legacy_denylist_if_set()
             if not deny:
-                deny = DEFAULT_DENYLIST_WIN if os.name == "nt" else DEFAULT_DENYLIST
+                deny = (
+                    [*DEFAULT_DENYLIST, *DEFAULT_DENYLIST_WIN]
+                    if os.name == "nt"
+                    else list(DEFAULT_DENYLIST)
+                )
         if not warn and not warn_env_present:
             warn = DEFAULT_WARNLIST_WIN if os.name == "nt" else DEFAULT_WARNLIST
 
