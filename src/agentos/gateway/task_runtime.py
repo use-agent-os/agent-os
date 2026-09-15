@@ -838,11 +838,18 @@ class TaskRuntime:
                     )
                     return
                 await self._wait_for_subagent_slot(task)
-                acquired = False
+                # ``task.acquired_slot`` is the flag ``_release_slot`` itself
+                # consults, so the release paths below track it rather than a
+                # local mirror. The mirror was set only after
+                # ``_acquire_fair_slot`` returned, but the slot is claimed part
+                # way through it -- the counters go up under the condition
+                # lock and ``_mark_running`` then writes to storage and emits
+                # outside it. A failure or a cancellation in that tail left the
+                # slot claimed with the mirror still False, so no release ran
+                # and ``_global_in_flight`` never came back down.
                 heartbeat_task: asyncio.Task[None] | None = None
                 try:
                     await self._acquire_fair_slot(task)
-                    acquired = True
                     async with write_lock:
                         pass
                     heartbeat_task = self._start_running_heartbeat(task)
@@ -867,9 +874,8 @@ class TaskRuntime:
                     if heartbeat_task is not None:
                         await self._stop_running_heartbeat(heartbeat_task)
                         heartbeat_task = None
-                    if acquired:
+                    if task.acquired_slot:
                         await self._release_slot(task)
-                        acquired = False
                     await self._mark_terminal(
                         task,
                         AgentTaskStatus.SUCCEEDED,
@@ -878,7 +884,7 @@ class TaskRuntime:
                 finally:
                     if heartbeat_task is not None:
                         await self._stop_running_heartbeat(heartbeat_task)
-                    if acquired:
+                    if task.acquired_slot:
                         await self._release_slot(task)
         except asyncio.CancelledError:
             reason = "overflow_drop" if task.overflow_dropped else "interrupt"
