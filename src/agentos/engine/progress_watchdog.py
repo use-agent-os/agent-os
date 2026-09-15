@@ -153,6 +153,15 @@ class ProgressWatchdog:
         flagged: ToolCallSignature | None = None
         flagged_count = 0
         for signature in observation.tool_calls:
+            if signature.is_error:
+                # This guard is about *succeeding* calls that keep returning the
+                # same answer. A failing call repeated with the same arguments
+                # is the other loop, and `_record_repeated_tool_error` names it
+                # correctly -- but this check runs first and returns early, so
+                # counting errors here shadowed that branch entirely and the
+                # model was told to "use what you already have" about a result
+                # that was an error (Issue #2101).
+                continue
             key = signature.key
             previous = self._repeat_results.get(key)
             if previous is not None and previous == signature.result_hash:
