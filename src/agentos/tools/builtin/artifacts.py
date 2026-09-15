@@ -218,8 +218,34 @@ async def publish_artifact(
     except ArtifactBudgetError as exc:
         raise ToolError(str(exc)) from exc
     target_sha256 = sha256_file(target)
+    artifact_name, artifact_mime = _publish_artifact_metadata(
+        target=target,
+        name=name,
+        mime=mime,
+    )
     for published in reversed(ctx.published_artifacts):
+        # A deliverable is identified by what it *is*, not by its bytes. On
+        # sha256 alone, two distinct files with identical content — a template
+        # and the copy made from it, three stub reports from one generator —
+        # collapsed into one: the second publish returned already_published
+        # carrying the *first* file's id and name, and was never registered,
+        # so nothing downstream could deliver it (#1793).
+        #
+        # ArtifactStore.find_existing_ref, one layer down, keys on
+        # (sha256, name, mime). The entry cached here carries no record of the
+        # file it came from, so the name is matched against either the name
+        # this call asks for or the source file's own basename: re-publishing
+        # the *same* file under a friendlier display name is one deliverable,
+        # which test_publish_artifact_tool_is_idempotent_for_existing_turn_artifact
+        # pins. Two different files can still both be published.
+        #
+        # A miss here is cheap: find_existing_ref below is authoritative and
+        # still answers already_published, so this check stays conservative.
         if published.get("sha256") != target_sha256:
+            continue
+        if published.get("name") not in {artifact_name, target.name}:
+            continue
+        if published.get("mime") != artifact_mime:
             continue
         llm_artifact = _llm_artifact_payload(
             published,
@@ -235,12 +261,6 @@ async def publish_artifact(
             },
             ensure_ascii=False,
         )
-
-    artifact_name, artifact_mime = _publish_artifact_metadata(
-        target=target,
-        name=name,
-        mime=mime,
-    )
 
     store = ArtifactStore(ctx.artifact_media_root)
     existing = store.find_existing_ref(

@@ -1724,6 +1724,21 @@ async def cron(
 # ---------------------------------------------------------------------------
 
 
+def _lookup_config_path(data: Any, parts: list[str]) -> tuple[bool, Any]:
+    """Walk a dotted config path, reporting presence separately from value.
+
+    A present key whose value is ``None`` and a missing key are the same thing
+    to ``dict.get``, which is how ``config_get`` came to tell the agent that a
+    configured-as-null key does not exist.
+    """
+    current = data
+    for part in parts:
+        if not isinstance(current, dict) or part not in current:
+            return False, None
+        current = current[part]
+    return True, current
+
+
 @tool(
     name="gateway",
     description="Gateway control: restart and configuration management.",
@@ -1776,17 +1791,23 @@ async def gateway(
 
     if action == "config_get":
         assert key is not None
-        cfg_dict = config.to_toml_dict() if hasattr(config, "to_toml_dict") else {}
-        # Navigate dot-path key
         parts = key.split(".")
-        val = cfg_dict
-        for p in parts:
-            if isinstance(val, dict):
-                val = val.get(p)
-            else:
-                val = None
-                break
-        if val is None:
+        cfg_dict = config.to_toml_dict() if hasattr(config, "to_toml_dict") else {}
+        found, val = _lookup_config_path(cfg_dict, parts)
+        if not found:
+            # ``to_toml_dict()`` is ``model_dump(exclude_none=True)`` plus a
+            # few deliberate removals, so a key whose configured value is
+            # null is simply absent from it — indistinguishable from a key
+            # that does not exist. Ask the model itself, and answer ``null``
+            # only when the key is declared there *and* its value really is
+            # None. A value the TOML view withheld on purpose (an env-sourced
+            # secret) is not None in the model, so it stays "not found"
+            # instead of leaking through this path.
+            model_dict = config.model_dump() if hasattr(config, "model_dump") else {}
+            declared, declared_val = _lookup_config_path(model_dict, parts)
+            if declared and declared_val is None:
+                found, val = True, None
+        if not found:
             raise ToolError(f"Config key not found: {key}")
         return json.dumps({"action": "config_get", "key": key, "value": val})
 

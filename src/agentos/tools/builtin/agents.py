@@ -13,6 +13,7 @@ from agentos.tools.types import ToolError, current_tool_context
 
 _VALID_SUBAGENT_ACTIONS = ("list", "kill", "steer")
 _TERMINAL_STATUSES = ("done", "failed", "killed", "timeout")
+_LIST_PAGE_SIZE = 100
 
 log = structlog.get_logger(__name__)
 
@@ -45,6 +46,41 @@ async def _current_session_key(mgr: Any) -> str | None:
     except (AttributeError, NotImplementedError):
         pass
     return current_key
+
+
+async def _list_children(mgr: Any, parent_key: str) -> list[dict[str, Any]]:
+    """Return every session spawned by ``parent_key``, filtered in storage.
+
+    ``list_sessions`` caps each call at ``limit`` rows *before* any Python-side
+    filtering could run, so the ``spawned_by`` filter has to go down to the
+    query; pages through the result so a parent with more children than one
+    page still sees all of them.
+    """
+    children: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    page = 0
+    while True:
+        rows = await mgr.list_sessions(
+            spawned_by=parent_key,
+            limit=_LIST_PAGE_SIZE,
+            offset=page * _LIST_PAGE_SIZE,
+        )
+        if not rows:
+            return children
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            # Rows are ordered by ``updated_at`` and children keep touching
+            # it, so one can straddle a page boundary; list it once.
+            key = row.get("session_key")
+            if isinstance(key, str):
+                if key in seen:
+                    continue
+                seen.add(key)
+            children.append(row)
+        if len(rows) < _LIST_PAGE_SIZE:
+            return children
+        page += 1
 
 
 def _spawned_by(session_or_dict: object) -> object:
@@ -126,12 +162,7 @@ async def subagents(
             if current_key is None:
                 log.warning("subagents.list_no_session_context")
                 return json.dumps({"action": "list", "subagents": []})
-            all_sessions = await mgr.list_sessions()
-            subs = [
-                s
-                for s in all_sessions
-                if isinstance(s, dict) and s.get("spawned_by") == current_key
-            ]
+            subs = await _list_children(mgr, current_key)
             return json.dumps({"action": "list", "subagents": subs})
         except (ImportError, AttributeError, NotImplementedError) as exc:
             raise _manager_unavailable() from exc

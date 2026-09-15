@@ -1000,7 +1000,16 @@ class SessionStorage:
         status: str | AgentTaskStatus | None = None,
         limit: int = 100,
         offset: int = 0,
+        newest_first: bool = False,
     ) -> list[AgentTaskRecord]:
+        """List agent tasks, oldest first.
+
+        ``newest_first`` selects the newest ``limit`` rows instead of the
+        oldest ones -- what a caller watching a live session needs once a
+        session has more lifetime tasks than the limit. The rows are still
+        returned oldest-first so ``rows[-1]`` stays the latest task.
+        ``list_agent_tasks_for_sessions`` already windows this way.
+        """
         clauses: list[str] = []
         params: list[Any] = []
         if session_key is not None:
@@ -1011,12 +1020,18 @@ class SessionStorage:
             params.append(str(status))
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params += [limit, offset]
+        order = "DESC" if newest_first else "ASC"
         sql = (
             f"SELECT * FROM agent_tasks {where} "
-            "ORDER BY created_at ASC, rowid ASC LIMIT ? OFFSET ?"
+            f"ORDER BY created_at {order}, rowid {order} LIMIT ? OFFSET ?"
         )
         async with self.conn.execute(sql, params) as cur:
             rows = await cur.fetchall()
+        if newest_first:
+            # Reverse in Python rather than re-sorting in SQL: `SELECT *` does
+            # not carry `rowid`, so an outer ORDER BY would have to tie-break
+            # on another column and could reorder rows sharing a `created_at`.
+            rows = list(reversed(rows))
         return [AgentTaskRecord(**_deserialize_row(dict(row))) for row in rows]
 
     @_serialized_write
@@ -1829,9 +1844,12 @@ class SessionStorage:
     ) -> list[dict[str, Any]]:
         """Full-text search across transcript entries.
 
-        ``project_id`` restricts hits to transcripts of sessions in that
-        project. Returns dicts with: id, session_key, role, snippet,
-        created_at.
+        ``session_id`` accepts either the internal session UUID or the
+        public ``session_key`` -- agents only ever see the key (it is what
+        the results carry), so filtering on the UUID column alone would make
+        every key-scoped search come back empty. ``project_id`` restricts
+        hits to transcripts of sessions in that project. Returns dicts with:
+        id, session_key, role, snippet, created_at.
         """
         safe_q = self.sanitize_fts_query(query)
         if safe_q == '""':
@@ -1841,8 +1859,8 @@ class SessionStorage:
         params: list[Any] = [safe_q]
         joins = ""
         if session_id:
-            clauses.append("t.session_id = ?")
-            params.append(session_id)
+            clauses.append("(t.session_id = ? OR t.session_key = ?)")
+            params.extend([session_id, canonicalize_session_key(session_id)])
         if project_id:
             joins = "JOIN sessions s ON s.session_id = t.session_id "
             clauses.append("s.project_id = ?")

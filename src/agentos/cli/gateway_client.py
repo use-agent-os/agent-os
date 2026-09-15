@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator
 from typing import Any, cast
 from urllib.parse import urlparse
 
+from agentos.session.keys import canonicalize_session_key
 from agentos.session.terminal_reply import build_terminal_reply, sanitize_agent_error
 
 
@@ -55,6 +56,34 @@ def gateway_base_is_local(base_url: str | None) -> bool:
         return ipaddress.ip_address(normalized).is_loopback
     except ValueError:
         return False
+
+
+def _frame_belongs_to_turn(
+    payload: dict[str, Any],
+    accepted_keys: set[str],
+    stream_watermark: int | None,
+) -> bool:
+    """Return whether a session event frame may belong to the turn in flight.
+
+    The gateway stamps every ``session.event.*`` payload with ``session_key``
+    and a per-session monotonic ``stream_seq``. A frame tagged with another
+    session, or positioned at/below the stream watermark observed when this
+    turn subscribed, predates the turn. Frames without ``stream_seq``
+    (``task.*`` events) or without either field (older servers) are only
+    checked as far as their fields allow.
+    """
+    frame_key = payload.get("session_key")
+    if isinstance(frame_key, str) and frame_key and frame_key not in accepted_keys:
+        return False
+    frame_seq = payload.get("stream_seq")
+    if (
+        stream_watermark is not None
+        and isinstance(frame_seq, int)
+        and not isinstance(frame_seq, bool)
+        and frame_seq <= stream_watermark
+    ):
+        return False
+    return True
 
 
 class GatewayClient:
@@ -513,8 +542,28 @@ class GatewayClient:
         sensitive paths still blocked), or "full" (host exec, auto-approve,
         sensitive paths bypassed).
         """
-        # Subscribe to message events for this session
-        await self._call("sessions.messages.subscribe", {"key": session_key})
+        # Anything already queued belongs to an earlier turn -- typically the
+        # ``done(reason="aborted")`` and trailing deltas of a Ctrl-C'd turn
+        # whose generator was abandoned. Nothing for *this* turn can exist
+        # before it is sent, so drop it all rather than let a stale terminal
+        # end the new turn on its first frame.
+        self._drain_recv_queue()
+
+        # Subscribe to message events for this session. The response carries
+        # the canonical session key and the stream position at this moment;
+        # frames tagged with another key, or at/below that position, are not
+        # ours (late leftovers of the previous turn, or another session this
+        # connection is still subscribed to after ``/new`` / ``/resume``).
+        subscribed = await self._call("sessions.messages.subscribe", {"key": session_key})
+        accepted_keys = {session_key, canonicalize_session_key(session_key)}
+        canonical_key = subscribed.get("key") if isinstance(subscribed, dict) else None
+        if isinstance(canonical_key, str) and canonical_key:
+            accepted_keys.add(canonical_key)
+        stream_watermark = (
+            subscribed.get("current_stream_seq") if isinstance(subscribed, dict) else None
+        )
+        if not isinstance(stream_watermark, int) or isinstance(stream_watermark, bool):
+            stream_watermark = None
 
         params: dict[str, Any] = {
             "key": session_key,
@@ -531,8 +580,13 @@ class GatewayClient:
         if elevated in ("on", "bypass", "full"):
             params["_source"]["elevated"] = elevated
 
-        # Send the message (accepted immediately; agent runs async)
-        await self._call("sessions.send", params)
+        # Send the message (accepted immediately; agent runs async). The
+        # response names the task that will run this turn, so a task-runtime
+        # terminal for any other task on this session is not ours.
+        accepted = await self._call("sessions.send", params)
+        accepted_task_id = accepted.get("task_id") if isinstance(accepted, dict) else None
+        if not isinstance(accepted_task_id, str) or not accepted_task_id:
+            accepted_task_id = None
 
         active_task_groups: set[str] = set()
 
@@ -542,6 +596,19 @@ class GatewayClient:
             frame = await self._recv_queue.get()
             event_name: str = frame.get("event", "")
             payload: dict = frame.get("payload") or {}
+            if not _frame_belongs_to_turn(payload, accepted_keys, stream_watermark):
+                continue
+            if (
+                accepted_task_id is not None
+                and not active_task_groups
+                and event_name.startswith("task.")
+                and isinstance(payload.get("task_id"), str)
+                and payload["task_id"] != accepted_task_id
+            ):
+                # ``task.cancelled`` left over from the aborted previous turn,
+                # or a cron run's ``task.failed`` on this session: with no
+                # task group in flight, only our own task may end the turn.
+                continue
             if event_name == "session.event.error":
                 payload = _normalize_session_error_payload(payload)
             if task_terminal := _task_terminal_as_session_event(event_name, payload):
@@ -588,6 +655,14 @@ class GatewayClient:
                 if active_task_groups:
                     continue
                 break
+
+    def _drain_recv_queue(self) -> None:
+        """Discard every frame currently queued (see ``send_message``)."""
+        while True:
+            try:
+                self._recv_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
 
     async def close(self) -> None:
         """Close the WebSocket connection."""

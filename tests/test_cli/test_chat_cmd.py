@@ -1514,19 +1514,32 @@ async def test_gateway_path_command_remote_rejects_before_send(
     assert "File not found" not in buffer.getvalue()
 
 
+def _deliver_on_send(client: object, frames: list[dict[str, object]]) -> object:
+    """Fake ``_call`` that queues ``frames`` when the turn is accepted.
+
+    ``send_message`` discards whatever is queued *before* it subscribes (a
+    stale turn's leftovers), so a fake server has to deliver frames the way a
+    real gateway does -- once ``sessions.send`` has been accepted.
+    """
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_call(method: str, params: dict[str, object]) -> dict[str, object]:
+        calls.append((method, params))
+        if method == "sessions.send":
+            for frame in frames:
+                client._recv_queue.put_nowait(frame)  # type: ignore[attr-defined]
+        return {}
+
+    client._call = fake_call  # type: ignore[attr-defined]
+    return calls
+
+
 @pytest.mark.asyncio
 async def test_gateway_chat_does_not_forward_workspace_fields() -> None:
     from agentos.cli.gateway_client import GatewayClient
 
     client = GatewayClient()
-    calls: list[tuple[str, dict[str, object]]] = []
-
-    async def fake_call(method: str, params: dict[str, object]) -> dict[str, object]:
-        calls.append((method, params))
-        return {}
-
-    client._call = fake_call  # type: ignore[method-assign]
-    client._recv_queue.put_nowait({"event": "session.event.done", "payload": {}})
+    calls = _deliver_on_send(client, [{"event": "session.event.done", "payload": {}}])
 
     events = [
         event
@@ -1550,15 +1563,8 @@ async def test_gateway_client_follows_background_task_group_until_terminal() -> 
     from agentos.cli.gateway_client import GatewayClient
 
     client = GatewayClient()
-    calls: list[tuple[str, dict[str, object]]] = []
-
-    async def fake_call(method: str, params: dict[str, object]) -> dict[str, object]:
-        calls.append((method, params))
-        return {}
-
-    client._call = fake_call  # type: ignore[method-assign]
     group_id = "subagent:agent:main:abc123:task-parent"
-    for frame in (
+    frames: list[dict[str, object]] = [
         {"event": "session.event.task_group.waiting", "payload": {"group_id": group_id}},
         {"event": "session.event.done", "payload": {"reason": "parent_yielded"}},
         {
@@ -1571,8 +1577,8 @@ async def test_gateway_client_follows_background_task_group_until_terminal() -> 
             "event": "session.event.task_group.done",
             "payload": {"group_id": group_id, "delivery_status": "not_applicable"},
         },
-    ):
-        client._recv_queue.put_nowait(frame)
+    ]
+    calls = _deliver_on_send(client, frames)
 
     events = [
         event
@@ -1601,17 +1607,15 @@ async def test_gateway_client_does_not_wait_for_late_task_group_after_done() -> 
     from agentos.cli.gateway_client import GatewayClient
 
     client = GatewayClient()
-
-    async def fake_call(method: str, params: dict[str, object]) -> dict[str, object]:
-        return {}
-
-    client._call = fake_call  # type: ignore[method-assign]
-    client._recv_queue.put_nowait({"event": "session.event.done", "payload": {}})
-    client._recv_queue.put_nowait(
-        {
-            "event": "session.event.task_group.synthesizing",
-            "payload": {"group_id": "late-group"},
-        }
+    _deliver_on_send(
+        client,
+        [
+            {"event": "session.event.done", "payload": {}},
+            {
+                "event": "session.event.task_group.synthesizing",
+                "payload": {"group_id": "late-group"},
+            },
+        ],
     )
 
     events = [
@@ -1631,18 +1635,16 @@ async def test_gateway_client_does_not_end_on_untracked_task_group_terminal() ->
     from agentos.cli.gateway_client import GatewayClient
 
     client = GatewayClient()
-
-    async def fake_call(method: str, params: dict[str, object]) -> dict[str, object]:
-        return {}
-
-    client._call = fake_call  # type: ignore[method-assign]
-    client._recv_queue.put_nowait(
-        {
-            "event": "session.event.task_group.done",
-            "payload": {"group_id": "untracked-group", "delivery_status": "not_applicable"},
-        }
+    _deliver_on_send(
+        client,
+        [
+            {
+                "event": "session.event.task_group.done",
+                "payload": {"group_id": "untracked-group", "delivery_status": "not_applicable"},
+            },
+            {"event": "session.event.done", "payload": {}},
+        ],
     )
-    client._recv_queue.put_nowait({"event": "session.event.done", "payload": {}})
 
     events = [
         event

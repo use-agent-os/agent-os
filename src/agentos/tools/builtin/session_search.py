@@ -50,7 +50,10 @@ def create_session_search_tool(
             },
             "session_id": {
                 "type": "string",
-                "description": "Optional: restrict search to a specific session ID.",
+                "description": (
+                    "Optional: restrict search to one session, identified by its "
+                    "session_key (as returned in results) or internal session ID."
+                ),
             },
             "scope": {
                 "type": "string",

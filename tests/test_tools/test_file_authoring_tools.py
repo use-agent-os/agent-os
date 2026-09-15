@@ -227,3 +227,67 @@ async def test_create_pdf_report_uses_unicode_fonts_for_channel_artifact(tmp_pat
 
     assert not any("ZapfDingbats" in font_name for font_name in base_fonts)
     assert any("STSong-Light" in font_name for font_name in base_fonts)
+
+
+@pytest.mark.asyncio
+async def test_create_csv_publishes_distinct_names_with_identical_content(tmp_path: Path) -> None:
+    """Two files that happen to share bytes are still two deliverables.
+
+    The in-turn dedupe keyed on ``sha256`` alone, so ``report_feb.csv`` came
+    back as ``already_published`` pointing at ``report_jan.csv`` and the second
+    file never existed.
+    """
+    ctx = _channel_artifact_context(tmp_path)
+    token = current_tool_context.set(ctx)
+    try:
+        first = json.loads(await create_csv(name="report_jan.csv", rows=[["a", "b"]]))
+        second = json.loads(await create_csv(name="report_feb.csv", rows=[["a", "b"]]))
+    finally:
+        current_tool_context.reset(token)
+
+    assert first["status"] == "published"
+    assert second["status"] == "published"
+    assert second["artifact"]["name"] == "report_feb.csv"
+    assert second["artifact"]["id"] != first["artifact"]["id"]
+    assert [item["name"] for item in ctx.published_artifacts] == [
+        "report_jan.csv",
+        "report_feb.csv",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_csv_dedupes_same_name_and_content_in_turn(tmp_path: Path) -> None:
+    ctx = _channel_artifact_context(tmp_path)
+    token = current_tool_context.set(ctx)
+    try:
+        first = json.loads(await create_csv(name="report.csv", rows=[["a", "b"]]))
+        second = json.loads(await create_csv(name="report.csv", rows=[["a", "b"]]))
+    finally:
+        current_tool_context.reset(token)
+
+    assert first["status"] == "published"
+    assert second["status"] == "already_published"
+    assert second["artifact"]["id"] == first["artifact"]["id"]
+    assert len(ctx.published_artifacts) == 1
+
+
+@pytest.mark.asyncio
+async def test_in_turn_dedupe_normalizes_the_name_like_the_store(tmp_path: Path) -> None:
+    """The in-turn check must agree with ``find_existing_ref`` on what a name is.
+
+    Published entries carry the store's sanitized filename, so the raw name a
+    caller passes has to be normalized the same way before comparing, or a
+    name with unsafe characters would never match its own earlier publish.
+    """
+    ctx = _channel_artifact_context(tmp_path)
+    token = current_tool_context.set(ctx)
+    try:
+        first = json.loads(await create_csv(name="q1:report.csv", rows=[["a", "b"]]))
+        second = json.loads(await create_csv(name="q1:report.csv", rows=[["a", "b"]]))
+    finally:
+        current_tool_context.reset(token)
+
+    assert first["artifact"]["name"] == "q1_report.csv"
+    assert second["status"] == "already_published"
+    assert second["note"].startswith("This generated file is already registered for the current")
+    assert len(ctx.published_artifacts) == 1

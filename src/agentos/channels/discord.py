@@ -1244,10 +1244,37 @@ class DiscordChannel:
             provider_message_id=message_id,
         )
 
+    def _split_message_ref(self, message_id: str) -> tuple[str, str]:
+        """Resolve ``message_id`` to ``(channel_id, message_id)``.
+
+        Mirrors Telegram's ``<chat_id>|<message_id>``: a Discord message id is
+        only addressable through its channel, so callers that did not send
+        the message themselves (the ``message`` tool, a process restarted
+        since the send) pass ``<channel_id>|<message_id>``. A bare id is
+        looked up in the sent-message cache, then falls back to
+        ``default_channel_id``; with neither there is no valid URL to build,
+        so refuse rather than request ``/channels//messages/<id>``.
+        """
+        channel_id, sep, raw_message_id = message_id.partition("|")
+        if not sep:
+            channel_id, raw_message_id = "", message_id
+        channel_id = (
+            channel_id
+            or self._sent_messages.get(raw_message_id, "")
+            or self.config.default_channel_id
+        )
+        if not channel_id:
+            raise ValueError(
+                "discord edit/delete requires '<channel_id>|<message_id>' for a message "
+                "this adapter did not send when default_channel_id is not configured"
+            )
+        return channel_id, raw_message_id
+
     async def edit(self, message_id: str, content: str) -> ChannelSendResult:
+        """Edit a message; ``message_id`` may be ``<channel_id>|<message_id>``."""
         await self._rate_limiter.acquire()
         client = self._get_client()
-        channel_id = self._sent_messages.get(message_id, self.config.default_channel_id)
+        channel_id, message_id = self._split_message_ref(message_id)
         resp = await retry_request(
             client.patch,
             f"/channels/{channel_id}/messages/{message_id}",
@@ -1263,9 +1290,10 @@ class DiscordChannel:
         )
 
     async def delete(self, message_id: str) -> ChannelSendResult:
+        """Delete a message; ``message_id`` may be ``<channel_id>|<message_id>``."""
         await self._rate_limiter.acquire()
         client = self._get_client()
-        channel_id = self._sent_messages.get(message_id, self.config.default_channel_id)
+        channel_id, message_id = self._split_message_ref(message_id)
         resp = await retry_request(
             client.delete,
             f"/channels/{channel_id}/messages/{message_id}",

@@ -1222,6 +1222,14 @@ def create_memory_tools(
         index_path = file_path.resolve().relative_to(workspace_dir.resolve()).as_posix()
         await r.store.remove_file(index_path)
 
+        # Same contract as memory_save: the frozen per-session snapshot only
+        # rebuilds through this callback, so without it the deleted file
+        # keeps being injected until the session ends.
+        if on_memory_write is not None:
+            ctx = current_tool_context.get()
+            _aid = (ctx.agent_id if ctx else None) or "main"
+            on_memory_write(_aid)
+
         logger.info("memory_delete.ok", path=path)
         return f"Deleted {path} and removed from index."
 

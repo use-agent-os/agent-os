@@ -4,14 +4,14 @@ Operations:
     {"op": "replace_run", "para": <int>, "run": <int>, "text": "..."}
     {"op": "replace_text", "find": "...", "with": "..."}
 
-`replace_text` walks every paragraph -- body paragraphs and the cells of every
-table, nested tables included -- and matches against the joined run texts, so a
-target that spans runs is still found. The replacement is written into the
-run that owns the first character of its match, and every character the match
-did not touch stays in the run it came from — a run is where Word keeps
-character formatting, so moving text between runs would silently restyle it.
-The resulting paragraph text is still plain `str.replace` on the joined runs;
-only the run layout is preserved.
+`replace_text` walks every paragraph -- body paragraphs, the cells of every
+table (nested tables included) and each section's headers and footers -- and
+matches against the joined run texts, so a target that spans runs is still
+found. The replacement is written into the run that owns the first character
+of its match, and every character the match did not touch stays in the run it
+came from — a run is where Word keeps character formatting, so moving text
+between runs would silently restyle it. The resulting paragraph text is still
+plain `str.replace` on the joined runs; only the run layout is preserved.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from docx import Document
+from docx.section import _BaseHeaderFooter
 from docx.table import Table, _Cell
 from docx.text.paragraph import Paragraph
 
@@ -95,14 +96,42 @@ def _iter_table_paragraphs(tables: Iterable[Table]) -> Iterator[Paragraph]:
             yield from _iter_table_paragraphs(cell.tables)
 
 
+def _iter_header_footer_paragraphs(doc: Document) -> Iterator[Paragraph]:
+    """Yield the paragraphs of every header and footer part the document defines.
+
+    A header or footer that ``is_linked_to_previous`` has no part of its own:
+    on the first section that means "none", on later sections it means the
+    previous section's part, which was already visited. Skipping those keeps
+    the walk to one visit per part -- and matters for a second reason:
+    python-docx materialises a header part the moment its paragraphs are
+    read, so touching a linked one would add empty headers to the package.
+    """
+    for section in doc.sections:
+        parts: tuple[_BaseHeaderFooter, ...] = (
+            section.header,
+            section.footer,
+            section.first_page_header,
+            section.first_page_footer,
+            section.even_page_header,
+            section.even_page_footer,
+        )
+        for part in parts:
+            if part.is_linked_to_previous:
+                continue
+            yield from part.paragraphs
+            yield from _iter_table_paragraphs(part.tables)
+
+
 def _iter_all_paragraphs(doc: Document) -> Iterator[Paragraph]:
-    """Body paragraphs followed by every table-cell paragraph in the document.
+    """Body paragraphs, every table-cell paragraph, then headers and footers.
 
     ``doc.paragraphs`` is body-only in python-docx, yet contracts, reports and
-    invoices keep most of their placeholders inside tables.
+    invoices keep most of their placeholders inside tables, and letterheads
+    or confidentiality banners live in the section headers and footers.
     """
     yield from doc.paragraphs
     yield from _iter_table_paragraphs(doc.tables)
+    yield from _iter_header_footer_paragraphs(doc)
 
 
 def apply_ops(doc: Document, ops: list[dict[str, Any]]) -> int:

@@ -75,21 +75,32 @@ def _table_text(shape) -> list[str]:
     return out
 
 
-def _slide_text(slide) -> list[str]:
-    """Walk shapes (and one level of grouped shapes) collecting text."""
+def _shapes_text(shapes) -> list[str]:
+    """Collect text from *shapes*, descending into groups at any depth.
+
+    A group shape carries no text of its own; its members do, and those
+    members may themselves be groups. Expanding a single level (what this did
+    before) silently dropped everything nested two groups deep or more.
+    """
     out: list[str] = []
-    for shape in slide.shapes:
+    for shape in shapes:
         out.extend(_shape_text(shape))
         out.extend(_table_text(shape))
-        # one level of group expansion (sufficient for most decks)
-        if getattr(shape, "shape_type", None) and getattr(shape, "shapes", None):
-            try:
-                for inner in shape.shapes:
-                    out.extend(_shape_text(inner))
-                    out.extend(_table_text(inner))
-            except (AttributeError, TypeError):
-                pass
+        # Only a group shape has a shape tree of its own.
+        members = getattr(shape, "shapes", None)
+        if members is None:
+            continue
+        try:
+            members = list(members)
+        except (AttributeError, TypeError):
+            continue
+        out.extend(_shapes_text(members))
     return out
+
+
+def _slide_text(slide) -> list[str]:
+    """Walk a slide's shapes, grouped shapes included, collecting text."""
+    return _shapes_text(slide.shapes)
 
 
 def _notes_text(slide) -> str:
@@ -100,6 +111,32 @@ def _notes_text(slide) -> str:
     if not tf:
         return ""
     return "\n".join(p.text for p in tf.paragraphs if p.text.strip())
+
+
+def _write(text: str) -> None:
+    """Write extracted text to stdout, surviving a non-UTF-8 stdout encoding.
+
+    Slide text is whatever the deck's author typed, so it routinely carries
+    non-Latin characters and emoji. On a Windows code page (cp936/cp1252) — which
+    is what a redirected or piped stdout falls back to — handing those to the
+    text layer raises ``UnicodeEncodeError`` before a byte is written, so the
+    binary buffer is the primary path. A stream without a usable ``buffer``
+    still gets the text, escaped rather than lost.
+    """
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is not None:
+        try:
+            buffer.write(text.encode("utf-8"))
+            buffer.flush()
+            return
+        except (AttributeError, OSError, ValueError):
+            # Buffer closed or not writable — fall through to the text layer.
+            pass
+
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    # Lossless: unencodable chars become \\uXXXX escapes, not "?".
+    sys.stdout.write(text.encode(encoding, errors="backslashreplace").decode(encoding))
+    sys.stdout.flush()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -141,17 +178,16 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     if args.json:
-        json.dump(slides_data, sys.stdout, ensure_ascii=False, indent=2)
-        sys.stdout.write("\n")
+        _write(json.dumps(slides_data, ensure_ascii=False, indent=2) + "\n")
         return 0
 
     for entry in slides_data:
-        sys.stdout.write(f"--- slide {entry['slide']} ---\n")
+        _write(f"--- slide {entry['slide']} ---\n")
         for line in entry["text"]:
-            sys.stdout.write(line + "\n")
+            _write(line + "\n")
         if args.include_notes and entry.get("notes"):
-            sys.stdout.write("[notes]\n")
-            sys.stdout.write(entry["notes"] + "\n")
+            _write("[notes]\n")
+            _write(entry["notes"] + "\n")
     return 0
 
 

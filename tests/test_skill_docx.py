@@ -363,6 +363,111 @@ def test_replace_text_survives_an_irregular_vertical_merge() -> None:
     assert table.cell(1, 0).text == "Cell Y"
 
 
+def test_replace_text_reaches_section_headers_and_footers() -> None:
+    """Letterheads and confidentiality banners live in headers and footers.
+
+    `_iter_all_paragraphs` walked the body and its tables only, so a
+    `{{ORG}}` in the header was never replaced and the op reported zero.
+    """
+    from docx import Document
+
+    edit_docx = _edit_docx_module()
+    doc = Document()
+    section = doc.sections[0]
+    section.header.paragraphs[0].text = "Header {{ORG}}"
+    section.footer.paragraphs[0].text = "Footer {{CONFIDENTIAL}}"
+
+    applied = edit_docx.apply_ops(
+        doc,
+        [
+            {"op": "replace_text", "find": "{{ORG}}", "with": "Acme Corp"},
+            {"op": "replace_text", "find": "{{CONFIDENTIAL}}", "with": "Public"},
+        ],
+    )
+
+    assert applied == 2
+    assert section.header.paragraphs[0].text == "Header Acme Corp"
+    assert section.footer.paragraphs[0].text == "Footer Public"
+
+
+def test_replace_text_reaches_first_and_even_page_headers_and_footers() -> None:
+    from docx import Document
+
+    edit_docx = _edit_docx_module()
+    doc = Document()
+    section = doc.sections[0]
+    section.different_first_page_header_footer = True
+    doc.settings.odd_and_even_pages_header_footer = True
+    section.first_page_header.paragraphs[0].text = "First {{X}}"
+    section.first_page_footer.paragraphs[0].text = "First foot {{X}}"
+    section.even_page_header.paragraphs[0].text = "Even {{X}}"
+    section.even_page_footer.paragraphs[0].text = "Even foot {{X}}"
+
+    applied = edit_docx.apply_ops(doc, [{"op": "replace_text", "find": "{{X}}", "with": "Y"}])
+
+    assert applied == 4
+    assert section.first_page_header.paragraphs[0].text == "First Y"
+    assert section.first_page_footer.paragraphs[0].text == "First foot Y"
+    assert section.even_page_header.paragraphs[0].text == "Even Y"
+    assert section.even_page_footer.paragraphs[0].text == "Even foot Y"
+
+
+def test_replace_text_reaches_tables_inside_headers() -> None:
+    from docx import Document
+    from docx.shared import Inches
+
+    edit_docx = _edit_docx_module()
+    doc = Document()
+    header = doc.sections[0].header
+    header.add_table(rows=1, cols=1, width=Inches(2)).cell(0, 0).text = "Ref {{REF}}"
+
+    applied = edit_docx.apply_ops(doc, [{"op": "replace_text", "find": "{{REF}}", "with": "42"}])
+
+    assert applied == 1
+    assert header.tables[0].cell(0, 0).text == "Ref 42"
+
+
+def test_replace_text_visits_a_header_shared_by_linked_sections_once() -> None:
+    """A section linked to the previous one reuses that section's header part.
+
+    Walking it again would replace nothing (the placeholder is already gone)
+    but must not be counted twice, and must not create a header part on a
+    section that has none: python-docx materialises one on first access.
+    """
+    from docx import Document
+    from docx.enum.section import WD_SECTION
+
+    edit_docx = _edit_docx_module()
+    doc = Document()
+    doc.sections[0].header.paragraphs[0].text = "Shared {{ORG}}"
+    doc.add_section(WD_SECTION.NEW_PAGE)
+    assert doc.sections[1].header.is_linked_to_previous is True
+
+    applied = edit_docx.apply_ops(doc, [{"op": "replace_text", "find": "{{ORG}}", "with": "Acme"}])
+
+    assert applied == 1
+    assert doc.sections[0].header.paragraphs[0].text == "Shared Acme"
+    assert doc.sections[1].header.is_linked_to_previous is True
+
+
+def test_replace_text_does_not_materialise_absent_headers() -> None:
+    """Touching `section.header.paragraphs` on a header-less section creates
+    the header part; a body-only replacement must leave the package alone."""
+    from docx import Document
+
+    edit_docx = _edit_docx_module()
+    doc = Document()
+    doc.add_paragraph("Body {{X}}")
+
+    edit_docx.apply_ops(doc, [{"op": "replace_text", "find": "{{X}}", "with": "Y"}])
+
+    section = doc.sections[0]
+    assert section.header.is_linked_to_previous is True
+    assert section.footer.is_linked_to_previous is True
+    assert section.first_page_header.is_linked_to_previous is True
+    assert section.even_page_footer.is_linked_to_previous is True
+
+
 def test_apply_ops_skips_non_dict_ops() -> None:
     """Malformed op lists are ignored, as `edit_xlsx.apply_ops` already does."""
     from docx import Document

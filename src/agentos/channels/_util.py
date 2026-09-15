@@ -146,7 +146,17 @@ class RateLimiter:
             if self._tokens < 1.0:
                 wait = (1.0 - self._tokens) / self.refill_rate
                 await asyncio.sleep(wait)
-                self._tokens = 0.0
+                # Re-read the clock after the sleep and account for the wait
+                # here. Leaving ``_last_refill`` at the pre-sleep reading let
+                # the next caller refill the same interval a second time,
+                # which admitted roughly twice the configured rate.
+                now = time.monotonic()
+                self._tokens = min(
+                    self.max_tokens,
+                    self._tokens + (now - self._last_refill) * self.refill_rate,
+                )
+                self._last_refill = now
+                self._tokens = max(0.0, self._tokens - 1.0)
             else:
                 self._tokens -= 1.0
 

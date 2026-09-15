@@ -16,6 +16,8 @@ from agentos.artifacts import (
     DEFAULT_ARTIFACT_MAX_BYTES,
     ArtifactBudgetError,
     ArtifactStore,
+    _safe_filename,
+    _safe_mime,
     artifact_payload,
 )
 from agentos.tools.registry import tool
@@ -234,8 +236,18 @@ def _published_response(
         raise ToolError("artifact session scope is not configured for this turn")
 
     target_sha256 = hashlib.sha256(payload).hexdigest()
+    # Published entries carry the store's sanitized name and mime, so compare
+    # against the same normalization ``find_existing_ref`` applies. Matching
+    # on the digest alone made two distinct files with identical bytes (an
+    # empty sheet, two reports with the same rows) collapse into one.
+    target_name = _safe_filename(name)
+    target_mime = _safe_mime(mime)
     for published in reversed(ctx.published_artifacts):
-        if published.get("sha256") != target_sha256:
+        if (
+            published.get("sha256") != target_sha256
+            or published.get("name") != target_name
+            or published.get("mime") != target_mime
+        ):
             continue
         llm_artifact = {k: v for k, v in published.items() if k != "download_url"}
         return json.dumps(

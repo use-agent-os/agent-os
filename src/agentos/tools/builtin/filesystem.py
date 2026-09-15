@@ -1038,6 +1038,12 @@ async def glob_search(pattern: str, path: str | None = None) -> str:
     if blocked is not None:
         return json.dumps(blocked)
     _gate_workspace_strict_read("glob_search", base, path or str(base))
+    # After the access gates, never before: a blocked path must report as
+    # blocked rather than leak its existence through this error. "No matches"
+    # for a path that is not there is not self-correcting -- the model reads
+    # it as "the symbol does not exist" and stops looking.
+    if not base.exists():
+        raise FileNotFoundError(f"Path not found: {path or base}")
 
     loop = asyncio.get_running_loop()
     strict_roots = _strict_read_roots()
@@ -1120,6 +1126,12 @@ async def grep_search(
     if blocked is not None:
         return json.dumps(blocked)
     _gate_workspace_strict_read("grep_search", base, path or str(base))
+    # After the access gates, never before: a blocked path must report as
+    # blocked rather than leak its existence through this error. "No matches"
+    # for a path that is not there is not self-correcting -- the model reads
+    # it as "the symbol does not exist" and stops looking.
+    if not base.exists():
+        raise FileNotFoundError(f"Path not found: {path or base}")
 
     loop = asyncio.get_running_loop()
     strict_roots = _strict_read_roots()

@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.9.14] - 2026-09-14
+
 ### Added
 
 - Environment page / `agentos env list`: `FIRECRAWL_API_KEY` is now listed

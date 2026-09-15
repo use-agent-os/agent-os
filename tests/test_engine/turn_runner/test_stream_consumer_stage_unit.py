@@ -539,6 +539,32 @@ def test_error_handler_drops_unpaired_tool_use_on_output_truncation() -> None:
     assert state.turn_segments == [{"type": "text", "text": "partial"}]
 
 
+def test_error_handler_flushes_pending_protocol_guard_text() -> None:
+    """Regression for #1796: text held back by the protocol-leak guard
+    because it merely resembled the start of a tool-protocol marker (e.g.
+    "<details>") is genuine assistant output once the stream ends in an
+    error instead of continuing. It must be flushed into final_text_parts /
+    current_text_parts the same way _DoneHandler and _ToolUseStartHandler
+    already do, not silently dropped.
+    """
+    state = _make_state()
+    delta_handler = _TextDeltaHandler()
+
+    delta_handler.handle(TextDeltaEvent(text="Sure, here is a collapsible section: "), state)
+    delta_handler.handle(TextDeltaEvent(text="<details>"), state)
+
+    # The guard is holding "<details>" back pending disambiguation -- it
+    # hasn't reached current_text_parts/final_text_parts yet.
+    assert "".join(state.final_text_parts) == "Sure, here is a collapsible section: "
+
+    handler = _ErrorHandler()
+    result = handler.handle(ErrorEvent(message="boom", code="timeout"), state)
+
+    assert result is _SUPPRESS
+    assert "".join(state.final_text_parts) == "Sure, here is a collapsible section: <details>"
+    assert "".join(state.current_text_parts) == "Sure, here is a collapsible section: <details>"
+
+
 def test_warning_handler_forwards_through_transformer() -> None:
     captured: list[WarningEvent] = []
 

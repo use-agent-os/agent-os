@@ -317,6 +317,9 @@ class MSTeamsChannel:
         ref = TurnContext.get_conversation_reference(activity)
         cache_key = self._reference_cache_key(activity)
         if cache_key:
+            # Pop-and-reinsert so ``next(reversed(...))`` -- the "whoever last
+            # spoke" fallback -- tracks last activity, not first insertion.
+            self._references.pop(cache_key, None)
             self._references[cache_key] = ref
         if activity.recipient is not None and getattr(activity.recipient, "id", None):
             self._bot_id = activity.recipient.id

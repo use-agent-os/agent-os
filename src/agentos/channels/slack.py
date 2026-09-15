@@ -480,11 +480,31 @@ class SlackChannel:
             provider_file_id=file_id,
         )
 
+    def _split_message_ref(self, message_id: str) -> tuple[str, str]:
+        """Split ``<channel_id>|<ts>`` into its parts; a bare ``ts`` uses the default.
+
+        Mirrors Telegram's ``<chat_id>|<message_id>``: a ``ts`` is only unique
+        within its conversation, so edit/delete must be told which one, and
+        the ``message`` tool encodes ``target`` into the id for that reason.
+        """
+        channel, sep, ts = message_id.partition("|")
+        if not sep:
+            channel, ts = "", message_id
+        channel = channel or self.slack_channel_id
+        if not channel:
+            raise RuntimeError("Slack edit/delete has no target channel; use '<channel_id>|<ts>'")
+        return channel, ts
+
     async def edit(self, message_id: str, content: str) -> None:
-        """Update an existing Slack message via chat.update."""
+        """Update an existing Slack message via chat.update.
+
+        ``message_id`` may be ``<channel_id>|<ts>`` to address a conversation
+        other than ``slack_channel_id``.
+        """
+        channel, ts = self._split_message_ref(message_id)
         payload: dict[str, Any] = {
-            "channel": self.slack_channel_id,
-            "ts": message_id,
+            "channel": channel,
+            "ts": ts,
             "text": content,
         }
         client = self._get_client()
@@ -497,10 +517,15 @@ class SlackChannel:
         log.debug("slack.edit", message_id=message_id)
 
     async def delete(self, message_id: str) -> None:
-        """Delete a Slack message via chat.delete."""
+        """Delete a Slack message via chat.delete.
+
+        ``message_id`` may be ``<channel_id>|<ts>`` to address a conversation
+        other than ``slack_channel_id``.
+        """
+        channel, ts = self._split_message_ref(message_id)
         payload: dict[str, Any] = {
-            "channel": self.slack_channel_id,
-            "ts": message_id,
+            "channel": channel,
+            "ts": ts,
         }
         client = self._get_client()
         resp = await retry_request(client.post, "/chat.delete", json=payload)
