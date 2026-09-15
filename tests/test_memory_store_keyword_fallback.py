@@ -5,7 +5,7 @@ import pytest
 from agentos.compat import aiosqlite
 from agentos.memory.embedding import NullEmbeddingProvider
 from agentos.memory.retrieval import MemoryRetriever
-from agentos.memory.store import LongTermMemoryStore
+from agentos.memory.store import LongTermMemoryStore, _build_fts_query
 from agentos.memory.types import (
     LEXICAL_GUARANTEE_METADATA_KEY,
     LEXICAL_GUARANTEE_METADATA_VALUE,
@@ -387,3 +387,63 @@ async def test_retriever_preserves_store_lexical_guaranteed_hits():
     )
 
     assert [result.chunk_id for result in results] == ["semantic", "lexical"]
+
+
+# Written as escapes so the expectations survive any editor's encoding.
+_HANGUL_DEPLOY = "배포"  # "baepo" -- deployment
+_HANGUL_CHECKLIST = "체크리스트"  # "chekeuriseuteu" -- checklist
+_CYRILLIC_ROTATION = "ротация"  # "rotatsiya" -- rotation
+_CYRILLIC_PASSWORD = "Пароль"  # "Parol" -- password
+_LATIN_DIACRITIC = "café"
+
+
+async def _indexed_store(path: str, text: str) -> LongTermMemoryStore:
+    store = LongTermMemoryStore(":memory:", embedding_provider=NullEmbeddingProvider())
+    store._db = await aiosqlite.connect(":memory:")  # type: ignore[assignment]
+    await store._ensure_schema()
+    await store.index_file(path, text)
+    return store
+
+
+@pytest.mark.asyncio
+async def test_search_finds_a_hangul_memory_the_indexer_segmented():
+    """Hangul is in ``_is_cjk``, so the indexer segments and stores it -- the query
+    builder has to tokenize it too or the memory is written and never readable."""
+    store = await _indexed_store("MEMORY.md", f"{_HANGUL_DEPLOY} {_HANGUL_CHECKLIST}")
+    try:
+        results, _mode = await store.search(_HANGUL_DEPLOY, max_results=5, min_score=0.0)
+
+        assert [result.path for result in results] == ["MEMORY.md"]
+    finally:
+        await store._db.close()  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
+async def test_search_finds_a_cyrillic_memory():
+    store = await _indexed_store("notes.md", f"{_CYRILLIC_PASSWORD} {_CYRILLIC_ROTATION} quarterly")
+    try:
+        results, _mode = await store.search(_CYRILLIC_ROTATION, max_results=5, min_score=0.0)
+
+        assert [result.path for result in results] == ["notes.md"]
+    finally:
+        await store._db.close()  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
+async def test_search_matches_a_word_carrying_a_diacritic():
+    """``café`` used to tokenize as ``caf``, which unicode61 never produces."""
+    store = await _indexed_store("fr.md", f"Le {_LATIN_DIACRITIC} est servi")
+    try:
+        results, _mode = await store.search(_LATIN_DIACRITIC, max_results=5, min_score=0.0)
+
+        assert [result.path for result in results] == ["fr.md"]
+    finally:
+        await store._db.close()  # type: ignore[union-attr]
+
+
+def test_build_fts_query_keeps_ascii_cjk_and_underscore_handling_unchanged():
+    """Guard for the widened class -- green before and after the fix."""
+    assert _build_fts_query("deployment checklist") == '"deployment" OR "checklist"'
+    assert _build_fts_query("on-call rotation") == '"on-call" OR "on" OR "call" OR "rotation"'
+    # ``_`` stays a separator, as it was under the old explicit class.
+    assert _build_fts_query("reset_token") == '"reset" OR "token"'
