@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import zipfile
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -28,7 +29,11 @@ def tool_context(workspace: Path) -> Iterator[None]:
         current_tool_context.reset(token)
 
 
-def _build_xlsx_bytes(sheets: dict[str, str], shared_strings: list[str] | None = None) -> bytes:
+def _build_xlsx_bytes(
+    sheets: dict[str, str],
+    shared_strings: list[str] | None = None,
+    shared_string_nodes: str | None = None,
+) -> bytes:
     import io
 
     buf = io.BytesIO()
@@ -65,8 +70,10 @@ def _build_xlsx_bytes(sheets: dict[str, str], shared_strings: list[str] | None =
         )
         zf.writestr("xl/_rels/workbook.xml.rels", rels_xml)
 
-        if shared_strings:
-            si_nodes = "".join(f"<si><t>{s}</t></si>" for s in shared_strings)
+        if shared_strings or shared_string_nodes:
+            si_nodes = shared_string_nodes or "".join(
+                f"<si><t>{s}</t></si>" for s in shared_strings or []
+            )
             shared_xml = (
                 '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                 f'<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">{si_nodes}</sst>'
@@ -524,3 +531,94 @@ async def test_read_spreadsheet_selects_by_position_when_no_sheet_has_that_name(
 
     assert "one-cell" in out
     assert "summary-cell" not in out
+
+
+# Typing Japanese through an IME makes Excel store a furigana reading next to
+# the value, in an <rPh> node. It is a pronunciation guide, not cell content.
+_TOKYO = "東京都"  # Tokyo-to
+_TOKYO_READING = "とうきょうと"  # toukyouto
+_OSAKA = "大阪"  # Osaka
+_OSAKA_READING = "おおさか"  # oosaka
+
+
+def test_shared_string_drops_the_phonetic_guide() -> None:
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f"<si><t>{_TOKYO}</t>"
+        f'<rPh sb="0" eb="3"><t>{_TOKYO_READING}</t></rPh>'
+        '<phoneticPr fontId="1"/></si>'
+        "</sst>"
+    ).encode()
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("xl/sharedStrings.xml", xml)
+    buf.seek(0)
+    with zipfile.ZipFile(buf) as zf:
+        shared = fs._read_xlsx_shared_strings(zf, set(zf.namelist()))
+
+    assert shared == [_TOKYO]
+
+
+def test_shared_string_still_joins_every_formatted_run() -> None:
+    """A rich string splits across <r> runs; those *are* the value."""
+    xml = (
+        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        b'<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        b"<si><r><rPr><b/></rPr><t>Hello </t></r><r><t>world</t></r></si>"
+        b"<si><t>plain</t></si>"
+        b"</sst>"
+    )
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("xl/sharedStrings.xml", xml)
+    buf.seek(0)
+    with zipfile.ZipFile(buf) as zf:
+        shared = fs._read_xlsx_shared_strings(zf, set(zf.namelist()))
+
+    assert shared == ["Hello world", "plain"]
+
+
+def test_inline_string_drops_the_phonetic_guide() -> None:
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<sheetData><row r="1">'
+        f'<c r="A1" t="inlineStr"><is><t>{_OSAKA}</t>'
+        f'<rPh sb="0" eb="2"><t>{_OSAKA_READING}</t></rPh></is></c>'
+        "</row></sheetData></worksheet>"
+    ).encode()
+
+    rows, total_rows = fs._read_xlsx_worksheet(xml, [])
+
+    assert total_rows == 1
+    assert rows[1] == [_OSAKA]
+
+
+@pytest.mark.asyncio
+async def test_read_spreadsheet_does_not_append_a_reading_to_a_cell(tmp_path: Path) -> None:
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row></sheetData>'
+        "</worksheet>"
+    )
+    target = tmp_path / "furigana.xlsx"
+    target.write_bytes(
+        _build_xlsx_bytes(
+            {"Sheet1": sheet_xml},
+            shared_string_nodes=(
+                f"<si><t>{_TOKYO}</t>"
+                f'<rPh sb="0" eb="3"><t>{_TOKYO_READING}</t></rPh>'
+                '<phoneticPr fontId="1"/></si>'
+            ),
+        )
+    )
+
+    with tool_context(tmp_path):
+        out = await fs.read_spreadsheet(str(target))
+
+    assert _TOKYO in out
+    assert _TOKYO_READING not in out

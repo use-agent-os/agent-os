@@ -662,15 +662,34 @@ def _read_xlsx_sheets(path: Path) -> list[tuple[str, dict[int, list[str]], int]]
         raise ToolError(f"Invalid .xlsx XML content in {path}: {exc}") from exc
 
 
+def _xlsx_rich_text(element: ET.Element) -> str:
+    """The displayed text of a shared-string or inline-string node.
+
+    A rich string (``CT_Rst``) keeps its value in a direct ``<t>`` child or, when
+    the cell mixes formatting, in the ``<t>`` of each direct ``<r>`` run. Its
+    ``<rPh>`` siblings hold the phonetic guide instead -- the furigana Excel
+    writes by itself whenever text is entered through a Japanese IME -- and are
+    not part of the value the sheet displays.
+
+    A descendant search over ``<t>`` cannot tell the two apart and appends the
+    reading to the cell, so walk the runs the schema actually defines.
+    """
+
+    parts: list[str] = []
+    for child in element:
+        if child.tag == f"{{{_XLSX_MAIN_NS}}}t":
+            parts.append(child.text or "")
+        elif child.tag == f"{{{_XLSX_MAIN_NS}}}r":
+            for run_text in child.findall(f"{{{_XLSX_MAIN_NS}}}t"):
+                parts.append(run_text.text or "")
+    return "".join(parts)
+
+
 def _read_xlsx_shared_strings(zf: zipfile.ZipFile, names: set[str]) -> list[str]:
     if "xl/sharedStrings.xml" not in names:
         return []
     root = ET.fromstring(zf.read("xl/sharedStrings.xml"))
-    shared: list[str] = []
-    for si in root.findall(f".//{{{_XLSX_MAIN_NS}}}si"):
-        texts = [node.text or "" for node in si.findall(f".//{{{_XLSX_MAIN_NS}}}t")]
-        shared.append("".join(texts))
-    return shared
+    return [_xlsx_rich_text(si) for si in root.findall(f".//{{{_XLSX_MAIN_NS}}}si")]
 
 
 def _read_xlsx_workbook_relationships(
@@ -754,8 +773,11 @@ def _xlsx_column_index(cell_ref: str) -> int:
 def _xlsx_cell_value(cell_el: ET.Element, shared_strings: list[str]) -> str:
     cell_type = cell_el.attrib.get("t")
     if cell_type == "inlineStr":
-        texts = [node.text or "" for node in cell_el.findall(f".//{{{_XLSX_MAIN_NS}}}t")]
-        return "".join(texts)
+        # The value lives in <is>; a writer that omits it and hangs <t> straight
+        # off <c> still reads correctly, since _xlsx_rich_text takes direct
+        # children either way.
+        inline = cell_el.find(f"{{{_XLSX_MAIN_NS}}}is")
+        return _xlsx_rich_text(cell_el if inline is None else inline)
 
     value_el = cell_el.find(f"{{{_XLSX_MAIN_NS}}}v")
     raw = value_el.text if value_el is not None else ""
