@@ -29,6 +29,20 @@ _LOOSE_IMAGE_LINE_RE = re.compile(r"^\s*(?:image|file)\s*:\s*(?P<target>\S+)\s*$
 
 
 def artifact_delivery_key(artifact: dict[str, Any]) -> str:
+    """Stable identity for one artifact on the channel delivery path.
+
+    Delivery identity is ``(content, name)``. ``sha256`` is consulted first
+    and is a first-class artifact field, so keying on it alone made two
+    files with different names but matching bytes — two empty CSVs, a
+    template rendered per region, two placeholder images — collapse into
+    one, and ``dedupe_artifacts_for_channel_delivery`` dropped the second
+    before anything could log or fall back to text. Qualifying the key with
+    the name keeps that from happening while leaving the key deterministic,
+    which ``channel_dispatch`` relies on to match delivered against
+    undelivered artifacts.
+    """
+    name = artifact.get("name")
+    qualifier = f"|name:{name}" if isinstance(name, str) and name else ""
     for field in (
         "sha256",
         "path",
@@ -40,7 +54,8 @@ def artifact_delivery_key(artifact: dict[str, Any]) -> str:
     ):
         value = artifact.get(field)
         if value:
-            return f"{field}:{value}"
+            # "name" is already the qualifier; do not repeat it.
+            return f"{field}:{value}" if field == "name" else f"{field}:{value}{qualifier}"
     return ""
 
 
