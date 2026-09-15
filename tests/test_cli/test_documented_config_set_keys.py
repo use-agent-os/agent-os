@@ -25,9 +25,8 @@ from agentos.cli.main import app
 
 ROOT = Path(__file__).resolve().parents[2]
 # Scoped to the two files issue #840 names. The bundled SKILL.md is
-# deliberately not scanned yet: it documents `config set auth.token`, which
-# also exits 1 — but because `to_toml_dict()` omits an unset secret, which is
-# the `_set_key` limitation tracked separately in #834.
+# deliberately not scanned yet: its examples carry trailing `# comments` that
+# `shlex.split` would hand to the CLI as extra arguments.
 DOCS = ("docs/cli.md", "README.product.md")
 
 # Matches anywhere, so a fenced block, an inline `agentos config set x.y` in

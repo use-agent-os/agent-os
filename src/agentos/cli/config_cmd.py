@@ -68,7 +68,7 @@ def config_set(
 
         cfg = load_config(config_path)
         data = cfg.to_toml_dict()
-        if not _set_key(data, key, _parse_config_value(value)):
+        if not _set_key(data, key, _parse_config_value(value), declared=cfg.model_dump()):
             console.print(f"[red]Key not found: {escape(key)}[/red]")
             raise typer.Exit(1)
         try:
@@ -85,10 +85,13 @@ def config_set(
 
     from agentos.gateway.config import GatewayConfig
 
-    data = GatewayConfig().to_toml_dict()
+    # The model's own dump, not ``to_toml_dict()``: the TOML view drops every
+    # key whose value is None, and a null default is exactly what an operator
+    # is setting for the first time.
+    declared = GatewayConfig().model_dump()
     parts = key.split(".")
     skill_config_map = len(parts) >= 3 and parts[0] == "skills" and parts[1] == "config"
-    if skill_config_map or _get_key(data, key) is _MISSING:
+    if skill_config_map or not _is_declared(declared, parts):
         console.print(f"[red]Key not found: {escape(key)}[/red]")
         raise typer.Exit(1)
 
@@ -104,27 +107,40 @@ def _parse_config_value(value: str) -> Any:
         return value
 
 
-def _set_key(data: dict[str, Any], key: str, value: Any) -> bool:
+def _is_declared(declared: dict[str, Any], parts: list[str]) -> bool:
+    """Return whether the dotted path *parts* names a key the config model declares."""
+    cursor: Any = declared
+    for part in parts:
+        if not isinstance(cursor, dict) or part not in cursor:
+            return False
+        cursor = cursor[part]
+    return True
+
+
+def _set_key(data: dict[str, Any], key: str, value: Any, *, declared: dict[str, Any]) -> bool:
     """Set a dotted key on a TOML dict.
 
-    Unknown keys are rejected so typos do not persist. ``skills.config.*`` is
-    the documented free-form skill-settings map; ``to_toml_dict`` omits it when
-    empty, so this path must create missing intermediate dicts.
+    Unknown keys are rejected so typos do not persist. Whether a key exists is
+    decided against *declared* -- the config model's own dump -- rather than
+    against *data*: ``to_toml_dict`` is ``model_dump(exclude_none=True)`` plus
+    a few deliberate removals, so a declared key whose value is still None
+    (``auth.token`` on a stock config) is absent from it and used to read as a
+    typo; and since a refused key stays None, it could never be set at all.
+    ``skills.config.*`` is the documented free-form skill-settings map, so
+    anything under it is accepted. Tables the TOML view omitted are created.
     """
-    cursor: Any = data
     parts = key.split(".")
     create = len(parts) >= 3 and parts[0] == "skills" and parts[1] == "config"
+    if not create and not _is_declared(declared, parts):
+        return False
+    cursor: Any = data
     for part in parts[:-1]:
         if not isinstance(cursor, dict):
             return False
         if part not in cursor:
-            if not create:
-                return False
             cursor[part] = {}
         cursor = cursor[part]
     if not isinstance(cursor, dict):
-        return False
-    if parts[-1] not in cursor and not create:
         return False
     cursor[parts[-1]] = value
     return True
