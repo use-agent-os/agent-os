@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Redaction: an all-caps acronym is now split from the capitalised word after
+  it, so `APISecret`, `DBPassword`, `JWTSecret`, `LDAPPassword` and
+  `AWSAccessKeyId` are recognised as credential names and masked in an env
+  dump or a `.env` read exactly like `apiSecret` and `API_SECRET` already
+  were. `APIEndpoint`, `DBHost`, `HTTPSProxy` and the rest of the ordinary
+  vocabulary are unaffected (#2007).
+- docx skill: `create_docx.py` no longer crashes on a slightly wrong spec. A
+  table whose rows are all empty is skipped, a scalar row becomes a one-cell
+  row, a heading `level` is clamped into python-docx's 0-9 range (and
+  defaults to 1 when it is not a number), a non-object spec or body builds an
+  empty document, and the CLI reports an unreadable or non-object spec file
+  with `error:` and exit code 2 instead of a traceback (#2018).
+- MCP stdio: a `tools/call` result the pinned SDK cannot model -- a
+  structured-only result with no `content` key, or a content block newer
+  than the installed `mcp` -- is no longer reported to the model as a tool
+  failure with a pydantic validation dump as its output. It is rendered from
+  the raw JSON the way the SDK-backed transports render theirs, so the two
+  spellings of a structured-only result now come out the same (#2020).
+- Telegram: a `~~~` fence is recognised alongside ```` ``` ````, so its body
+  is rendered literally instead of being run through the inline passes. The
+  closing fence must use the same character as the opener and be at least as
+  long, so a tilde block can quote a backtick block verbatim; `~~gone~~`
+  stays strikethrough (#2022).
+- CLI: `agentos config set` accepts any key the config model declares.
+  Both branches checked the key against `to_toml_dict()`, which drops every
+  key whose value is null, so `auth.token`, `auth.password`,
+  `workspace_strict` and 51 other keys on a stock config were refused as
+  `Key not found` -- while `config get` printed them -- and could never be
+  given a first value (#2031).
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added
