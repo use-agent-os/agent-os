@@ -283,6 +283,34 @@ def _redact(text: str) -> str:
         return "[REDACTED — redaction failed]"
 
 
+#: How long the reap after a kill waits for the child's pipes to close.
+#: ``communicate()`` resolves on pipe EOF, not on the child's exit, and a
+#: grandchild that inherited stdout/stderr keeps them open after the direct
+#: child is dead. A killed child normally drains in milliseconds; past this
+#: the orphan is not ours to wait for, and neither the job deadline nor
+#: scheduler shutdown may hang on it.
+_REAP_GRACE_S = 1.0
+
+
+async def _kill_and_reap(proc: asyncio.subprocess.Process) -> None:
+    """Kill *proc* and wait briefly for it, tolerating a child that already exited.
+
+    Reaping matters even after a kill: an unreaped child leaves the event
+    loop warning about a pending transport on the next GC pass. ``kill`` on a
+    process that exited between the deadline and the cleanup raises
+    ``ProcessLookupError``; the outcome the caller reports is the deadline,
+    not that race, so it is swallowed here.
+    """
+    try:
+        proc.kill()
+    except ProcessLookupError:
+        pass
+    try:
+        await asyncio.wait_for(proc.communicate(), timeout=_REAP_GRACE_S)
+    except Exception:
+        pass
+
+
 async def run_job_script(
     script: str,
     *,
@@ -336,14 +364,16 @@ async def run_job_script(
     try:
         raw_stdout, raw_stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except TimeoutError:
-        proc.kill()
-        # Reap the killed child so the event loop does not warn about a
-        # pending transport on the next GC pass.
-        try:
-            await proc.communicate()
-        except Exception:
-            pass
+        await _kill_and_reap(proc)
         return False, f"Script timed out after {timeout:g}s: {path.name}"
+    except asyncio.CancelledError:
+        # The scheduler's outer ``execute_with_timeout`` deadline (or a
+        # shutdown) cancels this coroutine rather than raising the inner
+        # TimeoutError. The child is ours either way: kill and reap it before
+        # the cancellation propagates, so a run recorded as failed cannot keep
+        # writing behind the scheduler's back.
+        await _kill_and_reap(proc)
+        raise
     except Exception as exc:
         return False, f"Script execution failed: {exc}"
 
