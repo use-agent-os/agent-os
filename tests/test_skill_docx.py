@@ -548,3 +548,164 @@ def test_apply_ops_counts_only_the_replace_runs_that_wrote() -> None:
 
     assert applied == 2
     assert [p.text for p in doc.paragraphs] == ["Hi world", "Last paragraph"]
+
+
+def _write_zip(path: Path, members: dict[str, str | bytes]) -> Path:
+    import zipfile
+
+    with zipfile.ZipFile(path, "w") as zf:
+        for name, content in members.items():
+            zf.writestr(name, content)
+    return path
+
+
+def _corrupt_docx_shapes(tmp_path: Path) -> dict[str, Path]:
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import create_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    good_path = tmp_path / "valid.docx"
+    create_docx.build({"body": [{"kind": "paragraph", "text": "hello"}]}).save(str(good_path))
+    real_bytes = good_path.read_bytes()
+
+    shapes: dict[str, Path] = {}
+    shapes["plain_text"] = tmp_path / "plain.docx"
+    shapes["plain_text"].write_bytes(b"not a docx file")
+
+    shapes["empty_file"] = tmp_path / "empty.docx"
+    shapes["empty_file"].write_bytes(b"")
+
+    shapes["truncated_docx"] = tmp_path / "cut.docx"
+    shapes["truncated_docx"].write_bytes(real_bytes[: len(real_bytes) // 2])
+
+    shapes["zip_without_ooxml_part"] = _write_zip(tmp_path / "bare.docx", {"hello.txt": "hi"})
+    shapes["zip_with_malformed_xml"] = _write_zip(
+        tmp_path / "broken.docx",
+        {"[Content_Types].xml": "<not xml", "word/document.xml": "<<<"},
+    )
+    return shapes
+
+
+_CORRUPT_DOCX_SHAPE_IDS = [
+    "plain_text",
+    "empty_file",
+    "truncated_docx",
+    "zip_without_ooxml_part",
+    "zip_with_malformed_xml",
+]
+
+
+@pytest.mark.parametrize("shape", _CORRUPT_DOCX_SHAPE_IDS)
+def test_inspect_reports_an_unreadable_docx(
+    shape: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import inspect_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    path = _corrupt_docx_shapes(tmp_path)[shape]
+    assert inspect_docx.main([str(path)]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("error: ")
+    assert str(path) in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize("shape", _CORRUPT_DOCX_SHAPE_IDS)
+def test_edit_reports_an_unreadable_docx(
+    shape: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import edit_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    path = _corrupt_docx_shapes(tmp_path)[shape]
+    ops = tmp_path / "ops.json"
+    ops.write_text(
+        json.dumps([{"op": "replace_text", "find": "hello", "with": "world"}]), encoding="utf-8"
+    )
+    out = tmp_path / "out.docx"
+
+    assert edit_docx.main([str(path), str(ops), "--out", str(out)]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("error: ")
+    assert str(path) in captured.err
+    assert "Traceback" not in captured.err
+    assert not out.exists()
+
+
+def test_an_unreadable_docx_exits_like_a_missing_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import inspect_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    corrupt = _corrupt_docx_shapes(tmp_path)["plain_text"]
+    missing_code = inspect_docx.main([str(tmp_path / "absent.docx")])
+    capsys.readouterr()
+    corrupt_code = inspect_docx.main([str(corrupt)])
+    capsys.readouterr()
+
+    assert (missing_code, corrupt_code) == (2, 2)
+
+
+def test_both_docx_scripts_agree_on_what_unreadable_means() -> None:
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import edit_docx  # type: ignore[import-not-found]
+        import inspect_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    assert edit_docx._UNREADABLE_DOCX == inspect_docx._UNREADABLE_DOCX
+    assert SyntaxError in inspect_docx._UNREADABLE_DOCX
+
+
+@pytest.mark.parametrize(
+    ("label", "payload"),
+    [
+        ("malformed", b"{not json"),
+        ("truncated", b'[{"op":'),
+        ("empty", b""),
+        ("utf16_from_powershell", "[]".encode("utf-16")),
+    ],
+)
+def test_edit_docx_reports_ops_that_are_not_json(
+    label: str,
+    payload: bytes,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import create_docx  # type: ignore[import-not-found]
+        import edit_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    src = tmp_path / "valid.docx"
+    create_docx.build({"body": [{"kind": "paragraph", "text": "hello"}]}).save(str(src))
+    ops = tmp_path / "ops.json"
+    ops.write_bytes(payload)
+    out = tmp_path / "out.docx"
+
+    assert edit_docx.main([str(src), str(ops), "--out", str(out)]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("error: ")
+    assert "is not valid JSON" in captured.err
+    assert "Traceback" not in captured.err
+    assert not out.exists()
+

@@ -22,11 +22,20 @@ import sys
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
+from zipfile import BadZipFile
 
 from docx import Document
+from docx.opc.exceptions import PackageNotFoundError
 from docx.section import _BaseHeaderFooter
 from docx.table import Table, _Cell
 from docx.text.paragraph import Paragraph
+
+# python-docx reports an unreadable docx through four unrelated classes: a
+# file that is not a ZIP or empty raises PackageNotFoundError, a truncated or
+# corrupt ZIP raises BadZipFile, a ZIP missing an OOXML part raises KeyError,
+# and a malformed part raises an XML parse error. SyntaxError is the base class
+# both XML backends share.
+_UNREADABLE_DOCX = (BadZipFile, PackageNotFoundError, KeyError, SyntaxError)
 
 
 def _replace_run(para: Paragraph, run_idx: int, text: str) -> bool:
@@ -168,25 +177,33 @@ def apply_ops(doc: Document, ops: list[dict[str, Any]]) -> int:
     return applied
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Edit a .docx in place via run-level ops.")
     parser.add_argument("input", type=Path, help="Path to the source .docx")
     parser.add_argument("ops", type=Path, help="JSON file containing a list of ops")
     parser.add_argument("--out", type=Path, required=True, help="Output .docx path")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    args = _parse_args()
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
     if not args.input.is_file():
         print(f"error: input {args.input} not found", file=sys.stderr)
         return 2
     if not args.ops.is_file():
         print(f"error: ops {args.ops} not found", file=sys.stderr)
         return 2
-    raw = json.loads(args.ops.read_text(encoding="utf-8"))
+    try:
+        raw = json.loads(args.ops.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        print(f"error: ops {args.ops} is not valid JSON: {exc}", file=sys.stderr)
+        return 2
     ops = raw if isinstance(raw, list) else []
-    doc = Document(str(args.input))
+    try:
+        doc = Document(str(args.input))
+    except _UNREADABLE_DOCX as exc:
+        print(f"error: input {args.input} is not a readable .docx: {exc}", file=sys.stderr)
+        return 2
     applied = apply_ops(doc, ops)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(args.out))

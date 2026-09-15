@@ -10,8 +10,17 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
+from zipfile import BadZipFile
 
 from docx import Document
+from docx.opc.exceptions import PackageNotFoundError
+
+# python-docx reports an unreadable docx through four unrelated classes: a
+# file that is not a ZIP or empty raises PackageNotFoundError, a truncated or
+# corrupt ZIP raises BadZipFile, a ZIP missing an OOXML part raises KeyError,
+# and a malformed part raises an XML parse error. SyntaxError is the base class
+# both XML backends share.
+_UNREADABLE_DOCX = (BadZipFile, PackageNotFoundError, KeyError, SyntaxError)
 
 
 def inspect(path: Path) -> dict[str, Any]:
@@ -46,21 +55,25 @@ def inspect(path: Path) -> dict[str, Any]:
     }
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Dump .docx structure as JSON.")
     parser.add_argument("path", type=Path, help="Path to a .docx file")
     parser.add_argument(
         "--out", type=Path, default=None, help="Optional output JSON path; default stdout"
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    args = _parse_args()
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
     if not args.path.is_file():
         print(f"error: {args.path} not found", file=sys.stderr)
         return 2
-    payload = inspect(args.path)
+    try:
+        payload = inspect(args.path)
+    except _UNREADABLE_DOCX as exc:
+        print(f"error: input {args.path} is not a readable .docx: {exc}", file=sys.stderr)
+        return 2
     text = json.dumps(payload, ensure_ascii=False, indent=2)
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)
