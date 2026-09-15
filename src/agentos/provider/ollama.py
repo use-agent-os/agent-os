@@ -112,16 +112,53 @@ def _build_ollama_messages(messages: list[Message]) -> list[dict[str, Any]]:
 
 
 def _normalize_tool_arguments(arguments: Any) -> dict[str, Any]:
+    """Coerce a tool call's ``function.arguments`` into a dict.
+
+    A parameterless tool call arrives with ``arguments`` as ``null``, ``""``
+    or the JSON text ``"null"`` depending on the model. All of those mean "no
+    arguments" and normalise to ``{}``. Anything else that is not an object —
+    text that fails to parse, or a list/number, parsed or native — becomes
+    the ``{"_raw": <text>}`` marker dispatch refuses as invalid arguments.
+    The marker's value is always a string: dispatch only recognises a string
+    ``_raw``, and a native list left in place would reach the tool as an
+    unexpected ``_raw`` keyword.
+    """
+    if arguments is None:
+        return {}
     if isinstance(arguments, dict):
         return arguments
     if isinstance(arguments, str):
+        if not arguments.strip():
+            return {}
         try:
             parsed = json.loads(arguments)
         except json.JSONDecodeError:
             return {"_raw": arguments}
+        if parsed is None:
+            return {}
         if isinstance(parsed, dict):
             return parsed
-    return {"_raw": arguments}
+        return {"_raw": arguments}
+    return {"_raw": json.dumps(arguments, default=str)}
+
+
+def _context_window(model: dict[str, Any]) -> int:
+    """Read a tag's ``details.context_length``, tolerating ``details: null``.
+
+    ``/api/tags`` may report ``"details": null`` for a tag; ``.get("details",
+    {})`` only substitutes the default for a *missing* key, so the ``None``
+    crashed ``list_models`` and the blanket handler returned no models at all.
+    """
+    details = model.get("details")
+    if not isinstance(details, dict):
+        return 0
+    value = details.get("context_length")
+    if isinstance(value, bool) or value is None:
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _format_error_body(body: bytes) -> str:
@@ -395,7 +432,7 @@ class OllamaProvider:
                         provider=self.provider_name,
                         model_id=m["name"],
                         display_name=m.get("name", ""),
-                        context_window=m.get("details", {}).get("context_length", 0),
+                        context_window=_context_window(m),
                     )
                     for m in data.get("models", [])
                 ]
