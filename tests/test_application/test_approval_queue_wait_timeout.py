@@ -1,10 +1,125 @@
 from __future__ import annotations
 
+import asyncio
 import time
 
 import pytest
 
 from agentos.application.approval_queue import ApprovalQueue
+
+
+def _queue(tmp_path, **kw) -> ApprovalQueue:
+    return ApprovalQueue(
+        default_timeout=kw.pop("default_timeout", 300.0),
+        db_path=str(tmp_path / "approval_queue.sqlite"),
+        poll_interval=0.01,
+        **kw,
+    )
+
+
+def test_reap_stale_denies_expired_approval_with_no_waiter(tmp_path) -> None:
+    """An approval that aged out with nobody waiting must not stay pending forever.
+
+    Previously only ``wait()`` denied a timed-out approval, so a row that
+    aged out with no active waiter stayed ``resolved=0`` and the Web UI
+    listed it as pending indefinitely.
+    """
+    queue = _queue(tmp_path, default_timeout=300.0)
+    approval_id = queue.request("exec", {"toolName": "exec_command"})
+    queue._conn.execute(
+        "UPDATE approval_queue SET created_at = ? WHERE approval_id = ?",
+        (time.time() - 1000.0, approval_id),
+    )
+    queue._conn.commit()
+
+    reaped = queue.reap_stale()
+    assert reaped == 1
+
+    entry = queue.get(approval_id)
+    assert entry.resolved is True
+    assert entry.approved is False
+
+    # The wait call after the reap observes the denial instead of hanging.
+
+    assert asyncio.run(queue.wait(approval_id, timeout=0.05)) is False
+    assert queue.list_pending() == []
+    queue.close()
+
+
+def test_reap_stale_wakes_an_active_waiter(tmp_path) -> None:
+    """reap_stale sets the in-memory event so a concurrent wait() returns."""
+
+    queue = _queue(tmp_path, default_timeout=300.0)
+    approval_id = queue.request("exec", {"toolName": "exec_command"})
+    queue._conn.execute(
+        "UPDATE approval_queue SET created_at = ? WHERE approval_id = ?",
+        (time.time() - 1000.0, approval_id),
+    )
+    queue._conn.commit()
+
+    async def scenario() -> None:
+        task = asyncio.create_task(queue.wait(approval_id, timeout=5.0))
+        await asyncio.sleep(0.05)
+        # Denied behind the waiter's back, as another thread would.
+        reaped = await asyncio.to_thread(queue.reap_stale)
+        assert reaped == 1
+        assert await task is False
+
+    asyncio.run(scenario())
+    queue.close()
+
+
+def test_list_pending_denies_expired_rows(tmp_path) -> None:
+    """The Web UI feed itself reaps, so stale approvals never render as pending."""
+    queue = _queue(tmp_path, default_timeout=300.0)
+    stale_id = queue.request("exec", {"toolName": "exec_command"})
+    queue._conn.execute(
+        "UPDATE approval_queue SET created_at = ? WHERE approval_id = ?",
+        (time.time() - 1000.0, stale_id),
+    )
+    queue._conn.commit()
+    fresh_id = queue.request("exec", {"toolName": "exec_command"})
+
+    pending = queue.list_pending()
+    assert [p["id"] for p in pending] == [fresh_id]
+
+    entry = queue.get(stale_id)
+    assert entry.resolved is True
+    assert entry.approved is False
+    queue.close()
+
+
+def test_purge_resolved_keeps_recent_tail(tmp_path) -> None:
+    """Resolved history is trimmed to the most recent 32 rows."""
+    queue = _queue(tmp_path, default_timeout=300.0)
+    for _ in range(40):
+        aid = queue.request("exec", {"toolName": "exec_command"})
+        queue.resolve(aid, True)
+    queue.purge_resolved(keep=32)
+
+    rows = queue._conn.execute(
+        "SELECT COUNT(*) AS n FROM approval_queue WHERE resolved = 1"
+    ).fetchone()
+    assert rows["n"] == 32
+    queue.close()
+
+
+def test_startup_reaps_and_purges(tmp_path) -> None:
+    """A queue opened over a stale file denies the expired rows on startup."""
+    queue = _queue(tmp_path, default_timeout=300.0)
+    stale_id = queue.request("exec", {"toolName": "exec_command"})
+    queue._conn.execute(
+        "UPDATE approval_queue SET created_at = ? WHERE approval_id = ?",
+        (time.time() - 1000.0, stale_id),
+    )
+    queue._conn.commit()
+    queue.close()
+
+    reopened = _queue(tmp_path, default_timeout=300.0)
+    entry = reopened.get(stale_id)
+    assert entry.resolved is True
+    assert entry.approved is False
+    reopened.close()
 
 
 @pytest.mark.asyncio

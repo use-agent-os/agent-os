@@ -80,6 +80,12 @@ class ApprovalQueue:
         self._conn.execute("PRAGMA synchronous=NORMAL;")
         self._init_schema()
         self._load_pending()
+        # Best-effort maintenance: deny anything that aged out while the
+        # process was down, and trim resolved history so the queue file
+        # cannot grow without bound (the queue doubles as a status table
+        # for the Web UI, which only ever lists unresolved rows).
+        self.reap_stale()
+        self.purge_resolved()
 
     def _init_schema(self) -> None:
         self._conn.executescript(
@@ -360,6 +366,9 @@ class ApprovalQueue:
         }
 
     def list_pending(self, namespace: str | None = None) -> list[dict]:
+        # Anything that aged out while nobody was watching is denied now,
+        # so the Web UI never shows forever-stale pending approvals.
+        self.reap_stale()
         if namespace:
             rows = self._conn.execute(
                 "SELECT approval_id, namespace, params, created_at "
@@ -382,6 +391,67 @@ class ApprovalQueue:
             }
             for row in rows
         ]
+
+    def reap_stale(self) -> int:
+        """Deny unresolved approvals whose overall lifespan has elapsed.
+
+        ``wait()`` only denies an approval when a caller is actively waiting;
+        an approval that ages out while nobody is waiting (the Web UI is the
+        only thing looking at it) stays ``resolved=0`` forever and is listed
+        as pending indefinitely. This sweeps those rows and wakes any waiter.
+
+        Safe to call from any thread: single write transaction, and
+        ``_pending`` is only ever touched by the asyncio loop.
+        """
+        now = time.time()
+        limit = now - self._timeout
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            rows = self._conn.execute(
+                "SELECT approval_id, created_at FROM approval_queue "
+                "WHERE resolved = 0 AND created_at < ?",
+                (limit,),
+            ).fetchall()
+            for row in rows:
+                self._conn.execute(
+                    "UPDATE approval_queue "
+                    "SET resolved = 1, approved = 0, consumed = 0 "
+                    "WHERE approval_id = ? AND resolved = 0",
+                    (str(row["approval_id"]),),
+                )
+                entry = self._pending.pop(str(row["approval_id"]), None)
+                if entry is not None:
+                    entry.resolved = True
+                    entry.approved = False
+                    entry._event.set()
+            self._conn.commit()
+            return len(rows)
+        except Exception:
+            self._conn.rollback()
+            raise
+
+    def purge_resolved(self, keep: int = 32) -> None:
+        """Trim resolved approvals down to the most recent ``keep`` rows.
+
+        The queue table is also the status feed for the Web UI, which only
+        renders unresolved rows, so resolved history is only useful for
+        auditing. Keep a small tail; older rows are dropped.
+        """
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            self._conn.execute(
+                "DELETE FROM approval_queue WHERE approval_id IN ("
+                "  SELECT approval_id FROM approval_queue "
+                "  WHERE resolved = 1 ORDER BY created_at DESC LIMIT -1 OFFSET ?"
+                ")",
+                (keep,),
+            )
+            self._conn.commit()
+        except sqlite3.Error:
+            self._conn.rollback()
+        except Exception:
+            self._conn.rollback()
+            raise
 
     def set_elevated_mode(self, session_key: str, mode: str | None) -> None:
         key = session_key.strip()
