@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Gateway: `usage.status` and `usage.cost` now page through all sessions in
+  storage instead of truncating at the 100-row default page, avoiding deflated
+  session/token/cost aggregates and missing historical chat sessions. `usage.cost`
+  also falls back to the session record's stored `agent_id` and `channel` when
+  the in-memory tracker has no active scope for the session.
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added
