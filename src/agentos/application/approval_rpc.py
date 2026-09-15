@@ -90,8 +90,15 @@ def approval_snapshot_rpc_payload(queue: ApprovalQueue, intent_cache: Any) -> di
         "mode": queue.get_settings().mode,
         "intent_cache_size": len(intent_cache._entries),  # noqa: SLF001 - diagnostic
         "intent_cache_entries": [
-            {"kind": kind, "target": target, "scope": scope}
-            for (kind, target), (_expires, scope) in intent_cache._entries.items()  # noqa: SLF001
+            # ``session`` is on the wire because a cached approval is now
+            # answerable only within the session that granted it: a diagnostic
+            # that hides which session owns an entry cannot explain why one
+            # session re-prompts and another does not.
+            {"session": session, "kind": kind, "target": target, "scope": scope}
+            for (session, kind, target), (
+                _expires,
+                scope,
+            ) in intent_cache._entries.items()  # noqa: SLF001
         ],
     }
 

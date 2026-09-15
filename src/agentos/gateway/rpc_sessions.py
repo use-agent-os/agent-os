@@ -1283,7 +1283,10 @@ async def _handle_sessions_send(params: dict | None, ctx: RpcContext) -> dict:
             try:
                 from agentos.sandbox.intent_cache import get_intent_cache
 
-                get_intent_cache().clear_scope("once")
+                # Scoped to this session: a message sent in one session used
+                # to disarm another session's in-flight "once" grants, so a
+                # sibling's turn re-prompted a user mid-turn.
+                get_intent_cache().clear_scope("once", session_key=key)
             except Exception:  # pragma: no cover — never block turn start
                 pass
             if ctx.turn_runner is None:

@@ -311,10 +311,16 @@ class ApprovalQueue:
             from agentos.application.intent_cache import get_intent_cache
 
             cache = get_intent_cache()
+            # The grant belongs to the session that was prompted -- the same
+            # session key this method's caller already files the elevated mode
+            # under, three lines up. Recording it without one made the answer
+            # apply to every session in the process (Issue #2191).
+            session_key = str(params.get("sessionKey") or "").strip()
+            base_dir = str(params.get("workspaceDir") or "") or None
             if allow_always:
-                cache.record_always(command)
+                cache.record_always(command, session_key=session_key, base_dir=base_dir)
             else:
-                cache.record(command)
+                cache.record(command, session_key=session_key, base_dir=base_dir)
         except Exception:  # pragma: no cover — cache path is best-effort
             return
 

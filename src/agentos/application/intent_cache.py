@@ -53,6 +53,17 @@ def _norm_path(raw: str, *, base_dir: str | Path | None = None) -> str:
         return raw
 
 
+def _session_scope(session_key: str | None) -> str:
+    """The cache's session dimension for *session_key*.
+
+    A missing session is filed under ``""`` rather than treated as a wildcard.
+    That keeps a grant recorded without a session from answering a real
+    session's prompt: the two simply never meet on the same key, and the
+    unmatched side re-prompts, which is the safe direction.
+    """
+    return (session_key or "").strip()
+
+
 _DELETE = "delete"
 
 # Escalation capabilities that a delete can carry, in canonical key order. An
@@ -396,40 +407,84 @@ class IntentApprovalCache:
 
     def __init__(self, default_ttl: float = _DEFAULT_TTL_SECONDS) -> None:
         self._default_ttl = default_ttl
-        # intent -> (expires_monotonic, scope)
-        # Keys are (kind, target), not sessions; the TTL already lives in
-        # the value, so this only adds the missing size ceiling. An ``always``
-        # grant carries a year-long TTL, so a long-lived gateway can push one
-        # out under the LRU ceiling — that fails *closed* (the user is
-        # re-prompted), which is the right direction for an approval cache.
-        self._entries: BoundedRegistry[tuple[str, str], tuple[float, str]] = BoundedRegistry(
+        # (session, kind, target) -> (expires_monotonic, scope)
+        #
+        # The session is part of the key because that is what the approval was:
+        # a person sitting in one session was shown one prompt and answered it.
+        # Keyed on (kind, target) alone, the grant answered every other
+        # session's prompt too — and the shell short-circuits *before* the
+        # approval queue, so the second session ran the command with no prompt
+        # raised on any surface (Issue #2191).
+        #
+        # The TTL already lives in the value, so the registry only adds the
+        # size ceiling. An ``always`` grant carries a year-long TTL, so a
+        # long-lived gateway can push one out under the LRU ceiling — that
+        # fails *closed* (the user is re-prompted), the right direction here.
+        #
+        # ``session_of`` lets :func:`drop_session_state` reap a finished
+        # session's grants, so an ``always`` no longer outlives the session
+        # that granted it. ``ApprovalQueue._session_elevated_modes`` — which
+        # holds the other half of the very same approval — already declares it.
+        self._entries: BoundedRegistry[tuple[str, str, str], tuple[float, str]] = BoundedRegistry(
             name="IntentApprovalCache._entries",
+            session_of=lambda key, _value: key[0] or None,
         )
         self._lock = threading.Lock()
 
     def record(
-        self, command: str, ttl: float | None = None, *, scope: str = "once"
+        self,
+        command: str,
+        ttl: float | None = None,
+        *,
+        scope: str = "once",
+        session_key: str | None = None,
+        base_dir: str | Path | None = None,
     ) -> list[tuple[str, str]]:
         """Mark every intent extracted from *command* as approved.
 
         Handles multi-target commands like ``rm a b c`` — each path becomes its
         own cache entry. Returns the list of recorded intents (empty if none
         could be extracted).
+
+        ``base_dir`` is the workspace a relative target should resolve against.
+        Without it ``rm -rf build`` normalises against the *gateway's* working
+        directory, so the key names a directory nobody is acting on, and the
+        same relative target matches whatever the agent's real cwd happens to
+        be at the time.
         """
-        intents = _extract_intents(command)
+        intents = _extract_intents(command, base_dir=base_dir)
         if not intents:
             return []
+        session = _session_scope(session_key)
         expires = time.monotonic() + (ttl if ttl is not None else self._default_ttl)
         with self._lock:
-            for intent in intents:
-                self._entries[intent] = (expires, scope)
+            for kind, target in intents:
+                self._entries[(session, kind, target)] = (expires, scope)
         return intents
 
-    def record_always(self, command: str) -> list[tuple[str, str]]:
+    def record_always(
+        self,
+        command: str,
+        *,
+        session_key: str | None = None,
+        base_dir: str | Path | None = None,
+    ) -> list[tuple[str, str]]:
         """Remember every intent in *command* for the session lifetime."""
-        return self.record(command, ttl=_ALWAYS_TTL_SECONDS, scope="always")
+        return self.record(
+            command,
+            ttl=_ALWAYS_TTL_SECONDS,
+            scope="always",
+            session_key=session_key,
+            base_dir=base_dir,
+        )
 
-    def check(self, command: str) -> bool:
+    def check(
+        self,
+        command: str,
+        *,
+        session_key: str | None = None,
+        base_dir: str | Path | None = None,
+    ) -> bool:
         """Return True only when **every** extracted intent is still approved.
 
         Multi-target commands must have approval for *all* targets — one
@@ -437,54 +492,86 @@ class IntentApprovalCache:
 
         An intent is satisfied by a cached approval whose capability set is a
         *superset* of its own, so ``rm -rf X`` covers ``rm X`` but never the
-        other way round.
+        other way round — and which was granted in *this* session. Another
+        session's grant is not an answer to this session's prompt.
         """
-        intents = _extract_intents(command)
+        intents = _extract_intents(command, base_dir=base_dir)
         if not intents:
             return False
+        session = _session_scope(session_key)
         now = time.monotonic()
         with self._lock:
             for kind, target in intents:
-                if not self._satisfied_locked(kind, target, now):
+                if not self._satisfied_locked(session, kind, target, now):
                     return False
         return True
 
-    def _satisfied_locked(self, kind: str, target: str, now: float) -> bool:
-        """True when some live entry for *target* is at least as permissive."""
+    def _satisfied_locked(self, session: str, kind: str, target: str, now: float) -> bool:
+        """True when a live entry of this session's is at least as permissive."""
         satisfied = False
         for candidate in _covering_kinds(kind):
-            entry = self._entries.get((candidate, target))
+            entry = self._entries.get((session, candidate, target))
             if entry is None:
                 continue
             expires, _scope = entry
             if expires < now:
-                self._entries.pop((candidate, target), None)
+                self._entries.pop((session, candidate, target), None)
                 continue
             satisfied = True
         return satisfied
 
-    def forget(self, command: str) -> None:
+    def forget(
+        self,
+        command: str,
+        *,
+        session_key: str | None = None,
+        base_dir: str | Path | None = None,
+    ) -> None:
         """Drop approvals for every target in *command*, at every grade.
 
         ``/forget <path>`` builds a plain ``rm <path>``; it has to clear the
         recursive entry too or the escalated approval would outlive it.
+
+        The session dimension is deliberately *not* symmetric with
+        :meth:`check`. Omitting ``session_key`` here forgets the intent in
+        every session, because the two directions fail in opposite ways:
+        checking too broadly runs an unapproved command, while forgetting too
+        broadly costs a prompt. ``exec.approval.forget`` and ``/forget`` carry
+        no session today, and scoping them to ``""`` would have quietly stopped
+        clearing anything a real session granted.
         """
-        intents = _extract_intents(command)
+        intents = _extract_intents(command, base_dir=base_dir)
         if not intents:
             return
+        session = _session_scope(session_key) if session_key is not None else None
         with self._lock:
-            for kind, target in intents:
-                for sibling in _sibling_kinds(kind):
-                    self._entries.pop((sibling, target), None)
+            if session is not None:
+                for kind, target in intents:
+                    for sibling in _sibling_kinds(kind):
+                        self._entries.pop((session, sibling, target), None)
+                return
+            wanted: set[tuple[str, str]] = {
+                (sibling, target) for kind, target in intents for sibling in _sibling_kinds(kind)
+            }
+            self._entries.discard_where(lambda intent, _data: intent[1:] in wanted)
 
     def clear(self) -> None:
         with self._lock:
             self._entries.clear()
 
-    def clear_scope(self, scope: str) -> None:
-        """Drop every entry whose scope matches, leaving other scopes intact."""
+    def clear_scope(self, scope: str, *, session_key: str | None = None) -> None:
+        """Drop every matching entry, leaving other scopes intact.
+
+        ``session_key`` narrows the sweep to one session. A turn starting in
+        session B used to clear session A's in-flight ``once`` grants, so a
+        sibling session's message re-prompted a user mid-turn. Passing ``None``
+        still sweeps every session, which is what a shutdown wants.
+        """
+        session = _session_scope(session_key) if session_key is not None else None
         with self._lock:
-            self._entries.discard_where(lambda _intent, data: data[1] == scope)
+            self._entries.discard_where(
+                lambda intent, data: data[1] == scope and (session is None or intent[0] == session)
+            )
 
 
 _cache: IntentApprovalCache | None = None

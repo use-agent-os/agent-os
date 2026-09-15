@@ -93,7 +93,10 @@ def test_approval_snapshot_and_forget_payloads_own_wire_shapes() -> None:
     intent_cache = IntentApprovalCache()
     try:
         queue.set_settings("prompt")
-        intent_cache.record_always("rm /tmp/approval-demo")
+        # Granted by a named session: the snapshot carries that session now,
+        # because an approval is only answerable inside the one that granted it
+        # and a diagnostic hiding the owner cannot explain a re-prompt.
+        intent_cache.record_always("rm /tmp/approval-demo", session_key="web:alice")
         normalized_target = str(Path("/tmp/approval-demo").resolve(strict=False))
 
         snapshot = approval_snapshot_rpc_payload(queue, intent_cache)
@@ -102,6 +105,7 @@ def test_approval_snapshot_and_forget_payloads_own_wire_shapes() -> None:
             "intent_cache_size": 1,
             "intent_cache_entries": [
                 {
+                    "session": "web:alice",
                     "kind": "delete",
                     "target": normalized_target,
                     "scope": "always",
