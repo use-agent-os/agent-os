@@ -166,6 +166,32 @@ def test_rss_reads_atom_entries(state_dir, base_url):
     assert "Atom one" in result.stdout
 
 
+ATOM_MULTI_LINK = """<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>tag:b</id>
+    <title>Episode one</title>
+    <link rel="enclosure" type="audio/mpeg" href="https://example.com/ep1.mp3"/>
+    <link rel="alternate" type="text/html" href="https://example.com/ep1.html"/>
+  </entry>
+</feed>"""
+
+
+def test_rss_prefers_atom_alternate_link_over_other_rel_values(state_dir, base_url):
+    """An entry with multiple <link> elements (podcast-style enclosure +
+    alternate) must report the human-readable alternate page, not whichever
+    link happens to come first in document order (#2318)."""
+    url = _feed(state_dir, base_url, "atom_multi.xml", ATOM_MULTI_LINK)
+
+    result = _run(
+        "watch_rss.py", "--url", url, "--name", "c", "--first-run-reports", env_home=state_dir
+    )
+
+    assert result.returncode == 0
+    assert "https://example.com/ep1.html" in result.stdout
+    assert "https://example.com/ep1.mp3" not in result.stdout
+
+
 def test_rss_fails_loudly_on_a_broken_feed(state_dir, base_url):
     url = _feed(state_dir, base_url, "broken.xml", "not xml at all")
 
