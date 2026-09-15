@@ -131,6 +131,94 @@ class TestHeaderShapes:
         assert redact.secret_header_marker(headers) is None
 
 
+class TestAcronymBoundary:
+    """An all-caps acronym is split from the capitalised word after it (#2007).
+
+    ``APISecret`` is the same credential as ``apiSecret``; a splitter that only
+    knew the lower-to-upper boundary kept it as one segment and let it through.
+    """
+
+    VALUE = "9f2b7c41ae55d0e3bb84aa11"
+
+    @pytest.mark.parametrize(
+        ("name", "segments"),
+        [
+            ("APISecret", ["api", "secret"]),
+            ("AWSAccessKeyId", ["aws", "access", "key", "id"]),
+            ("XMLHttpRequest", ["xml", "http", "request"]),
+            ("HTTPSProxy", ["https", "proxy"]),
+            ("getURL", ["get", "url"]),
+            ("CAP_API_KEY", ["cap", "api", "key"]),
+            ("x-cap-api-key", ["x", "cap", "api", "key"]),
+            ("capApiKey", ["cap", "api", "key"]),
+            ("APISECRET", ["apisecret"]),
+        ],
+    )
+    def test_segments(self, name: str, segments: list[str]) -> None:
+        assert redact._name_segments(name) == segments
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "APISecret",
+            "APIToken",
+            "AUTHToken",
+            "AUTHKey",
+            "ACCESSToken",
+            "CLIENTSecret",
+            "SESSIONToken",
+            "PRIVATEKey",
+            "SECRETKey",
+            "SERVICEKey",
+            "DBPassword",
+            "DBSecret",
+            "LDAPPassword",
+            "JWTSecret",
+            "SSHPassword",
+            "AWSAccessKeyId",
+        ],
+    )
+    def test_acronym_prefixed_credential_names(self, name: str) -> None:
+        assert redact._is_credential_name(name)
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "APIEndpoint",
+            "APIVersion",
+            "DBHost",
+            "HTTPHeader",
+            "HTTPSProxy",
+            "AWSRegion",
+            "XMLHttpRequest",
+            "publicKey",
+            "primaryKey",
+            "foreignKey",
+            "cacheKey",
+            "sortKey",
+            "sellToken",
+            "tokenId",
+        ],
+    )
+    def test_acronym_prefixed_ordinary_names(self, name: str) -> None:
+        assert not redact._is_credential_name(name)
+
+    @pytest.mark.parametrize("name", ["APISecret", "DBPassword", "JWTSecret", "AWSAccessKeyId"])
+    def test_env_dump_masks_every_spelling(self, name: str) -> None:
+        out = redact.redact_terminal_output(f"{name}={self.VALUE}\nPATH=/usr/bin\n", "env")
+        assert self.VALUE not in out
+        assert "PATH=/usr/bin" in out
+
+    @pytest.mark.parametrize("name", ["APISecret", "DBPassword", "JWTSecret", "AWSAccessKeyId"])
+    def test_dotenv_read_masks_every_spelling(self, name: str) -> None:
+        out = redact.redact_file_output(f"{name}={self.VALUE}\n", path=".env")
+        assert self.VALUE not in out
+
+    def test_an_ordinary_acronym_assignment_is_untouched(self) -> None:
+        line = f"APIEndpoint=https://api.example/v1\nDBHost=db.internal\nAWSRegion={self.VALUE}\n"
+        assert redact.redact_terminal_output(line, "env") == line
+
+
 class TestNameSegments:
     """Names are matched on segment boundaries, never as substrings."""
 

@@ -183,7 +183,12 @@ _QUALIFIED_NAME_PAIRS: frozenset[tuple[str, str]] = frozenset(
     }
 )
 
-_NAME_SPLIT_RE = re.compile(r"[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])")
+# Three boundaries: a separator run, lower-to-upper (``apiSecret``) and the
+# acronym rule, upper followed by upper-then-lower (``APISecret``,
+# ``AWSAccessKeyId``). Without the third an all-caps prefix glued the whole
+# name into one segment, so ``APISecret`` matched nothing while ``apiSecret``
+# did. ``APISECRET`` has no boundary to find and stays one segment on purpose.
+_NAME_SPLIT_RE = re.compile(r"[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 def _name_segments(name: str) -> list[str]:
