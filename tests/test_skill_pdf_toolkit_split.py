@@ -150,3 +150,25 @@ def test_main_stays_quiet_on_stderr_when_nothing_was_dropped(
     summary = json.loads(captured.out)
     assert summary["count"] == 2
     assert summary["skipped_pages"] == []
+
+
+@pytest.mark.parametrize("spec", ["abc", "1–3", "-5", "0", "1-0", "", "  "])
+def test_main_fails_on_malformed_pages_spec(
+    five_pages: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    spec: str,
+) -> None:
+    split = _split_module()
+    out_dir = tmp_path / "out"
+    monkeypatch.setattr(
+        sys, "argv", ["split.py", str(five_pages), "--pages", spec, "--out", str(out_dir)]
+    )
+
+    assert split.main() == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "error: --pages must be 1-based numbers and ranges, e.g. '1-3,5'\n"
+    assert not out_dir.exists(), "nothing may be written on invalid page spec"

@@ -199,3 +199,30 @@ def test_tables_strategy_explicit_is_rejected_with_a_clear_message(
         extract.main()
     assert exc_info.value.code == 2
     assert "invalid choice: 'explicit'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("spec", ["abc", "1–3", "-5", "0", "1-0"])
+def test_merge_fails_on_malformed_pages_spec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], spec: str
+) -> None:
+    import json
+
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import merge  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    pdf = tmp_path / "test.pdf"
+    _make_one_page_pdf(pdf, "Page 1")
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps([{"file": str(pdf), "pages": spec}]), encoding="utf-8")
+    out_file = tmp_path / "merged.pdf"
+
+    monkeypatch.setattr(sys, "argv", ["merge.py", str(manifest), "--out", str(out_file)])
+    assert merge.main() == 2
+
+    captured = capsys.readouterr()
+    assert captured.err == "error: --pages must be 1-based numbers and ranges, e.g. '1-3,5'\n"
+    assert not out_file.exists()

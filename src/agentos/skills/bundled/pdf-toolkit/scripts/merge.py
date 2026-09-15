@@ -24,24 +24,38 @@ def parse_ranges(spec: str | None, total: int) -> list[int]:
     if not spec:
         return list(range(1, total + 1))
     pages: list[int] = []
+    has_tokens = False
     for token in spec.split(","):
         token = token.strip()
         if not token:
             continue
+        has_tokens = True
         if "-" in token:
-            lo_s, hi_s = token.split("-", 1)
-            lo, hi = int(lo_s), int(hi_s)
+            parts = [p.strip() for p in token.split("-")]
+            if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
+                raise ValueError(f"malformed page range: {token!r}")
+            lo, hi = int(parts[0]), int(parts[1])
+            if lo < 1 or hi < 1:
+                raise ValueError(f"page numbers must be >= 1: {token!r}")
             if lo > hi:
                 lo, hi = hi, lo
             pages.extend(range(lo, hi + 1))
         else:
-            pages.append(int(token))
+            if not token.isdigit():
+                raise ValueError(f"malformed page number: {token!r}")
+            val = int(token)
+            if val < 1:
+                raise ValueError(f"page numbers must be >= 1: {token!r}")
+            pages.append(val)
+    if not has_tokens:
+        raise ValueError("empty page spec")
     return [p for p in pages if 1 <= p <= total]
 
 
 def merge(items: Iterable[dict[str, str]], out: Path) -> int:
     writer = PdfWriter()
     count = 0
+    pages_to_write: list[tuple[PdfReader, list[int]]] = []
     for item in items:
         path = Path(item["file"])
         if not path.is_file():
@@ -49,7 +63,10 @@ def merge(items: Iterable[dict[str, str]], out: Path) -> int:
             continue
         reader = PdfReader(str(path))
         total = len(reader.pages)
-        for page_num in parse_ranges(item.get("pages"), total):
+        pages = parse_ranges(item.get("pages"), total)
+        pages_to_write.append((reader, pages))
+    for reader, pages in pages_to_write:
+        for page_num in pages:
             writer.add_page(reader.pages[page_num - 1])
             count += 1
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -83,7 +100,14 @@ def main() -> int:
             return 2
     else:
         items = [{"file": p} for p in args.inputs]
-    written = merge(items, args.out)
+    try:
+        written = merge(items, args.out)
+    except ValueError:
+        print(
+            "error: --pages must be 1-based numbers and ranges, e.g. '1-3,5'",
+            file=sys.stderr,
+        )
+        return 2
     print(json.dumps({"pages_written": written, "out": str(args.out)}, ensure_ascii=False))
     return 0
 

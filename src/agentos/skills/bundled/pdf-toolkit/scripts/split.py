@@ -28,13 +28,24 @@ def split_ranges(spec: str) -> list[list[int]]:
         if not token:
             continue
         if "-" in token:
-            lo_s, hi_s = token.split("-", 1)
-            lo, hi = int(lo_s), int(hi_s)
+            parts = [p.strip() for p in token.split("-")]
+            if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
+                raise ValueError(f"malformed page range: {token!r}")
+            lo, hi = int(parts[0]), int(parts[1])
+            if lo < 1 or hi < 1:
+                raise ValueError(f"page numbers must be >= 1: {token!r}")
             if lo > hi:
                 lo, hi = hi, lo
             groups.append(list(range(lo, hi + 1)))
         else:
-            groups.append([int(token)])
+            if not token.isdigit():
+                raise ValueError(f"malformed page number: {token!r}")
+            val = int(token)
+            if val < 1:
+                raise ValueError(f"page numbers must be >= 1: {token!r}")
+            groups.append([val])
+    if not groups:
+        raise ValueError("empty page spec")
     return groups
 
 
@@ -87,7 +98,14 @@ def main() -> int:
     if not args.input.is_file():
         print(f"error: input {args.input} not found", file=sys.stderr)
         return 2
-    result = split(args.input, args.pages, args.out)
+    try:
+        result = split(args.input, args.pages, args.out)
+    except ValueError:
+        print(
+            "error: --pages must be 1-based numbers and ranges, e.g. '1-3,5'",
+            file=sys.stderr,
+        )
+        return 2
     if not result.parts:
         print(
             f"error: no page in {args.pages!r} exists in {args.input} ({result.total_pages} pages)",
