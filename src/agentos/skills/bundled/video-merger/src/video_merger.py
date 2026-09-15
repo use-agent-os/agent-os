@@ -2,6 +2,7 @@
 Video Merger Core Library
 自动拼接多个分段短视频为完整长视频的核心功能
 """
+
 import os
 import re
 import shutil
@@ -13,8 +14,7 @@ from glob import glob
 # (the gateway can launch this skill as a subprocess on a shell whose PATH
 # does not include the user-level winget/scoop/choco bin folders).
 _WINGET_FFMPEG_GLOB = (
-    "Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_*/"
-    "ffmpeg-*-full_build/bin"
+    "Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_*/ffmpeg-*-full_build/bin"
 )
 
 
@@ -62,13 +62,32 @@ class VideoMerger:
         self.ffprobe_path = _resolve_ffmpeg_binary(ffprobe_path, "ffprobe")
         self._check_dependencies()
 
+    @staticmethod
+    def concat_entry(video_path: str) -> str:
+        r"""构造 concat demuxer 的一行 ``file`` 指令（已转义）。
+
+        FFmpeg 用 ``av_get_token`` 解析这一行：单引号内的内容原样读取，直到
+        遇到下一个单引号为止。所以文件名里的单引号会提前结束 ``file '...'``
+        指令，剩下的部分退回到无引号状态——在那里反斜杠是转义符，Windows
+        路径 ``C:\Users`` 会被吃成 ``C:Users``，于是报 “Impossible to open”。
+
+        单引号按 ``'\''`` 转义：先关引号、转义一个引号、再重新开引号。反斜杠
+        统一换成正斜杠，FFmpeg 在 Windows 上同样接受，路径里也就不再留下任何
+        需要解释的转义符。
+        """
+        normalized = os.path.abspath(video_path).replace("\\", "/")
+        escaped = normalized.replace("'", "'\\''")
+        return f"file '{escaped}'\n"
+
     def _check_dependencies(self):
         """检查依赖是否安装"""
         for tool in [self.ffmpeg_path, self.ffprobe_path]:
             try:
                 subprocess.run([tool, "-version"], capture_output=True, check=True)
             except Exception as e:
-                raise RuntimeError(f"未找到{tool}，请先安装ffmpeg：https://ffmpeg.org/download.html") from e
+                raise RuntimeError(
+                    f"未找到{tool}，请先安装ffmpeg：https://ffmpeg.org/download.html"
+                ) from e
 
     def get_sorted_videos(self, input_dir: str) -> list[str]:
         """
@@ -95,24 +114,31 @@ class VideoMerger:
         :return: (width, height, duration)
         """
         cmd = [
-            self.ffprobe_path, "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=width,height,duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            video_path
+            self.ffprobe_path,
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            video_path,
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         width, height, duration = result.stdout.strip().split("\n")[:3]
         return int(width), int(height), float(duration)
 
-    def merge(self,
-              input_dir: str,
-              output_path: str,
-              resolution: str | None = None,
-              transition_duration: float = 0.5,
-              fps: int = 24,
-              crf: int = 22,
-              preset: str = "medium") -> bool:
+    def merge(
+        self,
+        input_dir: str,
+        output_path: str,
+        resolution: str | None = None,
+        transition_duration: float = 0.5,
+        fps: int = 24,
+        crf: int = 22,
+        preset: str = "medium",
+    ) -> bool:
         """
         拼接视频
         :param input_dir: 分镜头视频所在目录
@@ -137,41 +163,67 @@ class VideoMerger:
             print(f"使用自定义分辨率：{resolution}")
 
         # 生成concat列表
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             for v in video_list:
-                f.write(f"file '{os.path.abspath(v)}'\n")
+                f.write(self.concat_entry(v))
             concat_file = f.name
 
         try:
             # 先无损拼接所有片段
-            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
+            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
                 temp_raw = f.name
 
             cmd_concat = [
-                self.ffmpeg_path, "-y", "-f", "concat", "-safe", "0",
-                "-i", concat_file,
-                "-c", "copy",
-                temp_raw
+                self.ffmpeg_path,
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                concat_file,
+                "-c",
+                "copy",
+                temp_raw,
             ]
             print("正在拼接视频片段...")
             subprocess.run(cmd_concat, capture_output=True, check=True)
 
             # 获取总时长
             _, _, total_duration = self.get_video_info(temp_raw)
-            print(f"总时长：{int(total_duration/60)}分{int(total_duration%60)}秒")
+            print(f"总时长：{int(total_duration / 60)}分{int(total_duration % 60)}秒")
 
             # 统一参数+添加转场
             print("正在编码和添加转场效果...")
             cmd_final = [
-                self.ffmpeg_path, "-y", "-i", temp_raw,
-                "-vf", (f"scale={resolution},fps={fps},format=yuv420p,"
-                        f"fade=t=in:st=0:d={transition_duration},"
-                        f"fade=t=out:st={total_duration-transition_duration}:d={transition_duration}"),
-                "-af", (f"afade=t=in:st=0:d={transition_duration},"
-                        f"afade=t=out:st={total_duration-transition_duration}:d={transition_duration}"),
-                "-c:v", "h264", "-crf", str(crf), "-preset", preset,
-                "-c:a", "aac", "-ar", "44100", "-ac", "2",
-                output_path
+                self.ffmpeg_path,
+                "-y",
+                "-i",
+                temp_raw,
+                "-vf",
+                (
+                    f"scale={resolution},fps={fps},format=yuv420p,"
+                    f"fade=t=in:st=0:d={transition_duration},"
+                    f"fade=t=out:st={total_duration - transition_duration}:d={transition_duration}"
+                ),
+                "-af",
+                (
+                    f"afade=t=in:st=0:d={transition_duration},"
+                    f"afade=t=out:st={total_duration - transition_duration}:d={transition_duration}"
+                ),
+                "-c:v",
+                "h264",
+                "-crf",
+                str(crf),
+                "-preset",
+                preset,
+                "-c:a",
+                "aac",
+                "-ar",
+                "44100",
+                "-ac",
+                "2",
+                output_path,
             ]
             subprocess.run(cmd_final, capture_output=True, check=True)
 
@@ -192,15 +244,17 @@ class VideoMerger:
 
         return False
 
-    def merge_chunks(self,
-                     input_dir: str,
-                     output_dir: str,
-                     chunk_duration: int = 60,
-                     resolution: str | None = None,
-                     transition_duration: float = 0.5,
-                     fps: int = 24,
-                     crf: int = 22,
-                     preset: str = "medium") -> bool:
+    def merge_chunks(
+        self,
+        input_dir: str,
+        output_dir: str,
+        chunk_duration: int = 60,
+        resolution: str | None = None,
+        transition_duration: float = 0.5,
+        fps: int = 24,
+        crf: int = 22,
+        preset: str = "medium",
+    ) -> bool:
         """
         分块拼接视频
         :param input_dir: 分镜头视频所在目录
@@ -244,7 +298,7 @@ class VideoMerger:
                     transition_duration,
                     fps,
                     crf,
-                    preset
+                    preset,
                 )
                 chunk_index += 1
                 current_chunk = []
@@ -261,39 +315,48 @@ class VideoMerger:
                 transition_duration,
                 fps,
                 crf,
-                preset
+                preset,
             )
 
         print(f"[OK] 分块合并完成！共生成 {chunk_index} 个分块，保存在：{output_dir}")
         return True
 
-    def _merge_single_chunk(self,
-                            video_list: list[str],
-                            output_path: str,
-                            resolution: str,
-                            transition_duration: float = 0.5,
-                            fps: int = 24,
-                            crf: int = 22,
-                            preset: str = "medium") -> bool:
+    def _merge_single_chunk(
+        self,
+        video_list: list[str],
+        output_path: str,
+        resolution: str,
+        transition_duration: float = 0.5,
+        fps: int = 24,
+        crf: int = 22,
+        preset: str = "medium",
+    ) -> bool:
         """
         合并单个分块
         """
         # 生成concat列表
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             for v in video_list:
-                f.write(f"file '{os.path.abspath(v)}'\n")
+                f.write(self.concat_entry(v))
             concat_file = f.name
 
         try:
             # 先无损拼接所有片段
-            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
+            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
                 temp_raw = f.name
 
             cmd_concat = [
-                self.ffmpeg_path, "-y", "-f", "concat", "-safe", "0",
-                "-i", concat_file,
-                "-c", "copy",
-                temp_raw
+                self.ffmpeg_path,
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                concat_file,
+                "-c",
+                "copy",
+                temp_raw,
             ]
             print(f"正在拼接分块 {os.path.basename(output_path)}，包含 {len(video_list)} 个片段...")
             subprocess.run(cmd_concat, capture_output=True, check=True)
@@ -303,15 +366,34 @@ class VideoMerger:
 
             # 统一参数+添加转场
             cmd_final = [
-                self.ffmpeg_path, "-y", "-i", temp_raw,
-                "-vf", (f"scale={resolution},fps={fps},format=yuv420p,"
-                        f"fade=t=in:st=0:d={transition_duration},"
-                        f"fade=t=out:st={chunk_duration-transition_duration}:d={transition_duration}"),
-                "-af", (f"afade=t=in:st=0:d={transition_duration},"
-                        f"afade=t=out:st={chunk_duration-transition_duration}:d={transition_duration}"),
-                "-c:v", "h264", "-crf", str(crf), "-preset", preset,
-                "-c:a", "aac", "-ar", "44100", "-ac", "2",
-                output_path
+                self.ffmpeg_path,
+                "-y",
+                "-i",
+                temp_raw,
+                "-vf",
+                (
+                    f"scale={resolution},fps={fps},format=yuv420p,"
+                    f"fade=t=in:st=0:d={transition_duration},"
+                    f"fade=t=out:st={chunk_duration - transition_duration}:d={transition_duration}"
+                ),
+                "-af",
+                (
+                    f"afade=t=in:st=0:d={transition_duration},"
+                    f"afade=t=out:st={chunk_duration - transition_duration}:d={transition_duration}"
+                ),
+                "-c:v",
+                "h264",
+                "-crf",
+                str(crf),
+                "-preset",
+                preset,
+                "-c:a",
+                "aac",
+                "-ar",
+                "44100",
+                "-ac",
+                "2",
+                output_path,
             ]
             subprocess.run(cmd_final, capture_output=True, check=True)
 
