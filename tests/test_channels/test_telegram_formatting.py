@@ -370,10 +370,17 @@ def test_single_underscore_renders_italic(markdown: str, expected: str) -> None:
 )
 def test_single_underscore_leaves_identifiers_alone(markdown: str) -> None:
     """Intraword underscores are not emphasis (CommonMark), so identifiers
-    with several underscores must not sprout <i> tags."""
+    with several underscores must not sprout <i> tags.
+
+    Every case now round-trips unchanged. The ``__init__`` one used to need a
+    ``.replace("__init__", "<b>init</b>")`` here, which was this test working
+    around the ``__bold__`` pass eating the dunder rather than asserting that
+    it should — the stated contract was always the ``<i>`` check above. #2076
+    made the identifier survive whole, so the concession is gone.
+    """
     rendered = render_telegram_html(markdown)
     assert "<i>" not in rendered
-    assert rendered == markdown.replace("__init__", "<b>init</b>")
+    assert rendered == markdown
 
 
 def test_single_underscore_does_not_touch_a_parked_link_or_code_span() -> None:

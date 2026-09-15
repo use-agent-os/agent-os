@@ -49,6 +49,93 @@ def _replace_code_spans(text: str) -> tuple[str, list[str]]:
     return "".join(output), chunks
 
 
+#: Builtins whose ``dir()`` enumerates the dunder protocol. Deriving the set
+#: rather than typing it out means it tracks the interpreter: a dunder added in
+#: a later Python is covered the day the runtime knows about it, and nobody has
+#: to remember to extend a literal list.
+_DUNDER_SOURCE_TYPES: tuple[type, ...] = (
+    object,
+    type,
+    str,
+    bytes,
+    list,
+    dict,
+    set,
+    tuple,
+    int,
+    float,
+    complex,
+    BaseException,
+    slice,
+    range,
+    property,
+    staticmethod,
+    classmethod,
+)
+
+#: Dunders that live on no builtin type, so ``dir()`` cannot find them: module
+#: attributes, the async protocol, and names defined by the standard library
+#: rather than by the interpreter.
+_EXTRA_DUNDER_NAMES = frozenset(
+    {
+        # module and package attributes
+        "all", "builtins", "cached", "debug", "file", "loader", "main",
+        "package", "path", "spec", "version", "future", "test", "author",
+        # async protocol
+        "aenter", "aexit", "aiter", "anext", "await",
+        # class body and dataclass machinery
+        "post_init", "slots", "weakref", "match_args", "dataclass_fields",
+        # context manager and misc protocols the builtins do not carry
+        "enter", "exit", "del", "getattr", "next", "index", "fspath",
+        "copy", "deepcopy", "length_hint", "getstate", "setstate",
+    }
+)  # fmt: skip
+
+
+def _python_dunder_names() -> frozenset[str]:
+    """Inner names of the Python dunders this formatter must not eat.
+
+    ``__init__`` written with ordinary whitespace around it is structurally
+    identical to an intentional single-word ``__bold__`` -- both are a
+    delimiter run with non-word characters outside it -- so the two can only be
+    told apart by what sits between the underscores. Scoped to names Python
+    actually defines, so ordinary emphasis like ``__also__`` still bolds.
+    """
+    derived: set[str] = set()
+    for source in _DUNDER_SOURCE_TYPES:
+        derived.update(
+            name[2:-2]
+            for name in dir(source)
+            if name.startswith("__") and name.endswith("__") and len(name) > 4
+        )
+    return frozenset(derived | _EXTRA_DUNDER_NAMES)
+
+
+_DUNDER_NAMES = _python_dunder_names()
+
+_BOLD_UNDERSCORE_RE = re.compile(r"__(?=\S)(.+?)(?<=\S)__")
+
+#: Same word-boundary guards as the italic pass in :func:`_render_inline`, so
+#: ``snake_case`` survives the table-label strip too.
+_ITALIC_UNDERSCORE_RE = re.compile(r"(?<!\w)_(?=[^\s_])(.+?)(?<=[^\s_])_(?!\w)")
+
+
+def _is_python_dunder(content: str) -> bool:
+    return content in _DUNDER_NAMES
+
+
+def _bold_underscore_html(match: re.Match[str]) -> str:
+    if _is_python_dunder(match.group(1)):
+        return match.group(0)
+    return f"<b>{match.group(1)}</b>"
+
+
+def _bold_underscore_strip(match: re.Match[str]) -> str:
+    if _is_python_dunder(match.group(1)):
+        return match.group(0)
+    return match.group(1)
+
+
 def _render_inline(text: str) -> str:
     protected, code_chunks = _replace_code_spans(text)
     rendered = html.escape(protected)
@@ -69,7 +156,10 @@ def _render_inline(text: str) -> str:
 
     rendered = _LINK_RE.sub(_park_href, rendered)
     rendered = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", r"<b>\1</b>", rendered)
-    rendered = re.sub(r"__(?=\S)(.+?)(?<=\S)__", r"<b>\1</b>", rendered)
+    # Not a blanket sub: `__init__` is a delimiter run with whitespace on both
+    # sides, exactly like an intentional single-word `__bold__`, so the content
+    # is what decides. A Python dunder is left alone (Issue #2076).
+    rendered = _BOLD_UNDERSCORE_RE.sub(_bold_underscore_html, rendered)
     rendered = re.sub(r"~~(?=\S)(.+?)(?<=\S)~~", r"<s>\1</s>", rendered)
     rendered = re.sub(r"(?<!\*)\*(?=\S)(.+?)(?<=\S)\*(?!\*)", r"<i>\1</i>", rendered)
     # Word-boundary guards keep `snake_case_identifiers` intact: an opening `_`
@@ -98,8 +188,17 @@ def _plain_inline(text: str) -> str:
 
     text = _LINK_RE.sub(_park_href, text)
     text = text.replace("`", "")
-    for marker in ("**", "__", "~~"):
+    # `__` goes through the regex rather than `str.replace`: a blanket strip ate
+    # the delimiters of `__init__` and handed the reader `init`, with not even a
+    # tag left to hint that something had been removed.
+    text = _BOLD_UNDERSCORE_RE.sub(_bold_underscore_strip, text)
+    for marker in ("**", "~~"):
         text = text.replace(marker, "")
+    # `_italic_` was never stripped here, so a header written with
+    # underscore-italics kept its delimiters while its bold and strike
+    # neighbours lost theirs. The sibling of the #1931 fix, which only reached
+    # `_render_inline`.
+    text = _ITALIC_UNDERSCORE_RE.sub(r"\1", text)
     for index, href in enumerate(hrefs):
         text = text.replace(f"\x00TG_HREF_{index}\x00", href)
     return text.strip()
@@ -174,9 +273,7 @@ def _render_table(headers: list[str], rows: list[list[str]]) -> list[str]:
     clean_headers = [_plain_inline(header) for header in headers]
     column_count = len(headers)
     if column_count == 2:
-        rendered = [
-            f"<b>{html.escape(clean_headers[0])} — {html.escape(clean_headers[1])}</b>"
-        ]
+        rendered = [f"<b>{html.escape(clean_headers[0])} — {html.escape(clean_headers[1])}</b>"]
         for row in rows:
             normalised = _normalize_row(row, column_count)
             label = normalised[0]
