@@ -27,6 +27,7 @@ from agentos.channels._util import (
     EventDedupeCache,
     StreamThrottle,
     retry_request,
+    split_text_for_limit,
 )
 from agentos.channels.contract import (
     ChannelCapabilities,
@@ -46,6 +47,13 @@ log = structlog.get_logger(__name__)
 SLACK_API_BASE = "https://slack.com/api"
 
 _MENTION_RE = re.compile(r"<@(U[A-Z0-9]+)(?:\|[^>]*)?>")
+
+# Slack truncates (and may split) chat.postMessage's text field past 40000
+# characters (https://docs.slack.dev/changelog/2018-truncating-really-long-messages/).
+# #1544 fixed this exact class of gap -- send() posting an unbounded payload
+# and losing/mangling the final reply -- for Telegram and Discord; Slack's
+# send() had the identical gap. 38000 leaves headroom below the hard cutoff.
+_SLACK_MESSAGE_TEXT_LIMIT = 38000
 
 # Channel-contract constants pinned by the adapter audit.
 CAPABILITY_TIER = "GREEN-shipping"
@@ -410,22 +418,50 @@ class SlackChannel:
             log.error("slack.send_failed", channel="", error="no_target_channel")
             raise RuntimeError("Slack send has no target channel")
 
-        payload: dict[str, Any] = {"channel": channel, "text": message.content}
-        if thread_ts:
-            payload["thread_ts"] = thread_ts
-        for key, value in meta.items():
-            if key in ("channel", "thread_ts") or value is None:
-                continue
-            payload[key] = value
-
+        segments = self._split_content_for_send(message.content)
         client = self._get_client()
-        resp = await retry_request(client.post, "/chat.postMessage", json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-        if not data.get("ok"):
-            log.error("slack.send_failed", channel=channel, error=data.get("error"))
-            raise RuntimeError(f"Slack API error: {data.get('error')}")
-        log.debug("slack.send", channel=channel, ts=data.get("ts"))
+        last_ts: str | None = None
+        for index, segment in enumerate(segments):
+            payload: dict[str, Any] = {"channel": channel, "text": segment}
+            if thread_ts:
+                # Every chunk of one logical reply belongs in the same
+                # thread -- unlike a reply reference, this isn't "point at
+                # message N", so it isn't first-chunk-only.
+                payload["thread_ts"] = thread_ts
+            if index == len(segments) - 1:
+                # blocks/attachments describe the complete answer; putting
+                # them on every chunk would repeat them, so they belong on
+                # the last one only, same as Discord's embeds/components.
+                for key, value in meta.items():
+                    if key in ("channel", "thread_ts") or value is None:
+                        continue
+                    payload[key] = value
+
+            resp = await retry_request(client.post, "/chat.postMessage", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            if not data.get("ok"):
+                log.error("slack.send_failed", channel=channel, error=data.get("error"))
+                raise RuntimeError(f"Slack API error: {data.get('error')}")
+            last_ts = data.get("ts")
+        log.debug("slack.send", channel=channel, ts=last_ts)
+
+    @staticmethod
+    def _split_content_for_send(content: str) -> list[str]:
+        """Split *content* into one message per Slack's text-field cap.
+
+        Reuses the same splitter Telegram's and Discord's adapters rely on
+        (see ``_SLACK_MESSAGE_TEXT_LIMIT``) rather than a fourth,
+        independently-drifting length check.
+        """
+        segments: list[str] = []
+        remaining = content
+        while True:
+            head, tail = split_text_for_limit(remaining, _SLACK_MESSAGE_TEXT_LIMIT)
+            segments.append(head)
+            if not tail:
+                return segments
+            remaining = tail
 
     async def send_file(
         self,
