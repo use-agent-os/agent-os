@@ -15,6 +15,36 @@ import sys
 import urllib.error
 import urllib.request
 
+# U+2026. Three bytes once encoded, which is the whole reason the cap below
+# has to reserve room for it rather than append it to a full buffer.
+_TRUNCATION_MARKER = "\u2026".encode()
+
+
+def _truncate(raw: bytes, max_bytes: int) -> bytes:
+    """Cut ``raw`` so the UTF-8 written to stdout stays inside ``max_bytes``.
+
+    Two things have to come out of the budget instead of being added to it:
+    the marker, and any character the cut lands in the middle of -- a partial
+    sequence decodes to U+FFFD, which is three bytes again on the way back
+    out, so it is dropped rather than replaced. An invalid byte *inside* the
+    kept region is left alone for the lossy decode to replace, as documented;
+    only an incomplete sequence at the cut itself is trimmed.
+    """
+    cap = max(max_bytes, 0)
+    if len(raw) <= cap:
+        return raw
+    room_for_marker = cap >= len(_TRUNCATION_MARKER)
+    keep = raw[: cap - len(_TRUNCATION_MARKER)] if room_for_marker else raw[:cap]
+    while keep:
+        try:
+            keep.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            if exc.end >= len(keep):
+                keep = keep[: exc.start]
+                continue
+        break
+    return keep + _TRUNCATION_MARKER if room_for_marker else keep
+
 
 def _fetch(
     url: str,
@@ -80,8 +110,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
 
-    if len(raw) > args.max_bytes:
-        raw = raw[: args.max_bytes - 1] + b"\xe2\x80\xa6"  # … (truncation marker)
+    raw = _truncate(raw, args.max_bytes)
 
     # Lossy decode — meta-skill DAGs need string output for templating.
     text = raw.decode("utf-8", errors="replace")
