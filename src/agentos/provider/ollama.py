@@ -111,6 +111,13 @@ def _build_ollama_messages(messages: list[Message]) -> list[dict[str, Any]]:
     return result
 
 
+def _coerce_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _normalize_tool_arguments(arguments: Any) -> dict[str, Any]:
     if isinstance(arguments, dict):
         return arguments
@@ -336,8 +343,8 @@ class OllamaProvider:
 
                         # Final chunk carries usage stats
                         if chunk.get("done"):
-                            input_tokens = chunk.get("prompt_eval_count", 0)
-                            output_tokens = chunk.get("eval_count", 0)
+                            input_tokens = _coerce_int(chunk.get("prompt_eval_count"))
+                            output_tokens = _coerce_int(chunk.get("eval_count"))
                             raw_done_reason = chunk.get("done_reason")
                             if isinstance(raw_done_reason, str) and raw_done_reason:
                                 done_reason = raw_done_reason

@@ -366,3 +366,50 @@ def test_ollama_non_model_404_keeps_the_plain_http_message(
 
     assert isinstance(error, ErrorEvent)
     assert error.message == "HTTP 404: 404 page not found"
+
+
+@pytest.mark.parametrize(
+    ("raw_prompt_eval", "raw_eval", "expected_input", "expected_output"),
+    [
+        (None, None, 0, 0),
+        ("15", "4", 15, 4),
+        ("invalid", None, 0, 0),
+    ],
+)
+def test_ollama_coerces_eval_token_counts(
+    monkeypatch: pytest.MonkeyPatch,
+    raw_prompt_eval: Any,
+    raw_eval: Any,
+    expected_input: int,
+    expected_output: int,
+) -> None:
+    captured: dict[str, Any] = {}
+    final_chunk = {
+        "model": "llama3.1:8b",
+        "message": {"role": "assistant", "content": ""},
+        "done": True,
+        "done_reason": "stop",
+        "prompt_eval_count": raw_prompt_eval,
+        "eval_count": raw_eval,
+    }
+    chunks = (
+        '{"model":"llama3.1:8b","message":{"role":"assistant","content":"hello"},"done":false}\n'
+        f"{json.dumps(final_chunk)}\n"
+    )
+    _patch_transport(monkeypatch, captured, chunks)
+    provider = OllamaProvider(model="llama3.1:8b")
+
+    async def _run() -> list[Any]:
+        return [event async for event in provider.chat([Message(role="user", content="Hi")])]
+
+    events = asyncio.run(_run())
+    done = next(event for event in events if isinstance(event, DoneEvent))
+    assert isinstance(done.input_tokens, int)
+    assert done.input_tokens == expected_input
+    assert isinstance(done.output_tokens, int)
+    assert done.output_tokens == expected_output
+    # Guard against TypeError in turn accounting: total_input_tokens += raw_ev.input_tokens
+    total_tokens = 0
+    total_tokens += done.input_tokens
+    total_tokens += done.output_tokens
+    assert total_tokens == expected_input + expected_output
