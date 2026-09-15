@@ -19,7 +19,7 @@ from agentos.provider import (
     ToolUseEndEvent,
 )
 from agentos.provider.failures import ProviderFailureKind, classify_provider_error
-from agentos.provider.ollama import OllamaProvider, _stream_timeout
+from agentos.provider.ollama import OllamaProvider, _normalize_tool_arguments, _stream_timeout
 
 
 def _patch_transport(
@@ -31,7 +31,7 @@ def _patch_transport(
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
-        captured["payload"] = json.loads(request.content.decode("utf-8"))
+        captured["payload"] = json.loads(request.content.decode("utf-8")) if request.content else {}
         if isinstance(response_body, bytes):
             return httpx.Response(status_code, content=response_body)
         return httpx.Response(status_code, text=response_body)
@@ -366,3 +366,114 @@ def test_ollama_non_model_404_keeps_the_plain_http_message(
 
     assert isinstance(error, ErrorEvent)
     assert error.message == "HTTP 404: 404 page not found"
+
+
+@pytest.mark.parametrize(
+    ("raw_args", "expected"),
+    [
+        (None, {}),
+        ("", {}),
+        ("   ", {}),
+        ("null", {}),
+        ("{}", {}),
+        ({"count": 5}, {"count": 5}),
+        ('{"count": 5}', {"count": 5}),
+        ("invalid-json", {"_raw": "invalid-json"}),
+        (42, {"_raw": 42}),
+    ],
+)
+def test_ollama_normalize_tool_arguments_shapes(
+    raw_args: Any,
+    expected: dict[str, Any],
+) -> None:
+    assert _normalize_tool_arguments(raw_args) == expected
+
+
+@pytest.mark.parametrize(
+    "tool_call_args",
+    [None, "", "null", {}],
+)
+def test_ollama_emits_empty_arguments_for_parameterless_native_tool_call(
+    monkeypatch: pytest.MonkeyPatch,
+    tool_call_args: Any,
+) -> None:
+    captured: dict[str, Any] = {}
+    tool_chunk = {
+        "model": "qwen2.5:7b",
+        "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_noop",
+                    "type": "function",
+                    "function": {"name": "clear_cache", "arguments": tool_call_args},
+                }
+            ],
+        },
+        "done": False,
+    }
+    done_chunk = {
+        "model": "qwen2.5:7b",
+        "message": {"role": "assistant", "content": ""},
+        "done": True,
+        "done_reason": "stop",
+    }
+    _patch_transport(
+        monkeypatch,
+        captured,
+        f"{json.dumps(tool_chunk)}\n{json.dumps(done_chunk)}\n",
+    )
+    provider = OllamaProvider(model="configured-model")
+
+    async def _run() -> list[Any]:
+        return [
+            event
+            async for event in provider.chat(
+                [Message(role="user", content="Clear cache")],
+                tools=[_tool()],
+            )
+        ]
+
+    events = asyncio.run(_run())
+    tool_end = next(event for event in events if isinstance(event, ToolUseEndEvent))
+    assert tool_end.tool_name == "clear_cache"
+    assert tool_end.arguments == {}
+
+
+def test_ollama_list_models_handles_null_details_and_missing_attributes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    tags_response = {
+        "models": [
+            {
+                "name": "llama3.2:1b",
+                "model": "llama3.2:1b",
+                "details": None,
+            },
+            {
+                "name": "qwen2.5:7b",
+                "model": "qwen2.5:7b",
+                "details": {"context_length": 32768, "family": "qwen2"},
+            },
+            {
+                "name": "no-details:latest",
+                "model": "no-details:latest",
+            },
+            None,
+            {"name": ""},
+        ]
+    }
+    _patch_transport(monkeypatch, captured, json.dumps(tags_response))
+    provider = OllamaProvider(model="configured-model")
+
+    models = asyncio.run(provider.list_models())
+
+    assert len(models) == 3
+    assert models[0].model_id == "llama3.2:1b"
+    assert models[0].context_window == 0
+    assert models[1].model_id == "qwen2.5:7b"
+    assert models[1].context_window == 32768
+    assert models[2].model_id == "no-details:latest"
+    assert models[2].context_window == 0

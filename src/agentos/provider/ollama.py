@@ -112,15 +112,22 @@ def _build_ollama_messages(messages: list[Message]) -> list[dict[str, Any]]:
 
 
 def _normalize_tool_arguments(arguments: Any) -> dict[str, Any]:
+    if arguments is None:
+        return {}
     if isinstance(arguments, dict):
         return arguments
     if isinstance(arguments, str):
+        trimmed = arguments.strip()
+        if not trimmed or trimmed == "null":
+            return {}
         try:
-            parsed = json.loads(arguments)
+            parsed = json.loads(trimmed)
         except json.JSONDecodeError:
             return {"_raw": arguments}
         if isinstance(parsed, dict):
             return parsed
+        if parsed is None:
+            return {}
     return {"_raw": arguments}
 
 
@@ -184,7 +191,7 @@ def _parse_tool_call(value: Any, fallback_index: int) -> dict[str, Any] | None:
     return {
         "id": tool_use_id,
         "name": name,
-        "arguments": _normalize_tool_arguments(function.get("arguments", {})),
+        "arguments": _normalize_tool_arguments(function.get("arguments")),
     }
 
 
@@ -390,14 +397,22 @@ class OllamaProvider:
                 resp = await client.get(f"{self._base_url}/api/tags")
                 resp.raise_for_status()
                 data = resp.json()
-                return [
-                    ModelInfo(
-                        provider=self.provider_name,
-                        model_id=m["name"],
-                        display_name=m.get("name", ""),
-                        context_window=m.get("details", {}).get("context_length", 0),
+                models: list[ModelInfo] = []
+                for m in data.get("models", []):
+                    if not isinstance(m, dict) or not m.get("name"):
+                        continue
+                    details = m.get("details")
+                    context_window = (
+                        details.get("context_length", 0) if isinstance(details, dict) else 0
                     )
-                    for m in data.get("models", [])
-                ]
+                    models.append(
+                        ModelInfo(
+                            provider=self.provider_name,
+                            model_id=m["name"],
+                            display_name=m.get("name", ""),
+                            context_window=context_window,
+                        )
+                    )
+                return models
         except Exception:
             return []
