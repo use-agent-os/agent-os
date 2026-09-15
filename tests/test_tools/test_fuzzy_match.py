@@ -50,6 +50,44 @@ def test_trimmed_boundary_matches_across_an_indent_change() -> None:
     assert result.updated == "if x:\n\treturn 9\n"
 
 
+def test_trimmed_boundary_keeps_the_file_indent_on_continuation_lines() -> None:
+    # The only drift is trailing whitespace on the last line -- exactly what
+    # trimmed_boundary exists to absorb. The block's indentation is the file's.
+    content = "class A:\n    def foo(self):\n        return 1\n"
+
+    result = fuzzy_find_and_replace(
+        content,
+        "    def foo(self):\n        return 1   \n",
+        "    def foo(self):\n        return 2\n",
+    )
+
+    assert result.strategy == "trimmed_boundary"
+    # `return 2` has to stay in the body. Dedenting it changes what the code does.
+    assert result.updated == "class A:\n    def foo(self):\n        return 2\n"
+
+
+def test_trimmed_boundary_does_not_add_a_newline_the_caller_did_not_ask_for() -> None:
+    # old_text covers its line to the end; so must the span it matches.
+    content = "if x:\n    a = 1\n    b = 2\n"
+
+    result = fuzzy_find_and_replace(content, "    a = 1  \n", "    a = 9\n")
+
+    assert result.strategy == "trimmed_boundary"
+    assert result.updated == "if x:\n    a = 9\n    b = 2\n"
+
+
+def test_trimmed_boundary_keeps_two_matches_apart() -> None:
+    # Growing a span back over its line's indent must not let it swallow the
+    # match before it: two regions stay two regions.
+    content = "if x:\n    go()\n    go()\n"
+
+    result = fuzzy_find_and_replace(content, "go()  \n", "stop()\n", replace_all=True)
+
+    assert result.strategy == "trimmed_boundary"
+    assert result.match_count == 2
+    assert result.updated == "if x:\n    stop()\n    stop()\n"
+
+
 def test_indent_agnostic_reindents_replacement_to_the_matched_region() -> None:
     content = "class A:\n    def run(self):\n        value = 1\n        return value\n"
 

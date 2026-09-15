@@ -368,11 +368,54 @@ def _strategy_unicode_normalized(content: str, pattern: str) -> list[tuple[int, 
     return _project_spans(_find_all(normalized_content, normalized_pattern), starts, ends)
 
 
+def _align_trimmed_span(
+    content: str,
+    span: tuple[int, int],
+    *,
+    restore_newline: bool,
+) -> tuple[int, int]:
+    """Grow a trimmed match back over the whitespace ``strip()`` removed.
+
+    ``trimmed_boundary`` searches for ``old_text.strip()``, so its match begins
+    after the indentation the file already carries and ends before the newline
+    the pattern ended on. That span is not line-aligned, but the strategy is
+    ``_INDENT_BLIND``: ``_resolve_replacement`` reads the landing indent off the
+    span's own first line, finds none, and dedents every line of ``new_text``.
+    That is right for the first line, which really does start mid-line, and
+    wrong for every line after it -- those start at a line boundary and have to
+    keep the file's indentation.
+
+    Absorbing the leading whitespace and the trailing newline back into the span
+    makes it line-aligned, so the shared re-indentation works as documented.
+    Only characters ``strip()`` removed are absorbed, and only where the file
+    actually holds them, so no other text joins the replaced region.
+
+    Two matches can never be merged into one by this: a span only grows left
+    over whitespace, which cannot contain an earlier match, and only grows right
+    over a newline, which no later match can start before.
+    """
+
+    start, end = span
+    line_start = content.rfind("\n", 0, start) + 1
+    if start > line_start and not content[line_start:start].strip():
+        start = line_start
+    if restore_newline and end < len(content) and content[end] == "\n":
+        end += 1
+    return start, end
+
+
 def _strategy_trimmed_boundary(content: str, pattern: str) -> list[tuple[int, int]]:
     trimmed = pattern.strip()
     if not trimmed or trimmed == pattern:
         return []
-    return _find_all(content, trimmed)
+    # A newline anywhere in the trailing scrap means the caller's region ran to
+    # the end of its line; the span has to run there too or the replacement
+    # inserts a newline the caller never asked for.
+    restore_newline = "\n" in pattern[len(pattern.rstrip()) :]
+    return [
+        _align_trimmed_span(content, span, restore_newline=restore_newline)
+        for span in _find_all(content, trimmed)
+    ]
 
 
 def _strategy_indent_agnostic(content: str, pattern: str) -> list[tuple[int, int]]:
