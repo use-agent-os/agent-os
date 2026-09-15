@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Channels (security): the email `allowed_senders` allowlist admitted values
+  that are not addresses. `sender_allowed` derived the domain with
+  `rpartition("@")`, which returns the whole string when there is no
+  separator, so a `From` carrying no `@` — `<example.com>` — was treated as
+  its own domain and cleared an `@example.com` entry. The domain is also no
+  longer taken from raw header text when `parseaddr` cannot parse it, which
+  had let `attacker@evil.invalid@example.com` and
+  `attacker@evil.invalid, victim@example.com` each end in a matching tail. A
+  domain pattern now matches only a value parsed as an address with both a
+  local part and a domain; exact entries are unchanged, so a local-only `root`
+  still matches an explicit `root` entry. The allowlisted domain is usually
+  the operator's own and therefore public, so any of these was a turn of the
+  agent for anyone who knew it (#2078).
+
 ## [2026.9.14] - 2026-09-14
 
 ### Added

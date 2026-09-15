@@ -187,17 +187,52 @@ def normalize_address(value: str) -> str:
     return address.strip().lower()
 
 
+def _address_domain(parsed: str) -> str:
+    """The domain of a parsed addr-spec, or ``""`` when it has none.
+
+    Only ever called with the output of :func:`normalize_address`, never with
+    raw header text. Two things went wrong when it was:
+
+    ``str.rpartition`` hands back the whole value as the tail when the
+    separator is absent, so a ``From`` carrying no ``@`` at all --
+    ``<example.com>`` -- came back as its own domain and cleared an
+    ``@example.com`` entry. A value with no ``@``, or with nothing before it,
+    is not an address and has no domain for a domain pattern to claim.
+
+    And a header ``parseaddr`` cannot parse is not an address either. Deriving
+    a domain from the unparsed text let ``attacker@evil.invalid@example.com``
+    and ``attacker@evil.invalid, victim@example.com`` each end in a clean
+    ``example.com`` tail. Both are rejected outright by ``parseaddr``, so
+    taking the domain from its output alone closes them.
+
+    ``rpartition`` is still right for a *parsed* address: a quoted local part
+    may legally contain an ``@`` (``"a@b"@example.com``), and the domain is
+    what follows the last one.
+    """
+
+    local, at_sign, domain = parsed.rpartition("@")
+    if not at_sign or not local or not domain:
+        return ""
+    return domain
+
+
 def sender_allowed(sender: str, allowlist: list[str] | tuple[str, ...]) -> bool:
     """Return True when ``sender`` matches the fail-closed allowlist.
 
     Entries are exact addresses or domain patterns (``*@example.com`` and
     ``@example.com`` are equivalent). An empty allowlist admits nobody.
+
+    A domain pattern matches only a value ``parseaddr`` read as an address
+    with both a local part and a domain. Exact entries are unchanged and still
+    match whatever was passed, so a local-only ``root`` on a local MTA keeps
+    working against an explicit ``root`` entry.
     """
 
-    address = normalize_address(sender) or (sender or "").strip().lower()
+    parsed = normalize_address(sender)
+    address = parsed or (sender or "").strip().lower()
     if not address:
         return False
-    domain = address.rpartition("@")[2]
+    domain = _address_domain(parsed)
     for raw in allowlist:
         pattern = (raw or "").strip().lower()
         if not pattern:
