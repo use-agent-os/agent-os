@@ -148,8 +148,9 @@ Caveats:
   rather than `true` — inspect with `--list-fields` to discover.
 - AcroForm fills only. XFA forms (used by some legal templates) require
   Adobe-specific tooling and are out of scope.
-- Some signed PDFs invalidate the signature when fields change. Strip
-  signatures explicitly with `--clear-signatures` if that is intended.
+- Some signed PDFs invalidate the signature when fields change. This script
+  has no flag to strip or preserve signatures -- if the form is signed and
+  the signature must stay valid, fill it before signing, or re-sign after.
 
 ---
 
