@@ -102,9 +102,7 @@ def test_dsml_string_attribute_decides_the_argument_type() -> None:
     # string="true" stays a literal string...
     assert end.arguments["name"] == "bean-sprout-daily-record-sheet.xlsx"
     # ...and string="false" is JSON that must reach the tool as a real list.
-    assert end.arguments["sheets"] == [
-        {"name": "Record Sheet", "rows": [["Day", "Height"]]}
-    ]
+    assert end.arguments["sheets"] == [{"name": "Record Sheet", "rows": [["Day", "Height"]]}]
 
 
 def test_start_and_end_events_are_paired() -> None:
@@ -136,3 +134,41 @@ def test_a_disallowed_invoke_does_not_swallow_a_plain_json_call() -> None:
 
     assert end.tool_name == "write_file"
     assert end.arguments == {"path": "a.txt", "content": "hi"}
+
+
+def test_parameter_crlf_newlines_are_stripped_cleanly() -> None:
+    text = (
+        '<invoke name="write_file">\r\n'
+        '<parameter name="path">\r\n'
+        "hello.txt\r\n"
+        "</parameter>\r\n"
+        '<parameter name="content">\r\n'
+        "line 1\r\nline 2\r\n"
+        "</parameter>\r\n"
+        "</invoke>"
+    )
+
+    (end,) = _end_events(text)
+
+    assert end.tool_name == "write_file"
+    assert end.arguments["path"] == "hello.txt"
+    assert end.arguments["content"] == "line 1\r\nline 2"
+
+
+def test_dsml_crlf_json_parameter_decodes_properly() -> None:
+    text = (
+        '<｜DSML｜invoke name="create_xlsx">\r\n'
+        '<｜DSML｜parameter name="name" string="true">\r\n'
+        "report.xlsx\r\n"
+        "</｜DSML｜parameter>\r\n"
+        '<｜DSML｜parameter name="sheets" string="false">\r\n'
+        '[{"name":"Summary","rows":[["A","B"]]}]\r\n'
+        "</｜DSML｜parameter>\r\n"
+        "</｜DSML｜invoke>"
+    )
+
+    (end,) = _end_events(text)
+
+    assert end.tool_name == "create_xlsx"
+    assert end.arguments["name"] == "report.xlsx"
+    assert end.arguments["sheets"] == [{"name": "Summary", "rows": [["A", "B"]]}]
