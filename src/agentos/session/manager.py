@@ -40,6 +40,7 @@ from agentos.session.models import (
     SessionSummary,
     TranscriptEntry,
 )
+from agentos.session.naming import normalize_session_name
 from agentos.session.runtime_state import evict_session_runtime_state
 from agentos.session.storage import SessionStorage
 from agentos.session.tokenizer import estimate_tokens
@@ -279,6 +280,25 @@ class SessionManager:
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _normalize_name_field(fields: dict[str, Any]) -> dict[str, Any]:
+        """Return *fields* with ``display_name`` put through the shared normalizer.
+
+        ``agentos.session.naming`` documents itself as the funnel every write
+        path goes through, but only the RPC handlers actually called it, so a
+        writer that reaches the manager directly stored the name raw — the cron
+        ``agent_run`` handler builds one out of the job's user-typed ``--name``.
+        Normalizing at the manager makes this the choke point the docstring
+        claims, the way ``canonicalize_session_key`` and ``normalize_agent_id``
+        already are. The normalizer is idempotent, so callers that already run
+        it are unaffected.
+        """
+        if "display_name" not in fields:
+            return fields
+        normalized = dict(fields)
+        normalized["display_name"] = normalize_session_name(fields["display_name"])
+        return normalized
+
     async def create(
         self,
         session_key: str,
@@ -288,6 +308,7 @@ class SessionManager:
         """Create a new session entry. Raises ValueError if key already exists."""
         session_key = canonicalize_session_key(session_key)
         agent_id = normalize_agent_id(agent_id)
+        kwargs = self._normalize_name_field(kwargs)
         existing = await self._storage.get_session(session_key)
         if existing is not None:
             raise ValueError(f"Session already exists: {session_key}")
@@ -668,6 +689,7 @@ class SessionManager:
         node = await self._storage.get_session(session_key)
         if node is None:
             raise KeyError(f"Session not found: {session_key}")
+        fields = self._normalize_name_field(fields)
         for k, v in fields.items():
             if hasattr(node, k):
                 setattr(node, k, v)
