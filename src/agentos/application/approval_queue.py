@@ -40,6 +40,11 @@ class PendingApproval:
 
 _DEFAULT_APPROVAL_QUEUE_PATH = state_dir("approval_queue.sqlite")
 
+#: How long a resolved row stays in the table before it is pruned. Long
+#: enough that an approved row is always consumed first, short enough that
+#: the queue file stops growing for the lifetime of the install.
+DEFAULT_RESOLVED_RETENTION_SECONDS = 24 * 60 * 60.0
+
 
 class ApprovalQueue:
     def __init__(
@@ -48,10 +53,16 @@ class ApprovalQueue:
         *,
         db_path: str | None = None,
         poll_interval: float = 0.25,
+        resolved_retention: float = DEFAULT_RESOLVED_RETENTION_SECONDS,
     ):
         self._pending: dict[str, PendingApproval] = {}
         self._timeout = default_timeout
         self._poll_interval = max(0.01, float(poll_interval))
+        # A row can be resolved right up to the end of its lifespan and is
+        # consumed shortly after, so the window is never shorter than that:
+        # an explicit ``resolved_retention`` below ``default_timeout`` is
+        # raised to it.
+        self._resolved_retention = max(float(resolved_retention), float(default_timeout))
         self._global_settings = ApprovalSettings()
         # Node ids are an operational set rather than a per-session one, so
         # the ceiling is a backstop nothing reaches; eviction falls back to
@@ -79,6 +90,7 @@ class ApprovalQueue:
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.execute("PRAGMA synchronous=NORMAL;")
         self._init_schema()
+        self._sweep()
         self._load_pending()
 
     def _init_schema(self) -> None:
@@ -144,7 +156,76 @@ class ApprovalQueue:
             ).fetchone(),
         )
 
+    def _sweep(self) -> None:
+        """Deny approvals whose lifespan elapsed and prune old resolved rows.
+
+        ``wait()`` denies an approval once ``created_at + default_timeout``
+        has passed, but only while a caller is waiting. The shell tool waits
+        in bounded slices and gives up, and the process may restart, so
+        without this sweep an aged-out row stayed pending forever and the
+        Web UI kept showing a prompt nothing could act on. Runs at startup and
+        on the write/read paths that shape the pending set.
+        """
+        now = time.time()
+        expired_before = now - self._timeout
+        prune_before = now - self._resolved_retention
+        # Look before taking the write lock: the Web UI polls list_pending(),
+        # and in the common case there is nothing to do, so the poll must stay
+        # a plain read rather than queue behind a writer in another process.
+        due = self._conn.execute(
+            "SELECT 1 FROM approval_queue "
+            "WHERE (resolved = 0 AND created_at <= ?) OR (resolved = 1 AND created_at <= ?) "
+            "LIMIT 1",
+            (expired_before, prune_before),
+        ).fetchone()
+        if due is None:
+            return
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            expired = [
+                str(row["approval_id"])
+                for row in self._conn.execute(
+                    "SELECT approval_id FROM approval_queue WHERE resolved = 0 AND created_at <= ?",
+                    (expired_before,),
+                ).fetchall()
+            ]
+            if expired:
+                self._conn.execute(
+                    "UPDATE approval_queue SET resolved = 1, approved = 0 "
+                    "WHERE resolved = 0 AND created_at <= ?",
+                    (expired_before,),
+                )
+            pruned = [
+                str(row["approval_id"])
+                for row in self._conn.execute(
+                    "SELECT approval_id FROM approval_queue WHERE resolved = 1 AND created_at <= ?",
+                    (prune_before,),
+                ).fetchall()
+            ]
+            if pruned:
+                self._conn.execute(
+                    "DELETE FROM approval_queue WHERE resolved = 1 AND created_at <= ?",
+                    (prune_before,),
+                )
+            self._conn.commit()
+        except BaseException:
+            # Leaving the transaction open would make every later
+            # BEGIN IMMEDIATE on this connection fail.
+            self._conn.rollback()
+            raise
+        for approval_id in expired:
+            entry = self._pending.get(approval_id)
+            if entry is None:
+                continue
+            entry.resolved = True
+            entry.approved = False
+            # Wake an in-process waiter the same way a resolve would.
+            entry._event.set()
+        for approval_id in pruned:
+            self._pending.pop(approval_id, None)
+
     def request(self, namespace: str = "exec", params: dict | None = None) -> str:
+        self._sweep()
         payload = self._serialize_params(params or {})
         while True:
             approval_id = uuid.uuid4().hex[:12]
@@ -360,6 +441,7 @@ class ApprovalQueue:
         }
 
     def list_pending(self, namespace: str | None = None) -> list[dict]:
+        self._sweep()
         if namespace:
             rows = self._conn.execute(
                 "SELECT approval_id, namespace, params, created_at "

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+import time
 
 import pytest
 
@@ -45,7 +46,8 @@ def test_approval_queue_ignores_corrupt_json_payload(tmp_path) -> None:
         "INSERT OR REPLACE INTO approval_queue "
         "(approval_id, namespace, params, created_at, resolved, approved, consumed) "
         "VALUES (?, ?, ?, ?, 0, 0, 0)",
-        (bad_id, "exec", "{not-json}", 0.0),
+        # Current, so the startup sweep (#1987) does not reap it as expired.
+        (bad_id, "exec", "{not-json}", time.time()),
     )
     conn.commit()
     conn.close()
