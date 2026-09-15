@@ -73,5 +73,7 @@ worst-case but the program never crashes.
 - No alpha / transparency.
 - No rich text styling (italic / drop-shadow / gradient). For richer
   cards, generate a real image via `nano-banana-pro` instead.
-- Headline wrap is character-count-based for CJK and whitespace-based
-  for ASCII; mixed strings break at the CJK character count.
+- Headline wrap is character-count-based for CJK ideographs and
+  whitespace-based for every other script, Hangul and emoji included;
+  mixed strings break at the CJK character count, and a word wider than
+  the line is split at the character count rather than left to overflow.
