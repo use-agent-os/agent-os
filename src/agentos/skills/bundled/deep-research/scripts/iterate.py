@@ -38,7 +38,7 @@ def under_target(plan: Plan) -> list[dict[str, object]]:
     return out
 
 
-def record_evidence(plan: Plan, evidence: list[dict[str, object]]) -> int:
+def record_evidence(plan: Plan, evidence: list[dict[str, object]], round_num: int = 0) -> int:
     by_id = {sq.id: sq for sq in plan.subquestions}
     added = 0
     for item in evidence:
@@ -51,12 +51,13 @@ def record_evidence(plan: Plan, evidence: list[dict[str, object]]) -> int:
                 url=str(item.get("url", "")),
                 title=str(item.get("title", "")),
                 excerpt=str(item.get("excerpt", "")),
-                relevance=float(item.get("relevance", 0.0)),
+                relevance=float(str(item.get("relevance", 0.0))),
                 fetched_at=str(item.get("fetched_at", "")),
             )
         )
         added += 1
-    plan.rounds = max(plan.rounds, plan.rounds + 0)
+    target_round = round_num if round_num > 0 else plan.rounds + 1
+    plan.rounds = max(plan.rounds, target_round)
     if all(sq.coverage() >= 1.0 for sq in plan.subquestions):
         plan.done = True
     return added
@@ -109,7 +110,7 @@ def main() -> int:
             return 2
         raw = json.loads(args.record.read_text(encoding="utf-8"))
         evidence = raw if isinstance(raw, list) else []
-        added = record_evidence(plan, evidence)
+        added = record_evidence(plan, evidence, round_num=args.round_num)
         save_plan(plan, args.plan)
         sys.stdout.write(
             json.dumps(
