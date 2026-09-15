@@ -130,24 +130,34 @@ def test_visibility_boundary_preserves_effective_runtime_contexts() -> None:
         caller_kind=None,
         interaction_mode=None,
         tool_surface_capabilities=ToolSurfaceCapabilities(session_manager=True),
-            )
+    )
+    canonical_subagent_ctx = effective_tool_context(
+        session_key="agent:ops:subagent:run-123",
+        caller_kind=None,
+        interaction_mode=None,
+        tool_surface_capabilities=ToolSurfaceCapabilities(session_manager=True),
+    )
     cron_ctx = effective_tool_context(
         session_key="cron:nightly",
         caller_kind=None,
         interaction_mode=None,
         tool_surface_capabilities=ToolSurfaceCapabilities(scheduler=True),
-            )
+    )
     channel_ctx = effective_tool_context(
         caller_kind=CallerKind.CHANNEL,
         tool_surface_capabilities=ToolSurfaceCapabilities(
             channel_backing=True,
             scheduler=True,
         ),
-            )
+    )
 
     assert subagent_ctx.caller_kind is CallerKind.SUBAGENT
     assert subagent_ctx.interaction_mode is InteractionMode.UNATTENDED
     assert "publish_artifact" in subagent_ctx.denied_tools
+    assert canonical_subagent_ctx.caller_kind is CallerKind.SUBAGENT
+    assert canonical_subagent_ctx.interaction_mode is InteractionMode.UNATTENDED
+    assert canonical_subagent_ctx.agent_id == "ops"
+    assert "publish_artifact" in canonical_subagent_ctx.denied_tools
     assert cron_ctx.caller_kind is CallerKind.CRON
     assert cron_ctx.allowed_tools is not None
     assert "read_file" in cron_ctx.allowed_tools

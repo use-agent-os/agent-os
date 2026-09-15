@@ -8,6 +8,7 @@ from enum import StrEnum
 
 import structlog
 
+from agentos.session.keys import is_subagent_key, parse_agent_id
 from agentos.tools.policy_runtime import ToolSurfaceCapabilities, resolve_runtime_tool_surface
 from agentos.tools.types import (
     CRON_AGENT_ALLOW,
@@ -84,12 +85,12 @@ def effective_tool_context(
     mode = parse_interaction_mode(interaction_mode)
 
     if explicit_kind is CallerKind.SUBAGENT or (
-        session_key and session_key.startswith("subagent:")
+        session_key and is_subagent_key(session_key)
     ):
         ctx = ToolContext(
             caller_kind=CallerKind.SUBAGENT,
             interaction_mode=mode or InteractionMode.UNATTENDED,
-            agent_id=agent_id or "main",
+            agent_id=agent_id or (parse_agent_id(session_key) if session_key else "main"),
             denied_tools=set(SUBAGENT_TOOL_DENY),
         )
     elif explicit_kind is CallerKind.CRON or (session_key and session_key.startswith("cron:")):
