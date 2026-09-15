@@ -59,7 +59,14 @@ def save_seen(name: str, ids: list[str]) -> None:
     """Persist the most recent ids, trimmed so the file cannot grow forever."""
     path = watermark_path(name)
     path.parent.mkdir(parents=True, exist_ok=True)
-    trimmed = [str(item) for item in ids][-MAX_REMEMBERED_IDS:]
+    seen_ids: set[str] = set()
+    deduped: list[str] = []
+    for item in ids:
+        val = str(item)
+        if val not in seen_ids:
+            seen_ids.add(val)
+            deduped.append(val)
+    trimmed = deduped[-MAX_REMEMBERED_IDS:]
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps({"seen": trimmed}), encoding="utf-8")
     tmp.replace(path)
@@ -91,8 +98,14 @@ def select_new(
     """
     seen = load_seen(name)
     known = set(seen)
-    is_first_run = not seen
-    fresh = [item for item in ids if item not in known]
+    is_first_run = not watermark_path(name).is_file()
+    fresh_seen: set[str] = set()
+    fresh: list[str] = []
+    for item in ids:
+        val = str(item)
+        if val not in known and val not in fresh_seen:
+            fresh_seen.add(val)
+            fresh.append(val)
     if is_first_run and not first_run_reports:
         save_seen(name, [*seen, *fresh])
         return []

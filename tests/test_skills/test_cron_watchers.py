@@ -409,3 +409,30 @@ def test_rss_surplus_past_the_limit_is_reported_on_the_next_run(state_dir, base_
     assert first.returncode == 0 and first.stdout.strip() == "- Fourth post"
     assert second.returncode == 0 and second.stdout.strip() == "- Third post"
     assert third.returncode == 0 and third.stdout == ""
+
+
+def test_select_new_empty_first_run_reports_subsequent_items(state_dir):
+    """An empty initial feed initializes the watermark, so items arriving on run 2 are reported."""
+    watermark = _watermark_module()
+
+    # First run on empty feed: adopts state silently
+    assert watermark.select_new("empty_start", []) == []
+    assert watermark.load_seen("empty_start") == []
+
+    # Second run: new item appears and must be reported (not silently dropped as first run)
+    assert watermark.select_new("empty_start", ["item-1"]) == ["item-1"]
+    assert watermark.load_seen("empty_start") == ["item-1"]
+
+    # Third run: same item is not reported again
+    assert watermark.select_new("empty_start", ["item-1"]) == []
+
+
+def test_select_new_deduplicates_incoming_ids(state_dir):
+    """Duplicate IDs in a single poll are deduplicated and saved once."""
+    watermark = _watermark_module()
+
+    reported = watermark.select_new(
+        "dup_feed", ["item-1", "item-1", "item-2"], first_run_reports=True
+    )
+    assert reported == ["item-1", "item-2"]
+    assert watermark.load_seen("dup_feed") == ["item-1", "item-2"]
