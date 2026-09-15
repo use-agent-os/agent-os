@@ -357,6 +357,11 @@ def make_agent_run_handler(
                 )
                 try:
                     record = await task_runtime.wait(handle.task_id, timeout=job.timeout_seconds)
+                except asyncio.CancelledError:
+                    # The scheduler's outer timeout cancels this waiter, not
+                    # the independently enqueued turn that it owns.
+                    await _cancel_runtime_task(task_runtime, handle.task_id)
+                    raise
                 except TimeoutError:
                     await _cancel_runtime_task(task_runtime, handle.task_id)
                     success = False
