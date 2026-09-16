@@ -25,6 +25,15 @@ from pathlib import Path
 from pypdf import PdfReader, PdfWriter
 
 
+def _parse_page_num(text: str, token: str) -> int:
+    """Return 1-based integer page number from *text*, or raise :class:`ManifestError`."""
+    digits = text.strip()
+    page = int(digits) if digits.isascii() and digits.isdigit() else 0
+    if page < 1:
+        raise ManifestError(f"invalid page specification: {token!r}")
+    return page
+
+
 def requested_pages(spec: str | None, total: int) -> list[int]:
     """Every page number *spec* asks for, in order, without clamping to *total*.
 
@@ -40,12 +49,12 @@ def requested_pages(spec: str | None, total: int) -> list[int]:
             continue
         if "-" in token:
             lo_s, hi_s = token.split("-", 1)
-            lo, hi = int(lo_s), int(hi_s)
+            lo, hi = _parse_page_num(lo_s, token), _parse_page_num(hi_s, token)
             if lo > hi:
                 lo, hi = hi, lo
             pages.extend(range(lo, hi + 1))
         else:
-            pages.append(int(token))
+            pages.append(_parse_page_num(token, token))
     return pages
 
 
@@ -91,8 +100,10 @@ def load_manifest(path: Path) -> list[dict[str, str]]:
                 f'manifest entry {index} has a non-string "file": {entry["file"]!r}'
             )
         pages = entry.get("pages")
-        if pages is not None and not isinstance(pages, str):
-            raise ManifestError(f'manifest entry {index} has a non-string "pages": {pages!r}')
+        if pages is not None:
+            if not isinstance(pages, str):
+                raise ManifestError(f'manifest entry {index} has a non-string "pages": {pages!r}')
+            requested_pages(pages, total=0)
         items.append(entry)
     return items
 
@@ -172,7 +183,11 @@ def main() -> int:
             return 2
     else:
         items = [{"file": p} for p in args.inputs]
-    result = merge(items, args.out)
+    try:
+        result = merge(items, args.out)
+    except ManifestError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     if result.pages_written == 0:
         print(
             f"error: no requested page exists in any input; nothing written to {args.out}",

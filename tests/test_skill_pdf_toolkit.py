@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -200,3 +201,45 @@ def test_tables_strategy_explicit_is_rejected_with_a_clear_message(
         extract.main()
     assert exc_info.value.code == 2
     assert "invalid choice: 'explicit'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("spec", ["1-3, all", "-5", "5-", "abc", "0", "1,0", "²"])
+def test_merge_requested_pages_rejects_malformed_page_spec(spec: str) -> None:
+    """Every malformed page specification token raises ManifestError instead of ValueError
+    (#2501)."""
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import merge  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    with pytest.raises(merge.ManifestError, match="invalid page specification"):
+        merge.requested_pages(spec, 5)
+
+
+def test_merge_cli_reports_malformed_page_spec_with_exit_code_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The command from the report: a structured error, exit code 2, and nothing written."""
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import merge  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    pdf_file = tmp_path / "sample.pdf"
+    _make_one_page_pdf(pdf_file, "TEST")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps([{"file": str(pdf_file), "pages": "1-3, all"}]))
+    out_file = tmp_path / "merged.pdf"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["merge.py", str(manifest), "--out", str(out_file)],
+    )
+
+    assert merge.main() == 2
+    captured = capsys.readouterr()
+    assert "invalid page specification: 'all'" in captured.err
+    assert not out_file.exists()
