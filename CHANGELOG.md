@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- docx skill: `inspect_docx.py` iterated `row.cells` which duplicated horizontally merged table cells across every column spanned and raised `ValueError` on irregular vertical merge grids; table rows now iterate `<w:tc>` elements directly.
+
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed

@@ -548,3 +548,65 @@ def test_apply_ops_counts_only_the_replace_runs_that_wrote() -> None:
 
     assert applied == 2
     assert [p.text for p in doc.paragraphs] == ["Hi world", "Last paragraph"]
+
+
+def test_inspect_docx_horizontal_merged_cells_not_duplicated(tmp_path: Path) -> None:
+    """`row.cells` repeats a merged cell for every grid column it spans.
+
+    `inspect_docx` must extract each cell exactly once rather than duplicating
+    its content across spanned columns.
+    """
+    from docx import Document
+
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import inspect_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    doc = Document()
+    table = doc.add_table(rows=2, cols=3)
+    table.cell(0, 0).text = "Merged Header"
+    table.cell(0, 2).text = "Col 3"
+    table.cell(0, 0).merge(table.cell(0, 1))
+    table.cell(1, 0).text = "A"
+    table.cell(1, 1).text = "B"
+    table.cell(1, 2).text = "C"
+
+    src = tmp_path / "table_merge.docx"
+    doc.save(str(src))
+
+    payload = inspect_docx.inspect(src)
+    assert payload["tables"] == [
+        [["Merged Header", "Col 3"], ["A", "B", "C"]],
+    ]
+
+
+def test_inspect_docx_survives_irregular_vertical_merge(tmp_path: Path) -> None:
+    """`tbl.rows` raises ValueError on irregular vertical merge grids produced
+    by non-Word generators. Direct `<w:tc>` iteration keeps table inspection intact."""
+    from docx import Document
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import inspect_docx  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+
+    doc = Document()
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).merge(table.cell(0, 1))
+    table.cell(1, 0).text = "Cell X"
+    continue_marker = OxmlElement("w:vMerge")
+    continue_marker.set(qn("w:val"), "continue")
+    table.cell(1, 1)._tc.get_or_add_tcPr().append(continue_marker)
+
+    src = tmp_path / "irregular_table.docx"
+    doc.save(str(src))
+
+    payload = inspect_docx.inspect(src)
+    assert payload["tables"] == [
+        [[""], ["Cell X", ""]],
+    ]

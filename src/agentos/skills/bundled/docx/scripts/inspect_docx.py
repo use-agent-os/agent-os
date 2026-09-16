@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from docx import Document
+from docx.table import _Cell
 
 
 def inspect(path: Path) -> dict[str, Any]:
@@ -33,7 +34,7 @@ def inspect(path: Path) -> dict[str, Any]:
 
     tables: list[list[list[str]]] = []
     for tbl in doc.tables:
-        tables.append([[cell.text for cell in row.cells] for row in tbl.rows])
+        tables.append([[_Cell(tc, tbl).text for tc in tr.tc_lst] for tr in tbl._tbl.tr_lst])
 
     body_xml = doc.element.body.xml if doc.element is not None else ""
     has_tracked_changes = "<w:ins" in body_xml or "<w:del" in body_xml
