@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Scheduler: a cron job with a `tz` mis-fired across daylight-saving
+  transitions. `_next_run` walked UTC minute by minute and matched the cron
+  fields against the converted wall time — but a wall-clock time is not unique.
+  On the fall-back night the hour repeats, so two UTC minutes both rendered as
+  the scheduled local time and a *daily* job fired twice; on spring-forward the
+  hour is skipped, so nothing rendered as the scheduled time and the job was
+  silently skipped for that day. An ambiguous local time now fires on its first
+  occurrence only, and a local time that does not exist fires once at the first
+  instant after the gap. UTC-scheduled jobs are unchanged (#2472).
+
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed

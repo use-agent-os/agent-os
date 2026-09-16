@@ -127,6 +127,7 @@ def classify_error(error_text: str | None) -> str:
         return "transient"
     return "transient"
 
+
 # Exponential backoff schedule for retryable jobs.
 BACKOFF_SCHEDULE: list[int] = [30, 60, 300, 900, 3600]  # 30s, 1m, 5m, 15m, 60m
 MAX_CONSECUTIVE_ERRORS: int = 5
@@ -199,11 +200,41 @@ async def execute_with_timeout(job: CronJob, handler: HandlerFn) -> JobExecution
         try:
             await _failure_dispatcher(job, execution.error or "")
         except Exception:  # noqa: BLE001 — dispatcher is best-effort
-            logger.warning(
-                "failure_dispatcher_raised id=%s", job.id, exc_info=True
-            )
+            logger.warning("failure_dispatcher_raised id=%s", job.id, exc_info=True)
 
     return execution
+
+
+#: A DST gap is an hour at most in every zone tzdata ships, but the bound is
+#: what stops a malformed zone turning one tick into an unbounded inner loop.
+_MAX_GAP_MINUTES = 24 * 60
+
+
+def _skipped_wall_minutes(
+    previous_wall: datetime | None,
+    wall: datetime,
+) -> list[datetime]:
+    """Local minutes that the clock jumped over between two UTC candidates.
+
+    Returned naive, because these wall times do not exist in the zone -- that
+    is the point of them. They are only ever fed to ``CronExpression.matches``,
+    which reads calendar fields and never converts.
+
+    Empty when the clock moved normally, and empty across a fall-back, where
+    the local time goes backwards rather than forwards.
+    """
+    if previous_wall is None:
+        return []
+    start = previous_wall.replace(tzinfo=None)
+    end = wall.replace(tzinfo=None)
+    if end - start <= timedelta(minutes=1):
+        return []
+    missing: list[datetime] = []
+    cursor = start + timedelta(minutes=1)
+    while cursor < end and len(missing) < _MAX_GAP_MINUTES:
+        missing.append(cursor)
+        cursor += timedelta(minutes=1)
+    return missing
 
 
 def _next_run(job: CronJob, after: datetime) -> datetime:
@@ -236,10 +267,33 @@ def _next_run(job: CronJob, after: datetime) -> datetime:
     tz_name = (job.tz or "").strip()
     tz = ZoneInfo(tz_name) if tz_name else None
     candidate = after.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    previous_wall = candidate.astimezone(tz) - timedelta(minutes=1) if tz is not None else None
     for _ in range(2_102_400):
-        wall = candidate.astimezone(tz) if tz is not None else candidate
-        if expr.matches(wall):
+        if tz is None:
+            # UTC has no transitions, so every minute is distinct and real.
+            if expr.matches(candidate):
+                return candidate + timedelta(seconds=job.jitter_seconds)
+            candidate += timedelta(minutes=1)
+            continue
+
+        wall = candidate.astimezone(tz)
+
+        # Spring forward: the local clock jumps, and a schedule inside the gap
+        # names a wall time that never happens. Scanning UTC alone simply never
+        # matched it, so the job silently skipped that day. Fire once at the
+        # first instant after the gap instead.
+        for missing in _skipped_wall_minutes(previous_wall, wall):
+            if expr.matches(missing):
+                return candidate + timedelta(seconds=job.jitter_seconds)
+
+        # Fall back: the hour repeats, so two distinct UTC minutes render as
+        # the same wall time and a daily schedule fired twice. ``fold`` is 1 on
+        # the second pass; taking only the first keeps one run per scheduled
+        # local time.
+        if wall.fold == 0 and expr.matches(wall):
             return candidate + timedelta(seconds=job.jitter_seconds)
+
+        previous_wall = wall
         candidate += timedelta(minutes=1)
     raise ValueError(f"No valid next run found for expression '{job.cron_expr}'")
 
