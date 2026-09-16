@@ -149,6 +149,16 @@ def is_subagent_key(session_key: str) -> bool:
     return key.startswith("subagent:") or bool(re.match(r"^agent:[^:]+:subagent:[^:]+$", key))
 
 
+def is_cron_key(session_key: str) -> bool:
+    """Return True for a cron run session key.
+
+    The counterpart to :func:`is_subagent_key`, so a caller asking "what kind
+    of session is this?" gets the same normalization either way rather than
+    matching a raw prefix and tripping over surrounding whitespace or case.
+    """
+    return session_key.strip().lower().startswith("cron:")
+
+
 def allows_private_memory_prompt_injection(session_key: str | None) -> bool:
     """Return whether automatic private memory may be injected into a prompt."""
     key = canonicalize_session_key(session_key)

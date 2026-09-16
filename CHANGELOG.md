@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Tools (security): `effective_tool_context` recognised only the *legacy*
+  `subagent:` key prefix, so every subagent turn started by
+  `tools/builtin/sessions.py` — which builds the canonical
+  `agent:<id>:subagent:<run>` form — was classified as an interactive agent and
+  never had `SUBAGENT_TOOL_DENY` applied. It now uses `session.keys`'
+  `is_subagent_key`, which already answered this correctly for both shapes, so
+  the two definitions cannot drift apart again. A matching `is_cron_key` gives
+  the cron branch the same normalisation.
+- Tools: `effective_tool_context` hardcoded `agent_id or "main"` in every
+  branch, so a session belonging to agent `ops` reported `agent_id == "main"`
+  whenever the caller passed only a session key. `ctx.agent_id` selects whose
+  memory `memory_tools` reads and writes and whose policy
+  `agent_policy_from_config` applies, so an `ops` turn ran against main's
+  memory and main's tool policy. The id is now derived from the key in every
+  branch, falling back to `"main"` exactly as before for a key that cannot be
+  parsed (#2293).
+
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed
