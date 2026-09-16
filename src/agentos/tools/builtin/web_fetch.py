@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from typing import Any
 from urllib.parse import urljoin
 
@@ -82,18 +83,47 @@ def _html_to_markdown(html: str) -> str:
     return h.handle(html)
 
 
-def _markdown_to_text(markdown: str) -> str:
-    """Strip markdown formatting to plain text via html2text."""
-    import html2text
+_RE_CODE_BLOCK = re.compile(r"```[^\n]*\n([\s\S]*?)\n```")
+_RE_REF_LINK = re.compile(r"^[ \t]*\[[^\]]+\]:[ \t]+[^\n]+$", re.MULTILINE)
+_RE_IMG_INLINE = re.compile(r"!\[([^\]]*)\]\([^)]+\)")
+_RE_IMG_REF = re.compile(r"!\[([^\]]*)\]\[[^\]]*\]")
+_RE_LINK_INLINE = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+_RE_LINK_REF = re.compile(r"\[([^\]]+)\]\[[^\]]*\]")
+_RE_AUTOLINK_URL = re.compile(r"<([a-zA-Z][a-zA-Z0-9+.-]*://[^>]+)>")
+_RE_AUTOLINK_EMAIL = re.compile(r"<([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)>")
+_RE_HEADING = re.compile(r"^[ \t]*#{1,6}[ \t]+", re.MULTILINE)
+_RE_BLOCKQUOTE = re.compile(r"^[ \t]*>[ \t]?", re.MULTILINE)
+_RE_HR = re.compile(r"^[ \t]*([-*_][ \t]*){3,}$", re.MULTILINE)
+_RE_INLINE_CODE = re.compile(r"`([^`]+)`")
+_RE_STRIKETHROUGH = re.compile(r"~~([^~]+)~~")
+_RE_EMPHASIS_ASTERISK = re.compile(r"\*{1,3}(.*?)\*{1,3}")
+_RE_EMPHASIS_UNDERSCORE = re.compile(r"(?<![0-9A-Za-z])_{1,3}(.*?)_{1,3}(?![0-9A-Za-z])")
+_RE_MULTI_NEWLINES = re.compile(r"\n{3,}")
 
-    h = html2text.HTML2Text()
-    h.ignore_links = True
-    h.ignore_images = True
-    h.body_width = 0
-    # html2text can also strip simple markdown when fed as plain text
-    # but the cleanest approach: pass through as-is since we already
-    # have the markdown. Just strip link/image noise.
-    return h.handle(markdown)
+
+def _markdown_to_text(markdown: str) -> str:
+    """Strip markdown formatting to plain text while preserving paragraph structure."""
+    if not markdown:
+        return ""
+
+    text = markdown
+    text = _RE_CODE_BLOCK.sub(r"\1", text)
+    text = _RE_REF_LINK.sub("", text)
+    text = _RE_IMG_INLINE.sub(r"\1", text)
+    text = _RE_IMG_REF.sub(r"\1", text)
+    text = _RE_LINK_INLINE.sub(r"\1", text)
+    text = _RE_LINK_REF.sub(r"\1", text)
+    text = _RE_AUTOLINK_URL.sub(r"\1", text)
+    text = _RE_AUTOLINK_EMAIL.sub(r"\1", text)
+    text = _RE_HEADING.sub("", text)
+    text = _RE_BLOCKQUOTE.sub("", text)
+    text = _RE_HR.sub("", text)
+    text = _RE_INLINE_CODE.sub(r"\1", text)
+    text = _RE_STRIKETHROUGH.sub(r"\1", text)
+    text = _RE_EMPHASIS_ASTERISK.sub(r"\1", text)
+    text = _RE_EMPHASIS_UNDERSCORE.sub(r"\1", text)
+    text = _RE_MULTI_NEWLINES.sub("\n\n", text)
+    return text.strip()
 
 
 async def _try_firecrawl(url: str, api_key: str) -> tuple[str, str] | None:

@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `web_fetch` with `extract_mode="text"` passed extracted markdown to `html2text`, collapsing multiline paragraphs into single lines and leaving raw markdown syntax and brackets unparsed; it now strips markdown formatting cleanly to plain text while preserving paragraph structure.
+
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed
