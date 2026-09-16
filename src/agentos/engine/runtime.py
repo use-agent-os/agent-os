@@ -1729,12 +1729,32 @@ class TurnRunner:
         )
         # User turns since the last memory review, keyed (agent_id, session_key).
         self._memory_nudge_counters: dict[tuple[str, str], int] = {}
-        self._compaction_failures: dict[str, _CompactionFailureState] = {}
+        # Consecutive compaction failures per session, driving the circuit
+        # breaker. Only ``_record_compaction_success`` removes an entry, so a
+        # session that fails once and is then abandoned -- a one-off chat, a
+        # cron or subagent session, a client that disconnects -- kept its entry
+        # for the life of the process. Nothing notifies this runner when a
+        # session ends, which is the same reason the snapshot registries above
+        # are bounded.
+        self._compaction_failures: BoundedRegistry[str, _CompactionFailureState] = BoundedRegistry(
+            name="TurnRunner._compaction_failures",
+            session_of=lambda key, _value: key,
+        )
         self._turn_compaction_attempted_sessions: set[str] = set()
         self._turn_compacted_sessions: set[str] = set()
         self._active_pre_compaction_flush_tasks: dict[str, asyncio.Task] = {}
         self._background_tasks: set[asyncio.Task] = set()
-        self._emergency_compaction_overrides: dict[str, _EmergencyCompactionOverride] = {}
+        # Request-scoped emergency compaction results, consumed by the *next*
+        # turn's history load. If there is no next turn the entry is never
+        # read and never dropped, and each one carries a full kept-transcript
+        # slice rather than a counter, so this leak scaled with conversation
+        # size as well as session count.
+        self._emergency_compaction_overrides: BoundedRegistry[str, _EmergencyCompactionOverride] = (
+            BoundedRegistry(
+                name="TurnRunner._emergency_compaction_overrides",
+                session_of=lambda key, _value: key,
+            )
+        )
         # Last persisted row each session's loaded history covers, keyed by
         # session key; anchors inline compaction persistence so rows appended
         # mid-turn (queued follow-ups) are never overwritten or archived.
@@ -5904,7 +5924,7 @@ class TurnRunner:
         return flush_receipt_allows_destructive_compaction(receipt)
 
     def _compaction_circuit_open(self, session_key: str) -> bool:
-        state = getattr(self, "_compaction_failures", {}).get(session_key)
+        state = self._compaction_failures.get(session_key)
         if state is None or state.count < _COMPACTION_FAILURE_LIMIT:
             return False
         opened_at = state.opened_at if state.opened_at is not None else time.monotonic()
@@ -5929,15 +5949,14 @@ class TurnRunner:
         return True
 
     def _record_compaction_failure(self, session_key: str) -> None:
-        if not hasattr(self, "_compaction_failures"):
-            self._compaction_failures = {}
+        # No ``hasattr`` re-init here: the field is always built in __init__,
+        # and re-creating it as a plain ``{}`` would silently swap the bounded
+        # registry back out for the unbounded dict this replaced.
         state = self._compaction_failures.setdefault(session_key, _CompactionFailureState())
         state.count += 1
         state.opened_at = time.monotonic() if state.count >= _COMPACTION_FAILURE_LIMIT else None
 
     def _record_compaction_success(self, session_key: str) -> None:
-        if not hasattr(self, "_compaction_failures"):
-            self._compaction_failures = {}
         self._compaction_failures.pop(session_key, None)
 
     @staticmethod
@@ -6067,10 +6086,7 @@ class TurnRunner:
 
         history: list[Message] = []
         summary_markers: list[str] = []
-        emergency_override = getattr(self, "_emergency_compaction_overrides", {}).pop(
-            session_key,
-            None,
-        )
+        emergency_override = self._emergency_compaction_overrides.pop(session_key, None)
         if emergency_override is not None:
             transcript = list(emergency_override.kept_entries)
             summary_markers.append(emergency_override.summary)

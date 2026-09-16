@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Engine: `TurnRunner._compaction_failures` and
+  `TurnRunner._emergency_compaction_overrides` were still plain, uncapped
+  dicts, unlike the snapshot registries declared beside them. Each has a single
+  removal path an abandoned session never reaches — the failure counter is
+  cleared only by a later *success*, and the emergency override only by the
+  *next* turn's history load — so a one-off chat, a cron or subagent session,
+  or a client that disconnects left its entry for the life of the process. The
+  override is the heavier of the two: it carries a full kept-transcript slice,
+  so that leak scaled with conversation size as well as session count. Both are
+  now `BoundedRegistry` with `session_of`, which caps them and makes them
+  visible to `drop_session_state` — the process-wide reaper that was already
+  clearing their siblings and could not see these (#2399).
+
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed
