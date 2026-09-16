@@ -1878,25 +1878,6 @@ async def _handle_sessions_reset(params: dict | None, ctx: RpcContext) -> dict[s
             "epoch": new_epoch,
         }
 
-        if not transcript:
-            updated, rotated = await ctx.session_manager.apply_intent(
-                key, SessionIntent.RESET_SAME_KEY
-            )
-            new_epoch = await _increment_and_emit_epoch(ctx, storage, key)
-            await _notify_provider_session_boundary(
-                ctx,
-                agent_id=agent_id,
-                transcript=transcript,
-                new_session_id=updated.session_id,
-            )
-            return _reset_response(
-                key,
-                rotated,
-                previous_session_id,
-                updated.session_id,
-                new_epoch,
-            )
-
     if lock is None:
         return await _run_locked()
     async with lock:
@@ -1944,23 +1925,6 @@ async def _increment_and_emit_epoch(
             new_epoch=new_epoch,
         )
     return new_epoch
-
-
-def _reset_response(
-    key: str,
-    rotated: bool,
-    previous_session_id: str,
-    session_id: str,
-    epoch: int = 0,
-) -> dict[str, Any]:
-    return {
-        "key": key,
-        "reset": True,
-        "rotated": rotated,
-        "previous_session_id": previous_session_id,
-        "session_id": session_id,
-        "epoch": epoch,
-    }
 
 
 @_d.method("sessions.delete")

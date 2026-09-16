@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Gateway: `_handle_sessions_reset` carried a dead, unreachable duplicate
+  of its own final reset branch (a leftover from a past merge conflict) --
+  an unconditional `return` was immediately followed by an `if not
+  transcript:` block computing and returning the same thing a different
+  way, which `mypy --warn-unreachable` flags directly. Removed the dead
+  block and its now-unused `_reset_response` helper; the reachable branch
+  above it already covers the same case
+  (#2509).
+
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed

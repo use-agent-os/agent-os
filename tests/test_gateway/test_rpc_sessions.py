@@ -2083,6 +2083,36 @@ class TestSessionsReset:
         assert res.payload["previous_session_id"] == before
         assert res.payload["session_id"] != before
 
+    @pytest.mark.asyncio
+    async def test_reset_forced_with_covering_checkpoint_does_the_plain_reset(
+        self, dispatcher, session
+    ):
+        """Regression for #2509: a non-empty, checkpoint-covered transcript
+        reset with force=True falls through past both the not-force and the
+        not-checkpoint-safe branches to the plain apply_intent reset -- the
+        exact spot a dead, unreachable duplicate of this same logic used to
+        sit right after (a merge-conflict leftover). Pins that this path is
+        still reachable and still returns the plain shape (no reset_mode)
+        now that the duplicate is gone."""
+        manager = FakeSessionManager([session])
+        manager.transcript = [SimpleNamespace(id=1, content="message to preserve")]
+        manager._storage.memory_durable_receipts.append(
+            _checkpoint_receipt(session, turn_id="cmp-reset-forced", entries=manager.transcript)
+        )
+        ctx = make_ctx(session_manager=manager)
+        before = session.session_id
+
+        res = await dispatcher.dispatch(
+            "r1", "sessions.reset", {"key": session.session_key, "force": True}, ctx
+        )
+
+        assert res.ok is True
+        assert res.payload["reset"] is True
+        assert res.payload["previous_session_id"] == before
+        assert res.payload["session_id"] != before
+        assert "reset_mode" not in res.payload
+        assert manager.applied_intents == [(session.session_key, "reset_same_key")]
+
 
 class TestSessionsDelete:
     @pytest.mark.asyncio
