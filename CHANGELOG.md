@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Skills: `title-card-image` wrapped on `all(ord(c) < 0x4E00 for c in text)`,
+  which is not a script boundary but simply where CJK ideographs begin. Any
+  string containing one character above it was chopped at a fixed width, so a
+  Korean headline broke mid-word and a single emoji dragged an otherwise-Latin
+  headline onto the same path. The inverse was also true: Japanese kana sits
+  *below* the threshold, so a kana headline took the whitespace path, found no
+  spaces and was never wrapped at all. Wrapping is now keyed off the scripts
+  that are genuinely written without spaces — CJK ideographs, kana, and
+  fullwidth forms — leaving Hangul, emoji, Cyrillic, Greek, Arabic and the rest
+  to wrap on their spaces. A word wider than the line is split instead of
+  overflowing, each line of a multi-line input is wrapped rather than returned
+  untouched, and slicing no longer cuts through a ZWJ emoji sequence, a flag's
+  regional-indicator pair, a skin-tone modifier or a combining accent (#2265).
+
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed
