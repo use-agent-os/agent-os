@@ -373,7 +373,7 @@ async def test_get_transcript_orders_same_timestamp_by_insert_id(manager):
 def test_get_transcript_query_uses_id_tiebreaker() -> None:
     source = Path("src/agentos/session/storage.py").read_text(encoding="utf-8")
 
-    assert "ORDER BY created_at ASC, id ASC LIMIT ? OFFSET ?" in source
+    assert 'f"ORDER BY created_at {order}, id {order} LIMIT ? OFFSET ?"' in source
 
 
 @pytest.mark.asyncio

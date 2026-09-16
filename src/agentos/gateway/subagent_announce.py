@@ -300,7 +300,7 @@ async def _read_child_result(
     if not callable(read_transcript):
         return _result_payload("")
     try:
-        rows = await read_transcript(child_session_key, limit=50)
+        rows = await read_transcript(child_session_key, limit=50, newest_first=True)
     except Exception:
         return _result_payload("")
     for row in reversed(list(rows or [])):
@@ -678,9 +678,7 @@ async def _spawn_group_pending_count(
         parent_task_id=parent_task_id,
         session_manager=session_manager,
     )
-    return sum(
-        1 for row in rows if _session_status(row) not in _TERMINAL_SESSION_STATUSES
-    )
+    return sum(1 for row in rows if _session_status(row) not in _TERMINAL_SESSION_STATUSES)
 
 
 def _format_parent_wake_message(

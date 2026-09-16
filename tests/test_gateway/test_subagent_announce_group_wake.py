@@ -80,7 +80,7 @@ class _SessionManager:
             rows = [row for row in rows if row.spawned_by == spawned_by]
         return rows[offset : offset + limit]
 
-    async def read_transcript(self, session_key: str, limit: int = 50):
+    async def read_transcript(self, session_key: str, limit: int = 50, newest_first: bool = False):
         text = self.transcripts.get(session_key, "")
         return [SimpleNamespace(role="assistant", content=text)] if text else []
 

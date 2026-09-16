@@ -411,10 +411,11 @@ class SessionManager:
         self,
         session_key: str,
         limit: int | None = None,
+        newest_first: bool = False,
     ) -> list[dict[str, Any]]:
         """Return JSON-serializable transcript entries for a session."""
         session_key = canonicalize_session_key(session_key)
-        entries = await self.get_transcript(session_key, limit=limit)
+        entries = await self.get_transcript(session_key, limit=limit, newest_first=newest_first)
         return [entry.model_dump(mode="json") for entry in entries]
 
     async def inject_message(
@@ -1123,13 +1124,15 @@ class SessionManager:
         return await self._storage.delete_transcript_entry(node.session_id, message_id)
 
     async def get_transcript(
-        self, session_key: str, limit: int | None = None
+        self, session_key: str, limit: int | None = None, newest_first: bool = False
     ) -> list[TranscriptEntry]:
         session_key = canonicalize_session_key(session_key)
         node = await self._storage.get_session(session_key)
         if node is None:
             raise KeyError(f"Session not found: {session_key}")
-        return await self._storage.get_transcript(node.session_id, limit=limit)
+        return await self._storage.get_transcript(
+            node.session_id, limit=limit, newest_first=newest_first
+        )
 
     async def record_memory_checkpoint(
         self,

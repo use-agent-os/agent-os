@@ -253,9 +253,7 @@ async def sessions_send(session_key: str, message: str) -> str:
             raise SafeToolError(f"Session not found: {session_key}")
         status = getattr(session, "status", "unknown")
         if status in _TERMINAL_STATUSES:
-            raise SafeToolError(
-                f"Session '{session_key}' is terminated (status={status})"
-            )
+            raise SafeToolError(f"Session '{session_key}' is terminated (status={status})")
         try:
             runtime = _get_task_runtime()
         except ToolError:
@@ -574,7 +572,7 @@ async def sessions_history(session_key: str, limit: int = 20) -> str:
         session = await mgr.get_session(session_key)
         if session is None:
             raise ToolError(f"Session not found: {session_key}")
-        messages = await mgr.read_transcript(session_key, limit=limit)
+        messages = await mgr.read_transcript(session_key, limit=limit, newest_first=True)
         return json.dumps(
             {
                 "session_key": session_key,
