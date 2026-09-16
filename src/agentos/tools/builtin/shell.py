@@ -681,25 +681,55 @@ async def _wait_exec_process(proc: Any, timeout: float) -> bool:
 
 
 def _signal_exec_process_tree(proc: Any, sig: signal.Signals) -> bool:
-    if os.name == "posix":
-        os_mod = cast(Any, os)
-        try:
-            os_mod.killpg(proc.pid, sig)
-            return True
-        except ProcessLookupError:
-            return True
-        except OSError:
-            pass
-    if proc.returncode is not None:
+    """POSIX-only: signal *proc*'s whole process group.
+
+    Windows termination goes through :func:`_kill_windows_process_tree`
+    instead -- ``proc.terminate()``/``proc.kill()`` (``TerminateProcess``)
+    only reaches the process asyncio directly tracks, which is ``cmd.exe``
+    (``create_subprocess_shell`` launches through it), not whatever the
+    command itself spawned. A grandchild -- PowerShell, a compiler, a
+    download -- survives a bare kill and keeps running orphaned. Same
+    defect ``cli/upgrade_cmd.py``'s ``_kill_process_group`` already fixed
+    for the Windows upgrade path (#536/#541); this mirrors that fix here.
+    """
+    os_mod = cast(Any, os)
+    try:
+        os_mod.killpg(proc.pid, sig)
+        return True
+    except ProcessLookupError:
+        return True
+    except OSError:
         return False
-    if sig == signal.SIGTERM:
-        proc.terminate()
-    else:
-        proc.kill()
-    return True
+
+
+async def _kill_windows_process_tree(proc: Any) -> None:
+    """Kill *proc* and its full descendant tree on Windows via ``taskkill /T /F``.
+
+    Falls back to a bare ``proc.kill()`` only if ``taskkill`` itself errors
+    or times out -- better a possibly-incomplete kill than none at all.
+    """
+    try:
+        taskkill = await asyncio.create_subprocess_exec(
+            "taskkill",
+            "/T",
+            "/F",
+            "/PID",
+            str(proc.pid),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(taskkill.wait(), timeout=_EXEC_KILL_TIMEOUT)
+    except (TimeoutError, OSError):
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
 
 
 async def _terminate_exec_process_tree(proc: Any) -> None:
+    if os.name != "posix":
+        await _kill_windows_process_tree(proc)
+        if not await _wait_exec_process(proc, _EXEC_KILL_TIMEOUT):
+            log.warning("exec_command_termination_timeout", pid=proc.pid)
+        return
     _signal_exec_process_tree(proc, signal.SIGTERM)
     if await _wait_exec_process(proc, _EXEC_TERMINATE_TIMEOUT):
         return
@@ -860,6 +890,19 @@ async def exec_command(
                     proc.kill()
                     await proc.communicate()
                     return f"[timeout after {effective_timeout}s]\ncommand: {command}"
+                except asyncio.CancelledError:
+                    # An outer cancellation (execution_timeout_seconds, a
+                    # cancelled turn, session kill) raises here too, but
+                    # CancelledError is a BaseException, not an Exception --
+                    # the except Exception below never sees it, and without
+                    # this the subprocess keeps running orphaned after the
+                    # tool call has already ended. Clean up, then let the
+                    # cancellation continue exactly as #2041 does for cron
+                    # scripts.
+                    proc.kill()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await proc.communicate()
+                    raise
                 output = redact_terminal_output(
                     stdout_bytes.decode("utf-8", errors="replace"), command
                 )
@@ -893,19 +936,37 @@ async def exec_command(
                     subprocess_kwargs["creationflags"] = creationflags
 
             proc = await asyncio.create_subprocess_shell(command, **subprocess_kwargs)
-            if not await _wait_exec_process(proc, effective_timeout):
-                await _terminate_exec_process_tree(proc)
-                return f"[timeout after {effective_timeout}s]\ncommand: {command}"
-            if os.name == "posix":
-                _signal_exec_process_tree(proc, signal.SIGTERM)
+            try:
+                if not await _wait_exec_process(proc, effective_timeout):
+                    await _terminate_exec_process_tree(proc)
+                    return f"[timeout after {effective_timeout}s]\ncommand: {command}"
+                # The command itself finished, but anything it spawned in the
+                # background (start_new_session put it in the same process
+                # group) may still be running. Sweep it now. POSIX-only: the
+                # group leader (proc) has already exited by this point --
+                # that's what the wait above just confirmed -- and on
+                # Windows taskkill's tree-walk needs the root PID to still
+                # be alive to start from, so it can't reach survivors here.
+                # os.killpg has no such requirement; the process group ID
+                # stays valid after its leader exits.
+                if os.name == "posix":
+                    _signal_exec_process_tree(proc, signal.SIGTERM)
 
-            output_file.flush()
-            output_file.seek(0)
-            output = redact_terminal_output(
-                output_file.read().decode("utf-8", errors="replace"), command
-            )
-            output = await publish_inline_artifacts(output)
-            return f"exit_code={proc.returncode}\n{output}"
+                output_file.flush()
+                output_file.seek(0)
+                output = redact_terminal_output(
+                    output_file.read().decode("utf-8", errors="replace"), command
+                )
+                output = await publish_inline_artifacts(output)
+                return f"exit_code={proc.returncode}\n{output}"
+            except asyncio.CancelledError:
+                # Same reasoning as the elevated-bypass path above: an outer
+                # cancellation is a BaseException that skips `except Exception`
+                # entirely, so without this the child keeps running orphaned
+                # after the tool call has already ended. _terminate_exec_process_tree
+                # is safe to call on a process that already exited on its own.
+                await _terminate_exec_process_tree(proc)
+                raise
     except Exception as e:
         return f"[error] {e}"
 
