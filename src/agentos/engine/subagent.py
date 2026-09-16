@@ -71,10 +71,10 @@ class SubagentRegistry:
         return sum(1 for h in self._runs.values() if h.status == "running")
 
     def get(self, run_id: str) -> SubagentHandle | None:
-        return self._runs.get(run_id)
+        return self._runs.get(run_id) or self._archived.get(run_id)
 
     def all_handles(self) -> list[SubagentHandle]:
-        return list(self._runs.values())
+        return list(self._runs.values()) + list(self._archived.values())
 
     def abort(self, run_id: str) -> bool:
         """Cancel a running subagent's asyncio.Task and mark it aborted."""
@@ -99,11 +99,11 @@ class SubagentRegistry:
         return list(self._archived.values())
 
     def get_by_status(self, status: str) -> list[SubagentHandle]:
-        return [h for h in self._runs.values() if h.status == status]
+        return [h for h in self.all_handles() if h.status == status]
 
     def summary(self) -> dict[str, int]:
         counts: dict[str, int] = {}
-        for h in self._runs.values():
+        for h in self.all_handles():
             counts[h.status] = counts.get(h.status, 0) + 1
         return counts
 
@@ -121,7 +121,7 @@ class SubagentRegistry:
     def save_state(self, path: Path) -> None:
         """Serialize registry metadata to JSON (no asyncio.Task objects)."""
         entries = []
-        for h in self._runs.values():
+        for h in self.all_handles():
             entries.append(
                 {
                     "run_id": h.run_id,
@@ -252,6 +252,7 @@ class SubagentManager:
             else:
                 handle.status = "done"
                 handle.result = t.result()
+            self.registry.archive(handle.run_id)
 
         task.add_done_callback(_on_done)
         self.registry.register(handle)

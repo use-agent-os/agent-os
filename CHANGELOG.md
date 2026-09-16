@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `SubagentRegistry` retained completed, errored, and aborted subagent runs and
+  their result text in `_runs` for the life of the agent because `archive()` was
+  never called on task completion, leaving the bounded `_archived` cache empty;
+  `SubagentManager.spawn` now moves finished subagents to `_archived` on completion
+  and registry queries search both active and archived runs
+  ([#2424](https://github.com/use-agent-os/agent-os/issues/2424)).
+
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed
