@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `write_file` calculated and reported character length instead of actual UTF-8
+  byte count written to disk; non-ASCII multibyte files now report accurate byte
+  sizes matching disk measurements
+  ([#2478](https://github.com/use-agent-os/agent-os/issues/2478)).
+
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed
