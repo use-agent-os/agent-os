@@ -19,7 +19,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentos.channels.msteams import _MSTEAMS_TEXT_LIMIT, MSTeamsChannel, MSTeamsChannelConfig
+from agentos.channels.msteams import (
+    _MSTEAMS_TEXT_LIMIT,
+    MSTeamsChannel,
+    MSTeamsChannelConfig,
+    _utf16_units,
+)
 from agentos.channels.types import OutgoingMessage
 
 
@@ -76,6 +81,45 @@ async def test_send_of_a_short_reply_is_a_single_activity() -> None:
     await channel.send(OutgoingMessage(content="hello world", reply_to="conversation-A"))
 
     assert sent == ["hello world"]
+
+
+@pytest.mark.asyncio
+async def test_send_measures_emoji_in_utf16_units_not_characters() -> None:
+    """An emoji is one character but two UTF-16 units -- Teams' actual cap.
+
+    18,000 emoji is 18,000 characters (at the _MSTEAMS_TEXT_LIMIT boundary
+    under a character count) but 36,000 UTF-16 units -- double the limit.
+    A character-counted split would leave this as a single, oversized
+    activity that Teams would reject with 413.
+    """
+    channel, sent = _channel()
+    emoji_content = "\U0001f600" * 18_000
+
+    await channel.send(OutgoingMessage(content=emoji_content, reply_to="conversation-A"))
+
+    assert len(sent) > 1
+    for chunk in sent:
+        assert _utf16_units(chunk) <= _MSTEAMS_TEXT_LIMIT
+    assert "".join(sent) == emoji_content
+
+
+@pytest.mark.asyncio
+async def test_send_never_splits_inside_a_surrogate_pair() -> None:
+    """Counting in UTF-16 units means a cut can land between the high and
+    low surrogate of one astral character; the splitter must not do that,
+    or a chunk boundary would produce invalid UTF-16 on the wire."""
+    channel, sent = _channel()
+    # Pad to land a naive unit-boundary cut exactly inside an emoji's
+    # surrogate pair, then verify every emitted chunk is still valid text.
+    content = ("a" * (_MSTEAMS_TEXT_LIMIT - 1)) + ("\U0001f600" * 10)
+
+    await channel.send(OutgoingMessage(content=content, reply_to="conversation-A"))
+
+    assert len(sent) > 1
+    for chunk in sent:
+        chunk.encode("utf-16-le")  # raises if a surrogate is unpaired
+        assert _utf16_units(chunk) <= _MSTEAMS_TEXT_LIMIT
+    assert "".join(sent) == content
 
 
 @pytest.mark.asyncio

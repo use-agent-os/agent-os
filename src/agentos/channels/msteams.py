@@ -83,6 +83,19 @@ _CONVERSATION_CACHE_SCHEMA_VERSION = 1
 _MSTEAMS_TEXT_LIMIT = 18000
 
 
+def _utf16_units(text: str) -> int:
+    """Count *text* the way Teams' payload cap is actually measured.
+
+    ``len()`` counts Unicode code points; an astral-plane character (most
+    emoji, several CJK extension blocks) is one code point but two UTF-16
+    code units. A character-counted cap under-reads such a reply by up to
+    half, so an emoji-heavy chunk that measured comfortably under
+    ``_MSTEAMS_TEXT_LIMIT`` can still exceed the actual Activity cap and
+    come back ``413 MessageSizeTooBig``.
+    """
+    return len(text.encode("utf-16-le")) // 2
+
+
 def _default_workspace_dir() -> Path:
     """Return the default per-user agentos workspace directory."""
     return Path.home() / ".agentos"
@@ -526,7 +539,7 @@ class MSTeamsChannel:
         segments: list[str] = []
         remaining = content
         while True:
-            head, tail = split_text_for_limit(remaining, _MSTEAMS_TEXT_LIMIT)
+            head, tail = split_text_for_limit(remaining, _MSTEAMS_TEXT_LIMIT, measure=_utf16_units)
             segments.append(head)
             if not tail:
                 return segments
@@ -627,7 +640,9 @@ class MSTeamsChannel:
             remaining = text
             start_of_open_segment = segment_start
             while True:
-                head, tail = split_text_for_limit(remaining, _MSTEAMS_TEXT_LIMIT)
+                head, tail = split_text_for_limit(
+                    remaining, _MSTEAMS_TEXT_LIMIT, measure=_utf16_units
+                )
                 message_id = await _open_segment(head)
                 self._remember_sent_message(message_id, ref_key)
                 if not tail:
@@ -656,7 +671,9 @@ class MSTeamsChannel:
                 continue
 
             current_message_id = message_id
-            head, tail = split_text_for_limit(accumulated[segment_start:], _MSTEAMS_TEXT_LIMIT)
+            head, tail = split_text_for_limit(
+                accumulated[segment_start:], _MSTEAMS_TEXT_LIMIT, measure=_utf16_units
+            )
 
             async def _edit(
                 turn_context: Any, _id: str = current_message_id, _text: str = head
@@ -698,7 +715,9 @@ class MSTeamsChannel:
                 await _open_segments(remainder)
             else:
                 final_message_id = message_id
-                head, tail = split_text_for_limit(remainder, _MSTEAMS_TEXT_LIMIT)
+                head, tail = split_text_for_limit(
+                    remainder, _MSTEAMS_TEXT_LIMIT, measure=_utf16_units
+                )
 
                 async def _final_update(
                     turn_context: Any, _id: str = final_message_id, _text: str = head
