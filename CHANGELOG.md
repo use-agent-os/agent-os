@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Skills (hub scanner): `_strip_code_blocks` matched one unanchored
+  backtick regex, so it recognised only exactly-three-backtick fences.
+  Every other block form CommonMark defines -- a `~~~` fence, a
+  4-space or tab indented block, a fence of four or more backticks, a
+  fence left unclosed -- reached the shell and exfiltration checks as
+  prose and scored `dangerous`, which hard-blocks a hub install unless
+  the caller passes `force=True`. The same regex also caused a missed
+  detection in the other direction: a backtick run *inside* a `~~~`
+  block paired with an unrelated later run, silently exempting the
+  prose between them. Both markers are now scanned line by line under
+  one set of rules, so a fence closes only on its own marker at no
+  less than the opening length, and indented blocks are measured from
+  the enclosing list item's content indent (#2324).
+
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed
