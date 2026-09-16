@@ -127,11 +127,62 @@ def test_is_stock_token_keys_off_the_suffix() -> None:
     assert chain_stocks.is_stock_token(_TOKENS[2]) is False
 
 
+def test_is_stock_token_recognizes_truncated_coingecko_suffix() -> None:
+    # CoinGecko caps `name` at 60 characters, truncating long listing suffixes.
+    assert (
+        chain_stocks.is_stock_token(
+            {"name": "International Business Machines Corporation • Robinhood Toke"}
+        )
+        is True
+    )
+    assert (
+        chain_stocks.is_stock_token(
+            {"name": "SPDR Portfolio S&P 500 High Dividend ETF • Robinhood T"}
+        )
+        is True
+    )
+    assert (
+        chain_stocks.is_stock_token(
+            {"name": "Technology Select Sector SPDR Fund • Robinhood Token"}
+        )
+        is True
+    )
+
+
+def test_clean_name_strips_truncated_coingecko_suffix() -> None:
+    assert (
+        chain_stocks._clean_name("International Business Machines Corporation • Robinhood Toke")
+        == "International Business Machines Corporation"
+    )
+    assert (
+        chain_stocks._clean_name("SPDR Portfolio S&P 500 High Dividend ETF • Robinhood T")
+        == "SPDR Portfolio S&P 500 High Dividend ETF"
+    )
+
+
 def test_resolve_token_never_returns_an_impersonator() -> None:
     for query in ("GME", "GameStop", "mã cổ phiếu GME là gì"):
         match = chain_stocks.resolve_token(query, _TOKENS)
         assert match is not None, query
         assert match["address"] == REAL_GME, query
+
+
+def test_resolve_token_resolves_tokens_with_truncated_suffix() -> None:
+    ibm_token = {
+        "chainId": 4663,
+        "address": "0x1bm",
+        "name": "International Business Machines Corporation • Robinhood Toke",
+        "symbol": "IBM",
+        "decimals": 18,
+    }
+    tokens = [*_TOKENS, ibm_token]
+    match = chain_stocks.resolve_token("IBM", tokens)
+    assert match is not None
+    assert match["address"] == "0x1bm"
+
+    match_name = chain_stocks.resolve_token("International Business Machines", tokens)
+    assert match_name is not None
+    assert match_name["address"] == "0x1bm"
 
 
 def test_resolve_token_prefers_the_listing_over_a_lookalike_symbol() -> None:

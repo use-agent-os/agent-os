@@ -39,6 +39,14 @@ FEEDS_URL = "https://reference-data-directory.vercel.app/feeds-robinhood-mainnet
 # suffix is the offline signal that separates the two. `uiMultiplier()` is the
 # on-chain confirmation.
 _RH_SUFFIX_RE = re.compile(r"\s*[•·|-]?\s*robinhood token\s*$", re.IGNORECASE)
+# The truncation-tolerant form: a bullet followed by any prefix of the marker.
+# CoinGecko caps `name` at 60 characters, so long listings arrive with the
+# suffix chopped ("... • Robinhood Toke" for IBM, "... • Robinhood T" for SPYD).
+_RH_SUFFIX_LOOSE_RE = re.compile(
+    r"\s*[•·|-]\s*r(?:o(?:b(?:i(?:n(?:h(?:o(?:o(?:d)?)?)?)?)?)?)?)?"
+    r"(?:\s+t(?:o(?:k(?:e(?:n)?)?)?)?)?\s*$",
+    re.IGNORECASE,
+)
 _ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
 # Function selectors (first 4 bytes of keccak256 of the signature).
@@ -147,13 +155,22 @@ def _encode_address_arg(selector: str, address: str) -> str:
 
 
 def _clean_name(name: str) -> str:
-    """Strip the '- Robinhood Token' suffix so 'Apple' matches cleanly."""
-    return _RH_SUFFIX_RE.sub("", name or "").strip()
+    """Strip the '- Robinhood Token' suffix so 'Apple' matches cleanly.
+
+    Handles the truncated tail too: CoinGecko cuts `name` at 60 characters, so
+    'International Business Machines Corporation • Robinhood Toke' must still
+    display as the company name.
+    """
+    stripped = _RH_SUFFIX_RE.sub("", name or "").strip()
+    if stripped == (name or "").strip():
+        stripped = _RH_SUFFIX_LOOSE_RE.sub("", stripped).strip()
+    return stripped
 
 
 def is_stock_token(token: dict[str, Any]) -> bool:
     """True when the list entry is a Robinhood Stock Token, not a community token."""
-    return bool(_RH_SUFFIX_RE.search(token.get("name", "") or ""))
+    name = token.get("name", "") or ""
+    return bool(_RH_SUFFIX_RE.search(name) or _RH_SUFFIX_LOOSE_RE.search(name))
 
 
 def _norm(text: str) -> str:
