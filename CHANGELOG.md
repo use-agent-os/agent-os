@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Provider (text tool protocol): `_parameter_value` removed the newline
+  each `<parameter>` tag contributes using `startswith("
+")` and
+  `endswith("
+")`. Against CRLF the first test is false -- the leading
+  character is `` -- and the second strips the `
+` but orphans the
+  ``, so a value arrived as `"
+line 1
+line 2"`. The same
+  path carries `path`, `command` and `code`, so a CRLF-emitting model
+  asking to write `a.txt` reached the tool with a filename containing
+  control characters. One boundary newline is now removed at each end in
+  any of CRLF, LF or a lone CR, while every line ending inside the value
+  is preserved exactly as sent (#2238).
+
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed

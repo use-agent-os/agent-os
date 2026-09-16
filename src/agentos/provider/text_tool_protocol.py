@@ -41,6 +41,12 @@ _PARAM_RE = re.compile(
 # DSML marks each parameter as a literal string or as JSON to decode.
 _STRING_ATTR_RE = re.compile(r"\bstring\s*=\s*[\"'](true|false)[\"']", re.IGNORECASE)
 
+# One newline at each boundary, in any of the three encodings a model may emit.
+# CRLF has to be matched before the single-character alternatives, or "\r\n"
+# would lose only its "\n" and leave the "\r" behind as part of the value.
+_LEADING_NEWLINE_RE = re.compile(r"\A(?:\r\n|[\n\r])")
+_TRAILING_NEWLINE_RE = re.compile(r"(?:\r\n|[\n\r])\Z")
+
 
 @dataclass(frozen=True)
 class TextToolCall:
@@ -48,11 +54,26 @@ class TextToolCall:
     arguments: dict[str, Any]
 
 
+def _strip_boundary_newlines(raw: str) -> str:
+    """Drop the single newline each tag contributes, keeping the value intact.
+
+    A model writes the opening and closing tags on their own lines, so exactly
+    one newline at each end is markup rather than content. Everything further
+    in belongs to the value and is left alone, including interior line endings:
+    a ``content`` parameter written with CRLF is meant to arrive with CRLF.
+
+    Only ``\\n`` was recognised before, so a model emitting CRLF -- which the
+    issue reports from Windows environments -- had ``raw.startswith("\\n")``
+    come back false and ``raw.endswith("\\n")`` strip the ``\\n`` but orphan the
+    ``\\r``. A ``path`` parameter then reached the tool as ``"\\r\\na.txt\\r"``.
+    """
+
+    raw = _LEADING_NEWLINE_RE.sub("", raw, count=1)
+    return _TRAILING_NEWLINE_RE.sub("", raw, count=1)
+
+
 def _parameter_value(attributes: str, raw: str) -> Any:
-    if raw.startswith("\n"):
-        raw = raw[1:]
-    if raw.endswith("\n"):
-        raw = raw[:-1]
+    raw = _strip_boundary_newlines(raw)
 
     attr = _STRING_ATTR_RE.search(attributes)
     if attr is None or attr.group(1).lower() == "true":
