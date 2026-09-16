@@ -901,46 +901,49 @@ async def _dispatch_combined_message_after_debounce(channel: Any, combined: Any,
     else:
         _reservation_token = None  # type: ignore[assignment]
 
-    transcript_watermark = await _transcript_watermark(session_manager, session_key)
-    stream_relay = _RuntimeChannelStreamRelay.maybe_start(channel, msg, task_runtime, config)
     # Ghost-turn fix: enqueue BEFORE appending to transcript (same as
     # run_channel_dispatch). On TaskQueueFullError, transcript is not written.
-    # Reservation is released in the finally block below regardless of outcome.
+    # The reservation is released in the `finally` below on every exit from
+    # this block -- including `asyncio.CancelledError`, which `except
+    # Exception` never catches (it's a BaseException) and previously left the
+    # token held forever: the debounce task this runs in is cancelled wholesale
+    # on channel/gateway shutdown, and a leaked token is never reclaimed, so
+    # the in-flight cap silently shrinks by one per leak until every reply on
+    # that channel is rejected as "Server busy" with nothing actually in flight.
     try:
-        async with _maybe_lock(session_lock):
-            channel_overflow_policy = _resolve_channel_overflow_policy(channel, config)
-            if channel_overflow_policy is not None:
-                apply_policy = getattr(task_runtime, "apply_overflow_policy", None)
-                if callable(apply_policy):
-                    await apply_policy(session_key, policy=channel_overflow_policy)
-            handle = await start_turn_via_runtime(task_runtime, route_envelope, msg.content, attachments=ingested.attachments, mode="followup", run_kind="channel_turn", semantic_message=raw_content, stream_event_sink=stream_relay.emit if stream_relay is not None else None)  # noqa: E501
-            _persisted, persisted_content = await _append_channel_user_message(
-                session_manager=session_manager,
-                session_key=session_key,
-                text=ingested.text,
-                attachments=ingested.attachments,
-                config=config,
-            )
-            msg.content = persisted_content
-    except Exception as exc:
+        transcript_watermark = await _transcript_watermark(session_manager, session_key)
+        stream_relay = _RuntimeChannelStreamRelay.maybe_start(channel, msg, task_runtime, config)
+        try:
+            async with _maybe_lock(session_lock):
+                channel_overflow_policy = _resolve_channel_overflow_policy(channel, config)
+                if channel_overflow_policy is not None:
+                    apply_policy = getattr(task_runtime, "apply_overflow_policy", None)
+                    if callable(apply_policy):
+                        await apply_policy(session_key, policy=channel_overflow_policy)
+                handle = await start_turn_via_runtime(task_runtime, route_envelope, msg.content, attachments=ingested.attachments, mode="followup", run_kind="channel_turn", semantic_message=raw_content, stream_event_sink=stream_relay.emit if stream_relay is not None else None)  # noqa: E501
+                _persisted, persisted_content = await _append_channel_user_message(
+                    session_manager=session_manager,
+                    session_key=session_key,
+                    text=ingested.text,
+                    attachments=ingested.attachments,
+                    config=config,
+                )
+                msg.content = persisted_content
+        except Exception as exc:
+            if stream_relay is not None:
+                await stream_relay.close()
+
+            if isinstance(exc, TaskQueueFullError):
+                await status_reactor.failed(msg)
+                log.warning("channel_dispatch.debounce_enqueue_failed", session_key=session_key, reason="queue_full", coalesced_count=combined.coalesced_count)  # noqa: E501
+                await channel.send(_route_envelope_reply_message("Your messages couldn't be processed because the queue is full. Please retry.", route_envelope))  # noqa: E501
+                return
+            log.exception("channel_dispatch.debounce_enqueue_failed", session_key=session_key, reason="unexpected")  # noqa: E501
+            await status_reactor.failed(msg)
+            return
+    finally:
         if _in_flight is not None and _reservation_token is not None:
             _in_flight.release(_reservation_token)
-        if stream_relay is not None:
-            await stream_relay.close()
-
-        if isinstance(exc, TaskQueueFullError):
-            await status_reactor.failed(msg)
-            log.warning("channel_dispatch.debounce_enqueue_failed", session_key=session_key, reason="queue_full", coalesced_count=combined.coalesced_count)  # noqa: E501
-            await channel.send(_route_envelope_reply_message("Your messages couldn't be processed because the queue is full. Please retry.", route_envelope))  # noqa: E501
-            return
-        log.exception("channel_dispatch.debounce_enqueue_failed", session_key=session_key, reason="unexpected")  # noqa: E501
-        await status_reactor.failed(msg)
-        return
-
-    # Enqueue succeeded — release the placeholder reservation now that the real
-    # reply delivery will proceed (it doesn't use _in_flight in this path).
-    if _in_flight is not None and _reservation_token is not None:
-        _in_flight.release(_reservation_token)
 
     await status_reactor.running(msg)
     typing_task = _start_typing_keepalive(channel, msg, stop_signal=stream_relay.first_chunk_sent if stream_relay is not None else None)  # noqa: E501

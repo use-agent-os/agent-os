@@ -806,6 +806,158 @@ async def test_debounce_reservation_enforced() -> None:
     assert len(busy_replies) == 1, f"expected 1 busy reply, got {len(busy_replies)}"
 
 
+def _dispatch_debounce_fixture() -> Any:
+    """Common mocks for driving `_dispatch_combined_message_after_debounce` directly."""
+    channel = MagicMock()
+    channel.send = AsyncMock()
+    channel.build_reply_message = None
+    channel.streaming_reply_kwargs = None
+
+    combined = MagicMock()
+    combined.message = MagicMock()
+    combined.message.content = "hello"
+    combined.message.metadata = {}
+    combined.message.sender_id = "u-1"
+    combined.message.channel_id = "ch-test"
+    combined.message.thread_id = None
+    combined.message.id = "msg-1"
+    combined.raw_content = "hello"
+    combined.coalesced_count = 1
+
+    fake_envelope = MagicMock()
+    fake_envelope.thread_id = None
+    fake_envelope.channel_id = "ch-test"
+
+    mock_reactor = MagicMock()
+    mock_reactor.received = AsyncMock()
+    mock_reactor.completed = AsyncMock()
+    mock_reactor.running = AsyncMock()
+    mock_reactor.failed = AsyncMock()
+
+    return channel, combined, fake_envelope, mock_reactor
+
+
+@pytest.mark.asyncio
+async def test_reservation_released_when_enqueue_is_cancelled() -> None:
+    """A CancelledError mid-enqueue must not leave the reservation token held.
+
+    `except Exception` never sees `asyncio.CancelledError` (a BaseException),
+    so the token must be released some other way -- this is exactly the
+    window the debounce task's own cancellation (channel/gateway shutdown)
+    hits, which used to leak the token forever and shrink the in-flight cap.
+    """
+    from agentos.gateway.channel_dispatch import (
+        _ChannelInFlightSet,
+        _dispatch_combined_message_after_debounce,
+    )
+
+    ifs = _ChannelInFlightSet(cap=1)
+    channel, combined, fake_envelope, mock_reactor = _dispatch_debounce_fixture()
+    task_runtime = MagicMock()
+
+    with (
+        pytest.raises(asyncio.CancelledError),
+        patch(
+            "agentos.gateway.routing.build_channel_route_envelope",
+            return_value=fake_envelope,
+        ),
+        patch(
+            "agentos.gateway.channel_dispatch.start_turn_via_runtime",
+            side_effect=asyncio.CancelledError,
+        ),
+        patch(
+            "agentos.gateway.channel_dispatch._append_channel_user_message",
+            new=AsyncMock(return_value=(MagicMock(), "hello")),
+        ),
+        patch(
+            "agentos.gateway.channel_dispatch._record_delivery_context",
+            new=AsyncMock(return_value=(MagicMock(), False)),
+        ),
+        patch(
+            "agentos.gateway.channel_dispatch._ingest_channel_message_attachments",
+            new=AsyncMock(return_value=MagicMock(text="hello", attachments=[])),
+        ),
+        patch(
+            "agentos.gateway.channel_dispatch._transcript_watermark",
+            new=AsyncMock(return_value=0),
+        ),
+        patch("agentos.gateway.channel_dispatch._RuntimeChannelStreamRelay") as mock_relay_cls,
+        patch("agentos.gateway.channel_dispatch._status_reactor", return_value=mock_reactor),
+    ):
+        mock_relay_cls.maybe_start.return_value = None
+        turn_runner = MagicMock(spec=[])
+
+        await _dispatch_combined_message_after_debounce(
+            channel,
+            combined,
+            turn_runner,
+            MagicMock(),
+            "s:test",
+            "test",
+            task_runtime,
+            None,
+            None,
+            ifs,
+        )
+
+    assert not ifs.full(), "reservation token must be released after cancellation"
+    assert ifs.try_acquire(object()), "cap must accept a new reservation after the leak"
+
+
+@pytest.mark.asyncio
+async def test_reservation_released_when_transcript_watermark_raises() -> None:
+    """A plain exception before the enqueue's own try block must still release.
+
+    `_transcript_watermark` and `_RuntimeChannelStreamRelay.maybe_start` used
+    to run before any exception handling existed at all.
+    """
+    from agentos.gateway.channel_dispatch import (
+        _ChannelInFlightSet,
+        _dispatch_combined_message_after_debounce,
+    )
+
+    ifs = _ChannelInFlightSet(cap=1)
+    channel, combined, fake_envelope, mock_reactor = _dispatch_debounce_fixture()
+    task_runtime = MagicMock()
+
+    with (
+        pytest.raises(RuntimeError),
+        patch(
+            "agentos.gateway.routing.build_channel_route_envelope",
+            return_value=fake_envelope,
+        ),
+        patch(
+            "agentos.gateway.channel_dispatch._record_delivery_context",
+            new=AsyncMock(return_value=(MagicMock(), False)),
+        ),
+        patch(
+            "agentos.gateway.channel_dispatch._ingest_channel_message_attachments",
+            new=AsyncMock(return_value=MagicMock(text="hello", attachments=[])),
+        ),
+        patch(
+            "agentos.gateway.channel_dispatch._transcript_watermark",
+            side_effect=RuntimeError("storage unavailable"),
+        ),
+        patch("agentos.gateway.channel_dispatch._status_reactor", return_value=mock_reactor),
+    ):
+        turn_runner = MagicMock(spec=[])
+
+        await _dispatch_combined_message_after_debounce(
+            channel,
+            combined,
+            turn_runner,
+            MagicMock(),
+            "s:test",
+            "test",
+            task_runtime,
+            None,
+            None,
+            ifs,
+        )
+
+    assert not ifs.full(), "reservation token must be released even before the enqueue try block"
+
+
 # ── Per-channel overflow policy resolution ──────────────────────────────────
 
 
