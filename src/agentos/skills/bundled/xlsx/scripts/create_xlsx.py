@@ -80,7 +80,23 @@ def main() -> int:
     if not args.spec.is_file():
         print(f"error: spec {args.spec} not found", file=sys.stderr)
         return 2
-    spec = json.loads(args.spec.read_text(encoding="utf-8"))
+    try:
+        spec = json.loads(args.spec.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        # Same two failures as edit_xlsx's ops file, for the same reason: a
+        # UTF-16 spec from PowerShell's Out-File is as unusable as a truncated
+        # one, and both used to surface as a traceback.
+        print(f"error: spec {args.spec} is not valid JSON: {exc}", file=sys.stderr)
+        return 2
+    # ``build`` calls ``spec.get``, so anything but an object died with an
+    # AttributeError traceback rather than a message the caller could act on.
+    if not isinstance(spec, dict):
+        print(
+            f"error: spec {args.spec} must be a JSON object with a 'sheets' list, "
+            f"got {type(spec).__name__}",
+            file=sys.stderr,
+        )
+        return 2
     wb = build(spec)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     wb.save(str(args.out))

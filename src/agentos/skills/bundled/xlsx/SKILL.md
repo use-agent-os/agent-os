@@ -104,6 +104,14 @@ instead.
 
 Rules:
 
+- `ops.json` must be a JSON **list** of operations. A single operation object,
+  or any other JSON shape, is refused with exit 2 and no output workbook is
+  written. Malformed JSON, or a UTF-16 file from PowerShell's `Out-File`, is
+  refused the same way rather than raising a traceback.
+- Operations that cannot be applied are skipped, not fatal, so one bad entry
+  never costs the batch. Each one is named on stderr as
+  `warning: op N: <reason>`, and if *nothing* applied the tool says so
+  explicitly — `applied: 0` on its own used to read as success.
 - Rows and columns are 1-based (Excel convention).
 - An explicit `"value": null` **clears** the cell and keeps its style. It is
   the only way to empty a cell through this op list.
@@ -134,6 +142,10 @@ Rules:
 ```bash
 {python} {baseDir}/scripts/create_xlsx.py spec.json --out out.xlsx
 ```
+
+`spec.json` must be a JSON **object** with a `sheets` list. Any other shape, or
+malformed JSON, is refused with exit 2 and no output workbook — the same
+contract as `ops.json` above.
 
 Spec:
 

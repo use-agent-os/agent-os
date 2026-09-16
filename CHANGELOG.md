@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Skills (xlsx): `edit_xlsx.py` loaded its ops file as
+  `raw if isinstance(raw, list) else []`, so a caller who passed a
+  single operation object got the whole batch coerced to `[]` -- zero
+  operations applied, the output workbook saved anyway, `{"applied": 0}`
+  printed and exit 0, which is indistinguishable from a successful
+  edit. Malformed JSON or a UTF-16 file from PowerShell's `Out-File`
+  raised a raw traceback instead. Both are now refused with exit 2, a
+  message on stderr and no output file, matching the contract #2034 set
+  for `pdf-toolkit/form_fill.py`. `create_xlsx.py` had the same defect
+  in a worse form -- a bare `json.loads` feeding `build`, which calls
+  `spec.get`, so `null` or `42` died with an `AttributeError` -- and is
+  guarded the same way. Operations that a well-formed list cannot apply
+  are now named individually on stderr, and a run where nothing applied
+  says so, since `applied: 0` alone reads as success (#2303).
+
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed

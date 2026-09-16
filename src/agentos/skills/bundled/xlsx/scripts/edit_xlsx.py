@@ -64,10 +64,31 @@ def _coerce(value: Any, as_text: bool) -> Any:
     return value
 
 
-def apply_ops(wb: Any, ops: list[dict[str, Any]]) -> int:
+def apply_ops(
+    wb: Any,
+    ops: list[dict[str, Any]],
+    skipped: list[str] | None = None,
+) -> int:
+    """Apply *ops* to *wb* and return how many took effect.
+
+    Operations that cannot be applied are skipped rather than raising, so one
+    bad entry never costs the whole batch. That silence is the problem when
+    *every* entry is bad: the caller is told ``{"applied": 0}`` with exit 0 and
+    a written workbook, which reads as "the edits went through".
+
+    Passing a list as *skipped* collects one line per skipped operation saying
+    which index it was and why. The parameter is optional so the existing
+    ``apply_ops(wb, ops) -> int`` calls keep working unchanged.
+    """
     applied = 0
-    for op in ops:
+
+    def skip(index: int, reason: str) -> None:
+        if skipped is not None:
+            skipped.append(f"op {index}: {reason}")
+
+    for index, op in enumerate(ops):
         if not isinstance(op, dict):
+            skip(index, f"is not an object, got {type(op).__name__}")
             continue
         kind = op.get("op")
         if kind == "set_cell":
@@ -75,9 +96,14 @@ def apply_ops(wb: Any, ops: list[dict[str, Any]]) -> int:
             row = op.get("row")
             col = op.get("col")
             value = op.get("value", _MISSING)
-            if sheet_name not in wb.sheetnames or row is None or col is None:
+            if sheet_name not in wb.sheetnames:
+                skip(index, f"set_cell names sheet {sheet_name!r}, which is not in the workbook")
+                continue
+            if row is None or col is None:
+                skip(index, "set_cell is missing row or col")
                 continue
             if value is _MISSING:
+                skip(index, "set_cell has no value key (use an explicit null to clear a cell)")
                 continue
             ws = wb[sheet_name]
             as_text = bool(op.get("as_text"))
@@ -105,12 +131,24 @@ def apply_ops(wb: Any, ops: list[dict[str, Any]]) -> int:
             if old in wb.sheetnames and isinstance(new, str):
                 wb[old].title = new
                 applied += 1
+            elif old not in wb.sheetnames:
+                skip(index, f"rename_sheet names sheet {old!r}, which is not in the workbook")
+            else:
+                skip(index, "rename_sheet needs a string 'new' name")
         elif kind == "merge_cells":
             sheet_name = op.get("sheet")
             rng = op.get("range")
             if sheet_name in wb.sheetnames and isinstance(rng, str):
                 wb[sheet_name].merge_cells(rng)
                 applied += 1
+            elif sheet_name not in wb.sheetnames:
+                skip(index, f"merge_cells names sheet {sheet_name!r}, which is not in the workbook")
+            else:
+                skip(index, "merge_cells needs a string 'range'")
+        elif kind is None:
+            skip(index, "has no 'op' key")
+        else:
+            skip(index, f"has unknown op {kind!r}")
     return applied
 
 
@@ -130,12 +168,43 @@ def main() -> int:
     if not args.ops.is_file():
         print(f"error: ops {args.ops} not found", file=sys.stderr)
         return 2
-    raw = json.loads(args.ops.read_text(encoding="utf-8"))
-    ops = raw if isinstance(raw, list) else []
+    try:
+        raw = json.loads(args.ops.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        # Both mean "not a JSON document": a UTF-16 file from PowerShell's
+        # Out-File is as unusable as a truncated one, and a traceback is a
+        # worse answer than either.
+        print(f"error: ops {args.ops} is not valid JSON: {exc}", file=sys.stderr)
+        return 2
+    # A single op object is the routine slip here, and coercing it to [] used
+    # to apply nothing, save the workbook and still exit 0.
+    if not isinstance(raw, list):
+        print(
+            f"error: ops {args.ops} must be a JSON list of operations, "
+            f"got {type(raw).__name__}",
+            file=sys.stderr,
+        )
+        return 2
+    ops = raw
     wb = load_workbook(filename=str(args.input))
-    applied = apply_ops(wb, ops)
+    skipped: list[str] = []
+    applied = apply_ops(wb, ops, skipped)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     wb.save(str(args.out))
+    # A well-formed list whose operations all fail reaches the same dead end
+    # the ops-file check just closed: nothing applied, exit 0, a workbook on
+    # disk. Naming what was dropped is what stops "applied: 0" reading as
+    # success. This goes to stderr rather than into the stdout JSON because
+    # that object is pinned exactly by tests/test_skill_xlsx.py, and the exit
+    # code stays 0 because a partly-applied batch is a normal outcome.
+    for reason in skipped:
+        print(f"warning: {reason}", file=sys.stderr)
+    if ops and applied == 0:
+        print(
+            f"warning: none of the {len(ops)} operations applied; "
+            f"{args.out} is a copy of the input",
+            file=sys.stderr,
+        )
     print(json.dumps({"applied": applied}, ensure_ascii=False))
     return 0
 
