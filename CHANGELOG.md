@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `skill_edit` erased existing YAML frontmatter metadata (`requires`,
+  `install`, `metadata.agentos`, and custom settings) when modifying a skill's
+  description or content.
+
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import structlog
+import yaml
 
 from agentos.result_budget import register_persisted_result_budget
 from agentos.skills.hub.defaults import (
@@ -72,6 +73,33 @@ def _render_skill_md(
     lines.append("")
     lines.append(content)
     return "\n".join(lines)
+
+
+def _update_skill_md(
+    existing_raw: str,
+    *,
+    name: str,
+    description: str,
+    content: str,
+    triggers: list[str] | None = None,
+) -> str:
+    """Update a SKILL.md document while preserving existing frontmatter metadata."""
+    from agentos.skills.loader import _parse_frontmatter
+
+    frontmatter, _ = _parse_frontmatter(existing_raw)
+    if not frontmatter:
+        return _render_skill_md(name, description, content, triggers)
+
+    frontmatter["name"] = name
+    frontmatter["description"] = _sanitize_yaml_value(description)
+    if triggers is not None:
+        if triggers:
+            frontmatter["triggers"] = [_sanitize_yaml_value(t) for t in triggers]
+        else:
+            frontmatter.pop("triggers", None)
+
+    fm_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
+    return f"---\n{fm_text}\n---\n\n{content}"
 
 
 def _cap_output(value: bytes | str, limit: int = _INSTALL_OUTPUT_LIMIT) -> str:
@@ -1187,7 +1215,14 @@ def create_skill_tools(loader: SkillLoader) -> None:
         if not skill_file.exists():
             raise ToolError(f"Skill file missing: {skill_file}")
 
-        skill_md = _render_skill_md(name, new_description, new_content, new_triggers or None)
+        existing_raw = skill_file.read_text(encoding="utf-8")
+        skill_md = _update_skill_md(
+            existing_raw,
+            name=name,
+            description=new_description,
+            content=new_content,
+            triggers=new_triggers or None,
+        )
         skill_file.write_text(skill_md, encoding="utf-8")
 
         _loader.invalidate_cache()

@@ -159,3 +159,58 @@ async def test_skill_edit_does_not_bake_expanded_path_into_the_file(
     written = skill_file.read_text(encoding="utf-8")
     assert "{baseDir}/scripts" in written
     assert str(skill_loader.workspace_dir) not in written
+
+
+@pytest.mark.asyncio
+async def test_skill_edit_preserves_existing_frontmatter_metadata(
+    skill_loader: SkillLoader,
+) -> None:
+    skill_dir = skill_loader.workspace_dir / "custom-helper"
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    skill_file = skill_dir / "SKILL.md"
+    skill_file.write_text(
+        """---
+name: custom-helper
+description: Initial description
+metadata:
+  agentos:
+    emoji: 💡
+    category: productivity
+    requires:
+      env:
+        - name: HELPER_API_KEY
+          description: API key for helper
+    install:
+      - kind: uv
+        package: httpx
+custom_setting: custom_value
+triggers:
+  - run helper
+---
+
+# Custom Helper
+Body content here.
+""",
+        encoding="utf-8",
+    )
+    skill_loader.invalidate_cache()
+
+    registered = get_default_registry().get("skill_edit")
+    assert registered is not None
+    await registered.handler(name="custom-helper", description="Updated description")
+
+    updated_skill = skill_loader.get_by_name("custom-helper")
+    assert updated_skill is not None
+    assert updated_skill.description == "Updated description"
+    assert updated_skill.triggers == ["run helper"]
+    assert updated_skill.metadata is not None
+    assert updated_skill.metadata.emoji == "💡"
+    assert updated_skill.metadata.category == "productivity"
+    assert updated_skill.metadata.requires is not None
+    assert len(updated_skill.metadata.requires.env) == 1
+    assert updated_skill.metadata.requires.env[0].name == "HELPER_API_KEY"
+    assert len(updated_skill.metadata.install) == 1
+    assert updated_skill.metadata.install[0].kind == "uv"
+
+    raw_text = skill_file.read_text(encoding="utf-8")
+    assert "custom_setting: custom_value" in raw_text
