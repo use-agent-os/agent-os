@@ -296,11 +296,20 @@ async def _read_child_result(
     *,
     session_manager: Any,
 ) -> dict[str, Any]:
+    # read_recent_transcript windows from the newest end; read_transcript
+    # windows from the oldest end and is kept here only as a fallback for a
+    # session_manager stand-in that predates read_recent_transcript -- a
+    # subagent's transcript routinely exceeds 50 entries, and the scan below
+    # assumes these rows are the latest 50, not the first 50.
+    read_recent = getattr(session_manager, "read_recent_transcript", None)
     read_transcript = getattr(session_manager, "read_transcript", None)
-    if not callable(read_transcript):
-        return _result_payload("")
     try:
-        rows = await read_transcript(child_session_key, limit=50)
+        if callable(read_recent):
+            rows = await read_recent(child_session_key, 50)
+        elif callable(read_transcript):
+            rows = await read_transcript(child_session_key, limit=50)
+        else:
+            return _result_payload("")
     except Exception:
         return _result_payload("")
     for row in reversed(list(rows or [])):

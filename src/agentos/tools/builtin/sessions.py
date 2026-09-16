@@ -574,7 +574,7 @@ async def sessions_history(session_key: str, limit: int = 20) -> str:
         session = await mgr.get_session(session_key)
         if session is None:
             raise ToolError(f"Session not found: {session_key}")
-        messages = await mgr.read_transcript(session_key, limit=limit)
+        messages = await mgr.read_recent_transcript(session_key, limit)
         return json.dumps(
             {
                 "session_key": session_key,

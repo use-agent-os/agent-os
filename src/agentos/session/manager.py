@@ -1131,6 +1131,27 @@ class SessionManager:
             raise KeyError(f"Session not found: {session_key}")
         return await self._storage.get_transcript(node.session_id, limit=limit)
 
+    async def get_recent_transcript(self, session_key: str, n: int) -> list[TranscriptEntry]:
+        """Return the n most recent transcript entries, ordered oldest-first.
+
+        `get_transcript(limit=n)` takes its window from the *oldest* end (it
+        exists for chronological-from-start reads: full-transcript replay,
+        compaction, export), so a caller that wants "recent history" -- most
+        of them do -- must not use it once a session's transcript outgrows
+        n. This wraps ``SessionStorage.get_recent_transcript``, which already
+        windows from the newest end.
+        """
+        session_key = canonicalize_session_key(session_key)
+        node = await self._storage.get_session(session_key)
+        if node is None:
+            raise KeyError(f"Session not found: {session_key}")
+        return await self._storage.get_recent_transcript(node.session_id, n)
+
+    async def read_recent_transcript(self, session_key: str, n: int) -> list[dict[str, Any]]:
+        """Return JSON-serializable transcript entries, most recent n only."""
+        entries = await self.get_recent_transcript(session_key, n)
+        return [entry.model_dump(mode="json") for entry in entries]
+
     async def record_memory_checkpoint(
         self,
         session_key: str,
