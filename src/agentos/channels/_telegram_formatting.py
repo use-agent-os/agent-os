@@ -82,6 +82,15 @@ def _render_inline(text: str) -> str:
         return f'<a href="\x00TG_HREF_{len(hrefs) - 1}\x00">{match.group(1)}</a>'
 
     rendered = _LINK_RE.sub(_park_href, rendered)
+    # Triple markers for bold+italic (***text*** and ___text___) must be consumed
+    # before the double/single passes, otherwise the ** and * passes split the markers
+    # and emit crossed tags (<b><i>text</b></i>) which Telegram refuses.
+    rendered = re.sub(r"\*\*\*(?=\S)(.+?)(?<=\S)\*\*\*", r"<b><i>\1</i></b>", rendered)
+    rendered = re.sub(
+        r"(?<!\w)___(?=[^\s_])(.+?)(?<=[^\s_])___(?!\w)",
+        r"<b><i>\1</i></b>",
+        rendered,
+    )
     rendered = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", r"<b>\1</b>", rendered)
     rendered = re.sub(r"__(?=\S)(.+?)(?<=\S)__", r"<b>\1</b>", rendered)
     rendered = re.sub(r"~~(?=\S)(.+?)(?<=\S)~~", r"<s>\1</s>", rendered)
@@ -112,7 +121,7 @@ def _plain_inline(text: str) -> str:
 
     text = _LINK_RE.sub(_park_href, text)
     text = text.replace("`", "")
-    for marker in ("**", "__", "~~"):
+    for marker in ("***", "___", "**", "__", "~~"):
         text = text.replace(marker, "")
     for index, href in enumerate(hrefs):
         text = text.replace(f"\x00TG_HREF_{index}\x00", href)

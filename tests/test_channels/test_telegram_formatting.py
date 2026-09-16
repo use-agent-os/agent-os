@@ -524,3 +524,14 @@ def test_fence_info_string_with_a_backtick_does_not_open_a_block() -> None:
 
     assert "<pre>" not in rendered
     assert "<code>x</code>" in rendered
+
+
+def test_bold_italic_renders_properly_nested_tags() -> None:
+    """Issue #2308: ***bold italic*** and ___bold italic___ must emit
+    properly nested <b><i>...</i></b> tags without crossing."""
+    assert render_telegram_html("***both***") == "<b><i>both</i></b>"
+    assert render_telegram_html("___both___") == "<b><i>both</i></b>"
+    assert render_telegram_html("a ***bold italic*** b") == "a <b><i>bold italic</i></b> b"
+    assert render_telegram_html("a ___bold italic___ b") == "a <b><i>bold italic</i></b> b"
+    assert render_telegram_html("my_snake_case_var") == "my_snake_case_var"
+
