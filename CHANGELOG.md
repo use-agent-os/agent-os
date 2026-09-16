@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `weather` skill script `weather_fetch.py` checked `"june"` as a raw substring
+  in `_seasonal_hint`, causing locations like Juneau to falsely trigger seasonal
+  date-window warnings; it now matches month names with word boundaries.
+
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed
