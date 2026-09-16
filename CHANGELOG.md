@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Tools (`grep_search`): every file the walk reached was read with
+  `errors="replace"`, with none of the binary guards `read_file` has
+  had all along, so a pattern matching bytes inside a `.docx`, a
+  `.zip` or an `.exe` emitted replacement characters and raw control
+  bytes into the model's context -- one recursive search over a
+  ten-file directory returned 230 NUL bytes. Binary and Office files
+  are now skipped, decided on the extension before the file is opened
+  so a large archive costs no I/O. The content being searched is
+  checked as well, because `_looks_binary` samples only the first
+  8 KiB and a file whose binary payload follows a long ASCII header --
+  a text-heavy PDF -- passes that check. A file that was skipped is
+  named rather than silently dropped: a bare "No matches" reads to the
+  model as "the symbol does not exist", which is the dead end this
+  function's own access-gate comment warns about (#2310).
+
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed

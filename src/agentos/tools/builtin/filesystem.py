@@ -204,6 +204,28 @@ def _read_binary_sample(p: Path, size: int = 8192) -> bytes:
         return fh.read(size)
 
 
+def _grep_skip_reason(p: Path) -> str | None:
+    """Why ``grep_search`` must not search this file as text, or ``None``.
+
+    ``read_file`` has always refused binary and Office documents through
+    :func:`_looks_binary`; ``grep_search`` read every file it walked with
+    ``errors="replace"``, so one recursive search over a tree holding a
+    ``.docx`` or an ``.exe`` pushed replacement characters and raw control
+    bytes into the model's context.
+
+    The extension decides first, before the file is opened: a ``.xlsx`` never
+    has to be read to know it is not searchable text, and skipping the sample
+    keeps a large archive at zero I/O.
+    """
+
+    ext = p.suffix.lower()
+    if ext in _OFFICE_BINARY_EXTENSIONS:
+        return f"{ext} Office document"
+    if ext in _BINARY_EXTENSIONS:
+        return f"{ext} binary/container file"
+    return _looks_binary(_read_binary_sample(p), p)
+
+
 def _stream_numbered_lines_from_file(
     p: Path,
     original_path: str,
@@ -326,8 +348,7 @@ def _workspace_strict_read_block(
             "workspace": str(roots[0]),
             "allowed_roots": [str(root) for root in roots],
             "message": (
-                f"{tool_name} blocked: {candidate} is outside active read roots "
-                f"({root_labels})."
+                f"{tool_name} blocked: {candidate} is outside active read roots ({root_labels})."
             ),
             "retryable": False,
         }
@@ -833,8 +854,7 @@ def _format_spreadsheet(
             parts.append(f"{idx}\t" + "\t".join(rows.get(idx, [])))
         if end < total_rows:
             parts.append(
-                f"(Showing rows {offset}-{end} of {total_rows}. "
-                f"Use offset={end + 1} to continue.)"
+                f"(Showing rows {offset}-{end} of {total_rows}. Use offset={end + 1} to continue.)"
             )
     return "\n".join(parts)
 
@@ -1204,19 +1224,33 @@ async def grep_search(
     strict_roots = _strict_read_roots()
     workspace_root = _workspace_root()
 
-    def _search() -> list[str]:
+    def _search() -> tuple[list[str], list[tuple[str, str]]]:
         try:
             regex = re.compile(pattern)
         except re.error as e:
             raise ValueError(f"Invalid regex pattern: {e}") from e
 
         results: list[str] = []
+        skipped: list[tuple[str, str]] = []
 
         def search_file(fp: Path) -> None:
             if _is_sensitive_access_path(fp.resolve(strict=False), workspace=workspace_root):
                 return
             try:
-                text = fp.read_text(encoding="utf-8", errors="replace")
+                reason = _grep_skip_reason(fp)
+                if reason is not None:
+                    skipped.append((str(fp), reason))
+                    return
+                raw = fp.read_bytes()
+                # The sample above only saw the first 8 KiB. A file whose
+                # binary payload follows a long ASCII header -- a text-heavy
+                # PDF is the common one -- passes that check and would spill
+                # its stream into the results, so the content actually being
+                # searched is checked too.
+                if b"\x00" in raw:
+                    skipped.append((str(fp), "contains NUL bytes"))
+                    return
+                text = raw.decode("utf-8", errors="replace")
                 for lineno, line in enumerate(text.splitlines(), 1):
                     if regex.search(line):
                         shown = redact_file_output(line.rstrip(), path=fp)
@@ -1246,9 +1280,19 @@ async def grep_search(
                     continue
                 search_file(fp)
 
-        return results
+        return results, skipped
 
-    matches = await loop.run_in_executor(None, _search)
-    if not matches:
-        return f"No matches for '{pattern}'"
-    return "\n".join(matches)
+    matches, skipped_binaries = await loop.run_in_executor(None, _search)
+    if matches:
+        return "\n".join(matches)
+    # Silence about a skipped file is the same dead end this function's own
+    # gate comment warns about: the model reads "No matches" as "the symbol is
+    # not there" and stops looking. Naming a file that was never searched is
+    # what makes the answer self-correcting.
+    if skipped_binaries:
+        if base.is_file():
+            skipped_path, reason = skipped_binaries[0]
+            return f"Skipped binary file: {skipped_path} ({reason})"
+        noun = "file" if len(skipped_binaries) == 1 else "files"
+        return f"No matches for '{pattern}' (skipped {len(skipped_binaries)} binary {noun})"
+    return f"No matches for '{pattern}'"
