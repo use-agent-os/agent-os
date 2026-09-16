@@ -28,6 +28,36 @@ _SHOT_RE = re.compile(
 )
 _DUR_RE = re.compile(r"^\s*DURATION_S\s*:\s*(\d+)", re.MULTILINE)
 _VO_RE = re.compile(r"^\s*VOICEOVER\s*:\s*(.+?)\s*$", re.MULTILINE)
+# Used only to tell "the field is not there" apart from "the field is there
+# but its value is unusable" when reporting why a block was rejected.
+_DUR_LINE_RE = re.compile(r"^\s*DURATION_S\s*:(.*)$", re.MULTILINE)
+
+
+class ScriptFormatError(ValueError):
+    """A shot block drifted from ai-video-script's OUTPUT FORMAT.
+
+    Subclasses ``ValueError`` so existing callers that only catch that keep
+    working.
+    """
+
+
+def _duration_problem(shot_no: int, block: str) -> str | None:
+    """Say why this block's ``DURATION_S`` cannot be used, or ``None``.
+
+    The distinction is worth drawing because the two cases send whoever is
+    debugging to different places. "No DURATION_S field" for a block that
+    plainly has a ``DURATION_S:`` line -- just holding ``none`` or ``abc`` --
+    sends them looking for a missing line that is sitting right there.
+    """
+    if _DUR_RE.search(block):
+        return None
+    line = _DUR_LINE_RE.search(block)
+    if line is None:
+        return f"SHOT_{shot_no} is missing its DURATION_S field"
+    value = line.group(1).strip()
+    if not value:
+        return f"SHOT_{shot_no} has an empty DURATION_S field"
+    return f"SHOT_{shot_no} has DURATION_S: {value!r}, which is not a whole number of seconds"
 
 
 def parse_script(text: str) -> list[tuple[int, int, str]]:
@@ -36,20 +66,38 @@ def parse_script(text: str) -> list[tuple[int, int, str]]:
     Voiceover values of literal 'none' / empty / dashes are normalised
     to empty strings; such shots produce no SRT cue but their duration
     still advances the timestamp cursor.
+
+    A ``=== SHOT_N ===`` block whose ``DURATION_S`` is absent or unusable
+    raises :class:`ScriptFormatError`. Skipping it would be worse than
+    losing that one shot: its screen time never advances the cursor, so
+    every later cue starts early by exactly that much and the whole tail of
+    the file is silently misaligned against a video that does contain the
+    shot. SKILL.md already promises format drift is fatal ("drift away from
+    that format -> zero cues, exit 1"); this makes a single bad block among
+    good ones honour that too.
+
+    Every bad block is reported together, so a script with three malformed
+    shots takes one run to diagnose rather than three.
     """
     out: list[tuple[int, int, str]] = []
+    problems: list[str] = []
     for match in _SHOT_RE.finditer(text):
         shot_no = int(match.group(1))
         block = match.group(2)
+        problem = _duration_problem(shot_no, block)
+        if problem is not None:
+            problems.append(problem)
+            continue
         dur_m = _DUR_RE.search(block)
         vo_m = _VO_RE.search(block)
-        if not dur_m:
-            continue
+        assert dur_m is not None  # guaranteed by _duration_problem returning None
         duration = int(dur_m.group(1))
         voiceover = (vo_m.group(1) if vo_m else "").strip()
         if voiceover.lower() in {"", "none", "-", "--"}:
             voiceover = ""
         out.append((shot_no, duration, voiceover))
+    if problems:
+        raise ScriptFormatError("; ".join(problems))
     return out
 
 
@@ -128,7 +176,13 @@ def main() -> int:
         print("Error: empty script input.", file=sys.stderr)
         return 1
 
-    shots = parse_script(text)
+    try:
+        shots = parse_script(text)
+    except ScriptFormatError as exc:
+        # ASCII only: this runs against a Windows console code page often
+        # enough that the stdin decode above exists for the same reason.
+        print(f"Error: malformed script: {exc}.", file=sys.stderr)
+        return 1
     if not shots:
         print(
             "Error: no SHOT_N blocks found in script. Did ai-video-script "

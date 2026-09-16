@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Skills (srt-from-script): `parse_script` hit `if not dur_m: continue`,
+  so a `=== SHOT_N ===` block with no usable `DURATION_S` vanished from
+  the shot list. Its VOICEOVER text was lost with no error, and its
+  screen time never advanced the timestamp cursor, so every later cue
+  started early by exactly that much -- silently misaligning the whole
+  tail of the file against a video that does contain the shot, while
+  the script still exited 0. `main()` only produced the documented
+  "zero cues, exit 1" when *every* shot was bad. The block is now
+  rejected with `ScriptFormatError`, all bad shots are reported in one
+  run, and the message separates a field that is absent from one that
+  is present but unusable -- reporting "no DURATION_S field" for a
+  block holding `DURATION_S: none` sends the reader to the wrong place
+  (#2322).
+
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed
