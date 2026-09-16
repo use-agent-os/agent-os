@@ -6,6 +6,7 @@ import csv
 import hashlib
 import io
 import json
+import re
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,11 @@ _PDF_SANS_CANDIDATES = (
     "C:/Windows/Fonts/arial.ttf",
 )
 _STABLE_ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
+_STABLE_DCTERMS_TIMESTAMP = (
+    rb'<dcterms:\1 xmlns:dcterms="http://purl.org/dc/terms/" '
+    rb'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+    rb'xsi:type="dcterms:W3CDTF">1980-01-01T00:00:00Z</dcterms:\1>'
+)
 _PDF_SANS_BOLD_CANDIDATES = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/local/share/fonts/dejavu/DejaVuSans-Bold.ttf",
@@ -104,11 +110,18 @@ def _normalize_zip_timestamps(payload: bytes) -> bytes:
     target = io.BytesIO()
     with zipfile.ZipFile(source, "r") as src, zipfile.ZipFile(target, "w") as dst:
         for info in src.infolist():
+            content = src.read(info.filename)
+            if info.filename == "docProps/core.xml":
+                content = re.sub(
+                    rb"<dcterms:(created|modified)[^>]*>.*?</dcterms:\1>",
+                    _STABLE_DCTERMS_TIMESTAMP,
+                    content,
+                )
             stable = zipfile.ZipInfo(info.filename, _STABLE_ZIP_TIMESTAMP)
             stable.compress_type = info.compress_type
             stable.external_attr = info.external_attr
             stable.comment = info.comment
-            dst.writestr(stable, src.read(info.filename))
+            dst.writestr(stable, content)
     return target.getvalue()
 
 
@@ -389,7 +402,7 @@ async def create_xlsx(sheets: list[dict[str, Any]], name: str | None = None) -> 
     output = io.BytesIO()
     workbook.save(output)
     return _published_response(
-        payload=output.getvalue(),
+        payload=_normalize_zip_timestamps(output.getvalue()),
         name=_ensure_name(name, default="generated.xlsx", suffix=".xlsx"),
         mime=_XLSX_MIME,
         source="create_xlsx",

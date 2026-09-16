@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `create_xlsx` bypassed zip timestamp and `docProps/core.xml` normalization,
+  causing identical workbooks across turns to produce non-deterministic
+  hashes that silently broke artifact session deduplication.
+
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed

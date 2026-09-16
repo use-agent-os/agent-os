@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from io import BytesIO
 from pathlib import Path
@@ -23,7 +24,7 @@ def _channel_artifact_context(tmp_path: Path) -> ToolContext:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
     return ToolContext(
-                caller_kind=CallerKind.CHANNEL,
+        caller_kind=CallerKind.CHANNEL,
         workspace_dir=str(workspace),
         artifact_media_root=str(tmp_path / "media"),
         artifact_session_id="session-1",
@@ -93,6 +94,55 @@ async def test_create_xlsx_publishes_channel_artifact(tmp_path: Path) -> None:
     sheet = workbook["Summary"]
     assert sheet["A1"].value == "metric"
     assert sheet["B2"].value == 42
+
+
+@pytest.mark.asyncio
+async def test_create_xlsx_reuses_existing_session_deliverable_across_contexts(
+    tmp_path: Path,
+) -> None:
+    ctx1 = _channel_artifact_context(tmp_path)
+    token = current_tool_context.set(ctx1)
+    try:
+        first = json.loads(
+            await create_xlsx(
+                name="metrics.xlsx",
+                sheets=[
+                    {
+                        "name": "Summary",
+                        "rows": [["metric", "value"], ["requests", 42]],
+                    }
+                ],
+            )
+        )
+    finally:
+        current_tool_context.reset(token)
+
+    await asyncio.sleep(1.1)
+
+    ctx2 = _channel_artifact_context(tmp_path)
+    ctx2.artifact_session_id = ctx1.artifact_session_id
+    ctx2.session_key = ctx1.session_key
+    token = current_tool_context.set(ctx2)
+    try:
+        second = json.loads(
+            await create_xlsx(
+                name="metrics.xlsx",
+                sheets=[
+                    {
+                        "name": "Summary",
+                        "rows": [["metric", "value"], ["requests", 42]],
+                    }
+                ],
+            )
+        )
+    finally:
+        current_tool_context.reset(token)
+
+    assert first["status"] == "published"
+    assert second["status"] == "already_published"
+    assert second["artifact"]["id"] == first["artifact"]["id"]
+    assert len(ctx2.published_artifacts) == 1
+    assert ctx2.published_artifacts[0]["id"] == first["artifact"]["id"]
 
 
 @pytest.mark.asyncio
