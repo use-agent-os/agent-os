@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `rwa_lookup.py` in the `robinhood-rwa-addresses` bundled skill failed to
+  write card artifacts when target output paths specified non-existent parent
+  directories; it now creates parent directories recursively before writing.
+
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed
