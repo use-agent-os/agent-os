@@ -40,19 +40,25 @@ def resolve_ffmpeg(explicit: str) -> str:
     found = shutil.which(explicit)
     if found:
         return found
+    if os.path.isabs(explicit) and os.path.isfile(explicit):
+        return explicit
     if os.name != "nt":
         return explicit  # let subprocess fail with the canonical error
+    # The same probe order as video-merger and subtitle-burner, so that an
+    # ffmpeg one of them finds, this one finds too (#2435). A missing
+    # LOCALAPPDATA only skips the winget glob; the fixed locations below do
+    # not depend on it and used to be skipped along with it.
     local_app = os.environ.get("LOCALAPPDATA", "")
-    if not local_app:
-        return explicit
-    from glob import glob
-    for hit in glob(os.path.join(local_app, WINGET_FFMPEG_GLOB)):
-        if os.path.isfile(hit):
-            return hit
+    if local_app:
+        from glob import glob
+        for hit in glob(os.path.join(local_app, WINGET_FFMPEG_GLOB)):
+            if os.path.isfile(hit):
+                return hit
     candidates = [
         os.path.join(os.environ.get("USERPROFILE", ""), "scoop", "apps", "ffmpeg", "current", "bin", "ffmpeg.exe"),
         r"C:\ProgramData\chocolatey\bin\ffmpeg.exe",
         r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
+        r"C:\ffmpeg\bin\ffmpeg.exe",
     ]
     for p in candidates:
         if p and os.path.isfile(p):

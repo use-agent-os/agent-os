@@ -78,7 +78,8 @@ framing, and timing will still match the script.
 - ffmpeg ≥ 5.0 on PATH (or pass `--ffmpeg-path` directly).
 
 On Windows the script also probes the winget Gyan.FFmpeg install path,
-Scoop, Chocolatey, and `C:\Program Files\ffmpeg\bin` before giving up.
+Scoop, Chocolatey, `C:\Program Files\ffmpeg\bin` and `C:\ffmpeg\bin` before
+giving up -- the same locations video-merger and subtitle-burner probe.
 
 ## Use as `on_failure` substitute
 
