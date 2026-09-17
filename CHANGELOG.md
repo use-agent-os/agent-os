@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Skills (docx): `edit_docx.py` coerced an ops file that was not a JSON list
+  -- a single operation object being the common mistake -- to "no
+  operations", then wrote an unedited copy over `--out` and reported
+  `{"applied": 0}` with exit 0; invalid JSON or a UTF-16 file (PowerShell's
+  `Out-File` default) escaped as a traceback. Such a file is now refused with
+  `error: ...` and exit 2 before the document is opened or the output path
+  touched. A well-formed list whose operations apply nothing -- an unknown
+  `op`, a `find` that appears nowhere, a `para` index off the end -- is no
+  longer silent either: each skipped operation is explained on stderr as
+  `warning: op <i>: ...`, with the stdout payload unchanged (#2463).
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added

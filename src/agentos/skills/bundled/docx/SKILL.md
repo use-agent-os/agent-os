@@ -96,6 +96,15 @@ runs in place. This preserves all theme/style/font settings.
 ]
 ```
 
+The file must be a JSON **list**, even for one operation -- `[{...}]`, not
+`{...}`. A file that is not a list, is not valid JSON, or is not UTF-8 (a
+UTF-16 file from PowerShell's `Out-File`) is refused with `error: ...` on
+stderr and exit code 2, and nothing is written to `--out`. Stdout stays
+`{"applied": N}`; an operation that applied nothing -- an unknown `op`, a
+`find` that appears nowhere, a `para` index off the end -- is explained on
+stderr as `warning: op <i>: ...`, so `applied` being lower than the number
+of operations is never silent.
+
 `replace_text` walks body paragraphs, every table cell (nested tables
 included) and each section's headers and footers (first-page and even-page
 variants too), so placeholders inside contract or invoice tables, letterheads

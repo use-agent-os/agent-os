@@ -164,35 +164,69 @@ def _iter_all_paragraphs(doc: Document) -> Iterator[Paragraph]:
     yield from _iter_header_footer_paragraphs(doc)
 
 
-def apply_ops(doc: Document, ops: list[dict[str, Any]]) -> int:
+def apply_ops(
+    doc: Document,
+    ops: list[dict[str, Any]],
+    skipped: list[str] | None = None,
+) -> int:
+    """Apply *ops* to *doc* and return how many replacements were made.
+
+    An op that cannot be applied is skipped rather than fatal -- one bad entry
+    must not cost the batch. When *skipped* is given, the reason each one was
+    passed over is appended to it, so the caller can say why ``applied`` came
+    out lower than the number of ops: a typo in ``op``, a ``find`` that
+    appears nowhere, a ``para`` index off the end of the document.
+    """
     applied = 0
-    for op in ops:
-        if not isinstance(op, dict):
-            continue
-        kind = op.get("op")
-        if kind == "replace_run":
-            # Bounds are checked explicitly rather than by catching IndexError:
-            # a negative index would otherwise wrap round to the end of the
-            # document and edit a paragraph the op never named.
-            try:
-                para_idx = int(op["para"])
-                run_idx = int(op.get("run", 0))
-            except (KeyError, TypeError, ValueError):
-                continue
-            paragraphs = doc.paragraphs
-            if not 0 <= para_idx < len(paragraphs):
-                continue
-            if _replace_run(paragraphs[para_idx], run_idx, str(op.get("text", ""))):
-                applied += 1
-        elif kind == "replace_text":
-            find = str(op.get("find", ""))
-            replacement = str(op.get("with", ""))
-            if not find:
-                continue
-            for para in _iter_all_paragraphs(doc):
-                if _replace_text_in_paragraph(para, find, replacement):
-                    applied += 1
+    for index, op in enumerate(ops):
+        count, reason = _apply_one(doc, op)
+        applied += count
+        if reason is not None and skipped is not None:
+            skipped.append(f"op {index}: {reason}")
     return applied
+
+
+def _apply_one(doc: Document, op: Any) -> tuple[int, str | None]:
+    """Apply one op: how many replacements it made, and why none if none.
+
+    ``replace_text`` counts one per paragraph it changed, as it always has.
+    """
+    if not isinstance(op, dict):
+        return 0, f"is not an object (got {type(op).__name__})"
+    kind = op.get("op")
+    if kind == "replace_run":
+        # Bounds are checked explicitly rather than by catching IndexError:
+        # a negative index would otherwise wrap round to the end of the
+        # document and edit a paragraph the op never named.
+        if "para" not in op:
+            return 0, "replace_run has no 'para' index"
+        try:
+            para_idx = int(op["para"])
+            run_idx = int(op.get("run", 0))
+        except (TypeError, ValueError):
+            return 0, f"replace_run has a non-integer index (para={op.get('para')!r})"
+        paragraphs = doc.paragraphs
+        if not 0 <= para_idx < len(paragraphs):
+            return 0, f"replace_run names paragraph {para_idx}; the document has {len(paragraphs)}"
+        if _replace_run(paragraphs[para_idx], run_idx, str(op.get("text", ""))):
+            return 1, None
+        runs = len(paragraphs[para_idx].runs)
+        return 0, f"replace_run names run {run_idx}; paragraph {para_idx} has {runs}"
+    if kind == "replace_text":
+        find = str(op.get("find", ""))
+        replacement = str(op.get("with", ""))
+        if not find:
+            return 0, "replace_text has an empty 'find'"
+        count = 0
+        for para in _iter_all_paragraphs(doc):
+            if _replace_text_in_paragraph(para, find, replacement):
+                count += 1
+        if count == 0:
+            return 0, f"replace_text found {find!r} nowhere in the document"
+        return count, None
+    if kind is None:
+        return 0, "has no 'op' key"
+    return 0, f"has unknown op {kind!r}"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -211,12 +245,45 @@ def main() -> int:
     if not args.ops.is_file():
         print(f"error: ops {args.ops} not found", file=sys.stderr)
         return 2
-    raw = json.loads(args.ops.read_text(encoding="utf-8"))
-    ops = raw if isinstance(raw, list) else []
+    # Refuse a file that cannot be a list of operations before the document is
+    # opened or any output path is touched. Coercing a non-list to ``[]``
+    # wrote an unedited copy over --out and reported success; a single
+    # operation object instead of a one-element list is the common mistake.
+    try:
+        raw = json.loads(args.ops.read_text(encoding="utf-8"))
+    except UnicodeDecodeError:
+        print(
+            f"error: ops {args.ops} is not UTF-8 text (a UTF-16 file from PowerShell's "
+            "Out-File is the usual cause; re-save it as UTF-8)",
+            file=sys.stderr,
+        )
+        return 2
+    except json.JSONDecodeError as exc:
+        print(f"error: ops {args.ops} is not valid JSON: {exc}", file=sys.stderr)
+        return 2
+    if not isinstance(raw, list):
+        print(
+            f"error: ops {args.ops} must be a JSON list of operations, got {type(raw).__name__}",
+            file=sys.stderr,
+        )
+        return 2
+    ops = raw
     doc = Document(str(args.input))
-    applied = apply_ops(doc, ops)
+    skipped: list[str] = []
+    applied = apply_ops(doc, ops, skipped)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(args.out))
+    # The stdout payload is the contract other callers parse and stays as it
+    # is; the reasons go to stderr, where a human or an agent reading the
+    # transcript can see why "applied" is lower than the number of ops.
+    for reason in skipped:
+        print(f"warning: {reason}", file=sys.stderr)
+    if ops and applied == 0:
+        print(
+            f"warning: none of the {len(ops)} operations applied; "
+            f"{args.out} is a copy of the input",
+            file=sys.stderr,
+        )
     _write_stdout(json.dumps({"applied": applied}, ensure_ascii=False) + "\n")
     return 0
 
