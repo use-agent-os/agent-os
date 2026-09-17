@@ -6,6 +6,7 @@ import contextlib
 import hashlib
 import json
 import os
+from collections.abc import Callable
 from copy import deepcopy
 from typing import Any
 
@@ -202,9 +203,8 @@ def _invalid_provider_context_arguments(value: str | dict[str, Any]) -> dict[str
 
 
 def _has_provider_context_argument_marker(value: dict[str, Any]) -> bool:
-    return (
-        value.get(_INVALID_PROVIDER_CONTEXT_ARGUMENTS_KEY) is True
-        or any(value.get(marker) is True for marker in _COMPACTED_TOOL_ARGUMENT_MARKERS)
+    return value.get(_INVALID_PROVIDER_CONTEXT_ARGUMENTS_KEY) is True or any(
+        value.get(marker) is True for marker in _COMPACTED_TOOL_ARGUMENT_MARKERS
     )
 
 
@@ -218,17 +218,13 @@ def _parsed_tool_arguments(arguments: str) -> dict[str, Any] | None:
 
 def _tool_arguments_are_invalid_provider_context(arguments: str) -> bool:
     parsed = _parsed_tool_arguments(arguments)
-    return (
-        isinstance(parsed, dict)
-        and parsed.get(_INVALID_PROVIDER_CONTEXT_ARGUMENTS_KEY) is True
-    )
+    return isinstance(parsed, dict) and parsed.get(_INVALID_PROVIDER_CONTEXT_ARGUMENTS_KEY) is True
 
 
 def _tool_arguments_have_compacted_marker(arguments: str) -> bool:
     parsed = _parsed_tool_arguments(arguments)
-    return (
-        isinstance(parsed, dict)
-        and any(parsed.get(marker) is True for marker in _COMPACTED_TOOL_ARGUMENT_MARKERS)
+    return isinstance(parsed, dict) and any(
+        parsed.get(marker) is True for marker in _COMPACTED_TOOL_ARGUMENT_MARKERS
     )
 
 
@@ -283,10 +279,7 @@ def _provider_context_arguments_json(
     if (
         not _tool_arguments_are_invalid_provider_context(arguments)
         and not _tool_arguments_contain_projection(arguments)
-        and not (
-            include_compacted_markers
-            and _tool_arguments_have_compacted_marker(arguments)
-        )
+        and not (include_compacted_markers and _tool_arguments_have_compacted_marker(arguments))
     ):
         return None
     return json.dumps(
@@ -443,9 +436,121 @@ def _tool_content_is_critical(content: Any) -> bool:
     return False
 
 
-def _critical_tool_content_for_provider(content: Any) -> Any:
+#: Keys whose values carry the reason a tool call failed. Everything else in a
+#: critical tool result is ordinary payload and may be compacted freely.
+_CRITICAL_DIAGNOSTIC_KEYS = frozenset({"execution_status", "is_error", "error"})
+
+#: Head kept from a non-diagnostic field in a critical tool result.
+_CRITICAL_FIELD_PREVIEW_CHARS = 96
+
+
+def _bounded_diagnostic_value(value: Any, *, label: str) -> Any:
+    """Bound a diagnostic field without dropping its small scalars.
+
+    A diagnostic key's value is not always short: ``execution_status`` is a
+    dict whose fields can include a tool's ``stderr``, and ``error`` can be an
+    arbitrarily long message. Recursing and emergency-compacting only the
+    string leaves keeps the small fields that carry the actual verdict
+    (``status``, ``reason``, ``exit_code``) untouched -- they sit under
+    ``_emergency_compact_string``'s own no-op threshold -- while bounding
+    anything large enough to blow the budget this compaction exists to meet.
+    """
+    if isinstance(value, str):
+        return _emergency_compact_string(value, label=label)
+    if isinstance(value, dict):
+        return {
+            key: _bounded_diagnostic_value(item, label=f"{label}_{key}")
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_bounded_diagnostic_value(item, label=f"{label}_item") for item in value]
+    return value
+
+
+def _critical_field_preview(value: str, *, label: str) -> str:
+    """Keep the head of a non-diagnostic field, cheaply.
+
+    The final tier has to fit a budget that the untouched payload already
+    blew, so the preserved form must stay small. ``_emergency_compact_string``
+    is the wrong tool here: its marker alone carries a full 64-character
+    sha256 plus prose, so it costs ~340 characters per field and pushed
+    payloads that previously fit into ``ProviderRequestBudgetExceededError``.
+
+    A head plus a short marker costs about a third of that while keeping what
+    matters — a tool's failure detail usually opens the field (``stderr``
+    starting with the traceback, ``output`` starting with the error line), so
+    the head is the diagnostic part and the tail rarely is.
+    """
+    if len(value) <= _CRITICAL_FIELD_PREVIEW_CHARS * 2:
+        return value
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
+    head = value[:_CRITICAL_FIELD_PREVIEW_CHARS]
+    return f"{head}[agentos_compacted:{label}:{len(value)}:{digest}]"
+
+
+def _compact_non_diagnostic_value(value: Any, *, compact: Callable[[str], str]) -> Any:
+    """Compact a non-diagnostic non-string with the tier's own compactor.
+
+    A nested dict or list holding a large string is exactly as able to blow the
+    budget as a bare long string is, so it cannot pass through verbatim. But it
+    must not collapse to a bare digest at every tier either: the first tier
+    keeps a 900-character head of a string field, and a serialized
+    ``{"rows": [...]}`` sibling deserves the same -- that head is the row
+    preview the model would have had before this preservation existed.
+
+    *compact* is applied to the JSON serialization, so each tier bounds the
+    value exactly as it bounds a string. When the tier leaves the text
+    untouched the value is small enough to keep as its real type.
+    """
+    serialized = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    compacted = compact(serialized)
+    if compacted == serialized:
+        return value
+    return compacted
+
+
+def _critical_tool_string_for_provider(text: str, *, compact: Callable[[str], str]) -> str:
+    """Compact *text* field-wise, keeping genuine-failure diagnostics.
+
+    *text* must be the **original** tool content, not something an earlier tier
+    has already truncated. Every tier slices on raw character position with no
+    idea where ``execution_status`` sits, so running this on their output only
+    re-compacts whichever fragment happened to survive -- the bug this exists
+    to avoid (#2363).
+
+    When *text* parses as a JSON object reporting a failure, each diagnostic
+    key is kept but bounded, and every other field is compacted with *compact*
+    -- the caller's tier-appropriate compactor, so the first tier stays
+    generous and the last stays small. Anything that does not parse that way
+    falls back to compacting the whole string.
+    """
+    with contextlib.suppress(json.JSONDecodeError):
+        parsed = json.loads(text)
+        if isinstance(parsed, dict) and (
+            _execution_status_is_failure(parsed.get("execution_status"))
+            or parsed.get("is_error") is True
+        ):
+            preserved: dict[str, Any] = {}
+            for key, value in parsed.items():
+                label = f"critical_field_{key}"
+                if key in _CRITICAL_DIAGNOSTIC_KEYS:
+                    preserved[key] = _bounded_diagnostic_value(value, label=label)
+                elif isinstance(value, str):
+                    preserved[key] = compact(value)
+                else:
+                    preserved[key] = _compact_non_diagnostic_value(value, compact=compact)
+            return json.dumps(preserved, ensure_ascii=False, separators=(",", ":"))
+    return compact(text)
+
+
+def _critical_tool_content_for_provider(
+    content: Any,
+    *,
+    compact: Callable[[str], str] | None = None,
+) -> Any:
+    compact = compact or (lambda value: _emergency_compact_string(value, label="tool_result"))
     if isinstance(content, str):
-        return _emergency_compact_string(content, label="tool_result")
+        return _critical_tool_string_for_provider(content, compact=compact)
     if not isinstance(content, list):
         return content
     compacted: list[Any] = []
@@ -455,12 +560,32 @@ def _critical_tool_content_for_provider(content: Any) -> Any:
             continue
         next_block = dict(block)
         if isinstance(next_block.get("content"), str):
-            next_block["content"] = _emergency_compact_string(
+            next_block["content"] = _critical_tool_string_for_provider(
                 next_block["content"],
-                label="tool_result",
+                compact=compact,
             )
         compacted.append(next_block)
     return compacted
+
+
+def _critical_tool_message_content(payload: dict[str, Any]) -> dict[int, Any]:
+    """Map each critical tool message's index to its **original** content.
+
+    Read once, before any tier runs, because criticality cannot be recovered
+    from a truncated copy. No tier adds, drops or reorders messages -- each
+    deep-copies and mutates in place -- so the index stays valid through all
+    of them.
+    """
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return {}
+    return {
+        index: message.get("content")
+        for index, message in enumerate(messages)
+        if isinstance(message, dict)
+        and message.get("role") == "tool"
+        and _tool_content_is_critical(message.get("content"))
+    }
 
 
 def _compact_tool_arguments_for_final_cap(arguments: str) -> str:
@@ -471,12 +596,26 @@ def _compact_tool_arguments_for_final_cap(arguments: str) -> str:
     )
 
 
-def _compact_tool_payload_once(payload: dict[str, Any]) -> dict[str, Any]:
+def _compact_tool_payload_once(
+    payload: dict[str, Any],
+    *,
+    critical_tool_content: dict[int, Any] | None = None,
+) -> dict[str, Any]:
+    critical_tool_content = critical_tool_content or {}
     compacted = deepcopy(payload)
-    for message in compacted.get("messages", []):
+    for index, message in enumerate(compacted.get("messages", [])):
         if not isinstance(message, dict):
             continue
         content = message.get("content")
+        if message.get("role") == "tool" and index in critical_tool_content:
+            # Compact around the diagnostics instead of slicing through them.
+            # This is the *first* tier, so the non-diagnostic fields keep the
+            # generous head/tail treatment they would have had.
+            message["content"] = _critical_tool_content_for_provider(
+                critical_tool_content[index],
+                compact=_compact_string,
+            )
+            continue
         if message.get("role") == "tool" and isinstance(content, str):
             message["content"] = _compact_string(content)
             continue
@@ -568,7 +707,12 @@ def _compact_recent_tail_payload_once(
     return compacted, {"aggregate_tool_arguments_compacted": aggregate_tool_arguments}
 
 
-def _emergency_compact_current_turn_payload_once(payload: dict[str, Any]) -> dict[str, Any]:
+def _emergency_compact_current_turn_payload_once(
+    payload: dict[str, Any],
+    *,
+    critical_tool_content: dict[int, Any] | None = None,
+) -> dict[str, Any]:
+    critical_tool_content = critical_tool_content or {}
     compacted = deepcopy(payload)
     messages = compacted.get("messages", [])
     last_user_index = None
@@ -584,7 +728,15 @@ def _emergency_compact_current_turn_payload_once(payload: dict[str, Any]) -> dic
         if role == "user" and index != last_user_index:
             message["content"] = _compact_user_content_for_provider(content)
             content = message.get("content")
-        if isinstance(content, str) and role in {"assistant", "tool"}:
+        if role == "tool" and index in critical_tool_content:
+            # This tier keeps only 180 head + 40 tail, which is where a
+            # trailing ``execution_status`` is lost -- before the hard-cap
+            # tier ever gets to ask whether the result was critical.
+            message["content"] = _critical_tool_content_for_provider(
+                critical_tool_content[index],
+                compact=lambda value: _emergency_compact_string(value, label="tool_result"),
+            )
+        elif isinstance(content, str) and role in {"assistant", "tool"}:
             message["content"] = _emergency_compact_string(
                 content,
                 label=f"{role}_content",
@@ -644,7 +796,12 @@ def _emergency_compact_current_turn_payload_once(payload: dict[str, Any]) -> dic
     return compacted
 
 
-def _final_hard_cap_payload_once(payload: dict[str, Any]) -> dict[str, Any]:
+def _final_hard_cap_payload_once(
+    payload: dict[str, Any],
+    *,
+    critical_tool_content: dict[int, Any] | None = None,
+) -> dict[str, Any]:
+    critical_tool_content = critical_tool_content or {}
     compacted = deepcopy(payload)
     messages = compacted.get("messages", [])
     latest_user_index = None
@@ -667,7 +824,20 @@ def _final_hard_cap_payload_once(payload: dict[str, Any]) -> dict[str, Any]:
                 )
             continue
         if role == "tool":
-            if _tool_content_is_critical(content):
+            if index in critical_tool_content:
+                # Classified from the original content, not from ``content``,
+                # which three truncating tiers have already been through.
+                #
+                # Non-diagnostic strings keep a head/tail preview rather than
+                # becoming a bare digest: a tool's failure detail often sits in
+                # ``output`` or ``stderr`` rather than in the structured
+                # status, and hard-capping those throws away the very thing
+                # this tier is trying to protect.
+                message["content"] = _critical_tool_content_for_provider(
+                    critical_tool_content[index],
+                    compact=lambda value: _critical_field_preview(value, label="critical_field"),
+                )
+            elif _tool_content_is_critical(content):
                 message["content"] = _critical_tool_content_for_provider(content)
             else:
                 message["content"] = _hard_compact_content_for_provider(
@@ -713,18 +883,14 @@ def _message_role_chars(payload: dict[str, Any], role: str) -> int:
     if not isinstance(messages, list):
         return 0
     role_messages = [
-        message
-        for message in messages
-        if isinstance(message, dict) and message.get("role") == role
+        message for message in messages if isinstance(message, dict) and message.get("role") == role
     ]
     return _payload_chars(role_messages) if role_messages else 0
 
 
 def _top_level_chars(payload: dict[str, Any]) -> int:
     top_level_payload = {
-        key: value
-        for key, value in payload.items()
-        if key not in {"messages", "tools", "system"}
+        key: value for key, value in payload.items() if key not in {"messages", "tools", "system"}
     }
     return _payload_chars(top_level_payload) if top_level_payload else 0
 
@@ -746,6 +912,7 @@ def _payload_component_chars(payload: dict[str, Any], proof_budget: int) -> dict
         "top_level_chars": _top_level_chars(payload),
         "tool_schema_too_large": tool_schema_too_large,
     }
+
 
 def prove_provider_payload(
     payload: dict[str, Any],
@@ -789,6 +956,31 @@ def prove_provider_payload(
     return proof
 
 
+def _prove_or_none(
+    payload: dict[str, Any],
+    *,
+    projection_adapter: str,
+    proof_budget: int,
+    status_projection_mode: str,
+    fallback_reason: str | None,
+) -> dict[str, Any] | None:
+    """``prove_provider_payload``, returning ``None`` instead of raising.
+
+    Only for the final tier, which tries a second shape when the first does
+    not fit and needs to tell "too big" apart from "proved" without unwinding.
+    """
+    try:
+        return prove_provider_payload(
+            payload,
+            projection_adapter=projection_adapter,
+            proof_budget=proof_budget,
+            status_projection_mode=status_projection_mode,
+            fallback_reason=fallback_reason,
+        )
+    except ProviderRequestBudgetExceededError:
+        return None
+
+
 def prove_or_compact_provider_payload(
     payload: dict[str, Any],
     *,
@@ -816,7 +1008,10 @@ def prove_or_compact_provider_payload(
             proof["tool_argument_projection_scrubbed"] = True
         return payload, proof
 
-    tool_compacted = _compact_tool_payload_once(payload)
+    critical_tool_content = _critical_tool_message_content(payload)
+    tool_compacted = _compact_tool_payload_once(
+        payload, critical_tool_content=critical_tool_content
+    )
     tool_compacted_chars = _payload_chars(tool_compacted)
     try:
         proof = prove_provider_payload(
@@ -846,7 +1041,9 @@ def prove_or_compact_provider_payload(
             fallback_reason=fallback_reason,
         )
     except ProviderRequestBudgetExceededError as tail_error:
-        emergency_compacted = _emergency_compact_current_turn_payload_once(tail_compacted)
+        emergency_compacted = _emergency_compact_current_turn_payload_once(
+            tail_compacted, critical_tool_content=critical_tool_content
+        )
         emergency_compacted_chars = _payload_chars(emergency_compacted)
         try:
             proof = prove_provider_payload(
@@ -857,27 +1054,51 @@ def prove_or_compact_provider_payload(
                 fallback_reason=fallback_reason,
             )
         except ProviderRequestBudgetExceededError as exc:
-            hard_compacted = _final_hard_cap_payload_once(emergency_compacted)
+            hard_compacted = _final_hard_cap_payload_once(
+                emergency_compacted, critical_tool_content=critical_tool_content
+            )
             hard_compacted_chars = _payload_chars(hard_compacted)
-            try:
-                proof = prove_provider_payload(
-                    hard_compacted,
+            critical_diagnostics_dropped = False
+            proof_or_none: dict[str, Any] | None = _prove_or_none(
+                hard_compacted,
+                projection_adapter=projection_adapter,
+                proof_budget=proof_budget,
+                status_projection_mode=status_projection_mode,
+                fallback_reason=fallback_reason,
+            )
+            if proof_or_none is None and critical_tool_content:
+                # Keeping the diagnostics costs characters, and at a budget
+                # this tight they are what tipped the payload over. Rebuild the
+                # whole chain with no preservation at any tier -- byte for byte
+                # what this function produced before #2363 -- and send that.
+                # The failure detail is lost, which is the bug being fixed, but
+                # the request still goes out: a degraded answer beats
+                # ProviderRequestBudgetExceededError, which is what the caller
+                # would otherwise get. Preservation must never turn a request
+                # that worked into one that does not.
+                plain_tool = _compact_tool_payload_once(payload)
+                plain_tail, _plain_tail_metadata = _compact_recent_tail_payload_once(plain_tool)
+                plain_emergency = _emergency_compact_current_turn_payload_once(plain_tail)
+                fallback = _final_hard_cap_payload_once(plain_emergency)
+                fallback_proof = _prove_or_none(
+                    fallback,
                     projection_adapter=projection_adapter,
                     proof_budget=proof_budget,
                     status_projection_mode=status_projection_mode,
                     fallback_reason=fallback_reason,
                 )
-            except ProviderRequestBudgetExceededError:
-                pass
-            else:
+                if fallback_proof is not None:
+                    critical_diagnostics_dropped = True
+                    hard_compacted = fallback
+                    hard_compacted_chars = _payload_chars(hard_compacted)
+                    proof_or_none = fallback_proof
+            if proof_or_none is not None:
+                proof = proof_or_none
+                proof["critical_tool_diagnostics_dropped"] = critical_diagnostics_dropped
                 proof["retry_count"] = 4
                 proof["compact_needed"] = True
-                proof["tool_payload_compaction_not_smaller"] = (
-                    tool_compacted_chars >= first_chars
-                )
-                proof["tail_compaction_not_smaller"] = (
-                    tail_compacted_chars >= tool_compacted_chars
-                )
+                proof["tool_payload_compaction_not_smaller"] = tool_compacted_chars >= first_chars
+                proof["tail_compaction_not_smaller"] = tail_compacted_chars >= tool_compacted_chars
                 proof["emergency_current_turn_compacted"] = True
                 proof["emergency_compaction_not_smaller"] = (
                     emergency_compacted_chars >= tail_compacted_chars
@@ -892,12 +1113,8 @@ def prove_or_compact_provider_payload(
                 return hard_compacted, proof
             exc.proof["retry_count"] = 2
             exc.proof["compact_needed"] = True
-            exc.proof["tool_payload_compaction_not_smaller"] = (
-                tool_compacted_chars >= first_chars
-            )
-            exc.proof["tail_compaction_not_smaller"] = (
-                tail_compacted_chars >= tool_compacted_chars
-            )
+            exc.proof["tool_payload_compaction_not_smaller"] = tool_compacted_chars >= first_chars
+            exc.proof["tail_compaction_not_smaller"] = tail_compacted_chars >= tool_compacted_chars
             exc.proof["emergency_current_turn_compacted"] = True
             exc.proof["emergency_compaction_not_smaller"] = (
                 emergency_compacted_chars >= tail_compacted_chars
