@@ -6,6 +6,7 @@ import asyncio
 from email.message import EmailMessage
 from email.parser import BytesParser
 from email.policy import default as email_policy
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -30,7 +31,12 @@ from agentos.channels.email import (
 )
 from agentos.channels.manager import ChannelManager
 from agentos.channels.registry import discover_all, markdown_render_hint_for, parse_channel_entry
-from agentos.channels.types import IncomingMessage, OutgoingMessage, UnsupportedChannelOperation
+from agentos.channels.types import (
+    Attachment,
+    IncomingMessage,
+    OutgoingMessage,
+    UnsupportedChannelOperation,
+)
 
 
 def _config(**overrides: Any) -> EmailChannelConfig:
@@ -1262,3 +1268,88 @@ def test_a_dm_thread_id_without_the_opt_in_still_maps_to_one_session() -> None:
     assert ChannelManager._build_session_key("slack", message, agent_id="ops") == (
         "agent:ops:slack:direct:user-1"
     )
+
+
+# ---------------------------------------------------------------------------
+# Attachment MIME inference
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected_content_type"),
+    [
+        ("report.pdf", "application/pdf"),
+        ("image.png", "image/png"),
+        ("photo.jpeg", "image/jpeg"),
+        ("notes.txt", "text/plain"),
+        ("data.json", "application/json"),
+        ("unknown.unrecognizedextension123", "application/octet-stream"),
+    ],
+)
+async def test_send_file_infers_mime_type_from_filename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    filename: str,
+    expected_content_type: str,
+) -> None:
+    channel = EmailChannel(config=_config())
+    assert channel._to_incoming(_raw()) is not None
+
+    sent: list[EmailMessage] = []
+    monkeypatch.setattr(channel, "_smtp_send", sent.append)
+
+    test_file = tmp_path / filename
+    test_file.write_bytes(b"sample file payload")
+
+    result = await channel.send_file(
+        thread_id="m1@example.com",
+        file_path=str(test_file),
+        content="Here is your file",
+    )
+
+    assert result.status == ChannelSendStatus.SENT
+    assert len(sent) == 1
+    outbound = sent[0]
+
+    attachments = list(outbound.iter_attachments())
+    assert len(attachments) == 1
+    attachment = attachments[0]
+    assert attachment.get_filename() == filename
+    assert attachment.get_content_type() == expected_content_type
+
+
+async def test_send_outgoing_message_infers_mime_type_when_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    channel = EmailChannel(config=_config())
+    assert channel._to_incoming(_raw()) is not None
+
+    sent: list[EmailMessage] = []
+    monkeypatch.setattr(channel, "_smtp_send", sent.append)
+
+    await channel.send(
+        OutgoingMessage(
+            content="Check attachment",
+            reply_to="m1@example.com",
+            attachments=[
+                Attachment(
+                    name="document.pdf",
+                    data=b"%PDF-1.4 test",
+                    mime_type=None,
+                ),
+                Attachment(
+                    name="custom.pdf",
+                    data=b"%PDF-1.4 test",
+                    mime_type="application/x-custom-pdf",
+                ),
+            ],
+        )
+    )
+
+    assert len(sent) == 1
+    attachments = list(sent[0].iter_attachments())
+    assert len(attachments) == 2
+    assert attachments[0].get_filename() == "document.pdf"
+    assert attachments[0].get_content_type() == "application/pdf"
+    assert attachments[1].get_filename() == "custom.pdf"
+    assert attachments[1].get_content_type() == "application/x-custom-pdf"

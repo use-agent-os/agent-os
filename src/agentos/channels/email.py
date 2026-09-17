@@ -52,6 +52,7 @@ import contextlib
 import email.utils
 import html
 import imaplib
+import mimetypes
 import re
 import smtplib
 import ssl
@@ -931,7 +932,10 @@ class EmailChannel:
 
 
 def _attach(message: EmailMessage, name: str, mime_type: str | None, payload: bytes) -> None:
-    maintype, _, subtype = (mime_type or "application/octet-stream").partition("/")
+    resolved_mime = (
+        mime_type or (mimetypes.guess_type(name)[0] if name else None) or "application/octet-stream"
+    )
+    maintype, _, subtype = resolved_mime.partition("/")
     message.add_attachment(
         payload,
         maintype=maintype or "application",

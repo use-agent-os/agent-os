@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `channels/email`: infer attachment MIME type from filename in `EmailChannel.send_file` and `send` rather than defaulting all attachments to `application/octet-stream`.
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added
