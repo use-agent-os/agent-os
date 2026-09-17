@@ -17,6 +17,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Security: the sandbox denylist and the terminal-redaction gate kept
+  separate lists of credential directories and had drifted -- `~/.azure`,
+  `~/.config/gh`, `~/.anthropic` and `~/.openai` were blocked for
+  `read_file` but `cat` of the same files skipped the assignment pass, so
+  `~/.azure/service_principal_entries.json` handed the model its
+  `client_secret`. One list (`CREDENTIAL_HOME_DIRS`) now feeds both
+  layers. Six common credential files (`.my.cnf`, `.boto`, `.s3cfg`,
+  `.yarnrc.yml`, `gradle.properties`, `service-account.json`) and four
+  directories (`.cargo`, `.gradle`, `.m2`, `.terraform.d`) are now gated
+  too
+  ([#2621](https://github.com/use-agent-os/agent-os/issues/2621)).
 - `read_spreadsheet`: a phonetic guide (furigana) stored alongside an xlsx
   cell's text is no longer appended to the value. The shared-string reader took
   every `<t>` descendant, including the ones inside `<rPh>`, so a Japanese

@@ -750,10 +750,28 @@ def reads_credential_file(command: str | None) -> bool:
         if token.startswith("-"):
             continue
         name = os.path.basename(token).lower()
-        parts = {part.lower() for part in token.replace("\\", "/").split("/")[:-1]}
-        if name in _CREDENTIAL_FILE_NAMES or name.startswith(".env"):
+        if _is_credential_file_name(name) or _in_credential_home_dir(token):
             return True
-        if parts & _CREDENTIAL_DIR_NAMES:
+    return False
+
+
+def _is_credential_file_name(name: str) -> bool:
+    return name in _CREDENTIAL_FILE_NAMES or name.startswith(".env")
+
+
+def _in_credential_home_dir(path: str) -> bool:
+    """Whether *path*'s directory portion runs through a credential directory.
+
+    A multi-segment entry (``.config/gh``) must match as a contiguous run of
+    path segments, not "any segment matches" -- the same anchoring the
+    sandbox denylist (:mod:`agentos.sandbox.sensitive_paths`) already uses
+    for the identical list, so the two stay in step (#2621).
+    """
+    segments = [part.lower() for part in path.replace("\\", "/").split("/")[:-1]]
+    for entry in CREDENTIAL_HOME_DIRS:
+        wanted = entry.lower().split("/")
+        width = len(wanted)
+        if any(segments[i : i + width] == wanted for i in range(len(segments) - width + 1)):
             return True
     return False
 
@@ -832,17 +850,29 @@ _SOURCE_CODE_SUFFIXES: frozenset[str] = frozenset(
 
 #: Files that are nothing but credentials, matched whole because they carry no
 #: suffix. ``~/.aws/credentials`` is the case #355 was filed about.
+#:
+#: ``.my.cnf``, ``.boto``, ``.s3cfg``, ``.yarnrc.yml`` and
+#: ``gradle.properties`` hold a plaintext password/token often enough (MySQL,
+#: AWS, an npm auth token, a Gradle signing password) to be worth the same
+#: gate as the entries above, even though most instances of them on a real
+#: machine have nothing secret in them (#2621).
 _CREDENTIAL_FILE_NAMES: frozenset[str] = frozenset(
     {
+        ".boto",
         ".dockercfg",
         ".git-credentials",
         ".htpasswd",
+        ".my.cnf",
         ".netrc",
         ".npmrc",
         ".pgpass",
         ".pypirc",
+        ".s3cfg",
+        ".yarnrc.yml",
         "_netrc",
         "credentials",
+        "gradle.properties",
+        "service-account.json",
     }
 )
 
@@ -851,10 +881,34 @@ _CREDENTIAL_FILE_NAMES: frozenset[str] = frozenset(
 #: private name stays as-is for this module's own callers.
 CREDENTIAL_FILE_NAMES: frozenset[str] = _CREDENTIAL_FILE_NAMES
 
-#: Directories whose every file is credential material, for the ones that name
-#: their config plainly (``~/.kube/config``, ``~/.docker/config.json``).
-_CREDENTIAL_DIR_NAMES: frozenset[str] = frozenset(
-    {".aws", ".docker", ".gnupg", ".kube", ".ssh", "gcloud"}
+#: Home-relative directories whose every file is credential material. One
+#: list feeds both layers -- the sandbox denylist
+#: (:mod:`agentos.sandbox.sensitive_paths`) blocks ``read_file`` under
+#: ``~/<entry>``, and :func:`reads_credential_file` gates a shell read of the
+#: same path. These used to be two separate lists and drifted: #1138 added
+#: ``.azure``, ``.config/gh``, ``.anthropic``, ``.openai`` and
+#: ``.password-store`` to the sandbox side only, so ``read_file`` on
+#: ``~/.azure/service_principal_entries.json`` was blocked while ``cat`` of
+#: the same file handed the model its ``client_secret`` intact (#2621). An
+#: entry may be more than one path segment (``.config/gh``), and matches as a
+#: contiguous run of segments anywhere in the path's directory portion, so a
+#: single-segment entry like ``.aws`` still matches under any parent.
+CREDENTIAL_HOME_DIRS: tuple[str, ...] = (
+    ".ssh",
+    ".aws",
+    ".azure",
+    ".config/gcloud",
+    ".config/gh",
+    ".anthropic",
+    ".openai",
+    ".docker",
+    ".kube",
+    ".gnupg",
+    ".password-store",
+    ".cargo",
+    ".gradle",
+    ".m2",
+    ".terraform.d",
 )
 
 
@@ -864,10 +918,9 @@ def _is_source_code_path(path: str | os.PathLike[str] | None) -> bool:
         return False
     text = os.fspath(path)
     name = os.path.basename(text).lower()
-    if name in _CREDENTIAL_FILE_NAMES or name.startswith(".env"):
+    if _is_credential_file_name(name):
         return False
-    parts = {part.lower() for part in text.replace("\\", "/").split("/")[:-1]}
-    if parts & _CREDENTIAL_DIR_NAMES:
+    if _in_credential_home_dir(text):
         return False
     return os.path.splitext(name)[1] in _SOURCE_CODE_SUFFIXES
 

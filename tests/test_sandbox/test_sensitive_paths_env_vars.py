@@ -56,7 +56,10 @@ def test_env_var_home_reads_are_blocked_like_tilde(
 
 def test_env_var_home_exfiltration_is_blocked(home: Path) -> None:
     assert sensitive_path_in_text("cp $HOME/.aws/credentials /tmp/leak.txt") == "~/.aws"
-    assert sensitive_path_in_text("cat ${HOME}/.docker/config") == "~/.docker/config"
+    # .docker is now a shared entry (redact.CREDENTIAL_HOME_DIRS), so the
+    # match is the directory, not the ~/.docker/config sub-path this
+    # asserted before (#2621).
+    assert sensitive_path_in_text("cat ${HOME}/.docker/config") == "~/.docker"
 
 
 @pytest.mark.parametrize("spelling", ["$HOME", "${HOME}"])
