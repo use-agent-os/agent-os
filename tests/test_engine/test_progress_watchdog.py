@@ -134,3 +134,43 @@ def test_guidance_is_empty_for_an_ordinary_observation() -> None:
     decision = watchdog.observe(ProgressObservation(iteration=1, successful_tool_result=True))
 
     assert guidance_for(decision) == ""
+
+
+def test_a_repeated_failing_call_is_reported_as_a_repeated_error() -> None:
+    # Issue #2101: the same failing call three times used to trip the
+    # *succeeding*-call guard first, telling the model to "use what you
+    # already have" from a result that never existed.
+    watchdog = ProgressWatchdog(repeated_tool_call_threshold=3, repeated_tool_error_threshold=3)
+    call = _call("read_file", {"path": "missing.txt"}, "FileNotFoundError", is_error=True)
+
+    decisions = [
+        watchdog.observe(
+            ProgressObservation(
+                iteration=i,
+                tool_error_signature="read_file:FileNotFoundError",
+                tool_calls=(call,),
+            )
+        )
+        for i in range(1, 4)
+    ]
+
+    assert decisions[2].reason == "repeated_tool_error"
+    assert decisions[2].details["count"] == 3
+    guidance = guidance_for(decisions[2])
+    assert "same tool error has repeated 3 times" in guidance
+    assert "use what you already have" not in guidance
+
+
+def test_failing_calls_never_count_toward_the_repeated_call_threshold() -> None:
+    # Even with no error signature on the observation (so the error guard
+    # stays quiet), a failed call is not "the same result" being re-fetched.
+    watchdog = ProgressWatchdog(repeated_tool_call_threshold=2)
+    failing = _call("read_file", {"path": "/a.py"}, "permission denied", is_error=True)
+
+    decisions = [
+        watchdog.observe(ProgressObservation(iteration=i, tool_calls=(failing,)))
+        for i in range(1, 5)
+    ]
+
+    assert all(d.reason != "repeated_tool_call" for d in decisions)
+

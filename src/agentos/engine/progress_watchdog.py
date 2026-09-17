@@ -153,6 +153,11 @@ class ProgressWatchdog:
         flagged: ToolCallSignature | None = None
         flagged_count = 0
         for signature in observation.tool_calls:
+            if signature.is_error:
+                # A failed call has no result worth "using"; repeated
+                # failures are ``_record_repeated_tool_error``'s to judge,
+                # and counting them here would shadow that guidance (#2101).
+                continue
             key = signature.key
             previous = self._repeat_results.get(key)
             if previous is not None and previous == signature.result_hash:
