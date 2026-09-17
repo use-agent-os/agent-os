@@ -240,9 +240,33 @@ async def test_read_spreadsheet_pagination_crosses_a_gap_wider_than_limit(
             raise AssertionError("never reached row 5000 within 50 pages")
 
         assert "5000\tlast" in out
-        assert seen_offsets == [1, 201, 401, 601, 801, 1001, 1201, 1401, 1601, 1801, 2001,
-                                 2201, 2401, 2601, 2801, 3001, 3201, 3401, 3601, 3801, 4001,
-                                 4201, 4401, 4601, 4801]
+        assert seen_offsets == [
+            1,
+            201,
+            401,
+            601,
+            801,
+            1001,
+            1201,
+            1401,
+            1601,
+            1801,
+            2001,
+            2201,
+            2401,
+            2601,
+            2801,
+            3001,
+            3201,
+            3401,
+            3601,
+            3801,
+            4001,
+            4201,
+            4401,
+            4601,
+            4801,
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -622,3 +646,21 @@ async def test_read_spreadsheet_does_not_append_a_reading_to_a_cell(tmp_path: Pa
 
     assert _TOKYO in out
     assert _TOKYO_READING not in out
+
+
+def test_read_spreadsheet_handles_out_of_order_xlsx_cells() -> None:
+    """_read_xlsx_worksheet maps out-of-order cell elements to exact column positions."""
+    sheet_xml = (
+        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        b'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        b'<sheetData><row r="1">'
+        b'<c r="C1" t="inlineStr"><is><t>ValC</t></is></c>'
+        b'<c r="B1" t="inlineStr"><is><t>ValB</t></is></c>'
+        b"</row></sheetData>"
+        b"</worksheet>"
+    )
+
+    rows, total_rows = fs._read_xlsx_worksheet(sheet_xml, [])
+
+    assert total_rows == 1
+    assert rows[1] == ["", "ValB", "ValC"]
