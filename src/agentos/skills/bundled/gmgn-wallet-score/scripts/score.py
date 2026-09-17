@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 import json, math, subprocess, sys
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
     print(
         f"Usage: {sys.argv[0]} <wallet> <chain> [zh|en] [latency_s] [slippage_pct] [gas_usd] [sample]"
@@ -26,7 +30,14 @@ ZH = (LANG == 'zh')
 def _(zh, en): return zh if ZH else en
 
 def run_cli(args, timeout=30):
-    r = subprocess.run(['gmgn-cli'] + args + ['--raw'], capture_output=True, text=True, timeout=timeout)
+    r = subprocess.run(
+        ['gmgn-cli'] + args + ['--raw'],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+    )
     if r.returncode != 0:
         raise RuntimeError(r.stderr)
     return json.loads(r.stdout)

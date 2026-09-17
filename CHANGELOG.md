@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Skills (`gmgn-wallet-score`): `score.py` crashed with `UnicodeEncodeError` on non-UTF-8 console stdout and pipes when rendering CJK text, box borders, and emoji, and decoded `gmgn-cli` subprocess output using locale encoding instead of UTF-8 ([#2771](https://github.com/use-agent-os/agent-os/issues/2771)).
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added
