@@ -14,14 +14,8 @@ from types import ModuleType
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-IMAGE_SCRIPT = (
-    REPO_ROOT
-    / "src/agentos/skills/bundled/nano-banana-pro/scripts/generate_image.py"
-)
-VIDEO_SCRIPT = (
-    REPO_ROOT
-    / "src/agentos/skills/bundled/seedance-2-prompt/scripts/generate_video.py"
-)
+IMAGE_SCRIPT = REPO_ROOT / "src/agentos/skills/bundled/nano-banana-pro/scripts/generate_image.py"
+VIDEO_SCRIPT = REPO_ROOT / "src/agentos/skills/bundled/seedance-2-prompt/scripts/generate_video.py"
 
 
 def _load_script(path: Path, module_name: str) -> ModuleType:
@@ -234,3 +228,21 @@ def test_non_openrouter_video_provider_uses_only_its_provider_env(
         )
         == "ark-key"
     )
+
+
+def test_encode_input_image_supports_urls_and_data_uris(
+    video_script: ModuleType, tmp_path: Path
+) -> None:
+    http_url = "https://example.com/character.png"
+    assert video_script._encode_input_image(http_url) == http_url
+
+    data_uri = (
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+        "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    )
+    assert video_script._encode_input_image(data_uri) == data_uri
+
+    local_file = tmp_path / "test.png"
+    local_file.write_bytes(b"dummy")
+    encoded = video_script._encode_input_image(str(local_file))
+    assert encoded.startswith("data:image/png;base64,")
