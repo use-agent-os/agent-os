@@ -97,3 +97,35 @@ def test_weather_entrypoint_returns_seasonal_hint_on_network_error(
     assert payload["forecast"] == []
     assert payload["errors"]
     assert "rainy season" in payload["seasonal_hint"]
+
+
+def test_weather_entrypoint_handles_non_ascii_stdout_encoding(
+    monkeypatch,
+) -> None:
+    import io
+    import sys
+
+    module = _load_module()
+
+    def fake_fetch(_location: str, _timeout: float):
+        return {
+            "current_condition": [
+                {
+                    "weatherDesc": [{"value": "晴れ"}],
+                    "temp_C": "25",
+                },
+            ],
+            "weather": [],
+        }
+
+    monkeypatch.setattr(module, "_fetch_wttr_json", fake_fetch)
+
+    buf = io.BytesIO()
+    fake_stdout = io.TextIOWrapper(buf, encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", fake_stdout)
+
+    status = module.main(["--location", "Beijing (北京)"])
+    assert status == 0
+    fake_stdout.flush()
+    raw = buf.getvalue().decode("utf-8")
+    assert "Beijing" in raw

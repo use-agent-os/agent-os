@@ -53,7 +53,8 @@ def _fetch_wttr_json(location: str, timeout: float) -> dict[str, Any]:
         headers={"User-Agent": "AgentOS-weather-skill/0.1"},
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-        return json.loads(resp.read().decode("utf-8", errors="replace"))
+        payload: Any = json.loads(resp.read().decode("utf-8", errors="replace"))
+        return payload if isinstance(payload, dict) else {}
 
 
 def _pick_current(payload: dict[str, Any]) -> dict[str, str]:
@@ -100,6 +101,22 @@ def _summarize(result: dict[str, Any], max_chars: int) -> dict[str, Any]:
     return result
 
 
+def _write_stdout(text: str) -> None:
+    """Write *text* to stdout as UTF-8, surviving a non-UTF-8 stdout encoding."""
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is not None:
+        try:
+            buffer.write(text.encode("utf-8"))
+            buffer.flush()
+            return
+        except (AttributeError, OSError, ValueError):
+            pass
+
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    sys.stdout.write(text.encode(encoding, errors="backslashreplace").decode(encoding))
+    sys.stdout.flush()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--location", required=True)
@@ -129,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 - keep meta DAG resilient
         result["errors"].append(f"{type(exc).__name__}: {exc}")
 
-    sys.stdout.write(json.dumps(_summarize(result, args.max_chars), ensure_ascii=False))
+    _write_stdout(json.dumps(_summarize(result, args.max_chars), ensure_ascii=False))
     return 0
 
 
