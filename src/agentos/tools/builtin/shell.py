@@ -680,7 +680,50 @@ async def _wait_exec_process(proc: Any, timeout: float) -> bool:
     return True
 
 
+def _windows_tree_kill_argv(pid: int) -> list[str]:
+    """``taskkill /T /F``: the process and every descendant, forcefully.
+
+    ``proc.kill()`` on Windows is ``TerminateProcess`` on the one process
+    asyncio tracks -- the ``cmd.exe`` that ``create_subprocess_shell`` launches
+    through -- and reaches nothing ``cmd.exe`` spawned. The command itself,
+    and anything it started, survive orphaned for the life of the gateway.
+    ``taskkill /T`` walks the tree from that PID; the same fix
+    ``cli/upgrade_cmd.py`` applied for ``agentos upgrade`` (#536, #541).
+    """
+    return ["taskkill", "/T", "/F", "/PID", str(pid)]
+
+
+async def _kill_windows_process_tree(proc: Any) -> bool:
+    """Run ``taskkill /T /F`` against *proc*; return whether it ran to completion.
+
+    ``False`` -- ``taskkill`` missing, refusing, or hanging -- leaves the
+    caller to fall back to a bare ``proc.kill()``: an incomplete kill is
+    still better than none.
+    """
+    try:
+        killer = await asyncio.create_subprocess_exec(
+            *_windows_tree_kill_argv(proc.pid),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except OSError:
+        return False
+    try:
+        await asyncio.wait_for(killer.wait(), timeout=_EXEC_KILL_TIMEOUT)
+    except TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
+            killer.kill()
+        return False
+    return True
+
+
 def _signal_exec_process_tree(proc: Any, sig: signal.Signals) -> bool:
+    """POSIX: signal the session ``start_new_session`` made, so the whole tree.
+
+    On Windows this reaches only the one process asyncio tracks -- it is the
+    fallback for when ``taskkill`` itself cannot run, never the primary path;
+    :func:`_terminate_exec_process_tree` goes through the tree kill first.
+    """
     if os.name == "posix":
         os_mod = cast(Any, os)
         try:
@@ -700,13 +743,39 @@ def _signal_exec_process_tree(proc: Any, sig: signal.Signals) -> bool:
 
 
 async def _terminate_exec_process_tree(proc: Any) -> None:
+    """Stop *proc* and everything it spawned.
+
+    POSIX escalates ``SIGTERM`` to ``SIGKILL`` on the process group. Windows
+    goes straight to ``taskkill /T /F``: it walks the tree from the root PID,
+    so the root has to still be alive when it runs -- a gentler first signal
+    that let ``cmd.exe`` exit ahead of its grandchildren would make the tree
+    unreachable, which is the orphan this exists to prevent.
+    """
+    if os.name != "posix":
+        if proc.returncode is None and not await _kill_windows_process_tree(proc):
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+        if not await _wait_exec_process(proc, _EXEC_KILL_TIMEOUT):
+            log.warning("exec_command_termination_timeout", pid=proc.pid)
+        return
     _signal_exec_process_tree(proc, signal.SIGTERM)
     if await _wait_exec_process(proc, _EXEC_TERMINATE_TIMEOUT):
         return
-    kill_signal = getattr(signal, "SIGKILL", signal.SIGTERM)
-    _signal_exec_process_tree(proc, kill_signal)
+    _signal_exec_process_tree(proc, getattr(signal, "SIGKILL", signal.SIGTERM))
     if not await _wait_exec_process(proc, _EXEC_KILL_TIMEOUT):
         log.warning("exec_command_termination_timeout", pid=proc.pid)
+
+
+async def _cleanup_after_cancellation(proc: Any) -> None:
+    """Kill *proc*'s tree from a ``CancelledError`` handler, to completion.
+
+    The kill runs as its own task under :func:`asyncio.shield`, so if the
+    cancelling party cancels again while it is in flight, only this await is
+    interrupted -- the tree kill carries on in the loop and finishes.
+    """
+    cleanup = asyncio.ensure_future(_terminate_exec_process_tree(proc))
+    with contextlib.suppress(asyncio.CancelledError):
+        await asyncio.shield(cleanup)
 
 
 async def _await_bg_output_task(output_task: asyncio.Task[None]) -> None:
@@ -893,7 +962,18 @@ async def exec_command(
                     subprocess_kwargs["creationflags"] = creationflags
 
             proc = await asyncio.create_subprocess_shell(command, **subprocess_kwargs)
-            if not await _wait_exec_process(proc, effective_timeout):
+            try:
+                finished = await _wait_exec_process(proc, effective_timeout)
+            except asyncio.CancelledError:
+                # A turn deadline, a session kill or a cancelled tool call
+                # lands here as CancelledError -- a BaseException, so the
+                # `except Exception` below never sees it, and the subprocess
+                # tree used to outlive the tool call with no cleanup at all.
+                # The cleanup is shielded: a second cancellation while it runs
+                # interrupts this await, not the kill.
+                await _cleanup_after_cancellation(proc)
+                raise
+            if not finished:
                 await _terminate_exec_process_tree(proc)
                 return f"[timeout after {effective_timeout}s]\ncommand: {command}"
             if os.name == "posix":
