@@ -89,12 +89,39 @@ def build_payload(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _read_stdin() -> str:
+    """Read stdin as UTF-8, surviving a non-UTF-8 console stdin encoding."""
+    buffer = getattr(sys.stdin, "buffer", None)
+    if buffer is not None:
+        try:
+            return buffer.read().decode("utf-8")
+        except (AttributeError, OSError, ValueError, UnicodeDecodeError):
+            pass
+    return sys.stdin.read()
+
+
+def _write_stdout(text: str) -> None:
+    """Write *text* to stdout as UTF-8, surviving a non-UTF-8 stdout encoding."""
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is not None:
+        try:
+            buffer.write(text.encode("utf-8"))
+            buffer.flush()
+            return
+        except (AttributeError, OSError, ValueError):
+            pass
+
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    sys.stdout.write(text.encode(encoding, errors="backslashreplace").decode(encoding))
+    sys.stdout.flush()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Render rwa_lookup output as chat cards")
     parser.add_argument("--output", required=True, help="Where to write the cards artifact.")
     args = parser.parse_args()
 
-    raw = sys.stdin.read().strip()
+    raw = _read_stdin().strip()
     if not raw:
         print("rwa_cards: no input received", file=sys.stderr)
         return 1
@@ -115,7 +142,7 @@ def main() -> int:
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    print(f"publish_artifact path={output} mime={CARDS_MIME}")
+    _write_stdout(f"publish_artifact path={output} mime={CARDS_MIME}\n")
     return 0
 
 

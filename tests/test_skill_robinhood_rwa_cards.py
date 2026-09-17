@@ -138,3 +138,31 @@ def test_rwa_cards_creates_parent_directory(
     monkeypatch.setattr(sys, "argv", ["rwa_cards.py", "--output", str(out)])
     assert rwa_cards.main() == 0
     assert out.is_file()
+
+
+def test_rwa_cards_stdin_utf8_decoding_and_stdout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import io
+    import json
+    import sys
+
+    out = tmp_path / "cards.json"
+    payload = _result(_match(symbol="NESTLE", name="Nestlé S.A.", status="verified"))
+    payload["query"] = "cổ phiếu 日本語"
+    encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+    class FakeStdin:
+        def __init__(self, raw: bytes):
+            self.buffer = io.BytesIO(raw)
+
+        def read(self):
+            return self.buffer.read().decode("utf-8")
+
+    monkeypatch.setattr(sys, "stdin", FakeStdin(encoded))
+    monkeypatch.setattr(sys, "argv", ["rwa_cards.py", "--output", str(out)])
+    assert rwa_cards.main() == 0
+    assert out.is_file()
+    saved = json.loads(out.read_text(encoding="utf-8"))
+    assert "cổ phiếu 日本語" in saved["title"]
+    assert saved["cards"][0]["subtitle"] == "Nestlé S.A."
