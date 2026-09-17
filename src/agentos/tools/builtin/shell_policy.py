@@ -23,15 +23,30 @@ DEFAULT_DENYLIST: list[str] = [
     r"(?i)\bRestart-Computer\b",  # PowerShell system reboot
 ]
 
-# Anchors a command name to the start of a command: line start or a shell
-# separator, optionally through a `cmd /c` / `powershell -c` wrapper. The
-# wrapper's payload is commonly quoted (`powershell -c "rm -r C:\x"` is how
-# subprocess/cmd hand PowerShell a full command string), so a single opening
-# quote is allowed there -- but only there, not after a bare separator.
-_WIN_CMD_PREFIX: str = (
-    r"(?:^|[;&|\n])\s*"
-    r"(?:(?:cmd(?:\.exe)?\s+/[ck]|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+)*)\s+[\"']?)?"
+# One wrapper hop: `cmd /c` or `powershell [flags]`, followed by the payload's
+# optional opening quote. A PowerShell flag may carry a value, written either
+# `-Flag Value` or `-Flag:Value` (`-ExecutionPolicy Bypass`, `-ep:Bypass`,
+# `-WindowStyle Hidden`); a value never starts with `-`, which is what keeps
+# the next flag from being read as this one's value. `-Command`/`-c` is a
+# flag like any other here: the regex engine backtracks off an unquoted
+# `-c rm C:\x` so `rm` is left for the command match. The wrapper's payload
+# is commonly quoted (`powershell -c "rm -r C:\x"` is how subprocess/cmd
+# hand PowerShell a full command string), so opening quotes are allowed
+# there -- but only there, not after a bare separator. More than one, and a
+# backslash before one, because a payload nested in a payload arrives with
+# its quote doubled (`cmd /c "pwsh -c ""rm C:\x"""`) or escaped
+# (`-c \"rm C:\x\"`). The payload may also open with whitespace.
+_WIN_WRAPPER: str = (
+    r"(?:cmd(?:\.exe)?\s+/[ck]"
+    r"|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+(?:(?::|\s+)(?!-)[^\s\"';&|]+)?)*)"
+    r"\s+(?:\\?[\"'])*\s*"
 )
+
+# Anchors a command name to the start of a command: line start or a shell
+# separator, through any number of nested wrappers (`cmd /c powershell -c`),
+# then PowerShell's call operator and an opening script-block brace, both of
+# which precede the command in `powershell -Command "& {rm C:\x}"`.
+_WIN_CMD_PREFIX: str = r"(?:^|[;&|\n])\s*(?:" + _WIN_WRAPPER + r")*(?:&\s*)?(?:\{\s*)?"
 
 # What may follow an anchored command name: an optional `.exe`, then a
 # separator, whitespace, or end of string. Unlike a bare `\b`, this refuses

@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Shell policy (Windows): the denylist prefix that anchors `rm` / `ri` / `rd`
+  / `erase` through a `powershell -c` wrapper only understood flags with no
+  value, so `powershell -ExecutionPolicy Bypass -Command "rm C:\x"` (and
+  `-ep Bypass`, `-WindowStyle Hidden`, `-ep:Bypass`) came back
+  `allowed=True`. The wrapper is now modelled as a repeatable unit whose flags
+  may carry a value, so a wrapper nested in a wrapper
+  (`cmd /c powershell -ep bypass -c "rm C:\x"`), PowerShell's call operator
+  and script block (`-Command "& {rm C:\x}"`), doubled or escaped payload
+  quotes, and whitespace after the opening quote are all seen through as well
+  (#2485).
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added
