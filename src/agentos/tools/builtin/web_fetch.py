@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 import json
 import os
+import re
 from typing import Any
 from urllib.parse import urljoin
 
@@ -70,6 +72,80 @@ _STREAM_CHUNK_BYTES = 65_536
 def _check_ssrf(url: str) -> None:
     """Raise ValueError if the URL resolves to a private/internal address."""
     validate_http_url_for_fetch(url)
+
+
+# Matches the first 1024-byte prescan window's <meta charset="..."> form.
+_META_CHARSET_ATTR_RE = re.compile(rb'<meta\s+charset\s*=\s*["\']?([^"\'\s/>]+)', re.IGNORECASE)
+# Matches the older <meta http-equiv="Content-Type" content="...;charset=...">
+# form. http-equiv and content can appear in either order, so this only
+# requires "http-equiv" and a charset= inside *some* content="..." attribute
+# on the same tag, not a fixed attribute order.
+_META_HTTP_EQUIV_CHARSET_RE = re.compile(
+    rb'<meta\b(?=[^>]*\bhttp-equiv\s*=\s*["\']?content-type)'
+    rb'[^>]*\bcontent\s*=\s*["\'][^"\']*charset\s*=\s*["\']?([^"\';\s]+)',
+    re.IGNORECASE,
+)
+# A label the HTML spec requires treating as UTF-8: a document that is
+# genuinely UTF-16/UTF-32 is already caught by its byte-order mark before any
+# ASCII <meta> tag could be parsed, so a *label* claiming one of these is not
+# trustworthy on its own.
+_UTF_16_OR_32_LABELS = frozenset(
+    {"utf-16", "utf-16le", "utf-16be", "utf-32", "utf-32le", "utf-32be"}
+)
+
+
+def _sniff_html_meta_charset(body: bytes) -> str | None:
+    """Return the Python codec name an HTML document's own <meta> tag
+    declares, scanning only the first 1024 bytes and skipping comments --
+    the same window and comment-skipping the HTML spec's encoding prescan
+    uses. Returns ``None`` when no usable codec is declared.
+    """
+    head = body[:1024]
+    head = re.sub(rb"<!--.*?-->", b"", head, flags=re.DOTALL)
+    match = _META_CHARSET_ATTR_RE.search(head) or _META_HTTP_EQUIV_CHARSET_RE.search(head)
+    if match is None:
+        return None
+    label = match.group(1).decode("ascii", errors="ignore").strip().lower()
+    if not label:
+        return None
+    if label in _UTF_16_OR_32_LABELS:
+        return "utf-8"
+    try:
+        info = codecs.lookup(label)
+    except LookupError:
+        return None
+    try:
+        # Reject a bytes-to-bytes transform (base64, rot13, hex, ...) that
+        # codecs.lookup resolves but that cannot decode arbitrary text --
+        # using one here would corrupt the page rather than read it.
+        "x".encode(info.name)
+    except (LookupError, ValueError):
+        return None
+    return info.name
+
+
+def _decode_response_body(raw_body: bytes, content_type: str, header_charset: str | None) -> str:
+    """Decode a fetched response body to text.
+
+    The charset a server declares in ``Content-Type`` always wins when
+    present (``header_charset`` is the value httpx parsed from the header,
+    or ``None`` when the header carries none). Only when the header is
+    silent, and only for an HTML body, is the page's own ``<meta>`` charset
+    declaration consulted -- browsers do exactly this via the encoding
+    prescan, so an HTML page that only declares its encoding that way (e.g.
+    Shift_JIS) still decodes correctly instead of falling through to UTF-8
+    and coming back as replacement characters (issue #2557). Non-HTML bodies
+    are never sniffed. Anything unresolved falls back to UTF-8, matching the
+    behavior this replaces.
+    """
+    encoding = header_charset
+    if not encoding and "html" in (content_type or "").lower():
+        encoding = _sniff_html_meta_charset(raw_body)
+    encoding = encoding or "utf-8"
+    try:
+        return raw_body.decode(encoding, errors="replace")
+    except LookupError:
+        return raw_body.decode("utf-8", errors="replace")
 
 
 def _html_to_markdown(html: str) -> str:
@@ -290,11 +366,14 @@ async def web_fetch(
                 # downloaded.
                 download_limit = _resolve_download_limit_bytes()
                 # Snapshot the charset advertised in Content-Type before we
-                # start streaming — httpx derives response.encoding from
-                # those headers, and we have to honour the server's charset
-                # (e.g. text/plain; charset=iso-8859-1) instead of assuming
-                # UTF-8. Falling back to utf-8 matches httpx's own default.
-                response_encoding = response.encoding or "utf-8"
+                # start streaming. charset_encoding (not encoding, which
+                # already falls back to "utf-8") is None when the header
+                # names none, so _decode_response_body can tell "the header
+                # said nothing" apart from "the header said utf-8" and, for
+                # an HTML body, fall through to the page's own <meta>
+                # charset declaration instead of assuming UTF-8 (#2557).
+                header_charset = response.charset_encoding
+                content_type = response.headers.get("content-type", "")
                 total = 0
                 chunks: list[bytes] = []
                 truncated = False
@@ -306,12 +385,12 @@ async def web_fetch(
                         break
 
                 raw_body = b"".join(chunks)
-                raw_text = raw_body.decode(response_encoding, errors="replace")
+                raw_text = _decode_response_body(raw_body, content_type, header_charset)
 
                 return (
                     response.status_code,
                     str(response.url),
-                    response.headers.get("content-type", ""),
+                    content_type,
                     raw_text,
                     truncated,
                 )

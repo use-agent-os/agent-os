@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `web_fetch`: an HTML page whose `Content-Type` header names no charset is
+  now decoded using the page's own `<meta charset>` declaration instead of
+  always assuming UTF-8, so a Shift_JIS/GBK/EUC-JP/EUC-KR/windows-1251 page
+  that only declares its encoding that way (ordinary, spec-sanctioned HTML)
+  no longer comes back as a wall of U+FFFD replacement characters with a
+  normal `status: 200` and no indication anything went wrong. A charset
+  named in the header still wins, and non-HTML bodies are never sniffed
+  ([#2557](https://github.com/use-agent-os/agent-os/issues/2557)).
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added
