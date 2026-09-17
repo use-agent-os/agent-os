@@ -55,19 +55,19 @@ _DESTRUCTIVE_PY_PATTERNS: list[tuple[str, str]] = [
     (
         r"(?i)\bos\.system\s*\(\s*['\"]"
         + _IN_QUOTE_CMD_PREFIX
-        + r"(?:rm|rmdir|del|erase|rd|Remove-Item)\b",
+        + r"(?:rm|rmdir|del|erase|rd|Remove-Item|ri)\b",
         "os.system with delete command",
     ),
     (
         r"(?i)\bos\.popen\s*\(\s*['\"]"
         + _IN_QUOTE_CMD_PREFIX
-        + r"(?:rm|rmdir|del|erase|rd|Remove-Item)\b",
+        + r"(?:rm|rmdir|del|erase|rd|Remove-Item|ri)\b",
         "os.popen with delete command",
     ),
     (
         r"(?i)\bsubprocess\.(?:run|call|Popen|check_output|check_call)\s*\(\s*(?:[\[\(]\s*['\"]|['\"])"
         + _IN_QUOTE_CMD_PREFIX
-        + r"(?:rm|rmdir|del|erase|rd|Remove-Item)\b",
+        + r"(?:rm|rmdir|del|erase|rd|Remove-Item|ri)\b",
         "subprocess invoking delete command",
     ),
 ]
@@ -81,7 +81,9 @@ _ALL_DESTRUCTIVE_NAMES: frozenset[str] = frozenset(
 _SUBPROCESS_CALL_NAMES: frozenset[str] = frozenset(
     {"run", "call", "Popen", "check_output", "check_call"}
 )
-_SHELL_DELETE_CMDS: frozenset[str] = frozenset({"rm", "rmdir", "del", "erase", "rd", "remove-item"})
+_SHELL_DELETE_CMDS: frozenset[str] = frozenset(
+    {"rm", "rmdir", "del", "erase", "rd", "remove-item", "ri"}
+)
 _PREFIX_COMMANDS: frozenset[str] = frozenset(
     {
         "sudo",
@@ -139,7 +141,7 @@ _PREFIX_FLAGS_WITH_ARG: dict[str, frozenset[str]] = {
     "xargs": frozenset({"-I", "-n", "-L", "-P", "-s", "-d", "-a", "-E"}),
 }
 _SHELL_DELETE_RE: re.Pattern[str] = re.compile(
-    _COMMAND_PREFIX + r"(?:rm|rmdir|del|erase|rd|Remove-Item)\b", re.IGNORECASE
+    _COMMAND_PREFIX + r"(?:rm|rmdir|del|erase|rd|Remove-Item|ri)\b", re.IGNORECASE
 )
 
 

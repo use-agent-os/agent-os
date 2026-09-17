@@ -71,11 +71,26 @@ from agentos.tools.builtin.code_exec import _check_code_destructive
             r'import subprocess; subprocess.run(["powershell", "-c", "Remove-Item", "C:\\tmp\\x"])',
             "subprocess",
         ),
+        (
+            r'import subprocess; subprocess.run(["powershell", "-c", "ri", "C:\\tmp\\x"])',
+            "subprocess",
+        ),
+        (
+            r'import subprocess; subprocess.run(("powershell", "-c", "ri", "C:\\tmp\\x"))',
+            "subprocess",
+        ),
+        (
+            r'import subprocess; subprocess.run(["ri", "-Recurse", "-Force", "C:\\tmp\\x"])',
+            "subprocess",
+        ),
         (r'import os; os.system("del C:\\tmp\\x")', "os.system"),
         (r'import os; os.system("erase C:\\tmp\\x")', "os.system"),
         (r'import os; os.system("rd /s /q C:\\tmp\\x")', "os.system"),
         (r'import os; os.system("powershell Remove-Item C:\\tmp\\x")', "os.system"),
+        (r'import os; os.system("powershell -c ri C:\\tmp\\x")', "os.system"),
+        (r'import os; os.system("ri C:\\tmp\\x")', "os.system"),
         (r'import os; os.popen("del C:\\tmp\\x")', "os.popen"),
+        (r'import os; os.popen("ri C:\\tmp\\x")', "os.popen"),
         # Prefixed command deletion calls (sudo, env, nohup, time, nice, xargs)
         ('import subprocess; subprocess.run(["sudo", "rm", "-rf", "/etc"])', "subprocess"),
         ('import os; os.system("sudo rm -rf /etc")', "os.system"),
@@ -122,17 +137,22 @@ def test_destructive_ast_evasions_detected(code: str, expected_keyword: str) -> 
         # Benign getattr
         "import os\npath_fn = getattr(os, 'getcwd')",
         "getattr(dict, 'get')",
-        # Benign non-command occurrences of rd and erase (anchoring negative matrix)
+        # Benign non-command occurrences of rd, erase, and ri (anchoring negative matrix)
         'import subprocess; subprocess.run(["curl", "-o", "out.bin", "https://cdn.example.com/rd"])',
+        'import subprocess; subprocess.run(["curl", "-o", "out.bin", "https://cdn.example.com/ri"])',
         'import subprocess; subprocess.run(["psql", "-c", "SELECT * FROM rd"])',
         'import subprocess; subprocess.run(["git", "clone", "https://github.com/acme/rd"])',
+        'import subprocess; subprocess.run(["git", "branch", "ri"])',
         'import subprocess; subprocess.run(["ls"], cwd="/data/rd")',
         'import subprocess; subprocess.run(["node", "script.js", "--mode", "rd"])',
         'import subprocess; subprocess.run(["helm", "install", "rd", "./chart"])',
         'import subprocess; subprocess.check_output(["kubectl", "get", "pods", "-n", "rd"])',
+        'import subprocess; subprocess.check_output(["kubectl", "get", "pods", "-n", "ri"])',
         'import subprocess; subprocess.run(["python", "train.py", "--dataset", "erase-bench"])',
         'import os; os.system("aws s3 cp s3://bucket/rd ./")',
         'import os; os.system("echo rd")',
+        'import os; os.system("echo ri")',
+        'import os; os.system("echo ring the bell")',
     ],
 )
 def test_benign_code_does_not_trigger_warning(code: str) -> None:
