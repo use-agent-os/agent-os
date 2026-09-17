@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Security: the sandbox denylist and the terminal-redaction gate kept
+  separate lists of credential directories and had drifted -- `~/.azure`,
+  `~/.config/gh`, `~/.anthropic` and `~/.openai` were blocked for
+  `read_file` but `cat` of the same files skipped the assignment pass, so
+  `~/.azure/service_principal_entries.json` handed the model its
+  `client_secret`. One list (`CREDENTIAL_HOME_DIRS`) now feeds both layers.
+  The sandbox entry `~/.docker/config` never matched the file Docker
+  actually writes, `config.json`, so `read_file` on it returned registry
+  credentials; the shared entry is the `~/.docker` directory. Seven common
+  credential files (`.my.cnf`, `.boto`, `.s3cfg`, `.yarnrc.yml`,
+  `gradle.properties`, `service-account*.json` and the `~/.cargo`,
+  `~/.gradle`, `~/.m2`, `~/.terraform.d` directories) are now masked when
+  read, without being hard-blocked, since they sit among build
+  configuration an agent needs. An unquoted Windows-native path
+  (`type C:\dir\.aws\credentials`) was invisible to the gate because
+  `shlex` ate the backslashes; it is now read literally as well
+  (#2621, #2623).
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added

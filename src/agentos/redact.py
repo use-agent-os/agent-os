@@ -742,20 +742,37 @@ def reads_credential_file(command: str | None) -> bool:
     """
     if not command or not isinstance(command, str):
         return False
+    for token in _command_operands(command):
+        if token.startswith("-"):
+            continue
+        # ``basename`` on a POSIX host does not split on ``\``; normalise so a
+        # Windows-native operand is judged by its real name.
+        name = os.path.basename(token.replace("\\", "/"))
+        if _is_credential_file_name(name) or _in_credential_dir(token):
+            return True
+    return False
+
+
+def _command_operands(command: str) -> list[str]:
+    """Split *command* into tokens, keeping Windows-native paths intact.
+
+    ``shlex`` in POSIX mode reads ``\\`` as an escape, so an unquoted
+    ``C:\\Users\\u\\.aws\\credentials`` came out as ``C:Usersu.awscredentials``
+    and matched nothing. On a Windows host that spelling is the natural one
+    for ``type`` or ``Get-Content``, so a command carrying a backslash is
+    also split with escapes off, and both readings are checked.
+    """
     try:
         tokens = shlex.split(command)
     except ValueError:
         tokens = command.split()
-    for token in tokens:
-        if token.startswith("-"):
-            continue
-        name = os.path.basename(token).lower()
-        parts = {part.lower() for part in token.replace("\\", "/").split("/")[:-1]}
-        if name in _CREDENTIAL_FILE_NAMES or name.startswith(".env"):
-            return True
-        if parts & _CREDENTIAL_DIR_NAMES:
-            return True
-    return False
+    if "\\" in command:
+        try:
+            literal = shlex.split(command, posix=False)
+        except ValueError:
+            literal = command.split()
+        tokens.extend(token.strip("'\"") for token in literal)
+    return tokens
 
 
 def redact_terminal_output(output: str, command: str | None = None, *, force: bool = False) -> str:
@@ -851,11 +868,87 @@ _CREDENTIAL_FILE_NAMES: frozenset[str] = frozenset(
 #: private name stays as-is for this module's own callers.
 CREDENTIAL_FILE_NAMES: frozenset[str] = _CREDENTIAL_FILE_NAMES
 
-#: Directories whose every file is credential material, for the ones that name
-#: their config plainly (``~/.kube/config``, ``~/.docker/config.json``).
-_CREDENTIAL_DIR_NAMES: frozenset[str] = frozenset(
-    {".aws", ".docker", ".gnupg", ".kube", ".ssh", "gcloud"}
+#: Home-relative directories whose every file is credential material. This is
+#: the one list for both layers: the sandbox denylist blocks ``read_file``
+#: under ``~/<entry>``, and :func:`reads_credential_file` gates ``cat`` of the
+#: same path. It used to be two lists, and they drifted -- #1138 added
+#: ``~/.azure`` to the sandbox and nothing to redaction, so ``read_file`` on
+#: ``~/.azure/service_principal_entries.json`` was blocked while ``cat`` of
+#: it handed the model ``client_secret`` intact (#2621). An entry may be more
+#: than one segment (``.config/gh``), and matches as a contiguous run of
+#: segments anywhere in a path, so a single-segment entry like ``.aws``
+#: matches under any parent.
+#:
+#: ``.docker`` is the directory, not ``.docker/config`` as the sandbox once
+#: had it: Docker writes ``config.json``, and a prefix match anchored at a
+#: segment boundary never matched the file that exists (#2623).
+#: ``AppData/Roaming/gcloud`` is where the Cloud SDK keeps its credentials
+#: on Windows, so the same entry covers both platforms.
+CREDENTIAL_HOME_DIRS: tuple[str, ...] = (
+    ".ssh",
+    ".aws",
+    ".azure",
+    ".config/gcloud",
+    "AppData/Roaming/gcloud",
+    ".config/gh",
+    ".anthropic",
+    ".openai",
+    ".docker",
+    ".kube",
+    ".gnupg",
+    ".password-store",
 )
+
+#: Files masked when read but **not** blocked by the sandbox. Each holds a
+#: credential often enough to deserve the assignment pass, and build or tool
+#: configuration often enough that hard-blocking ``read_file`` on it would
+#: break ordinary work -- ``gradle.properties`` sits in every Gradle project,
+#: usually with nothing secret in it, and sometimes with ``signing.password``.
+_REDACT_ONLY_CREDENTIAL_FILE_NAMES: frozenset[str] = frozenset(
+    {
+        ".boto",
+        ".my.cnf",
+        ".s3cfg",
+        ".yarnrc.yml",
+        "credentials.tfrc.json",
+        "credentials.toml",
+        "gradle.properties",
+    }
+)
+
+#: ``service-account.json``, ``my-project-service_account-key.json`` -- a GCP
+#: service-account key by any of its usual names.
+_SERVICE_ACCOUNT_FILE_RE = re.compile(r"service[-_]?account.*\.json$", re.IGNORECASE)
+
+#: Directories masked when read but not blocked, for the same reason: the
+#: credential file sits next to caches and build config an agent needs.
+_REDACT_ONLY_CREDENTIAL_DIRS: tuple[str, ...] = (".cargo", ".gradle", ".m2", ".terraform.d")
+
+
+def _is_credential_file_name(name: str) -> bool:
+    lowered = name.lower()
+    return (
+        lowered in _CREDENTIAL_FILE_NAMES
+        or lowered in _REDACT_ONLY_CREDENTIAL_FILE_NAMES
+        or lowered.startswith(".env")
+        or _SERVICE_ACCOUNT_FILE_RE.search(lowered) is not None
+    )
+
+
+def _in_credential_dir(path: str) -> bool:
+    """Whether *path* sits under one of the credential directories.
+
+    An entry's segments must appear as a contiguous run in the path's
+    directory segments, so ``.config/gh`` matches ``~/.config/gh/hosts.yml``
+    and not ``~/.config/other/gh/x``.
+    """
+    segments = [part.lower() for part in path.replace("\\", "/").split("/")[:-1]]
+    for entry in (*CREDENTIAL_HOME_DIRS, *_REDACT_ONLY_CREDENTIAL_DIRS):
+        wanted = entry.lower().split("/")
+        width = len(wanted)
+        if any(segments[i : i + width] == wanted for i in range(len(segments) - width + 1)):
+            return True
+    return False
 
 
 def _is_source_code_path(path: str | os.PathLike[str] | None) -> bool:
@@ -863,13 +956,10 @@ def _is_source_code_path(path: str | os.PathLike[str] | None) -> bool:
     if path is None:
         return False
     text = os.fspath(path)
-    name = os.path.basename(text).lower()
-    if name in _CREDENTIAL_FILE_NAMES or name.startswith(".env"):
+    name = os.path.basename(text)
+    if _is_credential_file_name(name) or _in_credential_dir(text):
         return False
-    parts = {part.lower() for part in text.replace("\\", "/").split("/")[:-1]}
-    if parts & _CREDENTIAL_DIR_NAMES:
-        return False
-    return os.path.splitext(name)[1] in _SOURCE_CODE_SUFFIXES
+    return os.path.splitext(name.lower())[1] in _SOURCE_CODE_SUFFIXES
 
 
 def redact_file_output(text: str, *, path: str | os.PathLike[str] | None = None) -> str:

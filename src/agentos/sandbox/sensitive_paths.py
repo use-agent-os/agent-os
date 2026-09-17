@@ -17,7 +17,7 @@ import re
 import shlex
 from pathlib import Path, PurePosixPath
 
-from agentos.redact import CREDENTIAL_FILE_NAMES
+from agentos.redact import CREDENTIAL_FILE_NAMES, CREDENTIAL_HOME_DIRS
 
 # Operator escape hatch — set AGENTOS_SENSITIVE_PATHS_DISABLED=1 to no-op
 # the entire sensitive-path block layer. ONLY for trusted single-operator
@@ -43,20 +43,14 @@ _HOST_CREDENTIAL_FILES: tuple[str, ...] = tuple(
 # entry matches the path itself or the path plus ``/``), so ``~/.config/gh``
 # guards the GitHub CLI directory without reaching ``~/.config/gh-dash`` or
 # ``~/.config`` at large.
+#
+# The directories come from the redaction layer's list, the same way the
+# credential filenames do, so an entry added here for ``read_file`` also
+# gates ``cat`` of the same path -- the two lists drifted once (#2621), and
+# the anchored match is also why ``~/.docker/config`` never guarded
+# ``~/.docker/config.json`` (#2623): the shared entry is the directory.
 _BASE_SENSITIVE_PREFIXES: tuple[str, ...] = (
-    "~/.ssh",
-    "~/.aws",
-    "~/.azure",
-    "~/.config/gcloud",
-    # Agents run ``gh`` routinely, so a live GitHub token sits in
-    # ``~/.config/gh/hosts.yml`` next to entries that already guard ``~/.npmrc``.
-    "~/.config/gh",
-    "~/.anthropic",
-    "~/.openai",
-    "~/.docker/config",
-    "~/.kube",
-    "~/.gnupg",
-    "~/.password-store",
+    *(f"~/{directory}" for directory in CREDENTIAL_HOME_DIRS),
     # A file, not a directory — the entries above all name directories, but the
     # prefix match already accepts an exact path, so a bare file works here and
     # covers the token in its documented home location. Outside home the Vault
