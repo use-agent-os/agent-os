@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Tools: `create_xlsx` published different bytes for identical input, so the
+  session deliverable store -- which recognises a file by the hash of its
+  bytes -- never matched the previous one and published a fresh artifact on
+  every call. openpyxl stamps the wall clock into every zip entry and into
+  `docProps/core.xml`; the workbook now goes through the same normaliser
+  `create_pptx` already used, which also pins `dcterms:created` and
+  `dcterms:modified` (openpyxl re-stamps `modified` on save with no opt-out,
+  so it has to be done on the package). `create_pdf_report` had the same
+  defect from reportlab's `/CreationDate`, `/ModDate` and document `/ID`,
+  and now builds with reportlab's own `invariant` flag (#2419).
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added

@@ -6,6 +6,7 @@ import csv
 import hashlib
 import io
 import json
+import re
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,14 @@ _PDF_SANS_CANDIDATES = (
     "C:/Windows/Fonts/arial.ttf",
 )
 _STABLE_ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
+#: The same instant, as OPC core properties write it. A generated file is
+#: identified by the hash of its bytes, so every clock the writer stamps into
+#: the package has to be pinned or two identical requests publish twice.
+_STABLE_CORE_TIMESTAMP = b"1980-01-01T00:00:00Z"
+#: ``dcterms:created`` / ``dcterms:modified`` in ``docProps/core.xml``. Only
+#: the text node is captured -- the element and its namespace declarations are
+#: whatever the writer emitted, so a rewrite changes one value and nothing else.
+_CORE_TIMESTAMP_RE = re.compile(rb"(<dcterms:(?:created|modified)\b[^>]*>)[^<]*(</dcterms:)")
 _PDF_SANS_BOLD_CANDIDATES = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/local/share/fonts/dejavu/DejaVuSans-Bold.ttf",
@@ -100,15 +109,33 @@ def _first_existing_path(candidates: tuple[str, ...]) -> str | None:
 
 
 def _normalize_zip_timestamps(payload: bytes) -> bytes:
+    """Pin every wall-clock value an OOXML writer puts in the package.
+
+    Two clocks: the zip entry timestamps, and ``dcterms:created`` /
+    ``dcterms:modified`` in ``docProps/core.xml``. Both are set to the same
+    instant, so a workbook or deck built twice from the same input is the same
+    bytes, and the session deliverable store can recognise the second as the
+    first instead of publishing it again (#2419).
+
+    The core-properties rewrite has to happen here rather than on the
+    workbook: openpyxl's ``save_workbook`` stamps ``modified`` with the
+    current time unconditionally, with no way to opt out, so a value set on
+    ``workbook.properties`` beforehand is overwritten on the way out.
+    """
     source = io.BytesIO(payload)
     target = io.BytesIO()
     with zipfile.ZipFile(source, "r") as src, zipfile.ZipFile(target, "w") as dst:
         for info in src.infolist():
+            content = src.read(info.filename)
+            if info.filename == "docProps/core.xml":
+                content = _CORE_TIMESTAMP_RE.sub(
+                    rb"\g<1>" + _STABLE_CORE_TIMESTAMP + rb"\g<2>", content
+                )
             stable = zipfile.ZipInfo(info.filename, _STABLE_ZIP_TIMESTAMP)
             stable.compress_type = info.compress_type
             stable.external_attr = info.external_attr
             stable.comment = info.comment
-            dst.writestr(stable, src.read(info.filename))
+            dst.writestr(stable, content)
     return target.getvalue()
 
 
@@ -389,7 +416,7 @@ async def create_xlsx(sheets: list[dict[str, Any]], name: str | None = None) -> 
     output = io.BytesIO()
     workbook.save(output)
     return _published_response(
-        payload=output.getvalue(),
+        payload=_normalize_zip_timestamps(output.getvalue()),
         name=_ensure_name(name, default="generated.xlsx", suffix=".xlsx"),
         mime=_XLSX_MIME,
         source="create_xlsx",
@@ -502,7 +529,11 @@ async def create_pdf_report(
         raise ToolError("create_pdf_report requires reportlab to be installed") from exc
 
     output = io.BytesIO()
-    doc = SimpleDocTemplate(output, pagesize=letter)
+    # ``invariant`` is reportlab's own switch for reproducible output: it
+    # pins ``/CreationDate``, ``/ModDate`` and the document ``/ID``, which
+    # otherwise change on every call and defeat the same hash-based
+    # deduplication the OOXML tools rely on.
+    doc = SimpleDocTemplate(output, pagesize=letter, invariant=1)
     styles = getSampleStyleSheet()
     base_font, bold_font, cjk_font = _register_pdf_fonts()
     for style_name in ("Title", "Heading2", "BodyText"):
