@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import re
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -163,6 +164,21 @@ def _coerce_telegram_int(value: Any) -> int | str:
     if isinstance(value, str) and value.lstrip("-").isdigit():
         return int(value)
     return str(value)
+
+
+def _text_mentions_username(text: str, username: str) -> bool:
+    """Whether *text* contains ``@username`` as a whole username.
+
+    The last-resort check when there is no entity to match structurally --
+    and the one that runs after every entity has been checked and none was
+    us. Plain containment is not enough: a Telegram username is word
+    characters after the ``@``, so ``@helper`` is a substring of a different
+    bot's ``@helperbot2`` and of the address ``someone@helperdesk.com``, and
+    ``bob@helper.com`` has the word character on the other side. A word
+    character on either side means the ``@`` belongs to something else.
+    """
+    pattern = r"(?<!\w)@" + re.escape(username.lstrip("@").casefold()) + r"(?!\w)"
+    return re.search(pattern, text.casefold()) is not None
 
 
 def _slice_utf16(text: str, offset: int, length: int) -> str:
@@ -1165,7 +1181,7 @@ class TelegramChannel:
                     has_mismatched_bot_command = True
         if has_mismatched_bot_command:
             return False
-        return mention in text.lower()
+        return _text_mentions_username(text, username)
 
     def build_reply_message(self, content: str, inbound: IncomingMessage) -> OutgoingMessage:
         metadata: dict[str, Any] = {"chat_id": inbound.channel_id}
