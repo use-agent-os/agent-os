@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Skills (`poolsdotfun-token-launcher`): `cmd_approve` in `pools_write.py` treated `--amount 0` as falsy, resetting `amount` to `2**256 - 1` (unlimited allowance) instead of 0, preventing standard ERC20 allowance revocations. In addition, the dry-run execution prompt omitted `--amount`, causing replay commands to re-plan with unlimited allowance and fail on `PLAN_HASH` mismatch during confirmation ([#2719](https://github.com/use-agent-os/agent-os/issues/2719)).
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added

@@ -425,8 +425,10 @@ def cmd_set_fee_recipient(client: RpcClient, args: dict) -> None:
 def cmd_approve(client: RpcClient, args: dict) -> None:
     signer = resolve_signer(args)
     paired = resolve_paired_asset(args.get("paired"))
-    amount_raw = _amount(args.get("amount"), 18, "amount")
-    amount = amount_raw if amount_raw else 2**256 - 1
+    if args.get("amount") is not None:
+        amount = _amount(args.get("amount"), 18, "amount")
+    else:
+        amount = 2**256 - 1
     current = client.read(paired, ERC20_ABI, "allowance",
                           [signer["address"], PARTY_FACTORY])
 
@@ -445,8 +447,14 @@ def cmd_approve(client: RpcClient, args: dict) -> None:
     print(f"\n  PLAN_HASH  {digest}")
     if not _confirmed(args, digest):
         print("\n  Nothing was sent. To execute:")
-        print(f"    python3 pools_write.py approve --paired "
-              f"{asset_label(paired).lower()} --broadcast --confirm {digest}")
+        cmd = f"python3 pools_write.py approve --paired {asset_label(paired).lower()}"
+        if args.get("amount") is not None:
+            cmd += f" --amount {shlex.quote(str(args['amount']))}"
+        if args.get("signer-env"):
+            cmd += f" --signer-env {shlex.quote(str(args['signer-env']))}"
+        if args.get("rpc"):
+            cmd += f" --rpc {shlex.quote(str(args['rpc']))}"
+        print(f"    {cmd} --broadcast --confirm {digest}")
         return
 
     data = encode_function_data(ERC20_ABI, "approve", [PARTY_FACTORY, amount])
