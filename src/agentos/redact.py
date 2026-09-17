@@ -758,6 +758,112 @@ def reads_credential_file(command: str | None) -> bool:
     return False
 
 
+#: Credential files whose secret is positional or keyword-introduced rather
+#: than ``name=value``. The assignment pass cannot see a secret it cannot
+#: name, so these get a rule of their own, keyed by basename. Both are in
+#: :data:`_CREDENTIAL_FILE_NAMES` -- the gate fired for them all along; what
+#: ran behind it could not read the file.
+_CREDENTIAL_FILE_FORMATS: Mapping[str, str] = {
+    ".pgpass": "pgpass",
+    ".netrc": "netrc",
+    "_netrc": "netrc",
+}
+
+#: ``.netrc`` introduces each value with a keyword: ``machine H login U
+#: password P``. ``account`` is a second password in the same format, and a
+#: value may be quoted (curl reads quotes; ftp does not).
+_NETRC_SECRET_RE = re.compile(r'(?i)\b(password|passwd|account)([ \t]+)("(?:[^"\\]|\\.)*"|\S+)')
+
+
+def _mask_whole(_token: str) -> str:
+    """Mask a password entirely.
+
+    The head/tail reveal in :func:`mask_secret` exists so an agent can tell
+    *which* vendor key it is looking at. A positional password has no such
+    prefix, so showing six characters of it shows six characters of a password.
+    """
+    return _MASK
+
+
+def _mask_whole_nonreusable(_token: str) -> str:
+    return _mask_nonreusable("")
+
+
+def _credential_file_format(path: str | os.PathLike[str] | None) -> str | None:
+    if path is None:
+        return None
+    # Normalise separators first: a Windows path handed to a POSIX host has
+    # no ``/`` for ``basename`` to split on, as ``_is_source_code_path`` knows.
+    name = os.path.basename(os.fspath(path).replace("\\", "/")).lower()
+    return _CREDENTIAL_FILE_FORMATS.get(name)
+
+
+def _credential_file_formats_in(command: str) -> set[str]:
+    """The formats of every credential file *command* names as an operand."""
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+    formats: set[str] = set()
+    for token in tokens:
+        if token.startswith("-"):
+            continue
+        file_format = _credential_file_format(token)
+        if file_format is not None:
+            formats.add(file_format)
+    return formats
+
+
+def _pgpass_password_start(line: str) -> int | None:
+    """Offset of the fifth ``:``-field, honouring ``\\:`` and ``\\\\`` escapes.
+
+    ``.pgpass`` is ``hostname:port:database:username:password``; the password
+    is everything after the fourth unescaped colon, escapes included.
+    """
+    colons = 0
+    index = 0
+    while index < len(line):
+        char = line[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == ":":
+            colons += 1
+            if colons == 4:
+                return index + 1
+        index += 1
+    return None
+
+
+def _redact_pgpass(text: str, *, mask: Callable[[str], str]) -> str:
+    masked: list[str] = []
+    for line in text.splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        ending = line[len(body) :]
+        start = None if body.lstrip().startswith("#") else _pgpass_password_start(body)
+        if start is None or start >= len(body):
+            masked.append(line)
+            continue
+        masked.append(body[:start] + mask(body[start:]) + ending)
+    return "".join(masked)
+
+
+def _redact_netrc(text: str, *, mask: Callable[[str], str]) -> str:
+    return _NETRC_SECRET_RE.sub(
+        lambda match: match.group(1) + match.group(2) + mask(match.group(3)), text
+    )
+
+
+def _redact_credential_file_format(
+    text: str, file_format: str, *, mask: Callable[[str], str]
+) -> str:
+    if file_format == "pgpass":
+        return _redact_pgpass(text, mask=mask)
+    if file_format == "netrc":
+        return _redact_netrc(text, mask=mask)
+    return text
+
+
 def redact_terminal_output(output: str, command: str | None = None, *, force: bool = False) -> str:
     """Mask credentials in command output before it reaches the model.
 
@@ -768,9 +874,16 @@ def redact_terminal_output(output: str, command: str | None = None, *, force: bo
     output is that file. Everything else skips it, because ordinary output is
     source code and config dumps where the assignment pass is mostly false
     positives.
+
+    A credential file whose secret is positional (``.pgpass``) or
+    keyword-introduced (``.netrc``) gets its own format rule first: the
+    assignment pass cannot name a value that has no name.
     """
     if not output:
         return output
+    if command and (force or _REDACT_ENABLED):
+        for file_format in sorted(_credential_file_formats_in(command)):
+            output = _redact_credential_file_format(output, file_format, mask=_mask_whole)
     assignments = is_env_dump_command(command or "") or reads_credential_file(command)
     redacted = redact_sensitive_text(output, force=force, code_file=not assignments)
     return redacted if redacted is not None else output
@@ -895,6 +1008,9 @@ def redact_file_output(text: str, *, path: str | os.PathLike[str] | None = None)
     """
     if not text or not _REDACT_ENABLED:
         return text
+    file_format = _credential_file_format(path)
+    if file_format is not None:
+        text = _redact_credential_file_format(text, file_format, mask=_mask_whole_nonreusable)
     masked = _redact_value_shapes(text, mask=_mask_nonreusable, line_safe=True)
     if _is_source_code_path(path) or path is None:
         return masked
