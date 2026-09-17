@@ -526,7 +526,6 @@ class DiscordChannel:
             elif op == 11:  # Heartbeat ACK
                 self._state.last_heartbeat_ack = True
 
-
     async def _handle_dispatch(self, event_type: str | None, data: dict[str, Any]) -> None:
         if event_type == "READY":
             self._state.session_id = data["session_id"]
@@ -949,9 +948,7 @@ class DiscordChannel:
 
     def is_connected(self) -> bool:
         return (
-            self._connected
-            and self._dispatch_task is not None
-            and not self._dispatch_task.done()
+            self._connected and self._dispatch_task is not None and not self._dispatch_task.done()
         )
 
     async def health_check(self) -> ChannelHealth:
@@ -964,7 +961,6 @@ class DiscordChannel:
                 "sequence": self._state.sequence,
             },
         )
-
 
     # ------------------------------------------------------------------
     # Inbound
@@ -1239,6 +1235,15 @@ class DiscordChannel:
         content: str = "",
     ) -> ChannelSendResult:
         check_channel_file_size(file_path, self.MAX_FILE_BYTES, "Discord")
+        target_channel, sep, _ = channel_id.partition("|")
+        target_channel = (target_channel if sep else channel_id) or self.config.default_channel_id
+        if not target_channel:
+            raise ValueError("discord.send_file requires channel_id or default_channel_id")
+
+        caption_head, caption_tail = "", ""
+        if content:
+            caption_head, caption_tail = split_text_for_limit(content, _DISCORD_MESSAGE_TEXT_LIMIT)
+
         await self._rate_limiter.acquire()
         client = self._get_client()
         path = Path(file_path)
@@ -1249,8 +1254,8 @@ class DiscordChannel:
             # first attempt would upload an empty body on the second.
             with path.open("rb") as f:
                 return await client.post(
-                    f"/channels/{channel_id}/messages",
-                    data={"content": content} if content else {},
+                    f"/channels/{target_channel}/messages",
+                    data={"content": caption_head} if caption_head else {},
                     files={"file": (path.name, f)},
                     headers=self._auth_headers(),
                 )
@@ -1260,10 +1265,19 @@ class DiscordChannel:
         data = resp.json()
         message_id = str(data.get("id", ""))
         if message_id:
-            self._sent_messages[message_id] = channel_id
+            self._sent_messages[message_id] = target_channel
+
+        if caption_tail:
+            await self.send(
+                OutgoingMessage(
+                    content=caption_tail,
+                    reply_to=target_channel,
+                )
+            )
+
         return ChannelSendResult.sent(
             capability=ChannelCapabilities.NATIVE_FILE_UPLOAD,
-            target_id=channel_id,
+            target_id=target_channel,
             provider_message_id=message_id,
         )
 
