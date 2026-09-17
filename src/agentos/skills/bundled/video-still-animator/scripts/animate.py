@@ -20,6 +20,7 @@ Exit codes:
     0  success — output MP4 written.
     1  failure — stderr carries the cause.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -46,11 +47,20 @@ def resolve_ffmpeg(explicit: str) -> str:
     if not local_app:
         return explicit
     from glob import glob
+
     for hit in glob(os.path.join(local_app, WINGET_FFMPEG_GLOB)):
         if os.path.isfile(hit):
             return hit
     candidates = [
-        os.path.join(os.environ.get("USERPROFILE", ""), "scoop", "apps", "ffmpeg", "current", "bin", "ffmpeg.exe"),
+        os.path.join(
+            os.environ.get("USERPROFILE", ""),
+            "scoop",
+            "apps",
+            "ffmpeg",
+            "current",
+            "bin",
+            "ffmpeg.exe",
+        ),
         r"C:\ProgramData\chocolatey\bin\ffmpeg.exe",
         r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
     ]
@@ -69,7 +79,9 @@ def main() -> int:
     parser.add_argument("--height", type=int, default=1280)
     parser.add_argument("--fps", type=int, default=24)
     parser.add_argument(
-        "--zoom-rate", type=float, default=0.0015,
+        "--zoom-rate",
+        type=float,
+        default=0.0015,
         help="Per-frame zoom increment; 0.0015 over 5s ≈ 1.18x final zoom",
     )
     parser.add_argument("--ffmpeg-path", default="ffmpeg")
@@ -90,8 +102,11 @@ def main() -> int:
     #   [0:v] scale to cover, then zoompan over N frames at fps.
     #   [1:a] anullsrc gives a silent stereo track at 44.1kHz.
     # -shortest cuts the audio to match video length.
+    w_scale = args.width * 4
+    h_scale = args.height * 4
     vf = (
-        f"[0:v]scale={args.width * 4}:{args.height * 4}:flags=lanczos,"
+        f"[0:v]scale={w_scale}:{h_scale}:force_original_aspect_ratio=increase:flags=lanczos,"
+        f"crop={w_scale}:{h_scale},"
         f"zoompan=z='min(zoom+{args.zoom_rate},1.2)':"
         f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
         f"d={total_frames}:s={args.width}x{args.height}:fps={args.fps}[v]"
@@ -99,20 +114,33 @@ def main() -> int:
     cmd = [
         ffmpeg_bin,
         "-y",
-        "-loop", "1",
-        "-i", str(src),
-        "-f", "lavfi",
-        "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
-        "-filter_complex", vf,
-        "-map", "[v]",
-        "-map", "1:a",
-        "-t", f"{args.duration}",
-        "-c:v", "libx264",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
-        "-b:a", "128k",
+        "-loop",
+        "1",
+        "-i",
+        str(src),
+        "-f",
+        "lavfi",
+        "-i",
+        "anullsrc=channel_layout=stereo:sample_rate=44100",
+        "-filter_complex",
+        vf,
+        "-map",
+        "[v]",
+        "-map",
+        "1:a",
+        "-t",
+        f"{args.duration}",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
         "-shortest",
-        "-movflags", "+faststart",
+        "-movflags",
+        "+faststart",
         str(out),
     ]
     try:
@@ -122,7 +150,10 @@ def main() -> int:
             check=False,
         )
     except FileNotFoundError as exc:
-        print(f"Error: ffmpeg not found ({exc}). Install via video-merger/install.ps1 or pass --ffmpeg-path.", file=sys.stderr)
+        print(
+            f"Error: ffmpeg not found ({exc}). Install via video-merger/install.ps1 or pass --ffmpeg-path.",
+            file=sys.stderr,
+        )
         return 1
     if proc.returncode != 0:
         sys.stderr.write(proc.stderr.decode("utf-8", "replace")[-2000:])
