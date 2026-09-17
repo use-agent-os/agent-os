@@ -62,6 +62,25 @@ class VideoMerger:
         self.ffprobe_path = _resolve_ffmpeg_binary(ffprobe_path, "ffprobe")
         self._check_dependencies()
 
+    @staticmethod
+    def concat_entry(video_path: str) -> str:
+        r"""构造 concat demuxer 的一行 ``file`` 指令（已转义）。
+
+        FFmpeg 用 ``av_get_token`` 解析这一行：单引号内的内容原样读取，直到
+        遇到下一个单引号为止。所以文件名里的单引号会提前结束 ``file '...'``
+        指令，剩下的部分退回到无引号状态——在那里反斜杠是转义符，Windows
+        路径 ``C:\Users`` 会被吃成 ``C:Users``，于是报 "Impossible to open"。
+
+        单引号按 ``'\''`` 转义：先关引号、转义一个引号、再重新开引号。反斜杠
+        统一换成正斜杠，FFmpeg 在 Windows 上同样接受，路径里也就不再留下任何
+        需要解释的转义符。清单文件本身以 UTF-8 写出：``mode='w'`` 默认用系统
+        编码，在 GBK/CP1252 的 Windows 上遇到 ``1_场景一.mp4`` 这类文件名会
+        直接抛 ``UnicodeEncodeError``，而 FFmpeg 读清单时按 UTF-8 解释。
+        """
+        normalized = os.path.abspath(video_path).replace("\\", "/")
+        escaped = normalized.replace("'", "'\\''")
+        return f"file '{escaped}'\n"
+
     def _check_dependencies(self):
         """检查依赖是否安装"""
         for tool in [self.ffmpeg_path, self.ffprobe_path]:
@@ -137,9 +156,9 @@ class VideoMerger:
             print(f"使用自定义分辨率：{resolution}")
 
         # 生成concat列表
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
             for v in video_list:
-                f.write(f"file '{os.path.abspath(v)}'\n")
+                f.write(self.concat_entry(v))
             concat_file = f.name
 
         try:
@@ -279,9 +298,9 @@ class VideoMerger:
         合并单个分块
         """
         # 生成concat列表
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
             for v in video_list:
-                f.write(f"file '{os.path.abspath(v)}'\n")
+                f.write(self.concat_entry(v))
             concat_file = f.name
 
         try:

@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Skills (video-merger): the ffmpeg concat manifest was written unescaped
+  and in the system's default encoding. FFmpeg reads a `file '...'` line
+  with `av_get_token`, so a `'` in a filename ended the directive early and
+  a Windows path's backslashes were then eaten as escapes (`C:\Users` read
+  as `C:Users`, "Impossible to open"); and `NamedTemporaryFile(mode='w')`
+  encoded with the locale, so a name like `1_场景一.mp4` raised
+  `UnicodeEncodeError` on a GBK or CP1252 host before ffmpeg ever ran. Both
+  manifests (`merge` and `merge_chunks`) now go through one escaper --
+  forward slashes, `'` written as `'\''` -- and are written as UTF-8, which is
+  what ffmpeg reads (#2122, #2431).
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added
