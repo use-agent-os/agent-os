@@ -420,6 +420,146 @@ async def test_branch_fork_transcript(manager):
 
 
 @pytest.mark.asyncio
+async def test_branch_fork_transcript_preserves_reasoning_content(manager):
+    await manager.create("agent:main:main")
+    await manager.append_message(
+        "agent:main:main",
+        "assistant",
+        "let me think...",
+        reasoning_content="step-by-step reasoning trace",
+        token_count=10,
+    )
+    await manager.branch("agent:main:main", "agent:main:direct:u1", fork_transcript=True)
+    child_entries = await manager.get_transcript("agent:main:direct:u1")
+    assert len(child_entries) == 1
+    assert child_entries[0].reasoning_content == "step-by-step reasoning trace"
+
+
+@pytest.mark.asyncio
+async def test_branch_fork_transcript_preserves_tool_call_id(manager):
+    await manager.create("agent:main:main")
+    await manager.append_message(
+        "agent:main:main",
+        "tool",
+        '{"result": "ok"}',
+        tool_call_id="call_abc123",
+        token_count=8,
+    )
+    await manager.branch("agent:main:main", "agent:main:direct:u1", fork_transcript=True)
+    child_entries = await manager.get_transcript("agent:main:direct:u1")
+    assert len(child_entries) == 1
+    assert child_entries[0].tool_call_id == "call_abc123"
+
+
+@pytest.mark.asyncio
+async def test_branch_fork_transcript_preserves_provenance_metadata(manager):
+    await manager.create("agent:main:main")
+    await manager.append_message(
+        "agent:main:main",
+        "user",
+        "run action",
+        provenance={
+            "kind": "tool",
+            "origin_session_id": "sess_orig_99",
+            "source_session_key": "agent:sub:1",
+            "source_channel": "slack",
+            "source_tool": "browser",
+        },
+        token_count=6,
+    )
+    await manager.branch("agent:main:main", "agent:main:direct:u1", fork_transcript=True)
+    child_entries = await manager.get_transcript("agent:main:direct:u1")
+    assert len(child_entries) == 1
+    assert child_entries[0].provenance_kind == "tool"
+    assert child_entries[0].provenance_origin_session_id == "sess_orig_99"
+    assert child_entries[0].provenance_source_session_key == "agent:sub:1"
+    assert child_entries[0].provenance_source_channel == "slack"
+    assert child_entries[0].provenance_source_tool == "browser"
+
+
+@pytest.mark.asyncio
+async def test_branch_fork_transcript_preserves_all_metadata_multi_turn(manager):
+    await manager.create("agent:main:main")
+    # Turn 1: user with provenance
+    await manager.append_message(
+        "agent:main:main",
+        "user",
+        "calculate sum",
+        provenance={
+            "kind": "user_ui",
+            "origin_session_id": "root_sess",
+            "source_session_key": "agent:main:main",
+            "source_channel": "webui",
+            "source_tool": None,
+        },
+        token_count=4,
+    )
+    # Turn 2: assistant with reasoning and tool_calls
+    await manager.append_message(
+        "agent:main:main",
+        "assistant",
+        "calling calc",
+        reasoning_content="need to invoke calculator",
+        tool_calls=[{"id": "call_calc_1", "type": "function", "function": {"name": "calc"}}],
+        token_count=12,
+    )
+    # Turn 3: tool result with tool_call_id
+    await manager.append_message(
+        "agent:main:main",
+        "tool",
+        "42",
+        tool_call_id="call_calc_1",
+        provenance={
+            "kind": "tool",
+            "origin_session_id": "root_sess",
+            "source_session_key": "agent:main:main",
+            "source_channel": "webui",
+            "source_tool": "calc",
+        },
+        token_count=2,
+    )
+    # Turn 4: assistant final response
+    await manager.append_message(
+        "agent:main:main",
+        "assistant",
+        "The result is 42.",
+        turn_usage={"model": "deepseek/deepseek-r1", "input_tokens": 50, "output_tokens": 15},
+        token_count=8,
+    )
+
+    child = await manager.branch("agent:main:main", "agent:main:direct:u1", fork_transcript=True)
+    assert child.forked_from_parent is True
+
+    entries = await manager.get_transcript("agent:main:direct:u1")
+    assert len(entries) == 4
+
+    # Entry 0
+    assert entries[0].role == "user"
+    assert entries[0].provenance_kind == "user_ui"
+    assert entries[0].provenance_source_channel == "webui"
+
+    # Entry 1
+    assert entries[1].role == "assistant"
+    assert entries[1].reasoning_content == "need to invoke calculator"
+    assert entries[1].tool_calls == [
+        {"id": "call_calc_1", "type": "function", "function": {"name": "calc"}}
+    ]
+
+    # Entry 2
+    assert entries[2].role == "tool"
+    assert entries[2].tool_call_id == "call_calc_1"
+    assert entries[2].provenance_source_tool == "calc"
+
+    # Entry 3
+    assert entries[3].role == "assistant"
+    assert entries[3].turn_usage == {
+        "model": "deepseek/deepseek-r1",
+        "input_tokens": 50,
+        "output_tokens": 15,
+    }
+
+
+@pytest.mark.asyncio
 async def test_branch_fork_transcript_copies_compaction_summaries(manager):
     parent = await manager.create("agent:main:main")
     await manager.append_message("agent:main:main", "user", "kept tail", token_count=5)

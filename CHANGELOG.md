@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- `SessionManager.branch`: branching a session with `fork_transcript=True`
+  dropped `reasoning_content`, `tool_call_id`, and all `provenance_*` fields
+  from copied transcript entries; child transcripts now retain model reasoning
+  traces, tool call identifiers, and input provenance metadata
+  ([#2582](https://github.com/use-agent-os/agent-os/issues/2582)).
 - `read_spreadsheet`: a phonetic guide (furigana) stored alongside an xlsx
   cell's text is no longer appended to the value. The shared-string reader took
   every `<t>` descendant, including the ones inside `<rPh>`, so a Japanese

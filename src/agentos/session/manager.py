@@ -995,9 +995,16 @@ class SessionManager:
                         role=entry.role,
                         content=entry.content,
                         tool_calls=entry.tool_calls,
+                        tool_call_id=entry.tool_call_id,
+                        reasoning_content=entry.reasoning_content,
                         turn_usage=entry.turn_usage,
                         created_at=entry.created_at,
                         token_count=entry.token_count,
+                        provenance_kind=entry.provenance_kind,
+                        provenance_origin_session_id=entry.provenance_origin_session_id,
+                        provenance_source_session_key=entry.provenance_source_session_key,
+                        provenance_source_channel=entry.provenance_source_channel,
+                        provenance_source_tool=entry.provenance_source_tool,
                     )
                     await self._storage.append_transcript_entry(forked)
                 for summary in parent_summaries:
