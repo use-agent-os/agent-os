@@ -173,6 +173,8 @@ def _is_cjk_symbol(char: str) -> bool:
 
 
 def _font_supports_char(font_name: str, char: str) -> bool:
+    if char in "\n\r\t":
+        return True
     from reportlab.pdfbase import pdfmetrics  # type: ignore[import-untyped]
 
     font = pdfmetrics.getFont(font_name)
