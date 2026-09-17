@@ -887,18 +887,23 @@ async def write_file(path: str, content: str, approval_id: str | None = None) ->
 
     loop = asyncio.get_running_loop()
 
-    def _write() -> None:
+    def _write() -> int:
         p.parent.mkdir(parents=True, exist_ok=True)
-        # newline="" so the content is the sole authority on line endings;
-        # write_text() would stamp os.linesep onto every line.
-        with p.open("w", encoding="utf-8", newline="") as handle:
-            handle.write(content)
+        # Encode once and write the bytes: no newline translation (the content
+        # is the sole authority on line endings, where write_text() would stamp
+        # os.linesep onto every line), and the count reported is exactly what
+        # reached the disk. len(content) was code points, which under-reported
+        # every multibyte character -- 10 emoji as "10 bytes" for a 40-byte
+        # file -- to callers comparing against byte budgets and limits.
+        data = content.encode("utf-8")
+        p.write_bytes(data)
+        return len(data)
 
-    await loop.run_in_executor(None, _write)
+    written = await loop.run_in_executor(None, _write)
     record_workspace_file_write(p)
     _notify_memory_source_write(p)
     _notify_bootstrap_source_write(p)
-    return f"Written {len(content)} bytes to {p}"
+    return f"Written {written} bytes to {p}"
 
 
 def _read_raw_text(p: Path) -> str:
