@@ -1416,40 +1416,82 @@ class DiscordChannel:
                 raise ValueError("missing Discord application id for interaction response")
             interaction_path = f"/webhooks/{application_id}/{interaction_token}/messages/@original"
 
-        async def _post(text: str) -> None:
-            nonlocal message_id
+        # Offset into the accumulated text where the message currently being
+        # edited starts. Everything before it lives in messages that are full
+        # and frozen, so an edit only ever re-renders ``text[segment_start:]``.
+        segment_start = 0
+        # Where edits of the message being filled go. The interaction's
+        # @original slot holds exactly one message; once the reply rolls past
+        # it, overflow is posted to the channel as regular messages (the same
+        # shape ``send()`` produces for a chunked interaction reply) and edits
+        # follow the newest one, with the bot's auth headers.
+        edit_path: str | None = None
+        edit_headers: dict[str, str] | None = None
+        original_used = False
+
+        async def _send_new(text: str) -> None:
+            nonlocal message_id, edit_path, edit_headers, original_used
             await self._rate_limiter.acquire()
-            if interaction_path is not None:
+            if interaction_path is not None and not original_used:
                 resp = await retry_request(
                     client.patch,
                     interaction_path,
                     json={"content": text},
                 )
-            else:
-                resp = await retry_request(
-                    client.post,
-                    f"/channels/{target}/messages",
-                    json={"content": text},
-                    headers=self._auth_headers(),
-                )
+                resp.raise_for_status()
+                original_used = True
+                message_id = resp.json().get("id")
+                edit_path, edit_headers = interaction_path, None
+                return
+            resp = await retry_request(
+                client.post,
+                f"/channels/{target}/messages",
+                json={"content": text},
+                headers=self._auth_headers(),
+            )
             resp.raise_for_status()
             message_id = resp.json().get("id")
+            edit_path = f"/channels/{target}/messages/{message_id}"
+            edit_headers = self._auth_headers()
+
+        async def _post_segments(remaining: str) -> None:
+            """Post *remaining* as one or more new messages, splitting at the cap.
+
+            A send that raises propagates out of ``send_streaming`` and ends
+            the stream; dispatch then replays the undelivered text through
+            ``send()``, so no partial state has to survive here.
+            """
+            nonlocal segment_start
+            while True:
+                head, tail = split_text_for_limit(remaining, _DISCORD_MESSAGE_TEXT_LIMIT)
+                await _send_new(head)
+                if not tail:
+                    return
+                segment_start += len(head)
+                remaining = tail
+
+        async def _post(text: str) -> None:
+            await _post_segments(text[segment_start:])
 
         async def _edit(text: str) -> None:
+            nonlocal segment_start
+            if edit_path is None:  # pragma: no cover - throttle opens before it edits
+                raise RuntimeError("Discord stream edit before the message was opened")
+            head, tail = split_text_for_limit(text[segment_start:], _DISCORD_MESSAGE_TEXT_LIMIT)
             await self._rate_limiter.acquire()
-            if interaction_path is not None:
-                await retry_request(
-                    client.patch,
-                    interaction_path,
-                    json={"content": text},
-                )
+            if edit_headers is None:
+                await retry_request(client.patch, edit_path, json={"content": head})
             else:
                 await retry_request(
                     client.patch,
-                    f"/channels/{target}/messages/{message_id}",
-                    json={"content": text},
-                    headers=self._auth_headers(),
+                    edit_path,
+                    json={"content": head},
+                    headers=edit_headers,
                 )
+            if tail:
+                # This message is full: freeze it and roll over into a new one.
+                segment_start += len(head)
+                await _post_segments(tail)
 
         async for chunk in chunks:
             throttle.add(chunk)
