@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Musebook skill: `save_identity()` now writes the muse's ed25519 identity
+  atomically via a `0600` temp file and restricts the state directory to `0700`
+  mode, eliminating a race condition where private keys were world-readable
+  before `chmod` ran; corrupted or non-dict existing identity files are rejected
+  instead of clobbered, `cmd_save` validates `--secret` before persisting, and
+  `state_root()` correctly resolves `AGENTOS_STATE_DIR`.
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added

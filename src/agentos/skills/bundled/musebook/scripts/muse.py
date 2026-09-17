@@ -30,6 +30,7 @@ import mimetypes
 import os
 import secrets
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -76,10 +77,12 @@ def state_root() -> Path:
     configured = os.environ.get("MUSE_STATE_DIR", "").strip()
     if configured:
         return Path(configured).expanduser()
-    for var in ("AGENTOS_STATE_DIR", "AGENTOS_HOME"):
-        home = os.environ.get(var, "").strip()
-        if home:
-            return Path(home).expanduser() / "state" / "muse"
+    state_dir = os.environ.get("AGENTOS_STATE_DIR", "").strip()
+    if state_dir:
+        return Path(state_dir).expanduser() / "muse"
+    home = os.environ.get("AGENTOS_HOME", "").strip()
+    if home:
+        return Path(home).expanduser() / "state" / "muse"
     return Path.home() / ".agentos" / "state" / "muse"
 
 
@@ -112,19 +115,48 @@ def load_identity() -> dict[str, str]:
 
 def save_identity(**fields: str) -> Path:
     path = key_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        os.chmod(path.parent, 0o700)
+    except OSError:
+        pass
+
     existing: dict[str, Any] = {}
     if path.is_file():
         try:
             loaded = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(loaded, dict):
                 existing = loaded
-        except (OSError, json.JSONDecodeError):
-            existing = {}
+            else:
+                raise SystemExit(f"identity file {path} does not contain a JSON object")
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"identity file {path} is unreadable or corrupted: {exc}") from exc
+
     existing.update({k: v for k, v in fields.items() if v})
-    path.write_text(json.dumps(existing, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    # The file holds a private key. 0600 before anyone else on the box reads it.
-    os.chmod(path, 0o600)
+    payload = json.dumps(existing, indent=2, sort_keys=True) + "\n"
+
+    # Write atomically via a 0600 temp file so the private key is never
+    # world-readable at its destination and cannot be truncated by interruptions.
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+        try:
+            os.chmod(tmp_name, 0o600)
+        except OSError:
+            pass
+        os.replace(tmp_name, path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
     return path
 
 
@@ -327,6 +359,8 @@ def cmd_save(args: argparse.Namespace) -> int:
     }
     if not fields:
         raise SystemExit("save needs at least one of --muse-id / --secret / --public-key")
+    if args.secret:
+        private_key(args.secret)
     return emit({"ok": True, "saved_to": str(save_identity(**fields))})
 
 
