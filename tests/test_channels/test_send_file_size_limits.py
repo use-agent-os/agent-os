@@ -18,6 +18,7 @@ from agentos.channels._util import check_channel_file_size
 from agentos.channels.contract import ChannelSendStatus
 from agentos.channels.discord import DiscordChannel, DiscordChannelConfig
 from agentos.channels.email import EmailChannel, EmailChannelConfig
+from agentos.channels.slack import SlackChannel
 from agentos.channels.telegram import TelegramChannel, TelegramChannelConfig
 
 
@@ -118,3 +119,19 @@ class TestEmailFileSizeCeiling:
 
         assert result.status == ChannelSendStatus.FAILED
         assert "exceeds Email 25 MB upload ceiling" in result.reason
+
+
+class TestSlackFileSizeCeiling:
+    def test_slack_ceiling_is_1_gb(self) -> None:
+        assert SlackChannel.MAX_FILE_BYTES == 1024 * 1024 * 1024
+
+    @pytest.mark.asyncio
+    async def test_send_file_rejects_oversized_file(self, tmp_path: Path) -> None:
+        f = tmp_path / "huge_file.dat"
+        f.write_bytes(b"x" * 10)
+
+        channel = SlackChannel(token="xoxb-test", slack_channel_id="C00000001")
+
+        with patch("os.path.getsize", return_value=1025 * 1024 * 1024):
+            with pytest.raises(ValueError, match="exceeds Slack 1024 MB upload ceiling"):
+                await channel.send_file(channel_id="C00000001", file_path=str(f))

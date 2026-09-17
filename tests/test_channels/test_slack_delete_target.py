@@ -12,12 +12,14 @@ the same ``<channel_id>|<ts>`` shape, and the tool builds it from ``target``.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
+from agentos.channels.contract import ChannelSendStatus
 from agentos.channels.slack import SlackChannel
 from agentos.tools.builtin import messaging
 
@@ -145,3 +147,95 @@ async def test_message_tool_delete_routes_slack_target(monkeypatch: pytest.Monke
         "message_id": "1712345678.123456",
     }
     assert _payload(post) == {"channel": "C99999999", "ts": "1712345678.123456"}
+
+
+# --- send_file -------------------------------------------------------------
+
+
+async def test_send_file_uses_channel_and_thread_from_composite_id(tmp_path: Path) -> None:
+    channel = SlackChannel(token="xoxb-test", slack_channel_id="C00000001")
+    client = AsyncMock()
+
+    init_resp = _resp(
+        {"ok": True, "upload_url": "https://upload.slack.test/file", "file_id": "F123"}
+    )
+    upload_resp = _resp({"ok": True})
+    complete_resp = _resp({"ok": True})
+
+    async def mock_post(url, *args, **kwargs):
+        if url == "/files.getUploadURLExternal":
+            return init_resp
+        elif url == "https://upload.slack.test/file":
+            return upload_resp
+        elif url == "/files.completeUploadExternal":
+            return complete_resp
+        return _resp()
+
+    client.post = AsyncMock(side_effect=mock_post)
+    channel._client = client
+
+    test_file = tmp_path / "test.txt"
+    test_file.write_bytes(b"hello slack")
+
+    res = await channel.send_file(
+        "C99999999|1712345678.123456", str(test_file), content="Here is a file"
+    )
+    assert res.status == ChannelSendStatus.SENT
+    assert res.provider_file_id == "F123"
+
+    complete_call = [
+        call
+        for call in client.post.await_args_list
+        if call.args[0] == "/files.completeUploadExternal"
+    ][0]
+    payload = complete_call.kwargs["json"]
+    assert payload["channel_id"] == "C99999999"
+    assert payload["thread_ts"] == "1712345678.123456"
+    assert payload["initial_comment"] == "Here is a file"
+    assert payload["files"] == [{"id": "F123", "title": "test.txt"}]
+
+
+async def test_send_file_bare_thread_ts_falls_back_to_default_channel(tmp_path: Path) -> None:
+    channel = SlackChannel(token="xoxb-test", slack_channel_id="C00000001")
+    client = AsyncMock()
+    init_resp = _resp(
+        {"ok": True, "upload_url": "https://upload.slack.test/file", "file_id": "F123"}
+    )
+    upload_resp = _resp({"ok": True})
+    complete_resp = _resp({"ok": True})
+
+    async def mock_post(url, *args, **kwargs):
+        if url == "/files.getUploadURLExternal":
+            return init_resp
+        elif url == "https://upload.slack.test/file":
+            return upload_resp
+        elif url == "/files.completeUploadExternal":
+            return complete_resp
+        return _resp()
+
+    client.post = AsyncMock(side_effect=mock_post)
+    channel._client = client
+
+    test_file = tmp_path / "test.txt"
+    test_file.write_bytes(b"hello slack")
+
+    res = await channel.send_file("1712345678.123456", str(test_file))
+    assert res.status == ChannelSendStatus.SENT
+
+    complete_call = [
+        call
+        for call in client.post.await_args_list
+        if call.args[0] == "/files.completeUploadExternal"
+    ][0]
+    payload = complete_call.kwargs["json"]
+    assert payload["channel_id"] == "C00000001"
+    assert payload["thread_ts"] == "1712345678.123456"
+
+
+async def test_send_file_without_target_channel_raises(tmp_path: Path) -> None:
+    channel = SlackChannel(token="xoxb-test", slack_channel_id="")
+    test_file = tmp_path / "test.txt"
+    test_file.write_bytes(b"hello slack")
+
+    with pytest.raises(RuntimeError, match="no target channel"):
+        await channel.send_file("", str(test_file))

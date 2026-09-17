@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `channels/slack`: support composite `<channel_id>|<thread_ts>` targets, default channel fallback, and file size validation in `SlackChannel.send_file`.
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added
