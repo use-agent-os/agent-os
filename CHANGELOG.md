@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Skills (cron-watchers): `watch_rss` took the first `<link>` of an Atom
+  entry in document order, and platforms commonly put `rel="self"` -- the
+  feed's own address -- ahead of `rel="alternate"`, so every reported entry
+  linked to the feed instead of the article. Links are now chosen by
+  relation and type per RFC 4287: `alternate` first (a missing `rel` means
+  `alternate`, and the IANA IRI spelling is accepted), an HTML alternate
+  ahead of a PDF one, `self` last of all. A relative `href` is resolved
+  against `xml:base` and the feed URL, and an RSS item whose only URL is a
+  permalink `<guid>` now reports it as the link (#2468).
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added
