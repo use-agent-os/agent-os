@@ -881,6 +881,7 @@ Read:
 ```sh
 agentos context
 agentos context --json
+agentos context --top 5
 agentos cost
 agentos cost savings
 agentos diagnostics status
@@ -894,7 +895,10 @@ session spent, but what every request carries before the conversation starts.
 Tool schemas dominate it — around 7,300 tokens on a stock install, charged on
 every call in every turn — and the command prices each `[tools] profile` against
 the current one so the trade is visible before you make it. A profile is fixed
-for the session, so narrowing it does not disturb the prompt cache.
+for the session, so narrowing it does not disturb the prompt cache. `--top`
+controls how many of the largest tool schemas are listed (default 10) —
+raise it to see further down the list, or lower it to focus on the biggest
+offenders when trimming a profile.
 
 `agentos cost` aggregates and displays model usage and estimated cost reports from the gateway:
 
