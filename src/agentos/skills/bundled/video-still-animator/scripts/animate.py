@@ -43,16 +43,23 @@ def resolve_ffmpeg(explicit: str) -> str:
     if os.name != "nt":
         return explicit  # let subprocess fail with the canonical error
     local_app = os.environ.get("LOCALAPPDATA", "")
-    if not local_app:
-        return explicit
-    from glob import glob
-    for hit in glob(os.path.join(local_app, WINGET_FFMPEG_GLOB)):
-        if os.path.isfile(hit):
-            return hit
+    # A missing LOCALAPPDATA only rules out the winget glob below -- it must
+    # not skip the fixed-path candidates further down too (#2435).
+    if local_app:
+        from glob import glob
+        for hit in glob(os.path.join(local_app, WINGET_FFMPEG_GLOB)):
+            if os.path.isfile(hit):
+                return hit
     candidates = [
-        os.path.join(os.environ.get("USERPROFILE", ""), "scoop", "apps", "ffmpeg", "current", "bin", "ffmpeg.exe"),
+        # A raw backslash literal, not os.path.join: these are Windows-target
+        # paths regardless of which OS this script's own process is running
+        # under (e.g. a cross-platform test on Linux CI simulating "nt" via
+        # os.name), and os.path.join always uses the *host* platform's
+        # separator, not the target's.
+        rf"{os.environ.get('USERPROFILE', '')}\scoop\apps\ffmpeg\current\bin\ffmpeg.exe",
         r"C:\ProgramData\chocolatey\bin\ffmpeg.exe",
         r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
+        r"C:\ffmpeg\bin\ffmpeg.exe",
     ]
     for p in candidates:
         if p and os.path.isfile(p):
