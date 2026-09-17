@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Security: `is_env_dump_command` judged a shell segment by its first token
+  alone, so `sudo printenv` and `/usr/bin/env` were not dumps -- the
+  environment reached the model with only shape matching, and an opaque
+  `DATABASE_PASSWORD` went straight through -- while `set -e`,
+  `export X=y && ...` and `env python3 build.py` *were* dumps, so the output
+  of whatever followed got the assignment pass and `secret_key =
+  self._secret_key` in a `cat` of source came back masked. The command is
+  now found under any wrapper that runs it and by its basename, and its
+  arguments decide what it does (#2617).
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added
