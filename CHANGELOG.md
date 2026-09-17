@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- `is_env_dump_command`: unwrap command wrappers (`sudo`, `command`, `exec`,
+  `busybox`, `nohup`, `time`, `nice`) and parse argument operands so wrapped
+  environment dumps are masked and non-dump commands like `set -e`, `export
+  VAR=val`, or `env python3 script.py` do not trigger false-positive code
+  redaction ([#2617](https://github.com/use-agent-os/agent-os/issues/2617)).
 - `read_spreadsheet`: a phonetic guide (furigana) stored alongside an xlsx
   cell's text is no longer appended to the value. The shared-string reader took
   every `<t>` descendant, including the ones inside `<rPh>`, so a Japanese

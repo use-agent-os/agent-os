@@ -689,7 +689,11 @@ def _has_known_prefix(text: str) -> bool:
 
 # ── Terminal output ─────────────────────────────────────────────────────────
 
-_ENV_DUMP_COMMANDS = frozenset({"env", "printenv", "set", "export", "declare"})
+_ENV_DUMP_COMMANDS = frozenset({"env", "printenv", "set", "export", "declare", "typeset"})
+_WRAPPER_COMMANDS = frozenset(
+    {"sudo", "command", "exec", "busybox", "nohup", "time", "nice", "doas"}
+)
+_ENV_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
 
 #: The separators that end one command and start the next. A newline is one of
 #: them — in POSIX shell it does the same job as ``;`` — and ``exec_command``
@@ -704,13 +708,137 @@ _SEGMENT_SEPARATOR_RE = re.compile(r"[|;&\n\r]+")
 _SHELL_GROUPING_CHARS = "(){}"
 
 
+def _command_base_name(token: str) -> str:
+    base = os.path.basename(token.replace("\\", "/")).lower()
+    if base.endswith(".exe"):
+        base = base[:-4]
+    return base
+
+
+def _is_tokens_env_dump(tokens: list[str]) -> bool:
+    if not tokens:
+        return False
+
+    idx = 0
+    while idx < len(tokens):
+        cmd = _command_base_name(tokens[idx])
+        if cmd in _WRAPPER_COMMANDS:
+            if cmd == "sudo":
+                idx += 1
+                while idx < len(tokens):
+                    t = tokens[idx]
+                    if t == "--":
+                        idx += 1
+                        break
+                    if t.startswith("-"):
+                        if t in {
+                            "-u",
+                            "-g",
+                            "-C",
+                            "-p",
+                            "-r",
+                            "-t",
+                            "-T",
+                            "-h",
+                            "-U",
+                        } and idx + 1 < len(tokens):
+                            idx += 2
+                        else:
+                            idx += 1
+                    else:
+                        break
+                continue
+            if cmd == "command":
+                idx += 1
+                if any(t in {"-v", "-V"} for t in tokens[idx:]):
+                    return False
+                while idx < len(tokens) and tokens[idx].startswith("-"):
+                    idx += 1
+                continue
+            if cmd == "exec":
+                idx += 1
+                while idx < len(tokens) and tokens[idx].startswith("-"):
+                    if tokens[idx] in {"-a"} and idx + 1 < len(tokens):
+                        idx += 2
+                    else:
+                        idx += 1
+                continue
+            if cmd in {"busybox", "nohup"}:
+                idx += 1
+                continue
+            if cmd == "time":
+                idx += 1
+                while idx < len(tokens) and tokens[idx].startswith("-"):
+                    if tokens[idx] in {"-o"} and idx + 1 < len(tokens):
+                        idx += 2
+                    else:
+                        idx += 1
+                continue
+            if cmd in {"nice", "doas"}:
+                idx += 1
+                while idx < len(tokens) and tokens[idx].startswith("-"):
+                    if tokens[idx] in {"-n", "-u"} and idx + 1 < len(tokens):
+                        idx += 2
+                    else:
+                        idx += 1
+                continue
+
+        args = tokens[idx + 1 :]
+        if cmd == "printenv":
+            return True
+        if cmd == "set":
+            return len(args) == 0
+        if cmd == "export":
+            return len(args) == 0 or all(a == "-p" for a in args)
+        if cmd in {"declare", "typeset"}:
+            if not args:
+                return True
+            valid_flags = {"-p", "-x", "-px", "-xp", "--"}
+            return all(a in valid_flags for a in args)
+        if cmd == "env":
+            env_opts_with_arg = {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"}
+            i = 0
+            while i < len(args):
+                arg = args[i]
+                if arg == "--":
+                    i += 1
+                    break
+                if arg == "-":
+                    i += 1
+                    continue
+                if arg.startswith("-"):
+                    if any(
+                        arg.startswith(opt + "=")
+                        for opt in ("--unset", "--chdir", "--split-string")
+                    ):
+                        i += 1
+                        continue
+                    if arg in env_opts_with_arg:
+                        i += 2
+                        continue
+                    i += 1
+                    continue
+                if _ENV_IDENTIFIER_RE.match(arg):
+                    i += 1
+                    continue
+                break
+            if i >= len(args):
+                return True
+            return _is_tokens_env_dump(args[i:])
+        return False
+
+    return False
+
+
 def is_env_dump_command(command: str | None) -> bool:
     """Return whether *command* prints the environment to stdout.
 
-    Checks the first token of every pipeline or sequence segment, with shell
-    grouping characters stripped off. Conservative: anything it cannot parse is
-    reported as not-a-dump, and the caller falls back to the pass that has
-    fewer false positives.
+    Unwraps wrapper commands (``sudo``, ``command``, ``exec``, ``busybox``,
+    ``nohup``, ``time``, ``nice``), normalises binary paths, and inspects
+    command argument operands. Non-dump invocations such as ``env python3
+    build.py``, ``set -e``, ``export VAR=val``, or ``declare -A`` return
+    ``False`` so that subsequent output is not falsely subjected to name-based
+    assignment masking.
     """
     if not command or not isinstance(command, str):
         return False
@@ -727,7 +855,7 @@ def is_env_dump_command(command: str | None) -> bool:
             for stripped in (token.strip(_SHELL_GROUPING_CHARS) for token in tokens)
             if stripped
         ]
-        if tokens and tokens[0] in _ENV_DUMP_COMMANDS:
+        if _is_tokens_env_dump(tokens):
             return True
     return False
 

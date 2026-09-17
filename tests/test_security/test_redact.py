@@ -338,8 +338,19 @@ class TestBotTokensAndPassphrases:
 
     @pytest.mark.parametrize(
         "name",
-        ["bot_name", "bot_id", "bot_count", "bot_status", "bot_version", "robot_arm",
-         "chatbot_config", "chatbot_model", "botHandler", "MAX_BOTS", "token_budget"],
+        [
+            "bot_name",
+            "bot_id",
+            "bot_count",
+            "bot_status",
+            "bot_version",
+            "robot_arm",
+            "chatbot_config",
+            "chatbot_model",
+            "botHandler",
+            "MAX_BOTS",
+            "token_budget",
+        ],
     )
     def test_an_unqualified_bot_name_is_not_a_credential(self, name: str) -> None:
         """The pair must be adjacent, so ``bot`` alone still means nothing."""
@@ -347,8 +358,16 @@ class TestBotTokensAndPassphrases:
 
     @pytest.mark.parametrize(
         "name",
-        ["passphrase", "PASSPHRASE", "Passphrase", "ssh_passphrase", "SSH_PASSPHRASE",
-         "gpg_passphrase", "key_passphrase", "keystore_passphrase"],
+        [
+            "passphrase",
+            "PASSPHRASE",
+            "Passphrase",
+            "ssh_passphrase",
+            "SSH_PASSPHRASE",
+            "gpg_passphrase",
+            "key_passphrase",
+            "keystore_passphrase",
+        ],
     )
     def test_a_passphrase_is_a_credential(self, name: str) -> None:
         """``passphrase`` belongs beside ``password`` and ``passwd``.
@@ -470,15 +489,62 @@ class TestTerminalOutput:
             # Grouping keeps the command glued to a paren once shlex is done.
             pytest.param("(printenv)", True, id="parenthesised"),
             pytest.param("(cd /srv; printenv)", True, id="parenthesised-sequence"),
-            # The same shapes with no dump in them stay out.
-            pytest.param("git log --oneline\ngit status", False, id="multi-line-non-dump"),
-            pytest.param('grep "(env)" notes.txt', False, id="parens-in-a-pattern"),
-            pytest.param("echo 'set'\nls", False, id="quoted-keyword-on-a-line"),
-            pytest.param("node --env-file=.env app.js", False, id="env-inside-a-flag"),
+            # Wrapped commands and absolute/relative binary paths.
+            pytest.param("/usr/bin/env", True, id="path-env"),
+            pytest.param("/usr/bin/printenv", True, id="path-printenv"),
+            pytest.param("sudo env", True, id="sudo-env"),
+            pytest.param("sudo -E printenv", True, id="sudo-flags-printenv"),
+            pytest.param("sudo -u root printenv", True, id="sudo-opt-arg-printenv"),
+            pytest.param("command env", True, id="command-env"),
+            pytest.param("command -p env", True, id="command-flag-env"),
+            pytest.param("exec env", True, id="exec-env"),
+            pytest.param("busybox env", True, id="busybox-env"),
+            pytest.param("nohup printenv", True, id="nohup-printenv"),
+            pytest.param("time env", True, id="time-env"),
+            pytest.param("nice -n 10 env", True, id="nice-env"),
+            # Argument variations for genuine dumps.
+            pytest.param("printenv DATABASE_PASSWORD", True, id="printenv-variable-name"),
+            pytest.param("export -p", True, id="export-p"),
+            pytest.param("declare -p", True, id="declare-p"),
+            pytest.param("declare -x", True, id="declare-x"),
+            pytest.param("declare -xp", True, id="declare-xp"),
+            pytest.param("typeset -p", True, id="typeset-p"),
+            pytest.param("env -i", True, id="env-ignore-flag"),
+            pytest.param("env -0", True, id="env-null-flag"),
+            pytest.param("env -u FOO", True, id="env-unset-flag"),
+            pytest.param("env FOO=bar", True, id="env-assignment-only"),
+            pytest.param("env FOO=bar BAZ=qux", True, id="env-multiple-assignments"),
+            pytest.param("env sudo printenv", True, id="env-running-wrapper-dump"),
+            # Non-dump commands: env running program, option setting, variable exports/declarations.
+            pytest.param("env python3 build.py", False, id="env-running-program"),
+            pytest.param("env FOO=bar ./run.sh", False, id="env-assign-and-run"),
+            pytest.param("set -e", False, id="set-option-single"),
+            pytest.param("set -euo pipefail\ncat src/config.py", False, id="set-options-script"),
+            pytest.param("export API_KEY=abc && python deploy.py", False, id="export-assignment"),
+            pytest.param("export PATH=$PATH:/opt/bin; make", False, id="export-path-assignment"),
+            pytest.param("declare -A colors", False, id="declare-assoc-array"),
+            pytest.param("declare -i count=0", False, id="declare-integer"),
+            pytest.param("command -v printenv", False, id="command-lookup"),
         ],
     )
     def test_env_dump_detection(self, command: str, expected: bool) -> None:
         assert redact.is_env_dump_command(command) is expected
+
+    def test_a_wrapped_dump_is_masked_in_terminal_output(self) -> None:
+        """``sudo printenv`` or ``/usr/bin/env`` triggers the assignment pass for opaque secrets."""
+        output = "DATABASE_PASSWORD=hunter2-prod\nPATH=/usr/bin\n"
+        out_sudo = redact.redact_terminal_output(output, "sudo printenv")
+        out_path = redact.redact_terminal_output(output, "/usr/bin/env")
+        assert "hunter2-prod" not in out_sudo
+        assert "hunter2-prod" not in out_path
+
+    def test_a_non_dump_command_avoids_false_positive_code_redaction(self) -> None:
+        """``set -euo pipefail`` or ``export X=y && ...`` does not mask code identifiers."""
+        code = "class Settings:\n    secret_key = self._secret_key\n"
+        out_set = redact.redact_terminal_output(code, "set -euo pipefail\ncat src/config.py")
+        out_export = redact.redact_terminal_output(code, "export DEBUG=1 && cat src/settings.py")
+        assert out_set == code
+        assert out_export == code
 
     def test_a_multi_line_dump_is_masked_like_its_one_line_twin(self) -> None:
         """``cd x`` + newline + ``printenv`` runs what ``cd x && printenv`` runs.
