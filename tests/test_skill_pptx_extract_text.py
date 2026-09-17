@@ -150,3 +150,48 @@ def test_write_falls_back_when_stdout_has_no_buffer() -> None:
     assert "季度回顾" in written
     # The emoji has no cp936 form, so it is escaped rather than dropped.
     assert "?" not in written
+
+
+def test_table_merged_cells_deduplication() -> None:
+    """extract_text extracts merged table cells exactly once, skipping spanned continuations."""
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+
+    table_shape = slide.shapes.add_table(3, 3, Inches(1), Inches(1), Inches(6), Inches(3))
+    table = table_shape.table
+
+    # Row 0: Horizontally merge cell(0, 0) through cell(0, 2)
+    cell_00 = table.cell(0, 0)
+    cell_02 = table.cell(0, 2)
+    cell_00.merge(cell_02)
+    cell_00.text_frame.text = "Q1 Financial Summary"
+    table.cell(0, 1).text_frame.text = "Q1 Financial Summary"
+
+    # Row 1 & 2: Vertically merge cell(1, 0) and cell(2, 0)
+    cell_10 = table.cell(1, 0)
+    cell_20 = table.cell(2, 0)
+    cell_10.merge(cell_20)
+    cell_10.text_frame.text = "North America"
+    table.cell(2, 0).text_frame.text = "North America"
+
+    table.cell(1, 1).text_frame.text = "Revenue"
+    table.cell(1, 2).text_frame.text = "$50M"
+    table.cell(2, 1).text_frame.text = "Profit"
+    table.cell(2, 2).text_frame.text = "$12M"
+
+    table_lines = extract_text._table_text(table_shape)
+    assert table_lines == [
+        "Q1 Financial Summary",
+        "North America | Revenue | $50M",
+        "Profit | $12M",
+    ]
+
+
+def test_notes_text_does_not_mutate_slide_without_notes() -> None:
+    """_notes_text returns empty string and avoids creating notes slide part when none exists."""
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+
+    assert getattr(slide, "has_notes_slide", False) is False
+    assert extract_text._notes_text(slide) == ""
+    assert getattr(slide, "has_notes_slide", False) is False

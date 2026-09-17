@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `skills/pptx`: deduplicate merged table cells and guard notes slide access in `extract_text`.
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added

@@ -68,6 +68,7 @@ def _table_text(shape) -> list[str]:
         cells = [
             " ".join(para.text.strip() for para in cell.text_frame.paragraphs if para.text.strip())
             for cell in row.cells
+            if not getattr(cell, "is_spanned", False)
         ]
         cells = [c for c in cells if c]
         if cells:
@@ -104,6 +105,8 @@ def _slide_text(slide) -> list[str]:
 
 
 def _notes_text(slide) -> str:
+    if getattr(slide, "has_notes_slide", True) is False:
+        return ""
     notes = getattr(slide, "notes_slide", None)
     if not notes:
         return ""
