@@ -191,6 +191,7 @@ class TelegramChannel:
     supports_slash_commands: bool = True
     typing_keepalive_interval_s: ClassVar[float] = 4.0
     MAX_FILE_BYTES: ClassVar[int] = 50 * 1024 * 1024
+    _CAPTION_TEXT_LIMIT: ClassVar[int] = 1024
     policy: ChannelAccessPolicy = field(
         default_factory=lambda: ChannelAccessPolicy(
             dm_allowed=True,
@@ -1279,21 +1280,13 @@ class TelegramChannel:
     @staticmethod
     def _split_for_limit(
         segment: str,
+        limit: int = _MESSAGE_TEXT_LIMIT,
         *,
         measure: Callable[[str], int] | None = None,
     ) -> tuple[str, str]:
-        """Split *segment* into the largest prefix that fits one message, plus the rest.
-
-        The 4096 budget applies to the *rendered* HTML by default, which is
-        longer than the markdown it came from. ``measure`` overrides what's
-        measured against the budget — callers that send raw text verbatim
-        (an explicit ``parse_mode``, where there is no HTML render step)
-        pass ``len`` directly so the cut reflects what Telegram will
-        actually receive. See :func:`split_text_for_limit` for the shared
-        cut-point and fenced-code-block logic.
-        """
+        """Split *segment* into the largest prefix that fits one message/caption, plus the rest."""
         length = measure if measure is not None else (lambda text: len(render_telegram_html(text)))
-        return split_text_for_limit(segment, _MESSAGE_TEXT_LIMIT, measure=length)
+        return split_text_for_limit(segment, limit, measure=length)
 
     async def _stream_send(
         self,
@@ -1482,8 +1475,12 @@ class TelegramChannel:
         path = Path(file_path)
         check_channel_file_size(path, self.MAX_FILE_BYTES, "Telegram")
         payload = {"chat_id": str(chat_id)}
+        caption_tail = ""
         if content:
-            payload["caption"] = render_telegram_html(content)
+            caption_head, caption_tail = self._split_for_limit(
+                content, limit=self._CAPTION_TEXT_LIMIT
+            )
+            payload["caption"] = render_telegram_html(caption_head)
             payload["parse_mode"] = "HTML"
         client = self._get_client()
         try:
@@ -1499,6 +1496,13 @@ class TelegramChannel:
         result: dict[str, Any] = raw_result if isinstance(raw_result, dict) else {}
         raw_document = result.get("document")
         document: dict[str, Any] = raw_document if isinstance(raw_document, dict) else {}
+        if caption_tail:
+            await self.send(
+                OutgoingMessage(
+                    content=caption_tail,
+                    reply_to=str(chat_id),
+                )
+            )
         return ChannelSendResult.sent(
             capability=ChannelCapabilities.NATIVE_FILE_UPLOAD,
             target_id=str(chat_id),
