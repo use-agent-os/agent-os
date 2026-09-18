@@ -18,6 +18,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- `multi-search-engine`: `_ddg_search` returned 1 result instead of an empty list when `limit <= 0` and sent an unnecessary HTTP request to DuckDuckGo; it now returns an empty list immediately for `limit <= 0`.
+
+
 - WebUI chat: "Move to project" and "Rename session" on a brand-new chat
   (Cmd+Shift+O / `/new`, before the first message) failed with "Session not
   found". The WebUI mints the session key client-side and the row only

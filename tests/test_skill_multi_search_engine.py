@@ -688,3 +688,17 @@ def test_search_all_reports_resolved_engines(
 
     assert payload["engines"] == ["duckduckgo"]
     assert payload["errors"] == []
+
+
+def test_ddg_search_returns_empty_list_for_zero_or_negative_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    search = _import_search()
+
+    def _fail_client():
+        raise AssertionError("network call must not be made when limit <= 0")
+
+    monkeypatch.setattr(search, "_client", _fail_client)
+
+    assert search._ddg_search("query", 0) == []
+    assert search._ddg_search("query", -1) == []

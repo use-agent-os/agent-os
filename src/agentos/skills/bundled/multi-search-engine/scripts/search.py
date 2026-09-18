@@ -75,6 +75,8 @@ def _is_ddg_challenge(response: httpx.Response, soup: BeautifulSoup) -> bool:
 
 
 def _ddg_search(query: str, limit: int) -> list[Result]:
+    if limit <= 0:
+        return []
     with _client() as client:
         soup: BeautifulSoup | None = None
         for attempt in range(2):
