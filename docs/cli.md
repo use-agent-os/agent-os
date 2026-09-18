@@ -981,6 +981,32 @@ Read:
 - [`diagnostics-and-replay.md`](diagnostics-and-replay.md)
 - [`configuration.md`](configuration.md)
 
+## Migration from External Runtimes
+
+```sh
+agentos migrate                          # interactive migration wizard
+agentos migrate openclaw                 # preview migration from OpenClaw (dry-run)
+agentos migrate openclaw --apply         # apply OpenClaw migration
+agentos migrate hermes                   # preview migration from Hermes (dry-run)
+agentos migrate hermes --apply           # apply Hermes migration
+agentos migrate openclaw --json          # machine-readable preview report
+agentos migrate hermes --source /path    # custom external home path
+```
+
+`agentos migrate` imports skills, configuration, and session histories from external runtimes.
+
+- **Safe by default**: Running without `--apply` performs a dry-run preview, inspecting the source directory and reporting what would be imported, updated, or skipped without modifying AgentOS files.
+- `--apply`: Executes the migration and writes changes to AgentOS config, skills, and sessions.
+- `--source <path>`: Points to a custom source runtime home directory (defaults to auto-detected `~/.openclaw` or `~/.hermes`).
+- `--json`: Emits machine-readable JSON detailing discovered artifacts, conflicts, and migration actions.
+- `--skills-conflict {skip,overwrite,rename}`: Conflict resolution strategy when an imported skill name collides with an existing skill.
+- `--preset {all,skills_only,config_only,sessions_only}`: Limits migration to specific resource types.
+
+Read:
+
+- [`../MIGRATION.md`](../MIGRATION.md)
+- [`operations.md`](operations.md)
+
 ## MCP Server Bridge
 
 ```sh
