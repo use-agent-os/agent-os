@@ -26,7 +26,7 @@ _BUNDLED = _AGENTOS_ROOT / "skills" / "bundled"
 if str(_AGENTOS_ROOT.parent) not in sys.path:
     sys.path.insert(0, str(_AGENTOS_ROOT.parent))
 
-from agentos.observability.decision_log_aggregate import (  # noqa: E402
+from agentos.observability.decision_log_aggregate import (  # type: ignore[import-untyped]  # noqa: E402
     aggregate_co_occurrences,
 )
 
@@ -93,6 +93,23 @@ def aggregate_router_fixtures(repo_root: Path | None = None) -> list[dict]:
     return fixtures
 
 
+def _write_json(data: dict) -> None:
+    """Write JSON output safely, surviving a non-UTF-8 stdout encoding."""
+    text = json.dumps(data, ensure_ascii=False) + "\n"
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is not None:
+        try:
+            buffer.write(text.encode("utf-8"))
+            buffer.flush()
+            return
+        except (AttributeError, OSError, ValueError):
+            pass
+
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    sys.stdout.write(text.encode(encoding, errors="backslashreplace").decode(encoding))
+    sys.stdout.flush()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -126,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
     if not result.get("co_occurrences"):
         result["placeholder"] = "no history available; downstream should rely on user intent only"
 
-    json.dump(result, sys.stdout, ensure_ascii=False)
+    _write_json(result)
     return 0
 
 

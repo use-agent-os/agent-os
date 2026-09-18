@@ -157,3 +157,17 @@ def test_resolve_log_dir_respects_env_overrides(tmp_path: Path, monkeypatch) -> 
     assert default.name == "logs"
     assert default.parent.name == ".agentos"
 
+
+def test_non_ascii_query_survives_non_utf8_stdout(tmp_path: Path) -> None:
+    """Non-ASCII query strings don't crash when stdout is cp1252/cp936."""
+    import os
+
+    query = "季度回顾 🎉"
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
+    args = [sys.executable, str(EXPLORE), "--log-dir", str(tmp_path), "--query", query]
+    proc = subprocess.run(args, capture_output=True, env=env)
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    payload = json.loads(proc.stdout.decode("utf-8"))
+    assert payload["query"] == query
+
+
