@@ -276,9 +276,7 @@ def test_memory_tool_descriptions_name_nested_memory_sources(tmp_path):
     assert "exact transcript full-text search" in memory_search.spec.description
     assert "MEMORY.md or memory/**/*.md" in memory_get.spec.description
     assert "sessions source results are virtual snippets" in memory_get.spec.description
-    assert "MEMORY.md or memory/**/*.md" in memory_get.spec.parameters["path"][
-        "description"
-    ]
+    assert "MEMORY.md or memory/**/*.md" in memory_get.spec.parameters["path"]["description"]
 
 
 def test_session_search_description_separates_transcripts_from_curated_memory():
@@ -467,3 +465,20 @@ async def test_memory_search_tool_allows_sessions_source_results(tmp_path, sourc
 
     assert "source: sessions" in output
     assert "sessions/main/session-1.md" in output
+
+
+def test_memory_search_query_terms_non_ascii() -> None:
+    assert memory_tools._memory_search_query_terms("東京カンファレンス") == ("東京カンファレンス",)
+    assert memory_tools._memory_search_query_terms("東京") == ("東京",)
+    assert memory_tools._memory_search_query_terms("über café") == ("über", "café")
+    assert memory_tools._memory_search_query_terms("привет мир") == ("привет", "мир")
+
+
+def test_bounded_memory_search_evidence_centers_on_non_ascii_matches() -> None:
+    lines = [f"line {i}" for i in range(200)]
+    lines[149] = "東京カンファレンスの議事録: プロジェクト承認完了"
+    content = "\n".join(lines)
+
+    evidence = memory_tools._bounded_memory_search_evidence(content, query="東京カンファレンス")
+    assert "東京カンファレンスの議事録" in evidence
+    assert "line 0\n" not in evidence

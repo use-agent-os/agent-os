@@ -303,8 +303,11 @@ def _clean_memory_search_evidence(text: str) -> str:
 def _memory_search_query_terms(query: str) -> tuple[str, ...]:
     terms: list[str] = []
     seen: set[str] = set()
-    for term in re.findall(r"[A-Za-z0-9]+", query.lower()):
-        if len(term) < 3 or term in _MEMORY_SEARCH_STOP_WORDS or term in seen:
+    for term in re.findall(r"\w+", query.lower()):
+        if not term.strip("_"):
+            continue
+        min_len = 3 if term.isascii() else 1
+        if len(term) < min_len or term in _MEMORY_SEARCH_STOP_WORDS or term in seen:
             continue
         terms.append(term)
         seen.add(term)
