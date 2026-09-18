@@ -104,7 +104,12 @@ def test_turn_runner_snapshot_fields_are_bounded() -> None:
     source = runtime.__file__
     with open(source, encoding="utf-8") as handle:
         text = handle.read()
-    for field in ("_memory_snapshots", "_bootstrap_snapshots"):
+    for field in (
+        "_memory_snapshots",
+        "_bootstrap_snapshots",
+        "_compaction_failures",
+        "_emergency_compaction_overrides",
+    ):
         assert f"self.{field}: BoundedRegistry" in text or f"self.{field}: dict" not in text
 
 
@@ -149,6 +154,45 @@ def test_evict_session_runtime_state_drops_bounded_registry_entries() -> None:
     assert plan.is_enabled("doomed") is False
     assert plan.is_enabled("kept") is True
     assert "doomed" not in monitor._baselines
+
+
+def test_turn_runner_compaction_state_is_dropped_on_teardown() -> None:
+    """#2399: these two leaked one entry per abandoned session forever.
+
+    Unlike ``_memory_snapshots``/``_bootstrap_snapshots`` (already
+    ``BoundedRegistry`` before this fix), neither dict's only removal path
+    (compaction success, or the session's next turn) ever fires for a
+    session that fails once and is never revisited -- proven here via the
+    same terminal-event sweep every other session-scoped registry answers.
+    """
+    from agentos.engine.runtime import (
+        TurnRunner,
+        _CompactionFailureState,
+        _EmergencyCompactionOverride,
+    )
+
+    runner = TurnRunner(provider_selector=object())
+    runner._compaction_failures["doomed"] = _CompactionFailureState(count=1)
+    runner._compaction_failures["kept"] = _CompactionFailureState(count=1)
+    runner._emergency_compaction_overrides["doomed"] = _EmergencyCompactionOverride(
+        summary="s",
+        kept_entries=[],
+        reason="test",
+        compaction_id="c1",
+    )
+    runner._emergency_compaction_overrides["kept"] = _EmergencyCompactionOverride(
+        summary="s",
+        kept_entries=[],
+        reason="test",
+        compaction_id="c2",
+    )
+
+    drop_session_state("doomed")
+
+    assert "doomed" not in runner._compaction_failures
+    assert "kept" in runner._compaction_failures
+    assert "doomed" not in runner._emergency_compaction_overrides
+    assert "kept" in runner._emergency_compaction_overrides
 
 
 def test_denial_ledger_session_state_is_dropped_on_teardown() -> None:

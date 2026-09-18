@@ -1729,12 +1729,31 @@ class TurnRunner:
         )
         # User turns since the last memory review, keyed (agent_id, session_key).
         self._memory_nudge_counters: dict[tuple[str, str], int] = {}
-        self._compaction_failures: dict[str, _CompactionFailureState] = {}
+        # Consecutive-failure circuit state, keyed by session_key. Only cleared
+        # on the next compaction *success* (#2399) -- a session that fails once
+        # and is never revisited would otherwise pin this entry forever, the
+        # same "nothing notifies this runner when a session ends" gap
+        # _memory_snapshots/_bootstrap_snapshots are already bounded against.
+        self._compaction_failures: BoundedRegistry[str, _CompactionFailureState] = (
+            BoundedRegistry(
+                name="TurnRunner._compaction_failures",
+                session_of=lambda key, _value: key,
+            )
+        )
         self._turn_compaction_attempted_sessions: set[str] = set()
         self._turn_compacted_sessions: set[str] = set()
         self._active_pre_compaction_flush_tasks: dict[str, asyncio.Task] = {}
         self._background_tasks: set[asyncio.Task] = set()
-        self._emergency_compaction_overrides: dict[str, _EmergencyCompactionOverride] = {}
+        # Emergency-compaction result awaiting the session's next turn, keyed by
+        # session_key. Only popped when that next turn loads history (#2399) --
+        # each entry carries a full kept-transcript slice, so an abandoned
+        # session leaks more than a counter would.
+        self._emergency_compaction_overrides: BoundedRegistry[
+            str, _EmergencyCompactionOverride
+        ] = BoundedRegistry(
+            name="TurnRunner._emergency_compaction_overrides",
+            session_of=lambda key, _value: key,
+        )
         # Last persisted row each session's loaded history covers, keyed by
         # session key; anchors inline compaction persistence so rows appended
         # mid-turn (queued follow-ups) are never overwritten or archived.
@@ -5930,14 +5949,20 @@ class TurnRunner:
 
     def _record_compaction_failure(self, session_key: str) -> None:
         if not hasattr(self, "_compaction_failures"):
-            self._compaction_failures = {}
+            self._compaction_failures = BoundedRegistry(
+                name="TurnRunner._compaction_failures",
+                session_of=lambda key, _value: key,
+            )
         state = self._compaction_failures.setdefault(session_key, _CompactionFailureState())
         state.count += 1
         state.opened_at = time.monotonic() if state.count >= _COMPACTION_FAILURE_LIMIT else None
 
     def _record_compaction_success(self, session_key: str) -> None:
         if not hasattr(self, "_compaction_failures"):
-            self._compaction_failures = {}
+            self._compaction_failures = BoundedRegistry(
+                name="TurnRunner._compaction_failures",
+                session_of=lambda key, _value: key,
+            )
         self._compaction_failures.pop(session_key, None)
 
     @staticmethod
