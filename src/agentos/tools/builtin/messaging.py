@@ -32,7 +32,16 @@ def _outgoing_metadata(channel: str, target: str, thread_id: str | None) -> dict
             metadata["thread_id"] = thread_id
         return metadata
     if channel == "slack":
-        return {"thread_ts": thread_id} if thread_id else {}
+        # ``SlackChannel.send`` resolves its destination from
+        # ``metadata['channel']`` first, then from a ``C``/``G``/``D``-prefixed
+        # ``reply_to``, then from the statically configured channel id. Passing
+        # only ``thread_ts`` left the tool's ``target`` with no way through, so
+        # every send landed in the configured channel whatever the caller asked
+        # for -- and the tool still reported the requested target back.
+        metadata = {"channel": target} if target else {}
+        if thread_id:
+            metadata["thread_ts"] = thread_id
+        return metadata
 
     metadata = {"recipient": target}
     if thread_id:
