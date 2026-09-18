@@ -67,21 +67,54 @@ def _run_git(args: list[str], cwd: Path) -> tuple[int, bytes, bytes]:
     return proc.returncode, proc.stdout, proc.stderr
 
 
+def _has_head(cwd: Path) -> bool:
+    """Whether the repository has a commit to diff against.
+
+    ``git diff HEAD`` is the spelling that reports staged and unstaged work in
+    one pass, but before the first commit lands ``HEAD`` names nothing and git
+    exits 128 with ``ambiguous argument 'HEAD'``. There the index *is* the
+    entire change set, so the revision is dropped and ``--cached`` carries it.
+
+    Asked as its own question, with the same probe
+    ``tools/builtin/git.py::_diff_revision`` already uses, rather than inferred
+    from a failed diff: a diff can fail for reasons that have nothing to do
+    with ``HEAD`` -- a damaged object store is the easy one -- and retrying
+    those without the revision answers a *different* question and calls it
+    success.
+    """
+    rc, _out, _err = _run_git(["rev-parse", "--verify", "--quiet", "HEAD"], cwd)
+    return rc == 0
+
+
+def _diff_argv(*, cached: bool, head: bool) -> list[str]:
+    argv = ["diff"]
+    if cached:
+        argv.append("--cached")
+    if head:
+        argv.append("HEAD")
+    return argv
+
+
 def _diff_for_mode(mode: str, cwd: Path) -> tuple[int, bytes, bytes]:
-    if mode == "cached_fallback_worktree":
-        rc, out, err = _run_git(["diff", "--cached", "HEAD"], cwd)
-        if rc != 0:
-            return rc, out, err
-        if out.strip():
-            return 0, out, err
-        return _run_git(["diff", "HEAD"], cwd)
-    if mode == "cached":
-        return _run_git(["diff", "--cached", "HEAD"], cwd)
-    if mode == "worktree":
-        return _run_git(["diff", "HEAD"], cwd)
     if mode == "staged_files":
+        # Never spelled HEAD, so it worked on an unborn branch already.
         return _run_git(["diff", "--cached", "--name-only"], cwd)
-    raise ValueError(f"unsupported mode {mode!r}")
+
+    if mode not in ("cached_fallback_worktree", "cached", "worktree"):
+        raise ValueError(f"unsupported mode {mode!r}")
+
+    head = _has_head(cwd)
+    if mode == "cached":
+        return _run_git(_diff_argv(cached=True, head=head), cwd)
+    if mode == "worktree":
+        return _run_git(_diff_argv(cached=False, head=head), cwd)
+
+    rc, out, err = _run_git(_diff_argv(cached=True, head=head), cwd)
+    if rc != 0:
+        return rc, out, err
+    if out.strip():
+        return 0, out, err
+    return _run_git(_diff_argv(cached=False, head=head), cwd)
 
 
 def main(argv: list[str] | None = None) -> int:
