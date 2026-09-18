@@ -49,7 +49,11 @@ def _norm_path(raw: str, *, base_dir: str | Path | None = None) -> str:
         if base_dir is not None and not path.is_absolute():
             path = Path(base_dir).expanduser() / path
         return str(path.resolve(strict=False))
-    except (OSError, ValueError):
+    except (OSError, RuntimeError, ValueError):
+        # RuntimeError: `~` that pathlib cannot expand — a tail that is not a
+        # real user name, or no resolvable home at all. This runs inside the
+        # sensitive-path scan, where a raise is worse than an unnormalized
+        # token.
         return raw
 
 

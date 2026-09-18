@@ -149,10 +149,38 @@ _DOTENV_LITERAL_RE = re.compile(
 )
 
 
+def _expanduser(path: str | Path) -> Path:
+    """``Path.expanduser()`` that cannot raise.
+
+    ``~`` expansion goes through ``pwd.getpwnam`` on POSIX, so a token whose
+    tail is not a real user name — ``~\\.aws\\credentials``, where the whole
+    backslash-separated tail reads as the user — raises ``RuntimeError``, and
+    so does any ``~`` in an environment with no resolvable home (a minimal
+    container, a headless service account). An exception escaping the
+    sensitive-path scanner is worse than a wrong verdict: it turns a security
+    check into a tool crash, so every expansion in this module goes through
+    here and falls back to the unexpanded path. The string-level candidates in
+    ``_comparison_path_candidates`` still catch the sensitive cases.
+    """
+    candidate = Path(path)
+    try:
+        return candidate.expanduser()
+    except (OSError, RuntimeError):
+        return candidate
+
+
+def _home() -> Path | None:
+    """``Path.home()``, or ``None`` where the home directory is indeterminate."""
+    try:
+        return Path.home()
+    except (OSError, RuntimeError):
+        return None
+
+
 def _expand(path: str) -> str:
     """Expand ``~`` and resolve to absolute without requiring existence."""
     try:
-        return str(Path(path).expanduser().resolve(strict=False))
+        return str(_expanduser(path).resolve(strict=False))
     except (OSError, RuntimeError):
         return path
 
@@ -167,8 +195,9 @@ def _comparison_path_candidates(path: str) -> list[str]:
     raw = str(path).strip().replace("\\", "/")
     if raw:
         candidates.append(raw.casefold() if os.name == "nt" else raw)
-    if raw.startswith("~/"):
-        expanded_home = str(Path.home()).replace("\\", "/") + raw[1:]
+    home = _home()
+    if raw.startswith("~/") and home is not None:
+        expanded_home = str(home).replace("\\", "/") + raw[1:]
         candidates.append(expanded_home.casefold() if os.name == "nt" else expanded_home)
     return list(dict.fromkeys(candidates))
 
@@ -354,7 +383,7 @@ def sensitive_path_marker(
     # turns into an absolute sensitive path, and the narrow leaf-marker
     # fallback below would be the only check it ever faced.
     text = _expand_env_vars(str(path).strip())
-    raw = Path(text).expanduser()
+    raw = _expanduser(text)
     if (
         text
         and not text.startswith("~")
@@ -519,12 +548,12 @@ def _resolve_command_cwd(cwd: str | Path | None, workspace: str | Path | None) -
     workspace itself (or, failing that, the process cwd) is the anchor.
     """
     if cwd is not None:
-        raw = Path(cwd).expanduser()
+        raw = _expanduser(cwd)
         if raw.is_absolute() or workspace is None:
             return raw
-        return Path(workspace).expanduser() / raw
+        return _expanduser(workspace) / raw
     if workspace is not None:
-        return Path(workspace).expanduser()
+        return _expanduser(workspace)
     return Path.cwd()
 
 
