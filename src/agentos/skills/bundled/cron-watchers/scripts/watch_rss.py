@@ -43,9 +43,21 @@ def _entries(root: ET.Element) -> list[tuple[str, str, str]]:
         title = _text(item.find("title")) or _text(item.find("{*}title"))
         link = _text(item.find("link")) or _text(item.find("{*}link"))
         if not link:
-            link_el = item.find("{*}link")
-            if link_el is not None:
-                link = (link_el.get("href") or "").strip()
+            # Atom <link rel="..." href="..."> elements (RFC 4287):
+            # rel defaults to "alternate"; prioritize alternate link over self/edit/enclosure.
+            links = item.findall("{*}link") or item.findall("link")
+            for link_el in links:
+                rel = (link_el.get("rel") or "alternate").strip().lower()
+                href = (link_el.get("href") or "").strip()
+                if href and rel == "alternate":
+                    link = href
+                    break
+            if not link and links:
+                for link_el in links:
+                    href = (link_el.get("href") or "").strip()
+                    if href:
+                        link = href
+                        break
         guid = (
             _text(item.find("guid"))
             or _text(item.find("id"))
