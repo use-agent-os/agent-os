@@ -128,6 +128,9 @@ class VideoMerger:
         total_segments = len(video_list)
         print(f"找到 {total_segments} 个视频片段，已按序号排序完成")
 
+        # 创建输出目录 (与 merge_chunks 保持一致)
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+
         # 获取原始分辨率
         if not resolution:
             width, height, _ = self.get_video_info(video_list[0])
