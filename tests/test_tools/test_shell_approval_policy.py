@@ -643,7 +643,7 @@ async def test_workspace_lockdown_still_blocks_a_real_target_beside_a_null_sink(
 
     result = await shell._check_exec_approval(
         "exec_command",
-        f"echo ok > {outside} 2>/dev/null",
+        f'echo ok > "{outside}" 2>/dev/null',
         str(workspace),
         "command requires approval",
         None,
@@ -660,12 +660,12 @@ async def test_workspace_lockdown_still_blocks_a_real_target_beside_a_null_sink(
 @pytest.mark.parametrize(
     "template",
     [
-        "echo ok>{target}",
-        "echo ok>>{target}",
-        "echo ok 2>{target}",
-        ">&{target}",
-        "echo ok &>{target}",
-        "cat<in>{target}",
+        'echo ok>"{target}"',
+        'echo ok>>"{target}"',
+        'echo ok 2>"{target}"',
+        '>&"{target}"',
+        'echo ok &>"{target}"',
+        'cat<in>"{target}"',
     ],
 )
 async def test_workspace_lockdown_blocks_redirection_without_whitespace(
@@ -701,10 +701,10 @@ async def test_workspace_lockdown_blocks_redirection_without_whitespace(
 @pytest.mark.parametrize(
     "template",
     [
-        "echo ok|tee {target}",
-        "echo ok|tee -a {target}",
-        "echo ok | tee --append {target}",
-        "echo ok | tee --output-error=warn {target}",
+        'echo ok|tee "{target}"',
+        'echo ok|tee -a "{target}"',
+        'echo ok | tee --append "{target}"',
+        'echo ok | tee --output-error=warn "{target}"',
     ],
 )
 async def test_workspace_lockdown_blocks_tee_without_whitespace_or_long_options(
@@ -808,6 +808,67 @@ async def test_workspace_lockdown_allows_descriptor_duplication_inside_workspace
     )
 
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_workspace_write_deny_globs_block_redirection_with_a_trailing_token(
+    tmp_path: Path,
+) -> None:
+    """A token after the target must not widen the target.
+
+    Recovering multi-word unquoted targets made this read as
+    ``reports/out.txt 2``, which no longer matched ``reports/*.txt`` and let
+    an ordinary, non-adversarial redirection through.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ctx = current_tool_context.get()
+    assert ctx is not None
+    ctx.interaction_mode = InteractionMode.UNATTENDED
+    ctx.elevated = "bypass"
+    ctx.workspace_dir = str(workspace)
+    ctx.workspace_write_deny_globs = ["reports/*.txt"]  # type: ignore[attr-defined]
+
+    result = await shell._check_exec_approval(
+        "exec_command",
+        "echo ok > reports/out.txt 2>/dev/null",
+        str(workspace),
+        "command requires approval",
+        None,
+        False,
+    )
+
+    assert result is not None
+    assert result["status"] == "blocked"
+    assert result["reason"] == "workspace_write_deny"
+
+
+@pytest.mark.asyncio
+async def test_workspace_write_deny_globs_block_a_quoted_target_with_spaces(
+    tmp_path: Path,
+) -> None:
+    """The fail-open from the issue: quotes used to defeat the deny glob."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ctx = current_tool_context.get()
+    assert ctx is not None
+    ctx.interaction_mode = InteractionMode.UNATTENDED
+    ctx.elevated = "bypass"
+    ctx.workspace_dir = str(workspace)
+    ctx.workspace_write_deny_globs = ["reports/*.txt"]  # type: ignore[attr-defined]
+
+    result = await shell._check_exec_approval(
+        "exec_command",
+        'echo ok > "reports/my report.txt"',
+        str(workspace),
+        "command requires approval",
+        None,
+        False,
+    )
+
+    assert result is not None
+    assert result["status"] == "blocked"
+    assert result["reason"] == "workspace_write_deny"
 
 
 @pytest.mark.asyncio

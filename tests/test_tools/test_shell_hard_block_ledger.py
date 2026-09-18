@@ -79,7 +79,7 @@ async def test_workspace_lockdown_block_is_recorded(ctx: ToolContext, tmp_path: 
     ctx.workspace_lockdown = True
     outside = tmp_path / "outside.txt"
 
-    command = f"echo hi > {outside}"
+    command = f'echo hi > "{outside}"'
     payload = json.loads(await shell.exec_command(command))
 
     assert payload["reason"] == "workspace_lockdown"
@@ -90,7 +90,7 @@ async def test_workspace_lockdown_block_is_recorded(ctx: ToolContext, tmp_path: 
 async def test_workspace_write_deny_block_is_recorded(ctx: ToolContext, workspace: Path) -> None:
     ctx.workspace_write_deny_globs = ["*.env"]
 
-    command = f"echo hi > {workspace / 'secrets.env'}"
+    command = 'echo hi > "%s"' % (workspace / "secrets.env")
     payload = json.loads(await shell.exec_command(command))
 
     assert payload["status"] == "blocked"
