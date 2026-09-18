@@ -104,6 +104,8 @@ instead.
 
 Rules:
 
+- `ops.json` must be a JSON list of operations. A single object or any other shape
+  is refused with exit 2 and no output file is written.
 - Rows and columns are 1-based (Excel convention).
 - An explicit `"value": null` **clears** the cell and keeps its style. It is
   the only way to empty a cell through this op list.

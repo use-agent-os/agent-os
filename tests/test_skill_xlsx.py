@@ -571,3 +571,68 @@ def test_clearing_a_cell_keeps_its_style(
     cell = load_workbook(str(out))["S"].cell(row=1, column=1)
     assert cell.value is None
     assert cell.number_format == "0.00%"
+
+
+@pytest.mark.parametrize(
+    "ops_text",
+    [
+        '{"op": "set_cell", "sheet": "S", "row": 1, "col": 1, "value": "x"}',
+        '"set_cell"',
+        "42",
+        "null",
+        "true",
+    ],
+)
+def test_non_list_ops_file_is_refused_and_nothing_is_written(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    ops_text: str,
+) -> None:
+    create_xlsx, edit_xlsx, _ = _import_scripts()
+    src = tmp_path / "book.xlsx"
+    create_xlsx.build({"sheets": [{"name": "S", "rows": [["initial"]]}]}).save(str(src))
+
+    ops_path = tmp_path / "ops.json"
+    ops_path.write_text(ops_text, encoding="utf-8")
+    out = tmp_path / "out.xlsx"
+    monkeypatch.setattr(sys, "argv", ["edit_xlsx.py", str(src), str(ops_path), "--out", str(out)])
+
+    code = edit_xlsx.main()
+    assert code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith(f"error: ops {ops_path} must be a JSON list of operations")
+    assert not out.exists(), "a refused ops file must not write an output workbook"
+
+
+@pytest.mark.parametrize(
+    "ops_bytes",
+    [
+        b'[{"op": "set_cell",',
+        # UTF-16LE with BOM — what PowerShell 5.1's Out-File writes by default.
+        '[{"op": "set_cell"}]'.encode("utf-16"),
+    ],
+)
+def test_invalid_json_ops_file_is_refused_with_a_clean_message(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    ops_bytes: bytes,
+) -> None:
+    create_xlsx, edit_xlsx, _ = _import_scripts()
+    src = tmp_path / "book.xlsx"
+    create_xlsx.build({"sheets": [{"name": "S", "rows": [["initial"]]}]}).save(str(src))
+
+    ops_path = tmp_path / "ops.json"
+    ops_path.write_bytes(ops_bytes)
+    out = tmp_path / "out.xlsx"
+    monkeypatch.setattr(sys, "argv", ["edit_xlsx.py", str(src), str(ops_path), "--out", str(out)])
+
+    code = edit_xlsx.main()
+    assert code == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith(f"error: ops {ops_path} is not valid JSON")
+    assert not out.exists(), "a refused ops file must not write an output workbook"
+
