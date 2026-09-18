@@ -106,3 +106,31 @@ async def test_path_qualified_glob_that_matches_nothing_reports_no_matches(repo:
         out = await fs.grep_search("def test_", path=str(repo), include="docs/*.py")
 
     assert out == "No matches for 'def test_'"
+
+
+@pytest.mark.asyncio
+async def test_grep_search_skips_binary_files(tmp_path: Path) -> None:
+    (tmp_path / "text.txt").write_text("def test_text(): pass\n", encoding="utf-8")
+    (tmp_path / "app.exe").write_bytes(b"MZ\x90\x00def test_binary")
+    (tmp_path / "data.bin").write_bytes(b"\x00\x01\x02def test_raw_nul")
+    (tmp_path / "doc.docx").write_bytes(b"PK\x03\x04def test_docx")
+
+    with _tool_context(tmp_path):
+        out = await fs.grep_search("def test_", path=str(tmp_path))
+
+    assert "text.txt" in out
+    assert "app.exe" not in out
+    assert "data.bin" not in out
+    assert "doc.docx" not in out
+
+
+@pytest.mark.asyncio
+async def test_grep_search_single_binary_file_returns_no_matches(tmp_path: Path) -> None:
+    binary_file = tmp_path / "sample.bin"
+    binary_file.write_bytes(b"\x00\x01needle\x00")
+
+    with _tool_context(tmp_path):
+        out = await fs.grep_search("needle", path=str(binary_file))
+
+    assert out == "No matches for 'needle'"
+
