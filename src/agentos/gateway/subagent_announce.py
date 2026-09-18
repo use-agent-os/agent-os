@@ -209,7 +209,11 @@ async def _announce_to_parent_channel(
         content = f"{content}\n{result_text[:500]}"
     metadata: dict[str, Any] = {}
     reply_to = thread_id or channel_id
-    if channel_name == "slack" and thread_id and channel_id:
+    # Not a Slack-only rule: any channel whose thread id is not also a valid
+    # channel id needs the channel carried alongside it. Telegram's forum
+    # topics are the other one -- addressed by ``reply_to`` while the chat
+    # comes from ``metadata["channel"]``.
+    if thread_id and channel_id:
         metadata["channel"] = channel_id
     message = OutgoingMessage(content=content, reply_to=reply_to, metadata=metadata)
     try:

@@ -583,7 +583,15 @@ def _build_channel_message(
                 reply_to=None,
                 metadata={**metadata, "thread_ts": None},
             )
-    return OutgoingMessage(content=content, reply_to=thread_id or channel_id)
+    # A thread id addresses a conversation *inside* a channel, so it cannot
+    # stand in for the channel itself. Telegram reads the chat from
+    # ``metadata["channel"]`` and takes ``reply_to`` as the forum topic; with
+    # the topic alone it treats the topic number as the chat id and the answer
+    # never reaches the group. Same rule as
+    # ``channel_dispatch._route_envelope_reply_message``; adapters that key on
+    # ``reply_to`` (Discord, MS Teams, email) ignore the extra field.
+    metadata = {"channel": channel_id} if thread_id and channel_id else {}
+    return OutgoingMessage(content=content, reply_to=thread_id or channel_id, metadata=metadata)
 
 
 def _status_value(value: Any) -> str | None:
