@@ -212,3 +212,15 @@ async def test_an_existing_file_base_still_searches_that_file(workspace: Path) -
     with _tool_context(workspace):
         out = await fs.grep_search("needle", path=str(workspace / "src" / "app.py"))
     assert "app.py:1:" in out
+
+
+@pytest.mark.asyncio
+async def test_glob_search_handles_leading_slashes(workspace: Path) -> None:
+    """Leading slashes in pattern (e.g. '/**/*.py') must not raise NotImplementedError."""
+    with _tool_context(workspace):
+        out = await fs.glob_search("/**/*.py")
+        assert "app.py" in out
+
+        out_slash = await fs.glob_search("/*.txt")
+        assert isinstance(out_slash, str)
+

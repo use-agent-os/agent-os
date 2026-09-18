@@ -1138,9 +1138,11 @@ async def glob_search(pattern: str, path: str | None = None) -> str:
     strict_roots = _strict_read_roots()
     workspace_root = _workspace_root()
 
+    normalized_pattern = pattern.lstrip("/\\") or "*"
+
     def _glob() -> list[str]:
         matches: list[str] = []
-        for candidate in sorted(base.glob(pattern), key=lambda item: str(item)):
+        for candidate in sorted(base.glob(normalized_pattern), key=lambda item: str(item)):
             marker = _workspace_strict_candidate_marker(
                 "glob_search",
                 candidate,
