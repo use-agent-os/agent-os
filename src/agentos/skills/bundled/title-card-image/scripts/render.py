@@ -60,6 +60,27 @@ def _parse_color(spec: str) -> tuple[int, int, int]:
     return tuple(int(s[i:i + 2], 16) for i in (0, 2, 4))  # type: ignore[return-value]
 
 
+def _is_cjk_ideograph(char: str) -> bool:
+    """Return True only for CJK Unified Ideograph code points.
+
+    Hangul (U+AC00–U+D7AF), Cyrillic, emoji, and other non-ideographic scripts
+    are excluded so they take the whitespace-wrap path instead of the fixed-width
+    CJK chunker.
+    """
+    cp = ord(char)
+    return (
+        0x4E00 <= cp <= 0x9FFF       # CJK Unified Ideographs
+        or 0x3400 <= cp <= 0x4DBF    # CJK Unified Ideographs Extension A
+        or 0xF900 <= cp <= 0xFAFF    # CJK Compatibility Ideographs
+        or 0x20000 <= cp <= 0x2A6DF  # CJK Unified Ideographs Extension B
+        or 0x2A700 <= cp <= 0x2B73F  # Extension C
+        or 0x2B740 <= cp <= 0x2B81F  # Extension D
+        or 0x2B820 <= cp <= 0x2CEAF  # Extension E
+        or 0x2CEB0 <= cp <= 0x2EBEF  # Extension F
+        or 0x30000 <= cp <= 0x3134F  # Extension G
+    )
+
+
 def _wrap_text(text: str, max_chars: int) -> list[str]:
     """Greedy line wrap that respects CJK (no spaces) and ASCII (whitespace)."""
     if not text:
@@ -67,8 +88,10 @@ def _wrap_text(text: str, max_chars: int) -> list[str]:
     # If text already has explicit newlines, honour them.
     if "\n" in text:
         return text.split("\n")
-    # For pure-ASCII strings, break on whitespace.
-    if all(ord(c) < 0x4E00 for c in text):
+    # Use the fixed-width chunker only when the text is predominantly CJK
+    # ideographs.  Space-delimited scripts (Latin, Cyrillic, Hangul, etc.)
+    # and emoji take the whitespace-wrap path.
+    if not any(_is_cjk_ideograph(c) for c in text):
         words = text.split()
         out: list[str] = []
         line = ""
