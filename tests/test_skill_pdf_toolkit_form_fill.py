@@ -37,6 +37,18 @@ def _make_form(path: Path) -> None:
     c.save()
 
 
+def _make_plain_pdf(path: Path) -> None:
+    """A PDF with no AcroForm at all -- a report, a scan, anything not a form."""
+    from reportlab.lib.pagesizes import LETTER
+    from reportlab.pdfgen import canvas
+
+    c = canvas.Canvas(str(path), pagesize=LETTER)
+    c.drawString(72, 720, "A")
+    c.showPage()
+    c.drawString(72, 720, "B")
+    c.save()
+
+
 def _field_values(path: Path) -> dict[str, str]:
     from pypdf import PdfReader
 
@@ -115,3 +127,65 @@ def test_invalid_json_data_file_is_refused_with_a_clean_message(
     assert captured.err.startswith("error: data ")
     assert "not valid JSON" in captured.err
     assert not out.exists()
+
+
+# ── an input PDF with no AcroForm is refused, not written as a blank copy ────
+# (#2131 — distinct from #1903 above: the data file here is a perfectly good
+# object, it's the input PDF that has nothing to fill.)
+
+
+def test_form_fill_refuses_an_input_with_no_acroform(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Every page update used to raise, and the script wrote the output anyway:
+    a complete, valid, entirely unfilled copy reported as a successful fill."""
+    form_fill = _form_fill_module()
+    plain = tmp_path / "doc.pdf"
+    _make_plain_pdf(plain)
+    data = tmp_path / "data.json"
+    data.write_text(json.dumps({"applicant_name": "Ada"}), encoding="utf-8")
+    out = tmp_path / "filled.pdf"
+    monkeypatch.setattr(sys, "argv", ["form_fill.py", str(plain), str(data), "--out", str(out)])
+
+    assert form_fill.main() == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"error: {plain} has no AcroForm fields to fill" in captured.err
+    assert "--list-fields" in captured.err, "the message should point at the way to check"
+    assert not out.exists()
+
+
+def test_form_fill_does_not_overwrite_an_existing_output_with_a_blank_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The destructive variant behind #1921: pointing --out at an existing
+    filled form used to replace it with an unfilled copy of the input, at
+    exit 0."""
+    form_fill = _form_fill_module()
+    plain = tmp_path / "doc.pdf"
+    _make_plain_pdf(plain)
+    out = tmp_path / "filled.pdf"
+    _make_form(out)
+    before = out.read_bytes()
+    data = tmp_path / "data.json"
+    data.write_text(json.dumps({"applicant_name": "Ada"}), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["form_fill.py", str(plain), str(data), "--out", str(out)])
+
+    assert form_fill.main() == 2
+    assert out.read_bytes() == before
+
+
+def test_list_fields_on_a_pdf_with_no_acroform_still_reports_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The documented way to check before filling must stay usable on exactly
+    the documents the fill path now refuses -- proves the guard is scoped to
+    `fill()` and doesn't touch `--list-fields`."""
+    form_fill = _form_fill_module()
+    plain = tmp_path / "doc.pdf"
+    _make_plain_pdf(plain)
+    monkeypatch.setattr(sys, "argv", ["form_fill.py", str(plain), "--list-fields"])
+
+    assert form_fill.main() == 0
+    assert json.loads(capsys.readouterr().out) == {}

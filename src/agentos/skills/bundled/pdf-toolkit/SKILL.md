@@ -151,7 +151,10 @@ file is written:
 The script discovers fields via `pypdf.PdfReader.get_fields()` and updates
 them with `update_page_form_field_values()`. Fields not present in the JSON
 are left untouched. Run with `--list-fields` to enumerate the form's fields
-without filling.
+without filling. If `form.pdf` has no AcroForm at all (a generated report, a
+scan, anything that is not a form), the fill is refused with exit 2 and no
+output file is written or overwritten — `--list-fields` is the way to check
+first, and correctly returns `{}` for these.
 
 Caveats:
 
