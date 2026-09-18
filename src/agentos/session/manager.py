@@ -887,15 +887,22 @@ class SessionManager:
         self._evict_session_runtime_state(session_key)
         return node
 
-    @staticmethod
-    def _evict_session_runtime_state(session_key: str) -> None:
+    def _evict_session_runtime_state(self, session_key: str) -> None:
         """Drop in-memory subagent and routing bookkeeping for ``session_key``.
 
         Called from ``finish`` and from every deletion path so neither
         terminal nor deleted sessions leak unbounded entries in long-running
         gateway processes. Idempotent, so the two overlapping callers are
         safe. See :mod:`agentos.session.runtime_state`.
+
+        The epoch cache is dropped here rather than in
+        :func:`evict_session_runtime_state`, which can only reach
+        process-global stores: this one belongs to the manager instance. It has
+        to go at the same moment as the rest, because the epoch is a staleness
+        marker -- a key that outlives its row hands its epoch to the next
+        session created under the same name.
         """
+        self._epoch_cache.pop(session_key, None)
         evict_session_runtime_state(session_key)
 
     async def _cancel_task_runtime(self, session_key: str, *, reason: str) -> None:
@@ -934,7 +941,7 @@ class SessionManager:
         """
         session_key = canonicalize_session_key(session_key)
         await self._cancel_task_runtime(session_key, reason="session_delete")
-        evict_session_runtime_state(session_key)
+        self._evict_session_runtime_state(session_key)
         await self._storage.delete_session(session_key)
 
     async def branch(
