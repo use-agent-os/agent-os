@@ -67,6 +67,17 @@ def _capture_console_print(*objects: Any, **kwargs: Any) -> str:
     return capture.get()
 
 
+def _tool_line(marker: str, marker_style: str, body: str) -> Text:
+    """One tool status row: a styled marker, then ``body`` dimmed.
+
+    ``body`` carries the tool's arguments or error text -- a shell command, a
+    path, a search query. Built as ``Text`` so none of it is read as Rich
+    markup: ``awk -F'[/]'`` raised ``MarkupError`` out of the renderer and
+    ended the chat session, and ``*.[ch]`` printed as ``*.``.
+    """
+    return Text.assemble((marker, marker_style), " ", (body, "dim"))
+
+
 def _sanitize_stream_text(delta: str) -> str:
     """Strip ANSI escapes and dangerous C0 controls from streamed model text.
 
@@ -182,8 +193,7 @@ class _ToolCallStrip:
         if self._run_name is not None and self._run_count > 3:
             elapsed = time.monotonic() - self._run_start
             payload += _capture_console_print(
-                f"[{ACCENT}]▸[/] [dim]{self._run_name} "
-                f"×{self._run_count} total {elapsed:.1f}s[/dim]"
+                _tool_line("▸", ACCENT, f"{self._run_name} ×{self._run_count} total {elapsed:.1f}s")
             )
         self._run_name = None
         self._run_count = 0
@@ -215,10 +225,10 @@ class _ToolCallStrip:
 
         if self._run_count <= 2:
             suffix = f" {summary}" if summary else ""
-            payload += _capture_console_print(f"[{ACCENT}]▸[/] [dim]{name}{suffix}[/dim]")
+            payload += _capture_console_print(_tool_line("▸", ACCENT, f"{name}{suffix}"))
         elif self._run_count == 3:
             self._coalesced = True
-            payload += _capture_console_print(f"[{ACCENT}]▸[/] [dim]{name} ×3[/dim]")
+            payload += _capture_console_print(_tool_line("▸", ACCENT, f"{name} ×3"))
         # count > 3 and already coalesced: suppress output, keep counting
         return payload
 
@@ -240,7 +250,7 @@ class _ToolCallStrip:
             if self._run_name is not None and self._run_count > 3:
                 payload += self._flush_run_payload()
             name = entry[0] if entry else (tool_use_id or "tool")
-            payload += _capture_console_print(f"[red]✗[/] [dim]{name}: {error}[/dim]")
+            payload += _capture_console_print(_tool_line("✗", "red", f"{name}: {error}"))
         return payload
 
     def record_finish(
