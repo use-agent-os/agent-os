@@ -27,22 +27,32 @@ from agentos.tools.types import ToolError, current_tool_context
 # shell warnlist hits. Catches the "agent pivots from `rm` to `os.remove()`"
 # bypass. We scan using shallow regex (fast-path) plus AST analysis to catch
 # dynamic evasion (getattr, __import__, importlib, exec/eval, and wildcard imports).
+# A wrapper may take flags with values (``sudo -u root``, ``-ExecutionPolicy
+# Bypass``, ``-o pipefail``) before the command it runs, so a flag group
+# allows one optional value each. The value must not itself look like a flag:
+# without that guard every ``-x`` token can be read two ways and a long run
+# of flags with no delete command behind it backtracks exponentially.
+_FLAG_VALUE: str = r"(?:\s+(?!-)\S+)?"
 _PREFIX_CMD_PATTERN: str = (
     r"(?:"
     r"cmd(?:\.exe)?\s+/[ck]"
-    r"|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z0-9]+)*"
-    r"|sudo(?:\s+-[a-zA-Z0-9]+(?:\s+\S+)?)*"
-    r"|doas(?:\s+-[a-zA-Z0-9]+(?:\s+\S+)?)*"
+    r"|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z0-9]+" + _FLAG_VALUE + r")*"
+    r"|(?:\S*[/\\])?(?:ba|z|da|k|fi|c|tc)?sh(?:\.exe)?"
+    r"(?:\s+--?[a-zA-Z0-9][a-zA-Z0-9-]*" + _FLAG_VALUE + r")*"
+    r"|sudo(?:\s+-[a-zA-Z0-9]+" + _FLAG_VALUE + r")*"
+    r"|doas(?:\s+-[a-zA-Z0-9]+" + _FLAG_VALUE + r")*"
     r"|env(?:\s+-[a-zA-Z0-9]+)*(?:\s+[a-zA-Z_][a-zA-Z0-9_]*=\S*)*"
-    r"|nice(?:\s+-[a-zA-Z0-9]+(?:\s+\S+)?)*"
+    r"|nice(?:\s+-[a-zA-Z0-9]+" + _FLAG_VALUE + r")*"
     r"|time(?:\s+-[a-zA-Z0-9]+)*"
     r"|timeout(?:\s+-[a-zA-Z0-9]+)*(?:\s+\d+[a-zA-Z]?)?"
-    r"|xargs(?:\s+-[a-zA-Z0-9]+(?:\s+\S+)?)*"
+    r"|xargs(?:\s+-[a-zA-Z0-9]+" + _FLAG_VALUE + r")*"
     r"|nohup"
     r")"
 )
-_IN_QUOTE_CMD_PREFIX: str = r"(?:" + _PREFIX_CMD_PATTERN + r"\s+)*"
-_COMMAND_PREFIX: str = r"(?:^|[;&|])\s*" + _IN_QUOTE_CMD_PREFIX
+_IN_QUOTE_CMD_PREFIX: str = r"(?:" + _PREFIX_CMD_PATTERN + r"""\s+['"]?)*"""
+# A newline separates commands the way ``;`` does; ``bash -c`` scripts are
+# usually written that way.
+_COMMAND_PREFIX: str = r"(?:^|[;&|\n])\s*" + _IN_QUOTE_CMD_PREFIX
 
 _DESTRUCTIVE_PY_PATTERNS: list[tuple[str, str]] = [
     (r"\bos\.remove\s*\(", "os.remove()"),
@@ -98,8 +108,19 @@ _PREFIX_COMMANDS: frozenset[str] = frozenset(
         "powershell.exe",
         "pwsh",
         "pwsh.exe",
+        "bash",
+        "bash.exe",
+        "sh",
+        "sh.exe",
+        "zsh",
+        "dash",
+        "ksh",
+        "fish",
+        "csh",
+        "tcsh",
     }
 )
+_SHELL_OPTION_FLAGS_WITH_ARG: frozenset[str] = frozenset({"-o", "-O", "--rcfile", "--init-file"})
 _PREFIX_FLAGS_WITH_ARG: dict[str, frozenset[str]] = {
     "sudo": frozenset(
         {
@@ -137,7 +158,97 @@ _PREFIX_FLAGS_WITH_ARG: dict[str, frozenset[str]] = {
     "nice": frozenset({"-n", "--adjustment"}),
     "timeout": frozenset({"-k", "-s", "--kill-after", "--signal"}),
     "xargs": frozenset({"-I", "-n", "-L", "-P", "-s", "-d", "-a", "-E"}),
+    "bash": _SHELL_OPTION_FLAGS_WITH_ARG,
+    "bash.exe": _SHELL_OPTION_FLAGS_WITH_ARG,
+    "sh": _SHELL_OPTION_FLAGS_WITH_ARG,
+    "sh.exe": _SHELL_OPTION_FLAGS_WITH_ARG,
+    "zsh": _SHELL_OPTION_FLAGS_WITH_ARG,
+    "dash": _SHELL_OPTION_FLAGS_WITH_ARG,
+    "ksh": _SHELL_OPTION_FLAGS_WITH_ARG,
+    "fish": _SHELL_OPTION_FLAGS_WITH_ARG,
+    "csh": _SHELL_OPTION_FLAGS_WITH_ARG,
+    "tcsh": _SHELL_OPTION_FLAGS_WITH_ARG,
 }
+_POWERSHELL_COMMANDS: frozenset[str] = frozenset(
+    {"powershell", "powershell.exe", "pwsh", "pwsh.exe"}
+)
+# powershell.exe / pwsh parameters, lower-cased, mapped to whether the next
+# argv token is their value. ``-Command`` is deliberately False: its value is
+# the command we want to inspect. PowerShell resolves a flag by documented
+# alias first and then by unique prefix (``-exec`` -> ``-ExecutionPolicy``),
+# so the lookup below does the same.
+_POWERSHELL_PARAMS: dict[str, bool] = {
+    "command": False,
+    "commandwithargs": False,
+    "configurationfile": True,
+    "configurationname": True,
+    "custompipename": True,
+    "encodedarguments": True,
+    "encodedcommand": True,
+    "executionpolicy": True,
+    "file": True,
+    "help": False,
+    "inputformat": True,
+    "interactive": False,
+    "login": False,
+    "mta": False,
+    "noexit": False,
+    "nologo": False,
+    "noninteractive": False,
+    "noprofile": False,
+    "noprofileloadtime": False,
+    "outputformat": True,
+    "psconsolefile": True,
+    "settingsfile": True,
+    "sshservermode": False,
+    "sta": False,
+    "version": True,
+    "windowstyle": True,
+    "workingdirectory": True,
+}
+_POWERSHELL_PARAM_ALIASES: dict[str, str] = {
+    "c": "command",
+    "cwa": "commandwithargs",
+    "config": "configurationname",
+    "e": "encodedcommand",
+    "ec": "encodedcommand",
+    "ea": "encodedarguments",
+    "encodeda": "encodedarguments",
+    "ep": "executionpolicy",
+    "ex": "executionpolicy",
+    "f": "file",
+    "i": "interactive",
+    "if": "inputformat",
+    "inp": "inputformat",
+    "l": "login",
+    "noe": "noexit",
+    "nol": "nologo",
+    "noni": "noninteractive",
+    "nop": "noprofile",
+    "o": "outputformat",
+    "of": "outputformat",
+    "settings": "settingsfile",
+    "sshs": "sshservermode",
+    "v": "version",
+    "w": "windowstyle",
+    "wd": "workingdirectory",
+}
+
+
+def _powershell_flag_takes_value(flag: str) -> bool:
+    """True when a ``powershell``/``pwsh`` flag consumes the next argv token."""
+    name = flag.lstrip("-/").lower()
+    if not name:
+        return False
+    resolved = _POWERSHELL_PARAM_ALIASES.get(name)
+    if resolved is None:
+        candidates = [param for param in _POWERSHELL_PARAMS if param.startswith(name)]
+        if len(candidates) != 1:
+            return False
+        resolved = candidates[0]
+    return _POWERSHELL_PARAMS[resolved]
+
+
 _SHELL_DELETE_RE: re.Pattern[str] = re.compile(
     _COMMAND_PREFIX + r"(?:rm|rmdir|del|erase|rd|Remove-Item)\b", re.IGNORECASE
 )
@@ -422,7 +533,12 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
                         if arg == "--":
                             idx += 1
                             break
-                        if arg in flags_with_arg:
+                        takes_value = arg in flags_with_arg or (
+                            base_cmd in _POWERSHELL_COMMANDS
+                            and arg.startswith(("-", "/"))
+                            and _powershell_flag_takes_value(arg)
+                        )
+                        if takes_value:
                             idx += 2 if idx + 1 < len(evaluated) else 1
                             continue
                         if arg.startswith("-") or arg.startswith("/"):
