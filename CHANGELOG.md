@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `title-card-image`: `_wrap_text` treated Japanese Kana (Hiragana and Katakana)
+  as ASCII due to an incomplete Unicode check (`ord(c) < 0x4E00`), preventing
+  headlines without Kanji or spaces from wrapping; it now recognizes all CJK
+  and Kana scripts, and also wraps individual long lines in multi-line inputs.
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added
