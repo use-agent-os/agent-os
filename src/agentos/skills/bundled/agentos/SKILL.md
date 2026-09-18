@@ -552,6 +552,11 @@ agentos cost savings           # what the Pilot Router saved, from the local dec
 # Baseline = the priciest model in [router.tiers], input tokens only, routing
 # mechanism only. Reads ~/.agentos/logs/decisions-*.jsonl; no gateway needed.
 agentos diagnostics on         # runtime diagnostics logging
+agentos sandbox status         # inspect current sandbox posture
+agentos sandbox on             # restore standard sandboxed posture
+agentos sandbox bypass         # disable sandboxing with sensitive path protection
+agentos sandbox full           # disable sandboxing and all approval gates
+agentos sandbox reset          # reset posture to defaults
 agentos migrate hermes --source <dir> [--apply]   # dry-run first, then --apply
 ```
 

@@ -890,6 +890,28 @@ Read:
 - [`scheduling.md`](scheduling.md)
 - [`approvals-and-permissions.md`](approvals-and-permissions.md)
 
+## Sandbox Posture Controls
+
+```sh
+agentos sandbox status
+agentos sandbox status --json
+agentos sandbox bypass
+agentos sandbox full
+agentos sandbox on
+agentos sandbox reset
+```
+
+`agentos sandbox status` shows the current sandbox posture (`on`, `bypass`, `full`), whether runtime sandboxing and security grading are active, and default permissions.
+
+- `agentos sandbox on`: Restores the default sandboxed posture (`sandbox = true`, `security_grading = true`, `permissions.default_mode = "off"`).
+- `agentos sandbox bypass`: Disables runtime sandboxing and auto-grants approvals except for sensitive paths (`permissions.default_mode = "bypass"`).
+- `agentos sandbox full`: Disables runtime sandboxing and skips approval and sensitive-path gates (`permissions.default_mode = "full"`).
+- `agentos sandbox reset`: Resets sandbox posture to AgentOS defaults (`bypass`).
+
+Pass `--config <path>` to target an explicit configuration file. Changes require a gateway restart (`agentos gateway restart`) to apply to running processes.
+
+Read: [`tools-and-sandbox.md`](tools-and-sandbox.md)
+
 ## Cost, Diagnostics, and Replay
 
 ```sh
