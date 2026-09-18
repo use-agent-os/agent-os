@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `nano-banana-pro` (`generate_image.py`): the exponential sleep between retry
+  attempts no longer resets to 2 seconds when the schedule moves from the
+  primary model to a fallback model. The backoff exponent was computed with the
+  per-model attempt counter `n` (which resets to 1 for every fallback entry)
+  instead of the global `attempt_idx`, so the first sleep after a model
+  transition was shorter than the one before it. The fix uses `attempt_idx` so
+  the sleep grows monotonically across the whole attempt schedule.
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added

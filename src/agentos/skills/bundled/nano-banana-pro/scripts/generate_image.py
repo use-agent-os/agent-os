@@ -420,7 +420,7 @@ def main() -> int:
             last_error = f"[{model} #{n}] {exc}"
             print(f"  {last_error}", file=sys.stderr)
             if attempt_idx < len(schedule):
-                backoff = min(2 ** n, args.retry_backoff_cap)
+                backoff = min(2 ** attempt_idx, args.retry_backoff_cap)
                 print(f"  sleeping {backoff}s before next attempt", file=sys.stderr)
                 time.sleep(backoff)
 
