@@ -1453,6 +1453,9 @@ async def _check_exec_approval(
         "command": command,
         "args": {"command": command, "workdir": workdir},
         "sessionKey": ctx.session_key if ctx is not None and ctx.session_key else "",
+        # Carried so the grant is recorded against the same workspace the check
+        # will resolve relative targets against.
+        "workspaceDir": str(getattr(ctx, "workspace_dir", "") or "") if ctx is not None else "",
         "agent": ctx.agent_id if ctx is not None else "",
         "mode": "background" if background else "foreground",
     }
@@ -1565,7 +1568,15 @@ async def _check_exec_approval(
     if approval_id is None and not sandbox_off_requires_approval:
         from agentos.sandbox.intent_cache import get_intent_cache
 
-        if get_intent_cache().check(command):
+        # Scoped to this session and this workspace. Unscoped, the check met
+        # another session's grant and returned *before* `queue.request`, so the
+        # command ran with no approval row and no prompt on any surface
+        # (Issue #2191). The workspace matters for the same reason: a relative
+        # `rm -rf build` resolved against the gateway's cwd otherwise, matching
+        # whatever directory the agent was not actually in.
+        intent_session = ctx.session_key if ctx is not None and ctx.session_key else ""
+        intent_base_dir = getattr(ctx, "workspace_dir", None) if ctx is not None else None
+        if get_intent_cache().check(command, session_key=intent_session, base_dir=intent_base_dir):
             log.info(
                 "shell_approval_intent_cached",
                 command=_audit_command(command),

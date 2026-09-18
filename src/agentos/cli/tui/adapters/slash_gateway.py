@@ -744,8 +744,11 @@ async def _handle_approvals_command(cmd: str, client: object | None = None) -> N
             console.print(f"[{ACCENT}]Approval mode reset to prompt; cache cleared.[/]")
             return
         entries = [
-            f"  [dim]{scope}[/dim] {k}:{t}"
-            for (k, t), (_exp, scope) in cache._entries.items()  # noqa: SLF001
+            # The session is part of the key now, and worth showing: "who
+            # granted this" is the first question when a cached approval
+            # surprises someone.
+            f"  [dim]{scope}[/dim] {session or '(no session)'} {k}:{t}"
+            for (session, k, t), (_exp, scope) in cache._entries.items()  # noqa: SLF001
         ]
         console.print(f"[{ACCENT}]mode:[/] {queue.get_settings().mode}")
         console.print(f"[{ACCENT}]cached intents ({len(entries)}):[/]")
