@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path, PurePosixPath
 
@@ -48,7 +49,61 @@ def expand_skill_placeholders(text: str, base_dir: str, python: str | None = Non
     text = text.replace(SKILL_PYTHON_PLACEHOLDER, python or skill_python())
     if not base_dir:
         return text
+    if any(ch.isspace() for ch in base_dir):
+        text = _quote_base_dir_in_commands(text)
     return text.replace(SKILL_BASE_DIR_PLACEHOLDER, base_dir)
+
+
+# ``{baseDir}`` plus the path written after it, up to where a shell word ends.
+_BASE_DIR_TOKEN_RE = re.compile(re.escape(SKILL_BASE_DIR_PLACEHOLDER) + r"[^\s\"'`<>|;&()]*")
+_FENCE_RE = re.compile(r"^\s*(```|~~~)")
+
+
+def _quote_base_dir_in_commands(text: str) -> str:
+    """Double-quote each ``{baseDir}/...`` word that sits in a shell command.
+
+    ``skill_python`` quotes an interpreter path that carries whitespace, and
+    the bundled skills live in the same install prefix, so on the machines
+    where that matters (``C:\\Users\\Jane Doe\\AppData\\Local\\agentos``) the
+    word right after it -- ``{python} {baseDir}/scripts/run.py`` -- split in
+    two and the script could not be found.
+
+    Only command text is touched: fenced code blocks, and inline code spans
+    that hold more than the path alone. A bare path in prose or in its own
+    code span is a file reference the model hands to ``read_file``, where
+    quotes would be part of the name. A word already inside quotes on its
+    line (``S="{baseDir}/scripts"``) is left as written.
+    """
+    lines = text.splitlines(keepends=True)
+    in_fence = False
+    for index, line in enumerate(lines):
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
+            continue
+        if SKILL_BASE_DIR_PLACEHOLDER in line:
+            lines[index] = _quote_line(line, in_fence=in_fence)
+    return "".join(lines)
+
+
+def _quote_line(line: str, *, in_fence: bool) -> str:
+    def replace(match: re.Match[str]) -> str:
+        token = match.group(0)
+        before = line[: match.start()]
+        if before.count("`") % 2:
+            # Inside an inline code span: only the span is the command.
+            span_start = before.rfind("`") + 1
+            span_end = line.find("`", match.end())
+            span = line[span_start : span_end if span_end != -1 else len(line)]
+            if span.strip() == token:
+                return token
+            before = line[span_start : match.start()]
+        elif not in_fence:
+            return token
+        if before.count('"') % 2 or before.count("'") % 2:
+            return token
+        return f'"{token}"'
+
+    return _BASE_DIR_TOKEN_RE.sub(replace, line)
 
 
 class SkillResources:
