@@ -213,10 +213,14 @@ def test_windows_anchored_rm_ri_negative_cases_allowed(command: str) -> None:
         r'powershell -c "erase C:\x"',
         r'powershell -c "rm -r C:\x"',
         r"powershell -Command 'ri -Recurse C:\x'",
+        r'powershell -ExecutionPolicy Bypass -Command "rm C:\x"',
+        r'powershell -ep Bypass -c "rm C:\x"',
+        r'powershell -ConfigurationName default -Command "rm C:\x"',
         r'cmd /c "rm C:\x"',
         r'pwsh.exe -NoProfile -Command "rd -Force C:\x"',
     ],
 )
+
 def test_windows_quoted_wrapper_payload_is_denied(command: str) -> None:
     """A wrapper payload is usually quoted; every anchored alias must see through it."""
     result = shell_policy.SafeBinPolicy.from_env().check(command)

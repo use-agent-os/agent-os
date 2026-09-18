@@ -30,7 +30,7 @@ DEFAULT_DENYLIST: list[str] = [
 # quote is allowed there -- but only there, not after a bare separator.
 _WIN_CMD_PREFIX: str = (
     r"(?:^|[;&|\n])\s*"
-    r"(?:(?:cmd(?:\.exe)?\s+/[ck]|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+)*)\s+[\"']?)?"
+    r"(?:(?:cmd(?:\.exe)?\s+/[ck]|(?:powershell|pwsh)(?:\.exe)?(?:\s+-[a-zA-Z]+(?::[^\s\"';&|]+|\s+[^-\s\"';&|][^\s\"';&|]*)?)*)\s+[\"']?)?"
 )
 
 # What may follow an anchored command name: an optional `.exe`, then a
