@@ -17,8 +17,18 @@ from .hexutil import format_units, parse_amount  # noqa: F401 — re-exported
 # ---------------------------------------------------------------------------
 
 
-def parse_args(argv: list[str]) -> dict:
-    """Parse ``--flag value`` / ``--flag=value`` / ``--bool`` plus positionals."""
+def parse_args(argv: list[str], bool_flags: frozenset[str] = frozenset()) -> dict:
+    """Parse ``--flag value`` / ``--flag=value`` / ``--bool`` plus positionals.
+
+    ``bool_flags`` names flags that never take a value, so a bare ``--flag``
+    is read as ``True`` regardless of what follows it -- including a
+    subcommand placed right after it. Without this, whether a bare
+    ``--flag`` consumes the next token as its value depends entirely on
+    whether that token happens to start with ``--``, which silently
+    swallows the subcommand when a boolean switch like ``--json`` precedes
+    it (``--json pools`` reads as ``json="pools"`` instead of
+    ``json=True, _=["pools"]``) (#2864).
+    """
     out: dict[str, Any] = {"_": []}
     index = 0
     while index < len(argv):
@@ -31,6 +41,10 @@ def parse_args(argv: list[str]) -> dict:
         if "=" in body:
             name, _, value = body.partition("=")
             out[name] = value
+            index += 1
+            continue
+        if body in bool_flags:
+            out[body] = True
             index += 1
             continue
         nxt = argv[index + 1] if index + 1 < len(argv) else None

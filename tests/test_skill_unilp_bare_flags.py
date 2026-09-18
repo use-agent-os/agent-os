@@ -56,6 +56,17 @@ def lp_read():
     return _load("lp_read")
 
 
+@pytest.fixture(scope="module")
+def ratchet():
+    try:
+        return _load("ratchet")
+    except ModuleNotFoundError as exc:
+        # ratchet.py imports unilp/journal.py, which imports the POSIX-only
+        # `fcntl` for its mandate lock file -- a pre-existing gap unrelated
+        # to this fix (#2864 is about flag parsing, not file locking).
+        pytest.skip(f"ratchet.py is not importable on this platform: {exc}")
+
+
 # --- helpers ----------------------------------------------------------------
 
 
@@ -152,6 +163,79 @@ def test_pool_key_from_args_rejects_a_bare_fee(lp_read) -> None:
 
 def test_pool_key_from_args_still_absent_when_nothing_given(lp_read) -> None:
     assert lp_read.pool_key_from_args({"_": []}) is None
+
+
+# --- a boolean flag before the subcommand (#2864) ------------------------------
+
+
+def test_json_before_the_subcommand_no_longer_swallows_it(lp_read) -> None:
+    """The issue's own repro: --json pools --token 0x... must run `pools`, not
+    read "pools" as --json's value."""
+    args = lp_read.parse_args(
+        ["--json", "pools", "--token", "0x1234567890123456789012345678901234567890"],
+        bool_flags=lp_read._BOOL_FLAGS,
+    )
+    assert args["json"] is True
+    assert args["_"] == ["pools"]
+    assert args["token"] == "0x1234567890123456789012345678901234567890"
+
+
+@pytest.mark.parametrize(
+    ("module_name", "flag"),
+    [
+        ("lp_read", "include-v3"),
+        ("lp_write", "broadcast"),
+        ("ratchet", "alert-only"),
+    ],
+)
+def test_every_declared_bool_flag_survives_before_the_subcommand(
+    request: pytest.FixtureRequest, module_name: str, flag: str
+) -> None:
+    module = request.getfixturevalue(module_name)
+    args = module.parse_args([f"--{flag}", "some-subcommand"], bool_flags=module._BOOL_FLAGS)
+    assert args[flag] is True
+    assert args["_"] == ["some-subcommand"]
+
+
+def test_value_taking_flag_before_the_subcommand_is_unaffected(lp_read) -> None:
+    """Boundary: a real value-taking flag placed before the subcommand must
+    keep consuming its value -- bool_flags only changes behavior for the
+    flags it explicitly names."""
+    args = lp_read.parse_args(["--chain", "base", "pools"], bool_flags=lp_read._BOOL_FLAGS)
+    assert args["chain"] == "base"
+    assert args["_"] == ["pools"]
+
+
+def test_flags_after_the_subcommand_are_unaffected(lp_read) -> None:
+    """Boundary: the documented/tested usage shape (subcommand first, flags
+    after) is byte-for-byte unchanged by bool_flags."""
+    args = lp_read.parse_args(
+        ["pool", "--id", "0xabc", "--json", "--mode=ticks", "--ranges", "10"],
+        bool_flags=lp_read._BOOL_FLAGS,
+    )
+    assert args == {
+        "_": ["pool"],
+        "id": "0xabc",
+        "json": True,
+        "mode": "ticks",
+        "ranges": "10",
+    }
+
+
+def test_bool_flags_defaults_to_empty_and_changes_nothing(fmt) -> None:
+    """Boundary: calling parse_args without bool_flags (every other caller in
+    the tree) is byte-for-byte identical to before this change."""
+    assert fmt.parse_args(["--json", "pools"]) == {"json": "pools", "_": []}
+
+
+@pytest.mark.parametrize("module_name", ["lp_read", "lp_write", "ratchet"])
+def test_declared_bool_flags_are_all_vetted_switches(request, module_name: str) -> None:
+    """Every name in _BOOL_FLAGS must already be in the vetted on/off-switch
+    set below (_SWITCHES) -- catches a future _BOOL_FLAGS entry that is
+    actually value-taking (like `confirm`, deliberately excluded: it takes
+    --confirm <PLAN_HASH>, so it must never be treated as a bare boolean)."""
+    module = request.getfixturevalue(module_name)
+    assert module._BOOL_FLAGS <= (_SWITCHES - {"confirm"})
 
 
 # --- source guard --------------------------------------------------------------

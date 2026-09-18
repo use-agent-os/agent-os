@@ -1336,13 +1336,25 @@ COMMANDS = {
 }
 
 
+_BOOL_FLAGS = frozenset(
+    {
+        "broadcast",
+        "allow-hooked",
+        "allow-odd-tier",
+        "json",
+        "help",
+        "h",
+    }
+)
+
+
 def main() -> None:
     # From here on this process is the interactive CLI, and MandateAuthorization refuses to
     # be constructed. The unattended runner imports this module and never calls main().
     global _ARGV_ENTRY
     _ARGV_ENTRY = True
 
-    args = parse_args(sys.argv[1:])
+    args = parse_args(sys.argv[1:], bool_flags=_BOOL_FLAGS)
     command = args["_"][0] if args["_"] else None
     if not command or args.get("help") or args.get("h"):
         print(USAGE)

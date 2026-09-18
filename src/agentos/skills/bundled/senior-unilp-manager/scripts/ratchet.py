@@ -1553,8 +1553,21 @@ COMMANDS = {
 }
 
 
+_BOOL_FLAGS = frozenset(
+    {
+        "allow-hooked",
+        "broadcast",
+        "all",
+        "json",
+        "alert-only",
+        "help",
+        "h",
+    }
+)
+
+
 def main() -> None:
-    args = parse_args(sys.argv[1:])
+    args = parse_args(sys.argv[1:], bool_flags=_BOOL_FLAGS)
     command = args["_"][0] if args["_"] else None
     if not command or args.get("help") or args.get("h"):
         print(USAGE)
