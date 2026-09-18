@@ -9,10 +9,9 @@ UI, CLI, channels, and gateway control console.
 
 ## Requirements
 
-Install AgentOS with the `mcp` extra when you need this bridge. Follow the
-[Installation](../README.md#installation) section of the README, and add `mcp`
-to the extras list — use `use-agent-os[recommended,mcp]` in place of
-`use-agent-os[recommended]`.
+The MCP server bridge dependencies are included with AgentOS by default.
+Follow the [Installation](../README.md#installation) section of the README
+to install AgentOS (for example, `use-agent-os[recommended]`).
 
 Start the AgentOS gateway:
 
@@ -64,8 +63,8 @@ agentos gateway status
 agentos doctor
 ```
 
-If the command reports that MCP dependencies are missing, reinstall with the
-`mcp` extra.
+If the command cannot connect to the gateway, ensure the gateway is running
+and reachable at the configured address.
 
 Read next:
 
