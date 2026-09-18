@@ -287,6 +287,51 @@ async def test_dubbing_generate_submits_elevenlabs_job(monkeypatch, tmp_path: Pa
 
 
 @pytest.mark.anyio
+async def test_dubbing_generate_accepts_video_files(monkeypatch, tmp_path: Path) -> None:
+    from agentos.tools.builtin import media
+
+    captured: dict[str, object] = {}
+
+    class FakeProvider:
+        def __init__(self, **_kwargs):
+            return None
+
+        async def create_dubbing(self, request):
+            captured["request"] = request
+            return DubbingResult(
+                provider="elevenlabs",
+                dubbing_id="dub_video_456",
+                status="submitted",
+                target_language=request.target_language,
+                source_language=request.source_language,
+            )
+
+    source = tmp_path / "workspace" / "clip.mov"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"mov-video-bytes")
+    monkeypatch.setattr(media, "ElevenLabsAudioProductionProvider", FakeProvider)
+    media.configure_audio(_audio_config())
+
+    token = current_tool_context.set(_tool_context(tmp_path))
+    try:
+        payload = await media.dubbing_generate(
+            source_media="clip.mov",
+            target_language="es",
+        )
+    finally:
+        current_tool_context.reset(token)
+        media.configure_audio(None)
+
+    result = json.loads(payload)
+    assert result["status"] == "ok"
+    assert result["dubbing_id"] == "dub_video_456"
+    assert result["target_language"] == "es"
+    req = captured["request"]
+    assert getattr(req, "mime_type") == "video/quicktime"
+
+
+
+@pytest.mark.anyio
 async def test_music_generate_calls_elevenlabs_and_writes_audio(
     monkeypatch, tmp_path: Path
 ) -> None:

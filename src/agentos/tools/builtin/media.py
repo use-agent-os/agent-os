@@ -60,6 +60,7 @@ from agentos.tools.types import (
 
 _SUPPORTED_IMAGE_FORMATS = {"png", "jpg", "jpeg", "gif", "webp"}
 _SUPPORTED_AUDIO_FORMATS = {"aac", "flac", "m4a", "mp3", "mp4", "mpeg", "ogg", "wav", "webm"}
+_SUPPORTED_DUBBING_MEDIA_FORMATS = _SUPPORTED_AUDIO_FORMATS | {"mov", "mkv", "avi", "flv"}
 _IMAGE_SIZE_LIMIT = 20 * 1024 * 1024  # 20 MB
 _AUDIO_SIZE_LIMIT = 100 * 1024 * 1024  # 100 MB
 _PDF_RENDER_SCALE = 2.0
@@ -954,29 +955,39 @@ def _audio_mime_type(path: Path) -> str:
         "flac": "audio/flac",
         "m4a": "audio/mp4",
         "mp3": "audio/mpeg",
-        "mp4": "audio/mp4",
+        "mp4": "video/mp4",
         "mpeg": "audio/mpeg",
         "ogg": "audio/ogg",
         "wav": "audio/wav",
-        "webm": "audio/webm",
+        "webm": "video/webm",
+        "mov": "video/quicktime",
+        "mkv": "video/x-matroska",
+        "avi": "video/x-msvideo",
+        "flv": "video/x-flv",
     }
     return mapping.get(ext, "application/octet-stream")
 
 
 async def _resolve_supported_audio_file_for_tool(
-    *, tool_name: str, path: str
+    *,
+    tool_name: str,
+    path: str,
+    supported_formats: set[str] | None = None,
 ) -> tuple[Path, bytes, str]:
     resolved = _resolve_media_path(path)
     path_block = _sensitive_media_path_block(tool_name, resolved, path)
     if path_block is not None:
         raise SafeToolError(path_block["message"])
     if not resolved.exists():
-        raise SafeToolError(f"Audio file not found: {path} (resolved={resolved})")
+        media_label = "Media" if supported_formats is not None else "Audio"
+        raise SafeToolError(f"{media_label} file not found: {path} (resolved={resolved})")
     ext = resolved.suffix.lstrip(".").lower()
-    if ext not in _SUPPORTED_AUDIO_FORMATS:
+    allowed = supported_formats if supported_formats is not None else _SUPPORTED_AUDIO_FORMATS
+    if ext not in allowed:
+        label = "media" if supported_formats is not None else "audio"
         raise ToolError(
-            f"Unsupported audio format: {ext}. "
-            f"Supported: {', '.join(sorted(_SUPPORTED_AUDIO_FORMATS))}"
+            f"Unsupported {label} format: {ext}. "
+            f"Supported: {', '.join(sorted(allowed))}"
         )
     loop = asyncio.get_running_loop()
     audio_bytes: bytes = await loop.run_in_executor(None, resolved.read_bytes)
@@ -1388,6 +1399,7 @@ async def dubbing_generate(
     resolved, audio_bytes, mime_type = await _resolve_supported_audio_file_for_tool(
         tool_name="dubbing_generate",
         path=source_media,
+        supported_formats=_SUPPORTED_DUBBING_MEDIA_FORMATS,
     )
     try:
         result = await _elevenlabs_provider(config).create_dubbing(
