@@ -39,9 +39,15 @@ _PREFIX_CMD_PATTERN: str = (
     r"|timeout(?:\s+-[a-zA-Z0-9]+)*(?:\s+\d+[a-zA-Z]?)?"
     r"|xargs(?:\s+-[a-zA-Z0-9]+(?:\s+\S+)?)*"
     r"|nohup"
+    # Shell wrappers: `bash -c "rm -rf /data"` hides the delete command in the
+    # wrapper's argument, so the wrapper has to be consumed as a prefix before
+    # the delete command becomes visible.
+    r"|(?:bash|sh|zsh|dash|ksh|ash)(?:\.exe)?\b(?:\s+-[a-zA-Z0-9]+)*"
     r")"
 )
-_IN_QUOTE_CMD_PREFIX: str = r"(?:" + _PREFIX_CMD_PATTERN + r"\s+)*"
+# An optional opening quote after a prefix: `sh -c 'rm -rf /data'` puts one
+# between the wrapper and the command it runs.
+_IN_QUOTE_CMD_PREFIX: str = r"(?:" + _PREFIX_CMD_PATTERN + r"\s+['\"]?)*"
 _COMMAND_PREFIX: str = r"(?:^|[;&|])\s*" + _IN_QUOTE_CMD_PREFIX
 
 _DESTRUCTIVE_PY_PATTERNS: list[tuple[str, str]] = [
@@ -98,6 +104,33 @@ _PREFIX_COMMANDS: frozenset[str] = frozenset(
         "powershell.exe",
         "pwsh",
         "pwsh.exe",
+        "bash",
+        "sh",
+        "zsh",
+        "dash",
+        "ksh",
+        "ash",
+    }
+)
+#: Commands whose flags are case-insensitive. PowerShell accepts
+#: ``-ExecutionPolicy``, ``-executionpolicy`` and ``-EXECUTIONPOLICY`` alike,
+#: so an exact-case lookup misses most of the ways a flag is really written.
+_CASE_INSENSITIVE_PREFIX_CMDS: frozenset[str] = frozenset(
+    {"powershell", "powershell.exe", "pwsh", "pwsh.exe", "cmd", "cmd.exe"}
+)
+_POWERSHELL_VALUE_FLAGS: frozenset[str] = frozenset(
+    {
+        "-executionpolicy",
+        "-ep",
+        "-configurationname",
+        "-windowstyle",
+        "-inputformat",
+        "-outputformat",
+        "-version",
+        "-psconsolefile",
+        "-file",
+        "-workingdirectory",
+        "-settingsfile",
     }
 )
 _PREFIX_FLAGS_WITH_ARG: dict[str, frozenset[str]] = {
@@ -137,6 +170,17 @@ _PREFIX_FLAGS_WITH_ARG: dict[str, frozenset[str]] = {
     "nice": frozenset({"-n", "--adjustment"}),
     "timeout": frozenset({"-k", "-s", "--kill-after", "--signal"}),
     "xargs": frozenset({"-I", "-n", "-L", "-P", "-s", "-d", "-a", "-E"}),
+    # PowerShell flags taking a separate value. Without these, the value is
+    # read as the command target -- `powershell -ExecutionPolicy Bypass -c
+    # Remove-Item x` stopped at "Bypass", which is not a delete command, and
+    # inspection ended before ever reaching Remove-Item. Stored lowercase and
+    # matched case-insensitively (see _CASE_INSENSITIVE_PREFIX_CMDS).
+    # -command / -c is deliberately absent: what follows it is the command
+    # itself, which is exactly what must stay visible.
+    "powershell": _POWERSHELL_VALUE_FLAGS,
+    "powershell.exe": _POWERSHELL_VALUE_FLAGS,
+    "pwsh": _POWERSHELL_VALUE_FLAGS,
+    "pwsh.exe": _POWERSHELL_VALUE_FLAGS,
 }
 _SHELL_DELETE_RE: re.Pattern[str] = re.compile(
     _COMMAND_PREFIX + r"(?:rm|rmdir|del|erase|rd|Remove-Item)\b", re.IGNORECASE
@@ -422,7 +466,8 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
                         if arg == "--":
                             idx += 1
                             break
-                        if arg in flags_with_arg:
+                        lookup = arg.lower() if base_cmd in _CASE_INSENSITIVE_PREFIX_CMDS else arg
+                        if lookup in flags_with_arg:
                             idx += 2 if idx + 1 < len(evaluated) else 1
                             continue
                         if arg.startswith("-") or arg.startswith("/"):

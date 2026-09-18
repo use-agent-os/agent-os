@@ -224,3 +224,77 @@ def test_indirect_destructive_calls_detected(code: str, expected_keyword: str) -
 def test_indirect_benign_code_does_not_trigger_warning(code: str) -> None:
     warning = _check_code_destructive(code)
     assert warning is None, f"Unexpected warning for safe code: {warning}"
+
+
+# ---------------------------------------------------------------------------
+# Shell-wrapper and PowerShell-flag bypasses (#2096)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        pytest.param(
+            'import subprocess; subprocess.run(["powershell", "-ExecutionPolicy", '
+            '"Bypass", "-c", "Remove-Item", "C:/data"])',
+            id="powershell-executionpolicy-value",
+        ),
+        pytest.param(
+            'import subprocess; subprocess.run(["powershell", "-executionpolicy", '
+            '"bypass", "-c", "Remove-Item", "x"])',
+            id="powershell-lowercase-flag",
+        ),
+        pytest.param(
+            'import subprocess; subprocess.run(["pwsh", "-WindowStyle", "Hidden", '
+            '"-c", "Remove-Item", "x"])',
+            id="pwsh-windowstyle-value",
+        ),
+    ],
+)
+def test_powershell_value_flags_do_not_hide_the_command(code: str) -> None:
+    """A flag's value was read as the command target, ending inspection early."""
+    assert _check_code_destructive(code) is not None
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        pytest.param(
+            'import subprocess; subprocess.run(["bash", "-c", "rm -rf /data"])',
+            id="bash-argv",
+        ),
+        pytest.param(
+            'import subprocess; subprocess.run(["zsh", "-c", "rm -rf /data"])',
+            id="zsh-argv",
+        ),
+        pytest.param(
+            "import os; os.system(\"sh -c 'rm -rf /data'\")",
+            id="sh-os-system",
+        ),
+        pytest.param(
+            'import os; os.popen("bash -c \\"rm -rf /x\\"")',
+            id="bash-os-popen",
+        ),
+    ],
+)
+def test_shell_wrappers_do_not_hide_the_command(code: str) -> None:
+    """The wrapper must be consumed so the delete command becomes visible."""
+    assert _check_code_destructive(code) is not None
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        pytest.param(
+            'import subprocess; subprocess.run(["bash", "-c", "echo hello"])',
+            id="bash-echo",
+        ),
+        pytest.param('import os; os.system("ls -la")', id="ls"),
+        pytest.param('import os; os.system("ssh host uptime")', id="ssh-not-sh"),
+        pytest.param('import os; os.system("sharmony --list")', id="sh-prefix-word"),
+        pytest.param('import shutil; shutil.copy("a", "b")', id="copy"),
+    ],
+)
+def test_benign_shell_usage_is_not_flagged(code: str) -> None:
+    """Widening the wrapper list must not start refusing ordinary commands."""
+    assert _check_code_destructive(code) is None
