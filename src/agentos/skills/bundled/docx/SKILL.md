@@ -106,6 +106,9 @@ text drops formatting. If a placeholder spans multiple runs (often happens
 when the original template applied bold/italic mid-word), the helper script
 collapses runs into the first one and clears the rest.
 
+`ops.json` must be a JSON list of operations. A single object or any other shape
+is refused with exit 2 and no output file is written.
+
 ### B2. Structural edits (sections / page layout / numbering)
 
 python-docx exposes paragraphs, tables, and runs but has limited support for

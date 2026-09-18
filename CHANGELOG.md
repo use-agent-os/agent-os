@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **skills(docx):** refuse a non-list or invalid JSON ops file in `edit_docx.py`
+  with exit 2 instead of writing an unedited document and exiting 0.
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added
