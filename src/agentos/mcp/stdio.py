@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
+import sys
 from typing import Any, cast
 
 from agentos import __version__
@@ -99,6 +101,33 @@ class MCPStdioClient(MCPClient):
         self._request_id += 1
         return self._request_id
 
+    @staticmethod
+    def _resolve_command(command: str) -> str:
+        """Resolve *command* to a launchable path on Windows.
+
+        ``asyncio.create_subprocess_exec`` hands the command straight to
+        ``CreateProcessW``, which only auto-appends ``.exe`` to an
+        extensionless name -- it never consults ``PATHEXT`` the way a shell
+        does (issue #2726). ``npx``, ``npm``, and ``pipx`` ship as ``.cmd``
+        wrappers on Windows, so the bare name is never found and the
+        subprocess fails immediately with ``WinError 2``, before a single
+        byte of MCP traffic. ``shutil.which`` performs that same PATHEXT
+        search, and CPython's own Windows process launch already knows how
+        to hand a resolved ``.cmd``/``.bat`` path to ``cmd.exe`` safely
+        (the "BatBadBut" argv-escaping fix, Python 3.12.9+/3.13.2+) -- so no
+        extra shell wrapping belongs here. If nothing resolves, the command
+        is passed through unchanged so a genuinely missing binary still
+        fails with the same clear error as before.
+
+        POSIX's own ``exec`` already searches ``PATH`` for a bare command,
+        so this only changes anything on Windows; touching it there too
+        would trade a program's own ``argv[0]`` for its resolved path for
+        no reason.
+        """
+        if sys.platform != "win32":
+            return command
+        return shutil.which(command) or command
+
     async def connect(self) -> None:
         """Spawn the subprocess and perform MCP initialization handshake."""
         assert self.config.command is not None, "stdio transport requires command"
@@ -108,7 +137,7 @@ class MCPStdioClient(MCPClient):
             env = {**os.environ, **self.config.env}
 
         self._process = await asyncio.create_subprocess_exec(
-            self.config.command,
+            self._resolve_command(self.config.command),
             *self.config.args,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,

@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from agentos.mcp import stdio
 from agentos.mcp.stdio import MCPStdioClient
 from agentos.mcp.types import MCPServerConfig
 
@@ -102,6 +103,69 @@ def _reader(
 
 def _client_reading(data: bytes, *, limit: int | None = None) -> MCPStdioClient:
     return _client_with_process(_PipeProcess(_reader(data=data, limit=limit)))
+
+
+# --- Windows command resolution (#2726) -------------------------------------
+
+
+def test_resolve_command_uses_pathext_search_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bare ``npx``/``npm``/``pipx`` name must resolve to its ``.cmd`` wrapper."""
+    monkeypatch.setattr(stdio.sys, "platform", "win32")
+    monkeypatch.setattr(
+        stdio.shutil, "which", lambda cmd: r"C:\nodejs\npx.cmd" if cmd == "npx" else None
+    )
+
+    assert MCPStdioClient._resolve_command("npx") == r"C:\nodejs\npx.cmd"
+
+
+def test_resolve_command_falls_back_when_unresolved_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A genuinely missing binary still fails the same way it did before."""
+    monkeypatch.setattr(stdio.sys, "platform", "win32")
+    monkeypatch.setattr(stdio.shutil, "which", lambda cmd: None)
+
+    assert MCPStdioClient._resolve_command("totally-not-installed") == "totally-not-installed"
+
+
+def test_resolve_command_is_untouched_on_posix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """POSIX's own ``exec`` already resolves a bare command against ``PATH``.
+
+    Proves the boundary deliberately not fixed: even if ``shutil.which``
+    would resolve to something else, the command must pass through exactly
+    as given here, or a program's own ``argv[0]`` would change for no reason.
+    """
+    monkeypatch.setattr(stdio.sys, "platform", "linux")
+    monkeypatch.setattr(stdio.shutil, "which", lambda cmd: "/usr/local/bin/npx")
+
+    assert MCPStdioClient._resolve_command("npx") == "npx"
+
+
+@pytest.mark.asyncio
+async def test_connect_spawns_the_resolved_command_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End to end: ``connect()`` must hand the resolved path to the subprocess,
+    not the bare wrapper name that fails with ``WinError 2``."""
+    monkeypatch.setattr(stdio.sys, "platform", "win32")
+    monkeypatch.setattr(
+        stdio.shutil, "which", lambda cmd: r"C:\nodejs\npx.cmd" if cmd == "npx" else None
+    )
+
+    captured: dict[str, Any] = {}
+
+    async def fake_create_subprocess_exec(*args: Any, **kwargs: Any) -> _PipeProcess:
+        captured["args"] = args
+        return _PipeProcess(_reader(data=b'{"jsonrpc":"2.0","id":1,"result":{}}\n'))
+
+    monkeypatch.setattr(stdio.asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
+
+    client = MCPStdioClient(
+        MCPServerConfig(name="demo", transport="stdio", command="npx", args=["-y", "some-server"])
+    )
+    await client.connect()
+
+    assert captured["args"] == (r"C:\nodejs\npx.cmd", "-y", "some-server")
 
 
 # --- request framing -------------------------------------------------------
