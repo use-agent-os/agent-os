@@ -15,6 +15,7 @@ APPROVED_PACKAGE_IMPORTS: frozenset[tuple[str, str]] = frozenset({
     ("channels", "util"),
     ("engine", "util"),
     ("gateway", "util"),
+    ("memory", "util"),
     ("plan_mode.py", "util"),
     ("sandbox", "util"),
     ("session", "util"),

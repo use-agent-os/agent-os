@@ -9,6 +9,8 @@ from typing import Any
 
 import structlog
 
+from agentos.util.bounded_registry import BoundedRegistry
+
 from .source_paths import is_memory_source_path
 from .store import LongTermMemoryStore
 from .types import MemorySource
@@ -121,7 +123,14 @@ class MemorySyncManager:
         self._session_indexer = session_indexer
 
         self._dirty = False
-        self._warmed_sessions: set[str] = set()
+        # Session-shaped so the terminal-event hook reaches it: this set decides
+        # whether the *next* session under a given key is warmed, and a key that
+        # outlives its session made a brand-new one skip its session-start sync.
+        self._warmed_sessions: BoundedRegistry[str, bool] = BoundedRegistry(
+            shape="session",
+            name="MemorySyncManager._warmed_sessions",
+            session_of=lambda key, _value: key,
+        )
         self._delta = SessionDeltaTracker()
         self._mtimes: dict[str, float] = {}
         self._pending_changes: set[str] = set()
@@ -248,7 +257,7 @@ class MemorySyncManager:
         """Trigger 1: sync on first session access."""
         if session_key in self._warmed_sessions:
             return
-        self._warmed_sessions.add(session_key)
+        self._warmed_sessions[session_key] = True
         await self.sync(reason="session-start")
 
     def mark_dirty(self) -> None:
