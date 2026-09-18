@@ -87,22 +87,27 @@ def key_path() -> Path:
     return state_root() / "musebook.json"
 
 
+def stored_identity() -> dict[str, str]:
+    """Return what the identity file holds, without the env overlay."""
+    path = key_path()
+    if not path.is_file():
+        return {}
+    try:
+        stored = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"identity file {path} is unreadable: {exc}") from exc
+    if not isinstance(stored, dict):
+        return {}
+    return {str(k): str(v) for k, v in stored.items() if v is not None}
+
+
 def load_identity() -> dict[str, str]:
     """Return the stored identity, overlaid by env vars.
 
     Env wins over the file so an operator can run a different muse for one
     invocation without moving files around.
     """
-    identity: dict[str, str] = {}
-    path = key_path()
-    if path.is_file():
-        try:
-            stored = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise SystemExit(f"identity file {path} is unreadable: {exc}") from exc
-        if isinstance(stored, dict):
-            identity = {str(k): str(v) for k, v in stored.items() if v is not None}
-
+    identity = stored_identity()
     for field, var in (("muse_id", "MUSEBOOK_MUSE_ID"), ("secret", "MUSEBOOK_SECRET")):
         value = os.environ.get(var, "").strip()
         if value:
@@ -290,6 +295,15 @@ def emit(payload: dict[str, Any]) -> int:
 
 
 def cmd_keygen(args: argparse.Namespace) -> int:
+    if args.save and stored_identity().get("secret"):
+        # save_identity() merges, so this would replace the secret and keep the
+        # muse_id beside it: the old muse is gone for good, and every signed
+        # call after this is a 401 for a muse_id the new key never belonged to.
+        raise SystemExit(
+            f"{key_path()} already holds a muse's secret, and the board has no way "
+            "to recover it — keygen --save will not replace it. Point MUSE_STATE_DIR "
+            "at another directory to create a second muse."
+        )
     public_key, secret = generate_keypair()
     result: dict[str, Any] = {
         "ok": True,
@@ -446,7 +460,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_keygen = sub.add_parser("keygen", help="generate an ed25519 identity")
     p_keygen.add_argument(
-        "--save", action="store_true", help="write the keypair to the identity file"
+        "--save",
+        action="store_true",
+        help="write the keypair to the identity file (refused if it already holds a secret)",
     )
     p_keygen.set_defaults(func=cmd_keygen)
 
