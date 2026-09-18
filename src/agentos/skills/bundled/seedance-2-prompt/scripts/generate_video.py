@@ -263,7 +263,17 @@ class Args:
     input_references: list[str]
 
 
+def _is_remote_image_ref(path: str) -> bool:
+    """True for a value that must be passed straight through to the provider
+    instead of read from local disk: an HTTP(S) URL or a Data URI. Every
+    supported provider (openrouter, volcengine, byteplus) accepts both
+    directly in an ``image_url`` payload field (#2734)."""
+    return path.startswith(("http://", "https://", "data:"))
+
+
 def _encode_input_image(path: str) -> str:
+    if _is_remote_image_ref(path):
+        return path
     raw = Path(path).read_bytes()
     suffix = Path(path).suffix.lower().lstrip(".")
     mime = {
@@ -604,11 +614,15 @@ def main() -> int:
             )
         return 1
 
-    if raw.input_image and not Path(raw.input_image).is_file():
+    if (
+        raw.input_image
+        and not _is_remote_image_ref(raw.input_image)
+        and not Path(raw.input_image).is_file()
+    ):
         print(f"Error: --input-image not found: {raw.input_image}", file=sys.stderr)
         return 1
     for ref in raw.input_references or []:
-        if ref and not Path(ref).is_file():
+        if ref and not _is_remote_image_ref(ref) and not Path(ref).is_file():
             print(f"Error: --input-reference not found: {ref}", file=sys.stderr)
             return 1
 

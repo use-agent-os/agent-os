@@ -234,3 +234,81 @@ def test_non_openrouter_video_provider_uses_only_its_provider_env(
         )
         == "ark-key"
     )
+
+
+# ── #2734: HTTP(S) URLs and Data URIs for --input-image / --input-reference ──
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "https://example.com/character.png",
+        "http://example.com/character.png",
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+        "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+    ],
+)
+def test_encode_input_image_passes_remote_refs_through_unchanged(
+    video_script: ModuleType, ref: str
+) -> None:
+    assert video_script._encode_input_image(ref) == ref
+
+
+def test_encode_input_image_still_reads_and_base64_encodes_a_local_file(
+    video_script: ModuleType, tmp_path: Path
+) -> None:
+    """Boundary: a real local path must still be read from disk, not treated
+    as a remote ref just because #2734 widened what's accepted."""
+    local_file = tmp_path / "character.png"
+    local_file.write_bytes(b"\x89PNG\r\n\x1a\nfakepngbytes")
+
+    encoded = video_script._encode_input_image(str(local_file))
+
+    assert encoded.startswith("data:image/png;base64,")
+    import base64
+
+    assert base64.b64decode(encoded.split(",", 1)[1]) == local_file.read_bytes()
+
+
+def test_main_does_not_reject_a_remote_input_image_before_submitting(
+    video_script: ModuleType,
+    isolated_runtime: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Real-entry-point regression test for #2734: main()'s own upfront
+    ``Path(...).is_file()`` gate — separate from _encode_input_image — must
+    not reject a remote sessionKey/URL before the payload is ever built.
+    This is the specific gap a fix scoped only to _encode_input_image (as in
+    the competing PR for this issue) misses: it still hard-errors with
+    "--input-image not found" for the issue's own literal repro."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+
+    captured: dict = {}
+
+    def _fake_run_attempt(**kwargs):
+        captured.update(kwargs)
+        raise video_script._AttemptError("stopped before network for the test")
+
+    monkeypatch.setattr(video_script, "_run_attempt", _fake_run_attempt)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "generate_video.py",
+            "--prompt",
+            "test",
+            "--input-image",
+            "https://example.com/character.png",
+            "--filename",
+            str(isolated_runtime / "out.mp4"),
+        ],
+    )
+
+    exit_code = video_script.main()
+
+    assert exit_code == 1  # the faked attempt always fails -- that's expected
+    assert captured, "main() must have reached _run_attempt, not stopped at the input-image gate"
+    assert (
+        captured["payload"]["frame_images"][0]["image_url"]["url"]
+        == "https://example.com/character.png"
+    )
