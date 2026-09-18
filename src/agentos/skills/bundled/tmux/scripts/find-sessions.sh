@@ -58,7 +58,15 @@ list_sessions() {
   fi
 
   if [[ -n "$query" ]]; then
-    sessions="$(printf '%s\n' "$sessions" | grep -i -- "$query" || true)"
+    # Match the name field only: the rows also carry the attached flag and the
+    # creation date, so a grep over the whole line answers "sep" or "1" with
+    # every session. And a session name is a literal string -- BRE would read
+    # `notes[draft]` as a character class and report a session that is right
+    # there as missing.
+    sessions="$(
+      printf '%s\n' "$sessions" |
+        awk -F'\t' -v q="$query" 'BEGIN { q = tolower(q) } index(tolower($1), q)'
+    )"
   fi
 
   if [[ -z "$sessions" ]]; then
