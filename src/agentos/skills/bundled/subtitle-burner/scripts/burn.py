@@ -36,16 +36,30 @@ _WINGET_FFMPEG_GLOB = (
 )
 
 
+def _ffprobe_beside(ffmpeg_bin: str) -> str:
+    """Return the ffprobe that ships next to ``ffmpeg_bin``.
+
+    Only the file name is swapped. Rewriting the whole path renames any
+    directory that happens to be called ffmpeg as well, which is exactly the
+    layout a manual /opt/ffmpeg/bin install and Homebrew's Cellar both use --
+    and the derived path then does not exist, so the probe below is skipped
+    and PlayRes is silently left off the style chain.
+
+    The suffix is carried across (``ffmpeg.exe`` -> ``ffprobe.exe``,
+    ``ffmpeg-7.1`` -> ``ffprobe-7.1``). A binary under some other name gets
+    the platform's plain ffprobe from the same directory.
+    """
+    directory, name = os.path.split(ffmpeg_bin)
+    if name.lower().startswith("ffmpeg"):
+        probe_name = "ffprobe" + name[len("ffmpeg") :]
+    else:
+        probe_name = "ffprobe.exe" if os.name == "nt" else "ffprobe"
+    return os.path.join(directory, probe_name)
+
+
 def _probe_resolution(ffmpeg_bin: str, video_path: Path) -> tuple[int, int] | None:
     """Use ffprobe (next to ffmpeg) to read the source video's W x H."""
-    ffprobe = ffmpeg_bin.replace("ffmpeg.exe", "ffprobe.exe").replace(
-        "/ffmpeg", "/ffprobe",
-    )
-    if ffprobe == ffmpeg_bin:
-        # Fallback for non-Windows / non-suffixed names.
-        ffprobe = str(Path(ffmpeg_bin).with_name(
-            "ffprobe.exe" if os.name == "nt" else "ffprobe",
-        ))
+    ffprobe = _ffprobe_beside(ffmpeg_bin)
     if not Path(ffprobe).is_file() and shutil.which(ffprobe) is None:
         return None
     try:
