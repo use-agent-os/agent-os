@@ -15,6 +15,7 @@ Two behaviours are under test:
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -317,3 +318,43 @@ def test_skipped_verification_is_not_reported_as_a_network_fault() -> None:
 
 def _warning(statuses: list[str]) -> str | None:
     return rwa_lookup._warning_for([{"status": s} for s in statuses])
+
+
+def test_write_cards_creates_missing_parent_directories(
+    tmp_path: Path, capsys: Any
+) -> None:
+    """Issue #2474: --cards into a not-yet-existing subdirectory must not fail.
+
+    _write_cards defers ``import rwa_cards`` to call time, resolved against
+    the script's own directory -- the module loaded here via
+    spec_from_file_location doesn't put that on sys.path the way running the
+    script directly does, so the import needs the same help here.
+    """
+    sys.path.insert(0, str(_SCRIPT.parent))
+    try:
+        out = tmp_path / "nested" / "dir" / "AAPL.cards.json"
+        result = {
+            "query": "Apple",
+            "matches": [
+                {
+                    "name": "Apple",
+                    "symbol": "AAPL",
+                    "address": "0xaf3d76f1834a1d425780943c99ea8a608f8a93f9",
+                    "chainId": 4663,
+                    "decimals": 18,
+                    "isStockToken": True,
+                    "logoURI": "",
+                    "status": "verified",
+                    "beacon": "0xe10b6f6b275de231345c20d14ab812db62151b00",
+                }
+            ],
+        }
+
+        rwa_lookup._write_cards(result, str(out))
+    finally:
+        sys.path.remove(str(_SCRIPT.parent))
+
+    captured = capsys.readouterr()
+    assert "[card not written:" not in captured.err
+    assert f"publish_artifact path={out}" in captured.err
+    assert out.is_file()
