@@ -495,8 +495,20 @@ COMMANDS = {
 }
 
 
+_BOOL_FLAGS = frozenset(
+    {
+        "broadcast",
+        "pin-metadata",
+        "allow-fallback-tick",
+        "json",
+        "debug",
+        "help",
+    }
+)
+
+
 def main(argv: list[str]) -> None:
-    args = parse_args(argv)
+    args = parse_args(argv, bool_flags=_BOOL_FLAGS)
     command = args["_"][0] if args["_"] else None
     if not command or args.get("help") or command not in COMMANDS:
         print(USAGE)
