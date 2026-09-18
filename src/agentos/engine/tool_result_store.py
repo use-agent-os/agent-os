@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import secrets
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -16,6 +17,7 @@ from agentos.attachment_refs import _atomic_write_bytes
 DEFAULT_TOOL_RESULT_MAX_BYTES = 8 * 1024 * 1024
 DEFAULT_TOOL_RESULT_DISK_BUDGET_BYTES = 256 * 1024 * 1024
 DEFAULT_TOOL_RESULT_RETENTION_SECONDS = 7 * 24 * 60 * 60
+DEFAULT_TOOL_RESULT_EXPIRY_SWEEP_INTERVAL_SECONDS = 60.0
 TOOL_RESULT_STORE_SESSION_BUCKET = "s"
 TOOL_RESULT_CONTENT_NAME = "content.txt"
 TOOL_RESULT_META_NAME = "meta.json"
@@ -51,11 +53,44 @@ class _StoredMeta:
     record_dir: Path
 
 
-class ToolResultStore:
-    """Store full raw tool results omitted from provider context."""
+@dataclass
+class _ScanState:
+    """What the last full scan of one store root established.
 
-    def __init__(self, root: str | Path) -> None:
+    ``usage_bytes`` is an upper bound between scans: every successful write
+    adds to it and nothing ever subtracts without a rescan, so a record
+    removed behind our back only costs one extra scan, never an overshoot.
+    """
+
+    usage_bytes: int | None = None
+    last_sweep_monotonic: float | None = None
+
+
+# Keyed by store root. The engine builds a fresh ``ToolResultStore`` for every
+# write, so the sweep clock and the usage bound cannot live on the instance.
+_scan_state_by_root: dict[str, _ScanState] = {}
+
+
+class ToolResultStore:
+    """Store full raw tool results omitted from provider context.
+
+    Expiry and disk-budget accounting both need a full walk of the store
+    (``rglob`` plus a ``json.loads`` per record). That walk used to run twice
+    on every ``write`` — once per pass — which put work proportional to the
+    whole store on the turn loop for each tool call (#2126). Now a write
+    scans at most once, the expiry sweep runs on a timer, and the budget
+    check consults a cached usage bound so a store comfortably under budget
+    writes without scanning at all.
+    """
+
+    def __init__(
+        self,
+        root: str | Path,
+        *,
+        expiry_sweep_interval_seconds: float = DEFAULT_TOOL_RESULT_EXPIRY_SWEEP_INTERVAL_SECONDS,
+    ) -> None:
         self.root = Path(root)
+        self._expiry_sweep_interval_seconds = max(0.0, float(expiry_sweep_interval_seconds))
 
     def write(
         self,
@@ -82,9 +117,19 @@ class ToolResultStore:
                 f"tool result snapshot exceeds per-result budget ({size_bytes} > {max_bytes})"
             )
 
-        self._remove_expired(retention_seconds)
+        state = self._scan_state()
         if disk_budget_bytes is not None:
-            self._prune_to_fit(size_bytes, disk_budget_bytes)
+            _check_fits_budget(size_bytes, disk_budget_bytes)
+        records: list[_StoredMeta] | None = None
+        if retention_seconds is not None and self._expiry_sweep_due(state):
+            records = self._scan(state)
+            records = self._remove_expired(records, state, retention_seconds)
+            state.last_sweep_monotonic = time.monotonic()
+        if disk_budget_bytes is not None:
+            if records is None and not _fits_cached_usage(state, size_bytes, disk_budget_bytes):
+                records = self._scan(state)
+            if records is not None:
+                self._prune_to_fit(records, state, size_bytes, disk_budget_bytes)
 
         sha = hashlib.sha256(payload).hexdigest()
         created_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
@@ -132,6 +177,8 @@ class ToolResultStore:
             except BaseException:
                 _remove_record_dir(record_dir)
                 raise
+            if state.usage_bytes is not None:
+                state.usage_bytes += size_bytes
             return record
         raise FileExistsError("could not allocate unique tool result handle")
 
@@ -176,6 +223,25 @@ class ToolResultStore:
             / normalized
         )
 
+    def _scan_state(self) -> _ScanState:
+        key = str(self.root.resolve())
+        state = _scan_state_by_root.get(key)
+        if state is None:
+            state = _ScanState()
+            _scan_state_by_root[key] = state
+        return state
+
+    def _scan(self, state: _ScanState) -> list[_StoredMeta]:
+        """One full walk; refreshes the usage bound with what is really there."""
+        records = self._iter_records()
+        state.usage_bytes = sum(record.size_bytes for record in records)
+        return records
+
+    def _expiry_sweep_due(self, state: _ScanState) -> bool:
+        if state.last_sweep_monotonic is None:
+            return True
+        return time.monotonic() - state.last_sweep_monotonic >= self._expiry_sweep_interval_seconds
+
     def _iter_records(self) -> list[_StoredMeta]:
         root = self.root / TOOL_RESULT_STORE_SESSION_BUCKET
         if not root.exists():
@@ -207,34 +273,68 @@ class ToolResultStore:
             total += record.size_bytes
         return total
 
-    def _remove_expired(self, retention_seconds: int | None) -> None:
-        if retention_seconds is None:
-            return
+    def _remove_expired(
+        self,
+        records: list[_StoredMeta],
+        state: _ScanState,
+        retention_seconds: int,
+    ) -> list[_StoredMeta]:
+        """Drop expired records from disk and from ``records``; return the survivors."""
         cutoff = datetime.now(UTC) - timedelta(seconds=max(0, int(retention_seconds)))
-        for record in self._iter_records():
+        kept: list[_StoredMeta] = []
+        for record in records:
             if record.created_at < cutoff:
                 _remove_record_dir(record.record_dir)
+                continue
+            kept.append(record)
+        state.usage_bytes = sum(record.size_bytes for record in kept)
+        return kept
 
-    def _prune_to_fit(self, incoming_bytes: int, disk_budget_bytes: int) -> None:
+    def _prune_to_fit(
+        self,
+        records: list[_StoredMeta],
+        state: _ScanState,
+        incoming_bytes: int,
+        disk_budget_bytes: int,
+    ) -> None:
         budget = max(0, int(disk_budget_bytes))
-        # A snapshot larger than the whole budget can never be made to fit, so
-        # pruning first only destroys unrelated records on the way to the same
-        # error. The caller records a `skipped` metric and carries on, which
-        # made that loss silent.
-        if incoming_bytes > budget:
-            raise ToolResultStoreBudgetError(
-                "tool result snapshot exceeds disk budget "
-                f"({incoming_bytes} > {budget})"
-            )
-        records = sorted(self._iter_records(), key=lambda item: item.created_at)
-        current = sum(record.size_bytes for record in records)
+        _check_fits_budget(incoming_bytes, budget)
+        ordered = sorted(records, key=lambda item: item.created_at)
+        current = sum(record.size_bytes for record in ordered)
         if current + incoming_bytes <= budget:
             return
-        for record in records:
+        # Free a little more than strictly needed. Pruning to exactly the
+        # budget leaves the store sitting on the line, and every following
+        # write would pay for a full scan to shave off one more record.
+        target = budget - _prune_headroom_bytes(budget)
+        for record in ordered:
             _remove_record_dir(record.record_dir)
             current = max(0, current - record.size_bytes)
-            if current + incoming_bytes <= budget:
-                return
+            if current + incoming_bytes <= target:
+                break
+        state.usage_bytes = current
+
+
+def _check_fits_budget(incoming_bytes: int, disk_budget_bytes: int) -> None:
+    # A snapshot larger than the whole budget can never be made to fit, so
+    # pruning first only destroys unrelated records on the way to the same
+    # error. The caller records a `skipped` metric and carries on, which
+    # made that loss silent.
+    budget = max(0, int(disk_budget_bytes))
+    if incoming_bytes > budget:
+        raise ToolResultStoreBudgetError(
+            f"tool result snapshot exceeds disk budget ({incoming_bytes} > {budget})"
+        )
+
+
+def _fits_cached_usage(state: _ScanState, incoming_bytes: int, disk_budget_bytes: int) -> bool:
+    if state.usage_bytes is None:
+        return False
+    return state.usage_bytes + incoming_bytes <= max(0, int(disk_budget_bytes))
+
+
+def _prune_headroom_bytes(budget: int) -> int:
+    return min(budget // 16, 16 * 1024 * 1024)
 
 
 def _parse_created_at(value: str) -> datetime:
