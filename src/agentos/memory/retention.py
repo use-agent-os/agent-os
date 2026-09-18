@@ -27,7 +27,7 @@ logger = structlog.get_logger(__name__)
 # ``identity/workspace.py:BOOTSTRAP_FILENAMES`` plus ``MEMORY.md`` /
 # ``memory.md`` aliases).
 DEFAULT_EXEMPT_FILES: frozenset[str] = frozenset(
-    {"MEMORY.md", *BOOTSTRAP_FILENAMES}
+    {"MEMORY.md", "memory.md", *BOOTSTRAP_FILENAMES}
 )
 
 
