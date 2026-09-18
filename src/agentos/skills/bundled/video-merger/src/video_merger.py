@@ -136,6 +136,11 @@ class VideoMerger:
         else:
             print(f"使用自定义分辨率：{resolution}")
 
+        # 创建输出目录
+        output_dir = os.path.dirname(os.path.abspath(output_path))
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+
         # 生成concat列表
         with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
             for v in video_list:
@@ -278,6 +283,11 @@ class VideoMerger:
         """
         合并单个分块
         """
+        # 创建输出目录
+        out_dir = os.path.dirname(os.path.abspath(output_path))
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+
         # 生成concat列表
         with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
             for v in video_list:
