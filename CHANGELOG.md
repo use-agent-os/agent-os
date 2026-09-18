@@ -18,6 +18,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- `grep_search`: single-file searches with `max_results <= 0` returned 1 matching line instead of returning no matches; it now returns `"No matches for '<pattern>'"` immediately when `max_results <= 0`.
+
+
 - WebUI chat: "Move to project" and "Rename session" on a brand-new chat
   (Cmd+Shift+O / `/new`, before the first message) failed with "Session not
   found". The WebUI mints the session key client-side and the row only

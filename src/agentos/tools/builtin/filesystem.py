@@ -326,8 +326,7 @@ def _workspace_strict_read_block(
             "workspace": str(roots[0]),
             "allowed_roots": [str(root) for root in roots],
             "message": (
-                f"{tool_name} blocked: {candidate} is outside active read roots "
-                f"({root_labels})."
+                f"{tool_name} blocked: {candidate} is outside active read roots ({root_labels})."
             ),
             "retryable": False,
         }
@@ -855,8 +854,7 @@ def _format_spreadsheet(
             parts.append(f"{idx}\t" + "\t".join(rows.get(idx, [])))
         if end < total_rows:
             parts.append(
-                f"(Showing rows {offset}-{end} of {total_rows}. "
-                f"Use offset={end + 1} to continue.)"
+                f"(Showing rows {offset}-{end} of {total_rows}. Use offset={end + 1} to continue.)"
             )
     return "\n".join(parts)
 
@@ -1221,6 +1219,8 @@ async def grep_search(
     # it as "the symbol does not exist" and stops looking.
     if not base.exists():
         raise FileNotFoundError(f"Path not found: {path or base}")
+    if max_results <= 0:
+        return f"No matches for '{pattern}'"
 
     loop = asyncio.get_running_loop()
     strict_roots = _strict_read_roots()

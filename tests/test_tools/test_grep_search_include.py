@@ -106,3 +106,15 @@ async def test_path_qualified_glob_that_matches_nothing_reports_no_matches(repo:
         out = await fs.grep_search("def test_", path=str(repo), include="docs/*.py")
 
     assert out == "No matches for 'def test_'"
+
+
+@pytest.mark.asyncio
+async def test_grep_search_zero_max_results_returns_no_matches(repo: Path) -> None:
+    with _tool_context(repo):
+        file_out = await fs.grep_search(
+            "def test_", path=str(repo / "tests" / "test_basic.py"), max_results=0
+        )
+        dir_out = await fs.grep_search("def test_", path=str(repo), max_results=0)
+
+    assert file_out == "No matches for 'def test_'"
+    assert dir_out == "No matches for 'def test_'"
