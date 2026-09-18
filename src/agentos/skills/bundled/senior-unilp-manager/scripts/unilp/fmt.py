@@ -17,6 +17,27 @@ from .hexutil import format_units, parse_amount  # noqa: F401 — re-exported
 # ---------------------------------------------------------------------------
 
 
+BOOLEAN_FLAGS: frozenset[str] = frozenset(
+    {
+        "json",
+        "include-v3",
+        "all",
+        "all-pools",
+        "no-hook",
+        "no-fees",
+        "include-empty",
+        "from-current",
+        "scan-logs",
+        "broadcast",
+        "allow-hooked",
+        "allow-odd-tier",
+        "alert-only",
+        "help",
+        "h",
+    }
+)
+
+
 def parse_args(argv: list[str]) -> dict:
     """Parse ``--flag value`` / ``--flag=value`` / ``--bool`` plus positionals."""
     out: dict[str, Any] = {"_": []}
@@ -31,6 +52,10 @@ def parse_args(argv: list[str]) -> dict:
         if "=" in body:
             name, _, value = body.partition("=")
             out[name] = value
+            index += 1
+            continue
+        if body in BOOLEAN_FLAGS:
+            out[body] = True
             index += 1
             continue
         nxt = argv[index + 1] if index + 1 < len(argv) else None
