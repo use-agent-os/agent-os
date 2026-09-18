@@ -46,7 +46,7 @@ def _seasonal_hint(query: str, location: str) -> str:
 
 
 def _fetch_wttr_json(location: str, timeout: float) -> dict[str, Any]:
-    encoded = urllib.parse.quote(location)
+    encoded = urllib.parse.quote(location, safe="")
     url = f"https://wttr.in/{encoded}?format=j1"
     req = urllib.request.Request(  # noqa: S310 - fixed trusted weather endpoint
         url,

@@ -97,3 +97,29 @@ def test_weather_entrypoint_returns_seasonal_hint_on_network_error(
     assert payload["forecast"] == []
     assert payload["errors"]
     assert "rainy season" in payload["seasonal_hint"]
+
+
+def test_fetch_wttr_json_escapes_slash_in_location(monkeypatch) -> None:
+    module = _load_module()
+    requested_urls: list[str] = []
+
+    class FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"current_condition": [{}], "weather": []}'
+
+    def fake_urlopen(req, timeout=None):
+        requested_urls.append(req.full_url)
+        return FakeResp()
+
+    monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen)
+    module._fetch_wttr_json("Dallas/Fort Worth", 5.0)
+
+    assert len(requested_urls) == 1
+    assert requested_urls[0] == "https://wttr.in/Dallas%2FFort%20Worth?format=j1"
+
