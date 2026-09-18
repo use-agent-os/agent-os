@@ -138,6 +138,31 @@ def _extract_docx_text(data: bytes | io.BytesIO | Path) -> str:
         raise ValueError(f"Failed to extract text from DOCX: {exc}") from exc
 
 
+def _pptx_shapes_text(shapes: Any) -> list[str]:
+    """Paragraphs and table rows of *shapes*, descending into groups at any depth.
+
+    A table sits in a graphic frame and a group shape holds its members in a
+    shape tree of its own; neither has a text frame, so checking only
+    ``has_text_frame`` indexes none of their text.
+    """
+    parts: list[str] = []
+    for shape in shapes:
+        if shape.has_text_frame:
+            for paragraph in shape.text_frame.paragraphs:
+                text = paragraph.text.strip()
+                if text:
+                    parts.append(text)
+        if getattr(shape, "has_table", False):
+            for row in shape.table.rows:
+                row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+                if row_text:
+                    parts.append(row_text)
+        members = getattr(shape, "shapes", None)
+        if members is not None:
+            parts.extend(_pptx_shapes_text(members))
+    return parts
+
+
 def _extract_pptx_text(data: bytes | io.BytesIO | Path) -> str:
     """Extract text from a PowerPoint presentation (.pptx)."""
     try:
@@ -151,13 +176,7 @@ def _extract_pptx_text(data: bytes | io.BytesIO | Path) -> str:
         prs = pptx.Presentation(stream)
         slides_text: list[str] = []
         for i, slide in enumerate(prs.slides):
-            slide_parts: list[str] = []
-            for shape in slide.shapes:
-                if shape.has_text_frame:
-                    for paragraph in shape.text_frame.paragraphs:
-                        text = paragraph.text.strip()
-                        if text:
-                            slide_parts.append(text)
+            slide_parts = _pptx_shapes_text(slide.shapes)
             if slide_parts:
                 slides_text.append(f"[Slide {i + 1}]\n" + "\n".join(slide_parts))
         return "\n\n".join(slides_text)
