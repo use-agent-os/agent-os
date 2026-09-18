@@ -11,7 +11,7 @@
 #   render_thumbs.sh deck.pptx --range 3-5           # render only slides 3..5
 #
 # Output:
-#   <out_dir>/<basename>-NN.jpg     per slide
+#   <out_dir>/<basename>-NN.jpg     per slide (at least two digits)
 #   <out_dir>/<basename>.pdf        intermediate, kept for re-rendering
 #
 # Exit codes:
@@ -113,11 +113,29 @@ if [[ -n "$range" ]]; then
   fi
 fi
 
+# Render into a private directory, then move the pages into out_dir. pdftoppm pads
+# the page number to the width of the page count (a 9-slide deck comes out as
+# deck-1.jpg), so a re-render after the deck crossed 9<->10 slides used to sit
+# beside the previous render under different names, and globbing out_dir printed
+# both. Pages are renamed to the documented deck-NN.jpg, and only the pages this
+# run rendered are printed.
+tmp_dir="$(mktemp -d "$out_dir/.render_thumbs.XXXXXX")"
+trap 'rm -rf "$tmp_dir"' EXIT
+
 if ! pdftoppm -jpeg -r "$dpi" "${range_args[@]}" \
-    "$pdf_path" "$out_dir/$basename"; then
+    "$pdf_path" "$tmp_dir/page"; then
   echo "pdftoppm failed" >&2
   exit 4
 fi
 
 echo "$pdf_path"
-ls "$out_dir/$basename"-*.jpg 2>/dev/null || true
+shopt -s nullglob
+for page in "$tmp_dir"/page-*.jpg; do
+  num="${page##*-}"
+  num="${num%.jpg}"
+  if [[ ${#num} -lt 2 ]]; then
+    num="0$num"
+  fi
+  mv -f "$page" "$out_dir/$basename-$num.jpg"
+  echo "$out_dir/$basename-$num.jpg"
+done

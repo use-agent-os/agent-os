@@ -283,6 +283,10 @@ bash {baseDir}/scripts/render_thumbs.sh out.pptx
 # emits out-01.jpg, out-02.jpg, ... in cwd, plus out.pdf
 ```
 
+The script prints out.pdf and then every slide image it just rendered. After a
+re-render, inspect exactly those: an image left over from an earlier, longer
+version of the deck stays on disk but is not printed.
+
 The script needs `soffice` (LibreOffice) and `pdftoppm` (poppler) on PATH. If
 either is missing, the script tells you what to install for the host OS.
 
