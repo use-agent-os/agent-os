@@ -254,6 +254,7 @@ otherwise export them with `agentos channels native-commands slack --request-url
 ```sh
 agentos providers configure openrouter -m anthropic/claude-sonnet-4   # provider + model in one step
 agentos config set llm.model "anthropic/claude-sonnet-4"              # just the model key
+agentos models list [--provider <name>] [--json]                      # inspect models and pricing
 agentos configure                                                     # interactive wizard
 agentos gateway restart                                               # apply to a running gateway
 ```

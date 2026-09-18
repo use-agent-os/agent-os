@@ -370,11 +370,20 @@ agentos configure router --router recommended
 agentos providers list
 agentos providers configure openrouter
 agentos providers status
+agentos models list
+agentos models list --provider openrouter
+agentos models list -c vision -c reasoning
+agentos models list --json
 ```
 
 `providers status` includes a `circuit` column with the active provider's
 failover circuit-breaker state (`closed`, `half_open`, or `open (42s)`); see
 [`providers-and-models.md`](providers-and-models.md#provider-health-circuit-breaker).
+
+`agentos models list` queries the running gateway to inspect available models,
+their context windows, supported capabilities, and per-1k token input/output
+pricing. Filter results with `--provider <name>` or required `--capability` /
+`-c <capability>` (repeatable). Use `--json` for structured output.
 
 Provider-specific setup examples, including OpenCAP and Surplus Intelligence,
 live in [`providers-and-models.md`](providers-and-models.md).
