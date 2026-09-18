@@ -931,10 +931,17 @@ async def _dispatch_combined_message_after_debounce(channel: Any, combined: Any,
         if isinstance(exc, TaskQueueFullError):
             await status_reactor.failed(msg)
             log.warning("channel_dispatch.debounce_enqueue_failed", session_key=session_key, reason="queue_full", coalesced_count=combined.coalesced_count)  # noqa: E501
-            await channel.send(_route_envelope_reply_message("Your messages couldn't be processed because the queue is full. Please retry.", route_envelope))  # noqa: E501
+            try:
+                await channel.send(_route_envelope_reply_message("Your messages couldn't be processed because the queue is full. Please retry.", route_envelope))  # noqa: E501
+            except Exception:
+                log.warning("channel_dispatch.debounce_error_reply_failed", session_key=session_key, reason="queue_full")  # noqa: E501
             return
         log.exception("channel_dispatch.debounce_enqueue_failed", session_key=session_key, reason="unexpected")  # noqa: E501
         await status_reactor.failed(msg)
+        try:
+            await channel.send(_route_envelope_reply_message("An unexpected error occurred while processing your message. Please retry.", route_envelope))  # noqa: E501
+        except Exception:
+            log.warning("channel_dispatch.debounce_error_reply_failed", session_key=session_key, reason="unexpected")  # noqa: E501
         return
 
     # Enqueue succeeded — release the placeholder reservation now that the real

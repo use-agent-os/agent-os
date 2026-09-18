@@ -115,3 +115,27 @@ async def test_debounce_cap_flush_isolates_next_window():
     counts = [getattr(c, "coalesced_count", 0) for c in fired]
     assert counts.count(MAX_COALESCED_MESSAGES) == 1
     assert counts.count(1) == 1
+
+
+async def test_debounce_deliver_handles_on_fire_exception():
+    """An exception in on_fire is logged and does not crash the debounce coordinator."""
+    coord = _DefaultDebounceCoordinator()
+
+    async def failing_on_fire(combined: object) -> None:
+        raise RuntimeError("Database connection failed")
+
+    # Scheduling and triggering delivery should not raise uncaught exception
+    await coord.schedule("tg:chat1", _msg("hello"), window_s=0.01, on_fire=failing_on_fire)
+    await asyncio.sleep(0.05)
+
+    # Coordinator remains functional for subsequent messages
+    fired: list[object] = []
+
+    async def ok_on_fire(combined: object) -> None:
+        fired.append(combined)
+
+    await coord.schedule("tg:chat1", _msg("next"), window_s=0.01, on_fire=ok_on_fire)
+    await asyncio.sleep(0.05)
+    assert len(fired) == 1
+    assert getattr(fired[0], "content") == "next"
+
