@@ -183,6 +183,15 @@ def _font_supports_char(font_name: str, char: str) -> bool:
     return ord(char) in char_widths
 
 
+#: reportlab's Paragraph markup collapses a literal "\n"/"\t" to a single
+#: space, the same whitespace-folding HTML does -- it never reads them as
+#: line breaks or tab stops. "\n" is a request for a new line (rendered
+#: below as a literal <br/>) and "\t" is a request for visible separation,
+#: approximated with this many non-breaking spaces (Paragraph collapses
+#: plain spaces the same way, but not "&#160;" runs).
+_PDF_TAB_EXPANSION = "&#160;" * 4
+
+
 def _pdf_markup_text(value: Any, *, base_font: str, cjk_font: str | None) -> str:
     text = _text(value)
     if not text:
@@ -204,7 +213,20 @@ def _pdf_markup_text(value: Any, *, base_font: str, cjk_font: str | None) -> str
         run = []
         run_font = None
 
-    for char in text:
+    # Every newline spelling becomes one line break below: CRLF and a lone
+    # CR (old Mac text) are real line breaks too, not a second character to
+    # render next to "\n".
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    for char in normalized:
+        if char == "\n":
+            flush()
+            parts.append("<br/>")
+            continue
+        if char == "\t":
+            flush()
+            parts.append(_PDF_TAB_EXPANSION)
+            continue
         target_font: str | None = None
         if cjk_font is not None and (
             _is_cjk(char) or (_is_cjk_symbol(char) and not _font_supports_char(base_font, char))
