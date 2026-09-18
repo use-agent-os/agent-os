@@ -370,3 +370,37 @@ def test_separator_after_a_prepend_hunk_is_trimmed() -> None:
 
 def test_counted_trailing_blank_is_kept_and_only_the_separator_is_trimmed() -> None:
     assert _parsed_hunk_lines("@@@ -1,2 +1,2 @@@\n-bar\n+baz\n\n\n") == ["-bar", "+baz", ""]
+
+
+def test_addition_hunk_with_start_exceeding_file_length_raises_error() -> None:
+    hunk = patch_tool.Hunk(
+        old_start=50, old_count=0, new_start=50, new_count=1, lines=["+added line"]
+    )
+    with pytest.raises(ValueError, match=r"Hunk start line 50 exceeds file length \(3 lines\)"):
+        patch_tool._apply_hunk(["line1\n", "line2\n", "line3\n"], hunk)
+
+
+def test_addition_hunk_with_start_exceeding_empty_file_raises_error() -> None:
+    hunk = patch_tool.Hunk(
+        old_start=2, old_count=0, new_start=2, new_count=1, lines=["+added line"]
+    )
+    with pytest.raises(ValueError, match=r"Hunk start line 2 exceeds file length \(0 lines\)"):
+        patch_tool._apply_hunk([], hunk)
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_tool_start_line_exceeding_file_length_fails_end_to_end(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "test.txt"
+    target.write_text("line1\nline2\nline3\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"Hunk start line 50 exceeds file length \(3 lines\)"):
+        await _apply(
+            tmp_path,
+            "*** Begin Patch\n"
+            "*** Update File: test.txt\n"
+            "@@@ -50,0 +50,1 @@@\n"
+            "+added line\n"
+            "*** End Patch",
+        )
