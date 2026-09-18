@@ -43,6 +43,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   RPC client surfaces the JSON-RPC error carried in a 5xx body instead of
   `HTTP 500`, retrying only when it names a transient condition.
 
+- Channels: `split_text_for_limit` (the shared chunking primitive behind
+  Discord's and Telegram's message-length caps) left a half-open code
+  fence in the first chunk when the fence opened the segment itself --
+  the "back up to before the fence" guard only fired when the backup
+  point was greater than zero, and a fence with nothing before it on its
+  own line legitimately backs up to exactly zero. The fence is now closed
+  on that chunk and reopened (with its original language tag) on the
+  next, computed via a fresh, independent cut rather than reusing the
+  caller's word/line-boundary cut -- reusing it could send the next call
+  right back to the same input, an infinite loop in every caller that
+  splits until the tail is empty ([#2127](https://github.com/use-agent-os/agent-os/issues/2127),
+  [#1997](https://github.com/use-agent-os/agent-os/issues/1997)).
+
 ### Changed
 
 - Web UI keyboard shortcuts: `g p` now jumps to Projects (it used to be `g j`,
@@ -338,18 +351,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   ([#2354](https://github.com/use-agent-os/agent-os/issues/2354)), and the
   gmgn skills no longer carry broken relative workflow links
   ([#2361](https://github.com/use-agent-os/agent-os/issues/2361)).
-
-- Channels: `split_text_for_limit` (the shared chunking primitive behind
-  Discord's and Telegram's message-length caps) left a half-open code
-  fence in the first chunk when the fence opened the segment itself --
-  the "back up to before the fence" guard only fired when the backup
-  point was greater than zero, and a fence with nothing before it on its
-  own line legitimately backs up to exactly zero. The fence is now closed
-  on that chunk and reopened (with its original language tag) on the
-  next, computed via a fresh, independent cut rather than reusing the
-  caller's word/line-boundary cut -- reusing it could send the next call
-  right back to the same input, an infinite loop in every caller that
-  splits until the tail is empty (#2127).
 
 ## [2026.9.14] - 2026-09-14
 
