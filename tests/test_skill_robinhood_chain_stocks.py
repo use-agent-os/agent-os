@@ -127,6 +127,66 @@ def test_is_stock_token_keys_off_the_suffix() -> None:
     assert chain_stocks.is_stock_token(_TOKENS[2]) is False
 
 
+def test_is_stock_token_recognizes_truncated_coingecko_suffix() -> None:
+    # CoinGecko caps `name` at 60 characters, truncating long listing suffixes
+    # down to as little as a bare "T" -- but never truncates "Robinhood" itself.
+    assert (
+        chain_stocks.is_stock_token(
+            {"name": "International Business Machines Corporation • Robinhood Toke"}
+        )
+        is True
+    )
+    assert (
+        chain_stocks.is_stock_token(
+            {"name": "SPDR Portfolio S&P 500 High Dividend ETF • Robinhood T"}
+        )
+        is True
+    )
+
+
+def test_is_stock_token_rejects_bare_share_class_suffixes() -> None:
+    """Boundary the truncation tolerance must NOT cross: '- R'/'• r' is a
+    common mutual-fund/ETF share-class suffix (Class R, Institutional R6,
+    ...), not a truncated 'Robinhood'. A version of the truncation pattern
+    that let 'robinhood' itself degrade to a bare leading letter matched any
+    name ending in a separator plus 'r'/'R', misclassifying these."""
+    assert chain_stocks.is_stock_token({"name": "Some Fund - R"}) is False
+    assert chain_stocks.is_stock_token({"name": "XYZ Class R Shares - r"}) is False
+    assert chain_stocks.is_stock_token({"name": "Vanguard International Growth Fund - R"}) is False
+
+
+def test_clean_name_strips_truncated_coingecko_suffix() -> None:
+    assert (
+        chain_stocks._clean_name("International Business Machines Corporation • Robinhood Toke")
+        == "International Business Machines Corporation"
+    )
+    assert (
+        chain_stocks._clean_name("SPDR Portfolio S&P 500 High Dividend ETF • Robinhood T")
+        == "SPDR Portfolio S&P 500 High Dividend ETF"
+    )
+
+
+def test_clean_name_keeps_a_real_share_class_suffix_intact() -> None:
+    assert (
+        chain_stocks._clean_name("Vanguard International Growth Fund - R")
+        == "Vanguard International Growth Fund - R"
+    )
+
+
+def test_resolve_token_resolves_a_token_with_truncated_suffix() -> None:
+    ibm_token = {
+        "chainId": 4663,
+        "address": "0x1bm",
+        "name": "International Business Machines Corporation • Robinhood Toke",
+        "symbol": "IBM",
+        "decimals": 18,
+    }
+    tokens = [*_TOKENS, ibm_token]
+    match = chain_stocks.resolve_token("IBM", tokens)
+    assert match is not None
+    assert match["address"] == "0x1bm"
+
+
 def test_resolve_token_never_returns_an_impersonator() -> None:
     for query in ("GME", "GameStop", "mã cổ phiếu GME là gì"):
         match = chain_stocks.resolve_token(query, _TOKENS)

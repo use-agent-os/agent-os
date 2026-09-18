@@ -39,6 +39,19 @@ FEEDS_URL = "https://reference-data-directory.vercel.app/feeds-robinhood-mainnet
 # suffix is the offline signal that separates the two. `uiMultiplier()` is the
 # on-chain confirmation.
 _RH_SUFFIX_RE = re.compile(r"\s*[•·|-]?\s*robinhood token\s*$", re.IGNORECASE)
+# CoinGecko caps `name` at 60 characters, so a long company name (IBM, SPYD,
+# ...) truncates the trailing " Token" down to as little as a bare "T" before
+# the string ends. The word "robinhood" itself is never what gets truncated in
+# practice -- it always fits before the cutoff, since it's the shorter of the
+# two words -- so this only makes "token" partial-tolerant, never "robinhood".
+# A version that also let "robinhood" itself degrade to a bare leading letter
+# was rejected: it made the pattern match any name ending in a separator plus
+# a bare "r"/"R" (e.g. "Some Fund - R", a common mutual-fund share-class
+# suffix), misclassifying unrelated tokens as Robinhood Stock Tokens.
+_RH_SUFFIX_LOOSE_RE = re.compile(
+    r"\s*[•·|-]?\s*robinhood(?:\s+t(?:o(?:k(?:e(?:n)?)?)?)?)?\s*$",
+    re.IGNORECASE,
+)
 _ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 
 # Function selectors (first 4 bytes of keccak256 of the signature).
@@ -174,13 +187,22 @@ def _encode_address_arg(selector: str, address: str) -> str:
 
 
 def _clean_name(name: str) -> str:
-    """Strip the '- Robinhood Token' suffix so 'Apple' matches cleanly."""
-    return _RH_SUFFIX_RE.sub("", name or "").strip()
+    """Strip the '- Robinhood Token' suffix so 'Apple' matches cleanly.
+
+    Handles the truncated tail too: CoinGecko cuts `name` at 60 characters, so
+    'International Business Machines Corporation • Robinhood Toke' must still
+    display as the company name.
+    """
+    stripped = _RH_SUFFIX_RE.sub("", name or "").strip()
+    if stripped == (name or "").strip():
+        stripped = _RH_SUFFIX_LOOSE_RE.sub("", stripped).strip()
+    return stripped
 
 
 def is_stock_token(token: dict[str, Any]) -> bool:
     """True when the list entry is a Robinhood Stock Token, not a community token."""
-    return bool(_RH_SUFFIX_RE.search(token.get("name", "") or ""))
+    name = token.get("name", "") or ""
+    return bool(_RH_SUFFIX_RE.search(name) or _RH_SUFFIX_LOOSE_RE.search(name))
 
 
 def _norm(text: str) -> str:
