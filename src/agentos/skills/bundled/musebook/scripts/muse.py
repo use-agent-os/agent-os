@@ -30,6 +30,7 @@ import mimetypes
 import os
 import secrets
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -76,6 +77,10 @@ def state_root() -> Path:
     configured = os.environ.get("MUSE_STATE_DIR", "").strip()
     if configured:
         return Path(configured).expanduser()
+    # ``AGENTOS_STATE_DIR`` is the AgentOS *home* (what replaces ``~/.agentos``),
+    # and runtime state lives in its ``state`` subdirectory: that is how
+    # ``agentos.paths.state_dir`` and the cron-watchers' ``_watermark`` resolve
+    # it, so ``<home>/state/muse`` is the same directory either way.
     for var in ("AGENTOS_STATE_DIR", "AGENTOS_HOME"):
         home = os.environ.get(var, "").strip()
         if home:
@@ -110,22 +115,86 @@ def load_identity() -> dict[str, str]:
     return identity
 
 
+def _chmod_best_effort(path: Path, mode: int) -> None:
+    """``chmod`` where it means something; Windows honours only the read-only bit."""
+    try:
+        os.chmod(path, mode)
+    except OSError:
+        pass
+
+
 def save_identity(**fields: str) -> Path:
+    """Merge *fields* into the identity file, written privately and atomically.
+
+    The file holds the muse's private key, and there is no recovery for it,
+    so two things the previous ``write_text`` + ``chmod`` did not give:
+
+    * **Private from inception.** ``write_text`` created the file at its
+      final path with the umask's mode -- typically ``0644``, world-readable
+      -- and the ``chmod`` narrowed it only afterwards. The content now goes
+      into a ``0600`` temp file (``mkstemp`` creates it that way) in the same
+      directory and is renamed over the target, so the key is never readable
+      at a predictable path by anyone else on the box. The directory is
+      ``0700`` for the same reason.
+    * **All or nothing.** An interruption mid-write -- SIGKILL, Ctrl-C, a
+      full disk, power loss -- used to leave a truncated or empty file where
+      the identity had been. The temp file is flushed to disk before the
+      rename, the rename is atomic, and on any failure the temp file is
+      removed and the previous file is untouched.
+
+    A file that exists but cannot be read as a JSON object is an error, not
+    an empty starting point: ``post --save-identity`` passes only ``muse_id``,
+    and merging that into ``{}`` would have written the identity back without
+    its ``secret``.
+    """
     path = key_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    _chmod_best_effort(path.parent, 0o700)
     existing: dict[str, Any] = {}
     if path.is_file():
         try:
             loaded = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                existing = loaded
-        except (OSError, json.JSONDecodeError):
-            existing = {}
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"identity file {path} is unreadable: {exc}") from exc
+        if not isinstance(loaded, dict):
+            raise SystemExit(f"identity file {path} does not hold a JSON object")
+        existing = loaded
     existing.update({k: v for k, v in fields.items() if v})
-    path.write_text(json.dumps(existing, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    # The file holds a private key. 0600 before anyone else on the box reads it.
-    os.chmod(path, 0o600)
+    payload = json.dumps(existing, indent=2, sort_keys=True) + "\n"
+
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        _chmod_best_effort(Path(tmp_name), 0o600)
+        os.replace(tmp_name, path)
+    except BaseException:
+        # BaseException, not Exception: a Ctrl-C between mkstemp and replace
+        # would otherwise leave a second copy of the private key on disk.
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+    _fsync_directory(path.parent)
+    _chmod_best_effort(path, 0o600)
     return path
+
+
+def _fsync_directory(directory: Path) -> None:
+    """Make the rename itself durable, where the platform allows opening a directory."""
+    try:
+        dir_fd = os.open(str(directory), os.O_RDONLY)
+    except OSError:
+        return  # Windows: directories cannot be opened this way; the rename is still atomic
+    try:
+        os.fsync(dir_fd)
+    except OSError:
+        pass
+    finally:
+        os.close(dir_fd)
 
 
 # --------------------------------------------------------------------------
@@ -327,6 +396,14 @@ def cmd_save(args: argparse.Namespace) -> int:
     }
     if not fields:
         raise SystemExit("save needs at least one of --muse-id / --secret / --public-key")
+    if args.secret:
+        # Refuse before touching the file: a secret that is not a 32-byte
+        # ed25519 seed would be persisted over the real one and every later
+        # `sign`/`post` would fail at the point of use instead of here.
+        try:
+            private_key(args.secret)
+        except (ValueError, TypeError) as exc:
+            raise SystemExit(f"--secret is not valid base64url: {exc}") from exc
     return emit({"ok": True, "saved_to": str(save_identity(**fields))})
 
 
