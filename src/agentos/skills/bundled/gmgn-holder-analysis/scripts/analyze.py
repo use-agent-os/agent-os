@@ -58,7 +58,14 @@ with ThreadPoolExecutor(max_workers=3) as ex:
                                         '--order-by', 'token_ath_mc', '--direction', 'desc'])
 
     holders      = f_holders.result()['list']
-    created_data = f_created.result() if f_created else None
+    created_data = None
+    if f_created:
+        try:
+            res = f_created.result()
+            if isinstance(res, dict):
+                created_data = res.get('data') if isinstance(res.get('data'), dict) else res
+        except Exception:
+            created_data = None
 
 normal = [h for h in holders if h.get('addr_type', 0) == 0]
 burn   = [h for h in holders if h.get('addr_type', 0) == 1]

@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `gmgn-holder-analysis`: isolate secondary `created-tokens` portfolio history
+  failures and normalize wrapped response shapes so secondary creator lookups
+  do not abort token holder analysis.
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added
