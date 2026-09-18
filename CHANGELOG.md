@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `srt-from-script`: `build_srt` now caps each cue's end timestamp to the
+  current shot's boundary so sub-second and short shots do not bleed past the
+  shot end into subsequent cues, preventing overlapping subtitle timestamps.
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added

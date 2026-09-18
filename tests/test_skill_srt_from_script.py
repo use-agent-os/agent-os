@@ -117,3 +117,67 @@ def test_cli_writes_fractional_timestamps(tmp_path: Path, monkeypatch: pytest.Mo
     assert out_path.read_text(encoding="utf-8") == (
         "1\n00:00:00,000 --> 00:00:03,500\nline 1\n\n2\n00:00:03,500 --> 00:00:06,000\nline 2\n"
     )
+
+
+def test_sub_second_shots_do_not_bleed_into_subsequent_shot_cues() -> None:
+    """Two 0.5s shots: cue 1 must not bleed past 500ms into shot 2.
+
+    An unconstrained start+800ms minimum display forced cue 1 to end at 800ms,
+    overlapping with shot 2 (which starts at 500ms). The cue end time must be
+    capped at the shot boundary (500ms).
+    """
+    mod = _build_srt_module()
+
+    srt = mod.build_srt(mod.parse_script(_script("0.5", "0.5")), gap_ms=200)
+
+    assert srt == (
+        "1\n00:00:00,000 --> 00:00:00,500\nline 1\n\n2\n00:00:00,500 --> 00:00:01,000\nline 2\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("durations", "gap_ms", "expected_end_1"),
+    [
+        (("0.3", "1.0"), 200, "00:00:00,300"),
+        (("0.6", "1.0"), 200, "00:00:00,600"),
+        (("0.9", "1.0"), 200, "00:00:00,800"),  # 900ms - 200ms = 700ms, boosted to 800ms <= 900ms
+        (("1.2", "1.0"), 200, "00:00:01,000"),  # 1200ms - 200ms = 1000ms
+        (("0.5", "1.0"), 0, "00:00:00,500"),
+    ],
+)
+def test_cue_end_time_never_exceeds_shot_boundary(
+    durations: tuple[str, ...],
+    gap_ms: int,
+    expected_end_1: str,
+) -> None:
+    mod = _build_srt_module()
+
+    srt = mod.build_srt(mod.parse_script(_script(*durations)), gap_ms=gap_ms)
+
+    assert f"00:00:00,000 --> {expected_end_1}" in srt
+
+
+def test_cli_sub_second_shots_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    mod = _build_srt_module()
+    script_path = tmp_path / "script.txt"
+    script_path.write_text(_script("0.5", "0.5"), encoding="utf-8")
+    out_path = tmp_path / "out.srt"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_srt.py",
+            "--script",
+            str(script_path),
+            "--output",
+            str(out_path),
+            "--gap-ms",
+            "200",
+        ],
+    )
+
+    assert mod.main() == 0
+
+    assert out_path.read_text(encoding="utf-8") == (
+        "1\n00:00:00,000 --> 00:00:00,500\nline 1\n\n2\n00:00:00,500 --> 00:00:01,000\nline 2\n"
+    )

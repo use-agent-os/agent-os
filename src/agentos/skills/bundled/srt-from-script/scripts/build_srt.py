@@ -15,6 +15,7 @@ Usage:
 
 Output: prints the absolute path of the written SRT on stdout.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -84,8 +85,12 @@ def build_srt(
         if voiceover:
             start = cursor_ms
             # Hold the line until ~gap_ms before the next shot starts so
-            # the cut doesn't visually clip the text.
-            end = max(start + 800, cursor_ms + shot_ms - max(0, gap_ms))
+            # the cut doesn't visually clip the text, but never exceed the
+            # current shot's boundary so short shots do not bleed into the
+            # next shot's cue.
+            shot_end = cursor_ms + shot_ms
+            target_end = shot_end - max(0, gap_ms)
+            end = min(shot_end, max(start + 800, target_end))
             lines.append(str(cue_index))
             lines.append(f"{fmt_ts(start)} --> {fmt_ts(end)}")
             lines.append(voiceover)
@@ -98,20 +103,25 @@ def build_srt(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--script", default="",
+        "--script",
+        default="",
         help="Path to script text file. If empty/missing, read from stdin.",
     )
     parser.add_argument("--output", "-o", required=True, help="Output .srt path")
     parser.add_argument(
-        "--gap-ms", type=int, default=200,
+        "--gap-ms",
+        type=int,
+        default=200,
         help="Tail pad subtracted from each cue's end_time so the line "
-             "vanishes ~Nms before the next shot starts. Default 200.",
+        "vanishes ~Nms before the next shot starts. Default 200.",
     )
     parser.add_argument(
-        "--leading-offset-ms", type=int, default=0,
+        "--leading-offset-ms",
+        type=int,
+        default=0,
         help="Shift every cue forward by this many milliseconds. Use to "
-             "skip past a cover/intro clip that precedes SHOT_1 in the "
-             "merged video. Default 0 (no shift).",
+        "skip past a cover/intro clip that precedes SHOT_1 in the "
+        "merged video. Default 0 (no shift).",
     )
     args = parser.parse_args()
 
@@ -134,8 +144,7 @@ def main() -> int:
     shots = parse_script(text)
     if not shots:
         print(
-            "Error: no SHOT_N blocks found in script. Did ai-video-script "
-            "emit the OUTPUT FORMAT?",
+            "Error: no SHOT_N blocks found in script. Did ai-video-script emit the OUTPUT FORMAT?",
             file=sys.stderr,
         )
         return 1
