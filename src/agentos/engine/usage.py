@@ -429,7 +429,15 @@ class UsageTracker:
         inside a migration-managed database.
         """
         global _global_usage_tracker
-        self._sessions: dict[str, SessionUsage] = {}
+        # Cache-shaped, not session-shaped: ``rpc_usage._append_tracker_only_rows``
+        # reads these to give a session its per-model breakdown, which disk
+        # persistence does not record, so dropping a session the moment it ends
+        # is the regression that helper exists to prevent. A TTL keeps a
+        # recently-ended session reportable and still bounds the map.
+        self._sessions: BoundedRegistry[str, SessionUsage] = BoundedRegistry(
+            shape="cache",
+            name="UsageTracker._sessions",
+        )
         self._scopes: BoundedRegistry[tuple[str, str], SessionUsage] = BoundedRegistry(
             name="UsageTracker._scopes",
             session_of=lambda key, _value: key[0],
@@ -447,8 +455,21 @@ class UsageTracker:
         # under-report spend and silently retire a ceiling.
         self._daily_spend: dict[tuple[str, str, str], float] = {}
         self._daily_spend_day = ""
-        self._session_spend: dict[str, float] = {}
-        self._session_active_skill: dict[str, str] = {}
+        # Session-shaped: both describe a session while it is live. An ended
+        # session cannot accrue more spend, so its ceiling is moot and the
+        # terminal event is the right moment to drop the mirror; the in-memory
+        # copy guards a dropped ledger write only for as long as the session can
+        # still spend.
+        self._session_spend: BoundedRegistry[str, float] = BoundedRegistry(
+            shape="session",
+            name="UsageTracker._session_spend",
+            session_of=lambda key, _value: key,
+        )
+        self._session_active_skill: BoundedRegistry[str, str] = BoundedRegistry(
+            shape="session",
+            name="UsageTracker._session_active_skill",
+            session_of=lambda key, _value: key,
+        )
         # Headroom held for turns that have been admitted but have not yet
         # recorded their spend. Without it every member of a concurrent
         # fan-out reads the same pre-fan-out snapshot and clears the same
