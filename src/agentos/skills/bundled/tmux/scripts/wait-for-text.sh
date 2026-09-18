@@ -49,6 +49,16 @@ if ! [[ "$timeout" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
+# Checked here rather than left to `sleep`, which only runs after a poll that
+# did not match: a bad interval would then be reported or not depending on
+# whether the pattern was already on the pane, and when reported it surfaced as
+# a `sleep` diagnostic under exit 1 -- the code this script uses for "timed
+# out". Zero is rejected too; `sleep 0` turns the poll into a busy loop.
+if ! [[ "$interval" =~ ^([0-9]+(\.[0-9]*)?|\.[0-9]+)$ ]] || [[ "$interval" =~ ^0*\.?0*$ ]]; then
+  echo "interval must be a positive number of seconds" >&2
+  exit 1
+fi
+
 if ! [[ "$lines" =~ ^[0-9]+$ ]]; then
   echo "lines must be an integer" >&2
   exit 1
