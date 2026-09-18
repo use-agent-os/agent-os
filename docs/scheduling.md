@@ -160,7 +160,9 @@ What the job does with the result:
 - **no stdout** → silent run. Nothing is delivered and the run counts as a
   success, so a watchdog that prints only on trouble stays quiet.
 - **a final line of `{"wakeAgent": false}`** → also treated as silence, so
-  watchdog scripts written for other runtimes work unchanged.
+  watchdog scripts written for other runtimes work unchanged. Nothing is
+  delivered, but what the script printed stays on the run record, where
+  `agentos cron output <job-id>` shows it.
 - **non-zero exit or timeout** → the error is delivered *and* the job fails, so
   a broken watchdog cannot be mistaken for a quiet one. `--timeout` bounds the
   run (default 600s).
@@ -447,9 +449,11 @@ agentos channels status
 ```
 
 A `script` job that appears to do nothing is usually working as designed: empty
-stdout means silence. `agentos cron runs <job-id>` distinguishes the two — a
-silent run is recorded with a `silent: script produced no output` summary, while
-a broken script is recorded as a failure with the exit code and stderr.
+stdout, or a final `{"wakeAgent": false}` line, means silence.
+`agentos cron runs <job-id>` distinguishes the two — a silent run is recorded
+with a `silent: …` summary (followed by whatever the script printed above its
+gate, which `agentos cron output <job-id>` shows in full), while a broken script
+is recorded as a failure with the exit code and stderr.
 
 Read next:
 

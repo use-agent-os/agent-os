@@ -98,6 +98,18 @@ def _resolve_session_key(job: CronJob) -> str:
             return f"cron:{job.id}"
 
 
+def _silent_run_summary(reason: str, output: str) -> str:
+    """Run-record summary for a tick whose script had nothing to report.
+
+    A closed ``{"wakeAgent": false}`` gate keeps the run off the channel, not
+    out of the run history: what the script printed above the gate is recorded
+    under the ``silent:`` line, so ``cron runs`` still tells a quiet tick from a
+    failed one and ``cron output`` shows what the quiet tick actually saw.
+    """
+    body = (output or "").strip()
+    return f"{reason}\n\n{body}" if body else reason
+
+
 def _required_delivery_error(job: CronJob, report: Any) -> str | None:
     """Return an error when required primary delivery failed."""
     if job.delivery.best_effort:
@@ -287,7 +299,9 @@ def make_agent_run_handler(
                     script=prerun_script,
                 )
                 return HandlerResult(
-                    summary="silent: pre-run script reported nothing to act on",
+                    summary=_silent_run_summary(
+                        "silent: pre-run script reported nothing to act on", script_output
+                    ),
                     session_key=session_key,
                     delivery_status="skipped",
                 )
@@ -576,8 +590,13 @@ def make_script_run_handler(delivery_chain: DeliveryChain) -> Callable:
 
         if not has_actionable_output(output):
             log.info("script_run_handler.silent", job_id=job.id)
+            reason = (
+                "silent: script closed its wakeAgent gate; nothing delivered"
+                if output.strip()
+                else "silent: script produced no output to deliver"
+            )
             return HandlerResult(
-                summary="silent: script produced no output to deliver",
+                summary=_silent_run_summary(reason, output),
                 session_key=session_key,
                 delivery_status="skipped",
             )
