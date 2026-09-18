@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 from typing import Any, cast
 
 from agentos import __version__
@@ -107,8 +108,19 @@ class MCPStdioClient(MCPClient):
         if self.config.env:
             env = {**os.environ, **self.config.env}
 
+        path_env: str | None = None
+        if env is not None:
+            for k, v in reversed(list(env.items())):
+                if k.upper() == "PATH":
+                    path_env = v
+                    break
+
+        executable = shutil.which(self.config.command, path=path_env)
+        if executable is None:
+            raise FileNotFoundError(f"MCP server command not found: {self.config.command}")
+
         self._process = await asyncio.create_subprocess_exec(
-            self.config.command,
+            executable,
             *self.config.args,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
