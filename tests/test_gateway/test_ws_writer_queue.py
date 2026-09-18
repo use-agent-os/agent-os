@@ -529,3 +529,30 @@ async def test_writer_emits_make_event_envelope() -> None:
             assert wire[key] == expected[key]
     finally:
         await conn._stop_writer()
+
+
+# ---------------------------------------------------------------------------
+# send_pong serialization tests.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_send_pong_routes_through_writer_queue_when_enabled() -> None:
+    conn = _make_conn(maxsize=8, enabled=True)
+    try:
+        await conn.send_pong()
+        await _flush_writer(conn)
+        assert conn.ws.sent == ['{"type":"pong"}']  # type: ignore[attr-defined]
+    finally:
+        await conn._stop_writer()
+
+
+@pytest.mark.asyncio
+async def test_send_pong_direct_when_queue_disabled() -> None:
+    conn = _make_conn(maxsize=8, enabled=False)
+    try:
+        await conn.send_pong()
+        assert conn.ws.sent == ['{"type":"pong"}']  # type: ignore[attr-defined]
+    finally:
+        await conn._stop_writer()
+
