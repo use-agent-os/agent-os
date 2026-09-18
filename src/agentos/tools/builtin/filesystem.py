@@ -326,8 +326,7 @@ def _workspace_strict_read_block(
             "workspace": str(roots[0]),
             "allowed_roots": [str(root) for root in roots],
             "message": (
-                f"{tool_name} blocked: {candidate} is outside active read roots "
-                f"({root_labels})."
+                f"{tool_name} blocked: {candidate} is outside active read roots ({root_labels})."
             ),
             "retryable": False,
         }
@@ -749,14 +748,28 @@ def _read_xlsx_worksheet(
             row_num = next_implicit
         next_implicit = row_num + 1
         total_rows = max(total_rows, row_num)
-        row: list[str] = []
+
+        row_cells: dict[int, str] = {}
+        max_col = -1
+        last_col = -1
         for cell_el in row_el.findall(f"{{{_XLSX_MAIN_NS}}}c"):
-            column_index = _xlsx_column_index(cell_el.attrib.get("r", ""))
-            while len(row) < column_index:
-                row.append("")
-            row.append(_xlsx_cell_value(cell_el, shared_strings))
-        while row and row[-1] == "":
-            row.pop()
+            ref = cell_el.attrib.get("r", "")
+            if ref:
+                col_idx = _xlsx_column_index(ref)
+            else:
+                col_idx = last_col + 1
+            last_col = col_idx
+            val = _xlsx_cell_value(cell_el, shared_strings)
+            row_cells[col_idx] = val
+            if val or col_idx in row_cells:
+                max_col = max(max_col, col_idx)
+
+        if max_col < 0:
+            row: list[str] = []
+        else:
+            row = [row_cells.get(c, "") for c in range(max_col + 1)]
+            while row and row[-1] == "":
+                row.pop()
         rows[row_num] = row
     return rows, total_rows
 
@@ -855,8 +868,7 @@ def _format_spreadsheet(
             parts.append(f"{idx}\t" + "\t".join(rows.get(idx, [])))
         if end < total_rows:
             parts.append(
-                f"(Showing rows {offset}-{end} of {total_rows}. "
-                f"Use offset={end + 1} to continue.)"
+                f"(Showing rows {offset}-{end} of {total_rows}. Use offset={end + 1} to continue.)"
             )
     return "\n".join(parts)
 
