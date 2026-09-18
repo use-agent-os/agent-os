@@ -13,6 +13,7 @@ from agentos.agents.scope import resolve_agent_workspace_dir
 from agentos.asyncio_utils import create_background_task
 from agentos.scheduler.heartbeat import (
     HeartbeatLoopOverrides,
+    hour_in_active_window,
     is_heartbeat_content_effectively_empty,
     parse_loop_overrides,
 )
@@ -138,11 +139,7 @@ class HeartbeatLoop:
     def _within_active_hours(window: tuple[int, int] | None, moment: datetime) -> bool:
         if window is None:
             return True
-        start, end = window
-        hour = moment.hour
-        if start <= end:
-            return start <= hour < end
-        return hour >= start or hour < end
+        return hour_in_active_window(window, moment)
 
     async def start(self) -> None:
         if self._started:

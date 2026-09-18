@@ -101,11 +101,24 @@ class HeartbeatConfig:
     def is_within_active_hours(self, moment: datetime) -> bool:
         if self.active_hours is None:
             return True
-        start, end = self.active_hours
-        hour = moment.hour
-        if start <= end:
-            return start <= hour < end
-        return hour >= start or hour < end
+        return hour_in_active_window(self.active_hours, moment)
+
+
+def hour_in_active_window(window: tuple[int, int], moment: datetime) -> bool:
+    """Whether *moment* falls inside an ``active_hours`` window.
+
+    The window is in the host's local time (see the module docstring), while
+    every caller hands in ``datetime.now(UTC)``. Reading ``moment.hour``
+    straight off that compared the UTC hour instead, so the window drifted by
+    the host's UTC offset. ``astimezone()`` with no argument converts to the
+    local zone first; a naive moment is already taken as local and keeps its
+    hour.
+    """
+    start, end = window
+    hour = moment.astimezone().hour
+    if start <= end:
+        return start <= hour < end
+    return hour >= start or hour < end
 
 
 @dataclass
