@@ -529,3 +529,93 @@ async def test_writer_emits_make_event_envelope() -> None:
             assert wire[key] == expected[key]
     finally:
         await conn._stop_writer()
+
+
+# ---------------------------------------------------------------------------
+# send_pong serialization tests (#2527)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_send_pong_routes_through_writer_queue_when_enabled() -> None:
+    conn = _make_conn(maxsize=8, enabled=True)
+    try:
+        await conn.send_pong()
+        await _flush_writer(conn)
+        assert conn.ws.sent == ['{"type":"pong"}']  # type: ignore[attr-defined]
+    finally:
+        await conn._stop_writer()
+
+
+@pytest.mark.asyncio
+async def test_send_pong_direct_when_queue_disabled() -> None:
+    conn = _make_conn(maxsize=8, enabled=False)
+    try:
+        await conn.send_pong()
+        assert conn.ws.sent == ['{"type":"pong"}']  # type: ignore[attr-defined]
+    finally:
+        await conn._stop_writer()
+
+
+@pytest.mark.asyncio
+async def test_send_pong_serializes_concurrently_with_streaming_events() -> None:
+    """Outbound frames and pong replies do not interleave or conflict on ws.send_text."""
+    conn = _make_conn(maxsize=64, enabled=True)
+    try:
+
+        async def stream_tokens() -> None:
+            for i in range(10):
+                await conn.send_event("session.event.text_delta", {"chunk": f"t{i}"})
+                await asyncio.sleep(0.001)
+
+        async def send_heartbeats() -> None:
+            for _ in range(5):
+                await conn.send_pong()
+                await asyncio.sleep(0.002)
+
+        await asyncio.gather(stream_tokens(), send_heartbeats())
+        await _flush_writer(conn)
+
+        assert len(conn.ws.sent) == 15  # type: ignore[attr-defined]
+        pongs = [s for s in conn.ws.sent if s == '{"type":"pong"}']  # type: ignore[attr-defined]
+        assert len(pongs) == 5
+    finally:
+        await conn._stop_writer()
+
+
+@pytest.mark.asyncio
+async def test_send_pong_control_overflow_triggers_force_close() -> None:
+    """Pong frames are CONTROL classified; overflow triggers force-close with code 1011."""
+    fake = _FakeWebSocket()
+    conn = WsConnection(conn_id="cx-pong-overflow", ws=fake)  # type: ignore[arg-type]
+    conn._start_writer(maxsize=2, enabled=True)
+
+    fake._send_event = asyncio.Event()
+    fake._send_unblock = asyncio.Event()
+    try:
+        # Fill the queue
+        await conn.send_event("session.event.text_delta", {"chunk": "1"})
+        await conn.send_event("session.event.text_delta", {"chunk": "2"})
+        # 3rd send triggers CONTROL overflow on full queue
+        await conn.send_pong()
+
+        assert conn._closing is True
+        # Let background task run force-close
+        await asyncio.sleep(0.05)
+        assert fake.close_code == 1011
+    finally:
+        if fake._send_unblock is not None:
+            fake._send_unblock.set()
+        await conn._stop_writer()
+
+
+@pytest.mark.asyncio
+async def test_send_pong_noop_when_disconnected() -> None:
+    """send_pong in legacy mode does not crash when socket is disconnected."""
+    conn = _make_conn(maxsize=8, enabled=False)
+    conn.ws.client_state = WebSocketState.DISCONNECTED  # type: ignore[attr-defined]
+    try:
+        await conn.send_pong()
+        assert conn.ws.sent == []  # type: ignore[attr-defined]
+    finally:
+        await conn._stop_writer()

@@ -174,6 +174,7 @@ class _OutboundFrame:
     event_name: str | None
     res_frame: ResFrame | None
     meta: dict[str, Any] | None = None
+    raw_text: str | None = None
 
 
 def _payload_field(payload: Any, key: str) -> Any:
@@ -274,6 +275,29 @@ class WsConnection:
         async with self._send_lock:
             if self.ws.client_state == WebSocketState.CONNECTED:
                 await self.ws.send_text(frame.model_dump_json())
+
+    async def send_pong(self) -> None:
+        """Send a heartbeat pong reply, serialized via writer queue or send lock.
+
+        In queue mode, enqueues as a CONTROL frame to preserve strict write
+        serialization with concurrent streams and RPC responses.
+        In legacy/fallback mode, guards direct send with _send_lock.
+        """
+        raw = '{"type":"pong"}'
+        if self._queue_enabled and self._outbox is not None and not self._closing:
+            outbound = _OutboundFrame(
+                kind="pong",
+                classification="control",
+                payload=None,
+                event_name=None,
+                res_frame=None,
+                raw_text=raw,
+            )
+            self._enqueue_frame(outbound)
+            return
+        async with self._send_lock:
+            if self.ws.client_state == WebSocketState.CONNECTED:
+                await self.ws.send_text(raw)
 
     async def close(self, code: int = WS_CLOSE_SERVICE_RESTART, reason: str = "") -> None:
         try:
@@ -407,7 +431,9 @@ class WsConnection:
                 if self.ws.client_state != WebSocketState.CONNECTED:
                     return
                 try:
-                    if item.event_name is not None:
+                    if item.raw_text is not None:
+                        await self.ws.send_text(item.raw_text)
+                    elif item.event_name is not None:
                         wire = make_event(
                             item.event_name,
                             item.payload,
@@ -892,7 +918,7 @@ async def _message_loop(
         frame_type = data.get("type")
 
         if frame_type == "ping":
-            await ws.send_text('{"type":"pong"}')
+            await conn.send_pong()
             continue
 
         if frame_type == "pong":
