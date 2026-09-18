@@ -172,6 +172,35 @@ def _is_cjk_symbol(char: str) -> bool:
     )
 
 
+#: Stands in for a character no registered font can draw. ASCII, so every font
+#: in use here renders it.
+_PDF_UNRENDERABLE_PLACEHOLDER = "?"
+
+
+def _is_cjk_font_covered(char: str) -> bool:
+    """Non-CJK letters the CJK CID font draws, so Helvetica need not drop them.
+
+    ``STSong-Light`` carries the Adobe charset's basic Greek and Russian
+    Cyrillic alongside the ideographs. The exact coverage, measured by
+    rendering each block and reading the text back out of the PDF, is basic
+    Greek (no accented forms, no final sigma) and Russian Cyrillic (no
+    Ukrainian, Serbian or extended letters) -- 48 of 135 Greek code points and
+    66 of 256 Cyrillic. Only those are routed here; a character outside them
+    would be dropped by the font itself, silently, which is the behaviour this
+    routing exists to end.
+    """
+    codepoint = ord(char)
+    return (
+        0x0391 <= codepoint <= 0x03A1  # Greek capitals, ..-Rho
+        or 0x03A3 <= codepoint <= 0x03A9  # Sigma-Omega (U+03A2 is unassigned)
+        or 0x03B1 <= codepoint <= 0x03C1  # Greek smalls, alpha-rho
+        or 0x03C3 <= codepoint <= 0x03C9  # sigma-omega (final sigma is absent)
+        or codepoint == 0x0401  # Cyrillic Io
+        or 0x0410 <= codepoint <= 0x044F  # Cyrillic A-ya
+        or codepoint == 0x0451  # Cyrillic io
+    )
+
+
 def _font_supports_char(font_name: str, char: str) -> bool:
     from reportlab.pdfbase import pdfmetrics  # type: ignore[import-untyped]
 
@@ -207,11 +236,24 @@ def _pdf_markup_text(value: Any, *, base_font: str, cjk_font: str | None) -> str
     for char in text:
         target_font: str | None = None
         if cjk_font is not None and (
-            _is_cjk(char) or (_is_cjk_symbol(char) and not _font_supports_char(base_font, char))
+            _is_cjk(char)
+            or (
+                (_is_cjk_symbol(char) or _is_cjk_font_covered(char))
+                and not _font_supports_char(base_font, char)
+            )
         ):
             target_font = cjk_font
         if target_font is None and not _font_supports_char(base_font, char):
-            continue
+            # Neither the base font nor the CJK font can draw this character
+            # -- Hebrew, Arabic and emoji have no glyph in either -- so it
+            # cannot survive into the PDF. Deleting it is the one outcome the
+            # reader cannot detect: the sentence closes over the gap and reads
+            # as if it was written that way. Leaving it in the run does not
+            # help either, since a Type 1 base font encodes it through WinAnsi
+            # and it comes out as an unrelated Latin letter, stating something
+            # the caller never wrote. A placeholder the base font can draw
+            # keeps the loss visible, so the reader can ask for the source.
+            char = _PDF_UNRENDERABLE_PLACEHOLDER
         if target_font != run_font:
             flush()
             run_font = target_font
@@ -470,7 +512,9 @@ async def create_pptx(slides: list[dict[str, Any]], name: str | None = None) -> 
     description=(
         "Create a simple PDF report from structured text sections and publish it as a "
         "generated artifact. "
-        "Use this for channel PDF requests instead of returning PDF source text."
+        "Use this for channel PDF requests instead of returning PDF source text. "
+        "Latin, CJK, basic Greek and Russian Cyrillic render on any host; a character "
+        "no available font can draw (emoji, Hebrew, Arabic) is written as '?'."
     ),
     params={
         "name": {"type": "string", "description": "Output filename. .pdf is appended if missing."},

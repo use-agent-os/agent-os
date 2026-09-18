@@ -58,16 +58,21 @@ def test_helvetica_base_keeps_quotes_dashes_and_ellipsis() -> None:
     assert markup == f'<font name="{CJK_FONT}">{text}</font>'
 
 
-def test_latin_text_stays_on_the_base_font_and_unsupported_symbols_are_still_dropped() -> None:
+def test_latin_text_stays_on_the_base_font_and_undrawable_symbols_are_marked() -> None:
+    """``✅`` has no glyph in any registered font, so it stands as ``?``.
+
+    It used to be deleted, which left ``Title: ok  done`` reading as if that
+    was what the caller wrote.
+    """
     markup = _markup("Title: ok ✅ — done")
-    assert markup.startswith("Title: ok ")
+    assert markup.startswith("Title: ok ?")
     assert "✅" not in markup
     assert f'<font name="{CJK_FONT}">—</font>' in markup
 
 
-def test_without_a_cjk_font_the_punctuation_is_dropped_not_crashed() -> None:
+def test_without_a_cjk_font_the_punctuation_is_marked_not_dropped() -> None:
     _register_pdf_fonts()
-    assert _pdf_markup_text("a，b", base_font="Helvetica", cjk_font=None) == "ab"
+    assert _pdf_markup_text("a，b", base_font="Helvetica", cjk_font=None) == "a?b"
 
 
 def _channel_artifact_context(tmp_path: Path) -> ToolContext:
