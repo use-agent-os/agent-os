@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import codecs
 import io
 from dataclasses import dataclass
 from pathlib import Path
@@ -166,6 +167,22 @@ def _extract_pptx_text(data: bytes | io.BytesIO | Path) -> str:
         raise ValueError(f"Failed to extract text from PPTX: {exc}") from exc
 
 
+def _bom_encoding(head: bytes) -> str:
+    """The codec for text that starts with *head*: whatever its byte-order mark names.
+
+    Windows tools write UTF-16 with a BOM by default (PowerShell 5 ``>`` and
+    ``Out-File``, Notepad's "Unicode", Excel's "Unicode Text"). Read as UTF-8,
+    every other character of such a file is a NUL and none of its words can be
+    searched. Every codec returned here also drops the mark itself, and
+    ``utf-8-sig`` reads a file with no BOM exactly as ``utf-8`` does.
+    """
+    if head.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
+        return "utf-32"
+    if head.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return "utf-16"
+    return "utf-8-sig"
+
+
 def extract_document_text(
     source: str | Path | bytes,
     filename: str | None = None,
@@ -187,7 +204,9 @@ def extract_document_text(
             return _extract_docx_text(p)
         if suffix == ".pptx":
             return _extract_pptx_text(p)
-        return p.read_text(encoding="utf-8", errors="replace")
+        with p.open("rb") as handle:
+            head = handle.read(4)
+        return p.read_text(encoding=_bom_encoding(head), errors="replace")
 
     raw_bytes = source
     if suffix == ".pdf":
@@ -196,7 +215,7 @@ def extract_document_text(
         return _extract_docx_text(raw_bytes)
     if suffix == ".pptx":
         return _extract_pptx_text(raw_bytes)
-    return raw_bytes.decode(encoding="utf-8", errors="replace")
+    return raw_bytes.decode(encoding=_bom_encoding(raw_bytes[:4]), errors="replace")
 
 
 async def ingest_document(
