@@ -148,6 +148,44 @@ def test_read_xlsx_worksheet_contiguous_rows() -> None:
     assert rows[2] == ["Row 2"]
 
 
+def test_read_xlsx_worksheet_out_of_order_cells() -> None:
+    """Issue #2717: a <c r="..."> can appear out of column order in the XML."""
+    xml = b"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+        <sheetData>
+            <row r="1">
+                <c r="A1" t="inlineStr"><is><t>ColA</t></is></c>
+                <c r="C1" t="inlineStr"><is><t>ColC</t></is></c>
+                <c r="B1" t="inlineStr"><is><t>ColB</t></is></c>
+            </row>
+        </sheetData>
+    </worksheet>"""
+
+    rows, total_rows = fs._read_xlsx_worksheet(xml, [])
+    assert total_rows == 1
+    assert rows[1] == ["ColA", "ColB", "ColC"]
+
+
+def test_read_xlsx_worksheet_cell_without_r_attribute_after_an_out_of_order_ref() -> None:
+    """Issue #2717's other named case: a <c> with no r= inherits the column
+    right after the previous cell, per the OOXML spec -- even when that
+    previous cell's own column came from an out-of-order ref."""
+    xml = b"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+        <sheetData>
+            <row r="1">
+                <c r="C1" t="inlineStr"><is><t>ColC</t></is></c>
+                <c r="A1" t="inlineStr"><is><t>ColA</t></is></c>
+                <c t="inlineStr"><is><t>ColB</t></is></c>
+            </row>
+        </sheetData>
+    </worksheet>"""
+
+    rows, total_rows = fs._read_xlsx_worksheet(xml, [])
+    assert total_rows == 1
+    assert rows[1] == ["ColA", "ColB", "ColC"]
+
+
 @pytest.mark.asyncio
 async def test_read_spreadsheet_xlsx_sparse_rows_and_pagination(tmp_path: Path) -> None:
     sheet_xml = (

@@ -749,12 +749,20 @@ def _read_xlsx_worksheet(
             row_num = next_implicit
         next_implicit = row_num + 1
         total_rows = max(total_rows, row_num)
-        row: list[str] = []
+        # Keyed by resolved column, not append order: a <c> with an explicit
+        # r="..." can appear out of column order in the XML (#2717), and
+        # appending on sight then displaces every cell after the first
+        # out-of-order one. A <c> with no r inherits the column immediately
+        # after the previous cell, per the OOXML spec -- correct even when
+        # that previous cell's own column came from an out-of-order ref.
+        cells: dict[int, str] = {}
+        next_column = 0
         for cell_el in row_el.findall(f"{{{_XLSX_MAIN_NS}}}c"):
-            column_index = _xlsx_column_index(cell_el.attrib.get("r", ""))
-            while len(row) < column_index:
-                row.append("")
-            row.append(_xlsx_cell_value(cell_el, shared_strings))
+            cell_ref = cell_el.attrib.get("r")
+            column_index = _xlsx_column_index(cell_ref) if cell_ref else next_column
+            cells[column_index] = _xlsx_cell_value(cell_el, shared_strings)
+            next_column = column_index + 1
+        row = [cells.get(i, "") for i in range(max(cells, default=-1) + 1)]
         while row and row[-1] == "":
             row.pop()
         rows[row_num] = row
