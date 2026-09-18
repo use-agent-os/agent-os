@@ -287,6 +287,144 @@ async def test_dubbing_generate_submits_elevenlabs_job(monkeypatch, tmp_path: Pa
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("extension", "expected_mime"),
+    [
+        ("mov", "video/quicktime"),
+        ("mkv", "video/x-matroska"),
+        ("avi", "video/x-msvideo"),
+        ("flv", "video/x-flv"),
+        ("mp4", "video/mp4"),
+        ("webm", "video/webm"),
+    ],
+)
+async def test_dubbing_generate_accepts_video_containers(
+    monkeypatch, tmp_path: Path, extension: str, expected_mime: str
+) -> None:
+    from agentos.tools.builtin import media
+
+    captured: dict[str, object] = {}
+
+    class FakeProvider:
+        def __init__(self, **_kwargs):
+            return None
+
+        async def create_dubbing(self, request):
+            captured["request"] = request
+            return DubbingResult(
+                provider="elevenlabs",
+                dubbing_id="dub_video",
+                status="submitted",
+                target_language=request.target_language,
+                source_language=request.source_language,
+            )
+
+    source = tmp_path / "workspace" / f"clip.{extension}"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"video-bytes")
+    monkeypatch.setattr(media, "ElevenLabsAudioProductionProvider", FakeProvider)
+    media.configure_audio(_audio_config())
+
+    token = current_tool_context.set(_tool_context(tmp_path))
+    try:
+        payload = await media.dubbing_generate(
+            source_media=f"clip.{extension}",
+            target_language="es",
+        )
+    finally:
+        current_tool_context.reset(token)
+        media.configure_audio(None)
+
+    result = json.loads(payload)
+    assert result["status"] == "ok"
+    assert getattr(captured["request"], "mime_type") == expected_mime
+
+
+@pytest.mark.anyio
+async def test_voice_clone_keeps_audio_mime_for_mp4_and_webm_samples(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Regression guard: dubbing_generate's separate video-mime mapping must
+    not leak into voice_clone, whose mp4/webm samples are real audio."""
+    from agentos.tools.builtin import media
+
+    captured: dict[str, object] = {}
+
+    class FakeProvider:
+        def __init__(self, **_kwargs):
+            return None
+
+        async def clone_voice(self, request):
+            captured["request"] = request
+            return VoiceCloneResult(provider="elevenlabs", voice_id="voice_mp4", name=request.name)
+
+    sample = tmp_path / "workspace" / "sample.mp4"
+    sample.parent.mkdir(parents=True)
+    sample.write_bytes(b"mp4-audio-bytes")
+    monkeypatch.setattr(media, "ElevenLabsAudioProductionProvider", FakeProvider)
+    media.configure_audio(_audio_config())
+
+    token = current_tool_context.set(_tool_context(tmp_path))
+    try:
+        await media.voice_clone(
+            sample_audio="sample.mp4",
+            name="Demo",
+            consent_metadata={"speaker": "me", "consent": True},
+        )
+    finally:
+        current_tool_context.reset(token)
+        media.configure_audio(None)
+
+    assert getattr(captured["request"], "sample_mime_type") == "audio/mp4"
+
+
+@pytest.mark.anyio
+async def test_voice_convert_keeps_audio_mime_for_webm_source(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Regression guard: dubbing_generate's separate video-mime mapping must
+    not leak into voice_convert, whose webm source is real audio."""
+    from agentos.tools.builtin import media
+
+    captured: dict[str, object] = {}
+
+    class FakeProvider:
+        def __init__(self, **_kwargs):
+            return None
+
+        async def convert_voice(self, request):
+            captured["request"] = request
+            return VoiceConversionResult(
+                audio_bytes=b"converted-audio",
+                provider="elevenlabs",
+                model=request.model_id,
+                voice=request.target_voice,
+                response_format=request.output_format,
+                mime_type="audio/mpeg",
+            )
+
+    source = tmp_path / "workspace" / "source.webm"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"webm-audio-bytes")
+    monkeypatch.setattr(media, "ElevenLabsAudioProductionProvider", FakeProvider)
+    media.configure_audio(_audio_config())
+
+    token = current_tool_context.set(_tool_context(tmp_path))
+    try:
+        await media.voice_convert(
+            source_audio="source.webm",
+            target_voice="voice_123",
+            output_path="converted.mp3",
+            consent_metadata={"speaker": "me", "consent": True},
+        )
+    finally:
+        current_tool_context.reset(token)
+        media.configure_audio(None)
+
+    assert getattr(captured["request"], "source_mime_type") == "audio/webm"
+
+
+@pytest.mark.anyio
 async def test_music_generate_calls_elevenlabs_and_writes_audio(
     monkeypatch, tmp_path: Path
 ) -> None:

@@ -9,6 +9,7 @@ import json
 import os
 import re
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -60,6 +61,10 @@ from agentos.tools.types import (
 
 _SUPPORTED_IMAGE_FORMATS = {"png", "jpg", "jpeg", "gif", "webp"}
 _SUPPORTED_AUDIO_FORMATS = {"aac", "flac", "m4a", "mp3", "mp4", "mpeg", "ogg", "wav", "webm"}
+# dubbing_generate additionally accepts plain video containers (ElevenLabs
+# dubs video, not just audio); voice_clone/voice_convert stay audio-only via
+# _SUPPORTED_AUDIO_FORMATS above.
+_SUPPORTED_DUBBING_MEDIA_FORMATS = _SUPPORTED_AUDIO_FORMATS | {"mov", "mkv", "avi", "flv"}
 _IMAGE_SIZE_LIMIT = 20 * 1024 * 1024  # 20 MB
 _AUDIO_SIZE_LIMIT = 100 * 1024 * 1024  # 100 MB
 _PDF_RENDER_SCALE = 2.0
@@ -963,8 +968,35 @@ def _audio_mime_type(path: Path) -> str:
     return mapping.get(ext, "application/octet-stream")
 
 
+def _dubbing_media_mime_type(path: Path) -> str:
+    """Mime type for dubbing_generate's source_media.
+
+    Distinct from _audio_mime_type: dubbing accepts plain video containers,
+    and for the two extensions video and audio share (mp4, webm) dubbing's
+    upload is typically a video file, so those resolve to video/* here
+    while _audio_mime_type keeps mapping them to audio/* for voice_clone
+    and voice_convert, which only ever receive real audio samples.
+    """
+    ext = path.suffix.lstrip(".").lower()
+    video_mapping = {
+        "mp4": "video/mp4",
+        "webm": "video/webm",
+        "mov": "video/quicktime",
+        "mkv": "video/x-matroska",
+        "avi": "video/x-msvideo",
+        "flv": "video/x-flv",
+    }
+    if ext in video_mapping:
+        return video_mapping[ext]
+    return _audio_mime_type(path)
+
+
 async def _resolve_supported_audio_file_for_tool(
-    *, tool_name: str, path: str
+    *,
+    tool_name: str,
+    path: str,
+    supported_formats: set[str] | None = None,
+    mime_type_resolver: Callable[[Path], str] | None = None,
 ) -> tuple[Path, bytes, str]:
     resolved = _resolve_media_path(path)
     path_block = _sensitive_media_path_block(tool_name, resolved, path)
@@ -973,16 +1005,20 @@ async def _resolve_supported_audio_file_for_tool(
     if not resolved.exists():
         raise SafeToolError(f"Audio file not found: {path} (resolved={resolved})")
     ext = resolved.suffix.lstrip(".").lower()
-    if ext not in _SUPPORTED_AUDIO_FORMATS:
+    allowed_formats = (
+        supported_formats if supported_formats is not None else _SUPPORTED_AUDIO_FORMATS
+    )
+    if ext not in allowed_formats:
         raise ToolError(
             f"Unsupported audio format: {ext}. "
-            f"Supported: {', '.join(sorted(_SUPPORTED_AUDIO_FORMATS))}"
+            f"Supported: {', '.join(sorted(allowed_formats))}"
         )
     loop = asyncio.get_running_loop()
     audio_bytes: bytes = await loop.run_in_executor(None, resolved.read_bytes)
     if len(audio_bytes) > _AUDIO_SIZE_LIMIT:
         raise ToolError("Audio file exceeds 100MB size limit")
-    return resolved, audio_bytes, _audio_mime_type(resolved)
+    resolve_mime = mime_type_resolver if mime_type_resolver is not None else _audio_mime_type
+    return resolved, audio_bytes, resolve_mime(resolved)
 
 
 def _audio_extension(response_format: str, mime_type: str) -> str:
@@ -1388,6 +1424,8 @@ async def dubbing_generate(
     resolved, audio_bytes, mime_type = await _resolve_supported_audio_file_for_tool(
         tool_name="dubbing_generate",
         path=source_media,
+        supported_formats=_SUPPORTED_DUBBING_MEDIA_FORMATS,
+        mime_type_resolver=_dubbing_media_mime_type,
     )
     try:
         result = await _elevenlabs_provider(config).create_dubbing(
