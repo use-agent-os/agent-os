@@ -388,14 +388,17 @@ class ApprovalQueue:
         command = str(params.get("command") or "")
         if not command:
             return
+        # Same params, same scope as the elevated mode resolved just above:
+        # the grant belongs to the session that was prompted.
+        session_key = str(params.get("sessionKey") or "")
         try:
             from agentos.application.intent_cache import get_intent_cache
 
             cache = get_intent_cache()
             if allow_always:
-                cache.record_always(command)
+                cache.record_always(command, session_key=session_key)
             else:
-                cache.record(command)
+                cache.record(command, session_key=session_key)
         except Exception:  # pragma: no cover — cache path is best-effort
             return
 

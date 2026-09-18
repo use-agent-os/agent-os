@@ -93,7 +93,7 @@ def test_approval_snapshot_and_forget_payloads_own_wire_shapes() -> None:
     intent_cache = IntentApprovalCache()
     try:
         queue.set_settings("prompt")
-        intent_cache.record_always("rm /tmp/approval-demo")
+        intent_cache.record_always("rm /tmp/approval-demo", session_key="agent:main:demo")
         normalized_target = str(Path("/tmp/approval-demo").resolve(strict=False))
 
         snapshot = approval_snapshot_rpc_payload(queue, intent_cache)
@@ -102,6 +102,7 @@ def test_approval_snapshot_and_forget_payloads_own_wire_shapes() -> None:
             "intent_cache_size": 1,
             "intent_cache_entries": [
                 {
+                    "session": "agent:main:demo",
                     "kind": "delete",
                     "target": normalized_target,
                     "scope": "always",
@@ -113,10 +114,44 @@ def test_approval_snapshot_and_forget_payloads_own_wire_shapes() -> None:
             "scope": "target",
             "target": "/tmp/approval-demo",
         }
-        assert intent_cache.check("rm /tmp/approval-demo") is False
+        assert intent_cache.check("rm /tmp/approval-demo", session_key="agent:main:demo") is False
 
-        intent_cache.record_always("rm /tmp/approval-demo")
+        intent_cache.record_always("rm /tmp/approval-demo", session_key="agent:main:demo")
         assert approval_forget_rpc_payload(intent_cache) == {"scope": "all"}
-        assert intent_cache.check("rm /tmp/approval-demo") is False
+        assert intent_cache.check("rm /tmp/approval-demo", session_key="agent:main:demo") is False
     finally:
+        queue.close()
+
+
+def test_resolving_an_approval_files_its_intent_under_the_prompted_session() -> None:
+    """The grant lands in the same scope as the approval's elevated mode.
+
+    ``ApprovalQueue.resolve`` already reads ``params["sessionKey"]`` to file the
+    elevated mode; the intent it records has to read the same field, or the
+    next session inherits an approval it never saw.
+    """
+    from agentos.application.intent_cache import get_intent_cache, reset_intent_cache
+
+    queue = ApprovalQueue(db_path=":memory:")
+    reset_intent_cache()
+    cache = get_intent_cache()
+    try:
+        queue.set_settings("prompt")
+        payload = approval_request_rpc_payload(
+            queue,
+            namespace="exec",
+            params={
+                "toolName": "exec_command",
+                "command": "rm -rf /tmp/approval-scope",
+                "args": {},
+                "sessionKey": "agent:main:granting",
+            },
+        )
+        approval_resolve_rpc_payload(queue, payload["id"], True, allow_always=True)
+
+        assert cache.check("rm -rf /tmp/approval-scope", session_key="agent:main:granting") is True
+        assert cache.check("rm -rf /tmp/approval-scope", session_key="agent:main:other") is False
+        assert cache.check("rm -rf /tmp/approval-scope") is False
+    finally:
+        reset_intent_cache()
         queue.close()

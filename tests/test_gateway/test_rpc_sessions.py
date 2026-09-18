@@ -796,6 +796,41 @@ class _LimitAwareSessionManager(FakeSessionManager):
 
 class TestSessionsSend:
     @pytest.mark.asyncio
+    async def test_send_clears_once_grants_of_its_own_session_only(
+        self, dispatcher, ctx_with_sessions, session
+    ):
+        """A turn starting here must not disarm a concurrent session's approval.
+
+        The "once" scope means "until this session's next user message", so a
+        sibling session sending a message is not the event that ends it.
+        """
+        from agentos.sandbox.intent_cache import get_intent_cache, reset_intent_cache
+
+        reset_intent_cache()
+        cache = get_intent_cache()
+        cache.record("rm /tmp/agentos-sender", session_key=session.session_key)
+        cache.record("rm /tmp/agentos-bystander", session_key="agent:other:main")
+        try:
+            res = await dispatcher.dispatch(
+                "r1",
+                "sessions.send",
+                {"key": session.session_key, "message": "hello"},
+                ctx_with_sessions,
+            )
+
+            assert res.ok is True
+            # The turn runs in a background task; yield until it has started.
+            for _ in range(100):
+                if not cache.check("rm /tmp/agentos-sender", session_key=session.session_key):
+                    break
+                await asyncio.sleep(0)
+
+            assert cache.check("rm /tmp/agentos-sender", session_key=session.session_key) is False
+            assert cache.check("rm /tmp/agentos-bystander", session_key="agent:other:main") is True
+        finally:
+            reset_intent_cache()
+
+    @pytest.mark.asyncio
     async def test_send_valid(self, dispatcher, ctx_with_sessions, session):
         res = await dispatcher.dispatch(
             "r1",

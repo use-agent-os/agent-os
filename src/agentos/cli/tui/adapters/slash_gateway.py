@@ -744,8 +744,8 @@ async def _handle_approvals_command(cmd: str, client: object | None = None) -> N
             console.print(f"[{ACCENT}]Approval mode reset to prompt; cache cleared.[/]")
             return
         entries = [
-            f"  [dim]{scope}[/dim] {k}:{t}"
-            for (k, t), (_exp, scope) in cache._entries.items()  # noqa: SLF001
+            f"  [dim]{scope}[/dim] {s}: {k}:{t}" if s else f"  [dim]{scope}[/dim] {k}:{t}"
+            for (s, k, t), (_exp, scope) in cache._entries.items()  # noqa: SLF001
         ]
         console.print(f"[{ACCENT}]mode:[/] {queue.get_settings().mode}")
         console.print(f"[{ACCENT}]cached intents ({len(entries)}):[/]")
