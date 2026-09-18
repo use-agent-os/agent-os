@@ -630,6 +630,14 @@ class SlackChannel:
                 },
             )
             resp.raise_for_status()
+            data = resp.json()
+            if not data.get("ok"):
+                log.error(
+                    "slack.stream_edit_failed",
+                    error=data.get("error"),
+                    message_id=message_ts,
+                )
+                raise RuntimeError(f"Slack API error: {data.get('error')}")
 
         async for chunk in chunks:
             throttle.add(chunk)

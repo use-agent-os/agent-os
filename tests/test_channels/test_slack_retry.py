@@ -189,3 +189,21 @@ async def test_send_does_not_retry_slack_level_error(no_sleep) -> None:
         await channel.send(OutgoingMessage(content="hi", reply_to="C123"))
 
     assert post.await_count == 1
+
+
+async def test_send_streaming_edit_surfaces_slack_level_error(no_sleep) -> None:
+    """``ok: false`` from chat.update inside send_streaming raises RuntimeError."""
+    channel = _channel()
+    _attach(
+        channel,
+        _resp(200, {"ok": True, "ts": "1234.5678"}),
+        _resp(200, {"ok": False, "error": "ratelimited"}),
+    )
+
+    async def chunks():
+        yield "first"
+        yield "second"
+
+    with pytest.raises(RuntimeError, match="ratelimited"):
+        await channel.send_streaming(chunks(), update_interval_ms=0)
+
