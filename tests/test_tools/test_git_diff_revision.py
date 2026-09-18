@@ -162,6 +162,12 @@ async def test_diff_revision_resolves_head_only_when_a_commit_exists(
     assert await git._diff_revision(str(empty_repo)) == "HEAD"
 
 
+async def test_git_log_in_repository_without_commits(empty_repo: Path) -> None:
+    """git_log returns informative message rather than failing with exit 128."""
+    out = await git.git_log(workdir=str(empty_repo))
+    assert out == "No commits yet in repository."
+
+
 @pytest.mark.parametrize(
     ("kwargs", "expected"),
     [

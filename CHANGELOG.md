@@ -18,6 +18,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- `git_log`: return an informative message ("No commits yet in repository.")
+  when invoked on an empty repository without commits instead of crashing with
+  `RuntimeError` (exit 128) ([#2737](https://github.com/use-agent-os/agent-os/issues/2737)).
+
 - WebUI chat: "Move to project" and "Rename session" on a brand-new chat
   (Cmd+Shift+O / `/new`, before the first message) failed with "Session not
   found". The WebUI mints the session key client-side and the row only

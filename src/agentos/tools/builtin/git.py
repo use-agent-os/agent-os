@@ -279,10 +279,13 @@ async def git_commit(
     record_payload=False,
 )
 async def git_log(count: int = 10, workdir: str | None = None) -> str:
+    cwd = _effective_workdir(workdir)
+    if await _diff_revision(cwd) is None:
+        return "No commits yet in repository."
     return await _run_git(
         "log",
         f"--max-count={count}",
         "--oneline",
         "--decorate",
-        cwd=_effective_workdir(workdir),
+        cwd=cwd,
     )
