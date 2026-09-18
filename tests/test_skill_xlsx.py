@@ -395,7 +395,6 @@ def test_the_apostrophe_escape_is_not_consumed_without_as_text(tmp_path: Path) -
     assert sheet.cell(row=2, column=1).value == "'=hello"
 
 
-
 def _import_scripts() -> tuple[Any, Any, Any]:
     sys.path.insert(0, str(SCRIPTS))
     try:
@@ -571,3 +570,75 @@ def test_clearing_a_cell_keeps_its_style(
     cell = load_workbook(str(out))["S"].cell(row=1, column=1)
     assert cell.value is None
     assert cell.number_format == "0.00%"
+
+
+def test_inspect_xlsx_stdout_survives_non_utf8_encoding_cp1252(tmp_path: Path) -> None:
+    """Inspect stdout must not raise UnicodeEncodeError on a cp1252 code page."""
+    import os
+    import subprocess
+
+    from agentos.skills.bundled.xlsx.scripts.create_xlsx import build
+
+    book_path = tmp_path / "cjk_book.xlsx"
+    wb = build({"sheets": [{"name": "Data", "rows": [["東京都", "Summary"]]}]})
+    wb.save(book_path)
+    wb.close()
+
+    script = SCRIPTS / "inspect_xlsx.py"
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
+    proc = subprocess.run(
+        [sys.executable, str(script), str(book_path)],
+        capture_output=True,
+        env=env,
+    )
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    assert "東京都".encode() in proc.stdout
+    payload = json.loads(proc.stdout.decode("utf-8"))
+    assert payload["sheets"][0]["rows"][0][0]["value"] == "東京都"
+
+
+def test_inspect_xlsx_stdout_survives_non_utf8_encoding_cp936_emoji(tmp_path: Path) -> None:
+    """Inspect stdout must not raise UnicodeEncodeError on cp936 when cells have emoji."""
+    import os
+    import subprocess
+
+    from agentos.skills.bundled.xlsx.scripts.create_xlsx import build
+
+    book_path = tmp_path / "emoji_book.xlsx"
+    wb = build({"sheets": [{"name": "Data", "rows": [["季度回顾 🎉"]]}]})
+    wb.save(book_path)
+    wb.close()
+
+    script = SCRIPTS / "inspect_xlsx.py"
+    env = {**os.environ, "PYTHONIOENCODING": "cp936"}
+    proc = subprocess.run(
+        [sys.executable, str(script), str(book_path)],
+        capture_output=True,
+        env=env,
+    )
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    assert "季度回顾 🎉".encode() in proc.stdout
+    payload = json.loads(proc.stdout.decode("utf-8"))
+    assert payload["sheets"][0]["rows"][0][0]["value"] == "季度回顾 🎉"
+
+
+def test_inspect_xlsx_write_falls_back_when_stdout_has_no_buffer() -> None:
+    """_write must fall back gracefully to text layer with backslashreplace."""
+    import io
+
+    _, _, inspect_xlsx = _import_scripts()
+
+    class NoBufferStream(io.StringIO):
+        encoding = "cp936"
+
+    stream = NoBufferStream()
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(sys, "stdout", stream)
+    try:
+        inspect_xlsx._write("季度回顾 🎉\n")
+    finally:
+        monkeypatch.undo()
+
+    written = stream.getvalue()
+    assert "季度回顾" in written
+    assert "?" not in written
