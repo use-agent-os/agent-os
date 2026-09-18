@@ -189,3 +189,67 @@ async def test_send_does_not_retry_slack_level_error(no_sleep) -> None:
         await channel.send(OutgoingMessage(content="hi", reply_to="C123"))
 
     assert post.await_count == 1
+
+
+# ---------------------------------------------------------------------------
+# send_streaming _edit Slack-level error surfacing (#2526)
+# ---------------------------------------------------------------------------
+
+
+async def test_send_streaming_edit_surfaces_slack_level_error(no_sleep) -> None:
+    """``ok: false`` from chat.update inside send_streaming raises RuntimeError."""
+    channel = _channel()
+    _attach(
+        channel,
+        _resp(200, {"ok": True, "ts": "1234.5678"}),
+        _resp(200, {"ok": False, "error": "ratelimited"}),
+    )
+
+    async def chunks():
+        yield "first"
+        yield "second"
+
+    with pytest.raises(RuntimeError, match="Slack API error: ratelimited"):
+        await channel.send_streaming(chunks(), update_interval_ms=0)
+
+
+async def test_send_streaming_force_flush_surfaces_slack_level_error(no_sleep) -> None:
+    """``ok: false`` on the final edit in force_flush raises RuntimeError."""
+    channel = _channel()
+    _attach(
+        channel,
+        _resp(200, {"ok": True, "ts": "1234.5678"}),
+        _resp(200, {"ok": False, "error": "msg_too_long"}),
+    )
+
+    async def chunks():
+        yield "first"
+        yield "second"
+
+    with pytest.raises(RuntimeError, match="Slack API error: msg_too_long"):
+        await channel.send_streaming(chunks(), update_interval_ms=10000)
+
+
+async def test_send_streaming_edit_logs_structured_failure(no_sleep) -> None:
+    """``ok: false`` logs slack.stream_edit_failed with error and message_id."""
+    import structlog
+
+    channel = _channel()
+    _attach(
+        channel,
+        _resp(200, {"ok": True, "ts": "9999.0001"}),
+        _resp(200, {"ok": False, "error": "message_not_found"}),
+    )
+
+    async def chunks():
+        yield "chunk1"
+        yield "chunk2"
+
+    with structlog.testing.capture_logs() as logs:
+        with pytest.raises(RuntimeError, match="message_not_found"):
+            await channel.send_streaming(chunks(), update_interval_ms=0)
+
+    edit_fail_logs = [e for e in logs if e.get("event") == "slack.stream_edit_failed"]
+    assert len(edit_fail_logs) == 1
+    assert edit_fail_logs[0]["error"] == "message_not_found"
+    assert edit_fail_logs[0]["message_id"] == "9999.0001"
