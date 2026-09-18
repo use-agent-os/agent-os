@@ -10,6 +10,7 @@ from typing import Annotated, Any
 
 import typer
 from rich.table import Table
+from rich.text import Text
 
 from agentos.cli.gateway_rpc import confirm_or_exit, rpc_error_exit_code, run_gateway_sync
 from agentos.cli.output import emit_error, print_json
@@ -408,6 +409,18 @@ def _job_rows(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _cell(value: Any) -> Text:
+    """A table cell holding gateway data, shown exactly as stored.
+
+    Job names, prompts, run output and error text are written by users, models
+    and scripts. Rich reads ``[word]`` in a plain ``str`` cell as a style tag
+    and ``:name:`` as an emoji code, so ``[daily] standup`` lost its label and a
+    ``[/]`` raised ``MarkupError`` and took the whole table down. ``Text`` is
+    never parsed.
+    """
+    return Text(str(value))
+
+
 def _render_jobs(rows: list[dict[str, Any]], *, title: str = "Cron jobs") -> None:
     if not rows:
         typer.echo("No cron jobs.")
@@ -425,20 +438,20 @@ def _render_jobs(rows: list[dict[str, Any]], *, title: str = "Cron jobs") -> Non
     table.add_column("Errors", justify="right")
     for row in rows:
         table.add_row(
-            str(row.get("id") or ""),
-            str(row.get("name") or ""),
-            str(row.get("enabled") or False),
-            str(row.get("expression") or row.get("schedule_raw") or ""),
-            str(row.get("payloadKind") or row.get("payload_kind") or ""),
-            str(row.get("agentId") or row.get("agent_id") or ""),
-            str(
+            _cell(row.get("id") or ""),
+            _cell(row.get("name") or ""),
+            _cell(row.get("enabled") or False),
+            _cell(row.get("expression") or row.get("schedule_raw") or ""),
+            _cell(row.get("payloadKind") or row.get("payload_kind") or ""),
+            _cell(row.get("agentId") or row.get("agent_id") or ""),
+            _cell(
                 row.get("effectiveElevated")
                 or row.get("elevated")
                 or ""
             ),
-            str(row.get("next_run") or ""),
-            str(row.get("last_run") or ""),
-            str(row.get("error_count") or row.get("consecutive_errors") or 0),
+            _cell(row.get("next_run") or ""),
+            _cell(row.get("last_run") or ""),
+            _cell(row.get("error_count") or row.get("consecutive_errors") or 0),
         )
     console.print(table)
 
@@ -448,7 +461,7 @@ def _render_mapping(payload: dict[str, Any], *, title: str) -> None:
     table.add_column("Field")
     table.add_column("Value")
     for key, value in payload.items():
-        table.add_row(str(key), str(value))
+        table.add_row(_cell(key), _cell(value))
     console.print(table)
 
 
@@ -485,14 +498,14 @@ def _render_runs(rows: list[dict[str, Any]]) -> None:
     table.add_column("Error")
     for row in rows:
         table.add_row(
-            str(row.get("id") or ""),
-            str(row.get("started_at") or ""),
-            str(row.get("finished_at") or ""),
-            str(row.get("status") or ("ok" if row.get("success") else "error")),
-            str(row.get("duration_ms") or ""),
-            str(row.get("deliveryStatus") or row.get("delivery_status") or ""),
-            _run_output_cell(row.get("summary")),
-            str(row.get("error") or ""),
+            _cell(row.get("id") or ""),
+            _cell(row.get("started_at") or ""),
+            _cell(row.get("finished_at") or ""),
+            _cell(row.get("status") or ("ok" if row.get("success") else "error")),
+            _cell(row.get("duration_ms") or ""),
+            _cell(row.get("deliveryStatus") or row.get("delivery_status") or ""),
+            _cell(_run_output_cell(row.get("summary"))),
+            _cell(row.get("error") or ""),
         )
     console.print(table)
 
@@ -1233,10 +1246,12 @@ def cron_output(
     if isinstance(payload, dict):
         error = payload.get("error")
         if error:
-            console.print(f"[red]error:[/red] {error}")
+            console.print(Text.assemble(("error:", "red"), f" {error}"))
         output = payload.get("output")
         if output:
-            # Raw script stdout — JSON brackets must not be read as rich markup.
-            console.print(output, markup=False, highlight=False)
+            # Raw script stdout, printed as written: brackets are not markup,
+            # ``:name:`` is not an emoji code, and a long line is not hard-wrapped
+            # at the console width, which split JSON strings in a piped copy.
+            console.print(output, markup=False, emoji=False, highlight=False, soft_wrap=True)
         else:
             console.print("[dim](no output)[/dim]")
