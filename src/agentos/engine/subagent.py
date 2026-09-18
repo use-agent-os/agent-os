@@ -71,7 +71,11 @@ class SubagentRegistry:
         return sum(1 for h in self._runs.values() if h.status == "running")
 
     def get(self, run_id: str) -> SubagentHandle | None:
-        return self._runs.get(run_id)
+        """The handle for ``run_id``, whether it is still running or finished."""
+        handle = self._runs.get(run_id)
+        if handle is None:
+            return self._archived.get(run_id)
+        return handle
 
     def all_handles(self) -> list[SubagentHandle]:
         return list(self._runs.values())
@@ -252,6 +256,11 @@ class SubagentManager:
             else:
                 handle.status = "done"
                 handle.result = t.result()
+            # A settled run is no longer active. Without this the handle -- and
+            # the whole result string hanging off it -- stayed in ``_runs`` for
+            # the life of the agent, because ``archive()`` had no caller and the
+            # bounded ``_archived`` it moves into was never written to.
+            self.registry.archive(handle.run_id)
 
         task.add_done_callback(_on_done)
         self.registry.register(handle)
