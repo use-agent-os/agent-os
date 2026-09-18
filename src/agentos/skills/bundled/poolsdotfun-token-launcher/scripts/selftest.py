@@ -456,7 +456,7 @@ def tier7_import_graph() -> None:
     section("Tier 7 — capability separation")
     source_dir = Path(__file__).resolve().parent
 
-    read_src = (source_dir / "pools_read.py").read_text()
+    read_src = (source_dir / "pools_read.py").read_text(encoding="utf-8")
     # Match import statements, not the substring: the module's own docstring
     # mentions secp256k1 to explain why it is absent, and a naive `in` check
     # fails on the documentation rather than on a real import.
@@ -484,7 +484,7 @@ def tier7_import_graph() -> None:
     check("sys.modules has no secp256k1 after importing pools_read",
           any("secp256k1" in m for m in sys.modules), False)
 
-    plan_src = (source_dir / "poolsfun" / "plan.py").read_text()
+    plan_src = (source_dir / "poolsfun" / "plan.py").read_text(encoding="utf-8")
     check("plan.py does not import secp256k1", "secp256k1" in plan_src, False)
 
     from poolsfun import account
@@ -493,7 +493,7 @@ def tier7_import_graph() -> None:
     check("secp256k1.py does expose sign_digest",
           hasattr(secp256k1, "sign_digest"), True)
 
-    write_src = (source_dir / "pools_write.py").read_text()
+    write_src = (source_dir / "pools_write.py").read_text(encoding="utf-8")
     # One definition plus one call site per write path (launch, the shared locker
     # writer, set-fee-recipient, approve). A new write command that forgets the
     # gate moves this count.
@@ -574,7 +574,7 @@ def tier9_chain_constants() -> None:
             os.environ["POOLSFUN_PRIVATE_KEY"] = saved
 
     # A key is never accepted from the command line.
-    write_src = (Path(__file__).resolve().parent / "pools_write.py").read_text()
+    write_src = (Path(__file__).resolve().parent / "pools_write.py").read_text(encoding="utf-8")
     check("no --private-key flag exists", "private-key" in write_src, False)
 
 

@@ -2765,7 +2765,7 @@ def main(argv):
 
     gaps = []
     if fixture:
-        with open(fixture) as fh:
+        with open(fixture, encoding="utf-8") as fh:
             d = json.load(fh)
         wallet = d.get("_wallet", "FIXTURE")
         chain = d.get("_chain", "sol")

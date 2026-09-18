@@ -1622,8 +1622,8 @@ def _tier7_journal(r) -> None:
             r.check("the lock is not the file that gets atomically replaced",
                     store.lock_path != store.path, True)
 
-        tampered = store.path.read_text().replace('"tokenId": 7', '"tokenId": 8')
-        store.path.write_text(tampered)
+        tampered = store.path.read_text(encoding="utf-8").replace('"tokenId": 7', '"tokenId": 8')
+        store.path.write_text(tampered, encoding="utf-8")
         threw = False
         try:
             store.load()
@@ -1650,7 +1650,10 @@ def _tier7_journal(r) -> None:
         # transaction was signed.
         good = MandateStore(root, "test", mandate_id({"chainId": 1}))
         good.append({"event": "tx.sent"})
-        good.log_path.write_text(good.log_path.read_text() + '{"event": "tx.se\n')
+        good.log_path.write_text(
+            good.log_path.read_text(encoding="utf-8") + '{"event": "tx.se\n',
+            encoding="utf-8",
+        )
         r.check("a torn final line is tolerated",
                 [rec["event"] for rec in good.records()], ["tx.sent"])
         good.append({"event": "tick.noop"})
@@ -2309,7 +2312,7 @@ def main() -> int:
     if not GOLDEN_PATH.is_file():
         print(f"missing golden vectors: {GOLDEN_PATH}", file=sys.stderr)
         return 2
-    golden = json.loads(GOLDEN_PATH.read_text())
+    golden = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
 
     results = Results(args.verbose)
     for title, fn in TIERS:
