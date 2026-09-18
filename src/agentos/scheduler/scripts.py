@@ -278,6 +278,11 @@ def _interpreter(path: Path) -> tuple[list[str], dict[str, str], str | None]:
             )
         return [bash, str(path)], {}, None
     python_exe, env_overlay = _python_invocation(sys.executable)
+    # run_job_script decodes the captured output as UTF-8, so the child must
+    # encode it that way. A piped stdout otherwise uses the locale code page
+    # (cp1252/cp936 on Windows): anything outside it raises UnicodeEncodeError
+    # and fails the run, and anything inside it arrives as U+FFFD.
+    env_overlay = {**env_overlay, "PYTHONIOENCODING": "utf-8"}
     return [python_exe, str(path)], env_overlay, None
 
 
