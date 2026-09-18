@@ -20,6 +20,7 @@ Exit codes:
     0  success — output MP4 written.
     1  failure — stderr carries the cause.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,16 +44,25 @@ def resolve_ffmpeg(explicit: str) -> str:
     if os.name != "nt":
         return explicit  # let subprocess fail with the canonical error
     local_app = os.environ.get("LOCALAPPDATA", "")
-    if not local_app:
-        return explicit
-    from glob import glob
-    for hit in glob(os.path.join(local_app, WINGET_FFMPEG_GLOB)):
-        if os.path.isfile(hit):
-            return hit
+    if local_app:
+        from glob import glob
+
+        for hit in glob(os.path.join(local_app, WINGET_FFMPEG_GLOB)):
+            if os.path.isfile(hit):
+                return hit
     candidates = [
-        os.path.join(os.environ.get("USERPROFILE", ""), "scoop", "apps", "ffmpeg", "current", "bin", "ffmpeg.exe"),
+        os.path.join(
+            os.environ.get("USERPROFILE", ""),
+            "scoop",
+            "apps",
+            "ffmpeg",
+            "current",
+            "bin",
+            "ffmpeg.exe",
+        ),
         r"C:\ProgramData\chocolatey\bin\ffmpeg.exe",
         r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
+        r"C:\ffmpeg\bin\ffmpeg.exe",
     ]
     for p in candidates:
         if p and os.path.isfile(p):
@@ -69,7 +79,9 @@ def main() -> int:
     parser.add_argument("--height", type=int, default=1280)
     parser.add_argument("--fps", type=int, default=24)
     parser.add_argument(
-        "--zoom-rate", type=float, default=0.0015,
+        "--zoom-rate",
+        type=float,
+        default=0.0015,
         help="Per-frame zoom increment; 0.0015 over 5s ≈ 1.18x final zoom",
     )
     parser.add_argument("--ffmpeg-path", default="ffmpeg")
@@ -99,20 +111,33 @@ def main() -> int:
     cmd = [
         ffmpeg_bin,
         "-y",
-        "-loop", "1",
-        "-i", str(src),
-        "-f", "lavfi",
-        "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
-        "-filter_complex", vf,
-        "-map", "[v]",
-        "-map", "1:a",
-        "-t", f"{args.duration}",
-        "-c:v", "libx264",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac",
-        "-b:a", "128k",
+        "-loop",
+        "1",
+        "-i",
+        str(src),
+        "-f",
+        "lavfi",
+        "-i",
+        "anullsrc=channel_layout=stereo:sample_rate=44100",
+        "-filter_complex",
+        vf,
+        "-map",
+        "[v]",
+        "-map",
+        "1:a",
+        "-t",
+        f"{args.duration}",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
         "-shortest",
-        "-movflags", "+faststart",
+        "-movflags",
+        "+faststart",
         str(out),
     ]
     try:
@@ -122,7 +147,10 @@ def main() -> int:
             check=False,
         )
     except FileNotFoundError as exc:
-        print(f"Error: ffmpeg not found ({exc}). Install via video-merger/install.ps1 or pass --ffmpeg-path.", file=sys.stderr)
+        print(
+            f"Error: ffmpeg not found ({exc}). Install via video-merger/install.ps1 or pass --ffmpeg-path.",
+            file=sys.stderr,
+        )
         return 1
     if proc.returncode != 0:
         sys.stderr.write(proc.stderr.decode("utf-8", "replace")[-2000:])

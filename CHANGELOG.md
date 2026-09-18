@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `video-still-animator` failed with `Error: ffmpeg not found` on Windows
+  installations where `ffmpeg.exe` was located under `C:\ffmpeg\bin` and not
+  in `PATH`; its binary resolver now probes `C:\ffmpeg\bin\ffmpeg.exe` matching
+  `video-merger` and `subtitle-burner`
+  ([#2435](https://github.com/use-agent-os/agent-os/issues/2435)).
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added
