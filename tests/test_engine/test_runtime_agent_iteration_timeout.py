@@ -174,9 +174,21 @@ async def test_run_threads_iteration_timeout_into_agent_config(
 
 
 @pytest.mark.asyncio
-async def test_stream_iteration_timeout_does_not_double_close_provider_stream(
+async def test_stream_iteration_timeout_closes_the_provider_stream_exactly_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """An iteration timeout must close the abandoned provider stream (once).
+
+    Regression: this used to assert ``close_calls == 0`` -- the iteration-
+    timeout exit raised ``_IterationStreamTimeoutError`` without ever calling
+    ``_close_provider_stream``, unlike the sibling total-deadline exit two
+    lines above it. The caller's ``except _IterationStreamTimeoutError``
+    handler does no cleanup of its own either, so the abandoned generator's
+    own ``async with client.stream(...)`` __aexit__ (closing the underlying
+    httpx connection) would only run whenever the GC finalized it -- not
+    deterministic, and a real connection/socket leak under repeated
+    iteration timeouts in a long-lived gateway process.
+    """
     agent = Agent.__new__(Agent)
     agent.config = MagicMock(timeout=1.0, iteration_timeout=0.01)
     close_calls = 0
@@ -204,4 +216,55 @@ async def test_stream_iteration_timeout_does_not_double_close_provider_stream(
         ):
             pass
 
-    assert close_calls == 0
+    assert close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_total_deadline_hit_mid_wait_closes_the_provider_stream_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other timeout exit inside the same ``if not done:`` branch.
+
+    Distinct from the ``remaining_total <= 0`` check at the top of the loop
+    (already covered -- it always closed) and from the plain iteration
+    timeout above: this is the total deadline being crossed *while* the
+    per-iteration wait was in flight, discovered only after the wait
+    times out. It shared the exact same missing-close bug.
+
+    The margin below has to clear ``asyncio``'s own timer-firing slop, not
+    just be "short": ``BaseEventLoop._run_once`` treats a scheduled callback
+    as ready once ``when < now + clock_resolution``, i.e. it may fire up to
+    one clock-resolution period *early*. On Windows that resolution is
+    commonly ~15.6ms, so a margin under that (this used to be 10ms) let
+    ``asyncio.wait``'s timeout fire before ``loop.time()`` had actually
+    crossed ``total_deadline``, taking the iteration-timeout branch instead
+    of the total-deadline one on Windows CI while passing everywhere else.
+    """
+    agent = Agent.__new__(Agent)
+    agent.config = MagicMock(timeout=1.0, iteration_timeout=10.0)
+    close_calls = 0
+
+    async def provider_stream() -> AsyncIterator[dict[str, str]]:
+        try:
+            await asyncio.sleep(10.0)
+            yield {"type": "chunk", "data": "late"}
+        finally:
+            await asyncio.sleep(0)
+
+    async def record_close(_stream_iter: AsyncIterator[Any]) -> None:
+        nonlocal close_calls
+        close_calls += 1
+
+    monkeypatch.setattr(agent, "_close_provider_stream", record_close)
+
+    loop = asyncio.get_running_loop()
+
+    with pytest.raises(TimeoutError, match="Agent total timeout"):
+        async for _event in agent._stream_provider_events_with_deadline(
+            provider_stream(),
+            loop=loop,
+            total_deadline=loop.time() + 0.25,
+        ):
+            pass
+
+    assert close_calls == 1

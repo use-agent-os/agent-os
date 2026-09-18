@@ -3848,6 +3848,13 @@ class Agent:
                 next_event.cancel()
                 with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
                     await next_event
+                # Both timeout exits abandon the generator without ever
+                # resuming it, so its own `async with client.stream(...)`
+                # __aexit__ (closing the underlying httpx connection) would
+                # otherwise only run whenever the GC finalizes it -- not
+                # deterministic, and can lag significantly in a long-lived
+                # gateway process. Close explicitly before raising either way.
+                await self._close_provider_stream(stream_iter)
                 if total_deadline is not None and loop.time() >= total_deadline:
                     raise TimeoutError(f"Agent total timeout after {self.config.timeout}s")
                 raise _IterationStreamTimeoutError
