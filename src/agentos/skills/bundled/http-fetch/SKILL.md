@@ -38,7 +38,7 @@ loop).
 | `method`    | no       | `GET`                  | `GET` / `POST` / `PUT` / `DELETE` (case-insensitive)           |
 | `body`      | no       | `''`                   | request body, piped via stdin (for POST/PUT); empty = no body  |
 | `timeout`   | no       | `30`                   | request timeout in seconds                                     |
-| `max_bytes` | no       | `2000000`              | response body cap; larger payloads truncated + suffixed `…`    |
+| `max_bytes` | no       | `2000000`              | response body cap; the read stops there, larger payloads truncated + suffixed `…` |
 
 ## Output
 
@@ -53,7 +53,9 @@ loop).
 - Crawling multiple pages → use ``scrapling`` (via ``sub-agent``).
 - JS-rendered pages → use ``sub-agent`` + browser tools.
 - OAuth dance / multi-step auth → use ``sub-agent``.
-- Streaming responses → not supported (we buffer + return).
+- Streaming responses → not supported: the first ``max_bytes`` of the
+  stream are returned and the connection is closed; nothing after the
+  cap is read.
 
 ## Fallback
 
