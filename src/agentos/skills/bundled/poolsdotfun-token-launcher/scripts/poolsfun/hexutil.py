@@ -203,7 +203,12 @@ def parse_units(value: str, decimals: int) -> int:
         rounded = js_round(float(f"{unit}.{right}"))
         if rounded > 9:
             # The rounded digit carried; bump the digit to its left and reset.
-            fraction = str(int(left or "0") + 1).rjust(len(left) + 1, "0") + "0"
+            # The trailing zero is inside what gets padded: viem writes
+            # ``${BigInt(left) + 1n}0``.padStart(left.length + 1, "0"). Padding
+            # the digits alone and then appending the zero makes the fraction
+            # one character too long whenever the carry does not widen ``left``,
+            # which the length check below reads as a carry into the integer.
+            fraction = (str(int(left or "0") + 1) + "0").rjust(len(left) + 1, "0")
         else:
             fraction = f"{left}{rounded}"
         if len(fraction) > decimals:
