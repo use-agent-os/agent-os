@@ -94,6 +94,9 @@ _ALLOWED_UPDATES = (
 #: Hard ceiling Telegram enforces on ``sendMessage``/``editMessageText`` text.
 #: Measured on the *rendered* HTML, which is longer than the markdown it came from.
 _MESSAGE_TEXT_LIMIT = 4096
+#: Hard ceiling Telegram enforces on media/document captions (``sendDocument``).
+_CAPTION_TEXT_LIMIT = 1024
+
 #: Telegram tolerates roughly one edit per second per chat — well below Slack's
 #: 500ms default, so streaming updates get their own slower cadence.
 _STREAM_UPDATE_INTERVAL_MS = 1200
@@ -1280,6 +1283,7 @@ class TelegramChannel:
     def _split_for_limit(
         segment: str,
         *,
+        limit: int = _MESSAGE_TEXT_LIMIT,
         measure: Callable[[str], int] | None = None,
     ) -> tuple[str, str]:
         """Split *segment* into the largest prefix that fits one message, plus the rest.
@@ -1293,7 +1297,7 @@ class TelegramChannel:
         cut-point and fenced-code-block logic.
         """
         length = measure if measure is not None else (lambda text: len(render_telegram_html(text)))
-        return split_text_for_limit(segment, _MESSAGE_TEXT_LIMIT, measure=length)
+        return split_text_for_limit(segment, limit, measure=length)
 
     async def _stream_send(
         self,
@@ -1482,9 +1486,13 @@ class TelegramChannel:
         path = Path(file_path)
         check_channel_file_size(path, self.MAX_FILE_BYTES, "Telegram")
         payload = {"chat_id": str(chat_id)}
+        head = ""
+        tail = ""
         if content:
-            payload["caption"] = render_telegram_html(content)
-            payload["parse_mode"] = "HTML"
+            head, tail = self._split_for_limit(content, limit=_CAPTION_TEXT_LIMIT)
+            if head:
+                payload["caption"] = render_telegram_html(head)
+                payload["parse_mode"] = "HTML"
         client = self._get_client()
         try:
             with path.open("rb") as f:
@@ -1499,6 +1507,14 @@ class TelegramChannel:
         result: dict[str, Any] = raw_result if isinstance(raw_result, dict) else {}
         raw_document = result.get("document")
         document: dict[str, Any] = raw_document if isinstance(raw_document, dict) else {}
+        if tail and tail.strip():
+            await self.send(
+                OutgoingMessage(
+                    content=tail,
+                    reply_to=str(chat_id),
+                    metadata={"chat_id": str(chat_id)},
+                )
+            )
         return ChannelSendResult.sent(
             capability=ChannelCapabilities.NATIVE_FILE_UPLOAD,
             target_id=str(chat_id),
