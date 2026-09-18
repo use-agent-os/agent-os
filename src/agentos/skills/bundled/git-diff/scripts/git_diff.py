@@ -68,16 +68,25 @@ def _run_git(args: list[str], cwd: Path) -> tuple[int, bytes, bytes]:
 
 
 def _diff_for_mode(mode: str, cwd: Path) -> tuple[int, bytes, bytes]:
+    head_rc, _, _ = _run_git(["rev-parse", "--verify", "--quiet", "HEAD"], cwd)
+    has_head = head_rc == 0
+
     if mode == "cached_fallback_worktree":
-        rc, out, err = _run_git(["diff", "--cached", "HEAD"], cwd)
+        cached_cmd = ["diff", "--cached", "HEAD"] if has_head else ["diff", "--cached"]
+        rc, out, err = _run_git(cached_cmd, cwd)
         if rc != 0:
             return rc, out, err
         if out.strip():
             return 0, out, err
+        if not has_head:
+            return 0, b"", b""
         return _run_git(["diff", "HEAD"], cwd)
     if mode == "cached":
-        return _run_git(["diff", "--cached", "HEAD"], cwd)
+        cached_cmd = ["diff", "--cached", "HEAD"] if has_head else ["diff", "--cached"]
+        return _run_git(cached_cmd, cwd)
     if mode == "worktree":
+        if not has_head:
+            return 0, b"", b""
         return _run_git(["diff", "HEAD"], cwd)
     if mode == "staged_files":
         return _run_git(["diff", "--cached", "--name-only"], cwd)

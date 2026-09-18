@@ -183,3 +183,33 @@ def test_emit_writes_bytes_verbatim_through_the_buffer() -> None:
     module._emit(payload, stream)
 
     assert raw.getvalue() == payload
+
+
+def test_git_diff_repository_without_initial_commit(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "-q")
+    (tmp_path / "initial.txt").write_bytes(b"hello world\n")
+    _git(tmp_path, "add", "initial.txt")
+
+    # cached_fallback_worktree (default)
+    proc = subprocess.run(
+        [sys.executable, str(SCRIPT), "--cwd", str(tmp_path)],
+        capture_output=True,
+    )
+    assert proc.returncode == 0
+    assert b"initial.txt" in proc.stdout
+    assert b"+hello world" in proc.stdout
+
+    # cached mode
+    proc_cached = subprocess.run(
+        [sys.executable, str(SCRIPT), "--cwd", str(tmp_path), "--mode", "cached"],
+        capture_output=True,
+    )
+    assert proc_cached.returncode == 0
+    assert b"initial.txt" in proc_cached.stdout
+
+    # worktree mode before commit should not fail with 128
+    proc_worktree = subprocess.run(
+        [sys.executable, str(SCRIPT), "--cwd", str(tmp_path), "--mode", "worktree"],
+        capture_output=True,
+    )
+    assert proc_worktree.returncode == 0
