@@ -113,8 +113,9 @@ agentos sessions export <session-key> --format json --output session.json
 ```
 
 Exported transcripts are useful for bug reports, audits, or moving a task into a
-document. Remove secrets, private local paths, provider tokens, and private
-channel identifiers before sharing an export publicly.
+document. Transcripts export messages from the gateway's active chat history
+window (up to the 200-message gateway limit). Remove secrets, private local paths,
+provider tokens, and private channel identifiers before sharing an export publicly.
 
 ## Delete a Session
 
