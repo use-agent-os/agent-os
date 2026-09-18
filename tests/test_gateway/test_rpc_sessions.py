@@ -2083,6 +2083,29 @@ class TestSessionsReset:
         assert res.payload["previous_session_id"] == before
         assert res.payload["session_id"] != before
 
+    @pytest.mark.asyncio
+    async def test_reset_forced_with_covering_checkpoint_does_the_plain_reset(
+        self, dispatcher, session
+    ):
+        manager = FakeSessionManager([session])
+        manager.transcript = [SimpleNamespace(id=1, content="message to preserve")]
+        manager._storage.memory_durable_receipts.append(
+            _checkpoint_receipt(session, turn_id="cmp-reset-forced", entries=manager.transcript)
+        )
+        ctx = make_ctx(session_manager=manager)
+        before = session.session_id
+
+        res = await dispatcher.dispatch(
+            "r1", "sessions.reset", {"key": session.session_key, "force": True}, ctx
+        )
+
+        assert res.ok is True
+        assert res.payload["reset"] is True
+        assert res.payload["previous_session_id"] == before
+        assert res.payload["session_id"] != before
+        assert "reset_mode" not in res.payload
+        assert manager.applied_intents == [(session.session_key, "reset_same_key")]
+
 
 class TestSessionsDelete:
     @pytest.mark.asyncio
@@ -2148,9 +2171,7 @@ class TestSessionsDelete:
 
         ctx = make_ctx(session_manager=FakeSessionManager([session]), task_runtime=_BrokenRuntime())
 
-        res = await dispatcher.dispatch(
-            "r1", "sessions.delete", {"key": session.session_key}, ctx
-        )
+        res = await dispatcher.dispatch("r1", "sessions.delete", {"key": session.session_key}, ctx)
 
         assert res.ok is True
         assert res.payload["deleted"] == [session.session_key]
