@@ -86,7 +86,8 @@ class SlackStatusReactor(_BaseStatusReactor):
         super().__init__("slack", logger); self._channel = channel
     async def _remove(self, payload: dict[str, str]) -> None: await self._post("/reactions.remove", payload)
     async def _add(self, message: IncomingMessage, state: str) -> dict[str, str] | None:
-        ts = message.metadata.get("ts") or message.metadata.get("thread_ts")
+        metadata = message.metadata or {}
+        ts = metadata.get("ts") or metadata.get("thread_ts")
         if not isinstance(ts, str) or not ts: return None
         payload = {"channel": message.channel_id, "timestamp": ts, "name": SLACK_STATUS_EMOJI[state]}
         return payload if await self._post("/reactions.add", payload) else None
