@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import codecs
 import re
 from pathlib import Path
 from typing import Any, cast
@@ -43,6 +44,23 @@ def _string_list(value: object) -> list[str]:
     if isinstance(value, str) and value.strip():
         return [value.strip()]
     return []
+
+
+def _read_skill_md(skill_file: Path) -> str:
+    """Read a SKILL.md, honouring a byte-order mark if the file starts with one.
+
+    Windows tools write one by default: PowerShell 5.1's ``Set-Content
+    -Encoding UTF8`` prefixes a UTF-8 BOM, and its ``>`` / ``Out-File`` write
+    UTF-16. Read as plain ``utf-8``, the first put ``\ufeff`` in front of
+    ``---`` so the frontmatter did not match and the skill was dropped without
+    a word; the second failed to decode. ``utf-8-sig`` reads a BOM-less file
+    exactly as ``utf-8`` does.
+    """
+    with skill_file.open("rb") as handle:
+        head = handle.read(2)
+    if head in (codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE):
+        return skill_file.read_text(encoding="utf-16")
+    return skill_file.read_text(encoding="utf-8-sig")
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -545,7 +563,7 @@ class SkillLoader:
             return None
 
         try:
-            text = skill_file.read_text(encoding="utf-8")
+            text = _read_skill_md(skill_file)
             frontmatter, body = _parse_frontmatter(text)
 
             if not frontmatter or "name" not in frontmatter:
