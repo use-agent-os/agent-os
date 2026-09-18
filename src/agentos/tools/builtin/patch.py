@@ -165,7 +165,9 @@ def _parse_patch(patch_text: str) -> list[PatchOp]:
                         and not body[i].startswith("@@@ ")
                         and not body[i].startswith("*** ")
                     ):
-                        hunk.lines.append(body[i])
+                        raw = body[i]
+                        _split_hunk_line(raw)
+                        hunk.lines.append(raw)
                         i += 1
                     _trim_trailing_separators(hunk)
                     hunks.append(hunk)
@@ -194,7 +196,12 @@ def _split_hunk_line(raw: str) -> tuple[str, str]:
     """
     if not raw:
         return " ", ""
-    return raw[0], raw[1:]
+    prefix = raw[0]
+    if prefix not in (" ", "-", "+"):
+        raise ValueError(
+            f"Invalid line in hunk (expected prefix ' ', '-', or '+'): {raw!r}"
+        )
+    return prefix, raw[1:]
 
 
 def _old_side_line_count(lines: list[str]) -> int:

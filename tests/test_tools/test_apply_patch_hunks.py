@@ -370,3 +370,21 @@ def test_separator_after_a_prepend_hunk_is_trimmed() -> None:
 
 def test_counted_trailing_blank_is_kept_and_only_the_separator_is_trimmed() -> None:
     assert _parsed_hunk_lines("@@@ -1,2 +1,2 @@@\n-bar\n+baz\n\n\n") == ["-bar", "+baz", ""]
+
+
+def test_hunk_line_with_invalid_prefix_raises_value_error() -> None:
+    """Issue #2296: Hunk lines must start with ' ', '-', or '+'.
+    Lines missing a valid prefix must not be silently dropped."""
+    patch_text = (
+        "*** Begin Patch\n"
+        "*** Update File: foo.py\n"
+        "@@@ -1,1 +1,3 @@@\n"
+        " line1\n"
+        "+added_line\n"
+        "malformed_line_no_prefix\n"
+        "*** End Patch"
+    )
+    match_err = r"Invalid line in hunk \(expected prefix ' ', '-', or '\+'\)"
+    with pytest.raises(ValueError, match=match_err):
+        patch_tool._parse_patch(patch_text)
+
