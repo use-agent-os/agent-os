@@ -317,7 +317,7 @@ async def http_request(
         saved_path, digest = _save_http_response_body(raw_body, output_path)
         preview = (
             wrap_untrusted_boundary(
-                raw_body[:_TEXT_BODY_LIMIT].decode(response_encoding, "replace"),
+                raw_body.decode(response_encoding, "replace")[:_TEXT_BODY_LIMIT],
                 response_url,
             )
             if is_text

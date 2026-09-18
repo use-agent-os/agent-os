@@ -580,3 +580,47 @@ async def test_http_request_without_output_path_does_not_record_workspace_write(
         assert len(ctx.workspace_file_writes) == 0
     finally:
         current_tool_context.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_http_request_body_preview_truncates_multibyte_by_characters(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    ctx = ToolContext(workspace_dir=str(workspace))
+    token = current_tool_context.set(ctx)
+
+    text_content = "あ" * 12000
+    raw_content = text_content.encode("utf-8")
+
+    _patch_response(
+        monkeypatch,
+        httpx.Response(
+            200,
+            content=raw_content,
+            headers={"content-type": "text/plain; charset=utf-8"},
+            request=httpx.Request("GET", "https://example.test/japanese.txt"),
+        ),
+    )
+
+    import agentos.tools.builtin.web
+
+    monkeypatch.setattr(agentos.tools.builtin.web, "_TEXT_BODY_LIMIT", 10000)
+
+    try:
+        raw_result = await _original_http_request()(
+            url="https://example.test/japanese.txt",
+            output_path="japanese.txt",
+        )
+        payload = json.loads(raw_result)
+
+        preview = payload["body_preview"]
+        assert "\ufffd" not in preview
+
+        # Verify the content wasn't truncated prematurely.
+        # The untrusted boundary adds characters, so the total length is > 10000.
+        assert len(preview) > 10000
+    finally:
+        current_tool_context.reset(token)

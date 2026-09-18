@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `http_request` body preview is now decoded to UTF-8 before length truncation.
+  Previously, truncating at a fixed byte limit could slice a multi-byte character
+  in half, resulting in `\ufffd` at the boundary and invalidating the preview
+  ([#2396](https://github.com/use-agent-os/agent-os/issues/2396)).
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added
