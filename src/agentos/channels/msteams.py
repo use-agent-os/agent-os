@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -300,7 +301,34 @@ class MSTeamsChannel:
             "schema_version": _CONVERSATION_CACHE_SCHEMA_VERSION,
             "conversations": serialized,
         }
-        path.write_text(json.dumps(payload), encoding="utf-8")
+        # Temp file + rename: this runs on every turn, and a plain write_text
+        # truncates first, so a kill mid-write would leave a file that loads
+        # as empty and forgets every conversation, not just the latest one.
+        tmp = path.with_name(f".{path.name}.tmp")
+        try:
+            with tmp.open("w", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload))
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+
+    def _persist_conversation_cache(self) -> None:
+        """Save the cache after a turn, without letting a failed write drop the turn.
+
+        ``stop()`` used to be the only writer, so a crash, OOM kill or redeploy
+        lost every conversation learned -- and the last-activity order the
+        ``reply_to=None`` fallback relies on -- since the previous clean stop.
+        Saving on every turn, not only when a key is new, keeps that order on
+        disk too: otherwise a heartbeat after the restart goes to whichever
+        conversation was *learned* last rather than the one that spoke last.
+        """
+        try:
+            self._save_conversation_cache()
+        except OSError as exc:
+            log.warning("msteams.cache_save_failed", error=str(exc))
 
     # ------------------------------------------------------------------
     # Webhook
@@ -353,6 +381,7 @@ class MSTeamsChannel:
             # spoke" fallback -- tracks last activity, not first insertion.
             self._references.pop(cache_key, None)
             self._references[cache_key] = ref
+            self._persist_conversation_cache()
         if activity.recipient is not None and getattr(activity.recipient, "id", None):
             self._bot_id = activity.recipient.id
 
