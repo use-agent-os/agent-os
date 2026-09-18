@@ -31,7 +31,12 @@ from agentos.tools.fuzzy_match import (
 )
 from agentos.tools.path_policy import reject_foreign_host_path
 from agentos.tools.registry import tool
-from agentos.tools.types import ToolError, WorkspaceAccessError, current_tool_context
+from agentos.tools.types import (
+    EditMatchError,
+    ToolError,
+    WorkspaceAccessError,
+    current_tool_context,
+)
 from agentos.tools.write_tracking import record_workspace_file_write
 
 log = structlog.get_logger(__name__)
@@ -972,7 +977,7 @@ def _locate_edit(original: str, old_text: str, new_text: str, *, path: str) -> F
         return fuzzy_find_and_replace(original, old_text, new_text)
     except AmbiguousMatchError as exc:
         lines = ", ".join(str(line) for line in exc.lines)
-        raise ValueError(
+        raise EditMatchError(
             f"old_text matches {exc.match_count} locations in {path} (lines {lines});"
             " be more specific"
         ) from exc
@@ -981,7 +986,7 @@ def _locate_edit(original: str, old_text: str, new_text: str, *, path: str) -> F
         # channel like any other and gets the same mask.
         hint = redact_file_output(exc.hint, path=path) if exc.hint else ""
         detail = f" Closest match: {hint}" if hint else ""
-        raise ValueError(f"old_text not found in {path}.{detail}") from exc
+        raise EditMatchError(f"old_text not found in {path}.{detail}") from exc
 
 
 @tool(

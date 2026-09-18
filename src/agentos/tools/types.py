@@ -252,6 +252,10 @@ class UnsupportedSurfaceError(SafeToolError):
     )
 
 
+class EditMatchError(SafeToolError, ValueError):
+    """Raised when edit_file cannot locate unique text to replace."""
+
+
 class UnsupportedURLSchemeError(SafeToolUserMessage, ValueError):
     """Raised when a URL tool receives a URL without an HTTP(S) scheme."""
 

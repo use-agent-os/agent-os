@@ -126,3 +126,15 @@ def test_image_attachment_path_safe_tool_error_is_not_generic_internal_error() -
     assert "chat attachment" in envelope["user_message"]
     assert "internal error" not in envelope["user_message"]
     assert "secret" not in envelope["user_message"]
+
+
+def test_edit_match_error_preserves_closest_match_hint_in_envelope() -> None:
+    from agentos.tools.types import EditMatchError
+
+    err = EditMatchError("old_text not found in test.py. Closest match: line 1 (def foo())")
+    envelope = build_tool_failure_envelope(err, "edit_file")
+    assert envelope["status"] == "error"
+    assert envelope["tool"] == "edit_file"
+    assert envelope["error_class"] == "EditMatchError"
+    assert "old_text not found in test.py" in envelope["user_message"]
+    assert "Closest match: line 1" in envelope["user_message"]
