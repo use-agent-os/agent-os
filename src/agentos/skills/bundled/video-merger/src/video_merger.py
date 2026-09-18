@@ -102,8 +102,43 @@ class VideoMerger:
             video_path
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        width, height, duration = result.stdout.strip().split("\n")[:3]
-        return int(width), int(height), float(duration)
+        lines = [line.strip() for line in result.stdout.strip().split("\n") if line.strip()]
+        if len(lines) < 2:
+            raise ValueError(f"无法获取视频尺寸: {video_path}")
+        width = int(lines[0])
+        height = int(lines[1])
+        duration_str = lines[2] if len(lines) > 2 else "N/A"
+        try:
+            duration = float(duration_str)
+        except ValueError:
+            # Fall back to container format duration when stream duration is N/A or missing
+            cmd_fmt = [
+                self.ffprobe_path, "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                video_path
+            ]
+            result_fmt = subprocess.run(cmd_fmt, capture_output=True, text=True, check=True)
+            fmt_stdout = result_fmt.stdout.strip()
+            try:
+                duration = float(fmt_stdout)
+            except ValueError:
+                raise ValueError(f"无法获取视频时长: {video_path}") from None
+        return width, height, duration
+
+    def has_audio_stream(self, video_path: str) -> bool:
+        """检查视频是否包含音频流。"""
+        cmd = [
+            self.ffprobe_path, "-v", "error",
+            "-select_streams", "a:0",
+            "-show_entries", "stream=codec_type",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            video_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return bool(result.stdout.strip())
+
+    _has_audio_stream = has_audio_stream
 
     def merge(self,
               input_dir: str,
@@ -162,15 +197,23 @@ class VideoMerger:
 
             # 统一参数+添加转场
             print("正在编码和添加转场效果...")
+            audio_args: list[str] = []
+            if self.has_audio_stream(temp_raw):
+                audio_args = [
+                    "-af", (f"afade=t=in:st=0:d={transition_duration},"
+                            f"afade=t=out:st={total_duration-transition_duration}:d={transition_duration}"),
+                    "-c:a", "aac", "-ar", "44100", "-ac", "2",
+                ]
+            else:
+                audio_args = ["-an"]
+
             cmd_final = [
                 self.ffmpeg_path, "-y", "-i", temp_raw,
                 "-vf", (f"scale={resolution},fps={fps},format=yuv420p,"
                         f"fade=t=in:st=0:d={transition_duration},"
                         f"fade=t=out:st={total_duration-transition_duration}:d={transition_duration}"),
-                "-af", (f"afade=t=in:st=0:d={transition_duration},"
-                        f"afade=t=out:st={total_duration-transition_duration}:d={transition_duration}"),
+                *audio_args,
                 "-c:v", "h264", "-crf", str(crf), "-preset", preset,
-                "-c:a", "aac", "-ar", "44100", "-ac", "2",
                 output_path
             ]
             subprocess.run(cmd_final, capture_output=True, check=True)
@@ -302,15 +345,23 @@ class VideoMerger:
             _, _, chunk_duration = self.get_video_info(temp_raw)
 
             # 统一参数+添加转场
+            audio_args: list[str] = []
+            if self.has_audio_stream(temp_raw):
+                audio_args = [
+                    "-af", (f"afade=t=in:st=0:d={transition_duration},"
+                            f"afade=t=out:st={chunk_duration-transition_duration}:d={transition_duration}"),
+                    "-c:a", "aac", "-ar", "44100", "-ac", "2",
+                ]
+            else:
+                audio_args = ["-an"]
+
             cmd_final = [
                 self.ffmpeg_path, "-y", "-i", temp_raw,
                 "-vf", (f"scale={resolution},fps={fps},format=yuv420p,"
                         f"fade=t=in:st=0:d={transition_duration},"
                         f"fade=t=out:st={chunk_duration-transition_duration}:d={transition_duration}"),
-                "-af", (f"afade=t=in:st=0:d={transition_duration},"
-                        f"afade=t=out:st={chunk_duration-transition_duration}:d={transition_duration}"),
+                *audio_args,
                 "-c:v", "h264", "-crf", str(crf), "-preset", preset,
-                "-c:a", "aac", "-ar", "44100", "-ac", "2",
                 output_path
             ]
             subprocess.run(cmd_final, capture_output=True, check=True)
