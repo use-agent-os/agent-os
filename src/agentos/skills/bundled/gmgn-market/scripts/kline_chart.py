@@ -119,6 +119,35 @@ def build_payload(
     }
 
 
+def _read_input(path_or_dash: str) -> str:
+    """Read JSON input as UTF-8, surviving a non-UTF-8 console stdin encoding."""
+    if path_or_dash != "-":
+        return Path(path_or_dash).read_text(encoding="utf-8")
+    buffer = getattr(sys.stdin, "buffer", None)
+    if buffer is not None:
+        try:
+            return buffer.read().decode("utf-8")
+        except (AttributeError, OSError, ValueError, UnicodeDecodeError):
+            pass
+    return sys.stdin.read()
+
+
+def _write_stdout(text: str) -> None:
+    """Write *text* to stdout as UTF-8, surviving a non-UTF-8 stdout encoding."""
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is not None:
+        try:
+            buffer.write(text.encode("utf-8"))
+            buffer.flush()
+            return
+        except (AttributeError, OSError, ValueError):
+            pass
+
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    sys.stdout.write(text.encode(encoding, errors="backslashreplace").decode(encoding))
+    sys.stdout.flush()
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -136,7 +165,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
-    raw = sys.stdin.read() if args.input == "-" else Path(args.input).read_text(encoding="utf-8")
+    raw = _read_input(args.input)
     if not raw.strip():
         print("kline_chart: no input received", file=sys.stderr)
         return 1
@@ -161,8 +190,8 @@ def main(argv: list[str] | None = None) -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
-    print(f"wrote {len(candles)} candles to {output}")
-    print(f"publish_artifact path={output} mime={CHART_MIME}")
+    _write_stdout(f"wrote {len(candles)} candles to {output}\n")
+    _write_stdout(f"publish_artifact path={output} mime={CHART_MIME}\n")
     return 0
 
 

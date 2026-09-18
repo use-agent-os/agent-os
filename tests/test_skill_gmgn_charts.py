@@ -136,3 +136,95 @@ def test_the_payload_titles_itself_from_the_symbol_and_resolution() -> None:
     assert payload["title"] == "BONK · 1h"
     assert payload["subtitle"] == "SOL · 1h"
     assert payload["candles"] == candles
+
+
+@pytest.mark.parametrize("script_path", [MARKET_SCRIPT, TOKEN_SCRIPT])
+def test_kline_chart_stdin_utf8_decoding_and_stdout(
+    script_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import io
+    import json
+
+    spec = importlib.util.spec_from_file_location(script_path.parent.parent.name, script_path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    out = tmp_path / "chart.json"
+    rows = [
+        {
+            "time": 1735689600000,
+            "open": "1.5",
+            "high": "2.0",
+            "low": "1.0",
+            "close": "1.8",
+            "volume": "500",
+        }
+    ]
+    payload = {"data": {"list": rows}}
+    encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+    class FakeStdin:
+        def __init__(self, raw: bytes):
+            self.buffer = io.BytesIO(raw)
+
+        def read(self):
+            return self.buffer.read().decode("utf-8")
+
+    monkeypatch.setattr(sys, "stdin", FakeStdin(encoded))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "kline_chart.py",
+            "--symbol",
+            "cổ phiếu 日本語",
+            "--chain",
+            "sol",
+            "--resolution",
+            "1h",
+            "--output",
+            str(out),
+        ],
+    )
+    assert mod.main() == 0
+    assert out.is_file()
+    saved = json.loads(out.read_text(encoding="utf-8"))
+    assert "cổ phiếu 日本語" in saved["title"]
+    assert len(saved["candles"]) == 1
+    assert saved["candles"][0]["time"] == 1735689600
+
+
+@pytest.mark.parametrize("script_path", [MARKET_SCRIPT, TOKEN_SCRIPT])
+def test_kline_chart_file_input_utf8(
+    script_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    spec = importlib.util.spec_from_file_location(script_path.parent.parent.name, script_path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    in_file = tmp_path / "input.json"
+    out_file = tmp_path / "output.chart.json"
+    rows = [{"time": 100000, "open": "10", "high": "20", "low": "5", "close": "15"}]
+    in_file.write_text(json.dumps({"list": rows}), encoding="utf-8")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "kline_chart.py",
+            "--input",
+            str(in_file),
+            "--symbol",
+            "TEST",
+            "--output",
+            str(out_file),
+        ],
+    )
+    assert mod.main() == 0
+    assert out_file.is_file()
+    saved = json.loads(out_file.read_text(encoding="utf-8"))
+    assert len(saved["candles"]) == 1
