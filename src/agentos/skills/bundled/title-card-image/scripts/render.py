@@ -60,6 +60,25 @@ def _parse_color(spec: str) -> tuple[int, int, int]:
     return tuple(int(s[i:i + 2], 16) for i in (0, 2, 4))  # type: ignore[return-value]
 
 
+_CJK_IDEOGRAPH_RANGES = (
+    (0x3400, 0x4DBF),  # CJK Unified Ideographs Extension A
+    (0x4E00, 0x9FFF),  # CJK Unified Ideographs
+    (0xF900, 0xFAFF),  # CJK Compatibility Ideographs
+    (0x20000, 0x2A6DF),  # CJK Unified Ideographs Extension B
+    (0x2F800, 0x2FA1F),  # CJK Compatibility Ideographs Supplement
+)
+
+
+def _is_cjk_char(char: str) -> bool:
+    """True for a CJK ideograph, the only script here written without spaces.
+
+    Hangul, Cyrillic, emoji and everything else that happens to sit above
+    U+4E00 separate their words with whitespace, so they wrap like Latin.
+    """
+    cp = ord(char)
+    return any(low <= cp <= high for low, high in _CJK_IDEOGRAPH_RANGES)
+
+
 def _wrap_text(text: str, max_chars: int) -> list[str]:
     """Greedy line wrap that respects CJK (no spaces) and ASCII (whitespace)."""
     if not text:
@@ -67,12 +86,22 @@ def _wrap_text(text: str, max_chars: int) -> list[str]:
     # If text already has explicit newlines, honour them.
     if "\n" in text:
         return text.split("\n")
-    # For pure-ASCII strings, break on whitespace.
-    if all(ord(c) < 0x4E00 for c in text):
+    # A line has to hold at least one character, whatever the CLI passed in.
+    max_chars = max(1, max_chars)
+    # For whitespace-delimited scripts, break on whitespace.
+    if not any(_is_cjk_char(c) for c in text):
         words = text.split()
         out: list[str] = []
         line = ""
         for word in words:
+            # A word wider than the line has no whitespace to break at, so it
+            # is split at the character count rather than left to overflow.
+            while len(word) > max_chars:
+                if line:
+                    out.append(line)
+                    line = ""
+                out.append(word[:max_chars])
+                word = word[max_chars:]
             candidate = f"{line} {word}".strip()
             if len(candidate) <= max_chars:
                 line = candidate
