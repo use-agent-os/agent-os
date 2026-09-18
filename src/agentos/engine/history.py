@@ -31,7 +31,12 @@ def _is_real_user_turn(message: Message) -> bool:
     if isinstance(content, str):
         return not content.startswith(_SYNTHETIC_USER_PREFIXES)
     if isinstance(content, list):
-        return not all(isinstance(block, ContentBlockToolResult) for block in content)
+        if all(isinstance(block, ContentBlockToolResult) for block in content):
+            return False
+        text_blocks = [block.text for block in content if isinstance(block, ContentBlockText)]
+        if text_blocks and all(text.startswith(_SYNTHETIC_USER_PREFIXES) for text in text_blocks):
+            return False
+        return True
     return True
 
 
@@ -59,9 +64,7 @@ def limit_turns(messages: list[Message], max_turns: int) -> list[Message]:
                 # so cut at the first non-excluded index, which is i+1 only if i+1 is a user msg.
                 # Simpler: scan forward from i+1 to find the next user message.
                 cut_index = i + 1
-                while cut_index < len(messages) and not _is_real_user_turn(
-                    messages[cut_index]
-                ):
+                while cut_index < len(messages) and not _is_real_user_turn(messages[cut_index]):
                     cut_index += 1
                 break
 
