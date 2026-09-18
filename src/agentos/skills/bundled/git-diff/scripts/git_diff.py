@@ -69,19 +69,26 @@ def _run_git(args: list[str], cwd: Path) -> tuple[int, bytes, bytes]:
 
 def _diff_for_mode(mode: str, cwd: Path) -> tuple[int, bytes, bytes]:
     if mode == "cached_fallback_worktree":
-        rc, out, err = _run_git(["diff", "--cached", "HEAD"], cwd)
+        rc, out, err = _run_git(["diff", "--cached"], cwd)
         if rc != 0:
             return rc, out, err
         if out.strip():
             return 0, out, err
-        return _run_git(["diff", "HEAD"], cwd)
+        rc_wt, out_wt, err_wt = _run_git(["diff", "HEAD"], cwd)
+        if rc_wt == 0:
+            return 0, out_wt, err_wt
+        return _run_git(["diff"], cwd)
     if mode == "cached":
-        return _run_git(["diff", "--cached", "HEAD"], cwd)
+        return _run_git(["diff", "--cached"], cwd)
     if mode == "worktree":
-        return _run_git(["diff", "HEAD"], cwd)
+        rc, out, err = _run_git(["diff", "HEAD"], cwd)
+        if rc == 0:
+            return rc, out, err
+        return _run_git(["diff"], cwd)
     if mode == "staged_files":
         return _run_git(["diff", "--cached", "--name-only"], cwd)
     raise ValueError(f"unsupported mode {mode!r}")
+
 
 
 def main(argv: list[str] | None = None) -> int:

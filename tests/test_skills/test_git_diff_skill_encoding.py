@@ -183,3 +183,20 @@ def test_emit_writes_bytes_verbatim_through_the_buffer() -> None:
     module._emit(payload, stream)
 
     assert raw.getvalue() == payload
+
+
+def test_fresh_repository_without_commits(tmp_path: Path) -> None:
+    """Fresh repository with no initial commit (unborn branch) must return diffs cleanly."""
+    _git(tmp_path, "init", "-q", ".")
+    (tmp_path / "fresh.txt").write_bytes(b"initial content\n")
+    _git(tmp_path, "add", "fresh.txt")
+
+    module = _load_script()
+    for mode in ("cached_fallback_worktree", "cached", "staged_files"):
+        rc, out, err = module._diff_for_mode(mode, tmp_path)
+        assert rc == 0
+        assert b"fresh.txt" in out
+
+    rc_wt, out_wt, err_wt = module._diff_for_mode("worktree", tmp_path)
+    assert rc_wt == 0
+
