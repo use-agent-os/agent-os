@@ -400,7 +400,7 @@ async def run_job_script(
             parts.append(f"stdout:\n{stdout}")
         return False, _clip("\n".join(parts))
 
-    return True, _clip(stdout)
+    return True, _clip_keeping_wake_gate(stdout)
 
 
 def has_actionable_output(output: str) -> bool:
@@ -426,6 +426,27 @@ def has_actionable_output(output: str) -> bool:
     if not isinstance(gate, dict):
         return True
     return gate.get("wakeAgent", True) is not False
+
+
+def _clip_keeping_wake_gate(stdout: str) -> str:
+    """Clip a successful run's stdout without cutting off its wake gate.
+
+    :func:`has_actionable_output` reads the *last* line of what the runner
+    returns. Clipping to the first :data:`MAX_SCRIPT_OUTPUT_CHARS` dropped a
+    ``{"wakeAgent": false}`` that closed a longer output, so the quiet tick the
+    script asked for delivered the first 16k characters instead, or paid for an
+    agent turn. A closed gate is carried past the truncation marker, so the
+    clipped output answers :func:`has_actionable_output` the way the whole
+    stdout does. Anything else ends on the marker, which already reads as
+    actionable, and stays within the cap.
+    """
+    clipped = _clip(stdout)
+    if clipped == stdout:
+        return stdout
+    last_line = stdout.rsplit("\n", 1)[-1].strip()
+    if has_actionable_output(last_line):
+        return clipped
+    return f"{clipped}\n{last_line}"
 
 
 __all__ = [
