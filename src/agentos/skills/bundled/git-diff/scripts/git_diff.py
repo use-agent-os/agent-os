@@ -67,18 +67,35 @@ def _run_git(args: list[str], cwd: Path) -> tuple[int, bytes, bytes]:
     return proc.returncode, proc.stdout, proc.stderr
 
 
+def _head_args(cwd: Path) -> list[str]:
+    """``["HEAD"]`` when the repository has a commit to diff against, else ``[]``.
+
+    ``git diff --cached HEAD`` / ``git diff HEAD`` exit 128 with ``ambiguous
+    argument 'HEAD'`` before the first commit lands — HEAD is an unborn
+    branch there, not a missing-but-resolvable ref. Dropping the revision
+    argument entirely (rather than substituting some other spelling) is what
+    the builtin ``git_diff`` tool already does for the same case (#2882):
+    ``git diff --cached`` still reports the full staged change set, and bare
+    ``git diff`` still reports the worktree-vs-index diff, neither of which
+    needs HEAD to exist.
+    """
+    rc, _out, _err = _run_git(["rev-parse", "--verify", "--quiet", "HEAD"], cwd)
+    return ["HEAD"] if rc == 0 else []
+
+
 def _diff_for_mode(mode: str, cwd: Path) -> tuple[int, bytes, bytes]:
+    head = _head_args(cwd)
     if mode == "cached_fallback_worktree":
-        rc, out, err = _run_git(["diff", "--cached", "HEAD"], cwd)
+        rc, out, err = _run_git(["diff", "--cached", *head], cwd)
         if rc != 0:
             return rc, out, err
         if out.strip():
             return 0, out, err
-        return _run_git(["diff", "HEAD"], cwd)
+        return _run_git(["diff", *head], cwd)
     if mode == "cached":
-        return _run_git(["diff", "--cached", "HEAD"], cwd)
+        return _run_git(["diff", "--cached", *head], cwd)
     if mode == "worktree":
-        return _run_git(["diff", "HEAD"], cwd)
+        return _run_git(["diff", *head], cwd)
     if mode == "staged_files":
         return _run_git(["diff", "--cached", "--name-only"], cwd)
     raise ValueError(f"unsupported mode {mode!r}")

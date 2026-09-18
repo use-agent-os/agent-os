@@ -139,6 +139,55 @@ def test_no_diff_marker_when_nothing_is_staged(tmp_path: Path) -> None:
     assert proc.stdout == b"NO_DIFF"
 
 
+def _run_mode(repo: Path, mode: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), "--cwd", str(repo), "--mode", mode],
+        capture_output=True,
+    )
+
+
+@pytest.mark.parametrize("mode", ["cached_fallback_worktree", "cached"])
+def test_staged_diff_works_before_the_first_commit_exists(tmp_path: Path, mode: str) -> None:
+    # Issue #2882: HEAD is an unborn branch until the first commit, so
+    # ``git diff --cached HEAD`` exits 128 with "ambiguous argument 'HEAD'"
+    # even though files are staged and ``git diff --cached`` (no HEAD) works.
+    _git(tmp_path, "init", "-q", ".")
+    (tmp_path / "f.txt").write_bytes(b"hello\n")
+    _git(tmp_path, "add", "f.txt")
+
+    proc = _run_mode(tmp_path, mode)
+
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    assert b"+hello" in proc.stdout
+
+
+def test_worktree_mode_does_not_crash_before_the_first_commit_exists(tmp_path: Path) -> None:
+    # The boundary this fix does not change the meaning of: worktree mode
+    # with an unborn HEAD and nothing staged has no baseline to diff against,
+    # so it correctly reports NO_DIFF rather than erroring.
+    _git(tmp_path, "init", "-q", ".")
+    (tmp_path / "f.txt").write_bytes(b"hello\n")
+    _git(tmp_path, "add", "f.txt")
+
+    proc = _run_mode(tmp_path, "worktree")
+
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    assert proc.stdout == b"NO_DIFF"
+
+
+def test_staged_files_mode_is_unaffected_before_the_first_commit_exists(tmp_path: Path) -> None:
+    # --mode staged_files never referenced HEAD in the first place; this pins
+    # that it still doesn't, and still works, before the first commit.
+    _git(tmp_path, "init", "-q", ".")
+    (tmp_path / "f.txt").write_bytes(b"hello\n")
+    _git(tmp_path, "add", "f.txt")
+
+    proc = _run_mode(tmp_path, "staged_files")
+
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    assert proc.stdout == b"f.txt\n"
+
+
 def test_git_failure_still_reports_on_stderr(tmp_path: Path) -> None:
     # Not a repo: the exit code stays git's own and stderr carries its output,
     # which this change deliberately leaves as it is.
