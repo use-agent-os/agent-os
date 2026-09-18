@@ -38,13 +38,13 @@ async def test_send_file_caption_exceeding_2000_chars_splits_safely(tmp_path: Pa
     client.post = AsyncMock(side_effect=_post)
     channel._client = client
 
-    long_caption = "Line of text.\n" * 200  # ~2800 characters, exceeds 2000 limit
+    long_caption = "Line of text.\n" * 350  # ~4900 characters, exceeds 2x 2000 limit
 
     result = await channel.send_file("C100", str(sample), content=long_caption)
 
     assert result.status.value == "sent"
-    # First call is file upload with caption <= 2000 chars; second is follow-up text
-    assert len(post_calls) >= 2
+    # First call is file upload with caption <= 2000 chars; subsequent calls are follow-up messages
+    assert len(post_calls) == 3
     first_call = post_calls[0]
     assert first_call["url"] == "/channels/C100/messages"
     assert "content" in first_call["data"]
@@ -54,6 +54,12 @@ async def test_send_file_caption_exceeding_2000_chars_splits_safely(tmp_path: Pa
     second_call = post_calls[1]
     assert second_call["url"] == "/channels/C100/messages"
     assert "content" in second_call["json"]
+    assert len(second_call["json"]["content"]) <= 2000
+
+    third_call = post_calls[2]
+    assert third_call["url"] == "/channels/C100/messages"
+    assert "content" in third_call["json"]
+    assert len(third_call["json"]["content"]) <= 2000
 
 
 @pytest.mark.asyncio

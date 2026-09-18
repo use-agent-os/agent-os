@@ -1240,9 +1240,8 @@ class DiscordChannel:
         if not target_channel:
             raise ValueError("discord.send_file requires channel_id or default_channel_id")
 
-        caption_head, caption_tail = "", ""
-        if content:
-            caption_head, caption_tail = split_text_for_limit(content, _DISCORD_MESSAGE_TEXT_LIMIT)
+        segments = self._split_content_for_send(content) if content else []
+        caption_head = segments[0] if segments else ""
 
         await self._rate_limiter.acquire()
         client = self._get_client()
@@ -1267,10 +1266,10 @@ class DiscordChannel:
         if message_id:
             self._sent_messages[message_id] = target_channel
 
-        if caption_tail:
+        for seg in segments[1:]:
             await self.send(
                 OutgoingMessage(
-                    content=caption_tail,
+                    content=seg,
                     reply_to=target_channel,
                 )
             )
