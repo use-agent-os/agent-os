@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- CLI: `sessions list --since` read any digit-only value as epoch seconds
+  with no plausibility check, so a date typed without separators
+  (`20260101`) or a bare year (`2026`) landed in 1970 and the filter
+  silently matched every session -- a full table, exit 0, no warning.
+  Digit-only input is now read by its length: 8 digits is a compact
+  `YYYYMMDD` date, 10 is epoch seconds, 13 is epoch milliseconds; anything
+  else is rejected with `--since must be an ISO date/datetime, a compact
+  date (YYYYMMDD), or an epoch timestamp in seconds (10 digits) or
+  milliseconds (13 digits)`. An out-of-range value (e.g. a 14-digit
+  string) previously reached `datetime.fromtimestamp`, whose range check
+  is platform-dependent -- it raised on Windows but not on Linux, where it
+  silently produced a valid-looking date thousands of years out -- so
+  epoch-timestamp conversion now goes through plain `timedelta` arithmetic
+  instead, which raises the same way on every platform (#2132).
+
 ## [2026.9.18] - 2026-09-18
 
 ### Added
