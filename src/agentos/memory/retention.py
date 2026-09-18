@@ -26,9 +26,7 @@ logger = structlog.get_logger(__name__)
 # accidentally end up under ``memory/`` (mirrors
 # ``identity/workspace.py:BOOTSTRAP_FILENAMES`` plus ``MEMORY.md`` /
 # ``memory.md`` aliases).
-DEFAULT_EXEMPT_FILES: frozenset[str] = frozenset(
-    {"MEMORY.md", *BOOTSTRAP_FILENAMES}
-)
+DEFAULT_EXEMPT_FILES: frozenset[str] = frozenset({"MEMORY.md", "memory.md", *BOOTSTRAP_FILENAMES})
 
 
 @dataclass(frozen=True)
@@ -194,9 +192,7 @@ async def prune_expired_memory_files(
             # the watcher diff alone cannot rediscover the file.
             store_removed = False
             failed_store_removals.append(store_key)
-            logger.warning(
-                "retention.remove_file_failed", path=store_key, error=str(exc)
-            )
+            logger.warning("retention.remove_file_failed", path=store_key, error=str(exc))
 
         pruned += 1
         chunks_removed += 1 if store_removed else 0
