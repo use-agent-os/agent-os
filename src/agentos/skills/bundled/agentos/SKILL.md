@@ -63,7 +63,7 @@ agentos agent -m "..."       # one-shot, automation-friendly agent turn
 ### `agentos chat` REPL essentials
 
 The interactive REPL exposes slash commands; the most-used are `/new [title]`,
-`/resume <key>`, `/status`, `/model <id>`, `/clear`, `/compact`, `/cost`,
+`/resume <key>`, `/status`, `/model [filter]`, `/use <model-id>`, `/clear`, `/compact`, `/cost`,
 `/save [path]`, `/help`, and `/exit`. Pilot Router tier pins are available
 in both gateway and `--standalone` modes:
 
