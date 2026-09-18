@@ -128,25 +128,28 @@ than reading a version out of `uv tool list` or `pip show`.
 | --- | --- |
 | `gateway` | `run`, `start`, `status`, `stop`, `restart` (`--port`, `--bind`, `--listen`, `--config`, `--json`, `--debug`) |
 | `config` | `get [key]` (empty key = show all), `set <dot.key> <value>` |
-| `env` | `list [--missing] [--category]`, `get <NAME> [--reveal]`, `set <NAME> --stdin`, `import <NAME>`, `unset <NAME>` |
+| `env` | `list [--missing] [--category]`, `get <NAME> [--reveal] [-y]`, `set <NAME> --stdin`, `import <NAME>`, `unset <NAME> [-y]` |
 | `providers` | `list`, `status`, `configure <id> [-m MODEL] [-k API_KEY] [--base-url] [--proxy]` |
-| `models` | `list` |
+| `models` | `list [--provider] [--capability/-c] [--json]` |
 | `skills` | `init`, `list`, `search`, `view`, `install`, `uninstall`, `update`, `publish`, `tap add/list/remove` |
-| `sessions` | `list`, `show`, `rename`, `resume`, `abort`, `delete`, `export` |
-| `projects` | `list`, `create` (`--knowledge`/`--knowledge-file`), `show`, `update`, `delete`, `move <session> <project\|none>` — group sessions across agents; the knowledge text is injected into every member session's prompt |
+| `sessions` | `list`, `show`, `rename`, `resume`, `abort`, `delete` (`-y`), `export` (`--format md|json`, `--output`) |
+| `projects` | `list` (`--agent`, `--json`), `create` (`--knowledge`/`--knowledge-file`, `--agent`, `--json`), `show`, `update`, `delete` (`-y`, `--json`), `move <session> <project\|none>` — group sessions across agents; the knowledge text is injected into every member session's prompt |
 | `cron` | `list`, `status`, `add` (also takes `--session-key`, the chat a job reports into), `update` (both take `--job-kind`, `--script`, `--script-arg`, `--workdir`, `--elevated`, `--elevated-mode`, `--tool-policy`; the policy's `profile` must be one of `coding`/`full`/`memory_only`/`messaging`/`minimal`, or be omitted), `remove`, `run`, `runs` |
 | `channels` | `list`, `status`, `types`, `describe`, `native-commands`, `add`, `remove`, `enable`, `disable`, `edit`, `restart`, `logout`, `pairing …` |
-| `memory` | `status`, `index`, `list`, `search`, `show`, `ingest`, `curated`, `embedding-download`, `raw-fallbacks …` |
+| `memory` | `status` (`--deep`, `--agent`, `--json`), `index` (`--force`, `--agent`, `--json`), `list`, `search`, `show`, `ingest`, `curated`, `embedding-download`, `raw-fallbacks …` |
 | `sandbox` | `status`, `on`, `bypass`, `full`, `reset` |
-| `search` | `list`, `status`, `query`, `configure` |
+| `search` | `list`, `status [provider]`, `query`, `configure` |
 | `auth` | `login xai` (`--no-wait`/`--resume`/`--json` for non-blocking use), `status`, `logout xai` — xAI OAuth (SuperGrok / X Premium+) for `x_search`; tokens in `~/.agentos/auth.json`, never printed |
 | `configure x-search` | xAI X (Twitter) search: `--api-key-env`, `--x-search-model`, `--x-search-reasoning-effort`, `--no-x-search-enabled`; catalog via `onboard catalog x-search` |
 | `cost` | usage and estimated cost report; `savings` for the Pilot Router savings report (`--pdf`) |
 | `diagnostics` | `status`, `on`, `off` |
-| `migrate` | `openclaw`, `hermes` (`--source`, `--profile`, `--apply`, `--migrate-secrets`; dry-run without `--apply`) |
-| `agents` | `list`, `add`, `delete` (durable agents) |
+| `migrate` | `openclaw`, `hermes` (`--source`, `--preset user-data|full`, `--apply`, `--migrate-secrets`, `--overwrite`, `--include`, `--exclude`, `--skill-conflict skip|overwrite|rename`; dry-run without `--apply`) |
+| `agents` | `list`, `add` (`--model`, `--description`, `--workspace`, `--name`), `delete` (`--force`/`-f`) |
 | `mcp-server` | `run` (MCP bridge) |
-| `replay`, `dist`, `onboard` | replay recorded turns / workspace inventory / setup status |
+| `replay` | `--session`/`-s`, `--turn`/`-t` — print a recorded turn; no tools are re-executed |
+| `dist` | emit workspace-state.json (`--output`/`-o` writes a file instead of stdout) |
+| `reset` | `--key <session-key>` — rotate a session to a fresh transcript |
+| `onboard` | first-run setup / `status` |
 
 Built-in channel types are `discord`, `email`, `slack`, and `telegram`; use
 `agentos channels types` as the authoritative catalog. Config migration backs up the
@@ -166,8 +169,9 @@ Interactivity, and slash-command Request URLs to match, then restart the gateway
 Duplicate webhook paths with overlapping HTTP methods cause a startup error.
 
 Telegram direct messages always require pairing. Use `agentos channels pairing
-list <name>`, `approve <name> <code>`, `deny <name> <sender-id>`, or `revoke
-<name> <sender-id>`. Pairing is binary and has no admin/owner tier. Telegram
+list <name>`, `approve <name> <code>`, `deny <name> <sender-id>`, `revoke
+<name> <sender-id>`, or `clear-pending <name>`. Pairing is binary and has no
+admin/owner tier. Telegram
 groups are disabled by default; enable them only with explicit
 `group_chat_ids`, paired senders, and the desired mention requirement.
 
@@ -380,6 +384,7 @@ agentos skills install <bankr-skill-url> -s bankr # from Bankr (repo or bankr.bo
 agentos skills install <aeon-skill-url> -s aeon   # from Aeon (aeonfun/aeon skills/<slug>)
 agentos skills tap add owner/repo      # register a GitHub repo as a skill source
 agentos skills tap list
+agentos skills tap remove owner/repo
 agentos skills update
 agentos skills uninstall <name>
 ```
@@ -494,7 +499,9 @@ containment: `--workspace-strict` (reads), `--workspace-lockdown` (writes),
 ### Day-two operations
 
 ```sh
-agentos sessions list / show <id> / export <id> <out>
+agentos sessions list / show <id>
+agentos sessions export <id> --format md --output notes.md   # --format json|md; omit --output to print
+agentos sessions delete <id> -y
 # Label a session so it is findable later; --search matches the name.
 agentos sessions rename <id> "api-refactor"   # --clear drops the name
 agentos sessions list --search api-refactor
@@ -502,10 +509,17 @@ agentos sessions list --search api-refactor
 # the agent is running in — use it when the user just asks in prose.
 # Group related sessions into a project; its knowledge text is injected into
 # every member session. Delete keeps the sessions (they just detach).
-agentos projects create "Token research" --knowledge-file notes.md
+agentos projects create "Token research" --knowledge-file notes.md --agent main --json
 agentos projects move <session-id> <project-id>   # 'none' detaches
 agentos projects show <project-id>
+agentos projects delete <project-id> -y --json
+agentos agents add research --name Research --model gpt-5.4-mini --description "research agent"
+agentos agents delete research -f
 agentos cron list / add / run <id> / runs
+agentos cron remove <id> -y --json
+agentos channels edit <name> --field key=value
+agentos channels logout <name> -y
+agentos channels pairing clear-pending <name>
 # --job-kind decides what fires. Default 'auto' = reminder: --text is delivered
 # verbatim and NO LLM runs, so a job that should think needs agent_turn.
 agentos cron add --every 1h --job-kind agent_turn --text "Summarize updates"
@@ -539,6 +553,15 @@ agentos cron add --every 10m --job-kind agent_turn --script watch_rss.py \
 # host shell as the user. --no-elevated opts one job out of that, running it
 # read-only instead. See docs/cli.md before suggesting either.
 agentos cron add --every 6h --agent main --no-elevated --name "LP check" --text "..."
+agentos memory status --deep --agent main
+agentos memory index --force --agent main
+agentos context --top 10 --json
+agentos doctor --quick --json          # --deep is the default
+agentos models list --provider openrouter -c tools --json
+agentos search status                  # optional provider id: agentos search status brave
+agentos auth logout xai
+agentos dist -o workspace-state.json
+agentos reset --key <session-key>
 agentos cost                   # usage + estimated spend
 # cost support filtering and grouping:
 # agentos cost [--by-model] [--json] [--csv]
@@ -552,7 +575,7 @@ agentos cost savings           # what the Pilot Router saved, from the local dec
 # Baseline = the priciest model in [router.tiers], input tokens only, routing
 # mechanism only. Reads ~/.agentos/logs/decisions-*.jsonl; no gateway needed.
 agentos diagnostics on         # runtime diagnostics logging
-agentos migrate hermes --source <dir> [--apply]   # dry-run first, then --apply
+agentos migrate hermes --source <dir> [--preset full] [--apply]   # dry-run first; flag is --preset, not --profile
 ```
 
 ## Gateway HTTP API

@@ -24,6 +24,8 @@ available without `uv tool list` or `pip show`.
 | `agentos onboard` | Run or inspect first-run setup. |
 | `agentos auth` | Provider logins that are not API keys (`login`/`status`/`logout`; xAI today). |
 | `agentos configure` | Reconfigure provider, router, channels, search, x-search, image generation, or memory embedding. |
+| `agentos config` | Read or write `agentos.toml` keys (`get`/`set`). |
+| `agentos env` | Read or write `~/.agentos/.env` credentials (`list`/`get`/`set`/`import`/`unset`). |
 | `agentos gateway` | Run and manage the gateway server. |
 | `agentos chat` | Start interactive terminal chat. |
 | `agentos agent` | Run a single automation-friendly agent turn. |
@@ -383,6 +385,7 @@ Search:
 
 ```sh
 agentos search list
+agentos search status                  # optional provider id: agentos search status brave
 agentos search configure duckduckgo
 agentos search query "latest AgentOS release"
 agentos configure search --search-provider duckduckgo
@@ -459,6 +462,9 @@ agentos channels pairing list personal
 agentos channels pairing approve personal ABCD2345
 agentos channels pairing deny personal <telegram-user-id>
 agentos channels pairing revoke personal <telegram-user-id>
+agentos channels pairing clear-pending personal
+agentos channels edit personal --field allowed_senders=you@example.com
+agentos channels logout personal -y
 agentos channels enable personal
 agentos channels disable personal
 agentos channels restart personal
@@ -488,9 +494,10 @@ For security, interactive approvals are:
 - **Access Gated**: Each button click/interaction verifies that the clicker's sender ID is paired and authorized under the channel's access policy. Clicking by an unpaired or unauthorized user is dropped and rejected.
 - **Session Bound**: Approval tokens are strictly bound to their originating chat session key. A click received from a different chat context or user session will mismatch and be ignored.
 
-Raw config:
+Raw config (`agentos config`):
 
 ```sh
+agentos config get                     # dump every key
 agentos config get llm.provider
 agentos config set port 18791
 ```
@@ -542,6 +549,7 @@ agentos env get OPENAI_API_KEY --reveal
 agentos env set OPENAI_API_KEY --stdin # value read from stdin
 agentos env import GITHUB_TOKEN         # copy from a tool that already has it
 agentos env unset OPENAI_API_KEY
+agentos env unset OPENAI_API_KEY -y    # skip the confirmation
 ```
 
 `agentos env import` covers the case where the credential is not really
@@ -609,6 +617,9 @@ agentos skills install <skill-url> --source bankr
 agentos skills install <skill-url> --source aeon
 agentos skills update --all
 agentos skills uninstall <skill-name>
+agentos skills tap add owner/repo
+agentos skills tap list
+agentos skills tap remove owner/repo
 ```
 
 `agentos skills init <name>` initializes a new custom skill template.
@@ -679,8 +690,9 @@ agentos sessions rename <session-key> "api-refactor"
 agentos sessions rename <session-key> --clear  # drop the custom name
 agentos sessions resume <session-key>
 agentos sessions abort <session-key>
-agentos sessions export <session-key>
-agentos sessions delete <session-key>
+agentos sessions export <session-key> --format md --output notes.md
+agentos sessions export <session-key> --format json
+agentos sessions delete <session-key> -y
 ```
 
 Every filter on `sessions list` runs client-side over the recent history rather
@@ -703,7 +715,8 @@ agentos projects create "Token research" --knowledge-file notes.md
 agentos projects show <project-id>
 agentos projects update <project-id> --name "New name" --knowledge-file notes.md
 agentos projects move <session-key> <project-id>   # 'none' detaches
-agentos projects delete <project-id>               # sessions survive, detached
+agentos projects delete <project-id> -y --json     # sessions survive, detached
+agentos projects list --agent main --json
 ```
 
 A project groups chat sessions across agents and carries a free-form
@@ -730,8 +743,8 @@ Read: [`sessions.md`](sessions.md)
 ## Memory
 
 ```sh
-agentos memory status
-agentos memory index
+agentos memory status --deep --agent main
+agentos memory index --force --agent main
 agentos memory list --source all
 agentos memory ingest /path/to/docs
 agentos memory curated get --target memory
@@ -750,11 +763,13 @@ Read: [`features/memory.md`](features/memory.md)
 
 ```sh
 agentos agents list
-agentos agents add research --name Research --workspace /path/to/research
-agentos agents delete research
+agentos agents add research --name Research --workspace /path/to/research --model gpt-5.4-mini --description "research agent"
+agentos agents delete research -f
 agentos cron list
 agentos cron add --every 1h --text "Summarize important updates" --name hourly-summary
 agentos cron status <job-id>
+agentos cron run <job-id> -y --json     # run now; may post into a live session
+agentos cron remove <job-id> -y --json
 agentos cron runs <job-id>
 agentos cron output <job-id>
 ```
@@ -894,13 +909,14 @@ Read:
 
 ```sh
 agentos context
-agentos context --json
+agentos context --top 10 --json
 agentos cost
 agentos cost savings
 agentos diagnostics status
 agentos diagnostics on
 agentos diagnostics off
 agentos replay --session <session-key> --turn <turn-id>
+agentos replay -s <session-key> -t <turn-id>
 ```
 
 `agentos context` answers a different question from `agentos cost`: not what a
@@ -980,6 +996,31 @@ Read:
 - [`usage-and-cost.md`](usage-and-cost.md)
 - [`diagnostics-and-replay.md`](diagnostics-and-replay.md)
 - [`configuration.md`](configuration.md)
+
+## Doctor, models, inventory, migrate, reset
+
+```sh
+agentos doctor                         # --deep is the default
+agentos doctor --quick --json
+agentos doctor --agent main --gateway ws://localhost:18791/ws --config ./agentos.toml
+agentos models list
+agentos models list --provider openrouter --capability tools --json
+agentos dist                           # workspace-state.json on stdout
+agentos dist -o workspace-state.json
+agentos migrate                        # dry-run; auto-detect ~/.openclaw and ~/.hermes
+agentos migrate --preset full --apply --migrate-secrets
+agentos migrate hermes --source <dir> --preset user-data
+agentos reset --key <session-key>
+```
+
+`agentos doctor --deep` (the default) includes memory diagnostics; `--quick`
+skips them. `--config` is used when the local gateway is unavailable.
+`agentos models list` talks to the running gateway and can filter by
+`--provider` and `--capability`/`-c`. `agentos dist` is a reproducible
+install inventory, not a packaging command. `agentos migrate` is a dry-run
+until `--apply`; the preset flag is `--preset` (`user-data` or `full`), not
+`--profile`. `agentos reset --key` rotates a session to a fresh transcript
+and leaves the session itself in place.
 
 ## MCP Server Bridge
 
