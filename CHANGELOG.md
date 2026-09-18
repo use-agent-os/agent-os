@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `video-merger` concat list generation escaped Windows backslashes incorrectly for
+  ffmpeg's concat demuxer format and did not specify UTF-8 encoding for temporary
+  manifest files, causing failures when merging video segments with backslashes, single quotes, or
+  non-ASCII/Unicode names ([#2431](https://github.com/use-agent-os/agent-os/issues/2431)).
+
 ## [2026.9.17] - 2026-09-17
 
 ### Added

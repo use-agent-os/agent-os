@@ -51,6 +51,13 @@ def _resolve_ffmpeg_binary(explicit: str, tool: str) -> str:
     return explicit  # let subprocess raise the canonical "not found" error
 
 
+def _format_concat_entry(path: str) -> str:
+    """Format a file path for ffmpeg concat demuxer safely with forward slashes and quote escaping."""
+    abs_path = os.path.abspath(path).replace("\\", "/")
+    escaped = abs_path.replace("'", r"'\''")
+    return f"file '{escaped}'\n"
+
+
 class VideoMerger:
     def __init__(self, ffmpeg_path: str = "ffmpeg", ffprobe_path: str = "ffprobe"):
         """
@@ -137,9 +144,11 @@ class VideoMerger:
             print(f"使用自定义分辨率：{resolution}")
 
         # 生成concat列表
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as f:
             for v in video_list:
-                f.write(f"file '{os.path.abspath(v)}'\n")
+                f.write(_format_concat_entry(v))
             concat_file = f.name
 
         try:
@@ -279,9 +288,11 @@ class VideoMerger:
         合并单个分块
         """
         # 生成concat列表
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as f:
             for v in video_list:
-                f.write(f"file '{os.path.abspath(v)}'\n")
+                f.write(_format_concat_entry(v))
             concat_file = f.name
 
         try:
