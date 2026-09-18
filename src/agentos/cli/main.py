@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 
 from agentos.env import load_env, warn_if_proxy_ignored
+
+if TYPE_CHECKING:
+    from rich.console import Console
+    from rich.text import Text
 
 
 class _CurrentStderr:
@@ -156,6 +161,24 @@ raw_fallbacks_app = typer.Typer(help="Raw fallback receipt commands.")
 memory_app.add_typer(raw_fallbacks_app, name="raw-fallbacks")
 
 
+def _print_stored_text(console: Console, text: str) -> None:
+    """Print memory text exactly as it is stored.
+
+    Rich reads ``[...]`` as markup and ``:name:`` as an emoji code, so a
+    Markdown checkbox ``- [x]``, a link label ``[docs](url)`` or a type such
+    as ``list[int]`` lost its brackets, ``[/]`` raised ``MarkupError``, and a
+    non-terminal stdout hard-wrapped long lines at 80 columns.
+    """
+    console.print(text, markup=False, emoji=False, soft_wrap=True)
+
+
+def _stored_cell(value: object) -> Text:
+    """A table cell holding stored text, rendered without markup or emoji codes."""
+    from rich.text import Text
+
+    return Text(str(value))
+
+
 @memory_app.command("status")
 def memory_status_cmd(
     agent_id: str = typer.Option("main", "--agent", help="Agent id (default: main)"),
@@ -273,7 +296,7 @@ def memory_curated_get_cmd(
 
     console.print(f"[bold]{target.upper()}.md[/bold] ({payload.get('usage', '')})")
     for i, entry in enumerate(payload.get("entries", []), 1):
-        console.print(f"  {i}. {entry}")
+        _print_stored_text(console, f"  {i}. {entry}")
 
 
 @curated_app.command("add")
@@ -365,11 +388,11 @@ def memory_ingest_cmd(
     table.add_column("Error")
     for r in results:
         table.add_row(
-            str(r.get("path") or ""),
+            _stored_cell(r.get("path") or ""),
             str(r.get("chunksIndexed") or 0),
             str(r.get("sizeBytes") or 0),
             str(r.get("status") or ""),
-            str(r.get("error") or ""),
+            _stored_cell(r.get("error") or ""),
         )
     console.print(table)
 
@@ -409,7 +432,7 @@ def memory_list_cmd(
     table.add_column("Modified")
     for row in payload.get("files", []):
         table.add_row(
-            str(row.get("path") or ""),
+            _stored_cell(row.get("path") or ""),
             str(row.get("source") or "memory"),
             "" if row.get("lineCount") is None else str(row.get("lineCount")),
             "" if row.get("sizeBytes") is None else str(row.get("sizeBytes")),
@@ -458,10 +481,10 @@ def memory_search_cmd(
     for row in payload.get("results", []):
         table.add_row(
             str(row.get("source") or "memory"),
-            str(row.get("path") or ""),
+            _stored_cell(row.get("path") or ""),
             f"{row.get('startLine', '')}-{row.get('endLine', '')}",
             f"{float(row.get('score') or 0.0):.3f}",
-            str(row.get("snippet") or "")[:120],
+            _stored_cell(str(row.get("snippet") or "")[:120]),
         )
     console.print(table)
 
@@ -492,7 +515,7 @@ def memory_show_cmd(
     if json_output:
         print_json(payload)
         return
-    console.print(str(payload.get("content") or ""))
+    _print_stored_text(console, str(payload.get("content") or ""))
     if payload.get("truncated"):
         console.print("[dim]... truncated[/dim]")
 
@@ -582,9 +605,9 @@ def memory_raw_fallbacks_list_cmd(
     table.add_column("Modified")
     for row in payload.get("files", []):
         table.add_row(
-            str(row.get("path") or ""),
+            _stored_cell(row.get("path") or ""),
             "" if row.get("sizeBytes") is None else str(row.get("sizeBytes")),
-            str(row.get("reason") or ""),
+            _stored_cell(row.get("reason") or ""),
             str(row.get("modifiedAt") or ""),
         )
     console.print(table)
@@ -616,7 +639,7 @@ def memory_raw_fallbacks_show_cmd(
     if json_output:
         print_json(payload)
         return
-    console.print(str(payload.get("content") or ""))
+    _print_stored_text(console, str(payload.get("content") or ""))
     if payload.get("truncated"):
         console.print("[dim]... truncated[/dim]")
 
