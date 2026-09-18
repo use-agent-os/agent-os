@@ -863,7 +863,7 @@ async def exec_command(
                 output = redact_terminal_output(
                     stdout_bytes.decode("utf-8", errors="replace"), command
                 )
-                output = await publish_inline_artifacts(output)
+                output = await publish_inline_artifacts(output, cwd=cwd)
                 return f"exit_code={proc.returncode}\n{output}"
             except Exception as e:
                 return f"[error] {e}"
@@ -871,7 +871,7 @@ async def exec_command(
         if sandbox_result.stderr:
             output += sandbox_result.stderr
         output = _append_sandbox_network_hint(redact_terminal_output(output, command))
-        output = await publish_inline_artifacts(output)
+        output = await publish_inline_artifacts(output, cwd=cwd)
         return f"exit_code={sandbox_result.returncode}\n{output}"
 
     if elevated_bypass:
@@ -904,7 +904,7 @@ async def exec_command(
             output = redact_terminal_output(
                 output_file.read().decode("utf-8", errors="replace"), command
             )
-            output = await publish_inline_artifacts(output)
+            output = await publish_inline_artifacts(output, cwd=cwd)
             return f"exit_code={proc.returncode}\n{output}"
     except Exception as e:
         return f"[error] {e}"
