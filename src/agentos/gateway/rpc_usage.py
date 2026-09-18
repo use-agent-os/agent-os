@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import inspect
 import time
 from collections.abc import Mapping
 from typing import Any
 
 from agentos.gateway.access import CONTROL_AND_CHANNEL
 from agentos.gateway.rpc import RpcContext, get_dispatcher
+from agentos.gateway.session_services import get_session_storage
 from agentos.provider.model_catalog import ModelCatalog
 from agentos.session.cost_rollup import rollup_cost_source
 from agentos.session.tokenizer import estimate_tokens
@@ -536,6 +538,79 @@ def _usage_totals(rows: list[dict[str, Any]]) -> dict[str, int | float]:
     }
 
 
+def _session_manager_supports_paging(list_fn: Any) -> bool:
+    try:
+        params = inspect.signature(list_fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return "limit" in params and "offset" in params
+
+
+async def _list_all_sessions(
+    session_manager: Any,
+    *,
+    agent_id: str | None = None,
+) -> list[Any]:
+    """Every session in storage, not just the first page.
+
+    ``SessionManager.list_sessions`` defaults to ``limit=100``; calling it
+    with no arguments silently truncates every ``usage.status``/``usage.cost``
+    aggregate once a deployment passes 100 sessions (#2232). Paging is
+    additive: a ``session_manager`` whose ``list_sessions`` doesn't declare
+    ``limit``/``offset`` (an older or minimal implementation) is called once,
+    unpaginated, exactly as before — it is never assumed to support kwargs
+    it never advertised, so a signature mismatch can't silently discard
+    sessions the way swallowing the resulting TypeError would.
+    """
+    list_fn = getattr(session_manager, "list_sessions", None)
+    if not callable(list_fn):
+        return []
+    if not _session_manager_supports_paging(list_fn):
+        rows = await list_fn()
+        if agent_id is not None:
+            rows = [r for r in rows if _field(r, "agent_id") == agent_id]
+        return list(rows)
+
+    page_size = 100
+    offset = 0
+    sessions: list[Any] = []
+    while True:
+        kwargs: dict[str, Any] = {"limit": page_size, "offset": offset}
+        if agent_id is not None:
+            kwargs["agent_id"] = agent_id
+        page = await list_fn(**kwargs)
+        if not page:
+            break
+        sessions.extend(page)
+        if len(page) < page_size:
+            break
+        offset += page_size
+    return sessions
+
+
+async def _find_session_by_key(session_manager: Any, session_key: str) -> Any | None:
+    """Direct storage lookup for one session, bypassing pagination entirely.
+
+    Used when a caller asks for a specific ``sessionKey`` — paging through
+    everything just to find one already-known key is wasted work, and the
+    key may belong to a session older than any page a caller would otherwise
+    see. Best-effort: a lookup failure here means "fall back to whatever the
+    full list produces," not a request failure, since this is a shortcut on
+    top of the primary path, not the primary path itself.
+    """
+    storage = get_session_storage(session_manager)
+    getter = getattr(storage, "get_session", None) if storage is not None else None
+    if not callable(getter):
+        return None
+    try:
+        node = await getter(session_key)
+    except Exception:
+        return None
+    if node is None:
+        return None
+    return node.model_dump(mode="json") if hasattr(node, "model_dump") else node
+
+
 @_d.method("usage.status", CONTROL_AND_CHANNEL)
 async def _handle_usage_status(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     now_ms = _now_ms()
@@ -560,7 +635,13 @@ async def _handle_usage_status(params: dict | None, ctx: RpcContext) -> dict[str
             requested_session_key = (
                 params.get("sessionKey") or params.get("session_key") or params.get("key")
             )
-        sessions = await ctx.session_manager.list_sessions()
+        sessions = await _list_all_sessions(ctx.session_manager)
+        if requested_session_key and not any(
+            _field(s, "session_key") == requested_session_key for s in sessions
+        ):
+            found = await _find_session_by_key(ctx.session_manager, requested_session_key)
+            if found is not None:
+                sessions.append(found)
         rows = []
         active = sum(1 for s in sessions if _field(s, "status", "") == "running")
         for s in sessions:
@@ -669,14 +750,29 @@ async def _handle_usage_cost(params: dict | None, ctx: RpcContext) -> dict[str, 
                 "cannot filter by tool name, skill, or date range."
             )
         try:
-            sessions = await ctx.session_manager.list_sessions()
+            target_key = query_params.get("session_key")
+            target_agent = query_params.get("agent_id")
+            sessions = None
+            if target_key:
+                found = await _find_session_by_key(ctx.session_manager, target_key)
+                if found is not None:
+                    sessions = [found]
+            if sessions is None:
+                sessions = await _list_all_sessions(ctx.session_manager, agent_id=target_agent)
             for s in sessions:
                 s_key = _field(s, "session_key", "unknown")
-                agent_id, channel = (
+                tracker_agent, tracker_channel = (
                     ctx.usage_tracker.get_session_scope(s_key)
                     if ctx.usage_tracker
                     else ("unknown", "unknown")
                 )
+                # Stored fields win: the tracker only knows about sessions still
+                # in memory, and its scope for a key is unrelated to the
+                # session record's actual agent/channel once the gateway has
+                # restarted or the session aged out of the tracker (#2232).
+                agent_id = _field(s, "agent_id") or tracker_agent or "unknown"
+                stored_channel = _field(s, "channel") or _field(s, "last_channel")
+                channel = stored_channel or tracker_channel or "unknown"
                 if query_params.get("session_key") and query_params["session_key"] != s_key:
                     continue
                 if query_params.get("agent_id") and query_params["agent_id"] != agent_id:
