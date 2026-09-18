@@ -51,6 +51,24 @@ def _resolve_ffmpeg_binary(explicit: str, tool: str) -> str:
     return explicit  # let subprocess raise the canonical "not found" error
 
 
+def _concat_manifest_line(path: str) -> str:
+    """Return one ``file '...'`` directive for ffmpeg's concat demuxer.
+
+    The demuxer parses the quoted token with ffmpeg's own escaping rules: a
+    single quote ends the token, so it is written as ``'\\''`` (close, escaped
+    quote, reopen), and a Windows backslash is an escape character outside the
+    quotes, so on Windows the path is normalised to forward slashes, which
+    every Windows API accepts. (On POSIX a backslash is an ordinary filename
+    character and is left alone.) Without this a clip called
+    ``01_user's_intro.mp4`` or a path under ``C:\\Users`` made ffmpeg fail
+    with "Impossible to open".
+    """
+    normalised = os.path.abspath(path)
+    if os.name == "nt":
+        normalised = normalised.replace("\\", "/")
+    return "file '" + normalised.replace("'", "'\\''") + "'\n"
+
+
 class VideoMerger:
     def __init__(self, ffmpeg_path: str = "ffmpeg", ffprobe_path: str = "ffprobe"):
         """
@@ -137,9 +155,9 @@ class VideoMerger:
             print(f"使用自定义分辨率：{resolution}")
 
         # 生成concat列表
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
             for v in video_list:
-                f.write(f"file '{os.path.abspath(v)}'\n")
+                f.write(_concat_manifest_line(v))
             concat_file = f.name
 
         try:
@@ -279,9 +297,9 @@ class VideoMerger:
         合并单个分块
         """
         # 生成concat列表
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
             for v in video_list:
-                f.write(f"file '{os.path.abspath(v)}'\n")
+                f.write(_concat_manifest_line(v))
             concat_file = f.name
 
         try:
