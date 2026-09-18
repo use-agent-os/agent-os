@@ -58,6 +58,9 @@ def main():
         merger = VideoMerger(ffmpeg_path=args.ffmpeg_path, ffprobe_path=args.ffprobe_path)
 
         if args.mode == "full":
+            out_parent = os.path.dirname(os.path.abspath(args.output))
+            if out_parent:
+                os.makedirs(out_parent, exist_ok=True)
             success = merger.merge(
                 input_dir=args.input,
                 output_path=args.output,

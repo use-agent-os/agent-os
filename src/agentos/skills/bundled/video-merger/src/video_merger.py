@@ -162,6 +162,11 @@ class VideoMerger:
 
             # 统一参数+添加转场
             print("正在编码和添加转场效果...")
+            # 确保输出目录存在
+            out_dir = os.path.dirname(os.path.abspath(output_path))
+            if out_dir:
+                os.makedirs(out_dir, exist_ok=True)
+
             cmd_final = [
                 self.ffmpeg_path, "-y", "-i", temp_raw,
                 "-vf", (f"scale={resolution},fps={fps},format=yuv420p,"
