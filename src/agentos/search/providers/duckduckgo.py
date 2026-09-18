@@ -65,6 +65,8 @@ class DuckDuckGoProvider:
         self._diagnostics = bool(diagnostics)
 
     async def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
+        if max_results <= 0:
+            return []
         try:
             async with httpx.AsyncClient(
                 timeout=15.0,

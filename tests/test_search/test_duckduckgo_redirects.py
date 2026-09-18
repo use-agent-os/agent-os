@@ -111,3 +111,16 @@ async def test_ads_are_still_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
     results = await DuckDuckGoProvider().search("query")
 
     assert [result.url for result in results] == ["https://example.org/"]
+
+
+@pytest.mark.asyncio
+async def test_search_providers_zero_or_negative_max_results_returns_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _fail_client(*args, **kwargs):
+        raise AssertionError("network client must not be constructed when max_results <= 0")
+
+    monkeypatch.setattr("httpx.AsyncClient", _fail_client)
+
+    assert await DuckDuckGoProvider().search("query", max_results=0) == []
+    assert await DuckDuckGoProvider().search("query", max_results=-1) == []

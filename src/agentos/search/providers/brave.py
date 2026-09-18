@@ -34,6 +34,8 @@ class BraveSearchProvider:
         self._diagnostics = bool(diagnostics)
 
     async def search(self, query: str, max_results: int = 5) -> list[SearchResult]:
+        if max_results <= 0:
+            return []
         if not self._api_key:
             raise SearchProviderError(
                 provider=self.name,
