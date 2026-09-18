@@ -492,7 +492,19 @@ class DeliveryChain:
                     content=text, reply_to=channel_id, metadata={"to": channel_id}
                 )
             else:
-                msg = OutgoingMessage(content=text, reply_to=channel_id or None)
+                # A thread id names a conversation *inside* the chat, so it is
+                # what the message is addressed to, with the chat carried
+                # beside it in ``metadata["channel"]`` — the rule
+                # ``channel_dispatch._route_envelope_reply_message`` states for
+                # the in-turn reply. Dropping it delivered a job scheduled in a
+                # Telegram forum topic to the group's General topic, and one
+                # scheduled in a Discord thread to the parent channel.
+                thread_metadata = {"channel": channel_id} if thread_id and channel_id else {}
+                msg = OutgoingMessage(
+                    content=text,
+                    reply_to=thread_id or channel_id or None,
+                    metadata=thread_metadata,
+                )
             await asyncio.wait_for(adapter.send(msg), timeout=30.0)
             log.info("delivery.channel_sent", job_id=job_id, channel=channel_name)
             return "delivered"

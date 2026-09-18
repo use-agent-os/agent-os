@@ -21,6 +21,13 @@ from agentos.session.keys import DmScope, build_direct_key, build_group_key, bui
 
 log = structlog.get_logger(__name__)
 
+#: Channel types whose send path takes a thread id as the address it delivers
+#: to: Slack's ``thread_ts``, Telegram's forum ``message_thread_id``, Discord's
+#: thread channel id. Email threads exist too, but there the thread key *is*
+#: the ``channel_id``, so a second thread id beside it is still a mistake and
+#: keeps being refused.
+_THREAD_ADDRESSABLE = frozenset({"slack", "telegram", "discord"})
+
 
 @dataclass
 class ChannelManager:
@@ -509,7 +516,7 @@ class ChannelManager:
         account_id: str,
         thread_id: str,
     ) -> DeliveryTargetResolution:
-        if thread_id and channel_type not in {"slack"}:
+        if thread_id and channel_type not in _THREAD_ADDRESSABLE:
             return DeliveryTargetResolution(ok=False, reason="unsupported_thread")
         return DeliveryTargetResolution(
             ok=True,

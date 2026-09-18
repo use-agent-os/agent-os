@@ -292,7 +292,14 @@ class HeartbeatService:
             # *is* the thread key and must stay ``reply_to`` alone.
             msg = OutgoingMessage(content=text, reply_to=channel_id, metadata={"to": channel_id})
         else:
-            msg = OutgoingMessage(content=text, reply_to=channel_id or None)
+            # Same rule as the scheduler's channel delivery: a thread id is the
+            # address, and the chat rides along in ``metadata["channel"]``.
+            thread_metadata = {"channel": channel_id} if thread_id and channel_id else {}
+            msg = OutgoingMessage(
+                content=text,
+                reply_to=thread_id or channel_id or None,
+                metadata=thread_metadata,
+            )
         try:
             await adapter.send(msg)
         except Exception:

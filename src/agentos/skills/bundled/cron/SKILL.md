@@ -96,8 +96,9 @@ cron(action="add", schedule={"kind": "cron", "expr": "0 9 * * 1-5"},
   numeric chat id, negative for a group, or `@username`. It is never an AgentOS
   session key like `agent:main:telegram:direct:1245463966`; the tool rejects
   those with the id you probably meant. Leave `channel_id` empty to use the
-  channel's configured default chat. `thread_id` is optional (Slack only
-  today), and `account_id` is stored but not yet honoured by channel delivery.
+  channel's configured default chat. `thread_id` is optional — a Slack
+  thread ts, a Telegram forum topic id or a Discord thread id — and
+  `account_id` is stored but not yet honoured by channel delivery.
 - `mode="none"` schedules a job that announces nowhere.
 - `mode="origin"` (or omitting `delivery`) keeps the calling conversation.
 - `best_effort: true` keeps a failed delivery from failing the run. It applies

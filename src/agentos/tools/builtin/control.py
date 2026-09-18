@@ -873,7 +873,9 @@ def _session_storage_or_none() -> Any:
                 "thread_id": {
                     "type": "string",
                     "description": (
-                        "Optional thread id inside the recipient chat (Slack only today)."
+                        "Optional thread id inside the recipient chat: a Slack "
+                        "thread ts, a Telegram forum topic id, or a Discord "
+                        "thread id."
                     ),
                 },
                 "best_effort": {
