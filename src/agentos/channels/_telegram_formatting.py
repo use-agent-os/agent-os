@@ -30,6 +30,15 @@ _UNORDERED_LIST_RE = re.compile(r"^(?P<indent>\s*)[-+*]\s+(?P<text>.+)$")
 # of being cut at the first `)` with the remainder rendered as text after the
 # anchor. Deeper nesting is left as literal text rather than a truncated link.
 _LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://(?:[^\s()<]|\([^\s()<]*\))+)\)")
+# Bare URLs are not Markdown links, so they were never parked before the inline
+# formatting passes below -- `*`, `**`, `__`, `~~` and `_` inside a bare URL were
+# rewritten as HTML tags (e.g. `<i>v1</i>` on `https://example.com/api/_v1_`), and
+# Telegram rejected the message or rendered a broken link. Park bare URLs the same
+# way link hrefs are parked: protect the raw URL, run the formatting passes on the
+# rest, then restore. A bare URL is a stand-alone `http://` / `https://` token that
+# is not already inside a parked Markdown link (parked links carry the `\x00TG_HREF_`
+# placeholder), so the two parking schemes never step on each other.
+_BARE_URL_RE = re.compile(r"(?<![\w)])(https?://[^\s)<>\"\x00]+)(?![\w)])")
 # CommonMark's blockquote marker: up to 3 leading spaces, `>`, then at most
 # one space before the content. `>quote` (no space) and `>` alone (an empty
 # quote line, used to separate paragraphs within one quote) both match.
@@ -174,6 +183,18 @@ def _render_inline(text: str) -> str:
         return f'<a href="\x00TG_HREF_{len(hrefs) - 1}\x00">{match.group(1)}</a>'
 
     rendered = _LINK_RE.sub(_park_href, rendered)
+    # Park bare URLs the same way link hrefs are parked (Issue #2560): a bare
+    # `http://` / `https://` token is not a Markdown link, so it was never
+    # protected before the formatting passes below and characters such as `_`,
+    # `*`, `**`, `__`, `~~` inside the URL were rewritten as HTML tags (e.g.
+    # `<i>v1</i>` on `https://example.com/api/_v1_`), which Telegram rejected.
+    bare: list[str] = []
+
+    def _park_bare_url(match: re.Match[str]) -> str:
+        bare.append(match.group(0))
+        return f"\x00TG_BAREURL_{len(bare) - 1}\x00"
+
+    rendered = _BARE_URL_RE.sub(_park_bare_url, rendered)
     rendered = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", r"<b>\1</b>", rendered)
     # Not a blanket sub: `__init__` is a delimiter run with whitespace on both
     # sides, exactly like an intentional single-word `__bold__`, so the content
@@ -185,7 +206,10 @@ def _render_inline(text: str) -> str:
     # must not follow a word character and a closing one must not precede one.
     rendered = re.sub(r"(?<!\w)_(?=[^\s_])(.+?)(?<=[^\s_])_(?!\w)", r"<i>\1</i>", rendered)
     # Restore in reverse order of protection: code spans were parked first, so
-    # they come back last and a restored code span is never rescanned.
+    # they come back last and a restored code span is never rescanned. Bare URLs
+    # were parked after code spans and link hrefs, so they go back first here.
+    for index, url in enumerate(bare):
+        rendered = rendered.replace(f"\x00TG_BAREURL_{index}\x00", url)
     for index, href in enumerate(hrefs):
         rendered = rendered.replace(f"\x00TG_HREF_{index}\x00", href)
     for index, chunk in enumerate(code_chunks):
@@ -206,6 +230,15 @@ def _plain_inline(text: str) -> str:
         return f"{match.group(1)} (\x00TG_HREF_{len(hrefs) - 1}\x00)"
 
     text = _LINK_RE.sub(_park_href, text)
+    # Park bare URLs too (Issue #2560), before the marker stripping below eats
+    # `_`, `*`, `**`, `__`, `~~` inside them.
+    bare: list[str] = []
+
+    def _park_bare_url(match: re.Match[str]) -> str:
+        bare.append(match.group(0))
+        return f"\x00TG_BAREURL_{len(bare) - 1}\x00"
+
+    text = _BARE_URL_RE.sub(_park_bare_url, text)
     text = text.replace("`", "")
     # `__` goes through the regex rather than `str.replace`: a blanket strip ate
     # the delimiters of `__init__` and handed the reader `init`, with not even a
@@ -218,6 +251,8 @@ def _plain_inline(text: str) -> str:
     # neighbours lost theirs. The sibling of the #1931 fix, which only reached
     # `_render_inline`.
     text = _ITALIC_UNDERSCORE_RE.sub(r"\1", text)
+    for index, url in enumerate(bare):
+        text = text.replace(f"\x00TG_BAREURL_{index}\x00", url)
     for index, href in enumerate(hrefs):
         text = text.replace(f"\x00TG_HREF_{index}\x00", href)
     return text.strip()
