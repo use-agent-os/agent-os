@@ -46,7 +46,11 @@ def _seasonal_hint(query: str, location: str) -> str:
 
 
 def _fetch_wttr_json(location: str, timeout: float) -> dict[str, Any]:
-    encoded = urllib.parse.quote(location)
+    # safe="" rather than the default "/": the location is one path segment,
+    # and the entrypoint defaults it to the user's own message, so an ordinary
+    # "Dallas/Fort Worth" or a "15/09" date would otherwise split the path and
+    # address somewhere else entirely.
+    encoded = urllib.parse.quote(location, safe="")
     url = f"https://wttr.in/{encoded}?format=j1"
     req = urllib.request.Request(  # noqa: S310 - fixed trusted weather endpoint
         url,
