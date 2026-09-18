@@ -910,6 +910,11 @@ every call in every turn — and the command prices each `[tools] profile` again
 the current one so the trade is visible before you make it. A profile is fixed
 for the session, so narrowing it does not disturb the prompt cache.
 
+Every CLI command logs to stderr at `INFO` and above, so its output is only
+the command's own. Set `AGENTOS_LOG_LEVEL=debug` to see the debug-level events
+too (the gateway process keeps its own configured `log_level`, `DEBUG` by
+default, and `agentos chat` its `WARNING`).
+
 `agentos cost` aggregates and displays model usage and estimated cost reports from the gateway:
 
 ```sh

@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- CLI: commands no longer print structlog debug events to stderr — `agentos
+  context` put ~190 `tool_filtered` lines on the terminal on top of its tables.
+  The CLI filters at `INFO` (`AGENTOS_LOG_LEVEL` overrides); the gateway keeps
+  its own configured `log_level` for the console and `debug.log` (#2896)
+
 ## [2026.9.18] - 2026-09-18
 
 ### Added

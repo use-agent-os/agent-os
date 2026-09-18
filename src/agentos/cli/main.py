@@ -30,8 +30,29 @@ class _CurrentStderr:
         sys.stderr.flush()
 
 
+#: What the CLI shows on stderr unless ``AGENTOS_LOG_LEVEL`` says otherwise.
+#: Debug events are diagnostics for the gateway log, not terminal output for
+#: a command someone ran to read its result.
+_CLI_DEFAULT_LOG_LEVEL = "INFO"
+
+
+def _cli_log_level() -> int:
+    """The structlog threshold for a CLI process, from ``AGENTOS_LOG_LEVEL``.
+
+    Same variable the gateway and the chat REPL honour, so one setting
+    controls all three; an unknown name falls back to the default rather
+    than to "everything".
+    """
+    import logging
+    import os
+
+    name = (os.environ.get("AGENTOS_LOG_LEVEL") or _CLI_DEFAULT_LOG_LEVEL).strip().upper()
+    level = logging.getLevelName(name)
+    return level if isinstance(level, int) else logging.INFO
+
+
 def _route_logs_to_stderr() -> None:
-    """Send structlog output to stderr before anything can log.
+    """Send structlog output to stderr before anything can log, above a level.
 
     structlog's unconfigured default prints to stdout, and the first thing the
     CLI does is load .env files — which log. That put log lines in front of
@@ -39,6 +60,12 @@ def _route_logs_to_stderr() -> None:
     ``agentos <anything> --json | jq`` failed on a real install while working
     in a clean one. Logs are diagnostics; stdout belongs to the command's
     output.
+
+    The level filter is the other half of that: with none, every
+    ``log.debug`` in the code a command happens to touch reaches the terminal.
+    ``agentos context`` resolves five tool profiles and got ~190
+    ``tool_filtered`` lines on top of its tables (#2896). The gateway raises
+    the threshold back to its own configured level when it boots.
     """
     from typing import TextIO, cast
 
@@ -48,7 +75,10 @@ def _route_logs_to_stderr() -> None:
     # whole contract _CurrentStderr implements — the annotation asks for a full
     # TextIO that structlog does not actually use.
     stream = cast("TextIO", _CurrentStderr())
-    structlog.configure(logger_factory=structlog.PrintLoggerFactory(file=stream))
+    structlog.configure(
+        logger_factory=structlog.PrintLoggerFactory(file=stream),
+        wrapper_class=structlog.make_filtering_bound_logger(_cli_log_level()),
+    )
 
 
 _route_logs_to_stderr()

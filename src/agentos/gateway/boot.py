@@ -995,9 +995,26 @@ def _remove_structlog_tee() -> None:
     _structlog_processors_before_tee = None
 
 
+def _apply_structlog_level(config: GatewayConfig) -> None:
+    """Let structlog through at the gateway's configured level.
+
+    The CLI entry point installs an INFO threshold so a one-shot command does
+    not print every debug event it brushes past (#2896). The gateway is the
+    process those events are *for* -- ``log_level`` defaults to DEBUG and the
+    file tee below copies each event into ``debug.log`` -- so it sets the
+    threshold from its own config before the first event is logged.
+    """
+    import structlog
+
+    structlog.configure(
+        wrapper_class=structlog.make_filtering_bound_logger(_resolve_log_level(config)),
+    )
+
+
 def _setup_file_logging(config: GatewayConfig | None = None) -> None:
     """Configure structlog + stdlib logging to write to a debug.log file."""
     config = config or GatewayConfig()
+    _apply_structlog_level(config)
     root = logging.getLogger()
     _remove_debug_file_handlers(root)
 
