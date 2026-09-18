@@ -990,6 +990,42 @@ agentos mcp-server run --gateway ws://localhost:18792/ws
 
 Read: [`mcp-server.md`](mcp-server.md)
 
+## Install Inventory
+
+```sh
+agentos dist
+agentos dist --output workspace-state.json
+agentos dist -o ./support/workspace-state.json
+```
+
+`agentos dist` emits `workspace-state.json`, a versioned inventory of the
+installed AgentOS: what shipped, not what is configured. With no flags the
+JSON goes to stdout and nothing else is printed, so `agentos dist > state.json`
+and `agentos dist | jq .bundled_tools` both work. `--output` / `-o PATH` writes
+it to a file instead — creating any missing parent directories — and prints
+the path it wrote, so a pipeline can capture where the file landed.
+
+The payload has six keys:
+
+| key | value |
+|---|---|
+| `schema_version` | integer; bumped when the shape of this payload changes (currently `1`) |
+| `agentos_version` | the installed package version |
+| `python_requires` | the package's Python requirement (`>=3.12`) |
+| `bundled_channels` | the channel adapters this install ships, sorted |
+| `bundled_tools` | the built-in tool modules this install ships, sorted |
+| `gateway_defaults` | the gateway's safety defaults: `listen` (`127.0.0.1`) and `port` (`18791`) |
+
+Two properties make it useful for support, release QA and comparing
+environments. It is **reproducible**: built only from installed package
+metadata and hard-coded constants, with sorted keys and fixed indentation, so
+two runs on the same install are byte-identical and two installs can be
+diffed. And it is **safe to attach to a ticket**: no value comes from the
+environment, a config file, a path on disk, a timestamp or a random source,
+and no key is a credential.
+
+Read: [`operations.md`](operations.md#install-inventory)
+
 ---
 
 [Docs index](README.md) · [Product guide](../README.product.md) · [Improve this page](contributing-docs.md) · [Report a docs issue](https://github.com/use-agent-os/agent-os/issues/new?template=docs_report.yml)

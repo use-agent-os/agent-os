@@ -187,10 +187,26 @@ For setup details, see [`mcp-server.md`](mcp-server.md).
 Emit a reproducible workspace-state inventory:
 
 ```sh
-agentos dist
+agentos dist                                   # JSON to stdout
+agentos dist --output workspace-state.json     # write the file, print its path
 ```
 
-Use this for support, release QA, or environment comparison.
+Use this for support, release QA, or environment comparison. The payload names
+the installed version, the Python requirement, the bundled channels and tools,
+and the gateway's safety defaults, under a `schema_version` that changes only
+when the shape does. It is built from package metadata and constants alone —
+byte-identical on every run of the same install, and free of environment
+values, paths, timestamps and secrets — so it can be diffed between two
+machines and attached to a support request as it is.
+
+When comparing two installs, diff the files rather than the terminal output:
+
+```sh
+agentos dist -o /tmp/here.json
+diff /tmp/here.json /tmp/there.json
+```
+
+Read: [`cli.md`](cli.md#install-inventory) for the full key list.
 
 ## Models
 
