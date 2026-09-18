@@ -1122,6 +1122,7 @@ async def list_dir(path: str) -> str:
     required=["pattern"],
 )
 async def glob_search(pattern: str, path: str | None = None) -> str:
+    pattern = pattern.lstrip("/\\") or "*"
     base = _resolve_base(path)
     blocked = _sensitive_access_block("glob_search", base, path or str(base))
     if blocked is not None:
