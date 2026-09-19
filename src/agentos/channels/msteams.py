@@ -351,8 +351,16 @@ class MSTeamsChannel:
         if cache_key:
             # Pop-and-reinsert so ``next(reversed(...))`` -- the "whoever last
             # spoke" fallback -- tracks last activity, not first insertion.
+            is_new = cache_key not in self._references
             self._references.pop(cache_key, None)
             self._references[cache_key] = ref
+            if is_new:
+                # Persist as soon as a conversation is first learned, not only
+                # on a clean stop() -- an unclean restart (crash, OOM kill,
+                # redeploy) between now and the next graceful shutdown would
+                # otherwise silently drop this reference, and proactive sends
+                # to this conversation would fail until it messages again.
+                self._save_conversation_cache()
         if activity.recipient is not None and getattr(activity.recipient, "id", None):
             self._bot_id = activity.recipient.id
 

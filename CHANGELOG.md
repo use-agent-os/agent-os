@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- MSTeams channel: a newly learned conversation reference is now persisted to
+  disk as soon as `_on_turn` first sees it, not only when the process reaches
+  a clean `stop()`. Previously an unclean restart (crash, OOM kill, container
+  redeploy) between two graceful shutdowns silently dropped every
+  conversation reference learned in that window, so proactive/streamed
+  replies to those users failed after restart until they messaged again.
 - Discord channel: a reaction added to the bot's own message in a guild
   channel or thread is no longer silently dropped by the group mention
   gate. `is_group_mentioned` fell back to searching a reaction's (always
