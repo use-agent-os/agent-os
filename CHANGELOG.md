@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Image generation: `OpenRouterImageGenerationProvider` now preserves explicit
+  aspect ratio strings (e.g. `16:9`, `9:16`) and standard pixel resolutions
+  (e.g. `1920x1080`, `1280x720`) in request payload, preventing requested
+  aspect ratios from collapsing to `1:1`.
 - Discord channel: a reaction added to the bot's own message in a guild
   channel or thread is no longer silently dropped by the group mention
   gate. `is_group_mentioned` fell back to searching a reaction's (always

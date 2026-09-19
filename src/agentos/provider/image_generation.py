@@ -147,10 +147,17 @@ class OpenRouterImageGenerationProvider:
 
     @staticmethod
     def _image_config_for_size(size: str) -> dict[str, str]:
+        if ":" in size:
+            return {"aspect_ratio": size, "image_size": "1K"}
         aspect_ratio = {
             "1024x1024": "1:1",
             "1536x1024": "3:2",
             "1024x1536": "2:3",
+            "1920x1080": "16:9",
+            "1280x720": "16:9",
+            "1080x1920": "9:16",
+            "800x600": "4:3",
+            "600x800": "3:4",
         }.get(size, "1:1")
         return {"aspect_ratio": aspect_ratio, "image_size": "1K"}
 
