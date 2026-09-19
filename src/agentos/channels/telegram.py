@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import html
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -1005,7 +1006,11 @@ class TelegramChannel:
             log.warning("telegram.callback_query_answer_failed", error=str(exc))
 
         message_id = msg.get("message_id")
-        orig_text = msg.get("text", "")
+        # Telegram hands back a message's ``text`` as plain text: whatever the
+        # prompt showed -- ``cat a > b``, ``<done>``, ``&&`` -- arrives with raw
+        # ``<``, ``>`` and ``&``. Spliced into an HTML-mode edit unescaped, those
+        # made Telegram refuse the whole edit ("can't parse entities").
+        orig_text = html.escape(msg.get("text", ""), quote=False)
         decision_text = "Approved ✅" if approved else "Denied ❌"
         new_text = f"{orig_text}\n\n<b>{decision_text}</b>"
 
@@ -1023,6 +1028,22 @@ class TelegramChannel:
                 )
             except Exception as exc:
                 log.warning("telegram.callback_message_edit_failed", error=str(exc))
+                # The request is resolved either way, so its buttons must go
+                # even when the text cannot be rewritten (the edit can still be
+                # refused -- escaping lengthens the text, and it may then pass
+                # the length cap). Left in place, every later tap on them
+                # reports an approval that no longer exists.
+                try:
+                    await self._api(
+                        "editMessageReplyMarkup",
+                        {
+                            "chat_id": str(chat_id),
+                            "message_id": message_id,
+                            "reply_markup": {"inline_keyboard": []},
+                        },
+                    )
+                except Exception as markup_exc:
+                    log.warning("telegram.callback_markup_clear_failed", error=str(markup_exc))
 
         # 5. Enqueue the virtual message
         metadata = {

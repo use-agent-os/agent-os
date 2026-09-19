@@ -533,3 +533,66 @@ async def test_channel_turn_survives_approval_prompt_rendering_failure() -> None
     assert "ls -l" in sent[0].content
     assert "reply_markup" not in sent[0].metadata
     assert "waiting for approval" in sent[-1].content
+
+
+def _approval_callback(approval_id: str, prompt: str) -> dict:
+    return {
+        "id": "cb-html",
+        "from": {"id": 12345, "username": "bob"},
+        "message": {
+            "message_id": 999,
+            "chat": {"id": 12345, "type": "private"},
+            "text": prompt,
+        },
+        "data": f"approve:{approval_id}",
+    }
+
+
+@pytest.mark.asyncio
+async def test_telegram_approval_edit_escapes_the_prompt_text() -> None:
+    """#2997: Telegram returns ``text`` as plain text, so a prompt showing a
+    shell redirect or a tag came back with raw ``<``/``>``/``&`` and the
+    HTML-mode edit was refused, leaving the buttons live."""
+    approval_id = get_approval_queue().request("exec", {"argv": ["sh"], "action_kind": "exec"})
+    channel = TelegramChannel(TelegramChannelConfig(token="test-token"))
+    calls: list[tuple[str, dict]] = []
+
+    async def fake_api(method: str, payload: dict | None = None) -> Any:
+        calls.append((method, payload or {}))
+        return True
+
+    channel._api = fake_api
+    prompt = 'Run: cat input.txt > output.txt && echo "<done>"'
+    admission = ChannelAdmission("telegram", "12345", "grant1", 1)
+    with patch.object(channel.pairing_store, "admission", return_value=admission):
+        await channel._handle_telegram_callback(_approval_callback(approval_id, prompt))
+
+    edit = next(payload for method, payload in calls if method == "editMessageText")
+    assert edit["parse_mode"] == "HTML"
+    assert 'cat input.txt &gt; output.txt &amp;&amp; echo "&lt;done&gt;"' in edit["text"]
+    assert edit["text"].endswith("<b>Approved ✅</b>")
+
+
+@pytest.mark.asyncio
+async def test_telegram_approval_clears_buttons_when_the_edit_is_refused() -> None:
+    """A resolved request must lose its buttons even if the text edit fails."""
+    approval_id = get_approval_queue().request("exec", {"argv": ["sh"], "action_kind": "exec"})
+    channel = TelegramChannel(TelegramChannelConfig(token="test-token"))
+    calls: list[tuple[str, dict]] = []
+
+    async def fake_api(method: str, payload: dict | None = None) -> Any:
+        calls.append((method, payload or {}))
+        if method == "editMessageText":
+            raise RuntimeError("Bad Request: message is too long")
+        return True
+
+    channel._api = fake_api
+    admission = ChannelAdmission("telegram", "12345", "grant1", 1)
+    with patch.object(channel.pairing_store, "admission", return_value=admission):
+        await channel._handle_telegram_callback(_approval_callback(approval_id, "ok?"))
+
+    assert get_approval_queue().get(approval_id).resolved is True
+    markup = [payload for method, payload in calls if method == "editMessageReplyMarkup"]
+    assert markup == [
+        {"chat_id": "12345", "message_id": 999, "reply_markup": {"inline_keyboard": []}}
+    ]
