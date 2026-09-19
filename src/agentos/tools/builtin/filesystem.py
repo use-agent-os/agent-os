@@ -54,6 +54,7 @@ _XLSX_MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 _XLSX_PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 _XLSX_OFFICE_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _XLSX_MAX_ROWS = 1_048_576
+_XLSX_MAX_COLS = 16_384  # "XFD" — Excel's own column ceiling
 _BOOTSTRAP_SOURCE_FILENAMES = frozenset(BOOTSTRAP_FILENAMES)
 
 
@@ -729,7 +730,14 @@ def _read_xlsx_worksheet(
     not to the largest declared row number. A padded-list design lets either
     a crafted/corrupt ``r`` or, combined with a large enough render window,
     an entirely ordinary sparse sheet cost memory and time proportional to
-    that number instead of the file's real size (#1149 follow-ups).
+    that number instead of the file's real size (#1149 follow-ups). A cell's
+    own ``r`` is bounded the same way and for the same reason: a column
+    reference like ``AAAAAAA1`` decodes to an index in the hundreds of
+    millions, and the padding loop below would try to grow ``row`` to match
+    it -- confirmed to allocate multiple GB and hang for tens of seconds on
+    a single crafted cell (#2867). ``_XLSX_MAX_COLS`` is Excel's own column
+    ceiling ("XFD"), so no worksheet a real spreadsheet application could
+    have produced is affected.
 
     Returns ``(rows, total_row_count)``; a row missing from ``rows`` is
     exactly that sheet's real empty row, distinguishable from "out of
@@ -752,6 +760,8 @@ def _read_xlsx_worksheet(
         row: list[str] = []
         for cell_el in row_el.findall(f"{{{_XLSX_MAIN_NS}}}c"):
             column_index = _xlsx_column_index(cell_el.attrib.get("r", ""))
+            if column_index >= _XLSX_MAX_COLS:
+                continue
             while len(row) < column_index:
                 row.append("")
             row.append(_xlsx_cell_value(cell_el, shared_strings))

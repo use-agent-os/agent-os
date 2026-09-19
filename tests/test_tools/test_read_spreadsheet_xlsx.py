@@ -385,6 +385,71 @@ def test_read_xlsx_worksheet_crafted_row_beyond_ceiling() -> None:
     assert elapsed < 0.5
 
 
+def test_read_xlsx_worksheet_crafted_column_beyond_ceiling() -> None:
+    """Issue #2867: a crafted or corrupt cell r="AAAAAAA1" decodes to a
+    column index in the hundreds of millions, and the padding loop that
+    grows a row up to that index must not run at all for it -- confirmed
+    on the unfixed code to allocate multiple GB and take tens of seconds
+    for a single such cell."""
+    xml = b"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+        <sheetData>
+            <row r="1">
+                <c r="A1" t="inlineStr"><is><t>Header</t></is></c>
+                <c r="AAAAAAA1" t="inlineStr"><is><t>Huge Column</t></is></c>
+            </row>
+        </sheetData>
+    </worksheet>"""
+
+    import time
+
+    start = time.perf_counter()
+    rows, total_rows = fs._read_xlsx_worksheet(xml, [])
+    elapsed = time.perf_counter() - start
+
+    assert rows[1] == ["Header"]
+    assert total_rows == 1
+    assert elapsed < 0.5
+
+
+def test_read_xlsx_worksheet_max_real_column_still_works() -> None:
+    """Boundary: XFD (index 16383) is Excel's own actual last column and
+    must still be read correctly -- the cap must not clip real data."""
+    xml = b"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+        <sheetData>
+            <row r="1">
+                <c r="A1" t="inlineStr"><is><t>first</t></is></c>
+                <c r="XFD1" t="inlineStr"><is><t>last-real-column</t></is></c>
+            </row>
+        </sheetData>
+    </worksheet>"""
+
+    rows, _ = fs._read_xlsx_worksheet(xml, [])
+
+    assert len(rows[1]) == 16384
+    assert rows[1][0] == "first"
+    assert rows[1][-1] == "last-real-column"
+
+
+def test_read_xlsx_worksheet_one_column_past_the_ceiling_is_dropped() -> None:
+    """Boundary: XFE (index 16384), one past Excel's real ceiling, is
+    silently dropped -- same failure direction as an out-of-range row."""
+    xml = b"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+        <sheetData>
+            <row r="1">
+                <c r="A1" t="inlineStr"><is><t>ok</t></is></c>
+                <c r="XFE1" t="inlineStr"><is><t>just-over-the-line</t></is></c>
+            </row>
+        </sheetData>
+    </worksheet>"""
+
+    rows, _ = fs._read_xlsx_worksheet(xml, [])
+
+    assert rows[1] == ["ok"]
+
+
 def _sparse_far_row_sheet_xml() -> str:
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
