@@ -139,7 +139,9 @@ class HeartbeatLoop:
         if window is None:
             return True
         start, end = window
-        hour = moment.hour
+        # Mirrors HeartbeatConfig.is_within_active_hours: "local time" means
+        # the system's local timezone, not the UTC every caller here passes.
+        hour = moment.astimezone().hour
         if start <= end:
             return start <= hour < end
         return hour >= start or hour < end

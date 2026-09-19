@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Heartbeat: `active_hours` is now compared against the system's local time.
+  The module docstring documents the window as "24-hour local time", but
+  `HeartbeatConfig.is_within_active_hours` and `HeartbeatLoop._within_active_hours`
+  both compared `.hour` on a `datetime.now(UTC)` moment — every caller's local
+  clock offset silently shifted the window, so a non-UTC user's configured
+  quiet hours fired at the wrong time of day with nothing indicating why.
 - Discord channel: a reaction added to the bot's own message in a guild
   channel or thread is no longer silently dropped by the group mention
   gate. `is_group_mentioned` fell back to searching a reaction's (always

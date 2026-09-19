@@ -102,7 +102,12 @@ class HeartbeatConfig:
         if self.active_hours is None:
             return True
         start, end = self.active_hours
-        hour = moment.hour
+        # "24-hour local time" per the module docstring, not whatever
+        # timezone *moment* happens to carry (every caller passes UTC).
+        # ``astimezone()`` with no argument converts to the system's local
+        # timezone, matching how a human reads ``active_hours`` off their
+        # own clock.
+        hour = moment.astimezone().hour
         if start <= end:
             return start <= hour < end
         return hour >= start or hour < end
@@ -441,11 +446,7 @@ def parse_loop_overrides(source: str | Path) -> HeartbeatLoopOverrides:
     # is True. Reject bools explicitly — otherwise ``interval_ms: true``
     # parses as 1, giving a 1 ms heartbeat. Same logic for ``ack_max_chars``.
     interval = data.get("interval_ms")
-    if (
-        not isinstance(interval, bool)
-        and isinstance(interval, (int, float))
-        and interval >= 1
-    ):
+    if not isinstance(interval, bool) and isinstance(interval, (int, float)) and interval >= 1:
         overrides.interval_ms = int(interval)
 
     target = data.get("target")
