@@ -20,6 +20,7 @@ from agentos.sandbox.integration import (
     run_under_backend,
 )
 from agentos.sandbox.types import DenialResult, SandboxRequest
+from agentos.tools.builtin.shell_policy import DELETE_DENYLIST_PATTERNS, denylist_hit
 from agentos.tools.registry import tool
 from agentos.tools.types import ToolError, current_tool_context
 
@@ -380,11 +381,23 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
                         f"destructive Python operation detected: os.{attr_name} with delete command"
                     )
                     return
+                if _denylisted(cmd_str):
+                    self.warning = (
+                        f"destructive Python operation detected: os.{attr_name} "
+                        "running a command the shell denylist blocks"
+                    )
+                    return
 
             if mod == "subprocess" and attr_name in _SUBPROCESS_CALL_NAMES and node.args:
                 if self._subprocess_argv_removes(node.args[0]):
                     self.warning = (
                         "destructive Python operation detected: subprocess invoking delete command"
+                    )
+                    return
+                if _denylisted(self._subprocess_command_text(node.args[0])):
+                    self.warning = (
+                        "destructive Python operation detected: subprocess "
+                        "running a command the shell denylist blocks"
                     )
                     return
 
@@ -403,13 +416,37 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
                     f"destructive Python operation detected: os.{attr} "
                     "with delete command via getattr"
                 )
+            if _denylisted(cmd_str):
+                return (
+                    f"destructive Python operation detected: os.{attr} "
+                    "running a command the shell denylist blocks via getattr"
+                )
         if module == "subprocess" and attr in _SUBPROCESS_CALL_NAMES and node.args:
             if self._subprocess_argv_removes(node.args[0]):
                 return (
                     "destructive Python operation detected: "
                     "subprocess invoking delete command via getattr"
                 )
+            if _denylisted(self._subprocess_command_text(node.args[0])):
+                return (
+                    "destructive Python operation detected: subprocess "
+                    "running a command the shell denylist blocks via getattr"
+                )
         return None
+
+    def _subprocess_command_text(self, first_arg: ast.expr) -> str | None:
+        """The command a subprocess argv runs, as one string, when it is static.
+
+        An argv list is joined with spaces -- ``["dd", "if=/dev/zero", ...]``
+        reads as ``dd if=/dev/zero ...`` -- which is the form the shell
+        denylist's patterns are written against.
+        """
+        aliases = frozenset(self.compile_aliases)
+        if isinstance(first_arg, (ast.List, ast.Tuple)):
+            parts = [_eval_const_str(elt, aliases) for elt in first_arg.elts]
+            evaluated = [p for p in parts if p is not None]
+            return " ".join(evaluated) if evaluated else None
+        return _eval_const_str(first_arg, aliases)
 
     def _subprocess_argv_removes(self, first_arg: ast.expr) -> bool:
         """True when a subprocess argv (list, tuple, or string form) invokes delete commands."""
@@ -456,6 +493,24 @@ class _DestructiveCodeVisitor(ast.NodeVisitor):
             return False
         cmd_str = _eval_const_str(first_arg, aliases)
         return bool(cmd_str and _SHELL_DELETE_RE.search(cmd_str))
+
+
+def _denylisted(command: str | None) -> bool:
+    """True when the shell tool's own denylist would refuse *command*.
+
+    ``code_exec`` exists to stop an agent pivoting from a blocked shell command
+    to the same command run from Python. Checking only delete commands left
+    everything else the shell refuses -- ``Format-Volume``, ``Clear-Disk``,
+    ``mkfs``, ``dd if=``, ``shutdown``, ``reboot`` -- one ``os.system`` away
+    (#3006). Asking the live denylist keeps the two gates identical.
+    """
+    # Deletes are left to the position-aware check above: the denylist's
+    # delete entries are word matches that would flag
+    # ``echo del`` -- ``code_exec`` is deliberately stricter than that.
+    return (
+        command is not None
+        and denylist_hit(command, ignore=DELETE_DENYLIST_PATTERNS) is not None
+    )
 
 
 def _check_code_destructive(code: str) -> str | None:

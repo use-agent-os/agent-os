@@ -224,3 +224,63 @@ def test_indirect_destructive_calls_detected(code: str, expected_keyword: str) -
 def test_indirect_benign_code_does_not_trigger_warning(code: str) -> None:
     warning = _check_code_destructive(code)
     assert warning is None, f"Unexpected warning for safe code: {warning}"
+
+
+# ---------------------------------------------------------------------------
+# #3006: everything the shell denylist refuses, not only deletes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        pytest.param(
+            'import os; os.system("powershell Format-Volume -DriveLetter D")', id="format-volume"
+        ),
+        pytest.param('import subprocess; subprocess.run(["Clear-Disk", "1"])', id="clear-disk"),
+        pytest.param('import os; os.system("powershell Stop-Computer")', id="stop-computer"),
+        pytest.param('import os; os.system("shutdown -s -t 0")', id="shutdown"),
+        pytest.param('import subprocess; subprocess.run(["reboot"])', id="reboot-argv"),
+        pytest.param(
+            'import subprocess; subprocess.run(["mkfs.ext4", "/dev/sdb"])', id="mkfs-argv"
+        ),
+        pytest.param('import os; os.system("dd if=/dev/zero of=/dev/sda")', id="dd"),
+        pytest.param('import os; os.popen("halt")', id="halt-popen"),
+        pytest.param('import os; getattr(os, "sys" + "tem")("shutdown now")', id="via-getattr"),
+    ],
+)
+def test_a_command_the_shell_denylist_blocks_is_flagged(code: str) -> None:
+    """Blocked in the shell, it must not run unannounced through Python."""
+    warning = _check_code_destructive(code)
+    assert warning is not None
+    assert "shell denylist" in warning
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        pytest.param('import subprocess; subprocess.run(["git", "status"])', id="git-status"),
+        pytest.param('import os; os.system("ls -la")', id="ls"),
+        pytest.param('print("reboot the router later")', id="text-not-a-command"),
+    ],
+)
+def test_ordinary_commands_stay_unflagged(code: str) -> None:
+    assert _check_code_destructive(code) is None
+
+
+def test_an_operator_denylist_entry_applies_to_code_exec_too() -> None:
+    """The check reads the live policy, so AGENTOS_SAFE_BIN_DENY-style
+    overrides reach code_exec as well -- no second list to keep in sync."""
+    from agentos.tools.builtin import shell_policy
+
+    previous = shell_policy.get_policy()
+    shell_policy.set_policy(
+        shell_policy.SafeBinPolicy(denylist=[r"\bnuke-cluster\b"], allowlist=[], warnlist=[])
+    )
+    try:
+        assert _check_code_destructive(
+            'import subprocess; subprocess.run(["nuke-cluster", "--all"])'
+        )
+        assert _check_code_destructive('import os; os.system("shutdown now")') is None
+    finally:
+        shell_policy.set_policy(previous)

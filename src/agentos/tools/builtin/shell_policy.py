@@ -59,6 +59,23 @@ DEFAULT_DENYLIST_WIN: list[str] = [
     r"git\s+push\s+.*--force",
 ]
 
+#: The denylist entries that name a delete command. ``code_exec`` recognises a
+#: delete by where the word sits in the command (``_SHELL_DELETE_RE``), which is
+#: deliberately stricter than these word matches -- ``echo del`` is not a delete
+#: -- so it leaves these out when it asks the denylist about everything else.
+DELETE_DENYLIST_PATTERNS: frozenset[str] = frozenset(
+    {
+        r"rm\s+-rf\s+/\*?$",
+        r"\bdel\b",
+        r"\brmdir\b",
+        r"\bRemove-Item\b",
+        _WIN_CMD_PREFIX + r"rd" + _WIN_CMD_END,
+        _WIN_CMD_PREFIX + r"erase" + _WIN_CMD_END,
+        _WIN_CMD_PREFIX + r"rm" + _WIN_CMD_END,
+        _WIN_CMD_PREFIX + r"ri" + _WIN_CMD_END,
+    }
+)
+
 # Patterns that require two-step confirmation (warn, not block)
 DEFAULT_WARNLIST: list[str] = [
     r"\brm\b",  # any rm invocation (catches rm, rm -r, rm -R, rm -f, rm -rf /etc, etc.)
@@ -194,3 +211,21 @@ def set_policy(policy: SafeBinPolicy) -> None:
 def check_safe_bin(command: str) -> PolicyResult:
     """Check command against the active policy. Returns PolicyResult."""
     return get_policy().check(command)
+
+
+def denylist_hit(command: str, *, ignore: frozenset[str] = frozenset()) -> str | None:
+    """The active denylist pattern *command* matches, or ``None``.
+
+    The denylist is the layer no approval unlocks. Code that runs a command by
+    another route -- ``code_exec`` shelling out through ``os.system`` or
+    ``subprocess`` -- asks it here instead of keeping its own list, so the two
+    cannot drift apart, and an operator's ``AGENTOS_SAFE_BIN_DENY`` applies to
+    both.
+    """
+    flags = re.IGNORECASE if os.name == "nt" else 0
+    for pattern in get_policy().denylist:
+        if pattern in ignore:
+            continue
+        if re.search(pattern, command, flags=flags):
+            return pattern
+    return None
