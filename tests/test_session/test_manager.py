@@ -420,6 +420,36 @@ async def test_branch_fork_transcript(manager):
 
 
 @pytest.mark.asyncio
+async def test_branch_fork_transcript_preserves_reasoning_and_provenance(manager):
+    await manager.create("agent:main:main")
+    await manager.append_message(
+        "agent:main:main",
+        "assistant",
+        "parent response",
+        reasoning_content="thinking step 1",
+        tool_call_id="call_123",
+        provenance={
+            "kind": "tool",
+            "origin_session_id": "origin_sess",
+            "source_session_key": "orig_key",
+            "source_channel": "web",
+            "source_tool": "browser",
+        },
+    )
+    child = await manager.branch("agent:main:main", "agent:main:direct:u1", fork_transcript=True)
+    assert child.forked_from_parent is True
+    child_entries = await manager.get_transcript("agent:main:direct:u1")
+    assert len(child_entries) == 1
+    assert child_entries[0].reasoning_content == "thinking step 1"
+    assert child_entries[0].tool_call_id == "call_123"
+    assert child_entries[0].provenance_kind == "tool"
+    assert child_entries[0].provenance_origin_session_id == "origin_sess"
+    assert child_entries[0].provenance_source_session_key == "orig_key"
+    assert child_entries[0].provenance_source_channel == "web"
+    assert child_entries[0].provenance_source_tool == "browser"
+
+
+@pytest.mark.asyncio
 async def test_branch_fork_transcript_copies_compaction_summaries(manager):
     parent = await manager.create("agent:main:main")
     await manager.append_message("agent:main:main", "user", "kept tail", token_count=5)
