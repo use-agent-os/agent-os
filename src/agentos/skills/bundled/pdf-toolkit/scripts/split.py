@@ -48,6 +48,45 @@ def _write_stdout(text: str) -> None:
     sys.stdout.flush()
 
 
+class PageSpecError(ValueError):
+    """A ``--pages`` value that cannot be parsed. Reported as ``error:`` / exit
+    2, never as a traceback: the caller passed bad input, the script did not
+    break."""
+
+
+def _page_number(token: str, spec: str) -> int:
+    """Parse one page number, or raise :class:`PageSpecError` naming the flag."""
+    try:
+        return int(token)
+    except ValueError:
+        hint = ""
+        if any(dash in token for dash in "–—−"):
+            # A model writes an en dash more often than one would like, and it
+            # is invisible in a diff: the token never splits, so the whole
+            # thing lands in int().
+            hint = " (that looks like an en/em dash; ranges use a plain '-')"
+        raise PageSpecError(
+            f"invalid --pages value {spec!r}: {token.strip()!r} is not a page "
+            f"number{hint}; expected 1-based numbers and ranges, e.g. '1-3,5'"
+        ) from None
+
+
+def _range_bounds(token: str, spec: str) -> tuple[int, int]:
+    """Both ends of ``lo-hi``, or raise :class:`PageSpecError`.
+
+    An open-ended range (``3-``, ``-5``) is not supported -- there is no
+    ``total`` here to close it against -- and is named as such rather than
+    reported as ``'' is not a page number``.
+    """
+    lo_s, hi_s = token.split("-", 1)
+    if not lo_s.strip() or not hi_s.strip():
+        raise PageSpecError(
+            f"invalid --pages value {spec!r}: open-ended range {token!r} is not "
+            f"supported; give both ends, e.g. '3-7'"
+        )
+    return _page_number(lo_s, spec), _page_number(hi_s, spec)
+
+
 def split_ranges(spec: str) -> list[list[int]]:
     groups: list[list[int]] = []
     for token in spec.split(","):
@@ -55,13 +94,12 @@ def split_ranges(spec: str) -> list[list[int]]:
         if not token:
             continue
         if "-" in token:
-            lo_s, hi_s = token.split("-", 1)
-            lo, hi = int(lo_s), int(hi_s)
+            lo, hi = _range_bounds(token, spec)
             if lo > hi:
                 lo, hi = hi, lo
             groups.append(list(range(lo, hi + 1)))
         else:
-            groups.append([int(token)])
+            groups.append([_page_number(token, spec)])
     return groups
 
 
@@ -79,9 +117,12 @@ class SplitResult:
 
 
 def split(input_path: Path, pages_spec: str, out_dir: Path) -> SplitResult:
+    # Parse before opening the document: an unparseable spec is the caller's
+    # mistake, and it should be named before any work is done on their behalf.
+    groups = split_ranges(pages_spec)
     reader = PdfReader(str(input_path))
     result = SplitResult(total_pages=len(reader.pages))
-    for group in split_ranges(pages_spec):
+    for group in groups:
         valid_pages = [p for p in group if 1 <= p <= result.total_pages]
         result.skipped_pages.extend(p for p in group if not 1 <= p <= result.total_pages)
         if not valid_pages:
@@ -114,7 +155,11 @@ def main() -> int:
     if not args.input.is_file():
         print(f"error: input {args.input} not found", file=sys.stderr)
         return 2
-    result = split(args.input, args.pages, args.out)
+    try:
+        result = split(args.input, args.pages, args.out)
+    except PageSpecError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     if not result.parts:
         print(
             f"error: no page in {args.pages!r} exists in {args.input} ({result.total_pages} pages)",

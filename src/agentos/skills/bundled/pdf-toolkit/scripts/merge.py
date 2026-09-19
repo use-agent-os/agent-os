@@ -52,11 +52,50 @@ def _write_stdout(text: str) -> None:
     sys.stdout.flush()
 
 
+class PageSpecError(ValueError):
+    """A manifest ``pages`` value that cannot be parsed. Reported as ``error:``
+    / exit 2, never as a traceback: the caller passed bad input, the script did
+    not break."""
+
+
+def _page_number(token: str, spec: str) -> int:
+    """Parse one page number, or raise :class:`PageSpecError` naming the spec."""
+    try:
+        return int(token)
+    except ValueError:
+        hint = ""
+        if any(dash in token for dash in "–—−"):
+            # A model writes an en dash more often than one would like, and it
+            # is invisible in a diff: the token never splits, so the whole
+            # thing lands in int().
+            hint = " (that looks like an en/em dash; ranges use a plain '-')"
+        raise PageSpecError(
+            f"invalid pages value {spec!r}: {token.strip()!r} is not a page "
+            f"number{hint}; expected 1-based numbers and ranges, e.g. '1-3,5'"
+        ) from None
+
+
+def _range_bounds(token: str, spec: str) -> tuple[int, int]:
+    """Both ends of ``lo-hi``, or raise :class:`PageSpecError`.
+
+    An open-ended range (``3-``, ``-5``) is not supported and is named as such
+    rather than reported as ``'' is not a page number``.
+    """
+    lo_s, hi_s = token.split("-", 1)
+    if not lo_s.strip() or not hi_s.strip():
+        raise PageSpecError(
+            f"invalid pages value {spec!r}: open-ended range {token!r} is not "
+            f"supported; give both ends, e.g. '3-7'"
+        )
+    return _page_number(lo_s, spec), _page_number(hi_s, spec)
+
+
 def requested_pages(spec: str | None, total: int) -> list[int]:
     """Every page number *spec* asks for, in order, without clamping to *total*.
 
     ``parse_ranges`` drops what the document does not have; a caller that has to
-    report the difference needs the unclamped list to subtract from.
+    report the difference needs the unclamped list to subtract from. A *spec*
+    that cannot be parsed raises :class:`PageSpecError`.
     """
     if not spec:
         return list(range(1, total + 1))
@@ -66,13 +105,12 @@ def requested_pages(spec: str | None, total: int) -> list[int]:
         if not token:
             continue
         if "-" in token:
-            lo_s, hi_s = token.split("-", 1)
-            lo, hi = int(lo_s), int(hi_s)
+            lo, hi = _range_bounds(token, spec)
             if lo > hi:
                 lo, hi = hi, lo
             pages.extend(range(lo, hi + 1))
         else:
-            pages.append(int(token))
+            pages.append(_page_number(token, spec))
     return pages
 
 
@@ -199,7 +237,13 @@ def main() -> int:
             return 2
     else:
         items = [{"file": p} for p in args.inputs]
-    result = merge(items, args.out)
+    try:
+        result = merge(items, args.out)
+    except PageSpecError as exc:
+        # A ``pages`` value that does not parse is bad input like any other
+        # unusable manifest, and is reported the same way.
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     if result.pages_written == 0:
         print(
             f"error: no requested page exists in any input; nothing written to {args.out}",

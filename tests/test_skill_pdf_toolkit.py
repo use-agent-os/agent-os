@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import re
 import sys
 from pathlib import Path
@@ -280,3 +281,226 @@ def test_form_fill_rejects_the_flag_skill_md_used_to_advertise(
     with pytest.raises(SystemExit) as exit_info:
         form_fill._parse_args()
     assert exit_info.value.code == 2
+
+
+# ── a malformed --pages spec is reported, not raised (#2128) ─────────────────
+
+
+def _split_module():
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import split  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+    return split
+
+
+def _merge_module_for_pages():
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import merge  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+    return merge
+
+
+@pytest.mark.parametrize("spec", ["abc", "1,x", "1-abc", "one-two"])
+def test_split_ranges_rejects_a_non_numeric_spec(spec: str) -> None:
+    split = _split_module()
+
+    with pytest.raises(split.PageSpecError, match="not a page number"):
+        split.split_ranges(spec)
+
+
+@pytest.mark.parametrize("spec", ["1–3", "1—3", "1−3"])
+def test_a_dash_that_is_not_a_hyphen_says_so(spec: str) -> None:
+    """The realistic trigger: --pages is written by the model, and an en dash
+    never splits the token, so the whole thing reaches int()."""
+    split = _split_module()
+
+    with pytest.raises(split.PageSpecError, match="en/em dash"):
+        split.split_ranges(spec)
+
+
+@pytest.mark.parametrize("spec", ["3-", "-5", "-", "1,3-", "1, -5"])
+def test_an_open_ended_range_is_named_as_such(spec: str) -> None:
+    """``3-`` and ``-5`` are rejected -- there is no ``total`` here to close
+    them against -- but the message names the case, not an empty string."""
+    split = _split_module()
+
+    with pytest.raises(split.PageSpecError, match="open-ended range") as exc_info:
+        split.split_ranges(spec)
+
+    assert "''" not in str(exc_info.value)
+    assert repr(spec.split(",")[-1].strip()) in str(exc_info.value)
+
+
+def test_the_error_names_the_offending_token_not_just_the_spec() -> None:
+    split = _split_module()
+
+    with pytest.raises(split.PageSpecError) as exc_info:
+        split.split_ranges("1-3,5,x,7")
+
+    message = str(exc_info.value)
+    assert "'1-3,5,x,7'" in message
+    assert "'x' is not a page number" in message
+
+
+def test_split_reports_a_malformed_spec_and_creates_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    split = _split_module()
+    pdf_file = tmp_path / "doc.pdf"
+    _make_one_page_pdf(pdf_file, "ALPHA")
+    out_dir = tmp_path / "out"
+    monkeypatch.setattr(
+        sys, "argv", ["split.py", str(pdf_file), "--pages", "abc", "--out", str(out_dir)]
+    )
+
+    assert split.main() == 2
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("error: ")
+    assert "Traceback" not in captured.err
+    assert "--pages" in captured.err
+    assert captured.out == ""
+    assert not out_dir.exists(), "an unparseable spec must not create the output directory"
+
+
+def test_split_reports_an_open_ended_range_on_the_cli(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    split = _split_module()
+    pdf_file = tmp_path / "doc.pdf"
+    _make_one_page_pdf(pdf_file, "ALPHA")
+    monkeypatch.setattr(
+        sys, "argv", ["split.py", str(pdf_file), "--pages", "3-", "--out", str(tmp_path / "out")]
+    )
+
+    assert split.main() == 2
+    assert "open-ended range '3-'" in capsys.readouterr().err
+
+
+def test_split_parses_the_spec_before_opening_the_document(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bad spec is the caller's mistake; it is named before the document is
+    touched, so a broken PDF never masks it."""
+    split = _split_module()
+    opened: list[str] = []
+
+    def reader(path: str) -> None:
+        opened.append(path)
+        raise AssertionError("the document must not be opened")
+
+    monkeypatch.setattr(split, "PdfReader", reader)
+
+    with pytest.raises(split.PageSpecError):
+        split.split(tmp_path / "doc.pdf", "abc", tmp_path / "out")
+
+    assert opened == []
+
+
+def test_split_still_splits_a_valid_spec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    split = _split_module()
+    pdf_file = tmp_path / "doc.pdf"
+    _make_one_page_pdf(pdf_file, "ALPHA")
+    out_dir = tmp_path / "out"
+    monkeypatch.setattr(
+        sys, "argv", ["split.py", str(pdf_file), "--pages", "1", "--out", str(out_dir)]
+    )
+
+    assert split.main() == 0
+    assert json.loads(capsys.readouterr().out)["count"] == 1
+
+
+@pytest.mark.parametrize("spec", ["abc", "1,x", "1–3"])
+def test_merge_parse_ranges_rejects_a_non_numeric_spec(spec: str) -> None:
+    merge = _merge_module_for_pages()
+
+    with pytest.raises(merge.PageSpecError, match="not a page number"):
+        merge.parse_ranges(spec, 5)
+
+
+@pytest.mark.parametrize("spec", ["3-", "-5", "-"])
+def test_merge_names_an_open_ended_range(spec: str) -> None:
+    merge = _merge_module_for_pages()
+
+    with pytest.raises(merge.PageSpecError, match=f"open-ended range '{spec}'"):
+        merge.requested_pages(spec, 5)
+
+
+def test_merge_requested_pages_and_parse_ranges_reject_the_same_specs() -> None:
+    """``parse_ranges`` is ``requested_pages`` clamped; both must refuse."""
+    merge = _merge_module_for_pages()
+
+    for spec in ("abc", "3-"):
+        with pytest.raises(merge.PageSpecError):
+            merge.requested_pages(spec, 5)
+        with pytest.raises(merge.PageSpecError):
+            merge.parse_ranges(spec, 5)
+
+
+def test_merge_reports_a_malformed_manifest_pages_value_and_writes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    merge = _merge_module_for_pages()
+    source = tmp_path / "a.pdf"
+    _make_one_page_pdf(source, "ALPHA")
+    manifest = tmp_path / "m.json"
+    manifest.write_text(json.dumps([{"file": str(source), "pages": "abc"}]), encoding="utf-8")
+    out = tmp_path / "out.pdf"
+    monkeypatch.setattr(sys, "argv", ["merge.py", str(manifest), "--out", str(out)])
+
+    assert merge.main() == 2
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("error: ")
+    assert "Traceback" not in captured.err
+    assert "not a page number" in captured.err
+    assert captured.out == ""
+    assert not out.exists()
+
+
+def test_merge_reports_a_bad_pages_value_like_any_other_manifest_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Same prefix, same exit code as ``ManifestError``: a caller matching on
+    ``error:`` / 2 sees one kind of failure, not two."""
+    merge = _merge_module_for_pages()
+    source = tmp_path / "a.pdf"
+    _make_one_page_pdf(source, "ALPHA")
+    out = tmp_path / "out.pdf"
+
+    manifest = tmp_path / "bad_shape.json"
+    manifest.write_text(json.dumps([{"pages": "1"}]), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["merge.py", str(manifest), "--out", str(out)])
+    shape_code = merge.main()
+    shape_err = capsys.readouterr().err
+
+    manifest = tmp_path / "bad_pages.json"
+    manifest.write_text(json.dumps([{"file": str(source), "pages": "2-"}]), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["merge.py", str(manifest), "--out", str(out)])
+    pages_code = merge.main()
+    pages_err = capsys.readouterr().err
+
+    assert (shape_code, pages_code) == (2, 2)
+    assert shape_err.startswith("error: ") and pages_err.startswith("error: ")
+    assert "open-ended range '2-'" in pages_err
+
+
+def test_merge_still_honours_a_valid_pages_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    merge = _merge_module_for_pages()
+    source = tmp_path / "a.pdf"
+    _make_one_page_pdf(source, "ALPHA")
+    manifest = tmp_path / "m.json"
+    manifest.write_text(json.dumps([{"file": str(source), "pages": "1"}]), encoding="utf-8")
+    out = tmp_path / "out.pdf"
+    monkeypatch.setattr(sys, "argv", ["merge.py", str(manifest), "--out", str(out)])
+
+    assert merge.main() == 0
+    assert json.loads(capsys.readouterr().out)["pages_written"] == 1
