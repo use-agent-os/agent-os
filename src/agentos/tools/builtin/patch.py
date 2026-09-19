@@ -12,10 +12,11 @@ from pathlib import Path
 import structlog
 
 from agentos.identity.workspace import BOOTSTRAP_FILENAMES
+from agentos.redact import redact_file_output
 from agentos.sandbox.integration import sandboxed
 from agentos.tools.path_policy import reject_foreign_host_path
 from agentos.tools.registry import tool
-from agentos.tools.types import ToolError, current_tool_context
+from agentos.tools.types import SafeToolError, ToolError, current_tool_context
 from agentos.tools.write_tracking import record_workspace_file_write
 
 log = structlog.get_logger(__name__)
@@ -52,6 +53,25 @@ class DeleteFile:
 
 
 PatchOp = AddFile | UpdateFile | DeleteFile
+
+
+class PatchError(SafeToolError, ValueError):
+    """A patch that cannot be parsed or applied, in words the model can act on.
+
+    ``SafeToolError`` is what lets the text through: the failure envelope
+    forwards a message only for ``SafeToolUserMessage`` subclasses, and every
+    diagnostic here used to be a plain ``ValueError`` that reached the model as
+    "The tool received an invalid argument" -- the marker, the offending line,
+    the mismatched context all discarded, so the retry had nothing to correct
+    against (#2977). Still a ``ValueError`` so callers that distinguish it from
+    ``FileNotFoundError`` keep doing so.
+
+    A message is either an authored literal, the model's own patch text, or --
+    for a context mismatch, which quotes a line of the target file -- text that
+    ``_plan_ops`` has passed through ``redact_file_output``.
+    """
+
+
 _BOOTSTRAP_SOURCE_FILENAMES = frozenset(BOOTSTRAP_FILENAMES)
 _APPLY_PATCH_APPROVAL_TOOL = "apply_patch"
 _APPLY_PATCH_APPROVAL_NAMESPACE = "exec"
@@ -93,7 +113,7 @@ def _marker_span(lines: list[str]) -> tuple[int, int]:
         None,
     )
     if start_idx is None:
-        raise ValueError("Missing '*** Begin Patch' marker")
+        raise PatchError("Missing '*** Begin Patch' marker")
 
     indent = _leading_ws(lines[start_idx])
     end_idx = next(
@@ -105,7 +125,7 @@ def _marker_span(lines: list[str]) -> tuple[int, int]:
         None,
     )
     if end_idx is None:
-        raise ValueError("Missing '*** End Patch' marker")
+        raise PatchError("Missing '*** End Patch' marker")
     return start_idx, end_idx
 
 
@@ -173,7 +193,7 @@ def _parse_patch(patch_text: str) -> list[PatchOp]:
                     content_lines.append("")
                     trailing_bare_blanks += 1
                 else:
-                    raise ValueError(
+                    raise PatchError(
                         f"Invalid line in '*** Add File: {path}' block "
                         f"(expected a '+' prefix): {raw!r}"
                     )
@@ -217,7 +237,7 @@ def _parse_patch(patch_text: str) -> list[PatchOp]:
     if not ops:
         # Loud, not "Applied patch: no changes": a patch that fails is retried,
         # one that reports success while dropping every operation is believed.
-        raise ValueError(
+        raise PatchError(
             "No operations found between '*** Begin Patch' and '*** End Patch': "
             "expected a '*** Add File: <path>', '*** Update File: <path>' or "
             "'*** Delete File: <path>' line. Nothing was applied."
@@ -263,7 +283,7 @@ def _parse_hunk_header(header: str) -> Hunk:
 
     m = re.match(r"@@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@@", header.strip())
     if not m:
-        raise ValueError(f"Invalid hunk header: {header!r}")
+        raise PatchError(f"Invalid hunk header: {header!r}")
     old_start = int(m.group(1))
     old_count = int(m.group(2)) if m.group(2) is not None else (0 if old_start == 0 else 1)
     new_start = int(m.group(3))
@@ -295,7 +315,7 @@ def _validate_path(path: str, root: Path | None = None) -> Path:
     raw = Path(path).expanduser()
     resolved = (root / raw).resolve() if not raw.is_absolute() else raw.resolve()
     if not resolved.is_relative_to(root):
-        raise ValueError(f"Path traversal detected: {path!r} resolves outside patch root")
+        raise PatchError(f"Path traversal detected: {path!r} resolves outside patch root")
     return resolved
 
 
@@ -637,11 +657,13 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk, newline: str = "\n") -> list[
         prefix, content = _split_hunk_line(raw)
         if prefix in (" ", "-"):
             if check_pos >= len(result):
-                raise ValueError(f"Hunk context/delete at line {check_pos + 1} exceeds file length")
+                raise PatchError(f"Hunk context/delete at line {check_pos + 1} exceeds file length")
             actual = result[check_pos].rstrip("\r\n")
             expected = content.rstrip("\r\n")
             if actual != expected:
-                raise ValueError(
+                # ``actual`` is a line of the target file; _plan_ops masks the
+                # message before it can leave as a PatchError.
+                raise PatchError(
                     f"Context mismatch at line {check_pos + 1}: "
                     f"expected {expected!r}, got {actual!r}"
                 )
@@ -765,6 +787,11 @@ def _plan_ops(
                     raise FileNotFoundError(f"File not found for deletion: {op.path}")
                 content = None
                 deleted += 1
+        except PatchError as exc:
+            # Say which op failed, and mask the message the way every file-read
+            # surface is masked: a context mismatch quotes the line the file
+            # actually holds, and that line can be a credential.
+            raise PatchError(f"{label}: {redact_file_output(str(exc), path=op.path)}") from exc
         except ToolError:
             raise
         except (OSError, ValueError) as exc:

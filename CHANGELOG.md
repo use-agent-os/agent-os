@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- `apply_patch`: the reason a patch was refused now reaches the model — the
+  missing marker, the offending line, the bad hunk header, the path outside the
+  workspace, the mismatched context — instead of "The tool received an invalid
+  argument". A context mismatch, which quotes a line of the target file, is
+  masked the way `read_file` output is (#2977)
 - Discord channel: a reaction added to the bot's own message in a guild
   channel or thread is no longer silently dropped by the group mention
   gate. `is_group_mentioned` fell back to searching a reaction's (always
