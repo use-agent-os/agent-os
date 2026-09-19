@@ -232,9 +232,23 @@ def _int_param(
 
 
 def _bool_param(params: dict[str, Any], name: str, default: bool = False) -> bool:
-    value = params.get(name, default)
+    if name not in params:
+        return default
+    value = params[name]
+    if value is None:
+        return default
     if isinstance(value, bool):
         return value
+    if isinstance(value, int):
+        if value in (0, 1):
+            return bool(value)
+        raise ValueError(f"params.{name} must be a boolean")
+    if isinstance(value, str):
+        cleaned = value.strip().lower()
+        if cleaned in ("true", "1", "yes", "on"):
+            return True
+        if cleaned in ("false", "0", "no", "off"):
+            return False
     raise ValueError(f"params.{name} must be a boolean")
 
 
