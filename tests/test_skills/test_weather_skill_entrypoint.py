@@ -97,3 +97,33 @@ def test_weather_entrypoint_returns_seasonal_hint_on_network_error(
     assert payload["forecast"] == []
     assert payload["errors"]
     assert "rainy season" in payload["seasonal_hint"]
+
+
+def test_seasonal_hint_does_not_fire_for_juneau_alaska() -> None:
+    """'june' is a substring of 'Juneau' — the check must not fire on it."""
+    module = _load_module()
+
+    hint = module._seasonal_hint("DESTINATION: Juneau, Alaska\nDATES: tomorrow", "Juneau, Alaska")
+
+    assert hint == (
+        "Short-range forecast only; verify dates again near departure for "
+        "weather-sensitive bookings."
+    )
+
+
+def test_seasonal_hint_still_fires_for_the_month_of_june() -> None:
+    """Guard: an actual June date must still trigger the existing hint."""
+    module = _load_module()
+
+    hint = module._seasonal_hint("DATES: June 20th", "London")
+
+    assert "outside the reliable short forecast window" in hint
+
+
+def test_seasonal_hint_still_fires_for_tokyo_in_june() -> None:
+    """Guard: the Tokyo tsuyu-season branch must still trigger normally."""
+    module = _load_module()
+
+    hint = module._seasonal_hint("DATES: late June", "Tokyo, Japan")
+
+    assert "rainy season" in hint

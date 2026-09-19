@@ -27,13 +27,19 @@ def _extract_location(raw: str) -> str:
 
 def _seasonal_hint(query: str, location: str) -> str:
     lowered = f"{query} {location}".lower()
-    if "tokyo" in lowered and ("june" in lowered or "late june" in lowered):
+    # Whole-word match: "june" and "tokyo" are substrings of place names like
+    # "Juneau" and (hypothetically) a "Tokyoto"-style name, so plain `in`
+    # containment false-fires the seasonal advisory for those locations even
+    # though no month or city was actually mentioned.
+    has_tokyo = re.search(r"\btokyo\b", lowered) is not None
+    has_june = re.search(r"\bjune\b", lowered) is not None
+    if has_tokyo and has_june:
         return (
             "Tokyo in late June is usually tsuyu rainy season: humid, warm, "
             "frequent showers, and occasional heavy rain. Treat outdoor plans "
             "as weather-dependent and keep indoor backups."
         )
-    if "june" in lowered:
+    if has_june:
         return (
             "Requested dates appear outside the reliable short forecast window; "
             "use current forecast only as near-term context and verify seasonal "
