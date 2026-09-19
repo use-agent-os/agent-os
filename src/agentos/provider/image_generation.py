@@ -84,7 +84,7 @@ class OpenAIImageGenerationProvider:
             "model": request.model,
             "prompt": request.prompt,
             "size": request.size,
-            "output_format": request.output_format,
+            "response_format": "b64_json",
             "n": 1,
         }
         async with httpx.AsyncClient(

@@ -9,6 +9,7 @@ import pytest
 from agentos.provider.image_generation import (
     ImageGenerationRequest,
     ImageGenerationResult,
+    OpenAIImageGenerationProvider,
     OpenRouterImageGenerationProvider,
     get_image_generation_provider,
 )
@@ -112,6 +113,68 @@ async def test_openrouter_image_provider_adds_app_attribution_headers(monkeypatc
         "X-OpenRouter-Categories": "cli-agent,personal-agent",
     }
     assert result.image_bytes == b"agentos"
+
+
+@pytest.mark.asyncio
+async def test_openai_image_provider_sends_response_format_b64_json(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    encoded = base64.b64encode(b"openai-image-bytes").decode("utf-8")
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "data": [
+                    {
+                        "b64_json": encoded,
+                        "revised_prompt": "prompt revised",
+                    }
+                ]
+            }
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+        async def post(self, url, *, headers, json):
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        "agentos.provider.image_generation.httpx.AsyncClient",
+        lambda **kwargs: FakeClient(),
+    )
+
+    provider = OpenAIImageGenerationProvider(api_key="sk-test-key")
+    result = await provider.generate(
+        ImageGenerationRequest(
+            prompt="a glowing lantern",
+            model="gpt-image-1",
+            size="1024x1024",
+            output_format="png",
+            timeout_seconds=10.0,
+        )
+    )
+
+    assert captured["url"] == "https://api.openai.com/v1/images/generations"
+    assert captured["headers"] == {"Authorization": "Bearer sk-test-key"}
+    assert captured["json"] == {
+        "model": "gpt-image-1",
+        "prompt": "a glowing lantern",
+        "size": "1024x1024",
+        "response_format": "b64_json",
+        "n": 1,
+    }
+    assert result.image_bytes == b"openai-image-bytes"
+    assert result.revised_prompt == "prompt revised"
+    assert result.provider == "openai"
 
 
 @pytest.mark.asyncio
