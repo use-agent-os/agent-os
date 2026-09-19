@@ -1265,18 +1265,29 @@ def _segment_for_fts(text: str) -> str:
     return " ".join(jieba.cut(text))
 
 
+# Any Unicode letter or digit, minus ``_``. The FTS5 table is ``tokenize='unicode61'``,
+# which indexes every script, and ``_is_cjk`` -- the gate the indexer segments on --
+# already covers Hangul. A query class that named only ASCII, the CJK ideographs and
+# the two kana blocks left Hangul, Cyrillic, Greek, Arabic, Hebrew, Thai, Devanagari
+# and accented Latin with no tokens at all, so the builder returned None and every
+# search in those scripts came back empty over text that was indexed and matchable.
+_FTS_WORD_CHAR = r"[^\W_]"
+
+
 def _build_fts_query(query: str) -> str | None:
     """Convert query to FTS5 OR query with jieba segmentation for CJK."""
     import re
 
     segmented = _segment_for_fts(query)
     # Prefer multi-char tokens, which filters common single-character particles.
-    tokens = re.findall(r"[a-zA-Z0-9\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]{2,}", segmented)
+    tokens = re.findall(rf"{_FTS_WORD_CHAR}{{2,}}", segmented)
     if not tokens:
         # Fallback: include single chars
-        tokens = re.findall(r"[a-zA-Z0-9\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]+", segmented)
+        tokens = re.findall(rf"{_FTS_WORD_CHAR}+", segmented)
     if not tokens:
         return None
+    # Left ASCII on purpose: a hyphen phrase only adds a clause beside tokens that
+    # already match on their own, so a missing one costs ranking, never a hit.
     phrases = re.findall(r"[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)+", segmented)
     quoted = [f'"{p}"' for p in phrases] + [f'"{t}"' for t in tokens]
     return " OR ".join(quoted)

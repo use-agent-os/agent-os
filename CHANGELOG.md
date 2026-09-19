@@ -266,7 +266,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   every `<t>` descendant, including the ones inside `<rPh>`, so a Japanese
   workbook read back with each reading glued onto the word it annotates
   ([#2053](https://github.com/use-agent-os/agent-os/issues/2053)).
-
+  workbook read back with each reading glued onto the word it annotates.
+- Memory search: a query written in Hangul, Cyrillic, Greek, Arabic, Hebrew,
+  Thai, Devanagari or accented Latin returns results again. `_build_fts_query`
+  tokenized with a class naming only ASCII, the CJK ideographs and the two kana
+  blocks, so those queries produced no token at all and the search
+  short-circuited to an empty list — over text the `unicode61` index had
+  already stored.
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed
