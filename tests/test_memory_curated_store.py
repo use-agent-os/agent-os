@@ -165,15 +165,20 @@ def test_external_drift_blocks_replace_and_writes_backup(store: CuratedMemorySto
     assert list(tmp_path.glob("MEMORY.md.bak.*")), "backup snapshot must exist"
 
 
-def test_add_skips_drift_guard(store: CuratedMemoryStore, tmp_path: Path):
+def test_add_also_blocks_on_external_drift(store: CuratedMemoryStore, tmp_path: Path):
+    """``add`` persists via the same full-file rewrite as every other
+    mutator (`_save` -> `_write_file`), so it is not actually append-only --
+    it must detect and refuse on external drift exactly like `replace`."""
     store.add("memory", "entry one")
     mem = tmp_path / "MEMORY.md"
     mem.write_text(
-        mem.read_text(encoding="utf-8") + "\n\nfree text appended externally",
+        mem.read_text(encoding="utf-8") + ENTRY_DELIMITER + ENTRY_DELIMITER + "entry two",
         encoding="utf-8",
     )
-    result = store.add("memory", "entry two")
-    assert result["success"] is True  # append-only add never clobbers
+    result = store.add("memory", "entry three")
+    assert result["success"] is False
+    assert "drift_backup" in result
+    assert list(tmp_path.glob("MEMORY.md.bak.*")), "backup snapshot must exist"
 
 
 def test_roundtrip_mismatch_drift_blocks_replace(store: CuratedMemoryStore, tmp_path: Path):

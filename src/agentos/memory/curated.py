@@ -226,9 +226,11 @@ class CuratedMemoryStore:
             return {"success": False, "error": scan_error}
 
         with self._file_lock(self._path_for(target)):
-            reload_signal = self._reload_target(target, skip_drift=True)
+            reload_signal = self._reload_target(target, skip_drift=False)
             if reload_signal is _READ_FAILED:
                 return self._read_failed_error(self._path_for(target))
+            if reload_signal:
+                return self._drift_error(self._path_for(target), reload_signal)
             entries = self.entries_for(target)
             limit = self._char_limit(target)
             if content in entries:
@@ -549,7 +551,7 @@ class CuratedMemoryStore:
         separator = "═" * 46
         return f"{separator}\n{header}\n{separator}\n{content}"
 
-    def _reload_target(self, target: str, skip_drift: bool = True) -> str | None:
+    def _reload_target(self, target: str, skip_drift: bool = False) -> str | None:
         """Re-read entries from disk into in-memory state.
 
         Called under the file lock to get the latest state before mutating.
@@ -564,8 +566,10 @@ class CuratedMemoryStore:
           - ``None`` on a clean reload.
 
         When *skip_drift* is True the round-trip / entry-size check is
-        bypassed. Used by ``add``, which appends without rewriting, so
-        existing content is never clobbered.
+        bypassed. Every mutator -- ``add`` included -- persists via
+        ``_save()``'s full atomic rewrite of the whole file, so none of them
+        are actually append-only; *skip_drift* has no current caller that
+        needs True and defaults to False.
         """
         path = self._path_for(target)
         raw = self._read_raw_checked(path)
