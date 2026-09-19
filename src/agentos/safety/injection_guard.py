@@ -306,8 +306,20 @@ def wrap_untrusted(content: str, source: str) -> str:
     return f"<untrusted source='{escaped_source}'>{escaped_content}</untrusted>"
 
 
-_UNTRUSTED_CLOSE_IN_CONTENT = re.compile(r"<\s*/\s*untrusted\s*>", re.IGNORECASE)
+# A close tag is matched on the ``untrusted`` word boundary rather than on a
+# following ``>``: an end tag may carry anything up to the terminator, and both
+# HTML parsers and a model reading the assembled prompt read
+# ``</untrusted foo>`` as closing the block. Requiring ``\s*>`` let those
+# spellings through verbatim. The second pattern catches an unterminated
+# ``</untrusted``, which the first cannot match for want of a ``>``.
+_UNTRUSTED_CLOSE_IN_CONTENT = re.compile(r"<\s*/\s*untrusted\b[^>]*>", re.IGNORECASE)
+_UNTRUSTED_CLOSE_UNTERMINATED = re.compile(r"<\s*/\s*untrusted\b", re.IGNORECASE)
 _UNTRUSTED_OPEN_IN_CONTENT = re.compile(r"<\s*untrusted\b", re.IGNORECASE)
+
+
+def _escape_tag_angles(match: re.Match[str]) -> str:
+    """Entity-escape a matched tag's own angle brackets, keeping its interior."""
+    return f"&lt;{match.group(0)[1:-1]}&gt;"
 
 
 def wrap_untrusted_boundary(content: str, source: str) -> str:
@@ -328,7 +340,8 @@ def wrap_untrusted_boundary(content: str, source: str) -> str:
     """
 
     escaped_source = xml_escape(source)
-    safe = _UNTRUSTED_CLOSE_IN_CONTENT.sub("&lt;/untrusted&gt;", content)
+    safe = _UNTRUSTED_CLOSE_IN_CONTENT.sub(_escape_tag_angles, content)
+    safe = _UNTRUSTED_CLOSE_UNTERMINATED.sub("&lt;/untrusted", safe)
     safe = _UNTRUSTED_OPEN_IN_CONTENT.sub("&lt;untrusted", safe)
     return f"<untrusted source='{escaped_source}'>{safe}</untrusted>"
 
