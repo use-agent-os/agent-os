@@ -55,6 +55,13 @@ class DiagnosticsState:
             self._runtime_raw = bool(enabled and raw)
             return self.snapshot()
 
+    def reset_runtime(self) -> DiagnosticsSnapshot:
+        """Reset runtime overrides to None, reverting to the configured default."""
+        with self._lock:
+            self._runtime_enabled = None
+            self._runtime_raw = False
+            return self.snapshot()
+
     def raw_turn_call_enabled(self) -> bool:
         return self.snapshot().raw_enabled
 

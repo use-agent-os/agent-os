@@ -154,3 +154,43 @@ def test_doctor_status_is_control_only() -> None:
     entry = get_dispatcher().get_entry("doctor.status")
     assert entry is not None
     assert entry.audiences == CONTROL_ONLY
+
+
+def test_diagnostics_state_reset_runtime() -> None:
+    state = DiagnosticsState(configured_enabled=True)
+    assert state.snapshot().effective_enabled is True
+    assert state.snapshot().runtime_enabled is None
+
+    state.set_runtime(enabled=False)
+    assert state.snapshot().effective_enabled is False
+    assert state.snapshot().runtime_enabled is False
+
+    snap = state.reset_runtime()
+    assert snap.effective_enabled is True
+    assert snap.runtime_enabled is None
+    assert snap.runtime_raw is False
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_set_reset_reverts_to_configured(monkeypatch) -> None:
+    monkeypatch.delenv("AGENTOS_TURN_CALL_LOG", raising=False)
+    state = DiagnosticsState.from_config(GatewayConfig(diagnostics_enabled=True))
+    state.set_runtime(enabled=False)
+    assert state.snapshot().effective_enabled is False
+
+    ctx = RpcContext(
+        conn_id="test",
+        config=GatewayConfig(diagnostics_enabled=True),
+        diagnostics_state=state,
+    )
+
+    response = await get_dispatcher().dispatch(
+        "req-reset",
+        "diagnostics.set",
+        {"reset": True},
+        ctx,
+    )
+    assert response.ok is True
+    assert response.payload["enabled"] is True
+    assert response.payload["runtime"]["enabled"] is None
+
