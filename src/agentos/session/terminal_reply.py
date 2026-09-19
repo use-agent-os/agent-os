@@ -68,6 +68,16 @@ def build_terminal_reply(
         # message that names the scope and the number instead of collapsing it
         # into generic failure text the operator cannot act on.
         return error_message or "The task stopped because a spend budget limit was reached."
+    if (
+        reason in {"rate_limited", "rate_limit"}
+        or error_class in {"rate_limit", "rate_limited", "ratelimiterror"}
+        or "rate limit" in error_message
+        or "429" in error_message
+    ):
+        return (
+            "The task stopped because an upstream provider rate limit was reached. "
+            "Please retry shortly."
+        )
     if status == AgentTaskStatus.FAILED.value or reason in {"error", "tool_error"}:
         return "The task failed before it could finish."
     if status == AgentTaskStatus.SUCCEEDED.value or reason in {"completed", "done"}:

@@ -101,6 +101,24 @@ RAW_INTERNAL_STRINGS = (
             },
             "output limit",
         ),
+        (
+            {
+                "status": "failed",
+                "terminal_reason": "rate_limited",
+                "error_class": "RateLimitError",
+                "error_message": "Rate limit exceeded (429)",
+            },
+            "upstream provider rate limit",
+        ),
+        (
+            {
+                "status": "failed",
+                "terminal_reason": "error",
+                "error_class": "RateLimitError",
+                "error_message": "429 Too Many Requests",
+            },
+            "upstream provider rate limit",
+        ),
     ],
 )
 def test_build_terminal_reply_returns_user_readable_messages(
