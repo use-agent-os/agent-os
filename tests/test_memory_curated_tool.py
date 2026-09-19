@@ -200,3 +200,29 @@ async def test_memory_tool_picks_up_budget_change_without_restart(tmp_path):
 
     now_fits = json.loads(await tools["memory"](action="add", content="y" * 50))
     assert now_fits["success"] is True
+
+
+@pytest.mark.parametrize("spelling", ["MEMORY.md", "./MEMORY.md"])
+async def test_memory_delete_refuses_the_curated_memory_file(
+    memory_tools_fixture, tmp_path, spelling
+):
+    """#2973: memory_save refuses MEMORY.md because the curated store owns it;
+    memory_delete used to erase it -- every curated fact, in one call."""
+    tools = memory_tools_fixture
+    added = json.loads(await tools["memory"](action="add", content="User's budget is $500"))
+    assert added["success"] is True
+
+    result = await tools["memory_delete"](path=spelling)
+
+    assert result.startswith("Error:") and "managed by the `memory` tool" in result
+    assert "User's budget is $500" in (tmp_path / "MEMORY.md").read_text(encoding="utf-8")
+
+
+async def test_memory_delete_still_deletes_a_memory_note(memory_tools_fixture, tmp_path):
+    tools = memory_tools_fixture
+    await tools["memory_save"](path="memory/notes.md", content="daily note")
+
+    result = await tools["memory_delete"](path="memory/notes.md")
+
+    assert result.startswith("Deleted memory/notes.md")
+    assert not (tmp_path / "memory" / "notes.md").exists()

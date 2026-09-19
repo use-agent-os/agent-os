@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -1214,6 +1215,21 @@ def create_memory_tools(
 
         if not file_path.exists():
             return f"Error: {path} not found."
+
+        # MEMORY.md belongs to the curated store, the same reason memory_save
+        # refuses it. Deleting it here erased every curated fact in one call,
+        # with none of the drift backup the `memory` tool's remove/replace
+        # take -- while USER.md, its sibling, was never deletable at all.
+        # Compare the files themselves rather than the spelling of the path,
+        # since more than one spelling (``./MEMORY.md`` among them) passes the
+        # source-path check above and names the same file.
+        curated = workspace_dir / "MEMORY.md"
+        if curated.exists() and os.path.samefile(file_path, curated):
+            return (
+                "Error: MEMORY.md is managed by the `memory` tool. Use "
+                "memory(action=remove, old_text=...) to drop a fact; deleting the "
+                "file would erase every curated fact at once."
+            )
 
         # Remove from disk
         file_path.unlink()
