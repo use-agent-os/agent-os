@@ -114,6 +114,29 @@ async def test_openrouter_image_provider_adds_app_attribution_headers(monkeypatc
     assert result.image_bytes == b"agentos"
 
 
+def test_openrouter_image_config_preserves_aspect_ratios_and_resolutions() -> None:
+    assert OpenRouterImageGenerationProvider._image_config_for_size("16:9") == {
+        "aspect_ratio": "16:9",
+        "image_size": "1K",
+    }
+    assert OpenRouterImageGenerationProvider._image_config_for_size("9:16") == {
+        "aspect_ratio": "9:16",
+        "image_size": "1K",
+    }
+    assert OpenRouterImageGenerationProvider._image_config_for_size("4:3") == {
+        "aspect_ratio": "4:3",
+        "image_size": "1K",
+    }
+    assert OpenRouterImageGenerationProvider._image_config_for_size("1920x1080") == {
+        "aspect_ratio": "16:9",
+        "image_size": "1K",
+    }
+    assert OpenRouterImageGenerationProvider._image_config_for_size("1080x1920") == {
+        "aspect_ratio": "9:16",
+        "image_size": "1K",
+    }
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("caller_kind", ["web", "channel"])
 async def test_image_generate_auto_publishes_generated_image_artifact_for_surfaces(
