@@ -338,8 +338,19 @@ class TestBotTokensAndPassphrases:
 
     @pytest.mark.parametrize(
         "name",
-        ["bot_name", "bot_id", "bot_count", "bot_status", "bot_version", "robot_arm",
-         "chatbot_config", "chatbot_model", "botHandler", "MAX_BOTS", "token_budget"],
+        [
+            "bot_name",
+            "bot_id",
+            "bot_count",
+            "bot_status",
+            "bot_version",
+            "robot_arm",
+            "chatbot_config",
+            "chatbot_model",
+            "botHandler",
+            "MAX_BOTS",
+            "token_budget",
+        ],
     )
     def test_an_unqualified_bot_name_is_not_a_credential(self, name: str) -> None:
         """The pair must be adjacent, so ``bot`` alone still means nothing."""
@@ -347,8 +358,16 @@ class TestBotTokensAndPassphrases:
 
     @pytest.mark.parametrize(
         "name",
-        ["passphrase", "PASSPHRASE", "Passphrase", "ssh_passphrase", "SSH_PASSPHRASE",
-         "gpg_passphrase", "key_passphrase", "keystore_passphrase"],
+        [
+            "passphrase",
+            "PASSPHRASE",
+            "Passphrase",
+            "ssh_passphrase",
+            "SSH_PASSPHRASE",
+            "gpg_passphrase",
+            "key_passphrase",
+            "keystore_passphrase",
+        ],
     )
     def test_a_passphrase_is_a_credential(self, name: str) -> None:
         """``passphrase`` belongs beside ``password`` and ``passwd``.
@@ -502,6 +521,58 @@ class TestTerminalOutput:
         """The widened split must not drag ordinary output into the pass."""
         out = redact.redact_terminal_output("MAX_TOKENS=4096\n", "cd /srv\ncat config.py")
         assert out == "MAX_TOKENS=4096\n"
+
+
+class TestPgpassAndNetrc:
+    def test_pgpass_password_masked_in_terminal_output(self) -> None:
+        pgpass = "db.host:5432:app:appuser:pgpass-hunter2\n"
+        out = redact.redact_terminal_output(pgpass, "cat ~/.pgpass")
+        assert "pgpass-hunter2" not in out
+        assert out == "db.host:5432:app:appuser:***\n"
+
+    def test_pgpass_escaped_colons_and_comments(self) -> None:
+        pgpass = (
+            "# This is a comment\n"
+            "db.host:5432:app\\:name:appuser:pgpass-hunter2\n"
+            "\n"
+            "short:entry:line\n"
+        )
+        out = redact.redact_terminal_output(pgpass, "cat ~/.pgpass")
+        assert "pgpass-hunter2" not in out
+        assert "# This is a comment\n" in out
+        assert "db.host:5432:app\\:name:appuser:***\n" in out
+        assert "short:entry:line\n" in out
+
+    def test_netrc_password_masked_in_terminal_output(self) -> None:
+        netrc = "machine api.example.com login me password netrc-hunter2\n"
+        out = redact.redact_terminal_output(netrc, "cat ~/.netrc")
+        assert "netrc-hunter2" not in out
+        assert "password ***" in out
+        assert "machine api.example.com login me" in out
+
+    def test_netrc_multi_line_and_aliases(self) -> None:
+        netrc = (
+            "machine gitlab.com\n"
+            "  login dev\n"
+            "  passwd gitlab-hunter2\n"
+            "machine other.com account acct-secret-val\n"
+        )
+        out = redact.redact_terminal_output(netrc, "cat ~/.netrc")
+        assert "gitlab-hunter2" not in out
+        assert "acct-secret-val" not in out
+        assert "passwd ***" in out
+        assert "account ***" in out
+
+    def test_pgpass_and_netrc_file_read_output(self) -> None:
+        pgpass = "db.host:5432:app:appuser:pgpass-hunter2\n"
+        out_pg = redact.redact_file_output(pgpass, path="/home/u/.pgpass")
+        assert "pgpass-hunter2" not in out_pg
+        assert "«redacted:" in out_pg
+
+        netrc = "machine api.example.com login me password netrc-hunter2\n"
+        out_netrc = redact.redact_file_output(netrc, path="/home/u/.netrc")
+        assert "netrc-hunter2" not in out_netrc
+        assert "«redacted:" in out_netrc
 
 
 def test_the_disable_switch_is_read_once_at_import(monkeypatch: pytest.MonkeyPatch) -> None:

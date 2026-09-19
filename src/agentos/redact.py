@@ -732,6 +732,86 @@ def is_env_dump_command(command: str | None) -> bool:
     return False
 
 
+_NETRC_SECRET_KW_RE = re.compile(
+    r"(?i)\b(password|passwd|account)(\s+)(\"[^\"]*\"|\'[^\']*\'|[^\s#]+)"
+)
+
+
+def _redact_pgpass_line(line: str, mask: Callable[[str], str]) -> str:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return line
+    parts: list[str] = []
+    cur: list[str] = []
+    escaped = False
+    for ch in line:
+        if escaped:
+            cur.append(ch)
+            escaped = False
+        elif ch == "\\":
+            cur.append(ch)
+            escaped = True
+        elif ch == ":" and len(parts) < 4:
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    parts.append("".join(cur))
+    if len(parts) == 5:
+        pw_field = parts[4]
+        ending = ""
+        if pw_field.endswith("\r\n"):
+            ending = "\r\n"
+            pw_val = pw_field[:-2]
+        elif pw_field.endswith("\n"):
+            ending = "\n"
+            pw_val = pw_field[:-1]
+        elif pw_field.endswith("\r"):
+            ending = "\r"
+            pw_val = pw_field[:-1]
+        else:
+            pw_val = pw_field
+
+        if pw_val:
+            parts[4] = mask(pw_val) + ending
+            return ":".join(parts)
+    return line
+
+
+def _redact_pgpass(text: str, mask: Callable[[str], str]) -> str:
+    return "".join(_redact_pgpass_line(line, mask) for line in text.splitlines(keepends=True))
+
+
+def _redact_netrc(text: str, mask: Callable[[str], str]) -> str:
+    def repl(m: re.Match[str]) -> str:
+        kw = m.group(1)
+        ws = m.group(2)
+        val = m.group(3)
+        return f"{kw}{ws}{mask(val)}"
+
+    return _NETRC_SECRET_KW_RE.sub(repl, text)
+
+
+def _matched_credential_file_name(command: str | None) -> str | None:
+    if not command or not isinstance(command, str):
+        return None
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+    for token in tokens:
+        if token.startswith("-"):
+            continue
+        normalized = token.replace("\\", "/")
+        name = os.path.basename(normalized).lower()
+        if name in _CREDENTIAL_FILE_NAMES or name.startswith(".env"):
+            return name
+        parts = {part.lower() for part in normalized.split("/")[:-1]}
+        if parts & _CREDENTIAL_DIR_NAMES:
+            return name
+    return None
+
+
 def reads_credential_file(command: str | None) -> bool:
     """Return whether *command* names a credential file as an operand.
 
@@ -749,8 +829,9 @@ def reads_credential_file(command: str | None) -> bool:
     for token in tokens:
         if token.startswith("-"):
             continue
-        name = os.path.basename(token).lower()
-        parts = {part.lower() for part in token.replace("\\", "/").split("/")[:-1]}
+        normalized = token.replace("\\", "/")
+        name = os.path.basename(normalized).lower()
+        parts = {part.lower() for part in normalized.split("/")[:-1]}
         if name in _CREDENTIAL_FILE_NAMES or name.startswith(".env"):
             return True
         if parts & _CREDENTIAL_DIR_NAMES:
@@ -771,6 +852,11 @@ def redact_terminal_output(output: str, command: str | None = None, *, force: bo
     """
     if not output:
         return output
+    matched_name = _matched_credential_file_name(command)
+    if matched_name == ".pgpass":
+        output = _redact_pgpass(output, mask=_mask_token)
+    elif matched_name in {".netrc", "_netrc"}:
+        output = _redact_netrc(output, mask=_mask_token)
     assignments = is_env_dump_command(command or "") or reads_credential_file(command)
     redacted = redact_sensitive_text(output, force=force, code_file=not assignments)
     return redacted if redacted is not None else output
@@ -895,6 +981,14 @@ def redact_file_output(text: str, *, path: str | os.PathLike[str] | None = None)
     """
     if not text or not _REDACT_ENABLED:
         return text
+    if path is not None:
+        normalized = os.fspath(path).replace("\\", "/")
+        name = os.path.basename(normalized).lower()
+        if name == ".pgpass":
+            text = _redact_pgpass(text, mask=_mask_nonreusable)
+        elif name in {".netrc", "_netrc"}:
+            text = _redact_netrc(text, mask=_mask_nonreusable)
+
     masked = _redact_value_shapes(text, mask=_mask_nonreusable, line_safe=True)
     if _is_source_code_path(path) or path is None:
         return masked

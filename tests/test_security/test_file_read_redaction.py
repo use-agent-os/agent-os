@@ -302,3 +302,23 @@ def test_redact_terminal_output_still_masks_a_short_header_value() -> None:
     out = redact_terminal_output("Authorization: Bearer abc123def45", "curl -v https://x")
 
     assert "abc123def45" not in out
+
+
+def test_redact_file_output_masks_pgpass() -> None:
+    out = redact_file_output(
+        "postgres.example.com:5432:mydb:myuser:secretpassword123\n",
+        path="/home/u/.pgpass",
+    )
+    assert "secretpassword123" not in out
+    assert "«redacted:" in out
+    assert "postgres.example.com:5432:mydb:myuser:" in out
+
+
+def test_redact_file_output_masks_netrc() -> None:
+    out = redact_file_output(
+        "machine api.github.com login octocat password secrettoken456\n",
+        path="/home/u/.netrc",
+    )
+    assert "secrettoken456" not in out
+    assert "«redacted:" in out
+    assert "machine api.github.com login octocat" in out

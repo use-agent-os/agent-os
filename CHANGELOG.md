@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Security redaction: passwords and tokens inside `.pgpass` and `.netrc` / `_netrc`
+  files are now parsed and masked in both terminal output and file read tools.
+
+- `redact`: `.pgpass` and `.netrc`/`_netrc` credential files now have their
+  passwords properly masked across `redact_terminal_output` and `redact_file_output`
+  ([#2620](https://github.com/use-agent-os/agent-os/issues/2620)).
 - Discord channel: a reaction added to the bot's own message in a guild
   channel or thread is no longer silently dropped by the group mention
   gate. `is_group_mentioned` fell back to searching a reaction's (always
