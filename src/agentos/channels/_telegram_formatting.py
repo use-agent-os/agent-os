@@ -28,8 +28,9 @@ _UNORDERED_LIST_RE = re.compile(r"^(?P<indent>\s*)[-+*]\s+(?P<text>.+)$")
 # The destination may carry one level of balanced parentheses (CommonMark), so
 # a Wikipedia disambiguator or a `#method_(args)` anchor is kept whole instead
 # of being cut at the first `)` with the remainder rendered as text after the
-# anchor. Deeper nesting is left as literal text rather than a truncated link.
-_LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://(?:[^\s()<]|\([^\s()<]*\))+)\)")
+_LINK_RE = re.compile(
+    r"\[([^\]\n]+)\]\(((?:https?://|tg://|mailto:)(?:[^\s()<]|\([^\s()<]*\))+)\)"
+)
 # CommonMark's blockquote marker: up to 3 leading spaces, `>`, then at most
 # one space before the content. `>quote` (no space) and `>` alone (an empty
 # quote line, used to separate paragraphs within one quote) both match.
