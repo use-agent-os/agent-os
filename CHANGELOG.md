@@ -266,7 +266,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   every `<t>` descendant, including the ones inside `<rPh>`, so a Japanese
   workbook read back with each reading glued onto the word it annotates
   ([#2053](https://github.com/use-agent-os/agent-os/issues/2053)).
-
+  workbook read back with each reading glued onto the word it annotates.
+- Ollama provider: an image the user attached now reaches the model.
+  `_build_ollama_message` had no branch for image blocks, so the block was
+  skipped and the message went out as its text alone — the model answered
+  about a picture it was never sent, and nothing reported the loss. Images are
+  now carried in Ollama's per-message `images` field as bare base64.
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed

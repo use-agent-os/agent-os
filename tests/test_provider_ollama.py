@@ -413,3 +413,134 @@ def test_ollama_coerces_eval_token_counts(
     total_tokens += done.input_tokens
     total_tokens += done.output_tokens
     assert total_tokens == expected_input + expected_output
+
+
+_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAE"
+    "hQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+_DONE_STREAM = (
+    '{"model":"llava:7b","message":{"role":"assistant","content":"A cat."},"done":false}\n'
+    '{"model":"llava:7b","message":{"role":"assistant","content":""},"done":true,'
+    '"done_reason":"stop","prompt_eval_count":10,"eval_count":2}\n'
+)
+
+
+def _run_chat(provider: OllamaProvider, messages: list[Message]) -> None:
+    async def _go() -> list[Any]:
+        return [event async for event in provider.chat(messages, tools=[])]
+
+    asyncio.run(_go())
+
+
+def _image_message(*images: str, text: str = "What is in this picture?") -> Message:
+    from agentos.provider.types import ContentBlockImage, ContentBlockText
+
+    blocks: list[Any] = [ContentBlockImage(media_type="image/png", data=data) for data in images]
+    blocks.append(ContentBlockText(text=text))
+    return Message(role="user", content=blocks)
+
+
+def test_ollama_sends_an_attached_image(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An image the user attached must reach the model, not be skipped.
+
+    ``_build_ollama_message`` had no ``image`` branch, so the block was
+    dropped and the message went out as its text alone -- the model answered
+    about a picture it was never sent, with nothing reporting the loss.
+    """
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured, _DONE_STREAM)
+
+    _run_chat(OllamaProvider(model="llava:7b"), [_image_message(_PNG_B64)])
+
+    sent = captured["payload"]["messages"][-1]
+    assert sent["images"] == [_PNG_B64]
+    assert sent["content"] == "What is in this picture?"
+
+
+def test_ollama_sends_base64_verbatim_without_a_data_url_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ollama's ``images`` field takes bare base64; a data: prefix breaks it."""
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured, _DONE_STREAM)
+
+    _run_chat(OllamaProvider(model="llava:7b"), [_image_message(_PNG_B64)])
+
+    (image,) = captured["payload"]["messages"][-1]["images"]
+    assert image == _PNG_B64
+    assert not image.startswith("data:")
+
+
+def test_ollama_sends_every_image_in_one_message_in_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured, _DONE_STREAM)
+
+    _run_chat(
+        OllamaProvider(model="llava:7b"),
+        [_image_message(_PNG_B64, "c2Vjb25k", text="Compare these two.")],
+    )
+
+    assert captured["payload"]["messages"][-1]["images"] == [_PNG_B64, "c2Vjb25k"]
+
+
+def test_ollama_keeps_an_image_across_a_later_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """History is rebuilt on every request, so an old image must survive too."""
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured, _DONE_STREAM)
+
+    _run_chat(
+        OllamaProvider(model="llava:7b"),
+        [
+            _image_message(_PNG_B64),
+            Message(role="assistant", content="A cat."),
+            Message(role="user", content="Are you sure?"),
+        ],
+    )
+
+    messages = captured["payload"]["messages"]
+    assert messages[0]["images"] == [_PNG_B64]
+    assert "images" not in messages[-1]
+
+
+def test_ollama_omits_the_images_field_when_there_is_no_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Guard: a text-only message must go out exactly as it did before."""
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured, _DONE_STREAM)
+
+    _run_chat(OllamaProvider(model="llava:7b"), [Message(role="user", content="Hello")])
+
+    assert captured["payload"]["messages"][-1] == {"role": "user", "content": "Hello"}
+
+
+def test_ollama_leaves_a_url_image_out_of_the_images_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ollama's field takes base64 only, and no writer here produces a url block."""
+    from agentos.provider.types import ContentBlockImage
+
+    captured: dict[str, Any] = {}
+    _patch_transport(monkeypatch, captured, _DONE_STREAM)
+
+    _run_chat(
+        OllamaProvider(model="llava:7b"),
+        [
+            Message(
+                role="user",
+                content=[
+                    ContentBlockImage(
+                        source_type="url",
+                        media_type="image/png",
+                        data="https://example.invalid/cat.png",
+                    )
+                ],
+            )
+        ],
+    )
+
+    assert "images" not in captured["payload"]["messages"][-1]
