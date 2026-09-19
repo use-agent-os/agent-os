@@ -100,7 +100,10 @@ def _chat_history_bool(value: object, *, default: bool) -> bool:
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
-        return value.strip().lower() not in {"0", "false", "no", "off"}
+        cleaned = value.strip().lower()
+        if not cleaned:
+            return default
+        return cleaned not in {"0", "false", "no", "off"}
     return bool(value)
 
 

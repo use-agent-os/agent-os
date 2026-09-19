@@ -506,3 +506,50 @@ async def test_chat_history_exposes_download_url_for_transcript_attachment_refs(
         f"/api/v1/attachments/{sha}?sessionKey=agent%3Amain%3Awebchat%3Atest"
         "&name=webchat-paste-test.txt&mime=text%2Fplain"
     )
+
+
+def test_chat_history_bool_empty_string_returns_default() -> None:
+    from agentos.gateway.rpc_chat import _chat_history_bool
+
+    assert _chat_history_bool("", default=False) is False
+    assert _chat_history_bool("   ", default=False) is False
+    assert _chat_history_bool("", default=True) is True
+    assert _chat_history_bool("true", default=False) is True
+    assert _chat_history_bool("1", default=False) is True
+    assert _chat_history_bool("false", default=True) is False
+    assert _chat_history_bool("0", default=True) is False
+    assert _chat_history_bool(None, default=False) is False
+
+
+def test_api_chat_history_forwards_query_params() -> None:
+    from starlette.testclient import TestClient
+
+    from agentos.gateway.app import create_gateway_app
+    from agentos.gateway.config import GatewayConfig
+
+    entries = [_entry(i) for i in range(1, 10)]
+    sm = _FakeSessionManager(entries, canonical_entries=entries)
+    app = create_gateway_app(GatewayConfig(), session_manager=sm)
+    with TestClient(app, base_url="http://localhost", client=("127.0.0.1", 50000)) as client:
+        resp = client.get("/api/chat/history?sessionKey=agent:main:webchat:test&limit=2")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["messages"]) == 2
+        assert data["page_size"] == 2
+        assert sm.used_canonical is True
+        assert data["canonical_available"] is True
+
+    sm_non_canonical = _FakeSessionManager(entries, canonical_entries=entries)
+    app_non_canonical = create_gateway_app(GatewayConfig(), session_manager=sm_non_canonical)
+    with TestClient(
+        app_non_canonical, base_url="http://localhost", client=("127.0.0.1", 50000)
+    ) as client_nc:
+        resp = client_nc.get(
+            "/api/chat/history?sessionKey=agent:main:webchat:test&includeCanonical=0&limit=2"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert sm_non_canonical.used_canonical is False
+        assert data["canonical_available"] is False
+        assert len(data["messages"]) == 2
+        assert data["page_size"] == 2

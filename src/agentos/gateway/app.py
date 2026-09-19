@@ -501,10 +501,12 @@ def create_gateway_app(
     async def api_chat_history(request: Request) -> JSONResponse:
         """GET /api/chat/history?sessionKey=xxx — return chat transcript."""
         session_key = request.query_params.get("sessionKey", "agent:main:webchat:default")
+        params: dict[str, Any] = {"sessionKey": session_key}
+        for key in ("limit", "before", "after", "includeCanonical", "includeSummaries"):
+            if key in request.query_params:
+                params[key] = request.query_params[key]
         ctx = _make_ctx(request)
-        result = await dispatcher.dispatch(
-            "_http", "chat.history", {"sessionKey": session_key}, ctx
-        )
+        result = await dispatcher.dispatch("_http", "chat.history", params, ctx)
         if result.ok:
             return JSONResponse(result.payload or {"messages": []})
         return JSONResponse(
