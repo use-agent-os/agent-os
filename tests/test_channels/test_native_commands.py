@@ -16,9 +16,12 @@ from agentos.channels.slack import SlackChannel
 from agentos.channels.telegram import TelegramChannel, TelegramChannelConfig
 from agentos.engine import native_commands
 from agentos.engine.native_commands import (
+    DISCORD_COMMAND_NAME_LIMIT,
     DISCORD_DESCRIPTION_LIMIT,
+    SLACK_COMMAND_NAME_LIMIT,
     SLACK_DESCRIPTION_LIMIT,
     TELEGRAM_COMMAND_LIMIT,
+    TELEGRAM_COMMAND_NAME_LIMIT,
     TELEGRAM_DESCRIPTION_LIMIT,
     discord_application_commands,
     slack_command_manifest,
@@ -33,10 +36,48 @@ def test_native_command_payloads_are_derived_from_channel_registry() -> None:
     assert {item["command"] for item in telegram} == {item["name"] for item in discord}
     assert {item["command"] for item in telegram} >= {"help", "new", "status"}
     assert all("/" not in item["command"] for item in telegram)
+    assert all(item["command"].islower() for item in telegram)
+    assert all(len(item["command"]) <= TELEGRAM_COMMAND_NAME_LIMIT for item in telegram)
+    assert all(len(item["name"]) <= DISCORD_COMMAND_NAME_LIMIT for item in discord)
     assert all(item["type"] == 1 for item in discord)
     assert len(telegram) <= TELEGRAM_COMMAND_LIMIT
     assert all(len(item["description"]) <= TELEGRAM_DESCRIPTION_LIMIT for item in telegram)
     assert all(len(item["description"]) <= DISCORD_DESCRIPTION_LIMIT for item in discord)
+
+
+def test_native_channel_commands_normalize_name_and_bound_length(monkeypatch) -> None:
+    from agentos.engine.commands import (
+        CommandDef,
+        CommandExecution,
+        ExecutionKind,
+        SlashCommandRegistry,
+        Surface,
+    )
+
+    custom_registry = SlashCommandRegistry(
+        (
+            CommandDef(
+                name="/Custom_LONG_Command_Name_Exceeding_Thirty_Two_Characters",
+                usage="/custom",
+                description="A command with uppercase and >32 chars",
+                execution={
+                    Surface.CHANNEL: CommandExecution(
+                        kind=ExecutionKind.LOCAL, action="custom"
+                    )
+                },
+            ),
+        )
+    )
+    monkeypatch.setattr(native_commands, "DEFAULT_REGISTRY", custom_registry)
+
+    telegram = telegram_bot_commands()
+    discord = discord_application_commands()
+    assert len(telegram) == 1
+    assert telegram[0]["command"] == "custom_long_command_name_exceedi"
+    assert len(telegram[0]["command"]) == TELEGRAM_COMMAND_NAME_LIMIT
+    assert telegram[0]["command"].islower()
+    assert discord[0]["name"] == "custom_long_command_name_exceedi"
+    assert len(discord[0]["name"]) == DISCORD_COMMAND_NAME_LIMIT
 
 
 def test_telegram_command_payload_honors_platform_limit(monkeypatch) -> None:
@@ -58,6 +99,10 @@ def test_slack_manifest_uses_same_commands_and_request_url() -> None:
     }
     assert all(item["url"] == "https://example.test/slack/events" for item in commands)
     assert all(item["should_escape"] is False for item in commands)
+    assert all(
+        len(item["command"].removeprefix("/")) <= SLACK_COMMAND_NAME_LIMIT
+        for item in commands
+    )
     assert all(len(item["description"]) <= SLACK_DESCRIPTION_LIMIT for item in commands)
 
 

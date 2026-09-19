@@ -11,15 +11,21 @@ from agentos.engine.commands import DEFAULT_REGISTRY, Surface
 # https://discord.com/developers/docs/interactions/application-commands
 # https://api.slack.com/reference/manifests
 TELEGRAM_COMMAND_LIMIT = 100
+TELEGRAM_COMMAND_NAME_LIMIT = 32
 TELEGRAM_DESCRIPTION_LIMIT = 256
+DISCORD_COMMAND_NAME_LIMIT = 32
 DISCORD_DESCRIPTION_LIMIT = 100
+SLACK_COMMAND_NAME_LIMIT = 32
 SLACK_DESCRIPTION_LIMIT = 48
 
 
 def _channel_commands() -> tuple[tuple[str, str], ...]:
     """Return canonical CHANNEL commands as ``(name, description)`` pairs."""
     return tuple(
-        (command.name.lstrip("/"), command.description)
+        (
+            command.name.lstrip("/").lower()[:TELEGRAM_COMMAND_NAME_LIMIT],
+            command.description,
+        )
         for command in DEFAULT_REGISTRY.for_surface(Surface.CHANNEL)
     )
 
