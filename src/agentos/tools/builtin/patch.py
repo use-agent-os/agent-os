@@ -590,6 +590,11 @@ def _apply_hunk(file_lines: list[str], hunk: Hunk, newline: str = "\n") -> list[
     pos = max(hunk.old_start - 1, 0)
     result = list(file_lines)
 
+    if pos > len(result):
+        raise ValueError(
+            f"Hunk start line {hunk.old_start} exceeds file length ({len(result)} lines)"
+        )
+
     # Verify context and deleted lines match
     check_pos = pos
     for raw in hunk.lines:

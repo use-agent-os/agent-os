@@ -370,3 +370,39 @@ def test_separator_after_a_prepend_hunk_is_trimmed() -> None:
 
 def test_counted_trailing_blank_is_kept_and_only_the_separator_is_trimmed() -> None:
     assert _parsed_hunk_lines("@@@ -1,2 +1,2 @@@\n-bar\n+baz\n\n\n") == ["-bar", "+baz", ""]
+
+
+def test_addition_hunk_with_start_exceeding_file_length_raises_error() -> None:
+    hunk = patch_tool.Hunk(old_start=50, old_count=0, new_start=50, new_count=1)
+    hunk.lines = ["+line at 50"]
+
+    with pytest.raises(ValueError, match=r"Hunk start line 50 exceeds file length \(3 lines\)"):
+        patch_tool._apply_hunk(["line1\n", "line2\n", "line3\n"], hunk)
+
+
+def test_addition_hunk_with_start_exceeding_empty_file_raises_error() -> None:
+    hunk = patch_tool.Hunk(old_start=2, old_count=0, new_start=2, new_count=1)
+    hunk.lines = ["+line at 2"]
+
+    with pytest.raises(ValueError, match=r"Hunk start line 2 exceeds file length \(0 lines\)"):
+        patch_tool._apply_hunk([], hunk)
+
+
+def test_addition_hunk_at_exact_eof_is_allowed() -> None:
+    hunk = patch_tool.Hunk(old_start=4, old_count=0, new_start=4, new_count=1)
+    hunk.lines = ["+line4"]
+
+    assert patch_tool._apply_hunk(["line1\n", "line2\n", "line3\n"], hunk) == [
+        "line1\n",
+        "line2\n",
+        "line3\n",
+        "line4\n",
+    ]
+
+
+def test_addition_hunk_at_line_zero_and_one_on_empty_file_is_allowed() -> None:
+    hunk0 = patch_tool.Hunk(old_start=0, old_count=0, new_start=1, new_count=1, lines=["+first"])
+    assert patch_tool._apply_hunk([], hunk0) == ["first\n"]
+
+    hunk1 = patch_tool.Hunk(old_start=1, old_count=0, new_start=1, new_count=1, lines=["+first"])
+    assert patch_tool._apply_hunk([], hunk1) == ["first\n"]
