@@ -383,3 +383,35 @@ async def test_rpc_knowledge_base_root_ingest_rejected(tmp_path: Path):
             assert not (kb / "workspace").exists()
     finally:
         await store.close()
+
+
+def test_rpc_memory_bool_param_coercion() -> None:
+    from agentos.gateway.rpc_memory import _bool_param
+
+    # Python bools
+    assert _bool_param({"flag": True}, "flag") is True
+    assert _bool_param({"flag": False}, "flag") is False
+
+    # Integers 0 and 1
+    assert _bool_param({"flag": 1}, "flag") is True
+    assert _bool_param({"flag": 0}, "flag") is False
+
+    # Truthy strings
+    for truthy in ("true", "True", "TRUE", "1", "yes", "YES", "on", "ON"):
+        assert _bool_param({"flag": truthy}, "flag") is True
+
+    # Falsy strings
+    for falsy in ("false", "False", "FALSE", "0", "no", "NO", "off", "OFF"):
+        assert _bool_param({"flag": falsy}, "flag") is False
+
+    # Missing or None uses default
+    assert _bool_param({}, "flag", default=True) is True
+    assert _bool_param({}, "flag", default=False) is False
+    assert _bool_param({"flag": None}, "flag", default=True) is True
+    assert _bool_param({"flag": None}, "flag", default=False) is False
+
+    # Invalid values raise ValueError
+    for invalid in (2, -1, "invalid", "maybe", [], {}):
+        with pytest.raises(ValueError, match=r"params\.flag must be a boolean"):
+            _bool_param({"flag": invalid}, "flag")
+
