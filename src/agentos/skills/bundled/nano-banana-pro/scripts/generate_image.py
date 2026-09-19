@@ -31,6 +31,7 @@ Auth:
 
 Output: prints the absolute path of the saved PNG on stdout.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -183,9 +184,19 @@ def resolve_api_key(provided: str | None) -> str | None:
     return _openrouter_llm_env_key(llm) or _openrouter_key_from_config(llm)
 
 
+def _is_url(spec: str | None) -> bool:
+    if not spec:
+        return False
+    raw = spec.strip()
+    return raw.startswith(("http://", "https://", "data:"))
+
+
 def encode_input_image(path: str) -> str:
-    raw = Path(path).read_bytes()
-    suffix = Path(path).suffix.lower().lstrip(".")
+    raw_path = path.strip()
+    if _is_url(raw_path):
+        return raw_path
+    raw = Path(raw_path).read_bytes()
+    suffix = Path(raw_path).suffix.lower().lstrip(".")
     mime = {
         "jpg": "image/jpeg",
         "jpeg": "image/jpeg",
@@ -196,7 +207,9 @@ def encode_input_image(path: str) -> str:
     return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
 
 
-def build_payload(prompt: str, input_image: str | None, aspect_ratio: str, image_size: str, model: str) -> dict:
+def build_payload(
+    prompt: str, input_image: str | None, aspect_ratio: str, image_size: str, model: str
+) -> dict:
     user_content: list = [{"type": "text", "text": prompt}]
     if input_image:
         user_content.append(
@@ -238,11 +251,21 @@ def extract_finish_reason(data: dict) -> str | None:
     return None
 
 
-def decode_data_url(data_url: str) -> bytes:
-    prefix, sep, encoded = data_url.partition(",")
-    if not sep or ";base64" not in prefix:
-        raise RuntimeError("OpenRouter returned a non-base64 image URL")
-    return base64.b64decode(encoded)
+def _fetch_url_to_bytes(url: str, api_key: str, timeout: int = 180) -> bytes:
+    if url.startswith("data:"):
+        prefix, sep, encoded = url.partition(",")
+        if not sep or ";base64" not in prefix:
+            raise RuntimeError("OpenRouter returned a non-base64 image URL")
+        return base64.b64decode(encoded)
+    if not url.startswith(("http://", "https://")):
+        raise RuntimeError(f"Unsupported URL scheme: {url[:60]}")
+    headers: dict[str, str] = {}
+    if _is_openrouter_url(url):
+        headers["Authorization"] = f"Bearer {api_key}"
+        headers.update(_openrouter_attribution_headers(url))
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read()
 
 
 def post_chat_completions(base_url: str, api_key: str, payload: dict, timeout: int) -> dict:
@@ -281,7 +304,7 @@ def _try_one_attempt(
         reason = extract_finish_reason(data) or "unknown"
         head = json.dumps(data, ensure_ascii=False)[:600]
         raise RuntimeError(f"no image (finish_reason={reason}); head={head}")
-    return decode_data_url(image_url)
+    return _fetch_url_to_bytes(image_url, api_key, timeout)
 
 
 def _write_placeholder_png(out_path: Path, prompt: str, aspect_ratio: str) -> None:
@@ -345,23 +368,33 @@ def main() -> int:
     parser.add_argument("--prompt", "-p", required=True)
     parser.add_argument("--filename", "-f", required=True, help="Output filename (.png)")
     parser.add_argument("--input-image", "-i", help="Optional reference image path")
-    parser.add_argument("--aspect-ratio", default="1:1", choices=["1:1", "3:2", "2:3", "16:9", "9:16", "4:3", "3:4"])
+    parser.add_argument(
+        "--aspect-ratio", default="1:1", choices=["1:1", "3:2", "2:3", "16:9", "9:16", "4:3", "3:4"]
+    )
     parser.add_argument("--image-size", default="1K", choices=["1K", "2K", "4K"])
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument(
-        "--max-retries", type=int, default=0,
+        "--max-retries",
+        type=int,
+        default=0,
         help="Extra retries on the PRIMARY model before moving on to --fallback-model entries. Default 0.",
     )
     parser.add_argument(
-        "--fallback-model", action="append", default=[],
+        "--fallback-model",
+        action="append",
+        default=[],
         help="Repeatable. Each is tried ONCE after the primary model exhausts its retries.",
     )
     parser.add_argument(
-        "--placeholder-on-fail", default="no", choices=["yes", "no"],
+        "--placeholder-on-fail",
+        default="no",
+        choices=["yes", "no"],
         help="When every model refuses, write a solid-colour placeholder PNG instead of exiting non-zero. Default no.",
     )
     parser.add_argument(
-        "--retry-backoff-cap", type=int, default=8,
+        "--retry-backoff-cap",
+        type=int,
+        default=8,
         help="Maximum sleep seconds between retries (exponential backoff capped here).",
     )
     parser.add_argument("--api-key", "-k")
@@ -379,7 +412,7 @@ def main() -> int:
         )
         return 1
 
-    if args.input_image and not Path(args.input_image).is_file():
+    if args.input_image and not _is_url(args.input_image) and not Path(args.input_image).is_file():
         print(f"Error: --input-image not found: {args.input_image}", file=sys.stderr)
         return 1
 
@@ -420,7 +453,7 @@ def main() -> int:
             last_error = f"[{model} #{n}] {exc}"
             print(f"  {last_error}", file=sys.stderr)
             if attempt_idx < len(schedule):
-                backoff = min(2 ** n, args.retry_backoff_cap)
+                backoff = min(2**n, args.retry_backoff_cap)
                 print(f"  sleeping {backoff}s before next attempt", file=sys.stderr)
                 time.sleep(backoff)
 
