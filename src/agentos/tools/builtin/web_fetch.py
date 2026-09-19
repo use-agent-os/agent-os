@@ -96,6 +96,74 @@ def _markdown_to_text(markdown: str) -> str:
     return h.handle(markdown)
 
 
+def _sniff_meta_charset(body: bytes) -> str | None:
+    """Extract text codec from HTML <meta> tags in the first 1024 bytes of body."""
+    import codecs
+    import re
+
+    head = body[:1024]
+    head_clean = re.sub(rb"(?s)<!--.*?-->", b"", head)
+
+    m = re.search(rb"""(?i)<meta\s+[^>]*\bcharset\s*=\s*['"]?([a-zA-Z0-9._-]+)['"]?""", head_clean)
+    if not m:
+        m = re.search(
+            rb"""(?i)<meta\s+[^>]*\bcontent\s*=\s*['"]?[^'"]*charset\s*=\s*([a-zA-Z0-9._-]+)['"]?""",
+            head_clean,
+        )
+    if not m:
+        return None
+
+    raw_charset = m.group(1).decode("ascii", errors="ignore").strip().lower()
+    if not raw_charset:
+        return None
+
+    if raw_charset in ("utf-16", "utf-16le", "utf-16be", "utf-32", "utf-32le", "utf-32be"):
+        return "utf-8"
+
+    if raw_charset in ("iso-8859-1", "latin1", "latin-1", "iso8859-1"):
+        return "cp1252"
+
+    try:
+        info = codecs.lookup(raw_charset)
+        "a".encode(info.name)
+        return info.name
+    except (LookupError, Exception):
+        return None
+
+
+def _decode_html_bytes(
+    raw_body: bytes,
+    content_type: str,
+    header_charset: str | None = None,
+) -> str:
+    """Decode raw HTTP body handling BOM, header charset, and HTML <meta> charset."""
+    body = raw_body
+    is_html = "html" in (content_type or "").lower()
+    if body.startswith(b"\xef\xbb\xbf"):
+        body = body[3:]
+    elif is_html and body.startswith((b"\xfe\xff", b"\xff\xfe")):
+        # A page only. Outside HTML this path also carries opaque bytes, and a
+        # binary body mislabelled ``text/plain`` starts with these two markers
+        # as readily as real UTF-16 does -- decoding it anyway turns a blob
+        # into plausible-looking CJK and hides the mislabelling that the
+        # U+FFFD in the decoded body exists to show
+        # (test_http_request_keeps_body_base64_for_misleading_text_content_type).
+        try:
+            return body.decode("utf-16", errors="replace")
+        except Exception:
+            pass
+
+    encoding = header_charset
+    if not encoding and is_html:
+        encoding = _sniff_meta_charset(body)
+
+    encoding = encoding or "utf-8"
+    try:
+        return body.decode(encoding, errors="replace")
+    except Exception:
+        return body.decode("utf-8", errors="replace")
+
+
 async def _try_firecrawl(url: str, api_key: str) -> tuple[str, str] | None:
     """Try Firecrawl API. Returns (content, extractor) or None."""
     try:
@@ -289,12 +357,6 @@ async def web_fetch(
                 # only caps what is returned to the model, not what is
                 # downloaded.
                 download_limit = _resolve_download_limit_bytes()
-                # Snapshot the charset advertised in Content-Type before we
-                # start streaming — httpx derives response.encoding from
-                # those headers, and we have to honour the server's charset
-                # (e.g. text/plain; charset=iso-8859-1) instead of assuming
-                # UTF-8. Falling back to utf-8 matches httpx's own default.
-                response_encoding = response.encoding or "utf-8"
                 total = 0
                 chunks: list[bytes] = []
                 truncated = False
@@ -306,12 +368,14 @@ async def web_fetch(
                         break
 
                 raw_body = b"".join(chunks)
-                raw_text = raw_body.decode(response_encoding, errors="replace")
+                content_type = response.headers.get("content-type", "")
+                header_charset = response.charset_encoding
+                raw_text = _decode_html_bytes(raw_body, content_type, header_charset)
 
                 return (
                     response.status_code,
                     str(response.url),
-                    response.headers.get("content-type", ""),
+                    content_type,
                     raw_text,
                     truncated,
                 )

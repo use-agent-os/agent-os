@@ -16,6 +16,7 @@ from agentos.env import trust_env as _trust_env
 from agentos.redact import credential_text_marker, secret_header_marker, secret_literal_marker
 from agentos.sandbox.integration import sandboxed
 from agentos.search.types import SearchProviderError, SearchResult
+from agentos.tools.builtin.web_fetch import _decode_html_bytes
 from agentos.tools.path_policy import reject_foreign_host_path
 from agentos.tools.registry import tool
 from agentos.tools.ssrf import assert_not_metadata_endpoint
@@ -303,7 +304,7 @@ async def http_request(
             status_code = response.status_code
             response_url = str(response.url)
             response_headers = dict(response.headers)
-            response_encoding = response.encoding or "utf-8"
+            response_encoding = response.charset_encoding
             content_type = response_headers.get("content-type", "")
         finally:
             await response.aclose()
@@ -317,7 +318,7 @@ async def http_request(
         saved_path, digest = _save_http_response_body(raw_body, output_path)
         preview = (
             wrap_untrusted_boundary(
-                raw_body[:_TEXT_BODY_LIMIT].decode(response_encoding, "replace"),
+                _decode_html_bytes(raw_body[:_TEXT_BODY_LIMIT], content_type, response_encoding),
                 response_url,
             )
             if is_text
@@ -348,7 +349,7 @@ async def http_request(
         download_capped or stream_truncated or len(raw_body) > _BINARY_BODY_LIMIT
     )
     if is_text:
-        text_body = raw_body.decode(response_encoding, "replace")
+        text_body = _decode_html_bytes(raw_body, content_type, response_encoding)
         body = wrap_untrusted_boundary(text_body[:_TEXT_BODY_LIMIT], response_url)
         body_truncated = download_capped or stream_truncated or len(text_body) > _TEXT_BODY_LIMIT
     else:

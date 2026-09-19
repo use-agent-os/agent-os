@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- `web_fetch` and `http_request`: HTML pages that omit the `charset` parameter
+  in HTTP `Content-Type` headers now parse `<meta charset="...">` and
+  `<meta http-equiv="Content-Type" content="...;charset=...">` tags from the
+  document head to decode non-UTF-8 character encodings (e.g. Shift_JIS,
+  Windows-1251, Windows-1252) instead of assuming UTF-8 and mangling the text.
 - Discord channel: a reaction added to the bot's own message in a guild
   channel or thread is no longer silently dropped by the group mention
   gate. `is_group_mentioned` fell back to searching a reaction's (always
