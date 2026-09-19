@@ -248,6 +248,51 @@ def test_added_and_deleted_blank_lines_keep_their_prefix_semantics() -> None:
     assert patch_tool._apply_hunk(["foo\n", "\n", "bar\n"], hunk) == ["foo\n", "\n", "added\n"]
 
 
+def test_hunk_line_without_a_recognized_prefix_is_rejected_not_dropped() -> None:
+    """A line that isn't ' '/'-'/'+' -- prefixed used to vanish from both the
+    context check and the rebuilt content with no error, while apply_patch
+    still reported success. Same contract as the '*** Add File' block, which
+    already rejects an unprefixed line instead of silently dropping it."""
+    patch_text = (
+        "*** Begin Patch\n"
+        "*** Update File: foo.py\n"
+        "@@@ -1,1 +1,3 @@@\n"
+        " line1\n"
+        "+added_line\n"
+        "malformed_line_no_prefix\n"
+        "*** End Patch"
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Update File: foo\.py.*' ', '-', or '\+' prefix.*'malformed_line_no_prefix'",
+    ):
+        patch_tool._parse_patch(patch_text)
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_rejects_rather_than_silently_drops_a_malformed_hunk_line(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "foo.py"
+    target.write_text("line1\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"'malformed_line_no_prefix'"):
+        await _apply(
+            tmp_path,
+            "*** Begin Patch\n"
+            "*** Update File: foo.py\n"
+            "@@@ -1,1 +1,3 @@@\n"
+            " line1\n"
+            "+added_line\n"
+            "malformed_line_no_prefix\n"
+            "*** End Patch",
+        )
+
+    # Nothing was written -- a rejected patch must not partially apply.
+    assert target.read_text(encoding="utf-8") == "line1\n"
+
+
 def test_blank_context_line_reuses_the_original_file_line() -> None:
     """A blank context line is copied through, not re-synthesised."""
     hunk = _hunk(1, 2, 3, [" foo", "", "+"])

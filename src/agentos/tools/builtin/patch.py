@@ -198,7 +198,18 @@ def _parse_patch(patch_text: str) -> list[PatchOp]:
                         and not body[i].startswith("@@@ ")
                         and not body[i].startswith("*** ")
                     ):
-                        hunk.lines.append(body[i])
+                        raw = body[i]
+                        if raw and raw[0] not in (" ", "-", "+"):
+                            # Same contract as the '*** Add File' block above:
+                            # a line that doesn't start with a recognized
+                            # hunk-line prefix is rejected here, not silently
+                            # excluded from both the context check and the
+                            # rebuilt content further down in _apply_hunk.
+                            raise ValueError(
+                                f"Invalid line in '*** Update File: {path}' hunk "
+                                f"(expected a ' ', '-', or '+' prefix): {raw!r}"
+                            )
+                        hunk.lines.append(raw)
                         i += 1
                     _trim_trailing_separators(hunk)
                     hunks.append(hunk)
