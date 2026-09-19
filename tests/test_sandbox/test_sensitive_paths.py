@@ -646,3 +646,49 @@ def test_cwd_alone_still_anchors_relative_targets(fixed_home: Path) -> None:
     assert (
         sensitive_target_in_command("rm scratch.txt", cwd=Path("/root/.agentos/workspace")) is None
     )
+
+
+# --- Issue #1503: backslash tilde tokens and undetermined home directory ------
+
+
+def test_sensitive_path_marker_with_backslash_tilde_tokens(fixed_home: Path) -> None:
+    """Tokens like ~\\.aws\\credentials should resolve without raising RuntimeError."""
+    assert sensitive_path_marker(r"~\.aws\credentials") == "~/.aws"
+    assert sensitive_path_marker(r"~\.ssh\id_rsa") == "~/.ssh"
+    assert sensitive_path_marker(r"~\.azure\tokens") == "~/.azure"
+    assert sensitive_path_marker(r"~\.docker\config") == "~/.docker/config"
+    assert sensitive_path_marker(r"~\.vault-token") == "~/.vault-token"
+    assert sensitive_path_marker(r"~\benign\path") is None
+
+
+def test_sensitive_path_in_text_with_backslash_tilde_tokens(fixed_home: Path) -> None:
+    assert sensitive_path_in_text(r"cat ~\.aws\credentials") == "~/.aws"
+    assert sensitive_path_in_text(r"type ~\.ssh\id_rsa") == "~/.ssh"
+    assert sensitive_path_in_text(r"del ~\.ssh\id_rsa") == "~/.ssh"
+    assert sensitive_path_in_text(r"cat ~\.vault-token") == "~/.vault-token"
+
+
+def test_sensitive_target_in_command_with_backslash_tilde_tokens(fixed_home: Path) -> None:
+    assert sensitive_target_in_command(r"rm ~\.aws\credentials") == "~/.aws"
+    assert sensitive_target_in_command(r"rm -rf ~\.ssh\id_rsa") == "~/.ssh"
+    assert sensitive_target_in_command(r"shutil.rmtree('~\.azure\tokens')") == "~/.azure"
+
+
+def test_sensitive_paths_when_home_cannot_be_determined(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In minimal containers where home cannot be determined, operations must not crash."""
+    monkeypatch.delenv("HOME", raising=False)
+    monkeypatch.delenv("USERPROFILE", raising=False)
+
+    def _raise_home(*args: object, **kwargs: object) -> Path:
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(Path, "home", _raise_home)
+
+    # Should not raise RuntimeError:
+    marker = sensitive_path_marker(r"~\.aws\credentials")
+    assert marker == "~/.aws" or marker is None
+    assert sensitive_path_in_text("cat /etc/passwd") == "/etc"
+    assert sensitive_target_in_command("rm -rf /etc") == "/etc"
+

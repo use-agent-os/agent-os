@@ -152,7 +152,12 @@ _DOTENV_LITERAL_RE = re.compile(
 def _expand(path: str) -> str:
     """Expand ``~`` and resolve to absolute without requiring existence."""
     try:
-        return str(Path(path).expanduser().resolve(strict=False))
+        normalized = (
+            path.replace("\\", "/")
+            if path.startswith("~\\") or path.startswith("~")
+            else path
+        )
+        return str(Path(normalized).expanduser().resolve(strict=False))
     except (OSError, RuntimeError):
         return path
 
@@ -168,8 +173,11 @@ def _comparison_path_candidates(path: str) -> list[str]:
     if raw:
         candidates.append(raw.casefold() if os.name == "nt" else raw)
     if raw.startswith("~/"):
-        expanded_home = str(Path.home()).replace("\\", "/") + raw[1:]
-        candidates.append(expanded_home.casefold() if os.name == "nt" else expanded_home)
+        try:
+            expanded_home = str(Path.home()).replace("\\", "/") + raw[1:]
+            candidates.append(expanded_home.casefold() if os.name == "nt" else expanded_home)
+        except (OSError, RuntimeError):
+            pass
     return list(dict.fromkeys(candidates))
 
 
@@ -287,8 +295,8 @@ def _workspace_contains(path: str, workspace: str | Path | None) -> bool:
     if workspace is None:
         return False
     try:
-        candidate = Path(path).expanduser().resolve(strict=False)
-        root = Path(workspace).expanduser().resolve(strict=False)
+        candidate = Path(str(path).replace("\\", "/")).expanduser().resolve(strict=False)
+        root = Path(str(workspace).replace("\\", "/")).expanduser().resolve(strict=False)
         candidate.relative_to(root)
         return True
     except (OSError, RuntimeError, ValueError):
@@ -306,8 +314,8 @@ def _workspace_nested_under_marker(workspace: str | Path | None, marker: str) ->
     if workspace is None or marker not in _WORKSPACE_PARENT_EXCEPTION_MARKERS:
         return False
     try:
-        root = Path(workspace).expanduser().resolve(strict=False)
-        marker_root = Path(marker).expanduser().resolve(strict=False)
+        root = Path(str(workspace).replace("\\", "/")).expanduser().resolve(strict=False)
+        marker_root = Path(str(marker).replace("\\", "/")).expanduser().resolve(strict=False)
         if root == marker_root:
             return False
         root.relative_to(marker_root)
@@ -354,11 +362,16 @@ def sensitive_path_marker(
     # turns into an absolute sensitive path, and the narrow leaf-marker
     # fallback below would be the only check it ever faced.
     text = _expand_env_vars(str(path).strip())
-    raw = Path(text).expanduser()
+    try:
+        raw = Path(text.replace("\\", "/")).expanduser()
+        is_abs = raw.is_absolute()
+    except (OSError, RuntimeError):
+        raw = Path(text)
+        is_abs = False
     if (
         text
         and not text.startswith("~")
-        and not raw.is_absolute()
+        and not is_abs
         and not _looks_like_rooted_path_text(text)
     ):
         return _sensitive_leaf_marker(text)
@@ -518,14 +531,20 @@ def _resolve_command_cwd(cwd: str | Path | None, workspace: str | Path | None) -
     given, a relative one is anchored to the workspace, and with neither the
     workspace itself (or, failing that, the process cwd) is the anchor.
     """
-    if cwd is not None:
-        raw = Path(cwd).expanduser()
-        if raw.is_absolute() or workspace is None:
-            return raw
-        return Path(workspace).expanduser() / raw
-    if workspace is not None:
-        return Path(workspace).expanduser()
-    return Path.cwd()
+    try:
+        if cwd is not None:
+            raw = Path(str(cwd).replace("\\", "/")).expanduser()
+            if raw.is_absolute() or workspace is None:
+                return raw
+            return Path(str(workspace).replace("\\", "/")).expanduser() / raw
+        if workspace is not None:
+            return Path(str(workspace).replace("\\", "/")).expanduser()
+    except (OSError, RuntimeError):
+        pass
+    try:
+        return Path.cwd()
+    except (OSError, RuntimeError):
+        return Path("/")
 
 
 def build_block_envelope(

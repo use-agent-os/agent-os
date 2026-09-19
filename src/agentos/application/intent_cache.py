@@ -23,7 +23,6 @@ network egress) need intent-level memory.
 from __future__ import annotations
 
 import itertools
-import os
 import re
 import shlex
 import threading
@@ -45,11 +44,12 @@ def _norm_path(raw: str, *, base_dir: str | Path | None = None) -> str:
     if not raw or raw.startswith(("$", "`")) or raw in {"*", "-"}:
         return raw
     try:
-        path = Path(raw).expanduser()
+        normalized = raw.replace("\\", "/") if raw.startswith("~\\") or raw.startswith("~") else raw
+        path = Path(normalized).expanduser()
         if base_dir is not None and not path.is_absolute():
             path = Path(base_dir).expanduser() / path
         return str(path.resolve(strict=False))
-    except (OSError, ValueError):
+    except (OSError, RuntimeError, ValueError):
         return raw
 
 
@@ -310,7 +310,7 @@ def _extract_rm_targets(command: str) -> list[tuple[str, frozenset[str]]]:
             token_sets.append(shlex.split(tail))
         except ValueError:
             token_sets.append(tail.split())
-        if "\\" in tail and (os.name == "nt" or re.search(r"(?:^|\s)\\[^\s]", tail)):
+        if "\\" in tail:
             try:
                 token_sets.append(shlex.split(tail, posix=False))
             except ValueError:
