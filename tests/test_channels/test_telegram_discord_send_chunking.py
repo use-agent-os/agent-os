@@ -208,6 +208,35 @@ def test_split_text_for_limit_backs_up_to_text_before_a_first_line_fence() -> No
     assert head + tail == segment  # nothing invented; a real cut existed
 
 
+def test_split_text_for_limit_keeps_a_tilde_fenced_block_whole() -> None:
+    """``~~~`` is the other CommonMark fence, reached for exactly when the
+    body contains backticks; the Telegram renderer has treated it as a fence
+    since #2022, so the splitter must back a cut out of one just like it
+    does for ``` (the ``` half of this pair is the assertion above)."""
+    body = "\n".join(f"line {i} of *sample* code" for i in range(40))
+    segment = f"Here is the snippet:\n\n~~~markdown\n{body}\n~~~\n"
+
+    head, tail = split_text_for_limit(segment, 300)
+
+    assert head.count("~~~") % 2 == 0
+    assert tail.count("~~~") % 2 == 0
+    assert head + tail == segment
+
+
+def test_split_text_for_limit_balances_a_bare_tilde_fence_that_opens_the_segment() -> None:
+    """The #2127 shape with the tilde marker: nothing before the fence to
+    back up to, so the head is closed and the tail reopened -- with ``~~~``,
+    not a backtick closer that would leave both halves malformed."""
+    segment = "~~~" + ("a" * 100) + "~~~\nrest"
+
+    head, tail = split_text_for_limit(segment, 50)
+
+    assert head.count("~~~") % 2 == 0
+    assert tail.count("~~~") % 2 == 0
+    assert "```" not in head + tail
+    assert len(head) <= 50
+
+
 def test_split_text_for_limit_falls_back_to_an_unbalanced_cut_rather_than_hang() -> None:
     """When the limit is too small to fit even a closed fence, the function
     must still terminate -- accepting one unbalanced chunk beats an infinite

@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Message chunking: a `~~~` fenced code block split across two messages no
+  longer loses its fence. `split_text_for_limit` only ever counted ```` ``` ````
+  markers, so a cut landing inside a tilde-fenced block left the first half
+  with an unclosed fence and the second half with none at all — the second
+  half then rendered as prose, and the markdown inside the code (`*like
+  this*`) was re-interpreted as formatting instead of shown literally. Both
+  CommonMark fence markers are now recognized; the backtick path is
+  unchanged.
 - Discord channel: a reaction added to the bot's own message in a guild
   channel or thread is no longer silently dropped by the group mention
   gate. `is_group_mentioned` fell back to searching a reaction's (always
