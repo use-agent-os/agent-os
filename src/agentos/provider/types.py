@@ -194,6 +194,19 @@ class ModelInfo(BaseModel):
     input_cost_per_1k: float = 0.0
     output_cost_per_1k: float = 0.0
 
+    @property
+    def name(self) -> str:
+        """Display name falling back to model_id."""
+        return self.display_name or self.model_id
+
+    def calculate_cost(self, input_tokens: int = 0, output_tokens: int = 0) -> float:
+        """Calculate estimated cost in USD for the given token counts."""
+        return (
+            (input_tokens / 1000.0) * self.input_cost_per_1k
+            + (output_tokens / 1000.0) * self.output_cost_per_1k
+        )
+
+
 
 # ---------------------------------------------------------------------------
 # Chat config (Pydantic BaseModel — call-time settings)
