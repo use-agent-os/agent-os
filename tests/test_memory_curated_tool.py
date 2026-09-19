@@ -200,3 +200,86 @@ async def test_memory_tool_picks_up_budget_change_without_restart(tmp_path):
 
     now_fits = json.loads(await tools["memory"](action="add", content="y" * 50))
     assert now_fits["success"] is True
+
+
+def _patched(root_config, **memory_fields):
+    """Apply config.patch's real mutation: replace root.memory with a new instance."""
+    from agentos.gateway.config import GatewayConfig
+    from agentos.gateway.rpc_config import _update_config_in_place
+
+    dump = root_config.model_dump()
+    dump["memory"].update(memory_fields)
+    old = root_config.memory
+    _update_config_in_place(root_config, GatewayConfig(**dump))
+    assert root_config.memory is not old, "setup: patch must replace config.memory"
+
+
+def _live_tools(tmp_path, **memory_fields):
+    from agentos.gateway.config import GatewayConfig
+
+    registry = ToolRegistry()
+    root_config = GatewayConfig(config_path=str(tmp_path / "c.toml"), memory=memory_fields)
+    create_memory_tools(
+        stores=_FakeMemorySaveStore(),
+        retrievers=SimpleNamespace(),
+        memory_dir=str(tmp_path),
+        registry=registry,
+        memory_config=root_config.memory,
+        config_root=root_config,
+    )
+    return root_config, {name: registry.get(name).handler for name in registry.list_names()}
+
+
+async def test_memory_save_applies_a_tightened_file_size_limit_without_restart(tmp_path):
+    """#2972: memory_save's size limits read the captured ``memory_config``,
+    which config.patch orphans -- so a tightened limit never took effect."""
+    root_config, tools = _live_tools(tmp_path, max_file_size_kb=1000)
+    await tools["memory_save"](path="memory/a.md", content="x" * 2048, mode="replace")
+
+    _patched(root_config, max_file_size_kb=1)
+
+    with pytest.raises(ToolError, match="per-file limit"):
+        await tools["memory_save"](path="memory/b.md", content="x" * 2048, mode="replace")
+
+
+async def test_memory_save_enforces_a_file_count_enabled_after_boot(tmp_path):
+    """A cap switched on after boot was never enforced: the captured config
+    still said ``max_files = 0``."""
+    root_config, tools = _live_tools(tmp_path, max_files=0)
+    await tools["memory_save"](path="memory/one.md", content="first", mode="replace")
+
+    _patched(root_config, max_files=1)
+
+    with pytest.raises(ToolError, match="max file count"):
+        await tools["memory_save"](path="memory/two.md", content="second", mode="replace")
+
+
+async def test_memory_save_honours_a_relaxed_total_limit_without_restart(tmp_path):
+    """The other direction: a raised limit must stop refusing writes."""
+
+    class _SizedStore(_FakeMemorySaveStore):
+        async def total_size(self) -> int:
+            return 50 * 1024
+
+    from agentos.gateway.config import GatewayConfig
+
+    registry = ToolRegistry()
+    root_config = GatewayConfig(
+        config_path=str(tmp_path / "c.toml"), memory={"max_total_size_kb": 10}
+    )
+    create_memory_tools(
+        stores=_SizedStore(),
+        retrievers=SimpleNamespace(),
+        memory_dir=str(tmp_path),
+        registry=registry,
+        memory_config=root_config.memory,
+        config_root=root_config,
+    )
+    tools = {name: registry.get(name).handler for name in registry.list_names()}
+    with pytest.raises(ToolError, match="total memory limit"):
+        await tools["memory_save"](path="memory/n.md", content="note", mode="replace")
+
+    _patched(root_config, max_total_size_kb=10_000)
+
+    result = await tools["memory_save"](path="memory/n.md", content="note", mode="replace")
+    assert "Saved to memory/n.md" in result
