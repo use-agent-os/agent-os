@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Provider: `OpenAIImageGenerationProvider` now passes `"response_format": "b64_json"` in the HTTP payload to OpenAI's `/v1/images/generations` endpoint instead of `"output_format"`, allowing base64 image data to be properly returned and extracted without failing with `RuntimeError("Image generation provider returned no b64_json")`.
 - Discord channel: a reaction added to the bot's own message in a guild
   channel or thread is no longer silently dropped by the group mention
   gate. `is_group_mentioned` fell back to searching a reaction's (always
