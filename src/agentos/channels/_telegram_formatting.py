@@ -134,6 +134,8 @@ _DUNDER_NAMES = _python_dunder_names()
 
 _BOLD_UNDERSCORE_RE = re.compile(r"__(?=\S)(.+?)(?<=\S)__")
 
+_ITALIC_ASTERISK_RE = re.compile(r"(?<!\*)\*(?=\S)(.+?)(?<=\S)\*(?!\*)")
+
 #: Same word-boundary guards as the italic pass in :func:`_render_inline`, so
 #: ``snake_case`` survives the table-label strip too.
 _ITALIC_UNDERSCORE_RE = re.compile(r"(?<!\w)_(?=[^\s_])(.+?)(?<=[^\s_])_(?!\w)")
@@ -213,10 +215,7 @@ def _plain_inline(text: str) -> str:
     text = _BOLD_UNDERSCORE_RE.sub(_bold_underscore_strip, text)
     for marker in ("**", "~~"):
         text = text.replace(marker, "")
-    # `_italic_` was never stripped here, so a header written with
-    # underscore-italics kept its delimiters while its bold and strike
-    # neighbours lost theirs. The sibling of the #1931 fix, which only reached
-    # `_render_inline`.
+    text = _ITALIC_ASTERISK_RE.sub(r"\1", text)
     text = _ITALIC_UNDERSCORE_RE.sub(r"\1", text)
     for index, href in enumerate(hrefs):
         text = text.replace(f"\x00TG_HREF_{index}\x00", href)

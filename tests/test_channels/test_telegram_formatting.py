@@ -49,8 +49,7 @@ if x < 2:
     assert "<b>Result &lt;safe&gt;</b>" in rendered
     assert "Use <b>care &amp; caution</b> with <code>x &lt; 2</code>." in rendered
     assert (
-        '<pre><code class="language-python">'
-        "if x &lt; 2:\n    print(&quot;&amp;&quot;)</code></pre>"
+        '<pre><code class="language-python">if x &lt; 2:\n    print(&quot;&amp;&quot;)</code></pre>'
     ) in rendered
 
 
@@ -180,12 +179,7 @@ async def test_telegram_send_falls_back_to_plain_text_on_entity_parse_error() ->
 
 def test_two_column_table_with_short_row_pads_missing_cell() -> None:
     """A 2-column table row with only 1 cell should be padded, not dropped."""
-    markdown = (
-        "| Header A | Header B |\n"
-        "| --- | --- |\n"
-        "| Row 1 Only |\n"
-        "| x | y |\n"
-    )
+    markdown = "| Header A | Header B |\n| --- | --- |\n| Row 1 Only |\n| x | y |\n"
     rendered = render_telegram_html(markdown)
 
     # Both rows must appear — the old `break` dropped "| x | y |".
@@ -199,12 +193,7 @@ def test_two_column_table_with_short_row_pads_missing_cell() -> None:
 
 def test_three_column_table_with_short_row_pads_missing_cells() -> None:
     """A 3-column table row missing trailing cells should be padded."""
-    markdown = (
-        "| A | B | C |\n"
-        "| --- | --- | --- |\n"
-        "| only-a |\n"
-        "| x | y | z |\n"
-    )
+    markdown = "| A | B | C |\n| --- | --- | --- |\n| only-a |\n| x | y | z |\n"
     rendered = render_telegram_html(markdown)
 
     assert "<b>A · B · C</b>" in rendered
@@ -219,12 +208,7 @@ def test_three_column_table_with_short_row_pads_missing_cells() -> None:
 
 def test_table_row_with_extra_columns_is_truncated() -> None:
     """A row with more cells than headers should be truncated, not break."""
-    markdown = (
-        "| A | B |\n"
-        "| --- | --- |\n"
-        "| 1 | 2 | 3 | 4 |\n"
-        "| x | y |\n"
-    )
+    markdown = "| A | B |\n| --- | --- |\n| 1 | 2 | 3 | 4 |\n| x | y |\n"
     rendered = render_telegram_html(markdown)
 
     assert "<b>A — B</b>" in rendered
@@ -599,3 +583,35 @@ def test_unterminated_tilde_fence_runs_to_the_end() -> None:
 )
 def test_two_tildes_are_still_strikethrough(markdown: str, expected: str) -> None:
     assert render_telegram_html(markdown) == expected
+
+
+@pytest.mark.parametrize(
+    ("markdown", "expected"),
+    [
+        ("*heading*", "heading"),
+        ("***heading***", "heading"),
+        ("*both* and **bold**", "both and bold"),
+        ("*alpha* and _beta_", "alpha and beta"),
+        ("`code` and *em*", "code and em"),
+    ],
+)
+def test_plain_inline_strips_asterisk_and_triple_markers(markdown: str, expected: str) -> None:
+    """Table headers and plain labels strip single and triple asterisk markers cleanly."""
+    assert _plain_inline(markdown) == expected
+
+
+def test_table_headers_and_labels_strip_asterisk_italics() -> None:
+    markdown = (
+        "| *Metric* | *Value* |\n"
+        "| --- | --- |\n"
+        "| *Latency* | 12ms |\n"
+        "| ***Throughput*** | 500 rps |\n"
+    )
+    rendered = render_telegram_html(markdown)
+
+    assert "<b>Metric — Value</b>" in rendered
+    assert "<b>Latency:</b> 12ms" in rendered
+    assert "<b>Throughput:</b> 500 rps" in rendered
+    assert "*Metric*" not in rendered
+    assert "*Latency*" not in rendered
+    assert "*Throughput*" not in rendered

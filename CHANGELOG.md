@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Channels / Telegram: Strip single-asterisk (`*italic*`) and triple-asterisk (`***bold italic***`) markers in `_plain_inline`, so Markdown table headers and row labels in Telegram HTML mode do not leak raw asterisk formatting characters.
+
 ## [2026.9.18] - 2026-09-18
 
 ### Added
