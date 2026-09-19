@@ -78,6 +78,17 @@ def test_weather_entrypoint_extracts_destination_and_compacts_forecast(
     assert payload["errors"] == []
 
 
+def test_extract_location_falls_back_to_london_when_destination_is_blank() -> None:
+    """A blank ``DESTINATION:`` value must fall back to the same default as
+    no text at all, not to whatever unrelated line happens to be first."""
+    module = _load_module()
+
+    assert (
+        module._extract_location("DATES: next weekend\nTRAVELERS: 2\nDESTINATION:   \n") == "London"
+    )
+    assert module._extract_location("DESTINATION: \nDATES: tomorrow\n") == "London"
+
+
 def test_weather_entrypoint_returns_seasonal_hint_on_network_error(
     monkeypatch,
     capsys,

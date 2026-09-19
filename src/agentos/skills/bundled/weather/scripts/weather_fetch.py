@@ -18,9 +18,13 @@ def _extract_location(raw: str) -> str:
     if not text:
         return "London"
     for line in text.splitlines():
-        match = re.match(r"\s*DESTINATION:\s*(.+?)\s*$", line, flags=re.I)
+        match = re.match(r"\s*DESTINATION:\s*(.*?)\s*$", line, flags=re.I)
         if match:
-            return match.group(1).strip()
+            # A DESTINATION field is present, so it -- not some other field
+            # in the contract -- is the caller's answer for "where"; a blank
+            # value means no destination was resolved, same as no text at
+            # all, not "fall through to whatever line comes first".
+            return match.group(1).strip() or "London"
     first = text.splitlines()[0].strip()
     return first[:120] or "London"
 
