@@ -49,9 +49,14 @@ class TextToolCall:
 
 
 def _parameter_value(attributes: str, raw: str) -> Any:
-    if raw.startswith("\n"):
+    if raw.startswith("\r\n"):
+        raw = raw[2:]
+    elif raw.startswith("\n"):
         raw = raw[1:]
-    if raw.endswith("\n"):
+
+    if raw.endswith("\r\n"):
+        raw = raw[:-2]
+    elif raw.endswith("\n") or raw.endswith("\r"):
         raw = raw[:-1]
 
     attr = _STRING_ATTR_RE.search(attributes)
