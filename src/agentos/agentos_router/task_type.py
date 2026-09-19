@@ -102,6 +102,8 @@ _TRANSLATE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("de", r"\b(?:ü|ue)bersetz(?:e|en|t|st)\b"),
     # Portuguese — verb forms only.
     ("pt", r"\btraduza\b|\btraduzir\b|\btraduz\b|\btraduzam\b"),
+    # Italian — verb forms only.
+    ("it", r"\btradur(?:re|rò|rà)\b|\btraduc(?:i|ete|a|ano|iamo)\b"),
     # Russian — imperative and infinitive only (noun "перевод" excluded).
     ("ru", r"\bперевед(?:и|ите)\b|\bперевести\b"),
     # Arabic — ترجم and its inflections.

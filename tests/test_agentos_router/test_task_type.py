@@ -31,6 +31,7 @@ TRANSLATE_REQUESTS: tuple[tuple[str, str], ...] = (
     ("es", "Traduce esta frase al inglés: Hoy hace muy buen tiempo."),
     ("de", "Übersetze diesen Satz ins Englische: Das Wetter ist heute schön."),
     ("pt", "Traduza esta frase para o inglês: O tempo está muito bom hoje."),
+    ("it", "Traduci questa frase in inglese: Oggi fa bel tempo."),
     ("ru", "Переведите это предложение на английский: Сегодня прекрасная погода."),
     ("ar", "ترجم هذه الجملة إلى الإنجليزية: الطقس جميل اليوم."),
     ("hi", "इस वाक्य का अंग्रेज़ी में अनुवाद करें: आज मौसम बहुत अच्छा है।"),
@@ -59,6 +60,7 @@ NON_TRANSLATE: tuple[tuple[str, str], ...] = (
     ("en_nat_bug", "Fix the address translation bug in the NAT layer."),
     ("en_i18n_keys", "Our translation keys are out of sync with the locale files."),
     ("en_past_tense", "The translated output was cached before the deploy."),
+    ("it_nat_bug", "Correggi il bug nella traduzione degli indirizzi di rete."),
     ("th_strange", "เรื่องนี้แปลกมาก ช่วยดูให้หน่อย"),
     ("th_convert", "ช่วยแปลงไฟล์นี้เป็น PDF"),
     ("ja_reason", "その訳ではうまくいかない理由を教えてください。"),
@@ -112,6 +114,11 @@ class TestProgrammingLanguageTarget:
 
     def test_programming_language_target_blocks_in_vietnamese(self) -> None:
         verdict = detect_task_type("Dịch đoạn code này sang Rust giúp tôi.")
+        assert verdict.task_type is None
+        assert verdict.blocked_by == BLOCK_CODE_TARGET
+
+    def test_programming_language_target_blocks_in_italian(self) -> None:
+        verdict = detect_task_type("Traduci questo modulo Python in Rust, stessa interfaccia.")
         assert verdict.task_type is None
         assert verdict.blocked_by == BLOCK_CODE_TARGET
 
