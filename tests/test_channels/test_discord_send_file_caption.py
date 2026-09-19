@@ -266,6 +266,27 @@ async def test_a_lost_overflow_does_not_turn_a_delivered_file_into_a_failure(
     assert events[0]["overflow_chars"] == 1
 
 
+async def test_a_runtime_error_exhausted_overflow_does_not_fail_delivered_file(
+    sample: Path,
+) -> None:
+    """Issue #3051: When retry_request exhausts retries on follow-up overflow,
+    it raises RuntimeError. The already-uploaded file delivery must stand."""
+    channel, recorder = _channel(), Recorder(statuses=[200])
+    _attach(channel, recorder)
+    channel.send = AsyncMock(side_effect=RuntimeError("retry_request exhausted"))  # type: ignore[method-assign]
+
+    with structlog.testing.capture_logs() as logs:
+        result = await channel.send_file("C1", str(sample), content="x" * (LIMIT + 1))
+
+    assert result.is_delivered()
+    assert result.provider_message_id == "101"
+    events = [
+        entry for entry in logs if entry["event"] == "discord.send_file_caption_overflow_failed"
+    ]
+    assert len(events) == 1
+    assert events[0]["error"] == "retry_request exhausted"
+
+
 async def test_a_failed_upload_still_raises_and_sends_no_follow_up(sample: Path) -> None:
     channel, recorder = _channel(), Recorder(statuses=[400])
     _attach(channel, recorder)

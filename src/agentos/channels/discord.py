@@ -1291,7 +1291,7 @@ class DiscordChannel:
             # own result stands.
             try:
                 await self.send(OutgoingMessage(content=overflow, reply_to=target_channel))
-            except httpx.HTTPError as exc:
+            except (httpx.HTTPError, RuntimeError) as exc:
                 log.warning(
                     "discord.send_file_caption_overflow_failed",
                     channel_id=target_channel,
