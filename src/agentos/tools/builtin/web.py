@@ -426,6 +426,8 @@ def is_search_api_key_configured(provider_name: str | None = None) -> bool:
         spec = get_provider_spec(provider)
     except Exception:
         return False
+    if provider == "brave" and os.environ.get("BRAVE_API_KEY"):
+        return True
     return bool(spec.env_key and os.environ.get(spec.env_key))
 
 

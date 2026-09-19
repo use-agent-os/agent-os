@@ -40,3 +40,21 @@ def test_web_search_kwargs_pass_brave_api_key() -> None:
     web.configure_search("brave", api_key="brave-test-key")
 
     assert web._search_provider_kwargs("brave")["api_key"] == "brave-test-key"
+
+
+def test_brave_provider_falls_back_to_brave_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+    monkeypatch.setenv("BRAVE_API_KEY", "legacy-brave-key")
+
+    provider = BraveSearchProvider()
+
+    assert provider._api_key == "legacy-brave-key"
+
+
+def test_is_search_api_key_configured_detects_brave_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
+    monkeypatch.setenv("BRAVE_API_KEY", "legacy-brave-key")
+
+    assert web.is_search_api_key_configured("brave") is True

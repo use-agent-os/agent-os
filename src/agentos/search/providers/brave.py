@@ -26,7 +26,9 @@ class BraveSearchProvider:
         diagnostics: bool = False,
     ) -> None:
         self._api_key = clean_header_secret(
-            api_key or os.environ.get("BRAVE_SEARCH_API_KEY", ""),
+            api_key
+            or os.environ.get("BRAVE_SEARCH_API_KEY", "")
+            or os.environ.get("BRAVE_API_KEY", ""),
             label="Brave Search API key",
         )
         self._proxy = proxy or None
