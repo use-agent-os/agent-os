@@ -30,9 +30,9 @@ def build(spec: Any) -> Document:
     meta = spec.get("metadata", {})
     if isinstance(meta, dict):
         core = doc.core_properties
-        if "title" in meta:
+        if "title" in meta and meta["title"] is not None:
             core.title = str(meta["title"])
-        if "author" in meta:
+        if "author" in meta and meta["author"] is not None:
             core.author = str(meta["author"])
 
     body = spec.get("body")
@@ -49,10 +49,12 @@ def build(spec: Any) -> Document:
             except (TypeError, ValueError):
                 level = 1
             level = max(0, min(9, level))
-            doc.add_heading(str(item.get("text", "")), level=level)
+            text = item.get("text")
+            doc.add_heading("" if text is None else str(text), level=level)
         elif kind == "paragraph":
             style = item.get("style") or "Normal"
-            doc.add_paragraph(str(item.get("text", "")), style=style)
+            text = item.get("text")
+            doc.add_paragraph("" if text is None else str(text), style=style)
         elif kind == "table":
             raw_rows = item.get("rows")
             if not isinstance(raw_rows, (list, tuple)):
@@ -68,7 +70,7 @@ def build(spec: Any) -> Document:
             table = doc.add_table(rows=len(rows), cols=ncols)
             for r_idx, row in enumerate(rows):
                 for c_idx, value in enumerate(row):
-                    table.rows[r_idx].cells[c_idx].text = str(value)
+                    table.rows[r_idx].cells[c_idx].text = "" if value is None else str(value)
         elif kind == "page_break":
             doc.add_page_break()
     return doc
