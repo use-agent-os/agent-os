@@ -57,30 +57,58 @@ def _emit(data: bytes, stream: TextIO) -> None:
     stream.flush()
 
 
-def _run_git(args: list[str], cwd: Path) -> tuple[int, bytes, bytes]:
+def _run_git(
+    args: list[str], cwd: Path, input_bytes: bytes | None = None
+) -> tuple[int, bytes, bytes]:
     proc = subprocess.run(  # noqa: S603 — argv is constructed from a static allowlist
         ["git", *args],
         cwd=str(cwd),
+        input=input_bytes,
         capture_output=True,
         check=False,
     )
     return proc.returncode, proc.stdout, proc.stderr
 
 
+def _base_revision(cwd: Path) -> str:
+    """What to diff against: ``HEAD``, or the empty tree before the first commit.
+
+    Before the first commit HEAD is an unborn branch, and ``git diff HEAD`` /
+    ``git diff --cached HEAD`` exit 128 with ``ambiguous argument 'HEAD'``
+    even when files are staged (#2882). Dropping the revision is not a
+    substitute: bare ``git diff`` compares the worktree to the index, so it
+    loses everything already staged, and bare ``git diff --cached`` loses any
+    edit made after staging. With no commit yet, "changes since HEAD" means
+    "changes since nothing" -- a diff against the empty tree, which reports
+    the staged content and later edits together, as ``git diff HEAD`` would.
+
+    The empty tree's id is asked of git rather than hard-coded, so a SHA-256
+    repository gets its own. If neither lookup works (not a repository at
+    all), ``HEAD`` is kept so git's own error is what the caller sees.
+    """
+    rc, _out, _err = _run_git(["rev-parse", "--verify", "--quiet", "HEAD"], cwd)
+    if rc == 0:
+        return "HEAD"
+    rc, out, _err = _run_git(["hash-object", "-t", "tree", "--stdin"], cwd, input_bytes=b"")
+    empty_tree = out.decode("ascii", "replace").strip()
+    return empty_tree if rc == 0 and empty_tree else "HEAD"
+
+
 def _diff_for_mode(mode: str, cwd: Path) -> tuple[int, bytes, bytes]:
+    if mode == "staged_files":
+        return _run_git(["diff", "--cached", "--name-only"], cwd)
+    base = _base_revision(cwd)
     if mode == "cached_fallback_worktree":
-        rc, out, err = _run_git(["diff", "--cached", "HEAD"], cwd)
+        rc, out, err = _run_git(["diff", "--cached", base], cwd)
         if rc != 0:
             return rc, out, err
         if out.strip():
             return 0, out, err
-        return _run_git(["diff", "HEAD"], cwd)
+        return _run_git(["diff", base], cwd)
     if mode == "cached":
-        return _run_git(["diff", "--cached", "HEAD"], cwd)
+        return _run_git(["diff", "--cached", base], cwd)
     if mode == "worktree":
-        return _run_git(["diff", "HEAD"], cwd)
-    if mode == "staged_files":
-        return _run_git(["diff", "--cached", "--name-only"], cwd)
+        return _run_git(["diff", base], cwd)
     raise ValueError(f"unsupported mode {mode!r}")
 
 
