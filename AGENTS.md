@@ -127,6 +127,14 @@ Docs live in `docs/` (`docs/README.md` is the index); helper scripts in `scripts
   `src/agentos/skills/bundled/agentos/SKILL.md` (and `docs/cli.md`) and those
   docs updated in the same PR so the bundled operator guide never drifts from
   the real CLI.
+- **Bundled skill scripts write UTF-8.** A script under
+  `src/agentos/skills/bundled/*/scripts/` runs on the interpreter AgentOS runs
+  on and its output is read back as UTF-8, but its console may be cp1252 or
+  cp936. Import from `agentos.skills.stdio`: call `configure_utf8_stdio()` at
+  the top of `main` (`stdin=True` if the script reads a piped payload), or use
+  `write_stdout()` for a single result payload; pass `**SUBPROCESS_UTF8` to a
+  `subprocess.run` that decodes a child's output. `tests/test_skill_stdout_utf8.py`
+  fails a new script that does neither.
 
 ## Commits & PRs
 

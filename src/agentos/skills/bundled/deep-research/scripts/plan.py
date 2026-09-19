@@ -11,6 +11,13 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+# Bundled scripts run under AgentOS's own interpreter; the path insert only
+# matters in a source checkout where the package is not installed (#2804).
+_SRC_ROOT = str(Path(__file__).resolve().parents[5])
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+from agentos.skills.stdio import configure_utf8_stdio  # noqa: E402
+
 DEPTHS: dict[str, tuple[int, int, int]] = {
     # depth → (min_subquestions, max_subquestions, target_sources_per_sq)
     "overview": (3, 5, 1),
@@ -77,6 +84,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    configure_utf8_stdio()
     args = _parse_args()
     plan = Plan(
         question=args.question,

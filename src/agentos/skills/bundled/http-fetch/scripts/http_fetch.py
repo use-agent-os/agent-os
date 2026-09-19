@@ -14,6 +14,14 @@ import argparse
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
+
+# Bundled scripts run under AgentOS's own interpreter; the path insert only
+# matters in a source checkout where the package is not installed (#2804).
+_SRC_ROOT = str(Path(__file__).resolve().parents[5])
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+from agentos.skills.stdio import configure_utf8_stdio  # noqa: E402
 
 
 def _fetch(
@@ -41,6 +49,7 @@ def _fetch(
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_utf8_stdio()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", required=True)
     parser.add_argument("--method", default="GET")

@@ -29,6 +29,7 @@ if str(_AGENTOS_ROOT.parent) not in sys.path:
 from agentos.observability.decision_log_aggregate import (  # noqa: E402
     aggregate_co_occurrences,
 )
+from agentos.skills.stdio import configure_utf8_stdio  # noqa: E402
 
 
 def _expand_user_path(raw_path: str) -> Path:
@@ -94,6 +95,7 @@ def aggregate_router_fixtures(repo_root: Path | None = None) -> list[dict]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_utf8_stdio()
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--log-dir",

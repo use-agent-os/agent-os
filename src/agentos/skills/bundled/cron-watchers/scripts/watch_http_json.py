@@ -24,6 +24,13 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+# Bundled scripts run under AgentOS's own interpreter; the path insert only
+# matters in a source checkout where the package is not installed (#2804).
+_SRC_ROOT = str(Path(__file__).resolve().parents[5])
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+from agentos.skills.stdio import configure_utf8_stdio  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).parent))
 
 from _url import require_http_url  # noqa: E402
@@ -54,6 +61,7 @@ def _summarize(item: dict[str, Any], fields: list[str]) -> str:
 
 
 def main() -> int:
+    configure_utf8_stdio()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", required=True, help="Endpoint returning JSON")
     parser.add_argument("--name", required=True, help="Watermark name, unique per endpoint")

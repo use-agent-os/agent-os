@@ -21,6 +21,13 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Bundled scripts run under AgentOS's own interpreter; the path insert only
+# matters in a source checkout where the package is not installed (#2804).
+_SRC_ROOT = str(Path(__file__).resolve().parents[5])
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+from agentos.skills.stdio import configure_utf8_stdio  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 FAILURES: list[str] = []
@@ -696,6 +703,7 @@ def tier11_hostile_input() -> None:
 
 
 def main() -> int:
+    configure_utf8_stdio()
     print("poolsdotfun-token-launcher selftest — offline, no network")
     for tier in (tier1_reference_calldata, tier2_create2, tier3_error_selectors,
                  tier4_curve_math, tier5_plan_hash, tier6_metadata,

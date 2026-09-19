@@ -29,6 +29,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Bundled scripts run under AgentOS's own interpreter; the path insert only
+# matters in a source checkout where the package is not installed (#2804).
+_SRC_ROOT = str(Path(__file__).resolve().parents[5])
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+from agentos.skills.stdio import configure_utf8_stdio  # noqa: E402
+
 WINGET_FFMPEG_GLOB = (
     "Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_*/"
     "ffmpeg-*-full_build/bin/ffmpeg.exe"
@@ -61,6 +68,7 @@ def resolve_ffmpeg(explicit: str) -> str:
 
 
 def main() -> int:
+    configure_utf8_stdio()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", "-i", required=True, help="Input PNG or JPG")
     parser.add_argument("--output", "-o", required=True, help="Output MP4 path")

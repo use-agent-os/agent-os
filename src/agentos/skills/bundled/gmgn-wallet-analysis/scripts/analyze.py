@@ -28,6 +28,13 @@ import subprocess
 import sys
 import time
 
+# Bundled scripts run under AgentOS's own interpreter; the path insert only
+# matters in a source checkout where the package is not installed (#2804).
+_SRC_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), *[".."] * 5))
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+from agentos.skills.stdio import configure_utf8_stdio  # noqa: E402
+
 # ─────────────────────────── plumbing ───────────────────────────
 
 
@@ -822,7 +829,7 @@ class Gap(Exception):
 
 def cli(args, timeout=45):
     r = subprocess.run(
-        ["gmgn-cli"] + args + ["--raw"], capture_output=True, text=True, timeout=timeout
+        ["gmgn-cli"] + args + ["--raw"], capture_output=True, encoding="utf-8", errors="replace", timeout=timeout
     )
     if r.returncode != 0:
         raise Gap((r.stderr or r.stdout or "gmgn-cli failed").strip()[:400])
@@ -2735,6 +2742,7 @@ def actions(m, g, card_shown=False):
 
 
 def main(argv):
+    configure_utf8_stdio()
     args = [a for a in argv[1:]]
     latency_s, my_size, fixture, brief = 3.0, None, None, False
     rest = []

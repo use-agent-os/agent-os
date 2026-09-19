@@ -12,6 +12,13 @@ from typing import Any
 from openpyxl import load_workbook
 from openpyxl.cell.cell import TYPE_BOOL, TYPE_FORMULA, TYPE_NUMERIC, TYPE_STRING
 
+# Bundled scripts run under AgentOS's own interpreter; the path insert only
+# matters in a source checkout where the package is not installed (#2804).
+_SRC_ROOT = str(Path(__file__).resolve().parents[5])
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+from agentos.skills.stdio import configure_utf8_stdio  # noqa: E402
+
 
 def _serialize(value: Any) -> Any:
     if isinstance(value, datetime):
@@ -75,6 +82,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    configure_utf8_stdio()
     args = _parse_args()
     if not args.path.is_file():
         print(f"error: {args.path} not found", file=sys.stderr)

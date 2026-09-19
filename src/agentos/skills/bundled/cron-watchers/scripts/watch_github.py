@@ -24,6 +24,13 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+# Bundled scripts run under AgentOS's own interpreter; the path insert only
+# matters in a source checkout where the package is not installed (#2804).
+_SRC_ROOT = str(Path(__file__).resolve().parents[5])
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+from agentos.skills.stdio import configure_utf8_stdio  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).parent))
 
 from _watermark import positive_int, select_new  # noqa: E402
@@ -62,6 +69,7 @@ def _describe(scope: str, item: dict[str, Any]) -> tuple[str, str]:
 
 
 def main() -> int:
+    configure_utf8_stdio()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", required=True, help="owner/name")
     parser.add_argument("--scope", default="issues", choices=SCOPES, help="What to watch")

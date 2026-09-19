@@ -24,6 +24,13 @@ import sys
 from pathlib import Path
 from typing import TextIO
 
+# Bundled scripts run under AgentOS's own interpreter; the path insert only
+# matters in a source checkout where the package is not installed (#2804).
+_SRC_ROOT = str(Path(__file__).resolve().parents[5])
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+from agentos.skills.stdio import configure_utf8_stdio  # noqa: E402
+
 _VALID_MODES = {
     "cached_fallback_worktree",
     "cached",
@@ -85,6 +92,7 @@ def _diff_for_mode(mode: str, cwd: Path) -> tuple[int, bytes, bytes]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_utf8_stdio()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", default="cached_fallback_worktree")
     parser.add_argument("--cwd", default=".")

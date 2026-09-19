@@ -7,6 +7,13 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+# Bundled scripts run under AgentOS's own interpreter; the path insert only
+# matters in a source checkout where the package is not installed (#2804).
+_SRC_ROOT = str(Path(__file__).resolve().parents[5])
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+from agentos.skills.stdio import configure_utf8_stdio  # noqa: E402
+
 PAGE_SIZES = {
     "letter": "Letter",
     "a4": "A4",
@@ -61,6 +68,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    configure_utf8_stdio()
     args = _parse_args()
     render(args.html, args.out, args.page_size)
     print(f"wrote {args.out}")

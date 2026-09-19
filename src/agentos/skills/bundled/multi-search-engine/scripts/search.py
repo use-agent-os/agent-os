@@ -18,6 +18,13 @@ from typing import Any
 import httpx
 from bs4 import BeautifulSoup
 
+# Bundled scripts run under AgentOS's own interpreter; the path insert only
+# matters in a source checkout where the package is not installed (#2804).
+_SRC_ROOT = str(Path(__file__).resolve().parents[5])
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+from agentos.skills.stdio import configure_utf8_stdio  # noqa: E402
+
 USER_AGENT = "Mozilla/5.0 (compatible; AgentOS-multi-search-engine/0.1)"
 TIMEOUT_S = 8.0
 
@@ -554,6 +561,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    configure_utf8_stdio()
     args = _parse_args()
     engines = [e.strip() for e in args.engines.split(",") if e.strip()]
     payload = search_all(args.query, engines, args.limit, args.strict)

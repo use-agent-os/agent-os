@@ -29,6 +29,13 @@ import sys
 import time
 from pathlib import Path
 
+# Bundled scripts run under AgentOS's own interpreter; the path insert only
+# matters in a source checkout where the package is not installed (#2804).
+_SRC_ROOT = str(Path(__file__).resolve().parents[5])
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+from agentos.skills.stdio import configure_utf8_stdio  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lp_read import pool_key_for_id  # noqa: E402  (read-only; imports no signing path)
@@ -1339,6 +1346,7 @@ COMMANDS = {
 def main() -> None:
     # From here on this process is the interactive CLI, and MandateAuthorization refuses to
     # be constructed. The unattended runner imports this module and never calls main().
+    configure_utf8_stdio()
     global _ARGV_ENTRY
     _ARGV_ENTRY = True
 

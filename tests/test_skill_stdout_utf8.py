@@ -322,3 +322,336 @@ def test_rwa_lookup_result_echoes_the_query_as_utf8(monkeypatch: pytest.MonkeyPa
     with CodePageStdout() as code_page_stdout:
         assert rwa_lookup.main() == 0
     assert code_page_stdout.payload()["query"] == NON_ASCII
+
+
+# ── #2804: the sweep, and the guard that keeps it swept ─────────────────────
+#
+# The helper now lives in ``agentos.skills.stdio``. Every bundled script that
+# touches stdout or stdin goes through it, or through one of the two inline
+# forms earlier batches established. The test below is parametrised over the
+# bundled tree at collection time, so a script added without the convention
+# appears here on its own and fails.
+
+import ast  # noqa: E402
+import re  # noqa: E402
+
+SCRIPTS = sorted(BUNDLED.glob("*/scripts/*.py"))
+STDIO_IMPORT = re.compile(r"^from agentos\.skills\.stdio import ", re.M)
+INLINE_FORMS = (
+    "reconfigure(encoding",  # earlier batches: reconfigure in place
+    "stdout.buffer",  # earlier batches: buffer write in place
+    'getattr(sys.stdout, "buffer"',  # pptx/extract_text.py's spelling of it
+)
+STDOUT_USE = re.compile(r"\bprint\(|sys\.stdout\b|json\.dump\(")
+STDIN_TEXT_READ = re.compile(r"sys\.stdin\.(read|readline|readlines)\(")
+
+
+def _rel(path: Path) -> str:
+    return path.relative_to(BUNDLED).as_posix()
+
+
+def _uses_stdout(source: str) -> bool:
+    return STDOUT_USE.search(source) is not None
+
+
+def _reads_stdin_as_text(source: str) -> bool:
+    return STDIN_TEXT_READ.search(source) is not None and "stdin.buffer" not in source
+
+
+def _subprocess_text_calls(source: str) -> list[tuple[int, bool]]:
+    """``(line, names_encoding)`` for every subprocess call that decodes as text."""
+    calls: list[tuple[int, bool]] = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if name not in {"run", "check_output", "Popen", "check_call"}:
+            continue
+        keywords = {k.arg: k.value for k in node.keywords if k.arg}
+        text_mode = any(
+            isinstance(keywords.get(k), ast.Constant) and keywords[k].value is True
+            for k in ("text", "universal_newlines")
+        )
+        spreads_utf8 = any(k.arg is None for k in node.keywords)  # **SUBPROCESS_UTF8
+        if text_mode or "encoding" in keywords or spreads_utf8:
+            calls.append((node.lineno, "encoding" in keywords or spreads_utf8))
+    return calls
+
+
+@pytest.mark.parametrize("script", SCRIPTS, ids=_rel)
+def test_every_bundled_script_follows_the_utf8_stdio_convention(script: Path) -> None:
+    """The guard. A script that writes to stdout must import the shared
+    helper (and call it), or carry one of the inline forms earlier batches
+    used. A script that does no stdout or stdin I/O at all is exempt."""
+    source = script.read_text(encoding="utf-8")
+    if not _uses_stdout(source) and not STDIN_TEXT_READ.search(source):
+        return  # a helper module, not a script that emits anything
+    shared = STDIO_IMPORT.search(source) is not None
+    inline = any(form in source for form in INLINE_FORMS)
+    assert shared or inline, f"{_rel(script)} writes to stdout without the UTF-8 convention"
+    if shared:
+        assert re.search(r"\b(configure_utf8_stdio|write_stdout|_write_stdout)\(", source), (
+            f"{_rel(script)} imports the shared helper but never calls it"
+        )
+
+
+@pytest.mark.parametrize("script", SCRIPTS, ids=_rel)
+def test_a_script_reading_stdin_as_text_configures_stdin(script: Path) -> None:
+    """Point 2 of #2804: a piped payload is UTF-8 whatever the console is."""
+    source = script.read_text(encoding="utf-8")
+    if not _reads_stdin_as_text(source):
+        return
+    assert "configure_utf8_stdio(stdin=True)" in source or "stdin.reconfigure(" in source, (
+        f"{_rel(script)} reads sys.stdin as text through the console code page"
+    )
+
+
+@pytest.mark.parametrize("script", SCRIPTS, ids=_rel)
+def test_a_text_mode_subprocess_names_its_encoding(script: Path) -> None:
+    """Point 3 of #2804: ``text=True`` alone inherits the locale."""
+    source = script.read_text(encoding="utf-8")
+    for line, names_encoding in _subprocess_text_calls(source):
+        assert names_encoding, f"{_rel(script)}:{line} decodes a child through the locale"
+
+
+def test_the_guard_actually_sees_every_script() -> None:
+    """If the glob ever stops matching, the guard passes vacuously; pin the
+    count the sweep was done against so a silent zero is caught."""
+    assert len(SCRIPTS) >= 50
+
+
+def test_the_shared_helper_is_not_copied_anywhere() -> None:
+    """#2804: one copy, in ``agentos.skills.stdio``."""
+    copies = [_rel(s) for s in SCRIPTS if "def _write_stdout(" in s.read_text(encoding="utf-8")]
+
+    assert copies == []
+
+
+def test_the_four_pipe_receivers_named_in_the_issue_configure_stdin() -> None:
+    for rel in (
+        "gmgn-market/scripts/kline_chart.py",
+        "gmgn-token/scripts/kline_chart.py",
+        "robinhood-chain-stocks/scripts/chain_cards.py",
+        "robinhood-rwa-addresses/scripts/rwa_cards.py",
+    ):
+        source = (BUNDLED / rel).read_text(encoding="utf-8")
+        assert "configure_utf8_stdio(stdin=True)" in source, rel
+
+
+def test_the_gmgn_cli_calls_named_in_the_issue_decode_as_utf8() -> None:
+    for rel in (
+        "gmgn-wallet-score/scripts/score.py",
+        "gmgn-holder-analysis/scripts/analyze.py",
+        "gmgn-wallet-analysis/scripts/analyze.py",
+    ):
+        source = (BUNDLED / rel).read_text(encoding="utf-8")
+        assert "text=True" not in source, rel
+        assert 'encoding="utf-8", errors="replace"' in source, rel
+
+
+# ── behaviour, on a simulated code page, for the newly covered scripts ─────
+
+
+class CodePageStdin:
+    """A ``sys.stdin`` that would decode a UTF-8 pipe through a legacy page."""
+
+    def __init__(self, payload: str, encoding: str = "cp1252") -> None:
+        self.stream = io.TextIOWrapper(io.BytesIO(payload.encode("utf-8")), encoding=encoding)
+        self._saved: Any = None
+
+    def __enter__(self) -> CodePageStdin:
+        self._saved = sys.stdin
+        sys.stdin = self.stream
+        return self
+
+    def __exit__(self, *_exc: Any) -> None:
+        sys.stdin = self._saved
+
+
+def test_chain_cards_decodes_a_utf8_pipe_and_names_its_output_as_utf8(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Both halves of #2781: the piped query survives, and the output path is
+    printed as UTF-8."""
+    chain_cards = _load("robinhood-chain-stocks/scripts/chain_cards.py", "chain_cards_2804")
+    output = tmp_path / f"{NON_ASCII}.json"
+    payload = json.dumps({"query": NON_ASCII, "token": {"isStockToken": True, "name": NON_ASCII}})
+    _argv(monkeypatch, "chain_cards.py", "--output", str(output))
+
+    with CodePageStdin(payload), CodePageStdout() as code_page_stdout:
+        assert chain_cards.main() == 0
+
+    assert code_page_stdout.text().startswith(f"publish_artifact path={output}")
+    assert json.loads(output.read_text(encoding="utf-8"))["title"].endswith(NON_ASCII)
+
+
+def test_rwa_cards_decodes_a_utf8_pipe_as_utf8(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rwa_cards = _load("robinhood-rwa-addresses/scripts/rwa_cards.py", "rwa_cards_2804")
+    output = tmp_path / "cards.json"
+    payload = json.dumps(
+        {"query": NON_ASCII, "matches": [{"symbol": "AAPL", "name": NON_ASCII, "address": "0x1"}]}
+    )
+    _argv(monkeypatch, "rwa_cards.py", "--output", str(output))
+
+    with CodePageStdin(payload), CodePageStdout() as code_page_stdout:
+        rc = rwa_cards.main()
+
+    assert rc == 0
+    assert "publish_artifact" in code_page_stdout.text()
+    assert NON_ASCII in output.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("skill", ["gmgn-market", "gmgn-token"])
+def test_kline_chart_decodes_a_utf8_pipe_and_prints_its_path_as_utf8(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, skill: str
+) -> None:
+    """#2783: the piped kline JSON, and the publish line naming the output."""
+    kline_chart = _load(f"{skill}/scripts/kline_chart.py", f"kline_chart_{skill}_2804")
+    output = tmp_path / f"{NON_ASCII}.svg"
+    rows = [
+        {
+            "time": 1_700_000_000 + i * 60,
+            "open": 1,
+            "high": 2,
+            "low": 0.5,
+            "close": 1.5,
+            "volume": 10,
+        }
+        for i in range(5)
+    ]
+    _argv(monkeypatch, "kline_chart.py", "--input", "-", "--output", str(output))
+
+    with CodePageStdin(json.dumps(rows)), CodePageStdout() as code_page_stdout:
+        rc = kline_chart.main()
+
+    assert rc == 0, code_page_stdout.text()
+    assert f"publish_artifact path={output}" in code_page_stdout.text()
+
+
+def test_inspect_xlsx_emits_cjk_cells_as_utf8(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from openpyxl import Workbook
+
+    inspect_xlsx = _load("xlsx/scripts/inspect_xlsx.py", "inspect_xlsx_2804")
+    book = tmp_path / "book.xlsx"
+    workbook = Workbook()
+    workbook.active.append([NON_ASCII, 1])
+    workbook.save(str(book))
+    _argv(monkeypatch, "inspect_xlsx.py", str(book))
+
+    with CodePageStdout() as code_page_stdout:
+        assert inspect_xlsx.main() == 0
+
+    assert NON_ASCII in code_page_stdout.text()
+
+
+def test_build_srt_prints_a_non_ascii_output_path_as_utf8(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    build_srt = _load("srt-from-script/scripts/build_srt.py", "build_srt_2804")
+    script = tmp_path / "script.txt"
+    script.write_text(f"=== SHOT_1 ===\nDURATION_S: 3\nVOICEOVER: {NON_ASCII}\n", encoding="utf-8")
+    out = tmp_path / f"{NON_ASCII}.srt"
+    _argv(monkeypatch, "build_srt.py", "--script", str(script), "--out", str(out))
+
+    with CodePageStdout() as code_page_stdout:
+        assert build_srt.main() == 0
+
+    assert code_page_stdout.text().strip() == str(out)
+    assert NON_ASCII in out.read_text(encoding="utf-8")
+
+
+def test_plan_prints_a_non_ascii_plan_path_as_utf8(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    plan = _load("deep-research/scripts/plan.py", "plan_2804")
+    out = tmp_path / f"{NON_ASCII}.json"
+    _argv(monkeypatch, "plan.py", "--question", NON_ASCII, "--out", str(out))
+
+    with CodePageStdout() as code_page_stdout:
+        assert plan.main() == 0
+
+    assert json.loads(code_page_stdout.text())["plan_path"] == str(out)
+
+
+def test_weather_fetch_emits_a_non_ascii_location_as_utf8(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#2713, with the network stubbed at the one function that touches it."""
+    weather = _load("weather/scripts/weather_fetch.py", "weather_fetch_2804")
+    monkeypatch.setattr(
+        weather,
+        "_fetch_wttr_json",
+        lambda *_a, **_k: {
+            "current_condition": [{"weatherDesc": [{"value": NON_ASCII}], "temp_C": "20"}],
+            "weather": [],
+        },
+    )
+    _argv(monkeypatch, "weather_fetch.py", "--location", NON_ASCII)
+
+    with CodePageStdout() as code_page_stdout:
+        assert weather.main() == 0
+
+    assert NON_ASCII in code_page_stdout.text()
+
+
+def test_http_fetch_writes_a_utf8_body_as_utf8(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#2643's encoding half: a UTF-8 response body reaches stdout intact."""
+    http_fetch = _load("http-fetch/scripts/http_fetch.py", "http_fetch_2804")
+    monkeypatch.setattr(
+        http_fetch, "_fetch", lambda *_a, **_k: (200, NON_ASCII.encode("utf-8"), "OK")
+    )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
+    _argv(monkeypatch, "http_fetch.py", "--url", "https://example.test/")
+
+    with CodePageStdout() as code_page_stdout:
+        rc = http_fetch.main()
+
+    assert rc == 0
+    assert code_page_stdout.text() == NON_ASCII
+
+
+def test_watch_rss_reports_a_cjk_title_as_utf8(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    watch_rss = _load("cron-watchers/scripts/watch_rss.py", "watch_rss_2804")
+    feed = (
+        '<?xml version="1.0"?><rss><channel><item><title>'
+        f"{NON_ASCII}</title><link>https://x/1</link><guid>1</guid></item></channel></rss>"
+    ).encode()
+
+    class _Response:
+        def read(self) -> bytes:
+            return feed
+
+        def __enter__(self) -> _Response:
+            return self
+
+        def __exit__(self, *_exc: Any) -> None:
+            return None
+
+    monkeypatch.setattr(watch_rss.urllib.request, "urlopen", lambda *_a, **_k: _Response())
+    monkeypatch.setenv("AGENTOS_STATE_DIR", str(tmp_path / "state"))
+    _argv(
+        monkeypatch, "watch_rss.py", "--url", "https://x/feed", "--name", "t", "--first-run-reports"
+    )
+
+    with CodePageStdout() as code_page_stdout:
+        assert watch_rss.main() == 0
+
+    assert f"- {NON_ASCII}" in code_page_stdout.text()
+
+
+def test_a_configured_script_keeps_working_under_pytest_capture(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Without a simulated code page, pytest's capture has no ``reconfigure``;
+    the helper must leave it alone and the script must still print."""
+    plan = _load("deep-research/scripts/plan.py", "plan_2804_capsys")
+    out = tmp_path / "plan.json"
+    _argv(monkeypatch, "plan.py", "--question", "q", "--out", str(out))
+
+    assert plan.main() == 0
+    assert json.loads(capsys.readouterr().out)["plan_path"] == str(out)

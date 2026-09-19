@@ -28,37 +28,17 @@ from typing import Any
 
 from openpyxl import load_workbook
 
+# Bundled scripts run under AgentOS's own interpreter; the path insert only
+# matters in a source checkout where the package is not installed (#2804).
+_SRC_ROOT = str(Path(__file__).resolve().parents[5])
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+from agentos.skills.stdio import write_stdout as _write_stdout  # noqa: E402
+
 # Distinguishes {"value": null} from an op with no "value" key at all.
 # ``op.get("value")`` collapses both to None, which would make a malformed
 # operation indistinguishable from a deliberate clear.
 _MISSING = object()
-
-
-def _write_stdout(text: str) -> None:
-    """Write *text* to stdout as UTF-8, surviving a non-UTF-8 stdout encoding.
-
-    ``print`` encodes through ``sys.stdout.encoding``, which on Windows is the
-    console code page (cp1252, cp936, cp932) and not UTF-8, so a character
-    outside that page raises ``UnicodeEncodeError`` before a byte is written —
-    the document decides whether the skill runs. The binary buffer is therefore
-    the primary path, matching the ``--out`` branch, which already passes
-    ``encoding="utf-8"``. A stream without a usable ``buffer`` — a wrapper, or a
-    captured stdout — still gets the text, escaped rather than lost.
-    """
-    buffer = getattr(sys.stdout, "buffer", None)
-    if buffer is not None:
-        try:
-            buffer.write(text.encode("utf-8"))
-            buffer.flush()
-            return
-        except (AttributeError, OSError, ValueError):
-            # Buffer closed or not writable — fall through to the text layer.
-            pass
-
-    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
-    # Lossless: unencodable chars become \\uXXXX escapes, not "?".
-    sys.stdout.write(text.encode(encoding, errors="backslashreplace").decode(encoding))
-    sys.stdout.flush()
 
 
 def _coerce(value: Any, as_text: bool) -> Any:

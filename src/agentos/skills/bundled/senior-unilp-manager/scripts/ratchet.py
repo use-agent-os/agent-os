@@ -31,6 +31,13 @@ import sys
 import time
 from pathlib import Path
 
+# Bundled scripts run under AgentOS's own interpreter; the path insert only
+# matters in a source checkout where the package is not installed (#2804).
+_SRC_ROOT = str(Path(__file__).resolve().parents[5])
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+from agentos.skills.stdio import configure_utf8_stdio  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import lp_write  # noqa: E402
@@ -1554,6 +1561,7 @@ COMMANDS = {
 
 
 def main() -> None:
+    configure_utf8_stdio()
     args = parse_args(sys.argv[1:])
     command = args["_"][0] if args["_"] else None
     if not command or args.get("help") or args.get("h"):

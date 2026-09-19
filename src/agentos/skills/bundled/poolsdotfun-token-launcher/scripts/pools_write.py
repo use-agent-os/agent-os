@@ -22,6 +22,7 @@ import json
 import shlex
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 from poolsfun.abi_codec import encode_function_data
@@ -54,6 +55,13 @@ from poolsfun.metadata import resolve_metadata_uri
 from poolsfun.plan import action_hash, plan_launch, verify_plan_unchanged
 from poolsfun.rpc import RpcClient, RpcError
 from poolsfun.tx import prepare_transaction, receipt_status, send_transaction, wait_for_receipt
+
+# Bundled scripts run under AgentOS's own interpreter; the path insert only
+# matters in a source checkout where the package is not installed (#2804).
+_SRC_ROOT = str(Path(__file__).resolve().parents[5])
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+from agentos.skills.stdio import configure_utf8_stdio  # noqa: E402
 
 USAGE = """
 pools_write.py — launch a pools.fun token, manage creator fees
@@ -496,6 +504,7 @@ COMMANDS = {
 
 
 def main(argv: list[str]) -> None:
+    configure_utf8_stdio()
     args = parse_args(argv)
     command = args["_"][0] if args["_"] else None
     if not command or args.get("help") or command not in COMMANDS:

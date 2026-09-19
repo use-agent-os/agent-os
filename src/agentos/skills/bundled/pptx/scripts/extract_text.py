@@ -33,6 +33,13 @@ import json
 import sys
 from pathlib import Path
 
+# Bundled scripts run under AgentOS's own interpreter; the path insert only
+# matters in a source checkout where the package is not installed (#2804).
+_SRC_ROOT = str(Path(__file__).resolve().parents[5])
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+from agentos.skills.stdio import configure_utf8_stdio  # noqa: E402
+
 
 def _load_python_pptx():
     try:
@@ -140,6 +147,7 @@ def _write(text: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_utf8_stdio()
     ap = argparse.ArgumentParser(description="Extract slide text from a .pptx file.")
     ap.add_argument("path", type=Path, help="Path to .pptx file")
     ap.add_argument("--json", action="store_true", help="Emit JSON")

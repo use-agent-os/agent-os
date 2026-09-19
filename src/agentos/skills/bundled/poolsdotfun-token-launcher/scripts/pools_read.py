@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 from poolsfun.chains import (
@@ -57,6 +58,13 @@ from poolsfun.plan import (
     read_start_tick,
 )
 from poolsfun.rpc import RpcClient
+
+# Bundled scripts run under AgentOS's own interpreter; the path insert only
+# matters in a source checkout where the package is not installed (#2804).
+_SRC_ROOT = str(Path(__file__).resolve().parents[5])
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+from agentos.skills.stdio import configure_utf8_stdio  # noqa: E402
 
 USAGE = """
 pools_read.py — read pools.fun launch state (never signs, never spends)
@@ -564,6 +572,7 @@ COMMANDS = {
 
 
 def main(argv: list[str]) -> None:
+    configure_utf8_stdio()
     args = parse_args(argv)
     command = args["_"][0] if args["_"] else None
     if not command or args.get("help") or command not in COMMANDS:
