@@ -191,19 +191,39 @@ async def _handle_logs_tail(params: dict | None, ctx: RpcContext) -> dict[str, A
     if cursor >= file_size:
         return {"lines": [], "cursor": file_size, "has_more": False}
 
-    with open(log_file, encoding="utf-8", errors="replace") as f:
+    with open(log_file, "rb") as f:
         f.seek(cursor)
         raw_lines = f.readlines()
-        new_cursor = f.tell()
+
+    # Pair each decoded line with the byte offset right after it, so the
+    # returned cursor can point just past whatever was actually returned
+    # instead of past everything that was read.
+    decoded: list[tuple[str, int]] = []
+    pos = cursor
+    for raw in raw_lines:
+        pos += len(raw)
+        decoded.append((raw.decode("utf-8", errors="replace"), pos))
 
     # Apply level filter if specified
     if level_filter:
-        filtered = [ln for ln in raw_lines if level_filter in ln.upper()]
+        filtered = [pair for pair in decoded if level_filter in pair[0].upper()]
     else:
-        filtered = raw_lines
+        filtered = decoded
 
-    # Limit output
+    # Limit output. A burst of more than `limit` new lines since the last
+    # poll must not jump the cursor past the unreturned excess -- that
+    # silently drops it forever, since the next call starts from the new
+    # cursor. Return the oldest unread lines first and advance the cursor
+    # only to just past them, so a follow-up call (has_more=True promises
+    # exactly this) picks up where this one left off.
     has_more = len(filtered) > limit
-    lines = [ln.rstrip() for ln in filtered[-limit:]]
+    kept = filtered[:limit]
+    lines = [ln.rstrip() for ln, _ in kept]
+    if kept:
+        new_cursor = kept[-1][1]
+    elif decoded:
+        new_cursor = decoded[-1][1]
+    else:
+        new_cursor = cursor
 
     return {"lines": lines, "cursor": new_cursor, "has_more": has_more}

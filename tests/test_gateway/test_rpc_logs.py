@@ -26,6 +26,33 @@ async def test_logs_tail_uses_agentos_log_dir_and_filters_level(tmp_path, monkey
 
 
 @pytest.mark.asyncio
+async def test_logs_tail_recovers_a_burst_larger_than_limit_across_two_calls(
+    tmp_path, monkeypatch
+) -> None:
+    """A burst of more lines than `limit` since the last poll must not be
+    dropped -- has_more=True promises a follow-up call picks up the rest,
+    but the old cursor-to-EOF behavior skipped straight past it."""
+    monkeypatch.setenv("AGENTOS_LOG_DIR", str(tmp_path))
+    log_file = tmp_path / "debug.log"
+    lines = [f"2026-05-03 [INFO] agentos: line {i}\n" for i in range(10)]
+    log_file.write_text("".join(lines), encoding="utf-8")
+
+    first = await _handle_logs_tail({"limit": 4, "cursor": 0}, None)  # type: ignore[arg-type]
+
+    assert first["lines"] == [f"2026-05-03 [INFO] agentos: line {i}" for i in range(4)]
+    assert first["has_more"] is True
+    assert first["cursor"] < log_file.stat().st_size
+
+    second = await _handle_logs_tail(
+        {"limit": 4, "cursor": first["cursor"]},
+        None,  # type: ignore[arg-type]
+    )
+
+    assert second["lines"] == [f"2026-05-03 [INFO] agentos: line {i}" for i in range(4, 8)]
+    assert second["has_more"] is True
+
+
+@pytest.mark.asyncio
 async def test_logs_tail_missing_file_returns_empty_payload(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("AGENTOS_LOG_DIR", str(tmp_path))
 
