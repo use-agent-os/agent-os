@@ -181,13 +181,10 @@ async def test_exec_command_returns_when_shell_exits_even_if_descendant_holds_pi
 async def test_exec_command_cleans_descendant_after_shell_exits(tmp_path) -> None:
     marker = tmp_path / "descendant-ran"
     child_script = (
-        "import pathlib, time; "
-        f"time.sleep(0.5); pathlib.Path({str(marker)!r}).write_text('ran')"
+        f"import pathlib, time; time.sleep(0.5); pathlib.Path({str(marker)!r}).write_text('ran')"
     )
     parent_script = (
-        "import subprocess, sys; "
-        "subprocess.Popen([sys.executable, '-c', "
-        f"{child_script!r}])"
+        f"import subprocess, sys; subprocess.Popen([sys.executable, '-c', {child_script!r}])"
     )
     command = f"{shlex.quote(sys.executable)} -c {shlex.quote(parent_script)}"
 
@@ -209,6 +206,60 @@ async def test_exec_command_timeout_still_stops_foreground_process() -> None:
 
     assert "[timeout after 0.1s]" in result
     assert elapsed < 1.0
+
+
+def _windows_descendant_scripts(tmp_path, marker, *, child_sleep: float, parent_sleep: float = 0.0):
+    child_script = tmp_path / "child.py"
+    child_script.write_text(
+        "import pathlib, time\n"
+        f"time.sleep({child_sleep})\n"
+        f"pathlib.Path({str(marker)!r}).write_text('ran')\n"
+    )
+    parent_script = tmp_path / "parent.py"
+    parent_script.write_text(
+        "import subprocess, sys, time\n"
+        f"subprocess.Popen([sys.executable, {str(child_script)!r}])\n"
+        f"time.sleep({parent_sleep})\n"
+    )
+    return f'"{sys.executable}" "{parent_script}"'
+
+
+@pytest.mark.skipif(os.name == "posix", reason="Windows process-tree behavior is Windows-specific")
+@pytest.mark.asyncio
+async def test_exec_command_timeout_stops_process_tree_on_windows(tmp_path) -> None:
+    # child_sleep must be short enough that, if the grandchild survives the
+    # kill, it writes the marker well inside the post-return observation
+    # window below -- otherwise the assertion passes whether or not the kill
+    # actually worked. parent_sleep keeps the middle process (and thus proc,
+    # the cmd.exe asyncio tracks) alive past exec_command's own timeout, so
+    # the timeout path -- not a natural exit -- is what's under test.
+    marker = tmp_path / "descendant-ran"
+    command = _windows_descendant_scripts(tmp_path, marker, child_sleep=1.0, parent_sleep=5)
+
+    started = time.monotonic()
+    result = await shell.exec_command(command, timeout=0.3)
+    elapsed = time.monotonic() - started
+    await asyncio.sleep(1.2)
+
+    assert "[timeout after 0.3s]" in result
+    assert elapsed < 3.0
+    assert not marker.exists()
+
+
+@pytest.mark.skipif(os.name == "posix", reason="Windows process-tree behavior is Windows-specific")
+@pytest.mark.asyncio
+async def test_exec_command_cancellation_stops_process_tree_on_windows(tmp_path) -> None:
+    marker = tmp_path / "descendant-ran"
+    command = _windows_descendant_scripts(tmp_path, marker, child_sleep=1.0, parent_sleep=5)
+
+    task = asyncio.create_task(shell.exec_command(command, timeout=30))
+    await asyncio.sleep(0.3)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    await asyncio.sleep(1.2)
+    assert not marker.exists()
 
 
 @pytest.mark.asyncio
@@ -233,9 +284,7 @@ async def test_process_control_context_can_list_all_sessions() -> None:
     shell._bg_sessions["own"] = _session("own", "agent:main:one")
     shell._bg_sessions["other"] = _session("other", "agent:main:two")
 
-    token = current_tool_context.set(
-        _ctx("agent:main:ops", caller_kind=CallerKind.CLI)
-    )
+    token = current_tool_context.set(_ctx("agent:main:ops", caller_kind=CallerKind.CLI))
     try:
         payload = json.loads(await shell.process("list"))
     finally:
@@ -266,9 +315,7 @@ async def test_process_cross_context_operations_are_denied(action: str) -> None:
 async def test_process_control_context_can_poll_other_sessions() -> None:
     shell._bg_sessions["other"] = _session("other", "agent:main:two")
 
-    token = current_tool_context.set(
-        _ctx("agent:main:ops", caller_kind=CallerKind.CLI)
-    )
+    token = current_tool_context.set(_ctx("agent:main:ops", caller_kind=CallerKind.CLI))
     try:
         payload = json.loads(await shell.process("poll", session_id="other"))
     finally:
