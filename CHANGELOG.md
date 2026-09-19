@@ -261,6 +261,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `srt-from-script` truncated a fractional `DURATION_S` to an integer, so
   every cue after a `3.5`-second shot drifted earlier
   ([#2070](https://github.com/use-agent-os/agent-os/issues/2070)).
+- Memory: the TTL retention sweep no longer deletes a lowercase `memory.md`.
+  `DEFAULT_EXEMPT_FILES` in `retention.py` only listed `MEMORY.md`, even
+  though its own docstring documents both `MEMORY.md` and `memory.md` as
+  aliases that must never be deleted by TTL. On a case-sensitive filesystem
+  (Linux, macOS), a workspace's lowercase `memory.md` aged past `ttl_days`
+  was unlinked from disk and removed from the SQLite index like any other
+  note. `memory.md` is now exempt, matching the documented contract.
 - `read_spreadsheet`: a phonetic guide (furigana) stored alongside an xlsx
   cell's text is no longer appended to the value. The shared-string reader took
   every `<t>` descendant, including the ones inside `<rPh>`, so a Japanese
