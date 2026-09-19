@@ -261,6 +261,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `srt-from-script` truncated a fractional `DURATION_S` to an integer, so
   every cue after a `3.5`-second shot drifted earlier
   ([#2070](https://github.com/use-agent-os/agent-os/issues/2070)).
+- `skill_edit` erased existing YAML frontmatter metadata (`requires`,
+  `install`, `metadata.agentos`, and custom keys) when updating a skill's
+  description or content ([#2426](https://github.com/use-agent-os/agent-os/issues/2426)).
+  Existing frontmatter and unmodified sections are now preserved.
 - `read_spreadsheet`: a phonetic guide (furigana) stored alongside an xlsx
   cell's text is no longer appended to the value. The shared-string reader took
   every `<t>` descendant, including the ones inside `<rPh>`, so a Japanese

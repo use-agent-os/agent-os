@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import structlog
+import yaml
 
 from agentos.result_budget import register_persisted_result_budget
 from agentos.skills.hub.defaults import (
@@ -72,6 +73,39 @@ def _render_skill_md(
     lines.append("")
     lines.append(content)
     return "\n".join(lines)
+
+
+def _update_skill_md(
+    existing_raw: str,
+    *,
+    name: str,
+    description: str | None = None,
+    content: str | None = None,
+    triggers: list[str] | None = None,
+) -> str:
+    """Update a SKILL.md document while preserving existing frontmatter metadata."""
+    from agentos.skills.loader import _parse_frontmatter
+
+    frontmatter, body = _parse_frontmatter(existing_raw)
+    if not frontmatter:
+        new_description = description if description is not None else ""
+        new_content = content if content is not None else body
+        return _render_skill_md(name, new_description, new_content, triggers or None)
+
+    frontmatter["name"] = name
+    if description is not None:
+        frontmatter["description"] = description
+    if triggers is not None:
+        if triggers:
+            frontmatter["triggers"] = list(triggers)
+        else:
+            frontmatter.pop("triggers", None)
+
+    target_body = content if content is not None else body
+    fm_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
+    if target_body:
+        return f"---\n{fm_text}\n---\n\n{target_body}"
+    return f"---\n{fm_text}\n---\n"
 
 
 def _cap_output(value: bytes | str, limit: int = _INSTALL_OUTPUT_LIMIT) -> str:
@@ -1178,16 +1212,18 @@ def create_skill_tools(loader: SkillLoader) -> None:
         if content is None and description is None and triggers is None:
             raise ToolError("Nothing to edit — provide content, description, or triggers")
 
-        # Build updated SKILL.md
-        new_description = description if description is not None else existing.description
-        new_content = content if content is not None else (existing.content or "")
-        new_triggers = triggers if triggers is not None else existing.triggers
-
         skill_file = Path(existing.file_path)
         if not skill_file.exists():
             raise ToolError(f"Skill file missing: {skill_file}")
 
-        skill_md = _render_skill_md(name, new_description, new_content, new_triggers or None)
+        existing_raw = skill_file.read_text(encoding="utf-8")
+        skill_md = _update_skill_md(
+            existing_raw,
+            name=name,
+            description=description,
+            content=content,
+            triggers=triggers,
+        )
         skill_file.write_text(skill_md, encoding="utf-8")
 
         _loader.invalidate_cache()
