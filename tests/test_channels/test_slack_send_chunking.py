@@ -97,3 +97,68 @@ async def test_send_chunking_puts_extra_metadata_only_on_the_last_chunk() -> Non
     for call in calls[:-1]:
         assert "blocks" not in call
     assert calls[-1]["blocks"] == [{"type": "divider"}]
+
+
+@pytest.mark.asyncio
+async def test_send_streaming_chunks_and_rolls_over_on_oversized_stream() -> None:
+    """Streams exceeding _SLACK_MESSAGE_TEXT_LIMIT must freeze the current
+    message at the cap and roll subsequent content into a new message (#3068)."""
+    channel, calls = _channel()
+
+    part1 = "a" * 1000
+    part2 = "b" * 45000
+
+    async def chunks():
+        yield part1
+        yield part2
+
+    last_ts = await channel.send_streaming(chunks(), update_interval_ms=10)
+
+    assert last_ts is not None
+    assert len(calls) >= 3  # initial post + edit up to limit + rollover post
+
+    for call in calls:
+        assert len(call["text"]) <= _SLACK_MESSAGE_TEXT_LIMIT
+
+    # Check that postMessage was called more than once (initial + rollover)
+    post_calls = [c for c in calls if "ts" not in c]
+    assert len(post_calls) >= 2
+
+
+@pytest.mark.asyncio
+async def test_send_streaming_short_stream_single_message() -> None:
+    """Short streams that fit in one message do not trigger rollover."""
+    channel, calls = _channel()
+
+    async def chunks():
+        yield "hello "
+        yield "world"
+
+    last_ts = await channel.send_streaming(chunks(), update_interval_ms=10)
+
+    assert last_ts is not None
+    post_calls = [c for c in calls if "ts" not in c]
+    assert len(post_calls) == 1
+    assert calls[-1]["text"] == "hello world"
+
+
+@pytest.mark.asyncio
+async def test_send_streaming_keeps_thread_ts_on_rollover() -> None:
+    """Rollover messages must preserve thread_ts so streaming replies remain threaded."""
+    channel, calls = _channel()
+
+    async def chunks():
+        yield "x" * 1000
+        yield "y" * 40000
+
+    await channel.send_streaming(
+        chunks(),
+        thread_ts="1700000000.000100",
+        update_interval_ms=10,
+    )
+
+    post_calls = [c for c in calls if "ts" not in c]
+    assert len(post_calls) >= 2
+    for call in post_calls:
+        assert call.get("thread_ts") == "1700000000.000100"
+
