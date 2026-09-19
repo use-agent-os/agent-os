@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import re
 from typing import Any
 
 import pytest
@@ -590,6 +591,18 @@ def test_unterminated_tilde_fence_runs_to_the_end() -> None:
     assert rendered == "<pre>x\ny</pre>"
 
 
+def _entities_are_properly_nested(html_text: str) -> bool:
+    """Telegram rejects a message whose entities are not properly nested."""
+    stack: list[str] = []
+    for closing, name in re.findall(r"<(/?)([a-zA-Z-]+)[^>]*>", html_text):
+        if closing:
+            if not stack or stack.pop() != name:
+                return False
+        else:
+            stack.append(name)
+    return not stack
+
+
 @pytest.mark.parametrize(
     ("markdown", "expected"),
     [
@@ -599,3 +612,52 @@ def test_unterminated_tilde_fence_runs_to_the_end() -> None:
 )
 def test_two_tildes_are_still_strikethrough(markdown: str, expected: str) -> None:
     assert render_telegram_html(markdown) == expected
+
+
+@pytest.mark.parametrize(
+    ("markdown", "expected"),
+    [
+        ("***both***", "<b><i>both</i></b>"),
+        ("___both___", "<b><i>both</i></b>"),
+        ("a***b***c", "a<b><i>b</i></b>c"),
+        ("***a b***", "<b><i>a b</i></b>"),
+    ],
+)
+def test_triple_marker_emphasis_nests_properly(markdown: str, expected: str) -> None:
+    """``***x***`` is one run, not a bold run beside an italic one.
+
+    Consumed by the ``**`` pass first, the third marker was left behind and the
+    ``*`` pass then paired it with the trailing one across the closing tag,
+    producing ``<b><i>x</b></i>``. Telegram's parser requires properly nested
+    entities, and this adapter sends ``parse_mode=HTML`` with no plain-text
+    retry, so the reply was refused rather than rendered.
+    """
+    rendered = render_telegram_html(markdown)
+
+    assert rendered == expected
+    assert _entities_are_properly_nested(rendered)
+
+
+@pytest.mark.parametrize(
+    ("markdown", "expected"),
+    [
+        ("**bold**", "<b>bold</b>"),
+        ("*italic*", "<i>italic</i>"),
+        ("__bold__", "<b>bold</b>"),
+        ("_italic_", "<i>italic</i>"),
+        ("**a** *b*", "<b>a</b> <i>b</i>"),
+        ("**a *b* c**", "<b>a <i>b</i> c</b>"),
+        ("snake_case_name", "snake_case_name"),
+        ("`***c***`", "<code>***c***</code>"),
+    ],
+)
+def test_the_single_and_double_marker_runs_are_unchanged(markdown: str, expected: str) -> None:
+    """The new pass must not take over anything the existing passes handled."""
+    assert render_telegram_html(markdown) == expected
+
+
+def test_a_triple_marker_run_beside_a_bold_run() -> None:
+    rendered = render_telegram_html("***a*** and **b**")
+
+    assert rendered == "<b><i>a</i></b> and <b>b</b>"
+    assert _entities_are_properly_nested(rendered)

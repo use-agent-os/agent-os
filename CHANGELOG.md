@@ -266,7 +266,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   every `<t>` descendant, including the ones inside `<rPh>`, so a Japanese
   workbook read back with each reading glued onto the word it annotates
   ([#2053](https://github.com/use-agent-os/agent-os/issues/2053)).
-
+  workbook read back with each reading glued onto the word it annotates.
+- Telegram: a reply containing `***bold italic***` (or `___both___`) is
+  delivered again. The `**` pass consumed two of the three markers and the `*`
+  pass then paired the leftover one across the closing tag, producing
+  `<b><i>x</b></i>`; Telegram rejects improperly nested entities and the
+  adapter sends `parse_mode=HTML` with no plain-text retry, so the reply was
+  dropped rather than mis-rendered.
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed
