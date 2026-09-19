@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Curated memory: a note containing a compound emoji (👨‍👩‍👧 and every other
+  ZWJ sequence), Persian/Arabic/Indic text shaped with ZWNJ, or a leading
+  BOM is no longer treated as a smuggled-injection threat. `memory_tools`
+  kept a private invisible-character list that never got #2610's fix, so
+  such an entry was refused on write and — the silent half — swapped for a
+  `[BLOCKED: ... threat pattern(s) ...]` placeholder in the system prompt at
+  load, while the file on disk still showed the user's note. The verdict now
+  comes from `safety.injection_guard.classify_injection`, which also catches
+  the soft hyphen, LRM/RLM and word joiner the private list was missing.
 - Discord channel: a reaction added to the bot's own message in a guild
   channel or thread is no longer silently dropped by the group mention
   gate. `is_group_mentioned` fell back to searching a reaction's (always

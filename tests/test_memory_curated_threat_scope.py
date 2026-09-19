@@ -76,6 +76,13 @@ ALLOWED = [
     pytest.param("Use curl to check the health endpoint", id="benign_curl"),
     pytest.param("AGENTS.md documents the commit conventions", id="mentions_agents_md"),
     pytest.param("Prefer they/them when pronouns are unstated", id="style"),
+    # #2120's false positives, fixed for injection_guard's invisible_char
+    # class in #2610: ZWJ glues every compound emoji, ZWNJ shapes Persian,
+    # Arabic and Indic words, and a leading BOM is how a file that has been
+    # through Excel or Notepad starts.
+    pytest.param("Books the \U0001f468‍\U0001f469‍\U0001f467 family plan", id="zwj_emoji"),
+    pytest.param("Wants replies in Persian: می‌خواهم", id="zwnj_persian"),
+    pytest.param("﻿Imported from a spreadsheet export", id="leading_bom"),
 ]
 
 
@@ -105,6 +112,25 @@ def test_batch_rejects_whole_batch_on_one_poisoned_op(store: CuratedMemoryStore,
 
     assert result["success"] is False
     assert (tmp_path / "MEMORY.md").read_text(encoding="utf-8") == before
+
+
+def test_a_legitimate_emoji_entry_still_reaches_the_prompt(tmp_path: Path):
+    """The mirror of the test below: an entry whose only "invisible" character
+    is the ZWJ inside a family emoji must survive into the system prompt.
+
+    This is the silent half of the bug — the file on disk still shows the
+    user's note, so nothing looks wrong, while the agent is handed a
+    ``[BLOCKED: ... threat pattern(s) ...]`` placeholder instead and loses
+    the preference entirely.
+    """
+    note = "Books the \U0001f468‍\U0001f469‍\U0001f467 family plan, not singles"
+    (tmp_path / "MEMORY.md").write_text(note, encoding="utf-8")
+    s = CuratedMemoryStore(memory_dir=tmp_path, memory_char_limit=4000, user_char_limit=2000)
+    s.load_from_disk()
+
+    block = s.snapshot_block("memory") or ""
+    assert "[BLOCKED:" not in block
+    assert "family plan" in block
 
 
 def test_poisoned_on_disk_entry_is_blocked_from_the_prompt(tmp_path: Path):
