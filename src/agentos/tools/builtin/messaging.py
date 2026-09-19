@@ -32,7 +32,10 @@ def _outgoing_metadata(channel: str, target: str, thread_id: str | None) -> dict
             metadata["thread_id"] = thread_id
         return metadata
     if channel == "slack":
-        return {"thread_ts": thread_id} if thread_id else {}
+        metadata = {"channel": target}
+        if thread_id:
+            metadata["thread_ts"] = thread_id
+        return metadata
 
     metadata = {"recipient": target}
     if thread_id:
@@ -61,7 +64,7 @@ def _reply_to_target(channel: str, target: str, thread_id: str | None) -> str | 
     if channel == "telegram":
         return target
     if channel == "slack":
-        return thread_id
+        return thread_id or target
     return thread_id or target
 
 
