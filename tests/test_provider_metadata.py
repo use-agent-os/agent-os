@@ -53,3 +53,32 @@ def test_compaction_config_uses_provider_connection_config_protocol() -> None:
     assert cfg.api_key == "meta-key"
     assert cfg.model == "meta/model"
     assert cfg.base_url == "https://metadata.example/v1"
+
+
+def test_model_info_name_property_and_calculate_cost() -> None:
+    import pytest
+
+    from agentos.provider.types import ModelInfo
+
+    info_with_display = ModelInfo(
+        provider="openrouter",
+        model_id="anthropic/claude-3.5-sonnet",
+        display_name="Claude 3.5 Sonnet",
+        input_cost_per_1k=0.003,
+        output_cost_per_1k=0.015,
+    )
+    assert info_with_display.name == "Claude 3.5 Sonnet"
+    assert info_with_display.calculate_cost(input_tokens=1000, output_tokens=1000) == pytest.approx(
+        0.018
+    )
+    assert info_with_display.calculate_cost(input_tokens=2000, output_tokens=500) == pytest.approx(
+        0.0135
+    )
+
+    info_bare = ModelInfo(
+        provider="ollama",
+        model_id="llama3:latest",
+    )
+    assert info_bare.name == "llama3:latest"
+    assert info_bare.calculate_cost(100, 100) == 0.0
+
