@@ -266,6 +266,10 @@ _MEMORY_SEARCH_STOP_WORDS: Final[frozenset[str]] = frozenset(
     }
 )
 _YAML_FRONTMATTER_RE = re.compile(r"\A---\s*\n.*?\n---\s*(?:\n|$)", re.S)
+# Unicode letters and digits; underscore is excluded so it still splits words.
+_MEMORY_SEARCH_WORD_RE = re.compile(r"[^\W_]+")
+# CJK ideographs and kana carry no spaces, so they are matched one char at a time.
+_MEMORY_SEARCH_CJK_RE = re.compile(r"[一-鿿぀-ヿ]")
 
 
 def _memory_search_limit(value: object) -> int:
@@ -300,11 +304,46 @@ def _clean_memory_search_evidence(text: str) -> str:
     return cleaned or raw
 
 
+def _min_term_chars(term: str) -> int:
+    """Shortest useful term, by script.
+
+    The floor of three keeps English particles and sub-word fragments from
+    steering the excerpt, and that is the length it was tuned at. Hangul and
+    other dense scripts write a whole word in two characters, so holding them to
+    the ASCII floor drops the only term a query has.
+    """
+    return 3 if term.isascii() else 2
+
+
 def _memory_search_query_terms(query: str) -> tuple[str, ...]:
+    """Terms used to centre the evidence excerpt on the part that matched.
+
+    ``[^\\W_]+`` is ``[A-Za-z0-9]+`` widened to every Unicode letter and digit,
+    with underscore left out so an ASCII query still tokenizes exactly as it did
+    before. The old ASCII class yielded no terms at all for a Cyrillic, Greek,
+    Hangul, Arabic or Devanagari query, and mangled an accented one, so the
+    excerpt silently fell back to the head of the file instead of the line the
+    query actually hit.
+
+    CJK carries no spaces, so a run of ideographs or kana is additionally
+    expanded into unigrams and bigrams -- the shape
+    ``agentos.memory.retrieval._jaccard_similarity`` already tokenizes with.
+    """
     terms: list[str] = []
     seen: set[str] = set()
-    for term in re.findall(r"[A-Za-z0-9]+", query.lower()):
-        if len(term) < 3 or term in _MEMORY_SEARCH_STOP_WORDS or term in seen:
+    lowered = query.lower()
+
+    candidates = [
+        term
+        for term in _MEMORY_SEARCH_WORD_RE.findall(lowered)
+        if len(term) >= _min_term_chars(term)
+    ]
+    cjk = _MEMORY_SEARCH_CJK_RE.findall(lowered)
+    candidates.extend(cjk)
+    candidates.extend(cjk[index] + cjk[index + 1] for index in range(len(cjk) - 1))
+
+    for term in candidates:
+        if term in _MEMORY_SEARCH_STOP_WORDS or term in seen:
             continue
         terms.append(term)
         seen.add(term)
