@@ -261,6 +261,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `srt-from-script` truncated a fractional `DURATION_S` to an integer, so
   every cue after a `3.5`-second shot drifted earlier
   ([#2070](https://github.com/use-agent-os/agent-os/issues/2070)).
+- Telegram: `is_group_mentioned`'s plain-text fallback no longer matches our
+  bot's username as a substring of a longer one. With no message entities to
+  check structurally, it fell back to `mention in text.lower()`, so a group
+  message that only mentioned a different bot (`@helperbot2` when ours is
+  `@helper`) — or that merely contained an email address like
+  `someone@helperdesk.com` — satisfied the mention gate and the bot replied
+  to a message that never addressed it. The fallback now requires a
+  Telegram-username-safe boundary after the match.
 - `read_spreadsheet`: a phonetic guide (furigana) stored alongside an xlsx
   cell's text is no longer appended to the value. The shared-string reader took
   every `<t>` descendant, including the ones inside `<rPh>`, so a Japanese

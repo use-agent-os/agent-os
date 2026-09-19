@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import re
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -1165,7 +1166,12 @@ class TelegramChannel:
                     has_mismatched_bot_command = True
         if has_mismatched_bot_command:
             return False
-        return mention in text.lower()
+        # Plain containment would also match this bot's username as a
+        # substring of a longer, unrelated one (@helper inside @helperbot2)
+        # or of an ordinary word (an email address like someone@helperdesk.com).
+        # A Telegram username is [A-Za-z0-9_]+, so require that no such
+        # character immediately follows the match.
+        return re.search(re.escape(mention) + r"(?![A-Za-z0-9_])", text.lower()) is not None
 
     def build_reply_message(self, content: str, inbound: IncomingMessage) -> OutgoingMessage:
         metadata: dict[str, Any] = {"chat_id": inbound.channel_id}
