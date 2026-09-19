@@ -162,6 +162,20 @@ async def test_diff_revision_resolves_head_only_when_a_commit_exists(
     assert await git._diff_revision(str(empty_repo)) == "HEAD"
 
 
+async def test_git_log_in_repository_without_commits(empty_repo: Path) -> None:
+    """git_log returns informative message rather than failing with exit 128."""
+    out = await git.git_log()
+    assert out == "No commits yet in repository."
+
+
+async def test_git_log_in_non_repository_raises(empty_repo: Path, tmp_path: Path) -> None:
+    """git_log outside a git repository raises the underlying git error."""
+    non_repo = tmp_path / "plain_dir"
+    non_repo.mkdir()
+    with pytest.raises(RuntimeError, match="not a git repository"):
+        await git.git_log(workdir=str(non_repo))
+
+
 @pytest.mark.parametrize(
     ("kwargs", "expected"),
     [
