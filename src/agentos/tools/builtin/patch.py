@@ -169,8 +169,18 @@ def _parse_patch(patch_text: str) -> list[PatchOp]:
                         i += 1
                     _trim_trailing_separators(hunk)
                     hunks.append(hunk)
-                else:
+                elif hunk_line.strip() == "":
                     i += 1
+                else:
+                    raise ValueError(
+                        f"Invalid line in '*** Update File: {path}' block "
+                        f"(expected a '@@@ ' hunk header): {hunk_line!r}"
+                    )
+            if not hunks:
+                raise ValueError(
+                    f"No hunks found in '*** Update File: {path}' block: "
+                    "expected at least one '@@@ ' hunk header"
+                )
             ops.append(UpdateFile(path=path, hunks=hunks))
 
         elif line.startswith("*** Delete File: "):
@@ -707,6 +717,8 @@ def _plan_ops(
             elif isinstance(op, UpdateFile):
                 if not _will_exist(resolved):
                     raise FileNotFoundError(f"File not found for update: {op.path}")
+                if not op.hunks:
+                    raise ValueError(f"No hunks to apply for update: {op.path}")
                 # Only an update needs the text; an add/delete of a file this
                 # tool never decodes must not start failing on bad UTF-8.
                 current = pending.get(resolved) if resolved in pending else None
