@@ -281,6 +281,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `srt-from-script` truncated a fractional `DURATION_S` to an integer, so
   every cue after a `3.5`-second shot drifted earlier
   ([#2070](https://github.com/use-agent-os/agent-os/issues/2070)).
+- Zhipu/GLM provider: `glm-4.6` no longer silently loses reasoning support.
+  `get_capabilities`'s zai reasoning-shape prefix check listed `glm-4.5` and
+  `glm-4.7` but skipped `glm-4.6` — even though `engine/reasoning_hint.py`'s
+  own reasoning-family markers already list `glm-4.6` right next to
+  `glm-4.7` — so a request to `glm-4.6` got `supports_reasoning=False` and
+  never carried the `thinking` payload key, silently dropping a configured
+  `thinking_level` with no error anywhere.
 - `read_spreadsheet`: a phonetic guide (furigana) stored alongside an xlsx
   cell's text is no longer appended to the value. The shared-string reader took
   every `<t>` descendant, including the ones inside `<rPh>`, so a Japanese

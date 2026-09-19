@@ -65,6 +65,23 @@ def test_zai_glm5_models_use_zai_reasoning_format() -> None:
         assert caps.reasoning_format == "zai"
 
 
+def test_zai_glm_4_6_uses_zai_reasoning_format() -> None:
+    """glm-4.6 is a reasoning-capable GLM release, listed as such right next to
+    glm-4.7 in engine/reasoning_hint.py's own reasoning-family markers -- the
+    zai-shape prefix table here must recognize it too, or a request for it
+    silently never gets a `thinking` payload despite the user's configured
+    thinking_level."""
+    caps = ModelCatalog().get_capabilities(
+        "glm-4.6",
+        provider_name="zhipu",
+        base_url="https://open.bigmodel.cn/api/paas/v4",
+    )
+
+    assert caps.supports_reasoning is True
+    assert caps.supports_tools is True
+    assert caps.reasoning_format == "zai"
+
+
 def test_dashscope_qwen_thinking_models_use_dashscope_reasoning_format() -> None:
     catalog = ModelCatalog()
 
