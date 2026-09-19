@@ -97,9 +97,12 @@ runs in place. This preserves all theme/style/font settings.
 ```
 
 `replace_text` walks body paragraphs, every table cell (nested tables
-included) and each section's headers and footers (first-page and even-page
-variants too), so placeholders inside contract or invoice tables, letterheads
-and confidentiality banners are all found.
+included), each section's headers and footers (first-page and even-page
+variants too) and the paragraphs inside every text box, so placeholders inside
+contract or invoice tables, letterheads, pull quotes and confidentiality
+banners are all found. A shape that Word stored in both its modern and legacy
+spellings counts once per stored copy in `applied`, because both copies hold
+the text and both are rewritten.
 
 Edit at the **run** level, not the paragraph level — replacing whole paragraph
 text drops formatting. If a placeholder spans multiple runs (often happens

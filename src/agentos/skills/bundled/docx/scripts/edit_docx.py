@@ -5,7 +5,8 @@ Operations:
     {"op": "replace_text", "find": "...", "with": "..."}
 
 `replace_text` walks every paragraph -- body paragraphs, the cells of every
-table (nested tables included) and each section's headers and footers -- and
+table (nested tables included), each section's headers and footers, and the
+paragraphs inside every text box -- and
 matches against the joined run texts, so a target that spans runs is still
 found. The replacement is written into the run that owns the first character
 of its match, and every character the match did not touch stays in the run it
@@ -24,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from docx import Document
+from docx.oxml.ns import qn
 from docx.section import _BaseHeaderFooter
 from docx.table import Table, _Cell
 from docx.text.paragraph import Paragraph
@@ -152,13 +154,52 @@ def _iter_header_footer_paragraphs(doc: Document) -> Iterator[Paragraph]:
             yield from _iter_table_paragraphs(part.tables)
 
 
+_P = qn("w:p")
+_TBL = qn("w:tbl")
+_TXBX_CONTENT = qn("w:txbxContent")
+
+
+def _iter_textbox_paragraphs(para: Paragraph) -> Iterator[Paragraph]:
+    """Yield the paragraphs held by every text box anywhere inside *para*.
+
+    A text box is not a paragraph of the story it sits in: Word parks its
+    content in a ``<w:txbxContent>`` nested inside a run, so python-docx reports
+    the host paragraph with empty text and the box's own words are reached by no
+    paragraph walk at all. Pull quotes, callouts, letterhead banners and the
+    "CONFIDENTIAL" stamps that templates ship are text boxes almost by default.
+
+    ``iter`` sweeps every depth in one pass, so a box nested inside another box
+    -- or inside a table that is itself inside a box -- is found without
+    recursing here. Both OOXML spellings land on the same element: the modern
+    DrawingML shape (``<w:drawing>``) and the legacy VML one (``<w:pict>``) each
+    wrap a ``<w:txbxContent>``. A shape written as ``<mc:AlternateContent>``
+    carries both spellings of the same box, and both are visited on purpose --
+    Word may render either, so replacing only one leaves the other stale.
+    """
+    for content in para._p.iter(_TXBX_CONTENT):
+        for child in content.iterchildren():
+            if child.tag == _P:
+                yield Paragraph(child, para)
+            elif child.tag == _TBL:
+                yield from _iter_table_paragraphs([Table(child, para)])
+
+
 def _iter_all_paragraphs(doc: Document) -> Iterator[Paragraph]:
     """Body paragraphs, every table-cell paragraph, then headers and footers.
 
     ``doc.paragraphs`` is body-only in python-docx, yet contracts, reports and
     invoices keep most of their placeholders inside tables, and letterheads
     or confidentiality banners live in the section headers and footers.
+
+    Each of those may host text boxes, so every paragraph is followed by the
+    paragraphs of the boxes it contains.
     """
+    for para in _iter_story_paragraphs(doc):
+        yield para
+        yield from _iter_textbox_paragraphs(para)
+
+
+def _iter_story_paragraphs(doc: Document) -> Iterator[Paragraph]:
     yield from doc.paragraphs
     yield from _iter_table_paragraphs(doc.tables)
     yield from _iter_header_footer_paragraphs(doc)

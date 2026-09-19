@@ -654,3 +654,173 @@ def test_create_docx_cli_reports_non_object_json_with_exit_code_2(
     assert create_docx.main() == 2
     assert 'must be a JSON object with a "body" array' in capsys.readouterr().err
     assert not out.exists()
+
+
+_W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_V = "urn:schemas-microsoft-com:vml"
+_WPS = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
+
+
+def _txbx_content(inner: str) -> str:
+    return f"<w:txbxContent>{inner}</w:txbxContent>"
+
+
+def _paragraph_xml(text: str) -> str:
+    return f"<w:p><w:r><w:t>{text}</w:t></w:r></w:p>"
+
+
+def _add_vml_text_box(para: object, inner: str) -> None:
+    """Attach a legacy ``<w:pict>`` text box holding *inner* to *para*."""
+    from lxml import etree
+
+    run = etree.fromstring(
+        f'<w:r xmlns:w="{_W}" xmlns:v="{_V}"><w:pict><v:shape><v:textbox>'
+        f"{_txbx_content(inner)}"
+        "</v:textbox></v:shape></w:pict></w:r>"
+    )
+    para._p.append(run)
+
+
+def _add_drawingml_text_box(para: object, inner: str) -> None:
+    """Attach a modern ``<w:drawing>`` shape text box holding *inner* to *para*."""
+    from lxml import etree
+
+    run = etree.fromstring(
+        f'<w:r xmlns:w="{_W}" xmlns:wps="{_WPS}"><w:drawing><wps:wsp><wps:txbx>'
+        f"{_txbx_content(inner)}"
+        "</wps:txbx></wps:wsp></w:drawing></w:r>"
+    )
+    para._p.append(run)
+
+
+def _document_xml(doc: object, tmp_path: Path) -> str:
+    import zipfile
+
+    out = tmp_path / "saved.docx"
+    doc.save(str(out))
+    return zipfile.ZipFile(out).read("word/document.xml").decode("utf-8")
+
+
+def test_replace_text_reaches_a_vml_text_box(tmp_path: Path) -> None:
+    """A text box's words belong to no paragraph any walk reached.
+
+    Word parks text-box content in a ``<w:txbxContent>`` nested inside a run, so
+    python-docx reports the host paragraph as empty. A `replace_text` that
+    rewrote the body and left the box alone still reported the body hit, which
+    reads as a completed redaction.
+    """
+    from docx import Document
+
+    edit_docx = _edit_docx_module()
+    doc = Document()
+    doc.add_paragraph("Prepared for ACME-CODENAME under NDA.")
+    _add_vml_text_box(doc.add_paragraph(), _paragraph_xml("Confidential: ACME-CODENAME"))
+
+    applied = edit_docx.apply_ops(
+        doc, [{"op": "replace_text", "find": "ACME-CODENAME", "with": "Project Harbor"}]
+    )
+
+    assert applied == 2
+    xml = _document_xml(doc, tmp_path)
+    assert "ACME-CODENAME" not in xml
+    assert xml.count("Project Harbor") == 2
+
+
+def test_replace_text_reaches_a_drawingml_text_box(tmp_path: Path) -> None:
+    from docx import Document
+
+    edit_docx = _edit_docx_module()
+    doc = Document()
+    _add_drawingml_text_box(doc.add_paragraph(), _paragraph_xml("Callout: {{NAME}}"))
+
+    applied = edit_docx.apply_ops(doc, [{"op": "replace_text", "find": "{{NAME}}", "with": "Wei"}])
+
+    assert applied == 1
+    xml = _document_xml(doc, tmp_path)
+    assert "{{NAME}}" not in xml
+    assert "Callout: Wei" in xml
+
+
+def test_replace_text_reaches_a_text_box_in_a_header(tmp_path: Path) -> None:
+    """Letterhead banners are text boxes inside a header — two misses at once."""
+    from docx import Document
+
+    edit_docx = _edit_docx_module()
+    doc = Document()
+    header = doc.sections[0].header
+    header.is_linked_to_previous = False
+    _add_vml_text_box(header.paragraphs[0], _paragraph_xml("DRAFT — {{STATUS}}"))
+
+    applied = edit_docx.apply_ops(
+        doc, [{"op": "replace_text", "find": "{{STATUS}}", "with": "Final"}]
+    )
+
+    assert applied == 1
+    assert "DRAFT — Final" in header.part.blob.decode("utf-8")
+
+
+def test_replace_text_reaches_a_table_inside_a_text_box(tmp_path: Path) -> None:
+    from docx import Document
+
+    edit_docx = _edit_docx_module()
+    doc = Document()
+    _add_vml_text_box(
+        doc.add_paragraph(),
+        f"<w:tbl><w:tr><w:tc>{_paragraph_xml('Total: {{TOTAL}}')}</w:tc></w:tr></w:tbl>",
+    )
+
+    applied = edit_docx.apply_ops(
+        doc, [{"op": "replace_text", "find": "{{TOTAL}}", "with": "42.00"}]
+    )
+
+    assert applied == 1
+    assert "Total: 42.00" in _document_xml(doc, tmp_path)
+
+
+def test_replace_text_reaches_a_text_box_inside_a_text_box(tmp_path: Path) -> None:
+    from docx import Document
+
+    edit_docx = _edit_docx_module()
+    doc = Document()
+    inner_box = (
+        f'<w:p><w:r xmlns:v="{_V}"><w:pict><v:shape><v:textbox>'
+        f"{_txbx_content(_paragraph_xml('deep {{X}}'))}"
+        "</v:textbox></v:shape></w:pict></w:r></w:p>"
+    )
+    _add_vml_text_box(doc.add_paragraph(), inner_box)
+
+    applied = edit_docx.apply_ops(doc, [{"op": "replace_text", "find": "{{X}}", "with": "found"}])
+
+    assert applied == 1
+    assert "deep found" in _document_xml(doc, tmp_path)
+
+
+def test_replace_text_visits_a_text_box_paragraph_once(tmp_path: Path) -> None:
+    """A replacement containing its own needle exposes a paragraph visited twice."""
+    from docx import Document
+
+    edit_docx = _edit_docx_module()
+    doc = Document()
+    _add_vml_text_box(doc.add_paragraph(), _paragraph_xml("{{X}}"))
+
+    applied = edit_docx.apply_ops(doc, [{"op": "replace_text", "find": "{{X}}", "with": "{{X}}!"}])
+
+    assert applied == 1
+    assert "{{X}}!" in _document_xml(doc, tmp_path)
+    assert "{{X}}!!" not in _document_xml(doc, tmp_path)
+
+
+def test_replace_run_still_indexes_only_body_paragraphs() -> None:
+    """Guard: text boxes must not shift the index space `replace_run` addresses."""
+    from docx import Document
+
+    edit_docx = _edit_docx_module()
+    doc = Document()
+    doc.add_paragraph("first")
+    _add_vml_text_box(doc.add_paragraph(), _paragraph_xml("boxed"))
+    doc.add_paragraph("third")
+
+    applied = edit_docx.apply_ops(doc, [{"op": "replace_run", "para": 2, "run": 0, "text": "3rd"}])
+
+    assert applied == 1
+    assert doc.paragraphs[2].text == "3rd"
