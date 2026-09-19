@@ -278,3 +278,24 @@ def test_cached_fallback_worktree_shows_only_the_cached_half_when_anything_is_st
     assert proc.returncode == 0
     assert b"+line1" in proc.stdout
     assert b"+line2" not in proc.stdout
+
+
+def test_cached_mode_before_the_first_commit_in_a_sha256_repository(tmp_path: Path) -> None:
+    """The empty-tree hash differs by object format -- the SHA-1 constant
+    (``4b825dc6...``) is not a valid tree-ish in a ``--object-format=sha256``
+    repository, so a fix that hard-codes it fails this exact case (``fatal:
+    ambiguous argument``) even though the ordinary SHA-1 tests above pass."""
+    init = subprocess.run(
+        ["git", "init", "-q", "--object-format=sha256", "."],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    if init.returncode != 0:
+        pytest.skip(f"git lacks sha256 repository support: {init.stderr.decode()!r}")
+    (tmp_path / "f.txt").write_bytes(b"hello\n")
+    _git(tmp_path, "add", "f.txt")
+
+    proc = _run_mode(tmp_path, "cached")
+
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    assert b"+hello" in proc.stdout

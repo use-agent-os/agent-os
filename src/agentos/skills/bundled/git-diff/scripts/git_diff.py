@@ -57,23 +57,17 @@ def _emit(data: bytes, stream: TextIO) -> None:
     stream.flush()
 
 
-def _run_git(args: list[str], cwd: Path) -> tuple[int, bytes, bytes]:
+def _run_git(
+    args: list[str], cwd: Path, input_bytes: bytes | None = None
+) -> tuple[int, bytes, bytes]:
     proc = subprocess.run(  # noqa: S603 — argv is constructed from a static allowlist
         ["git", *args],
         cwd=str(cwd),
+        input=input_bytes,
         capture_output=True,
         check=False,
     )
     return proc.returncode, proc.stdout, proc.stderr
-
-
-#: The well-known, universal hash of the empty tree object -- every git
-#: repository has it, without needing a commit to exist first. A one-argument
-#: ``git diff <tree-ish>`` compares the working tree (staged and unstaged
-#: together) against that tree-ish, so diffing against this specific one
-#: reproduces ``git diff HEAD``'s exact semantics for a repository that has
-#: no HEAD yet, rather than a narrower spelling that only covers one half.
-_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
 def _head_revision(cwd: Path) -> str:
@@ -88,13 +82,24 @@ def _head_revision(cwd: Path) -> str:
     the change set (unstaged-only, staged-only respectively), so a file
     that was staged and then further modified unstaged has its staged
     content silently omitted from a "worktree" read and its unstaged
-    content omitted from a "cached" one. The empty-tree hash is a real
-    tree-ish every repository already has, so ``git diff <empty-tree>`` /
-    ``git diff --cached <empty-tree>`` keep the exact one-argument
-    semantics ``HEAD`` would carry, before HEAD exists to spell.
+    content omitted from a "cached" one. A one-argument ``git diff
+    <tree-ish>`` against the *empty* tree keeps that exact one-argument,
+    both-halves semantics before HEAD exists to spell it.
+
+    The empty tree's hash is asked of git rather than hard-coded: it is
+    ``4b825dc6...`` in a SHA-1 repository but a different value in a
+    SHA-256 one (``git init --object-format=sha256``), and hard-coding the
+    SHA-1 spelling makes the substituted revision unresolvable -- and the
+    diff fail outright -- in the newer format. ``git hash-object`` computes
+    the id for the running repository's own object format without needing
+    the tree to already exist as an object on disk.
     """
     rc, _out, _err = _run_git(["rev-parse", "--verify", "--quiet", "HEAD"], cwd)
-    return "HEAD" if rc == 0 else _EMPTY_TREE
+    if rc == 0:
+        return "HEAD"
+    rc, out, _err = _run_git(["hash-object", "-t", "tree", "--stdin"], cwd, input_bytes=b"")
+    empty_tree = out.decode("ascii", "replace").strip()
+    return empty_tree if rc == 0 and empty_tree else "HEAD"
 
 
 def _diff_for_mode(mode: str, cwd: Path) -> tuple[int, bytes, bytes]:
