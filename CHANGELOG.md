@@ -266,7 +266,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   every `<t>` descendant, including the ones inside `<rPh>`, so a Japanese
   workbook read back with each reading glued onto the word it annotates
   ([#2053](https://github.com/use-agent-os/agent-os/issues/2053)).
-
+  workbook read back with each reading glued onto the word it annotates.
+- Discord: a fenced code block longer than one message stays a code block. The
+  shared splitter's fence backup is skipped when the open fence starts at
+  offset 0 — the shape of every continuation chunk — so the middle of a long
+  block rendered as prose. Each Discord message now closes the block at its end
+  and reopens it, with the info string, at the start of the next.
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed

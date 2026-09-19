@@ -67,6 +67,11 @@ _DISCORD_MESSAGE_TEXT_LIMIT = 2000
 #: of the connection. Sized for channels, not sessions, hence the override.
 _MAX_CACHED_CHANNEL_CONTEXTS = 10_000
 
+#: Closes a code block that a chunk boundary left open, and the cap on the info
+#: string carried into the fence that reopens it in the next message.
+_DISCORD_FENCE_CLOSE = "\n```"
+_DISCORD_FENCE_INFO_LIMIT = 20
+
 # Gateway intents bitmask
 GATEWAY_INTENTS = (
     (1 << 0)  # GUILDS
@@ -1215,17 +1220,55 @@ class DiscordChannel:
         return result
 
     @staticmethod
+    def _reopen_marker(chunk: str) -> str:
+        """Return the fence that reopens the block *chunk* left open.
+
+        The info string is carried over so the continuation keeps the language
+        it was highlighted with.
+        """
+        fence_at = chunk.rfind("```")
+        end_of_line = chunk.find("\n", fence_at)
+        info = chunk[fence_at + 3 : end_of_line] if end_of_line != -1 else chunk[fence_at + 3 :]
+        return f"```{info.strip()[:_DISCORD_FENCE_INFO_LIMIT]}\n"
+
+    @staticmethod
     def _split_content_for_send(content: str) -> list[str]:
         """Split *content* into one message per Discord's 2000-char cap.
 
         Reuses the same splitter Telegram's adapter relies on rather than a
         second, independently-drifting length check.
+
+        ``split_text_for_limit`` backs a cut off a half-open fence, but it
+        cannot when the block starts at the segment's own beginning — backing
+        up there would return an empty chunk and the caller would never make
+        progress. That is exactly the shape every chunk after the first of a
+        long code block has, so a block spanning three messages arrived as an
+        unterminated fence, then a middle message rendered as prose, then a
+        stray fence. Discord's chunks are independent messages and nothing here
+        maps them back onto offsets in ``content``, so this seam can close the
+        block at the end of one message and reopen it at the start of the next.
+        Telegram's streaming path measures ``len(head)`` against the source
+        text, so the shared splitter itself stays byte-for-byte lossless.
         """
         segments: list[str] = []
         remaining = content
+        reopen = ""
         while True:
-            head, tail = split_text_for_limit(remaining, _DISCORD_MESSAGE_TEXT_LIMIT)
-            segments.append(head)
+            # Only fenced content pays for the closing marker, so text without
+            # a block still fills a message exactly as before.
+            fenced = reopen or "```" in remaining
+            reserved = len(reopen) + len(_DISCORD_FENCE_CLOSE) if fenced else 0
+            head, tail = split_text_for_limit(remaining, _DISCORD_MESSAGE_TEXT_LIMIT - reserved)
+            chunk = reopen + head
+            if chunk.count("```") % 2 == 1:
+                reopen = DiscordChannel._reopen_marker(chunk)
+                # The closing fence needs its own line, but a chunk that
+                # already ends on a newline must not gain a blank one: that
+                # blank would show up inside the delivered code.
+                chunk += _DISCORD_FENCE_CLOSE if not chunk.endswith("\n") else "```"
+            else:
+                reopen = ""
+            segments.append(chunk)
             if not tail:
                 return segments
             remaining = tail
