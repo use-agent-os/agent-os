@@ -183,3 +183,98 @@ def test_emit_writes_bytes_verbatim_through_the_buffer() -> None:
     module._emit(payload, stream)
 
     assert raw.getvalue() == payload
+
+
+# ---------------------------------------------------------------------------
+# A repository with no commit yet: HEAD is an unborn branch, and
+# ``git diff HEAD`` / ``git diff --cached HEAD`` exit 128 ("ambiguous
+# argument 'HEAD'") before the first commit lands.
+# ---------------------------------------------------------------------------
+
+
+def _run_mode(repo: Path, mode: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), "--cwd", str(repo), "--mode", mode],
+        capture_output=True,
+    )
+
+
+def test_cached_fallback_worktree_before_the_first_commit(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "-q", ".")
+    (tmp_path / "f.txt").write_bytes(b"hello\n")
+    _git(tmp_path, "add", "f.txt")
+
+    proc = _run_mode(tmp_path, "cached_fallback_worktree")
+
+    assert proc.returncode == 0
+    assert b"f.txt" in proc.stdout
+    assert b"+hello" in proc.stdout
+
+
+def test_cached_mode_before_the_first_commit(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "-q", ".")
+    (tmp_path / "f.txt").write_bytes(b"hello\n")
+    _git(tmp_path, "add", "f.txt")
+
+    proc = _run_mode(tmp_path, "cached")
+
+    assert proc.returncode == 0
+    assert b"f.txt" in proc.stdout
+
+
+def test_worktree_mode_before_the_first_commit_with_nothing_staged(tmp_path: Path) -> None:
+    """An untracked file with no ``git add`` is outside any diff's scope,
+    staged or not -- the "before first commit" fallback must not surface it
+    either, matching what ``worktree`` mode does once HEAD exists."""
+    _git(tmp_path, "init", "-q", ".")
+    (tmp_path / "untracked.txt").write_bytes(b"nobody added me\n")
+
+    proc = _run_mode(tmp_path, "worktree")
+
+    assert proc.returncode == 0
+    assert proc.stdout == b"NO_DIFF"
+
+
+def test_worktree_mode_before_the_first_commit_combines_staged_and_unstaged(
+    tmp_path: Path,
+) -> None:
+    """The case neither a bare fallback nor an unconditional ``--cached``
+    gets right: a file staged once, then further modified without
+    re-staging. ``worktree`` mode must show the *whole* file as new content
+    -- both lines -- exactly as ``git diff HEAD`` would once a commit
+    exists, not just the incremental unstaged edit (which reads as though
+    the first line already existed) and not nothing (which loses the
+    staged line entirely)."""
+    _git(tmp_path, "init", "-q", ".")
+    (tmp_path / "f.txt").write_bytes(b"line1\n")
+    _git(tmp_path, "add", "f.txt")
+    (tmp_path / "f.txt").write_bytes(b"line1\nline2\n")
+
+    proc = _run_mode(tmp_path, "worktree")
+
+    assert proc.returncode == 0
+    assert b"new file mode" in proc.stdout
+    assert b"+line1" in proc.stdout
+    assert b"+line2" in proc.stdout
+
+
+def test_cached_fallback_worktree_shows_only_the_cached_half_when_anything_is_staged(
+    tmp_path: Path,
+) -> None:
+    """``cached_fallback_worktree`` is "cached, falling back to worktree only
+    when cached is empty" by design: once ``--cached`` finds *any* staged
+    content it returns that directly and never reaches the worktree
+    fallback, before the first commit exactly as after one. A file staged
+    and then further modified unstaged is the ``worktree``-mode case
+    covered above, not this one -- confirming that design is unchanged by
+    this fix, not accidentally widened."""
+    _git(tmp_path, "init", "-q", ".")
+    (tmp_path / "f.txt").write_bytes(b"line1\n")
+    _git(tmp_path, "add", "f.txt")
+    (tmp_path / "f.txt").write_bytes(b"line1\nline2\n")
+
+    proc = _run_mode(tmp_path, "cached_fallback_worktree")
+
+    assert proc.returncode == 0
+    assert b"+line1" in proc.stdout
+    assert b"+line2" not in proc.stdout
