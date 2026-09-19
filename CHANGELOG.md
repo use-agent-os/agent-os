@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Email channel: conversion failures in `_to_incoming` now call
+  `_register_fetch_failure` and retain attempt counts across poll cycles,
+  ensuring poison messages are quarantined after `MAX_FETCH_ATTEMPTS` instead
+  of looping the IMAP poller indefinitely.
 - Discord channel: a reaction added to the bot's own message in a guild
   channel or thread is no longer silently dropped by the group mention
   gate. `is_group_mentioned` fell back to searching a reaction's (always
