@@ -150,3 +150,83 @@ def test_main_stays_quiet_on_stderr_when_nothing_was_dropped(
     summary = json.loads(captured.out)
     assert summary["count"] == 2
     assert summary["skipped_pages"] == []
+
+
+# ---------------------------------------------------------------------------
+# #2996: a span is two numbers until it is clamped to the document
+# ---------------------------------------------------------------------------
+
+
+def test_a_runaway_range_splits_the_real_pages_without_expanding_the_span(
+    five_pages: Path, tmp_path: Path
+) -> None:
+    """``1-100000000`` used to allocate a hundred million ints -- and list
+    every one of them as skipped -- before the page count was consulted."""
+    split = _split_module()
+
+    result = split.split(five_pages, "1-100000000", tmp_path / "out")
+
+    assert result.parts == [(result.files[0], [1, 2, 3, 4, 5])]
+    assert len(result.skipped_pages) == split.MAX_REPORTED_SKIPPED
+    assert result.skipped_pages[:2] == [6, 7]
+    assert result.skipped_pages_omitted == 100_000_000 - 5 - split.MAX_REPORTED_SKIPPED
+
+
+def test_a_runaway_range_summary_counts_what_it_does_not_list(
+    five_pages: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    split = _split_module()
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["split.py", str(five_pages), "--pages", "4-100000", "--out", str(tmp_path / "out")],
+    )
+
+    assert split.main() == 0
+
+    captured = capsys.readouterr()
+    summary = json.loads(captured.out)
+    assert summary["parts"][0]["pages"] == [4, 5]
+    assert len(summary["skipped_pages"]) == split.MAX_REPORTED_SKIPPED
+    assert summary["skipped_pages_omitted"] == 100_000 - 5 - split.MAX_REPORTED_SKIPPED
+    assert "more" in captured.err
+
+
+def test_an_ordinary_summary_has_no_omitted_count(
+    five_pages: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The additive field appears only when something was actually omitted."""
+    split = _split_module()
+    monkeypatch.setattr(
+        sys, "argv", ["split.py", str(five_pages), "--pages", "1-7", "--out", str(tmp_path / "o")]
+    )
+
+    assert split.main() == 0
+
+    assert "skipped_pages_omitted" not in json.loads(capsys.readouterr().out)
+
+
+@pytest.mark.parametrize("spec", ["1-", "-5", "a-b", "3,x"])
+def test_a_malformed_page_spec_is_an_error_not_a_traceback(
+    spec: str,
+    five_pages: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    split = _split_module()
+    out_dir = tmp_path / "out"
+    monkeypatch.setattr(
+        sys, "argv", ["split.py", str(five_pages), "--pages", spec, "--out", str(out_dir)]
+    )
+
+    assert split.main() == 2
+
+    assert "error: invalid page range" in capsys.readouterr().err
+    assert not out_dir.exists()

@@ -48,21 +48,47 @@ def _write_stdout(text: str) -> None:
     sys.stdout.flush()
 
 
-def split_ranges(spec: str) -> list[list[int]]:
-    groups: list[list[int]] = []
+#: How many out-of-range pages ``skipped_pages`` lists one by one. Beyond this
+#: the rest are counted in ``skipped_pages_omitted`` instead of enumerated, so a
+#: runaway span cannot turn the summary into a hundred-million-entry list.
+MAX_REPORTED_SKIPPED = 1000
+
+
+class PageSpecError(ValueError):
+    """A ``--pages`` value that is not a list of ``N`` / ``N-M`` tokens."""
+
+
+def page_spans(spec: str) -> list[tuple[int, int]]:
+    """Parse ``'1-3,5,7-9'`` into inclusive ``(lo, hi)`` spans, without expanding them.
+
+    Expanding each span into a list of page numbers happened before the
+    document's length was known, so ``--pages 1-100000000`` allocated a hundred
+    million ints (and listed every one of them as skipped) to split a five-page
+    file (#2996). A span is two numbers; the pages it covers are only ever
+    materialised after clamping to the document.
+    """
+    spans: list[tuple[int, int]] = []
     for token in spec.split(","):
         token = token.strip()
         if not token:
             continue
-        if "-" in token:
-            lo_s, hi_s = token.split("-", 1)
-            lo, hi = int(lo_s), int(hi_s)
-            if lo > hi:
-                lo, hi = hi, lo
-            groups.append(list(range(lo, hi + 1)))
-        else:
-            groups.append([int(token)])
-    return groups
+        lo_s, sep, hi_s = token.partition("-")
+        try:
+            lo = int(lo_s)
+            hi = int(hi_s) if sep else lo
+        except ValueError:
+            raise PageSpecError(
+                f"invalid page range {token!r}: expected a page (5) or a range (1-3)"
+            ) from None
+        if lo > hi:
+            lo, hi = hi, lo
+        spans.append((lo, hi))
+    return spans
+
+
+def split_ranges(spec: str) -> list[list[int]]:
+    """Every page each span of *spec* names. Unbounded -- :func:`split` does not use it."""
+    return [list(range(lo, hi + 1)) for lo, hi in page_spans(spec)]
 
 
 @dataclass
@@ -72,6 +98,17 @@ class SplitResult:
     total_pages: int
     parts: list[tuple[Path, list[int]]] = field(default_factory=list)
     skipped_pages: list[int] = field(default_factory=list)
+    #: Out-of-range pages counted but not listed, past MAX_REPORTED_SKIPPED.
+    skipped_pages_omitted: int = 0
+
+    def skip(self, lo: int, hi: int) -> None:
+        """Record the inclusive span ``lo..hi`` as skipped, listing at most the cap."""
+        if lo > hi:
+            return
+        room = max(0, MAX_REPORTED_SKIPPED - len(self.skipped_pages))
+        listed = min(room, hi - lo + 1)
+        self.skipped_pages.extend(range(lo, lo + listed))
+        self.skipped_pages_omitted += (hi - lo + 1) - listed
 
     @property
     def files(self) -> list[Path]:
@@ -81,9 +118,11 @@ class SplitResult:
 def split(input_path: Path, pages_spec: str, out_dir: Path) -> SplitResult:
     reader = PdfReader(str(input_path))
     result = SplitResult(total_pages=len(reader.pages))
-    for group in split_ranges(pages_spec):
-        valid_pages = [p for p in group if 1 <= p <= result.total_pages]
-        result.skipped_pages.extend(p for p in group if not 1 <= p <= result.total_pages)
+    total = result.total_pages
+    for lo, hi in page_spans(pages_spec):
+        result.skip(lo, min(hi, 0))  # before page 1
+        valid_pages = list(range(max(lo, 1), min(hi, total) + 1))
+        result.skip(max(lo, total + 1), hi)  # past the last page
         if not valid_pages:
             continue
         writer = PdfWriter()
@@ -114,7 +153,11 @@ def main() -> int:
     if not args.input.is_file():
         print(f"error: input {args.input} not found", file=sys.stderr)
         return 2
-    result = split(args.input, args.pages, args.out)
+    try:
+        result = split(args.input, args.pages, args.out)
+    except PageSpecError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     if not result.parts:
         print(
             f"error: no page in {args.pages!r} exists in {args.input} ({result.total_pages} pages)",
@@ -123,6 +166,8 @@ def main() -> int:
         return 2
     if result.skipped_pages:
         skipped = ", ".join(str(p) for p in result.skipped_pages)
+        if result.skipped_pages_omitted:
+            skipped += f" and {result.skipped_pages_omitted} more"
         print(
             f"warn: skipped pages outside 1-{result.total_pages} of {args.input}: {skipped}",
             file=sys.stderr,
@@ -135,6 +180,11 @@ def main() -> int:
                 "parts": [{"file": str(p), "pages": pages} for p, pages in result.parts],
                 "skipped_pages": result.skipped_pages,
                 "total_pages": result.total_pages,
+                **(
+                    {"skipped_pages_omitted": result.skipped_pages_omitted}
+                    if result.skipped_pages_omitted
+                    else {}
+                ),
             },
             ensure_ascii=False,
         )
