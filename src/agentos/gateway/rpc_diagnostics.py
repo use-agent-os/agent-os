@@ -31,10 +31,13 @@ async def _handle_diagnostics_status(params: dict | None, ctx: RpcContext) -> di
 async def _handle_diagnostics_set(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     if not isinstance(params, dict):
         raise ValueError("params must be an object")
+    state = _state(ctx)
+    if params.get("reset"):
+        state.reset_runtime()
+        return diagnostics_status_payload(state, getattr(ctx, "config", None))
     if "enabled" not in params:
         raise ValueError("params.enabled is required")
     enabled = bool(params.get("enabled"))
     raw = bool(params.get("raw", False))
-    state = _state(ctx)
     state.set_runtime(enabled=enabled, raw=raw)
     return diagnostics_status_payload(state, getattr(ctx, "config", None))
