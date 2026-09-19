@@ -100,6 +100,8 @@ _TRANSLATE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("es", r"\btraduce\b|\btraducir\b|\btraduzca\b|\btraducid\b|\btraduzcan\b"),
     # German — verb forms only, incl. the ue- transliteration.
     ("de", r"\b(?:ü|ue)bersetz(?:e|en|t|st)\b"),
+    # Dutch — verb forms only (vertaal, vertalen, vertaalt; noun "vertaling" excluded).
+    ("nl", r"\bvertaal(?:t|en)?\b"),
     # Portuguese — verb forms only.
     ("pt", r"\btraduza\b|\btraduzir\b|\btraduz\b|\btraduzam\b"),
     # Russian — imperative and infinitive only (noun "перевод" excluded).
