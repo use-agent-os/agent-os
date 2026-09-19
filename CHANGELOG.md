@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Search provider: `BraveSearchProvider` now falls back to the `BRAVE_API_KEY`
+  environment variable when `BRAVE_SEARCH_API_KEY` is unset, matching OpenClaw
+  migration mappings and `multi-search-engine` configuration.
 - Discord channel: a reaction added to the bot's own message in a guild
   channel or thread is no longer silently dropped by the group mention
   gate. `is_group_mentioned` fell back to searching a reaction's (always

@@ -1911,7 +1911,11 @@ async def build_services(
             search_api_key = os.environ.get(env_key, "") if env_key else ""
         # Auto-select: use brave if key is available and provider is default
         if provider == "duckduckgo":
-            if search_api_key or os.environ.get("BRAVE_SEARCH_API_KEY"):
+            if (
+                search_api_key
+                or os.environ.get("BRAVE_SEARCH_API_KEY")
+                or os.environ.get("BRAVE_API_KEY")
+            ):
                 provider = "brave"
 
         configure_search(
