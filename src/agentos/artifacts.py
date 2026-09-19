@@ -23,9 +23,21 @@ DEFAULT_ARTIFACT_DISK_BUDGET_BYTES = 512 * 1024 * 1024
 _UNSAFE_FILENAME_RE = re.compile(r'[\x00-\x1f\x7f<>:"/\\|?*]+')
 _SAFE_TOKEN_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _SAFE_MIME_RE = re.compile(r"^[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+$")
-_ARTIFACT_MARKER_RE = re.compile(
-    r"(?:^|\s*)\[generated artifact omitted:\s*[^\]\n]+?\]\s*",
-    re.IGNORECASE,
+#: ``[generated artifact omitted: <name> (<mime>)]`` -- see artifact_marker.
+#: The match ends at the first `` (<mime>)]``, not at a bare ``]``: a name may
+#: carry its own brackets (``Q3 Report [Draft].pdf``), and stopping at the first
+#: ``]`` left the marker's tail behind, while running to the last ``]`` on the
+#: line deleted whatever followed the marker -- a Markdown link, a footnote.
+_ARTIFACT_MARKER_BODY = r"\[generated artifact omitted:[^\n]*? \([^()\s\]]+\)\]"
+#: A marker alone on its line goes with its line break, so the lines around it
+#: stay separate lines rather than being glued together.
+_ARTIFACT_MARKER_LINE_RE = re.compile(
+    r"^[ \t]*" + _ARTIFACT_MARKER_BODY + r"[ \t]*(?:\n|\Z)", re.IGNORECASE | re.MULTILINE
+)
+#: A marker inside a line collapses to one space, so the words either side of
+#: it do not run together.
+_ARTIFACT_MARKER_INLINE_RE = re.compile(
+    r"[ \t]*" + _ARTIFACT_MARKER_BODY + r"[ \t]*", re.IGNORECASE
 )
 _PUBLIC_ARTIFACT_FIELDS = (
     "id",
@@ -107,8 +119,10 @@ def artifact_marker(ref: dict[str, Any] | ArtifactRef) -> str:
 def strip_artifact_markers_from_text(text: str) -> str:
     if "[generated artifact omitted:" not in text:
         return text
-    cleaned = _ARTIFACT_MARKER_RE.sub("", text.replace("\r\n", "\n"))
+    cleaned = _ARTIFACT_MARKER_LINE_RE.sub("", text.replace("\r\n", "\n"))
+    cleaned = _ARTIFACT_MARKER_INLINE_RE.sub(" ", cleaned)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
     return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
 
