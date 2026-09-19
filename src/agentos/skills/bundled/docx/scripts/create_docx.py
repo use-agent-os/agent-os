@@ -51,8 +51,13 @@ def build(spec: Any) -> Document:
             level = max(0, min(9, level))
             doc.add_heading(str(item.get("text", "")), level=level)
         elif kind == "paragraph":
-            style = item.get("style") or "Normal"
-            doc.add_paragraph(str(item.get("text", "")), style=style)
+            p = doc.add_paragraph(str(item.get("text", "")))
+            style = item.get("style")
+            if style:
+                try:
+                    p.style = style
+                except (KeyError, ValueError):
+                    pass
         elif kind == "table":
             raw_rows = item.get("rows")
             if not isinstance(raw_rows, (list, tuple)):

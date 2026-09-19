@@ -626,6 +626,25 @@ def test_build_clamps_an_invalid_heading_level(level: object) -> None:
     assert doc.paragraphs[0].text == "Title"
 
 
+@pytest.mark.parametrize("bad_style", ["NonExistentStyle", "Callout", 123])
+def test_build_falls_back_to_default_style_for_unrecognized_style(bad_style: object) -> None:
+    create_docx = _create_docx_module()
+
+    # Must not raise KeyError/ValueError when paragraph specifies unknown style
+    doc = create_docx.build(
+        {
+            "body": [
+                {"kind": "paragraph", "text": "Styled text", "style": bad_style},
+                {"kind": "paragraph", "text": "Normal text"},
+            ]
+        }
+    )
+
+    assert len(doc.paragraphs) == 2
+    assert doc.paragraphs[0].text == "Styled text"
+    assert doc.paragraphs[1].text == "Normal text"
+
+
 def test_create_docx_cli_reports_invalid_json_with_exit_code_2(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
