@@ -15,6 +15,11 @@ Operations:
 * A **missing** ``value`` key is a malformed operation: it is skipped and not
   counted in ``applied``, so a typo cannot silently wipe data.
 * ``0``, ``false`` and ``""`` are values, not absence, and are written as given.
+
+``rename_sheet`` lands the sheet on exactly the name asked for, or does nothing.
+A name another sheet already holds -- Excel compares sheet names without regard
+to case -- is refused and not counted in ``applied``, because openpyxl would
+otherwise store ``Summary1`` and report success.
 """
 
 from __future__ import annotations
@@ -91,6 +96,45 @@ def _coerce(value: Any, as_text: bool) -> Any:
     return value
 
 
+def _free_temp_title(wb: Any) -> str:
+    """A sheet title no sheet in *wb* currently holds, in any capitalisation."""
+    taken = {name.casefold() for name in wb.sheetnames}
+    index = 0
+    while True:
+        candidate = f"_rename_{index}"
+        if candidate.casefold() not in taken:
+            return candidate
+        index += 1
+
+
+def _rename_sheet(wb: Any, old: str, new: str) -> bool:
+    """Rename *old* to exactly *new*; return whether that happened.
+
+    openpyxl runs an assigned title through ``avoid_duplicate_name``, which
+    compares case-insensitively against **every** sheet name -- the renamed
+    sheet's own included -- and on a hit stores *new* with a number glued on
+    rather than refusing. So renaming onto a name another sheet already held
+    wrote ``Summary1``, and merely correcting a sheet's own capitalisation
+    (``data`` -> ``Data``) wrote ``Data1``. Both reported ``applied``, and every
+    later op addressing ``Summary`` then read and wrote the *other* sheet.
+
+    A name another sheet holds is refused here, uncounted, the way this op list
+    already treats a ``set_cell`` with no ``value``. A name only the renamed
+    sheet itself holds is a legitimate request, so it goes through a free
+    intermediate title: that clears the old spelling before the new one is
+    claimed, leaving the title exactly as asked.
+    """
+    sheet = wb[old]
+    if any(name != old and name.casefold() == new.casefold() for name in wb.sheetnames):
+        return False
+    if new == old:
+        return True
+    if new.casefold() == old.casefold():
+        sheet.title = _free_temp_title(wb)
+    sheet.title = new
+    return True
+
+
 def apply_ops(wb: Any, ops: list[dict[str, Any]]) -> int:
     applied = 0
     for op in ops:
@@ -129,8 +173,7 @@ def apply_ops(wb: Any, ops: list[dict[str, Any]]) -> int:
         elif kind == "rename_sheet":
             old = op.get("old")
             new = op.get("new")
-            if old in wb.sheetnames and isinstance(new, str):
-                wb[old].title = new
+            if old in wb.sheetnames and isinstance(new, str) and _rename_sheet(wb, old, new):
                 applied += 1
         elif kind == "merge_cells":
             sheet_name = op.get("sheet")

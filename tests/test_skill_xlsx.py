@@ -667,3 +667,68 @@ def test_create_xlsx_cli_reports_non_object_json_with_exit_code_2(
     assert create_xlsx.main() == 2
     assert "JSON spec must be an object" in capsys.readouterr().err
     assert not out.exists()
+def _two_sheet_workbook(first: str, second: str):
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    wb.active.title = first
+    wb[first]["A1"] = f"from {first}"
+    wb.create_sheet(second)["A1"] = f"from {second}"
+    return wb
+
+
+def test_rename_sheet_refuses_a_name_another_sheet_already_holds() -> None:
+    from agentos.skills.bundled.xlsx.scripts.edit_xlsx import apply_ops
+
+    wb = _two_sheet_workbook("Sheet1", "Summary")
+
+    applied = apply_ops(wb, [{"op": "rename_sheet", "old": "Sheet1", "new": "Summary"}])
+
+    assert applied == 0
+    assert wb.sheetnames == ["Sheet1", "Summary"]
+    assert wb["Summary"]["A1"].value == "from Summary"
+
+
+def test_rename_sheet_refuses_a_name_taken_in_another_capitalisation() -> None:
+    """Excel's sheet names are unique without regard to case, and so is
+    openpyxl's dedupe -- so ``summary`` collides with ``Summary`` too."""
+    from agentos.skills.bundled.xlsx.scripts.edit_xlsx import apply_ops
+
+    wb = _two_sheet_workbook("Sheet1", "summary")
+
+    applied = apply_ops(wb, [{"op": "rename_sheet", "old": "Sheet1", "new": "Summary"}])
+
+    assert applied == 0
+    assert wb.sheetnames == ["Sheet1", "summary"]
+
+
+def test_rename_sheet_recapitalises_a_sheet_without_renumbering_it() -> None:
+    from agentos.skills.bundled.xlsx.scripts.edit_xlsx import apply_ops
+
+    wb = _two_sheet_workbook("data", "Other")
+
+    applied = apply_ops(wb, [{"op": "rename_sheet", "old": "data", "new": "Data"}])
+
+    assert applied == 1
+    assert wb.sheetnames == ["Data", "Other"]
+    assert wb["Data"]["A1"].value == "from data"
+
+
+def test_a_refused_rename_leaves_the_rest_of_the_op_list_alone() -> None:
+    """The later ops address the names the caller expected, so a refused rename
+    must not shift what they hit."""
+    from agentos.skills.bundled.xlsx.scripts.edit_xlsx import apply_ops
+
+    wb = _two_sheet_workbook("Sheet1", "Summary")
+
+    applied = apply_ops(
+        wb,
+        [
+            {"op": "rename_sheet", "old": "Sheet1", "new": "Summary"},
+            {"op": "set_cell", "sheet": "Summary", "row": 1, "col": 1, "value": "edited"},
+        ],
+    )
+
+    assert applied == 1
+    assert wb["Summary"]["A1"].value == "edited"
+    assert wb["Sheet1"]["A1"].value == "from Sheet1"

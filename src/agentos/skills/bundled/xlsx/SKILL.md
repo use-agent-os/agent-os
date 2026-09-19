@@ -123,6 +123,11 @@ Rules:
 - Datetimes go in as ISO 8601 strings (`"2026-05-06T09:00:00"`); the helper
   parses them back to `datetime` objects so Excel renders the cell with date
   format. Pass `as_text: true` to keep such a string as text instead.
+- `rename_sheet` lands the sheet on exactly the name you asked for, or does
+  nothing. Excel compares sheet names without regard to case, so a name another
+  sheet already holds is refused and not counted in `applied` — inspect the
+  workbook and pick a free name. Correcting only a sheet's own capitalisation
+  (`data` → `Data`) is applied normally.
 - Editing a cell does not recalculate dependent formulas. Excel and
   LibreOffice recalculate on open. If you need cached values immediately,
   use a calculation engine (out of scope here).

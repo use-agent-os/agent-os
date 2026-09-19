@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- `xlsx` `edit_xlsx.py`: a `rename_sheet` lands on exactly the name asked for,
+  or does nothing. openpyxl routes an assigned title through
+  `avoid_duplicate_name`, so renaming onto a name another sheet held wrote
+  `Summary1` and counted it as applied, and every later op addressing `Summary`
+  then read and wrote the other sheet. A taken name is now refused and
+  uncounted; a capitalisation-only rename is applied exactly.
 - Discord channel: a reaction added to the bot's own message in a guild
   channel or thread is no longer silently dropped by the group mention
   gate. `is_group_mentioned` fell back to searching a reaction's (always
