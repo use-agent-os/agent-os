@@ -211,7 +211,13 @@ def _pdf_markup_text(value: Any, *, base_font: str, cjk_font: str | None) -> str
         ):
             target_font = cjk_font
         if target_font is None and not _font_supports_char(base_font, char):
-            continue
+            # Non-Latin-1 scripts (Cyrillic, Arabic, Hebrew, Thai, ...) are not
+            # CJK, but the CID fallback font covers far more codepoints than
+            # Helvetica.  Route them there instead of silently dropping them.
+            if cjk_font is not None:
+                target_font = cjk_font
+            else:
+                continue
         if target_font != run_font:
             flush()
             run_font = target_font
