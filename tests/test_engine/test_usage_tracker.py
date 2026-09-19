@@ -483,3 +483,21 @@ def test_model_usage_positional_construction_keeps_billed_cost_default() -> None
     assert mu.cache_read_tokens == 200
     assert mu.cache_write_tokens == 80
     assert mu.billed_cost == 0.0  # default at the tail
+
+
+def test_total_tokens_properties() -> None:
+    from agentos.engine.types import DoneEvent as EngineDoneEvent
+    from agentos.provider.types import DoneEvent as ProviderDoneEvent
+
+    mu = ModelUsage("claude-opus-4-7", 1000, 50)
+    assert mu.total_tokens == 1050
+
+    su = SessionUsage(input_tokens=2500, output_tokens=300)
+    assert su.total_tokens == 2800
+
+    eng_done = EngineDoneEvent(input_tokens=150, output_tokens=40)
+    assert eng_done.total_tokens == 190
+
+    prov_done = ProviderDoneEvent(input_tokens=300, output_tokens=85)
+    assert prov_done.total_tokens == 385
+
