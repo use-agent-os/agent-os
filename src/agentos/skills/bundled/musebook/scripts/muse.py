@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import json
 import mimetypes
 import os
@@ -77,12 +78,18 @@ def state_root() -> Path:
     configured = os.environ.get("MUSE_STATE_DIR", "").strip()
     if configured:
         return Path(configured).expanduser()
-    state_dir = os.environ.get("AGENTOS_STATE_DIR", "").strip()
-    if state_dir:
-        return Path(state_dir).expanduser() / "muse"
-    home = os.environ.get("AGENTOS_HOME", "").strip()
-    if home:
-        return Path(home).expanduser() / "state" / "muse"
+    # AGENTOS_STATE_DIR overrides the AgentOS *home* (agentos.paths's
+    # default_agentos_home()), not the state directory itself -- runtime
+    # state always lives one "state" segment below home, for every
+    # subsystem (agentos.paths.state_dir(), the gateway's own default).
+    # AGENTOS_STATE_DIR and AGENTOS_HOME are therefore equivalent here and
+    # both get "state/muse" appended; treating AGENTOS_STATE_DIR as the
+    # state root itself would put this skill's identity file somewhere no
+    # other subsystem's state lives.
+    for var in ("AGENTOS_STATE_DIR", "AGENTOS_HOME"):
+        home = os.environ.get(var, "").strip()
+        if home:
+            return Path(home).expanduser() / "state" / "muse"
     return Path.home() / ".agentos" / "state" / "muse"
 
 
@@ -141,16 +148,37 @@ def save_identity(**fields: str) -> Path:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(payload)
+            # A rename can be durable before the data it points at: after
+            # os.replace the directory entry may hit disk while the temp
+            # file's blocks are still only in the page cache, and a crash
+            # then leaves an atomically-renamed but EMPTY key. Flush and
+            # fsync the file's own content before the rename makes it visible.
+            fh.flush()
+            os.fsync(fh.fileno())
         try:
             os.chmod(tmp_name, 0o600)
         except OSError:
             pass
         os.replace(tmp_name, path)
-    except Exception:
-        try:
+        # Best-effort: fsync the directory entry too, so the rename itself
+        # survives a crash. Not available on Windows (no directory file
+        # descriptors), where NTFS's own metadata journal covers this.
+        if os.name == "posix":
+            dir_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+    except BaseException:
+        # BaseException, not Exception: a Ctrl-C (KeyboardInterrupt) or
+        # SystemExit between mkstemp and os.replace must still clean up --
+        # the temp file is a full, 0600 copy of the private key sitting in
+        # the same directory, not scratch space that's safe to abandon.
+        # os.replace having already succeeded (so tmp_name is gone) is the
+        # ordinary case for a BaseException raised after it -- FileNotFoundError
+        # from that race is expected, not an error.
+        with contextlib.suppress(OSError):
             os.unlink(tmp_name)
-        except OSError:
-            pass
         raise
 
     try:

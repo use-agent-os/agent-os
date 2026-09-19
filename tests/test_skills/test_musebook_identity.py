@@ -125,14 +125,96 @@ def test_state_root_resolution_precedence(
     monkeypatch.setenv("AGENTOS_HOME", str(agentos_home))
     assert muse.state_root() == custom_muse
 
-    # 2. AGENTOS_STATE_DIR resolves directly under state dir as state/muse
+    # 2. AGENTOS_STATE_DIR overrides the AgentOS *home* (agentos.paths's
+    #    default_agentos_home()), not the state directory itself -- every
+    #    subsystem's runtime state lives one "state" segment below home
+    #    (agentos.paths.state_dir()), and this skill matches that rather
+    #    than being the one place in the tree state/muse isn't state/muse.
     monkeypatch.delenv("MUSE_STATE_DIR")
-    assert muse.state_root() == agentos_state / "muse"
+    assert muse.state_root() == agentos_state / "state" / "muse"
 
-    # 3. AGENTOS_HOME resolves under home/state/muse
+    # 3. AGENTOS_HOME resolves under home/state/muse the same way
     monkeypatch.delenv("AGENTOS_STATE_DIR")
     assert muse.state_root() == agentos_home / "state" / "muse"
 
     # 4. Default fallback under ~/.agentos/state/muse
     monkeypatch.delenv("AGENTOS_HOME")
     assert muse.state_root() == Path.home() / ".agentos" / "state" / "muse"
+
+
+def test_save_identity_fsyncs_before_the_rename(
+    muse, muse_state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The write must be durable, not just atomic.
+
+    os.replace makes the rename atomic, but a crash right after it can still
+    leave an empty key: the directory entry can reach disk before the temp
+    file's own content does, if nothing forces that content out of the page
+    cache first. fsync on the file, before the rename, closes that window.
+    """
+    calls: list[str] = []
+    real_fsync = os.fsync
+
+    def _tracking_fsync(fd: int) -> None:
+        calls.append("fsync")
+        real_fsync(fd)
+
+    real_replace = os.replace
+
+    def _tracking_replace(src, dst):
+        calls.append("replace")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(muse.os, "fsync", _tracking_fsync)
+    monkeypatch.setattr(muse.os, "replace", _tracking_replace)
+
+    pub, sec = muse.generate_keypair()
+    muse.save_identity(public_key=pub, secret=sec)
+
+    assert "fsync" in calls
+    assert calls.index("fsync") < calls.index("replace")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="no directory file descriptors on Windows")
+def test_save_identity_fsyncs_the_directory_after_the_rename(
+    muse, muse_state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rename itself must be durable too, or the whole write can vanish."""
+    opened_dirs: list[str] = []
+    real_open = os.open
+
+    def _tracking_open(path, flags, *a, **kw):
+        fd = real_open(path, flags, *a, **kw)
+        if flags == os.O_RDONLY:
+            opened_dirs.append(str(path))
+        return fd
+
+    monkeypatch.setattr(muse.os, "open", _tracking_open)
+
+    pub, sec = muse.generate_keypair()
+    muse.save_identity(public_key=pub, secret=sec)
+
+    assert str(muse_state) in opened_dirs
+
+
+def test_save_identity_cleans_up_the_temp_file_on_keyboard_interrupt(
+    muse, muse_state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Ctrl-C between mkstemp and os.replace must not leave a second,
+    full, 0600 copy of the private key sitting beside the real file.
+
+    KeyboardInterrupt is a BaseException, not an Exception -- an
+    ``except Exception`` cleanup handler never sees it.
+    """
+
+    def _raise_keyboard_interrupt(src, dst):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(muse.os, "replace", _raise_keyboard_interrupt)
+
+    pub, sec = muse.generate_keypair()
+    with pytest.raises(KeyboardInterrupt):
+        muse.save_identity(public_key=pub, secret=sec)
+
+    leftovers = list(muse_state.glob(".musebook.json.*"))
+    assert leftovers == [], f"temp file(s) leaked a copy of the secret: {leftovers}"
