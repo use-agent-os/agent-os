@@ -164,6 +164,22 @@ async def test_publish_failure_is_reported_not_raised(
     assert "outside workspace" in out
 
 
+@pytest.mark.asyncio
+async def test_publish_oserror_and_permission_error_reported_not_raised(
+    ctx: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _locked(path: str, name: str | None = None, mime: str | None = None) -> str:
+        raise PermissionError(
+            "The process cannot access the file because it is being used by another process"
+        )
+
+    monkeypatch.setattr(artifacts_mod, "publish_artifact", _locked)
+    out = await publish_inline_artifacts(f"results ready\n{marker('locked.json')}")
+    assert out.startswith("results ready\n")
+    assert "not published" in out
+    assert "used by another process" in out
+
+
 # ── Cheap exits ─────────────────────────────────────────────────────────────
 
 

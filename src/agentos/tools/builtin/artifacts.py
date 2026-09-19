@@ -389,7 +389,7 @@ async def publish_inline_artifacts(output: str) -> str:
             continue
         try:
             await publish_artifact(path=match.group("path"), mime=mime)
-        except ToolError as exc:
+        except (ToolError, OSError, Exception) as exc:
             replacements[marker] = f"[inline artifact not published: {exc}]"
             continue
         published += 1
