@@ -581,6 +581,8 @@ class MSTeamsChannel:
         Falls back to final-flush behavior if ``update_activity`` reports
         the channel as unsupported.
         Edits throttled at ``edit_interval_s`` (default 2.0 s).
+        Oversized content is split per ``_MSTEAMS_MESSAGE_TEXT_LIMIT`` with
+        segment rollover across activities (#2876).
         """
         if self._adapter is None:
             raise RuntimeError("MSTeamsChannel.send_streaming requires start() first")
@@ -597,6 +599,7 @@ class MSTeamsChannel:
         unsupported = False
         last_edit = 0.0
         interval = self.config.edit_interval_s
+        segment_start = 0
 
         async for chunk in chunks:
             if not chunk:
@@ -604,20 +607,25 @@ class MSTeamsChannel:
             accumulated += chunk
 
             if message_id is None:
-                holder: dict[str, str | None] = {"id": None}
+                opened_ids: list[str] = []
+                first_segments = _split_activity_text(accumulated)
 
                 async def _send(
                     turn_context: Any,
-                    _holder: dict[str, str | None] = holder,
-                    _text: str = accumulated,
+                    _segments: list[str] = first_segments,
                 ) -> None:
-                    response = await turn_context.send_activity(_text)
-                    if response is not None and getattr(response, "id", None):
-                        _holder["id"] = response.id
+                    nonlocal segment_start, message_id
+                    for idx, segment in enumerate(_segments):
+                        response = await turn_context.send_activity(segment)
+                        if response is not None and getattr(response, "id", None):
+                            opened_ids.append(response.id)
+                            message_id = response.id
+                        if idx < len(_segments) - 1:
+                            segment_start += len(segment)
 
                 await self._adapter.continue_conversation(ref, _send, bot_id=self._bot_id)
-                message_id = holder["id"]
-                self._remember_sent_message(message_id, ref_key)
+                for sid in opened_ids:
+                    self._remember_sent_message(sid, ref_key)
                 last_edit = time.monotonic()
                 continue
 
@@ -629,16 +637,38 @@ class MSTeamsChannel:
             if now - last_edit < interval:
                 continue
 
+            current_text = accumulated[segment_start:]
+            head, tail = split_text_for_limit(
+                current_text, _MSTEAMS_MESSAGE_TEXT_LIMIT, measure=_measure_activity_text
+            )
+
             current_message_id = message_id
+            rollover_ids: list[str] = []
+            edit_tail_segments = _split_activity_text(tail) if tail else []
 
             async def _edit(
-                turn_context: Any, _id: str = current_message_id, _text: str = accumulated
+                turn_context: Any,
+                _id: str = current_message_id,
+                _head: str = head,
+                _tail_segs: list[str] = edit_tail_segments,
             ) -> None:
-                updated = Activity(type="message", id=_id, text=_text)
+                nonlocal segment_start, message_id
+                updated = Activity(type="message", id=_id, text=_head)
                 await turn_context.update_activity(updated)
+                if _tail_segs:
+                    segment_start += len(_head)
+                    for idx, segment in enumerate(_tail_segs):
+                        resp = await turn_context.send_activity(segment)
+                        if resp is not None and getattr(resp, "id", None):
+                            rollover_ids.append(resp.id)
+                            message_id = resp.id
+                        if idx < len(_tail_segs) - 1:
+                            segment_start += len(segment)
 
             try:
                 await self._adapter.continue_conversation(ref, _edit, bot_id=self._bot_id)
+                for sid in rollover_ids:
+                    self._remember_sent_message(sid, ref_key)
                 last_edit = now
             except Exception as exc:  # noqa: BLE001 — channel may not support edits
                 if _is_update_unsupported(exc):
@@ -656,31 +686,60 @@ class MSTeamsChannel:
         # and either the stream produced more content after the first send
         # or edits were unsupported and we never updated mid-stream.
         if message_id is not None and accumulated:
+            flush_ids: list[str] = []
             final_callback: Any
             if unsupported:
                 # Channel doesn't support ``update_activity``. The
                 # first chunk already shipped as a partial message; we
-                # send the **complete** accumulated text as a fresh
-                # message so the user gets the full reply (the partial
-                # first chunk stays in place but is no longer the only
-                # thing visible).
-                async def _final_send(turn_context: Any, _text: str = accumulated) -> None:
-                    await turn_context.send_activity(_text)
+                # send the **complete** accumulated text as fresh
+                # messages split to the payload cap.
+                segments = _split_activity_text(accumulated)
+
+                async def _final_send(
+                    turn_context: Any,
+                    _segments: list[str] = segments,
+                ) -> None:
+                    nonlocal message_id
+                    for segment in _segments:
+                        resp = await turn_context.send_activity(segment)
+                        if resp is not None and getattr(resp, "id", None):
+                            flush_ids.append(resp.id)
+                            message_id = resp.id
 
                 final_callback = _final_send
             else:
+                current_text = accumulated[segment_start:]
+                head, tail = split_text_for_limit(
+                    current_text, _MSTEAMS_MESSAGE_TEXT_LIMIT, measure=_measure_activity_text
+                )
                 final_message_id = message_id
+                final_tail_segments = _split_activity_text(tail) if tail else []
 
                 async def _final_update(
-                    turn_context: Any, _id: str = final_message_id, _text: str = accumulated
+                    turn_context: Any,
+                    _id: str = final_message_id,
+                    _head: str = head,
+                    _tail_segs: list[str] = final_tail_segments,
                 ) -> None:
-                    updated = Activity(type="message", id=_id, text=_text)
+                    nonlocal segment_start, message_id
+                    updated = Activity(type="message", id=_id, text=_head)
                     await turn_context.update_activity(updated)
+                    if _tail_segs:
+                        segment_start += len(_head)
+                        for idx, segment in enumerate(_tail_segs):
+                            resp = await turn_context.send_activity(segment)
+                            if resp is not None and getattr(resp, "id", None):
+                                flush_ids.append(resp.id)
+                                message_id = resp.id
+                            if idx < len(_tail_segs) - 1:
+                                segment_start += len(segment)
 
                 final_callback = _final_update
 
             try:
                 await self._adapter.continue_conversation(ref, final_callback, bot_id=self._bot_id)
+                for sid in flush_ids:
+                    self._remember_sent_message(sid, ref_key)
             except Exception as exc:  # noqa: BLE001
                 if not _is_update_unsupported(exc):
                     raise
@@ -688,16 +747,28 @@ class MSTeamsChannel:
                 # attempt of this stream — fast streams skip mid-stream
                 # edits because of ``edit_interval_s`` throttling, so
                 # we don't learn the channel is edit-incapable until
-                # this point. Retry with a fresh ``send_activity`` so
-                # the user receives the full accumulated text instead
-                # of only the first chunk that shipped at stream start.
+                # this point. Retry with fresh ``send_activity`` calls so
+                # the user receives the full accumulated text split into
+                # properly bounded segments.
                 self._streams_unsupported = True
+                segments = _split_activity_text(accumulated)
+                retry_ids: list[str] = []
 
-                async def _retry_send(turn_context: Any, _text: str = accumulated) -> None:
-                    await turn_context.send_activity(_text)
+                async def _retry_send(
+                    turn_context: Any,
+                    _segments: list[str] = segments,
+                ) -> None:
+                    nonlocal message_id
+                    for segment in _segments:
+                        resp = await turn_context.send_activity(segment)
+                        if resp is not None and getattr(resp, "id", None):
+                            retry_ids.append(resp.id)
+                            message_id = resp.id
 
                 try:
                     await self._adapter.continue_conversation(ref, _retry_send, bot_id=self._bot_id)
+                    for sid in retry_ids:
+                        self._remember_sent_message(sid, ref_key)
                 except Exception as retry_exc:  # noqa: BLE001
                     log.warning(
                         "msteams.unsupported_retry_failed",
