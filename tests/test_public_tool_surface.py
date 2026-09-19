@@ -94,3 +94,25 @@ def test_web_ui_tool_icon_map_avoids_removed_wrapper_tools() -> None:
     for name in REMOVED_TOOL_NAMES:
         assert name not in tool_display_map
     assert "http_request" in tool_display_map
+
+
+def test_tool_error_attributes_and_code() -> None:
+    from agentos.tools.types import SafeToolError, ToolError
+
+    err = ToolError("simple error")
+    assert str(err) == "simple error"
+    assert err.message == "simple error"
+    assert err.code is None
+    assert err.details is None
+
+    err_custom = ToolError("not found", code="not_found", details={"item": "123"})
+    assert str(err_custom) == "not found"
+    assert err_custom.code == "not_found"
+    assert err_custom.details == {"item": "123"}
+
+    safe_err = SafeToolError("User actionable", "raw internal", code="safe_code", details=[1, 2])
+    assert safe_err.user_message == "User actionable"
+    assert safe_err.code == "safe_code"
+    assert safe_err.details == [1, 2]
+    assert "raw internal" in str(safe_err)
+

@@ -206,6 +206,17 @@ class RegisteredTool:
 class ToolError(Exception):
     """Raised for invalid tool inputs."""
 
+    def __init__(
+        self,
+        *args: object,
+        code: str | None = None,
+        details: Any = None,
+    ) -> None:
+        super().__init__(*args)
+        self.message = str(args[0]) if args else ""
+        self.code = code
+        self.details = details
+
 
 class SafeToolUserMessage:
     """Marker for exceptions with a sanitized, user-actionable message.
@@ -220,8 +231,18 @@ class SafeToolUserMessage:
 class SafeToolError(SafeToolUserMessage, ToolError):
     """ToolError variant that may expose a sanitized user-actionable message."""
 
-    def __init__(self, user_message: str | None = None, *raw_details: object) -> None:
-        super().__init__(*(raw_details or (user_message or self.user_message,)))
+    def __init__(
+        self,
+        user_message: str | None = None,
+        *raw_details: object,
+        code: str | None = None,
+        details: Any = None,
+    ) -> None:
+        super().__init__(
+            *(raw_details or (user_message or self.user_message,)),
+            code=code,
+            details=details,
+        )
         if user_message is not None and user_message.strip():
             self.user_message = user_message
 
