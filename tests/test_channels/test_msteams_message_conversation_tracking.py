@@ -151,3 +151,27 @@ async def test_send_streaming_records_which_conversation_the_message_landed_in()
 
     assert message_id == "stream-activity-id"
     assert channel._message_conversation_keys["stream-activity-id"] == "conversation-A"
+
+
+def test_message_conversation_keys_is_bounded_and_evicts_lru() -> None:
+    """Issue #3052: _message_conversation_keys must be bounded so high message volumes
+    do not leak memory indefinitely."""
+    channel = MSTeamsChannel(config=MSTeamsChannelConfig(name="msteams"))
+    from agentos.util.bounded_registry import BoundedRegistry
+
+    channel._message_conversation_keys = BoundedRegistry(
+        name="test_message_keys",
+        max_entries=3,
+        register=False,
+    )
+
+    channel._remember_sent_message("msg-1", "conv-1")
+    channel._remember_sent_message("msg-2", "conv-2")
+    channel._remember_sent_message("msg-3", "conv-3")
+    assert len(channel._message_conversation_keys) == 3
+
+    channel._remember_sent_message("msg-4", "conv-4")
+    assert len(channel._message_conversation_keys) == 3
+    assert "msg-1" not in channel._message_conversation_keys
+    assert channel._message_conversation_keys.get("msg-2") == "conv-2"
+    assert channel._message_conversation_keys.get("msg-4") == "conv-4"
