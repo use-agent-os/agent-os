@@ -202,8 +202,30 @@ def _parse_patch(patch_text: str) -> list[PatchOp]:
                         i += 1
                     _trim_trailing_separators(hunk)
                     hunks.append(hunk)
-                else:
+                elif hunk_line.strip() == "":
+                    # A bare blank between the directive and its first hunk is
+                    # formatting; blanks after a hunk belong to that hunk and
+                    # were consumed above.
                     i += 1
+                else:
+                    # Skipping this line used to leave an update with no hunks,
+                    # which was then "applied" by rewriting the file unchanged
+                    # and reported as modified (#2837). The unified-diff header
+                    # is the usual shape, so it gets named.
+                    hint = (
+                        " (that is a unified-diff header; hunks here open with '@@@')"
+                        if hunk_line.startswith("@@ ")
+                        else ""
+                    )
+                    raise ValueError(
+                        f"Invalid line in '*** Update File: {path}' block "
+                        f"(expected a '@@@ ' hunk header): {hunk_line!r}{hint}"
+                    )
+            if not hunks:
+                raise ValueError(
+                    f"No hunks found in '*** Update File: {path}' block: expected at "
+                    "least one '@@@ -old_start,count +new_start,count @@@' hunk header"
+                )
             ops.append(UpdateFile(path=path, hunks=hunks))
 
         elif line.startswith("*** Delete File: "):
