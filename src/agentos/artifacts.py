@@ -24,7 +24,7 @@ _UNSAFE_FILENAME_RE = re.compile(r'[\x00-\x1f\x7f<>:"/\\|?*]+')
 _SAFE_TOKEN_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _SAFE_MIME_RE = re.compile(r"^[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+$")
 _ARTIFACT_MARKER_RE = re.compile(
-    r"(?:^|\s*)\[generated artifact omitted:\s*[^\]\n]+?\]\s*",
+    r"(?:^|\s*)\[generated artifact omitted:\s*[^\n]+\]\s*",
     re.IGNORECASE,
 )
 _PUBLIC_ARTIFACT_FIELDS = (

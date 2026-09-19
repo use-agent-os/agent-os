@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Chat transcripts: an artifact whose (perfectly legal) name contains a `]`
+  — e.g. `Q3 Report [Draft].pdf` — no longer leaves a mangled tail of its
+  `[generated artifact omitted: ...]` marker in the displayed text.
+  `strip_artifact_markers_from_text`'s regex stopped at the first `]` it
+  found, which was inside the name itself rather than the marker's own
+  closing bracket; `_safe_filename` never strips `[`/`]` from a published
+  artifact's name, so this was reachable through ordinary artifact naming,
+  not a contrived input.
 - Discord channel: a reaction added to the bot's own message in a guild
   channel or thread is no longer silently dropped by the group mention
   gate. `is_group_mentioned` fell back to searching a reaction's (always

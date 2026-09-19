@@ -12,7 +12,9 @@ from agentos.artifacts import (
     ArtifactBudgetError,
     ArtifactIntegrityError,
     ArtifactStore,
+    artifact_marker,
     artifact_payload,
+    strip_artifact_markers_from_text,
 )
 from agentos.tools.builtin.artifacts import publish_artifact
 from agentos.tools.types import CallerKind, ToolContext, ToolError, current_tool_context
@@ -167,6 +169,30 @@ def test_artifact_store_preserves_unicode_filename_and_normalizes_mime_params(
 
     assert ref.name == "记忆修补师.txt"
     assert ref.mime == "text/plain"
+
+
+def test_strip_artifact_markers_from_text_handles_a_bracket_in_the_artifact_name(
+    tmp_path: Path,
+) -> None:
+    """`_safe_filename` never strips `[`/`]` (they aren't in the unsafe-char
+    set), so a published name like "Q3 Report [Draft].pdf" is stored as-is.
+    The stripper's own regex must not stop at that embedded `]` and leave a
+    mangled tail of the marker sitting in the displayed text."""
+    store = ArtifactStore(tmp_path)
+    ref = store.publish_bytes(
+        b"data",
+        session_id="session-1",
+        session_key="agent:main:webchat:session-1",
+        name="Q3 Report [Draft].pdf",
+        mime="application/pdf",
+        source="publish_artifact",
+    )
+    assert ref.name == "Q3 Report [Draft].pdf"
+
+    marker = artifact_marker(ref.to_dict())
+    text = "Here is the file.\n" + marker
+
+    assert strip_artifact_markers_from_text(text) == "Here is the file."
 
 
 def test_artifact_store_rejects_hash_mismatch(tmp_path: Path) -> None:
