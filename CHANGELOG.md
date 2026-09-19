@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Provider: `AuxiliaryClient._credentials()` now dynamically queries the provider metadata registry (`get_provider_spec`), resolving each non-OpenAI provider's specific API key environment variable (e.g. `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`) and default base URL instead of defaulting all non-Anthropic/OpenRouter providers to `OPENAI_API_KEY` and `OPENAI_BASE_URL`.
 - Discord channel: a reaction added to the bot's own message in a guild
   channel or thread is no longer silently dropped by the group mention
   gate. `is_group_mentioned` fell back to searching a reaction's (always
