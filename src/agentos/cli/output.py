@@ -46,6 +46,16 @@ def print_json(payload: Any) -> None:
     _write_json_text(json.dumps(payload, ensure_ascii=False, default=str))
 
 
+def print_text(text: str) -> None:
+    """Print machine-readable text (CSV) to stdout exactly as given.
+
+    Not through the Rich console: that wraps a redirected stdout at 80 columns,
+    which splits a long CSV row into two records, and reads ``[...]`` as markup.
+    """
+
+    _write_json_text(text)
+
+
 def error_payload(
     message: str,
     *,

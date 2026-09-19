@@ -12,7 +12,7 @@ import typer
 from rich.table import Table
 
 from agentos.cli.gateway_rpc import run_gateway_sync
-from agentos.cli.output import print_json
+from agentos.cli.output import print_json, print_text
 from agentos.cli.ui import ACCENT_HEADER, console
 from agentos.observability.decision_log import _default_log_dir
 from agentos.observability.savings_pdf import render_savings_pdf
@@ -149,7 +149,7 @@ def cost(
                     int(row.get("created_at") or row.get("createdAt") or 0),
                 ]
             )
-        console.print(f.getvalue().strip())
+        print_text(f.getvalue().strip())
         return
 
     if by_model:
@@ -282,7 +282,7 @@ def savings(
                     f"{row.savings_usd:.6f}",
                 ]
             )
-        console.print(f.getvalue().strip())
+        print_text(f.getvalue().strip())
         return
 
     _render_savings_table(report)
