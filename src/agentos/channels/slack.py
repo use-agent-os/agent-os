@@ -46,7 +46,8 @@ log = structlog.get_logger(__name__)
 
 SLACK_API_BASE = "https://slack.com/api"
 
-_MENTION_RE = re.compile(r"<@(U[A-Z0-9]+)(?:\|[^>]*)?>")
+# Slack IDs: 'U' (workspace user), 'W' (Enterprise Grid user), 'B' (bot).
+_MENTION_RE = re.compile(r"<@([UWB][A-Z0-9]+)(?:\|[^>]*)?>")
 
 # Slack truncates (and may split) chat.postMessage's text field past 40000
 # characters (https://docs.slack.dev/changelog/2018-truncating-really-long-messages/).
