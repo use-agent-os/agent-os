@@ -4,9 +4,9 @@ from agentos.session.storage import SessionStorage
 
 
 def test_ascii_alphanumeric_passthrough() -> None:
-    """ASCII alphanumeric and spaces pass through unchanged."""
+    """ASCII alphanumeric terms pass through unchanged, joined with OR (#2897)."""
     result = SessionStorage.sanitize_fts_query("hello world 123")
-    assert result == '"hello" "world" "123"'
+    assert result == '"hello" OR "world" OR "123"'
 
 
 def test_cjk_ideographs_preserved() -> None:
@@ -52,25 +52,29 @@ def test_arabic_preserved() -> None:
 
 def test_mixed_ascii_unicode_preserved() -> None:
     """Mixed ASCII + Unicode query preserves all characters."""
-    result = SessionStorage.sanitize_fts_query("hello \u4e16\u754c")
-    assert result == '"hello" "\u4e16\u754c"'
+    result = SessionStorage.sanitize_fts_query("hello \u4e16\u754c\u5730\u56fe")
+    assert result == '"hello" OR "\u4e16\u754c\u5730\u56fe"'
 
 
 def test_fts_operators_stripped() -> None:
     """FTS5 operators (*, -, AND, OR, NEAR) are stripped."""
-    result = SessionStorage.sanitize_fts_query("hello* -world AND OR NEAR/5")
+    result = SessionStorage.sanitize_fts_query("hello* -world AND NOT NEAR/5")
     assert '"hello"' in result
     assert '"world"' in result
     assert "*" not in result
     assert '"AND"' in result
-    assert '"OR"' in result
+    assert '"NOT"' in result
     assert '"NEAR"' in result
+    # The only bare operator is the one the builder itself inserts.
+    assert result == '"hello" OR "world" OR "AND" OR "NOT" OR "NEAR"'
 
 
 def test_punctuation_stripped() -> None:
     """Punctuation and special characters are stripped."""
-    result = SessionStorage.sanitize_fts_query("hello, world! how's \"it\" going?")
-    assert result == '"hello" "world" "how" "s" "it" "going"'
+    result = SessionStorage.sanitize_fts_query('hello, world! how\'s "it" going?')
+    # ``s`` and ``it`` are below the trigram floor and never reach the index;
+    # ``search_transcript`` still marks them in the snippet.
+    assert result == '"hello" OR "world" OR "how" OR "going"'
 
 
 def test_empty_input() -> None:
@@ -87,15 +91,15 @@ def test_whitespace_only() -> None:
 
 def test_token_limit_20() -> None:
     """Input with more than 20 tokens is capped to 20 tokens."""
-    result = SessionStorage.sanitize_fts_query('a b c d e f g h i j k l m n o p q r s t u v w x y')
-    tokens = result.split()
+    result = SessionStorage.sanitize_fts_query(" ".join(f"term{i:02d}" for i in range(25)))
+    tokens = result.split(" OR ")
     assert len(tokens) == 20
 
 
 def test_unicode_token_limit() -> None:
     """Unicode tokens count toward the 20-token limit correctly."""
-    tokens_list = [chr(0x4e00 + i) for i in range(25)]
+    tokens_list = [chr(0x4E00 + i) * 3 for i in range(25)]
     query = " ".join(tokens_list)
     result = SessionStorage.sanitize_fts_query(query)
-    tokens = result.split()
+    tokens = result.split(" OR ")
     assert len(tokens) == 20

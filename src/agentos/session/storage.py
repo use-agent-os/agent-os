@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
+import sqlite3
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from functools import wraps
@@ -214,11 +216,36 @@ CREATE INDEX IF NOT EXISTS idx_compacted_transcript_session_key
 ON compacted_transcript_entries(session_key)
 """
 
-# FTS5 full-text search on transcript content
-_CREATE_TRANSCRIPT_FTS = """
+# FTS5 full-text search on transcript content.
+#
+# The index is built with the ``trigram`` tokenizer, not the default
+# ``unicode61``. ``unicode61`` turns a run of CJK characters into one token,
+# so ``数据库迁移计划`` was findable only by that exact run and never by
+# ``迁移计划`` inside it -- and nothing on the query side can split a token the
+# index never split (#2897). Trigrams index every three-character window, so a
+# query term matches wherever it occurs: inside a CJK run, inside a longer
+# Latin word (``migrat`` in ``migration``), case-insensitively. The price is
+# that a term shorter than three characters matches nothing through the
+# index; ``search_transcript`` answers those with a plain scan instead.
+#
+# ``trigram`` needs SQLite 3.34 (2020-12). An older library keeps the previous
+# tokenizer and the previous limits rather than failing to open the database.
+_FTS_TOKENIZER = "trigram" if sqlite3.sqlite_version_info >= (3, 34, 0) else "unicode61"
+_FTS_MIN_INDEXED_TERM_CHARS = 3 if _FTS_TOKENIZER == "trigram" else 1
+_FTS_MAX_TERMS = 20
+
+_CREATE_TRANSCRIPT_FTS = f"""
 CREATE VIRTUAL TABLE IF NOT EXISTS transcript_fts
-USING fts5(content, content=transcript_entries, content_rowid=id)
+USING fts5(content, content=transcript_entries, content_rowid=id, tokenize='{_FTS_TOKENIZER}')
 """
+
+_DROP_TRANSCRIPT_FTS = "DROP TABLE IF EXISTS transcript_fts"
+_DROP_FTS_TRIGGERS = (
+    "DROP TRIGGER IF EXISTS transcript_fts_ai",
+    "DROP TRIGGER IF EXISTS transcript_fts_ad",
+    "DROP TRIGGER IF EXISTS transcript_fts_au",
+)
+_REBUILD_TRANSCRIPT_FTS = "INSERT INTO transcript_fts(transcript_fts) VALUES ('rebuild')"
 
 _CREATE_FTS_TRIGGER_INSERT = """
 CREATE TRIGGER IF NOT EXISTS transcript_fts_ai AFTER INSERT ON transcript_entries BEGIN
@@ -386,6 +413,59 @@ def _now_ms() -> int:
     return int(datetime.now(UTC).timestamp() * 1000)
 
 
+_WORD_RE = re.compile(r"\w+")
+_TOKENIZE_RE = re.compile(r"tokenize\s*=\s*['\"]?\s*([A-Za-z0-9_]+)", re.IGNORECASE)
+#: Characters of context kept on each side of the first matching term.
+_SNIPPET_RADIUS = 160
+
+
+def _fts_tokenizer_of(ddl: str) -> str:
+    """The tokenizer named in a stored ``CREATE VIRTUAL TABLE ... fts5`` DDL.
+
+    FTS5's default is ``unicode61``, which is what an index created without a
+    ``tokenize`` option -- every database from before #2897 -- is using.
+    """
+    match = _TOKENIZE_RE.search(ddl)
+    return match.group(1).lower() if match else "unicode61"
+
+
+def _escape_like(term: str) -> str:
+    """Make *term* literal inside a ``LIKE ... ESCAPE '\\'`` pattern."""
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _snippet_around(content: str, terms: list[str], radius: int = _SNIPPET_RADIUS) -> str:
+    """Cut *content* around the first occurrence of any of *terms*.
+
+    Every occurrence inside the window is wrapped in ``>>>``/``<<<`` and a
+    cut edge is marked with ``...``, the shape FTS5's own ``snippet()``
+    produced before. Built here rather than in SQL because ``snippet()``
+    counts its window in tokens -- under ``trigram`` that is three-character
+    windows, so its 64-token ceiling is about 70 characters of context -- and
+    because the ``LIKE`` path has no ``snippet()`` at all. A term that bm25
+    matched but the pattern cannot find (it cannot happen for literal terms,
+    but the fallback costs nothing) yields the head of the entry.
+    """
+    if not content:
+        return ""
+    head = content[: radius * 2]
+    if len(content) > len(head):
+        head += "..."
+    ordered = sorted((t for t in terms if t), key=len, reverse=True)
+    if not ordered:
+        return head
+    pattern = re.compile("|".join(re.escape(t) for t in ordered), re.IGNORECASE)
+    first = pattern.search(content)
+    if first is None:
+        return head
+    start = max(0, first.start() - radius)
+    end = min(len(content), first.end() + radius)
+    window = pattern.sub(lambda m: f">>>{m.group(0)}<<<", content[start:end])
+    prefix = "..." if start > 0 else ""
+    suffix = "..." if end < len(content) else ""
+    return f"{prefix}{window}{suffix}"
+
+
 def _serialize(value: Any) -> Any:
     """Serialize dict/list fields to JSON string for SQLite TEXT columns."""
     if isinstance(value, dict | list):
@@ -490,6 +570,7 @@ class SessionStorage:
         await self._conn.commit()
         # Migrate older databases — add the epoch column if missing.
         await self._migrate_epoch_column()
+        await self._migrate_transcript_fts_tokenizer()
         await self._migrate_transcript_reasoning_content_column()
         await self._migrate_transcript_turn_usage_column()
         await self._migrate_summary_metadata_columns()
@@ -527,6 +608,44 @@ class SessionStorage:
                 "UPDATE sessions SET epoch = 0 WHERE epoch IS NULL"
             )
             await self._conn.commit()
+
+    async def _migrate_transcript_fts_tokenizer(self) -> None:
+        """Rebuild ``transcript_fts`` when it was created with another tokenizer.
+
+        ``CREATE VIRTUAL TABLE IF NOT EXISTS`` leaves an existing index alone,
+        so a database from before the switch to ``trigram`` keeps its
+        ``unicode61`` index -- and its inability to find anything inside a
+        CJK run -- forever. The tokenizer is part of the stored DDL, so it is
+        read back from ``sqlite_master``; a mismatch drops the index and its
+        triggers, recreates them, and rebuilds the index from
+        ``transcript_entries`` (an external-content table, so nothing but the
+        index is touched). One pass over the transcript, once.
+        """
+        assert self._conn is not None
+        async with self._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'transcript_fts'"
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None or not row[0]:
+            return
+        if _fts_tokenizer_of(str(row[0])) == _FTS_TOKENIZER:
+            return
+        for statement in _DROP_FTS_TRIGGERS:
+            await self._conn.execute(statement)
+        await self._conn.execute(_DROP_TRANSCRIPT_FTS)
+        await self._conn.execute(_CREATE_TRANSCRIPT_FTS)
+        await self._conn.execute(_CREATE_FTS_TRIGGER_INSERT)
+        await self._conn.execute(_CREATE_FTS_TRIGGER_DELETE)
+        await self._conn.execute(_CREATE_FTS_TRIGGER_UPDATE)
+        await self._conn.execute(_REBUILD_TRANSCRIPT_FTS)
+        await self._conn.commit()
+        async with self._conn.execute("SELECT COUNT(*) FROM transcript_entries") as cur:
+            count_row = await cur.fetchone()
+        log.info(
+            "transcript_fts rebuilt with the %s tokenizer (%d entries)",
+            _FTS_TOKENIZER,
+            int(count_row[0]) if count_row else 0,
+        )
 
     async def _migrate_transcript_reasoning_content_column(self) -> None:
         """Idempotently add assistant reasoning replay storage to transcripts."""
@@ -1819,21 +1938,40 @@ class SessionStorage:
     # ── FTS5 Search ──────────────────────────────────────────────────────
 
     @staticmethod
-    def sanitize_fts_query(raw: str) -> str:
-        """Sanitize a user query for safe FTS5 MATCH.
+    def fts_query_terms(raw: str) -> tuple[list[str], list[str]]:
+        """Split a user query into ``(indexed_terms, short_terms)``.
 
-        Strips FTS5 operators and special chars, wraps each token in quotes.
+        Only word characters survive -- every FTS5 operator and quote is
+        punctuation -- so a term can be quoted into a MATCH expression as a
+        literal. Terms are deduplicated in order and capped at
+        :data:`_FTS_MAX_TERMS`. ``short_terms`` are the ones below the
+        tokenizer's floor (three characters under ``trigram``), which the
+        index cannot answer and :meth:`search_transcript` scans for instead.
         """
-        import re as _re
+        seen: dict[str, None] = {}
+        for token in _WORD_RE.findall(raw):
+            seen.setdefault(token, None)
+        tokens = list(seen)[:_FTS_MAX_TERMS]
+        indexed = [t for t in tokens if len(t) >= _FTS_MIN_INDEXED_TERM_CHARS]
+        short = [t for t in tokens if len(t) < _FTS_MIN_INDEXED_TERM_CHARS]
+        return indexed, short
 
-        # Whitelist: only allow alphanumeric and whitespace through
-        cleaned = _re.sub(r"[^\w\s]", " ", raw)
-        # Collapse whitespace and split into tokens
-        tokens = cleaned.split()
-        if not tokens:
+    @staticmethod
+    def sanitize_fts_query(raw: str) -> str:
+        """Build the FTS5 MATCH expression for a user query.
+
+        Each indexable term is quoted as a literal and the terms are joined
+        with ``OR``: a natural-language query is a bag of words, and the best
+        document is the one matching most of them, which ``bm25`` ranking
+        puts first. Joining with implicit AND required *every* word --
+        ``migration plan for postgres`` found nothing in a transcript that
+        lacked only ``for`` (#2897). ``'""'`` (matches nothing) when no term
+        reaches the index.
+        """
+        indexed, _short = SessionStorage.fts_query_terms(raw)
+        if not indexed:
             return '""'
-        # Wrap each token in double-quotes for literal matching
-        return " ".join(f'"{t}"' for t in tokens[:20])  # cap at 20 terms
+        return " OR ".join(f'"{t}"' for t in indexed)
 
     async def search_transcript(
         self,
@@ -1850,14 +1988,33 @@ class SessionStorage:
         every key-scoped search come back empty. ``project_id`` restricts
         hits to transcripts of sessions in that project. Returns dicts with:
         id, session_key, role, snippet, created_at.
+
+        Terms the index can answer go through FTS5, ranked by ``bm25``. A
+        query made only of terms below the tokenizer's floor (``go``, ``db``,
+        a two-character CJK word) is answered by a ``LIKE`` scan over the
+        entries instead of by nothing: the transcript store is small enough
+        that a scan for a rare query beats a silent miss. Snippets are cut
+        in Python around the first matching term for both paths, so they are
+        the same shape whichever answered.
         """
-        safe_q = self.sanitize_fts_query(query)
-        if safe_q == '""':
+        indexed, short = self.fts_query_terms(query)
+        if not indexed and not short:
             return []
 
-        clauses = ["f.content MATCH ?"]
-        params: list[Any] = [safe_q]
+        params: list[Any] = []
         joins = ""
+        clauses: list[str] = []
+        if indexed:
+            source = "FROM transcript_fts f JOIN transcript_entries t ON f.rowid = t.id "
+            clauses.append("f.content MATCH ?")
+            params.append(self.sanitize_fts_query(query))
+            order = "ORDER BY f.rank"
+        else:
+            source = "FROM transcript_entries t "
+            likes = " OR ".join("t.content LIKE ? ESCAPE '\\'" for _ in short)
+            clauses.append(f"({likes})")
+            params.extend(f"%{_escape_like(term)}%" for term in short)
+            order = "ORDER BY t.created_at DESC, t.id DESC"
         if session_id:
             clauses.append("(t.session_id = ? OR t.session_key = ?)")
             params.extend([session_id, canonicalize_session_key(session_id)])
@@ -1866,19 +2023,26 @@ class SessionStorage:
             clauses.append("s.project_id = ?")
             params.append(project_id)
         sql = (
-            "SELECT t.id, t.session_key, t.role, t.created_at, "
-            "snippet(transcript_fts, 0, '>>>', '<<<', '...', 48) AS snippet "
-            "FROM transcript_fts f "
-            "JOIN transcript_entries t ON f.rowid = t.id "
+            "SELECT t.id, t.session_key, t.role, t.created_at, t.content "
+            f"{source}"
             f"{joins}"
             f"WHERE {' AND '.join(clauses)} "
-            "ORDER BY f.rank LIMIT ?"
+            f"{order} LIMIT ?"
         )
         params.append(limit)
 
         async with self.conn.execute(sql, params) as cur:
             rows = await cur.fetchall()
-        return [dict(r) for r in rows]
+        # Short terms did not reach the index but are still part of the
+        # question, so they are marked in the snippet like the rest.
+        terms = indexed + short
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            record = dict(row)
+            content = record.pop("content") or ""
+            record["snippet"] = _snippet_around(str(content), terms)
+            results.append(record)
+        return results
 
     async def __aenter__(self) -> SessionStorage:
         await self.connect()
