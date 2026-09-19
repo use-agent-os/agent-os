@@ -265,6 +265,21 @@ def _command_spans(command: str) -> list[tuple[int, int]]:
     return spans
 
 
+def _split_rm_tail(tail: str, *, posix: bool = True) -> list[str]:
+    """Tokenize an ``rm`` argument tail, tolerating an unbalanced quote."""
+    try:
+        return shlex.split(tail, posix=posix)
+    except ValueError:
+        pass
+    trimmed = tail.rstrip("\"'")
+    if trimmed != tail:
+        try:
+            return shlex.split(trimmed, posix=posix)
+        except ValueError:
+            pass
+    return [stripped for token in tail.split() if (stripped := token.strip("\"'"))]
+
+
 def _extract_rm_targets(command: str) -> list[tuple[str, frozenset[str]]]:
     """Pull every ``rm`` argument out, tagged with that invocation's flags.
 
@@ -305,16 +320,9 @@ def _extract_rm_targets(command: str) -> list[tuple[str, frozenset[str]]]:
         if not tail:
             continue
 
-        token_sets: list[list[str]] = []
-        try:
-            token_sets.append(shlex.split(tail))
-        except ValueError:
-            token_sets.append(tail.split())
+        token_sets: list[list[str]] = [_split_rm_tail(tail)]
         if "\\" in tail and (os.name == "nt" or re.search(r"(?:^|\s)\\[^\s]", tail)):
-            try:
-                token_sets.append(shlex.split(tail, posix=False))
-            except ValueError:
-                token_sets.append(tail.split())
+            token_sets.append(_split_rm_tail(tail, posix=False))
 
         for tokens in token_sets:
             capabilities = _rm_invocation_capabilities(tokens)

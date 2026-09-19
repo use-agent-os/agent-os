@@ -13,6 +13,7 @@ from __future__ import annotations
 import pytest
 
 from agentos.application.intent_cache import IntentApprovalCache, _extract_intents
+from agentos.sandbox.sensitive_paths import sensitive_target_in_command
 
 
 def _names_etc(targets: list[str]) -> bool:
@@ -385,6 +386,10 @@ class TestQuotedRmIsNotACommand:
     @pytest.mark.parametrize(
         "command",
         [
+            'bash -c "rm -rf /etc"',
+            "bash -c 'rm -rf /etc'",
+            'sh -c "rm -rf ~/.ssh"',
+            "sh -c 'rm -rf ~/.ssh'",
             'sh -c "rm -rf /etc/passwd"',
             'bash -c "rm -rf /root/.ssh/id_rsa"',
             "bash -c 'rm -rf /etc/'",
@@ -417,7 +422,6 @@ class TestQuotedRmIsNotACommand:
         two halves of the same rule; asserting only one of them cannot tell the
         fix from the regression.
         """
-        from agentos.sandbox.sensitive_paths import sensitive_target_in_command
 
         assert sensitive_target_in_command(command) is not None, command
 
@@ -467,3 +471,73 @@ class TestQuotedRmIsNotACommand:
         # An unclosed quote quotes the remainder, which is what the shell does
         # with it too, so nothing after it is read as a command.
         assert _extract_intents('echo "rm -rf /etc') == []
+
+
+# ---------------------------------------------------------------------------
+# Quoted shell wrappers (#2141)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("command", "expected_suffix"),
+    [
+        pytest.param('bash -c "rm -rf /etc"', "etc", id="double-quoted-wrapper"),
+        pytest.param("bash -c 'rm -rf /etc'", "etc", id="single-quoted-wrapper"),
+        pytest.param('sh -c "rm -rf /var/log"', "log", id="sh-wrapper"),
+    ],
+)
+def test_wrapped_command_target_has_no_trailing_quote(command: str, expected_suffix: str) -> None:
+    """The wrapper's closing quote must not end up glued to the path.
+
+    The rm tail is sliced with a regex whose terminator class excludes quotes,
+    so the wrapper's closing quote lands in the tail, shlex.split raises, and
+    the old whitespace fallback produced targets like ``/etc"``.
+    """
+    intents = _extract_intents(command)
+    assert intents, "a delete intent should still be recognized"
+    for _kind, target in intents:
+        assert not target.endswith(('"', "'")), f"trailing quote survived: {target!r}"
+        assert target.rstrip("/\\").endswith(expected_suffix)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param('bash -c "rm -rf /etc"', id="double-quoted"),
+        pytest.param("bash -c 'rm -rf /etc'", id="single-quoted"),
+    ],
+)
+def test_wrapped_command_still_trips_the_sensitive_path_block(command: str) -> None:
+    """A glued quote made the sensitive-path check miss the target entirely."""
+    assert sensitive_target_in_command(command) is not None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("rm -rf /etc", id="bare"),
+        pytest.param('rm -rf "/etc"', id="quoted-arg"),
+    ],
+)
+def test_unwrapped_commands_are_unchanged(command: str) -> None:
+    """Control: the shapes that already worked must keep working."""
+    assert sensitive_target_in_command(command) is not None
+
+
+def test_benign_command_is_still_not_an_intent() -> None:
+    assert _extract_intents('echo "rm is a word"') == []
+
+
+def test_backslash_inside_single_quotes_does_not_hide_the_next_command() -> None:
+    """Review regression on #2178: a backslash is literal inside single quotes.
+
+    In POSIX shells ``'abc\\'`` is a closed string, so ``rm -rf /etc`` after the
+    separator runs. Treating the backslash as escaping the closing quote kept
+    the quote open to the end of the line, the ``rm`` read as quoted data,
+    and the sensitive-path hard block never fired.
+    """
+    command = "echo 'abc\\' ; rm -rf /etc"
+    assert command.count("\\") == 1, "the single backslash is the point of this case"
+
+    assert _names_etc([target for _kind, target in _extract_intents(command)])
+    assert sensitive_target_in_command(command) is not None
