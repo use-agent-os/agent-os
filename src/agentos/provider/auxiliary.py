@@ -203,21 +203,38 @@ class AuxiliaryClient:
         if not isinstance(routing, dict):
             routing = {}
 
-        if provider == "anthropic":
-            api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
-            base_url = base_url or os.environ.get("ANTHROPIC_BASE_URL", "")
-        elif provider == "openrouter":
+        spec = None
+        try:
+            from agentos.provider.registry import get_provider_spec
+
+            spec = get_provider_spec(provider)
+        except Exception:
+            pass
+
+        env_key = (
+            spec.env_key
+            if spec and spec.env_key and spec.env_key != "OAuth"
+            else f"{provider.upper()}_API_KEY"
+        )
+        base_url_env = f"{provider.upper()}_BASE_URL"
+        default_base = spec.default_base_url if spec else ""
+
+        if provider == "openrouter":
             api_key = (
                 api_key
                 or os.environ.get("OPENROUTER_API_KEY", "")
                 or os.environ.get("OPENAI_API_KEY", "")
             )
-            base_url = base_url or os.environ.get(
-                "OPENROUTER_BASE_URL", _OPENROUTER_DEFAULT_BASE_URL
+            base_url = (
+                base_url
+                or os.environ.get("OPENROUTER_BASE_URL", "")
+                or default_base
+                or _OPENROUTER_DEFAULT_BASE_URL
             )
         else:
-            api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
-            base_url = base_url or os.environ.get("OPENAI_BASE_URL", "")
+            if env_key:
+                api_key = api_key or os.environ.get(env_key, "")
+            base_url = base_url or os.environ.get(base_url_env, "") or default_base
 
         return api_key, base_url, proxy or os.environ.get("AGENTOS_LLM_PROXY", ""), routing
 

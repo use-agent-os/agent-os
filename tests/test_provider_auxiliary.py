@@ -26,6 +26,13 @@ _ENV_KEYS = (
     "OPENAI_BASE_URL",
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_BASE_URL",
+    "DEEPSEEK_API_KEY",
+    "DEEPSEEK_BASE_URL",
+    "GEMINI_API_KEY",
+    "GEMINI_BASE_URL",
+    "GROQ_API_KEY",
+    "GROQ_BASE_URL",
+    "OLLAMA_BASE_URL",
 )
 
 
@@ -420,3 +427,32 @@ def test_configure_keeps_a_tracker_wired_by_an_earlier_call() -> None:
         assert get_auxiliary_client().usage_tracker is tracker
     finally:
         auxiliary._client = original
+
+
+def test_provider_config_resolves_credentials_and_default_base_url_for_registered_providers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-deepseek-test")
+    monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://custom.deepseek.com/v1")
+
+    client = AuxiliaryClient(config=_config(provider="deepseek", model="deepseek-chat"))
+    cfg = client.provider_config("vision")
+
+    assert cfg.provider == "deepseek"
+    assert cfg.model == "deepseek-chat"
+    assert cfg.api_key == "sk-deepseek-test"
+    assert cfg.base_url == "https://custom.deepseek.com/v1"
+
+
+def test_provider_config_falls_back_to_spec_default_base_url_for_registered_providers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GROQ_API_KEY", "sk-groq-test")
+
+    client = AuxiliaryClient(config=_config(provider="groq", model="llama-3.3-70b"))
+    cfg = client.provider_config("vision")
+
+    assert cfg.provider == "groq"
+    assert cfg.model == "llama-3.3-70b"
+    assert cfg.api_key == "sk-groq-test"
+    assert cfg.base_url == "https://api.groq.com/openai/v1"
