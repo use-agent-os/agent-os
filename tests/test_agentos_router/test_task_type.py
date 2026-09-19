@@ -163,6 +163,56 @@ class TestProgrammingLanguageTarget:
     @pytest.mark.parametrize(
         "prompt",
         [
+            # `golang` was listed but the name everyone actually writes was
+            # not, so a Go port read as a translation and was capped to the
+            # cheapest tier.
+            "Translate this module to Go.",
+            "Translate the function below into Go, keep the signatures.",
+            # The C family: `c++` and `c#` were special-cased, the parent
+            # language and Objective-C were not.
+            "Translate this script to C.",
+            "Translate this class to Objective-C.",
+            # `f#` sits directly beside the already-handled `c#`.
+            "Translate this to F#.",
+            "Translate this module to F# with records.",
+            # The MS stack: `.net` was handled, its languages were not.
+            "Translate this snippet to Visual Basic.",
+            "Translate this macro to VBA.",
+            # JS frameworks were covered; the runtime they all run on was not.
+            "Translate the attached handler to Node.js.",
+            "Translate this worker to nodejs.",
+        ],
+    )
+    def test_missing_language_targets_block(self, prompt: str) -> None:
+        """Every name in the guard's own families must block a port request.
+
+        A miss here is the harmful direction: the verb still matches, so the
+        turn is capped to ``translate_ceiling_tier`` (c0 by default) and a
+        code-porting request is handed to the cheapest model.
+        """
+        verdict = detect_task_type(prompt)
+        assert verdict.task_type is None
+        assert verdict.blocked_by == BLOCK_CODE_TARGET
+
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            # "go" and "c" are ordinary English too. They are recognised only
+            # in target position, so these must stay real translations.
+            "Translate this paragraph to French and go ahead with the rest.",
+            "Let's go through the attached page and translate it to Spanish.",
+            "Translate this to German, then go over the glossary с нами.",
+        ],
+    )
+    def test_ordinary_english_go_is_not_a_language_target(self, prompt: str) -> None:
+        """The short-name rule must not suppress genuine translation work."""
+        verdict = detect_task_type(prompt)
+        assert verdict.task_type == TASK_TYPE_TRANSLATE
+        assert verdict.blocked_by is None
+
+    @pytest.mark.parametrize(
+        "prompt",
+        [
             # "c++"/"c#" embedded inside a longer identifier must still NOT
             # match — dropping the boundary assertion on *both* edges would
             # wrongly block these on the strength of an unrelated substring.

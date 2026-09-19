@@ -136,14 +136,29 @@ _TRANSLATE_RES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
 #: is enough, and it now matches consistently whether the name sits at a
 #: sentence boundary ("C++.", "to .NET") or has a version/suffix attached
 #: ("C++17", "C#7", "ASP.NET").
+#: Names whose own family is already in the guard but which were themselves
+#: missing, so the port request they name was capped to the cheapest tier:
+#: ``golang`` was listed without the spelling everyone actually uses, ``c++``
+#: and ``c#`` without the language they extend or Objective-C, ``.net``
+#: without the two languages written against it, and the JS frameworks
+#: without the runtime they run on. ``f#`` is anchored like ``c#``.
+#:
+#: ``go``, ``c`` and ``r`` are ordinary English words as well as language
+#: names, so they are recognised only in *target* position — directly after
+#: the preposition that names a target. A bare alternation on them would
+#: suppress most genuine requests ("let's go ahead and translate this"),
+#: which is the one direction this guard must not fail in.
 _CODE_TARGET_RE = re.compile(
     r"\b(?:python|javascript|typescript|golang|rust|java|kotlin|swift|scala"
     r"|haskell|ruby|php|perl|sql|bash|powershell|matlab|fortran|cobol"
     r"|react|vue|svelte|jquery|regex|assembly|solidity"
-    r"|dart|elixir|erlang|clojure|lua|zig)\b"
+    r"|dart|elixir|erlang|clojure|lua|zig"
+    r"|objective-?c|visual\s+basic|vba|node\.?js)\b"
     r"|\bc\+\+"
     r"|\bc#"
-    r"|\.net\b",
+    r"|\bf#"
+    r"|\.net\b"
+    r"|\b(?:in|into|to)\s+(?:go|c|r)\b",
     re.IGNORECASE,
 )
 
