@@ -2404,14 +2404,19 @@ async def _deliver_runtime_channel_reply(
 
     if content:
         content, artifacts = _split_assistant_artifact_content(content)
+        content = _strip_artifact_markers_from_channel_text(content)
+        # Strip inline references for every artifact named in this text, not
+        # just the ones still pending delivery below -- one already delivered
+        # natively by the stream relay is just as stale a reference as one
+        # about to be delivered here, and dropping it from `artifacts` first
+        # left its "![name](name)" markdown sitting in the fallback text.
+        content = _strip_delivered_artifact_image_references(content, artifacts)
         if stream_relay is not None and stream_relay.delivered_artifact_keys:
             artifacts = [
                 artifact
                 for artifact in artifacts
                 if _artifact_delivery_key(artifact) not in stream_relay.delivered_artifact_keys
             ]
-        content = _strip_artifact_markers_from_channel_text(content)
-        content = _strip_delivered_artifact_image_references(content, artifacts)
         if _can_deliver_channel_files(channel):
             if content:
                 await channel.send(

@@ -1164,6 +1164,91 @@ async def test_runtime_channel_stream_relay_does_not_redeliver_transcript_artifa
 
 
 @pytest.mark.asyncio
+async def test_runtime_reply_strips_image_reference_for_artifact_already_stream_delivered(
+    tmp_path,
+) -> None:
+    """The batch-fallback text re-fetched from the transcript still names an
+    artifact that the stream relay already delivered as a native file, so its
+    markdown image reference must be stripped from the text -- otherwise the
+    user sees a literal ``![chart](chart.png)`` right after the real chart."""
+    store = ArtifactStore(tmp_path)
+    ref = store.publish_bytes(
+        b"\x89PNG\r\n\x1a\nimage bytes",
+        session_id="session-1",
+        session_key="agent:main:discord:direct:u1",
+        name="chart.png",
+        mime="image/png",
+        source="publish_artifact",
+    )
+
+    class StreamingFileChannel(_FakeChannel):
+        def __init__(self) -> None:
+            super().__init__()
+            self.files: list[tuple[str, str]] = []
+
+        async def send_streaming(self, chunks, **kwargs):
+            async for _chunk in chunks:
+                pass
+
+        async def send_file(self, chat_id: str, file_path: str) -> None:
+            assert Path(file_path).is_file()
+            self.files.append((chat_id, Path(file_path).name))
+
+    class FakeTaskRuntime:
+        async def enqueue(self, envelope, message: str, *, stream_event_sink=None):
+            return None
+
+        async def wait(self, task_id: str):
+            return SimpleNamespace(status="succeeded")
+
+    class FakeSessionManager:
+        async def read_transcript(self, key: str):
+            return [
+                {"role": "user", "content": "draw chart"},
+                {
+                    "role": "assistant",
+                    "content": json.dumps(
+                        {
+                            "text": "Here is your chart:\n\n![chart](chart.png)",
+                            "artifacts": [ref.to_dict()],
+                        }
+                    ),
+                },
+            ]
+
+    config = SimpleNamespace(attachments=SimpleNamespace(media_root=str(tmp_path)))
+    channel = StreamingFileChannel()
+    runtime = FakeTaskRuntime()
+    relay = _RuntimeChannelStreamRelay.maybe_start(
+        channel,
+        _message(),
+        runtime,
+        config,
+    )
+
+    assert relay is not None
+
+    await relay.emit(ArtifactEvent(**ref.to_dict()))
+    await _deliver_runtime_channel_reply(
+        channel=channel,
+        task_runtime=runtime,
+        session_manager=FakeSessionManager(),
+        session_key="agent:main:discord:direct:u1",
+        task_id="task-1",
+        route_envelope=SimpleNamespace(reply_target=None),
+        inbound=_message(),
+        transcript_watermark=1,
+        config=config,
+        stream_relay=relay,
+    )
+
+    assert channel.files == [("c1", "chart.png")]
+    sent_text = "\n".join(message.content for message in channel.sent)
+    assert "chart.png" not in sent_text
+    assert "Here is your chart" in sent_text
+
+
+@pytest.mark.asyncio
 async def test_direct_channel_turn_idle_timeout_sends_error_reply() -> None:
     class SlowTurnRunner:
         async def run(self, message: str, session_key: str, **kwargs):
