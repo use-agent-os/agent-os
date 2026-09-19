@@ -21,7 +21,7 @@ import pytest
 from agentos.tools.builtin import filesystem as fs
 from agentos.tools.fuzzy_match import _MAX_SWEEP_CELLS, FuzzyMatchError, FuzzyMatchResult
 from agentos.tools.fuzzy_match import fuzzy_find_and_replace as real_fuzzy_find_and_replace
-from agentos.tools.types import CallerKind, ToolContext, current_tool_context
+from agentos.tools.types import CallerKind, SafeToolError, ToolContext, current_tool_context
 
 
 def _original_async(fn: Callable[..., Awaitable[str]]) -> Callable[..., Awaitable[str]]:
@@ -122,7 +122,7 @@ async def test_oversized_miss_fails_fast_without_a_hint(tmp_path: Path) -> None:
 
     started = time.perf_counter()
     with tool_context(tmp_path):
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(SafeToolError) as excinfo:
             await edit_file(str(target), old_text, "x = 1\n")
     elapsed = time.perf_counter() - started
 

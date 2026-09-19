@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from agentos.tools.builtin import filesystem as fs
-from agentos.tools.types import CallerKind, ToolContext, current_tool_context
+from agentos.tools.types import CallerKind, SafeToolError, ToolContext, current_tool_context
 
 
 def _original_async(fn: Callable[..., Awaitable[str]]) -> Callable[..., Awaitable[str]]:
@@ -87,7 +87,7 @@ async def test_ambiguous_edit_reports_the_matching_lines(tmp_path: Path) -> None
     target.write_text("x = 1\ny = 0\nx = 1\n", encoding="utf-8")
 
     with tool_context(tmp_path):
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(SafeToolError) as excinfo:
             await edit_file(str(target), "x = 1", "x = 2")
 
     message = str(excinfo.value)
@@ -103,7 +103,7 @@ async def test_missing_text_error_carries_a_closest_match_hint(tmp_path: Path) -
     target.write_text("def calculate_total(items):\n    return 0\n", encoding="utf-8")
 
     with tool_context(tmp_path):
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(SafeToolError) as excinfo:
             await edit_file(
                 str(target),
                 "def calculate_grand_totals(a, b, c, d):\n",

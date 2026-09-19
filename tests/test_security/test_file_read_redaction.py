@@ -16,7 +16,7 @@ import pytest
 from agentos.redact import redact_file_output
 from agentos.sandbox.sensitive_paths import sensitive_path_marker
 from agentos.tools.builtin import filesystem as fs
-from agentos.tools.types import CallerKind, ToolContext, current_tool_context
+from agentos.tools.types import CallerKind, SafeToolError, ToolContext, current_tool_context
 
 OPENAI_KEY = "sk-proj-" + "A" * 24
 GITHUB_PAT = "ghp_" + "B" * 20
@@ -214,7 +214,7 @@ def test_edit_file_failed_match_hint_does_not_quote_a_secret(tmp_path: Path) -> 
     target = tmp_path / "credentials"
     original = f"aws_secret_access_key = {AWS_SECRET}\n"
 
-    with pytest.raises(ValueError) as excinfo:
+    with pytest.raises(SafeToolError) as excinfo:
         fs._locate_edit(original, "aws_secret_access_key = NOPE", "x", path=str(target))
 
     message = str(excinfo.value)

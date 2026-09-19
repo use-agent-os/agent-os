@@ -18,7 +18,7 @@ import json
 import structlog
 
 from agentos.tools.registry import tool
-from agentos.tools.types import ToolError, current_tool_context
+from agentos.tools.types import SafeToolError, ToolError, current_tool_context
 
 _log = structlog.get_logger("agentos.tools.projects")
 
@@ -43,6 +43,17 @@ def _get_session_manager():  # noqa: ANN202
 
 def _manager_unavailable(exc: Exception) -> ToolError:
     return ToolError(f"Session manager not available: {exc}")
+
+
+def _project_rejected(exc: ValueError) -> SafeToolError:
+    """A ``SessionManager`` project-validation refusal, as the model should see it.
+
+    The manager raises ``ValueError`` with an authored message ("Project name
+    cannot be empty", "Project name already exists: …") that the failure
+    envelope would otherwise replace with "The tool received an invalid
+    argument" (#2889). The text is this codebase's own, never a library's.
+    """
+    return SafeToolError(str(exc))
 
 
 def _resolve_agent_id(agent_id: str | None) -> str:
@@ -110,8 +121,10 @@ async def projects_create(
             knowledge=knowledge,
         )
         return json.dumps(project, ensure_ascii=False)
-    except (ToolError, ValueError):
+    except ToolError:
         raise
+    except ValueError as exc:
+        raise _project_rejected(exc) from exc
     except (ImportError, AttributeError, NotImplementedError) as exc:
         raise _manager_unavailable(exc) from exc
 
@@ -204,8 +217,10 @@ async def projects_update(
             )
         project = await mgr.update_project(project_id.strip(), name=name, knowledge=knowledge)
         return json.dumps(project, ensure_ascii=False)
-    except (ToolError, ValueError):
+    except ToolError:
         raise
+    except ValueError as exc:
+        raise _project_rejected(exc) from exc
     except KeyError as exc:
         raise ToolError(f"Project not found: {project_id}") from exc
     except (ImportError, AttributeError, NotImplementedError) as exc:

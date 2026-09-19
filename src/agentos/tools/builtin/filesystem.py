@@ -31,7 +31,12 @@ from agentos.tools.fuzzy_match import (
 )
 from agentos.tools.path_policy import reject_foreign_host_path
 from agentos.tools.registry import tool
-from agentos.tools.types import ToolError, WorkspaceAccessError, current_tool_context
+from agentos.tools.types import (
+    SafeToolError,
+    ToolError,
+    WorkspaceAccessError,
+    current_tool_context,
+)
 from agentos.tools.write_tracking import record_workspace_file_write
 
 log = structlog.get_logger(__name__)
@@ -965,14 +970,18 @@ def _locate_edit(original: str, old_text: str, new_text: str, *, path: str) -> F
     Exact equality is tried first and costs nothing extra. The fallback chain
     only runs once exact has missed, so the common case is unchanged. Both
     failure modes keep the wording the model already knows, enriched with
-    whatever the matcher learned.
+    whatever the matcher learned -- and raise ``SafeToolError`` so that
+    wording reaches the model: the failure envelope forwards only
+    ``SafeToolUserMessage`` subclasses, and a plain ``ValueError`` arrived as
+    "The tool received an invalid argument" with the line numbers and the
+    closest-match hint discarded (#2888).
     """
 
     try:
         return fuzzy_find_and_replace(original, old_text, new_text)
     except AmbiguousMatchError as exc:
         lines = ", ".join(str(line) for line in exc.lines)
-        raise ValueError(
+        raise SafeToolError(
             f"old_text matches {exc.match_count} locations in {path} (lines {lines});"
             " be more specific"
         ) from exc
@@ -981,7 +990,7 @@ def _locate_edit(original: str, old_text: str, new_text: str, *, path: str) -> F
         # channel like any other and gets the same mask.
         hint = redact_file_output(exc.hint, path=path) if exc.hint else ""
         detail = f" Closest match: {hint}" if hint else ""
-        raise ValueError(f"old_text not found in {path}.{detail}") from exc
+        raise SafeToolError(f"old_text not found in {path}.{detail}") from exc
 
 
 @tool(
@@ -1230,7 +1239,11 @@ async def grep_search(
         try:
             regex = re.compile(pattern)
         except re.error as e:
-            raise ValueError(f"Invalid regex pattern: {e}") from e
+            # SafeToolError so the parser's diagnostic reaches the model
+            # (#2890). It describes the model's own ``pattern`` argument --
+            # "nothing to repeat at position 0" -- and quotes nothing from the
+            # workspace or the environment.
+            raise SafeToolError(f"Invalid regex pattern: {e}") from e
 
         results: list[str] = []
 

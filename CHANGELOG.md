@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Tools: the reasons `edit_file`, `grep_search`, `projects_create` and
+  `projects_update` refuse a call now reach the model instead of "The tool
+  received an invalid argument" — the closest-match hint and ambiguous line
+  numbers, the regex diagnostic, and the project-name rule; and `web_fetch`
+  reports an unresolvable hostname in its result's `error` field like every
+  other unreachable URL (#2888, #2889, #2890, #2891)
 - Discord channel: a reaction added to the bot's own message in a guild
   channel or thread is no longer silently dropped by the group mention
   gate. `is_group_mentioned` fell back to searching a reaction's (always
