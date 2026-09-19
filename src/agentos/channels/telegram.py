@@ -899,18 +899,24 @@ class TelegramChannel:
         )
 
     async def _handle_telegram_callback(self, cb: dict[str, Any]) -> None:
+        if not isinstance(cb, dict):
+            return
         cb_id = cb.get("id")
-        data = cb.get("data", "")
+        raw_data = cb.get("data")
+        data = raw_data if isinstance(raw_data, str) else ""
         if not data.startswith("approve:") and not data.startswith("deny:"):
             return
 
         act, approval_id = data.split(":", 1)
         approved = act == "approve"
 
-        sender = cb.get("from", {})
+        sender = cb.get("from")
+        sender = sender if isinstance(sender, dict) else {}
         sender_id = str(sender.get("id") or "")
-        msg = cb.get("message", {})
-        chat = msg.get("chat", {})
+        msg = cb.get("message")
+        msg = msg if isinstance(msg, dict) else {}
+        chat = msg.get("chat")
+        chat = chat if isinstance(chat, dict) else {}
         chat_id = str(chat.get("id") or "")
         chat_type = chat.get("type", "")
         is_group = chat_type in {"group", "supergroup", "channel"}

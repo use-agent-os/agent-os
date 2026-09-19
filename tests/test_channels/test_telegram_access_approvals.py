@@ -289,3 +289,16 @@ async def test_unapproved_sender_is_gated_before_slash_command_dispatch(command:
     assert channel.denials == ["not_in_allowlist"]
     assert channel.notified is True
     assert dispatcher.calls == 0
+
+
+async def test_handle_telegram_callback_handles_null_data_and_null_message() -> None:
+    channel = TelegramChannel(TelegramChannelConfig(name="tg"))
+
+    # Null data (e.g. game or webapp buttons) must exit cleanly without raising AttributeError
+    await channel._handle_telegram_callback({"id": "cb-1", "data": None})
+
+    # Non-approval callback with None message (e.g. inline query buttons) must also exit cleanly
+    await channel._handle_telegram_callback(
+        {"id": "cb-2", "data": "random_payload", "message": None}
+    )
+
