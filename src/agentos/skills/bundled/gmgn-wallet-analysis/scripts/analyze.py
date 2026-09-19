@@ -1048,7 +1048,13 @@ def compute(d, latency_s, my_size):
         and m["buckets"]["x0_2"] > 0
         and m["unsettled"] >= 0.25 * m["buckets"]["x0_2"]
     )
-    m["winners"] = m["buckets"]["gt5"] + m["buckets"]["x2_5"] + m["buckets"]["x0_2"]
+    # The headline "N of M coins in profit" must not sum that band in raw (#2797). Tokens past
+    # 2x are realized wins whatever the win rate says, so only the 0-200% band is capped, at the
+    # wins the win rate leaves for it. A missing win rate reads as 0 and leaves the >2x count.
+    settled_wins = m["buckets"]["gt5"] + m["buckets"]["x2_5"]
+    m["winners"] = settled_wins + min(
+        m["buckets"]["x0_2"], max(0, m["implied_winners"] - settled_wins)
+    )
 
     # identity
     m["tags"] = common.get("tags") or ([common["tag"]] if common.get("tag") else [])
