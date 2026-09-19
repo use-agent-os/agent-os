@@ -266,7 +266,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   every `<t>` descendant, including the ones inside `<rPh>`, so a Japanese
   workbook read back with each reading glued onto the word it annotates
   ([#2053](https://github.com/use-agent-os/agent-os/issues/2053)).
-
+  workbook read back with each reading glued onto the word it annotates.
+- `edit_file`: an `old_text` that occurs more than once *overlapping* itself is
+  now reported as ambiguous instead of silently editing the first occurrence.
+  `_find_all` advanced its cursor past the whole needle, so the overlapping
+  second match was never counted and the same duplication with a separator line
+  in between behaved differently.
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed

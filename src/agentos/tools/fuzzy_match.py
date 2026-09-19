@@ -241,7 +241,14 @@ def _map_collapsed_whitespace(text: str) -> tuple[str, list[int], list[int]]:
 
 
 def _find_all(haystack: str, needle: str) -> list[tuple[int, int]]:
-    """Every non-overlapping occurrence of *needle*, as (start, end) spans."""
+    """Every occurrence of *needle*, as (start, end) spans, overlaps included.
+
+    Advancing the cursor past the whole needle would hide an occurrence that
+    starts inside the previous one, and hiding it turns a genuinely ambiguous
+    edit into a silent one: three identical adjacent lines contain a two-line
+    pattern twice, and the caller has to be told so. ``_drop_overlaps`` keeps
+    the replacement pass non-overlapping; counting is what needs the truth.
+    """
 
     if not needle:
         return []
@@ -252,7 +259,7 @@ def _find_all(haystack: str, needle: str) -> list[tuple[int, int]]:
         if found < 0:
             return spans
         spans.append((found, found + len(needle)))
-        cursor = found + len(needle)
+        cursor = found + 1
 
 
 def _project_spans(
@@ -654,17 +661,22 @@ def fuzzy_find_and_replace(
         matcher = _STRATEGY_FUNCTIONS.get(strategy)
         if matcher is None:
             continue
-        spans = _drop_overlaps(matcher(content, old_text))
+        # Ambiguity is decided on every occurrence the strategy found;
+        # ``_drop_overlaps`` only exists to keep the replacement pass from
+        # splicing two regions that share bytes. Deciding on the trimmed list
+        # let two overlapping occurrences read as one certain match.
+        found = matcher(content, old_text)
+        spans = _drop_overlaps(found)
         if not spans:
             continue
 
-        if len(spans) > 1 and not replace_all:
+        if len(found) > 1 and not replace_all:
             raise AmbiguousMatchError(
-                f"old_text matches {len(spans)} locations (strategy: {strategy});"
+                f"old_text matches {len(found)} locations (strategy: {strategy});"
                 " be more specific",
                 strategy=strategy,
-                match_count=len(spans),
-                lines=[_line_number(content, start) for start, _ in spans],
+                match_count=len(found),
+                lines=[_line_number(content, start) for start, _ in found],
             )
 
         # Right to left, so each replacement leaves earlier offsets valid.
