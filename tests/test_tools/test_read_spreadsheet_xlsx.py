@@ -622,3 +622,29 @@ async def test_read_spreadsheet_does_not_append_a_reading_to_a_cell(tmp_path: Pa
 
     assert _TOKYO in out
     assert _TOKYO_READING not in out
+
+
+@pytest.mark.asyncio
+async def test_read_spreadsheet_extreme_column_reference_does_not_overflow(
+    tmp_path: Path,
+) -> None:
+    extreme_sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<sheetData>'
+        '<row r="1">'
+        '<c r="A1" t="inlineStr"><is><t>valid-cell</t></is></c>'
+        '<c r="ZZZZZ1" t="inlineStr"><is><t>extreme-col</t></is></c>'
+        '</row>'
+        '</sheetData>'
+        '</worksheet>'
+    )
+    target = tmp_path / "crafted.xlsx"
+    target.write_bytes(_build_xlsx_bytes({"Sheet1": extreme_sheet_xml}))
+
+    with tool_context(tmp_path):
+        out = await fs.read_spreadsheet(str(target))
+
+    assert "valid-cell" in out
+    assert "extreme-col" not in out
+

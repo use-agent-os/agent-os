@@ -54,6 +54,7 @@ _XLSX_MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 _XLSX_PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 _XLSX_OFFICE_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 _XLSX_MAX_ROWS = 1_048_576
+_XLSX_MAX_COLUMNS = 16_384
 _BOOTSTRAP_SOURCE_FILENAMES = frozenset(BOOTSTRAP_FILENAMES)
 
 
@@ -752,6 +753,8 @@ def _read_xlsx_worksheet(
         row: list[str] = []
         for cell_el in row_el.findall(f"{{{_XLSX_MAIN_NS}}}c"):
             column_index = _xlsx_column_index(cell_el.attrib.get("r", ""))
+            if column_index >= _XLSX_MAX_COLUMNS:
+                continue
             while len(row) < column_index:
                 row.append("")
             row.append(_xlsx_cell_value(cell_el, shared_strings))
@@ -765,9 +768,14 @@ def _xlsx_column_index(cell_ref: str) -> int:
     match = re.match(r"([A-Za-z]+)", cell_ref)
     if not match:
         return 0
+    letters = match.group(1).upper()
+    if len(letters) > 3:
+        return _XLSX_MAX_COLUMNS
     index = 0
-    for char in match.group(1).upper():
+    for char in letters:
         index = index * 26 + (ord(char) - ord("A") + 1)
+        if index > _XLSX_MAX_COLUMNS:
+            return _XLSX_MAX_COLUMNS
     return max(0, index - 1)
 
 
