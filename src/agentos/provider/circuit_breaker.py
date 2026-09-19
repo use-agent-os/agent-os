@@ -143,6 +143,7 @@ class ProviderBreakerStatus:
         return {
             "provider": self.provider,
             "state": str(self.state),
+            "healthy": self.healthy,
             "consecutiveFailures": self.consecutive_failures,
             "failureThreshold": self.failure_threshold,
             "cooldownRemainingSeconds": round(self.cooldown_remaining_seconds, 3),

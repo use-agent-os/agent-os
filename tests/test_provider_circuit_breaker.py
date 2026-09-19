@@ -476,3 +476,18 @@ def test_failover_from_the_primary_still_starts_at_the_first_fallback() -> None:
 
     selector.next_fallback_after_failure(RuntimeError("503"))
     assert selector.active_provider_id == "deepseek"
+
+
+def test_provider_breaker_status_to_dict_includes_healthy() -> None:
+    clock = FakeClock()
+    breaker = _breaker(clock, threshold=2)
+
+    status = breaker.status("openrouter")
+    assert status.healthy is True
+    assert status.to_dict()["healthy"] is True
+
+    _fail(breaker, "openrouter", 2)
+    open_status = breaker.status("openrouter")
+    assert open_status.healthy is False
+    assert open_status.to_dict()["healthy"] is False
+

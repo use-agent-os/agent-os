@@ -163,6 +163,7 @@ def test_system_status_exposes_breaker_state() -> None:
 
     assert payload["provider"] == "openrouter"
     assert payload["circuitBreaker"]["state"] == "open"
+    assert payload["circuitBreaker"]["healthy"] is False
     assert payload["circuitBreaker"]["provider"] == "openrouter"
     assert [row["provider"] for row in payload["circuitBreakers"]] == ["openrouter"]
 
