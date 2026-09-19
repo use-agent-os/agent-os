@@ -38,7 +38,7 @@ class SubagentHandle:
 
     run_id: str
     label: str
-    task: asyncio.Task[str]  # type: ignore[type-arg]
+    task: asyncio.Task[str] | None = None  # type: ignore[type-arg]
     status: str = "running"  # running | done | error | aborted | archived | orphaned
     result: str = ""
     error: str = ""
@@ -81,7 +81,8 @@ class SubagentRegistry:
         handle = self._runs.get(run_id)
         if handle is None:
             return False
-        handle.task.cancel()
+        if handle.task is not None and not handle.task.done():
+            handle.task.cancel()
         handle.status = "aborted"
         handle.completed_at = time.monotonic()
         return True
@@ -144,17 +145,10 @@ class SubagentRegistry:
         loaded: dict[str, SubagentHandle] = {}
 
         for entry in entries:
-            # Create a dummy completed task as placeholder
-            async def _noop() -> str:
-                return ""
-
-            task: asyncio.Task[str] = asyncio.create_task(_noop())
-            task.cancel()
-
             handle = SubagentHandle(
                 run_id=entry["run_id"],
                 label=entry["label"],
-                task=task,
+                task=None,
                 status="orphaned",
                 result=entry.get("result", ""),
                 error=entry.get("error", ""),
@@ -264,7 +258,11 @@ class SubagentManager:
         teardown paths need an awaitable "all running subagents settled"
         primitive rather than each one open-coding ``asyncio.wait``.
         """
-        tasks = [h.task for h in self.registry.all_handles() if h.status == "running"]
+        tasks = [
+            h.task
+            for h in self.registry.all_handles()
+            if h.status == "running" and h.task is not None
+        ]
         if not tasks:
             return
         await asyncio.wait(tasks, timeout=timeout)
