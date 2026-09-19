@@ -124,3 +124,13 @@ node_modules/
 # React frontend build output (built at release; never committed)
 src/agentos/gateway/static/dist/
 frontend/node_modules/
+
+# Auto-added by github-engineer
+*.pyc
+*.pyd
+*.obj
+*.so
+*.whl
+nem_stats.c
+*.exp
+*.lib
