@@ -21,6 +21,38 @@ from typing import Any
 
 from docx import Document
 
+#: Every body entry kind ``build`` renders. Anything else is a caller mistake:
+#: ``build`` skips it, so a typo like ``paragrpah`` produced an empty document
+#: reported as a success.
+BODY_KINDS = ("heading", "paragraph", "table", "page_break")
+
+
+class SpecError(ValueError):
+    """A spec that cannot be used. Reported as ``error:`` / exit 2, never as a
+    traceback: the caller passed bad input, the script did not break."""
+
+
+def check_body_entries(spec: dict[str, Any]) -> None:
+    """Raise :class:`SpecError` for a body entry ``build`` would silently skip.
+
+    An entry that is not an object has no ``kind`` at all, and an object with
+    a ``kind`` outside :data:`BODY_KINDS` is a misspelling nine times out of
+    ten; both used to fall through ``build`` unmentioned. An empty ``body`` is
+    a valid, empty document and is left alone.
+    """
+    body = spec.get("body")
+    if not isinstance(body, (list, tuple)):
+        return
+    for index, item in enumerate(body):
+        if not isinstance(item, dict):
+            raise SpecError(f"body entry {index} must be an object, got {type(item).__name__}")
+        kind = item.get("kind")
+        if kind not in BODY_KINDS:
+            raise SpecError(
+                f"body entry {index} has unknown kind {kind!r}; "
+                f"expected one of {', '.join(BODY_KINDS)}"
+            )
+
 
 def build(spec: Any) -> Document:
     doc = Document()
@@ -97,9 +129,19 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
+    try:
+        check_body_entries(spec)
+    except SpecError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     doc = build(spec)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(args.out))
+    # The sibling scripts all print a summary; this one printed nothing at all,
+    # so a caller had no signal beyond the exit code.
+    body = spec.get("body")
+    entries = len(body) if isinstance(body, (list, tuple)) else 0
+    print(json.dumps({"entries": entries, "out": str(args.out)}, ensure_ascii=False))
     return 0
 
 

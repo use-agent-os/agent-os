@@ -164,6 +164,40 @@ def _iter_all_paragraphs(doc: Document) -> Iterator[Paragraph]:
     yield from _iter_header_footer_paragraphs(doc)
 
 
+#: Every op kind ``apply_ops`` knows. An op outside this set is a caller
+#: mistake, not a no-op: the ops file is written by the agent one step before
+#: the call, so ``replace-text`` for ``replace_text`` is a routine slip.
+OP_KINDS = ("replace_run", "replace_text")
+
+
+class OpsError(ValueError):
+    """An ops file that cannot be used. Reported as ``error:`` / exit 2, never
+    as a traceback: the caller passed bad input, the script did not break."""
+
+
+def load_ops(path: Path) -> list[dict[str, Any]]:
+    """Read and validate the ops file, or raise :class:`OpsError`.
+
+    Validation happens before the document is opened, so an unusable ops file
+    cannot leave a half-applied document behind, and ``--out`` is never touched.
+    """
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise OpsError(f"ops {path} is not valid JSON: {exc}") from exc
+    if not isinstance(raw, list):
+        raise OpsError(f"ops {path} must be a JSON array of operations, got {type(raw).__name__}")
+    for index, op in enumerate(raw):
+        if not isinstance(op, dict):
+            raise OpsError(f"op {index} must be an object, got {type(op).__name__}")
+        kind = op.get("op")
+        if kind not in OP_KINDS:
+            raise OpsError(
+                f"op {index} has unknown kind {kind!r}; expected one of {', '.join(OP_KINDS)}"
+            )
+    return raw
+
+
 def apply_ops(doc: Document, ops: list[dict[str, Any]]) -> int:
     applied = 0
     for op in ops:
@@ -211,9 +245,15 @@ def main() -> int:
     if not args.ops.is_file():
         print(f"error: ops {args.ops} not found", file=sys.stderr)
         return 2
-    raw = json.loads(args.ops.read_text(encoding="utf-8"))
-    ops = raw if isinstance(raw, list) else []
+    try:
+        ops = load_ops(args.ops)
+    except OpsError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     doc = Document(str(args.input))
+    # Deliberately still writes when `applied` is 0: a valid op that matches
+    # nothing is a different question from an unusable ops file, and a skipped
+    # op must not fail the run (see the sibling xlsx script's `value` rule).
     applied = apply_ops(doc, ops)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(args.out))

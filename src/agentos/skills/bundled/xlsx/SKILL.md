@@ -109,6 +109,11 @@ Rules:
   the only way to empty a cell through this op list.
 - Omitting `value` entirely is a malformed operation: it is skipped and not
   counted in `applied`, so a typo cannot silently wipe a cell.
+- The ops file itself must be a JSON **array** of objects, each with a known
+  `op` (`set_cell`, `rename_sheet`, `merge_cells`). An unparseable file, a
+  non-array, or an unknown `op` exits 2 with `error: …` and writes nothing —
+  the file is validated before the workbook is opened, so a bad op list cannot
+  leave a half-applied workbook or overwrite `--out` with an unchanged copy.
 - `0`, `false` and `""` are values, not absence. Note that Excel has no
   empty-string cell, so `""` reads back as empty — use `null` when you mean
   "clear this cell".

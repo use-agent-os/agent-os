@@ -654,3 +654,273 @@ def test_create_docx_cli_reports_non_object_json_with_exit_code_2(
     assert create_docx.main() == 2
     assert 'must be a JSON object with a "body" array' in capsys.readouterr().err
     assert not out.exists()
+
+
+# ── unusable ops and specs are reported, not swallowed (#2145, #2146) ────────
+
+
+def _one_paragraph_docx(path: Path, text: str) -> None:
+    from docx import Document
+
+    doc = Document()
+    doc.add_paragraph(text)
+    doc.save(str(path))
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ("not json at all", "is not valid JSON"),
+        ('{"op": "replace_text", "find": "a", "with": "b"}', "must be a JSON array"),
+        ('["replace_text"]', "op 0 must be an object"),
+        ('[{"op": "replace-text", "find": "a", "with": "b"}]', "unknown kind 'replace-text'"),
+        ('[{"find": "a", "with": "b"}]', "unknown kind None"),
+        (
+            '[{"op": "replace_text", "find": "a", "with": "b"}, {"op": "Replace_Text"}]',
+            "op 1 has unknown kind 'Replace_Text'",
+        ),
+    ],
+)
+def test_edit_docx_reports_an_unusable_ops_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    body: str,
+    expected: str,
+) -> None:
+    """Each of these either crashed with a traceback or was silently dropped,
+    leaving an unmodified copy at --out reported as a successful edit."""
+    edit_docx = _edit_docx_module()
+    src = tmp_path / "in.docx"
+    _one_paragraph_docx(src, "Hello ORIGINAL world")
+    ops = tmp_path / "ops.json"
+    ops.write_text(body, encoding="utf-8")
+    out = tmp_path / "out.docx"
+    monkeypatch.setattr(sys, "argv", ["edit_docx.py", str(src), str(ops), "--out", str(out)])
+
+    assert edit_docx.main() == 2
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("error: ")
+    assert "Traceback" not in captured.err
+    assert expected in captured.err
+    assert captured.out == ""
+    assert not out.exists()
+
+
+def test_edit_docx_reports_an_ops_file_that_is_not_utf8(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    edit_docx = _edit_docx_module()
+    src = tmp_path / "in.docx"
+    _one_paragraph_docx(src, "Hello")
+    ops = tmp_path / "ops.json"
+    ops.write_bytes(b"\xff\xfe[]")
+    out = tmp_path / "out.docx"
+    monkeypatch.setattr(sys, "argv", ["edit_docx.py", str(src), str(ops), "--out", str(out)])
+
+    assert edit_docx.main() == 2
+    assert "is not valid JSON" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_edit_docx_leaves_an_existing_output_alone_when_the_ops_are_unusable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The destructive case: a typo'd op kind used to replace a document that
+    already held real work with an unmodified copy of the input, and exit 0."""
+    edit_docx = _edit_docx_module()
+    src = tmp_path / "in.docx"
+    _one_paragraph_docx(src, "Hello ORIGINAL world")
+    out = tmp_path / "out.docx"
+    _one_paragraph_docx(out, "PREVIOUSLY EDITED CONTENT")
+    before = out.read_bytes()
+    ops = tmp_path / "ops.json"
+    ops.write_text('[{"op": "replace-text", "find": "a", "with": "b"}]', encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["edit_docx.py", str(src), str(ops), "--out", str(out)])
+
+    assert edit_docx.main() == 2
+    assert out.read_bytes() == before
+
+
+def test_edit_docx_validates_the_ops_before_opening_the_document(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ops file is checked first, so a bad ops file is named even when the
+    input is not a document python-docx can open."""
+    edit_docx = _edit_docx_module()
+    src = tmp_path / "in.docx"
+    src.write_bytes(b"this is not a docx")
+    ops = tmp_path / "ops.json"
+    ops.write_text('[{"op": "replace-text"}]', encoding="utf-8")
+    monkeypatch.setattr(
+        sys, "argv", ["edit_docx.py", str(src), str(ops), "--out", str(tmp_path / "o.docx")]
+    )
+
+    assert edit_docx.main() == 2
+
+
+def test_edit_docx_load_ops_returns_the_ops_unchanged(tmp_path: Path) -> None:
+    """Validation only inspects; the ops reach ``apply_ops`` exactly as written."""
+    edit_docx = _edit_docx_module()
+    ops = [{"op": "replace_text", "find": "a", "with": "b", "extra": 1}]
+    path = tmp_path / "ops.json"
+    path.write_text(json.dumps(ops), encoding="utf-8")
+
+    assert edit_docx.load_ops(path) == ops
+
+
+def test_edit_docx_op_kinds_match_what_apply_ops_handles(tmp_path: Path) -> None:
+    """Every advertised kind is applied; the allow-list and the dispatcher
+    cannot drift apart without this failing."""
+    from docx import Document
+
+    edit_docx = _edit_docx_module()
+    doc = Document()
+    doc.add_paragraph("alpha beta")
+    ops = [
+        {"op": "replace_text", "find": "alpha", "with": "ALPHA"},
+        {"op": "replace_run", "para": 0, "run": 0, "text": "gamma"},
+    ]
+    assert {op["op"] for op in ops} == set(edit_docx.OP_KINDS)
+
+    assert edit_docx.apply_ops(doc, ops) == 2
+
+
+def test_edit_docx_an_empty_ops_array_is_still_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``[]`` is a valid list of zero ops: the document is copied, applied is 0."""
+    edit_docx = _edit_docx_module()
+    src = tmp_path / "in.docx"
+    _one_paragraph_docx(src, "Hello")
+    ops = tmp_path / "ops.json"
+    ops.write_text("[]", encoding="utf-8")
+    out = tmp_path / "out.docx"
+    monkeypatch.setattr(sys, "argv", ["edit_docx.py", str(src), str(ops), "--out", str(out)])
+
+    assert edit_docx.main() == 0
+    assert json.loads(capsys.readouterr().out) == {"applied": 0}
+    assert out.is_file()
+
+
+def test_edit_docx_still_applies_a_valid_ops_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Validation must not disturb the working path."""
+    from docx import Document
+
+    edit_docx = _edit_docx_module()
+    src = tmp_path / "in.docx"
+    _one_paragraph_docx(src, "Hello ORIGINAL world")
+    ops = tmp_path / "ops.json"
+    ops.write_text(
+        json.dumps([{"op": "replace_text", "find": "ORIGINAL", "with": "PATCHED"}]),
+        encoding="utf-8",
+    )
+    out = tmp_path / "out.docx"
+    monkeypatch.setattr(sys, "argv", ["edit_docx.py", str(src), str(ops), "--out", str(out)])
+
+    assert edit_docx.main() == 0
+
+    assert json.loads(capsys.readouterr().out) == {"applied": 1}
+    assert [p.text for p in Document(str(out)).paragraphs] == ["Hello PATCHED world"]
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ('{"body": [{"kind": "paragrpah", "text": "Hi"}]}', "unknown kind 'paragrpah'"),
+        ('{"body": [{"text": "Hi"}]}', "body entry 0 has unknown kind None"),
+        ('{"body": ["paragraph"]}', "body entry 0 must be an object, got str"),
+        (
+            '{"body": [{"kind": "paragraph", "text": "ok"}, {"kind": "Heading", "text": "T"}]}',
+            "body entry 1 has unknown kind 'Heading'",
+        ),
+    ],
+)
+def test_create_docx_reports_an_unrecognised_body_entry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    body: str,
+    expected: str,
+) -> None:
+    """A typo'd kind fell through ``build`` and produced an empty document at
+    exit 0; now it is named by index, and nothing is written."""
+    create_docx = _create_docx_module()
+    spec = tmp_path / "spec.json"
+    spec.write_text(body, encoding="utf-8")
+    out = tmp_path / "new.docx"
+    monkeypatch.setattr(sys, "argv", ["create_docx.py", str(spec), "--out", str(out)])
+
+    assert create_docx.main() == 2
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("error: ")
+    assert expected in captured.err
+    if "unknown kind" in expected:
+        assert "expected one of heading, paragraph, table, page_break" in captured.err
+    assert captured.out == ""
+    assert not out.exists()
+
+
+def test_create_docx_accepts_an_empty_body(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``{"body": []}`` is a valid empty document, not an unrecognised entry."""
+    from docx import Document
+
+    create_docx = _create_docx_module()
+    spec = tmp_path / "spec.json"
+    spec.write_text('{"body": []}', encoding="utf-8")
+    out = tmp_path / "new.docx"
+    monkeypatch.setattr(sys, "argv", ["create_docx.py", str(spec), "--out", str(out)])
+
+    assert create_docx.main() == 0
+
+    assert json.loads(capsys.readouterr().out) == {"entries": 0, "out": str(out)}
+    assert Document(str(out)).paragraphs == []
+
+
+def test_create_docx_body_kinds_match_what_build_renders() -> None:
+    """Every advertised kind produces something; the allow-list and ``build``
+    cannot drift apart without this failing."""
+    create_docx = _create_docx_module()
+    entries = [
+        {"kind": "heading", "text": "T", "level": 1},
+        {"kind": "paragraph", "text": "p"},
+        {"kind": "table", "rows": [["a"]]},
+        {"kind": "page_break"},
+    ]
+    assert [e["kind"] for e in entries] == list(create_docx.BODY_KINDS)
+
+    create_docx.check_body_entries({"body": entries})
+    doc = create_docx.build({"body": entries})
+
+    assert [p.text for p in doc.paragraphs][:2] == ["T", "p"]
+    assert len(doc.tables) == 1
+
+
+def test_create_docx_still_builds_a_valid_spec_and_now_reports_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`create_docx` printed nothing at all on success, so a caller had no
+    signal beyond the exit code."""
+    from docx import Document
+
+    create_docx = _create_docx_module()
+    spec = tmp_path / "spec.json"
+    spec.write_text(
+        json.dumps(
+            {"body": [{"kind": "heading", "text": "T"}, {"kind": "paragraph", "text": "Hi"}]}
+        ),
+        encoding="utf-8",
+    )
+    out = tmp_path / "new.docx"
+    monkeypatch.setattr(sys, "argv", ["create_docx.py", str(spec), "--out", str(out)])
+
+    assert create_docx.main() == 0
+
+    assert json.loads(capsys.readouterr().out) == {"entries": 2, "out": str(out)}
+    assert [p.text for p in Document(str(out)).paragraphs] == ["T", "Hi"]
