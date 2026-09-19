@@ -990,6 +990,27 @@ agentos mcp-server run --gateway ws://localhost:18792/ws
 
 Read: [`mcp-server.md`](mcp-server.md)
 
+## Install Inventory
+
+`agentos dist` emits `workspace-state.json` — a reproducible, versioned
+inventory of the install for support, release QA, or environment
+comparison:
+
+```sh
+agentos dist
+agentos dist --output workspace-state.json
+```
+
+With no flags the payload prints to stdout. `--output` (`-o`) writes it to
+the given file instead (creating parent directories) and prints the
+resolved path. The payload (`schema_version`, `agentos_version`,
+`python_requires`, `bundled_channels`, `bundled_tools`,
+`gateway_defaults`) is derived only from installed package metadata plus
+hard-coded constants — byte-identical per install, with no environment
+values, paths, or secrets.
+
+Read: [`operations.md`](operations.md#install-inventory)
+
 ---
 
 [Docs index](README.md) · [Product guide](../README.product.md) · [Improve this page](contributing-docs.md) · [Report a docs issue](https://github.com/use-agent-os/agent-os/issues/new?template=docs_report.yml)

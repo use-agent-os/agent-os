@@ -188,7 +188,31 @@ Emit a reproducible workspace-state inventory:
 
 ```sh
 agentos dist
+agentos dist --output workspace-state.json
+agentos dist -o ./support/workspace-state.json
 ```
+
+With no flags the payload prints to stdout. `--output` (`-o`) writes the
+payload to the given file instead (creating parent directories) and prints
+the resolved path so shell pipelines can capture it.
+
+The payload is a versioned JSON document:
+
+```jsonc
+{
+  "schema_version": 1,
+  "agentos_version": "<installed version>",
+  "python_requires": ">=3.12",
+  "bundled_channels": ["discord", "email", "slack", "telegram", ...],
+  "bundled_tools": ["agents", "code_exec", "filesystem", "git", ...],
+  "gateway_defaults": {"listen": "127.0.0.1", "port": 18791}
+}
+```
+
+It is built only from installed package metadata plus hard-coded
+constants, so two calls from the same install produce byte-identical JSON
+(sorted keys, stable indent). It carries no environment values, file
+paths, timestamps, or secrets — safe to attach to support requests.
 
 Use this for support, release QA, or environment comparison.
 
