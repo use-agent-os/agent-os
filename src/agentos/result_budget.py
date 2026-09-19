@@ -118,6 +118,22 @@ class ToolRunBudgetReservation:
     counted_as_external_text: bool = False
 
 
+def _parse_budget_int(value: Any) -> int | None:
+    """Parse an integer budget parameter, rejecting booleans."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
 class ToolRunBudgetTracker:
     """Concurrency-safe per-turn accounting for tool calls and raw text."""
 
@@ -230,10 +246,7 @@ class ToolRunBudgetTracker:
                     ),
                 )
             requested = arguments.get("max_chars")
-            try:
-                requested_int = int(requested) if requested is not None else None
-            except (TypeError, ValueError):
-                requested_int = None
+            requested_int = _parse_budget_int(requested)
             if requested_int is None or requested_int > cap:
                 arguments["max_chars"] = cap
         self._external_text_chars_reserved += cap
@@ -478,18 +491,20 @@ def clamp_tool_arguments(
     if tool_name == "web_fetch":
         requested = next_args.get("max_chars")
         cap = policy.max_single_fetch_chars
-        if isinstance(requested, int):
-            value = max(100, requested)
+        parsed = _parse_budget_int(requested)
+        if parsed is not None:
+            value = max(WEB_FETCH_MIN_MAX_CHARS, parsed)
             next_args["max_chars"] = min(value, cap) if cap is not None else value
-        elif requested is None and cap is not None:
+        elif cap is not None:
             next_args["max_chars"] = cap
     elif tool_name == "web_search":
         requested = next_args.get("max_results")
         cap = policy.max_web_search_results
-        if isinstance(requested, int):
-            value = max(1, requested)
+        parsed = _parse_budget_int(requested)
+        if parsed is not None:
+            value = max(1, parsed)
             next_args["max_results"] = min(value, cap) if cap is not None else value
-        elif requested is None and cap is not None:
+        elif cap is not None:
             next_args["max_results"] = cap
     return next_args
 
