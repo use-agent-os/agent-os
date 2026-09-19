@@ -371,7 +371,12 @@ def render_telegram_html(markdown: str) -> str:
 
         heading = _HEADING_RE.match(line)
         if heading:
-            rendered.append(f"<b>{_render_inline(heading.group('text'))}</b>")
+            # Telegram HTML forbids nested tags of the same type (<b> inside <b>).
+            # Headings are wrapped in <b>...</b>, so redundant inner bold tags are removed.
+            heading_text = (
+                _render_inline(heading.group("text")).replace("<b>", "").replace("</b>", "")
+            )
+            rendered.append(f"<b>{heading_text}</b>")
             index += 1
             continue
         quote = _BLOCKQUOTE_RE.match(line)
