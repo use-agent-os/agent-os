@@ -97,6 +97,13 @@ class StaleOutputCache:
         async with self._lock:
             return self._entries.discard_session(session_id)
 
+    async def clear(self) -> int:
+        """Remove every entry across all sessions. Returns the count removed."""
+        async with self._lock:
+            count = len(self._entries)
+            self._entries.clear()
+            return count
+
     def snapshot(self) -> list[dict[str, object]]:
         """Return a plain-data view of cached keys (debug/test helper).
 
@@ -146,6 +153,9 @@ class NullStaleOutputCache:
         return None
 
     async def clear_session(self, session_id: str) -> int:
+        return 0
+
+    async def clear(self) -> int:
         return 0
 
     def snapshot(self) -> list[dict[str, object]]:
