@@ -59,6 +59,8 @@ def build_terminal_reply(
         )
     if reason == "output_truncated" or error_class == "provider_output_truncated":
         return "The provider stopped because the output limit was reached before the task finished."
+    if reason == "dropped_by_overflow":
+        return "The task was dropped because the session queue was full."
     if status == AgentTaskStatus.CANCELLED.value or reason.startswith("cancelled"):
         return "The task was cancelled before it finished."
     if status == AgentTaskStatus.ABANDONED.value or reason == "shutdown_timeout":
@@ -68,6 +70,10 @@ def build_terminal_reply(
         # message that names the scope and the number instead of collapsing it
         # into generic failure text the operator cannot act on.
         return error_message or "The task stopped because a spend budget limit was reached."
+    if error_class == "max_iterations" or reason == "max_iterations":
+        # An iteration ceiling is a deliberate limit, not an unexpected crash.
+        # Preserve the guidance message that explains how to adjust the cap.
+        return error_message or "The task stopped because the maximum iteration limit was reached."
     if status == AgentTaskStatus.FAILED.value or reason in {"error", "tool_error"}:
         return "The task failed before it could finish."
     if status == AgentTaskStatus.SUCCEEDED.value or reason in {"completed", "done"}:

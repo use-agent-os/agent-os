@@ -101,6 +101,33 @@ RAW_INTERNAL_STRINGS = (
             },
             "output limit",
         ),
+        (
+            {
+                "status": "cancelled",
+                "terminal_reason": "dropped_by_overflow",
+            },
+            "session queue was full",
+        ),
+        (
+            {
+                "status": "failed",
+                "terminal_reason": "max_iterations",
+                "error_class": "max_iterations",
+                "error_message": (
+                    "Reached max_iterations=5 from agent_config after a finalization "
+                    "attempt. Set session agent_max_iterations=0 for unlimited tasks."
+                ),
+            },
+            "reached max_iterations=5",
+        ),
+        (
+            {
+                "status": "failed",
+                "terminal_reason": "max_iterations",
+                "error_class": "max_iterations",
+            },
+            "maximum iteration limit was reached",
+        ),
     ],
 )
 def test_build_terminal_reply_returns_user_readable_messages(
