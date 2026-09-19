@@ -1212,6 +1212,13 @@ def create_memory_tools(
         if not _is_memory_source_path(path):
             return f"Error: path is not a memory source file. {_MEMORY_SOURCE_PATH_HINT}"
 
+        if Path(path).parts == ("MEMORY.md",):
+            return (
+                "Error: MEMORY.md is managed by the `memory` tool now. Use "
+                "memory(action='remove', ...) for durable facts; memory_delete is for "
+                "memory/**/*.md notes."
+            )
+
         if not file_path.exists():
             return f"Error: {path} not found."
 

@@ -200,3 +200,13 @@ async def test_memory_tool_picks_up_budget_change_without_restart(tmp_path):
 
     now_fits = json.loads(await tools["memory"](action="add", content="y" * 50))
     assert now_fits["success"] is True
+
+
+async def test_memory_delete_rejects_memory_md(memory_tools_fixture, tmp_path):
+    """Direct deletion of MEMORY.md via memory_delete must be rejected."""
+    tools = memory_tools_fixture
+    (tmp_path / "MEMORY.md").write_text("sample curated memory", encoding="utf-8")
+    result = await tools["memory_delete"](path="MEMORY.md")
+    assert "Error: MEMORY.md is managed by the `memory` tool" in result
+    assert (tmp_path / "MEMORY.md").exists()
+
