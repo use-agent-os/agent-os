@@ -32,6 +32,27 @@ async def _session_id_for_download(session_manager: Any, session_key: str) -> st
     return session_id if isinstance(session_id, str) and session_id else None
 
 
+async def _material_scopes_for_download(session_manager: Any, session_key: str) -> list[str]:
+    """Directories under ``transcripts/`` that may hold this session's material.
+
+    ``chat.send`` stages an attachment under the session's ``session_id``, but a
+    channel turn (``channel_dispatch``) stages it under the session key's last
+    segment -- ``main`` for a DM on the default ``dm_scope``, the chat id for a
+    group. Looking only under ``session_id`` turned every
+    attachment a user sent over Telegram, Discord or Slack into a 404 in the
+    Control UI. Both scopes are tried, canonical first, and only for a key that
+    names an existing session.
+    """
+    session_id = await _session_id_for_download(session_manager, session_key)
+    if not session_id:
+        return []
+    scopes = [session_id]
+    key_scope = session_key.split(":")[-1] or session_key
+    if key_scope not in scopes:
+        scopes.append(key_scope)
+    return scopes
+
+
 def _media_root_from_config(config: GatewayConfig) -> Path:
     return media_root_from_config(config)
 
@@ -65,21 +86,17 @@ def register_attachment_routes(
             or request.headers.get("x-agentos-session-key")
             or ""
         )
-        session_id = await _session_id_for_download(session_manager, session_key)
-        if not session_id:
-            return JSONResponse(
-                {"error": "Attachment not found", "code": "NOT_FOUND"},
-                status_code=404,
-            )
-
-        try:
-            path = transcript_material_path(_media_root_from_config(config), session_id, sha)
-        except ValueError:
-            return JSONResponse(
-                {"error": "Attachment not found", "code": "NOT_FOUND"},
-                status_code=404,
-            )
-        if not path.exists() or not path.is_file():
+        media_root = _media_root_from_config(config)
+        path: Path | None = None
+        for scope in await _material_scopes_for_download(session_manager, session_key):
+            try:
+                candidate = transcript_material_path(media_root, scope, sha)
+            except ValueError:
+                continue
+            if candidate.is_file():
+                path = candidate
+                break
+        if path is None:
             return JSONResponse(
                 {"error": "Attachment not found", "code": "NOT_FOUND"},
                 status_code=404,
