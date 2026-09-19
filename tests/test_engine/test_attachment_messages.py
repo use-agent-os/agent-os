@@ -361,3 +361,45 @@ def test_text_wrapper_escapes_content_with_close_tag() -> None:
     assert wrapped.text.count("</file>") == 1
     # The user's "second line" still survives in escaped form.
     assert "second line" in wrapped.text
+
+
+# ---------------------------------------------------------------------------
+# #2998 — an attachment sent with no text must not carry an empty text block.
+# ---------------------------------------------------------------------------
+
+_PNG = {"type": "image/png", "data": _b64(b"\x89PNG\r\n\x1a\n"), "name": "p.png"}
+
+
+@pytest.mark.parametrize("message", ["", "   ", "\n\t"])
+def test_attachment_only_turn_has_no_empty_text_block(message: str) -> None:
+    """A photo with no caption, or a file sent with an empty chat box, reaches
+    the builder as a blank message. Anthropic rejects an empty (or blank)
+    text block with a 400, failing the whole turn."""
+    out = _build(message, [_PNG])
+
+    assert out is not None
+    blocks = out[0].content
+    assert [type(b) for b in blocks] == [ContentBlockImage]
+    assert all(b.text.strip() for b in blocks if isinstance(b, ContentBlockText))
+
+
+def test_a_message_with_text_still_leads_with_its_text_block() -> None:
+    out = _build("what is in this picture?", [_PNG])
+
+    assert out is not None
+    first, second = out[0].content
+    assert isinstance(first, ContentBlockText) and first.text == "what is in this picture?"
+    assert isinstance(second, ContentBlockImage)
+
+
+def test_attachment_only_turn_reaches_anthropic_without_an_empty_text_part() -> None:
+    """The failure was at the provider boundary; assert on the wire payload."""
+    from agentos.provider.anthropic import _build_message_payload
+
+    out = _build("", [_PNG])
+    assert out is not None
+
+    payload = _build_message_payload(out[0])
+
+    assert payload["role"] == "user"
+    assert [part["type"] for part in payload["content"]] == ["image"]

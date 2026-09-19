@@ -6365,7 +6365,12 @@ class TurnRunner:
             Message,
         )
 
-        prompt_block = ContentBlockText(text=message)
+        # An attachment sent with no text -- a photo with no caption, a file
+        # dropped into the web chat with an empty box -- arrives as message "".
+        # An empty text block is not "no text": Anthropic rejects it outright
+        # (text content blocks must be non-empty), failing the whole turn. A
+        # user turn made only of attachments is valid for every provider.
+        prompt_blocks: list[Any] = [ContentBlockText(text=message)] if message.strip() else []
         attachment_blocks: list[Any] = []
         for index, att in enumerate(attachments, start=1):
             att_type = att.get("type")
@@ -6451,6 +6456,6 @@ class TurnRunner:
         return [
             Message(
                 role="user",
-                content=[prompt_block] + attachment_blocks,  # type: ignore[arg-type]
+                content=prompt_blocks + attachment_blocks,  # type: ignore[arg-type]
             )
         ]
