@@ -9,6 +9,7 @@ the marker from becoming a way to publish arbitrary files.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -162,6 +163,115 @@ async def test_publish_failure_is_reported_not_raised(
     assert out.startswith("ok\n")
     assert "not published" in out
     assert "outside workspace" in out
+
+
+# ── I/O failures on the announced file (#2892) ──────────────────────────────
+#
+# publish_artifact hashes and copies the file itself, so a file the finished
+# process still holds open (routine on Windows) or one the agent cannot read
+# raises PermissionError / OSError from inside it, not ToolError. Only ToolError
+# was caught, so exec_command lost its whole stdout to a publish that was
+# supposed to be best-effort. These go through the real publish_artifact.
+
+
+@pytest.fixture
+def publishing_ctx(workspace: Path, tmp_path: Path) -> Any:
+    """A context publish_artifact accepts, so the failure comes from real I/O."""
+    context = ToolContext(
+        workspace_dir=str(workspace),
+        artifact_media_root=str(tmp_path / "media"),
+        artifact_session_id="session-1",
+        session_key="agent:main:webchat:aaaa0001",
+    )
+    token = current_tool_context.set(context)
+    yield context
+    current_tool_context.reset(token)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [
+        PermissionError(13, "The process cannot access the file because it is being used"),
+        OSError(5, "Input/output error"),
+        FileNotFoundError(2, "No such file or directory"),
+    ],
+    ids=["permission", "io", "vanished-between-exists-and-open"],
+)
+async def test_an_io_error_while_hashing_is_reported_in_place_of_the_marker(
+    publishing_ctx: Any, monkeypatch: pytest.MonkeyPatch, error: OSError
+) -> None:
+    def _cannot_read(path: Any, **_kwargs: Any) -> str:
+        raise error
+
+    monkeypatch.setattr(artifacts_mod, "sha256_file", _cannot_read)
+
+    out = await publish_inline_artifacts(f"results ready\n{marker()}\ndone")
+
+    assert out.startswith("results ready\n")
+    assert out.endswith("\ndone")
+    assert "publish_artifact path=" not in out
+    assert "[inline artifact not published:" in out
+    assert str(error) in out
+
+
+@pytest.mark.asyncio
+async def test_an_io_error_on_one_marker_does_not_stop_the_others(
+    publishing_ctx: Any, workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (workspace / "pear.cards.json").write_text('{"type":"cards","cards":[]}', encoding="utf-8")
+    real = artifacts_mod.sha256_file
+
+    def _apple_is_locked(path: Any, **kwargs: Any) -> str:
+        if Path(path).name == "apple.cards.json":
+            raise PermissionError(13, "locked")
+        return real(path, **kwargs)
+
+    monkeypatch.setattr(artifacts_mod, "sha256_file", _apple_is_locked)
+
+    out = await publish_inline_artifacts(
+        f"{marker('apple.cards.json')}\n{marker('pear.cards.json')}"
+    )
+
+    assert "not published: [Errno 13] locked" in out
+    assert "already rendered for the user: pear.cards.json" in out
+    assert [a["name"] for a in publishing_ctx.published_artifacts] == ["pear.cards.json"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows honours only the read-only bit")
+@pytest.mark.asyncio
+async def test_an_unreadable_file_is_reported_not_raised(
+    publishing_ctx: Any, workspace: Path
+) -> None:
+    """No stubs: a real 0o000 file makes publish_artifact's own open() fail."""
+    if os.geteuid() == 0:
+        pytest.skip("root can read anything")
+    target = workspace / "apple.cards.json"
+    target.chmod(0o000)
+    try:
+        out = await publish_inline_artifacts(f"ok\n{marker()}")
+    finally:
+        target.chmod(0o644)
+
+    assert out.startswith("ok\n")
+    assert "[inline artifact not published:" in out
+    assert "Permission denied" in out
+
+
+@pytest.mark.asyncio
+async def test_a_defect_in_publishing_still_surfaces(
+    publishing_ctx: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Best-effort covers what the file system does, not what the code does:
+    the handler is (ToolError, OSError), deliberately not Exception."""
+
+    def _bug(path: Any, **_kwargs: Any) -> str:
+        raise TypeError("sha256_file() got an unexpected argument")
+
+    monkeypatch.setattr(artifacts_mod, "sha256_file", _bug)
+
+    with pytest.raises(TypeError):
+        await publish_inline_artifacts(marker())
 
 
 # ── Cheap exits ─────────────────────────────────────────────────────────────
