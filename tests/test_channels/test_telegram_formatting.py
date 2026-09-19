@@ -317,6 +317,18 @@ def test_formatting_inside_link_text_still_renders() -> None:
     )
 
 
+def test_telegram_deep_links_and_mailto_render_as_anchors() -> None:
+    assert render_telegram_html("[User Profile](tg://user?id=123456789)") == (
+        '<a href="tg://user?id=123456789">User Profile</a>'
+    )
+    assert render_telegram_html("[Contact Bot](tg://resolve?domain=testbot)") == (
+        '<a href="tg://resolve?domain=testbot">Contact Bot</a>'
+    )
+    assert render_telegram_html("[Email Us](mailto:team@agentos.org)") == (
+        '<a href="mailto:team@agentos.org">Email Us</a>'
+    )
+
+
 def test_plain_inline_keeps_the_url_intact() -> None:
     """The table-label path strips markers with `str.replace`.
 
@@ -327,6 +339,8 @@ def test_plain_inline_keeps_the_url_intact() -> None:
     assert _plain_inline("[t](https://x.test/a__b__c)") == "t (https://x.test/a__b__c)"
     assert _plain_inline("[t](https://x.test/a~~b~~c)") == "t (https://x.test/a~~b~~c)"
     assert _plain_inline("[t](https://x.test/a**b**c)") == "t (https://x.test/a**b**c)"
+    assert _plain_inline("[User](tg://user?id=12345)") == "User (tg://user?id=12345)"
+    assert _plain_inline("[Help](mailto:help@test.org)") == "Help (mailto:help@test.org)"
 
 
 def test_plain_inline_still_strips_markers_outside_a_url() -> None:
