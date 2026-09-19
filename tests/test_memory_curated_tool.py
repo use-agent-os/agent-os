@@ -200,3 +200,44 @@ async def test_memory_tool_picks_up_budget_change_without_restart(tmp_path):
 
     now_fits = json.loads(await tools["memory"](action="add", content="y" * 50))
     assert now_fits["success"] is True
+
+
+async def test_memory_save_size_limits_ignores_non_memory_markdown_files(tmp_path):
+    """Ensure max_files only counts files inside memory_dir and MEMORY.md, not
+    arbitrary markdown files in docs/, skills/, or elsewhere in the workspace.
+    """
+    from agentos.gateway.config import GatewayConfig
+
+    # Populate multiple markdown files outside memory_dir
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    for i in range(10):
+        (docs_dir / f"doc_{i}.md").write_text(f"Documentation {i}", encoding="utf-8")
+
+    registry = ToolRegistry()
+    root_config = GatewayConfig(
+        config_path=str(tmp_path / "c.toml"),
+        memory={"max_files": 2},
+    )
+    create_memory_tools(
+        stores=_FakeMemorySaveStore(),
+        retrievers=SimpleNamespace(),
+        memory_dir=str(tmp_path / "memory"),
+        registry=registry,
+        memory_config=root_config.memory,
+        config_root=root_config,
+    )
+    tools = {name: registry.get(name).handler for name in registry.list_names()}
+
+    # Saving to memory/note1.md should succeed despite 10 docs/*.md files
+    res1 = await tools["memory_save"](path="memory/note1.md", content="note 1")
+    assert "Saved to memory/note1.md" in res1
+
+    # Second memory file should also succeed (count becomes 2 == max_files)
+    res2 = await tools["memory_save"](path="memory/note2.md", content="note 2")
+    assert "Saved to memory/note2.md" in res2
+
+    # Third new memory file should exceed limit
+    with pytest.raises(ToolError, match="max file count reached"):
+        await tools["memory_save"](path="memory/note3.md", content="note 3")
+

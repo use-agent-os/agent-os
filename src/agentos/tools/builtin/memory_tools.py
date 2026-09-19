@@ -633,11 +633,12 @@ def create_memory_tools(
         return redact_memory_text(content)
 
     async def _maybe_prune(r: ResolvedAgent) -> None:
-        if memory_config and getattr(memory_config, "entry_ttl_days", 0) > 0 and r.memory_dir:
+        live_cfg = _live_memory_config()
+        if live_cfg and getattr(live_cfg, "entry_ttl_days", 0) > 0 and r.memory_dir:
             await _prune_expired_files(
                 r.memory_dir,
                 r.store,
-                memory_config.entry_ttl_days,
+                live_cfg.entry_ttl_days,
                 workspace_dir=r.workspace_dir,
             )
 
@@ -648,12 +649,13 @@ def create_memory_tools(
         content: str,
         mode: str,
     ) -> None:
-        if not memory_config:
+        live_cfg = _live_memory_config()
+        if not live_cfg:
             return
 
         content_size_kb = len(content.encode("utf-8")) / 1024
 
-        max_file = getattr(memory_config, "max_file_size_kb", 0)
+        max_file = getattr(live_cfg, "max_file_size_kb", 0)
         if max_file > 0:
             existing_size = mem_path.stat().st_size / 1024 if mem_path.exists() else 0
             projected = (existing_size + content_size_kb) if mode != "replace" else content_size_kb
@@ -662,13 +664,21 @@ def create_memory_tools(
                     f"write would exceed per-file limit ({projected:.0f} KB > {max_file} KB)."
                 )
 
-        max_files = getattr(memory_config, "max_files", 0)
+        max_files = getattr(live_cfg, "max_files", 0)
         if max_files > 0 and not mem_path.exists():
-            file_count = len(list(workspace_dir.rglob("*.md")))
+            memory_files: set[Path] = set()
+            if r.memory_dir:
+                mem_dir = Path(r.memory_dir)
+                if mem_dir.exists():
+                    memory_files.update(f for f in mem_dir.rglob("*.md") if f.is_file())
+            root_mem = workspace_dir / "MEMORY.md"
+            if root_mem.exists() and root_mem.is_file():
+                memory_files.add(root_mem)
+            file_count = len(memory_files)
             if file_count >= max_files:
                 raise ToolError(f"max file count reached ({max_files}).")
 
-        max_total = getattr(memory_config, "max_total_size_kb", 0)
+        max_total = getattr(live_cfg, "max_total_size_kb", 0)
         if max_total > 0:
             total_kb = (await r.store.total_size()) / 1024
             if total_kb + content_size_kb > max_total:
