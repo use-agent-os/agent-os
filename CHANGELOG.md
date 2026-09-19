@@ -7,6 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Slack: clicking Approve/Deny on a tool-call approval prompt that was posted
+  as a top-level message (not already inside a thread) made the agent's reply
+  post unthreaded instead of anchoring under the prompt it answered.
+  `_handle_slack_interactive` built the synthesized reply event from
+  `orig_message.get("thread_ts")` alone, never `orig_message.get("ts")`, so
+  `parse_event` recorded `ts=None` and, with no `thread_ts` on a top-level
+  prompt, `_reply_thread_ts` had nothing to fall back to. With
+  `reply_in_thread` enabled and several approvals pending at once in the same
+  channel, the reply's thread anchor was silently lost, making it impossible
+  to tell which approval a bare reply belonged to. The synthesized event now
+  also carries `ts`, so the reply threads under the prompt's own message when
+  the prompt itself started no thread.
 - Discord channel: a reaction added to the bot's own message in a guild
   channel or thread is no longer silently dropped by the group mention
   gate. `is_group_mentioned` fell back to searching a reaction's (always

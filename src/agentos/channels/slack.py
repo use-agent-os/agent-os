@@ -1050,6 +1050,7 @@ class SlackChannel:
                 "channel": channel_id,
                 "text": "Approve" if approved else "Deny",
                 "team": team_id,
+                "ts": orig_message.get("ts"),
                 "thread_ts": orig_message.get("thread_ts"),
             }
         )
