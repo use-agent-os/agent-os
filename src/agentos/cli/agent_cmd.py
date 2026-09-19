@@ -472,7 +472,7 @@ def _usage_from_done(done: Any | None, model: str | None) -> dict[str, Any]:
     return {
         "input_tokens": done.input_tokens if done else 0,
         "output_tokens": done.output_tokens if done else 0,
-        "total_tokens": (done.input_tokens + done.output_tokens) if done else 0,
+        "total_tokens": done.total_tokens if done else 0,
         "reasoning_tokens": done.reasoning_tokens if done else 0,
         "cached_tokens": done.cached_tokens if done else 0,
         "cost_usd": done.cost_usd if done else 0.0,

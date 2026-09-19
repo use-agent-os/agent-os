@@ -1130,7 +1130,7 @@ class _TurnRunnerSessionTotalsAdapter(SessionTotalsPort):
             if current_session is None:
                 return None
 
-            done_total_tokens = done_event.input_tokens + done_event.output_tokens
+            done_total_tokens = done_event.total_tokens
             event_cost_source = normalize_event_cost_source(
                 done_event.cost_source,
                 input_tokens=done_event.input_tokens,

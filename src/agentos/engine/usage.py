@@ -150,6 +150,11 @@ class ModelUsage:
             cached_input_tokens=self.cache_read_tokens,
         )
 
+    @property
+    def total_tokens(self) -> int:
+        """Total token count (input_tokens + output_tokens)."""
+        return self.input_tokens + self.output_tokens
+
 
 @dataclass
 class SessionUsage:
@@ -164,6 +169,11 @@ class SessionUsage:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     provider_id: str = ""
+
+    @property
+    def total_tokens(self) -> int:
+        """Total token count (input_tokens + output_tokens)."""
+        return self.input_tokens + self.output_tokens
 
     @property
     def cost(self) -> float:

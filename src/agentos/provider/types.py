@@ -83,6 +83,11 @@ class DoneEvent:
         """Backward-compatible alias for earlier OpenRouter cost consumers."""
         return self.billed_cost
 
+    @property
+    def total_tokens(self) -> int:
+        """Total token count (input_tokens + output_tokens)."""
+        return self.input_tokens + self.output_tokens
+
 
 @dataclass
 class ErrorEvent:
