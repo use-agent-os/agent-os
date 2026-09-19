@@ -69,8 +69,7 @@ def _table_text(shape) -> list[str]:
             " ".join(para.text.strip() for para in cell.text_frame.paragraphs if para.text.strip())
             for cell in row.cells
         ]
-        cells = [c for c in cells if c]
-        if cells:
+        if any(cells):
             out.append(" | ".join(cells))
     return out
 

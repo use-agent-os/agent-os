@@ -150,3 +150,76 @@ def test_write_falls_back_when_stdout_has_no_buffer() -> None:
     assert "季度回顾" in written
     # The emoji has no cp936 form, so it is escaped rather than dropped.
     assert "?" not in written
+
+
+def test_table_text_preserves_empty_cell_positions() -> None:
+    """extract_text preserves empty cell columns so subsequent values are not shifted."""
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+
+    table_shape = slide.shapes.add_table(4, 3, Inches(1), Inches(1), Inches(6), Inches(3))
+    table = table_shape.table
+
+    # Row 0: Full headers
+    table.cell(0, 0).text_frame.text = "Metric"
+    table.cell(0, 1).text_frame.text = "Target"
+    table.cell(0, 2).text_frame.text = "Actual"
+
+    # Row 1: Middle cell empty
+    table.cell(1, 0).text_frame.text = "Revenue"
+    table.cell(1, 1).text_frame.text = ""
+    table.cell(1, 2).text_frame.text = "$10M"
+
+    # Row 2: Leading cell empty
+    table.cell(2, 0).text_frame.text = ""
+    table.cell(2, 1).text_frame.text = "50%"
+    table.cell(2, 2).text_frame.text = "60%"
+
+    # Row 3: Entire row empty (should be omitted)
+    table.cell(3, 0).text_frame.text = ""
+    table.cell(3, 1).text_frame.text = ""
+    table.cell(3, 2).text_frame.text = ""
+
+    table_lines = extract_text._table_text(table_shape)
+    assert table_lines == [
+        "Metric | Target | Actual",
+        "Revenue |  | $10M",
+        " | 50% | 60%",
+    ]
+
+
+def test_table_text_with_empty_cells_cli_json(tmp_path: Path) -> None:
+    """CLI --json preserves table cell alignment on presentations with sparse tables."""
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+
+    table_shape = slide.shapes.add_table(3, 3, Inches(1), Inches(1), Inches(6), Inches(3))
+    table = table_shape.table
+
+    table.cell(0, 0).text_frame.text = "Col A"
+    table.cell(0, 1).text_frame.text = "Col B"
+    table.cell(0, 2).text_frame.text = "Col C"
+
+    table.cell(1, 0).text_frame.text = "Val A"
+    table.cell(1, 1).text_frame.text = ""
+    table.cell(1, 2).text_frame.text = "Val C"
+
+    table.cell(2, 0).text_frame.text = ""
+    table.cell(2, 1).text_frame.text = "Val B2"
+    table.cell(2, 2).text_frame.text = ""
+
+    deck_path = tmp_path / "sparse_table.pptx"
+    prs.save(str(deck_path))
+
+    proc = subprocess.run(
+        [sys.executable, str(_SCRIPT), str(deck_path), "--json"],
+        capture_output=True,
+    )
+    assert proc.returncode == 0
+    payload = json.loads(proc.stdout.decode("utf-8"))
+    assert len(payload) == 1
+    assert payload[0]["text"] == [
+        "Col A | Col B | Col C",
+        "Val A |  | Val C",
+        " | Val B2 | ",
+    ]
