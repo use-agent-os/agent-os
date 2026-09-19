@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import re
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -1117,6 +1118,19 @@ class TelegramChannel:
             metadata=metadata,
         )
 
+    def _mention_at_boundary(self, mention: str, text: str) -> bool:
+        """True when *mention* (``@username``) sits on a username boundary in *text*.
+
+        Plain containment is not enough as the last-resort fallback when
+        Telegram sends no entity metadata to check precisely: a username is
+        ``[\\w]`` characters after the ``@``, so ``@helper`` is a substring of
+        a different, longer ``@helperbot2`` and of ``someone@helperdesk.com``.
+        Nothing that could continue a username is allowed directly before the
+        ``@`` or directly after the matched name.
+        """
+        pattern = r"(?<!\w)" + re.escape(mention) + r"(?!\w)"
+        return re.search(pattern, text) is not None
+
     def is_group_mentioned(self, msg: IncomingMessage) -> bool:
         if not msg.metadata.get("is_group"):
             return True
@@ -1165,7 +1179,7 @@ class TelegramChannel:
                     has_mismatched_bot_command = True
         if has_mismatched_bot_command:
             return False
-        return mention in text.lower()
+        return self._mention_at_boundary(mention, text.lower())
 
     def build_reply_message(self, content: str, inbound: IncomingMessage) -> OutgoingMessage:
         metadata: dict[str, Any] = {"chat_id": inbound.channel_id}
