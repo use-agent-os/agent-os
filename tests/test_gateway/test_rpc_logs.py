@@ -25,6 +25,93 @@ async def test_logs_tail_uses_agentos_log_dir_and_filters_level(tmp_path, monkey
     assert result["has_more"] is False
 
 
+def _line(i: int, level: str = "INFO") -> str:
+    return f"2026-05-03 [{level}] agentos: line {i}"
+
+
+async def _tail(**params: object) -> dict:
+    return await _handle_logs_tail(dict(params), None)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_logs_tail_first_poll_shows_the_newest_lines(tmp_path, monkeypatch) -> None:
+    """The first poll is `tail`: a console opened on a big log shows what is
+    happening now, not the top of the file. Returning the oldest window here
+    would leave the Logs page paging through history for minutes."""
+    monkeypatch.setenv("AGENTOS_LOG_DIR", str(tmp_path))
+    log_file = tmp_path / "debug.log"
+    log_file.write_text("".join(_line(i) + "\n" for i in range(2000)), encoding="utf-8")
+
+    first = await _tail(limit=500, cursor=0)
+
+    assert first["lines"][-1] == _line(1999)
+    assert first["lines"][0] == _line(1500)
+    assert first["cursor"] == log_file.stat().st_size
+    assert first["has_more"] is True
+
+
+@pytest.mark.asyncio
+async def test_logs_tail_recovers_a_burst_larger_than_limit(tmp_path, monkeypatch) -> None:
+    """A burst bigger than `limit` between polls must arrive in full, oldest first."""
+    monkeypatch.setenv("AGENTOS_LOG_DIR", str(tmp_path))
+    log_file = tmp_path / "debug.log"
+    log_file.write_text(_line(0) + "\n", encoding="utf-8")
+    cursor = (await _tail(limit=500, cursor=0))["cursor"]
+
+    with log_file.open("a", encoding="utf-8") as fh:
+        fh.write("".join(_line(i) + "\n" for i in range(1, 11)))
+
+    seen: list[str] = []
+    for _ in range(5):
+        page = await _tail(limit=4, cursor=cursor)
+        seen += page["lines"]
+        cursor = page["cursor"]
+        if not page["has_more"]:
+            break
+
+    assert seen == [_line(i) for i in range(1, 11)]
+    assert cursor == log_file.stat().st_size
+
+
+@pytest.mark.asyncio
+async def test_logs_tail_holds_back_a_line_still_being_written(tmp_path, monkeypatch) -> None:
+    """A trailing line with no newline yet is left for the next poll, whole."""
+    monkeypatch.setenv("AGENTOS_LOG_DIR", str(tmp_path))
+    log_file = tmp_path / "debug.log"
+    log_file.write_text(_line(0) + "\n", encoding="utf-8")
+    cursor = (await _tail(limit=10, cursor=0))["cursor"]
+
+    with log_file.open("a", encoding="utf-8") as fh:
+        fh.write(_line(1) + "\n" + "2026-05-03 [INFO] agentos: half-wri")
+    page = await _tail(limit=10, cursor=cursor)
+    assert page["lines"] == [_line(1)]
+
+    with log_file.open("a", encoding="utf-8") as fh:
+        fh.write("tten\n")
+    page = await _tail(limit=10, cursor=page["cursor"])
+    assert page["lines"] == ["2026-05-03 [INFO] agentos: half-written"]
+
+
+@pytest.mark.asyncio
+async def test_logs_tail_pages_a_level_filter_without_skipping(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("AGENTOS_LOG_DIR", str(tmp_path))
+    log_file = tmp_path / "debug.log"
+    log_file.write_text("{marker}\n".replace("{marker}", _line(-1)), encoding="utf-8")
+    cursor = (await _tail(limit=10, cursor=0))["cursor"]
+    with log_file.open("a", encoding="utf-8") as fh:
+        fh.write("".join(_line(i, "ERROR" if i % 2 else "INFO") + "\n" for i in range(12)))
+
+    errors: list[str] = []
+    for _ in range(6):
+        page = await _tail(limit=2, cursor=cursor, level="error")
+        errors += page["lines"]
+        cursor = page["cursor"]
+        if not page["has_more"]:
+            break
+
+    assert errors == [_line(i, "ERROR") for i in range(1, 12, 2)]
+
+
 @pytest.mark.asyncio
 async def test_logs_tail_missing_file_returns_empty_payload(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("AGENTOS_LOG_DIR", str(tmp_path))

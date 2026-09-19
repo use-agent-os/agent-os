@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -177,11 +178,29 @@ async def _handle_logs_trace(params: dict | None, ctx: RpcContext) -> dict[str, 
 
 @_d.method("logs.tail")
 async def _handle_logs_tail(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
-    """Tail log file with cursor-based pagination and level filter."""
+    """Tail log file with cursor-based pagination and level filter.
+
+    A call with no cursor (``0``) is the first poll and behaves like ``tail``:
+    it returns the newest ``limit`` matching lines and a cursor at the end of
+    the file, so a console opened on a large log shows what is happening now.
+
+    A call with a cursor resumes from it and returns the *oldest* unread
+    matching lines, advancing the cursor only past what it consumed. Jumping
+    the cursor to end-of-file after returning only the newest ``limit`` lines
+    discarded the rest of a burst for good, even though ``has_more`` told the
+    caller there was more to fetch.
+
+    Either way the cursor never moves past a line that is still being written:
+    a trailing line with no newline yet is left for the next poll, rather than
+    split into two halves across two responses.
+    """
     p = params or {}
-    limit = min(p.get("limit", 100), 1000)
+    try:
+        limit = max(1, min(int(p.get("limit", 100)), 1000))
+    except (TypeError, ValueError):
+        limit = 100
     level_filter = (p.get("level", "") or "").upper()
-    cursor = p.get("cursor", 0)
+    cursor = p.get("cursor", 0) or 0
 
     log_file = _find_log_file()
     if log_file is None or not log_file.exists():
@@ -191,19 +210,59 @@ async def _handle_logs_tail(params: dict | None, ctx: RpcContext) -> dict[str, A
     if cursor >= file_size:
         return {"lines": [], "cursor": file_size, "has_more": False}
 
-    with open(log_file, encoding="utf-8", errors="replace") as f:
+    def matches(text: str) -> bool:
+        return not level_filter or level_filter in text.upper()
+
+    if cursor <= 0:
+        return _tail_newest(log_file, limit, matches)
+    return _resume_from(log_file, cursor, limit, matches)
+
+
+def _tail_newest(log_file: Path, limit: int, matches: Callable[[str], bool]) -> dict[str, Any]:
+    """First poll: the newest ``limit`` matching lines, cursor at end of file."""
+    kept: list[str] = []
+    total = 0
+    end = 0
+    with open(log_file, "rb") as f:
+        for raw in f:
+            if not raw.endswith(b"\n"):
+                break  # still being written; the next poll reads it whole
+            end += len(raw)
+            text = raw.decode("utf-8", errors="replace").rstrip()
+            if matches(text):
+                total += 1
+                kept.append(text)
+                if len(kept) > limit:
+                    kept.pop(0)
+    return {"lines": kept, "cursor": end, "has_more": total > limit}
+
+
+def _resume_from(
+    log_file: Path, cursor: int, limit: int, matches: Callable[[str], bool]
+) -> dict[str, Any]:
+    """Later polls: the oldest unread matching lines, cursor just past them.
+
+    Reads only as far as it needs to -- ``limit`` matches plus one more to
+    answer ``has_more`` -- instead of the whole unread remainder each poll.
+    """
+    lines: list[str] = []
+    position = cursor
+    consumed = cursor
+    has_more = False
+    with open(log_file, "rb") as f:
         f.seek(cursor)
-        raw_lines = f.readlines()
-        new_cursor = f.tell()
-
-    # Apply level filter if specified
-    if level_filter:
-        filtered = [ln for ln in raw_lines if level_filter in ln.upper()]
-    else:
-        filtered = raw_lines
-
-    # Limit output
-    has_more = len(filtered) > limit
-    lines = [ln.rstrip() for ln in filtered[-limit:]]
-
-    return {"lines": lines, "cursor": new_cursor, "has_more": has_more}
+        for raw in f:
+            if not raw.endswith(b"\n"):
+                break  # still being written; the next poll reads it whole
+            position += len(raw)
+            text = raw.decode("utf-8", errors="replace").rstrip()
+            if not matches(text):
+                if len(lines) < limit:
+                    consumed = position  # skipped, never to be returned
+                continue
+            if len(lines) == limit:
+                has_more = True
+                break
+            lines.append(text)
+            consumed = position
+    return {"lines": lines, "cursor": consumed, "has_more": has_more}
