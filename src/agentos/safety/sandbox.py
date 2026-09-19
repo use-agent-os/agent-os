@@ -52,6 +52,12 @@ NOTE_NO_RLIMITS: Final[str] = (
 )
 
 _DEFAULT_ENV_WHITELIST: Final[tuple[str, ...]] = ("HOME", "PATH", "LANG")
+_MEMORY_ERROR_MARKERS: Final[tuple[str, ...]] = (
+    "memoryerror",
+    "out of memory",
+    "cannot allocate memory",
+    "std::bad_alloc",
+)
 
 
 @dataclass(frozen=True)
@@ -177,17 +183,21 @@ def run_sandboxed(
             notes=notes,
         )
 
-    # Translate exit signals into structured reasons. On POSIX a hard
-    # RLIMIT_CPU exceed produces SIGKILL (returncode == -9); RLIMIT_AS
-    # typically surfaces as SIGSEGV / allocation-error exits. Only a
-    # negative returncode is a signal exit, so the mapping never fires on
-    # platforms that have no signals.
+    # Translate exit signals and allocation failures into structured reasons.
+    # On POSIX a hard RLIMIT_CPU exceed produces SIGKILL (returncode == -9);
+    # RLIMIT_AS typically surfaces either as SIGSEGV (returncode == -11) or as
+    # a graceful allocation-error exit (e.g. MemoryError, ENOMEM) with a non-zero
+    # returncode.
     reason = REASON_OK
     if proc.returncode < 0:
         signalled = -proc.returncode
         if signalled in {_signal(9), _signal(24)}:  # SIGKILL / SIGXCPU
             reason = REASON_CPU_LIMIT
         elif signalled == _signal(11):  # SIGSEGV
+            reason = REASON_MEMORY_LIMIT
+    elif proc.returncode != 0:
+        err_lower = (stderr or "").lower()
+        if any(marker in err_lower for marker in _MEMORY_ERROR_MARKERS):
             reason = REASON_MEMORY_LIMIT
 
     return SandboxResult(
