@@ -261,6 +261,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `srt-from-script` truncated a fractional `DURATION_S` to an integer, so
   every cue after a `3.5`-second shot drifted earlier
   ([#2070](https://github.com/use-agent-os/agent-os/issues/2070)).
+- Surplus provider: `claude-haiku-4.5` no longer silently loses reasoning
+  support when the Surplus catalog fetch fails at boot. The offline fallback
+  prefix table (`_SURPLUS_REASONING_PREFIXES`) listed `claude-opus-` and
+  `claude-sonnet-` but not `claude-haiku-4.5`, even though the sibling vision
+  table right next to it does list `claude-haiku-4.5` — so a boot with no
+  live catalog answered `supports_reasoning=False` for a model that genuinely
+  supports extended thinking, silently turning a configured `thinking_level`
+  into a no-op.
 - `read_spreadsheet`: a phonetic guide (furigana) stored alongside an xlsx
   cell's text is no longer appended to the value. The shared-string reader took
   every `<t>` descendant, including the ones inside `<rPh>`, so a Japanese

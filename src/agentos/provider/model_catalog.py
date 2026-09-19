@@ -53,6 +53,7 @@ def _catalog_price_per_1k(value: object) -> float:
 # supported_features. Only consulted when a boot could not reach the catalog;
 # a live fetch always wins.
 _SURPLUS_REASONING_PREFIXES = (
+    "claude-haiku-4.5",
     "claude-opus-",
     "claude-sonnet-",
     "deepseek-",

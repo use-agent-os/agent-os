@@ -280,6 +280,7 @@ def test_surplus_tier_defaults_resolve_reasoning_without_a_live_catalog() -> Non
         "gpt-5.6-luna",
         "glm-5.3",
         "claude-opus-5",
+        "claude-haiku-4.5",
     ):
         caps = catalog.get_capabilities(model, provider_name="surplus")
         assert caps.supports_reasoning is True, model
@@ -288,6 +289,21 @@ def test_surplus_tier_defaults_resolve_reasoning_without_a_live_catalog() -> Non
 
     image = catalog.get_capabilities("glm-5.3-flash", provider_name="surplus")
     assert image.supports_vision is True
+
+
+def test_surplus_offline_reasoning_prefixes_cover_every_vision_prefix_claude_id() -> None:
+    """`_SURPLUS_VISION_PREFIXES` lists claude-haiku-4.5 as a Surplus model, so
+    the reasoning table -- consulted by the same offline fallback -- must know
+    about it too, the way it already does for claude-opus-/claude-sonnet-.
+    Missing here means a real extended-thinking model silently answers
+    supports_reasoning=False whenever the catalog fetch has failed."""
+    catalog = ModelCatalog()
+
+    caps = catalog.get_capabilities("claude-haiku-4.5", provider_name="surplus")
+
+    assert caps.supports_vision is True
+    assert caps.supports_reasoning is True
+    assert caps.reasoning_format == "openrouter"
 
 
 def test_surplus_normalizes_reasoning_instead_of_using_vendor_native_switches() -> None:
