@@ -1072,6 +1072,17 @@ def create_memory_tools(
                 old_text=None,
                 operations=operations,
             )
+            # Same contract as memory_save/memory_delete: the frozen per-session
+            # snapshot only rebuilds through this callback, so without it a
+            # committed write here keeps being invisible to the model -- the
+            # prompt keeps injecting the pre-write memory_md -- until the
+            # session ends. Gated the same way _mirror_memory_write already is,
+            # so a staged-for-approval or failed batch does not trigger a
+            # refresh for a write that never actually landed.
+            if on_memory_write is not None and _memory_write_committed(result):
+                ctx = current_tool_context.get()
+                _aid = (ctx.agent_id if ctx else None) or "main"
+                on_memory_write(_aid)
             return json.dumps(result, ensure_ascii=False)
 
         # --- Single-op path --------------------------------------------------
@@ -1114,6 +1125,12 @@ def create_memory_tools(
             old_text=old_text,
             operations=None,
         )
+        # See the batch path above: without this, a committed add/replace/
+        # remove here is invisible to the model for the rest of the session.
+        if on_memory_write is not None and _memory_write_committed(result):
+            ctx = current_tool_context.get()
+            _aid = (ctx.agent_id if ctx else None) or "main"
+            on_memory_write(_aid)
         return json.dumps(result, ensure_ascii=False)
 
     @tool(

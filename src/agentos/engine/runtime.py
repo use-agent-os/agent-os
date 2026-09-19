@@ -1851,8 +1851,9 @@ class TurnRunner:
     def refresh_memory_snapshot(self, agent_id: str) -> None:
         """Refresh frozen snapshots for all sessions of the given agent.
 
-        Called by the on_memory_write callback when agent writes to
-        MEMORY.md or daily notes via memory_save.
+        Called by the on_memory_write callback when the agent writes to
+        MEMORY.md, USER.md, or daily notes via memory_save, memory_delete,
+        or memory (add/replace/remove).
         """
         ws = self._resolve_memory_source_dir(agent_id)
         new_snap = MemorySnapshot(
