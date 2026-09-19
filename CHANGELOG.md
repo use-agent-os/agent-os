@@ -266,7 +266,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   every `<t>` descendant, including the ones inside `<rPh>`, so a Japanese
   workbook read back with each reading glued onto the word it annotates
   ([#2053](https://github.com/use-agent-os/agent-os/issues/2053)).
-
+  workbook read back with each reading glued onto the word it annotates.
+- `http_request`: with `output_path` set, `body_preview` is now cut at
+  `_TEXT_BODY_LIMIT` *characters*, the way the inline `body` on the other
+  branch already is. It was cut out of the raw bytes, so a page in any script
+  that is not Latin-1 previewed about a third as much text as an ASCII one at
+  the same cap, and the character straddling the cut reached the model as a
+  `\ufffd` that was never in the document.
 ## [2026.9.16] - 2026-09-16
 
 ### Fixed

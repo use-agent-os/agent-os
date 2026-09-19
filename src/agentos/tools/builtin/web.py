@@ -315,9 +315,16 @@ async def http_request(
 
     if should_save:
         saved_path, digest = _save_http_response_body(raw_body, output_path)
+        # Decode first, then cut: ``_TEXT_BODY_LIMIT`` counts characters where
+        # the no-``output_path`` branch below applies it, and cutting the bytes
+        # instead made the same cap mean a third as much text on a page that is
+        # not Latin-1 -- and split whatever character straddled the boundary
+        # into a ``\ufffd`` that was never in the document. ``raw_body`` is
+        # already bounded by the download cap, and that branch decodes it whole
+        # too, so there is nothing extra to hold here.
         preview = (
             wrap_untrusted_boundary(
-                raw_body[:_TEXT_BODY_LIMIT].decode(response_encoding, "replace"),
+                raw_body.decode(response_encoding, "replace")[:_TEXT_BODY_LIMIT],
                 response_url,
             )
             if is_text
