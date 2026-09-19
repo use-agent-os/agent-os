@@ -17,18 +17,32 @@ class SessionWriteLock:
     def __init__(self) -> None:
         self._locks: dict[str, asyncio.Lock] = {}
 
+    @staticmethod
+    def _has_active_waiters(lock: asyncio.Lock) -> bool:
+        return bool(lock._waiters and any(not w.cancelled() for w in lock._waiters))
+
+    def _maybe_evict(self, session_key: str, lock: asyncio.Lock) -> None:
+        if self._locks.get(session_key) is lock:
+            if not lock.locked() and not self._has_active_waiters(lock):
+                del self._locks[session_key]
+
     async def acquire(self, session_key: str) -> None:
         if session_key not in self._locks:
             self._locks[session_key] = asyncio.Lock()
-        await self._locks[session_key].acquire()
+        lock = self._locks[session_key]
+        try:
+            await lock.acquire()
+        except asyncio.CancelledError:
+            self._maybe_evict(session_key, lock)
+            raise
 
     def release(self, session_key: str) -> None:
         if session_key in self._locks:
             lock = self._locks[session_key]
-            # Evict if no waiter is queued: the next acquire() will create a
-            # fresh lock for this session_key.  If waiters exist, keep the entry
+            # Evict if no active waiter is queued: the next acquire() will create a
+            # fresh lock for this session_key.  If uncancelled waiters exist, keep the entry
             # so they can acquire the already-released lock.
-            if not lock._waiters:
+            if not self._has_active_waiters(lock):
                 del self._locks[session_key]
             lock.release()
 

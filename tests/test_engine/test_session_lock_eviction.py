@@ -97,3 +97,96 @@ async def test_many_sessions_all_evicted():
     assert len(lock_mgr._locks) == 0
     # Even mid-batch, dict should never exceed a small constant.
     assert len(lock_mgr._locks) <= 1
+
+
+@pytest.mark.asyncio
+async def test_waiter_cancelled_before_release_does_not_leak_lock():
+    """When a queued waiter is cancelled before the current holder releases,
+    the idle lock must still be evicted from _locks upon release (issue #3007)."""
+    lock_mgr = SessionWriteLock()
+    await lock_mgr.acquire("session-cancel-1")
+
+    async def waiter() -> None:
+        await lock_mgr.acquire("session-cancel-1")
+        lock_mgr.release("session-cancel-1")
+
+    task = asyncio.create_task(waiter())
+    await asyncio.sleep(0.01)
+
+    # Cancel waiter while holder holds lock
+    task.cancel()
+
+    # Release holder
+    lock_mgr.release("session-cancel-1")
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert "session-cancel-1" not in lock_mgr._locks, (
+        "Idle lock was not evicted after cancelled waiter"
+    )
+    assert len(lock_mgr._locks) == 0
+
+
+@pytest.mark.asyncio
+async def test_waiter_cancelled_during_acquire_does_not_leak_lock():
+    """When a waiting task is cancelled while blocked on acquire(), it must
+    cleanly evict the idle lock on exit if no other waiters exist."""
+    lock_mgr = SessionWriteLock()
+    await lock_mgr.acquire("session-cancel-2")
+
+    async def waiter() -> None:
+        await lock_mgr.acquire("session-cancel-2")
+        lock_mgr.release("session-cancel-2")
+
+    task = asyncio.create_task(waiter())
+    await asyncio.sleep(0.01)
+    lock_mgr.release("session-cancel-2")
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert "session-cancel-2" not in lock_mgr._locks, (
+        "Idle lock was not evicted after waiter cancellation"
+    )
+    assert len(lock_mgr._locks) == 0
+
+
+@pytest.mark.asyncio
+async def test_multiple_waiters_one_cancelled_one_succeeds():
+    """When multiple waiters are queued and one is cancelled, the remaining
+    waiter must still acquire the lock safely and evict it when done."""
+    lock_mgr = SessionWriteLock()
+    await lock_mgr.acquire("session-multi")
+
+    order: list[str] = []
+
+    async def waiter1() -> None:
+        await lock_mgr.acquire("session-multi")
+        order.append("w1")
+        lock_mgr.release("session-multi")
+
+    async def waiter2() -> None:
+        await lock_mgr.acquire("session-multi")
+        order.append("w2")
+        lock_mgr.release("session-multi")
+
+    t1 = asyncio.create_task(waiter1())
+    t2 = asyncio.create_task(waiter2())
+    await asyncio.sleep(0.01)
+
+    # Cancel waiter1
+    t1.cancel()
+
+    # Release initial holder
+    lock_mgr.release("session-multi")
+
+    with pytest.raises(asyncio.CancelledError):
+        await t1
+
+    await t2
+    assert order == ["w2"], f"expected w2 to acquire lock, got {order}"
+    assert "session-multi" not in lock_mgr._locks
+    assert len(lock_mgr._locks) == 0
+
