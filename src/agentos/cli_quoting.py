@@ -36,10 +36,19 @@ def quote_cli_arg(value: str) -> str:
         return '""'
     if not any(char in _WINDOWS_SPECIAL for char in value):
         return value
-    # A Windows filename cannot contain ``"``, so the replacement only guards
-    # hand-written values; ``""`` is the literal-quote spelling both cmd.exe
-    # and PowerShell accept inside a double-quoted string.
-    return '"' + value.replace('"', '""') + '"'
+    # Double quotes are the one form both shells read as a single token, but
+    # PowerShell still expands ``$name`` and backtick escapes inside them, so a
+    # path like ``C:\home\Jo$hn`` came back as ``C:\home\Jo`` (#2978). Both
+    # are escaped with a backtick, PowerShell's own escape character. cmd.exe
+    # does not know the backtick and passes it through, so a hint holding one
+    # of these characters is now right in PowerShell and wrong in cmd.exe,
+    # where before it was the reverse; PowerShell is the shell Windows opens
+    # by default, so it is the one the hint is written for.
+    # ``""`` is the literal-quote spelling both shells accept inside a
+    # double-quoted string; a Windows filename cannot contain ``"``, so that
+    # replacement only guards hand-written values.
+    escaped = value.replace("`", "``").replace("$", "`$").replace('"', '""')
+    return '"' + escaped + '"'
 
 
 def config_cli_arg(config_path: str | Path | None) -> str:

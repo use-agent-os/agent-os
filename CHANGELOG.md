@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- CLI: a copy-pasteable hint whose path holds `$` or a backtick is now escaped
+  for PowerShell inside its double quotes; `"C:\home\Jo$hn\config.toml"`
+  pasted into PowerShell used to expand `$hn` and open the wrong path (#2978)
 - Discord channel: a reaction added to the bot's own message in a guild
   channel or thread is no longer silently dropped by the group mention
   gate. `is_group_mentioned` fell back to searching a reaction's (always

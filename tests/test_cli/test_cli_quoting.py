@@ -56,13 +56,40 @@ def test_windows_never_emits_posix_single_quotes(on_windows: None) -> None:
     [
         r"C:\opt\a&b\config.toml",
         r"C:\opt\a;b\config.toml",
-        r"C:\opt\a$b\config.toml",
         r"C:\opt\a(b)\config.toml",
-        "C:\\opt\\a`b\\config.toml",
+        r"C:\opt\a%b%\config.toml",
     ],
 )
 def test_windows_shell_metacharacters_are_quoted(value: str, on_windows: None) -> None:
     assert quote_cli_arg(value) == f'"{value}"'
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (r"C:\home\Jo$hn\config.toml", r'"C:\home\Jo`$hn\config.toml"'),
+        ("C:\\opt\\a`b\\config.toml", '"C:\\opt\\a``b\\config.toml"'),
+        ("C:\\home\\Jo$hn\\cfg`n.toml", '"C:\\home\\Jo`$hn\\cfg``n.toml"'),
+        ('C:\\a$b`c"d.toml', '"C:\\a`$b``c""d.toml"'),
+    ],
+)
+def test_windows_powershell_expansions_are_escaped(
+    value: str, expected: str, on_windows: None
+) -> None:
+    """Inside double quotes PowerShell expands ``$name`` and backtick escapes;
+    a bare ``"C:\\home\\Jo$hn\\cfg`n.toml"`` pasted there opened
+    ``C:\\home\\Jo\\cfg<newline>.toml`` (#2978). Backtick-escaping both is
+    what PowerShell reads back as the original characters (verified in
+    Windows PowerShell 5.1)."""
+    assert quote_cli_arg(value) == expected
+
+
+def test_windows_backtick_is_escaped_before_dollar(on_windows: None) -> None:
+    """Escaping ``$`` inserts a backtick; escaping backticks afterwards would
+    double that one too and hand PowerShell ``` ``$ ```, a literal backtick."""
+    assert quote_cli_arg("$") == '"`$"'
+    assert quote_cli_arg("`") == '"``"'
+    assert quote_cli_arg("`$") == '"```$"'
 
 
 def test_windows_embedded_double_quote_is_doubled(on_windows: None) -> None:
