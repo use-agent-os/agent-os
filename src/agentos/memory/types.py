@@ -23,6 +23,10 @@ def normalize_memory_search_min_score(
     parsed = default
     if value is None:
         return default
+    if isinstance(value, bool):
+        if strict:
+            raise TypeError("min_score must be a finite number")
+        return default
     if isinstance(value, (int, float, str)):
         try:
             parsed = float(value)

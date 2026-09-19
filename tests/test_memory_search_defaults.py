@@ -467,3 +467,42 @@ async def test_memory_search_tool_allows_sessions_source_results(tmp_path, sourc
 
     assert "source: sessions" in output
     assert "sessions/main/session-1.md" in output
+
+
+def test_normalize_memory_search_min_score_rejects_booleans() -> None:
+    from agentos.memory.types import (
+        DEFAULT_MEMORY_SEARCH_MIN_SCORE,
+        normalize_memory_search_min_score,
+    )
+
+    # In strict mode, booleans must raise TypeError, not evaluate to 1.0 or 0.0
+    with pytest.raises(TypeError, match="min_score must be a finite number"):
+        normalize_memory_search_min_score(True, strict=True)
+
+    with pytest.raises(TypeError, match="min_score must be a finite number"):
+        normalize_memory_search_min_score(False, strict=True)
+
+    # In non-strict mode, booleans fall back to default
+    assert normalize_memory_search_min_score(True, strict=False) == DEFAULT_MEMORY_SEARCH_MIN_SCORE
+    assert normalize_memory_search_min_score(False, strict=False) == DEFAULT_MEMORY_SEARCH_MIN_SCORE
+
+    # Standard numbers still work
+    assert normalize_memory_search_min_score(0.5) == 0.5
+    assert normalize_memory_search_min_score("0.75") == 0.75
+    assert normalize_memory_search_min_score(1.5) == 1.0
+    assert normalize_memory_search_min_score(-0.2) == 0.0
+
+
+def test_memory_search_limit_rejects_booleans() -> None:
+    from agentos.tools.builtin.memory_tools import (
+        _MEMORY_SEARCH_DEFAULT_RESULTS,
+        _memory_search_limit,
+    )
+
+    assert _memory_search_limit(True) == _MEMORY_SEARCH_DEFAULT_RESULTS
+    assert _memory_search_limit(False) == _MEMORY_SEARCH_DEFAULT_RESULTS
+    assert _memory_search_limit(10) == 10
+    assert _memory_search_limit("15") == 15
+    assert _memory_search_limit(100) == 20
+    assert _memory_search_limit(0) == 1
+

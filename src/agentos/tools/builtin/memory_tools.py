@@ -270,6 +270,8 @@ _YAML_FRONTMATTER_RE = re.compile(r"\A---\s*\n.*?\n---\s*(?:\n|$)", re.S)
 
 def _memory_search_limit(value: object) -> int:
     parsed = _MEMORY_SEARCH_DEFAULT_RESULTS
+    if isinstance(value, bool):
+        return _MEMORY_SEARCH_DEFAULT_RESULTS
     if isinstance(value, (int, float, str)):
         try:
             parsed = int(value)
