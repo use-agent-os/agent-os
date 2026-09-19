@@ -172,6 +172,31 @@ def _is_cjk_symbol(char: str) -> bool:
     )
 
 
+def _is_kana(char: str) -> bool:
+    """Hiragana and katakana, restricted to what ``STSong-Light`` can map.
+
+    Japanese is not writable without kana, yet ``_is_cjk`` names only the
+    ideograph blocks -- so on a host whose base font stops before U+3040 every
+    kana fell through to the ``continue`` below and was deleted, leaving the
+    kanji and the punctuation standing. ``確認してください`` came out as
+    ``確認``: still a plausible sentence, with the verb ending gone.
+
+    The blocks are cut to the codepoints the registered CID font actually
+    carries (Adobe-GB1 via GB2312). The handful it does not -- the small
+    ``ゕゖ``, the combining marks U+3099/U+309A, the digraphs ``ゟヿ``,
+    ``゠・`` and the Ainu extensions at U+31F0 -- are deliberately left on the
+    existing path: routing them here would trade a silent drop for a wrong
+    glyph, which is the worse of the two.
+    """
+    codepoint = ord(char)
+    return (
+        0x3041 <= codepoint <= 0x3094  # hiragana letters
+        or 0x309B <= codepoint <= 0x309E  # spacing sound marks, iteration marks
+        or 0x30A1 <= codepoint <= 0x30FA  # katakana letters
+        or 0x30FC <= codepoint <= 0x30FE  # prolonged sound mark, iteration marks
+    )
+
+
 def _font_supports_char(font_name: str, char: str) -> bool:
     from reportlab.pdfbase import pdfmetrics  # type: ignore[import-untyped]
 
@@ -206,8 +231,9 @@ def _pdf_markup_text(value: Any, *, base_font: str, cjk_font: str | None) -> str
 
     for char in text:
         target_font: str | None = None
+        needs_cjk_fallback = _is_cjk_symbol(char) or _is_kana(char)
         if cjk_font is not None and (
-            _is_cjk(char) or (_is_cjk_symbol(char) and not _font_supports_char(base_font, char))
+            _is_cjk(char) or (needs_cjk_fallback and not _font_supports_char(base_font, char))
         ):
             target_font = cjk_font
         if target_font is None and not _font_supports_char(base_font, char):
