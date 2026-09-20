@@ -32,3 +32,8 @@ class MCPToolDef:
 class MCPToolResult:
     content: str
     is_error: bool = False
+
+    @property
+    def is_success(self) -> bool:
+        """Return True if the tool result indicates success (not an error)."""
+        return not self.is_error

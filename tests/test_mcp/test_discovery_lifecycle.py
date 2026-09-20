@@ -298,3 +298,11 @@ async def test_clean_server_schema_is_registered_unchanged(
     assert registered is not None
     assert registered.spec.parameters == {"q": {"type": "string", "description": "Query."}}
     assert registered.spec.required == ["q"]
+
+
+def test_mcp_tool_result_is_success() -> None:
+    ok = MCPToolResult(content="ok", is_error=False)
+    err = MCPToolResult(content="fail", is_error=True)
+    assert ok.is_success is True
+    assert err.is_success is False
+
