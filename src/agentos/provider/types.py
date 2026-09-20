@@ -244,6 +244,11 @@ class ContentBlockToolResult(BaseModel):
     is_error: bool = False
     execution_status: ExecutionStatus | None = None
 
+    @property
+    def is_success(self) -> bool:
+        """Return True if the tool result indicates success (not an error)."""
+        return not self.is_error
+
 
 class ContentBlockImage(BaseModel):
     type: Literal["image"] = "image"

@@ -227,3 +227,11 @@ def test_openrouter_attribution_headers_are_scoped_to_openrouter_hosts() -> None
         "X-OpenRouter-Title"
     ] == "AgentOS"
     assert openrouter_app_headers("https://api.openai.com/v1") == {}
+
+
+def test_content_block_tool_result_is_success_property() -> None:
+    ok = ContentBlockToolResult(tool_use_id="call_1", content="ok", is_error=False)
+    err = ContentBlockToolResult(tool_use_id="call_2", content="fail", is_error=True)
+    assert ok.is_success is True
+    assert err.is_success is False
+
