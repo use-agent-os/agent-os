@@ -1117,7 +1117,27 @@ class TelegramChannel:
             metadata=metadata,
         )
 
+    @staticmethod
+    def format_mention(user_id_or_username: str | int, name: str = "") -> str:
+        """Format a Telegram user mention.
+
+        If the identifier starts with '@', it is returned as-is.
+        If it contains only digits (numeric user_id), it is formatted as an HTML text
+        mention: ``<a href="tg://user?id={user_id}">{name or user_id}</a>``.
+        Otherwise, it is prefixed with '@' if not already present.
+        """
+        raw = str(user_id_or_username).strip()
+        if not raw:
+            return ""
+        if raw.startswith("@"):
+            return raw
+        if raw.isdigit():
+            label = name.strip() or raw
+            return f'<a href="tg://user?id={raw}">{label}</a>'
+        return f"@{raw}"
+
     def is_group_mentioned(self, msg: IncomingMessage) -> bool:
+
         if not msg.metadata.get("is_group"):
             return True
         username = self.bot_username

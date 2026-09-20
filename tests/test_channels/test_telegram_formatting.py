@@ -595,3 +595,20 @@ def test_unterminated_tilde_fence_runs_to_the_end() -> None:
 )
 def test_two_tildes_are_still_strikethrough(markdown: str, expected: str) -> None:
     assert render_telegram_html(markdown) == expected
+
+
+def test_telegram_channel_format_mention() -> None:
+    # Username with @
+    assert TelegramChannel.format_mention("@alice") == "@alice"
+    # Username without @
+    assert TelegramChannel.format_mention("bob") == "@bob"
+    # Numeric user ID without name
+    assert TelegramChannel.format_mention(12345678) == '<a href="tg://user?id=12345678">12345678</a>'
+    # Numeric user ID string with name
+    assert (
+        TelegramChannel.format_mention("12345678", name="Charlie")
+        == '<a href="tg://user?id=12345678">Charlie</a>'
+    )
+    # Empty string
+    assert TelegramChannel.format_mention("") == ""
+
