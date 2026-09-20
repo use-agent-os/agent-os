@@ -302,9 +302,7 @@ async def _fetch_image_url(url: str) -> tuple[bytes, str]:
             resp: httpx.Response | None = None
             for _redirect_count in range(_MAX_REDIRECTS + 1):
                 _check_image_url(current_url)
-                resp = await client.send(
-                    client.build_request("GET", current_url), stream=True
-                )
+                resp = await client.send(client.build_request("GET", current_url), stream=True)
                 if resp.status_code not in {301, 302, 303, 307, 308}:
                     break
                 location = resp.headers.get("location")
@@ -625,7 +623,11 @@ def _resolve_generated_image_path(filename: str | None, output_format: str) -> P
     if not candidate.suffix:
         candidate = candidate.with_suffix(f".{ext}")
 
-    target = candidate if candidate.is_absolute() else root / candidate
+    target = (
+        alias
+        if (alias := resolve_workspace_alias(candidate, root)) is not None
+        else (candidate if candidate.is_absolute() else root / candidate)
+    )
     resolved = target.resolve(strict=False)
     try:
         resolved.relative_to(root)
@@ -810,8 +812,7 @@ def _config_value(config: Any | None, key: str, default: Any = "") -> Any:
 
 def _has_explicit_scope_override(scope: str) -> bool:
     return bool(
-        os.environ.get(f"AGENTOS_{scope}_PROVIDER")
-        or os.environ.get(f"AGENTOS_{scope}_MODEL")
+        os.environ.get(f"AGENTOS_{scope}_PROVIDER") or os.environ.get(f"AGENTOS_{scope}_MODEL")
     )
 
 
@@ -1025,7 +1026,11 @@ def _resolve_generated_audio_path(
     candidate = Path(raw).expanduser()
     if not candidate.suffix:
         candidate = candidate.with_suffix(f".{ext}")
-    target = candidate if candidate.is_absolute() else root / candidate
+    target = (
+        alias
+        if (alias := resolve_workspace_alias(candidate, root)) is not None
+        else (candidate if candidate.is_absolute() else root / candidate)
+    )
     resolved = target.resolve(strict=False)
     try:
         resolved.relative_to(root)
@@ -1146,9 +1151,7 @@ def _tts_voice_settings(
     settings: dict[str, Any] = {}
     resolved_stability = _bounded_float(
         "Stability",
-        stability
-        if stability is not None
-        else getattr(tts_config, "stability", None),
+        stability if stability is not None else getattr(tts_config, "stability", None),
     )
     resolved_similarity = _bounded_float(
         "Similarity boost",
@@ -1197,9 +1200,7 @@ def _shared_voice_summary(voice: dict[str, Any]) -> dict[str, Any]:
 
 def _provider_quota_exceeded(error: RuntimeError) -> bool:
     text = str(error).lower()
-    return "quota_exceeded" in text or (
-        "credits remaining" in text and "required" in text
-    )
+    return "quota_exceeded" in text or ("credits remaining" in text and "required" in text)
 
 
 def _short_song_preview_lyrics(lyrics: str) -> str:
@@ -1321,12 +1322,9 @@ async def voice_convert(
         )
     provider_config = _audio_provider_config(config)
     model_id = str(
-        getattr(provider_config, "voice_conversion_model", "")
-        or "eleven_multilingual_sts_v2"
+        getattr(provider_config, "voice_conversion_model", "") or "eleven_multilingual_sts_v2"
     )
-    output_format = str(
-        getattr(provider_config, "music_output_format", "") or "mp3_44100_128"
-    )
+    output_format = str(getattr(provider_config, "music_output_format", "") or "mp3_44100_128")
     resolved, audio_bytes, mime_type = await _resolve_supported_audio_file_for_tool(
         tool_name="voice_convert",
         path=source_audio,
@@ -1589,8 +1587,7 @@ async def music_generate(
                 prompt=final_prompt,
                 model_id=str(getattr(provider_config, "music_model", "") or "music_v1"),
                 output_format=str(
-                    getattr(provider_config, "music_output_format", "")
-                    or "mp3_44100_128"
+                    getattr(provider_config, "music_output_format", "") or "mp3_44100_128"
                 ),
                 duration_seconds=duration_seconds,
                 force_instrumental=True,
@@ -1647,9 +1644,7 @@ async def song_generate(
     provider = _elevenlabs_provider(config)
     lyrics_text = lyrics.strip()
     model_id = str(getattr(provider_config, "music_model", "") or "music_v1")
-    output_format = str(
-        getattr(provider_config, "music_output_format", "") or "mp3_44100_128"
-    )
+    output_format = str(getattr(provider_config, "music_output_format", "") or "mp3_44100_128")
     try:
         result = await provider.generate_music(
             MusicGenerationRequest(
@@ -1858,9 +1853,7 @@ async def voice_search(
         },
         "voice": {
             "type": "string",
-            "description": (
-                "ElevenLabs voice identifier. Uses audio.tts.voice when omitted."
-            ),
+            "description": ("ElevenLabs voice identifier. Uses audio.tts.voice when omitted."),
         },
         "output_path": {
             "type": "string",
@@ -1887,9 +1880,7 @@ async def voice_search(
         },
         "similarity_boost": {
             "type": "number",
-            "description": (
-                "Optional ElevenLabs similarity boost voice setting (0.0 to 1.0)."
-            ),
+            "description": ("Optional ElevenLabs similarity boost voice setting (0.0 to 1.0)."),
             "minimum": 0.0,
             "maximum": 1.0,
         },
