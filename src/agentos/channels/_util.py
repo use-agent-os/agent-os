@@ -478,8 +478,11 @@ def split_text_for_limit(
       unbalanced fence rather than the caller looping forever trying to
       avoid it.
     """
+    if limit <= 0:
+        raise ValueError(f"limit must be greater than 0, got {limit}")
     length = measure if measure is not None else len
     if length(segment) <= limit:
+
         return segment, ""
     low, high, best = 1, len(segment) - 1, 1
     while low <= high:

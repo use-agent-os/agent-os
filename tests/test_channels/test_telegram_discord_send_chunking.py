@@ -222,6 +222,15 @@ def test_split_text_for_limit_falls_back_to_an_unbalanced_cut_rather_than_hang()
     assert "".join(chunks).count("z") == segment.count("z")
 
 
+def test_split_text_for_limit_rejects_non_positive_limits() -> None:
+    with pytest.raises(ValueError, match="limit must be greater than 0"):
+        split_text_for_limit("hello", 0)
+
+    with pytest.raises(ValueError, match="limit must be greater than 0"):
+        split_text_for_limit("hello", -5)
+
+
+
 class _DiscordResponse:
     status_code = 200
 
