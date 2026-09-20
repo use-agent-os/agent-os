@@ -744,11 +744,18 @@ async def resolve_oauth_bearer(
 
     async with _refresh_lock:
         # Re-read under the lock: a concurrent caller may already have
-        # refreshed, and xAI's refresh tokens are single-use.
+        # refreshed, and xAI's refresh tokens are single-use. The skew is
+        # recomputed too -- it depends on the specific token's own remaining
+        # lifetime (short device-code tokens use a narrow skew so they are
+        # not refreshed on every resolution), so reusing the pre-lock value
+        # against whatever token turns up here would apply the wrong
+        # threshold whenever a concurrent refresh changed the token's
+        # lifetime class while this caller was waiting on the lock.
         state = read_oauth_state()
         tokens = _dict_field(state, "tokens")
         access_token = str(tokens.get("access_token") or "").strip()
         refresh_token = str(tokens.get("refresh_token") or "").strip()
+        skew = proactive_skew_seconds(access_token)
         if access_token and not access_token_is_expiring(access_token, skew):
             return access_token, base_url
         if not refresh_token:
