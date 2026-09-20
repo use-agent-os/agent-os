@@ -149,6 +149,34 @@ async def test_repository_without_a_commit_still_diffs(empty_repo: Path) -> None
     assert "+hello" in out
 
 
+async def test_repository_without_a_commit_includes_staged_and_unstaged(
+    empty_repo: Path,
+) -> None:
+    """A file staged and further modified before first commit must report both."""
+    (empty_repo / "first.txt").write_text("hello\n", encoding="utf-8", newline="\n")
+    _git(empty_repo, "add", "-A")
+    (empty_repo / "first.txt").write_text("hello\nworld\n", encoding="utf-8", newline="\n")
+
+    out = await git.git_diff()
+
+    assert "+hello" in out
+    assert "+world" in out
+
+
+async def test_repository_without_a_commit_staged_only_excludes_unstaged(
+    empty_repo: Path,
+) -> None:
+    """``staged=True`` before first commit shows only the indexed content."""
+    (empty_repo / "first.txt").write_text("hello\n", encoding="utf-8", newline="\n")
+    _git(empty_repo, "add", "-A")
+    (empty_repo / "first.txt").write_text("hello\nworld\n", encoding="utf-8", newline="\n")
+
+    out = await git.git_diff(staged=True)
+
+    assert "+hello" in out
+    assert "+world" not in out
+
+
 async def test_diff_revision_resolves_head_only_when_a_commit_exists(
     empty_repo: Path,
 ) -> None:

@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Tools: `git_diff` now diffs against Git's empty tree hash in repositories
+  without an initial commit when `staged=False`. Previously, `revision is None`
+  forced `git diff --cached`, silently omitting unstaged modifications to files
+  in an unborn branch instead of returning the combined staged + unstaged view
+  promised by the tool description (#3072).
 - Gateway/Sessions: `sessions_history` and spawned-subagent result reporting
   (`_read_child_result`) read a session's transcript through
   `SessionStorage.get_transcript`'s `limit`, which windows from the

@@ -142,14 +142,16 @@ async def git_status(workdir: str | None = None) -> str:
     return await _run_git("status", "--short", "--branch", cwd=_effective_workdir(workdir))
 
 
+EMPTY_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+
 async def _diff_revision(cwd: str | None) -> str | None:
     """``"HEAD"`` when the repository has a commit to diff against, else ``None``.
 
     ``git diff HEAD`` is the spelling that reports staged and unstaged work in
     one pass, but it exits 128 with ``ambiguous argument 'HEAD'`` before the
-    first commit lands. There the index is the entire change set, so the caller
-    drops the revision and lets ``--cached`` carry it rather than failing a
-    diff that plain ``git diff`` used to answer.
+    first commit lands. In that state the caller falls back to ``EMPTY_TREE_HASH``,
+    reproducing ``HEAD``'s exact combined staged + unstaged semantics.
     """
     try:
         await _run_git("rev-parse", "--verify", "--quiet", "HEAD", cwd=cwd)
@@ -206,10 +208,9 @@ async def git_diff(
     # bundled ``git-diff`` skill already uses.
     revision = await _diff_revision(cwd)
     args = ["diff"]
-    if staged or revision is None:
+    if staged:
         args.append("--cached")
-    if revision is not None:
-        args.append(revision)
+    args.append(revision or EMPTY_TREE_HASH)
     if path:
         _reject_foreign_git_path(path)
         args += ["--", path]
