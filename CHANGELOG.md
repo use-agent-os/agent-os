@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Tools: `web_fetch` in `extract_mode="text"` now strips Markdown formatting syntax
+  directly via clean regexes instead of passing Markdown text to `html2text`.
+  Previously, `html2text` expected HTML input, so it failed to strip Markdown
+  link URLs (`[label](url)`), failed to strip Markdown formatting (`**bold**`),
+  escaped brackets as `\[...\]`, and silently stripped literal `<tag>` elements in text.
 - Gateway/Sessions: `sessions_history` and spawned-subagent result reporting
   (`_read_child_result`) read a session's transcript through
   `SessionStorage.get_transcript`'s `limit`, which windows from the

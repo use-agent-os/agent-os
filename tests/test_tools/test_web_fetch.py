@@ -3,6 +3,7 @@ from __future__ import annotations
 from agentos.result_budget import ToolResultBudgetPolicy, ToolRunBudgetPolicy
 from agentos.tools.builtin.web_fetch import (
     _apply_max_chars,
+    _markdown_to_text,
     _resolve_effective_max_chars,
     _wrap_content,
 )
@@ -111,3 +112,26 @@ def test_resolve_effective_max_chars_run_budget_cap_still_applies_below_minimum(
         assert _resolve_effective_max_chars(999) == 50
     finally:
         current_tool_context.reset(token)
+
+
+def test_markdown_to_text_strips_markdown_formatting_cleanly() -> None:
+    markdown = (
+        "# Main Heading\n\n"
+        "Check [AgentOS](https://agentos.org) and ![Logo](https://agentos.org/logo.png).\n"
+        "This is **bold** text and `code_sample` with <python> tag."
+    )
+    plain = _markdown_to_text(markdown)
+
+    assert "[AgentOS](https://agentos.org)" not in plain
+    assert "AgentOS" in plain
+    assert "https://agentos.org" not in plain
+    assert "![Logo]" not in plain
+    assert "Logo" in plain
+    assert "**bold**" not in plain
+    assert "bold" in plain
+    assert "`code_sample`" not in plain
+    assert "code_sample" in plain
+    assert "# Main Heading" not in plain
+    assert "Main Heading" in plain
+    assert "<python>" in plain
+    assert "\\[" not in plain

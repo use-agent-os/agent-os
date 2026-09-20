@@ -128,17 +128,20 @@ def _html_to_markdown(html: str) -> str:
 
 
 def _markdown_to_text(markdown: str) -> str:
-    """Strip markdown formatting to plain text via html2text."""
-    import html2text
-
-    h = html2text.HTML2Text()
-    h.ignore_links = True
-    h.ignore_images = True
-    h.body_width = 0
-    # html2text can also strip simple markdown when fed as plain text
-    # but the cleanest approach: pass through as-is since we already
-    # have the markdown. Just strip link/image noise.
-    return h.handle(markdown)
+    """Strip markdown formatting markers to plain text."""
+    if not markdown:
+        return ""
+    # Strip images ![alt](url) -> alt
+    text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"\1", markdown)
+    # Strip links [label](url) -> label
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    # Strip inline code `code` -> code
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    # Strip bold/italic formatting
+    text = re.sub(r"(\*\*|__|\*|_)(.*?)\1", r"\2", text)
+    # Strip heading hashes
+    text = re.sub(r"^(#{1,6})\s+", "", text, flags=re.MULTILINE)
+    return text
 
 
 async def _try_firecrawl(url: str, api_key: str) -> tuple[str, str] | None:
