@@ -33,6 +33,26 @@ AgentOS có **1 channel**:
     assert "`" not in rendered
 
 
+@pytest.mark.parametrize(
+    "delimiter",
+    [
+        "|------|-----|",  # mixed widths
+        "| - | - |",  # single-dash cells
+        "|:-:|:-:|",  # centred
+        "|:-|:-|",  # left-aligned
+        "|-:|-:|",  # right-aligned
+    ],
+)
+def test_telegram_table_short_delimiter_cells_recognized(delimiter: str) -> None:
+    """GFM needs only one hyphen per delimiter cell (issue #3174)."""
+    markdown = f"| Name | Qty |\n{delimiter}\n| Bolt | 12 |\n"
+    rendered = render_telegram_html(markdown)
+    assert "<b>Name — Qty</b>" in rendered
+    assert "<b>Bolt:</b> 12" in rendered
+    assert "|" not in rendered
+    assert "--" not in rendered
+
+
 def test_render_telegram_html_preserves_bare_urls_with_underscores() -> None:
     text = "Check https://example.com/api/_v1_ and https://example.com/?q=_test_"
     rendered = render_telegram_html(text)

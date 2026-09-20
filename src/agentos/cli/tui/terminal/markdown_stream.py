@@ -195,7 +195,9 @@ def _render_think_line(line: str) -> str:
 # This is the one intentional exception to the write-once contract, and it
 # is the same trade-off every streaming terminal markdown renderer makes.
 
-_TABLE_SEPARATOR_CELL_RE = re.compile(r"^:?-{3,}:?$")
+_TABLE_SEPARATOR_CELL_RE = re.compile(r"^:?-+:?$")
+# GFM delimiter cells need only one hyphen (optionally colon-aligned), so
+# `-`, `--`, `:-`, `-:` and `:-:` are all valid (issue #3174).
 _TABLE_MIN_COL_WIDTH = 5
 _TABLE_PAD = 1  # spaces on each side of a cell
 
