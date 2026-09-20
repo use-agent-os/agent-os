@@ -39,9 +39,18 @@ class CommandRegistry:
     def __init__(self, commands: dict[str, tuple[str, ParamsFactory]]) -> None:
         self._commands = commands
 
+    def __len__(self) -> int:
+        return len(self._commands)
+
+    @property
+    def is_empty(self) -> bool:
+        """Return True if no commands are registered."""
+        return len(self._commands) == 0
+
     @property
     def command_names(self) -> set[str]:
         return set(self._commands)
+
 
     def match(self, envelope: RouteEnvelope, content: str) -> tuple[str, str, ParamsFactory] | None:
         head = content.strip().split(maxsplit=1)[0] if content.strip() else ""

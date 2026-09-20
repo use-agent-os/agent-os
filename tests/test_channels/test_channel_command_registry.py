@@ -72,6 +72,18 @@ def test_channel_command_names_include_usage_and_registry_words() -> None:
     assert expected <= DEFAULT_COMMAND_REGISTRY.command_names
 
 
+def test_command_registry_len_and_is_empty() -> None:
+    from agentos.channels.command_registry import CommandRegistry
+
+    assert len(DEFAULT_COMMAND_REGISTRY) > 0
+    assert DEFAULT_COMMAND_REGISTRY.is_empty is False
+
+    empty = CommandRegistry({})
+    assert len(empty) == 0
+    assert empty.is_empty is True
+
+
+
 @pytest.mark.asyncio
 async def test_paired_channel_context_is_limited_by_protocol_surface() -> None:
     context = build_channel_rpc_context(_envelope(), gateway_config=None)
