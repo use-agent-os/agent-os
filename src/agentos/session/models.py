@@ -186,6 +186,21 @@ class SessionNode(SQLModel, table=True):
         sid = (self.session_id or "").strip()
         return sid[:8] if sid else None
 
+    @property
+    def duration_ms(self) -> int:
+        """Elapsed session duration in milliseconds.
+
+        Returns ``runtime_ms`` if explicitly recorded, otherwise computes
+        the elapsed time from ``started_at`` (or ``created_at``) to ``ended_at``
+        (or ``updated_at``). Guaranteed to return a non-negative integer.
+        """
+        if self.runtime_ms is not None:
+            return max(0, self.runtime_ms)
+        start = self.started_at if self.started_at is not None else self.created_at
+        end = self.ended_at if self.ended_at is not None else self.updated_at
+        return max(0, end - start)
+
+
 
 class ProjectNode(SQLModel, table=True):
     """Persisted project grouping chat sessions (cross-agent).
