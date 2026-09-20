@@ -20,6 +20,14 @@ def test_sensitive_path_matches_nested_home_prefixes_with_native_separators() ->
     assert is_sensitive_path(str(Path.home() / ".aws" / "credentials")) == "~/.aws"
 
 
+def test_sensitive_path_matches_windows_appdata_credentials() -> None:
+    appdata_gh = Path.home() / "AppData" / "Roaming" / "GitHub CLI" / "hosts.yml"
+    appdata_gcloud = Path.home() / "AppData" / "Roaming" / "gcloud" / "credentials.db"
+    assert is_sensitive_path(str(appdata_gh)) == "~/AppData/Roaming/GitHub CLI"
+    assert is_sensitive_path(str(appdata_gcloud)) == "~/AppData/Roaming/gcloud"
+    assert is_sensitive_path("/tmp/hosts.yml") == "/hosts.yml"
+
+
 def test_sensitive_path_in_text_matches_native_separator_paths() -> None:
     key_path = Path.home() / ".ssh" / "id_rsa"
 
