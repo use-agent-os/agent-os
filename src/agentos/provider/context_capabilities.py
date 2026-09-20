@@ -136,7 +136,7 @@ def provider_context_capabilities(
             state_portable_across_providers=False,
         )
 
-    if provider == "openai" and "api.openai.com" in base_l:
+    if provider == "openai" and (not base_l or "api.openai.com" in base_l):
         return ProviderContextCapabilities(
             provider=provider,
             model=model,

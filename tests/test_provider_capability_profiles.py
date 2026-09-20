@@ -360,3 +360,18 @@ class TestProviderNameCasing:
             "reasoning-model", provider_name=provider_name.lower()
         )
         assert caps.supports_reasoning is False
+
+
+def test_openai_provider_context_capabilities_default_base_url_has_automatic_prompt_cache() -> None:
+    caps_default = provider_context_capabilities(provider_kind="openai", model="gpt-4o")
+    assert caps_default.prompt_cache == PromptCacheSupport.AUTOMATIC
+
+    caps_explicit = provider_context_capabilities(
+        provider_kind="openai", model="gpt-4o", base_url="https://api.openai.com/v1"
+    )
+    assert caps_explicit.prompt_cache == PromptCacheSupport.AUTOMATIC
+
+    caps_third_party = provider_context_capabilities(
+        provider_kind="openai", model="gpt-4o", base_url="http://localhost:11434/v1"
+    )
+    assert caps_third_party.prompt_cache == PromptCacheSupport.NONE
