@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Tools: `publish_artifact` now infers MIME type from the requested download
+  filename (`name`) before falling back to the raw source filename in the
+  workspace (`target.name`). When an artifact was published with a custom
+  name (e.g. `name="report.pdf"` for `path="output.txt"`), the MIME type was
+  previously inferred from `target.name`, causing it to be registered and
+  served as `text/plain` rather than `application/pdf`.
 - Gateway/Sessions: `sessions_history` and spawned-subagent result reporting
   (`_read_child_result`) read a session's transcript through
   `SessionStorage.get_transcript`'s `limit`, which windows from the

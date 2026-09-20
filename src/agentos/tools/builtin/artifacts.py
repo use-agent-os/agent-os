@@ -145,11 +145,11 @@ def _publish_artifact_metadata(
     if mime:
         artifact_mime = mime.strip()
     else:
-        target_mime = mimetypes.guess_type(target.name)[0]
         artifact_name_mime = mimetypes.guess_type(artifact_name)[0]
-        artifact_mime = target_mime or artifact_name_mime or ""
-        if target_mime == "application/octet-stream" and artifact_name_mime:
-            artifact_mime = artifact_name_mime
+        target_mime = mimetypes.guess_type(target.name)[0]
+        artifact_mime = artifact_name_mime or target_mime or ""
+        if artifact_name_mime == "application/octet-stream" and target_mime:
+            artifact_mime = target_mime
     if not artifact_mime:
         artifact_mime = "application/octet-stream"
     return artifact_name, artifact_mime
