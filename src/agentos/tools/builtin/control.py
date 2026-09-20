@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from typing import Any, Protocol
+from urllib.parse import urlsplit
 
 import structlog
 
@@ -191,16 +192,28 @@ def _enum_value(value: Any, default: str = "") -> str:
 
 
 def _webhook_origin(url: str) -> str:
-    """Scheme + host of a webhook URL, without the secret-bearing path.
+    """Scheme + host of a webhook URL, without the secret-bearing path, credentials, or query params.
 
     A Slack/Discord/Teams webhook URL *is* the credential — the path is the
     secret. The model only needs to know where a job reports, so it gets the
     host and nothing that would let it re-post there.
     """
-    if "://" not in url:
-        return url.split("/", 1)[0]
-    scheme, rest = url.split("://", 1)
-    return f"{scheme}://{rest.split('/', 1)[0]}"
+    if not url:
+        return ""
+    try:
+        parts = urlsplit(url)
+        if not parts.scheme and not parts.netloc:
+            return url.split("/", 1)[0].split("?", 1)[0].split("@", 1)[-1]
+        host = parts.hostname or ""
+        port = f":{parts.port}" if parts.port else ""
+        scheme = parts.scheme or "https"
+        return f"{scheme}://{host}{port}" if host else scheme
+    except Exception:
+        if "://" not in url:
+            return url.split("/", 1)[0].split("?", 1)[0].split("@", 1)[-1]
+        scheme, rest = url.split("://", 1)
+        host_part = rest.split("/", 1)[0].split("?", 1)[0].split("@", 1)[-1]
+        return f"{scheme}://{host_part}"
 
 
 def _cron_delivery_view(delivery: Any) -> dict[str, Any]:

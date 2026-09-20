@@ -305,3 +305,26 @@ async def test_cron_tool_rejects_every_anchor_until_supported() -> None:
             )
     finally:
         control_mod.set_scheduler(None)  # type: ignore[arg-type]
+
+
+def test_webhook_origin_strips_credentials_and_query() -> None:
+    from agentos.tools.builtin.control import _webhook_origin
+
+    assert (
+        _webhook_origin("https://hooks.slack.com/services/T00/B00/X00")
+        == "https://hooks.slack.com"
+    )
+    assert (
+        _webhook_origin("https://api-key:secret-token@webhook.site/endpoint")
+        == "https://webhook.site"
+    )
+    assert (
+        _webhook_origin("https://hooks.slack.com?token=xoxb-secret")
+        == "https://hooks.slack.com"
+    )
+    assert (
+        _webhook_origin("https://user:pass@hooks.slack.com:8443/path?token=secret")
+        == "https://hooks.slack.com:8443"
+    )
+    assert _webhook_origin("hooks.slack.com/endpoint") == "hooks.slack.com"
+    assert _webhook_origin("") == ""
