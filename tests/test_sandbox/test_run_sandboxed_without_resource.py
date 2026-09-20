@@ -58,6 +58,8 @@ def test_child_still_runs_without_resource_module(without_resource: None) -> Non
     assert result.returncode == 0, result.stderr
     assert "ok" in result.stdout
     assert result.reason == REASON_OK
+    assert result.ok is True
+    assert result.is_success is True
 
 
 def test_wall_limit_still_fires_without_resource_module(without_resource: None) -> None:
@@ -68,6 +70,25 @@ def test_wall_limit_still_fires_without_resource_module(without_resource: None) 
 
     assert result.reason == REASON_WALL_LIMIT
     assert result.returncode != 0
+    assert result.ok is False
+    assert result.is_success is False
+
+
+def test_sandbox_result_ok_and_is_success_properties() -> None:
+    from agentos.safety.sandbox import REASON_WALL_LIMIT, SandboxResult
+
+    success = SandboxResult(returncode=0, stdout="ok", stderr="", reason=REASON_OK)
+    assert success.ok is True
+    assert success.is_success is True
+
+    failed_exit = SandboxResult(returncode=1, stdout="", stderr="err", reason=REASON_OK)
+    assert failed_exit.ok is False
+    assert failed_exit.is_success is False
+
+    timeout = SandboxResult(returncode=0, stdout="", stderr="", reason=REASON_WALL_LIMIT)
+    assert timeout.ok is False
+    assert timeout.is_success is False
+
 
 
 def test_missing_rlimits_are_reported_on_the_result(without_resource: None) -> None:

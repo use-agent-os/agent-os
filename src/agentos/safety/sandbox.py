@@ -79,6 +79,16 @@ class SandboxResult:
     #: them: a user who turned the sandbox on has to know what is missing.
     notes: tuple[str, ...] = ()
 
+    @property
+    def ok(self) -> bool:
+        """Return True if the subprocess exited cleanly with returncode 0 and reason 'ok'."""
+        return self.returncode == 0 and self.reason == REASON_OK
+
+    @property
+    def is_success(self) -> bool:
+        """Alias for ``ok`` for consistency with tool result contracts."""
+        return self.ok
+
 
 def _preexec(limits: SandboxLimits):  # pragma: no cover — runs in child
     if not HAS_RESOURCE:
