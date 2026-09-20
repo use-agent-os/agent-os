@@ -32,6 +32,12 @@ class ToolResult:
     execution_status: ExecutionStatus | None = None
     terminates_turn: bool = False
 
+    @property
+    def is_success(self) -> bool:
+        """Return True if the tool result indicates success (not an error)."""
+        return not self.is_error
+
+
 
 AgentToolHandler = Callable[[ToolCall], Awaitable[ToolResult]]
 

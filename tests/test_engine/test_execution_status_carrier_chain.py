@@ -31,6 +31,20 @@ def test_tool_result_event_declares_nested_execution_status_field() -> None:
     assert "execution_status" in {field.name for field in fields(ToolResultEvent)}
 
 
+def test_tool_result_is_success_property() -> None:
+    ok = ToolResult(tool_use_id="1", tool_name="test", content="ok", is_error=False)
+    err = ToolResult(tool_use_id="2", tool_name="test", content="fail", is_error=True)
+    assert ok.is_success is True
+    assert err.is_success is False
+
+
+def test_tool_result_event_is_success_property() -> None:
+    ok = ToolResultEvent(tool_use_id="1", tool_name="test", result="ok", is_error=False)
+    err = ToolResultEvent(tool_use_id="2", tool_name="test", result="fail", is_error=True)
+    assert ok.is_success is True
+    assert err.is_success is False
+
+
 def test_persisted_tool_result_segment_includes_nested_execution_status() -> None:
     status = _failure_status()
 

@@ -88,6 +88,11 @@ class ToolResultEvent:
     execution_status: ExecutionStatus | None = None
     thought_signature: str | None = None
 
+    @property
+    def is_success(self) -> bool:
+        """Return True if the tool result indicates success (not an error)."""
+        return not self.is_error
+
 
 @dataclass
 class RouterControlReplayEvent:
