@@ -13,6 +13,7 @@ import structlog
 
 from agentos.identity.workspace import BOOTSTRAP_FILENAMES
 from agentos.sandbox.integration import sandboxed
+from agentos.tools.path_aliases import resolve_workspace_alias
 from agentos.tools.path_policy import reject_foreign_host_path
 from agentos.tools.registry import tool
 from agentos.tools.types import ToolError, current_tool_context
@@ -293,6 +294,9 @@ def _validate_path(path: str, root: Path | None = None) -> Path:
     root = root if root is not None else _default_patch_root()
     reject_foreign_host_path(path, platform=os.name, workspace=root)
     raw = Path(path).expanduser()
+    alias = resolve_workspace_alias(raw, root)
+    if alias is not None:
+        return alias
     resolved = (root / raw).resolve() if not raw.is_absolute() else raw.resolve()
     if not resolved.is_relative_to(root):
         raise ValueError(f"Path traversal detected: {path!r} resolves outside patch root")
