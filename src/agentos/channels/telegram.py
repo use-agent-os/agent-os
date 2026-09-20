@@ -1333,12 +1333,19 @@ class TelegramChannel:
         try:
             await self._api("editMessageText", payload)
         except TelegramApiError as exc:
-            if "parse entities" not in str(exc).lower():
+            err_lower = str(exc).lower()
+            if "message is not modified" in err_lower:
+                return
+            if "parse entities" not in err_lower:
                 raise
             log.warning("telegram.markdown_fallback", error=str(exc))
             payload["text"] = text
             payload.pop("parse_mode", None)
-            await self._api("editMessageText", payload)
+            try:
+                await self._api("editMessageText", payload)
+            except TelegramApiError as fallback_exc:
+                if "message is not modified" not in str(fallback_exc).lower():
+                    raise
 
     async def send_streaming(
         self,

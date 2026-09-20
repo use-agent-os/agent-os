@@ -218,3 +218,28 @@ async def test_telegram_send_streaming_keeps_editing_after_rollover() -> None:
     # The edit carries only the second message's segment, not the whole answer.
     assert edit_payload["text"].endswith(render_telegram_html("tail"))
     assert len(edit_payload["text"]) <= 4096
+
+
+@pytest.mark.asyncio
+async def test_telegram_send_streaming_ignores_message_not_modified_error() -> None:
+    channel = TelegramChannel(TelegramChannelConfig(token="token"))
+
+    def fail(method: str, payload: dict[str, Any]) -> None:
+        if method == "editMessageText":
+            from agentos.channels.telegram import TelegramApiError
+
+            raise TelegramApiError(
+                "Bad Request: message is not modified: specified new message content "
+                "and reply markup are exactly the same as a current content and reply markup"
+            )
+
+    calls = _install_fake_api(channel, fail=fail)
+
+    ref = await channel.send_streaming(
+        _stream("same text", "same text"),
+        chat_id="-100123",
+        update_interval_ms=0,
+    )
+
+    assert ref == "-100123|101"
+    assert [name for name, _ in calls] == ["sendMessage", "editMessageText"]
