@@ -50,8 +50,8 @@ audio provider and cannot authorize voice identity use.
    - target voice consent or provider-licensed voice
 3. Refuse public figure or copyrighted character imitation.
 4. Use `audio_provider_capabilities` if conversion availability is uncertain.
-5. Call `voice_convert` with `source_audio`, `voice`, optional `output_path`,
-   and any supported provider controls.
+5. Call `voice_convert` with `source_audio`, `target_voice`, optional
+   `output_path`, and any supported provider controls.
 6. Return the result as a playable audio artifact when the surface supports it.
 
 ## Preview-first

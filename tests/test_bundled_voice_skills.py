@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from agentos.skills.loader import SkillLoader
+from agentos.tools.registry import get_default_registry
 
 ROOT = Path(__file__).resolve().parents[1]
 BUNDLED = ROOT / "src" / "agentos" / "skills" / "bundled"
+
+#: A workflow step that spells out an exact call, e.g. "Call `voice_convert`
+#: with `source_audio`, `target_voice`, ...". Distinct from a step that
+#: describes the same call in plain words ("with the sample, name,
+#: description") -- only a step that already commits to exact backtick names
+#: is checked, so a looser, correct description isn't flagged as missing one.
+_EXACT_CALL_RE = re.compile(r"Call `(\w+)` with ((?:`\w+`(?:, )?)+)")
 
 VOICE_SKILLS = {
     "voiceover-studio": {
@@ -113,3 +122,25 @@ def test_bundled_voice_skills_document_rights_and_locale_accent_constraints() ->
 
         for phrase in expected["must_include"]:
             assert phrase in text
+
+
+def test_bundled_voice_skills_call_examples_name_the_real_required_params() -> None:
+    """A "Call `tool` with `a`, `b`, ..." step commits to exact parameter
+    names -- if one of them is wrong, the agent following the skill literally
+    sends a bad call (missing a required field, and/or an argument the tool's
+    schema has no slot for). ``voice-conversion-studio`` told the agent to
+    pass `voice`; the tool's real required parameter is `target_voice`."""
+    registry = get_default_registry()
+
+    for name in VOICE_SKILLS:
+        text = (BUNDLED / name / "SKILL.md").read_text(encoding="utf-8")
+        for tool_name, params_blob in _EXACT_CALL_RE.findall(text):
+            entry = registry.get(tool_name)
+            assert entry is not None, f"{name} calls unregistered tool {tool_name!r}"
+            named = set(re.findall(r"`(\w+)`", params_blob))
+            required = set(entry.spec.required or [])
+            missing = required - named
+            assert not missing, (
+                f"{name}'s SKILL.md calls `{tool_name}` without its required "
+                f"param(s) {missing} (named instead: {named})"
+            )
