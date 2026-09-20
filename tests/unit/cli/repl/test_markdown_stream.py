@@ -122,6 +122,29 @@ def test_table_header_bold_and_separator_dimmed() -> None:
     assert "[#6E9000]─" in out
 
 
+@pytest.mark.parametrize(
+    "separator",
+    [
+        "|---|---|",
+        "| - | - |",
+        "|:-:|:-:|",
+        "|:-|:-|",
+        "|-:|-:|",
+    ],
+)
+def test_table_short_delimiter_cells_recognized(separator: str) -> None:
+    """GFM needs only one hyphen per delimiter cell (issue #3174)."""
+    out = _render_all([f"| a | bb |\n{separator}\n| ccc | d |\n"])
+    # dimmed box-drawing separator row => the block rendered as a table
+    assert "[#6E9000]─" in out
+    lines = _display_lines(out)
+    # header, separator, one body row
+    assert len(lines) == 3
+    assert "─" in lines[1]
+    # the raw markdown separator must not leak through as a text line
+    assert separator not in out
+
+
 def test_table_bold_full_span_cell_styled_with_padding() -> None:
     out = _render_all(["| **one** | b |\n|---|---|\n| **two** | c |\n"])
     # Full-span bold cells keep bold across the padded width.
