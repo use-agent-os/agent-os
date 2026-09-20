@@ -21,9 +21,11 @@ _HARD_BLOCKED_NETWORKS: tuple[IPNetwork, ...] = (
     ipaddress.ip_network("169.254.0.0/16"),
     ipaddress.ip_network("172.16.0.0/12"),
     ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("224.0.0.0/4"),
     ipaddress.ip_network("::1/128"),
     ipaddress.ip_network("fc00::/7"),
     ipaddress.ip_network("fe80::/10"),
+    ipaddress.ip_network("ff00::/8"),
 )
 
 #: Hostnames that resolve to a cloud metadata service. Blocked by name as well
@@ -165,12 +167,22 @@ def assert_address_allowed_for_fetch(
         raise SSRFBlockedError(_blocked_message(hostname, addr, block_reason))
     if _is_trusted_fake_ip(addr, trusted_networks):
         return
-    if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+    if (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_link_local
+        or addr.is_reserved
+        or addr.is_multicast
+    ):
         reason = (
-            f"reserved/private range; configure [tools].trusted_fake_ip_cidrs "
-            f"with {RFC2544_FAKE_IP_NETWORK} only if this is fake-IP DNS"
-            if addr in RFC2544_FAKE_IP_NETWORK
-            else "private/internal range"
+            "multicast range"
+            if addr.is_multicast
+            else (
+                f"reserved/private range; configure [tools].trusted_fake_ip_cidrs "
+                f"with {RFC2544_FAKE_IP_NETWORK} only if this is fake-IP DNS"
+                if addr in RFC2544_FAKE_IP_NETWORK
+                else "private/internal range"
+            )
         )
         raise SSRFBlockedError(_blocked_message(hostname, addr, reason))
 
