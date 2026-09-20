@@ -186,6 +186,21 @@ class SessionNode(SQLModel, table=True):
         sid = (self.session_id or "").strip()
         return sid[:8] if sid else None
 
+    @property
+    def is_active(self) -> bool:
+        """Return True if the session status is RUNNING."""
+        return self.status == SessionStatus.RUNNING
+
+    @property
+    def is_terminal(self) -> bool:
+        """Return True if the session has reached a terminal status."""
+        return self.status in {
+            SessionStatus.DONE,
+            SessionStatus.FAILED,
+            SessionStatus.KILLED,
+            SessionStatus.TIMEOUT,
+        }
+
 
 class ProjectNode(SQLModel, table=True):
     """Persisted project grouping chat sessions (cross-agent).
