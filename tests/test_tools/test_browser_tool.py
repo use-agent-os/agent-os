@@ -124,6 +124,13 @@ class TestDispatch:
         assert "unknown action" in result["error"]
 
     @pytest.mark.asyncio
+    async def test_action_whitespace_and_case_normalization(self, fake_binary: str) -> None:
+        browser_mod.configure_browser(_config(fake_binary))
+        result = await _call(action=" SNAPSHOT ")
+        assert result["success"] is True
+        assert "snapshot" in result
+
+    @pytest.mark.asyncio
     async def test_unavailable_engine(self, tmp_path: Path) -> None:
         browser_mod.configure_browser(_config(str(tmp_path / "missing"), enabled=False))
         result = await _call(action="snapshot")

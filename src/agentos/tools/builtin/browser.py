@@ -727,8 +727,10 @@ async def browser(
     prompt_text: str | None = None,
     dialog_id: str | None = None,
 ) -> str:
-    if action not in _ACTIONS:
+    normalized_action = str(action or "").strip().lower()
+    if normalized_action not in _ACTIONS:
         return _fail(f"unknown action {action!r}; valid: {', '.join(_ACTIONS)}")
+    action = normalized_action
     if not browser_available():
         return _fail(
             "The browser engine is not available. Install agent-browser: "
