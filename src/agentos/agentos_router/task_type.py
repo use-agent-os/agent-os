@@ -108,6 +108,8 @@ _TRANSLATE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("ar", r"ترجم\w*"),
     # Hindi — अनुवाद (used with a light verb).
     ("hi", r"अनुवाद"),
+    # Greek — verb forms only (noun "μετάφραση" excluded).
+    ("el", r"\bμ(?:ετάφρα|εταφρά|εταφρα)(?:σε|στε|σω|σει|σουμε|σετε)\b"),
 )
 
 _TRANSLATE_RES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
