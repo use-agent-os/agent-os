@@ -137,3 +137,21 @@ async def test_other_slack_errors_still_disable_the_reactor() -> None:
 
     assert reactor._disabled is True
     assert [fields["reason"] for fields in _disabled_events(log)] == ["add_failed:RuntimeError"]
+
+
+@pytest.mark.asyncio
+async def test_none_or_missing_metadata_does_not_disable_reactor() -> None:
+    reactor, client, log = _reactor({})
+    message = IncomingMessage.model_construct(
+        sender_id="U1",
+        channel_id="C1",
+        content="hi",
+        metadata=None,
+    )
+
+    await reactor.received(message)
+
+    assert reactor._disabled is False
+    assert _disabled_events(log) == []
+    assert client.calls == []
+
