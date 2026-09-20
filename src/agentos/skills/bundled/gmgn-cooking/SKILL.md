@@ -164,7 +164,7 @@ gmgn-cli cooking stats [--raw]
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `--chain` | Yes | Chain: `sol` / `bsc` / `base` |
+| `--chain` | Yes | Chain: `sol` / `bsc` / `base` / `robinhood` |
 | `--dex` | Yes | Launchpad platform identifier — see Supported Launchpads table. Never guess this value. |
 | `--from` | Yes | Wallet address (must match API Key binding) |
 | `--name` | Yes | Token full name (e.g. `Doge Killer`). Max 100 chars; rejected if it contains control characters or prompt-injection framing. |
@@ -618,6 +618,8 @@ Show the options concisely:
 | BSC    | Flap       | `flap`     |
 | Base   | Klik       | `klik`     |
 | Base   | Clanker    | `clanker`  |
+| Robinhood | Trench  | `trench`   |
+| Robinhood | Pons    | `pons`     |
 
 If the user is unsure, recommend: **Pump.fun (SOL)** or **FourMeme (BSC)**.
 
