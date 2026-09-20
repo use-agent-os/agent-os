@@ -238,6 +238,22 @@ class TranscriptEntry(SQLModel, table=True):
     # Schema generation (S-MIGRATE).
     schema_version: int = 1
 
+    @property
+    def is_user(self) -> bool:
+        """Return True if this transcript entry is from the user."""
+        return self.role == "user"
+
+    @property
+    def is_assistant(self) -> bool:
+        """Return True if this transcript entry is from the assistant."""
+        return self.role == "assistant"
+
+    @property
+    def has_tool_calls(self) -> bool:
+        """Return True if this transcript entry contains one or more tool calls."""
+        return bool(self.tool_calls)
+
+
 
 class SessionSummary(SQLModel, table=True):
     """Compaction summary record — stores merged summaries of older transcript segments."""
