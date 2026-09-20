@@ -98,6 +98,8 @@ _TRANSLATE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("fr", r"\btradui(?:s|re|sez|t|sons)\b"),
     # Spanish — verb forms only.
     ("es", r"\btraduce\b|\btraducir\b|\btraduzca\b|\btraducid\b|\btraduzcan\b"),
+    # Italian — verb forms only (noun "traduzione" excluded).
+    ("it", r"\btradu(?:ci|rre|cete|ca)\b"),
     # German — verb forms only, incl. the ue- transliteration.
     ("de", r"\b(?:ü|ue)bersetz(?:e|en|t|st)\b"),
     # Portuguese — verb forms only.
