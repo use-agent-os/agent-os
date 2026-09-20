@@ -38,6 +38,30 @@ def test_register_overwrite_warns() -> None:
     )
 
 
+def test_tool_registry_container_protocol() -> None:
+    registry = ToolRegistry()
+    assert len(registry) == 0
+    assert "tool_a" not in registry
+    assert list(registry) == []
+
+    registry.register(_spec("tool_a"), _handler)
+    registry.register(_spec("tool_b"), _handler)
+
+    assert len(registry) == 2
+    assert "tool_a" in registry
+    assert "tool_b" in registry
+    assert "tool_c" not in registry
+
+    tools = list(registry)
+    assert len(tools) == 2
+    assert {t.spec.name for t in tools} == {"tool_a", "tool_b"}
+
+    registry.unregister("tool_a")
+    assert len(registry) == 1
+    assert "tool_a" not in registry
+    assert "tool_b" in registry
+
+
 def test_surfaced_tools_make_hidden_tools_visible() -> None:
     registry = ToolRegistry()
     registry.register(_spec("visible"), _handler)

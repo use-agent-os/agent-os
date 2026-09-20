@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import functools
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import Any
 
 import structlog
@@ -32,6 +32,15 @@ class ToolRegistry:
 
     def __init__(self) -> None:
         self._tools: dict[str, RegisteredTool] = {}
+
+    def __len__(self) -> int:
+        return len(self._tools)
+
+    def __contains__(self, name: str) -> bool:
+        return name in self._tools
+
+    def __iter__(self) -> Iterator[RegisteredTool]:
+        return iter(self._tools.values())
 
     def register(self, spec: ToolSpec, handler: ToolHandler) -> None:
         if spec.name in self._tools:
