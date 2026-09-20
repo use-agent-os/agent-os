@@ -478,6 +478,11 @@ def split_text_for_limit(
       unbalanced fence rather than the caller looping forever trying to
       avoid it.
     """
+    if limit <= 0:
+        # A non-positive limit can never fit any content. Hand the whole
+        # segment back as the remainder so the caller still makes progress
+        # instead of spinning on a zero-width head chunk (issue #3192).
+        return "", segment
     length = measure if measure is not None else len
     if length(segment) <= limit:
         return segment, ""
