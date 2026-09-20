@@ -43,18 +43,20 @@ def register_provider(
     call shape working for tests and third-party callers.
     """
 
-    _providers[name] = cls
+    key = str(name or "").strip().lower()
+    _providers[key] = cls
     if spec is not None:
-        _provider_specs[name] = spec
-    elif name not in _provider_specs:
-        _provider_specs[name] = SearchProviderSpec(provider_id=name)
+        _provider_specs[key] = spec
+    elif key not in _provider_specs:
+        _provider_specs[key] = SearchProviderSpec(provider_id=key)
 
 
 def get_provider(name: str, **kwargs) -> SearchProvider:
-    if name not in _providers:
-        available = ", ".join(_providers.keys()) if _providers else "none"
+    key = str(name or "").strip().lower()
+    if key not in _providers:
+        available = ", ".join(sorted(_providers.keys())) if _providers else "none"
         raise ValueError(f"Unknown search provider '{name}'. Available: {available}")
-    return _providers[name](**kwargs)
+    return _providers[key](**kwargs)
 
 
 def list_providers() -> list[str]:
@@ -66,8 +68,10 @@ def list_provider_specs() -> tuple[SearchProviderSpec, ...]:
 
 
 def get_provider_spec(name: str) -> SearchProviderSpec:
+    key = str(name or "").strip().lower()
     try:
-        return _provider_specs[name]
+        return _provider_specs[key]
     except KeyError as exc:
         available = ", ".join(sorted(_provider_specs))
         raise ValueError(f"Unknown search provider '{name}'. Available: {available}") from exc
+

@@ -29,3 +29,19 @@ def test_search_runtime_can_reset_global_configuration() -> None:
     assert web.get_search_fallback_policy() == "off"
     assert web.get_search_diagnostics() is False
     assert "api_key" not in web._search_provider_kwargs("brave")
+
+
+def test_search_provider_name_normalization() -> None:
+    from agentos.search.registry import get_provider, get_provider_spec
+
+    spec1 = get_provider_spec("  Brave  ")
+    spec2 = get_provider_spec("brave")
+    assert spec1.provider_id == "brave"
+    assert spec1 is spec2
+
+    ddg_spec = get_provider_spec("DuckDuckGo")
+    assert ddg_spec.provider_id == "duckduckgo"
+
+    ddg_provider = get_provider("  DUCKDUCKGO ")
+    assert ddg_provider is not None
+
