@@ -34,6 +34,7 @@ TRANSLATE_REQUESTS: tuple[tuple[str, str], ...] = (
     ("ru", "Переведите это предложение на английский: Сегодня прекрасная погода."),
     ("ar", "ترجم هذه الجملة إلى الإنجليزية: الطقس جميل اليوم."),
     ("hi", "इस वाक्य का अंग्रेज़ी में अनुवाद करें: आज मौसम बहुत अच्छा है।"),
+    ("nl", "Vertaal deze zin naar het Engels: Het weer is mooi vandaag."),
 )
 
 
@@ -62,6 +63,7 @@ NON_TRANSLATE: tuple[tuple[str, str], ...] = (
     ("th_strange", "เรื่องนี้แปลกมาก ช่วยดูให้หน่อย"),
     ("th_convert", "ช่วยแปลงไฟล์นี้เป็น PDF"),
     ("ja_reason", "その訳ではうまくいかない理由を教えてください。"),
+    ("nl_noun", "Deze vertaling van het document bevat inhoudelijke fouten."),
 )
 
 

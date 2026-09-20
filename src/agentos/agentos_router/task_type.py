@@ -108,6 +108,8 @@ _TRANSLATE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("ar", r"ترجم\w*"),
     # Hindi — अनुवाद (used with a light verb).
     ("hi", r"अनुवाद"),
+    # Dutch — verb forms only (noun "vertaling" excluded).
+    ("nl", r"\b(?:vertaal[t]?|vertalen)\b"),
 )
 
 _TRANSLATE_RES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(

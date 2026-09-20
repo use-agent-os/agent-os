@@ -98,7 +98,8 @@ Whether translation deserves more than the cheapest model is a policy question
 rather than something a classifier can be trained into, so it is answered
 deterministically. A translate verb in the first or last paragraph of a turn
 — recognised in English, Vietnamese, Chinese, Japanese, Korean, Thai,
-Indonesian, French, Spanish, German, Portuguese, Russian, Arabic, and Hindi —
+Indonesian, French, Spanish, German, Portuguese, Russian, Arabic, Hindi,
+and Dutch —
 caps the turn at `translate_ceiling_tier` (default `c0`).
 
 | Key | Default | Meaning |
