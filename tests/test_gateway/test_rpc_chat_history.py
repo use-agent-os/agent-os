@@ -3,7 +3,7 @@ import json
 import pytest
 
 from agentos.gateway.rpc import RpcContext
-from agentos.gateway.rpc_chat import _handle_chat_history
+from agentos.gateway.rpc_chat import _handle_chat_history, _normalize_chat_history_limit
 from agentos.session.models import SessionSummary, TranscriptEntry
 
 
@@ -506,3 +506,15 @@ async def test_chat_history_exposes_download_url_for_transcript_attachment_refs(
         f"/api/v1/attachments/{sha}?sessionKey=agent%3Amain%3Awebchat%3Atest"
         "&name=webchat-paste-test.txt&mime=text%2Fplain"
     )
+
+
+def test_normalize_chat_history_limit_rejects_booleans() -> None:
+    assert _normalize_chat_history_limit(True) == 50
+    assert _normalize_chat_history_limit(False) == 50
+    assert _normalize_chat_history_limit(10) == 10
+    assert _normalize_chat_history_limit("25") == 25
+    assert _normalize_chat_history_limit(0) == 1
+    assert _normalize_chat_history_limit(500) == 200
+    assert _normalize_chat_history_limit("invalid") == 50
+    assert _normalize_chat_history_limit(None) == 50
+

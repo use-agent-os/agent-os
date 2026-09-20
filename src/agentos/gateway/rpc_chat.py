@@ -46,6 +46,8 @@ def _require_chat_session_manager(ctx: RpcContext):
 
 
 def _normalize_chat_history_limit(value: object) -> int:
+    if isinstance(value, bool):
+        return _CHAT_HISTORY_DEFAULT_LIMIT
     try:
         if isinstance(value, int):
             limit = value
