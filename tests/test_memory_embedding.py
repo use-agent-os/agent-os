@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.memory.embedding import LocalEmbeddingProvider, OpenAIEmbeddingProvider
+from agentos.memory.embedding import LocalEmbeddingProvider, OpenAIEmbeddingProvider, chunk_text
 
 
 class _FakeEmbeddingResponse:
@@ -133,3 +133,20 @@ async def test_openai_embedding_provider_sends_dimensions_when_configured(
         "model": "text-embedding-3-small",
         "dimensions": 512,
     }
+
+
+def test_chunk_text_empty_input_returns_no_chunks() -> None:
+    """Issue #3172: empty (or whitespace-only) input has nothing to chunk, so
+    it must yield [] -- not a (1, 0, "") interval with start_line > end_line."""
+    assert chunk_text("") == []
+    assert chunk_text("   \n  \n") == []
+
+
+def test_chunk_text_line_intervals_are_ordered() -> None:
+    """Every emitted chunk must satisfy start_line <= end_line."""
+    text = "line one\nline two\nline three\n"
+    chunks = chunk_text(text, chunk_tokens=4, chunk_overlap=1)
+    assert chunks, "content must still chunk normally"
+    for start_line, end_line, chunk in chunks:
+        assert 1 <= start_line <= end_line
+        assert chunk

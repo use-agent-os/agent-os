@@ -673,7 +673,10 @@ def chunk_text(
     Split text into overlapping chunks by approximate token count.
     Returns list of (start_line, end_line, chunk_text).
     CJK chars count as 1 token each; ASCII uses 4 chars per token.
+    Empty or whitespace-only input yields no chunks (issue #3172).
     """
+    if not text.strip():
+        return []
     lines = text.splitlines(keepends=True)
     chunks: list[tuple[int, int, str]] = []
 
