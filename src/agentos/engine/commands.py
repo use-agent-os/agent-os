@@ -8,7 +8,7 @@ lockstep across surfaces.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -150,6 +150,16 @@ class SlashCommandRegistry:
                         f"duplicate slash word {word!r}: {self._by_word[lower].name} vs {cmd.name}"
                     )
                 self._by_word[lower] = cmd
+
+    def __len__(self) -> int:
+        return len(self._commands)
+
+    def __contains__(self, word: str) -> bool:
+        """Check if a command name or alias is registered."""
+        return word.strip().lower() in self._by_word
+
+    def __iter__(self) -> Iterator[CommandDef]:
+        return iter(self._commands)
 
     def for_surface(self, surface: Surface | str) -> tuple[CommandDef, ...]:
         parsed = parse_surface(surface) if isinstance(surface, str) else surface

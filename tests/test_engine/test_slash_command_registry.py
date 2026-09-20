@@ -95,3 +95,28 @@ def test_model_execution_surfaces_and_methods() -> None:
         assert execution is not None
         assert execution.kind is ExecutionKind.LOCAL
         assert execution.action == "model.list"
+
+
+def test_slash_command_registry_container_protocol() -> None:
+    from agentos.engine.commands import SlashCommandRegistry
+
+    assert len(DEFAULT_REGISTRY) > 0
+    assert "/help" in DEFAULT_REGISTRY
+    assert "/usage" in DEFAULT_REGISTRY
+    assert "/nonexistent" not in DEFAULT_REGISTRY
+
+    # Check alias membership
+    assert "/clear" in DEFAULT_REGISTRY
+
+    # Check iteration
+    commands = list(DEFAULT_REGISTRY)
+    assert len(commands) == len(DEFAULT_REGISTRY)
+    names = {c.name for c in commands}
+    assert "/help" in names
+    assert "/usage" in names
+
+    empty = SlashCommandRegistry(())
+    assert len(empty) == 0
+    assert "/help" not in empty
+    assert list(empty) == []
+
