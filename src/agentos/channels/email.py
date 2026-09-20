@@ -252,9 +252,10 @@ def decode_header_value(value: str | None) -> str:
     if not value:
         return ""
     try:
-        return str(make_header(decode_header(value)))
+        decoded = str(make_header(decode_header(value)))
     except (UnicodeDecodeError, ValueError, LookupError):
-        return str(value)
+        decoded = str(value)
+    return " ".join(decoded.split())
 
 
 def html_to_text(payload: str) -> str:
@@ -313,7 +314,7 @@ def is_automated(parsed: EmailMessage) -> bool:
 def reply_subject(subject: str) -> str:
     """Return ``subject`` prefixed with ``Re:`` unless it already is one."""
 
-    text = (subject or "").strip() or "(no subject)"
+    text = " ".join((subject or "").split()) or "(no subject)"
     return text if text.lower().startswith("re:") else f"Re: {text}"
 
 
@@ -848,7 +849,7 @@ class EmailChannel:
             (self.config.from_name or "", self.config.from_address)
         )
         message["To"] = to_address
-        message["Subject"] = subject
+        message["Subject"] = " ".join((subject or "").split())
         message["Date"] = email.utils.formatdate(localtime=True)
         message["Message-ID"] = email.utils.make_msgid()
         if in_reply_to:
