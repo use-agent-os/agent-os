@@ -1412,6 +1412,14 @@ class DiscordChannel:
     def format_mention(user_id: str) -> str:
         return f"<@{user_id}>"
 
+    @staticmethod
+    def format_channel_mention(channel_id: str) -> str:
+        return f"<#{channel_id}>"
+
+    @staticmethod
+    def format_role_mention(role_id: str) -> str:
+        return f"<@&{role_id}>"
+
     def is_mentioned(self, text: str) -> bool:
         if self.bot_user_id is None:
             return False

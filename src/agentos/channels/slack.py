@@ -663,6 +663,11 @@ class SlackChannel:
         """Format a user ID as a Slack mention string."""
         return f"<@{user_id}>"
 
+    @staticmethod
+    def format_channel_mention(channel_id: str) -> str:
+        """Format a channel ID as a Slack channel mention string."""
+        return f"<#{channel_id}>"
+
     def is_mentioned(self, text: str) -> bool:
         """Check whether this bot is mentioned in the given text."""
         if self.bot_user_id is None:
