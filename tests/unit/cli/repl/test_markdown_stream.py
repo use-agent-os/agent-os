@@ -137,7 +137,12 @@ def test_table_short_delimiter_cells_recognized(separator: str) -> None:
     out = _render_all([f"| a | bb |\n{separator}\n| ccc | d |\n"])
     # dimmed box-drawing separator row => the block rendered as a table
     assert "[#6E9000]─" in out
-    assert "|" not in _display_lines(out)[1]
+    lines = _display_lines(out)
+    # header, separator, one body row
+    assert len(lines) == 3
+    assert "─" in lines[1]
+    # the raw markdown separator must not leak through as a text line
+    assert separator not in out
 
 
 def test_table_bold_full_span_cell_styled_with_padding() -> None:
