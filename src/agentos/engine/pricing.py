@@ -34,6 +34,12 @@ class ModelPrice:
     input_per_token: float
     output_per_token: float
 
+    def calculate_cost(self, input_tokens: int = 0, output_tokens: int = 0) -> float:
+        """Calculate total USD cost for the given input and output token counts."""
+        safe_input = max(0, int(input_tokens))
+        safe_output = max(0, int(output_tokens))
+        return safe_input * self.input_per_token + safe_output * self.output_per_token
+
 
 class PricingCache:
     """Fetches and caches model pricing from OpenRouter /api/v1/models."""
@@ -117,6 +123,20 @@ class PriceEntry:
     input_per_m: float
     output_per_m: float
     cached_input_per_m: float | None = None
+
+    def calculate_cost(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        cached_input_tokens: int = 0,
+    ) -> float:
+        """Calculate USD cost for token counts using this PriceEntry."""
+        return calculate_cost_usd(
+            self,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_input_tokens=cached_input_tokens,
+        )
 
 
 def _entry(facts: model_registry.PriceFacts) -> PriceEntry:

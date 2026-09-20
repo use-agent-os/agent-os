@@ -5,6 +5,7 @@ import pytest
 
 from agentos.engine import pricing
 from agentos.engine.pricing import (
+    ModelPrice,
     PriceEntry,
     PricingCache,
     _parse_opencap_prices,
@@ -769,3 +770,21 @@ def test_calculate_cost_usd_with_anthropic_prompt_cache_hit() -> None:
 
     expected = (10_000 * 3.0 + 40_000 * 0.30 + 5_000 * 15.0) / 1_000_000
     assert cost == pytest.approx(expected)
+
+
+def test_price_entry_calculate_cost_method() -> None:
+    price = lookup_price("deepseek-chat", provider_id="deepseek")
+    cost = price.calculate_cost(
+        input_tokens=100_000,
+        output_tokens=10_000,
+        cached_input_tokens=80_000,
+    )
+    expected = (20_000 * 0.14 + 80_000 * 0.014 + 10_000 * 0.28) / 1_000_000
+    assert cost == pytest.approx(expected)
+
+
+def test_model_price_calculate_cost_method() -> None:
+    model_price = ModelPrice(input_per_token=0.000002, output_per_token=0.000005)
+    cost = model_price.calculate_cost(input_tokens=1_000, output_tokens=500)
+    assert cost == pytest.approx(0.000002 * 1_000 + 0.000005 * 500)
+
