@@ -16,6 +16,8 @@ Ingress points:
   skill metadata.
 * :func:`is_untrusted_fragment` — structural check: does the given text
   contain a well-formed ``<untrusted ...>...</untrusted>`` envelope?
+* :func:`is_prompt_injection` — heuristic check: does the given text match
+  any recognized prompt-injection pattern?
 * :func:`extract_tool_call_refusal_reason` — ingress-path enforcement:
   when the engine is about to execute a tool call, inspect the origin
   trace; if it lies inside an untrusted block, return the structured
@@ -233,6 +235,11 @@ def classify_injection(text: str) -> list[str]:
                 hits.add(threat_class)
                 break
     return sorted(hits)
+
+
+def is_prompt_injection(text: str) -> bool:
+    """Return True if ``text`` matches any recognized prompt injection threat class."""
+    return bool(classify_injection(text))
 
 
 def scan_for_injection(
