@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Skills/Video Merger: `merge` and `merge_chunks` in `video_merger.py` now clamp
+  `transition_duration` to at most half of the total/chunk video duration and omit
+  `fade` and `afade` filter arguments when transitions are disabled (duration <= 0).
+  Previously, short clips produced negative filter start times (`st < 0`) causing
+  FFmpeg filter parsing errors, overlapping fade-in/out blackout glitches, or invalid
+  zero-duration (`d=0`) filter parameters.
+
 ## [2026.9.20] - 2026-09-20
 
 ### Fixed

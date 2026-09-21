@@ -1,5 +1,6 @@
 """Tests for the bundled video-merger skill's handling of AI-generated clips
 that lack per-stream duration metadata or audio tracks."""
+
 from __future__ import annotations
 
 import importlib.util
@@ -156,3 +157,129 @@ class TestMergeSkipsAudioFilterForSilentInputs:
         assert "-af" in final_cmd
         assert "-c:a" in final_cmd
         assert "-an" not in final_cmd
+
+
+class TestTransitionDurationHandling:
+    def test_merge_omits_fade_filters_when_transition_is_zero(self, merger, tmp_path):
+        input_dir = tmp_path / "clips"
+        input_dir.mkdir()
+        (input_dir / "1_a.mp4").write_bytes(b"fake")
+        output_path = tmp_path / "out.mp4"
+
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(list(cmd))
+            if "ffprobe" in cmd[0]:
+                if "-select_streams" in cmd and "a" in cmd:
+                    return _completed("0\n")
+                return _completed("1920\n1080\n5.0\n")
+            return _completed()
+
+        with (
+            patch.object(video_merger.subprocess, "run", side_effect=fake_run),
+            patch("os.path.exists", return_value=True),
+            patch("os.path.getsize", return_value=1024),
+        ):
+            ok = merger.merge(str(input_dir), str(output_path), transition_duration=0.0)
+
+        assert ok is True
+        final_cmd = calls[-1]
+        vf_arg = final_cmd[final_cmd.index("-vf") + 1]
+        assert "fade=" not in vf_arg
+        assert "-af" not in final_cmd
+
+    def test_merge_clamps_transition_duration_for_short_clips(self, merger, tmp_path):
+        input_dir = tmp_path / "clips"
+        input_dir.mkdir()
+        (input_dir / "1_a.mp4").write_bytes(b"fake")
+        output_path = tmp_path / "out.mp4"
+
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(list(cmd))
+            if "ffprobe" in cmd[0]:
+                if "-select_streams" in cmd and "a" in cmd:
+                    return _completed("0\n")
+                return _completed("1920\n1080\n0.4\n")
+            return _completed()
+
+        with (
+            patch.object(video_merger.subprocess, "run", side_effect=fake_run),
+            patch("os.path.exists", return_value=True),
+            patch("os.path.getsize", return_value=1024),
+        ):
+            ok = merger.merge(str(input_dir), str(output_path), transition_duration=0.5)
+
+        assert ok is True
+        final_cmd = calls[-1]
+        vf_arg = final_cmd[final_cmd.index("-vf") + 1]
+        assert "fade=t=in:st=0:d=0.2" in vf_arg
+        assert "fade=t=out:st=0.2:d=0.2" in vf_arg
+        assert "st=-" not in vf_arg
+        af_arg = final_cmd[final_cmd.index("-af") + 1]
+        assert "afade=t=in:st=0:d=0.2" in af_arg
+        assert "afade=t=out:st=0.2:d=0.2" in af_arg
+
+    def test_merge_chunks_omits_fade_filters_when_transition_is_zero(self, merger, tmp_path):
+        input_dir = tmp_path / "clips"
+        input_dir.mkdir()
+        (input_dir / "1_a.mp4").write_bytes(b"fake")
+        output_dir = tmp_path / "chunks"
+
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(list(cmd))
+            if "ffprobe" in cmd[0]:
+                if "-select_streams" in cmd and "a" in cmd:
+                    return _completed("0\n")
+                return _completed("1920\n1080\n5.0\n")
+            return _completed()
+
+        with (
+            patch.object(video_merger.subprocess, "run", side_effect=fake_run),
+            patch("os.path.exists", return_value=True),
+            patch("os.path.getsize", return_value=1024),
+        ):
+            ok = merger.merge_chunks(str(input_dir), str(output_dir), transition_duration=0.0)
+
+        assert ok is True
+        final_cmd = calls[-1]
+        vf_arg = final_cmd[final_cmd.index("-vf") + 1]
+        assert "fade=" not in vf_arg
+        assert "-af" not in final_cmd
+
+    def test_merge_chunks_clamps_transition_duration_for_short_chunks(self, merger, tmp_path):
+        input_dir = tmp_path / "clips"
+        input_dir.mkdir()
+        (input_dir / "1_a.mp4").write_bytes(b"fake")
+        output_dir = tmp_path / "chunks"
+
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(list(cmd))
+            if "ffprobe" in cmd[0]:
+                if "-select_streams" in cmd and "a" in cmd:
+                    return _completed("0\n")
+                return _completed("1920\n1080\n0.4\n")
+            return _completed()
+
+        with (
+            patch.object(video_merger.subprocess, "run", side_effect=fake_run),
+            patch("os.path.exists", return_value=True),
+            patch("os.path.getsize", return_value=1024),
+        ):
+            ok = merger.merge_chunks(str(input_dir), str(output_dir), transition_duration=0.5)
+
+        assert ok is True
+        final_cmd = calls[-1]
+        vf_arg = final_cmd[final_cmd.index("-vf") + 1]
+        assert "fade=t=in:st=0:d=0.2" in vf_arg
+        assert "fade=t=out:st=0.2:d=0.2" in vf_arg
+        assert "st=-" not in vf_arg
+        af_arg = final_cmd[final_cmd.index("-af") + 1]
+        assert "afade=t=in:st=0:d=0.2" in af_arg
+        assert "afade=t=out:st=0.2:d=0.2" in af_arg

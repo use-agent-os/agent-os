@@ -2,6 +2,7 @@
 Video Merger Core Library
 自动拼接多个分段短视频为完整长视频的核心功能
 """
+
 import os
 import re
 import shutil
@@ -13,8 +14,7 @@ from glob import glob
 # (the gateway can launch this skill as a subprocess on a shell whose PATH
 # does not include the user-level winget/scoop/choco bin folders).
 _WINGET_FFMPEG_GLOB = (
-    "Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_*/"
-    "ffmpeg-*-full_build/bin"
+    "Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_*/ffmpeg-*-full_build/bin"
 )
 
 
@@ -86,7 +86,9 @@ class VideoMerger:
             try:
                 subprocess.run([tool, "-version"], capture_output=True, check=True)
             except Exception as e:
-                raise RuntimeError(f"未找到{tool}，请先安装ffmpeg：https://ffmpeg.org/download.html") from e
+                raise RuntimeError(
+                    f"未找到{tool}，请先安装ffmpeg：https://ffmpeg.org/download.html"
+                ) from e
 
     def get_sorted_videos(self, input_dir: str) -> list[str]:
         """
@@ -113,11 +115,16 @@ class VideoMerger:
         :return: (width, height, duration)
         """
         cmd = [
-            self.ffprobe_path, "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=width,height,duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            video_path
+            self.ffprobe_path,
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            video_path,
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         lines = result.stdout.strip().split("\n")
@@ -135,10 +142,14 @@ class VideoMerger:
             return float(duration_str)
 
         cmd = [
-            self.ffprobe_path, "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            video_path
+            self.ffprobe_path,
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            video_path,
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         fallback_str = result.stdout.strip()
@@ -151,23 +162,30 @@ class VideoMerger:
         检测视频是否包含音频轨道（部分AI生成视频不带音轨）。
         """
         cmd = [
-            self.ffprobe_path, "-v", "error",
-            "-select_streams", "a",
-            "-show_entries", "stream=index",
-            "-of", "csv=p=0",
-            video_path
+            self.ffprobe_path,
+            "-v",
+            "error",
+            "-select_streams",
+            "a",
+            "-show_entries",
+            "stream=index",
+            "-of",
+            "csv=p=0",
+            video_path,
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         return bool(result.stdout.strip())
 
-    def merge(self,
-              input_dir: str,
-              output_path: str,
-              resolution: str | None = None,
-              transition_duration: float = 0.5,
-              fps: int = 24,
-              crf: int = 22,
-              preset: str = "medium") -> bool:
+    def merge(
+        self,
+        input_dir: str,
+        output_path: str,
+        resolution: str | None = None,
+        transition_duration: float = 0.5,
+        fps: int = 24,
+        crf: int = 22,
+        preset: str = "medium",
+    ) -> bool:
         """
         拼接视频
         :param input_dir: 分镜头视频所在目录
@@ -192,43 +210,69 @@ class VideoMerger:
             print(f"使用自定义分辨率：{resolution}")
 
         # 生成concat列表
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as f:
             for v in video_list:
                 f.write(_concat_manifest_line(v))
             concat_file = f.name
 
         try:
             # 先无损拼接所有片段
-            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
+            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
                 temp_raw = f.name
 
             cmd_concat = [
-                self.ffmpeg_path, "-y", "-f", "concat", "-safe", "0",
-                "-i", concat_file,
-                "-c", "copy",
-                temp_raw
+                self.ffmpeg_path,
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                concat_file,
+                "-c",
+                "copy",
+                temp_raw,
             ]
             print("正在拼接视频片段...")
             subprocess.run(cmd_concat, capture_output=True, check=True)
 
             # 获取总时长
             _, _, total_duration = self.get_video_info(temp_raw)
-            print(f"总时长：{int(total_duration/60)}分{int(total_duration%60)}秒")
+            print(f"总时长：{int(total_duration / 60)}分{int(total_duration % 60)}秒")
 
             # 统一参数+添加转场
             print("正在编码和添加转场效果...")
             has_audio = self._has_audio_stream(temp_raw)
+            vf_filters = [f"scale={resolution}", f"fps={fps}", "format=yuv420p"]
+            af_filters: list[str] = []
+            effective_transition = min(max(0.0, transition_duration), total_duration / 2.0)
+            if effective_transition > 0.0:
+                fade_out_st = total_duration - effective_transition
+                vf_filters.extend(
+                    [
+                        f"fade=t=in:st=0:d={effective_transition}",
+                        f"fade=t=out:st={fade_out_st}:d={effective_transition}",
+                    ]
+                )
+                if has_audio:
+                    af_filters.extend(
+                        [
+                            f"afade=t=in:st=0:d={effective_transition}",
+                            f"afade=t=out:st={fade_out_st}:d={effective_transition}",
+                        ]
+                    )
             cmd_final = [
-                self.ffmpeg_path, "-y", "-i", temp_raw,
-                "-vf", (f"scale={resolution},fps={fps},format=yuv420p,"
-                        f"fade=t=in:st=0:d={transition_duration},"
-                        f"fade=t=out:st={total_duration-transition_duration}:d={transition_duration}"),
+                self.ffmpeg_path,
+                "-y",
+                "-i",
+                temp_raw,
+                "-vf",
+                ",".join(vf_filters),
             ]
-            if has_audio:
-                cmd_final += [
-                    "-af", (f"afade=t=in:st=0:d={transition_duration},"
-                            f"afade=t=out:st={total_duration-transition_duration}:d={transition_duration}"),
-                ]
+            if has_audio and af_filters:
+                cmd_final += ["-af", ",".join(af_filters)]
             cmd_final += ["-c:v", "h264", "-crf", str(crf), "-preset", preset]
             if has_audio:
                 cmd_final += ["-c:a", "aac", "-ar", "44100", "-ac", "2"]
@@ -254,15 +298,17 @@ class VideoMerger:
 
         return False
 
-    def merge_chunks(self,
-                     input_dir: str,
-                     output_dir: str,
-                     chunk_duration: int = 60,
-                     resolution: str | None = None,
-                     transition_duration: float = 0.5,
-                     fps: int = 24,
-                     crf: int = 22,
-                     preset: str = "medium") -> bool:
+    def merge_chunks(
+        self,
+        input_dir: str,
+        output_dir: str,
+        chunk_duration: int = 60,
+        resolution: str | None = None,
+        transition_duration: float = 0.5,
+        fps: int = 24,
+        crf: int = 22,
+        preset: str = "medium",
+    ) -> bool:
         """
         分块拼接视频
         :param input_dir: 分镜头视频所在目录
@@ -306,7 +352,7 @@ class VideoMerger:
                     transition_duration,
                     fps,
                     crf,
-                    preset
+                    preset,
                 )
                 chunk_index += 1
                 current_chunk = []
@@ -323,39 +369,50 @@ class VideoMerger:
                 transition_duration,
                 fps,
                 crf,
-                preset
+                preset,
             )
 
         print(f"[OK] 分块合并完成！共生成 {chunk_index} 个分块，保存在：{output_dir}")
         return True
 
-    def _merge_single_chunk(self,
-                            video_list: list[str],
-                            output_path: str,
-                            resolution: str,
-                            transition_duration: float = 0.5,
-                            fps: int = 24,
-                            crf: int = 22,
-                            preset: str = "medium") -> bool:
+    def _merge_single_chunk(
+        self,
+        video_list: list[str],
+        output_path: str,
+        resolution: str,
+        transition_duration: float = 0.5,
+        fps: int = 24,
+        crf: int = 22,
+        preset: str = "medium",
+    ) -> bool:
         """
         合并单个分块
         """
         # 生成concat列表
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as f:
             for v in video_list:
                 f.write(_concat_manifest_line(v))
             concat_file = f.name
 
         try:
             # 先无损拼接所有片段
-            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
+            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
                 temp_raw = f.name
 
             cmd_concat = [
-                self.ffmpeg_path, "-y", "-f", "concat", "-safe", "0",
-                "-i", concat_file,
-                "-c", "copy",
-                temp_raw
+                self.ffmpeg_path,
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                concat_file,
+                "-c",
+                "copy",
+                temp_raw,
             ]
             print(f"正在拼接分块 {os.path.basename(output_path)}，包含 {len(video_list)} 个片段...")
             subprocess.run(cmd_concat, capture_output=True, check=True)
@@ -365,17 +422,34 @@ class VideoMerger:
 
             # 统一参数+添加转场
             has_audio = self._has_audio_stream(temp_raw)
+            vf_filters = [f"scale={resolution}", f"fps={fps}", "format=yuv420p"]
+            af_filters: list[str] = []
+            effective_transition = min(max(0.0, transition_duration), chunk_duration / 2.0)
+            if effective_transition > 0.0:
+                fade_out_st = chunk_duration - effective_transition
+                vf_filters.extend(
+                    [
+                        f"fade=t=in:st=0:d={effective_transition}",
+                        f"fade=t=out:st={fade_out_st}:d={effective_transition}",
+                    ]
+                )
+                if has_audio:
+                    af_filters.extend(
+                        [
+                            f"afade=t=in:st=0:d={effective_transition}",
+                            f"afade=t=out:st={fade_out_st}:d={effective_transition}",
+                        ]
+                    )
             cmd_final = [
-                self.ffmpeg_path, "-y", "-i", temp_raw,
-                "-vf", (f"scale={resolution},fps={fps},format=yuv420p,"
-                        f"fade=t=in:st=0:d={transition_duration},"
-                        f"fade=t=out:st={chunk_duration-transition_duration}:d={transition_duration}"),
+                self.ffmpeg_path,
+                "-y",
+                "-i",
+                temp_raw,
+                "-vf",
+                ",".join(vf_filters),
             ]
-            if has_audio:
-                cmd_final += [
-                    "-af", (f"afade=t=in:st=0:d={transition_duration},"
-                            f"afade=t=out:st={chunk_duration-transition_duration}:d={transition_duration}"),
-                ]
+            if has_audio and af_filters:
+                cmd_final += ["-af", ",".join(af_filters)]
             cmd_final += ["-c:v", "h264", "-crf", str(crf), "-preset", preset]
             if has_audio:
                 cmd_final += ["-c:a", "aac", "-ar", "44100", "-ac", "2"]
