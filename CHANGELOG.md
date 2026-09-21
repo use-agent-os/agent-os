@@ -149,6 +149,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- `apply_patch`: hunks whose start line exceeds the target file's length
+  (such as pure-addition hunks attempting to insert lines past EOF) now raise
+  a `ValueError` instead of silently appending content at the end of the file
+  ([#2632](https://github.com/use-agent-os/agent-os/issues/2632)).
+
 - WebUI chat: "Move to project" and "Rename session" on a brand-new chat
   (Cmd+Shift+O / `/new`, before the first message) failed with "Session not
   found". The WebUI mints the session key client-side and the row only
