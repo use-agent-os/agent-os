@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Tools/Media: `_parse_page_range` in `pdf` tool failed with `SafeToolError` when a page range string contained whitespace around hyphens (e.g. `"1 - 5"` or `"1, 3 - 8"`); it now strips whitespace from range boundaries before parsing integer page numbers.
 - Gateway/Sessions: `sessions_history` and spawned-subagent result reporting
   (`_read_child_result`) read a session's transcript through
   `SessionStorage.get_transcript`'s `limit`, which windows from the

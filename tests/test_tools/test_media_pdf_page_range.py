@@ -24,6 +24,9 @@ def test_parse_page_range_deduplicates_overlapping_and_repeated_pages() -> None:
     # Mixed ranges and individual pages preserving order of first appearance
     assert _parse_page_range("1-2, 5, 2-3", total=5) == [0, 1, 4, 2]
 
+    # Whitespace around range hyphens
+    assert _parse_page_range("1 - 3, 4 - 5", total=5) == [0, 1, 2, 3, 4]
+
 
 def test_parse_page_range_validation_errors() -> None:
     with pytest.raises(SafeToolError, match="Invalid page range"):
