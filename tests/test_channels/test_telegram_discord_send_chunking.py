@@ -118,6 +118,15 @@ def test_split_text_for_limit_respects_a_raw_length_measure() -> None:
     assert head + tail == content
 
 
+def test_split_text_for_limit_nonpositive_limit_returns_empty_head() -> None:
+    """Issue #3192: a zero or negative limit can never fit any content, so the
+    whole segment comes back as the remainder. Callers can detect the
+    misconfiguration instead of spinning on a zero-width head chunk."""
+    assert split_text_for_limit("hello world", 0) == ("", "hello world")
+    assert split_text_for_limit("hello world", -10) == ("", "hello world")
+    assert split_text_for_limit("", 0) == ("", "")
+
+
 # ---------------------------------------------------------------------------
 # Issue #2127: a fence that opens the segment itself (no earlier line, and
 # no text before it on its own line) left the "back up to before the fence"
