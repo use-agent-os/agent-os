@@ -9,11 +9,15 @@ from dataclasses import dataclass, field
 # Patterns that are always dangerous regardless of context
 DEFAULT_DENYLIST: list[str] = [
     r"rm\s+-rf\s+/\*?$",  # rm -rf / and rm -rf /*
-    r"mkfs\b",  # format filesystems
+    # Leading \b as well as trailing: without it these match inside a longer
+    # word, so `echo asphalt`, `python autoshutdown.py` and `./fastreboot.sh`
+    # were all blocked outright. This list applies on Windows too, so the
+    # false positive would otherwise spread there.
+    r"\bmkfs\b",  # format filesystems
     r"dd\s+if=",  # raw disk writes
-    r"shutdown\b",  # system shutdown
-    r"reboot\b",  # system reboot
-    r"halt\b",  # system halt
+    r"\bshutdown\b",  # system shutdown
+    r"\breboot\b",  # system reboot
+    r"\bhalt\b",  # system halt
     r":\(\)\s*\{.*:\|:.*\}",  # fork bomb
     r">\s*/dev/sda",  # overwrite block device
     r"chmod\s+-R\s+777\s+/",  # world-writable root
@@ -50,11 +54,15 @@ _WIN_WRAPPER: str = (
     r"\s+(?:\\?[\"'])*\s*"
 )
 
-# Anchors a command name to the start of a command: line start or a shell
-# separator, through any number of nested wrappers (`cmd /c powershell -c`),
-# then PowerShell's call operator and an opening script-block brace, both of
+# Anchors a command name to the start of a command: line start, a shell
+# separator, or the opening of a block or subexpression -- `(` and `{` are
+# command positions too, since `powershell -c "if (Test-Path x) { rm -r x }"`
+# and `cmd /c (del x)` both run a real command that a separator-only anchor
+# never sees (only openers; a command does not begin right after `)`) --
+# through any number of nested wrappers (`cmd /c powershell -c`), then
+# PowerShell's call operator and an opening script-block brace, both of
 # which precede the command in `powershell -Command "& {rm C:\x}"`.
-_WIN_CMD_PREFIX: str = r"(?:^|[;&|\n])\s*(?:" + _WIN_WRAPPER + r")*(?:&\s*)?(?:\{\s*)?"
+_WIN_CMD_PREFIX: str = r"(?:^|[;&|\n({])\s*(?:" + _WIN_WRAPPER + r")*(?:&\s*)?(?:\{\s*)?"
 
 # What may follow an anchored command name: an optional `.exe`, then a
 # separator, whitespace, or end of string. Unlike a bare `\b`, this refuses
@@ -62,20 +70,29 @@ _WIN_CMD_PREFIX: str = r"(?:^|[;&|\n])\s*(?:" + _WIN_WRAPPER + r")*(?:&\s*)?(?:\
 # alias -- while still matching the real `rm.exe` / `rd.exe` binaries.
 _WIN_CMD_END: str = r"(?:\.exe)?(?![\w.\-])"
 
+
+def _win_command(name: str) -> str:
+    """Deny *name* only where it is actually being run as a command."""
+    return _WIN_CMD_PREFIX + name + _WIN_CMD_END
+
+
 DEFAULT_DENYLIST_WIN: list[str] = [
     r"\bdel\b",
     r"\brmdir\b",
     r"\bRemove-Item\b",
-    _WIN_CMD_PREFIX + r"rd" + _WIN_CMD_END,
-    _WIN_CMD_PREFIX + r"erase" + _WIN_CMD_END,
+    _win_command("rd"),
+    _win_command("erase"),
     # `rm` and `ri` are PowerShell's other two built-in aliases for
     # Remove-Item, exactly as real as del/rd/erase/rmdir/Remove-Item above.
     # Anchored the same way rd/erase are: both are short enough that a bare
     # `\bword\b` would fire inside `docker run --rm`, `git rm --cached`,
     # `npm run rm-cache`, branch names, and ordinary arguments.
-    _WIN_CMD_PREFIX + r"rm" + _WIN_CMD_END,
-    _WIN_CMD_PREFIX + r"ri" + _WIN_CMD_END,
+    _win_command("rm"),
+    _win_command("ri"),
     r"\bFormat-Volume\b",
+    # The native counterpart of Format-Volume. Anchored, so `git log
+    # --format=%H` and `--format json` are untouched.
+    _win_command("format"),
     r"\bStop-Computer\b",
     r"\bRestart-Computer\b",
     r"\bClear-Disk\b",

@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Shell policy (security): the Windows command-position anchor recognised only
+  `^` and `; & | \n`, so a delete alias inside a PowerShell block or
+  subexpression was missed -- `powershell -c "if ($true) { rd /s C:\x }"` and
+  `cmd /c (del x)` were allowed. `(` and `{` now open a command position.
+  `format`, the native counterpart of the already-denied `Format-Volume`, is
+  denied at a command position (`ruff format` and `git log --format=%H` are
+  unaffected). And `mkfs`, `shutdown`, `reboot` and `halt` gain a leading word
+  boundary, so `echo asphalt`, `python autoshutdown.py` and `./fastreboot.sh`
+  are no longer blocked outright (#2100).
 - Slack: clicking Approve/Deny on a tool-call approval prompt that was posted
   as a top-level message (not already inside a thread) made the agent's reply
   post unthreaded instead of anchoring under the prompt it answered.
