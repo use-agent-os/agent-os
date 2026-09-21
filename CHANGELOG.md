@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `subtitle-burner` skill: subtitle paths containing apostrophes are now
+  escaped for both parsing passes used by ffmpeg filter arguments (#3162).
+
+
 ## [2026.9.22] - 2026-09-22
 
 ### Fixed

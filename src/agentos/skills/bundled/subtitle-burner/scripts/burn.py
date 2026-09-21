@@ -134,8 +134,14 @@ def _escape_subtitle_path(path: str) -> str:
     rest = normalised[3:] if len(normalised) >= 3 else ""
     if ":" in rest:
         normalised = normalised[:3] + rest.replace(":", r"\:")
-    # Escape single quotes inside the path (rare on Windows but possible).
-    normalised = normalised.replace("'", r"\'")
+    # A -vf argument is tokenised twice: once by the filtergraph parser,
+    # then again by the option parser. A quote therefore has to survive both
+    # passes.
+    #
+    # Close the quote, emit an escaped backslash + quote, then reopen.
+    # The first pass leaves \\' behind; the second pass reads it as a
+    # literal quote. Equivalent to ffmpeg's two-level quote escaping.
+    normalised = normalised.replace("'", r"'\\\''")
     return normalised
 
 
