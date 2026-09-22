@@ -39,7 +39,17 @@ def quote_cli_arg(value: str) -> str:
     # A Windows filename cannot contain ``"``, so the replacement only guards
     # hand-written values; ``""`` is the literal-quote spelling both cmd.exe
     # and PowerShell accept inside a double-quoted string.
-    return '"' + value.replace('"', '""') + '"'
+    escaped = value.replace('"', '""')
+    # A run of backslashes immediately before the closing quote must be
+    # doubled: the program that ultimately parses this command line (MSVC-style
+    # argv parsing -- what python.exe itself uses) reads an odd trailing run as
+    # an escape for the closing quote rather than a delimiter, so the quote
+    # never closes and the rest of the line is swallowed into this argument.
+    # Directory paths routinely end in exactly this shape.
+    trailing_backslashes = len(escaped) - len(escaped.rstrip("\\"))
+    if trailing_backslashes:
+        escaped += "\\" * trailing_backslashes
+    return '"' + escaped + '"'
 
 
 def config_cli_arg(config_path: str | Path | None) -> str:
