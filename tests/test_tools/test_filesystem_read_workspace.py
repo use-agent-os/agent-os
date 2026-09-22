@@ -481,3 +481,30 @@ async def test_edit_file_gated_outside_workspace_records_nothing(tmp_path: Path)
         assert ctx.workspace_file_writes == []
     finally:
         current_tool_context.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_glob_search_accepts_leading_slash_patterns(tmp_path: Path) -> None:
+    """Leading slashes/backslashes in glob patterns are stripped so LLM-authored
+    absolute-looking patterns still match against the relative base (#2689)."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "a.py").write_text("x", encoding="utf-8")
+    (workspace / "b.txt").write_text("y", encoding="utf-8")
+    sub = workspace / "sub"
+    sub.mkdir()
+    (sub / "c.py").write_text("z", encoding="utf-8")
+
+    with tool_context(workspace):
+        assert "a.py" in await fs.glob_search("/*.py", path=str(workspace))
+        assert "a.py" in await fs.glob_search("/**/*.py", path=str(workspace))
+        assert "c.py" in await fs.glob_search("/**/*.py", path=str(workspace))
+        # Backslash-escaped leading slash
+        assert "a.py" in await fs.glob_search("\\*.py", path=str(workspace))
+        # Pattern that strips to empty defaults to "*"
+        all_entries = await fs.glob_search("/", path=str(workspace))
+        assert "a.py" in all_entries
+        assert "b.txt" in all_entries
+        # Normal relative patterns still work unchanged
+        assert "a.py" in await fs.glob_search("*.py", path=str(workspace))
+        assert "c.py" in await fs.glob_search("sub/*.py", path=str(workspace))

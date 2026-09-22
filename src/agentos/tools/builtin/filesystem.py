@@ -1136,6 +1136,11 @@ async def list_dir(path: str) -> str:
 )
 async def glob_search(pattern: str, path: str | None = None) -> str:
     base = _resolve_base(path)
+    # Strip leading slashes/backslashes so LLMs that emit absolute-looking
+    # patterns ("/*.py", "/**/*.py") still work against the relative base.
+    pattern = pattern.lstrip("/\\")
+    if not pattern:
+        pattern = "*"
     blocked = _sensitive_access_block("glob_search", base, path or str(base))
     if blocked is not None:
         return json.dumps(blocked)
