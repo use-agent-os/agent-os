@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- `pptx` skill: `render_thumbs.sh --dpi` is now validated as a positive number
+  before `soffice` runs. A negative or zero value used to reach `pdftoppm -r`
+  unchecked and silently produce a 1x1 pixel "thumbnail" while the script
+  reported success; a non-numeric value errored, but only after a full
+  LibreOffice conversion, and under exit code 4 ("conversion failed") instead
+  of the script's own "bad arguments" code, 1 (#3327)
 - Router task-type detection: a code-port request naming Go, C, Objective-C,
   F#, Visual Basic, VBA or Node.js is no longer read as a translation and
   capped to the cheapest tier. The guard already covered `golang`, `c++`,

@@ -50,6 +50,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if ! awk -v v="$dpi" 'BEGIN { exit !(v ~ /^[0-9]+(\.[0-9]+)?$/ && v + 0 > 0) }'; then
+  echo "Invalid --dpi '$dpi'; expected a positive number (e.g. 150, 300)" >&2
+  exit 1
+fi
+
 if [[ ! -f "$input" ]]; then
   echo "File not found: $input" >&2
   exit 1
