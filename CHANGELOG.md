@@ -7,6 +7,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- CLI: `agentos replay`, chat's `/new`, `/save` and `/approvals`, and
+  `agentos projects delete`/`move` printed a user-supplied string (a session
+  title, a saved-transcript path, an approval scope/target, recorded
+  free-text turn fields) straight into a Rich `console.print` call — a
+  bracketed value like `[redacted]` was either swallowed or raised a markup
+  error and crashed the command. Escaped every site with `markup_escape`
+  (`replay`'s transcript now prints with `markup=False, emoji=False,
+  soft_wrap=True` to keep its plain-string contract), matching the fix
+  already applied to `projects create`/`show`/`update` and chat's `/rename`
+  (#2820/#2823/#2920, fixed in #2822/#2824/#2923) (#3319)
 - Router task-type detection: a code-port request naming Go, C, Objective-C,
   F#, Visual Basic, VBA or Node.js is no longer read as a translation and
   capped to the cheapest tier. The guard already covered `golang`, `c++`,

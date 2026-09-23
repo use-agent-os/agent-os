@@ -155,3 +155,32 @@ def test_move_and_detach(client: _FakeClient) -> None:
         ("agent:main:webchat:aaa", "proj-1"),
         ("agent:main:webchat:aaa", None),
     ]
+
+
+# ── Rich markup: `!r` quotes a value but does not escape Rich markup, so a ──
+# ── bracketed id used to crash the confirmation line printed AFTER the ──────
+# ── mutation had already gone through. ───────────────────────────────────────
+
+
+def test_delete_survives_a_closing_tag_in_the_project_id(client: _FakeClient) -> None:
+    result = runner.invoke(projects_cmd.app, ["delete", "evil[/]", "--yes"])
+
+    assert result.exit_code == 0, result.output
+    assert client.delete_calls == ["evil[/]"]
+    assert "evil[/]" in result.output
+
+
+def test_move_survives_a_closing_tag_in_the_target_project_id(client: _FakeClient) -> None:
+    result = runner.invoke(projects_cmd.app, ["move", "agent:main:webchat:aaa", "work[/]"])
+
+    assert result.exit_code == 0, result.output
+    assert client.move_calls == [("agent:main:webchat:aaa", "work[/]")]
+    assert "work[/]" in result.output
+
+
+def test_detach_survives_a_closing_tag_in_the_session_key(client: _FakeClient) -> None:
+    result = runner.invoke(projects_cmd.app, ["move", "session[/]", "none"])
+
+    assert result.exit_code == 0, result.output
+    assert client.move_calls == [("session[/]", None)]
+    assert "session[/]" in result.output
