@@ -16,6 +16,7 @@ from .types import (
     DoneEvent,
     ErrorEvent,
     Message,
+    MessageContent,
     ModelInfo,
     StreamEvent,
     TextDeltaEvent,
@@ -47,6 +48,18 @@ def _tool_result_content(content: Any) -> str:
     return content if isinstance(content, str) else json.dumps(content)
 
 
+def _base64_payload(data: str) -> str:
+    """The bare base64 an Ollama ``images`` entry expects.
+
+    Blocks reach us either as raw base64 or as a ``data:image/png;base64,...``
+    URL depending on which surface produced them; Ollama accepts only the
+    former, and sending the wrapper makes the server fail the decode.
+    """
+    if data.startswith("data:") and ";base64," in data:
+        return data.split(";base64,", 1)[1]
+    return data
+
+
 def _build_ollama_message(
     msg: Message,
     tool_names_by_id: dict[str, str] | None = None,
@@ -56,10 +69,21 @@ def _build_ollama_message(
 
     tool_names = tool_names_by_id if tool_names_by_id is not None else {}
     parts: list[str] = []
+    images: list[str] = []
     tool_calls: list[dict[str, Any]] = []
     for block in msg.content:
         if block.type == "text":
             parts.append(block.text)
+        elif block.type == "image":
+            if block.source_type == "url":
+                # Ollama's ``images`` array carries base64 payloads only -- it
+                # has no URL form, and a URL passed there is decoded as base64
+                # and fails. Naming it in the text keeps the reference visible
+                # to the model instead of dropping it, which is the failure
+                # this whole change is about.
+                parts.append(f"[image: {block.data}]")
+            else:
+                images.append(_base64_payload(block.data))
         elif block.type == "tool_use":
             tool_names[block.id] = block.name
             tool_calls.append(
@@ -85,6 +109,8 @@ def _build_ollama_message(
     result: dict[str, Any] = {"role": msg.role, "content": " ".join(parts)}
     if tool_calls:
         result["tool_calls"] = tool_calls
+    if images:
+        result["images"] = images
     return result
 
 
@@ -106,6 +132,28 @@ def _build_ollama_messages(messages: list[Message]) -> list[dict[str, Any]]:
                     if tool_name:
                         tool_result["tool_name"] = tool_name
                     result.append(tool_result)
+                # A tool result can arrive alongside text or an image -- "here
+                # is the output, now look at this" -- and `continue` used to
+                # drop every companion block on the floor. Ollama has no way to
+                # carry them on a `role: tool` message, so they follow as their
+                # own message, after the results they refer to.
+                # Typed as the full union rather than the narrowed one the
+                # comprehension infers: `list` is invariant, so the narrower
+                # element type is not assignable to `MessageContent`.
+                companions: MessageContent = [
+                    block for block in message.content if block.type != "tool_result"
+                ]
+                if companions:
+                    companion_message = _build_ollama_message(
+                        Message(role=message.role, content=companions),
+                        tool_names_by_id,
+                    )
+                    if (
+                        companion_message.get("content")
+                        or companion_message.get("images")
+                        or companion_message.get("tool_calls")
+                    ):
+                        result.append(companion_message)
                 continue
         result.append(_build_ollama_message(message, tool_names_by_id))
     return result
