@@ -48,9 +48,12 @@ _BASE_SENSITIVE_PREFIXES: tuple[str, ...] = (
     "~/.aws",
     "~/.azure",
     "~/.config/gcloud",
+    "~/AppData/Roaming/gcloud",
     # Agents run ``gh`` routinely, so a live GitHub token sits in
     # ``~/.config/gh/hosts.yml`` next to entries that already guard ``~/.npmrc``.
+    # On Windows, GitHub CLI stores config under %APPDATA%/GitHub CLI.
     "~/.config/gh",
+    "~/AppData/Roaming/GitHub CLI",
     "~/.anthropic",
     "~/.openai",
     # The directory, not ``~/.docker/config``: the match below is anchored at a
@@ -205,6 +208,10 @@ def _comparison_path_candidates(path: str) -> list[str]:
     if raw.startswith("~/") and home is not None:
         expanded_home = str(home).replace("\\", "/") + raw[1:]
         candidates.append(expanded_home.casefold() if os.name == "nt" else expanded_home)
+    appdata = os.environ.get("APPDATA")
+    if appdata and raw.casefold().startswith("~/appdata/roaming/"):
+        expanded_appdata = appdata.replace("\\", "/") + raw[len("~/appdata/roaming") :]
+        candidates.append(expanded_appdata.casefold() if os.name == "nt" else expanded_appdata)
     return list(dict.fromkeys(candidates))
 
 
@@ -222,7 +229,12 @@ def _expand_env_vars(text: str) -> str:
     if "$" not in text and "%" not in text:
         return text
     try:
-        return os.path.expandvars(text)
+        expanded = os.path.expandvars(text)
+        if os.name == "nt" and ("$HOME" in text or "${HOME}" in text) and "HOME" not in os.environ:
+            home_val = os.environ.get("USERPROFILE") or str(_home() or "")
+            if home_val:
+                expanded = expanded.replace("$HOME", home_val).replace("${HOME}", home_val)
+        return expanded
     except (KeyError, TypeError, ValueError):
         return text
 

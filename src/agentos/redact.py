@@ -843,6 +843,7 @@ _CREDENTIAL_FILE_NAMES: frozenset[str] = frozenset(
         ".pypirc",
         "_netrc",
         "credentials",
+        "hosts.yml",
     }
 )
 
@@ -854,7 +855,7 @@ CREDENTIAL_FILE_NAMES: frozenset[str] = _CREDENTIAL_FILE_NAMES
 #: Directories whose every file is credential material, for the ones that name
 #: their config plainly (``~/.kube/config``, ``~/.docker/config.json``).
 _CREDENTIAL_DIR_NAMES: frozenset[str] = frozenset(
-    {".aws", ".docker", ".gnupg", ".kube", ".ssh", "gcloud"}
+    {".aws", ".docker", ".gnupg", ".kube", ".ssh", "gcloud", "github cli"}
 )
 
 
