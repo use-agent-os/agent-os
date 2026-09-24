@@ -60,6 +60,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   explicitly are not rewritten.
 
 ### Fixed
+- Curated memory: `memory add` no longer accepts an entry that the next read
+  splits apart. Entries are `§`-delimited (`ENTRY_DELIMITER` is `"\n§\n"`), and
+  nothing stopped an entry from containing the delimiter -- so `add` reported
+  success and `entry_count: 1` while the file it wrote held two entries, and
+  `remove` could not match the entry by the text that created it. A second
+  shape corrupts the neighbour instead: an entry ending in `\n§` supplies the
+  missing newline to the delimiter written after it, and the following entry
+  gains a stray `§`. Both are now refused by `add` and `replace`, asked of the
+  real serializer and parser rather than by pattern-matching, so the harmless
+  uses still store: `§` inside a line, an indented `§`, or an entry that is a
+  bare `§`. Of 4,000 marker-heavy candidates, 252 of the ~1,481 previously
+  accepted were lost on the next read; none are now.
 
 - CI: the Control UI build failed on `qrcode-generator`, whose npm tarball
   carries no license file. Its MIT text is vendored at

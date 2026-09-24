@@ -224,6 +224,8 @@ class CuratedMemoryStore:
         scan_error = _scan(content)
         if scan_error:
             return {"success": False, "error": scan_error}
+        if self._would_not_round_trip(content):
+            return self._delimiter_error(content)
 
         with self._file_lock(self._path_for(target)):
             reload_signal = self._reload_target(target, skip_drift=True)
@@ -267,6 +269,8 @@ class CuratedMemoryStore:
         scan_error = _scan(new_content)
         if scan_error:
             return {"success": False, "error": scan_error}
+        if self._would_not_round_trip(new_content):
+            return self._delimiter_error(new_content)
 
         with self._file_lock(self._path_for(target)):
             bak = self._reload_target(target, skip_drift=False)
@@ -816,6 +820,50 @@ class CuratedMemoryStore:
         """
         raw = cls._read_raw_checked(path)
         return cls._parse_entries(raw or "")
+
+    #: Probe text for :meth:`_would_not_round_trip`. Any two distinct strings
+    #: that are themselves clean entries work; NULs cannot occur in one.
+    _ROUND_TRIP_PROBE = ("\x00head", "\x00tail")
+
+    @classmethod
+    def _would_not_round_trip(cls, content: str) -> bool:
+        """Whether storing *content* as one entry would not survive the read.
+
+        Asked of the real serializer and the real parser rather than by
+        pattern-matching the delimiter, because two different shapes corrupt
+        the file and only one of them is visible in the entry itself: a line
+        that is just ``§`` inside the entry splits it in two, and an entry
+        *ending* in ``\n§`` supplies the missing newline to the delimiter that
+        follows it and steals the opening of the **next** entry. Joining the
+        candidate between two known-clean entries and re-parsing catches both,
+        and keeps passing the ``§`` uses that are harmless -- inline
+        (``5§ per unit``), indented, or an entry that is a bare ``§``.
+        """
+        head, tail = cls._ROUND_TRIP_PROBE
+        probe = ENTRY_DELIMITER.join([head, content, tail])
+        return cls._parse_entries(probe) != [head, content, tail]
+
+    @classmethod
+    def _delimiter_error(cls, content: str) -> dict[str, Any]:
+        """Refusal for content that cannot be stored as a single entry.
+
+        Rejected rather than rewritten, the same call
+        :func:`agentos.env_policy.sanitize_value` makes for a line break in a
+        ``.env`` value: silently editing the text would put words in the
+        agent's memory that it did not write, and silently splitting it -- what
+        happened before this check -- left an entry that ``remove`` could no
+        longer match by the text that created it.
+        """
+        return {
+            "success": False,
+            "error": (
+                "Entry contains a line that is just '§', which is the entry "
+                "delimiter, so it would be stored as several entries and could "
+                "not be removed or replaced by the text you sent. Reword or drop "
+                "that line — a '§' inside a line is fine."
+            ),
+            "content_preview": content[:200],
+        }
 
     @staticmethod
     def _parse_entries(raw: str) -> list[str]:
