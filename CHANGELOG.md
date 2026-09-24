@@ -60,6 +60,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   explicitly are not rewritten.
 
 ### Fixed
+- Zhipu/GLM provider: `glm-4.6` no longer silently loses reasoning support.
+  `get_capabilities`'s zai reasoning-shape prefix check listed `glm-4.5` and
+  `glm-4.7` but skipped `glm-4.6` — even though `engine/reasoning_hint.py`'s
+  own reasoning-family markers already list `glm-4.6` right next to
+  `glm-4.7` — so a request to `glm-4.6` got `supports_reasoning=False` and
+  never carried the `thinking` payload key, silently dropping a configured
+  `thinking_level` with no error anywhere.
 
 - CI: the Control UI build failed on `qrcode-generator`, whose npm tarball
   carries no license file. Its MIT text is vendored at

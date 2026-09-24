@@ -286,7 +286,7 @@ class ModelCatalog:
                 reasoning_format="gemini" if supports_reasoning else "none",
             )
         if provider_spec and provider_spec.reasoning_shape == "zai":
-            supports_reasoning = model_l.startswith(("glm-4.5", "glm-4.7", "glm-5"))
+            supports_reasoning = model_l.startswith(("glm-4.5", "glm-4.6", "glm-4.7", "glm-5"))
             return ModelCapabilities(
                 supports_reasoning=supports_reasoning,
                 supports_tools=True,
