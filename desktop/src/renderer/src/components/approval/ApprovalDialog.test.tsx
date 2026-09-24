@@ -21,8 +21,8 @@ const PATCH: Approval = {
   sessionKey: 'agent:main:s1',
   mode: 'patch',
   command: 'apply_patch 34536ae06e0cedb2ca2e716fd5747b69bcebbd1ab424a24159efb6e563b6c05b',
-  warning: 'apply_patch writes outside active workspace (/tmp/ws): /Users/me/notes.md',
-  args: { outside_paths: ['/Users/me/notes.md'], fingerprint: '34536ae0' },
+  warning: 'apply_patch writes outside active workspace (/tmp/ws): /srv/notes/notes.md',
+  args: { outside_paths: ['/srv/notes/notes.md'], fingerprint: '34536ae0' },
 }
 
 describe('ApprovalDialog', () => {
@@ -42,7 +42,7 @@ describe('ApprovalDialog', () => {
     render(<ApprovalDialog />)
     const dialog = screen.getByRole('alertdialog')
     expect(dialog).toHaveTextContent('Approval needed for apply_patch')
-    expect(screen.getByText('/Users/me/notes.md')).toBeInTheDocument()
+    expect(screen.getByText('/srv/notes/notes.md')).toBeInTheDocument()
     expect(dialog).not.toHaveTextContent('34536ae06e0cedb2')
     expect(dialog).toHaveTextContent('Session agent:main:s1')
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Deny' }))
