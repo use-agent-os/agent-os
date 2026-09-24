@@ -57,6 +57,9 @@ _PERSONA_KIND_BY_FILENAME = {
 MAX_SKILL_FILE_BYTES = 256_000
 MAX_MEMORY_CHARS = 80_000
 MEMORY_OVERFLOW_DIR = "memory-overflow"
+# Marks the start of one imported daily-memory note inside the merged
+# MEMORY.md. Everything up to the next such header belongs to that note.
+_DAILY_MEMORY_HEADER_RE = re.compile(r"^## Imported daily memory: ")
 
 USER_DATA_OPTIONS = {
     "soul",
@@ -1081,6 +1084,16 @@ class OpenClawMigrator:
         # by ``\n\n``, would be deduped independently and produce wrong
         # results when only the body happens to appear elsewhere.
         #
+        # A note's ``<body>`` is the whole file, which routinely holds more
+        # than one paragraph. Gluing only the first of them left the rest as
+        # independent blocks, so a note whose opening paragraph matched
+        # anything already in the destination — a bare ``## Preferences``
+        # heading is enough — lost its header and had its remaining
+        # paragraphs appended with no provenance, filed under whatever
+        # section happened to end the file. ``_memory_dedupe_key`` treats a
+        # note as one unit (``re.DOTALL`` over the whole part); this is the
+        # same rule on the merge side.
+        #
         # Returns ``(merged_text, n_deduplicated, n_appended)``. When all
         # logical blocks already exist the existing text is returned.
         def _logical_blocks(text: str) -> list[str]:
@@ -1089,12 +1102,16 @@ class OpenClawMigrator:
             i = 0
             while i < len(raw):
                 current = raw[i]
-                if re.match(r"^## Imported daily memory: ", current) and i + 1 < len(raw):
-                    glued.append(f"{current}\n\n{raw[i + 1]}")
-                    i += 2
-                else:
+                if not _DAILY_MEMORY_HEADER_RE.match(current):
                     glued.append(current)
                     i += 1
+                    continue
+                i += 1
+                body: list[str] = []
+                while i < len(raw) and not _DAILY_MEMORY_HEADER_RE.match(raw[i]):
+                    body.append(raw[i])
+                    i += 1
+                glued.append("\n\n".join([current, *body]))
             return glued
 
         def _norm(block: str) -> str:

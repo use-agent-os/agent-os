@@ -60,6 +60,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   explicitly are not rewritten.
 
 ### Fixed
+- openclaw migration: a multi-paragraph daily memory note is no longer split
+  across blocks. The memory merge treats a paragraph as a block and glues the
+  `## Imported daily memory: <name>` header to the paragraph that follows, but
+  a note's body is the whole file -- so a note written as a heading plus a line
+  under it split into several blocks, and when its opening paragraph matched
+  anything already in the destination `MEMORY.md` (a bare `## Preferences`
+  heading is enough) the provenance header was deduped away with it and the
+  note's facts were appended loose at the end, reading as part of whatever
+  section preceded them. The migration reported `migrated` regardless, and it
+  is a one-shot rewrite of the user's memory. A daily-memory header now claims
+  every paragraph up to the next one, the unit `_memory_dedupe_key` already
+  uses on the other side of the same merge.
 
 - CI: the Control UI build failed on `qrcode-generator`, whose npm tarball
   carries no license file. Its MIT text is vendored at
