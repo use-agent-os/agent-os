@@ -41,6 +41,7 @@ from agentos.memory.types import (
     normalize_memory_source_filter,
 )
 from agentos.safety.injection_guard import classify_injection
+from agentos.tools.builtin._lines import split_lines_keepends
 from agentos.tools.registry import tool
 from agentos.tools.types import ToolError, current_tool_context
 
@@ -1273,10 +1274,20 @@ def create_memory_tools(
 
         content = file_path.read_text(encoding="utf-8", errors="replace")
         if from_line is not None or lines is not None:
-            all_lines = content.splitlines()
+            # ``split_lines_keepends`` rather than ``str.splitlines()``: the
+            # latter also breaks on a form feed, a lone CR, NEL and U+2028
+            # (#3176), so ``from`` counted lines that ``read_file`` and
+            # ``grep_search`` -- newline-only since that fix -- do not, and the
+            # caller was handed a different line than the one it asked for.
+            # Keeping the terminators and joining on "" also returns the file's
+            # own bytes: rejoining with "\n" rewrote a CRLF memory file to LF
+            # and turned each of those characters into a newline, so the same
+            # tool returned different text for the same file depending on
+            # whether ``from``/``lines`` was passed.
+            all_lines = split_lines_keepends(content)
             start = max(0, (from_line - 1)) if from_line else 0
             end = (start + lines) if lines else len(all_lines)
-            content = "\n".join(all_lines[start:end])
+            content = "".join(all_lines[start:end])
         full_len = len(content)
         if full_len > 8000:
             return content[:8000] + f"\n\n... (truncated: showing 8000/{full_len} chars)"
