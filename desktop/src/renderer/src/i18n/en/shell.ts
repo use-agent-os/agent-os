@@ -72,4 +72,19 @@ export const shell = {
   'updates.pill.restart': 'Restart',
   'updates.pill.gateway': 'Restart gateway',
   'updates.pill.failed': 'Update failed',
+
+  // Approval prompt (components/approval/ApprovalDialog.tsx).
+  'approval.title': 'Approval needed for',
+  'approval.fallbackTool': 'a tool call',
+  'approval.writes': 'It wants to write outside the workspace:',
+  'approval.session': 'Session',
+  'approval.deny': 'Deny',
+  'approval.deny.title': 'Refuse this tool call',
+  'approval.once': 'Allow Once',
+  'approval.once.title': 'Approve only this pending tool call',
+  'approval.always': 'Always Allow',
+  'approval.always.title': 'Remember this operation type for future matching calls',
+  'approval.bypass': 'Stop Asking',
+  'approval.bypass.title':
+    'Skip approval prompts for the rest of this app session and allow this call',
 } as const

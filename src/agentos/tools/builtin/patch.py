@@ -510,10 +510,14 @@ def _patch_approval_plan(
 
     fingerprint = _patch_fingerprint(patch)
     command = f"apply_patch {fingerprint}"
+    # Name the files, not just the workspace: the approval prompt shows this
+    # line and a patch fingerprint, so without the targets the user is asked
+    # to approve a hash. Mirrors the write_file gate's "(workspace): path".
+    targets = ", ".join(outside_paths)
     warning = (
-        f"apply_patch writes outside active workspace ({workspace})"
+        f"apply_patch writes outside active workspace ({workspace}): {targets}"
         if workspace is not None
-        else "apply_patch writes to absolute paths outside the active workspace"
+        else f"apply_patch writes to absolute paths outside the active workspace: {targets}"
     )
     args: dict[str, object] = {
         "fingerprint": fingerprint,

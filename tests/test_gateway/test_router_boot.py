@@ -12,6 +12,7 @@ from agentos.gateway.boot import (
     _configured_agent_ids,
     _gateway_home,
     _task_runtime_turn_hard_deadline_s,
+    _warn_temporary_workspace,
     _warn_workspace_state_mismatch,
     build_services,
     build_task_runtime_run_kwargs,
@@ -980,6 +981,32 @@ def test_workspace_state_mismatch_emits_warning(
     assert "AGENTOS_STATE_DIR" in warnings[0]["expected_roots"]
 
 
+def test_workspace_under_temp_dir_emits_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A temp workspace makes every ordinary write "outside the workspace".
+
+    The log line is the evidence a user report of an out-of-workspace
+    approval naming ``.../T/tmpXXXX/ws`` was missing.
+    """
+    warnings: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "agentos.gateway.boot.log.warning",
+        lambda event, **kwargs: warnings.append({"event": event, **kwargs}),
+    )
+    monkeypatch.setattr("agentos.gateway.boot.tempfile.gettempdir", lambda: str(tmp_path))
+
+    _warn_temporary_workspace(GatewayConfig(workspace_dir=str(tmp_path / "tmpabc123" / "ws")))
+    assert [w["event"] for w in warnings] == ["build_services.workspace_in_temp_dir"]
+    assert warnings[0]["workspace"] == str((tmp_path / "tmpabc123" / "ws").resolve())
+
+    warnings.clear()
+    _warn_temporary_workspace(GatewayConfig(workspace_dir=str(tmp_path.parent / "workspace")))
+    _warn_temporary_workspace(GatewayConfig(workspace_dir=None))
+    assert warnings == []
+
+
 async def test_task_runtime_turn_uses_agent_registry_model_when_session_has_no_model() -> None:
     class RecordingTurnRunner:
         def __init__(self) -> None:
@@ -1243,4 +1270,3 @@ async def test_start_gateway_server_wires_hooks(tmp_path) -> None:
         assert runner._tool_hooks == (toh,)
     finally:
         await server.close()
-

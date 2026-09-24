@@ -197,12 +197,17 @@ async def test_apply_patch_workspace_escape_requests_patch_level_approval(
     ]
     assert payload["workspace"] == str(workspace.resolve())
     assert payload["patch_root"] == str(tmp_path.resolve())
+    # The prompt shows the warning next to a patch fingerprint, so the file
+    # being written has to be named there or the user is approving a hash.
+    assert str(outside.resolve()) in payload["warning"]
+    assert str(workspace.resolve()) in payload["warning"]
     pending = get_approval_queue().list_pending("exec")
     assert len(pending) == 1
     params = pending[0]["params"]
     assert params["toolName"] == "apply_patch"
     assert params["args"]["fingerprint"]
     assert params["args"]["outside_paths"] == [str(outside.resolve())]
+    assert params["warning"] == payload["warning"]
     assert outside.read_text(encoding="utf-8") == "old\n"
 
 

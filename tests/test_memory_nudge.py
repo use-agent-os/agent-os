@@ -456,3 +456,46 @@ def test_write_summary_truncates_a_long_entry():
 
     assert summary.endswith("…")
     assert len(summary) < 200
+
+
+# -- the review cannot reach past the memory tools ---------------------------
+
+
+class _ReviewRunner:
+    """Just enough of TurnRunner to drive one review turn and capture its context."""
+
+    def __init__(self) -> None:
+        self._config = type("C", (), {"memory": _Cfg(MemoryNudgeConfig(enabled=True))})()
+        self.contexts: list[Any] = []
+
+    _memory_nudge_config = TurnRunner._memory_nudge_config
+    _run_memory_nudge_review = TurnRunner._run_memory_nudge_review
+
+    def _resolve_memory_source_dir(self, agent_id: str) -> str:
+        return f"/memory/{agent_id}"
+
+    async def run(self, message: str, session_key: str, **kwargs: Any) -> Any:
+        self.contexts.append(kwargs["tool_context"])
+        return
+        yield  # pragma: no cover - makes this an async generator
+
+
+async def test_review_turn_is_unattended_and_memory_only():
+    """A background review must never be able to raise an approval prompt.
+
+    It inherited the full tool surface, so a model that chose ``apply_patch``
+    over the memory tool tripped the out-of-workspace gate and blocked the
+    user with an approval for a write they never asked for.
+    """
+    from agentos.engine.runtime import _MEMORY_REVIEW_TOOL_NAMES
+    from agentos.tools.types import InteractionMode
+
+    runner = _ReviewRunner()
+    await runner._run_memory_nudge_review(agent_id="main", session_key="s1")
+
+    (ctx,) = runner.contexts
+    assert ctx.interaction_mode is InteractionMode.UNATTENDED
+    assert ctx.allowed_tools == set(_MEMORY_REVIEW_TOOL_NAMES)
+    assert "apply_patch" not in ctx.allowed_tools
+    assert "write_file" not in ctx.allowed_tools
+    assert ctx.workspace_dir == "/memory/main"

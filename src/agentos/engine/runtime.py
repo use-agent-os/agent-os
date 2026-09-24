@@ -189,7 +189,7 @@ from agentos.session.keys import (
 )
 from agentos.session.manager import TranscriptSnapshot
 from agentos.session.terminal_reply import build_terminal_reply, sanitize_agent_error
-from agentos.tools.types import CallerKind, ToolContext
+from agentos.tools.types import CallerKind, InteractionMode, ToolContext
 from agentos.util.bounded_registry import BoundedRegistry
 
 # Stable user-facing envelope for LLM timeouts.
@@ -568,6 +568,15 @@ class MemorySourceUnreadableError(Exception):
 # Curated-memory write tools. A turn that calls one of these has already done
 # the thing the nudge would ask for, so it resets the counter instead.
 _MEMORY_WRITE_TOOL_NAMES: Final[frozenset[str]] = frozenset({"memory", "memory_save"})
+
+# The only tools the background review may see. It runs after the user's turn
+# with nobody watching, so anything outside the curated-memory surface can
+# only misfire: a review that reached for ``apply_patch`` or ``write_file``
+# tripped the out-of-workspace gate and put an approval prompt in front of
+# the user for a write they never asked for.
+_MEMORY_REVIEW_TOOL_NAMES: Final[frozenset[str]] = frozenset(
+    {"memory", "memory_save", "memory_get", "memory_search", "memory_delete"}
+)
 
 # Cap on retained nudge counters. Far above any realistic concurrent-session
 # count, low enough that the dict cannot grow without bound in a gateway that
@@ -1747,11 +1756,9 @@ class TurnRunner:
         # and is never revisited would otherwise pin this entry forever, the
         # same "nothing notifies this runner when a session ends" gap
         # _memory_snapshots/_bootstrap_snapshots are already bounded against.
-        self._compaction_failures: BoundedRegistry[str, _CompactionFailureState] = (
-            BoundedRegistry(
-                name="TurnRunner._compaction_failures",
-                session_of=lambda key, _value: key,
-            )
+        self._compaction_failures: BoundedRegistry[str, _CompactionFailureState] = BoundedRegistry(
+            name="TurnRunner._compaction_failures",
+            session_of=lambda key, _value: key,
         )
         self._turn_compaction_attempted_sessions: set[str] = set()
         self._turn_compacted_sessions: set[str] = set()
@@ -1761,11 +1768,11 @@ class TurnRunner:
         # session_key. Only popped when that next turn loads history (#2399) --
         # each entry carries a full kept-transcript slice, so an abandoned
         # session leaks more than a counter would.
-        self._emergency_compaction_overrides: BoundedRegistry[
-            str, _EmergencyCompactionOverride
-        ] = BoundedRegistry(
-            name="TurnRunner._emergency_compaction_overrides",
-            session_of=lambda key, _value: key,
+        self._emergency_compaction_overrides: BoundedRegistry[str, _EmergencyCompactionOverride] = (
+            BoundedRegistry(
+                name="TurnRunner._emergency_compaction_overrides",
+                session_of=lambda key, _value: key,
+            )
         )
         # Last persisted row each session's loaded history covers, keyed by
         # session key; anchors inline compaction persistence so rows appended
@@ -2340,11 +2347,18 @@ class TurnRunner:
             # memory the user cannot see is one they cannot correct, and a
             # silent review is indistinguishable from one that never ran --
             # which is exactly how the counter bug below stayed hidden.
+            # Unattended and memory-only: the review must never be able to
+            # block the user with an approval prompt. Without the allowlist
+            # it inherited the full tool surface, and a model that "saved"
+            # via apply_patch surfaced an out-of-workspace approval for a
+            # background write the user never asked for.
             tool_context = ToolContext(
+                interaction_mode=InteractionMode.UNATTENDED,
                 agent_id=agent_id,
                 session_key=session_key,
                 workspace_dir=str(self._resolve_memory_source_dir(agent_id)),
                 source_kind="memory_nudge",
+                allowed_tools=set(_MEMORY_REVIEW_TOOL_NAMES),
             )
             writes: list[str] = []
             failures: list[str] = []

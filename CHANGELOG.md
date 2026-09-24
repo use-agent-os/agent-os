@@ -116,6 +116,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- The background memory review (the turn that runs every N user turns to
+  curate MEMORY.md) can no longer put an approval prompt in front of the
+  user. It ran with the full tool surface, so a model that "saved" through
+  `apply_patch` instead of the memory tool tripped the out-of-workspace gate
+  and the user was asked to approve a hash for a write they never requested.
+  The review now sees only the memory tools and runs unattended.
+
+- `apply_patch` approvals name the files being written, not just the
+  workspace: the prompt showed a patch fingerprint and the workspace path,
+  which was no basis for a decision. The gateway also logs
+  `build_services.workspace_in_temp_dir` when the configured workspace lives
+  under the OS temp directory, since that turns every ordinary write into an
+  out-of-workspace approval.
+
+- Desktop: the approval prompt rendered as bare text and unstyled buttons
+  over the chat. It reused the console's prompt, whose panel styling only
+  exists under the console's stylesheet. The desktop now has its own
+  alert-shaped dialog that lists the target files, drops the patch
+  fingerprint, and defaults to Deny.
+
 - CI: the Control UI build failed on `qrcode-generator`, whose npm tarball
   carries no license file. Its MIT text is vendored at
   `frontend/vendor-licenses/qrcode-generator-LICENSE.txt` and appended to the

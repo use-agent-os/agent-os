@@ -1,7 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useEffect, useState, type ReactNode } from 'react'
 import { BootstrapContext, RpcContext } from '@/app/providers'
-import { ApprovalPrompt } from '@/components/ApprovalPrompt'
 import { KeyboardShortcutProvider } from '@/components/KeyboardShortcuts'
 import { Toaster } from '@/components/ui/sonner'
 import { initLocale } from '@/i18n'
@@ -10,6 +9,7 @@ import { WsRpcClient, type RpcState } from '@/lib/ws-rpc'
 import { approvalMonitor } from '@/services/approval-monitor'
 import { useConnection } from '@/stores/connection'
 import { useTheme as useWebTheme } from '@/stores/theme'
+import { ApprovalDialog } from '~/components/approval/ApprovalDialog'
 import { desktopApi } from '~/lib/desktop-api'
 import { useGateway } from '~/stores/gateway'
 import { useSettings } from '~/stores/settings'
@@ -121,7 +121,7 @@ export function GatewayProviders({ children }: { children: ReactNode }) {
         <QueryClientProvider client={queryClient}>
           <KeyboardShortcutProvider>
             {children}
-            <ApprovalPrompt />
+            <ApprovalDialog />
             <Toaster />
           </KeyboardShortcutProvider>
         </QueryClientProvider>

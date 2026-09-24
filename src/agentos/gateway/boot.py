@@ -7,6 +7,7 @@ import inspect
 import logging
 import os
 import secrets
+import tempfile
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -480,6 +481,30 @@ def _warn_workspace_state_mismatch(config: GatewayConfig) -> None:
         state_dir=getattr(config, "state_dir", None),
         config_path=getattr(config, "config_path", None),
         expected_roots=mismatches,
+    )
+
+
+def _warn_temporary_workspace(config: GatewayConfig) -> None:
+    """Log loudly when the workspace lives under the OS temp directory.
+
+    A temp workspace is never what an operator meant: everything the agent
+    writes will vanish, and every ordinary path (memory files, the user's
+    own files) counts as "outside the workspace", so routine writes start
+    asking for approval. That shipped once as an unexplained prompt naming
+    ``/var/folders/.../T/tmpXXXX/ws`` on a user's machine; this line is the
+    evidence that report was missing.
+    """
+    workspace = _resolved_path(getattr(config, "workspace_dir", None))
+    if workspace is None:
+        return
+    temp_root = _resolved_path(tempfile.gettempdir())
+    if temp_root is None or not _path_is_relative_to(workspace, temp_root):
+        return
+    log.warning(
+        "build_services.workspace_in_temp_dir",
+        workspace=str(workspace),
+        temp_dir=str(temp_root),
+        config_path=getattr(config, "config_path", None),
     )
 
 
@@ -1506,6 +1531,7 @@ async def build_services(
         if config.config_path:
             log.info("build_services.config_loaded", path=config.config_path)
     _warn_workspace_state_mismatch(config)
+    _warn_temporary_workspace(config)
 
     validate_agentos_router_runtime(config)
     from agentos.memory.embedding_resolver import resolve_memory_embedding

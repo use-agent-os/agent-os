@@ -1,0 +1,108 @@
+/* Approval prompt (components/approval/ApprovalDialog.tsx). An NSAlert-shaped
+   sheet over a dimmed backdrop: icon, one-line title, the paths or command
+   under review, push buttons with the default (Deny) on the right. */
+.approval-dialog__overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-critical-approval);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 96px;
+  background: color-mix(in srgb, var(--background) 55%, transparent);
+  backdrop-filter: blur(2px);
+}
+.approval-dialog {
+  display: flex;
+  width: min(520px, calc(100vw - 48px));
+  max-height: calc(100vh - 144px);
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px 24px 18px;
+  border-radius: var(--radius-dialog);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow:
+    0 0 0 0.5px var(--border),
+    0 24px 60px rgba(0, 0, 0, 0.38),
+    0 2px 8px rgba(0, 0, 0, 0.18);
+  outline: none;
+  transform-origin: top center;
+}
+.approval-dialog__icon {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+.approval-dialog__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+}
+.approval-dialog__title code {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+}
+.approval-dialog__body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.approval-dialog__body p {
+  margin: 0;
+}
+.approval-dialog__lead {
+  color: var(--foreground);
+}
+.approval-dialog__paths {
+  margin: 0;
+  padding: 8px 10px;
+  list-style: none;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--elevated);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  word-break: break-all;
+}
+.approval-dialog__paths li + li {
+  margin-top: 4px;
+}
+.approval-dialog__command {
+  margin: 0;
+  max-height: 160px;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--elevated);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.approval-dialog__warning {
+  color: var(--dim);
+  word-break: break-word;
+}
+.approval-dialog__meta {
+  font-size: 11px;
+  color: var(--dim);
+}
+.approval-dialog__buttons {
+  display: flex;
+  flex-direction: row-reverse;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
