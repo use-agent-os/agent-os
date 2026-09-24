@@ -78,6 +78,14 @@ _WORD_RE = re.compile(r"[^\W_]+")
 #: CJK ideographs and kana carry no spaces, so they are matched one char at a
 #: time and additionally paired into bigrams.
 _CJK_RE = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff]")
+#: One unbroken run of them. Bigrams are formed per run, never across the flat
+#: list of every CJK character in the text: that glued the tail of one word to
+#: the head of the next across the Latin text, punctuation or spaces between
+#: them, inventing a token that appears in neither snippet and making two
+#: unrelated ones look alike. ``memory_tools._memory_search_query_terms`` --
+#: which this function's shape is shared with -- was corrected the same way in
+#: #3180.
+_CJK_RUN_RE = re.compile(f"{_CJK_RE.pattern}+")
 
 
 def _jaccard_similarity(a: str, b: str) -> float:
@@ -86,11 +94,10 @@ def _jaccard_similarity(a: str, b: str) -> float:
     def tokenize(text: str) -> set[str]:
         tokens: set[str] = set()
         tokens.update(_WORD_RE.findall(text.lower()))
-        # CJK unigrams + bigrams
-        cjk = _CJK_RE.findall(text)
-        tokens.update(cjk)
-        for i in range(len(cjk) - 1):
-            tokens.add(cjk[i] + cjk[i + 1])
+        # CJK unigrams + bigrams, per unbroken run (see _CJK_RUN_RE).
+        for run in _CJK_RUN_RE.findall(text):
+            tokens.update(run)
+            tokens.update(run[index : index + 2] for index in range(len(run) - 1))
         return tokens
 
     ta, tb = tokenize(a), tokenize(b)

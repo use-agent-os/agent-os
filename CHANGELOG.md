@@ -60,6 +60,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   explicitly are not rewritten.
 
 ### Fixed
+- Memory MMR diversity: CJK bigrams are built per unbroken run rather than
+  across the whole snippet. `_jaccard_similarity` collected every CJK character
+  into one flat list and paired neighbours in it, so the tail of one word was
+  glued to the head of the next across the Latin text, punctuation or spaces
+  between them -- `"\u4f1a\u8bae notes and \u8ba1\u5212 draft"` produced the token
+  `"\u8bae\u8ba1"`, which appears nowhere in it. Two unrelated snippets then shared
+  a token, and `_mmr_rerank` penalises a candidate by its similarity to what is
+  already selected, so a memory the search should have returned was dropped as
+  redundant. Of 4,000 randomised result sets, 173 returned a different memory
+  before this change. Same correction `memory_tools._memory_search_query_terms`
+  received in #3180; its docstring names this function as the shape it shares.
 
 - CI: the Control UI build failed on `qrcode-generator`, whose npm tarball
   carries no license file. Its MIT text is vendored at
