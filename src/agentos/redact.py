@@ -118,7 +118,9 @@ _PREFIX_RE = re.compile(r"(?<![A-Za-z0-9])(?:" + "|".join(_PREFIX_PATTERNS) + ")
 #: ``https://user:token@host`` — userinfo in a web URL is a credential the
 #: same way a DSN password is. Redaction-only: the payload guard keeps its
 #: narrower connection-string vocabulary.
-_URL_USERINFO_RE = re.compile(r"(https?://[^:\s/]+:)([^@\s/]+)(@)", re.IGNORECASE)
+#: The username is optional (``*``, not ``+``): ``https://:token@host`` is a
+#: valid spelling and carries the credential in the same place.
+_URL_USERINFO_RE = re.compile(r"(https?://[^:\s/]*:)([^@\s/]+)(@)", re.IGNORECASE)
 
 _PEM_PRIVATE_KEY_RE = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----", re.IGNORECASE)
 _PEM_PRIVATE_KEY_BLOCK_RE = re.compile(
@@ -131,8 +133,14 @@ _PASSWD_ENTRY_RE = re.compile(r"(?m)^(?:\d+\t)?[a-z_][a-z0-9_-]*:x?:\d+:\d+:")
 _JWT_RE = re.compile(r"eyJ[A-Za-z0-9_-]{16,}(?:\.[A-Za-z0-9_=-]{8,}){1,2}")
 #: ``postgres://user:PASSWORD@host`` and friends. Whitespace is excluded from
 #: both halves so a match can never span a line break.
+#: The username is optional (``*``, not ``+``). ``redis://:password@host`` is
+#: the canonical Redis URL -- Redis had no usernames before ACLs, so the empty
+#: field is what ``REDIS_URL`` holds in practice -- and ``postgres``, ``amqp``
+#: and ``mongodb`` accept the same shape. Requiring a username meant the one
+#: spelling these schemes are usually written in was the one that went through
+#: unmasked, although every scheme here was listed deliberately.
 _DB_CONNSTR_RE = re.compile(
-    r"((?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://[^:\s/]+:)([^@\s]+)(@)",
+    r"((?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://[^:\s/]*:)([^@\s]+)(@)",
     re.IGNORECASE,
 )
 

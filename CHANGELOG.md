@@ -60,6 +60,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   explicitly are not rewritten.
 
 ### Fixed
+- Secret redaction: a connection string with an empty username no longer
+  reaches the model with its password intact. `_DB_CONNSTR_RE` lists
+  `postgres`, `mysql`, `mongodb`, `redis` and `amqp` deliberately, but required
+  a non-empty username before the colon -- so `redis://user:pw@host` was masked
+  while `redis://:pw@host` was not. That empty field is the canonical Redis URL
+  (Redis had no usernames before ACLs, so it is what a `REDIS_URL` holds), and
+  `postgres`, `amqp`, `mongodb` and `mysql` accept the same shape.
+  `_URL_USERINFO_RE` had the identical `+` and the same consequence for
+  `https://:token@host`. Both now accept an empty username. This is the default
+  path for an agent reading a `.env` or `docker-compose.yml`:
+  `AGENTOS_REDACT_SECRETS` is on by default and `redact_file_output` is the one
+  policy behind `read_file`, `grep_search`, `read_spreadsheet` and `edit_file`.
 
 - CI: the Control UI build failed on `qrcode-generator`, whose npm tarball
   carries no license file. Its MIT text is vendored at
