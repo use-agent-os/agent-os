@@ -60,6 +60,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   explicitly are not rewritten.
 
 ### Fixed
+- Curated memory (`memory` tool, `MEMORY.md`/`USER.md`): `add` now detects
+  and refuses on external drift exactly like `replace`/`remove`/
+  `apply_batch`. `add` persists through the same full-file atomic rewrite
+  as every other mutation, so its `skip_drift=True` call was never actually
+  justified by being "append-only" — a hand-edited or externally-appended
+  file that the other three operations correctly refuse and back up to a
+  `.bak` snapshot was instead silently accepted and rewritten by `add`,
+  with a plain "Entry added." success and no signal that on-disk drift
+  existed.
 
 - CI: the Control UI build failed on `qrcode-generator`, whose npm tarball
   carries no license file. Its MIT text is vendored at
