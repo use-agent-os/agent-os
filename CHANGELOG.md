@@ -60,6 +60,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   explicitly are not rewritten.
 
 ### Fixed
+- `apply_patch`: hunks whose start line exceeds the target file's length
+  (such as pure-addition hunks attempting to insert lines past EOF) now raise
+  a `ValueError` instead of silently appending content at the end of the file
+  ([#2632](https://github.com/use-agent-os/agent-os/issues/2632)).
 
 - CI: the Control UI build failed on `qrcode-generator`, whose npm tarball
   carries no license file. Its MIT text is vendored at
