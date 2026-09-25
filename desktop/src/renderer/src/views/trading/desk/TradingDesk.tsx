@@ -45,6 +45,8 @@ export function useDeskFrame(input: {
   entering: boolean
   onSwitchMode: (next: DeskMode) => void
   onSessionPending: (count: number) => void
+  /** Chat mode: the strip's slot for the chat's session actions (StatusStrip). */
+  sessionSlot?: (el: HTMLDivElement | null) => void
 }): {
   strip: ReactNode
   banner: ReactNode
@@ -56,7 +58,7 @@ export function useDeskFrame(input: {
   frameRef: React.RefObject<HTMLDivElement | null>
   collapsed: boolean
 } {
-  const { sessionKey, mode, active, entering, onSwitchMode, onSessionPending } = input
+  const { sessionKey, mode, active, entering, onSwitchMode, onSessionPending, sessionSlot } = input
   // An ordinary chat must not poll the trading engine or wake on its events.
   useTradingInvalidation(active)
   const status = useTradingStatus(active)
@@ -182,7 +184,7 @@ export function useDeskFrame(input: {
 
   if (!active) {
     return {
-      strip: <StatusStrip mode={mode} onSwitchMode={onSwitchMode} />,
+      strip: <StatusStrip mode={mode} onSwitchMode={onSwitchMode} sessionSlot={sessionSlot} />,
       banner: null,
       desk: null,
       book: null,

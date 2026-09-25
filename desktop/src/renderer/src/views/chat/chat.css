@@ -86,46 +86,114 @@
   display: none;
 }
 
+/* The session's actions: its project, its run state, new chat, reset and
+   export. No title beside them — the sidebar already names the chat. In Chat
+   mode they sit on the mode strip, right of the pill (ChatView renders them
+   into StatusStrip's slot), so the conversation starts right under the
+   switch. At the desk the strip is the desk's, and they keep a row of their
+   own above the chat column. */
 .chat-desktop-header {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  justify-content: flex-end;
   min-height: 32px;
   padding: 0 16px 6px 20px;
 }
-.chat-desktop-header__title {
+.chat-desktop-actions {
+  display: flex;
   min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  align-items: center;
+  gap: 6px;
 }
-.chat-desktop-header__state {
+/* Glyphs keep their size; only the chip's name and the state's word give,
+   and they give way with an ellipsis rather than push into the pill. */
+.chat-desktop-actions > *,
+.chat-desktop-actions .proj-chip > :not(.proj-chip__name) {
+  flex-shrink: 0;
+}
+.chat-desktop-actions > .proj-chip__anchor,
+.chat-desktop-actions > .chat-desktop-actions__state {
+  min-width: 0;
+  flex-shrink: 1;
+}
+.chat-desktop-actions .proj-chip {
+  max-width: min(220px, 100%);
+}
+/* The buttons keep the toolbar's rhythm (28 px on a 30 px pitch): on the
+   strip they sit right under the toolbar's own, flush right with them, and
+   a 34 px pitch left them 4 and 8 px out of line. */
+.chat-desktop-actions > .mac-button + .mac-button {
+  margin-left: -4px;
+}
+.chat-desktop-actions__state {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   margin-right: 6px;
   font-size: 11.5px;
+  white-space: nowrap;
   color: var(--muted-foreground);
 }
-.chat-desktop-header__state::before {
+.chat-desktop-actions__state::before {
   content: '';
+  flex-shrink: 0;
   width: 6px;
   height: 6px;
   border-radius: var(--radius-pill);
   background: currentColor;
 }
-.chat-desktop-header__state[data-tone='ok'] {
+.chat-desktop-actions__state-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-desktop-actions__state[data-tone='ok'] {
   color: var(--ok);
 }
-.chat-desktop-header__state[data-tone='warn'] {
+.chat-desktop-actions__state[data-tone='warn'] {
   color: var(--warn);
 }
-.chat-desktop-header__state[data-tone='danger'] {
+.chat-desktop-actions__state[data-tone='danger'] {
   color: var(--danger);
+}
+
+/* Shrink chain on the strip. The pill stays centred between two equal
+   columns, so where the strip's content box is C wide (a container query
+   measures the content box: the strip less its 28 px of padding) the
+   actions get (C − 244) / 2 − 12: the pill is 244 and 12 keeps them off it.
+   As the pane narrows a label goes one step before flex would crush it,
+   the way the desk's seats do (desk.css). Measured with "Add to project"
+   (222 px with the buttons; a state adds 12 + its own width, 18 as a dot):
+     ≥ 883  everything shown. "Interrupted", the longest one-word state,
+            fits beside the whole chip; "Waiting for approval" takes an
+            ellipsis below 979, and its approval prompt is up anyway
+     < 883  the run state keeps its dot; the word stays in its tooltip and
+            for screen readers
+     < 749  the chip keeps its folder and chevron; the name is its tooltip
+     < 580  not even that fits beside the pill: the actions take a row of
+            their own under it, words back on. With none to show (a fresh
+            chat, the gateway down) the strip keeps its one row
+   The strip's track, padding and container are in desk.css. */
+@container trd-strip (580px <= width < 883px) {
+  .chat-desktop-actions__state-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+@container trd-strip (580px <= width < 749px) {
+  .chat-desktop-actions .proj-chip__name {
+    display: none;
+  }
+}
+@container trd-strip (width < 580px) {
+  .trd-strip[data-mode='chat'] > .trd-strip__right:has(.chat-desktop-actions) {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    padding: 4px 0 6px;
+  }
 }
 
 .chat-desktop-hero {

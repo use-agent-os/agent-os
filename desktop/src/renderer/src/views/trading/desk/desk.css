@@ -147,10 +147,15 @@
 .trd-strip {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  /* Set close under the toolbar: the mode pill and its 1 px ring, with the
+     conversation starting right below. A track, not a height, so Chat mode
+     can give the chat's actions a second row when the pane is too narrow to
+     hold them beside the pill (chat.css). */
+  grid-template-rows: 42px;
   align-items: center;
-  /* Tall enough for the mode pill plus the bloom around its running edge. */
-  height: 50px;
   padding: 0 12px 0 16px;
+  /* Chat mode's actions shed their labels against this width (chat.css). */
+  container: trd-strip / inline-size;
   /* No rule under the strip: the app's toolbar rows never draw one, and a
      full-width line here would cut across the BOOK's own header. */
   font-size: 11px;
@@ -165,6 +170,14 @@
 }
 .trd-strip__right {
   justify-content: flex-end;
+}
+/* Chat mode: the open chat's session actions, rendered in by ChatView. The
+   padding keeps them off the pill however far they are squeezed. */
+.trd-strip__session {
+  display: flex;
+  min-width: 0;
+  justify-content: flex-end;
+  padding-left: 12px;
 }
 .trd-strip__mission {
   display: inline-flex;
@@ -1816,10 +1829,11 @@ body[data-dragging] .trd-book__handle {
 }
 
 /* Leaving: the short reverse — the chat drops back into the space the desk
-   was holding. No filter: a saturate() on the whole body is a full-pane
-   repaint for every frame of the exit, and it tinted anything captured
-   mid-flight. */
-.mode-shell[data-enter='chat'] .mode-body {
+   was holding, its actions with it into the strip. No filter: a saturate()
+   on the whole body is a full-pane repaint for every frame of the exit, and
+   it tinted anything captured mid-flight. */
+.mode-shell[data-enter='chat'] .mode-body,
+.mode-shell[data-enter='chat'] .trd-strip__session {
   animation: desk-settle var(--leave-total) var(--enter-ease) both;
 }
 @keyframes desk-settle {

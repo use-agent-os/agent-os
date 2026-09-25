@@ -11,11 +11,14 @@ import type { DeskMode } from './mode-logic'
  * Trading mode the row becomes the desk's status strip around it: missions
  * on the left, the one status word beside the pill, the approvals pin and
  * the Desk toggle on the right. The pin is null while the count is unknown
- * — never a broken count. In Chat mode the strip is only the pill.
+ * — never a broken count. In Chat mode the strip is the pill and, on the
+ * right, a slot the open chat fills with its session actions (ChatView), so
+ * the conversation needs no header row of its own.
  */
 export function StatusStrip({
   mode,
   onSwitchMode,
+  sessionSlot,
   missions = [],
   running = new Set(),
   sessionPending = 0,
@@ -27,6 +30,8 @@ export function StatusStrip({
 }: {
   mode: DeskMode
   onSwitchMode: (next: DeskMode) => void
+  /** Chat mode: handed the element the chat's session actions go into. */
+  sessionSlot?: (el: HTMLDivElement | null) => void
   missions?: RawJob[]
   running?: ReadonlySet<string>
   sessionPending?: number
@@ -103,6 +108,9 @@ export function StatusStrip({
             )}
             {deskMode ? t('trading.strip.chat') : t('trading.strip.desk')}
           </button>
+        ) : null}
+        {!trading && sessionSlot ? (
+          <div className="trd-strip__session" ref={sessionSlot} data-testid="strip-session" />
         ) : null}
       </div>
     </div>

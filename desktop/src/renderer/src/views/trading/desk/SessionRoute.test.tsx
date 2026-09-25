@@ -7,9 +7,15 @@ import { SessionRoute } from './SessionRoute'
 
 const frameState = { fullDesk: true }
 // The mock keeps the argument so the test can assert what the route hands the frame.
+// Its strip takes the slot ref the way StatusStrip does in Chat mode.
 const useDeskFrame = vi.fn((input: unknown) => ({
   input,
-  strip: <div data-testid="strip" />,
+  strip: (
+    <div
+      data-testid="strip"
+      ref={(input as { sessionSlot?: (el: HTMLDivElement | null) => void }).sessionSlot}
+    />
+  ),
   banner: <div data-testid="frame-banner" />,
   desk: null,
   book: null,
@@ -22,15 +28,19 @@ vi.mock('./TradingDesk', () => ({ useDeskFrame: (input: unknown) => useDeskFrame
 vi.mock('../TradingView', () => ({
   TradingView: () => <div data-testid="trading-view" />,
 }))
+const chatProps: { last: { actionsSlot?: HTMLElement | null } | null } = { last: null }
 vi.mock('~/views/chat/ChatView', () => ({
-  ChatView: () => <div data-testid="chat-view" />,
+  ChatView: (props: { actionsSlot?: HTMLElement | null }) => {
+    chatProps.last = props
+    return <div data-testid="chat-view" />
+  },
 }))
 
 const KEY = 'agent:trading:webchat:trading-t1'
 
-function mount() {
+function mount(key = KEY) {
   return render(
-    <MemoryRouter initialEntries={[`/sessions/${encodeURIComponent(KEY)}`]}>
+    <MemoryRouter initialEntries={[`/sessions/${encodeURIComponent(key)}`]}>
       <Routes>
         <Route path="/sessions/:key" element={<SessionRoute />} />
       </Routes>
@@ -43,6 +53,7 @@ beforeEach(() => {
   writeTradingSessionKey(KEY)
   useGateway.setState({ status: { state: 'running', pid: 1, url: 'http://x', error: null } })
   useDeskFrame.mockClear()
+  chatProps.last = null
 })
 
 describe('SessionRoute', () => {
@@ -67,5 +78,16 @@ describe('SessionRoute', () => {
     expect(useDeskFrame).toHaveBeenCalledWith(
       expect.objectContaining({ mode: 'trading', active: true, sessionKey: KEY }),
     )
+  })
+
+  it("hands the chat the strip's slot for its actions in Chat mode, and none at the desk", () => {
+    frameState.fullDesk = false
+    const { unmount } = mount('agent:main:webchat:plain')
+    expect(chatProps.last?.actionsSlot).toBe(screen.getByTestId('strip'))
+    unmount()
+    // At the desk the strip is the desk's: the chat keeps a row of its own.
+    mount()
+    expect(screen.getByTestId('chat-view')).toBeInTheDocument()
+    expect(chatProps.last?.actionsSlot).toBeUndefined()
   })
 })

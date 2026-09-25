@@ -7,8 +7,8 @@ import { useUi } from '~/stores/ui'
 import { ThemeToggle } from '~/theme/ThemeToggle'
 
 /**
- * Content-column toolbar. Left side stays empty on purpose (the wordmark or
- * the session title below carries identity); right side holds window-level
+ * Content-column toolbar. Left side stays empty on purpose (the wordmark, or
+ * in a chat the sidebar, carries identity); right side holds window-level
  * controls, the way Mail and Notes do.
  */
 export function Toolbar() {

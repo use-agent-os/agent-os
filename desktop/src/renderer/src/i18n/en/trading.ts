@@ -385,7 +385,6 @@ export const trading = {
   'trading.settings.invalid': 'Enter a number',
 
   // ── Chat-centric desk ────────────────────────────────────────────────────
-  'trading.chat.title': 'Trading desk',
   'trading.chat.fresh': 'New desk chat',
   'trading.chat.opening': 'Opening the desk',
   'trading.chat.empty.title': 'Tell the desk what to do',

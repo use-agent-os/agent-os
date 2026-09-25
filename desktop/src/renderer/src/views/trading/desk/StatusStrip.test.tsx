@@ -87,6 +87,37 @@ describe('StatusStrip', () => {
     fireEvent.keyDown(screen.getByTestId('mode-pill'), { key: 'ArrowRight' })
     expect(onSwitchMode).toHaveBeenCalledTimes(2)
   })
+
+  it("keeps a slot right of the pill for the chat's actions in Chat mode, none at the desk", () => {
+    const sessionSlot = vi.fn()
+    const { rerender } = renderDesk(
+      <StatusStrip mode="chat" onSwitchMode={vi.fn()} sessionSlot={sessionSlot} />,
+    )
+    const slot = screen.getByTestId('strip-session')
+    expect(slot.parentElement).toHaveClass('trd-strip__right')
+    // After the tab list, so Tab reaches the pill before the chat's actions.
+    expect(screen.getByTestId('mode-pill').compareDocumentPosition(slot)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
+    expect(sessionSlot).toHaveBeenLastCalledWith(slot)
+    // At the desk the right of the strip is the desk's: no slot, so no gap.
+    rerender(
+      <StatusStrip
+        {...pill}
+        missions={[]}
+        running={new Set()}
+        sessionPending={0}
+        globalPending={null}
+        streaming={false}
+        deskMode={false}
+        onToggleDesk={vi.fn()}
+        onOpenApprovals={vi.fn()}
+        sessionSlot={sessionSlot}
+      />,
+    )
+    expect(screen.queryByTestId('strip-session')).toBeNull()
+    expect(sessionSlot.mock.lastCall?.[0]).toBeNull()
+  })
 })
 
 describe('ComposerSeats', () => {

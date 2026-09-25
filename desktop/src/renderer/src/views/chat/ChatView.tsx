@@ -1,6 +1,7 @@
 import './chat.css'
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router'
 import { toast } from 'sonner'
 import { ArrowDown, Download, RotateCcw, SquarePen, Terminal, X } from 'lucide-react'
@@ -38,15 +39,11 @@ import { useGateway } from '~/stores/gateway'
 import { useLive } from '~/stores/live'
 import { useSettings } from '~/stores/settings'
 import { useUi } from '~/stores/ui'
-import { isPlaceholderSessionName, shownSessionName } from '~/lib/session-name'
 import { configuredProvider } from '@/views/setup/logic'
 import { useConfigSnapshot } from '~/views/settings/use-snapshot'
 import { ProjectChip } from './ProjectChip'
 import { useDeskInstruments, type DeskProps } from '~/views/trading/desk/useDeskInstruments'
 import { useTradeLedger } from '~/views/trading/desk/useTradeLedger'
-
-/** After a run settles, when the name is still a placeholder: re-read at these offsets. */
-const PLACEHOLDER_RECHECK_MS = [4_000, 12_000, 40_000]
 
 const NEW_CHAT_COMBO = 'mod+shift+o'
 const DEFAULT_AGENT_KEY = webchatSessionKey('main')
@@ -93,13 +90,24 @@ function runTone(status: string): 'ok' | 'warn' | 'danger' | 'dim' {
 /**
  * The conversation. This is the console's ChatPage with the desktop's chrome:
  * the session comes from the route (`/sessions/:key`, keyless = a fresh
- * session), the header is a plain row instead of a portal, and before the
+ * session), there is no title (the sidebar names the chat), and before the
  * first send the composer sits centred under the wordmark and docks to the
- * bottom on send. Everything below the header — transcript, composer, slash
- * menu, route picker, attachments, pending queue, approvals — is the shared
- * web implementation talking to the same gateway.
+ * bottom on send. The session actions go into `actionsSlot` when the route
+ * gives one (the mode strip, in Chat mode), or on a row above the chat when it
+ * does not (the desk). Everything else — transcript, composer, slash menu,
+ * route picker, attachments, pending queue, approvals — is the shared web
+ * implementation talking to the same gateway.
  */
-export function ChatView({ desk = null }: { desk?: DeskProps | null } = {}) {
+export function ChatView({
+  desk = null,
+  actionsSlot,
+}: {
+  desk?: DeskProps | null
+  /** Where the session actions go: an element, null while that element has
+      not mounted yet (render nothing rather than flash them in the chat), or
+      undefined for a row of their own. */
+  actionsSlot?: HTMLElement | null
+} = {}) {
   const gatewayState = useGateway((s) => s.status.state)
   if (gatewayState !== 'running') {
     return (
@@ -113,10 +121,16 @@ export function ChatView({ desk = null }: { desk?: DeskProps | null } = {}) {
       </div>
     )
   }
-  return <ConnectedChat desk={desk} />
+  return <ConnectedChat desk={desk} actionsSlot={actionsSlot} />
 }
 
-function ConnectedChat({ desk }: { desk: DeskProps | null }) {
+function ConnectedChat({
+  desk,
+  actionsSlot,
+}: {
+  desk: DeskProps | null
+  actionsSlot: HTMLElement | null | undefined
+}) {
   const rpc = useRpc()
   const navigate = useNavigate()
   const reduce = useReducedMotion()
@@ -286,53 +300,6 @@ function ConnectedChat({ desk }: { desk: DeskProps | null }) {
   }, [paramKey])
 
   const enterToSend = useSettings((s) => s.settings.general.enterToSend)
-
-  // Session display name (sessions.resolve), re-read when the run settles.
-  // The titler names a fresh session a few seconds after the first turn and
-  // broadcasts the rename; while the name is still a placeholder we also
-  // re-read it on a short schedule, so a missed event cannot leave "New
-  // session" on screen for a chat that has a name.
-  const [sessionName, setSessionName] = useState('')
-  const runStatus = runState.status
-  useEffect(() => {
-    let cancelled = false
-    const timers: number[] = []
-    const resolve = async (): Promise<string> => {
-      try {
-        await rpc.waitForConnection()
-        const resolved = await rpc.call<{ display_name?: string | null }>('sessions.resolve', {
-          key: sessionKey,
-        })
-        const name = String(resolved?.display_name || '')
-        if (!cancelled) setSessionName(name)
-        return name
-      } catch {
-        if (!cancelled) setSessionName('')
-        return ''
-      }
-    }
-    void (async () => {
-      const name = await resolve()
-      if (cancelled || !isPlaceholderSessionName(name)) return
-      for (const delay of PLACEHOLDER_RECHECK_MS) {
-        timers.push(
-          window.setTimeout(() => {
-            void resolve()
-          }, delay),
-        )
-      }
-    })()
-    // A rename from the sidebar (or another window) lands as an event.
-    const off = rpc.on('sessions.changed', (payload) => {
-      const p = (payload ?? {}) as { key?: string; reason?: string; display_name?: string }
-      if (p.key === sessionKey && p.reason === 'renamed') setSessionName(p.display_name || '')
-    })
-    return () => {
-      cancelled = true
-      for (const t of timers) window.clearTimeout(t)
-      off()
-    }
-  }, [rpc, sessionKey, runStatus])
 
   const pendingIntentRef = useRef<string | null>(null)
   const sendDrainedHeadRef = useRef<
@@ -652,9 +619,54 @@ function ConnectedChat({ desk }: { desk: DeskProps | null }) {
 
   // Reply notifications for this and every other session come from the
   // shell's session-run watcher (lib/use-notifications), not from here.
-  const title = desk
-    ? shownSessionName(sessionName) || t('trading.chat.title')
-    : shownSessionName(sessionName) || t('chat.untitled')
+
+  // No title row: the sidebar already names the chat. What the header held
+  // besides the title is the session's own actions, placed where the route
+  // asks (see `actionsSlot`).
+  const actions = docked ? (
+    <div className="chat-desktop-actions" role="group" aria-label={tw('chat.sessionControls')}>
+      <ProjectChip sessionKey={sessionKey} />
+      {runState.status !== 'idle' ? (
+        <span
+          className="chat-desktop-actions__state"
+          data-tone={runTone(runState.status)}
+          title={runState.label}
+        >
+          <span className="chat-desktop-actions__state-text">{runState.label}</span>
+        </span>
+      ) : null}
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={desk ? t('trading.chat.fresh') : t('chat.newChat')}
+        title={
+          desk ? t('trading.chat.fresh') : `${t('chat.newChat')} (${formatCombo(NEW_CHAT_COMBO)})`
+        }
+        onClick={desk ? desk.onStartFresh : startNewChat}
+        data-testid={desk ? 'chat-fresh' : undefined}
+      >
+        <SquarePen className="size-4 text-muted-foreground" strokeWidth={1.75} aria-hidden />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={t('chat.reset')}
+        title={t('chat.reset')}
+        onClick={resetSession}
+      >
+        <RotateCcw className="size-4 text-muted-foreground" strokeWidth={1.75} aria-hidden />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={t('chat.export')}
+        title={t('chat.export')}
+        onClick={onExportMarkdown}
+      >
+        <Download className="size-4 text-muted-foreground" strokeWidth={1.75} aria-hidden />
+      </Button>
+    </div>
+  ) : null
 
   return (
     <div
@@ -663,51 +675,10 @@ function ConnectedChat({ desk }: { desk: DeskProps | null }) {
       data-desk={desk ? 'true' : undefined}
       data-still={instruments.still || undefined}
     >
-      {docked ? (
-        <div className="chat-desktop-header">
-          <h1 className="chat-desktop-header__title" title={sessionKey}>
-            {title}
-          </h1>
-          <ProjectChip sessionKey={sessionKey} />
-          {runState.status !== 'idle' ? (
-            <span className="chat-desktop-header__state" data-tone={runTone(runState.status)}>
-              {runState.label}
-            </span>
-          ) : null}
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={desk ? t('trading.chat.fresh') : t('chat.newChat')}
-            title={
-              desk
-                ? t('trading.chat.fresh')
-                : `${t('chat.newChat')} (${formatCombo(NEW_CHAT_COMBO)})`
-            }
-            onClick={desk ? desk.onStartFresh : startNewChat}
-            data-testid={desk ? 'chat-fresh' : undefined}
-          >
-            <SquarePen className="size-4 text-muted-foreground" strokeWidth={1.75} aria-hidden />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={t('chat.reset')}
-            title={t('chat.reset')}
-            onClick={resetSession}
-          >
-            <RotateCcw className="size-4 text-muted-foreground" strokeWidth={1.75} aria-hidden />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={t('chat.export')}
-            title={t('chat.export')}
-            onClick={onExportMarkdown}
-          >
-            <Download className="size-4 text-muted-foreground" strokeWidth={1.75} aria-hidden />
-          </Button>
-        </div>
+      {actions && actionsSlot === undefined ? (
+        <div className="chat-desktop-header">{actions}</div>
       ) : null}
+      {actions && actionsSlot ? createPortal(actions, actionsSlot) : null}
 
       <div className="chat-stage" onDrop={onDrop} onDragOver={onDragOver} onPaste={onPaste}>
         <h1 className="sr-only">{tw('chat.srTitle')}</h1>

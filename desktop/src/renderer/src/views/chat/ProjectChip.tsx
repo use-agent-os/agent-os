@@ -8,9 +8,10 @@ import { useSessions } from '~/stores/sessions'
 import { useUi } from '~/stores/ui'
 
 /**
- * Where this chat is filed, as a chip in the conversation header. Click to
- * move it to another folder or take it out of one. Only for a session the
- * gateway already knows: a fresh, unsent chat has nothing to file yet.
+ * Where this chat is filed, as a chip among the chat's session actions (on
+ * the mode strip, or above the chat at the desk). Click to move it to another
+ * folder or take it out of one. Only for a session the gateway already
+ * knows: a fresh, unsent chat has nothing to file yet.
  */
 export function ProjectChip({ sessionKey }: { sessionKey: string }) {
   const { projects, byId } = useProjects()
@@ -52,7 +53,11 @@ export function ProjectChip({ sessionKey }: { sessionKey: string }) {
         <ChevronDown className="size-3 opacity-60" strokeWidth={2} aria-hidden />
       </button>
       {open ? (
-        <Menu onClose={close} label={t('projects.menu.label')} align="start">
+        // Hung from the chip's right edge, so it opens into the pane: the chip
+        // sits at the right of the window with only the buttons after it, and
+        // grown rightwards from a short chip (a short name, or folded to its
+        // glyphs on a narrow pane) the menu ran off the window's edge.
+        <Menu onClose={close} label={t('projects.menu.label')} align="end">
           {projects.length === 0 ? <MenuNote>{t('projects.menu.empty')}</MenuNote> : null}
           {projects.map((p) => {
             const id = projectId(p)

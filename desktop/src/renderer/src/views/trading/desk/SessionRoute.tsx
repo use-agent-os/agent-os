@@ -40,6 +40,10 @@ export function SessionRoute() {
   const { enter } = useEntrance({ mode, still: sessionPending > 0, requested })
   const gatewayRunning = useGateway((s) => s.status.state === 'running')
   const active = mode === 'trading' && gatewayRunning
+  // In Chat mode the chat's session actions sit on the strip, right of the
+  // pill, instead of on a row of their own under it. At the desk the strip
+  // is the desk's, and they stay above the chat column.
+  const [sessionSlot, setSessionSlot] = useState<HTMLDivElement | null>(null)
   const { frameRef, ...frame } = useDeskFrame({
     sessionKey: paramKey,
     mode,
@@ -47,6 +51,7 @@ export function SessionRoute() {
     entering: enter === 'trading',
     onSwitchMode,
     onSessionPending: setSessionPending,
+    sessionSlot: setSessionSlot,
   })
 
   return (
@@ -69,7 +74,7 @@ export function SessionRoute() {
           ref={frameRef}
           data-collapsed={frame.collapsed || undefined}
         >
-          <ChatView desk={frame.desk} />
+          <ChatView desk={frame.desk} actionsSlot={mode === 'chat' ? sessionSlot : undefined} />
           {frame.book}
         </div>
       )}
