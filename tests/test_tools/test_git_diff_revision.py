@@ -149,11 +149,27 @@ async def test_repository_without_a_commit_still_diffs(empty_repo: Path) -> None
     assert "+hello" in out
 
 
+async def test_repository_without_a_commit_keeps_the_unstaged_half(empty_repo: Path) -> None:
+    """Bare ``--cached`` showed only ``+line1`` here; the combined view needs both (#3072)."""
+    target = empty_repo / "f.txt"
+    target.write_text("line1\n", encoding="utf-8", newline="\n")
+    _git(empty_repo, "add", "f.txt")
+    target.write_text("line1\nline2\n", encoding="utf-8", newline="\n")
+
+    combined = await git.git_diff()
+    staged = await git.git_diff(staged=True)
+
+    assert "+line1" in combined
+    assert "+line2" in combined
+    assert "+line1" in staged
+    assert "+line2" not in staged
+
+
 async def test_diff_revision_resolves_head_only_when_a_commit_exists(
     empty_repo: Path,
 ) -> None:
     """Unit-level pin on the branch the fallback hangs off."""
-    assert await git._diff_revision(str(empty_repo)) is None
+    assert await git._diff_revision(str(empty_repo)) == git._EMPTY_TREE
 
     (empty_repo / "first.txt").write_text("hello\n", encoding="utf-8", newline="\n")
     _git(empty_repo, "add", "-A")

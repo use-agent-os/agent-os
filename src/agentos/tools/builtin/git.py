@@ -142,27 +142,32 @@ async def git_status(workdir: str | None = None) -> str:
     return await _run_git("status", "--short", "--branch", cwd=_effective_workdir(workdir))
 
 
-async def _diff_revision(cwd: str | None) -> str | None:
-    """``"HEAD"`` when the repository has a commit to diff against, else ``None``.
+# The empty tree exists in every repository without needing a commit.
+_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+
+async def _diff_revision(cwd: str | None) -> str:
+    """``"HEAD"`` when the repository has a commit to diff against, else the empty tree.
 
     ``git diff HEAD`` is the spelling that reports staged and unstaged work in
     one pass, but it exits 128 with ``ambiguous argument 'HEAD'`` before the
-    first commit lands. There the index is the entire change set, so the caller
-    drops the revision and lets ``--cached`` carry it rather than failing a
-    diff that plain ``git diff`` used to answer.
+    first commit lands. Diffing against the empty tree instead keeps the same
+    combined semantics: bare ``--cached`` would show only the staged half and
+    silently hide any further unstaged edit.
     """
     try:
         await _run_git("rev-parse", "--verify", "--quiet", "HEAD", cwd=cwd)
     except RuntimeError:
-        return None
+        return _EMPTY_TREE
     return "HEAD"
 
 
 def _git_diff_argv(a: dict[str, Any]) -> tuple[str, ...]:
     # Mirrors the ``git_diff`` body (#614). ``HEAD`` is spelled unconditionally
     # here because the fingerprint is derived before the repository is
-    # inspected; the body drops it in a repository without a first commit,
-    # which is the one case this argv describes more precisely than it runs.
+    # inspected; the body substitutes the empty tree in a repository without a
+    # first commit, which is the one case this argv describes more precisely
+    # than it runs.
     argv = ["git", "diff"]
     if a.get("staged"):
         argv.append("--cached")
@@ -206,10 +211,9 @@ async def git_diff(
     # bundled ``git-diff`` skill already uses.
     revision = await _diff_revision(cwd)
     args = ["diff"]
-    if staged or revision is None:
+    if staged:
         args.append("--cached")
-    if revision is not None:
-        args.append(revision)
+    args.append(revision)
     if path:
         _reject_foreign_git_path(path)
         args += ["--", path]
