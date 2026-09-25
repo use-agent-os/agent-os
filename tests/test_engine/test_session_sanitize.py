@@ -1320,6 +1320,22 @@ def test_limit_turns_ignores_synthetic_user_messages_when_counting_turns() -> No
     assert limit_turns(messages, 1) == messages[3:]
 
 
+def test_limit_turns_ignores_synthetic_blocks_when_counting_turns() -> None:
+    messages = [
+        Message(role="user", content=[ContentBlockText(text="first real user")]),
+        Message(role="assistant", content=[ContentBlockText(text="first answer")]),
+        Message(
+            role="user",
+            content=[ContentBlockText(text="[Available skills for this turn]\n<skill />")],
+        ),
+        Message(role="user", content=[ContentBlockText(text="second real user")]),
+        Message(role="assistant", content=[ContentBlockText(text="second answer")]),
+    ]
+
+    assert limit_turns(messages, 2) == messages
+    assert limit_turns(messages, 1) == messages[3:]
+
+
 def test_turn_runner_keeps_dynamic_prompt_out_of_system_when_cache_enabled() -> None:
     from agentos.engine.runtime import TurnRunner
 
@@ -1690,7 +1706,6 @@ def test_agent_provider_request_messages_project_overflow_retry_tool_results() -
     assert "[tool_result_projection]" in request_result.content
     assert "tool_result_handle:" not in request_result.content
     assert len(request_result.content) < len(raw_output)
-
 
 
 @pytest.mark.asyncio
