@@ -91,6 +91,43 @@ function menuItems(menu: HTMLElement): HTMLElement[] {
   )
 }
 
+interface Point {
+  x: number
+  y: number
+}
+
+/**
+ * How long the pointer may rest short of the open submenu it was heading
+ * for before the menu gives up and follows it to the row it stopped on.
+ */
+export const AIM_MS = 100
+
+/**
+ * NSMenu's safe triangle. A pointer that moved `from` → `to` is on its
+ * way into a submenu `panel` hung on `side` of its row when `to` lies in
+ * the triangle between `from` and the panel's near edge.
+ */
+export function headsInto(
+  from: Point,
+  to: Point,
+  panel: { left: number; right: number; top: number; bottom: number },
+  side: 'right' | 'left',
+): boolean {
+  const edge = side === 'right' ? panel.left : panel.right
+  const top = { x: edge, y: panel.top }
+  const bottom = { x: edge, y: panel.bottom }
+  // Inside is on the same side of all three edges.
+  const a = cross(from, top, to)
+  const b = cross(top, bottom, to)
+  const c = cross(bottom, from, to)
+  return (a >= 0 && b >= 0 && c >= 0) || (a <= 0 && b <= 0 && c <= 0)
+}
+
+/** Which side of the line o → a the point p is on (the sign of the cross product). */
+function cross(o: Point, a: Point, p: Point): number {
+  return (a.x - o.x) * (p.y - o.y) - (a.y - o.y) * (p.x - o.x)
+}
+
 /**
  * Keyboard and dismissal shared by every menu root: Escape closes (a
  * submenu first), arrows move within the menu that has focus, Right opens
@@ -203,32 +240,54 @@ function useMenuRoot(
     // eslint-disable-next-line react-hooks/exhaustive-deps -- rebinding per submenu state is intended
   }, [ref, openSub])
 
-  // Moving the pointer onto a row outside the open submenu closes it, the
-  // way NSMenu does, after a short grace so a diagonal move to the panel
-  // survives.
-  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The pointer drives submenus the way it drives NSMenu's: a row with a
+  // submenu opens it the moment the pointer arrives, and any other row
+  // closes the open one. Only rows count: the menu's padding (the strip
+  // between a row and its panel too), separators, headings and disabled
+  // rows change nothing. The exception is the safe triangle: while the
+  // pointer heads for the open panel across other rows, the panel stays,
+  // and it gives way only if the pointer rests short of it for AIM_MS.
+  const last = useRef<Point | null>(null)
+  const aimTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const onPointerMove = useCallback(
     (e: React.PointerEvent) => {
-      if (!openSub) return
-      const sub = (e.target as HTMLElement).closest<HTMLElement>('.mac-menu__sub')
-      const insideOpen =
-        sub?.dataset.subId === openSub || Boolean(sub?.closest(`[data-sub-id="${openSub}"]`))
-      if (insideOpen) {
-        if (leaveTimer.current) clearTimeout(leaveTimer.current)
-        leaveTimer.current = null
+      const from = last.current
+      const to = { x: e.clientX, y: e.clientY }
+      last.current = to
+      if (aimTimer.current) clearTimeout(aimTimer.current)
+      aimTimer.current = null
+      const target = e.target as HTMLElement
+      if (!target.closest('[role^="menuitem"]')) return
+      const next = target.closest<HTMLElement>('.mac-menu__sub')?.dataset.subId ?? null
+      if (!openSub) {
+        if (next) setOpenSub(next)
         return
       }
-      if (leaveTimer.current) return
-      leaveTimer.current = setTimeout(() => {
-        leaveTimer.current = null
-        setOpenSub(null)
-      }, 160)
+      const open = ref.current?.querySelector<HTMLElement>(`[data-sub-id="${openSub}"]`)
+      if (open?.contains(target)) return
+      const panel = open?.querySelector<HTMLElement>(':scope > [role="menu"]')
+      const side = open?.dataset.side === 'left' ? 'left' : 'right'
+      if (from && panel && headsInto(from, to, panel.getBoundingClientRect(), side)) {
+        aimTimer.current = setTimeout(() => {
+          aimTimer.current = null
+          setOpenSub((current) => (current === openSub ? next : current))
+        }, AIM_MS)
+        return
+      }
+      setOpenSub(next)
     },
-    [openSub],
+    [ref, openSub],
   )
+  // Off the menu the pointer is heading nowhere in it: what is open stays
+  // open, and a pointer that comes back starts a fresh path.
+  const onPointerLeave = useCallback(() => {
+    if (aimTimer.current) clearTimeout(aimTimer.current)
+    aimTimer.current = null
+    last.current = null
+  }, [])
   useEffect(
     () => () => {
-      if (leaveTimer.current) clearTimeout(leaveTimer.current)
+      if (aimTimer.current) clearTimeout(aimTimer.current)
     },
     [],
   )
@@ -237,7 +296,7 @@ function useMenuRoot(
     () => ({ close: () => closeRef.current(), openSub, setOpenSub }),
     [openSub],
   )
-  return { ctx, onPointerMove }
+  return { ctx, onPointerMove, onPointerLeave }
 }
 
 /**
@@ -262,7 +321,7 @@ export function PopMenu({
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ left: number; top: number; origin: Origin } | null>(null)
-  const { ctx, onPointerMove } = useMenuRoot(ref, onClose, {
+  const { ctx, onPointerMove, onPointerLeave } = useMenuRoot(ref, onClose, {
     outsideRef: triggerRef,
     closeOnScroll: true,
   })
@@ -295,6 +354,7 @@ export function PopMenu({
         aria-label={label}
         style={style}
         onPointerMove={onPointerMove}
+        onPointerLeave={onPointerLeave}
         onContextMenu={(e) => e.preventDefault()}
       >
         {children}
@@ -324,7 +384,7 @@ export function Menu({
   useLayoutEffect(() => {
     parentRef.current = ref.current?.parentElement ?? null
   }, [])
-  const { ctx, onPointerMove } = useMenuRoot(ref, onClose, {
+  const { ctx, onPointerMove, onPointerLeave } = useMenuRoot(ref, onClose, {
     outsideRef: parentRef,
     closeOnScroll: false,
   })
@@ -338,6 +398,7 @@ export function Menu({
         role="menu"
         aria-label={label}
         onPointerMove={onPointerMove}
+        onPointerLeave={onPointerLeave}
       >
         {children}
       </div>
@@ -401,8 +462,9 @@ export function MenuItem({
 }
 
 /**
- * A row that opens a panel to its side. Opens on hover (after a beat),
- * click, Right or Return; the current value can show beside the chevron.
+ * A row that opens a panel to its side. Opens on hover (the menu root
+ * follows the pointer), click, Right or Return; the current value can
+ * show beside the chevron.
  */
 export function MenuSub({
   icon: Icon,
@@ -421,7 +483,6 @@ export function MenuSub({
   const wrapRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const [side, setSide] = useState<'right' | 'left'>('right')
-  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [focusFirst, setFocusFirst] = useState(false)
 
   useLayoutEffect(() => {
@@ -435,13 +496,6 @@ export function MenuSub({
       setFocusFirst(false)
     }
   }, [open, focusFirst])
-
-  useEffect(
-    () => () => {
-      if (hoverTimer.current) clearTimeout(hoverTimer.current)
-    },
-    [],
-  )
 
   const openNow = (withFocus: boolean) => {
     setFocusFirst(withFocus)
@@ -457,15 +511,9 @@ export function MenuSub({
         aria-expanded={open}
         className="mac-menu__item"
         data-active={open}
-        onPointerEnter={() => {
-          if (open) return
-          hoverTimer.current = setTimeout(() => openNow(false), 110)
-        }}
-        onPointerLeave={() => {
-          if (hoverTimer.current) clearTimeout(hoverTimer.current)
-          hoverTimer.current = null
-        }}
-        onClick={() => (open ? ctx.setOpenSub(null) : openNow(true))}
+        // The pointer opened it on the way in, so a click keeps it open, as
+        // in NSMenu, and hands the keyboard to the panel.
+        onClick={() => openNow(true)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault()

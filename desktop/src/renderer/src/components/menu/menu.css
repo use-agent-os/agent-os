@@ -15,7 +15,8 @@
     0 0 0 0.5px var(--border),
     0 12px 32px rgba(0, 0, 0, 0.32),
     0 2px 6px rgba(0, 0, 0, 0.16);
-  animation: mac-menu-in 120ms cubic-bezier(0.32, 0.72, 0, 1);
+  /* Brief: the menu is there before the pointer reaches its first row. */
+  animation: mac-menu-in 80ms cubic-bezier(0.32, 0.72, 0, 1);
   transform-origin: top right;
   user-select: none;
 }
@@ -72,6 +73,7 @@
   color: var(--foreground);
   cursor: default;
 }
+/* No transition: the highlight lands under the pointer at once, as NSMenu's. */
 .mac-menu__item:hover,
 .mac-menu__item:focus-visible,
 .mac-menu__item[data-active='true'] {
@@ -148,7 +150,9 @@
   color: var(--dim);
 }
 
-/* Submenu: the trigger row plus a panel hung off its right edge. */
+/* Submenu: the trigger row plus a panel hung off its right edge. The panel
+   appears at once, like NSMenu's: it opens as the pointer arrives, and any
+   fade-in would read as lag. */
 .mac-menu__sub {
   position: relative;
 }
@@ -157,17 +161,9 @@
   top: -4px;
   left: calc(100% + 2px);
   z-index: 1;
-  transform-origin: top left;
-  animation-name: mac-submenu-in;
+  animation: none;
 }
 .mac-menu__sub[data-side='left'] > .mac-menu {
   left: auto;
   right: calc(100% + 2px);
-  transform-origin: top right;
-}
-@keyframes mac-submenu-in {
-  from {
-    opacity: 0;
-    transform: translateX(-2px);
-  }
 }
