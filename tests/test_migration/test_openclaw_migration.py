@@ -564,6 +564,47 @@ def test_zai_and_glm_models_migrate_to_zhipu_provider(
     build_provider(persisted["llm"]["provider"], persisted["llm"]["model"])
 
 
+def test_google_prefixed_gemini_models_migrate_to_gemini_provider(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = _make_source(tmp_path)
+    config = json.loads((source / "openclaw.json").read_text(encoding="utf-8"))
+    config["agents"]["defaults"]["model"] = "google/gemini-2.5-pro"
+    config["models"] = {
+        "providers": {
+            "gemini": {
+                "apiKey": "sk-gemini-secret",
+                "baseUrl": "https://gemini.example.test/v1beta",
+            }
+        }
+    }
+    (source / "openclaw.json").write_text(json.dumps(config), encoding="utf-8")
+    home = tmp_path / "agentos-home"
+    config_path = tmp_path / "config.toml"
+    monkeypatch.setenv("AGENTOS_STATE_DIR", str(home))
+
+    report = OpenClawMigrator(
+        MigrationOptions(
+            source=source,
+            config_path=config_path,
+            apply=True,
+            migrate_secrets=True,
+        )
+    ).migrate()
+
+    persisted = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    assert persisted["llm"]["provider"] == "gemini"
+    assert persisted["llm"]["model"] == "gemini-2.5-pro"
+    assert persisted["llm"]["api_key_env"] == "GEMINI_API_KEY"
+    assert persisted["llm"]["base_url"] == "https://gemini.example.test/v1beta"
+    item = next(item for item in report["items"] if item["kind"] == "model-config")
+    assert item["details"]["source_model"] == "google/gemini-2.5-pro"
+    assert item["details"]["normalized_provider_prefix"] == "google"
+    assert "sk-gemini-secret" not in json.dumps(report)
+    build_provider(persisted["llm"]["provider"], persisted["llm"]["model"])
+
+
 def test_model_provider_conflict_with_existing_tier_profile_is_reported(
     tmp_path: Path,
     monkeypatch,

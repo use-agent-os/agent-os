@@ -27,6 +27,10 @@ from agentos.migration.openclaw import (
         # The two prefixes that were already stripped keep working.
         ("openrouter/deepseek/deepseek-v3.1", "openrouter", "deepseek/deepseek-v3.1"),
         ("zai/glm-5", "zhipu", "glm-5"),
+        # The prefixes _provider_from_model derived a provider for but never stripped.
+        ("google/gemini-2.5-pro", "gemini", "gemini-2.5-pro"),
+        ("Google/Gemini-2.5-Flash-Lite", "gemini", "Gemini-2.5-Flash-Lite"),
+        ("zhipu/glm-5", "zhipu", "glm-5"),
     ],
 )
 def test_prefixed_model_is_reduced_to_the_native_id(
@@ -49,11 +53,41 @@ def test_prefixed_model_is_reduced_to_the_native_id(
         ("anthropic/claude-sonnet-4-5", "openrouter"),
         # Nothing follows the prefix: keep the id rather than write an empty model.
         ("anthropic/", "anthropic"),
+        ("google/", "gemini"),
         ("anthropic/claude-sonnet-4-5", None),
     ],
 )
 def test_other_ids_are_left_alone(model: str, provider: str | None) -> None:
     assert _model_for_agentos_provider(model, provider) == (model, {})
+
+
+def test_google_gemma_stays_unmapped_for_openrouter() -> None:
+    # google/gemma-... is an OpenRouter vendor id, not a Google Gemini model.
+    assert _provider_from_model("google/gemma-3-27b-it") is None
+
+
+def test_every_stripped_prefix_is_recorded_in_the_details() -> None:
+    assert _model_for_agentos_provider("google/gemini-2.5-pro", "gemini") == (
+        "gemini-2.5-pro",
+        {
+            "source_model": "google/gemini-2.5-pro",
+            "normalized_provider_prefix": "google",
+        },
+    )
+    assert _model_for_agentos_provider("zhipu/glm-5", "zhipu") == (
+        "glm-5",
+        {
+            "source_model": "zhipu/glm-5",
+            "normalized_provider_prefix": "zhipu",
+        },
+    )
+    assert _model_for_agentos_provider("zai/glm-5", "zhipu") == (
+        "glm-5",
+        {
+            "source_model": "zai/glm-5",
+            "normalized_provider_prefix": "zai",
+        },
+    )
 
 
 def _migrate_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model: str) -> dict:
@@ -75,6 +109,8 @@ def _migrate_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, model: str) 
         ("anthropic/claude-sonnet-4-5", "anthropic", "claude-sonnet-4-5"),
         ("openai/gpt-5", "openai", "gpt-5"),
         ("deepseek/deepseek-chat", "deepseek", "deepseek-chat"),
+        ("google/gemini-2.5-pro", "gemini", "gemini-2.5-pro"),
+        ("zhipu/glm-5", "zhipu", "glm-5"),
     ],
 )
 def test_migrate_writes_the_native_model_id(

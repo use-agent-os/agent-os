@@ -328,9 +328,13 @@ def _provider_from_model(model: str) -> str | None:
         return "openai"
     if normalized.startswith("claude") or normalized.startswith("anthropic/"):
         return "anthropic"
-    if normalized.startswith("gemini"):
+    if normalized.startswith("gemini") or normalized.startswith("google/gemini"):
         return "gemini"
-    if normalized.startswith("zai/") or normalized.startswith("glm-"):
+    if (
+        normalized.startswith("zai/")
+        or normalized.startswith("zhipu/")
+        or normalized.startswith("glm-")
+    ):
         return "zhipu"
     if normalized.startswith("minimax") or normalized.startswith("minimax/"):
         return "minimax"
@@ -338,24 +342,26 @@ def _provider_from_model(model: str) -> str | None:
 
 
 # The ``<prefix>/`` OpenClaw puts in front of a model id for each AgentOS provider
-# ``_provider_from_model`` derives from one. The provider's own API wants the bare id.
-_PROVIDER_MODEL_PREFIXES = {
-    "openrouter": "openrouter",
-    "zhipu": "zai",
-    "anthropic": "anthropic",
-    "openai": "openai",
-    "deepseek": "deepseek",
-    "minimax": "minimax",
+# ``_provider_from_model`` derives from one -- a provider may own several prefixes.
+# The provider's own API wants the bare id.
+_PROVIDER_MODEL_PREFIXES: dict[str, tuple[str, ...]] = {
+    "openrouter": ("openrouter",),
+    "zhipu": ("zai", "zhipu"),
+    "gemini": ("google",),
+    "anthropic": ("anthropic",),
+    "openai": ("openai",),
+    "deepseek": ("deepseek",),
+    "minimax": ("minimax",),
 }
 
 
 def _model_for_agentos_provider(model: str, provider: str | None) -> tuple[str, dict[str, Any]]:
     """Convert OpenClaw provider-prefixed model ids to provider-native ids."""
-    prefix = _PROVIDER_MODEL_PREFIXES.get(provider or "")
-    if prefix and model.lower().startswith(f"{prefix}/"):
-        native = model.split("/", 1)[1].strip()
-        if native:
-            return native, {"source_model": model, "normalized_provider_prefix": prefix}
+    for prefix in _PROVIDER_MODEL_PREFIXES.get(provider or "") or ():
+        if model.lower().startswith(f"{prefix}/"):
+            native = model.split("/", 1)[1].strip()
+            if native:
+                return native, {"source_model": model, "normalized_provider_prefix": prefix}
     return model, {}
 
 
