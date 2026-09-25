@@ -71,7 +71,7 @@ export function StatusStrip({
         ) : null}
       </div>
       <div className="trd-strip__centre">
-        <ModePill mode={mode} onSwitch={onSwitchMode} live={trading && word !== 'idle'} />
+        <ModePill mode={mode} onSwitch={onSwitchMode} />
         {/* No word for "idle": a label that says nothing is happening is
             chrome, not information. The row stays empty until there is
             something to say. */}
@@ -119,17 +119,17 @@ export function StatusStrip({
 
 /**
  * Chat | Trading. Two wordmarks in one capsule; the active one is filled,
- * and in Trading it wears the lime live dot that is the desk's resting
- * identity. Arrow keys move between the two, as a tab list should.
+ * and the fill slides across when the mode changes. The tabs carry nothing
+ * but their names: whether the desk is busy is the status word beside the
+ * pill, not a mark on the Trading tab. Arrow keys move between the two, as a
+ * tab list should.
  */
 export function ModePill({
   mode,
   onSwitch,
-  live,
 }: {
   mode: DeskMode
   onSwitch: (next: DeskMode) => void
-  live: boolean
 }) {
   const segs: DeskMode[] = ['chat', 'trading']
   return (
@@ -161,9 +161,6 @@ export function ModePill({
           }}
         >
           {t(`trading.mode.${seg}`)}
-          {seg === 'trading' ? (
-            <span className="trd-pill__dot" data-live={live || undefined} aria-hidden />
-          ) : null}
         </button>
       ))}
     </div>

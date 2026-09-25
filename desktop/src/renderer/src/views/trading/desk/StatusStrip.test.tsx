@@ -1,10 +1,14 @@
+import { readFileSync } from 'node:fs'
 import { fireEvent, screen } from '@testing-library/react'
+import type { ComponentProps } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { renderDesk, WALLET } from '../test-utils'
 import { ComposerSeats } from './ComposerSeats'
 import { StatusStrip } from './StatusStrip'
 
 const pill = { mode: 'trading' as const, onSwitchMode: vi.fn() }
+// Read as text: vitest stubs CSS imports, so this asserts what the sheet says.
+const deskCss = readFileSync('src/renderer/src/views/trading/desk/desk.css', 'utf8')
 
 describe('StatusStrip', () => {
   it('says nothing while idle, then carries one status word and a pin', () => {
@@ -117,6 +121,60 @@ describe('StatusStrip', () => {
     )
     expect(screen.queryByTestId('strip-session')).toBeNull()
     expect(sessionSlot.mock.lastCall?.[0]).toBeNull()
+  })
+})
+
+describe('ModePill', () => {
+  it('names the two modes and nothing else; a busy desk is said beside it', () => {
+    const { rerender } = renderDesk(<StatusStrip mode="chat" onSwitchMode={vi.fn()} />)
+    // The tabs are their names: no dot riding on "Trading", in either mode.
+    expect(screen.getAllByRole('tab').map((tab) => tab.innerHTML)).toEqual(['Chat', 'Trading'])
+    rerender(<StatusStrip mode="trading" onSwitchMode={vi.fn()} />)
+    expect(screen.getAllByRole('tab').map((tab) => tab.innerHTML)).toEqual(['Chat', 'Trading'])
+    const idle = screen.getByTestId('mode-pill').outerHTML
+    const busy: [Partial<ComponentProps<typeof StatusStrip>>, string][] = [
+      [{ sessionPending: 1 }, 'Awaiting'],
+      [{ streaming: true }, 'Live'],
+      [{ missions: [{ id: 'j1', name: 'DCA ETH' }], running: new Set(['j1']) }, 'Running'],
+    ]
+    for (const [state, word] of busy) {
+      rerender(<StatusStrip mode="trading" onSwitchMode={vi.fn()} {...state} />)
+      // Nothing on the pill follows the desk's state…
+      expect(screen.getByTestId('mode-pill').outerHTML).toBe(idle)
+      // …the status word beside it says it, outside the tab list.
+      const status = screen.getByTestId('status-word')
+      expect(status).toHaveTextContent(word)
+      expect(screen.getByTestId('mode-pill')).not.toContainElement(status)
+    }
+  })
+
+  it('never loops or wears a ring: a light round an edge means a session is working', () => {
+    // Innermost rules with comments dropped, so a rule inside @media is seen
+    // on its own.
+    const rules = [...deskCss.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+      .map(([, selector = '', body = '']) => ({ selector: selector.trim(), body }))
+      .filter((r) => r.selector.includes('.trd-pill'))
+    const where = (hit: (rule: { selector: string; body: string }) => boolean) =>
+      rules.filter(hit).map((r) => r.selector)
+    expect(rules.length).toBeGreaterThan(0)
+    expect(where((r) => /\binfinite\b/.test(r.body))).toEqual([])
+    // A ring on the capsule's edge, travelling or held still under reduced
+    // motion, is what a running session looks like (mac-live-orbit,
+    // composer-sweep).
+    expect(where((r) => /\.trd-pill::(before|after)/.test(r.selector))).toEqual([])
+    // Lime says "live" on the desk. The pill gets it once, from the
+    // entrance's pulse, and never at rest.
+    expect(
+      where((r) => !r.selector.includes('[data-enter') && r.body.includes('--primary')),
+    ).toEqual([])
+    // What moves is the thumb, when the mode changes, and under reduced
+    // motion not even that.
+    expect(rules.find((r) => r.selector === '.trd-pill__thumb')?.body).toMatch(
+      /transition: transform \d+ms/,
+    )
+    expect(deskCss).toMatch(
+      /@media \(prefers-reduced-motion: reduce\) \{(?:(?!@media)[\s\S])*?\.trd-pill__thumb \{\s*transition: none;/,
+    )
   })
 })
 

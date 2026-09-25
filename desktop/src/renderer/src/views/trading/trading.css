@@ -2305,7 +2305,7 @@ tr:focus-within .trd-row__actions {
   box-shadow: inset 0 0 0 0.5px var(--hairline);
 }
 /* The primary wallet is the one the agent spends from, so it is the only one
-   the sheet marks — in the same lime the pill's live dot uses. */
+   the sheet marks — in the desk's rationed lime. */
 .trd-wman__row[data-primary] {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent);
 }
