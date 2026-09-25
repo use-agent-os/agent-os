@@ -187,8 +187,26 @@ describe('tradingAgentFiles · reading an order', () => {
       /`--pct 100` on ETH fails with `trading\.invalid` when the balance is at\s+or below the 0\.001 ETH gas reserve/,
     )
   })
+  it('answers a bridge request in one message and runs nothing for it', () => {
+    // No command moves funds between chains. Asked to "bridge" ETH to
+    // Robinhood Chain, a desk opened the skill to look for one; asked to
+    // "chuyển 0.001 ETH qua Robinhood chain", it read a send there and
+    // asked the user for a recipient address.
+    const agents = files['AGENTS.md']
+    expect(agents).toContain('## Bridging')
+    expect(agents).toMatch(
+      /The desk cannot bridge: no command moves funds from one chain to another/,
+    )
+    expect(agents).toMatch(/is a bridge, whatever\s+the verb/)
+    expect(agents).toContain('`chuyển 0.01 ETH qua Robinhood chain`')
+    expect(agents).toMatch(/It is not a send, and it has no\s+recipient to ask for/)
+    expect(agents).toMatch(/Run nothing for it, not even `agentos trade status`/)
+    expect(agents).toMatch(/no send to a bridge address or to the\s+wallet's own address/)
+    expect(agents).toMatch(/Do not recommend, name or link a bridge/)
+    expect(files['TOOLS.md']).toMatch(/No command bridges: nothing moves funds from one chain/)
+  })
   it('bumped the version with the text, so every desk rewrites its files', () => {
-    expect(TRADING_AGENT_VERSION).toBeGreaterThanOrEqual(8)
+    expect(TRADING_AGENT_VERSION).toBeGreaterThanOrEqual(9)
   })
 })
 

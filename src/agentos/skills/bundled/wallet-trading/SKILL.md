@@ -1,6 +1,6 @@
 ---
 name: wallet-trading
-description: "[FINANCIAL EXECUTION] Trade from the AgentOS wallet vault: swap tokens on Base or Robinhood Chain through the AgentOS Aggregator or the Uniswap Trading API, send tokens to one or many addresses, review and revoke ERC-20 allowances, decode a transaction, check the RPC/gas health, read balances, PnL and history, run DCA / buy-the-dip / rebalance missions, from one, several, or all wallets. Use when the user asks to swap, buy, sell, send, transfer, pay, airdrop, multisend, revoke an approval, explain a transaction, DCA, rebalance, check a wallet's holdings or PnL, or gives the agent a trading mission on Base or Robinhood Chain. NOT for: GMGN meme-coin trading (gmgn-swap), Robinhood brokerage accounts (robinhood-agentic-trading), read-only Stock Token lookups (robinhood-chain-stocks), or chains other than Base and Robinhood Chain."
+description: "[FINANCIAL EXECUTION] Trade from the AgentOS wallet vault on Base or Robinhood Chain; it cannot bridge between chains, so a bridge request is answered as not supported and nothing is run. Swap tokens through the AgentOS Aggregator or the Uniswap Trading API, send tokens to one or many addresses, review and revoke ERC-20 allowances, decode a transaction, check the RPC/gas health, read balances, PnL and history, run DCA / buy-the-dip / rebalance missions, from one, several, or all wallets. Use when the user asks to swap, buy, sell, send, transfer, pay, airdrop, multisend, revoke an approval, explain a transaction, DCA, rebalance, check a wallet's holdings or PnL, or gives the agent a trading mission on Base or Robinhood Chain. NOT for: GMGN meme-coin trading (gmgn-swap), Robinhood brokerage accounts (robinhood-agentic-trading), read-only Stock Token lookups (robinhood-chain-stocks), or chains other than Base and Robinhood Chain."
 argument-hint: "[swap --chain <base|robinhood> --in <TOKEN> --out <TOKEN> --amount <n>] | [send --chain <c> --token <T> --to <addr> --amount <n>] | [allowances] | [decode <txhash>] | [portfolio] | [history] | [orders]"
 always: false
 triggers:
@@ -69,6 +69,18 @@ may be refused with `trading.unpriced` (no native USD price there yet), and
 the bare symbol `USDC` resolves to unverified lookalikes — use ETH or an
 address from `agentos trade tokens --chain robinhood … --json` marked
 `verified: true`.
+
+**There is no bridge.** No command moves funds from one chain to another:
+`--chain` is where an order runs, and a swap or a send never leaves it. A
+request to take funds from one chain to another — bridge, move, send,
+deposit or withdraw them between Base, Robinhood Chain or any other chain —
+is not an order and has no recipient to ask for. Say in one line that
+bridging is not supported for the AgentOS wallets yet, and stop. Run
+nothing for it: no `agentos` command, no web search, no bridge site, API or
+quote (a quote request hands the wallet's address to a stranger), no
+`trade send` to a bridge contract or to the same wallet on the other chain,
+no swap into a wrapped or bridged token as a stand-in. Do not recommend,
+name or link a bridge.
 
 **BEFORE ANY TRADE:** run `agentos trade status --json`. If `enabled` is
 false, `unlocked` is false, or the active provider is `uniswap` and
@@ -390,6 +402,8 @@ the ledger looks behind the chain, `agentos trade sync --json` first; if
   `trading.approval_threshold_usd` or the agent ceilings as a way to get a
   trade through; the user changes them, and the gateway refuses you anyway.
 - Never quote or swap on a chain other than `base` or `robinhood`.
+- Never bridge, and never stand in for one: funds asked to move between
+  chains get "not supported" and nothing else (see **There is no bridge.**).
 - Never send a token to `0x…dEaD` or any burn address from here. Destroying
   a token is irreversible and has its own procedure — hand that request to
   the `token-burner` skill, which prices it, revokes its allowances and

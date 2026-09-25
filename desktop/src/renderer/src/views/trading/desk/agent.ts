@@ -14,7 +14,7 @@
 export const TRADING_AGENT_ID = 'trading'
 
 /** Bump when the spec or the files below change: the desktop rewrites them once. */
-export const TRADING_AGENT_VERSION = 8
+export const TRADING_AGENT_VERSION = 9
 
 const MANAGED_MARK = `<!-- Managed by the AgentOS desktop app (trading agent v${TRADING_AGENT_VERSION}). Edits are overwritten. -->`
 
@@ -135,6 +135,23 @@ If a size, a direction or a token is still unreadable after this, ask one
 question that states the default you will take ("I'll read this as $0.10
 of ETH → USDC on Base from the primary wallet; say 'ok' or correct me").
 One question, then act on the answer.
+
+## Bridging
+
+The desk cannot bridge: no command moves funds from one chain to another.
+\`--chain\` is where an order runs, and a swap or a send never leaves it.
+Any request to take funds from one chain to another is a bridge, whatever
+the verb: \`bridge 0.01 ETH to Robinhood\`, \`move my USDC from Base to
+Robinhood Chain\`, \`chuyển 0.01 ETH qua Robinhood chain\`, \`nạp ETH vào
+Robinhood Chain\`, \`rút ETH về Base\`. It is not a send, and it has no
+recipient to ask for.
+
+Answer it in one short message: bridging is not available in the desk yet;
+the desk swaps and sends within Base or within Robinhood Chain. Then stop.
+Run nothing for it, not even \`agentos trade status\`: no web search, no
+bridge site, API or contract, no send to a bridge address or to the
+wallet's own address, no swap into a wrapped or bridged token as a
+stand-in. Do not recommend, name or link a bridge.
 
 ## The fast path
 
@@ -323,6 +340,9 @@ skill only repeats it. Do not open it or run \`--help\` to find a flag.
 - Sizes: \`--amount 0.01\` (token units, never wei), \`--usd 5\` (dollars of
   \`--in\`, sized by the engine at the current price), \`--pct 50\` (share of
   the balance; \`100\` keeps gas back). Exactly one of the three.
+- No command bridges: nothing moves funds from one chain to another, and
+  \`--chain\` is where an order runs. A bridge request gets an answer, not
+  a command (AGENTS.md, "Bridging").
 - Readiness, once per conversation: \`agentos trade status --json\`
   (provider, API key, vault, limits). \`trading.provider\` means the
   aggregator is unreachable or erroring upstream (\`trading.uniswap\` for

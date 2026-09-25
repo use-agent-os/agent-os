@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Trading: a request to bridge funds between chains is answered in one
+  message as not supported, and nothing runs for it. AgentOS has no bridge,
+  but neither the desk's agent nor the `wallet-trading` skill said so. Asked
+  to "chuyển 0.001 ETH qua Robinhood chain", the desk read a send and asked
+  for a recipient address; asked to bridge from an ordinary chat, the agent
+  spent seven minutes on `--help` pages and web searches, then posted the
+  wallet's address to a bridge's quote API and recommended third-party
+  bridges. The desk's agent files move to v9, so the desktop rewrites them
+  once.
+
 ## [2026.9.24.post1] - 2026-09-24
 
 ### Fixed

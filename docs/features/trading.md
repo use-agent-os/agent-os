@@ -65,7 +65,9 @@ gateway RPC surface (`wallet.*`, `trading.*`).
 | Base | 8453 | basescan.org | Uniswap Universal Router 2.0 default |
 | Robinhood Chain | 4663 | robinhoodchain.blockscout.com | Router 2.1.1 only; public RPC needs a `User-Agent` and has no archive data |
 
-Only these two chains are enabled. Native ETH is `0x0000…0000` in the API.
+Only these two chains are enabled. Nothing moves funds between them: there
+is no bridge, and an agent asked to bridge says so and runs nothing. Native
+ETH is `0x0000…0000` in the API.
 A swap into native ETH on an L2 may deliver **WETH** instead; the order then
 reports `deliveredToken` and the app offers a one-click unwrap
 (`trading.unwrap`, a `withdraw(uint256)` on the WETH contract).
