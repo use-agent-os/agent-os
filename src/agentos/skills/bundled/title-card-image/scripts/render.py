@@ -117,6 +117,52 @@ def _wrap_text(text: str, max_chars: int) -> list[str]:
     return [text[i:i + max_chars] for i in range(0, len(text), max_chars)]
 
 
+def _stack_height(
+    title_size: int, sub_size: int, title_lines: list[str], sub_lines: list[str]
+) -> int:
+    """Pixel height of the title (+ subtitle, if any) stacked with their gaps."""
+    gap_t = int(title_size * 0.25)
+    gap_s = int(sub_size * 0.25)
+    pad = int(title_size * 0.6)
+    height = title_size * len(title_lines) + gap_t * max(0, len(title_lines) - 1)
+    if sub_lines:
+        height += pad + sub_size * len(sub_lines) + gap_s * max(0, len(sub_lines) - 1)
+    return height
+
+
+def fit_stack_to_height(
+    title_size: int,
+    sub_size: int,
+    title_lines: list[str],
+    sub_lines: list[str],
+    canvas_height: int,
+    *,
+    shrink_floor: int = 12,
+) -> tuple[int, int, bool]:
+    """Shrink ``title_size``/``sub_size`` in lockstep until the stacked lines fit
+    ``canvas_height``, or until neither can shrink further.
+
+    Wrapping is character-count based (see ``_wrap_text``), so shrinking a font
+    size only makes each line narrower and shorter -- it never changes how many
+    lines there are. That makes the stacked height a simple, monotonically
+    decreasing function of the two sizes, so lockstep shrinking is enough; no
+    search over the wrap width is needed here the way ``_fit_font`` needs one.
+
+    Returns ``(title_size, sub_size, fits)`` -- ``fits`` is False only when the
+    stack still exceeds ``canvas_height`` at the floor, i.e. there is no font
+    size this function can offer that makes it fit.
+    """
+    while (
+        title_size > shrink_floor or (sub_lines and sub_size > shrink_floor)
+    ) and _stack_height(title_size, sub_size, title_lines, sub_lines) > canvas_height:
+        if title_size > shrink_floor:
+            title_size = max(shrink_floor, int(title_size * 0.92))
+        if sub_lines and sub_size > shrink_floor:
+            sub_size = max(shrink_floor, int(sub_size * 0.92))
+    fits = _stack_height(title_size, sub_size, title_lines, sub_lines) <= canvas_height
+    return title_size, sub_size, fits
+
+
 def main() -> int:
     configure_utf8_stdio()
     parser = argparse.ArgumentParser(description=__doc__)
@@ -137,8 +183,9 @@ def main() -> int:
     )
     parser.add_argument(
         "--auto-shrink", default="yes", choices=["yes", "no"],
-        help="When rendered text exceeds 88%% of canvas width, shrink the font "
-             "until it fits. Default yes.",
+        help="When rendered text exceeds 88%% of canvas width, or the stacked "
+        "lines exceed the canvas height, shrink the font until it fits. "
+        "Default yes.",
     )
     parser.add_argument("--font", default=None, help="Optional explicit font path.")
     args = parser.parse_args()
@@ -187,14 +234,33 @@ def main() -> int:
     title_size, font_title = _fit_font(args.font_size, title_lines)
     sub_size, font_sub = _fit_font(args.subtitle_size, sub_lines) if sub_lines else (args.subtitle_size, None)
 
+    # The width-based shrink above can still leave the *stacked* lines taller
+    # than the canvas -- it only ever looked at how wide a line renders, never
+    # how many lines there are stacked up. Shrink further, in lockstep, until
+    # the stack fits the requested height too -- the same "auto-shrink"
+    # promise already applied to width, extended to the other dimension of
+    # the same canvas.
+    if args.auto_shrink == "yes":
+        title_size, sub_size, fits = fit_stack_to_height(
+            title_size, sub_size, title_lines, sub_lines, args.height
+        )
+        font_title = _pick_font(title_size, args.font)
+        if sub_lines:
+            font_sub = _pick_font(sub_size, args.font)
+        if not fits:
+            print(
+                f"Warning: text still exceeds the {args.height}px canvas height "
+                "at the minimum font size (12px); some lines will render "
+                "outside the image.",
+                file=sys.stderr,
+            )
+
     # Stack all lines, vertically centered, using the (potentially shrunken) sizes.
     line_gap_title = int(title_size * 0.25)
     line_gap_sub = int(sub_size * 0.25)
     pad_between_groups = int(title_size * 0.6)
 
-    total_h = title_size * len(title_lines) + line_gap_title * max(0, len(title_lines) - 1)
-    if sub_lines:
-        total_h += pad_between_groups + sub_size * len(sub_lines) + line_gap_sub * max(0, len(sub_lines) - 1)
+    total_h = _stack_height(title_size, sub_size, title_lines, sub_lines)
     y = (args.height - total_h) // 2
 
     def _draw_line(text: str, font, color, y_pos: int) -> None:

@@ -187,6 +187,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   ahead of `openai` (0.10/0.50), and taking it made the cost-aware router
   treat `c1` as cheaper than `c0` on the OpenRouter profile.
 
+- `title-card-image` skill: `render.py`'s auto-shrink only checked the
+  rendered text against the canvas *width*; the stacked headline/subtitle
+  lines' total height was never checked, so text that wrapped into enough
+  lines rendered its top (and/or bottom) lines completely outside the
+  canvas -- invisible -- while the script still reported success. The
+  shrink now also fits the stacked height; if even the smallest font size
+  (12px) still overflows, the script prints a warning to stderr instead of
+  staying silent about it. (#3375)
 - Provider: a genuinely failed tool result could reach the model as a bare
   digest with no failure information. `_final_hard_cap_payload_once` asked
   `_tool_content_is_critical` about content that up to three earlier

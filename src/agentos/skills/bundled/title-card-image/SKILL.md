@@ -75,3 +75,8 @@ worst-case but the program never crashes.
   cards, generate a real image via `nano-banana-pro` instead.
 - Headline wrap is character-count-based for CJK and whitespace-based
   for ASCII; mixed strings break at the CJK character count.
+- With `--auto-shrink yes` (default), the font shrinks to fit both the
+  canvas width and the stacked lines' total height. If the text still
+  does not fit at the smallest size (12px), the script prints a
+  `Warning:` to stderr and still writes the file, rather than silently
+  rendering lines outside the canvas.
