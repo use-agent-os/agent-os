@@ -41,6 +41,7 @@ Run a prompt every hour:
 ```sh
 agentos cron add \
   --every 1h \
+  --job-kind agent_turn \
   --text "Summarize important project updates" \
   --name hourly-project-check
 ```
@@ -55,6 +56,7 @@ Run on weekdays at 09:00 in a named timezone:
 agentos cron add \
   --cron "0 9 * * 1-5" \
   --tz "America/Los_Angeles" \
+  --job-kind agent_turn \
   --text "Prepare a short morning brief" \
   --name weekday-morning-brief
 ```

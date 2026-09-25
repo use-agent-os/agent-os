@@ -58,6 +58,7 @@ Create scheduled work for an agent:
 agentos cron add \
   --agent research \
   --every 1h \
+  --job-kind agent_turn \
   --text "Summarize new research notes" \
   --name research-hourly-summary
 ```
