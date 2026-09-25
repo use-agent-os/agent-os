@@ -1,4 +1,4 @@
-import { Bot, Home, MoreHorizontal, PenSquare, RefreshCw } from 'lucide-react'
+import { Bot, Home } from 'lucide-react'
 import { NavLink } from 'react-router'
 import type { GatewayState } from '@shared/gateway'
 import { Button } from '~/components/ui/button'
@@ -17,6 +17,11 @@ const LIGHT: Record<GatewayState, string> = {
 /**
  * Icon strip at the bottom of the sidebar. The gateway light lives here as a
  * button: one glance for state, one click to start or stop.
+ *
+ * Nothing else sits here on purpose. New session is the first quick action
+ * (⌘N) and lands where Home does; the session and project lists follow the
+ * gateway's events on their own, so there is nothing to sync; and the rest
+ * already has a place: the quick actions, the toolbar, Settings, the menu bar.
  */
 export function SidebarFooter() {
   const { status, busy, start, stop } = useGateway()
@@ -40,12 +45,6 @@ export function SidebarFooter() {
           </span>
         )}
       </NavLink>
-      <Button variant="ghost" size="icon" aria-label={t('sidebar.new')} title={t('sidebar.new')}>
-        <PenSquare className="size-4 text-muted-foreground" strokeWidth={1.75} aria-hidden />
-      </Button>
-      <Button variant="ghost" size="icon" aria-label={t('sidebar.sync')} title={t('sidebar.sync')}>
-        <RefreshCw className="size-4 text-muted-foreground" strokeWidth={1.75} aria-hidden />
-      </Button>
       <div className="flex-1" />
       <Button
         variant="ghost"
@@ -63,9 +62,6 @@ export function SidebarFooter() {
             aria-hidden
           />
         </span>
-      </Button>
-      <Button variant="ghost" size="icon" aria-label={t('sidebar.more')} title={t('sidebar.more')}>
-        <MoreHorizontal className="size-4 text-muted-foreground" strokeWidth={1.75} aria-hidden />
       </Button>
     </div>
   )

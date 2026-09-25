@@ -12,8 +12,6 @@ export const shell = {
   'sidebar.sessions.loading': 'Loading sessions',
   'sidebar.filter': 'Filter sessions',
   'sidebar.home': 'Home',
-  'sidebar.sync': 'Sync',
-  'sidebar.more': 'More',
   'sidebar.collapse': 'Hide sidebar',
   'sidebar.resize': 'Resize sidebar',
 
