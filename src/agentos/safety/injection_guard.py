@@ -306,8 +306,37 @@ def wrap_untrusted(content: str, source: str) -> str:
     return f"<untrusted source='{escaped_source}'>{escaped_content}</untrusted>"
 
 
-_UNTRUSTED_CLOSE_IN_CONTENT = re.compile(r"<\s*/\s*untrusted\s*>", re.IGNORECASE)
+# The close marker, including one carrying attributes. ``</untrusted foo="x">``
+# is the same instruction to a parser as ``</untrusted>``, and matching only
+# the bare form let bulk content appear to close the envelope early (#3017).
+#
+# The attribute span is ``[^<>]*``, not ``[^>]*``: bounded at the next angle
+# bracket either way, so an unterminated ``</untrusted`` cannot send the scan
+# to the end of the string -- and do it again at every occurrence. On a 1 MiB
+# body of ``"</untrusted " * N`` (what `web_fetch` hands this before max_chars
+# is applied, synchronously on the event loop) the unbounded span took ~35s.
+#
+# ``>?`` makes the terminator optional so the unterminated form is one pattern
+# with the rest rather than a second scan.
+#
+# Every quantifier is possessive so the engine cannot backtrack into any of
+# them at all -- the bound is a property of the pattern rather than of the
+# input that happens to be passed. It is also about twice as fast on the
+# adversarial body above.
+_UNTRUSTED_CLOSE_IN_CONTENT = re.compile(r"<\s*+/\s*+untrusted\b[^<>]*+>?", re.IGNORECASE)
 _UNTRUSTED_OPEN_IN_CONTENT = re.compile(r"<\s*untrusted\b", re.IGNORECASE)
+
+
+def _escape_close_marker(match: re.Match[str]) -> str:
+    """Entity-escape a close marker's own angles, keeping whatever it carried.
+
+    The attributes are preserved rather than dropped: the point is to make the
+    marker inert for a parser, not to edit what the remote side wrote.
+    """
+    inner = match.group(0)[1:]
+    if inner.endswith(">"):
+        return f"&lt;{inner[:-1]}&gt;"
+    return f"&lt;{inner}"
 
 
 def neutralize_untrusted_markers(text: str) -> str:
@@ -320,7 +349,7 @@ def neutralize_untrusted_markers(text: str) -> str:
     or forge a new one. This applies the same escaping on its own.
     """
 
-    safe = _UNTRUSTED_CLOSE_IN_CONTENT.sub("&lt;/untrusted&gt;", text)
+    safe = _UNTRUSTED_CLOSE_IN_CONTENT.sub(_escape_close_marker, text)
     safe = _UNTRUSTED_OPEN_IN_CONTENT.sub("&lt;untrusted", safe)
     return safe
 
@@ -343,7 +372,7 @@ def wrap_untrusted_boundary(content: str, source: str) -> str:
     """
 
     escaped_source = xml_escape(source)
-    safe = _UNTRUSTED_CLOSE_IN_CONTENT.sub("&lt;/untrusted&gt;", content)
+    safe = _UNTRUSTED_CLOSE_IN_CONTENT.sub(_escape_close_marker, content)
     safe = _UNTRUSTED_OPEN_IN_CONTENT.sub("&lt;untrusted", safe)
     return f"<untrusted source='{escaped_source}'>{safe}</untrusted>"
 

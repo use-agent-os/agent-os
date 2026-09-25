@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Safety: `wrap_untrusted_boundary` left a close marker carrying attributes
+  (`</untrusted foo="bar">`) unescaped, so bulk external content could appear
+  to close the untrusted envelope early and continue outside it. The marker is
+  now neutralised whatever it carries, including an unterminated one, with a
+  scan bounded at the next angle bracket so a crafted page cannot make the
+  wrap quadratic (#3017).
+
 ## [2026.9.25] - 2026-09-25
 
 ### Fixed
