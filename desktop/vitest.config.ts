@@ -12,7 +12,15 @@ export default defineConfig({
       '@': path.resolve(__dirname, '../frontend/src'),
       '@shared': path.resolve(__dirname, 'src/shared'),
     },
-    dedupe: ['react', 'react-dom', 'zustand', 'sonner', '@tanstack/react-query', 'motion'],
+    dedupe: [
+      'react',
+      'react-dom',
+      'zustand',
+      'sonner',
+      '@tanstack/react-query',
+      'motion',
+      'lucide-react',
+    ],
   },
   test: {
     environment: 'jsdom',
