@@ -1290,8 +1290,39 @@ class UsageTracker:
         finally:
             conn.close()
 
+    @staticmethod
+    def _date_bounds_ms(start_date: str | None, end_date: str | None) -> tuple[int, int]:
+        """The [start, end] millisecond window the date filters describe.
+
+        Same reading as the SQL path: a start date begins at its midnight UTC and an end
+        date runs to the last millisecond of that day. An unparsable date is ignored
+        there, so it is ignored here too.
+        """
+        low, high = 0, 2**63 - 1
+        if start_date:
+            try:
+                dt = datetime.strptime(start_date, "%Y-%m-%d")
+                low = int(dt.replace(tzinfo=UTC).timestamp() * 1000)
+            except ValueError:
+                pass
+        if end_date:
+            try:
+                dt = datetime.strptime(end_date, "%Y-%m-%d")
+                high = int((dt.replace(tzinfo=UTC).timestamp() + 86400) * 1000) - 1
+            except ValueError:
+                pass
+        return low, high
+
     def _query_in_memory(self, **kwargs) -> list[dict[str, Any]]:
-        rows = []
+        rows: list[dict[str, Any]] = []
+        # In-memory rows are per-model turn totals; none of them is attributed to a tool,
+        # so a tool_name filter selects nothing rather than everything (#3034).
+        if kwargs.get("tool_name"):
+            return rows
+        low_ms, high_ms = self._date_bounds_ms(kwargs.get("start_date"), kwargs.get("end_date"))
+        created_at = int(time.time() * 1000)
+        if not (low_ms <= created_at <= high_ms):
+            return rows
         for session_key, usage in self._sessions.items():
             agent_id, channel = self.get_session_scope(session_key)
             if kwargs.get("agent_id") and kwargs["agent_id"] != agent_id:
@@ -1304,24 +1335,47 @@ class UsageTracker:
             if kwargs.get("skill") and kwargs["skill"] != skill:
                 continue
 
-            for model_key, mu in (usage._per_model or {}).items():
+            def _row(**fields: Any) -> dict[str, Any]:
+                return {
+                    "sessionKey": session_key,
+                    "agentId": agent_id,
+                    "channelType": channel,
+                    "toolName": None,
+                    "skill": skill,
+                    "createdAt": created_at,
+                    **fields,
+                }
+
+            per_model = usage._per_model or {}
+            if not per_model:
+                # A session recorded without per-model detail still holds its own totals,
+                # and SessionUsage.cost prices them from model_id/provider_id. Skipping it
+                # here reported the session as zero tokens and zero cost (#3031).
+                rows.append(
+                    _row(
+                        model=usage.model_id,
+                        provider=usage.provider_id,
+                        inputTokens=usage.input_tokens,
+                        outputTokens=usage.output_tokens,
+                        cacheReadTokens=usage.cache_read_tokens,
+                        cacheWriteTokens=usage.cache_write_tokens,
+                        costUsd=usage.cost,
+                        billedCostUsd=usage.billed_cost,
+                    )
+                )
+                continue
+            for model_key, mu in per_model.items():
                 provider_id, model_id = model_key
                 rows.append(
-                    {
-                        "sessionKey": session_key,
-                        "agentId": agent_id,
-                        "channelType": channel,
-                        "toolName": None,
-                        "skill": skill,
-                        "model": model_id,
-                        "provider": provider_id,
-                        "inputTokens": mu.input_tokens,
-                        "outputTokens": mu.output_tokens,
-                        "cacheReadTokens": mu.cache_read_tokens,
-                        "cacheWriteTokens": mu.cache_write_tokens,
-                        "costUsd": mu.cost,
-                        "billedCostUsd": mu.billed_cost,
-                        "createdAt": int(time.time() * 1000),
-                    }
+                    _row(
+                        model=model_id,
+                        provider=provider_id,
+                        inputTokens=mu.input_tokens,
+                        outputTokens=mu.output_tokens,
+                        cacheReadTokens=mu.cache_read_tokens,
+                        cacheWriteTokens=mu.cache_write_tokens,
+                        costUsd=mu.cost,
+                        billedCostUsd=mu.billed_cost,
+                    )
                 )
         return rows
