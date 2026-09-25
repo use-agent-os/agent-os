@@ -23,7 +23,6 @@ export const shell = {
 
   'toolbar.layout': 'Layout',
   'toolbar.settings': 'Settings',
-  'toolbar.inspector': 'Inspector',
 
   'composer.placeholder': 'Start with a goal',
   'composer.attach': 'Attach files',

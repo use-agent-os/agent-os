@@ -1,4 +1,4 @@
-import { LayoutPanelLeft, PanelRight, Settings } from 'lucide-react'
+import { LayoutPanelLeft, Settings } from 'lucide-react'
 import { NotificationBell } from '~/components/NotificationBell'
 import { Button } from '~/components/ui/button'
 import { UpdatePill } from '~/components/UpdatePill'
@@ -69,14 +69,6 @@ export function Toolbar() {
           onClick={() => openSettings()}
         >
           <Settings className="size-4 text-muted-foreground" strokeWidth={1.75} aria-hidden />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={t('toolbar.inspector')}
-          title={t('toolbar.inspector')}
-        >
-          <PanelRight className="size-4 text-muted-foreground" strokeWidth={1.75} aria-hidden />
         </Button>
       </div>
     </header>
