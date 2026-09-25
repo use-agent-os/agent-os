@@ -45,7 +45,7 @@
   overscroll-behavior: contain;
   scroll-behavior: auto;
   scrollbar-gutter: stable;
-  /* The side minimum is the hover-timestamp gutter, not a taste decision: rows
+  /* The side minimum is the timestamp gutter, not a taste decision: rows
      sit flush with the column edge and `.msg::after` hangs the time OUTSIDE
      them (8px out on the user side, 4px on the assistant side, ~30px of
      tabular digits). At the old 24px the thread's `overflow-x: hidden` sliced
@@ -169,7 +169,7 @@
 
 /* ── Messages ────────────────────────────────────────────────────────────
    Messages.app posture, not the console's terminal log: no sender captions,
-   no timestamps in the flow (they surface on hover), no rails or cards for
+   no timestamps in the flow (they hang in the gutter), no rails or cards for
    the assistant. Assistant text sits on the ground beside a small lime
    avatar; the user speaks in a tinted bubble on the right. */
 
@@ -211,7 +211,9 @@
   overflow-wrap: anywhere;
 }
 /* The renderer stamps data-sender/data-time; the desktop shows neither in
-   the flow. Time appears as a hover tooltip on the row's outer edge. */
+   the flow. Time sits in the gutter on the row's outer edge, always shown:
+   it is out of flow, so it never moves the row. Rows without a stamp (the
+   thinking indicator, a reply still streaming) render nothing there. */
 .msg:not(:has(.msg-header))::before {
   content: none;
 }
@@ -223,9 +225,7 @@
   font-size: 10.5px;
   font-variant-numeric: tabular-nums;
   color: var(--dim);
-  opacity: 0;
   pointer-events: none;
-  transition: opacity 120ms ease;
 }
 .msg:not(.user)::after {
   left: -4px;
@@ -234,9 +234,6 @@
 .msg.user::after {
   right: -8px;
   translate: 100% -50%;
-}
-.msg:hover::after {
-  opacity: 1;
 }
 .msg-header {
   display: none;
@@ -466,30 +463,29 @@
   font-family: var(--font-mono);
 }
 
-/* Turn footer: hidden until the row is hovered, then one quiet mono line. */
+/* Turn footer: one quiet mono line under a finished turn, always shown. It
+   used to open on hover (0 → 16 px plus its margin), which pushed every row
+   below it down a line each time the pointer crossed a message. Its row is
+   part of the layout at rest now, and hover only reveals the actions parked
+   in it. A narrow column wraps the figures rather than clipping them. */
 .msg-meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 10px;
-  height: 0;
-  margin-top: 0;
-  overflow: hidden;
+  min-height: 16px;
+  margin-top: 4px;
+  /* Room at the end of the line so a long figure never runs under the
+     glyphs. Kept at rest too: the line must not rewrap when they appear. */
+  padding-right: 48px;
   font-family: var(--font-mono);
   font-size: 10.5px;
   color: var(--dim);
-  opacity: 0;
-  transition:
-    opacity 120ms ease,
-    height 120ms ease,
-    margin-top 120ms ease;
   user-select: text;
 }
-.msg:hover .msg-meta,
-.msg:focus-within .msg-meta {
-  height: 16px;
-  margin-top: 4px;
-  opacity: 1;
+/* The figures arrive with the finished turn, never on a row still streaming. */
+.msg.streaming .msg-meta {
+  display: none;
 }
 .msg-meta__tokens,
 .msg-meta__cost,
@@ -501,9 +497,9 @@
 /* Hover actions. They used to be a raised popover card of their own, parked
    under the row on top of the meta line — two 26 px glyphs wearing a
    background, a ring and a drop shadow, and colliding with the figures they
-   sat over. They are the same hover state as the meta line, so they share it:
-   parked at the trailing end of that one 16 px row, bare, no card. Zero
-   layout either way, but now it reads as one quiet footer instead of a chip
+   sat over. Now they share that line: parked at the trailing end of its
+   16 px row, in the room the meta keeps free for them, bare, no card. Zero
+   layout either way, and it reads as one quiet footer instead of a chip
    floating over the transcript. */
 .msg .msg-body > .msg-actions {
   position: absolute;
@@ -555,12 +551,6 @@
 }
 .msg.streaming .msg-actions {
   display: none;
-}
-/* Room at the end of the line so a long figure never runs under the glyphs.
-   Only while hovered: the two appear together, so nothing shifts. */
-.msg:hover .msg-meta,
-.msg:focus-within .msg-meta {
-  padding-right: 48px;
 }
 .msg-action {
   display: inline-grid;
