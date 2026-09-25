@@ -187,6 +187,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   ahead of `openai` (0.10/0.50), and taking it made the cost-aware router
   treat `c1` as cheaper than `c0` on the OpenRouter profile.
 
+- `gmgn-wallet-analysis` skill: a wallet whose 7-day cost basis is zero (it
+  sold from a position bought before the window, without buying anything
+  new) has an undefined 7d ROI, not a zero one — `stats_roi` already
+  returned `None` for this, and `m["form"]` already read it as "cannot
+  tell". `pnl_level` was the one place that defaulted the `None` to `0.0`,
+  which fed a confident P3-tier "style" label ("has not turned into
+  anything") into the report — contradicting the "cannot tell" gate a few
+  lines below it, even when the wallet's 7d realized profit was a large
+  positive number. `pnl_level` (and the `style_title` label it feeds) now
+  reports no style rather than a fabricated one when `roi_7d` is `None`.
+  (#3378)
 - Provider: a genuinely failed tool result could reach the model as a bare
   digest with no failure information. `_final_hard_cap_payload_once` asked
   `_tool_content_is_critical` about content that up to three earlier

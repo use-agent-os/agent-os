@@ -1936,8 +1936,17 @@ def pnl_level(m):
     Returns (level, basis) — `basis` names the corroborator that carried P5, so the title's
     "strongly profitable" is never a bare claim. A 33%-win-rate wallet reaching P5 on its
     must not be glossed as high-hit-rate.
+
+    Returns ``(None, None)`` when ``roi_7d`` is ``None``: a zero cost basis for the window
+    means "no closed trades this window", never "zero return" (see ``stats_roi``), and
+    ``m["form"]`` already reads the same condition as "cannot tell" a few lines above where
+    this is computed. Defaulting to 0.0 here would print a confident P3-tier label
+    ("has not turned into anything") for a wallet whose 7d realized profit can be
+    substantial -- it just did not come from a buy inside this window.
     """
-    roi = m["roi_7d"] if m["roi_7d"] is not None else 0.0
+    if m["roi_7d"] is None:
+        return (None, None)
+    roi = m["roi_7d"]
     hits = []
     if m["winrate"] >= 0.5:
         hits.append(T('{0} hit rate', pct(m['winrate'])))
@@ -1964,6 +1973,8 @@ def style_title(m):
     if m["trades"] == 0 or m["token_num"] < 5:
         return None
     plevel, basis = pnl_level(m)
+    if plevel is None:
+        return None
     cell = (freq_level(m["per_day"]), plevel)
     e, name, gloss_en = TITLES[cell]
     gloss = T(gloss_en)
