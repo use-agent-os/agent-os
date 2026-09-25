@@ -597,7 +597,9 @@
   margin-left: auto;
 }
 /* The venue is a fact about where orders go, so it reads as a plate with a
-   live lamp — not as the lime CTA colour spent on a label. */
+   live lamp — not as the lime CTA colour spent on a label. It is also the
+   route's switch: at rest the same plate with a chevron, lit under the
+   pointer and while its menu is open, as the composer's route seat is. */
 .trd-venue {
   display: inline-flex;
   align-items: center;
@@ -611,6 +613,25 @@
   color: var(--muted-foreground);
   background: color-mix(in srgb, var(--foreground) 5%, transparent);
   white-space: nowrap;
+  transition:
+    color 120ms ease-out,
+    background-color 120ms ease-out;
+}
+.trd-venue:hover:not([aria-disabled='true']),
+.trd-venue[aria-expanded='true'] {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 9%, transparent);
+}
+.trd-venue:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+/* A switch on its way: the plate dims and waits, but keeps focus. */
+.trd-venue[aria-disabled='true'] {
+  opacity: 0.6;
+}
+.trd-venue > svg {
+  flex-shrink: 0;
 }
 .trd-venue i {
   width: 5px;

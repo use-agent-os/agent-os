@@ -342,7 +342,8 @@
     color 120ms ease-out,
     background-color 120ms ease-out;
 }
-.trd-seat:hover {
+.trd-seat:hover,
+.trd-seat[aria-expanded='true'] {
   color: var(--foreground);
   background: color-mix(in srgb, var(--foreground) 9%, transparent);
 }
@@ -350,7 +351,7 @@
   position: relative;
   display: inline-flex;
 }
-.trd-seat:disabled {
+.trd-seat[aria-disabled='true'] {
   opacity: 0.6;
 }
 .trd-seat__text {

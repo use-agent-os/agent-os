@@ -1,8 +1,10 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useGateway } from '~/stores/gateway'
-import { renderDesk } from './test-utils'
+import { useUi } from '~/stores/ui'
+import { renderDesk, WALLET } from './test-utils'
 import { TradingView } from './TradingView'
+import type { ProviderId } from './types'
 
 const rpcCall = vi.fn()
 vi.mock('@/app/providers', () => ({
@@ -16,6 +18,7 @@ vi.mock('~/lib/desktop-api', () => ({
 beforeEach(() => {
   rpcCall.mockReset()
   useGateway.setState({ status: { state: 'running', pid: 1, url: 'http://x', error: null } })
+  useUi.setState({ settingsOpen: false })
 })
 
 describe('TradingView · gate', () => {
@@ -57,5 +60,76 @@ describe('TradingView · gate', () => {
         before,
       ),
     )
+  })
+})
+
+describe('TradingView · the venue pill', () => {
+  it('switches the route from the desk head, and the ticket follows it at once', async () => {
+    // One engine: trading.setProvider changes what trading.status reports.
+    let provider: ProviderId = 'aggregator'
+    rpcCall.mockImplementation(async (method: string, params?: { provider?: ProviderId }) => {
+      switch (method) {
+        case 'trading.status':
+          return {
+            enabled: true,
+            apiKeyConfigured: false,
+            chains: [],
+            limits: { approvalThresholdUsd: 100, dailyCapUsd: 1000, approvalTtlSeconds: 900 },
+            unlockMode: 'auto',
+            unlocked: true,
+            syncing: false,
+            lastSyncAt: null,
+            provider,
+            providers: [
+              {
+                id: 'aggregator',
+                label: 'AgentOS Aggregator',
+                needsKey: false,
+                keyConfigured: true,
+                healthy: null,
+              },
+              {
+                id: 'uniswap',
+                label: 'Uniswap',
+                needsKey: true,
+                keyConfigured: false,
+                healthy: null,
+              },
+            ],
+          }
+        case 'wallet.status':
+          return { initialized: true, unlocked: true, unlockMode: 'auto', walletCount: 1 }
+        case 'wallet.list':
+          return { wallets: [WALLET], primary: WALLET.address }
+        case 'trading.limits':
+          return { dailyCapUsd: 1000, spentTodayUsd: 0, thresholdUsd: 100, approvalTtlSeconds: 900 }
+        case 'trading.setProvider':
+          provider = params?.provider ?? provider
+          return { provider, restartRequired: false }
+        default:
+          return {}
+      }
+    })
+    renderDesk(<TradingView />)
+
+    const pill = await screen.findByTestId('provider-pill')
+    expect(pill).toHaveTextContent('AgentOS Aggregator')
+    // The keyless aggregator: the ticket has no key to ask for.
+    expect(screen.getByTestId('swap-review')).not.toHaveTextContent('Add a Uniswap key')
+
+    fireEvent.click(pill)
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /^Uniswap/ }))
+    await waitFor(() =>
+      expect(rpcCall).toHaveBeenCalledWith('trading.setProvider', { provider: 'uniswap' }),
+    )
+
+    // The pill and the ticket read the same status: one refetch moves both, and
+    // the ticket keeps its gate — Uniswap without a key sends you to Settings.
+    await waitFor(() => expect(screen.getByTestId('provider-pill')).toHaveTextContent('Uniswap'))
+    const cta = screen.getByTestId('swap-review')
+    expect(cta).toHaveTextContent('Add a Uniswap key')
+    expect(screen.getByTestId('add-key')).toBeInTheDocument()
+    fireEvent.click(cta)
+    expect(useUi.getState()).toMatchObject({ settingsOpen: true, settingsSection: 'trading' })
   })
 })

@@ -1,22 +1,18 @@
 import {
   ArrowLeftRight,
-  ChevronDown,
   Lock,
   Rocket,
   SendHorizontal,
-  Settings2,
   Wallet as WalletIcon,
   Wrench,
   Zap,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { useRef, useState } from 'react'
-import { MenuItem, MenuSep, PopMenu } from '~/components/menu/PopMenu'
 import { t, type MessageKey } from '~/i18n'
 import { formatUsd, walletLabel } from '../logic'
 import { ProviderMark, providerMark } from '../ProviderMark'
+import { ProviderMenu } from '../ProviderMenu'
 import {
-  PROVIDERS,
   providerLabel,
   type Limits,
   type ProviderId,
@@ -179,7 +175,10 @@ export function ComposerSeats({
   )
 }
 
-/** Which aggregator routes the swaps, changeable right here (it is not a limit). */
+/**
+ * Which aggregator routes the swaps, changeable right here (it is not a
+ * limit). The desk head's venue pill is the same control in another face.
+ */
 function ProviderSeat({
   provider,
   providers,
@@ -193,35 +192,16 @@ function ProviderSeat({
   onSwitch?: (id: ProviderId) => void
   onOpenSettings: () => void
 }) {
-  // The anchor rect is captured on click, so no ref is read during render.
-  const [anchor, setAnchor] = useState<DOMRect | null>(null)
-  const triggerRef = useRef<HTMLButtonElement>(null)
-  const facts = (id: ProviderId): string => {
-    const row = providers.find((p) => p.id === id)
-    if (!row) return ''
-    if (row.needsKey) {
-      return row.keyConfigured
-        ? t('trading.seat.provider.keyOk')
-        : t('trading.seat.provider.needsKey')
-    }
-    return t('trading.seat.provider.noKey')
-  }
   return (
     <div className="trd-seat__anchor">
-      <button
-        ref={triggerRef}
-        type="button"
+      <ProviderMenu
         className="trd-seat app-no-drag"
-        onClick={(e) => {
-          const rect = e.currentTarget.getBoundingClientRect()
-          setAnchor((a) => (a ? null : rect))
-        }}
-        title={t('trading.seat.provider.title')}
-        aria-label={t('trading.seat.provider.title')}
-        aria-haspopup="menu"
-        aria-expanded={anchor !== null}
-        disabled={switching}
-        data-testid="provider-seat"
+        testId="provider-seat"
+        provider={provider}
+        providers={providers}
+        switching={switching}
+        onSwitch={onSwitch}
+        onOpenSettings={onOpenSettings}
       >
         {providerMark(provider) ? (
           <ProviderMark id={provider} size={13} />
@@ -229,43 +209,7 @@ function ProviderSeat({
           <ArrowLeftRight className="size-3" strokeWidth={2} aria-hidden />
         )}
         <span className="trd-seat__text">{providerLabel(provider)}</span>
-        <ChevronDown className="size-3 opacity-70" strokeWidth={2} aria-hidden />
-      </button>
-      {anchor ? (
-        // Anchored so it flips above the seat: the composer sits at the window's foot.
-        <PopMenu
-          place={{ anchor, align: 'start' }}
-          triggerRef={triggerRef}
-          onClose={() => setAnchor(null)}
-          label={t('trading.seat.provider.title')}
-        >
-          {PROVIDERS.map((p) => (
-            <MenuItem
-              key={p.id}
-              role="menuitemradio"
-              checked={p.id === provider}
-              mark={<ProviderMark id={p.id} size={13} />}
-              label={p.label}
-              aside={facts(p.id)}
-              onSelect={() => {
-                setAnchor(null)
-                if (p.id !== provider) onSwitch?.(p.id)
-              }}
-            />
-          ))}
-          <MenuSep />
-          <MenuItem
-            icon={Settings2}
-            // An empty mark slot: the labels in this menu line up in one column.
-            mark={<span aria-hidden />}
-            label={t('trading.seat.provider.settings')}
-            onSelect={() => {
-              setAnchor(null)
-              onOpenSettings()
-            }}
-          />
-        </PopMenu>
-      ) : null}
+      </ProviderMenu>
     </div>
   )
 }

@@ -42,6 +42,7 @@ import {
   type Totals,
   type Wallet,
 } from './types'
+import { useSwitchProvider } from './useSwitchProvider'
 import { WalletHead } from './WalletHead'
 import { Budget, WalletRail, type WalletAction, type WalletSelection } from './WalletRail'
 import { WalletSheet, type WalletSheetMode } from './WalletSheet'
@@ -266,6 +267,7 @@ function Desk({
   const decide = useOrderDecision()
   const sync = useSync()
   const walletWrite = useWalletMutation()
+  const switchProvider = useSwitchProvider()
 
   const totalsByWallet = useMemo(() => {
     const m = new Map<string, Totals>()
@@ -409,7 +411,13 @@ function Desk({
             now={now}
             loading={portfolio.isPending}
             onSync={onSync}
+            // A switch lands in trading.status, which the ticket's provider
+            // and its key gate are read from too: both follow it at once.
             provider={provider}
+            providers={status.data?.providers ?? []}
+            switchingProvider={switchProvider.switching}
+            onSwitchProvider={switchProvider.switchTo}
+            onOpenSettings={() => openSettings('trading')}
             entering={entering}
             head={
               <WalletHead

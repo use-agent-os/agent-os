@@ -6,7 +6,14 @@ import { shortAge } from '~/lib/relative-time'
 import { allocationSegments, formatPct, formatUsd, pnlTone } from './logic'
 import { Money, Spinner, useCountUp } from './parts'
 import { ProviderMark, providerMark } from './ProviderMark'
-import { providerLabel, type Holding, type ProviderId, type Totals } from './types'
+import { ProviderMenu } from './ProviderMenu'
+import {
+  providerLabel,
+  type Holding,
+  type ProviderId,
+  type ProviderStatus,
+  type Totals,
+} from './types'
 
 /**
  * The instrument head of the desk: one panel carrying whose wallet this is,
@@ -23,6 +30,10 @@ export function Overview({
   onSync,
   loading,
   provider,
+  providers,
+  switchingProvider,
+  onSwitchProvider,
+  onOpenSettings,
   entering,
   head,
   unpricedCount = 0,
@@ -34,8 +45,14 @@ export function Overview({
   now: number
   onSync: () => void
   loading: boolean
-  /** Who routes swaps right now, as a pill beside the sync state. */
+  /** Who routes swaps right now, as a pill beside the sync state that switches it. */
   provider?: ProviderId
+  /** Per-provider facts from trading.status; the pill's menu explains each choice. */
+  providers?: readonly ProviderStatus[]
+  switchingProvider?: boolean
+  onSwitchProvider?: (id: ProviderId) => void
+  /** Settings › Trading, where a Uniswap key is added. */
+  onOpenSettings: () => void
   /** The mode switch is playing: the value counts up on the same clock. */
   entering?: boolean
   /** Whose value this is: the wallet head, above the figure. */
@@ -92,17 +109,26 @@ export function Overview({
 
         {/* Where orders route and how fresh the figures are: facts about the
             desk, not about the wallet, so they sit with the value rather than
-            in the identity line above it. */}
+            in the identity line above it. The route is also switched here,
+            through the same menu as the desk chat's route seat. */}
         <div className="trd-hero__tools">
           {provider ? (
-            <span className="trd-venue" data-testid="provider-pill">
+            <ProviderMenu
+              className="trd-venue app-no-drag"
+              testId="provider-pill"
+              provider={provider}
+              providers={providers ?? []}
+              switching={Boolean(switchingProvider)}
+              onSwitch={onSwitchProvider}
+              onOpenSettings={onOpenSettings}
+            >
               {providerMark(provider) ? (
                 <ProviderMark id={provider} size={13} />
               ) : (
                 <i aria-hidden />
               )}
               {providerLabel(provider)}
-            </span>
+            </ProviderMenu>
           ) : null}
           <span className="trd-hero__sync" data-live={syncing ? 'true' : undefined}>
             {syncing ? (
