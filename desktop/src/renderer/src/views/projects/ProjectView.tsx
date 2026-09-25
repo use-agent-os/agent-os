@@ -1,10 +1,7 @@
 import './projects.css'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Folder, FolderX, MessageSquarePlus, MoreHorizontal, Trash2 } from 'lucide-react'
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
-import { toast } from 'sonner'
-import { useRpc } from '@/app/providers'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Link, useParams } from 'react-router'
 import { ModalShell } from '@/components/ModalShell'
 import { projectAgentId, projectId, projectName, type RawProject } from '@/views/projects/logic'
 import { Menu, MenuItem } from '~/components/menu/PopMenu'
@@ -15,11 +12,12 @@ import { shortAge } from '~/lib/relative-time'
 import { useNow } from '~/lib/use-now'
 import { useGateway } from '~/stores/gateway'
 import { useLive } from '~/stores/live'
-import { errorText, invalidateProjects, useProjects } from '~/stores/projects'
+import { useProjects } from '~/stores/projects'
 import { useSessions, type SessionRow } from '~/stores/sessions'
 import { useUi } from '~/stores/ui'
 import { BriefEditor } from './BriefEditor'
 import { briefDate, groupByAgent, initials, normalizeName } from './logic'
+import { useProjectActions } from './project-actions'
 
 function toEpochMs(value: unknown): number {
   const n = Number(value)
@@ -72,12 +70,10 @@ function ConnectedProject({ id }: { id: string }) {
 }
 
 function ProjectPage({ project }: { project: RawProject }) {
-  const rpc = useRpc()
-  const navigate = useNavigate()
-  const queryClient = useQueryClient()
   const setFolderOpen = useUi((s) => s.setFolderOpen)
   const { rows } = useSessions()
   const now = useNow(30_000)
+  const actions = useProjectActions(project)
   const id = projectId(project)
   const name = projectName(project)
   const agentId = projectAgentId(project) || 'main'
@@ -97,89 +93,6 @@ function ProjectPage({ project }: { project: RawProject }) {
   )
   const groups = useMemo(() => groupByAgent(sessions), [sessions])
 
-  // ── Save (name or brief), compare-and-swap on updated_at ─────────────────
-  const update = useMutation({
-    mutationFn: (vars: { name?: string; knowledge?: string; expected: number }) =>
-      rpc.call<{ project?: RawProject }>('projects.update', {
-        projectId: id,
-        ...(vars.name !== undefined ? { name: vars.name } : {}),
-        ...(vars.knowledge !== undefined ? { knowledge: vars.knowledge } : {}),
-        expectedUpdatedAt: vars.expected,
-      }),
-    onSuccess: (data, vars) => {
-      const fresh = data?.project
-      if (fresh) {
-        // Patch the cache so the page never shows the pre-save value between
-        // the response and the refetch.
-        queryClient.setQueryData<{ projects?: RawProject[] }>(['projects'], (prev) =>
-          prev
-            ? {
-                ...prev,
-                projects: (prev.projects ?? []).map((p) =>
-                  projectId(p) === id ? { ...p, ...fresh } : p,
-                ),
-              }
-            : prev,
-        )
-      }
-      if (vars.name !== undefined) {
-        toast.success(t('projects.toast.renamed'), { id: 'projects-update' })
-      }
-      invalidateProjects(queryClient)
-    },
-    onError: (err) => {
-      const code = (err as { code?: string }).code
-      if (code === 'project.conflict') {
-        toast.error(t('projects.toast.conflict'), { id: 'projects-update-err' })
-        invalidateProjects(queryClient)
-        return
-      }
-      toast.error(`${t('projects.toast.saveFailed')}: ${errorText(err)}`, {
-        id: 'projects-update-err',
-      })
-    },
-  })
-
-  const rawUpdated = Number(project.updated_at ?? project.updatedAt)
-  const saveBrief = useCallback(
-    (text: string) => update.mutateAsync({ knowledge: text, expected: rawUpdated }),
-    [update, rawUpdated],
-  )
-
-  function rename(next: string) {
-    const clean = normalizeName(next)
-    if (!clean || clean === name) return
-    update.mutate({ name: clean, expected: rawUpdated })
-  }
-
-  // ── New chat in this folder ──────────────────────────────────────────────
-  const newChat = useMutation({
-    mutationFn: () => rpc.call<{ key?: string }>('sessions.create', { agentId, projectId: id }),
-    onSuccess: (res) => {
-      invalidateProjects(queryClient)
-      if (res?.key) void navigate(sessionPath(res.key))
-    },
-    onError: (err) =>
-      toast.error(`${t('projects.toast.chatFailed')}: ${errorText(err)}`, {
-        id: 'projects-chat-err',
-      }),
-  })
-
-  // ── Delete ───────────────────────────────────────────────────────────────
-  const remove = useMutation({
-    mutationFn: () => rpc.call('projects.delete', { projectId: id }),
-    onSuccess: () => {
-      toast.success(t('projects.toast.deleted'), { id: 'projects-delete' })
-      setConfirmDelete(false)
-      invalidateProjects(queryClient)
-      void navigate('/sessions', { replace: true })
-    },
-    onError: (err) =>
-      toast.error(`${t('projects.toast.deleteFailed')}: ${errorText(err)}`, {
-        id: 'projects-delete-err',
-      }),
-  })
-
   const count = sessions.length
   const countWord = count === 1 ? t('projects.page.chats.one') : t('projects.page.chats.many')
 
@@ -198,7 +111,7 @@ function ProjectPage({ project }: { project: RawProject }) {
               {agentId}
             </span>
           </div>
-          <TitleField name={name} disabled={update.isPending} onRename={rename} />
+          <TitleField name={name} disabled={actions.saving} onRename={actions.rename} />
           <p className="proj-head__meta">
             <span>
               {count} {countWord}
@@ -222,9 +135,9 @@ function ProjectPage({ project }: { project: RawProject }) {
           </p>
         </div>
         <div className="proj-head__actions">
-          <Button variant="primary" disabled={newChat.isPending} onClick={() => newChat.mutate()}>
+          <Button variant="primary" disabled={actions.starting} onClick={actions.newChat}>
             <MessageSquarePlus className="size-3.5" strokeWidth={2} aria-hidden />
-            {newChat.isPending ? t('projects.page.newChat.busy') : t('projects.page.newChat')}
+            {actions.starting ? t('projects.page.newChat.busy') : t('projects.page.newChat')}
           </Button>
           <div className="proj-more">
             <Button
@@ -255,7 +168,7 @@ function ProjectPage({ project }: { project: RawProject }) {
         </div>
       </header>
 
-      <BriefEditor key={id} projectId={id} saved={knowledge} onSave={saveBrief} />
+      <BriefEditor key={id} projectId={id} saved={knowledge} onSave={actions.saveBrief} />
 
       <section className="proj-chats" aria-labelledby="proj-chats-title">
         <div className="proj-chats__head">
@@ -266,7 +179,7 @@ function ProjectPage({ project }: { project: RawProject }) {
           <div className="proj-chats__empty">
             <p>{t('projects.chats.empty')}</p>
             <p className="proj-chats__empty-hint">{t('projects.chats.empty.hint')}</p>
-            <Button disabled={newChat.isPending} onClick={() => newChat.mutate()}>
+            <Button disabled={actions.starting} onClick={actions.newChat}>
               <MessageSquarePlus className="size-3.5" strokeWidth={2} aria-hidden />
               {t('projects.chats.start')}
             </Button>
@@ -290,11 +203,13 @@ function ProjectPage({ project }: { project: RawProject }) {
       </section>
 
       {confirmDelete ? (
-        <DeleteConfirm
+        <DeleteProjectConfirm
           name={name}
-          busy={remove.isPending}
+          busy={actions.deleting}
           onCancel={() => setConfirmDelete(false)}
-          onConfirm={() => remove.mutate()}
+          onConfirm={async () => {
+            if (await actions.remove()) setConfirmDelete(false)
+          }}
         />
       ) : null}
     </div>
@@ -363,7 +278,8 @@ function ChatRow({ row, now }: { row: SessionRow; now: number }) {
   )
 }
 
-function DeleteConfirm({
+/** Asked before a project goes, from the page's "…" menu and from its sidebar folder alike. */
+export function DeleteProjectConfirm({
   name,
   busy,
   onCancel,

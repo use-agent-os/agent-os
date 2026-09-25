@@ -79,6 +79,7 @@ export function SessionRowLink({ row, nested = false }: { row: SessionRow; neste
           {stateGlyph}
           <RenameField
             value={row.title}
+            label={t('session.rename.label')}
             onDone={(next) => {
               setRenaming(false)
               if (next !== null) void actions.rename(next)
@@ -162,8 +163,19 @@ export function SessionRowLink({ row, nested = false }: { row: SessionRow; neste
 /**
  * The title as a field: Return commits, Escape reverts, leaving the field
  * commits too (Finder's rename). Selected on open so typing replaces.
+ * Project folders rename through it as well. `via` says how it ended: from
+ * a key, focus is still in the field; from a blur, it is already on its way
+ * to wherever the user sent it.
  */
-function RenameField({ value, onDone }: { value: string; onDone: (next: string | null) => void }) {
+export function RenameField({
+  value,
+  label,
+  onDone,
+}: {
+  value: string
+  label: string
+  onDone: (next: string | null, via: 'key' | 'blur') => void
+}) {
   const [draft, setDraft] = useState(value)
   const ref = useRef<HTMLInputElement>(null)
   const settled = useRef(false)
@@ -171,31 +183,31 @@ function RenameField({ value, onDone }: { value: string; onDone: (next: string |
     ref.current?.focus()
     ref.current?.select()
   }, [])
-  const finish = (next: string | null) => {
+  const finish = (next: string | null, via: 'key' | 'blur') => {
     if (settled.current) return
     settled.current = true
-    onDone(next)
+    onDone(next, via)
   }
   return (
     <input
       ref={ref}
       className="mac-session-rename app-no-drag"
       value={draft}
-      aria-label={t('session.rename.label')}
+      aria-label={label}
       maxLength={200}
       spellCheck={false}
       onChange={(e) => setDraft(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === 'Enter') {
           e.preventDefault()
-          finish(draft)
+          finish(draft, 'key')
         } else if (e.key === 'Escape') {
           e.preventDefault()
           e.stopPropagation()
-          finish(null)
+          finish(null, 'key')
         }
       }}
-      onBlur={() => finish(draft)}
+      onBlur={() => finish(draft, 'blur')}
       onClick={(e) => e.stopPropagation()}
     />
   )

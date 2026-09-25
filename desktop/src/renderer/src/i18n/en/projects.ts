@@ -12,6 +12,11 @@ export const projects = {
   'projects.folder.empty': 'No chats yet',
   'projects.folder.more': 'more',
   'projects.folder.drop': 'Move here',
+  'projects.folder.rename.label': 'Project name',
+  'projects.folder.menu.label': 'Project',
+  'projects.folder.menu.newChat': 'New chat',
+  'projects.folder.menu.rename': 'Rename…',
+  'projects.folder.menu.delete': 'Delete…',
   'projects.unfiled': 'Sessions',
   'projects.unfiled.drop': 'Remove from project',
 

@@ -43,7 +43,8 @@
   border-radius: var(--radius-control);
   transition: background-color 80ms ease-out;
 }
-.proj-folder__row:hover {
+.proj-folder__row:hover,
+.proj-folder__row[data-menu='true'] {
   background: color-mix(in srgb, var(--sidebar-accent) 55%, transparent);
 }
 .proj-folder__row:has(.proj-folder__link[aria-current='page']) {
