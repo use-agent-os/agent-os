@@ -87,7 +87,7 @@ The most useful ones:
 | `/new [title]` | Start a new chat session. The optional title is persisted as the session's display name and shown in the bottom toolbar and `/status`. |
 | `/resume <key>` | Resume an existing session by key (or a prefix / display-name match in gateway mode). |
 | `/status` | Show the current session, model, permissions, and the active Pilot Router tier (or `auto`). |
-| `/model <id>` | Override the model for this session. |
+| `/model [filter]` | List available models (optionally filtered by name). |
 | `/clear` / `/reset` | Clear the current conversation context. The screen is wiped too (including scrollback), so the cleared turns are gone from view as well as from context. |
 | `/compact` | Compact older context into a summary. |
 | `/cost` | Show per-session token and cost totals. |
