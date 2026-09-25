@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- MS Teams channel: `_message_conversation_keys` mapped every outbound
+  activity id to its conversation and never evicted, so a long-running bot
+  grew one entry per message sent for the life of the process. It is now a
+  bounded LRU registry (#3052).
+
 ## [2026.9.25] - 2026-09-25
 
 ### Fixed

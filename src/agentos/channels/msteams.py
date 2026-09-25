@@ -48,8 +48,12 @@ from agentos.channels.types import (
     IncomingMessage,
     OutgoingMessage,
 )
+from agentos.util.bounded_registry import BoundedRegistry
 
 log = structlog.get_logger(__name__)
+
+# Ceilings pinned by the adapter audit.
+_MAX_CACHED_MESSAGE_KEYS = 10_000
 
 # Channel-contract constants pinned by the adapter audit.
 CAPABILITY_TIER = "GREEN-shipping"
@@ -161,7 +165,15 @@ class MSTeamsChannel:
     _references: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
     # Tracks which cached conversation a given outbound activity id belongs
     # to, so edit()/delete() operate on the right chat instead of guessing.
-    _message_conversation_keys: dict[str, str] = field(default_factory=dict, init=False, repr=False)
+    # Bounded to prevent memory leaks in long-running bot processes.
+    _message_conversation_keys: BoundedRegistry[str, str] = field(
+        default_factory=lambda: BoundedRegistry(
+            name="MSTeamsChannel._message_conversation_keys",
+            max_entries=_MAX_CACHED_MESSAGE_KEYS,
+        ),
+        init=False,
+        repr=False,
+    )
     _bot_id: str | None = field(default=None, init=False, repr=False)
     _connected: bool = field(default=False, init=False, repr=False)
     _last_message_at: datetime | None = field(default=None, init=False, repr=False)

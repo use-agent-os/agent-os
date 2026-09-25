@@ -20,8 +20,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentos.channels.msteams import MSTeamsChannel, MSTeamsChannelConfig
+from agentos.channels.msteams import (
+    _MAX_CACHED_MESSAGE_KEYS,
+    MSTeamsChannel,
+    MSTeamsChannelConfig,
+)
 from agentos.channels.types import OutgoingMessage
+from agentos.util.bounded_registry import BoundedRegistry
 
 
 @pytest.fixture(autouse=True)
@@ -151,3 +156,38 @@ async def test_send_streaming_records_which_conversation_the_message_landed_in()
 
     assert message_id == "stream-activity-id"
     assert channel._message_conversation_keys["stream-activity-id"] == "conversation-A"
+
+
+def test_the_channel_builds_a_bounded_message_key_cache() -> None:
+    """Issue #3052: the dataclass default is the thing under test.
+
+    Asserting on a registry the test installed itself would pass with the
+    `msteams.py` change reverted -- it would be testing `BoundedRegistry`, not
+    the channel. This reads the field the channel actually builds.
+    """
+    channel = MSTeamsChannel(config=MSTeamsChannelConfig(name="msteams"))
+
+    assert isinstance(channel._message_conversation_keys, BoundedRegistry)
+    assert channel._message_conversation_keys.max_entries == _MAX_CACHED_MESSAGE_KEYS
+
+
+def test_the_message_key_cache_evicts_instead_of_growing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The leak this closes: a long-running bot used to keep one entry per
+    message forever. The ceiling is lowered before the channel is constructed,
+    so the eviction being exercised is the channel's own registry.
+    """
+    monkeypatch.setattr("agentos.channels.msteams._MAX_CACHED_MESSAGE_KEYS", 3)
+    channel = MSTeamsChannel(config=MSTeamsChannelConfig(name="msteams"))
+
+    for index in range(1, 4):
+        channel._remember_sent_message(f"msg-{index}", f"conv-{index}")
+    assert len(channel._message_conversation_keys) == 3
+
+    channel._remember_sent_message("msg-4", "conv-4")
+
+    assert len(channel._message_conversation_keys) == 3
+    assert "msg-1" not in channel._message_conversation_keys  # least recently used
+    assert channel._message_conversation_keys.get("msg-2") == "conv-2"
+    assert channel._message_conversation_keys.get("msg-4") == "conv-4"
