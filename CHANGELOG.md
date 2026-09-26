@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Desktop: a file the agent generated (an `.xlsx` from `create_xlsx`, a PDF,
+  a CSV) can be downloaded from its chip in the chat. Two things were wrong.
+  The shared transcript built every artifact URL relative to the page, which
+  is right for the console the gateway serves and wrong for the desktop
+  renderer, which loads from disk: the chip's link resolved to the dev server
+  (saving an HTML page under the Excel file's name) or to `file://` (saving
+  nothing), and the same relative URLs broke image previews, audio and chart
+  artifacts in the desktop. Off gateway the URLs now keep the gateway origin,
+  and a click on the chip goes through the authenticated fetch instead of a
+  cross-origin `download` link the shell refuses to navigate to; the file
+  then goes out through the normal save dialog, and a download the gateway
+  does not answer shows a toast rather than nothing. Second, that fetch — and
+  every other `fetch` the desktop makes to the gateway: bootstrap, the
+  approvals poll, file uploads — failed as a CORS error: the app presents the
+  gateway's own origin on loopback requests (the gateway refuses `file://`),
+  the gateway reflects it in `Access-Control-Allow-Origin`, and Chromium
+  compared that with the renderer's real origin. The main process now
+  translates the answer back to the renderer's origin.
+
 ## [2026.9.25] - 2026-09-25
 
 ### Fixed
