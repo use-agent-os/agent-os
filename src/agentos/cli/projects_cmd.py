@@ -80,9 +80,7 @@ def projects_list(
 @app.command("create")
 def projects_create(
     name: str = typer.Argument(..., help="Project name (unique across projects)"),
-    agent: str = typer.Option(
-        "main", "--agent", help="Default agent for new chats in the project"
-    ),
+    agent: str = typer.Option("main", "--agent", help="Default agent for new chats in the project"),
     knowledge: str | None = typer.Option(
         None, "--knowledge", help="Shared knowledge text injected into member sessions"
     ),
@@ -158,9 +156,7 @@ def projects_show(
                 continue
             session_table.add_row(
                 str(row.get("key") or ""),
-                markup_escape(
-                    str(row.get("display_name") or row.get("derived_title") or "")
-                ),
+                markup_escape(str(row.get("display_name") or row.get("derived_title") or "")),
                 str(row.get("status") or ""),
             )
         console.print(session_table)
@@ -204,9 +200,7 @@ def projects_delete(
 ) -> None:
     """Delete a project. Member sessions survive and become project-less."""
     if not yes:
-        confirmed = typer.confirm(
-            f"Delete project {project_id!r}? Sessions are kept and detached."
-        )
+        confirmed = typer.confirm(f"Delete project {project_id!r}? Sessions are kept and detached.")
         if not confirmed:
             raise typer.Abort()
 
@@ -218,7 +212,9 @@ def projects_delete(
         print_json(result)
         return
     cleared = result.get("sessions_cleared", 0) if isinstance(result, dict) else 0
-    console.print(f"Deleted project {project_id!r} ({cleared} session(s) detached)")
+    console.print(
+        f"Deleted project {markup_escape(repr(project_id))} ({cleared} session(s) detached)"
+    )
 
 
 @app.command("move")
@@ -244,6 +240,8 @@ def projects_move(
         return
     key = result.get("key") or session_id
     if target is None:
-        console.print(f"Detached session {key!r} from its project")
+        console.print(f"Detached session {markup_escape(repr(key))} from its project")
     else:
-        console.print(f"Moved session {key!r} into project {target!r}")
+        console.print(
+            f"Moved session {markup_escape(repr(key))} into project {markup_escape(repr(target))}"
+        )

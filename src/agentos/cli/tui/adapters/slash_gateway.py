@@ -209,7 +209,7 @@ async def handle_gateway_slash_command(
             pass
         sync_session_chrome_from_state(state)
         label = f" ({title})" if title else ""
-        console.print(f"[green]Started new session{label}:[/green] {session_key}")
+        console.print(f"[green]Started new session{markup_escape(label)}:[/green] {session_key}")
         return True
 
     if parts := _slash_parts(cmd, "/resume"):
@@ -647,7 +647,7 @@ async def _save_gateway_transcript_command(
     if not markdown.strip():
         markdown = state.transcript.to_markdown()
     target.write_text(markdown, encoding="utf-8")
-    console.print(f"[green]Saved transcript:[/green] {target}")
+    console.print(f"[green]Saved transcript:[/green] {markup_escape(target)}")
 
 
 def _image_prompt_from_command(command: str) -> str:
@@ -744,7 +744,10 @@ async def _handle_approvals_command(cmd: str, client: object | None = None) -> N
             console.print(f"[{ACCENT}]Approval mode reset to prompt; cache cleared.[/]")
             return
         entries = [
-            f"  [dim]{scope}[/dim] {s}: {k}:{t}" if s else f"  [dim]{scope}[/dim] {k}:{t}"
+            f"  [dim]{markup_escape(scope)}[/dim] "
+            f"{markup_escape(s)}: {markup_escape(k)}:{markup_escape(t)}"
+            if s
+            else f"  [dim]{markup_escape(scope)}[/dim] {markup_escape(k)}:{markup_escape(t)}"
             for (s, k, t), (_exp, scope) in cache._entries.items()  # noqa: SLF001
         ]
         console.print(f"[{ACCENT}]mode:[/] {queue.get_settings().mode}")
@@ -782,7 +785,10 @@ async def _handle_approvals_command(cmd: str, client: object | None = None) -> N
     if not approval_entries:
         console.print("  [dim](none)[/dim]")
     for e in approval_entries:
-        console.print(f"  [dim]{e.get('scope')}[/dim] {e.get('kind')}:{e.get('target')}")
+        console.print(
+            f"  [dim]{markup_escape(e.get('scope'))}[/dim] "
+            f"{markup_escape(e.get('kind'))}:{markup_escape(e.get('target'))}"
+        )
 
 
 async def _handle_forget_command(cmd: str, client: object | None = None) -> None:

@@ -558,6 +558,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `answered`, and the node-fault paths in `read_start_tick` / `simulate_launch`
   say the endpoint refused the call and that it is retryable instead.
 
+- CLI: `agentos replay`, the chat's `/new`, `/save` and `/approvals`
+  confirmations, and `agentos projects delete`/`move` print user-typed values
+  verbatim — a `[/]`-shaped session id, title, path or target raised
+  `MarkupError` and killed the command (for the projects commands, after the
+  mutation had already applied), and a `[redacted]`-shaped value silently
+  vanished from the confirmation (#3319)
+
+
 ## [2026.9.22.post1] - 2026-09-22
 
 ### Added
