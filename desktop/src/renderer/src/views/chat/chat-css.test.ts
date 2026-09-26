@@ -103,3 +103,45 @@ describe('desktop chat response info', () => {
     expect(css).toMatch(/^\.msg\.streaming \.msg-meta \{\s*display: none;\s*\}/m)
   })
 })
+
+// The file chip is the console's markup (`file · name · mime`) drawn as a
+// card: the shared renderer stamps `data-artifact-kind`, `-summary` and
+// `-action` for exactly this, and the skin must keep reading them — the raw
+// mime span is hidden, not reworded, and `.msg-body a` must not win the
+// anchor back (it underlines it in lime).
+describe('desktop artifact file card', () => {
+  const card = css.match(/^\.msg-body \.msg-artifact-chip \{[\s\S]*?^\}/m)?.[0]
+
+  it('outranks the transcript link rule and lays the card out as a grid', () => {
+    expect(card).toBeTruthy()
+    expect(card).toMatch(/display: grid;/)
+    expect(card).toMatch(/text-decoration: none;/)
+    expect(card).toMatch(/grid-template-areas:\s*'tile name action'\s*'tile summary action';/)
+  })
+
+  it('draws the subtitle and the button from the renderer-stamped attributes', () => {
+    expect(css).toMatch(
+      /^\.msg-body \.msg-artifact-chip::before \{[\s\S]*?content: attr\(data-artifact-summary\);/m,
+    )
+    expect(css).toMatch(
+      /^\.msg-body \.msg-artifact-chip::after \{[\s\S]*?content: attr\(data-artifact-action\);/m,
+    )
+    expect(css).toMatch(/^\.msg-artifact-chip \.msg-file-chip__meta \{\s*display: none;\s*\}/m)
+  })
+
+  it('tints the tile per kind, with a glyph for every kind the renderer emits', () => {
+    const tinted = selectors.filter((s) => /\.msg-artifact-chip\[data-artifact-kind=/.test(s))
+    for (const kind of ['spreadsheet', 'document', 'pdf', 'presentation', 'archive', 'data']) {
+      const rule = css.match(
+        new RegExp(`\\.msg-artifact-chip\\[data-artifact-kind='${kind}'\\] \\{[\\s\\S]*?\\n\\}`),
+      )?.[0]
+      expect(rule, kind).toMatch(/--artifact-accent: var\(--(ok|info|danger|warn)\);/)
+      expect(rule, kind).toMatch(/--artifact-glyph: url\('data:image\/svg\+xml,/)
+    }
+    expect(tinted.length).toBeGreaterThanOrEqual(6)
+    // The glyph is a mask so it takes the accent, never a fixed colour.
+    expect(css).toMatch(
+      /^\.msg-artifact-chip \.msg-file-chip__icon::before \{[\s\S]*?mask: var\(--artifact-glyph\) center \/ contain no-repeat;/m,
+    )
+  })
+})

@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- Desktop: a generated file shows as a file card in the chat instead of a
+  bare link that spelled out its mime type: a tile tinted and drawn by kind
+  (spreadsheet, document, PDF, presentation, archive, data, code, web page),
+  the file name, a plain subtitle such as "Spreadsheet · XLSX · 5 KB", and a
+  Download button. The shared transcript now stamps the kind, that subtitle
+  and the action label on the chip (`data-artifact-kind`, `-summary`,
+  `-action`) so a host can draw it as a card; the web console's chip is
+  unchanged.
+
 ### Fixed
 - Desktop: a file the agent generated (an `.xlsx` from `create_xlsx`, a PDF,
   a CSV) can be downloaded from its chip in the chat. Two things were wrong.
