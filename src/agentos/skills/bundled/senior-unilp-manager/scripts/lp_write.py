@@ -524,6 +524,13 @@ def run_plan(client, chain: dict, args: dict, signer: dict, ctx: dict, *,
     print(heading("simulation"))
     if not sim["ok"]:
         print(f"  method   : {sim['method']}")
+        if sim.get("refused"):
+            # The node refused the call; the contract was never reached, so no
+            # revert may be named and the parameters are not what to fix.
+            print("  result   : REFUSED (node fault — not a contract revert)")
+            print(f"  reason   : {sim['refused']}")
+            print("\n  Nothing was sent. This is a node fault, not a revert — retry in a moment.")
+            sys.exit(2)
         print("  result   : REVERTED")
         print(f"  reason   : {describe_revert(sim['revert']) or '(no revert data returned)'}")
         print("\n  Nothing was sent. Fix the parameters (or the approvals) and re-run.")

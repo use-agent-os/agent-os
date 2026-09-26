@@ -13,6 +13,7 @@ import os
 
 from .abi_codec import decode_event_log
 from .hexutil import checksum_address
+from .rpc import RpcError
 
 NATIVE = "0x0000000000000000000000000000000000000000"
 
@@ -34,7 +35,12 @@ _ERC721_TRANSFER_ABI = [
 
 
 def simulate_call(client, call: dict) -> dict:
-    """Simulate one call. Never raises — a failed simulation is a result, not an error."""
+    """Simulate one call. Never raises — a failed simulation is a result, not an error.
+
+    ``revert`` is populated only when the contract answered with one; a node that
+    refused the call comes back as ``refused`` instead, because a node fault is not
+    evidence about the contract.
+    """
     payload = {
         "from": checksum_address(call["from"]),
         "to": checksum_address(call["to"]),
@@ -74,10 +80,25 @@ def simulate_call(client, call: dict) -> dict:
         return {"ok": True, "gasUsed": None, "logs": [], "revert": None,
                 "method": "eth_call (no transfer trace)"}
     except Exception as exc:  # noqa: BLE001
-        data = getattr(exc, "data", None) or (getattr(exc, "error", {}) or {}).get("data")
-        return {"ok": False, "gasUsed": None, "logs": [],
-                "revert": {"data": data, "message": str(exc)},
-                "method": "eth_call (no transfer trace)"}
+        if isinstance(exc, RpcError) and exc.answered:
+            return {
+                "ok": False,
+                "gasUsed": None,
+                "logs": [],
+                "revert": {"data": exc.data, "message": str(exc)},
+                "method": "eth_call (no transfer trace)",
+            }
+        # The node refused the call -- a rate limit, a transient internal error, a
+        # transport failure. Nothing was learned about the contract, so it must not
+        # be reported as a revert: a node fault never names one.
+        return {
+            "ok": False,
+            "gasUsed": None,
+            "logs": [],
+            "revert": None,
+            "refused": str(exc),
+            "method": "eth_call (no transfer trace)",
+        }
 
 
 def net_transfers(logs: list, account: str) -> dict:

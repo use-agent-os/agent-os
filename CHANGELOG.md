@@ -558,6 +558,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `answered`, and the node-fault paths in `read_start_tick` / `simulate_launch`
   say the endpoint refused the call and that it is retryable instead.
 
+- `senior-unilp-manager`: a node that refuses the simulated `eth_call` — a
+  rate limit, a transient internal error, an HTTP-level failure — no longer
+  prints `result: REVERTED` with "Fix the parameters"; the dry-run reports
+  `REFUSED (node fault — not a contract revert)` and says to retry. Only a
+  contract that answered (code 3, a message naming a revert, or a non-empty
+  hex revert blob) may be reported as a revert (#3355)
+
+
 ## [2026.9.22.post1] - 2026-09-22
 
 ### Added
