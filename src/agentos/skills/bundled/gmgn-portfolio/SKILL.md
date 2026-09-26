@@ -64,6 +64,7 @@ Use the `gmgn-cli` tool to query wallet portfolio data based on the user's reque
 | `portfolio holdings` | Wallet token holdings with P&L |
 | `portfolio activity` | Transaction history |
 | `portfolio stats` | Trading statistics (supports batch) |
+| `portfolio profits` | Realized/unrealized profit and ROI for a window (`1d` / `7d` / `30d` / `all`) |
 | `portfolio token-balance` | Token balance for a specific token |
 | `portfolio created-tokens` | Tokens created by a developer wallet, with market cap and ATH info |
 
@@ -141,6 +142,12 @@ gmgn-cli portfolio stats --chain sol --wallet <wallet_address> --period 30d
 gmgn-cli portfolio stats --chain sol \
   --wallet <wallet_1> --wallet <wallet_2>
 
+# All-time realized/unrealized profit and ROI
+gmgn-cli portfolio profits --chain sol --wallet <wallet_address> --period all
+
+# Today's profit and ROI
+gmgn-cli portfolio profits --chain sol --wallet <wallet_address> --period 1d
+
 # Token balance
 gmgn-cli portfolio token-balance \
   --chain sol --wallet <wallet_address> --token <token_address>
@@ -205,6 +212,14 @@ The activity response includes a `next` field. Pass it to `--cursor` to fetch th
 | Option | Description |
 |--------|-------------|
 | `--period <period>` | Stats period: `7d` / `30d` (default `7d`) |
+
+## `portfolio profits` Options
+
+| Option | Description |
+|--------|-------------|
+| `--period <period>` | Profit window: `1d` / `7d` / `30d` / `all` |
+
+Uses exist auth (API Key only, weight `3`) — same auth tier and weight as `portfolio stats`.
 
 ## Response Field Reference
 
@@ -284,6 +299,17 @@ The response also includes a `common` object when available (absent if the upstr
 | `common.fund_amount` | Funding amount |
 
 Use `common.tags` and `common.twitter_username` when building a wallet profile narrative. If `common` is absent in the response, omit identity fields silently — do not report it as an error.
+
+### `portfolio profits` — Key Fields
+
+Field names differ by `--period`: `all` reports cumulative totals (`total_*`); `1d` / `7d` / `30d` report the window's own totals without the prefix.
+
+| Field | Windows | Description |
+|-------|---------|-------------|
+| `total_realized_profit` | `all` | Cumulative realized profit, all-time (USD) |
+| `total_realized_profit_cost` | `all` | Cumulative cost basis behind `total_realized_profit` — divide the two for all-time ROI |
+| `unrealized_profit` | `all` | Unrealized profit on currently open positions (USD) |
+| `realized_profit` | `1d` / `7d` / `30d` | Realized profit for that window (USD) |
 
 ### `portfolio created-tokens` — Key Fields
 
