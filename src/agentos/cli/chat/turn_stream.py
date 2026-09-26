@@ -19,6 +19,7 @@ from agentos.cli.chat.turn import TurnResult, UsageSummary
 from agentos.execution_status import derive_is_error
 from agentos.plan_mode import format_plan_as_text, plan_from_tool_result
 from agentos.session.terminal_reply import build_terminal_reply
+from agentos.ui import markup_escape
 
 _DEFAULT_STREAM_HEARTBEAT_INTERVAL_SECONDS = 15.0
 _DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 600.0
@@ -292,7 +293,7 @@ def render_gateway_task_group_status(
     if callable(status):
         status(message, style=style)
     else:
-        stream_deps.output_console.print(f"[{style}]{message}[/]")
+        stream_deps.output_console.print(f"[{style}]{markup_escape(message)}[/]")
 
 
 def gateway_task_group_status(
@@ -353,7 +354,7 @@ async def renderer_status(
     if callable(status):
         status(message, style=style)
     else:
-        stream_deps.output_console.print(f"[{style}]{message}[/]")
+        stream_deps.output_console.print(f"[{style}]{markup_escape(message)}[/]")
 
 
 async def renderer_tool_start(
