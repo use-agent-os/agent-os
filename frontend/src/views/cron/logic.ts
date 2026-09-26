@@ -1012,7 +1012,7 @@ export function buildFailureDest(form: CronForm): DeliveryBuild {
   const ch = form.fdChannel.trim()
   const to = form.fdTo.trim()
   const acct = form.fdAccount.trim()
-  if (!ch && !to) return { ok: false, error: t('cron.errFailureChannel') }
+  if (!ch) return { ok: false, error: t('cron.errFailureChannel') }
   const out: Record<string, unknown> = { mode: 'channel' }
   if (ch) out.channelName = ch.toLowerCase()
   if (to) out.to = to

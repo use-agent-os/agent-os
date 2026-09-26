@@ -568,10 +568,10 @@ describe('buildFailureDest', () => {
       delivery: { mode: 'webhook', webhookUrl: 'https://h', webhookToken: 't' },
     })
   })
-  it('channel needs a channel or recipient; lowercases the channel', () => {
-    expect(buildFailureDest(form({ fdMode: 'channel' }))).toEqual({
+  it('channel needs a channel name; lowercases the channel', () => {
+    expect(buildFailureDest(form({ fdMode: 'channel', fdTo: 'C1' }))).toEqual({
       ok: false,
-      error: 'Failure destination channel needs a channel or recipient',
+      error: 'Failure-destination channel is required',
     })
     expect(
       buildFailureDest(form({ fdMode: 'channel', fdChannel: 'Slack', fdTo: 'C1', fdAccount: 'a' })),

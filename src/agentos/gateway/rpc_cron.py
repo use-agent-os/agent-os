@@ -439,9 +439,12 @@ def _build_failure_destination(raw: Any) -> FailureDestination | None:
             webhook_url=str(url),
             webhook_token=str(raw.get("webhookToken") or raw.get("token") or ""),
         )
+    channel_name = _delivery_channel_name(raw)
+    if not channel_name:
+        raise ValueError("failureDestination mode='channel' requires channelName")
     return FailureDestination(
         mode=DeliveryMode.CHANNEL,
-        channel_name=str(raw.get("channelName") or raw.get("channel") or ""),
+        channel_name=channel_name,
         channel_id=str(raw.get("channelId") or raw.get("to") or ""),
         account_id=str(raw.get("accountId") or ""),
         thread_id=str(raw.get("threadId") or ""),

@@ -213,6 +213,33 @@ async def test_rpc_cron_add_failure_destination_webhook_requires_url() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "failure_destination",
+    [
+        {"mode": "channel", "to": "C-ops"},
+        {"mode": "channel", "channelId": "C-ops", "channelName": ""},
+        {"mode": "announce", "to": "C-ops"},
+    ],
+)
+async def test_rpc_cron_add_failure_destination_channel_requires_channel_name(
+    failure_destination: dict[str, Any],
+) -> None:
+    scheduler = _FakeScheduler()
+    with pytest.raises(ValueError, match="channelName"):
+        await _handle_cron_add(
+            {
+                "name": "x",
+                "expression": "0 9 * * *",
+                "payloadKind": AGENT_TURN_KIND,
+                "text": "x",
+                "sessionTarget": "isolated",
+                "delivery": {"mode": "none", "failureDestination": failure_destination},
+            },
+            RpcContext(conn_id="t", cron_scheduler=scheduler),
+        )
+    assert scheduler.kwargs is None
+
+
 def test_job_to_wire_emits_failure_destination() -> None:
     job = CronJob(
         id="job-1",

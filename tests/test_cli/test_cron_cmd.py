@@ -287,6 +287,30 @@ def test_failure_dest_channel() -> None:
     }
 
 
+def test_failure_dest_channel_requires_channel_name() -> None:
+    with pytest.raises(typer.BadParameter, match="--failure-channel"):
+        cron_cmd._build_failure_destination_dict(
+            mode="channel",
+            channel=None,
+            to="C-ops",
+            account=None,
+            webhook_url=None,
+            webhook_token=None,
+        )
+
+
+def test_failure_dest_channel_without_recipient() -> None:
+    fd = cron_cmd._build_failure_destination_dict(
+        mode="channel",
+        channel="Slack",
+        to=None,
+        account=None,
+        webhook_url=None,
+        webhook_token=None,
+    )
+    assert fd == {"mode": "channel", "channelName": "slack"}
+
+
 def test_failure_dest_webhook_requires_url() -> None:
     with pytest.raises(typer.BadParameter, match="--failure-webhook-url"):
         cron_cmd._build_failure_destination_dict(

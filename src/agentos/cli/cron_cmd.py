@@ -281,7 +281,7 @@ def _build_failure_destination_dict(
 
     Returns None when no failure-* flag is set. Raises BadParameter when the
     selected mode is missing required fields (webhook URL for webhook mode,
-    channel + recipient for channel mode).
+    channel name for channel mode).
     """
     any_failure_flag = any(
         bool(v) for v in (mode, channel, to, account, webhook_url, webhook_token)
@@ -311,13 +311,10 @@ def _build_failure_destination_dict(
         raise typer.BadParameter(
             "--failure-webhook-* requires --failure-mode=webhook"
         )
-    if not (channel or to):
-        raise typer.BadParameter(
-            "--failure-mode=channel requires --failure-channel and/or --failure-to"
-        )
-    fd = {"mode": "channel"}
-    if channel:
-        fd["channelName"] = channel.strip().lower()
+    channel_norm = (channel or "").strip().lower()
+    if not channel_norm:
+        raise typer.BadParameter("--failure-mode=channel requires --failure-channel")
+    fd = {"mode": "channel", "channelName": channel_norm}
     if to:
         fd["to"] = to
     if account:
@@ -709,7 +706,10 @@ def cron_add(
     failure_channel: str | None = typer.Option(
         None,
         "--failure-channel",
-        help="Failure-destination channel name (slack, discord, …) for --failure-mode=channel.",
+        help=(
+            "Failure-destination channel name (slack, discord, …); "
+            "required for --failure-mode=channel."
+        ),
     ),
     failure_to: str | None = typer.Option(
         None,
@@ -981,7 +981,7 @@ def cron_update(
     failure_channel: str | None = typer.Option(
         None,
         "--failure-channel",
-        help="Failure-destination channel name for --failure-mode=channel.",
+        help="Failure-destination channel name; required for --failure-mode=channel.",
     ),
     failure_to: str | None = typer.Option(
         None,

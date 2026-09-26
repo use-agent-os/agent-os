@@ -257,7 +257,7 @@ export const cron = defineNamespace('cron', {
 
   // Save validation (logic.ts).
   errFailureWebhookUrl: 'Failure-destination webhook URL is required',
-  errFailureChannel: 'Failure destination channel needs a channel or recipient',
+  errFailureChannel: 'Failure-destination channel is required',
   errWebhookUrl: 'Webhook URL is required for webhook delivery',
   errName: 'Name is required',
   errInterval: 'Interval must be an integer number of seconds',
