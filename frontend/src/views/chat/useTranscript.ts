@@ -5,6 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
+import { apiOrigin } from '@/lib/api-origin'
 import { useApprovals } from '@/services/approval-monitor'
 import { useTheme } from '@/stores/theme'
 import { chatMarkdown } from './markdown'
@@ -760,16 +761,23 @@ export function useTranscript(opts: {
     }
   }, [controller, syncPinnedToTail])
 
-  // chat.js:916-932 `_bindHoverActions` — anchor artifact targets keep native
-  // download behavior; any non-anchor target delegates to the authenticated
-  // fetch path so token/session headers and failure toasts work.
+  // chat.js:916-932 `_bindHoverActions` — on the gateway-served console an
+  // anchor artifact target keeps the browser's native download; any non-anchor
+  // target delegates to the authenticated fetch path so token/session headers
+  // and failure toasts work.
+  //
+  // Off gateway (the desktop renderer, loaded from disk) the native path cannot
+  // work: the chip's href points at the gateway, which is another origin, and
+  // Chromium ignores a cross-origin `download` attribute and navigates instead
+  // — a top-frame navigation the shell refuses. Every artifact target takes the
+  // fetch path there; the blob then leaves through a same-document link.
   useEffect(() => {
     const thread = containerRef.current
     if (!thread) return
     const onArtifactClick = (event: MouseEvent): void => {
       if (!(event.target instanceof Element)) return
       const artifact = event.target.closest<HTMLElement>('[data-artifact-download]')
-      if (!artifact || artifact.tagName === 'A') return
+      if (!artifact || (artifact.tagName === 'A' && !apiOrigin())) return
       event.preventDefault()
       event.stopPropagation()
       void controller.downloadArtifact({

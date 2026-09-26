@@ -25,7 +25,7 @@
 // chat.js:7043) is NOT re-ported here — Task 4 already ported it into tools.ts;
 // this module re-exports it from there so there is one definition (DRY).
 
-import { urlBase } from '@/lib/api-origin'
+import { apiOrigin, urlBase } from '@/lib/api-origin'
 import { t } from '@/i18n'
 import '@/i18n/en/chat'
 
@@ -154,7 +154,19 @@ export function isAudioArtifact(artifact: Artifact | null | undefined): boolean 
   return artifactCategory(artifact) === 'audio'
 }
 
-// chat.js:7480-7492 — the clean (session-key-stripped) relative download URL.
+/**
+ * Serialize a resolved artifact URL for the host. On the gateway-served
+ * console it stays relative (legacy parity: `/api/v1/artifacts/...`). Off
+ * gateway — the desktop renderer, loaded from disk — a relative path would
+ * resolve against `file://` (or the dev server), so the gateway origin the
+ * URL was resolved against is kept: the chip's href, the image preview, the
+ * audio source and the chart payload all have to reach the gateway.
+ */
+function gatewayHref(url: URL): string {
+  return apiOrigin() ? url.href : url.pathname + url.search + url.hash
+}
+
+// chat.js:7480-7492 — the clean (session-key-stripped) download URL.
 export function artifactDownloadUrl(artifact: Artifact | null | undefined): string {
   let raw = artifact && artifact.download_url ? String(artifact.download_url) : ''
   if (!raw && artifact && artifact.id) raw = `/api/v1/artifacts/${encodeURIComponent(artifact.id)}`
@@ -163,7 +175,7 @@ export function artifactDownloadUrl(artifact: Artifact | null | undefined): stri
     const url = new URL(raw, urlBase())
     url.searchParams.delete('sessionKey')
     url.searchParams.delete('session_key')
-    return url.pathname + url.search + url.hash
+    return gatewayHref(url)
   } catch {
     return raw
   }
@@ -188,7 +200,7 @@ export function artifactPreviewUrl(
     const url = new URL(raw, urlBase())
     if (ctx.sessionKey) url.searchParams.set('sessionKey', ctx.sessionKey)
     if (ctx.token) url.searchParams.set('token', ctx.token)
-    return url.pathname + url.search + url.hash
+    return gatewayHref(url)
   } catch {
     return raw
   }
@@ -202,7 +214,7 @@ export function artifactAuthenticatedDownloadUrl(raw: string, ctx: ArtifactUrlCo
     const url = new URL(raw, urlBase())
     if (ctx.sessionKey) url.searchParams.set('sessionKey', ctx.sessionKey)
     if (ctx.token) url.searchParams.set('token', ctx.token)
-    return url.pathname + url.search + url.hash
+    return gatewayHref(url)
   } catch {
     return raw
   }
@@ -426,11 +438,20 @@ export function createArtifactRenderer(deps: ArtifactRendererDeps) {
     if (token) headers['Authorization'] = `Bearer ${token}`
     if (sessionKey) headers['x-agentos-session-key'] = sessionKey
     downloadUrl = artifactAuthenticatedDownloadUrl(downloadUrl, { sessionKey, token })
-    const response = await fetch(downloadUrl, {
-      method: 'GET',
-      headers,
-      credentials: 'same-origin',
-    })
+    let response: Response
+    try {
+      response = await fetch(downloadUrl, {
+        method: 'GET',
+        headers,
+        credentials: 'same-origin',
+      })
+    } catch (err) {
+      // Off gateway this is a cross-origin request: an unreachable gateway or a
+      // refused CORS preflight rejects instead of answering, and a silent
+      // rejection is exactly the "nothing happens" the toast exists to avoid.
+      toast(`Download failed: ${err instanceof Error ? err.message : String(err)}`, 'warn', 3500)
+      return
+    }
     if (!response.ok) {
       toast(`Download failed: HTTP ${response.status}`, 'warn', 3500)
       return

@@ -11,7 +11,7 @@
 // nothing at all rather than a wrong-looking chip. Its hooks and its handoff to
 // the chart mounter are pinned below.
 
-import { describe, it, expect, vi } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 import {
   artifactMime,
   artifactName,
@@ -323,5 +323,80 @@ describe('createArtifactRenderer chart artifacts', () => {
 
     expect(() => createArtifactRenderer(deps).appendArtifact(CHART_ARTIFACT)).not.toThrow()
     expect(body.querySelector('[data-chart-src]')).not.toBeNull()
+  })
+})
+
+/* ── off-gateway hosts (the desktop renderer) ───────────────────────────── */
+
+describe('artifact URLs on an off-gateway host', () => {
+  // The desktop renderer is loaded from disk and points the shared URL helpers
+  // at the gateway it manages (lib/api-origin.ts). A relative `/api/...` there
+  // resolves against `file://` (or the dev server), never against the gateway,
+  // so the chip's href, the image preview, the audio source and the chart
+  // payload all fail silently. Off gateway every artifact URL keeps the
+  // gateway origin; the console (served by the gateway) stays relative.
+  const ORIGIN = 'http://127.0.0.1:18791'
+  const SESSION = 'agent%3Amain%3Awebchat%3Atest'
+  const ctx = { sessionKey: 'agent:main:webchat:test', token: 'tok' }
+
+  beforeEach(() => {
+    window.__AGENTOS_ENV__ = { apiOrigin: `${ORIGIN}/`, controlBase: '/control' }
+  })
+  afterEach(() => {
+    delete window.__AGENTOS_ENV__
+  })
+
+  it('resolves a relative download_url (or the id fallback) against the gateway origin', () => {
+    expect(artifactDownloadUrl({ download_url: '/api/v1/artifacts/42?sessionKey=s' })).toBe(
+      `${ORIGIN}/api/v1/artifacts/42`,
+    )
+    expect(artifactDownloadUrl({ id: 'abc 1' })).toBe(`${ORIGIN}/api/v1/artifacts/abc%201`)
+  })
+
+  it('keeps an already-absolute download_url on its own origin', () => {
+    expect(artifactDownloadUrl({ download_url: 'https://files.example/x.png?sessionKey=s' })).toBe(
+      'https://files.example/x.png',
+    )
+  })
+
+  it('authenticates preview and download URLs on the gateway origin', () => {
+    expect(artifactPreviewUrl({ download_url: '/api/v1/artifacts/7' }, ctx)).toBe(
+      `${ORIGIN}/api/v1/artifacts/7?sessionKey=${SESSION}&token=tok`,
+    )
+    expect(artifactAuthenticatedDownloadUrl('/api/v1/artifacts/5', ctx)).toBe(
+      `${ORIGIN}/api/v1/artifacts/5?sessionKey=${SESSION}&token=tok`,
+    )
+  })
+
+  it('renders every card URL against the gateway origin', () => {
+    const { deps } = chartRendererDeps()
+    const container = document.createElement('div')
+    container.innerHTML = createArtifactRenderer(deps).renderArtifacts([
+      {
+        id: 'x-1',
+        name: 'report.xlsx',
+        mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        size: 2048,
+        download_url: '/api/v1/artifacts/x-1',
+      },
+      { id: 'i-1', name: 'plot.png', mime: 'image/png', download_url: '/api/v1/artifacts/i-1' },
+      { id: 'a-1', name: 'clip.wav', mime: 'audio/wav', download_url: '/api/v1/artifacts/a-1' },
+      CHART_ARTIFACT,
+    ])
+
+    const chip = container.querySelector<HTMLAnchorElement>('.msg-artifact-chip')
+    expect(chip?.getAttribute('href')).toBe(
+      `${ORIGIN}/api/v1/artifacts/x-1?sessionKey=${SESSION}&token=tok`,
+    )
+    expect(chip?.dataset.artifactDownload).toBe(`${ORIGIN}/api/v1/artifacts/x-1`)
+    expect(container.querySelector('.msg-artifact-preview')?.getAttribute('src')).toBe(
+      `${ORIGIN}/api/v1/artifacts/i-1?sessionKey=${SESSION}&token=tok`,
+    )
+    expect(container.querySelector('.msg-artifact-audio')?.getAttribute('src')).toBe(
+      `${ORIGIN}/api/v1/artifacts/a-1?sessionKey=${SESSION}&token=tok`,
+    )
+    expect(container.querySelector<HTMLElement>('[data-chart-src]')?.dataset.chartSrc).toBe(
+      `${ORIGIN}/api/v1/artifacts/art-1?sessionKey=${SESSION}&token=tok`,
+    )
   })
 })

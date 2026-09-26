@@ -42,7 +42,8 @@ desktop/
     │   ├── settings.ts       #   DesktopSettings + normalizer
     │   └── gateway.ts        #   GatewayStatus
     ├── main/                 # Electron main process (Node)
-    │   ├── index.ts          #   lifecycle, single instance, loopback Origin, quit hook
+    │   ├── index.ts          #   lifecycle, single instance, quit hook
+    │   ├── loopback-cors.ts  #   Origin presented to the gateway + CORS answer translated back
     │   ├── window.ts         #   BrowserWindow (vibrancy, hiddenInset, sandbox)
     │   ├── menu.ts           #   macOS menu bar
     │   ├── ipc/              #   one file per IPC domain, registered in index.ts
@@ -439,7 +440,12 @@ then signs it on its `predev` step (see [Notifications](#notifications)).
   runs sandboxed.
 - The main process rewrites the `Origin` header on loopback requests: the
   gateway's WebSocket guard rejects `file://`, and the renderer is the local
-  operator, the same trust the browser console gets.
+  operator, the same trust the browser console gets. The gateway reflects
+  that Origin in `Access-Control-Allow-Origin`, which Chromium then compares
+  with the renderer's real origin (`null` from disk), so the same hook
+  translates the answer back on the way in (`main/loopback-cors.ts`); without
+  it every `fetch` to the gateway — bootstrap, approvals, uploads, artifact
+  downloads — fails as a CORS error while the WebSocket works.
 - The gateway is started (or adopted, if one is already running) when the app
   launches, and stopped on quit; the chat and jobs views wait for `running`
   before they connect.

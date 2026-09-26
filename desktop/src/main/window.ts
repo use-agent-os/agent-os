@@ -54,6 +54,24 @@ export function isAppNavigation(url: string, appOrigin: string): boolean {
   return target.origin === appOrigin
 }
 
+/** Where this process's renderer lives: the dev server in dev, disk when packaged. */
+function rendererLocation(): { rendererUrl: string | undefined; rendererDir: string } {
+  return {
+    rendererUrl: is.dev ? process.env.ELECTRON_RENDERER_URL : undefined,
+    rendererDir: path.join(__dirname, '../renderer'),
+  }
+}
+
+/**
+ * The renderer's own origin (see `appOriginFor`). The navigation guard
+ * measures against it, and so does the loopback CORS layer (loopback-cors.ts),
+ * which has to answer for the origin Chromium will compare.
+ */
+export function rendererAppOrigin(): string {
+  const { rendererUrl, rendererDir } = rendererLocation()
+  return appOriginFor(rendererUrl, rendererDir)
+}
+
 /** Matches --background in renderer/src/theme/palettes.ts so the first paint
  *  before React mounts is not a white flash in dark mode. */
 const BACKGROUND = { dark: '#060608', light: '#f4f5ee' }
@@ -120,8 +138,7 @@ export function createMainWindow(
   // that navigates the top frame anywhere else is stopped here; the page
   // stays where it was. (`loadURL`/`loadFile` from this process do not
   // raise will-navigate, so the app's own loads are unaffected.)
-  const rendererUrl = is.dev ? process.env.ELECTRON_RENDERER_URL : undefined
-  const rendererDir = path.join(__dirname, '../renderer')
+  const { rendererUrl, rendererDir } = rendererLocation()
   const appOrigin = appOriginFor(rendererUrl, rendererDir)
   win.webContents.on('will-navigate', (event, url) => {
     if (!isAppNavigation(url, appOrigin)) event.preventDefault()

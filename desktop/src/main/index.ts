@@ -1,4 +1,4 @@
-import { app, BrowserWindow, session } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -6,6 +6,7 @@ import path from 'node:path'
 import type { DesktopSettings } from '@shared/settings'
 import { GatewaySupervisor } from './gateway/supervisor'
 import { registerIpc } from './ipc'
+import { installLoopbackCors } from './loopback-cors'
 import { installAppMenu } from './menu'
 import { registerPetScheme, servePets } from './pets/protocol'
 import { bundledPetsDir, PetStore } from './pets/store'
@@ -16,7 +17,7 @@ import { appCalver } from './app-version'
 import { AppUpdateController, type UpdaterLike } from './updates/app-updater'
 import { startAutoCheck } from './updates/auto-check'
 import { defaultMarkerPath, EngineUpdater } from './updates/engine-updater'
-import { applyUiScale, applyVibrancy, createMainWindow } from './window'
+import { applyUiScale, applyVibrancy, createMainWindow, rendererAppOrigin } from './window'
 
 // Single instance: a second launch focuses the existing window.
 if (!app.requestSingleInstanceLock()) {
@@ -99,7 +100,7 @@ if (!app.requestSingleInstanceLock()) {
       optimizer.watchWindowShortcuts(win, { zoom: true }),
     )
 
-    installLoopbackOriginRewrite()
+    installLoopbackCors(rendererAppOrigin())
     servePets(pets)
     // The pets that ship with the app, so Settings > Appearance has one to
     // offer before anyone reaches petdex.dev. Seeded once each; never fatal.
@@ -206,26 +207,4 @@ function mirrorSettingsToOs(settings: SettingsStore): void {
   }
   apply(settings.get())
   settings.subscribe(apply)
-}
-
-/**
- * The gateway's WebSocket guard admits loopback Origins or no Origin at all.
- * A renderer loaded from disk sends `Origin: file://` (and `null` for fetch),
- * which it rejects with close code 1008. Present the gateway's own origin on
- * every loopback request instead: the renderer is the local operator, the
- * same trust the browser console gets when the gateway serves it.
- */
-function installLoopbackOriginRewrite(): void {
-  const urls = ['http://127.0.0.1/*', 'ws://127.0.0.1/*', 'http://localhost/*', 'ws://localhost/*']
-  session.defaultSession.webRequest.onBeforeSendHeaders({ urls }, (details, callback) => {
-    const requestHeaders = { ...details.requestHeaders }
-    try {
-      const target = new URL(details.url)
-      const scheme = target.protocol === 'ws:' ? 'http:' : target.protocol
-      requestHeaders.Origin = `${scheme}//${target.host}`
-    } catch {
-      /* leave headers untouched */
-    }
-    callback({ requestHeaders })
-  })
 }

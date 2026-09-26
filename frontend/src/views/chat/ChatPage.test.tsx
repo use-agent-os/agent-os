@@ -455,6 +455,72 @@ describe('ChatPage', () => {
     clickSpy.mockRestore()
   })
 
+  it('leaves an anchor artifact chip to the browser on the gateway-served console', () => {
+    mockRpc = makeRpc()
+    renderPage()
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const thread = document.querySelector('.chat-thread') as HTMLElement
+    thread.insertAdjacentHTML(
+      'beforeend',
+      '<a class="msg-artifact-chip" href="#artifact" download="report.xlsx" data-artifact-id="x-1" data-artifact-name="report.xlsx" data-artifact-download="/api/v1/artifacts/x-1"><span>report.xlsx</span></a>',
+    )
+
+    // Not prevented: same-origin, the browser's own download handles it.
+    expect(fireEvent.click(screen.getByText('report.xlsx'))).toBe(true)
+    const artifactFetches = fetchMock.mock.calls.filter((call) =>
+      String(call[0]).includes('/api/v1/artifacts/'),
+    )
+    expect(artifactFetches).toHaveLength(0)
+  })
+
+  it('routes an anchor artifact chip through the authenticated fetch on an off-gateway host', async () => {
+    // The desktop renderer (loaded from disk) points the URL helpers at the
+    // gateway it manages. There the chip's href is cross-origin: Chromium
+    // ignores a cross-origin `download` attribute and navigates instead, which
+    // the shell refuses, so the anchor must take the fetch path too.
+    window.__AGENTOS_ENV__ = { apiOrigin: 'http://127.0.0.1:18791' }
+    sessionStorage.setItem('agentos.wsToken', 'tok-1')
+    mockRpc = makeRpc()
+    renderPage()
+    const blob = new Blob(['xlsx'], { type: 'application/octet-stream' })
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, blob: async () => blob })
+    vi.stubGlobal('fetch', fetchMock)
+    ;(URL as unknown as { createObjectURL: unknown }).createObjectURL = vi
+      .fn()
+      .mockReturnValue('blob:artifact')
+    ;(URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = vi.fn()
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const thread = document.querySelector('.chat-thread') as HTMLElement
+    thread.insertAdjacentHTML(
+      'beforeend',
+      '<a class="msg-artifact-chip" href="http://127.0.0.1:18791/api/v1/artifacts/x-1?sessionKey=k&amp;token=tok-1" download="report.xlsx" data-artifact-id="x-1" data-artifact-name="report.xlsx" data-artifact-download="http://127.0.0.1:18791/api/v1/artifacts/x-1"><span>report.xlsx</span></a>',
+    )
+
+    try {
+      // Prevented: the click never becomes a navigation the shell would refuse.
+      expect(fireEvent.click(screen.getByText('report.xlsx'))).toBe(false)
+      await waitFor(() =>
+        expect(fetchMock).toHaveBeenCalledWith(
+          expect.stringMatching(/^http:\/\/127\.0\.0\.1:18791\/api\/v1\/artifacts\/x-1\?/),
+          expect.objectContaining({
+            method: 'GET',
+            headers: expect.objectContaining({
+              Authorization: 'Bearer tok-1',
+              'x-agentos-session-key': 'agent:main:webchat:default',
+            }),
+          }),
+        ),
+      )
+      // The blob then goes out through a same-document download link.
+      expect(clickSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      clickSpy.mockRestore()
+      delete window.__AGENTOS_ENV__
+      sessionStorage.removeItem('agentos.wsToken')
+    }
+  })
+
   it('waits for router config before requesting the initial persisted history', async () => {
     mockRpc = makeRpc()
     let resolveConfig!: (value: Record<string, unknown>) => void
