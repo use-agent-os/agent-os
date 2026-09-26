@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Redaction: a password in a URL's userinfo was masked only for schemes on a
+  fixed list, so `wss://user:pw@host` (a gateway URL with basic auth), `ftp`,
+  `sftp`, `ssh`, `smtp`, `ldap` and any database scheme outside the five in
+  `_DB_CONNSTR_RE` reached the model verbatim. The redaction pattern now
+  matches the userinfo structurally, for any scheme and with or without a
+  username (#3432).
+
 ## [2026.9.25] - 2026-09-25
 
 ### Fixed

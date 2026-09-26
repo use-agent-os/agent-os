@@ -115,10 +115,23 @@ _PREFIX_PATTERNS: tuple[str, ...] = (
 #: a key — masking it corrupts the blob on a read-then-write round trip.
 _PREFIX_RE = re.compile(r"(?<![A-Za-z0-9])(?:" + "|".join(_PREFIX_PATTERNS) + ")")
 
-#: ``https://user:token@host`` — userinfo in a web URL is a credential the
-#: same way a DSN password is. Redaction-only: the payload guard keeps its
-#: narrower connection-string vocabulary.
-_URL_USERINFO_RE = re.compile(r"(https?://[^:\s/]+:)([^@\s/]+)(@)", re.IGNORECASE)
+#: ``<scheme>://[user]:token@host`` — userinfo is a credential whatever the
+#: scheme in front of it is. Redaction-only: the payload guard keeps its
+#: narrower connection-string vocabulary (``_DB_CONNSTR_RE``).
+#:
+#: Matched structurally rather than against a scheme list, because a list only
+#: ever covers the schemes someone thought of: ``ws``/``wss`` (a gateway URL
+#: with basic auth), ``ftp``, ``sftp``, ``ssh``, ``smtp``, ``ldap`` and any
+#: database scheme outside the five in ``_DB_CONNSTR_RE`` were all handed to
+#: the model verbatim (#3432).
+#:
+#: The username part is ``*`` rather than ``+`` so an empty one still matches:
+#: ``redis://:password@host`` is the canonical Redis spelling and carries no
+#: username at all.
+_URL_USERINFO_RE = re.compile(
+    r"([a-z][a-z0-9+.-]*://[^:@\s/]*:)([^@\s/]+)(@)",
+    re.IGNORECASE,
+)
 
 _PEM_PRIVATE_KEY_RE = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----", re.IGNORECASE)
 _PEM_PRIVATE_KEY_BLOCK_RE = re.compile(
