@@ -26,7 +26,7 @@
 // this module re-exports it from there so there is one definition (DRY).
 
 import { apiOrigin, urlBase } from '@/lib/api-origin'
-import { t } from '@/i18n'
+import { t, type MessageKey } from '@/i18n'
 import '@/i18n/en/chat'
 
 export { publishArtifactTargetName } from './tools'
@@ -142,6 +142,161 @@ export function artifactCategoryLabel(category: string): string {
     default:
       return 'file'
   }
+}
+
+/* ── Kind (AgentOS-native; no legacy counterpart) ───────────────────────── */
+
+/**
+ * What the file is, in the user's words. Finer than `artifactCategory`
+ * (which only picks the card shape): a card tile and its subtitle want
+ * "Spreadsheet", not "data", and a `.docx` and a `.pdf` want different glyphs.
+ */
+export type ArtifactKind =
+  | 'spreadsheet'
+  | 'document'
+  | 'pdf'
+  | 'presentation'
+  | 'image'
+  | 'audio'
+  | 'archive'
+  | 'code'
+  | 'data'
+  | 'text'
+  | 'web'
+  | 'file'
+
+const KIND_BY_EXTENSION: Record<string, ArtifactKind> = {
+  xlsx: 'spreadsheet',
+  xlsm: 'spreadsheet',
+  xls: 'spreadsheet',
+  ods: 'spreadsheet',
+  numbers: 'spreadsheet',
+  csv: 'spreadsheet',
+  tsv: 'spreadsheet',
+  docx: 'document',
+  doc: 'document',
+  odt: 'document',
+  rtf: 'document',
+  pages: 'document',
+  pdf: 'pdf',
+  pptx: 'presentation',
+  ppt: 'presentation',
+  odp: 'presentation',
+  key: 'presentation',
+  zip: 'archive',
+  tar: 'archive',
+  gz: 'archive',
+  tgz: 'archive',
+  '7z': 'archive',
+  rar: 'archive',
+  json: 'data',
+  jsonl: 'data',
+  ndjson: 'data',
+  xml: 'data',
+  parquet: 'data',
+  sqlite: 'data',
+  db: 'data',
+  ipynb: 'data',
+  txt: 'text',
+  md: 'text',
+  markdown: 'text',
+  log: 'text',
+  html: 'web',
+  htm: 'web',
+  py: 'code',
+  js: 'code',
+  ts: 'code',
+  tsx: 'code',
+  jsx: 'code',
+  sql: 'code',
+  sh: 'code',
+  go: 'code',
+  rs: 'code',
+  java: 'code',
+  rb: 'code',
+  css: 'code',
+  yaml: 'code',
+  yml: 'code',
+  toml: 'code',
+}
+
+const KIND_BY_MIME: Record<string, ArtifactKind> = {
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'spreadsheet',
+  'application/vnd.ms-excel': 'spreadsheet',
+  'text/csv': 'spreadsheet',
+  'text/tab-separated-values': 'spreadsheet',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'document',
+  'application/msword': 'document',
+  'application/pdf': 'pdf',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'presentation',
+  'application/vnd.ms-powerpoint': 'presentation',
+  'application/zip': 'archive',
+  'application/gzip': 'archive',
+  'application/x-tar': 'archive',
+  'application/json': 'data',
+  'application/ndjson': 'data',
+  'application/x-ndjson': 'data',
+  'application/xml': 'data',
+  'text/xml': 'data',
+  'text/plain': 'text',
+  'text/markdown': 'text',
+  'text/html': 'web',
+}
+
+const KIND_LABEL_KEYS: Record<ArtifactKind, MessageKey> = {
+  spreadsheet: 'chat.artifactKindSpreadsheet',
+  document: 'chat.artifactKindDocument',
+  pdf: 'chat.artifactKindPdf',
+  presentation: 'chat.artifactKindPresentation',
+  image: 'chat.artifactKindImage',
+  audio: 'chat.artifactKindAudio',
+  archive: 'chat.artifactKindArchive',
+  code: 'chat.artifactKindCode',
+  data: 'chat.artifactKindData',
+  text: 'chat.artifactKindText',
+  web: 'chat.artifactKindWeb',
+  file: 'chat.artifactKindFile',
+}
+
+export function artifactKind(artifact: Artifact | null | undefined): ArtifactKind {
+  const mime = artifactMime(artifact)
+  if (mime.startsWith('image/')) return 'image'
+  if (mime.startsWith('audio/')) return 'audio'
+  // Extension before mime: the authoring tools name their files precisely,
+  // while a generic mime (octet-stream, the literal "artifact") says nothing.
+  const ext = artifactExtension(artifactName(artifact))
+  const byExtension = KIND_BY_EXTENSION[ext]
+  if (byExtension) return byExtension
+  const byMime = KIND_BY_MIME[mime]
+  if (byMime) return byMime
+  if (AUDIO_EXTENSIONS.includes(ext)) return 'audio'
+  return 'file'
+}
+
+/** The kind, in the user's language ("Spreadsheet", "PDF"). */
+export function artifactKindLabel(kind: ArtifactKind): string {
+  return t(KIND_LABEL_KEYS[kind])
+}
+
+/** A size the way Finder says it: KB under a megabyte, then MB with one decimal. */
+export function artifactSizeLabel(size: number | undefined): string {
+  const bytes = Number(size)
+  if (!Number.isFinite(bytes) || bytes <= 0) return ''
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/**
+ * The card subtitle: "Spreadsheet · XLSX · 5 KB". Each part is dropped when
+ * unknown, so a nameless artifact still reads "File" rather than "File · ",
+ * and an extension that only repeats the kind ("PDF · PDF") is left out.
+ */
+export function artifactSummary(artifact: Artifact | null | undefined): string {
+  const label = artifactKindLabel(artifactKind(artifact))
+  const ext = artifactExtension(artifactName(artifact)).toUpperCase()
+  return [label, ext === label.toUpperCase() ? '' : ext, artifactSizeLabel(artifact?.size)]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 // chat.js:7561-7563 — image = the 'visual' category.
@@ -382,7 +537,10 @@ export function createArtifactRenderer(deps: ArtifactRendererDeps) {
           <a class="msg-artifact-card__action" href="${escAttr(downloadHref)}" download="${escAttr(name)}" data-artifact-download="${escAttr(downloadUrl)}">${escAttr(t('chat.artifactDownload'))}</a>
         </div>`
       } else {
-        html += `<a class="msg-artifact-chip" href="${escAttr(downloadHref)}" download="${escAttr(name)}" data-artifact-category="${escAttr(category)}" data-artifact-download="${escAttr(downloadUrl)}" data-artifact-id="${escAttr(artifact?.id || '')}" data-artifact-name="${escAttr(name)}" title="${escAttr(name)}">
+        // `data-artifact-kind` / `-summary` / `-action` feed a host that draws
+        // the chip as a card (the desktop's tile, subtitle and Download
+        // button come from these); the console's own skin reads the spans.
+        html += `<a class="msg-artifact-chip" href="${escAttr(downloadHref)}" download="${escAttr(name)}" data-artifact-category="${escAttr(category)}" data-artifact-kind="${escAttr(artifactKind(artifact))}" data-artifact-summary="${escAttr(artifactSummary(artifact))}" data-artifact-action="${escAttr(t('chat.artifactDownload'))}" data-artifact-download="${escAttr(downloadUrl)}" data-artifact-id="${escAttr(artifact?.id || '')}" data-artifact-name="${escAttr(name)}" title="${escAttr(t('chat.artifactDownloadTitle', { name }))}">
           <span class="msg-file-chip__icon" aria-hidden="true">${esc(artifactCategoryLabel(category))}</span>
           <span class="msg-file-chip__name">${esc(name)}</span>
           <span class="msg-file-chip__meta">${esc(meta)}</span>

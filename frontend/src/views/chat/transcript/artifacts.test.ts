@@ -24,6 +24,9 @@ import {
   artifactDownloadUrl,
   artifactPreviewUrl,
   artifactAuthenticatedDownloadUrl,
+  artifactKind,
+  artifactSizeLabel,
+  artifactSummary,
   type Artifact,
   type ArtifactRendererDeps,
 } from './artifacts'
@@ -397,6 +400,85 @@ describe('artifact URLs on an off-gateway host', () => {
     )
     expect(container.querySelector<HTMLElement>('[data-chart-src]')?.dataset.chartSrc).toBe(
       `${ORIGIN}/api/v1/artifacts/art-1?sessionKey=${SESSION}&token=tok`,
+    )
+  })
+})
+
+/* ── kind + summary (AgentOS-native; feeds the desktop's card skin) ──────── */
+
+describe('artifactKind', () => {
+  const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+  it('reads the extension first: the authoring tools name their files precisely', () => {
+    expect(artifactKind({ name: 'report.xlsx', mime: 'application/octet-stream' })).toBe(
+      'spreadsheet',
+    )
+    expect(artifactKind({ name: 'prices.csv', mime: 'artifact' })).toBe('spreadsheet')
+    expect(artifactKind({ name: 'brief.docx' })).toBe('document')
+    expect(artifactKind({ name: 'brief.pdf' })).toBe('pdf')
+    expect(artifactKind({ name: 'deck.pptx' })).toBe('presentation')
+    expect(artifactKind({ name: 'bundle.zip' })).toBe('archive')
+    expect(artifactKind({ name: 'rows.jsonl' })).toBe('data')
+    expect(artifactKind({ name: 'NOTES.md' })).toBe('text')
+    expect(artifactKind({ name: 'page.html' })).toBe('web')
+    expect(artifactKind({ name: 'script.py' })).toBe('code')
+  })
+
+  it('falls back to the mime when the name has no telling extension', () => {
+    expect(artifactKind({ name: 'export', mime: XLSX })).toBe('spreadsheet')
+    expect(artifactKind({ name: 'export', mime: 'application/pdf' })).toBe('pdf')
+    expect(artifactKind({ name: 'export', mime: 'text/plain' })).toBe('text')
+  })
+
+  it('classifies media by mime family, and everything unknown as a file', () => {
+    expect(artifactKind({ name: 'plot.png', mime: 'image/png' })).toBe('image')
+    expect(artifactKind({ name: 'clip.wav', mime: 'audio/wav' })).toBe('audio')
+    expect(artifactKind({ name: 'clip.mp3' })).toBe('audio')
+    expect(artifactKind({ name: 'blob.bin', mime: 'application/octet-stream' })).toBe('file')
+    expect(artifactKind(null)).toBe('file')
+  })
+})
+
+describe('artifactSizeLabel / artifactSummary', () => {
+  it('says sizes the way Finder does', () => {
+    expect(artifactSizeLabel(5343)).toBe('5 KB')
+    expect(artifactSizeLabel(10)).toBe('1 KB')
+    expect(artifactSizeLabel(3 * 1024 * 1024 + 200_000)).toBe('3.2 MB')
+    expect(artifactSizeLabel(0)).toBe('')
+    expect(artifactSizeLabel(undefined)).toBe('')
+  })
+
+  it('joins kind, upper-cased extension and size, dropping what is unknown', () => {
+    expect(
+      artifactSummary({
+        name: 'danh-sach-trai-cay.xlsx',
+        mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        size: 5343,
+      }),
+    ).toBe('Spreadsheet · XLSX · 5 KB')
+    // The extension only repeats the kind here, so it is left out.
+    expect(artifactSummary({ name: 'brief.pdf', size: 212 * 1024 })).toBe('PDF · 212 KB')
+    expect(artifactSummary({ name: 'export', mime: 'text/csv', size: 2048 })).toBe(
+      'Spreadsheet · 2 KB',
+    )
+    expect(artifactSummary({})).toBe('File')
+  })
+
+  it('stamps kind, summary and the action label on the file chip for a card skin', () => {
+    const { deps } = chartRendererDeps()
+    const container = document.createElement('div')
+    container.innerHTML = createArtifactRenderer(deps).renderArtifacts([
+      { id: 'x-1', name: 'report.xlsx', mime: 'application/octet-stream', size: 5343 },
+    ])
+    const chip = container.querySelector<HTMLElement>('.msg-artifact-chip')
+    expect(chip?.dataset.artifactKind).toBe('spreadsheet')
+    expect(chip?.dataset.artifactSummary).toBe('Spreadsheet · XLSX · 5 KB')
+    expect(chip?.dataset.artifactAction).toBe('Download')
+    expect(chip?.getAttribute('title')).toBe('Download report.xlsx')
+    // The console's spans are still there for its own skin.
+    expect(chip?.querySelector('.msg-file-chip__name')?.textContent).toBe('report.xlsx')
+    expect(chip?.querySelector('.msg-file-chip__meta')?.textContent).toBe(
+      'application/octet-stream · 5 KB',
     )
   })
 })
