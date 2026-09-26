@@ -421,6 +421,50 @@ class TestResolveBearer:
         assert oauth.read_oauth_state()["tokens"]["refresh_token"] == "r-new"
 
     @pytest.mark.asyncio
+    async def test_skew_is_recomputed_for_the_token_found_under_the_lock(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """proactive_skew_seconds depends on the specific token's own remaining
+        lifetime -- a long-lived token uses the full hour of skew, a short
+        device-code token a narrow 2 minutes, or it would be refreshed on
+        every resolution. If a concurrent caller refreshes first, the
+        re-read under the lock can find a token in a different lifetime
+        class than the one the pre-lock skew was computed from; reusing that
+        stale skew applies the wrong threshold to it."""
+        # Pre-lock: 50 minutes left is past the 45-minute short-token cutoff,
+        # so this token's own skew is the full hour -- and 50 min < 1h makes
+        # it look due for refresh from the outer, pre-lock check.
+        old_state = {
+            "tokens": {"access_token": _jwt(50 * 60), "refresh_token": "r-old"},
+            "discovery": {"token_endpoint": TOKEN_ENDPOINT},
+            "base_url": oauth.DEFAULT_XAI_OAUTH_BASE_URL,
+        }
+        # Under the lock: a concurrent caller already refreshed to a token
+        # with 10 minutes left -- a short-lived token whose own 2-minute
+        # skew does not call it expiring, so it must be accepted as-is.
+        new_state = {
+            "tokens": {"access_token": _jwt(10 * 60), "refresh_token": "r-new"},
+            "discovery": {"token_endpoint": TOKEN_ENDPOINT},
+            "base_url": oauth.DEFAULT_XAI_OAUTH_BASE_URL,
+        }
+        calls = {"n": 0}
+
+        def fake_read() -> dict[str, Any]:
+            calls["n"] += 1
+            return old_state if calls["n"] == 1 else new_state
+
+        monkeypatch.setattr(oauth, "read_oauth_state", fake_read)
+        client = _install_refresh(monkeypatch, [])  # a refresh call here is the bug
+
+        resolved = await oauth.resolve_oauth_bearer()
+
+        assert resolved == (
+            new_state["tokens"]["access_token"],
+            oauth.DEFAULT_XAI_OAUTH_BASE_URL,
+        )
+        assert client.requests == []
+
+    @pytest.mark.asyncio
     async def test_a_403_is_reported_as_a_tier_gate_not_a_relogin(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
