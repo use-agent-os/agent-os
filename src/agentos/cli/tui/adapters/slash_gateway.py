@@ -344,12 +344,12 @@ async def handle_gateway_slash_command(
 
     if parts := _slash_parts(cmd, "/model"):
         if len(parts) == 1:
-            console.print(f"[dim]model={state.model or 'default'}[/dim]")
+            console.print(f"[dim]model={markup_escape(state.model or 'default')}[/dim]")
         else:
             new_model = parts[1].strip()
             await client.patch_session(state.session_key, model=new_model)
             state.model = new_model
-            console.print(f"[green]model:[/green] {new_model}")
+            console.print(f"[green]model:[/green] {markup_escape(new_model)}")
         return True
 
     if cmd == "/cost":
@@ -385,7 +385,7 @@ async def handle_gateway_slash_command(
         # misleading here; show the model itself as the active route.
         state.router_hold_tier = model
         sync_session_chrome_from_state(state)
-        console.print(f"[{ACCENT}]router pinned to model[/] {model}")
+        console.print(f"[{ACCENT}]router pinned to model[/] {markup_escape(model)}")
         return True
 
     if cmd in {"/c0", "/c1", "/c2", "/c3"}:

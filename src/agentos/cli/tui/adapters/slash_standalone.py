@@ -440,7 +440,7 @@ async def _apply_router_hold_standalone(
         # implementation detail of where the settings come from.
         context.state.router_hold_tier = model
         sync_session_chrome_from_state(context.state)
-        console.print(f"[{ACCENT}]router pinned to model[/] {model}")
+        console.print(f"[{ACCENT}]router pinned to model[/] {markup_escape(model)}")
         return
 
     if tier is None:
@@ -544,12 +544,12 @@ async def handle_standalone_slash_command(
 
     if parts := _slash_parts(cmd, "/model"):
         if len(parts) == 1:
-            console.print(f"[dim]model={state.model or 'default'}[/dim]")
+            console.print(f"[dim]model={markup_escape(state.model or 'default')}[/dim]")
         else:
             new_model = parts[1].strip()
             context.model = new_model
             state.model = new_model
-            console.print(f"[green]model:[/green] {new_model}")
+            console.print(f"[green]model:[/green] {markup_escape(new_model)}")
         return True
 
     if cmd == "/cost":
