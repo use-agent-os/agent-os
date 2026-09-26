@@ -130,9 +130,12 @@ _PASSWD_ENTRY_RE = re.compile(r"(?m)^(?:\d+\t)?[a-z_][a-z0-9_-]*:x?:\d+:\d+:")
 #: JWTs always start with the base64 of ``{``.
 _JWT_RE = re.compile(r"eyJ[A-Za-z0-9_-]{16,}(?:\.[A-Za-z0-9_=-]{8,}){1,2}")
 #: ``postgres://user:PASSWORD@host`` and friends. Whitespace is excluded from
-#: both halves so a match can never span a line break.
+#: both halves so a match can never span a line break. ``rediss?``/``amqps?``
+#: carry the TLS spellings beside the plain ones the way ``mongodb(?:\+srv)?``
+#: already does -- `REDIS_TLS_URL=rediss://…` and an `amqps://` endpoint are
+#: how those two are written in deployment configs (#3373).
 _DB_CONNSTR_RE = re.compile(
-    r"((?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://[^:\s/]+:)([^@\s]+)(@)",
+    r"((?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|rediss?|amqps?)://[^:\s/]+:)([^@\s]+)(@)",
     re.IGNORECASE,
 )
 

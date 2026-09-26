@@ -558,6 +558,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `answered`, and the node-fault paths in `read_start_tick` / `simulate_launch`
   say the endpoint refused the call and that it is retryable instead.
 
+- Security: secret redaction and the payload guard matched connection strings
+  against a scheme list that carried `redis` and `amqp` but not their TLS
+  spellings, so `rediss://user:password@host` (what `REDIS_TLS_URL` holds) and
+  `amqps://…` reached the model -- and passed the guard -- verbatim while the
+  plain `redis://`/`amqp://` spellings were masked (#3373).
+
 ## [2026.9.22.post1] - 2026-09-22
 
 ### Added
