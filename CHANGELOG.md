@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.9.26] - 2026-09-26
+
 ### Changed
 - Desktop: a generated file shows as a file card in the chat instead of a
   bare link that spelled out its mime type: a tile tinted and drawn by kind
