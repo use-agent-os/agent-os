@@ -25,7 +25,7 @@ from agentos.cli.tui.adapters import slash_bridge as _slash_bridge
 from agentos.cli.tui.backend.contracts import TuiOutputHandle
 from agentos.cli.tui.terminal.app import resolve_chat_fullscreen
 from agentos.cli.tui.terminal.prompt import queue_pane_output
-from agentos.cli.ui import console, error_panel
+from agentos.cli.ui import console, error_panel, markup_escape
 from agentos.engine.commands import Surface
 
 # Startup notices are emitted before the interactive surface opens. In the
@@ -177,13 +177,13 @@ def _gateway_runtime_notifier(
     def _emit(notice: _gateway_runtime.GatewayRuntimeNotice) -> None:
         if notice.kind == "created":
             output_console.print(
-                f"[dim]Connected to gateway. Session: {notice.session_key}[/dim]"
+                f"[dim]Connected to gateway. Session: {markup_escape(notice.session_key)}[/dim]"
             )
             return
         if notice.kind == "resumed":
             output_console.print(
                 "[dim]Connected to gateway. "
-                f"Resuming session: {notice.session_key}[/dim]"
+                f"Resuming session: {markup_escape(notice.session_key)}[/dim]"
             )
             return
         if notice.kind == "resume_model_ignored":
@@ -193,7 +193,7 @@ def _gateway_runtime_notifier(
             )
             return
         if notice.kind == "model":
-            output_console.print(f"[dim]Model: {notice.model}[/dim]")
+            output_console.print(f"[dim]Model: {markup_escape(notice.model)}[/dim]")
             return
         if notice.kind == "welcome":
             render_startup_screen(
