@@ -82,8 +82,17 @@ _RULE_RE = re.compile(r"^(?:\*\s*){3,}$|^(?:-\s*){3,}$|^(?:_\s*){3,}$")
 _FENCE_RE = re.compile(r"^\s*(?P<fence>`{3,}|~{3,})")
 _LIST_RE = re.compile(r"^(\s*)([-*+]|\d+\.)\s+(.*)$")
 
-_INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
-_BOLD_RE = re.compile(r"\*\*([^*\n]+)\*\*")
+# A code span is closed by a backtick run of the *same* length as its opener,
+# so ``a `b` c`` is one span containing a backtick rather than -- as the
+# single-backtick-only pattern read it -- a span over ``a `` followed by
+# loose text. That dropped the inner backtick and left the outer pair on
+# screen (#3427).
+_INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(.+?)\1(?!`)")
+# ``.+?`` rather than ``[^*\n]+``: the old class could not cross the ``*`` of
+# a nested span, so ``**bold with *italic* inside**`` never matched as bold
+# and its delimiters were printed (#3428). Nesting is handled by rendering a
+# span's content recursively, below.
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 _ITALIC_RE = re.compile(r"(?<!\*)\*([^*\n]+)\*(?!\*)")
 _STRIKE_RE = re.compile(r"~~([^~\n]+)~~")
 _LINK_RE = re.compile(r"\[([^\]\n]+)\]\(([^)\s]+)\)")
@@ -113,6 +122,35 @@ def _styled(text: str, style: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+#: CommonMark's escapable set: a backslash before ASCII punctuation makes that
+#: character literal. Only punctuation -- a backslash before anything else
+#: (``\d`` in a regex, a Windows path) is an ordinary backslash and stays.
+_ESCAPABLE_PUNCTUATION = frozenset("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
+
+
+def _park_escaped_punctuation(text: str) -> tuple[str, list[str]]:
+    """Replace ``\\<punctuation>`` with placeholders, returning the characters.
+
+    The marker has to be out of the way before the span patterns run, or they
+    match it anyway -- which is why ``\\*not italic\\*`` came back italicised
+    with its backslashes still in it (#3426). Restoring afterwards yields the
+    bare character, so the escape is consumed rather than printed.
+    """
+    parked: list[str] = []
+    out: list[str] = []
+    cursor = 0
+    while cursor < len(text):
+        char = text[cursor]
+        if char == "\\" and cursor + 1 < len(text) and text[cursor + 1] in _ESCAPABLE_PUNCTUATION:
+            out.append(f"\x00ESC{len(parked)}\x00")
+            parked.append(text[cursor + 1])
+            cursor += 2
+            continue
+        out.append(char)
+        cursor += 1
+    return "".join(out), parked
+
+
 def _render_inline(text: str) -> str:
     """Apply inline markdown styling to a single (already block-stripped)
     line of text.
@@ -125,37 +163,45 @@ def _render_inline(text: str) -> str:
     tag-insertion regexes, which previously produced unbalanced markup
     for e.g. ``[text](url)`` links.
     """
-    spans: list[tuple[int, int, str]] = []
+    text, escaped_chars = _park_escaped_punctuation(text)
 
-    def _claim(pattern: re.Pattern[str], make) -> None:  # type: ignore[no-untyped-def]
+    # (pattern, how to render one match). A span whose content may itself hold
+    # emphasis renders that content through `_render_inline` again; a code
+    # span and a link destination are literal, so they only get escaped.
+    candidates: list[tuple[int, int, str]] = []
+
+    def _collect(pattern: re.Pattern[str], make) -> None:  # type: ignore[no-untyped-def]
         for m in pattern.finditer(text):
-            if any(s < m.end() and m.start() < e for s, e, _ in spans):
-                continue
-            spans.append((m.start(), m.end(), make(m)))
+            candidates.append((m.start(), m.end(), make(m)))
 
-    _claim(
+    _collect(
         _LINK_RE,
         lambda m: (
             f"[{_LINK_STYLE}]{_rich_escape(m.group(1))}[/]"
             f" [{_LINK_URL_STYLE}]({_rich_escape(m.group(2))})[/]"
         ),
     )
-    _claim(
+    _collect(
         _INLINE_CODE_RE,
-        lambda m: f"[{_INLINE_CODE_STYLE}]{_rich_escape(m.group(1))}[/]",
+        lambda m: f"[{_INLINE_CODE_STYLE}]{_rich_escape(m.group(2))}[/]",
     )
-    _claim(
-        _BOLD_RE,
-        lambda m: f"[{_BOLD_STYLE}]{_rich_escape(m.group(1))}[/]",
-    )
-    _claim(
-        _ITALIC_RE,
-        lambda m: f"[{_ITALIC_STYLE}]{_rich_escape(m.group(1))}[/]",
-    )
-    _claim(
-        _STRIKE_RE,
-        lambda m: f"[{_STRIKE_STYLE}]{_rich_escape(m.group(1))}[/]",
-    )
+    _collect(_BOLD_RE, lambda m: f"[{_BOLD_STYLE}]{_render_inline(m.group(1))}[/]")
+    _collect(_ITALIC_RE, lambda m: f"[{_ITALIC_STYLE}]{_render_inline(m.group(1))}[/]")
+    _collect(_STRIKE_RE, lambda m: f"[{_STRIKE_STYLE}]{_render_inline(m.group(1))}[/]")
+
+    # Outermost-first, not pattern-order-first. The claim order used to decide
+    # which of two overlapping spans survived, so an *inner* span claimed by an
+    # earlier pattern discarded the span enclosing it and left that one's
+    # delimiters on screen -- `~~struck with *italic* inside~~` kept its `~~`
+    # because the italic was claimed first (#3428). Sorting by start, then by
+    # longest, makes the enclosing span win; its content is rendered
+    # recursively, so the inner one is not lost either.
+    candidates.sort(key=lambda c: (c[0], -(c[1] - c[0])))
+    spans: list[tuple[int, int, str]] = []
+    for start, end, replacement in candidates:
+        if any(s < end and start < e for s, e, _ in spans):
+            continue
+        spans.append((start, end, replacement))
 
     spans.sort()
     out: list[str] = []
@@ -165,7 +211,13 @@ def _render_inline(text: str) -> str:
         out.append(replacement)
         pos = end
     out.append(_rich_escape(text[pos:]))
-    return "".join(out)
+    rendered = "".join(out)
+    # Restored last, so the character the backslash protected was never
+    # visible to a span pattern, and Rich-escaped on the way back because the
+    # pass that would have done it ran while this was still a placeholder.
+    for index, char in enumerate(escaped_chars):
+        rendered = rendered.replace(f"\x00ESC{index}\x00", _rich_escape(char))
+    return rendered
 
 
 # ---------------------------------------------------------------------------
