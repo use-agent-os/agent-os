@@ -1,7 +1,7 @@
 ---
 name: gmgn-market
 description: Get crypto and meme token price charts (K-line, candlestick, OHLCV), trending meme coin rankings by volume, newly launched tokens on launchpads (pump.fun, fourmeme, letsbonk, Raydium, etc.), and the hot-search ranking (most-searched tokens) via GMGN API on Solana, BSC, Base, or Ethereum. Use when user asks for price chart, trending tokens, what's pumping, hot coins, most searched tokens, new launches, token signals, or wants to discover early-stage opportunities.
-argument-hint: "kline --chain <sol|bsc|base|eth|robinhood|arc|stable> --address <token_address> --resolution <30s|1m|5m|15m|1h|4h|1d> [--from <unix_ts>] [--to <unix_ts>] | trending --chain <sol|bsc|base|eth|robinhood|arc|stable> --interval <1m|5m|1h|6h|24h> | trenches --chain <sol|bsc|base|eth|robinhood|arc|stable> | signal --chain <sol|bsc|robinhood> | hot-searches [--chain <sol|bsc|base|eth|robinhood...>] [--interval <1m|5m|1h|6h|24h>]"
+argument-hint: "kline --chain <sol|bsc|base|eth|robinhood|arc|stable> --address <token_address> --resolution <30s|1m|5m|15m|1h|4h|1d> [--from <unix_ts>] [--to <unix_ts>] | trending --chain <sol|bsc|base|eth|robinhood|arc|stable> --interval <1m|5m|1h|6h|24h> | trenches --chain <sol|bsc|base|eth|robinhood|arc|stable> | signal --chain <sol|bsc|robinhood|arc|stable> | hot-searches [--chain <sol|bsc|base|eth|robinhood...>] [--interval <1m|5m|1h|6h|24h>]"
 provenance:
   origin: gmgn-mit
   license: MIT
@@ -1066,7 +1066,7 @@ Do **not** pass signal types **14, 15, or 16** in `signal_type` / `--signal-type
 
 | Option | Required | Description |
 |--------|----------|-------------|
-| `--chain` | Yes | `sol` / `bsc` |
+| `--chain` | Yes | `sol` / `bsc` / `robinhood` / `arc` / `stable` |
 | `--signal-type` | No | Signal type(s), repeatable (1–21, default: all). See Signal Types below. |
 | `--mc-min` | No | Min market cap at trigger time (USD) |
 | `--mc-max` | No | Max market cap at trigger time (USD) |
