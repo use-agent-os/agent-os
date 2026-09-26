@@ -29,8 +29,8 @@ that can do each job. AgentOS also
 has memory that stays after you close it, a safe sandbox with many
 layers, built-in web search, and on-device embeddings.
 
-You can use AgentOS from the Web UI, the CLI, or chat apps. All of
-them use the same core loop. This means tool calls, retries, and logs
+You can use AgentOS from the AgentOS App on your desktop, the Web UI,
+the CLI, or chat apps. All of them use the same core loop. This means tool calls, retries, and logs
 work the same way everywhere. AgentOS can talk to many AI providers.
 By default it uses OpenRouter. It can also use the Bankr LLM Gateway, OpenCAP,
 Surplus Intelligence, OpenAI, Anthropic, Ollama, DeepSeek, Gemini,
@@ -48,10 +48,38 @@ For step-by-step guides, start with the
 
 ---
 
+## AgentOS App
+
+AgentOS App is the native desktop app for macOS. It is the easiest way to
+run AgentOS: download it, open it, and it installs the engine and starts
+the gateway for you. Signed builds for Apple silicon and Intel are
+published on every release.
+
+<p align="center">
+  <a href="https://github.com/use-agent-os/agent-os/releases"><b>Download AgentOS App from GitHub Releases &rarr;</b></a>
+</p>
+
+- **One-click install.** On first launch the app installs the `use-agent-os`
+  engine and starts the local gateway. No terminal, Python, or `uv` needed.
+- **Chat and Trading in one window.** A desktop chat with the same sessions,
+  approvals, and scheduled jobs as the Web UI, plus the Trading Desk.
+- **Self-updating.** New releases show up as an **Update** pill inside the
+  app; the app and the engine update together.
+- **Signed and notarized.** Opens on macOS 13 or newer without any
+  Gatekeeper workaround.
+
+Each release page lists the app builds next to the Windows portable zip and
+the Python wheel: `AgentOS-<version>-arm64.dmg` for Apple silicon and
+`AgentOS-<version>.dmg` for Intel. See
+[AgentOS for Mac](#agentos-for-mac) for install steps and
+[`desktop/README.md`](desktop/README.md) for how the app is built.
+
+---
+
 ## Architecture
 
-Every client — the Web UI, the CLI, and the chat channels — talks to
-one local gateway. This gateway handles sessions, approvals, and
+Every client — the AgentOS App, the Web UI, the CLI, and the chat
+channels — talks to one local gateway. This gateway handles sessions, approvals, and
 scheduling. It sends each turn to the Pilot Router, which picks the
 model. Then it runs tool calls inside the safe sandbox.
 
@@ -137,7 +165,9 @@ signed with a Developer ID and notarized, so it opens without any
 Gatekeeper workaround.
 
 1. Download the dmg for your Mac from the
-   [latest release](https://github.com/use-agent-os/agent-os/releases/latest):
+   [latest release](https://github.com/use-agent-os/agent-os/releases/latest)
+   (or pick a version from the
+   [releases page](https://github.com/use-agent-os/agent-os/releases)):
    `AgentOS-<version>-arm64.dmg` for Apple silicon, `AgentOS-<version>.dmg`
    for Intel. The number in the file name is the app's build version; the
    release it belongs to is the tag.
@@ -648,6 +678,7 @@ settings are all in `agentos.toml.example`.
 | **Persistent local memory** | AgentOS remembers things between sessions, using a main `MEMORY.md` file plus dated notes in Markdown. You can search this memory two ways: by keyword (SQLite full-text search) or by meaning (`sqlite-vec`). The meaning search runs on your device using a built-in ONNX model, or you can switch to OpenAI or Ollama instead. Old memories can also slowly fade if you turn that on. |
 | **Layered security sandbox** | There are three safety levels: Standard, Strict, and Locked. Each one controls what tools are allowed to do. On Linux, Bubblewrap keeps code running in its own safe space. On macOS, this job is done by `sandbox-exec` (Apple's Seatbelt). Windows does not have this sandbox yet. If AgentOS is denied the same action too many times in a row, it pauses itself automatically and does not keep trying. Any blocked output is deleted right away. Skill details and tool results are also cleaned (escaped) so they can't trick the AI into doing something unsafe. |
 | **Built-in tools** | AgentOS can read, write, and edit files; run shell commands and background tasks; use git; search the web (with Brave or DuckDuckGo) and fetch pages safely (blocking unsafe internal network requests); create spreadsheets, PPTX, and PDF files; generate images; and turn text into speech. |
+| **AgentOS App (desktop)** | A signed, notarized macOS app that installs the engine, supervises the gateway, and offers Chat and the Trading Desk in a native window. It updates itself and the engine together. Download it from [GitHub Releases](https://github.com/use-agent-os/agent-os/releases). |
 | **Unified gateway** | One local web server (built with Starlette) runs at `127.0.0.1:18791`. It uses WebSockets and has a built-in control page at `/control/`. The Web UI, CLI, terminal, websocket, Slack, Telegram, and Discord clients all share one single `TurnRunner` engine underneath. |
 | **Durable sessions, subagents, and scheduling** | Sessions, chat history, and replay data are all saved in SQLite, and each agent gets its own workspace folder. An agent can start smaller "subagent" helpers, up to a limited depth. A `SchedulerEngine`, with its own built-in cron reader, runs jobs on a schedule through `agentos cron`. |
 | **Operator controls** | A person can review and approve risky tool calls before they run. You can see how many tokens and how much cost each turn and each session used, with `agentos cost`. More diagnostic tools are available from both the CLI and the Web UI. |
