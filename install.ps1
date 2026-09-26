@@ -12,7 +12,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$defaultVersion = 'v2026.9.25'
+$defaultVersion = 'v2026.9.26'
 $repoSlug = if ($env:AGENTOS_REPOSITORY) { $env:AGENTOS_REPOSITORY } else { 'use-agent-os/agent-os' }
 $pythonVersion = if ($env:AGENTOS_PYTHON_VERSION) { $env:AGENTOS_PYTHON_VERSION } else { '3.12' }
 $originalPath = if ($env:Path) { $env:Path } else { '' }
