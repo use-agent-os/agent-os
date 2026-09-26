@@ -98,6 +98,55 @@ async def test_ambiguous_edit_reports_the_matching_lines(tmp_path: Path) -> None
 
 
 @pytest.mark.asyncio
+async def test_escaped_newlines_in_both_texts_are_refused_and_nothing_written(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "app.py"
+    original = "def total(xs):\n    return sum(xs)\n"
+    target.write_text(original, encoding="utf-8")
+
+    with tool_context(tmp_path):
+        with pytest.raises(SafeToolError, match="nothing was written"):
+            await edit_file(
+                str(target),
+                "def total(xs):\\n    return sum(xs)",
+                "def total(xs):\\n    return sum(xs) + 1",
+            )
+
+    assert target.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.asyncio
+async def test_escaped_quotes_in_both_texts_are_refused_and_nothing_written(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "cfg.py"
+    target.write_text('name = "bob"\n', encoding="utf-8")
+
+    with tool_context(tmp_path):
+        with pytest.raises(SafeToolError, match="nothing was written"):
+            await edit_file(str(target), 'name = \\"bob\\"', 'name = \\"alice\\"')
+
+    assert target.read_text(encoding="utf-8") == 'name = "bob"\n'
+
+
+@pytest.mark.asyncio
+async def test_escaped_old_text_with_clean_new_text_still_applies(tmp_path: Path) -> None:
+    target = tmp_path / "app.py"
+    target.write_text("def total(xs):\n    return sum(xs)\n", encoding="utf-8")
+
+    with tool_context(tmp_path):
+        result = await edit_file(
+            str(target),
+            "def total(xs):\\n    return sum(xs)",
+            "def total(xs):\n    return sum(xs) + 1",
+        )
+
+    assert "[match=escape_normalized]" in result
+    assert target.read_text(encoding="utf-8") == "def total(xs):\n    return sum(xs) + 1\n"
+
+
+@pytest.mark.asyncio
 async def test_missing_text_error_carries_a_closest_match_hint(tmp_path: Path) -> None:
     target = tmp_path / "sample.py"
     target.write_text("def calculate_total(items):\n    return 0\n", encoding="utf-8")

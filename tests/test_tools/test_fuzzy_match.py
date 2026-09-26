@@ -5,6 +5,7 @@ import pytest
 from agentos.tools.fuzzy_match import (
     STRATEGIES,
     AmbiguousMatchError,
+    EscapeDriftError,
     FuzzyMatchError,
     find_closest_lines,
     fuzzy_find_and_replace,
@@ -24,6 +25,20 @@ def test_escape_normalized_matches_unexpanded_newline_literal() -> None:
 
     assert result.strategy == "escape_normalized"
     assert result.updated == "c = 3\n"
+
+
+def test_escape_normalized_refuses_when_new_text_keeps_the_same_literals() -> None:
+    with pytest.raises(EscapeDriftError) as excinfo:
+        fuzzy_find_and_replace("a = 1\nb = 2\n", "a = 1\\nb = 2", "a = 1\\nb = 3")
+
+    assert excinfo.value.literals == ("\\n",)
+
+
+def test_exact_match_on_real_escape_literals_is_not_refused() -> None:
+    result = fuzzy_find_and_replace('msg = "a\\nb"\n', 'msg = "a\\nb"', 'msg = "a\\nc"')
+
+    assert result.strategy == "exact"
+    assert result.updated == 'msg = "a\\nc"\n'
 
 
 def test_unicode_normalized_matches_smart_quotes() -> None:

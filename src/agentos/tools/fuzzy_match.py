@@ -140,6 +140,14 @@ class AmbiguousMatchError(FuzzyMatchError):
         self.lines = tuple(lines)
 
 
+class EscapeDriftError(FuzzyMatchError):
+    """old_text matched only once decoded, and new_text keeps the same literal escapes."""
+
+    def __init__(self, message: str, *, literals: Sequence[str]) -> None:
+        super().__init__(message)
+        self.literals = tuple(literals)
+
+
 # ---------------------------------------------------------------------------
 # line/offset bookkeeping
 # ---------------------------------------------------------------------------
@@ -678,6 +686,20 @@ def fuzzy_find_and_replace(
                 match_count=len(found),
                 lines=[_line_number(content, start) for start, _ in found],
             )
+
+        # new_text is spliced verbatim, so its undecoded escapes would land in the file.
+        if strategy == "escape_normalized":
+            drifted = [
+                literal
+                for literal, _ in _ESCAPE_SEQUENCES
+                if literal in old_text and literal in new_text
+            ]
+            if drifted:
+                raise EscapeDriftError(
+                    "old_text matched only after decoding literal escapes "
+                    f"({', '.join(drifted)}), and new_text contains the same literal escapes",
+                    literals=drifted,
+                )
 
         # Right to left, so each replacement leaves earlier offsets valid.
         updated = content
