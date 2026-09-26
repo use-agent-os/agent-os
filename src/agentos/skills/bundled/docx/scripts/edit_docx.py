@@ -219,6 +219,19 @@ def load_ops(path: Path) -> list[dict[str, Any]]:
     return raw
 
 
+def _op_text(op: dict[str, Any], key: str) -> str:
+    """The text an op carries under *key*, with JSON ``null`` meaning empty.
+
+    ``dict.get(key, "")`` returns the default only when the key is *absent*.
+    A key present with a ``null`` value returns ``None``, and ``str(None)`` is
+    the four-letter word "None" -- which is what got written into the document
+    where the caller meant to clear the text. Every other type keeps ``str``,
+    so a ``0`` or a ``false`` still prints as itself rather than vanishing.
+    """
+    value = op.get(key)
+    return "" if value is None else str(value)
+
+
 def apply_ops(doc: Document, ops: list[dict[str, Any]]) -> int:
     applied = 0
     for op in ops:
@@ -237,11 +250,11 @@ def apply_ops(doc: Document, ops: list[dict[str, Any]]) -> int:
             paragraphs = doc.paragraphs
             if not 0 <= para_idx < len(paragraphs):
                 continue
-            if _replace_run(paragraphs[para_idx], run_idx, str(op.get("text", ""))):
+            if _replace_run(paragraphs[para_idx], run_idx, _op_text(op, "text")):
                 applied += 1
         elif kind == "replace_text":
-            find = str(op.get("find", ""))
-            replacement = str(op.get("with", ""))
+            find = _op_text(op, "find")
+            replacement = _op_text(op, "with")
             if not find:
                 continue
             for para in _iter_all_paragraphs(doc):

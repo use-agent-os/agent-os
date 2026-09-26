@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `docx` skill: an `edit_docx` op carrying a JSON `null` -- the way a caller
+  clears a placeholder or empties a run -- wrote the literal word "None" into
+  the document instead. `null` now resolves to an empty string, while every
+  other value keeps its `str()` so `0` and `false` still print as themselves
+  (#3417).
+
 ## [2026.9.25] - 2026-09-25
 
 ### Fixed
