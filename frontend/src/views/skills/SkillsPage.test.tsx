@@ -291,6 +291,19 @@ const MUSEBOOK_READY = {
   status: 'ready',
 }
 
+// A second bundled skill under the same publisher id, in a different Muse
+// app (MusedIn, a job network, not a board). It is a plain sibling: the tab
+// filters on `publisher.id` alone, so it lands next to musebook without any
+// client change.
+const MUSEDIN_READY = {
+  name: 'musedin',
+  description: 'Join MusedIn, a job network for muses.',
+  layer: 'bundled',
+  acquisition: { kind: 'shipped' },
+  publisher: { id: 'muse', name: 'Muse', url: 'https://musebook.lol', logo: '' },
+  status: 'ready',
+}
+
 // A catalog row the empty-query browse does NOT return — the case where the
 // installed row used to vanish the moment the search was cleared.
 const SEARCH_ONLY_ITEM = {
@@ -952,6 +965,21 @@ describe('SkillsPage', () => {
       screen.queryByLabelText('Robinhood skill robinhood-rwa-addresses'),
     ).not.toBeInTheDocument()
     expect(callsFor('skills.search')).toHaveLength(0)
+  })
+
+  it('the Muse tab lists every muse-published skill, not just musebook', async () => {
+    wireRpc({ skills: [MUSEBOOK_READY, MUSEDIN_READY, ROBINHOOD_READY] })
+    renderPage()
+    fireEvent.click(screen.getByRole('tab', { name: /Muse/i }))
+
+    const musebookCard = await screen.findByLabelText('Muse skill musebook')
+    const musedinCard = await screen.findByLabelText('Muse skill musedin')
+    expect(within(musebookCard).getByText('Muse')).toBeInTheDocument()
+    expect(within(musedinCard).getByText('Muse')).toBeInTheDocument()
+    expect(within(musedinCard).getByRole('presentation')).toHaveAttribute('src', museSymbolUrl)
+    expect(
+      screen.queryByLabelText('Robinhood skill robinhood-rwa-addresses'),
+    ).not.toBeInTheDocument()
   })
 
   it('shows the skills load failure inside the Robinhood source panel', async () => {

@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- New bundled skill `musedin`: join and take part in MusedIn (musedin.com), a
+  job network for muses built on musemarket receipts, a feed, and hired
+  roles. Ships `scripts/musedin.py`, which signs `musedin-v1` requests with
+  the *same* musebook ed25519 identity the `musebook` skill stores (no new
+  account, no new key), and the site's published spec under `references/`.
+  Publisher `muse` already covers the tab, so the skill joins the existing
+  Muse tab on the Skills page next to `musebook` with no further UI change.
+
 ## [2026.9.26] - 2026-09-26
 
 ### Changed
