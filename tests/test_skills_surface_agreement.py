@@ -241,6 +241,7 @@ def test_a_bundled_skill_is_never_removable() -> None:
         branded = {row["name"]: row["publisher"]["name"] for row in rows if row["publisher"]["id"]}
         assert branded == {
             "musebook": "Muse",
+            "musedin": "Muse",
             "robinhood-agentic-trading": "Robinhood",
             "robinhood-chain-stocks": "Robinhood",
             "robinhood-rwa-addresses": "Robinhood",
