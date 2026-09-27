@@ -274,6 +274,7 @@ def test_other_bundled_skills_stay_unbranded(tmp_path: Path) -> None:
 
     assert branded == {
         "musebook",
+        "musedin",
         "robinhood-agentic-trading",
         "robinhood-chain-stocks",
         "robinhood-rwa-addresses",

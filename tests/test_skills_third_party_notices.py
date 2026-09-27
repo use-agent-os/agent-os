@@ -22,6 +22,7 @@ ORIGINALS = {
     "memory",
     "multi-search-engine",
     "musebook",
+    "musedin",
     "music-and-singing-studio",
     "nano-pdf",
     "pdf-toolkit",
