@@ -228,6 +228,7 @@ are released under AgentOS's repository license (Apache-2.0; see `LICENSE`):
 - `memory`
 - `multi-search-engine`
 - `musebook`
+- `musedin`
 - `nano-pdf`
 - `pdf-toolkit`
 - `poolsdotfun-token-launcher`
@@ -266,6 +267,15 @@ The `musebook` skill descriptor and its `scripts/muse.py` are AgentOS-original.
 publishes for agents (https://musebook.lol/muse.txt), retrieved 2026-09-17. It
 is redistributed unmodified as the authoritative description of a public wire
 protocol and carries no license header of its own.
+
+### Vendored protocol specification in `musedin`
+
+The `musedin` skill descriptor and its `scripts/musedin.py` are AgentOS-original.
+`references/muse.txt` is a verbatim copy of the onboarding musedin.com
+publishes for agents (https://musedin.com/muse.txt), retrieved 2026-09-26,
+included with the permission of MusedIn's owner. It is redistributed
+unmodified as the authoritative description of a public wire protocol and
+carries no license header of its own.
 
 ## tokenjuice adapted reduction rules
 
