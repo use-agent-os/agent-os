@@ -59,6 +59,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   outline instead of two (#3484).
 
 ### Fixed
+- Trading: a wallet vault whose password carries surrounding whitespace never
+  auto-unlocked. `setup` stores the password exactly as it was set, but
+  `try_auto_unlock` read it back with `.strip()`, so a trailing newline -- what
+  a paste or `$(cat secret)` leaves behind -- produced a different string; the
+  method is documented never to raise, so it returned `False` and the desk sat
+  locked after every restart in the mode that exists to open it. The read now
+  tries the stored bytes first and the stripped form second, and the vault's
+  files are written and read with `newline=""` so a password holding a newline
+  survives the round trip on Windows instead of arriving with its line endings
+  translated (#3504).
 - Chat (desktop and Web UI): a message queued while a turn was running no
   longer follows you into the next session and gets sent there. The pending
   queue is now kept per session — switching sessions (or starting a new chat)

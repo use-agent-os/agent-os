@@ -98,7 +98,11 @@ def _write_private(path: Path, text: str) -> None:
     tmp = path.with_name(path.name + ".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        # newline="": what is handed in is what lands on disk. Text mode
+        # would translate "\n" to "\r\n" on Windows, so a password
+        # holding a newline came back as a different string and never
+        # unlocked (#3504).
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
             handle.write(text)
     except Exception:
         tmp.unlink(missing_ok=True)
@@ -288,16 +292,29 @@ class Vault:
             if not self.initialized or self.unlock_mode != "auto":
                 return False
             try:
-                password = self.unlock_path.read_text(encoding="utf-8").strip()
+                # newline="" for the same reason as the write: the password is
+                # bytes the user chose, not lines to be normalised.
+                with self.unlock_path.open(encoding="utf-8", newline="") as handle:
+                    stored = handle.read()
             except OSError:
                 return False
-            if not password:
-                return False
-            try:
-                self.unlock(password)
-            except VaultError:
-                return False
-            return True
+            # Verbatim first, then stripped. ``setup`` writes the password
+            # exactly as it was set, so surrounding whitespace -- a trailing
+            # newline, most often -- is part of it, and reading it back
+            # stripped meant such a vault never auto-unlocked and never said
+            # why (#3504). The stripped form stays as a fallback, since a
+            # file edited by hand is where the strip came from.
+            candidates = [stored, stored.strip()]
+            for password in dict.fromkeys(c for c in candidates if c):
+                try:
+                    self.unlock(password)
+                except (VaultError, ValueError):
+                    # ValueError as well: ``_require_password`` raises it for
+                    # anything under 8 characters, and this method is
+                    # documented never to raise.
+                    continue
+                return True
+            return False
 
     def set_unlock_mode(self, mode: UnlockMode, password: str) -> None:
         if mode not in ("auto", "manual"):
