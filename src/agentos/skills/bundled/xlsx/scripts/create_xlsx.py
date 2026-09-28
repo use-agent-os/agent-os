@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -38,10 +39,34 @@ from agentos.skill_stdio import configure_utf8_stdio  # noqa: E402
 def _coerce(value: Any) -> Any:
     if isinstance(value, str) and len(value) >= 19 and value[10] == "T":
         try:
-            return datetime.fromisoformat(value)
+            parsed = datetime.fromisoformat(value)
+            # ``fromisoformat`` keeps a trailing ``Z`` / ``±HH:MM`` as an
+            # offset-aware datetime, and openpyxl refuses to serialise those
+            # (``TypeError: Excel does not support timezones in datetimes``).
+            # Excel has no timezone type at all, so the offset is dropped and
+            # the value is kept as the wall-clock time it spells out -- exactly
+            # what the naive spelling already stored.
+            return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
         except ValueError:
             return value
     return value
+
+
+def _save_atomic(wb: Workbook, out: Path) -> None:
+    """Save *wb* to *out* without ever leaving *out* half-written.
+
+    ``wb.save`` truncates its destination up front, so a failure partway
+    leaves a broken 3-entry zip behind -- and if *out* is where the caller's
+    only copy lived, that copy is gone. A sibling temp file plus rename means
+    an aborted save leaves *out* exactly as it was.
+    """
+    tmp = out.with_name(out.name + ".tmp")
+    try:
+        wb.save(str(tmp))
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    os.replace(tmp, out)
 
 
 def _merge_checked(ws: Any, rng: str) -> None:
@@ -146,7 +171,17 @@ def main() -> int:
         return 2
     wb = build(spec)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(str(args.out))
+    try:
+        _save_atomic(wb, args.out)
+    except Exception as exc:
+        # A writer-side failure is refused input like any other: named on
+        # stderr and exit 2, never a traceback -- and ``_save_atomic`` has
+        # already removed the temp file, so ``args.out`` is untouched (or
+        # absent). ``build`` above is deliberately outside this block: its
+        # refusals (an overlapping merge, a malformed range) already surface
+        # as ``ValueError`` and must keep doing so.
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     return 0
 
 

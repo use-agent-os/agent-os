@@ -39,6 +39,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   things the chat does not show on its own.
 
 ### Fixed
+- `xlsx` skill: `set_cell` and `create_xlsx` fed any ISO-looking string to
+  `datetime.fromisoformat` and wrote the result straight into a cell. A `Z`
+  or `±HH:MM` suffix parses to an *offset-aware* datetime, which openpyxl
+  refuses to serialise: the resulting `TypeError` escaped as a raw traceback
+  and aborted `wb.save()` half-written, leaving a corrupt 3-entry zip -- and
+  when `--out` pointed at the input file (the in-place edit) that destroyed
+  the caller's only copy. The offset is now dropped and the value stored as
+  the wall-clock time it spells out. The same change makes `wb.save()`
+  atomic (sibling temp file + rename), so a save that fails partway leaves
+  the destination untouched. `set_cell` coordinates are also validated up
+  front: `0` / negative / unparseable / fractional / `bool` are skipped and
+  uncounted like any other refused op, instead of raising a raw traceback --
+  and a fractional coordinate is no longer silently floored to a neighbouring
+  cell (#3487).
 - Security: secret redaction and the payload guard matched connection strings
   against a scheme list that carried `redis` and `amqp` but not their TLS
   spellings, so `rediss://user:password@host` (what `REDIS_TLS_URL` holds) and

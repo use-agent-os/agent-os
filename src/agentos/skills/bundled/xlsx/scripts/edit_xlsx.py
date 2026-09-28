@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -71,7 +72,14 @@ def _coerce(value: Any, as_text: bool) -> Any:
         return value
     if isinstance(value, str) and len(value) >= 19 and value[10] == "T":
         try:
-            return datetime.fromisoformat(value)
+            parsed = datetime.fromisoformat(value)
+            # ``fromisoformat`` keeps a trailing ``Z`` / ``±HH:MM`` as an
+            # offset-aware datetime, and openpyxl refuses to serialise those
+            # (``TypeError: Excel does not support timezones in datetimes``).
+            # Excel has no timezone type at all, so the offset is dropped and
+            # the value is kept as the wall-clock time it spells out -- exactly
+            # what the naive spelling already stored.
+            return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
         except ValueError:
             return value
     return value
@@ -86,6 +94,54 @@ OP_KINDS = ("set_cell", "rename_sheet", "merge_cells")
 class OpsError(ValueError):
     """An ops file that cannot be used. Reported as ``error:`` / exit 2, never
     as a traceback: the caller passed bad input, the script did not break."""
+
+
+class CoordinateError(ValueError):
+    """A ``set_cell`` row/column that is not a 1-based whole number.
+
+    ``0`` and negatives reached ``Worksheet.cell`` and raised ``ValueError``
+    from there, an unparseable one raised from ``int()``, and a fractional one
+    was silently floored to a neighbouring cell. All are bad caller input and
+    belong on the same ``error:`` / exit 2 path as :class:`OpsError`.
+    """
+
+
+def _cell_coord(value: Any, name: str) -> int:
+    """Validate one 1-based row/column number, or raise :class:`CoordinateError`.
+
+    ``bool`` is refused outright: ``True`` is an ``int`` (value 1), so
+    ``"row": true`` would quietly edit row 1. A float is accepted only when it
+    is whole (``1.0``), never floored (``1.7`` must not become ``1``).
+    """
+    if isinstance(value, bool):
+        raise CoordinateError(f"{name} must be a whole number >= 1, got {value!r}")
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise CoordinateError(f"{name} must be a whole number >= 1, got {value!r}")
+        value = int(value)
+    if isinstance(value, int):
+        if value < 1:
+            raise CoordinateError(f"{name} must be at least 1, got {value}")
+        return value
+    raise CoordinateError(f"{name} must be a whole number >= 1, got {value!r}")
+
+
+def _save_atomic(wb: Any, out: Path) -> None:
+    """Save *wb* to *out* without ever leaving *out* half-written.
+
+    ``wb.save`` truncates its destination up front, so a failure partway
+    through leaves a broken zip behind. When ``--out`` points at the input
+    file -- the in-place edit -- that broken zip is the caller's only copy.
+    Writing a sibling temp file first and renaming it over the destination
+    means an aborted save leaves *out* exactly as it was.
+    """
+    tmp = out.with_name(out.name + ".tmp")
+    try:
+        wb.save(str(tmp))
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    os.replace(tmp, out)
 
 
 def _merge_checked(ws: Any, rng: str) -> None:
@@ -197,12 +253,20 @@ def apply_ops(wb: Any, ops: list[dict[str, Any]]) -> int:
             ws = wb[sheet_name]
             as_text = bool(op.get("as_text"))
             coerced = _coerce(value, as_text)
+            try:
+                row = _cell_coord(row, "row")
+                col = _cell_coord(col, "col")
+            except CoordinateError:
+                # Unusable coordinates are refused input like a missing
+                # ``value``: the op is skipped and uncounted, so the rest of
+                # the batch still lands.
+                continue
             # Assign through the property, not Worksheet.cell(value=...): that
             # helper ends with `if value is not None: cell.value = value`, so an
             # explicit null only *reads* the cell and the old value survives
             # while this loop still counts the edit as applied. Fetching the
             # cell first also leaves its style untouched.
-            cell = ws.cell(row=int(row), column=int(col))
+            cell = ws.cell(row=row, column=col)
             cell.value = coerced
             if as_text and isinstance(coerced, str):
                 # Assigning a string that starts with ``=`` makes openpyxl mark
@@ -252,7 +316,17 @@ def main() -> int:
     wb = load_workbook(filename=str(args.input))
     applied = apply_ops(wb, ops)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(str(args.out))
+    try:
+        _save_atomic(wb, args.out)
+    except Exception as exc:
+        # A writer-side failure is refused input like any other: named on
+        # stderr and exit 2, never a traceback -- and with ``_save_atomic``
+        # the destination (which an in-place edit points at the input) is
+        # left byte-for-byte as it was. ``apply_ops`` above is deliberately
+        # outside this block: its refusals (an overlapping merge, a malformed
+        # range) already surface as ``ValueError`` and must keep doing so.
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     _write_stdout(json.dumps({"applied": applied}, ensure_ascii=False) + "\n")
     return 0
 
