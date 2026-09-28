@@ -30,6 +30,7 @@ ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 # JS-semantics arithmetic
 # ---------------------------------------------------------------------------
 
+
 def div_trunc(numerator: int, denominator: int) -> int:
     """Integer division that truncates toward zero, like JS ``BigInt`` division.
 
@@ -54,7 +55,16 @@ def js_round(value: float) -> int:
 
 
 def as_int_n(bits: int, value: int) -> int:
-    """``BigInt.asIntN`` — reinterpret the low ``bits`` of ``value`` as signed."""
+    """``BigInt.asIntN`` — reinterpret the low ``bits`` of ``value`` as signed.
+
+    ``BigInt.asIntN(0, x)`` is ``0n``: there are no bits to reinterpret. The port
+    used to reach ``1 << (bits - 1)`` and died on ``1 << -1`` with a bare
+    ``ValueError: negative shift count``, which explains nothing to the caller.
+    """
+    if bits < 0:
+        raise ValueError(f"bit width must be non-negative, got {bits}")
+    if bits == 0:
+        return 0
     masked = value & ((1 << bits) - 1)
     if masked >= (1 << (bits - 1)):
         return masked - (1 << bits)
@@ -68,12 +78,15 @@ def as_uint_n(bits: int, value: int) -> int:
     delta in ``getFeesOwed`` relies on ``uint256`` underflow, and a plain Python
     subtraction there yields a large negative number instead of the intended wrap.
     """
+    if bits < 0:
+        raise ValueError(f"bit width must be non-negative, got {bits}")
     return value & ((1 << bits) - 1)
 
 
 # ---------------------------------------------------------------------------
 # Hex
 # ---------------------------------------------------------------------------
+
 
 def strip0x(value: str) -> str:
     return value[2:] if value[:2].lower() == "0x" else value
@@ -94,24 +107,35 @@ def to_hex(value: int | bytes | bytearray | str, size: int | None = None) -> str
 
     Mirrors viem's ``toHex(value, {size})``. A negative integer is encoded as its
     two's-complement over ``size`` bytes, which requires ``size``.
+
+    With ``size`` the result is exactly ``size * 2`` hex digits wide, or the call
+    is refused — viem's ``SizeExceedsPaddingSizeError`` and the same guard
+    :func:`pad` applies one function above. Padding is not truncation: a value
+    wider than ``size`` bytes is a caller error, and silently returning a longer
+    (often odd-length, and so not even a whole-byte) hex string shifts every byte
+    a caller concatenates after it.
     """
+
+    def _fit(body: str) -> str:
+        assert size is not None
+        width = (len(body) + 1) // 2
+        if width > size:
+            raise ValueError(f"value is {width} bytes, cannot fit in {size}")
+        return body.rjust(size * 2, "0")
+
     if isinstance(value, (bytes, bytearray)):
         body = bytes(value).hex()
-        if size is not None:
-            body = body.rjust(size * 2, "0")
-        return "0x" + body
+        return "0x" + (_fit(body) if size is not None else body)
     if isinstance(value, str):
         body = strip0x(value)
-        if size is not None:
-            body = body.rjust(size * 2, "0")
-        return "0x" + body
+        return "0x" + (_fit(body) if size is not None else body)
     if value < 0:
         if size is None:
             raise ValueError("to_hex of a negative integer requires an explicit size")
         value = as_uint_n(size * 8, value)
     body = format(value, "x")
     if size is not None:
-        return "0x" + body.rjust(size * 2, "0")
+        return "0x" + _fit(body)
     # Unsized: minimal hex, exactly like viem's toHex(bigint) — `toHex(1n)` is "0x1",
     # not "0x01". This is the JSON-RPC *quantity* encoding, and a node rejects
     # "fromBlock": "0x00" outright. Callers that need whole bytes pass `size`.
@@ -135,6 +159,7 @@ def concat_hex(parts: list[str]) -> str:
 # Addresses
 # ---------------------------------------------------------------------------
 
+
 def checksum_address(address: str) -> str:
     """EIP-55 checksummed form of ``address``.
 
@@ -152,8 +177,7 @@ def checksum_address(address: str) -> str:
         raise ValueError(f"address has non-hex characters: {address!r}") from None
     digest = keccak256_bytes(body.encode("ascii")).hex()
     return "0x" + "".join(
-        char.upper() if int(digest[i], 16) >= 8 else char
-        for i, char in enumerate(body)
+        char.upper() if int(digest[i], 16) >= 8 else char for i, char in enumerate(body)
     )
 
 
@@ -170,6 +194,7 @@ def is_zero_address(address: str | None) -> bool:
 # ---------------------------------------------------------------------------
 # Fixed-point <-> human amounts
 # ---------------------------------------------------------------------------
+
 
 def parse_units(value: str, decimals: int) -> int:
     """Human decimal string -> base units, reproducing viem's ``parseUnits``.
@@ -198,7 +223,7 @@ def parse_units(value: str, decimals: int) -> int:
         fraction = ""
     elif len(fraction) > decimals:
         left = fraction[: decimals - 1]
-        unit = fraction[decimals - 1: decimals]
+        unit = fraction[decimals - 1 : decimals]
         right = fraction[decimals:]
         rounded = js_round(float(f"{unit}.{right}"))
         if rounded > 9:
@@ -234,7 +259,7 @@ def format_units(value: int, decimals: int) -> str:
         text = text[1:]
     text = text.rjust(decimals, "0")
     integer = text[: len(text) - decimals]
-    fraction = text[len(text) - decimals:].rstrip("0") if decimals else ""
+    fraction = text[len(text) - decimals :].rstrip("0") if decimals else ""
     sign = "-" if negative else ""
     return f"{sign}{integer or '0'}" + (f".{fraction}" if fraction else "")
 

@@ -39,6 +39,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   things the chat does not show on its own.
 
 ### Fixed
+- `unilp` / `poolsfun` skill: `to_hex(value, size)` never checked the value fit
+  in `size` bytes, so an over-wide value came back as wrong-width hex — often
+  with an odd digit count, not even a whole number of bytes (`to_hex(256, 1)`
+  was `"0x100"`). `pad()` in the same module already refused this and viem's
+  `toHex(value, {size})` throws `SizeExceedsPaddingSizeError`; the port now
+  refuses too. `encode_unlock_data` was building Uniswap v4 `modifyLiquidities`
+  calldata from `to_hex(a, size=1)` per action byte, so an out-of-range action
+  silently shifted every byte after it and produced a blob whose `abi.encode`d
+  length word disagreed with the action count (#3496). Also `as_int_n(0, x)` now
+  returns `0` (as `BigInt.asIntN(0, x)` is `0n`) instead of leaking
+  `ValueError: negative shift count`, and both vendored copies carry the fix.
 - Chat (desktop and Web UI): a message queued while a turn was running no
   longer follows you into the next session and gets sent there. The pending
   queue is now kept per session — switching sessions (or starting a new chat)
