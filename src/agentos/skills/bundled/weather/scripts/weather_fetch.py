@@ -108,14 +108,107 @@ def _pick_forecast(payload: dict[str, Any], days: int) -> list[dict[str, str]]:
     return forecast
 
 
+def _dump(payload: Any) -> str:
+    """The exact bytes ``main`` prints, so a size check is on what is emitted.
+
+    ``separators=(",", ":")`` matches :func:`_summarize`'s measurement. The old
+    pair disagreed -- the budget was measured on the compact form and the
+    output printed with the default ``", "`` / ``": "`` -- so even a result that
+    fit the measured budget came out over it on stdout.
+    """
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
 def _summarize(result: dict[str, Any], max_chars: int) -> dict[str, Any]:
-    text = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
-    if len(text) <= max_chars:
+    """Fit ``result`` into ``max_chars`` of JSON, or say plainly that it cannot.
+
+    ``--max-chars`` is the caller's budget: ``SKILL.md`` sells this entrypoint as
+    "a bounded JSON forecast" and ``{{ with.max_chars }}`` is how a meta-skill
+    sets the bound per invocation. The old body measured the JSON and applied
+    one fixed cut (``forecast[:2]``) without ever re-measuring, so 660 chars came
+    back against a budget of 50 -- flagged ``truncated: true``, as if the budget
+    had been kept.
+
+    ``truncated`` now means "something was actually dropped", never "a trim was
+    attempted", and the output is at or under ``max_chars`` whenever anything can
+    fit at all. Parts are dropped least load-bearing first: forecast days (a
+    caller can just ask for fewer), then accumulated errors, then the prose hint,
+    then the optional current readings, then the meta fields. ``location`` -- the
+    one thing the caller asked about -- is the last to go.
+    """
+
+    def _size(payload: Any) -> int:
+        return len(_dump(payload))
+
+    if _size(result) <= max_chars:
         return result
-    result = dict(result)
-    result["truncated"] = True
-    result["forecast"] = result.get("forecast", [])[:2]
-    return result
+
+    candidate = dict(result)
+    candidate["truncated"] = True
+    candidate["forecast"] = list(result.get("forecast") or [])
+    candidate["errors"] = list(result.get("errors") or [])
+    candidate["current"] = dict(result.get("current") or {})
+    candidate["seasonal_hint"] = result.get("seasonal_hint", "")
+
+    def _fits() -> bool:
+        return _size(candidate) <= max_chars
+
+    # Least load-bearing first: failed fetches nobody asked for, then the prose
+    # hint (a caller can ask the model to reason about the season itself), then
+    # forecast days (drop one day at a time, newest kept), then the optional
+    # current readings. ``location`` -- the one thing the caller asked about --
+    # is the last to go.
+    while candidate["errors"] and not _fits():
+        candidate["errors"].pop()
+    if candidate["seasonal_hint"] and not _fits():
+        candidate["seasonal_hint"] = ""
+    while candidate["forecast"] and not _fits():
+        candidate["forecast"].pop()
+    for key in (
+        "precip_mm",
+        "wind_kmph",
+        "humidity_pct",
+        "feels_like_c",
+        "condition",
+        "temperature_c",
+    ):
+        if _fits():
+            break
+        candidate["current"].pop(key, None)
+
+    # Drop what has been emptied outright: a ``"forecast": []`` left behind is
+    # not data, it is bytes the budget could spend on ``location``. This is what
+    # let the old shape sit at 95 chars against a budget of 50.
+    for key in ("forecast", "errors", "current"):
+        if not candidate.get(key):
+            candidate.pop(key, None)
+    if not candidate.get("seasonal_hint"):
+        candidate.pop("seasonal_hint", None)
+    for key in ("forecast_window", "source"):
+        if _fits():
+            break
+        candidate.pop(key, None)
+    if _fits():
+        return candidate
+
+    # Even the barest shape is over budget (``--max-chars`` in the tens). Build
+    # the smallest honest marker additively so the output honours the cap rather
+    # than coming back many times over with a flag claiming otherwise. ``truncated``
+    # is the contract and is added first; ``location`` -- the one thing the caller
+    # asked about -- is kept whole if it fits and shortened only if it must be;
+    # ``dropped`` is a bonus marker and the first to be forfeited.
+    fallback: dict[str, Any] = {}
+    if _size({"truncated": True}) <= max_chars:
+        fallback["truncated"] = True
+    location = str(result.get("location", ""))
+    shortened = location
+    while shortened and _size({**fallback, "location": shortened}) > max_chars:
+        shortened = shortened[:-1]
+    if _size({**fallback, "location": shortened}) <= max_chars:
+        fallback["location"] = shortened
+    if _size({**fallback, "dropped": True}) <= max_chars:
+        fallback["dropped"] = True
+    return fallback
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -148,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 - keep meta DAG resilient
         result["errors"].append(f"{type(exc).__name__}: {exc}")
 
-    sys.stdout.write(json.dumps(_summarize(result, args.max_chars), ensure_ascii=False))
+    sys.stdout.write(_dump(_summarize(result, args.max_chars)))
     return 0
 
 

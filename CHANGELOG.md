@@ -39,6 +39,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   things the chat does not show on its own.
 
 ### Fixed
+- `weather` skill: `weather_fetch._summarize` advertised a `--max-chars` budget
+  it never enforced — the JSON was measured and then cut once
+  (`forecast[:2]`) without re-measuring, so a budget of 50 chars came back as
+  660 carrying `"truncated": true`, which reported that a trim was attempted
+  rather than that the budget was kept. The shrink is now progressive (errors,
+  then the seasonal hint, then forecast days, then current readings), emptied
+  parts are dropped outright, `truncated` means something was actually dropped,
+  and when even the marker shape cannot fit the caller's budget the output says
+  so instead of overshooting. The budget is also measured on the same compact
+  JSON `main` prints (it used to be measured compact and printed with default
+  separators) (#3498).
 - Chat (desktop and Web UI): a message queued while a turn was running no
   longer follows you into the next session and gets sent there. The pending
   queue is now kept per session — switching sessions (or starting a new chat)
