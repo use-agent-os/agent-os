@@ -269,7 +269,6 @@ def test_create_xlsx_writes_an_offset_aware_timestamp_as_wall_clock(
     """``create_xlsx`` shares the coercion and must not abort ``wb.save``."""
     create_xlsx, _ = _import_scripts()
     out = tmp_path / "created.xlsx"
-
     wb = create_xlsx.build({"sheets": [{"name": "S", "rows": [["2026-01-02T03:04:05Z"]]}]})
     create_xlsx._save_atomic(wb, out)
 
@@ -284,3 +283,54 @@ def test_create_xlsx_writes_an_offset_aware_timestamp_as_wall_clock(
         3,
         4,
     )
+
+
+def test_create_xlsx_in_place_target_survives_a_writer_refusal(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``create_xlsx._save_atomic`` must leave the destination alone on error.
+
+    Regression: a save that failed partway left a corrupt 3-entry zip in
+    place of the destination -- for an in-place ``--out`` that was the
+    caller's only copy of the workbook. The save is written to a sibling
+    temp file and renamed over the destination only after it succeeds.
+    """
+    create_xlsx, _ = _import_scripts()
+    dest = tmp_path / "book.xlsx"
+    # Seed the destination with a valid workbook the caller cares about.
+    create_xlsx.build({"sheets": [{"name": "S", "rows": [["keep me"]]}]}).save(str(dest))
+    before = dest.read_bytes()
+
+    class _Boom:
+        sheetnames = ["S"]
+
+        def save(self, filename: Any) -> None:
+            raise TypeError("Excel does not support timezones in datetimes")
+
+    with pytest.raises(TypeError):
+        create_xlsx._save_atomic(_Boom(), dest)
+    capsys.readouterr()
+
+    # The in-place destination is byte-for-byte what it was.
+    assert dest.read_bytes() == before
+    assert "[Content_Types].xml" in _zip_entries(dest)
+    # And no temp file is left behind.
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_save_atomic_leaves_no_temp_file_after_a_clean_save(tmp_path: Path) -> None:
+    """``_save_atomic`` writes through ``<target>.xlsx.tmp`` and renames it in.
+
+    Regression: a leftover ``*.xlsx.tmp`` would pollute the caller's
+    directory after a *successful* save. The rename is the entire point --
+    after a clean save there must be only the destination.
+    """
+    create_xlsx, _ = _import_scripts()
+    dest = tmp_path / "clean.xlsx"
+    wb = create_xlsx.build({"sheets": [{"name": "S", "rows": [["ok"]]}]})
+    create_xlsx._save_atomic(wb, dest)
+
+    assert dest.exists()
+    assert _cell(dest) == "ok"
+    assert not list(tmp_path.glob("*.tmp")), "temp file should be renamed in, not left behind"
