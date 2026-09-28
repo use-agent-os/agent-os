@@ -19,6 +19,7 @@ A price miss never raises into a caller: it returns ``None``.
 from __future__ import annotations
 
 import asyncio
+import math
 import random
 import time
 from collections.abc import Callable, Iterable
@@ -124,12 +125,31 @@ def native_token(chain: ChainSpec) -> TokenMeta:
 
 
 def _f(value: Any) -> float | None:
+    """A number from the feed, or ``None``.
+
+    ``float()`` parses ``"NaN"`` and ``"Infinity"`` out of a third-party body,
+    and a NaN makes every comparison it takes part in false, so it travels
+    silently until something downstream decides the wrong way (#3503). Not a
+    finite number is not a number.
+    """
     try:
         if value is None or value == "":
             return None
-        return float(value)
+        number = float(value)
     except (TypeError, ValueError):
         return None
+    return number if math.isfinite(number) else None
+
+
+def _price(value: Any) -> float | None:
+    """A *price* from the feed: finite and above zero, or ``None``.
+
+    Zero or negative is not a price a position can be valued at, and the
+    callers already treat ``None`` as "this token is unpriced", which is the
+    honest reading of a feed that answered with one.
+    """
+    number = _f(value)
+    return number if number is not None and number > 0 else None
 
 
 def _market_label(pair: Any) -> str | None:
@@ -416,14 +436,14 @@ class PriceService:
         volume = pair.get("volume") or {}
         info = pair.get("info") or {}
         return address, PriceInfo(
-            price_usd=_f(pair.get("priceUsd")),
+            price_usd=_price(pair.get("priceUsd")),
             change_24h_pct=_f(change.get("h24")),
             liquidity_usd=_f(liquidity.get("usd")),
             volume_24h_usd=_f(volume.get("h24")),
             pair_address=str(pair.get("pairAddress") or "") or None,
             pair_url=str(pair.get("url") or "") or None,
             image_url=str(info.get("imageUrl") or "") or None,
-            price_native=_f(pair.get("priceNative")),
+            price_native=_price(pair.get("priceNative")),
             price_native_symbol=str((pair.get("quoteToken") or {}).get("symbol") or "") or None,
             # marketCap is absent for tokens DexScreener cannot supply; fdv is
             # the honest stand-in, and None rather than a zero when neither is.
@@ -530,7 +550,7 @@ class PriceService:
         points = (body or {}).get("prices") if isinstance(body, dict) else None
         if isinstance(points, list) and points:
             nearest = min(points, key=lambda p: abs(float(p[0]) / 1000 - ts))
-            price = _f(nearest[1])
+            price = _price(nearest[1])
         self._history[key] = (self._now(), price)
         return price
 

@@ -59,6 +59,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   outline instead of two (#3484).
 
 ### Fixed
+- Trading (security): a price feed answering `"NaN"`, `"Infinity"` or a
+  negative number made the swap guardrail return `allow`. `float()` parses
+  those out of a third-party body, and a NaN makes every comparison in
+  `guardrails.evaluate` false -- `spent + value > cap`, `value > threshold`
+  and the price-impact ceiling alike -- so the order fell through to the
+  final `allow` and executed with no approval and no cap check. The feed's
+  parser now rejects a non-finite number outright and a price that is not
+  above zero, and the guard treats an unusable value, or an unusable spend
+  so far today, as unpriced: it waits for a human, the way a missing price
+  already did (#3503).
 - Chat (desktop and Web UI): a message queued while a turn was running no
   longer follows you into the next session and gets sent there. The pending
   queue is now kept per session — switching sessions (or starting a new chat)

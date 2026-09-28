@@ -8,6 +8,7 @@ change which branch runs.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Literal
 
@@ -19,6 +20,27 @@ Initiator = Literal["manual", "agent"]
 DEFAULT_AGENT_MAX_PRICE_IMPACT_PCT = 5.0
 # An agent may not set slippage above this; the order is refused, not queued.
 DEFAULT_AGENT_MAX_SLIPPAGE_PCT = 5.0
+
+
+def _usd(value: float | None) -> float | None:
+    """A USD amount the comparisons below can trust, or ``None``.
+
+    A NaN makes ``spent + value > cap``, ``value > threshold`` and every other
+    test here false at once, so an order carrying one fell through to the
+    final ``allow`` -- past the approval threshold and the daily cap both
+    (#3503). A negative amount is nonsense in the same way. Neither is a
+    number to decide on, so both become "unpriced", which every caller
+    already routes to a human.
+    """
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number) or number < 0:
+        return None
+    return number
 
 
 @dataclass(frozen=True)
@@ -65,14 +87,16 @@ def evaluate(
       swap waits for a human — and so does one whose price impact could not
       be computed at all.
     """
-    spent = max(0.0, float(spent_today_usd))
+    priced = _usd(value_usd)
+    spent_known = _usd(spent_today_usd)
+    spent = spent_known if spent_known is not None else 0.0
     cap = float(daily_cap_usd)
     threshold = float(threshold_usd)
 
     def verdict(decision: Decision, reason: str) -> GuardVerdict:
         return GuardVerdict(
             decision=decision,
-            value_usd=value_usd,
+            value_usd=priced,
             spent_today_usd=spent,
             daily_cap_usd=cap,
             threshold_usd=threshold,
@@ -83,9 +107,18 @@ def evaluate(
         return verdict("allow", "manual")
     if cap <= 0:
         return verdict("blocked_daily_cap", "daily cap is 0 USD: agent swaps are switched off")
-    if value_usd is None:
-        return verdict("needs_approval", "value unknown (no price)")
-    value = float(value_usd)
+    if spent_known is None:
+        # Without today's spend the cap cannot be applied, and an agent order
+        # does not get to run on a number nobody could read.
+        return verdict("needs_approval", "spend so far today is unknown")
+    if priced is None:
+        return verdict(
+            "needs_approval",
+            "value unknown (no price)"
+            if value_usd is None
+            else "value unusable (price is not a finite positive number)",
+        )
+    value = priced
     if spent + value > cap:
         return verdict(
             "blocked_daily_cap",
@@ -129,13 +162,14 @@ def evaluate_transfer(
       judged once, on its total, so splitting it changes nothing.
     * Every other agent transfer waits for a human, priced or not.
     """
-    spent = max(0.0, float(spent_today_usd))
+    priced = _usd(value_usd)
+    spent = _usd(spent_today_usd) or 0.0
     cap = float(daily_cap_usd)
 
     def verdict(decision: Decision, reason: str) -> GuardVerdict:
         return GuardVerdict(
             decision=decision,
-            value_usd=value_usd,
+            value_usd=priced,
             spent_today_usd=spent,
             daily_cap_usd=cap,
             threshold_usd=0.0,
@@ -146,9 +180,9 @@ def evaluate_transfer(
         return verdict("allow", "manual")
     if cap <= 0:
         return verdict("blocked_daily_cap", "daily cap is 0 USD: agent transfers are switched off")
-    if value_usd is None:
+    if priced is None:
         return verdict("needs_approval", "value unknown (no price); a transfer always waits")
-    value = float(value_usd)
+    value = priced
     if spent + value > cap:
         return verdict(
             "blocked_daily_cap",
@@ -192,13 +226,14 @@ def evaluate_lp_write(
     orders still in flight). A person's own add is not capped, like a
     person's swap; it still parks.
     """
-    spent = max(0.0, float(spent_today_usd))
+    priced = _usd(value_usd)
+    spent = _usd(spent_today_usd) or 0.0
     cap = float(daily_cap_usd)
 
     def verdict(decision: Decision, reason: str) -> GuardVerdict:
         return GuardVerdict(
             decision=decision,
-            value_usd=value_usd,
+            value_usd=priced,
             spent_today_usd=spent,
             daily_cap_usd=cap,
             threshold_usd=0.0,
@@ -212,10 +247,9 @@ def evaluate_lp_write(
             return verdict(
                 "blocked_daily_cap", "daily cap is 0 USD: agent deposits are switched off"
             )
-        if value_usd is not None and spent + float(value_usd) > cap:
+        if priced is not None and spent + priced > cap:
             return verdict(
                 "blocked_daily_cap",
-                f"daily cap {cap:.2f} USD would be exceeded "
-                f"({spent:.2f} spent + {float(value_usd):.2f})",
+                f"daily cap {cap:.2f} USD would be exceeded ({spent:.2f} spent + {priced:.2f})",
             )
     return verdict("needs_approval", "an LP write always waits for you")
