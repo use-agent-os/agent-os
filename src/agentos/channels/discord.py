@@ -31,6 +31,7 @@ from agentos.channels._util import (
     StreamThrottle,
     check_channel_file_size,
     retry_request,
+    split_stream_segment,
     split_text_for_limit,
 )
 from agentos.channels.contract import (
@@ -1506,6 +1507,9 @@ class DiscordChannel:
         message_id: str | None = None
         segment_start = 0
         delivered = 0
+        # The reopening fence the open message starts with, when it continues
+        # a code block a rollover had to close (#3505).
+        carry = ""
         original_path: str | None = None
         used_original = False
         if interaction_token:
@@ -1546,32 +1550,42 @@ class DiscordChannel:
 
         async def _post_segments(remaining: str) -> None:
             """Deliver *remaining* as one or more messages, splitting at the cap."""
-            nonlocal message_id, segment_start, delivered, used_original
+            nonlocal message_id, segment_start, delivered, used_original, carry
             while True:
-                head, tail = split_text_for_limit(remaining, _DISCORD_MESSAGE_TEXT_LIMIT)
+                head, consumed, reopener = split_stream_segment(
+                    carry + remaining, _DISCORD_MESSAGE_TEXT_LIMIT
+                )
                 if original_path is not None and not used_original:
                     message_id = await _stream_edit(None, head)
                     used_original = True
                 else:
                     message_id = await _stream_send(head)
-                delivered = segment_start + len(head)
-                if not tail:
+                used = consumed - len(carry)
+                delivered = segment_start + used
+                if used >= len(remaining):
                     return
                 segment_start = delivered
-                remaining = tail
+                carry = reopener
+                remaining = remaining[used:]
 
         async def _post(text: str) -> None:
             await _post_segments(text[segment_start:])
 
         async def _edit(text: str) -> None:
-            nonlocal segment_start, delivered, message_id
-            head, tail = split_text_for_limit(text[segment_start:], _DISCORD_MESSAGE_TEXT_LIMIT)
+            nonlocal segment_start, delivered, message_id, carry
+            pending = text[segment_start:]
+            head, consumed, reopener = split_stream_segment(
+                carry + pending, _DISCORD_MESSAGE_TEXT_LIMIT
+            )
             message_id = await _stream_edit(message_id, head)
-            delivered = segment_start + len(head)
-            if tail:
-                # This message is full: freeze it and roll over into a new one.
+            used = consumed - len(carry)
+            delivered = segment_start + used
+            if used < len(pending):
+                # This message is full: freeze it and roll over into a new one,
+                # reopening the code block it was in the middle of.
                 segment_start = delivered
-                await _post_segments(tail)
+                carry = reopener
+                await _post_segments(text[delivered:])
 
         async for chunk in chunks:
             throttle.add(chunk)

@@ -35,7 +35,12 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
-from agentos.channels._util import ChannelAccessPolicy, EventDedupeCache, split_text_for_limit
+from agentos.channels._util import (
+    ChannelAccessPolicy,
+    EventDedupeCache,
+    split_stream_segment,
+    split_text_for_limit,
+)
 from agentos.channels.contract import (
     ChannelCapabilityProfile,
     ChannelPlatformCapability,
@@ -673,6 +678,9 @@ class MSTeamsChannel:
         last_edit = 0.0
         interval = self.config.edit_interval_s
         segment_start = 0
+        # The reopening fence the open message starts with, when it continues
+        # a code block a rollover had to close (#3505).
+        carry = ""
         delivered = 0
 
         async def _send_activity(text: str) -> str | None:
@@ -705,17 +713,21 @@ class MSTeamsChannel:
             await self._adapter.continue_conversation(ref, _edit, bot_id=self._bot_id)
 
         async def _post_segments(remaining: str) -> None:
-            nonlocal message_id, segment_start, delivered
+            nonlocal message_id, segment_start, delivered, carry
             while True:
-                head, tail = split_text_for_limit(
-                    remaining, _MSTEAMS_MESSAGE_TEXT_LIMIT, measure=_measure_activity_text
+                head, consumed, reopener = split_stream_segment(
+                    carry + remaining,
+                    _MSTEAMS_MESSAGE_TEXT_LIMIT,
+                    measure=_measure_activity_text,
                 )
                 message_id = await _send_activity(head)
-                delivered = segment_start + len(head)
-                if not tail:
+                used = consumed - len(carry)
+                delivered = segment_start + used
+                if used >= len(remaining):
                     return
                 segment_start = delivered
-                remaining = tail
+                carry = reopener
+                remaining = remaining[used:]
 
         async for chunk in chunks:
             if not chunk:
@@ -735,8 +747,9 @@ class MSTeamsChannel:
             if now - last_edit < interval:
                 continue
 
-            head, tail = split_text_for_limit(
-                accumulated[segment_start:],
+            pending = accumulated[segment_start:]
+            head, consumed, reopener = split_stream_segment(
+                carry + pending,
                 _MSTEAMS_MESSAGE_TEXT_LIMIT,
                 measure=_measure_activity_text,
             )
@@ -744,11 +757,13 @@ class MSTeamsChannel:
             try:
                 if message_id is not None:
                     await _edit_activity(message_id, head)
-                delivered = segment_start + len(head)
+                used = consumed - len(carry)
+                delivered = segment_start + used
                 last_edit = now
-                if tail:
+                if used < len(pending):
                     segment_start = delivered
-                    await _post_segments(tail)
+                    carry = reopener
+                    await _post_segments(accumulated[delivered:])
             except Exception as exc:  # noqa: BLE001 — channel may not support edits
                 if _is_update_unsupported(exc):
                     unsupported = True
@@ -773,18 +788,21 @@ class MSTeamsChannel:
                 for seg in _split_activity_text(accumulated):
                     message_id = await _send_activity(seg)
             elif delivered < len(accumulated):
-                head, tail = split_text_for_limit(
-                    accumulated[segment_start:],
+                pending = accumulated[segment_start:]
+                head, consumed, reopener = split_stream_segment(
+                    carry + pending,
                     _MSTEAMS_MESSAGE_TEXT_LIMIT,
                     measure=_measure_activity_text,
                 )
                 try:
                     if message_id is not None:
                         await _edit_activity(message_id, head)
-                    delivered = segment_start + len(head)
-                    if tail:
+                    used = consumed - len(carry)
+                    delivered = segment_start + used
+                    if used < len(pending):
                         segment_start = delivered
-                        await _post_segments(tail)
+                        carry = reopener
+                        await _post_segments(accumulated[delivered:])
                 except Exception as exc:  # noqa: BLE001
                     if not _is_update_unsupported(exc):
                         raise

@@ -34,6 +34,7 @@ from agentos.channels._util import (
     FloodStrikeBackoff,
     StreamThrottle,
     check_channel_file_size,
+    split_stream_segment,
     split_text_for_limit,
 )
 from agentos.channels.contract import (
@@ -1344,6 +1345,23 @@ class TelegramChannel:
         length = measure if measure is not None else (lambda text: len(render_telegram_html(text)))
         return split_text_for_limit(segment, limit, measure=length)
 
+    @staticmethod
+    def _split_stream_for_limit(
+        segment: str,
+        *,
+        limit: int = _MESSAGE_TEXT_LIMIT,
+        measure: Callable[[str], int] | None = None,
+    ) -> tuple[str, int, str]:
+        """:meth:`_split_for_limit` for a stream: also the source consumed.
+
+        A rollover inside a fenced code block closes the fence on the head and
+        reopens it on the tail, so ``len(head)`` is not what the head took out
+        of the source and the tail carries a reopener the next message has to
+        start with. See :func:`split_stream_segment` (#3505).
+        """
+        length = measure if measure is not None else (lambda text: len(render_telegram_html(text)))
+        return split_stream_segment(segment, limit, measure=length)
+
     async def _stream_send(
         self,
         chat_id: str,
@@ -1436,6 +1454,9 @@ class TelegramChannel:
         message_id: int | str | None = None
         segment_start = 0
         delivered = 0
+        # The reopening fence the open message starts with, when it continues
+        # a code block a rollover had to close (#3505).
+        carry = ""
 
         async def _post_segments(remaining: str) -> None:
             """Post *remaining* as one or more new messages, splitting at the cap.
@@ -1443,15 +1464,17 @@ class TelegramChannel:
             ``delivered`` advances after each successful send, so a failure part
             way through never causes already-visible text to be resent.
             """
-            nonlocal message_id, segment_start, delivered
+            nonlocal message_id, segment_start, delivered, carry
             while True:
-                head, tail = self._split_for_limit(remaining)
+                head, consumed, reopener = self._split_stream_for_limit(carry + remaining)
                 message_id = await self._stream_send(target, head, thread_id)
-                delivered = segment_start + len(head)
-                if not tail:
+                used = consumed - len(carry)
+                delivered = segment_start + used
+                if used >= len(remaining):
                     return
                 segment_start = delivered
-                remaining = tail
+                carry = reopener
+                remaining = remaining[used:]
 
         async def _post(text: str) -> int | str | None:
             await _post_segments(text[segment_start:])
@@ -1459,17 +1482,21 @@ class TelegramChannel:
             return message_id
 
         async def _edit(text: str) -> int | str | None:
-            nonlocal delivered, segment_start
+            nonlocal delivered, segment_start, carry
             current = message_id
             if current is None:  # pragma: no cover - throttle opens before it edits
                 raise TelegramApiError("Telegram stream edit before the message was opened")
-            head, tail = self._split_for_limit(text[segment_start:])
+            pending = text[segment_start:]
+            head, consumed, reopener = self._split_stream_for_limit(carry + pending)
             await self._stream_edit(target, current, head)
-            delivered = segment_start + len(head)
-            if tail:
-                # This message is full: freeze it and roll over into a new one.
+            used = consumed - len(carry)
+            delivered = segment_start + used
+            if used < len(pending):
+                # This message is full: freeze it and roll over into a new one,
+                # reopening the code block it was in the middle of.
                 segment_start = delivered
-                await _post_segments(tail)
+                carry = reopener
+                await _post_segments(text[delivered:])
             return message_id
 
         async for chunk in chunks:

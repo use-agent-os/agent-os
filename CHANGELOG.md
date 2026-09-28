@@ -59,6 +59,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   outline instead of two (#3484).
 
 ### Fixed
+- Channels: a streamed fenced code block lost four characters and its
+  reopening fence at every rollover in Discord, Telegram and MS Teams.
+  `split_text_for_limit` balances a block by closing it on the head and
+  reopening it on the tail, so `len(head)` is not what the head took out of
+  the source; each adapter advanced its watermark by it and then re-sliced
+  the accumulated text, deleting `x_1` from the middle of an identifier and
+  leaving the following messages rendering as prose. The three now share
+  `split_stream_segment`, which reports the source the head really consumed
+  and the reopener the next message carries -- the fix Slack got in #3304
+  (#3505).
 - Chat (desktop and Web UI): a message queued while a turn was running no
   longer follows you into the next session and gets sent there. The pending
   queue is now kept per session — switching sessions (or starting a new chat)

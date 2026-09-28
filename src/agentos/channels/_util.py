@@ -524,6 +524,43 @@ def _rebalance_open_fence(
     return _build(cut)
 
 
+#: What :func:`split_text_for_limit` appends to a head whose fence it closed.
+_FENCE_CLOSER = "\n```"
+
+
+def split_stream_segment(
+    text: str,
+    limit: int,
+    *,
+    measure: Callable[[str], int] | None = None,
+) -> tuple[str, int, str]:
+    """``(text to send, source characters consumed, reopener for the rest)``.
+
+    For a streaming adapter, which keeps a watermark into the accumulated
+    text and re-slices it on every flush. :func:`split_text_for_limit`
+    keeps a fenced code block balanced by closing it on the head and
+    reopening it on the tail, so the head carries characters the source does
+    not and the tail starts with a reopener. A watermark advanced by
+    ``len(head)`` therefore skips four source characters per rollover and
+    drops the reopening fence: the block loses text mid-identifier and the
+    messages after it render as prose (#3505).
+
+    The second element is what the head really consumed, counted in the
+    source; the third is the reopener the *next* message has to start with,
+    empty when there was no fence to rebalance.
+    """
+    head, tail = split_text_for_limit(text, limit, measure=measure)
+    if not tail or text.startswith(head):
+        return head, len(head), ""
+    body = head[: -len(_FENCE_CLOSER)] if head.endswith(_FENCE_CLOSER) else head
+    consumed = len(body)
+    # The tail is ``segment[cut:].lstrip("\\n")``, so the newlines it dropped
+    # were consumed as well.
+    rest = text[consumed:]
+    consumed += len(rest) - len(rest.lstrip("\n"))
+    return head, consumed, tail[: len(tail) - (len(text) - consumed)]
+
+
 def split_text_for_limit(
     segment: str,
     limit: int,
