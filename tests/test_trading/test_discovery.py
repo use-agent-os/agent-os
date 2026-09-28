@@ -112,8 +112,9 @@ class TestParse:
                 "garbage",
             ]
         }
-        assert _parse_token_balances(payload, 10) == [USDC, WETH]
-        assert _parse_token_balances(payload, 1) == [USDC]
+        assert _parse_token_balances(payload, 10) == ([USDC, WETH], True)
+        # Under the cap the answer is a subset, and says so (#3506).
+        assert _parse_token_balances(payload, 1) == ([USDC], False)
 
     def test_not_a_list_is_no_answer(self) -> None:
         assert _parse_token_balances({"message": "rate limited"}, 10) is None

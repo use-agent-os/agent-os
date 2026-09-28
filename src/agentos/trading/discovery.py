@@ -60,7 +60,7 @@ class BlockscoutDiscovery:
         self._now = now
         self.max_tokens = max_tokens
         self.max_body_bytes = max_body_bytes
-        self._cache: dict[tuple[int, str], tuple[float, list[str]]] = {}
+        self._cache: dict[tuple[int, str], tuple[float, list[str], bool]] = {}
 
     async def holdings(self, chain: ChainSpec, address: str) -> list[str]:
         """Lower-cased ERC-20 addresses the indexer says ``address`` holds.
@@ -76,15 +76,38 @@ class BlockscoutDiscovery:
         cached = self._cache.get(key)
         if cached is not None and self._now() - cached[0] < self.ttl_s:
             return list(cached[1])
-        tokens = await self._fetch(chain, base, address)
-        if tokens is None:
+        answer = await self._fetch(chain, base, address)
+        if answer is None:
             # Keep serving the last good answer while the indexer is down;
             # an empty answer would silently shrink the scan set.
             return list(cached[1]) if cached is not None else []
-        self._cache[key] = (self._now(), tokens)
+        tokens, complete = answer
+        if not complete:
+            # The body cap already says so when it trips; this one used to
+            # drop the rest of the wallet in silence (#3506).
+            log.info(
+                "trading.discovery_truncated",
+                chain=chain.key,
+                wallet=address,
+                kept=len(tokens),
+                limit=self.max_tokens,
+            )
+        self._cache[key] = (self._now(), tokens, complete)
         return list(tokens)
 
-    async def _fetch(self, chain: ChainSpec, base: str, address: str) -> list[str] | None:
+    def truncated(self, chain: ChainSpec, address: str) -> bool:
+        """Whether the last answer for this wallet hit :attr:`max_tokens`.
+
+        The sweep reads it to mark the chain's balances partial, so a
+        portfolio missing an airdropped token says so instead of reading as
+        "this is everything you hold".
+        """
+        cached = self._cache.get((chain.chain_id, address.lower()))
+        return bool(cached and not cached[2])
+
+    async def _fetch(
+        self, chain: ChainSpec, base: str, address: str
+    ) -> tuple[list[str], bool] | None:
         url = f"{base.rstrip('/')}/api/v2/addresses/{checksum_address(address)}/token-balances"
         try:
             async with self._http.stream(
@@ -96,7 +119,7 @@ class BlockscoutDiscovery:
                 if response.status_code == 404:
                     # Blockscout answers 404 for an address it has never seen:
                     # that is a real "holds nothing", not an outage.
-                    return []
+                    return [], True
                 if response.status_code != 200:
                     log.debug(
                         "trading.discovery_failed", chain=chain.key, status=response.status_code
@@ -187,8 +210,13 @@ class BlockscoutDiscovery:
         return ids
 
 
-def _parse_token_balances(payload: Any, max_tokens: int) -> list[str] | None:
-    """The ERC-20 contract addresses in a Blockscout ``token-balances`` body."""
+def _parse_token_balances(payload: Any, max_tokens: int) -> tuple[list[str], bool] | None:
+    """The ERC-20 contract addresses in a Blockscout ``token-balances`` body.
+
+    The second element is False when the wallet holds more than *max_tokens*
+    of them, so the caller can say the scan set is a subset rather than the
+    wallet (#3506).
+    """
     items = payload.get("items") if isinstance(payload, dict) else payload
     if not isinstance(items, list):
         return None
@@ -216,5 +244,5 @@ def _parse_token_balances(payload: Any, max_tokens: int) -> list[str] | None:
         seen.add(address)
         out.append(address)
         if len(out) >= max_tokens:
-            break
-    return out
+            return out, False
+    return out, True

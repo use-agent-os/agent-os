@@ -121,6 +121,7 @@ class WalletSyncer:
         token_meta: TokenMetaFn,
         watch_tokens: WatchFn | None = None,
         discover_tokens: DiscoverFn | None = None,
+        discovery_truncated: Callable[[ChainSpec, str], bool] | None = None,
         now: Callable[[], float] = time.time,
         initial_lookback: int = DEFAULT_INITIAL_LOOKBACK,
         full_lookback: int = DEFAULT_FULL_LOOKBACK,
@@ -131,6 +132,7 @@ class WalletSyncer:
         self._token_meta = token_meta
         self._watch_tokens = watch_tokens
         self._discover_tokens = discover_tokens
+        self._discovery_truncated = discovery_truncated
         self._now = now
         self.initial_lookback = initial_lookback
         self.full_lookback = full_lookback
@@ -193,13 +195,17 @@ class WalletSyncer:
         return changed
 
     def _record_read(self, chain: ChainSpec, wallet: str, read: BalanceRead) -> None:
+        reasons: list[str] = []
         if read.failed:
-            self.ledger.set_chain_read(
-                chain.chain_id,
-                wallet,
-                READ_PARTIAL,
-                f"{len(read.failed)} token balance(s) could not be read",
-            )
+            reasons.append(f"{len(read.failed)} token balance(s) could not be read")
+        if self._discovery_truncated is not None and self._discovery_truncated(chain, wallet):
+            # The indexer listed more tokens than discovery reads, so what was
+            # swept is a subset of the wallet. Saying so is the difference
+            # between "you hold nothing else" and "we stopped counting"
+            # (#3506).
+            reasons.append("the token indexer listed more tokens than one sweep reads")
+        if reasons:
+            self.ledger.set_chain_read(chain.chain_id, wallet, READ_PARTIAL, "; ".join(reasons))
         else:
             self.ledger.set_chain_read(chain.chain_id, wallet, READ_OK)
 

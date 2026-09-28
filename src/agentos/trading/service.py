@@ -392,6 +392,7 @@ class TradingService:
             token_meta=self.token_meta,
             watch_tokens=self.watch_tokens,
             discover_tokens=self.discovery.holdings,
+            discovery_truncated=self.discovery.truncated,
             now=now,
         )
         # When each wallet last had a chain read forced through wallet.balances,

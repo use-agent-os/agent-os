@@ -59,6 +59,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   outline instead of two (#3484).
 
 ### Fixed
+- Trading: token discovery truncated at 200 tokens in silence. The parser
+  stopped at the cap and returned a plain list, so a partial answer was
+  cached and swept as though it were the wallet -- a holder of a long tail of
+  airdrops could not tell "you hold nothing else" from "we stopped counting",
+  while the neighbouring body cap has always logged and stood aside. The
+  parser now reports whether it saw more, `holdings` logs
+  `trading.discovery_truncated`, and the sweep marks the chain's balances
+  partial, the way it already does for a balance the node would not answer
+  (#3506).
 - Chat (desktop and Web UI): a message queued while a turn was running no
   longer follows you into the next session and gets sent there. The pending
   queue is now kept per session — switching sessions (or starting a new chat)
