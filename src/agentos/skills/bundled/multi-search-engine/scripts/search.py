@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import math
 import os
 import sys
 import time
@@ -287,7 +288,13 @@ def _jwt_expiry(token: str) -> float | None:
     exp = claims.get("exp") if isinstance(claims, dict) else None
     # Tuple, not ``int | float``: a runtime union needs 3.10, and this script
     # must at least fail loudly-but-gracefully on an older PATH python.
-    return float(exp) if isinstance(exp, (int, float)) else None
+    if not isinstance(exp, (int, float)) or isinstance(exp, bool):
+        return None
+    value = float(exp)
+    # NaN and Infinity are literals ``json.loads`` accepts, and a non-finite
+    # expiry compares false against every deadline, so an expired token would
+    # read as usable (#3554).
+    return value if math.isfinite(value) else None
 
 
 @dataclass

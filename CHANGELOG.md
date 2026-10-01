@@ -16,6 +16,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   out on desktop, which never shows the router animation strip. (#3548)
 
 ### Fixed
+- xAI OAuth: an access token whose `exp` claim was `NaN`, `Infinity` or a
+  boolean decided the refresh question wrongly -- `json.loads` accepts those
+  literals, and a non-finite expiry compares false against every deadline. A
+  NaN or an infinity read as "not expiring" for ever, so the proactive
+  refresh never ran; `-Infinity` read as "expiring" on every call, and each
+  of those costs one of xAI's single-use refresh tokens. An expiry that is
+  not a finite number is now no expiry, which both callers already handle.
+  The copy of the reader in the `multi-search-engine` skill gets the same
+  guard (#3554).
 - `title-card-image` skill: `render.py`'s auto-shrink only checked the
   rendered text against the canvas *width*; the stacked headline/subtitle
   lines' total height was never checked, so text that wrapped into enough

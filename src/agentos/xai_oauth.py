@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import math
 import os
 import time
 import uuid
@@ -259,7 +260,15 @@ def _jwt_expiry(token: str) -> float | None:
     except Exception:  # noqa: BLE001 - an opaque token is not an error
         return None
     exp = payload.get("exp")
-    return float(exp) if isinstance(exp, int | float) else None
+    if not isinstance(exp, int | float) or isinstance(exp, bool):
+        return None
+    value = float(exp)
+    # ``json.loads`` accepts NaN and Infinity, and a non-finite expiry makes
+    # every comparison downstream answer the wrong way: NaN reads as "not
+    # expiring" for ever, -Infinity as "expiring" on every call, which would
+    # spend a single-use refresh token each time (#3554). An expiry nobody
+    # can read is no expiry, which both callers already handle.
+    return value if math.isfinite(value) else None
 
 
 def proactive_skew_seconds(access_token: str) -> int:
