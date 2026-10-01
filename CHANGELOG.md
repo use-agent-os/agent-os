@@ -16,6 +16,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   out on desktop, which never shows the router animation strip. (#3548)
 
 ### Fixed
+- Skills: the UTF-8 stdio guard only globbed `<skill>/scripts/*.py`, so a
+  module one level over -- a package inside `scripts/`, or
+  `video-merger/src/video_merger.py` -- was never read. It now walks every
+  bundled module: the stdout and stdin rules stay with the commands a
+  `SKILL.md` names, since configuring stdio is process-wide and belongs to
+  the entry point, and the rule a caller cannot discharge for a module -- a
+  text-mode subprocess inheriting the locale -- applies everywhere. The three
+  `ffprobe` calls in `video_merger.py` that it caught now name their encoding
+  (#3553).
 - `title-card-image` skill: `render.py`'s auto-shrink only checked the
   rendered text against the canvas *width*; the stacked headline/subtitle
   lines' total height was never checked, so text that wrapped into enough

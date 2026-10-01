@@ -119,7 +119,9 @@ class VideoMerger:
             "-of", "default=noprint_wrappers=1:nokey=1",
             video_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        result = subprocess.run(
+            cmd, capture_output=True, encoding="utf-8", errors="replace", check=True
+        )
         lines = result.stdout.strip().split("\n")
         width, height = int(lines[0]), int(lines[1])
         duration_str = lines[2] if len(lines) > 2 else ""
@@ -140,7 +142,9 @@ class VideoMerger:
             "-of", "default=noprint_wrappers=1:nokey=1",
             video_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        result = subprocess.run(
+            cmd, capture_output=True, encoding="utf-8", errors="replace", check=True
+        )
         fallback_str = result.stdout.strip()
         if not fallback_str or fallback_str == "N/A":
             raise ValueError(f"无法获取视频时长：{video_path}")
@@ -157,7 +161,9 @@ class VideoMerger:
             "-of", "csv=p=0",
             video_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        result = subprocess.run(
+            cmd, capture_output=True, encoding="utf-8", errors="replace", check=True
+        )
         return bool(result.stdout.strip())
 
     def merge(self,

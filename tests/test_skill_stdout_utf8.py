@@ -335,7 +335,34 @@ def test_rwa_lookup_result_echoes_the_query_as_utf8(monkeypatch: pytest.MonkeyPa
 
 import ast  # noqa: E402
 
-SCRIPTS = sorted(BUNDLED.glob("*/scripts/*.py"))
+#: Every bundled module, not only ``<skill>/scripts/*.py``. The glob used to
+#: stop at that one directory, so a module one level over -- a package inside
+#: ``scripts/``, or ``video-merger/src/video_merger.py`` -- was never checked
+#: at all (#3553).
+SCRIPTS = sorted(BUNDLED.rglob("*.py"))
+
+
+def _is_entry_point(path: Path) -> bool:
+    """Whether *path* is run as a command rather than imported by one.
+
+    ``<skill>/scripts/<file>.py`` is how a ``SKILL.md`` names a command, so
+    everything directly there counts -- four of them do their work at import
+    and have no ``__main__`` block. Anything deeper, or under ``src/``, is a
+    library module unless it declares a ``__main__`` of its own.
+
+    The distinction matters because configuring stdio is the entry point's
+    job: ``sys.stdout.reconfigure`` is process-wide, and a library module
+    that did it on import would reach into whatever imported it. A module's
+    own obligation is the one its caller cannot discharge -- see
+    :func:`test_a_text_mode_subprocess_names_its_encoding`.
+    """
+    parts = path.relative_to(BUNDLED).parts
+    if len(parts) == 3 and parts[1] == "scripts":
+        return True
+    return "__main__" in path.read_text(encoding="utf-8")
+
+
+ENTRY_POINTS = [s for s in SCRIPTS if _is_entry_point(s)]
 STDIO_IMPORT = re.compile(r"^from agentos\.skill_stdio import ", re.M)
 INLINE_FORMS = (
     "reconfigure(encoding",  # earlier batches: reconfigure in place
@@ -379,7 +406,7 @@ def _subprocess_text_calls(source: str) -> list[tuple[int, bool]]:
     return calls
 
 
-@pytest.mark.parametrize("script", SCRIPTS, ids=_rel)
+@pytest.mark.parametrize("script", ENTRY_POINTS, ids=_rel)
 def test_every_bundled_script_follows_the_utf8_stdio_convention(script: Path) -> None:
     """The guard. A script that writes to stdout must import the shared
     helper (and call it), or carry one of the inline forms earlier batches
@@ -396,7 +423,7 @@ def test_every_bundled_script_follows_the_utf8_stdio_convention(script: Path) ->
         )
 
 
-@pytest.mark.parametrize("script", SCRIPTS, ids=_rel)
+@pytest.mark.parametrize("script", ENTRY_POINTS, ids=_rel)
 def test_a_script_reading_stdin_as_text_configures_stdin(script: Path) -> None:
     """Point 2 of #2804: a piped payload is UTF-8 whatever the console is."""
     source = script.read_text(encoding="utf-8")
@@ -418,7 +445,26 @@ def test_a_text_mode_subprocess_names_its_encoding(script: Path) -> None:
 def test_the_guard_actually_sees_every_script() -> None:
     """If the glob ever stops matching, the guard passes vacuously; pin the
     count the sweep was done against so a silent zero is caught."""
-    assert len(SCRIPTS) >= 50
+    assert len(ENTRY_POINTS) >= 50
+
+
+def test_the_guard_reaches_past_the_scripts_directory() -> None:
+    """The blind spot itself: the old glob stopped at ``*/scripts/*.py``, so a
+    package inside it and a module under ``src/`` were never read."""
+    seen = {_rel(s) for s in SCRIPTS}
+
+    assert "video-merger/src/video_merger.py" in seen
+    assert "senior-unilp-manager/scripts/unilp/rpc.py" in seen
+    assert len(SCRIPTS) > len(ENTRY_POINTS), "the wider glob must see more than the commands"
+
+
+def test_a_library_module_is_not_asked_to_configure_stdio() -> None:
+    """Configuring stdio is process-wide, so it belongs to the command, not
+    to a module it imports. Pinned so widening the glob does not turn into a
+    demand that every helper reach into its caller's streams."""
+    assert _is_entry_point(BUNDLED / "video-merger" / "scripts" / "merge.py")
+    assert not _is_entry_point(BUNDLED / "video-merger" / "src" / "video_merger.py")
+    assert not _is_entry_point(BUNDLED / "senior-unilp-manager" / "scripts" / "unilp" / "rpc.py")
 
 
 def test_the_shared_helper_is_not_copied_anywhere() -> None:
