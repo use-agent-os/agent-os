@@ -16,6 +16,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   out on desktop, which never shows the router animation strip. (#3548)
 
 ### Fixed
+- Trading: `PriceService` never evicted anything. Its TTLs decide whether an
+  entry is stale, not whether it is kept, so a gateway that stays up
+  accumulated one entry per token ever priced -- discovery adds up to 200
+  addresses per wallet per chain, airdrop spam included -- and, because the
+  history key carries a day, one per token per day for as long as it ran
+  (pricing 5,000 tokens left 5,000 entries). The price, hold and history maps
+  are now LRU-bounded; a dropped entry costs one refetch, which is what a
+  stale entry costs anyway (#3555).
 - `title-card-image` skill: `render.py`'s auto-shrink only checked the
   rendered text against the canvas *width*; the stacked headline/subtitle
   lines' total height was never checked, so text that wrapped into enough

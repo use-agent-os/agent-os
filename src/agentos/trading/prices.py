@@ -22,6 +22,7 @@ import asyncio
 import math
 import random
 import time
+from collections import OrderedDict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -163,6 +164,56 @@ def _market_label(pair: Any) -> str | None:
     return f"{name} {tail}".strip()
 
 
+#: How many (chain, token) prices and (chain, token, day) history points one
+#: service keeps. A desk prices far more tokens than it holds -- discovery
+#: adds up to 200 addresses per wallet per chain, airdrop spam included -- and
+#: the history key carries a day, so it grows along a second axis for as long
+#: as the process lives (#3555). Evicting the least recently used costs one
+#: refetch, which is what a stale entry costs anyway; these numbers are a
+#: ceiling on memory, not a tuning knob for hit rate.
+MAX_PRICE_ENTRIES = 4_096
+MAX_HISTORY_ENTRIES = 2_048
+
+
+class _LruCache[K, V]:
+    """A dict that forgets its least recently used entry past *max_entries*.
+
+    Small on purpose: the service needs ``get``/``set``/``pop`` and nothing
+    else, and an explicit class keeps the eviction in one place rather than
+    spread over the four call sites that write a cache.
+    """
+
+    def __init__(self, max_entries: int) -> None:
+        self._max = max(1, int(max_entries))
+        self._data: OrderedDict[K, V] = OrderedDict()
+
+    def get(self, key: K) -> V | None:
+        if key not in self._data:
+            return None
+        self._data.move_to_end(key)
+        return self._data[key]
+
+    def set(self, key: K, value: V) -> None:
+        self._data[key] = value
+        self._data.move_to_end(key)
+        while len(self._data) > self._max:
+            self._data.popitem(last=False)
+
+    def pop(self, key: K) -> None:
+        self._data.pop(key, None)
+
+    def __getitem__(self, key: K) -> V:
+        """Read without touching the order, so a caller inspecting the cache
+        (a test, a status view) cannot change what gets evicted next."""
+        return self._data[key]
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._data
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+
 class PriceService:
     def __init__(
         self,
@@ -177,11 +228,13 @@ class PriceService:
         self._timeout = timeout
         self.ttl_s = ttl_s
         self._now = now
-        self._prices: dict[tuple[int, str], PriceInfo] = {}
+        self._prices: _LruCache[tuple[int, str], PriceInfo] = _LruCache(MAX_PRICE_ENTRIES)
         #: Cached ``unavailable`` misses: key -> when the source is asked again.
-        self._held_until: dict[tuple[int, str], float] = {}
+        self._held_until: _LruCache[tuple[int, str], float] = _LruCache(MAX_PRICE_ENTRIES)
         self._token_lists: dict[int, tuple[float, dict[str, TokenMeta]]] = {}
-        self._history: dict[tuple[int, str, int], tuple[float, float | None]] = {}
+        self._history: _LruCache[tuple[int, str, int], tuple[float, float | None]] = _LruCache(
+            MAX_HISTORY_ENTRIES
+        )
         self._list_locks: dict[int, asyncio.Lock] = {}
 
     async def aclose(self) -> None:
@@ -295,7 +348,7 @@ class PriceService:
             key = (chain.chain_id, lookup)
             cached = self._prices.get(key)
             if cached is not None and cached.unavailable:
-                held = self._held_until.get(key, 0.0) - now
+                held = (self._held_until.get(key) or 0.0) - now
                 if held > 0:
                     out[requested] = replace(cached, retry_in_s=held)
                     continue
@@ -330,7 +383,7 @@ class PriceService:
             key = (chain.chain_id, lookup)
             if found is not None:
                 resolved = found
-                self._held_until.pop(key, None)
+                self._held_until.pop(key)
             elif lookup in unanswered:
                 # "The source did not answer" is not an answer: held for
                 # seconds, not ``ttl_s`` (a 429 would blank prices for everyone
@@ -340,11 +393,11 @@ class PriceService:
                 resolved = PriceInfo(
                     price_usd=None, fetched_at=now, unavailable=True, retry_in_s=hold
                 )
-                self._held_until[key] = now + hold
+                self._held_until.set(key, now + hold)
             else:
                 resolved = PriceInfo(price_usd=None, fetched_at=now)
-                self._held_until.pop(key, None)
-            self._prices[key] = resolved
+                self._held_until.pop(key)
+            self._prices.set(key, resolved)
             out[requested] = resolved
         native = out.get(NATIVE_ADDRESS)
         if native is not None and native.price_usd is None:
@@ -551,7 +604,7 @@ class PriceService:
         if isinstance(points, list) and points:
             nearest = min(points, key=lambda p: abs(float(p[0]) / 1000 - ts))
             price = _price(nearest[1])
-        self._history[key] = (self._now(), price)
+        self._history.set(key, (self._now(), price))
         return price
 
     # ── charts ─────────────────────────────────────────────────────────
