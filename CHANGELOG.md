@@ -7,6 +7,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Telegram: `render_telegram_html` emitted interleaved HTML for emphasis runs
+  that overlap rather than nest, and paired a `**` closer with the wrong
+  opener. The six emphasis passes are independent `re.sub` calls over text
+  that already carries tags -- the link pass parks `<a href=...>` before any
+  of them -- and a `.+?` spans those happily, so a delimiter inside an
+  element paired with one outside it: `**a*b** *i*` rendered as
+  `<b>a<i>b</b> *i</i>`. Telegram refuses that with `400 Bad Request: can't
+  parse entities`; two send paths retry as plain text and lose all
+  formatting, and `edit()` and the document caption have no retry at all.
+  #2032 reported this for `***`/`___` and was fixed with a pre-pass for those
+  two spellings only. A match whose span straddles a tag is now not a match,
+  and the closer is left available to an opener that can reach it. Separately,
+  a lazy `.+?` pairs the nearest *closer* with the *first* opener where
+  CommonMark pairs each closer with the nearest opener before it, and the
+  asterisk-italic pattern guarded only one end of a delimiter run: `Use
+  **/*.py to match **all** Python files` came out
+  `Use <b>/<i>.py to match *</i>all</b>`, and `f(*args, **kwargs)` came out
+  `f(<i>args, *</i>kwargs)`. Both now render verbatim, as CommonMark does.
+  A sweep over 17576 three-atom inline combinations produced 1615 interleaved
+  results before and none after. (#3543)
 - Sessions started from a channel (Telegram, Slack, Discord, …) are now
   named from their first message, like WebChat and desktop-app sessions,
   instead of keeping their short id in the sidebar. Channel dispatch never
