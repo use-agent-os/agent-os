@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import codecs
 import io
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import structlog
+
+from agentos.text_encoding import bom_encoding
 
 from .types import MemorySource
 
@@ -192,14 +193,13 @@ def _bom_encoding(head: bytes) -> str:
     Windows tools write UTF-16 with a BOM by default (PowerShell 5 ``>`` and
     ``Out-File``, Notepad's "Unicode", Excel's "Unicode Text"). Read as UTF-8,
     every other character of such a file is a NUL and none of its words can be
-    searched. Every codec returned here also drops the mark itself, and
-    ``utf-8-sig`` reads a file with no BOM exactly as ``utf-8`` does.
+    searched.
+
+    The rule itself now lives in :func:`agentos.text_encoding.bom_encoding`,
+    because workspace bootstrap files need it too and neither module can
+    import the other (#3587). Kept as a name here for this module's callers.
     """
-    if head.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
-        return "utf-32"
-    if head.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
-        return "utf-16"
-    return "utf-8-sig"
+    return bom_encoding(head)
 
 
 def extract_document_text(

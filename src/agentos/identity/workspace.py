@@ -10,6 +10,7 @@ from agentos.bootstrap_types import BootstrapFileReport
 from agentos.paths import state_dir
 from agentos.safety.injection_guard import InjectionFinding, scan_for_injection
 from agentos.session.keys import is_subagent_key
+from agentos.text_encoding import read_text_honouring_bom
 
 # Matches YYYY-MM-DD.md or YYYY-MM-DD-<slug>.md (basename).
 _DATED_BASENAME_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})(?:-[a-z0-9][a-z0-9-]*)?\.md")
@@ -48,13 +49,24 @@ def _is_within_root(root: Path, target: Path) -> bool:
 
 
 def _read_file_sync(path: Path) -> str | None:
-    """Read a single bootstrap file, enforcing size limit."""
+    """Read a single bootstrap file, enforcing size limit.
+
+    Decoded as its byte-order mark says to. These files go into the system
+    prompt, and a Windows editor writes a mark without being asked: read as
+    plain ``utf-8`` a UTF-8 BOM put ``\\ufeff`` in front of the first
+    character, and a UTF-16 file decoded -- with ``errors="replace"`` it
+    does not fail -- to interleaved NULs and replacement characters, which
+    is what the agent was then given as its operating rules. It also cost
+    twice its length against the bootstrap budget, crowding out the files
+    after it (#3587). ``SKILL.md`` (#2697) and knowledge-base ingest
+    (#2670) already read this way.
+    """
     if not path.is_file():
         return None
     size = path.stat().st_size
     if size > _MAX_FILE_BYTES:
         return None
-    return path.read_text(encoding="utf-8", errors="replace")
+    return read_text_honouring_bom(path, errors="replace")
 
 
 def _bootstrap_allowlist_for_session(session_key: str | None) -> frozenset[str] | None:

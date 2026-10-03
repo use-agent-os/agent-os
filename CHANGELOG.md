@@ -7,6 +7,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Identity: a workspace bootstrap file (`AGENTS.md`, `SOUL.md`, …) saved with
+  a byte-order mark reached the system prompt as one. `identity.workspace`
+  read them as plain `utf-8` with `errors="replace"`, while the other two
+  readers of user-authored Markdown already honour a mark -- `SKILL.md` since
+  #2697 and knowledge-base ingest since #2670. PowerShell 5's `Set-Content
+  -Encoding UTF8` writes a UTF-8 BOM, which prepended `﻿` to the first
+  character; its `>` and `Out-File` write UTF-16, which decoded -- without
+  failing, because of `errors="replace"` -- into interleaved NULs and
+  replacement characters, so the agent was handed unreadable text where its
+  operating rules should be, at twice the length against the bootstrap
+  budget, crowding out the files after it. The rule now lives once, in
+  `agentos.text_encoding`, which `memory.ingest` also delegates to; the probe
+  reads four bytes rather than two, so UTF-32 is no longer read as UTF-16.
+  `errors="replace"` is kept, so a genuinely undecodable file still degrades
+  rather than failing a session. (#3587)
 - Sessions started from a channel (Telegram, Slack, Discord, …) are now
   named from their first message, like WebChat and desktop-app sessions,
   instead of keeping their short id in the sidebar. Channel dispatch never
