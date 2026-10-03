@@ -7,6 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Gateway: `memory.show` reported a `totalLines` its own `fromLine` could
+  not reach. The two branches of `_read_memory_content` counted differently
+  -- without `fromLine` it used `str.splitlines()`, which breaks on eleven
+  characters, and with `fromLine` it iterated the file handle, which ends a
+  line on a newline and (in universal-newline mode) a lone carriage return.
+  A memory file carrying a form feed, a vertical tab, NEL or U+2028/9 was
+  summarised as having more lines than the pager could address, and one
+  carrying a lone carriage return as having fewer. Memory files quote tool
+  output, so both arrive routinely. Both branches now split on newlines
+  only, which is the rule #3176 settled for `read_file`/`grep_search` and
+  #3369 applied to `memory_get`, the agent-facing twin of this RPC. The
+  whole-file read also stops translating line endings, so the body is the
+  file's own bytes rather than an LF rewrite of them. (#3571)
 - `title-card-image` skill: `render.py`'s auto-shrink only checked the
   rendered text against the canvas *width*; the stacked headline/subtitle
   lines' total height was never checked, so text that wrapped into enough

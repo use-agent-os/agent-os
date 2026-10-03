@@ -19,6 +19,7 @@ from agentos.memory.types import (
     normalize_memory_source_filter,
 )
 from agentos.session.keys import normalize_agent_id
+from agentos.tools.builtin._lines import split_lines
 from agentos.tools.builtin.memory_tools import _is_memory_source_path
 
 _d = get_dispatcher()
@@ -480,10 +481,26 @@ def _read_memory_content(
     lines: int | None,
 ) -> tuple[str, int, bool]:
     if from_line is None and lines is None:
-        content = file_path.read_text(encoding="utf-8", errors="replace")
+        # Newline-only, rather than ``read_text``: universal-newline mode
+        # turns a lone carriage return into a newline, which would make it
+        # a line break here and rewrite the file's own bytes on the way
+        # out. #3369 settled both for ``memory_get`` -- a line ends at a
+        # newline, and the text that comes back is what the file holds.
+        with file_path.open(
+            "r", encoding="utf-8", errors="replace", newline="\n"
+        ) as handle:
+            content = handle.read()
         return (
             content[:_MAX_MEMORY_SHOW_CHARS],
-            len(content.splitlines()),
+            # ``split_lines``, not ``str.splitlines()``: the latter breaks on
+            # eleven characters, so a memory file carrying a form feed, a
+            # vertical tab, NEL or U+2028/9 was counted higher here than the
+            # ``from_line`` branch below counts it -- the UI was told a line
+            # existed and then got nothing when it asked for it. Memory files
+            # quote tool output, so those characters arrive routinely. This is
+            # the rule #3176 settled for ``read_file`` and ``grep_search`` and
+            # #3369 applied to ``memory_get`` (#3571).
+            len(split_lines(content)),
             len(content) > _MAX_MEMORY_SHOW_CHARS,
         )
 
@@ -494,7 +511,12 @@ def _read_memory_content(
     selected_line_count = 0
     truncated = False
 
-    with file_path.open("r", encoding="utf-8", errors="replace") as handle:
+    # Newline-only here too, so iterating the handle splits where the count
+    # above splits: the default mode also ends a line on a lone carriage
+    # return, and a captured progress bar is full of them.
+    with file_path.open(
+        "r", encoding="utf-8", errors="replace", newline="\n"
+    ) as handle:
         for line_no, line in enumerate(handle, start=1):
             if line_no < start_line:
                 continue
