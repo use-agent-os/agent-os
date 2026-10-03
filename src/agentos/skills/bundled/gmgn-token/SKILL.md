@@ -125,6 +125,7 @@ When a request returns `429`:
 | `unrealized_profit` | Sort by unrealized profit in USD |
 | `buy_volume_cur` | Sort by buy volume |
 | `sell_volume_cur` | Sort by sell volume |
+| `last_active_timestamp` | Sort by most recent on-chain activity (desc = most recently active first) |
 
 ### `--tag` Values
 
