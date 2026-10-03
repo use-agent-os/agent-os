@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import re
+from collections.abc import Callable
 
 # GFM's delimiter cell is *one or more* hyphens with an optional leading
 # and/or trailing colon, so `-`, `--`, `:-`, `-:` and `:-:` are all valid.
@@ -186,7 +187,93 @@ def _python_dunder_names() -> frozenset[str]:
 
 _DUNDER_NAMES = _python_dunder_names()
 
-_BOLD_UNDERSCORE_RE = re.compile(r"__(?=\S)(.+?)(?<=\S)__")
+#: ``(?:(?!__).)+?`` rather than ``.+?``: a delimiter run inside the span
+#: would mean this opener had reached past a nearer one. See
+#: :data:`_BOLD_ASTERISK_RE` for what that cost.
+_BOLD_UNDERSCORE_RE = re.compile(r"__(?=\S)((?:(?!__).)+?)(?<=\S)__")
+
+#: CommonMark pairs each closing delimiter run with the *nearest* opener
+#: before it. A lazy ``.+?`` pairs the nearest *closer* with the first
+#: opener instead, which is not the same thing when a run in between can
+#: open but not close: in ``Use **/*.py to match **all** Python files`` the
+#: run before ``all`` has a space in front of it, so ``(?<=\S)`` rejects it
+#: as a closer, the match ran on to the one after ``all`` and swallowed the
+#: real bold span -- ``<b>/*.py to match **all</b>``. Forbidding the
+#: delimiter run inside the span makes the first opener fail here, the regex
+#: moves on, and ``**all**`` matches on its own, which is what CommonMark
+#: produces. A globstar is ordinary prose for an agent (#3543).
+_BOLD_ASTERISK_RE = re.compile(r"\*\*(?=\S)((?:(?!\*\*).)+?)(?<=\S)\*\*")
+_STRIKE_RE = re.compile(r"~~(?=\S)((?:(?!~~).)+?)(?<=\S)~~")
+_BOLD_ITALIC_ASTERISK_RE = re.compile(r"\*\*\*(?=\S)((?:(?!\*\*\*).)+?)(?<=\S)\*\*\*")
+_BOLD_ITALIC_UNDERSCORE_RE = re.compile(r"(?<!\w)___(?=[^\s_])((?:(?!___).)+?)(?<=[^\s_])___(?!\w)")
+
+#: Tags this module emitted. Matching the name lets :func:`_tags_balanced`
+#: tell a span that carries a whole element from one that cuts across it.
+_EMITTED_TAG_RE = re.compile(r"<(/?)([a-z]+)[^>]*>")
+
+
+def _tags_balanced(fragment: str) -> bool:
+    """True when every tag *fragment* contains is opened and closed inside it.
+
+    An emphasis pass runs over text an earlier pass has already marked up --
+    the link pass parks ``<a href=...>`` before any of them, and each
+    emphasis pass leaves its own tags behind. The patterns are plain ``re``
+    and their ``.+?`` spans those tags happily, so a delimiter inside an
+    element could pair with one outside it and the output came out
+    interleaved: ``**a*b** *i*`` rendered as ``<b>a<i>b</b> *i</i>``.
+    Telegram requires properly nested entities and answers ``400 Bad
+    Request: can't parse entities``; two of the four send paths retry as
+    plain text and lose all formatting, and ``edit()`` and the document
+    caption have no retry at all, so the message is simply not delivered
+    (#2032, #2308, #3543).
+
+    A span whose tags do not balance is therefore not a span. Only the
+    structure matters here, not validity: the fragment was produced by this
+    module, so there is nothing to sanitise, just a question of whether the
+    delimiters sit inside one element or straddle two.
+    """
+    open_tags: list[str] = []
+    for match in _EMITTED_TAG_RE.finditer(fragment):
+        closing, name = match.group(1), match.group(2)
+        if closing:
+            if not open_tags or open_tags.pop() != name:
+                return False
+        else:
+            open_tags.append(name)
+    return not open_tags
+
+
+def _apply_inline(
+    pattern: re.Pattern[str],
+    text: str,
+    build: Callable[[re.Match[str]], str | None],
+) -> str:
+    """``pattern.sub``, with the two outcomes a plain ``sub`` cannot express.
+
+    *build* returns ``None`` to decline a match it recognised but does not
+    want to rewrite -- a Python dunder, say. That is a real match, so it is
+    consumed and the scan continues after it, exactly as returning
+    ``match.group(0)`` from a ``sub`` callback did.
+
+    A match whose span does not have balanced tags is a different case: it
+    is not a pair at all, and consuming it would hide the closer from an
+    opener that *can* reach it. The scan resumes one character past the
+    opener instead, so ``<b>a*b</b> *i*`` still finds ``*i*``.
+    """
+    out: list[str] = []
+    position = 0
+    while (match := pattern.search(text, position)) is not None:
+        if not _tags_balanced(match.group(1)):
+            out.append(text[position : match.start() + 1])
+            position = match.start() + 1
+            continue
+        replacement = build(match)
+        out.append(text[position : match.start()])
+        out.append(match.group(0) if replacement is None else replacement)
+        position = match.end()
+    out.append(text[position:])
+    return "".join(out)
+
 
 #: Same word-boundary guards as the italic pass in :func:`_render_inline`, so
 #: ``snake_case`` survives the table-label strip too.
@@ -195,16 +282,25 @@ _ITALIC_UNDERSCORE_RE = re.compile(r"(?<!\w)_(?=[^\s_])(.+?)(?<=[^\s_])_(?!\w)")
 #: Same pattern as the asterisk-italic pass in :func:`_render_inline`. The
 #: lookarounds keep it off ``**bold**``; the ``**`` strip runs first anyway, so
 #: ``***both***`` reaches this as ``*both*``.
-_ITALIC_ASTERISK_RE = re.compile(r"(?<!\*)\*(?=\S)(.+?)(?<=\S)\*(?!\*)")
+#: Both ends carry both guards, so neither can land inside a ``**`` run:
+#: CommonMark reads a delimiter *run*, and one asterisk of a pair is not a
+#: single-asterisk delimiter. The underscore pattern below has always had
+#: this -- ``(?=[^\s_])`` and ``(?<=[^\s_])`` are the same rule -- and the
+#: asterisk one only half of it, which is why a leftover globstar opened a
+#: span (``**/*.py`` -> ``<i>*/</i>.py``) and why the closing run of
+#: ``f(*args, **kwargs)`` was read as a closer, giving
+#: ``f(<i>args, *</i>kwargs)`` (#3543).
+_ITALIC_ASTERISK_RE = re.compile(r"(?<!\*)\*(?!\*)(?=\S)(.+?)(?<=\S)(?<!\*)\*(?!\*)")
 
 
 def _is_python_dunder(content: str) -> bool:
     return content in _DUNDER_NAMES
 
 
-def _bold_underscore_html(match: re.Match[str]) -> str:
+def _bold_underscore_html(match: re.Match[str]) -> str | None:
+    """``None`` declines the match, which ``_apply_inline`` leaves as written."""
     if _is_python_dunder(match.group(1)):
-        return match.group(0)
+        return None
     return f"<b>{match.group(1)}</b>"
 
 
@@ -257,28 +353,35 @@ def _render_inline(text: str) -> str:
 
     rendered = _LINK_RE.sub(_park_href, rendered)
     rendered = _BARE_URL_RE.sub(_park_bare_url, rendered)
+    # Every pass below runs through `_apply_inline`, not `re.sub`, because by
+    # now the text already carries tags -- the link pass above parked
+    # `<a href=...>`, and each pass leaves its own behind. A `.+?` spans those
+    # happily, so a delimiter inside an element could pair with one outside it
+    # and the result was interleaved rather than nested, which Telegram
+    # refuses outright. `_apply_inline` drops a match whose span straddles a
+    # tag and leaves the closer available to an opener that can reach it.
+    #
     # `***both***` is one run, not a bold run next to an italic one, and it has
     # to be consumed before the `**` pass gets to it. Left to the passes below,
     # the bold pass took the first two markers and handed the capture the third
     # (`<b>*both</b>*`), then the italic pass paired that stray marker with the
-    # trailing one *across* the closing tag: `<b><i>both</b></i>`. Telegram's
-    # parser requires properly nested entities, so the message was rejected
-    # rather than rendered -- and this adapter sends `parse_mode=HTML` with no
-    # plain-text retry, so the reply never arrived.
-    rendered = re.sub(r"\*\*\*(?=\S)(.+?)(?<=\S)\*\*\*", r"<b><i>\1</i></b>", rendered)
-    rendered = re.sub(
-        r"(?<!\w)___(?=[^\s_])(.+?)(?<=[^\s_])___(?!\w)", r"<b><i>\1</i></b>", rendered
+    # trailing one *across* the closing tag: `<b><i>both</b></i>`.
+    rendered = _apply_inline(
+        _BOLD_ITALIC_ASTERISK_RE, rendered, lambda m: f"<b><i>{m.group(1)}</i></b>"
     )
-    rendered = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", r"<b>\1</b>", rendered)
-    # Not a blanket sub: `__init__` is a delimiter run with whitespace on both
-    # sides, exactly like an intentional single-word `__bold__`, so the content
-    # is what decides. A Python dunder is left alone (Issue #2076).
-    rendered = _BOLD_UNDERSCORE_RE.sub(_bold_underscore_html, rendered)
-    rendered = re.sub(r"~~(?=\S)(.+?)(?<=\S)~~", r"<s>\1</s>", rendered)
-    rendered = re.sub(r"(?<!\*)\*(?=\S)(.+?)(?<=\S)\*(?!\*)", r"<i>\1</i>", rendered)
+    rendered = _apply_inline(
+        _BOLD_ITALIC_UNDERSCORE_RE, rendered, lambda m: f"<b><i>{m.group(1)}</i></b>"
+    )
+    rendered = _apply_inline(_BOLD_ASTERISK_RE, rendered, lambda m: f"<b>{m.group(1)}</b>")
+    # Not a blanket rewrite: `__init__` is a delimiter run with whitespace on
+    # both sides, exactly like an intentional single-word `__bold__`, so the
+    # content is what decides. A Python dunder is declined (Issue #2076).
+    rendered = _apply_inline(_BOLD_UNDERSCORE_RE, rendered, _bold_underscore_html)
+    rendered = _apply_inline(_STRIKE_RE, rendered, lambda m: f"<s>{m.group(1)}</s>")
+    rendered = _apply_inline(_ITALIC_ASTERISK_RE, rendered, lambda m: f"<i>{m.group(1)}</i>")
     # Word-boundary guards keep `snake_case_identifiers` intact: an opening `_`
     # must not follow a word character and a closing one must not precede one.
-    rendered = re.sub(r"(?<!\w)_(?=[^\s_])(.+?)(?<=[^\s_])_(?!\w)", r"<i>\1</i>", rendered)
+    rendered = _apply_inline(_ITALIC_UNDERSCORE_RE, rendered, lambda m: f"<i>{m.group(1)}</i>")
     # Restore in reverse order of protection: code spans were parked first, so
     # they come back last and a restored code span is never rescanned. Escapes
     # are restored after the URLs and hrefs that may still carry one.
