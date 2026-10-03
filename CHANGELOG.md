@@ -7,6 +7,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Gateway: a local client was refused when the loopback address was spelled
+  any way other than `::1`. `is_loopback_address` compared strings, so
+  `0:0:0:0:0:0:0:1`, `::0001`, the fully expanded form and `::ffff:7f00:1`
+  (the hexadecimal spelling of the IPv4-mapped loopback whose dotted form
+  was handled) all answered False. That predicate gates the no-auth listener
+  (`auth.mode = "none"` admits only a loopback bind *and* a loopback peer),
+  the `Host` header guard and the control-UI `Origin` guard, each of which
+  fails closed -- so the refusal came back as an auth or Origin error rather
+  than anything about how the address was written. It now parses with
+  `ipaddress` and asks `.is_loopback`, looking through an IPv4 mapping, the
+  way `peer_is_trusted_proxy` in the same module already compares addresses
+  rather than spellings. `localhost` is still answered by name, and anything
+  that is not an IP literal is still False, so a hostname cannot reach this
+  gate. (#3572)
 - `title-card-image` skill: `render.py`'s auto-shrink only checked the
   rendered text against the canvas *width*; the stacked headline/subtitle
   lines' total height was never checked, so text that wrapped into enough

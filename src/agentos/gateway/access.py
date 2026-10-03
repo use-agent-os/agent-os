@@ -68,26 +68,42 @@ def normalize_audiences(
 
 
 def is_loopback_address(addr: str | None) -> bool:
-    """Return whether ``addr`` is a literal loopback IPv4/IPv6 address."""
+    """Return whether ``addr`` is a literal loopback IPv4/IPv6 address.
+
+    Compared as an address, not as a spelling. One IPv6 address has many
+    valid textual forms and the string comparison this used to do recognised
+    only the shortest: ``0:0:0:0:0:0:0:1``, ``::0001`` and the fully expanded
+    form are all ``::1`` and all answered False, as did ``::ffff:7f00:1``,
+    the hexadecimal spelling of the IPv4-mapped loopback whose dotted form
+    was handled. :func:`peer_is_trusted_proxy` below was already changed to
+    compare addresses for exactly this reason; this is the same fix for the
+    predicate that gates the no-auth listener, the ``Host`` header guard and
+    the control-UI ``Origin`` guard, each of which refused a local client
+    that spelled the loopback any other way (#3572).
+
+    ``localhost`` is answered before parsing because it is a name, not a
+    literal, and anything else unparseable stays False -- a hostname is not
+    an address and must not be read as one here.
+    """
 
     if not addr:
         return False
-    host = addr.split("%", 1)[0]
+    host = addr.strip().split("%", 1)[0]
     if host.startswith("[") and host.endswith("]"):
         host = host[1:-1]
-    if host.startswith("::ffff:"):
-        host = host[7:]
-    if host in ("::1", "localhost"):
+    if host == "localhost":
         return True
-    if host.startswith("127."):
-        parts = host.split(".")
-        if len(parts) != 4:
-            return False
-        try:
-            return all(0 <= int(part) <= 255 for part in parts)
-        except ValueError:
-            return False
-    return False
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    if address.is_loopback:
+        return True
+    # ``::ffff:127.0.0.1`` is the loopback reached over a v6 socket; the
+    # mapped v4 address is what carries the verdict, and ``is_loopback`` on
+    # the v6 object does not look through the mapping.
+    mapped = getattr(address, "ipv4_mapped", None)
+    return mapped is not None and bool(mapped.is_loopback)
 
 
 def is_loopback_bind(host: str | None) -> bool:
