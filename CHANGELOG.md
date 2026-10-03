@@ -7,6 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Telegram: a table label written as a code span had its contents edited. A
+  cell reading `` `2**8` `` reached the reader as `28`, and `` `a*b*c` `` as
+  `abc`, in a row whose value column says something else. `_plain_inline`
+  parked links and backslash escapes, then removed every backtick and ran
+  the marker passes -- so by the time those ran, nothing said the text was
+  code, and a matched pair of markers inside the span was stripped out of
+  it. `_render_inline` has never had this: it parks code spans first and
+  restores them last. `_plain_inline` now does the same, through the same
+  `_replace_code_spans`, which takes how to render a span so the HTML path
+  can keep `<code>` while the plain-text path gets the content itself --
+  one implementation of the backtick-run and escape rules for both. (#3586)
 - Sessions started from a channel (Telegram, Slack, Discord, …) are now
   named from their first message, like WebChat and desktop-app sessions,
   instead of keeping their short id in the sidebar. Channel dispatch never
