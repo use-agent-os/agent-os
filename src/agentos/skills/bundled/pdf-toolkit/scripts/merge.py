@@ -201,7 +201,9 @@ class MergeResult:
     pages_written: int = 0
     skipped: list[tuple[str, list[int]]] = field(default_factory=list)
     missing_files: list[str] = field(default_factory=list)
-    #: Per entry, how many further out-of-range pages ``skipped`` did not list.
+    #: Per entry, how many further out-of-range pages ``skipped`` did not
+    #: list. Index-aligned with :attr:`skipped`, including a zero, so a file
+    #: named by more than one entry keeps a count per entry.
     skipped_omitted: list[tuple[str, int]] = field(default_factory=list)
 
 
@@ -233,8 +235,12 @@ def merge(items: Iterable[dict[str, str]], out: Path) -> MergeResult:
         total = len(reader.pages)
         skipped, omitted = skipped_pages(item.get("pages"), total)
         if skipped:
+            # Appended together, always, so the two lists stay index-aligned.
+            # Reading the count back by filename collapsed two entries naming
+            # the same file -- interleaving pages of one PDF is the ordinary
+            # reason to name it twice -- and reported the last entry's count
+            # for both of them (#3589).
             result.skipped.append((str(path), skipped))
-        if omitted:
             result.skipped_omitted.append((str(path), omitted))
         for page_num in parse_ranges(item.get("pages"), total):
             writer.add_page(reader.pages[page_num - 1])
@@ -286,10 +292,10 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    omitted_by_file = dict(result.skipped_omitted)
-    for file_name, pages in result.skipped:
+    for (file_name, pages), (_file, more) in zip(
+        result.skipped, result.skipped_omitted, strict=True
+    ):
         dropped = ", ".join(str(p) for p in pages)
-        more = omitted_by_file.get(file_name, 0)
         tail = f" (and {more:,} more)" if more else ""
         print(f"warn: {file_name} has no page {dropped}{tail}", file=sys.stderr)
     _write_stdout(
@@ -303,13 +309,11 @@ def main() -> int:
                         "pages": pages,
                         # Only present when the list was capped, so an ordinary
                         # summary keeps exactly the shape it had before.
-                        **(
-                            {"omitted": omitted_by_file[file_name]}
-                            if omitted_by_file.get(file_name)
-                            else {}
-                        ),
+                        **({"omitted": more} if more else {}),
                     }
-                    for file_name, pages in result.skipped
+                    for (file_name, pages), (_file, more) in zip(
+                        result.skipped, result.skipped_omitted, strict=True
+                    )
                 ],
                 "missing_files": result.missing_files,
             },

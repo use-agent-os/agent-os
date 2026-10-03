@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- `pdf-toolkit` skill: `merge.py` reported one entry's omitted-page count for
+  every manifest entry naming the same file. `MergeResult` keeps the counts
+  per entry correctly; `main` read them back with
+  `dict(result.skipped_omitted)`, and `dict` keeps the last value for a
+  repeated key -- so interleaving pages of one PDF, which is the ordinary
+  reason to name a file twice, made both entries claim the second one's
+  count. The two lists are now appended together and read index-aligned. The
+  merged PDF was never affected; only the number telling the caller how much
+  a runaway range dropped. (#3589)
 - Sessions started from a channel (Telegram, Slack, Discord, …) are now
   named from their first message, like WebChat and desktop-app sessions,
   instead of keeping their short id in the sidebar. Channel dispatch never
