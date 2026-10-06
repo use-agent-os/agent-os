@@ -196,8 +196,11 @@ describe('History · liquidity entries', () => {
     renderDesk(
       <History
         entries={[
+          // Explicit times: rows sort newest first, and two `Date.now()`
+          // reads a millisecond apart once flipped them on CI.
           entry({
             id: 'c',
+            ts: 1_700_000_120_000,
             kind: 'lp_collect',
             tokenIn: null,
             amountIn: null,
@@ -206,6 +209,7 @@ describe('History · liquidity entries', () => {
           }),
           entry({
             id: 'r',
+            ts: 1_700_000_060_000,
             kind: 'lp_remove',
             tokenIn: null,
             amountIn: null,
