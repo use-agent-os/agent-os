@@ -86,12 +86,23 @@ def _is_escaped(text: str, index: int) -> bool:
     return backslashes % 2 == 1
 
 
-def _replace_code_spans(text: str) -> tuple[str, list[str]]:
+def _code_span_html(content: str) -> str:
+    return f"<code>{html.escape(content)}</code>"
+
+
+def _replace_code_spans(
+    text: str, *, render: Callable[[str], str] = _code_span_html
+) -> tuple[str, list[str]]:
     """Replace balanced Markdown code spans with private placeholders.
 
     A backslash-escaped backtick is literal and cannot *open* a span. The scan
     for the closer stays raw: matching the reference implementation, an
     escaped backtick still closes the span it sits in.
+
+    *render* turns a span's content into what replaces it. The HTML path
+    wants ``<code>``; :func:`_plain_inline`, which produces text rather than
+    markup, wants the content itself. Both go through here so the
+    backtick-run and escape rules have one implementation (#3586).
     """
     chunks: list[str] = []
     output: list[str] = []
@@ -117,7 +128,7 @@ def _replace_code_spans(text: str) -> tuple[str, list[str]]:
         if len(content) >= 2 and content[0] == " " and content[-1] == " " and content.strip():
             content = content[1:-1]
         placeholder = f"\x00TG_CODE_{len(chunks)}\x00"
-        chunks.append(f"<code>{html.escape(content)}</code>")
+        chunks.append(render(content))
         output.append(placeholder)
         cursor = closing + len(marker)
     return "".join(output), chunks
@@ -402,6 +413,12 @@ def _plain_inline(text: str) -> str:
     # below is a plain `str.replace`, so a URL containing `__`, `**` or `~~`
     # lost those characters outright and the reader was handed a link that does
     # not resolve. Park the URLs, strip the markers, put them back.
+    # Code spans are parked before anything else and restored after
+    # everything else, exactly as :func:`_render_inline` does. Without it
+    # the ``text.replace("`", "")`` below removed the delimiters and the
+    # marker passes then edited the code: a cell reading ``2**8`` was
+    # handed to the reader as ``28``, and ``a*b*c`` as ``abc`` (#3586).
+    text, code_chunks = _replace_code_spans(text, render=lambda content: content)
     hrefs: list[str] = []
     escapes: list[str] = []
 
@@ -439,6 +456,8 @@ def _plain_inline(text: str) -> str:
         text = text.replace(f"\x00TG_HREF_{index}\x00", href)
     for index, char in enumerate(escapes):
         text = text.replace(f"\x00TG_ESC_{index}\x00", char)
+    for index, chunk in enumerate(code_chunks):
+        text = text.replace(f"\x00TG_CODE_{index}\x00", chunk)
     return text.strip()
 
 
