@@ -48,7 +48,13 @@ def quote_cli_arg(value: str) -> str:
     # double-quoted string; a Windows filename cannot contain ``"``, so that
     # replacement only guards hand-written values.
     escaped = value.replace("`", "``").replace("$", "`$").replace('"', '""')
-    return '"' + escaped + '"'
+    # A run of backslashes right before the closing quote is doubled, as
+    # ``subprocess.list2cmdline`` does: the program that finally parses the
+    # line (MSVC-style argv parsing, what python.exe itself uses) reads an odd
+    # run as escaping that quote, so ``"C:\Agent OS\"`` never closed and
+    # swallowed the rest of the line. Directory paths routinely end this way.
+    trailing_backslashes = len(escaped) - len(escaped.rstrip("\\"))
+    return '"' + escaped + "\\" * trailing_backslashes + '"'
 
 
 def config_cli_arg(config_path: str | Path | None) -> str:

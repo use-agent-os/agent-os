@@ -11,6 +11,7 @@ covered on every CI leg rather than only the Windows one.
 from __future__ import annotations
 
 import ast
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -94,6 +95,40 @@ def test_windows_backtick_is_escaped_before_dollar(on_windows: None) -> None:
 
 def test_windows_embedded_double_quote_is_doubled(on_windows: None) -> None:
     assert quote_cli_arg('a"b') == '"a""b"'
+
+
+@pytest.mark.parametrize("backslash_run", ["\\", "\\\\", "\\\\\\"])
+def test_windows_trailing_backslash_before_the_closing_quote_is_doubled(
+    backslash_run: str, on_windows: None
+) -> None:
+    """A directory path ending in one or more backslashes, quoted for a space
+    elsewhere in the value: an odd run left undoubled here is read by the
+    program that ultimately parses this command line (MSVC-style argv
+    parsing -- what python.exe itself uses) as escaping the closing quote
+    rather than ending the argument, so the quote never closes and the rest
+    of the command line is swallowed into this one value. This is exactly
+    the C-runtime-compatible quoting ``subprocess.list2cmdline`` implements,
+    used here as the independent, known-correct reference -- only for values
+    with no backtick, ``$`` or ``"``, whose escaping differs from it."""
+    value = f"C:\\Program Files\\Agent OS{backslash_run}"
+
+    assert quote_cli_arg(value) == subprocess.list2cmdline([value])
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("C:\\Jo$hn Doe\\", '"C:\\Jo`$hn Doe\\\\"'),
+        ("C:\\opt\\a`b c\\", '"C:\\opt\\a``b c\\\\"'),
+        ("C:\\Jo$hn\\", '"C:\\Jo`$hn\\\\"'),
+    ],
+)
+def test_windows_trailing_backslash_is_doubled_after_powershell_escaping(
+    value: str, expected: str, on_windows: None
+) -> None:
+    """The doubling applies to the PowerShell-escaped value (#2978), so a
+    path that needs both still closes its quote."""
+    assert quote_cli_arg(value) == expected
 
 
 def test_windows_empty_value_is_quoted(on_windows: None) -> None:
