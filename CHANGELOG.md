@@ -27,6 +27,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `f(<i>args, *</i>kwargs)`. Both now render verbatim, as CommonMark does.
   A sweep over 17576 three-atom inline combinations produced 1615 interleaved
   results before and none after. (#3543)
+- CLI: on Windows, a copy-pasteable hint for a path with a space that ends in
+  a backslash broke the pasted command. `C:\Agent OS\` was quoted as
+  `"C:\Agent OS\"`, and MSVC-style argv parsing reads that trailing
+  backslash as escaping the closing quote, so the quote never closed and the
+  rest of the line was swallowed into the path. `quote_cli_arg` now doubles a
+  run of backslashes before the closing quote, as `subprocess.list2cmdline`
+  does. (#3210)
 - Telegram: a table label written as a code span had its contents edited. A
   cell reading `` `2**8` `` reached the reader as `28`, and `` `a*b*c` `` as
   `abc`, in a row whose value column says something else. `_plain_inline`
