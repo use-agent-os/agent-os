@@ -27,11 +27,15 @@ agentos providers status --probe-models
 
 ## Configure a Provider
 
-Interactive:
+Interactive (the provider steps of `agentos onboard`, skipping channels and
+search):
 
 ```sh
-agentos providers configure openrouter
+agentos configure provider
 ```
+
+`agentos onboard` runs the full first-run wizard, which also covers channels and
+search.
 
 Non-interactive onboarding-style configuration:
 
@@ -62,6 +66,16 @@ agentos configure provider --provider ollama --model llama3.1
 
 Prefer environment-variable references for API keys so secrets are not written
 directly into configuration files.
+
+Once a provider has a key or key reference configured, switch the active
+provider and model without prompts:
+
+```sh
+agentos providers configure openrouter --model anthropic/claude-sonnet-4
+```
+
+`providers configure` never prompts and has no `--api-key-env`; set the key
+with `agentos configure provider` first.
 
 ## Onboarding-Verified Providers
 
