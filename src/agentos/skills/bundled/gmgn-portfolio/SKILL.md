@@ -1,7 +1,7 @@
 ---
 name: gmgn-portfolio
 description: Analyze any crypto wallet by address — holdings, realized/unrealized P&L, win rate, trading history, performance stats, specific token balance, and tokens created by a developer wallet (with ATH market cap and DEX graduation status) via GMGN API on Solana, BSC, Base, or Ethereum. Use when user asks about a wallet's holdings, P&L, win rate, what tokens a dev has launched, the highest ATH token a dev ever created, or wants a wallet report to decide whether to copy-trade or follow.
-argument-hint: "<info|holdings|activity|stats|token-balance|created-tokens> [--chain <sol|bsc|base|eth|robinhood|arc|stable>] [--wallet <wallet_address>]"
+argument-hint: "<info|holdings|activity|stats|profits|token-balance|created-tokens> [--chain <sol|bsc|base|eth|robinhood|arc|stable>] [--wallet <wallet_address>]"
 provenance:
   origin: gmgn-mit
   license: MIT
@@ -64,6 +64,7 @@ Use the `gmgn-cli` tool to query wallet portfolio data based on the user's reque
 | `portfolio holdings` | Wallet token holdings with P&L |
 | `portfolio activity` | Transaction history |
 | `portfolio stats` | Trading statistics (supports batch) |
+| `portfolio profits` | Realized/unrealized profit and ROI for a window (`1d` / `7d` / `30d` / `all`); batch up to 100 wallets |
 | `portfolio token-balance` | Token balance for a specific token |
 | `portfolio created-tokens` | Tokens created by a developer wallet, with market cap and ATH info |
 
@@ -93,6 +94,7 @@ All portfolio routes used by this skill go through GMGN's leaky-bucket limiter w
 | `portfolio info` | `GET /v1/user/info` | 1 |
 | `portfolio activity` | `GET /v1/user/wallet_activity` | 3 |
 | `portfolio stats` | `GET /v1/user/wallet_stats` | 3 |
+| `portfolio profits` | `POST /v1/user/wallet_profits` | 3 |
 | `portfolio token-balance` | `GET /v1/user/wallet_token_balance` | 1 |
 | `portfolio created-tokens` | `GET /v1/user/created_tokens` | 2 |
 
@@ -140,6 +142,12 @@ gmgn-cli portfolio stats --chain sol --wallet <wallet_address> --period 30d
 # Batch stats for multiple wallets
 gmgn-cli portfolio stats --chain sol \
   --wallet <wallet_1> --wallet <wallet_2>
+
+# All-time realized/unrealized profit and ROI
+gmgn-cli portfolio profits --chain sol --wallet <wallet_address> --period all
+
+# Today's profit and ROI
+gmgn-cli portfolio profits --chain sol --wallet <wallet_address> --period 1d
 
 # Token balance
 gmgn-cli portfolio token-balance \
@@ -205,6 +213,13 @@ The activity response includes a `next` field. Pass it to `--cursor` to fetch th
 | Option | Description |
 |--------|-------------|
 | `--period <period>` | Stats period: `7d` / `30d` (default `7d`) |
+
+## `portfolio profits` Options
+
+| Option | Description |
+|--------|-------------|
+| `--wallet <address>` | Wallet address (required). Repeatable: pass 1–100 `--wallet` flags to query several wallets in one call |
+| `--period <period>` | Profit window: `1d` / `7d` / `30d` / `all` (default `7d`) |
 
 ## Response Field Reference
 
@@ -284,6 +299,24 @@ The response also includes a `common` object when available (absent if the upstr
 | `common.fund_amount` | Funding amount |
 
 Use `common.tags` and `common.twitter_username` when building a wallet profile narrative. If `common` is absent in the response, omit identity fields silently — do not report it as an error.
+
+### `portfolio profits` — Key Fields
+
+The response is `{"list": [ {…} ]}` — one row per `--wallet` passed, so a single-wallet call's row is `list[0]`, not the top level. Reading a field off the top level gets nothing back, which reads as a real `0` profit rather than as an error.
+
+Every row carries both field families, whatever `--period` is: the un-prefixed fields cover the selected period, and the `total_*` fields are always all-time. `--period` only changes what the un-prefixed fields cover.
+
+| Field | Scope | Description |
+|-------|-------|-------------|
+| `wallet_address` | — | Wallet this row belongs to |
+| `realized_profit` | selected period | Realized profit for the window |
+| `realized_profit_cost` | selected period | Cost basis behind `realized_profit` — divide the two for the window's ROI |
+| `buy` / `sell` | selected period | Buy and sell counts in the window |
+| `unrealized_profit` | current holdings | Unrealized profit on currently open positions |
+| `total_realized_profit` | all-time | Cumulative realized profit |
+| `total_realized_profit_cost` | all-time | Cost basis behind `total_realized_profit` — divide the two for all-time ROI |
+| `total_profit` | all-time | Total profit |
+| `total_cost` | all-time | Total cost basis |
 
 ### `portfolio created-tokens` — Key Fields
 
