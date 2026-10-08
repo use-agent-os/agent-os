@@ -172,8 +172,7 @@ Read: [`docs/features/tool-compression.md`](docs/features/tool-compression.md)
 - Track usage and estimated cost with `agentos cost`.
 - Diagnose readiness with `agentos doctor` and `/control/` health views.
 - Export reproducible install state with `agentos dist`.
-- Bridge AgentOS into MCP-capable clients with `agentos mcp-server run`
-  when the `mcp` extra is installed.
+- Bridge AgentOS into MCP-capable clients with `agentos mcp-server run`.
 - Create and deliver artifacts such as HTML files, PDF reports, slides,
   spreadsheets, generated images, and channel-delivered files.
 

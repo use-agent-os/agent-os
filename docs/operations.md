@@ -167,15 +167,15 @@ handling.
 
 ## MCP Server
 
-AgentOS can run an MCP server bridge when installed with the `mcp` extra:
+AgentOS can run an MCP server bridge:
 
 ```sh
 agentos mcp-server run
 ```
 
-Install by following the [Installation](../README.md#installation) section of
-the README, adding the `mcp` extra — use `use-agent-os[recommended,mcp]` in place of
-`use-agent-os[recommended]`.
+The MCP SDK is a core dependency, so a standard install from the
+[Installation](../README.md#installation) section of the README is enough; there
+is no `mcp` extra.
 
 Use this when another MCP-capable client should access AgentOS-managed tools
 or runtime surfaces.
