@@ -603,11 +603,16 @@ Use this table to pick the right combination for common `token traders` use case
 |----------|---------|-------------|
 | Smart money with highest buy volume | `smart_degen` | `buy_volume_cur` |
 | Smart money with highest sell volume (exit signal) | `smart_degen` | `sell_volume_cur` |
-| KOLs recently active | `renowned` | `last_active_timestamp` |
 | Smart money most profitable traders | `smart_degen` | `profit` |
 | Snipers still holding | `sniper` | `amount_percentage` |
 | Smart money sitting on biggest unrealized gains | `smart_degen` | `unrealized_profit` |
 | KOLs who already took profit | `renowned` | `profit` |
+
+`--order-by` takes only the five values in the `--order-by` Values table; the
+API rejects any other field with HTTP 400, even one that appears in the
+response. To find KOLs recently active, fetch `--tag renowned --limit 100` and
+sort the returned rows by their `last_active_timestamp` field yourself (this
+only ranks the 100 rows returned, which are the top 100 by the default sort).
 
 ### `token traders` — Find Active Traders
 
