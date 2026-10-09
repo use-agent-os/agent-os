@@ -4982,7 +4982,11 @@
   }
 }
 
-/* ── Ask / plan cards ────────────────────────────────────────────────────── */
+/* ── Ask / plan cards ────────────────────────────────────────────────────
+   Built by the shared renderer (transcript/ask.ts, transcript/plan.ts). Its
+   glyphs are bare `<svg viewBox>` elements with no width or height, so every
+   svg here needs a box of its own: unsized, the eyebrow's question mark grew
+   to the width of the card. */
 
 .chat-ask-card,
 .chat-plan-card {
@@ -4995,15 +4999,45 @@
   box-shadow: 0 0 0 1px var(--hairline);
 }
 .chat-ask-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.1em;
   color: var(--dim);
 }
-.chat-ask-title,
+.chat-ask-eyebrow svg {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--primary);
+}
 .chat-ask-question {
+  display: grid;
+  gap: 8px;
+}
+.chat-ask-question + .chat-ask-question {
+  padding-top: 10px;
+  box-shadow: 0 -1px 0 var(--hairline);
+}
+.chat-ask-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
   font-size: 14px;
   font-weight: 600;
+  line-height: 1.4;
+}
+.chat-ask-header-chip {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--secondary);
+  color: var(--muted-foreground);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
 }
 .chat-ask-options {
   display: grid;
@@ -5018,16 +5052,59 @@
   background: var(--secondary);
   text-align: left;
 }
-.chat-ask-option:hover {
+.chat-ask-option:hover:not(:disabled) {
   background: var(--accent);
+}
+.chat-ask-option:disabled {
+  cursor: default;
 }
 .chat-ask-option--selected {
   box-shadow: inset 0 0 0 1.5px var(--primary);
+}
+/* The select indicator: a radio for single-select, a square for multi. */
+.chat-ask-option-check {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--border);
+  color: transparent;
+}
+.chat-ask-option--multi .chat-ask-option-check {
+  border-radius: 4px;
+}
+.chat-ask-option-check svg {
+  width: 9px;
+  height: 9px;
+}
+.chat-ask-option--selected .chat-ask-option-check {
+  background: var(--primary);
+  box-shadow: none;
+  color: var(--primary-foreground);
+}
+.chat-ask-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.chat-ask-option-label {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.chat-ask-option-desc {
+  overflow-wrap: anywhere;
 }
 .chat-ask-option-desc,
 .chat-ask-multi-hint,
 .chat-plan-refine-hint {
   font-size: 11.5px;
+  line-height: 1.45;
   color: var(--muted-foreground);
 }
 .chat-ask-footer,
@@ -5038,6 +5115,7 @@
 }
 .chat-ask-other {
   flex: 1;
+  min-width: 0;
   height: 28px;
   padding: 0 10px;
   border-radius: var(--radius-control);
@@ -5048,6 +5126,7 @@
 }
 .chat-ask-send,
 .chat-plan-footer button {
+  flex: none;
   height: 26px;
   padding: 0 12px;
   border-radius: var(--radius-control);
@@ -5056,11 +5135,33 @@
   font-size: 12px;
   font-weight: 600;
 }
+.chat-ask-send:disabled,
+.chat-plan-approve:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.chat-ask-answered {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.chat-ask-answered svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--primary);
+}
 .chat-ask-card--answered {
   opacity: 0.7;
 }
 .chat-plan-body {
+  max-height: 340px;
+  overflow-y: auto;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   font-size: 13px;
   line-height: 1.55;
 }

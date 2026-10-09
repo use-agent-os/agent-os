@@ -916,3 +916,81 @@ describe('desktop bracket card skin', () => {
     expect(rule('.bracket-leg__state')).toMatch(/text-overflow: ellipsis;/)
   })
 })
+
+// The ask_user and exit_plan_mode cards come from the shared renderer
+// (transcript/ask.ts, transcript/plan.ts), which builds their glyphs as bare
+// <svg viewBox> elements with no width or height. Unsized, an svg is as wide
+// as its container: the question-mark eyebrow filled the whole card, every
+// option grew a card-sized tick, and with no column for the option text the
+// label ran into its description ("Bankr wallet only0x6be0…"). Read both
+// renderers so a class added there fails here until the skin draws it.
+describe('desktop ask and plan card skin covers the shared renderer', () => {
+  const transcript = resolve(__dirname, '../../../../../../frontend/src/views/chat/transcript')
+  const renderer = ['ask.ts', 'plan.ts']
+    .map((file) => readFileSync(resolve(transcript, file), 'utf8'))
+    .join('\n')
+  const emitted = new Set(
+    [...renderer.matchAll(/(?<![\w-])chat-(?:ask|plan)(?:-{1,2}[a-z0-9]+)+(?![\w-])/g)].map(
+      (m) => m[0],
+    ),
+  )
+  const drawn = (cls: string): boolean => {
+    const hook = new RegExp(`\\.${cls}(?![\\w-])`)
+    return selectors.some((sel) => hook.test(sel))
+  }
+  const rule = (selector: string): string | undefined => {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return css.match(
+      new RegExp(`^(?:[^{}\\n]+,\\n)*${escaped}(?:,\\n[^{}\\n]+)* \\{[^}]*\\}`, 'm'),
+    )?.[0]
+  }
+  const px = (block: string | undefined, prop: string): number =>
+    Number(block?.match(new RegExp(`(?:^|\\s)${prop}: (\\d+(?:\\.\\d+)?)px;`))?.[1])
+
+  it('reads the inventory off the renderers', () => {
+    expect(emitted.size).toBeGreaterThan(20)
+    for (const cls of [
+      'chat-ask-eyebrow',
+      'chat-ask-option-check',
+      'chat-ask-option-text',
+      'chat-ask-header-chip',
+      'chat-ask-answered',
+      'chat-plan-card',
+    ]) {
+      expect(emitted, cls).toContain(cls)
+    }
+  })
+
+  it('has at least one rule for every class the renderers emit', () => {
+    const missing = [...emitted].filter((cls) => !drawn(cls))
+    expect(missing).toEqual([])
+  })
+
+  it('gives every glyph the renderers draw an icon-sized box', () => {
+    for (const selector of [
+      '.chat-ask-eyebrow svg',
+      '.chat-ask-option-check svg',
+      '.chat-ask-answered svg',
+    ]) {
+      const block = rule(selector)
+      expect(block, selector).toBeTruthy()
+      for (const prop of ['width', 'height']) {
+        const size = px(block, prop)
+        expect(size, `${selector} ${prop}`).toBeGreaterThan(0)
+        expect(size, `${selector} ${prop}`).toBeLessThanOrEqual(16)
+      }
+    }
+    // The tick sits in a fixed box of its own, not the option's full height.
+    const check = rule('.chat-ask-option-check')
+    expect(px(check, 'width')).toBeLessThanOrEqual(18)
+    expect(px(check, 'height')).toBeLessThanOrEqual(18)
+    expect(check).toMatch(/flex: none;/)
+  })
+
+  it('keeps the label, its description and the header chip apart', () => {
+    expect(rule('.chat-ask-option-text')).toMatch(/flex-direction: column;/)
+    expect(rule('.chat-ask-eyebrow')).toMatch(/display: flex;[\s\S]*gap: \d+px;/)
+    expect(rule('.chat-ask-title')).toMatch(/display: flex;[\s\S]*gap: \d+px;/)
+    expect(rule('.chat-ask-answered')).toMatch(/display: flex;[\s\S]*gap: \d+px;/)
+  })
+})

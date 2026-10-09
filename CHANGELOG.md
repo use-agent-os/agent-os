@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Desktop: the ask_user question card and the exit_plan_mode plan card drew
+  their icons at the full width of the card. The shared transcript renderer
+  builds those glyphs as bare `<svg viewBox>` elements and leaves sizing to
+  the stylesheet, and the desktop skin never gave them a box: the question
+  mark filled the card, every option grew a card-sized tick, and with no
+  column for the option text the label ran into its description ("Bankr
+  wallet only0x6be0…") and the header chip into the question. The desktop
+  skin now sizes every card glyph, draws the radio/checkbox indicator, and
+  lays out the header chip, option text and answered line; a test reads both
+  renderers and fails when they emit a class the skin does not draw.
+
 ## [2026.10.9] - 2026-10-09
 
 ### Fixed
