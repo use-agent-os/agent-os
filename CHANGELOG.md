@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.10.9.post1] - 2026-10-09
+
 ### Fixed
 - Desktop: the ask_user question card and the exit_plan_mode plan card drew
   their icons at the full width of the card. The shared transcript renderer
