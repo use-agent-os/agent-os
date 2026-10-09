@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.10.9] - 2026-10-09
+
 ### Fixed
 - Telegram: `render_telegram_html` emitted interleaved HTML for emphasis runs
   that overlap rather than nest, and paired a `**` closer with the wrong
@@ -45,6 +47,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `_replace_code_spans`, which takes how to render a span so the HTML path
   can keep `<code>` while the plain-text path gets the content itself --
   one implementation of the backtick-run and escape rules for both. (#3586)
+- Skills: `ai-video-script` stated two defaults (3 and 5) and two ranges
+  for `N_SHOTS`; it now says one of each (#3625). `gmgn-token` recommended
+  `--order-by last_active_timestamp`, which the API rejects with HTTP 400
+  (#3626). `gmgn-portfolio` documents the `portfolio profits` sub-command
+  (#3627).
+- Docs: install hints no longer ask for a nonexistent `mcp` extra — the MCP
+  SDK is a core dependency (#3623) — and the interactive provider example
+  points at `agentos configure provider` (#3624).
 
 ## [2026.10.6] - 2026-10-06
 

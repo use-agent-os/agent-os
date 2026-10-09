@@ -4,7 +4,7 @@ import json
 import tomllib
 from pathlib import Path
 
-CURRENT_VERSION = "2026.10.6"
+CURRENT_VERSION = "2026.10.9"
 CURRENT_TAG = f"v{CURRENT_VERSION}"
 PREVIEW_VERSION = "0.0.1rc1"
 PREVIEW_TAG = f"v{PREVIEW_VERSION}"
