@@ -11,6 +11,7 @@ import volcengine from '~/assets/providers/volcengine.svg?raw'
 import zhipu from '~/assets/providers/zhipu.svg?raw'
 import opencap from '~/assets/providers/opencap.jpg'
 import surplus from '~/assets/providers/surplus.png'
+import bankr from '@/assets/bankr-symbol.svg'
 import { Plug } from 'lucide-react'
 import { cn } from '~/lib/utils'
 import { CUSTOM_PROVIDER_ID } from './logic'
@@ -35,8 +36,13 @@ const MARKS: Record<string, string> = {
   zhipu,
 }
 
-/** Raster marks the vendor publishes only as bitmaps. `bleed`: fills the plate edge to edge. */
+/**
+ * Marks drawn as `<img>`: bitmaps, and full-colour SVGs that must keep their
+ * own fills (Bankr shares the Skills tab's partner artwork). `bleed`: fills
+ * the plate edge to edge.
+ */
 const RASTER: Record<string, { src: string; bleed?: boolean }> = {
+  bankr: { src: bankr },
   opencap: { src: opencap, bleed: true },
   surplus: { src: surplus },
 }

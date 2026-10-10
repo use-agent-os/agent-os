@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Desktop: the Bankr LLM Gateway provider tile in Settings → Providers (and
+  the setup wizard's provider step) showed a generated "BL" monogram instead
+  of Bankr's mark. `ProviderLogo` now draws the Bankr symbol the Skills tab
+  already bundles.
+
 ## [2026.10.9.post1] - 2026-10-09
 
 ### Fixed
