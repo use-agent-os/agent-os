@@ -465,3 +465,170 @@ async def test_custom_instructions_are_user_scoped_and_identifier_policy_stays_s
     assert "Focus on deployment decisions." not in messages[0]["content"]
     assert messages[1]["role"] == "user"
     assert "Focus on deployment decisions." in messages[1]["content"]
+
+
+# ---------------------------------------------------------------------------
+# Session-level /compact uses the engine's structured summary and file lists
+# ---------------------------------------------------------------------------
+
+
+def _tool_entry(index: int, name: str, arguments: dict, *, error: bool = False) -> list[dict]:
+    call_id = f"call-{index}"
+    return [
+        {"role": "user", "content": f"step {index} " + "x" * 50, "token_count": 200},
+        {
+            "role": "assistant",
+            "content": f"did step {index}",
+            "token_count": 200,
+            "tool_calls": [
+                {"type": "tool_use", "tool_use_id": call_id, "name": name, "input": arguments},
+                {
+                    "type": "tool_result",
+                    "tool_use_id": call_id,
+                    "name": name,
+                    "result": "error" if error else "ok",
+                    "is_error": error,
+                },
+            ],
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_call_compaction_llm_sends_the_structured_summary_request() -> None:
+    from agentos.engine.compaction_service import SUMMARY_SECTIONS, SUMMARY_TEXT_MAX_TOKENS
+    from agentos.provider import DoneEvent, TextDeltaEvent
+
+    calls: list[tuple[list, object]] = []
+
+    class _Provider:
+        provider_name = "fake"
+
+        def chat(self, messages, tools=None, config=None):
+            calls.append((messages, config))
+
+            async def _stream():
+                yield TextDeltaEvent(text="## Goal\n- revised")
+                yield DoneEvent()
+
+            return _stream()
+
+    result = await call_compaction_llm(
+        chunk_text="[user]: next step",
+        identifier_instruction="Preserve exact IDs.",
+        model="any-model",
+        api_key="",
+        provider=_Provider(),
+        earlier_summary="## Goal\n- original",
+        custom_instructions="Focus on the parser.",
+    )
+
+    assert result == "## Goal\n- revised"
+    sent, config = calls[0]
+    system = str(getattr(config, "system", ""))
+    for name, _ in SUMMARY_SECTIONS:
+        assert f"- {name}:" in system
+    assert system.rstrip().endswith("Preserve exact IDs.")
+    assert getattr(config, "max_tokens", None) == SUMMARY_TEXT_MAX_TOKENS
+    request = str(sent[0].content)
+    assert request.startswith("Additional summary instructions.")
+    assert "Focus on the parser." in request
+    assert "[Earlier summary]\n## Goal\n- original\n[End of earlier summary]" in request
+    assert "[Newer conversation]\n[user]: next step" in request
+
+
+@pytest.mark.asyncio
+async def test_compact_context_rolls_one_summary_and_appends_the_file_lists(monkeypatch):
+    from agentos.engine.compaction_files import (
+        FILE_ACTIVITY_HEADER,
+        FileActivity,
+        attach_file_activity,
+        split_file_activity,
+    )
+
+    earlier: list[str | None] = []
+
+    async def fake_llm(**kwargs):
+        earlier.append(kwargs.get("earlier_summary"))
+        # The model tries to write its own file list; it is dropped.
+        return f"## Goal\n- after chunk {len(earlier)}\n\n{FILE_ACTIVITY_HEADER}\nRead:\n- fake.py"
+
+    monkeypatch.setattr("agentos.session.compaction.call_compaction_llm", fake_llm)
+    entries = [
+        *_tool_entry(0, "read_file", {"path": "src/parser.py"}),
+        *_tool_entry(1, "edit_file", {"path": "src/parser.py", "old_text": "a", "new_text": "b"}),
+        *_tool_entry(2, "write_file", {"path": "src/broken.py"}, error=True),
+        *_tool_entry(3, "read_file", {"path": "docs/grammar.md"}),
+        *_tool_entry(4, "exec_command", {"command": "touch src/shell_only.py"}),
+        *_tool_entry(5, "read_file", {"path": "src/lexer.py"}),
+    ]
+    previous = attach_file_activity(
+        "## Goal\n- before", FileActivity(read=("README.md",), modified=("setup.py",))
+    )
+
+    result = await compact_context(
+        CompactionRequest(
+            session_id="s1",
+            entries=entries,
+            context_window_tokens=1_000,
+            config=CompactionConfig(model="test/model", api_key="test-key"),
+            previous_summary=previous,
+        )
+    )
+
+    assert result.removed_count > 0
+    assert len(earlier) > 1
+    # The first chunk revises the previous summary; every later one revises
+    # the summary so far.
+    assert earlier[0] == "## Goal\n- before"
+    for index, base in enumerate(earlier[1:], start=1):
+        assert base == f"## Goal\n- after chunk {index}"
+    text, files = split_file_activity(result.summary)
+    assert text == f"## Goal\n- after chunk {len(earlier)}"
+    assert files is not None
+    assert "fake.py" not in result.summary
+    assert "src/shell_only.py" not in result.summary
+    assert "src/broken.py" not in result.summary
+    assert "src/parser.py" in files.modified
+    assert "src/parser.py" not in files.read
+    # The structured payload replays the summary text, file lists included.
+    assert result.summary_payload is not None
+    assert "src/parser.py" in result.summary_payload["current_status"]
+
+
+@pytest.mark.asyncio
+async def test_compact_context_merges_the_previous_file_lists(monkeypatch):
+    from agentos.engine.compaction_files import (
+        FileActivity,
+        attach_file_activity,
+        split_file_activity,
+    )
+
+    async def fake_llm(**kwargs):
+        return "## Goal\n- next"
+
+    monkeypatch.setattr("agentos.session.compaction.call_compaction_llm", fake_llm)
+    previous = attach_file_activity(
+        "## Goal\n- before", FileActivity(read=("README.md",), modified=("setup.py",))
+    )
+    entries = [
+        *_tool_entry(0, "edit_file", {"path": "src/a.py", "old_text": "a", "new_text": "b"}),
+        *_tool_entry(1, "read_file", {"path": "README.md"}),
+        *_tool_entry(2, "read_file", {"path": "src/z.py"}),
+    ]
+
+    result = await compact_context(
+        CompactionRequest(
+            session_id="s1",
+            entries=entries,
+            context_window_tokens=400,
+            config=CompactionConfig(model="test/model", api_key="test-key"),
+            previous_summary=previous,
+        )
+    )
+
+    assert result.removed_count > 0
+    _, files = split_file_activity(result.summary)
+    assert files is not None
+    assert files.modified[:2] == ("setup.py", "src/a.py")
+    assert files.read[0] == "README.md"

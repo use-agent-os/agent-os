@@ -558,3 +558,203 @@ def test_trigger_agrees_with_the_provider_request_budget(window: int) -> None:
     # ~74k on a 128k window, ~135k on 200k (16k output reserve).
     expected = {128_000: 73_777, 200_000: 134_977}[window]
     assert abs(limit - expected) <= 2
+
+
+# ---------------------------------------------------------------------------
+# Structured summary: fixed sections, previous summary as the base, file lists
+# ---------------------------------------------------------------------------
+
+
+def _tool_round(tool_id: str, name: str, arguments: dict[str, Any]) -> list[Message]:
+    return [
+        Message(
+            role="assistant",
+            content=[ContentBlockToolUse(id=tool_id, name=name, input=arguments)],
+        ),
+        Message(
+            role="user",
+            content=[ContentBlockToolResult(tool_use_id=tool_id, content="ok " + "r" * 3000)],
+        ),
+    ]
+
+
+def test_summary_prompt_asks_for_the_fixed_sections_in_order() -> None:
+    from agentos.engine.compaction_service import _SUMMARY_SYSTEM_PROMPT, SUMMARY_SECTIONS
+
+    names = [name for name, _ in SUMMARY_SECTIONS]
+    assert names == [
+        "Goal",
+        "Constraints and preferences",
+        "Done",
+        "In progress",
+        "Blocked",
+        "Key decisions",
+        "Next steps",
+        "Critical context",
+    ]
+    positions = [_SUMMARY_SYSTEM_PROMPT.index(f"- {name}:") for name in names]
+    assert positions == sorted(positions)
+    assert "## <section name>" in _SUMMARY_SYSTEM_PROMPT
+    assert "earlier summary" in _SUMMARY_SYSTEM_PROMPT
+    assert "identifiers" in _SUMMARY_SYSTEM_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_summarizer_call_uses_the_structured_prompt_within_the_budget() -> None:
+    from agentos.engine.compaction_files import FILE_ACTIVITY_MAX_TOKENS
+    from agentos.engine.compaction_service import SUMMARY_MAX_TOKENS
+
+    provider = _SummarizingProvider(text="## Goal\n- ship")
+    history = [
+        Message(role="user", content="please ship v2"),
+        Message(role="assistant", content="ok"),
+    ]
+
+    summary, source = await summarize_messages(provider, history, None, window_tokens=10_000)
+
+    assert (summary, source) == ("## Goal\n- ship", "llm")
+    sent, config = provider.calls[0]
+    assert config is not None
+    assert "- Critical context:" in str(config.system)
+    # The model's text and the engine's file block share the summary budget.
+    assert config.max_tokens == SUMMARY_MAX_TOKENS - FILE_ACTIVITY_MAX_TOKENS
+    request = str(sent[0].content)
+    assert request.startswith("Write the summary for the conversation below.")
+    assert "please ship v2" in request
+
+
+@pytest.mark.asyncio
+async def test_previous_summary_is_the_base_of_the_next_request() -> None:
+    provider = _SummarizingProvider(text="## Goal\n- updated")
+    history = [Message(role="user", content="next step"), Message(role="assistant", content="ok")]
+
+    await summarize_messages(provider, history, "## Goal\n- original", window_tokens=10_000)
+
+    request = str(provider.calls[0][0][0].content)
+    assert request.startswith("Revise the earlier summary")
+    assert "[Earlier summary]\n## Goal\n- original\n[End of earlier summary]" in request
+    assert request.index("[Earlier summary]") < request.index("[Newer conversation]")
+    assert "next step" in request
+
+
+@pytest.mark.asyncio
+async def test_chunks_revise_one_summary_in_order_instead_of_merging_parts() -> None:
+    requests: list[str] = []
+
+    async def _chunk(text: str, timeout: float) -> str | None:
+        requests.append(text)
+        return f"## Goal\n- after chunk {len(requests)}"
+
+    history: list[Message] = []
+    for index in range(6):
+        history.append(Message(role="user", content=f"q{index} " + "x" * 4000))
+        history.append(Message(role="assistant", content=f"a{index} " + "y" * 4000))
+
+    summary, source = await summarize_messages(_chunk, history, "start", window_tokens=2_000)
+
+    assert len(requests) > 1
+    assert source == "llm"
+    assert summary == f"## Goal\n- after chunk {len(requests)}"
+    assert "[Earlier summary]\nstart\n" in requests[0]
+    for index, request in enumerate(requests[1:], start=1):
+        assert f"[Earlier summary]\n## Goal\n- after chunk {index}\n" in request
+
+
+@pytest.mark.asyncio
+async def test_file_lists_are_merged_across_two_compactions_outside_the_model_text() -> None:
+    from agentos.engine.compaction_files import FILE_ACTIVITY_HEADER, split_file_activity
+
+    previous_seen: list[str | None] = []
+
+    async def _summarizer(messages: list[Message], previous: str | None) -> tuple[str, str]:
+        previous_seen.append(previous)
+        # A model that makes up its own file list: the engine drops it.
+        invented = f"{FILE_ACTIVITY_HEADER}\nModified:\n- invented.py"
+        return f"## Goal\n- summary {len(previous_seen)}\n\n{invented}", "llm"
+
+    service = CompactionService(provider=None, summarizer=_summarizer)
+    first_history = [
+        Message(role="user", content="refactor the parser " + "x" * 2000),
+        *_tool_round("t1", "read_file", {"path": "src/parser.py"}),
+        *_tool_round(
+            "t2", "edit_file", {"path": "src/parser.py", "old_text": "a", "new_text": "b"}
+        ),
+        *_tool_round("t3", "read_file", {"path": "docs/grammar.md"}),
+        Message(role="assistant", content="parser refactored"),
+    ]
+    first_turn = [Message(role="user", content="now the lexer")]
+    messages = [*first_history, *first_turn]
+
+    first = await service.compact(
+        messages,
+        turn_input_index=len(first_history),
+        estimated_tokens=_tokens(messages),
+        window_tokens=1_000,
+        message_tokens=_tokens,
+    )
+
+    assert first.compacted
+    text, files = split_file_activity(first.summary)
+    assert text == "## Goal\n- summary 1"
+    assert files is not None
+    assert files.modified == ("src/parser.py",)
+    assert files.read == ("docs/grammar.md",)
+    assert first.file_activity == files
+    assert "invented.py" not in first.summary
+    assert first.messages[0].content == f"{CONTEXT_SUMMARY_HEADER}\n{first.summary}"
+
+    second_history = [
+        *first.messages,
+        *_tool_round("t4", "read_file", {"path": "src/lexer.py"}),
+        *_tool_round("t5", "write_file", {"path": "src/tokens.py", "content": "T = 1"}),
+        *_tool_round("t6", "read_file", {"path": "docs/grammar.md"}),
+        Message(role="assistant", content="lexer done"),
+    ]
+    second_turn = [Message(role="user", content="run the tests")]
+    messages = [*second_history, *second_turn]
+
+    second = await service.compact(
+        messages,
+        turn_input_index=len(second_history),
+        estimated_tokens=_tokens(messages),
+        window_tokens=1_000,
+        message_tokens=_tokens,
+    )
+
+    assert second.compacted
+    # The model revised the earlier text only; the lists never reached it.
+    assert previous_seen == [None, "## Goal\n- summary 1"]
+    text, files = split_file_activity(second.summary)
+    assert text == "## Goal\n- summary 2"
+    assert files is not None
+    assert files.modified == ("src/parser.py", "src/tokens.py")
+    assert files.read == ("src/lexer.py", "docs/grammar.md")
+    assert second.summary.count(FILE_ACTIVITY_HEADER) == 1
+
+
+@pytest.mark.asyncio
+async def test_fallback_digest_also_carries_the_file_lists() -> None:
+    from agentos.engine.compaction_files import split_file_activity
+
+    async def _down(text: str, timeout: float) -> str | None:
+        return None
+
+    history = [
+        Message(role="user", content="update config " + "x" * 4000),
+        *_tool_round(
+            "t1", "edit_file", {"path": "conf/app.toml", "old_text": "a", "new_text": "b"}
+        ),
+    ]
+    messages = [*history, Message(role="user", content="next")]
+
+    result = await CompactionService(provider=None, chunk_summarizer=_down).compact(
+        messages,
+        turn_input_index=len(history),
+        estimated_tokens=_tokens(messages),
+        window_tokens=2_000,
+        message_tokens=_tokens,
+    )
+
+    assert result.compacted and result.summary_source == "fallback"
+    _, files = split_file_activity(result.summary)
+    assert files is not None and files.modified == ("conf/app.toml",)

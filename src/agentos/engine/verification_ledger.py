@@ -104,6 +104,34 @@ _RUNNER_PREFIXES = frozenset({"uv", "uvx", "npm", "npx", "pnpm", "yarn", "bun", 
 
 _MAX_PATHS_IN_NUDGE = 8
 
+# Built-in tools that change files on disk, and so count as a mutation. Shell
+# and code-execution tools may change files too, but their commands are not
+# parsed for paths.
+MUTATING_TOOL_NAMES = frozenset({"write_file", "edit_file", "apply_patch"})
+
+_PATCH_FILE_MARKERS = ("*** Update File:", "*** Add File:", "*** Delete File:")
+
+
+def mutated_paths(arguments: dict[str, Any]) -> list[str]:
+    """Pull the touched paths out of a mutating tool's arguments."""
+
+    paths: list[str] = []
+    for key in ("path", "file_path", "target"):
+        value = arguments.get(key)
+        if isinstance(value, str) and value.strip():
+            paths.append(value.strip())
+    patch = arguments.get("patch")
+    if isinstance(patch, str):
+        # apply_patch names its files inside the patch body.
+        for line in patch.splitlines():
+            stripped = line.strip()
+            for marker in _PATCH_FILE_MARKERS:
+                if stripped.startswith(marker):
+                    candidate = stripped[len(marker) :].strip()
+                    if candidate:
+                        paths.append(candidate)
+    return paths
+
 
 @dataclass(frozen=True)
 class VerificationDecision:

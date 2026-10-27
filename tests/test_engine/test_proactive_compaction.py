@@ -657,3 +657,110 @@ async def test_without_calibration_the_raw_estimate_still_compacts(
 
     assert len(provider.summarizer_requests) == 1
     assert str(provider.turn_requests[-1][0].content).startswith("[Context summary]")
+
+
+# ---------------------------------------------------------------------------
+# Structured summary on the proactive path
+# ---------------------------------------------------------------------------
+
+
+class _RecordingProvider(_Provider):
+    """Also keeps the summarizer's chat config."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.summarizer_configs: list[Any] = []
+
+    def chat(self, messages: list[Message], tools=None, config=None) -> AsyncIterator[Any]:
+        if str(getattr(config, "system", "") or "").startswith("You are a conversation compactor"):
+            self.summarizer_configs.append(config)
+        return super().chat(messages, tools, config)
+
+
+async def test_proactive_job_uses_the_structured_summary_prompt(
+    tmp_path: Path, storages: list[SessionStorage]
+) -> None:
+    from agentos.engine.compaction_service import SUMMARY_SECTIONS
+
+    manager = await _manager(tmp_path, storages)
+    provider = _RecordingProvider()
+    runner = _runner(provider, manager, tmp_path)
+    await _seed(manager, KEY, rounds=2)
+
+    await _turn(runner, manager, KEY, "deploy status?", tmp_path)
+    await _scheduler(runner).wait_idle(KEY)
+
+    assert len(provider.summarizer_configs) == 1
+    system = str(provider.summarizer_configs[0].system)
+    for name, _ in SUMMARY_SECTIONS:
+        assert f"- {name}:" in system
+    request = str(provider.summarizer_requests[0][0].content)
+    assert request.startswith("Write the summary for the conversation below.")
+    assert "old question 0" in request
+
+
+async def test_proactive_service_appends_and_merges_the_file_lists() -> None:
+    """The proactive job builds the summary with the same service and builder
+    as the in-turn path: the previous summary is the base, the file lists are
+    the engine's and merge with the previous ones."""
+    from agentos.engine.compaction_files import (
+        FileActivity,
+        attach_file_activity,
+        split_file_activity,
+    )
+    from agentos.engine.compaction_service import CONTEXT_SUMMARY_HEADER, SUMMARY_ACK
+    from agentos.engine.proactive_compaction import PROACTIVE_PHASE, _compaction_service
+    from agentos.provider import ContentBlockToolResult, ContentBlockToolUse
+
+    provider = _Provider()
+    _AUX_PROVIDER["provider"] = provider
+    agent = SimpleNamespace(
+        provider=provider,
+        config=SimpleNamespace(
+            context_overflow_threshold=0.85,
+            compaction_summary_model_hint=("", ""),
+            compaction_summary_timeout_seconds=5.0,
+        ),
+    )
+    service = _compaction_service(agent, KEY)
+    previous = attach_file_activity(
+        "## Goal\n- earlier work", FileActivity(read=("docs/plan.md",), modified=("src/a.py",))
+    )
+    messages = [
+        Message(role="user", content=f"{CONTEXT_SUMMARY_HEADER}\n{previous}"),
+        Message(role="assistant", content=SUMMARY_ACK),
+        Message(role="user", content="continue " + "x" * 3000),
+        Message(
+            role="assistant",
+            content=[
+                ContentBlockToolUse(id="w1", name="write_file", input={"path": "src/b.py"}),
+            ],
+        ),
+        Message(
+            role="user",
+            content=[ContentBlockToolResult(tool_use_id="w1", content="ok " + "y" * 3000)],
+        ),
+        Message(role="assistant", content="wrote it"),
+        Message(role="user", content="next"),
+    ]
+
+    def _size(items: Any) -> int:
+        return sum(len(item.model_dump_json()) for item in items) // 4
+
+    result = await service.compact(
+        messages,
+        turn_input_index=len(messages) - 1,
+        estimated_tokens=_size(messages),
+        window_tokens=4_000,
+        message_tokens=_size,
+        proactive=True,
+    )
+
+    assert service._phase == PROACTIVE_PHASE
+    assert result.compacted
+    request = str(provider.summarizer_requests[0][0].content)
+    assert "[Earlier summary]\n## Goal\n- earlier work\n[End of earlier summary]" in request
+    assert "docs/plan.md" not in request
+    text, files = split_file_activity(result.summary)
+    assert text == SUMMARY
+    assert files == FileActivity(read=("docs/plan.md",), modified=("src/a.py", "src/b.py"))

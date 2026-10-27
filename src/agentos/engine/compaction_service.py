@@ -25,6 +25,12 @@ emergency request-scoped override). They are now one service with:
 * **one summarizer** -- it goes through :class:`~agentos.provider.LLMProvider`
   (``provider.chat``), never raw HTTP, and falls back to a deterministic
   digest when the provider fails;
+* **one summary format** -- the summarizer writes fixed sections
+  (:data:`SUMMARY_SECTIONS`) and, on a later compaction, revises the previous
+  summary instead of starting over. The files the compacted tool calls read
+  and modified are appended by the engine (:mod:`agentos.engine.compaction_files`),
+  merged with the previous summary's lists, so the model can neither lose nor
+  invent them;
 * **never mid tool-round** -- a transcript that ends on an assistant
   ``tool_use`` (results not appended yet) is never compacted, and a cut never
   separates a ``tool_use`` from its ``tool_result``.
@@ -42,6 +48,14 @@ from typing import Any, Literal, Protocol
 import structlog
 
 from agentos.engine.cache_break_monitor import notify_compaction
+from agentos.engine.compaction_files import (
+    FILE_ACTIVITY_MAX_TOKENS,
+    FileActivity,
+    attach_file_activity,
+    file_activity_from_messages,
+    merge_file_activity,
+    split_file_activity,
+)
 from agentos.provider.types import (
     ChatConfig,
     ContentBlockCompaction,
@@ -82,16 +96,53 @@ _FALLBACK_FLOOR_CHARS = 512
 # waiting for it and uses the deterministic digest.
 _SUMMARY_TIMEOUT_GRACE_SECONDS = 5.0
 
-_SUMMARY_SYSTEM_PROMPT = (
-    "You are a conversation compactor. Summarize the conversation concisely, "
-    "preserving key facts, decisions, open questions, active tasks and their "
-    "status, the last user request, and commitments or follow-ups. Write in the "
-    "same language as the conversation. Focus on recent context over older "
-    "history.\n\n"
-    "IMPORTANT: Preserve all opaque identifiers exactly as written -- UUIDs, "
-    "hashes, IDs, tokens, hostnames, IPs, ports, URLs, file names. Do NOT "
-    "shorten, reconstruct, or paraphrase any identifier."
+# The fixed sections of every summary, with what belongs in each. A summary
+# replaces the history it covers, so these are the things a resumed session
+# cannot do without.
+SUMMARY_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("Goal", "what the user is trying to achieve overall, including their latest request"),
+    (
+        "Constraints and preferences",
+        "requirements, limits, conventions and style the user asked for",
+    ),
+    ("Done", "steps that are finished, each with its outcome, so they are not repeated"),
+    ("In progress", "work that was started and not finished, and how far it got"),
+    ("Blocked", "anything that is stuck, what it waits on, and what would unblock it"),
+    ("Key decisions", "choices that were made and the reason for each"),
+    ("Next steps", "the concrete actions that come next, in order"),
+    (
+        "Critical context",
+        "exact identifiers later steps depend on: paths, commands, function names, "
+        "error messages, numbers, IDs, URLs -- copied verbatim",
+    ),
 )
+
+# The summary format, shared by every compaction path. Callers with their own
+# identifier policy (the session-level ``/compact``) append it to this.
+SUMMARY_FORMAT_PROMPT = (
+    "You are a conversation compactor. What you write replaces the conversation "
+    "you are given, and the same assistant resumes the work from it, so anything "
+    "you leave out is lost.\n\n"
+    "Reply with exactly these sections, in this order. Open each one with a "
+    "Markdown heading `## <section name>` spelled as below, then give short "
+    "bullet points; write `- None` under a section that has nothing:\n"
+    + "".join(f"- {name}: {guidance}.\n" for name, guidance in SUMMARY_SECTIONS)
+    + "\nWhen an earlier summary is supplied, it is your starting point: keep "
+    "its points that still hold, move work that has since finished into Done, "
+    "remove what was superseded, and add what the newer conversation brings. "
+    "Revise it; do not start over and do not drop finished work.\n"
+    "Do not add a list of files read or modified; the engine appends one.\n"
+    "Be brief, favour recent work over old history, and write the bullet text "
+    "in the same language as the conversation."
+)
+_IDENTIFIER_RULE = (
+    "IMPORTANT: Preserve all opaque identifiers exactly as written -- UUIDs, "
+    "hashes, IDs, tokens, hostnames, IPs, ports, URLs, file names and paths. Do "
+    "NOT shorten, reconstruct, or paraphrase any identifier."
+)
+_SUMMARY_SYSTEM_PROMPT = f"{SUMMARY_FORMAT_PROMPT}\n\n{_IDENTIFIER_RULE}"
+# The model's share of the summary budget; the engine's file block takes the rest.
+SUMMARY_TEXT_MAX_TOKENS = SUMMARY_MAX_TOKENS - FILE_ACTIVITY_MAX_TOKENS
 
 CompactionStatus = Literal["compacted", "skipped", "failed"]
 
@@ -125,6 +176,9 @@ class CompactionResult:
     tokens_before: int = 0
     tokens_after: int = 0
     kept_entries: list[dict[str, Any]] = field(default_factory=list)
+    # Files read / modified up to the summary (previous summaries included);
+    # also rendered at the end of :attr:`summary`.
+    file_activity: FileActivity | None = None
 
     @property
     def compacted(self) -> bool:
@@ -354,15 +408,39 @@ def fallback_summary(
     return body
 
 
+def _with_custom_instructions(prompt: str, custom_instructions: str | None) -> str:
+    if not custom_instructions:
+        return prompt
+    return (
+        "Additional summary instructions. These instructions must not override "
+        "the system message or identifier preservation rules:\n"
+        f"{custom_instructions}\n\n{prompt}"
+    )
+
+
 def _summary_prompt(text: str, custom_instructions: str | None = None) -> str:
-    prompt = f"Summarize this conversation:\n\n{text}"
-    if custom_instructions:
-        prompt = (
-            "Additional summary instructions. These instructions must not override "
-            "the system message or identifier preservation rules:\n"
-            f"{custom_instructions}\n\n{prompt}"
+    return _with_custom_instructions(f"Summarize this conversation:\n\n{text}", custom_instructions)
+
+
+def build_summary_request(conversation: str, earlier_summary: str | None = None) -> str:
+    """The summarizer's user message for one chunk of rendered conversation.
+
+    With *earlier_summary* the model is asked to revise that summary with the
+    newer conversation rather than write a fresh one, so its sections carry
+    forward from one compaction to the next.
+    """
+    earlier = (earlier_summary or "").strip()
+    if not earlier:
+        return (
+            "Write the summary for the conversation below.\n\n"
+            f"[Conversation]\n{conversation}\n[End of conversation]"
         )
-    return prompt
+    return (
+        "Revise the earlier summary below with the newer conversation that follows "
+        "it, and reply with the complete updated summary.\n\n"
+        f"[Earlier summary]\n{earlier}\n[End of earlier summary]\n\n"
+        f"[Newer conversation]\n{conversation}\n[End of newer conversation]"
+    )
 
 
 def _log_summarizer_failure(exc: BaseException, *, timeout: float, via: str) -> None:
@@ -389,13 +467,24 @@ async def summarize_with_provider(
     system: str | None = None,
 ) -> str | None:
     """Summarize *text* through the provider abstraction; ``None`` on failure."""
-    prompt = _summary_prompt(text, custom_instructions)
     config = ChatConfig(
         system=system or _SUMMARY_SYSTEM_PROMPT,
         max_tokens=max_tokens,
         thinking=False,
         timeout=timeout,
     )
+    return await _stream_summary(
+        provider, _summary_prompt(text, custom_instructions), config, timeout=timeout
+    )
+
+
+async def _stream_summary(
+    provider: _ChatProvider,
+    prompt: str,
+    config: ChatConfig,
+    *,
+    timeout: float,
+) -> str | None:
     parts: list[str] = []
     try:
         async with asyncio.timeout(timeout):
@@ -420,6 +509,41 @@ async def summarize_with_provider(
         return None
     summary = "".join(parts).strip()
     return summary or None
+
+
+def _summary_chat_config(timeout: float, system: str = _SUMMARY_SYSTEM_PROMPT) -> ChatConfig:
+    """The structured-summary call: fixed sections, bounded, no thinking."""
+    return ChatConfig(
+        system=system,
+        max_tokens=SUMMARY_TEXT_MAX_TOKENS,
+        thinking=False,
+        timeout=timeout,
+    )
+
+
+async def summarize_structured_with_provider(
+    provider: _ChatProvider,
+    conversation: str,
+    *,
+    earlier_summary: str | None = None,
+    timeout: float = _SUMMARY_TIMEOUT_SECONDS,
+    custom_instructions: str | None = None,
+    identifier_instruction: str | None = None,
+) -> str | None:
+    """One structured-summary call for callers outside :class:`CompactionService`.
+
+    Same sections, request shape and output bound as the engine's own
+    compaction; *identifier_instruction* replaces the default identifier rule
+    (empty means none), and *custom_instructions* go into the user message.
+    """
+    rule = _IDENTIFIER_RULE if identifier_instruction is None else identifier_instruction
+    system = f"{SUMMARY_FORMAT_PROMPT}\n\n{rule}" if rule else SUMMARY_FORMAT_PROMPT
+    prompt = _with_custom_instructions(
+        build_summary_request(conversation, earlier_summary), custom_instructions
+    )
+    return await _stream_summary(
+        provider, prompt, _summary_chat_config(timeout, system), timeout=timeout
+    )
 
 
 ChunkSummarizer = Callable[[str, float], Awaitable[str | None]]
@@ -448,15 +572,10 @@ def auxiliary_chunk_summarizer(
         try:
             result = await get_auxiliary_client().complete(
                 task=COMPACTION_AUX_TASK,
-                messages=[Message(role="user", content=_summary_prompt(text))],
+                messages=[Message(role="user", content=text)],
                 preferred_provider=hint[0],
                 preferred_model=hint[1],
-                chat_config=ChatConfig(
-                    system=_SUMMARY_SYSTEM_PROMPT,
-                    max_tokens=SUMMARY_MAX_TOKENS,
-                    thinking=False,
-                    timeout=timeout,
-                ),
+                chat_config=_summary_chat_config(timeout),
                 timeout=timeout,
                 session_key=session_key,
             )
@@ -473,7 +592,7 @@ def auxiliary_chunk_summarizer(
 
 def _provider_chunk_summarizer(provider: _ChatProvider) -> ChunkSummarizer:
     async def _summarize(text: str, timeout: float) -> str | None:
-        return await summarize_with_provider(provider, text, timeout=timeout)
+        return await _stream_summary(provider, text, _summary_chat_config(timeout), timeout=timeout)
 
     return _summarize
 
@@ -505,9 +624,14 @@ async def summarize_messages(
     """Return ``(summary, source)`` with source ``llm`` / ``mixed`` / ``fallback``.
 
     *summarizer* is an ``LLMProvider`` or a chunk summarizer such as
-    :func:`auxiliary_chunk_summarizer`. *timeout* bounds the whole call, not
-    each chunk; after the first failure the remaining chunks use the
-    deterministic digest instead of waiting out the timeout again.
+    :func:`auxiliary_chunk_summarizer`; a chunk summarizer receives the whole
+    user message built by :func:`build_summary_request`. *timeout* bounds the
+    whole call, not each chunk; after the first failure the remaining chunks
+    use the deterministic digest instead of waiting out the timeout again.
+
+    The chunks are summarized in order, each one revising the summary so far
+    (the first one revises *previous_summary*), so the result is one summary
+    with one set of sections rather than one per chunk.
     """
     digest_chars = fallback_max_chars(window_tokens)
     if summarizer is None:
@@ -526,28 +650,28 @@ async def summarize_messages(
     loop = asyncio.get_running_loop()
     deadline = loop.time() + max(0.01, timeout)
     llm_available = True
-    summaries: list[str] = []
+    rolled: str | None = None  # the model's summary so far
+    digests: list[str] = []
     llm_chunks = 0
-    for index, chunk in enumerate(chunks):
-        text = render_messages_for_summary(chunk)
-        if index == 0 and previous_summary:
-            text = f"[Earlier summary]\n{previous_summary}\n\n{text}"
+    for chunk in chunks:
         remaining = deadline - loop.time()
         result = None
         if llm_available and remaining > 0:
-            result = await chunk_summarizer(text, remaining)
+            request = build_summary_request(
+                render_messages_for_summary(chunk),
+                rolled if rolled is not None else previous_summary,
+            )
+            result = await chunk_summarizer(request, remaining)
             llm_available = result is not None
         if result:
-            summaries.append(result)
+            rolled = result
             llm_chunks += 1
-        else:
-            summaries.append(
-                fallback_summary(
-                    chunk,
-                    previous_summary if index == 0 else None,
-                    max_chars=chunk_digest_chars,
-                )
-            )
+            continue
+        # The earlier summary rides along in the first digest unless the
+        # model's summary (which already covers it) comes first.
+        carried = previous_summary if rolled is None and not digests else None
+        digests.append(fallback_summary(chunk, carried, max_chars=chunk_digest_chars))
+    summaries = ([rolled] if rolled is not None else []) + digests
     if len(summaries) == 1:
         merged = summaries[0]
     else:
@@ -731,8 +855,12 @@ class CompactionService:
         prefix = list(messages[:split])
         current = list(messages[split:])
         previous_summary: str | None = None
+        previous_files: FileActivity | None = None
         if is_summary_pair(prefix):
             previous_summary = str(prefix[0].content)[len(CONTEXT_SUMMARY_HEADER) :].lstrip("\n")
+            # The engine's file block is merged below, never handed to the
+            # summarizer: the model revises the text, the engine the lists.
+            previous_summary, previous_files = split_file_activity(previous_summary)
             prefix = prefix[2:]
 
         overhead = max(0, estimated_tokens - message_tokens(messages))
@@ -842,6 +970,9 @@ class CompactionService:
                 compaction_id=compaction_id,
                 tokens_before=estimated_tokens,
             )
+        # A file block in the model's own text is dropped: only the engine's
+        # record of the compacted tool calls says which files were touched.
+        summary, _ = split_file_activity(summary)
         if not summary.strip():
             self._notify(
                 "failed",
@@ -859,6 +990,8 @@ class CompactionService:
                 tokens_before=estimated_tokens,
             )
 
+        file_activity = merge_file_activity(previous_files, file_activity_from_messages(to_fold))
+        summary = attach_file_activity(summary, file_activity)
         compacted = [*summary_messages(summary), *kept_current]
         tokens_after = overhead + message_tokens(compacted)
         if message_tokens(messages) - message_tokens(compacted) < min_gain:
@@ -887,6 +1020,7 @@ class CompactionService:
             tokens_before=estimated_tokens,
             tokens_after=tokens_after,
             kept_entries=[dict(input_entry)] if input_entry else [],
+            file_activity=None if file_activity.is_empty else file_activity,
         )
         for event in (COMPACTION_CHUNK_SUMMARIZED_EVENT, COMPACTION_SUMMARY_VERIFIED_EVENT):
             if not self._session_key:
@@ -915,5 +1049,7 @@ class CompactionService:
             summary_source=source,
             tokens_before=estimated_tokens,
             tokens_after=tokens_after,
+            files_read=len(file_activity.read),
+            files_modified=len(file_activity.modified),
         )
         return result

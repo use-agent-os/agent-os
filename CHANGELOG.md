@@ -17,6 +17,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   alphanumerics) with their tool results kept paired. Plain text and
   `reasoning_content` stay. Replays to the same model, and history without
   provenance, are sent unchanged.
+### Changed
+- Engine: the context compaction summary now has fixed sections (Goal,
+  Constraints and preferences, Done, In progress, Blocked, Key decisions,
+  Next steps, Critical context), and a later compaction revises the previous
+  summary instead of writing a new one; a long history split into chunks now
+  yields one revised summary rather than one per chunk. The files read and
+  modified by the compacted tool calls are appended by the engine, merged
+  across compactions and capped, so the model can neither drop nor invent
+  them. Applies to the in-turn, the proactive (between-turns) and the manual
+  (`/compact`, `sessions.compact`) compaction.
 
 ## [2026.10.27] - 2026-10-27
 
