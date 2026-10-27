@@ -44,6 +44,7 @@ __all__ = [
     "ArgumentIssue",
     "ToolArgumentsRejectedError",
     "admit_tool_arguments",
+    "coerce_tool_arguments",
     "tool_argument_schema",
 ]
 
@@ -119,7 +120,10 @@ def tool_argument_schema(spec: ToolSpec) -> dict[str, Any] | None:
     register a whole object schema there instead. Both shapes are accepted.
     """
 
-    parameters = spec.parameters
+    return _object_schema(spec.parameters, spec.required)
+
+
+def _object_schema(parameters: Any, spec_required: Any) -> dict[str, Any] | None:
     if not isinstance(parameters, Mapping):
         return None
     required: list[str] = []
@@ -135,7 +139,6 @@ def tool_argument_schema(spec: ToolSpec) -> dict[str, Any] | None:
         properties = parameters
     if not isinstance(properties, Mapping):
         return None
-    spec_required = spec.required
     if spec_required is not None and not isinstance(spec_required, list | tuple):
         return None
     for name in spec_required or ():
@@ -147,7 +150,29 @@ def tool_argument_schema(spec: ToolSpec) -> dict[str, Any] | None:
 def admit_tool_arguments(spec: ToolSpec, arguments: Mapping[str, Any]) -> ArgumentAdmission:
     """Validate ``arguments`` against ``spec``'s schema, applying safe coercions."""
 
-    schema = tool_argument_schema(spec)
+    return _admit(tool_argument_schema(spec), arguments)
+
+
+def coerce_tool_arguments(
+    properties: Mapping[str, Any],
+    required: Sequence[str],
+    arguments: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """The coerced arguments for a call, or None when there is nothing to coerce.
+
+    For callers that only want the lossless repairs applied early (the engine,
+    so the transcript keeps the value that actually runs) and leave rejection
+    to dispatch. Arguments that do not fully validate are left as they are:
+    dispatch then rejects them with the values the model actually sent.
+    """
+
+    admission = _admit(_object_schema(properties, list(required)), arguments)
+    if not admission.ok or not admission.coerced:
+        return None
+    return admission.arguments
+
+
+def _admit(schema: dict[str, Any] | None, arguments: Mapping[str, Any]) -> ArgumentAdmission:
     if schema is None or not isinstance(arguments, Mapping):
         return ArgumentAdmission(arguments=dict(arguments or {}), validated=False)
     outcome = _check(dict(arguments), schema, "", depth=0, optional=False)

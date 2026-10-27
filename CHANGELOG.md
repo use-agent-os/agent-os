@@ -109,7 +109,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   a boolean, a JSON-encoded string for an array or object) are coerced;
   anything else is rejected with `ToolArgumentsRejected`, naming each failing
   argument path and the expected type, instead of a generic type error from
-  the handler. Rejections count toward the repeated-failure guard.
+  the handler. Coerced values are what the transcript keeps and what the
+  next request replays. A rejection is marked retryable (a corrected call
+  should run), and identical rejected calls still count toward the
+  repeated-failure guard.
   `POST /api/v1/tools/invoke` answers such a call with `400 INVALID_REQUEST`.
 ### Added
 - Engine: when a reply ends by writing a tool call out as text (a JSON call in

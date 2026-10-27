@@ -57,6 +57,8 @@ _RETRIABLE_CLASSES: Final[frozenset[str]] = frozenset(
         "BrokenPipeError",
         "TransientError",
         "TypeError",
+        # Arguments that did not match the schema: a corrected call should run.
+        "ToolArgumentsRejectedError",
     }
 )
 

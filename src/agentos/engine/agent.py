@@ -2079,14 +2079,17 @@ class Agent:
                                     if acc is not None
                                     else raw_ev.synthetic_from_text
                                 )
+                                end_tool_name = self._canonical_tool_name(
+                                    raw_ev.tool_name,
+                                    tool_use_id=raw_ev.tool_use_id,
+                                )
                                 tool_calls.append(
                                     ToolCall(
                                         tool_use_id=raw_ev.tool_use_id,
-                                        tool_name=self._canonical_tool_name(
-                                            raw_ev.tool_name,
-                                            tool_use_id=raw_ev.tool_use_id,
+                                        tool_name=end_tool_name,
+                                        arguments=self._coerce_tool_arguments(
+                                            end_tool_name, arguments
                                         ),
-                                        arguments=arguments,
                                         synthetic_from_text=synthetic_from_text,
                                         thought_signature=raw_ev.thought_signature,
                                     )
@@ -4562,6 +4565,34 @@ class Agent:
                 rules=list(resolution.rules),
             )
         return resolution.resolved
+
+    def _coerce_tool_arguments(self, tool_name: str, arguments: Any) -> Any:
+        """Apply the lossless argument repairs dispatch would apply, up front.
+
+        Uses the schema of the tool definition sent with the request, so the
+        persisted ``tool_use`` input, replayed history and dispatch all carry
+        the value that actually runs. Rejection stays in dispatch: arguments
+        that do not fully validate are returned unchanged.
+        """
+        definition = self._tool_definition_by_name.get(tool_name)
+        if definition is None:
+            definition = next(
+                (item for item in self.tool_definitions if item.name == tool_name), None
+            )
+        schema = getattr(definition, "input_schema", None)
+        if schema is None or not isinstance(arguments, dict):
+            return arguments
+        from agentos.tools.argument_admission import coerce_tool_arguments
+
+        try:
+            coerced = coerce_tool_arguments(
+                getattr(schema, "properties", None) or {},
+                getattr(schema, "required", None) or [],
+                arguments,
+            )
+        except Exception:  # noqa: BLE001 - dispatch still validates the call
+            return arguments
+        return arguments if coerced is None else coerced
 
     async def _execute_tool(self, tc: ToolCall) -> ToolResult:
         """Dispatch a tool call to the registered handler."""

@@ -408,7 +408,8 @@ async def test_rejected_call_names_every_failing_path_and_never_runs() -> None:
     assert result.execution_status is not None
     assert result.execution_status["reason"] == "invalid_arguments"
     assert payload["error_class"] == "ToolArgumentsRejected"
-    assert payload["retry_allowed"] is False
+    # A corrected call is exactly what the model should do next.
+    assert payload["retry_allowed"] is True
     message = payload["user_message"]
     assert message.startswith("Invalid arguments for read_file: ")
     assert 'offset: expected integer, got string "ten"' in message

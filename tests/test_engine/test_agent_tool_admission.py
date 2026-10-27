@@ -120,6 +120,11 @@ async def test_repeated_rejections_reach_the_failure_loop_guard() -> None:
     ]
     assert calls == []
     assert reasons == ["invalid_arguments", "invalid_arguments", "tool_failure_loop_exhausted"]
+    # Marked retryable (a corrected call should run), yet the unchanged
+    # repeats still end in the loop stop.
+    first = json.loads(_tool_results(events)[0].result)
+    assert first["error_class"] == "ToolArgumentsRejected"
+    assert first["retry_allowed"] is True
 
 
 async def test_rejected_call_is_recorded_like_any_failed_call() -> None:
@@ -332,3 +337,78 @@ async def test_unresolvable_names_reach_dispatch_unchanged() -> None:
 
 async def _noop(**_kwargs: Any) -> str:
     return "noop"
+
+
+def _replayed_tool_inputs(provider: _BatchProvider) -> dict[str, Any]:
+    return {
+        block.id: block.input
+        for message in provider.calls[1]
+        if not isinstance(message.content, str)
+        for block in message.content
+        if getattr(block, "type", None) == "tool_use"
+    }
+
+
+def _read_registry(seen: list[dict[str, Any]]) -> ToolRegistry:
+    async def _read(**kwargs: Any) -> str:
+        seen.append(kwargs)
+        return "read ok"
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(
+            name="read_file",
+            description="Read.",
+            parameters={"path": {"type": "string"}, "limit": {"type": "integer"}},
+            required=["path"],
+        ),
+        _read,
+    )
+    return registry
+
+
+async def test_coerced_arguments_are_what_history_and_the_next_request_carry() -> None:
+    seen: list[dict[str, Any]] = []
+    registry = _read_registry(seen)
+    provider = _BatchProvider([("c1", "read_file", {"path": "a.txt", "limit": "1"})])
+    agent = Agent(
+        provider=provider,
+        config=AgentConfig(max_iterations=3),
+        tool_definitions=registry.to_tool_definitions(),
+        tool_registry=registry,
+        tool_handler=build_tool_handler(registry, ToolContext()),
+    )
+
+    events = [event async for event in agent.run_turn("read it")]
+
+    assert seen == [{"path": "a.txt", "limit": 1}]
+    assert _replayed_tool_inputs(provider) == {"c1": {"path": "a.txt", "limit": 1}}
+    history_inputs = [
+        block.input
+        for message in agent._history
+        if not isinstance(message.content, str)
+        for block in message.content
+        if getattr(block, "type", None) == "tool_use"
+    ]
+    assert history_inputs == [{"path": "a.txt", "limit": 1}]
+    assert any(isinstance(event, DoneEvent) for event in events)
+
+
+async def test_arguments_that_will_be_rejected_are_kept_as_sent() -> None:
+    seen: list[dict[str, Any]] = []
+    registry = _read_registry(seen)
+    sent = {"path": 7, "limit": "1"}
+    provider = _BatchProvider([("c2", "read_file", dict(sent))])
+    agent = Agent(
+        provider=provider,
+        config=AgentConfig(max_iterations=3),
+        tool_definitions=registry.to_tool_definitions(),
+        tool_registry=registry,
+        tool_handler=build_tool_handler(registry, ToolContext()),
+    )
+
+    events = [event async for event in agent.run_turn("read it")]
+
+    assert seen == []
+    assert _replayed_tool_inputs(provider) == {"c2": sent}
+    assert json.loads(_tool_results(events)[0].result)["error_class"] == "ToolArgumentsRejected"

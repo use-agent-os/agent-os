@@ -86,12 +86,14 @@ checked once:
   `properties`, `required`, `items`, `enum`, `additionalProperties`,
   `anyOf`/`oneOf`). Lossless mistakes are repaired: `"5"` for an integer or
   number, `5.0` for an integer, `"true"`/`"false"` for a boolean, and a
-  JSON-encoded string where an array or object is expected. Nothing is turned
-  into `null`, and arguments the schema does not mention are passed through
-  unchanged. Anything else is rejected without running the tool: the result is
+  JSON-encoded string where an array or object is expected. The repaired value
+  is what the transcript keeps and what the model sees on its next request.
+  Nothing is turned into `null`, and arguments the schema does not mention are
+  passed through unchanged. Anything else is rejected without running the tool: the result is
   an error with `error_class: "ToolArgumentsRejected"` (status reason
   `invalid_arguments`) that names every failing argument path and the type it
-  expected. A rejected call counts as a failed call, so repeating it unchanged
+  expected, marked `retry_allowed: true` because a corrected call should run.
+  A rejected call counts as a failed call, so repeating it unchanged
   trips the same failure-loop guard as any other failure. A tool whose schema
   cannot be read is not validated.
 
