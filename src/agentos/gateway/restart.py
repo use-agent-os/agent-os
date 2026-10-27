@@ -557,6 +557,20 @@ def get_restarter() -> GatewayRestarter | None:
 # ── after boot: confirm back to the chat that asked ─────────────────
 
 
+def peek_request(config: Any) -> RestartRequest | None:
+    """The request the previous image left behind, left in place (or ``None``).
+
+    For boot code that must know who asked for the restart before
+    :func:`read_and_clear_request` consumes it (restart recovery does not
+    resume the turn that asked). Never raises.
+    """
+    try:
+        raw = restart_request_path(config).read_text(encoding="utf-8")
+        return RestartRequest.from_json(json.loads(raw))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+
+
 def read_and_clear_request(config: Any, *, now: float | None = None) -> RestartRequest | None:
     """The request the previous image left behind, or ``None``.
 
@@ -711,6 +725,7 @@ __all__ = [
     "get_restarter",
     "in_place_restart_supported",
     "normalize_mode",
+    "peek_request",
     "read_and_clear_request",
     "restart_completion_text",
     "restart_request_path",

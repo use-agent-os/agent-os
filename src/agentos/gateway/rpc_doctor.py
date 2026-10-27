@@ -607,6 +607,91 @@ def _safe_mode_findings() -> list[HealthFinding]:
     ]
 
 
+def _turn_recovery_findings() -> list[HealthFinding]:
+    """Turns a restart or crash interrupted: being resumed, or left for the user."""
+    from agentos.gateway.turn_recovery import get_turn_recovery
+
+    recovery = get_turn_recovery()
+    if recovery is None:
+        return []
+    snapshot = recovery.snapshot()
+    if not snapshot.get("found"):
+        return []
+    sessions = [item for item in recovery.recoveries() if item.get("state") != "closed"][:20]
+    evidence = {**snapshot, "sessions": sessions}
+    not_resumed = sum(int(snapshot.get(key) or 0) for key in ("tombstoned", "reported", "expired"))
+    in_progress = int(snapshot.get("pending") or 0) + int(snapshot.get("running") or 0)
+    findings: list[HealthFinding] = []
+    if not_resumed:
+        findings.append(
+            HealthFinding(
+                id="gateway.turn_recovery.not_resumed",
+                severity="warn",
+                readiness_impact="none",
+                surface="gateway",
+                title=f"{not_resumed} interrupted turn(s) were not resumed",
+                detail=(
+                    "A gateway restart or crash stopped these turns and they were not "
+                    "continued automatically ("
+                    + (
+                        "automatic resume is off"
+                        if not snapshot.get("auto_resume")
+                        else "attempts used up, too old, or safe mode"
+                    )
+                    + "). Each session has a note; a new message there continues it."
+                ),
+                evidence=evidence,
+                fix_steps=[
+                    FixStep(
+                        label="Continue the session",
+                        detail="Open the session and send a message. Check any tool "
+                        "result marked unknown before repeating that action.",
+                    ),
+                    *(
+                        []
+                        if snapshot.get("auto_resume")
+                        else [
+                            FixStep(
+                                label="Resume interrupted turns automatically",
+                                command=(
+                                    "agentos config set task_runtime.resume_interrupted_turns true"
+                                ),
+                            )
+                        ]
+                    ),
+                ],
+            )
+        )
+    if in_progress:
+        findings.append(
+            HealthFinding(
+                id="gateway.turn_recovery.in_progress",
+                severity="info",
+                readiness_impact="none",
+                surface="gateway",
+                title=f"Resuming {in_progress} turn(s) interrupted by a restart",
+                detail="The gateway is continuing turns it was running when it stopped.",
+                evidence=evidence,
+            )
+        )
+    if not findings:
+        findings.append(
+            HealthFinding(
+                id="gateway.turn_recovery.ok",
+                severity="ok",
+                surface="gateway",
+                title="Interrupted turns handled",
+                detail=(
+                    f"{snapshot.get('resumed', 0)} resumed, {snapshot.get('closed', 0)} "
+                    f"needed nothing, {snapshot.get('cancelled', 0)} superseded by a new "
+                    "message."
+                ),
+                evidence=evidence,
+            )
+        )
+    return findings
+
+
 def _config_reload_findings(ctx: RpcContext) -> list[HealthFinding]:
     """Restart-only config changes still pending, and a config file edit that was refused."""
     from agentos.gateway.config_commit import pending_restart_metadata
@@ -673,6 +758,7 @@ async def _handle_doctor_status(params: dict | None, ctx: RpcContext) -> dict[st
             evidence={"connId": ctx.conn_id},
         ),
         *_safe_mode_findings(),
+        *_turn_recovery_findings(),
     ]
 
     collectors: list[tuple[str, Collector, Evaluator]] = [

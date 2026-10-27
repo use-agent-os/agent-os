@@ -98,6 +98,7 @@ class GatewayReadiness:
         self._safe_mode: Callable[[], dict[str, Any]] | None = None
         self._active_turns: Callable[[], int] | None = None
         self._failing_channels: Callable[[], list[str]] | None = None
+        self._turn_recovery: Callable[[], dict[str, Any]] | None = None
 
     # ── wiring ──────────────────────────────────────────────────────
 
@@ -111,6 +112,19 @@ class GatewayReadiness:
     def attach_failing_channels(self, provider: Callable[[], list[str]]) -> None:
         """``provider()`` names channels that are down (failed start, terminal)."""
         self._failing_channels = provider
+
+    def attach_turn_recovery(self, provider: Callable[[], dict[str, Any]]) -> None:
+        """``provider()`` counts the turns restart recovery found, by state."""
+        self._turn_recovery = provider
+
+    def turn_recovery(self) -> dict[str, Any] | None:
+        if self._turn_recovery is None:
+            return None
+        try:
+            snapshot = self._turn_recovery()
+        except Exception:  # noqa: BLE001 - a probe must never fail on recovery
+            return None
+        return snapshot if isinstance(snapshot, dict) else None
 
     def failing_channels(self) -> list[str]:
         if self._failing_channels is None:
@@ -237,6 +251,10 @@ class GatewayReadiness:
             "safe_mode": self.safe_mode(),
             "drain_budget_ms": drain_budget_ms(),
         }
+        recovery = self.turn_recovery()
+        if recovery is not None:
+            # Informational: interrupted turns never make the gateway unready.
+            payload["turn_recovery"] = recovery
         return payload
 
 

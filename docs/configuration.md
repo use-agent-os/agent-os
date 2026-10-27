@@ -1024,6 +1024,20 @@ way. Set it to `false` to go back to running them one after another.
 concurrent_turn_setup = true
 ```
 
+### Interrupted turns
+
+A turn that a gateway restart or crash cut short is resumed on the next boot
+from what its transcript shows; one whose last tool calls have no recorded
+result resumes with read and status tools only. `[task_runtime]
+resume_interrupted_turns` (default `true`) controls this; `false` only reports
+interrupted turns (a note in the session, `/ready` `turn_recovery`,
+`agentos doctor`). See [Gateway: interrupted turns](gateway.md#interrupted-turns).
+
+```toml
+[task_runtime]
+resume_interrupted_turns = true
+```
+
 Read: [`features/memory.md`](features/memory.md)
 
 ## Context Compaction

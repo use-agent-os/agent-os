@@ -35,6 +35,7 @@ from agentos.engine.steering import SteeringMessage, bind_steering
 from agentos.gateway.routing import RouteEnvelope, SourceKind
 from agentos.gateway.session_lifecycle import TaskLifecycleEvent, TaskLifecycleListener
 from agentos.gateway.terminal_events import TerminalPublications, runtime_terminal_frame
+from agentos.gateway.turn_recovery_route import route_snapshot
 from agentos.session.keys import canonicalize_session_key, normalize_agent_id, parse_agent_id
 from agentos.session.models import AgentTaskRecord, AgentTaskStatus
 from agentos.session.terminal_reply import (
@@ -98,6 +99,11 @@ TERMINAL_STATUSES = frozenset(
 #: reserved-slot budget and announce completion to the parent. ``acp`` is a
 #: coding-harness child spawned by ``sessions_spawn(runtime="acp")``.
 _CHILD_RUN_KINDS = frozenset({"subagent", "acp"})
+
+#: ``cancel_source`` of a task the gateway's own shutdown cancels.
+SHUTDOWN_CANCEL_SOURCE = "gateway_shutdown"
+#: ``terminal_reason`` of a turn a graceful shutdown or restart cut short.
+SHUTDOWN_INTERRUPTED_REASON = "shutdown_interrupted"
 
 TaskStreamEventSink = Callable[[Any], Awaitable[None]]
 #: Writes a deferred user message to the transcript; returns the stored text
@@ -492,6 +498,9 @@ class TaskRuntime:
         # One terminal stream frame per run, whichever path ends it.
         self._terminal_publications = TerminalPublications()
         self._finalizers: set[asyncio.Task[None]] = set()
+        # Told about every task as it is admitted (restart recovery cancels a
+        # pending resume when the user writes first). Called synchronously.
+        self._enqueue_listeners: builtins.list[Callable[[AgentTaskRecord], None]] = []
 
     def stop_admission(self) -> None:
         """Refuse every further :meth:`enqueue` until :meth:`resume_admission`."""
@@ -504,6 +513,10 @@ class TaskRuntime:
     @property
     def admitting(self) -> bool:
         return self._admitting
+
+    def add_enqueue_listener(self, listener: Callable[[AgentTaskRecord], None]) -> None:
+        """Call *listener* with each task record right after it is admitted."""
+        self._enqueue_listeners.append(listener)
 
     @property
     def terminal_publications(self) -> TerminalPublications:
@@ -586,6 +599,8 @@ class TaskRuntime:
                 "metadata": envelope.metadata,
                 "persisted_user_message_id": persisted_user_message_id,
                 "fresh_user_session": fresh_user_session,
+                # Who to answer, so a turn a restart cut short can be resumed.
+                "route": route_snapshot(envelope),
             },
         )
         if deferred_input is not None and isinstance(record.details, dict):
@@ -598,6 +613,11 @@ class TaskRuntime:
             if idempotency_fingerprint:
                 record.details["idempotency_fingerprint"] = idempotency_fingerprint
         await self._storage.create_agent_task(record)
+        for listener in builtins.list(self._enqueue_listeners):
+            try:
+                listener(record)
+            except Exception:  # noqa: BLE001 - a listener never blocks admission
+                log.debug("task_runtime.enqueue_listener_failed", exc_info=True)
         runtime_task = _RuntimeTask(
             task_id=record.task_id,
             envelope=envelope,
@@ -762,6 +782,11 @@ class TaskRuntime:
         """True while ``task_id`` is queued or running in this process."""
         task = self._tasks.get(task_id)
         return task is not None and task.status not in TERMINAL_STATUSES
+
+    def is_task_started(self, task_id: str) -> bool:
+        """True once ``task_id`` reached ``running`` in this process (and is not done)."""
+        task = self._tasks.get(task_id)
+        return task is not None and task.started and task.status not in TERMINAL_STATUSES
 
     def active_task_ids(self, session_key: str) -> builtins.list[str]:
         """Ids of the queued and running tasks of ``session_key``, oldest first."""
@@ -997,6 +1022,7 @@ class TaskRuntime:
             tasks = [t for t in tasks if not t.done()]
 
         if cancel:
+            self._stamp_shutdown_interrupt()
             for task in tasks:
                 task.cancel()
         if tasks:
@@ -1290,6 +1316,21 @@ class TaskRuntime:
         except asyncio.CancelledError:
             if task.steered_into is not None and task.terminal_emitted:
                 # A running turn took this message; its task already ended.
+                return
+            if task.cancel_source == SHUTDOWN_CANCEL_SOURCE and not task.overflow_dropped:
+                # The gateway stopped under the turn: interrupted, not
+                # cancelled by anyone, so restart recovery can pick it up.
+                _emit_metric(
+                    "turn_cancellations_total",
+                    value=1,
+                    reason="shutdown",
+                    session_key=task.envelope.session_key,
+                )
+                await self._mark_terminal(
+                    task,
+                    AgentTaskStatus.ABANDONED,
+                    terminal_reason=SHUTDOWN_INTERRUPTED_REASON,
+                )
                 return
             reason = "overflow_drop" if task.overflow_dropped else "interrupt"
             terminal_reason = "dropped_by_overflow" if task.overflow_dropped else "cancelled"
@@ -1801,6 +1842,14 @@ class TaskRuntime:
                 status=status.value,
                 exc_info=True,
             )
+
+    def _stamp_shutdown_interrupt(self) -> None:
+        """Tag every unfinished task as stopped by the gateway shutting down."""
+        for task in self._tasks.values():
+            if task.status in TERMINAL_STATUSES or task.cancel_requested:
+                continue
+            task.cancel_source = SHUTDOWN_CANCEL_SOURCE
+            task.cancel_reason = SHUTDOWN_INTERRUPTED_REASON
 
     async def _mark_unfinished_abandoned(self) -> None:
         async with self._state_lock:

@@ -373,6 +373,18 @@ only when `[gateway_control] chat_restart = true` (default `false`; takes
 effect after one restart). The gateway posts "Gateway restarted" back into
 the chat that asked once it is up again.
 
+A turn a restart or crash cut short is resumed after boot (not cron,
+heartbeat, subagent or ACP turns, and nothing in safe mode): normally when
+the last tool round finished or the message was never answered, with read and
+status tools only when its last tool calls have no recorded result (shell,
+writes, trading and sends come back with the user's next message). At most
+three attempts, 24 h maximum age; then the session gets a note to send a
+message. A new message cancels a resume not yet started. A turn that asked
+for the restart itself (gateway tool, `agentos gateway restart`, an update) is
+never resumed, only noted. `[task_runtime]
+resume_interrupted_turns = false` only reports them. Counts are in `/ready`
+`turn_recovery`; `agentos doctor` shows `gateway.turn_recovery.not_resumed`.
+
 ### Version
 
 `agentos --version` (or `-V`) prints the installed version and exits; it loads

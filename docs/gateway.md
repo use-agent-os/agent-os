@@ -156,7 +156,7 @@ rely on:
 | Signal | Contract |
 |---|---|
 | `GET /health` | Liveness: `200` whenever the HTTP server answers. |
-| `GET /ready` | `{ready, state, failing, startup, safe_mode, drain_budget_ms, uptime_ms}`. `state` is `starting` (boot sidecars still running; `failing` names them, e.g. `["channels"]`), `ready`, `draining` (stopping or restarting in place; `failing: ["draining"]`) or `safe_mode` (`failing: ["safe_mode"]`). `503` while `starting` or `draining`; `200` for `ready` and `safe_mode`, where the control plane serves so the cause can be fixed. In `ready` and `safe_mode`, `failing` also names each channel that is down (failed to start, or stopped on bad credentials) as `channel:<name>`; that does not make the gateway unready. `startup.failed.channels` records which channels failed at boot and why. |
+| `GET /ready` | `{ready, state, failing, startup, safe_mode, drain_budget_ms, uptime_ms}`. `state` is `starting` (boot sidecars still running; `failing` names them, e.g. `["channels"]`), `ready`, `draining` (stopping or restarting in place; `failing: ["draining"]`) or `safe_mode` (`failing: ["safe_mode"]`). `503` while `starting` or `draining`; `200` for `ready` and `safe_mode`, where the control plane serves so the cause can be fixed. In `ready` and `safe_mode`, `failing` also names each channel that is down (failed to start, or stopped on bad credentials) as `channel:<name>`; that does not make the gateway unready. `startup.failed.channels` records which channels failed at boot and why. `turn_recovery` counts the [interrupted turns](#interrupted-turns) found at boot by state (`found`, `pending`, `running`, `resumed`, `closed`, `tombstoned`, `cancelled`, `reported`, `expired`) plus `auto_resume`; it never makes the gateway unready. |
 | `GET /startupz` | `200` once every boot sidecar settled (channels started, router preloaded), `503` before; `pending` lists what is left. |
 | WebSocket `connect` during boot | Answered with a retryable error `UNAVAILABLE`, `details: {code: "STARTUP_SIDECARS", retry_after_ms}`, then close `1013` (`gateway starting`). Clients retry after `retry_after_ms`; the CLI retries for up to 30 s, the web console and desktop keep "connecting". |
 | `shutdown` event | `{reason, restart_expected_ms}`, flushed to every connection before its socket closes with `1012`. A number is an in-place restart with an estimate of when the gateway serves again (this boot's own duration plus teardown, at least 3 s); `null` is a terminal stop (a signal, `Ctrl+C`). A client that stopped reading may still miss it (each flush is bounded to 1 s); on close `1012` without the frame, reconnect with the normal backoff. |
@@ -352,6 +352,49 @@ The same in-place restart is reachable from chat:
 `/restart` waits up to 30 seconds for active turns to finish; `/restart force`
 (or `agentos gateway restart --force`) cancels them instead. A second
 request while one is pending is reported, not queued.
+
+### Interrupted turns
+
+A turn the gateway stops under -- a restart that cancels it, or a crash --
+is marked interrupted (task status `abandoned`, reason
+`shutdown_interrupted` or `process_restart`). On the next boot, once channels
+are up, the gateway looks at every session whose newest turn is such a turn
+and decides from the transcript what to do:
+
+- The reply (or an error) was already written, or there is nothing to
+  answer: nothing to resume.
+- The user's message was never answered, or the last recorded tool round
+  finished: the turn is resumed with the session's usual tools.
+- Tool calls were issued with no recorded result (their outcome is unknown):
+  the turn is resumed with **read and status tools only** (file, git, memory
+  and session reads, `web_search`), so it checks what happened instead of
+  acting again. Shell, file writes, trading, outbound messages, approvals and
+  arbitrary HTTP are not available to that turn; the user's next message
+  gets every tool back.
+
+The resume is a short internal continuation message, not a replay of the
+user's message, and its reply goes where a normal reply would: the web
+console and the desktop app show it in the session, a channel turn's reply is
+sent to the same chat or thread. A turn from a paired channel is resumed only
+while that sender's pairing still stands. Each interrupted turn gets at most
+three attempts (counted across restarts, with backoff); after that, or for a
+turn older than 24 hours, the session gets a note asking the user to send a
+message to continue. A new message on the session cancels a resume that has
+not started yet. Cron, heartbeat, subagent and ACP turns are never resumed,
+and neither is anything while the gateway is in safe mode. A turn that asked
+for the restart itself (the `gateway` tool's `restart`, or a shell command
+that restarts, stops or updates the gateway), or any turn of the session the
+restart request came from, is not resumed either, so it cannot restart the
+gateway again: its session gets a note instead.
+
+`[task_runtime] resume_interrupted_turns = false` turns the automatic resume
+off: interrupted turns are only reported (the note in the session, `/ready`
+`turn_recovery`, an `agentos doctor` finding).
+
+```toml
+[task_runtime]
+resume_interrupted_turns = true   # default
+```
 
 ## Troubleshooting
 

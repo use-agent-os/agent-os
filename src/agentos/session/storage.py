@@ -1360,6 +1360,32 @@ class SessionStorage:
         await self.conn.commit()
         return int(cur.rowcount if cur.rowcount is not None else 0)
 
+    async def list_interrupted_agent_tasks(
+        self,
+        terminal_reasons: list[str],
+        *,
+        since_ms: int,
+        limit: int = 500,
+    ) -> list[AgentTaskRecord]:
+        """Abandoned tasks with one of *terminal_reasons*, created since *since_ms*.
+
+        What restart recovery starts from: the tasks the startup sweep above
+        just abandoned (``process_restart``) and the ones a shutdown stopped.
+        Newest first.
+        """
+        if not terminal_reasons or limit <= 0:
+            return []
+        placeholders = ", ".join("?" for _ in terminal_reasons)
+        sql = (
+            "SELECT * FROM agent_tasks WHERE status = ? "
+            f"AND terminal_reason IN ({placeholders}) AND created_at >= ? "
+            "ORDER BY created_at DESC, rowid DESC LIMIT ?"
+        )
+        params: list[Any] = [AgentTaskStatus.ABANDONED, *terminal_reasons, since_ms, limit]
+        async with self.conn.execute(sql, params) as cur:
+            rows = await cur.fetchall()
+        return [AgentTaskRecord(**_deserialize_row(dict(row))) for row in rows]
+
     # ── Transcript CRUD ──────────────────────────────────────────────────────
 
     @_serialized_write

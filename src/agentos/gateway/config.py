@@ -362,6 +362,12 @@ class TaskRuntimeConfig(BaseModel):
     # The assembled prompt is the same either way; ``false`` restores the
     # serial order.
     concurrent_turn_setup: bool = True
+    # Resume a turn that a gateway restart or crash cut short, from what its
+    # transcript shows (``gateway/turn_recovery.py``). A turn whose last tool
+    # calls have no recorded result resumes with read and status tools only.
+    # ``false`` only reports such turns (``/ready``, ``doctor``, a note in the
+    # session) and leaves continuing to the user.
+    resume_interrupted_turns: bool = True
 
     @field_validator("pending_overflow_policy")
     @classmethod

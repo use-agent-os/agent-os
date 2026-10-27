@@ -273,6 +273,7 @@ class ServiceContainer:
     # over `memory_managers` (each manager's `.provider_manager`).
     memory_provider_managers: dict[str, Any] = field(default_factory=dict)
     task_runtime: Any = None
+    turn_recovery: Any = None
     acp_manager: Any = None
     heartbeat_loop: Any = None
     heartbeat_watcher: Any = None
@@ -675,6 +676,9 @@ async def dispatch_task_runtime_turn(
     ):
         raise PermissionError("channel pairing was revoked before the turn started")
     tool_context.task_id = run.task_id
+    from agentos.gateway.turn_recovery import apply_restart_recovery_tool_policy
+
+    apply_restart_recovery_tool_policy(tool_context, run.envelope)
     _end_once_intent_grants_for_user_turn(run)
     session = None
     if session_manager is not None and hasattr(session_manager, "get_session"):
@@ -1480,6 +1484,14 @@ class GatewayServer:
             except Exception:  # noqa: BLE001 - shutdown must not raise
                 pass
             self._config_watcher = None
+        # Restart recovery stops first: a resume still waiting must not start
+        # now. What it had not finished is picked up again on the next boot.
+        recovery = getattr(self._services, "turn_recovery", None)
+        if recovery is not None:
+            try:
+                await recovery.stop()
+            except Exception:  # noqa: BLE001 - shutdown must not raise
+                log.debug("gateway.turn_recovery_stop_failed", exc_info=True)
         # Drain in-flight turns FIRST so replies are not lost.
         # task_runtime.shutdown() waits for all running turns to complete before
         # returning; only then do we stop channel delivery.
@@ -3023,6 +3035,28 @@ async def start_gateway_server(
 
     set_task_runtime(task_runtime)
 
+    # Turns a restart or crash cut short: found and resumed once channels are
+    # up (started below). Listening from now on, so a user message that
+    # arrives first cancels the resume of its session.
+    from agentos.gateway.restart import peek_request
+    from agentos.gateway.turn_recovery import TurnRecovery, set_turn_recovery
+
+    # Read before the restart announce consumes it: the session that asked
+    # for this restart does not get its turn resumed.
+    previous_restart = peek_request(config) if run else None
+    svc.turn_recovery = TurnRecovery(
+        restart_requested_by=(
+            previous_restart.origin.session_key if previous_restart is not None else None
+        ),
+        storage=get_session_storage(svc.session_manager) or svc.session_manager,
+        session_manager=svc.session_manager,
+        task_runtime=task_runtime,
+        auto_resume=bool(getattr(config.task_runtime, "resume_interrupted_turns", True)),
+        channel_manager_ref=lambda: _cm_holder[0],
+        safe_mode_active=lambda: boot_tracker.safe_mode_active,
+    )
+    set_turn_recovery(svc.turn_recovery)
+
     # ACP coding harnesses: reap processes a crashed gateway left behind and
     # publish the session manager. Degrades to "ACP unavailable", never fails boot.
     try:
@@ -3311,6 +3345,8 @@ async def start_gateway_server(
     app.state.readiness = readiness
     app.state.boot_tracker = boot_tracker
     readiness.attach_active_turns(lambda: int(getattr(task_runtime, "_global_in_flight", 0)))
+    if svc.turn_recovery is not None:
+        readiness.attach_turn_recovery(svc.turn_recovery.snapshot)
 
     server_handle = GatewayServer(app=app, config=config)
     server_handle._channel_manager = channel_manager
@@ -3466,6 +3502,8 @@ async def start_gateway_server(
                 session_manager=svc.session_manager,
             )
         )
+        if svc.turn_recovery is not None:
+            svc.turn_recovery.start()
 
         # Thaw detection, the channel health sweep and safe-mode
         # re-evaluation share one 30 s tick (gateway/maintenance.py).

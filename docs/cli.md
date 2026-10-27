@@ -133,7 +133,12 @@ instead of draining them. On Windows, where in-place restart is not
 available, the command still exits 3 (`UNMANAGED_GATEWAY_RUNNING`). The same
 restart is available as `/restart [force]` in the web console and, behind
 `[gateway_control] chat_restart = true`, from paired channels; see
-[Gateway](gateway.md#when-to-restart).
+[Gateway](gateway.md#when-to-restart). A turn the restart (or a crash) cuts
+short is resumed after boot, with read and status tools only when its last
+tool calls have no recorded result; `[task_runtime] resume_interrupted_turns
+= false` only reports it. `agentos doctor` lists interrupted turns that were
+not resumed (`gateway.turn_recovery.not_resumed`); see
+[Gateway: interrupted turns](gateway.md#interrupted-turns).
 
 Terminal chat:
 
