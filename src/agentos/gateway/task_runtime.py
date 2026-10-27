@@ -110,6 +110,10 @@ TaskStreamEventSink = Callable[[Any], Awaitable[None]]
 #: Writes a deferred user message to the transcript; returns the stored text
 #: and the row's message id (see ``TaskRuntime.enqueue(deferred_input=...)``).
 DeferredUserInput = Callable[[], Awaitable[tuple[str, str | None]]]
+#: Task-ledger ``details`` key holding a deferred message's text until its
+#: user row is written: a crash before then must not lose the message
+#: (restart recovery writes the row, ``agentos.gateway.turn_recovery``).
+DEFERRED_USER_TEXT_KEY = "deferred_user_text"
 
 #: Queue mode of a message meant for the running turn (mid-turn steering).
 STEER_QUEUE_MODE = "steer"
@@ -608,6 +612,7 @@ class TaskRuntime:
         )
         if deferred_input is not None and isinstance(record.details, dict):
             record.details["deferred_user_message"] = True
+            record.details[DEFERRED_USER_TEXT_KEY] = message
         if idempotency_key and isinstance(record.details, dict):
             # On the task record, not the envelope: the cached envelope is
             # reused by later runtime sends, which must not inherit the key.
@@ -946,6 +951,8 @@ class TaskRuntime:
             return None
         candidate.message = text
         candidate.persisted_user_message_id = message_id
+        # _mark_terminal merges the ledger details: the text goes, the row
+        # id and the turn it joined are kept (_terminal_details_update).
         await self._mark_terminal(
             candidate,
             AgentTaskStatus.SUCCEEDED,
@@ -975,6 +982,25 @@ class TaskRuntime:
         text, message_id = await deferred()
         task.message = text
         task.persisted_user_message_id = message_id
+        await self._record_deferred_written(task)
+
+    async def _record_deferred_written(self, task: _RuntimeTask) -> None:
+        """The deferred row is in the transcript: drop its text from the ledger."""
+        try:
+            existing = await self._storage.get_agent_task(task.task_id)
+            current = getattr(existing, "details", None)
+            if not isinstance(current, dict) or DEFERRED_USER_TEXT_KEY not in current:
+                return
+            details = dict(current)
+            details.pop(DEFERRED_USER_TEXT_KEY, None)
+            details["persisted_user_message_id"] = task.persisted_user_message_id
+            await self._storage.update_agent_task(task.task_id, details=details)
+        except Exception:  # noqa: BLE001 - recovery double-checks the transcript
+            log.warning(
+                "task_runtime.deferred_ledger_update_failed",
+                task_id=task.task_id,
+                exc_info=True,
+            )
 
     async def shutdown(
         self,
@@ -1960,6 +1986,15 @@ class TaskRuntime:
         existing = await self._storage.get_agent_task(task.task_id)
         current_details = getattr(existing, "details", None)
         details = dict(current_details) if isinstance(current_details, dict) else {}
+        if DEFERRED_USER_TEXT_KEY in details:
+            if task.persisted_user_message_id:
+                details.pop(DEFERRED_USER_TEXT_KEY, None)
+                details["persisted_user_message_id"] = task.persisted_user_message_id
+            elif status != AgentTaskStatus.ABANDONED:
+                # Withdrawn or dropped before it was written: nothing to keep.
+                details.pop(DEFERRED_USER_TEXT_KEY, None)
+        if task.steered_into is not None and terminal_reason == STEERED_TERMINAL_REASON:
+            details["steered_into"] = task.steered_into
         cancellation: dict[str, str] | None = None
         if status == AgentTaskStatus.CANCELLED:
             cancellation = {

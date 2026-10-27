@@ -31,6 +31,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   resumed.
 
 ### Fixed
+- Gateway: restart recovery now resumes a turn that a message was steered
+  into before the crash. The steered message's task (ended `steered`) no
+  longer counts as newer work that supersedes the turn it joined, so the turn
+  is resumed and the model sees the message once, where it came in. A steer
+  message still waiting when the process died is no longer lost: its text is
+  kept on its task's ledger row until written, and recovery writes it after
+  the interrupted turn so the resumed turn answers it. The resume turn's own
+  input is now written to the transcript before it runs, so the history load
+  no longer drops the user's newest unanswered (or restored) message in its
+  place.
 - Engine, gateway: a message steered into a running turn now shows where it
   came in. `chat.history` (web console, desktop app) shows the work done
   before the message, then the message, then the work after it, instead of
