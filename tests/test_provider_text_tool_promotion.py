@@ -161,6 +161,14 @@ def test_unknown_tool_is_not_run_and_stays_visible() -> None:
     assert has_unpromoted_text_tool_calls(text, {t.name for t in TOOLS})
 
 
+@pytest.mark.parametrize("name", ["functions.read_file", "Read_File", "read_file:0"])
+def test_decorated_tool_name_resolves_like_a_native_call(name: str) -> None:
+    text = f'<tool_call>{{"name":"{name}","arguments":{{"path":"a"}}}}</tool_call>'
+
+    assert _run(text) == Outcome("", [("read_file", {"path": "a"})])
+    assert not has_unpromoted_text_tool_calls(text, {t.name for t in TOOLS})
+
+
 def test_one_unknown_tool_blocks_the_whole_reply() -> None:
     text = (
         '<tool_call>{"name":"read_file","arguments":{"path":"a"}}</tool_call>\n'

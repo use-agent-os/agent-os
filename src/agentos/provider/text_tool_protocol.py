@@ -474,8 +474,24 @@ def _payload_fits(text: str) -> bool:
     return len(text.encode("utf-8")) <= MAX_PAYLOAD_BYTES
 
 
-def _call_allowed(call: TextToolCall, allowed: Collection[str]) -> bool:
-    return len(call.name) <= MAX_TOOL_NAME_CHARS and call.name in allowed
+def _resolve_call(call: TextToolCall, allowed: Collection[str]) -> TextToolCall | None:
+    """The call under the offered tool name it means, or ``None`` if it names none.
+
+    A decorated name (``functions.read_file``, ``Read_File``, ``read_file:0``)
+    resolves the same way a native call's name does, so text-form calls are not
+    held to a stricter rule than native ones.
+    """
+    if len(call.name) > MAX_TOOL_NAME_CHARS:
+        return None
+    if call.name in allowed:
+        return call
+    # Imported here: the provider layer must not load the tool registry at import.
+    from agentos.tools.tool_name_resolution import resolve_tool_name_among
+
+    resolution = resolve_tool_name_among(call.name, allowed)
+    if resolution is None:
+        return None
+    return TextToolCall(resolution.resolved, call.arguments)
 
 
 _JSON_TYPES: dict[str, tuple[type, ...]] = {
@@ -527,12 +543,13 @@ def _promote_regions(
     for region in regions:
         if not region.valid or not _payload_fits(text[region.start : region.end]):
             return None
-        if not all(_call_allowed(call, allowed) for call in region.calls):
-            return None
+    resolved = [_resolve_call(call, allowed) for region in regions for call in region.calls]
+    if any(call is None for call in resolved):
+        return None
     for before, after in zip(regions, regions[1:], strict=False):
         if text[before.end : after.start].strip():
             return None
-    calls = tuple(call for region in regions for call in region.calls)
+    calls = tuple(call for call in resolved if call is not None)
     return TextToolPromotion(calls, _without_regions(text, regions), "markup")
 
 
@@ -582,8 +599,8 @@ def _promote_plain_json(text: str, allowed: Collection[str]) -> TextToolPromotio
     if parsed is None:
         return None
     name, arguments, start = parsed
-    call = TextToolCall(name, arguments)
-    if not _call_allowed(call, allowed) or not _payload_fits(text[start:]):
+    call = _resolve_call(TextToolCall(name, arguments), allowed)
+    if call is None or not _payload_fits(text[start:]):
         return None
     if _fenced_or_inline_code_at(text, start):
         return None
