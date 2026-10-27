@@ -29,10 +29,18 @@ from agentos.engine.compaction_service import CompactionService, auxiliary_chunk
 from agentos.engine.estimate_calibration import EstimateCalibration, request_has_media
 from agentos.engine.fallback import FallbackPolicy, backoff_sleep, retry_after_delay
 from agentos.engine.history import limit_turns, repair_tool_pairing
+from agentos.engine.loop_guard import (
+    append_guidance,
+    blocked_batch_results,
+    loop_detected_error,
+    loop_guard_enforced,
+    loop_guard_log_fields,
+)
 from agentos.engine.progress_watchdog import (
+    ProgressDecision,
     ProgressObservation,
     ProgressWatchdog,
-    guidance_for,
+    proposed_tool_call,
     tool_call_signature,
 )
 from agentos.engine.session_sanitize import (
@@ -1325,6 +1333,9 @@ class Agent:
     ) -> AsyncIterator[AgentEvent]:
         """Async generator that drives the state machine."""
         self._current_turn_message = message
+        # A new message is a fresh request: a call that failed in an earlier
+        # turn may be exactly what the user is now asking to try again.
+        self._tool_failure_loop_counts.clear()
 
         # ------ IDLE → THINKING ------
         yield self._transition(AgentState.THINKING)
@@ -1481,7 +1492,10 @@ class Agent:
         max_iterations_finalization_attempted = False
         max_iterations_finalization_pending = False
         max_iterations_finalization_message: Message | None = None
-        progress_watchdog = ProgressWatchdog(observe_only=True)
+        # One per turn, so the loop check never carries a block across turns.
+        progress_watchdog = ProgressWatchdog(
+            observe_only=not loop_guard_enforced(getattr(self.config, "loop_guard", "enforce"))
+        )
         verification_ledger = VerificationLedger()
         _fallback = FallbackPolicy(
             max_retries=self.config.max_provider_retries,
@@ -3161,6 +3175,20 @@ class Agent:
 
                 tool_deadline = _loop.time() + self.config.iteration_timeout
 
+                # A batch that repeats a dead end is answered, not run.
+                loop_block: ProgressDecision | None = progress_watchdog.admit(
+                    [proposed_tool_call(tc.tool_name, tc.arguments) for tc in tool_calls],
+                    iteration=iterations,
+                )
+                if loop_block is not None:
+                    self._write_turn_call_log(
+                        "progress_watchdog", **loop_guard_log_fields(loop_block)
+                    )
+                    if loop_block.action == "block":
+                        preflight_tool_results.update(blocked_batch_results(loop_block, tool_calls))
+                    else:
+                        loop_block = None
+
                 # The calls are on record before they run: a crash from here
                 # on leaves them in history with an unknown outcome instead of
                 # losing them.
@@ -3263,12 +3291,15 @@ class Agent:
                 )
                 if watchdog_decision.action != "observe":
                     self._write_turn_call_log(
-                        "progress_watchdog",
-                        action=watchdog_decision.action,
-                        reason=watchdog_decision.reason,
-                        details=watchdog_decision.details,
-                        guidance=guidance_for(watchdog_decision),
+                        "progress_watchdog", **loop_guard_log_fields(watchdog_decision)
                     )
+                    if not progress_watchdog.observe_only:
+                        append_guidance(tool_result_blocks, tool_calls, watchdog_decision)
+                if loop_block is not None and loop_block.terminal:
+                    yield self._transition(AgentState.ERROR)
+                    terminal_error = loop_detected_error(loop_block)
+                    yield terminal_error
+                    break
                 terminal_error = _turn_budget_error()
                 if terminal_error is not None:
                     if artifact_delivery_final_response_pending:
@@ -4492,6 +4523,7 @@ class Agent:
             ),
             tool_use_argument_projection_enabled=(self.config.tool_use_argument_projection_enabled),
             tool_failure_loop_block_threshold=(self.config.tool_failure_loop_block_threshold),
+            loop_guard=self.config.loop_guard,
             max_safe_tool_concurrency=self.config.max_safe_tool_concurrency,
             parallel_tool_calls=self.config.parallel_tool_calls,
             tool_result_store_dir=self.config.tool_result_store_dir,

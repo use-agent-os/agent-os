@@ -57,10 +57,12 @@ class _LoopingToolProvider:
 
         tool_id = f"tool-{call_number}"
         yield ProviderToolUseStart(tool_use_id=tool_id, tool_name="echo")
+        # A long loop of distinct steps; an identical call repeated this often
+        # would be stopped by the loop guard instead.
         yield ProviderToolUseEnd(
             tool_use_id=tool_id,
             tool_name="echo",
-            arguments={"value": "again"},
+            arguments={"value": f"again-{call_number}"},
         )
         yield ProviderDone(stop_reason="tool_use", input_tokens=1, output_tokens=1)
 

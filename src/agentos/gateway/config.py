@@ -292,6 +292,10 @@ class ToolsConfig(BaseModel):
     # Ask the model for several independent tool calls in one response (sent
     # only to providers known to accept the field). ``false`` sends nothing.
     parallel_calls: bool = True
+    # Repeated tool calls that keep returning the same result: "enforce" tells
+    # the model, then refuses the repeat and finally ends the turn
+    # (``loop_detected``); "observe" only writes the decision to the call log.
+    loop_guard: Literal["enforce", "observe"] = "enforce"
     profile: Literal["full", "minimal", "memory_only", "coding", "messaging"] | None = None
     allow: list[str] = Field(default_factory=list)
     deny: list[str] = Field(default_factory=list)

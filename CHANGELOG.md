@@ -92,6 +92,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   before. Retries show as `text_tool_call` in the decision log's
   `turn_policy_decision` entries and in the turn timing `retries` breakdown,
   with a `provider_text_tool_call_retry` warning.
+- Engine: the progress watchdog now acts instead of only logging. When a tool
+  call keeps returning the same result, or two calls alternate with nothing
+  new, the model gets a `[Loop check]` note on that result; the next repeat is
+  answered with "not run" results instead of being executed, and a second one
+  in the same turn ends it with `loop_detected` and a message for the user.
+  Calls whose results change, and status polls, are not refused (polls get a
+  much larger allowance). The guard and the repeated-failure streak both reset
+  on every new message. `[tools] loop_guard = "observe"` restores log-only.
 
 ## [2026.10.27] - 2026-10-27
 

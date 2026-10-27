@@ -538,6 +538,11 @@ defer_loading = true
 # OpenAI-compatible endpoints get nothing. false sends nothing, as before.
 parallel_calls = true
 
+# Repeated tool calls that keep returning the same result: "enforce" warns the
+# model, then refuses the repeat, then ends the turn (loop_detected); "observe"
+# only writes the decision to the turn call log. Resets on every new message.
+loop_guard = "enforce"
+
 # Base allowlist. Tool schemas are the fixed overhead on every provider call in
 # every turn — on a stock install roughly 7,300 tokens — so this is usually the
 # largest thing you can change. Run `agentos context` to see the current cost

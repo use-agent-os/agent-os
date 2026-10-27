@@ -4215,6 +4215,12 @@ class TurnRunner:
         tools_cfg = getattr(self._config, "tools", None) if self._config else None
         return bool(getattr(tools_cfg, "parallel_calls", True))
 
+    def _resolve_loop_guard(self) -> str:
+        """``[tools] loop_guard``: act on repeated no-progress tool calls."""
+
+        tools_cfg = getattr(self._config, "tools", None) if self._config else None
+        return str(getattr(tools_cfg, "loop_guard", "enforce") or "enforce")
+
     @staticmethod
     def _parse_thinking_level(value: Any, *, source: str) -> bool | ThinkingLevel | None:
         if value is None:
