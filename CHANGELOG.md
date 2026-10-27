@@ -77,6 +77,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   argument path and the expected type, instead of a generic type error from
   the handler. Rejections count toward the repeated-failure guard.
   `POST /api/v1/tools/invoke` answers such a call with `400 INVALID_REQUEST`.
+### Added
+- Engine: when a reply ends by writing a tool call out as text (a JSON call in
+  a code fence, ReAct `Action:` / `Action Input:` lines, an "I'll call
+  `read_file`" line followed by the arguments, or tool markup that was not
+  turned into a call) and nothing ran, the engine retries that model call
+  once with a short nudge to call the tool natively. The written-out call is
+  held back while it streams, so the user never sees it as the answer; the
+  nudge goes on the retried request only and is not stored in history. The
+  detector only fires on a call-shaped payload that ends the reply and names
+  a tool offered on that request, and not on text that explains or shows a
+  call. It uses the existing provider retry budget (`max_provider_retries: 0`
+  turns it off) and `max_turn_llm_calls`; a second miss ends the turn as
+  before. Retries show as `text_tool_call` in the decision log's
+  `turn_policy_decision` entries and in the turn timing `retries` breakdown,
+  with a `provider_text_tool_call_retry` warning.
 
 ## [2026.10.27] - 2026-10-27
 

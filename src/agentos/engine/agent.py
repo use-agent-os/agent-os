@@ -39,6 +39,12 @@ from agentos.engine.session_sanitize import (
     sanitize_session_messages,
     session_payload_chars,
 )
+from agentos.engine.text_tool_call_detect import (
+    TextToolCallStreamGate,
+    offered_tool_names,
+    text_tool_call_nudge,
+    text_tool_call_to_retry,
+)
 from agentos.engine.thinking import drop_reasoning
 from agentos.engine.tokenjuice_adapter import reduce_tool_result_with_tokenjuice
 from agentos.engine.tool_batch import ToolBatchExecutor, registry_spec_lookup
@@ -459,6 +465,9 @@ class _ProviderAttemptKind(StrEnum):
     REFUSAL = "refusal"
     # The provider paused a long-running turn and expects it to be resumed.
     PAUSE_TURN = "pause_turn"
+    # The reply wrote a tool call out as text and nothing ran. Detected by the
+    # engine, not by the classifier: such a reply classifies as OK.
+    TEXT_TOOL_CALL = "text_tool_call"
 
 
 class _IterationStreamTimeoutError(TimeoutError):
@@ -508,6 +517,7 @@ class _ProviderRetryPolicy:
                 _ProviderAttemptKind.MALFORMED_EMPTY: 1,
                 _ProviderAttemptKind.STREAM_INCOMPLETE: 1,
                 _ProviderAttemptKind.LENGTH_CAPPED: length_capped_continuations,
+                _ProviderAttemptKind.TEXT_TOOL_CALL: 1,
             },
             provider_failure_budgets={ProviderFailureKind.EMPTY_RESPONSE: 1},
         )
@@ -1718,6 +1728,9 @@ class Agent:
                     length_capped_continuations=self.config.length_capped_continuations,
                 )
                 _attempt_retries_used = _retry_policy.used_attempts()
+                # Request-scoped messages for the one retry after a reply that
+                # wrote a tool call as text; never added to turn_messages.
+                _text_tool_call_nudge: list[Message] = []
                 _invalid_response_fallback_done = False
                 _retry_after_fallback_done = False
                 _pause_turn_resumes = 0
@@ -1769,6 +1782,8 @@ class Agent:
                             else None
                         ),
                     )
+                    attempt_nudge, _text_tool_call_nudge = _text_tool_call_nudge, []
+                    request_messages.extend(attempt_nudge)
                     self._write_context_stage(
                         "stream:context",
                         request_messages,
@@ -1863,6 +1878,7 @@ class Agent:
                                 else None
                             ),
                         )
+                        request_messages.extend(attempt_nudge)
                         # Calibrate against the request actually sent.
                         estimated_context_tokens = self._estimate_live_request_tokens(
                             request_messages,
@@ -1898,6 +1914,17 @@ class Agent:
 
                     _got_done_event = False
                     attempt_user_visible_emitted = False
+                    # Holds back text that may be a tool call written as text,
+                    # while a retry for that is still available.
+                    text_call_gate = (
+                        TextToolCallStreamGate(offered_tool_names(provider_tools_for_call))
+                        if tools_supported_for_call
+                        and provider_tools_for_call
+                        and _retry_policy.can_retry_attempt(
+                            _ProviderAttemptKind.TEXT_TOOL_CALL, _attempt_retries_used
+                        )
+                        else None
+                    )
                     try:
                         raw_stream = self.provider.chat(
                             request_messages,
@@ -1915,7 +1942,10 @@ class Agent:
                                 assistant_text_parts.append(raw_ev.text)
                                 if raw_ev.text:
                                     attempt_user_visible_emitted = True
-                                yield TextDeltaEvent(text=raw_ev.text)
+                                if text_call_gate is None:
+                                    yield TextDeltaEvent(text=raw_ev.text)
+                                elif shown_text := text_call_gate.push(raw_ev.text):
+                                    yield TextDeltaEvent(text=shown_text)
 
                             elif isinstance(raw_ev, ProviderThinkingDelta):
                                 # Reasoning is display-only: never mixed into the
@@ -1935,6 +1965,10 @@ class Agent:
                                     ):
                                         ignored_post_delivery_tool_use = True
                                     continue
+                                if text_call_gate is not None and (
+                                    held_text := text_call_gate.release()
+                                ):
+                                    yield TextDeltaEvent(text=held_text)
                                 start_tool_name = self._canonical_tool_name(raw_ev.tool_name)
                                 pending_tools[raw_ev.tool_use_id] = _StreamAccumulator(
                                     tool_use_id=raw_ev.tool_use_id,
@@ -2095,6 +2129,8 @@ class Agent:
                                     message=raw_ev.message,
                                 )
                     except _IterationStreamTimeoutError:
+                        if text_call_gate is not None and (held_text := text_call_gate.release()):
+                            yield TextDeltaEvent(text=held_text)
                         if artifact_delivery_final_response_pending:
                             yield _finish_artifact_delivery_degraded(
                                 reason=(
@@ -2115,6 +2151,23 @@ class Agent:
                         )
                         yield terminal_error
                         break
+
+                    text_tool_call = (
+                        text_tool_call_to_retry(
+                            text="".join(assistant_text_parts),
+                            gate=text_call_gate,
+                            produced_tool_calls=bool(tool_calls or pending_tools),
+                            stream_complete=_got_done_event and not _got_error,
+                            stop_reason=getattr(provider_done_for_log, "stop_reason", None),
+                        )
+                        if text_call_gate is not None
+                        and _turn_budget_error() is None
+                        and _turn_llm_call_budget_error(turn_llm_calls + 1) is None
+                        else None
+                    )
+                    if text_call_gate is not None and text_tool_call is None:
+                        if held_text := text_call_gate.release():
+                            yield TextDeltaEvent(text=held_text)
 
                     call_duration_ms = int((time.monotonic() - call_started_at) * 1000)
                     response_payload = {
@@ -2170,6 +2223,53 @@ class Agent:
                             yield terminal_error
                         break
                     response_text = "".join(assistant_text_parts)
+                    if text_tool_call is not None and text_call_gate is not None:
+                        # The reply wrote a tool call as text and nothing ran.
+                        # Drop it (the gate kept it off screen) and ask once
+                        # more, with a nudge on that request only.
+                        _attempt_retries_used[_ProviderAttemptKind.TEXT_TOOL_CALL] += 1
+                        text_call_gate.discard()
+                        _text_tool_call_nudge = [
+                            Message(
+                                role="assistant",
+                                content=[ContentBlockText(text=response_text)],
+                            ),
+                            Message(role="user", content=text_tool_call_nudge(text_tool_call)),
+                        ]
+                        self.turn_timing.record_retry(_ProviderAttemptKind.TEXT_TOOL_CALL.value)
+                        logger.warning(
+                            "provider.text_tool_call_retry",
+                            session_key=self._session_key,
+                            model=last_actual_model or self.config.model_id or "",
+                            provider=type(self.provider).__name__,
+                            iteration=iterations,
+                            call_attempt=_call_attempt,
+                            tool_name=text_tool_call.tool_name,
+                            shape=text_tool_call.shape,
+                            discarded_chars=len(response_text) - text_tool_call.start,
+                        )
+                        self._write_turn_call_log(
+                            "turn_policy_decision",
+                            action="retry_text_tool_call",
+                            reason="text_tool_call",
+                            code="text_tool_call",
+                            iteration=iterations,
+                            attempt=_call_attempt,
+                            tool_name=text_tool_call.tool_name,
+                            shape=text_tool_call.shape,
+                            budget=_retry_policy.attempt_budgets[
+                                _ProviderAttemptKind.TEXT_TOOL_CALL
+                            ],
+                        )
+                        yield WarningEvent(
+                            code="provider_text_tool_call_retry",
+                            message=(
+                                "The model wrote a tool call as text instead of calling "
+                                "the tool; retrying once."
+                            ),
+                        )
+                        _call_attempt += 1
+                        continue
                     if ignored_post_delivery_tool_use and not response_text.strip():
                         if artifact_delivery_final_response_pending:
                             response_text = self._artifact_delivery_final_response_text(

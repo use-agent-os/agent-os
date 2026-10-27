@@ -9,6 +9,8 @@ fed by a handful of call sites:
   :meth:`TurnTiming.provider_stream`, every tool batch through
   :meth:`TurnTiming.tool_batch`, and waits for approvals through the callable
   returned by :meth:`TurnTiming.timed_approval`.
+* engine-initiated retries of a model call are counted per category through
+  :meth:`TurnTiming.record_retry` (for example ``text_tool_call``).
 
 :meth:`TurnTiming.summary` returns a JSON-ready dict (integer milliseconds)
 that goes into the decision log; :meth:`TurnTiming.log_fields` is the flat
@@ -94,6 +96,7 @@ class TurnTiming:
         self._approval_active = 0
         self._approval_since: float | None = None
         self._open_batch: ToolBatchTiming | None = None
+        self.retries: dict[str, int] = {}
         self.logged = False
 
     # ── stages ──────────────────────────────────────────────────────────
@@ -156,6 +159,11 @@ class TurnTiming:
             return
         call.stream_done = self._clock()
         self._provider_total += call.stream_done - call.request_started
+
+    def record_retry(self, category: str) -> None:
+        """Count one engine-initiated model-call retry of ``category``."""
+
+        self.retries[category] = self.retries.get(category, 0) + 1
 
     # ── tool batches and approvals ──────────────────────────────────────
 
@@ -240,6 +248,7 @@ class TurnTiming:
             "tool_batches": self._tool_batch_count,
             "tool_calls": self._tool_call_count,
             "stages": {name: _ms(self.stages[name]) for name in STAGE_NAMES if name in self.stages},
+            "retries": dict(self.retries),
             "provider_calls": [self._call_dict(c) for c in self.provider_calls],
             "tool_batch_detail": [
                 {
@@ -272,10 +281,12 @@ class TurnTiming:
         flat = {
             key: value
             for key, value in summary.items()
-            if key not in {"stages", "provider_calls", "tool_batch_detail"}
+            if key not in {"stages", "provider_calls", "tool_batch_detail", "retries"}
         }
         for name, ms in summary["stages"].items():
             flat[f"stage_{name}_ms"] = ms
+        for category, count in summary["retries"].items():
+            flat[f"retry_{category}"] = count
         first_call = summary["provider_calls"][0] if summary["provider_calls"] else None
         if first_call is not None:
             flat["first_call_first_event_ms"] = first_call["first_event_ms"]
@@ -298,6 +309,9 @@ class _NullTurnTiming(TurnTiming):
         self, wait: Callable[..., Awaitable[T]] | None
     ) -> Callable[..., Awaitable[T]] | None:
         return wait
+
+    def record_retry(self, category: str) -> None:
+        return None
 
 
 NULL_TURN_TIMING: TurnTiming = _NullTurnTiming()

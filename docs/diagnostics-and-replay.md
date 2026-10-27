@@ -80,6 +80,11 @@ under `timing` (schema 16), which `agentos replay` prints:
 - per provider call: start offset, then time to first event, first text and
   end of stream, with input/output tokens; per tool batch: duration, number of
   calls and approval wait.
+- `retries`: model calls the engine repeated, by category (in the log line as
+  `retry_<category>`). `text_tool_call` counts replies that wrote a tool call
+  out as text instead of calling the tool; the engine drops such a reply and
+  asks once more, and the turn-call log records it as a `turn_policy_decision`
+  with `action: retry_text_tool_call`.
 
 Rows written before schema 16 have no `timing`; replay shows only the total
 latency for them.

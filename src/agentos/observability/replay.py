@@ -93,6 +93,9 @@ def _timing_lines(timing: dict[str, Any]) -> list[str]:
     stages = timing.get("stages")
     if isinstance(stages, dict) and stages:
         lines.append("  Stages: " + " ".join(f"{name}={value}ms" for name, value in stages.items()))
+    retries = timing.get("retries")
+    if isinstance(retries, dict) and retries:
+        lines.append("  Retries: " + " ".join(f"{name}={value}" for name, value in retries.items()))
     calls = timing.get("provider_calls")
     if isinstance(calls, list):
         for index, call in enumerate(calls, start=1):
