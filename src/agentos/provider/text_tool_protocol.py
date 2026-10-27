@@ -42,6 +42,8 @@ from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from agentos.provider.tool_names import resolve_tool_name_among
+
 MAX_TOOL_NAME_CHARS = 120
 MAX_PAYLOAD_BYTES = 256 * 1024
 
@@ -485,9 +487,6 @@ def _resolve_call(call: TextToolCall, allowed: Collection[str]) -> TextToolCall 
         return None
     if call.name in allowed:
         return call
-    # Imported here: the provider layer must not load the tool registry at import.
-    from agentos.tools.tool_name_resolution import resolve_tool_name_among
-
     resolution = resolve_tool_name_among(call.name, allowed)
     if resolution is None:
         return None
