@@ -17,8 +17,15 @@ and decides from the transcript tail:
   ``read_only``). The model checks what happened instead of acting again;
   the full set returns with the user's next message.
 
+A task a running turn took as a steered message (``agentos.engine.steering``,
+terminal reason ``steered``) joined that turn and never counts as later work
+that supersedes it. A steered message still waiting when the process died is
+written to the transcript (from its task's ledger row) before the tail is
+read, so the resumed turn answers it instead of losing it.
+
 A resume is a synthetic continuation turn (internal-system provenance, not a
-replay of the user's message), run through the task runtime in a lane of
+replay of the user's message), written as its own user row and run through
+the task runtime in a lane of
 :data:`RECOVERY_LANE_CONCURRENCY`, with the interrupted run's id as its
 idempotency key. A recovery cycle makes at most :data:`MAX_ATTEMPTS` attempts
 with backoff, then leaves a tombstone row with a hint; a turn older than
@@ -45,7 +52,9 @@ import structlog
 
 from agentos.engine.turn_progress import TurnTail, classify_transcript_tail
 from agentos.gateway.task_runtime import (
+    DEFERRED_USER_TEXT_KEY,
     SHUTDOWN_INTERRUPTED_REASON,
+    STEERED_TERMINAL_REASON,
     TaskRuntimeNotAdmittingError,
 )
 from agentos.gateway.turn_recovery_route import envelope_from_task
@@ -70,6 +79,9 @@ RECOVERY_LANE_CONCURRENCY: Final = 4
 RECOVERY_KEY: Final = "restart_recovery"
 RECOVERY_SOURCE_TOOL: Final = "restart_recovery"
 _TRANSCRIPT_TAIL_ROWS = 80
+#: Newest tasks of a session read to tell whether later work superseded an
+#: interrupted turn (tasks steered into a running turn are skipped).
+_NEWEST_TASKS_WINDOW = 50
 
 #: Sources whose turns a person is waiting on. Cron and system work is not
 #: resumed; their own schedulers re-run what matters.
@@ -328,6 +340,11 @@ def _status_value(value: Any) -> str:
     return str(getattr(value, "value", value) or "")
 
 
+def _joined_another_turn(record: Any) -> bool:
+    """A task a running turn took as a steered message (not a turn of its own)."""
+    return getattr(record, "terminal_reason", None) == STEERED_TERMINAL_REASON
+
+
 def _is_cron_session(session_key: str) -> bool:
     return session_key.startswith("cron:") or ":cron:" in session_key
 
@@ -544,6 +561,14 @@ class TurnRecovery:
         )
         self._recoveries[origin.task_id] = recovery
         self._by_session[session_key] = recovery
+        # Before anything is decided: even a turn that is not resumed must
+        # not lose a message the user sent into it.
+        if await self._restore_untaken_messages(session_key):
+            # The origin may be one of them: keep its updated ledger row.
+            get_task = getattr(self._storage, "get_agent_task", None)
+            refreshed = await get_task(origin.task_id) if callable(get_task) else None
+            if refreshed is not None:
+                recovery.origin = refreshed
 
         started = origin.started_at or origin.created_at or now
         if now - int(started) > self._max_age_ms:
@@ -587,11 +612,103 @@ class TurnRecovery:
         )
 
     async def _is_newest_task(self, record: Any) -> bool:
+        """Whether *record* is the session's latest turn.
+
+        A task a running turn took as a steered message
+        (``agentos.engine.steering``) joined that turn: it is not a turn of
+        its own and never supersedes the one it joined.
+        """
         list_tasks = getattr(self._storage, "list_agent_tasks", None)
         if not callable(list_tasks):
             return True
-        newest = await list_tasks(session_key=record.session_key, limit=1, newest_first=True)
-        return not newest or newest[-1].task_id == record.task_id
+        newest = await list_tasks(
+            session_key=record.session_key, limit=_NEWEST_TASKS_WINDOW, newest_first=True
+        )
+        for task in reversed(newest):
+            if _joined_another_turn(task):
+                continue
+            return bool(task.task_id == record.task_id)
+        return True
+
+    async def _restore_untaken_messages(self, session_key: str) -> int:
+        """Write the steered messages a crash left unwritten; return how many.
+
+        A message sent to join the running turn is written to the transcript
+        only when the turn takes it. One still waiting when the process died
+        exists only on its task's ledger row (``DEFERRED_USER_TEXT_KEY``):
+        write it now, after the interrupted turn, where a message no
+        checkpoint took belongs, so the resumed turn answers it.
+        """
+        list_tasks = getattr(self._storage, "list_agent_tasks", None)
+        update = getattr(self._storage, "update_agent_task", None)
+        if not callable(list_tasks) or not callable(update):
+            return 0
+        tasks = await list_tasks(
+            session_key=session_key, limit=_NEWEST_TASKS_WINDOW, newest_first=True
+        )
+        untaken = [
+            task
+            for task in tasks
+            if _status_value(task.status) == AgentTaskStatus.ABANDONED.value
+            and isinstance(_details(task).get(DEFERRED_USER_TEXT_KEY), str)
+            and _details(task)[DEFERRED_USER_TEXT_KEY]
+            and not _details(task).get("persisted_user_message_id")
+        ]
+        if not untaken:
+            return 0
+        recent = await self._recent_rows(session_key)
+        restored = 0
+        for task in untaken:  # oldest first
+            details = _details(task)
+            text = str(details[DEFERRED_USER_TEXT_KEY])
+            created = int(task.created_at or 0)
+            # Written, but the ledger update did not land before the crash.
+            existing = next(
+                (
+                    row
+                    for row in recent
+                    if getattr(row, "role", None) == "user"
+                    and getattr(row, "content", None) == text
+                    and int(getattr(row, "created_at", 0) or 0) >= created
+                ),
+                None,
+            )
+            message_id = getattr(existing, "message_id", None)
+            if existing is None:
+                try:
+                    entry = await self._session_manager.append_message(session_key, "user", text)
+                except Exception:  # noqa: BLE001 - leave it for the next boot
+                    log.warning(
+                        "turn_recovery.restore_message_failed",
+                        session_key=session_key,
+                        task_id=task.task_id,
+                        exc_info=True,
+                    )
+                    continue
+                message_id = getattr(entry, "message_id", None)
+                restored += 1
+            details = dict(details)
+            details.pop(DEFERRED_USER_TEXT_KEY, None)
+            details["persisted_user_message_id"] = message_id
+            with contextlib.suppress(Exception):
+                await update(task.task_id, details=details)
+        if restored:
+            log.info(
+                "turn_recovery.restored_untaken_messages",
+                session_key=session_key,
+                count=restored,
+            )
+        return restored
+
+    async def _recent_rows(self, session_key: str) -> list[Any]:
+        try:
+            return list(
+                await self._session_manager.get_recent_transcript(
+                    session_key, _TRANSCRIPT_TAIL_ROWS
+                )
+            )
+        except Exception:  # noqa: BLE001
+            return []
 
     async def _origin_of(self, record: Any) -> Any:
         marker = recovery_marker(_details(record).get("metadata"))
@@ -730,19 +847,27 @@ class TurnRecovery:
             recovery.state = "running"
             await self._persist(recovery)
             watermark = await self._transcript_length(recovery.session_key)
+            text = continuation_message(
+                restricted=recovery.restricted,
+                unanswered_input=recovery.unanswered_input,
+            )
+            continuation_id = await self._write_continuation(recovery, text)
             try:
                 handle = await self._task_runtime.enqueue(
                     recovery.envelope,
-                    continuation_message(
-                        restricted=recovery.restricted,
-                        unanswered_input=recovery.unanswered_input,
-                    ),
+                    text,
                     mode="followup",
                     run_kind=str(recovery.origin.run_kind or "default"),
                     update_envelope_cache=False,
                     idempotency_key=f"{RECOVERY_KEY}:{recovery.origin_task_id}",
+                    persisted_user_message_id=continuation_id,
                 )
             except TaskRuntimeNotAdmittingError:
+                if continuation_id is not None:
+                    with contextlib.suppress(Exception):
+                        await self._session_manager.remove_message(
+                            recovery.session_key, continuation_id
+                        )
                 return  # the gateway is stopping; the next boot carries on
             recovery.current_task_id = handle.task_id
             recovery.resume_task_ids.append(handle.task_id)
@@ -776,6 +901,34 @@ class TurnRecovery:
                 terminal_reason=getattr(record, "terminal_reason", None),
             )
         await self._finish(recovery, "tombstoned", "attempts_exhausted", hint=True)
+
+    async def _write_continuation(self, recovery: _Recovery, text: str) -> str | None:
+        """Persist the resume turn's input row, as a user send is persisted.
+
+        A turn the task runtime runs takes its input from the transcript: the
+        history load leaves out the row named by ``persisted_user_message_id``
+        and, without one, the newest user row -- which after a crash can be
+        the user's own unanswered or steered message, and would then be
+        dropped from what the model sees. ``None`` when the write failed (the
+        turn then runs as before).
+        """
+        provenance = getattr(recovery.envelope, "input_provenance", None)
+        try:
+            entry = await self._session_manager.append_message(
+                recovery.session_key,
+                "user",
+                text,
+                provenance=dict(provenance) if isinstance(provenance, dict) else None,
+            )
+        except Exception:  # noqa: BLE001
+            log.warning(
+                "turn_recovery.continuation_write_failed",
+                session_key=recovery.session_key,
+                exc_info=True,
+            )
+            return None
+        message_id = getattr(entry, "message_id", None)
+        return message_id if isinstance(message_id, str) and message_id else None
 
     def _on_enqueue(self, record: Any) -> None:
         """A new task on a session with a recovery that has not started: cancel it."""
