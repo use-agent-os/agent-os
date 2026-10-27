@@ -3406,7 +3406,14 @@ class TurnRunner:
             # lets future turns (and users reading history) recognise the
             # response is incomplete.
             partial_text = "".join(final_text_parts).rstrip()
-            if (
+            from agentos.engine.turn_progress import stopped_by_shutdown
+
+            if stopped_by_shutdown():
+                # The gateway is stopping under the turn: no "[interrupted]"
+                # reply. The in-progress row (or the bare user message) stays
+                # the tail, so restart recovery sees how far the turn got.
+                log.info("turn_runner.cancelled_by_shutdown", session_key=session_key)
+            elif (
                 partial_text or turn_segments or turn_artifacts
             ) and self._session_manager is not None:
                 try:

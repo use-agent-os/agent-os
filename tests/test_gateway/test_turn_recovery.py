@@ -856,3 +856,25 @@ def test_peek_request_leaves_the_restart_request_for_the_announce(tmp_path: Path
     assert path.exists()
     assert read_and_clear_request(config) is not None
     assert peek_request(config) is None
+
+
+async def test_doctor_names_the_actual_reason_a_turn_was_not_resumed(env: _Env) -> None:
+    from agentos.gateway.rpc_doctor import _turn_recovery_findings
+
+    await _session_with_calls(
+        env,
+        [{"type": "tool_use", "id": "r1", "name": "gateway", "input": {"action": "restart"}}],
+        answered=False,
+    )
+    recovery = env.recovery()
+    await recovery.scan()
+    await recovery.wait_idle(timeout=5)
+    set_turn_recovery(recovery)
+    try:
+        [finding] = _turn_recovery_findings()
+    finally:
+        set_turn_recovery(None)
+    assert finding.id == "gateway.turn_recovery.not_resumed"
+    assert "the turn asked for the restart itself" in finding.detail
+    assert "attempts" not in finding.detail
+    assert "safe mode" not in finding.detail

@@ -9,7 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 - Gateway: turns a restart or crash cut short are resumed. A graceful
   shutdown or restart marks the turns it cancels interrupted
-  (`shutdown_interrupted`); the startup sweep still marks a crashed
+  (`shutdown_interrupted`, also when a safe drain runs out of time), and such
+  a turn keeps its in-progress transcript row instead of an `[interrupted]`
+  reply, so its progress is still readable; the startup sweep still marks a crashed
   process's turns `process_restart`. After boot the gateway classifies each
   such session from its transcript: nothing to do when the reply is already
   there; a normal resume when the message was never answered or the last tool

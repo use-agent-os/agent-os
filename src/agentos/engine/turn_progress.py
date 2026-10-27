@@ -35,6 +35,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Final, Literal
 
@@ -235,6 +236,44 @@ def _finished_or_unanswered(trailing_users: list[Any], *, empty_if_none: bool = 
     if trailing_users:
         return TurnTail(status="unanswered_input", trailing_user_entries=tuple(trailing_users))
     return TurnTail(status="empty" if empty_if_none else "finished")
+
+
+# ---------------------------------------------------------------------------
+# Why a turn is being stopped
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class TurnStopSignal:
+    """Shared by a running turn and whoever runs it: why it is being stopped.
+
+    The task runtime binds one per turn (:func:`bind_turn_stop_signal`) and
+    sets :attr:`shutdown` before the gateway's own shutdown cancels the turn.
+    A mutable holder in a context variable, so tasks the turn spawns (stream
+    drivers) see the flag too.
+    """
+
+    shutdown: bool = False
+
+
+_TURN_STOP_SIGNAL: ContextVar[TurnStopSignal | None] = ContextVar(
+    "agentos_turn_stop_signal", default=None
+)
+
+
+def bind_turn_stop_signal(signal: TurnStopSignal) -> None:
+    """Bind *signal* to the current task's context (and tasks it creates)."""
+    _TURN_STOP_SIGNAL.set(signal)
+
+
+def stopped_by_shutdown() -> bool:
+    """True when the running turn is being cancelled by a gateway shutdown.
+
+    Such a turn keeps its in-progress row, so restart recovery can tell from
+    the transcript how far it got.
+    """
+    signal = _TURN_STOP_SIGNAL.get()
+    return signal is not None and signal.shutdown
 
 
 # ---------------------------------------------------------------------------

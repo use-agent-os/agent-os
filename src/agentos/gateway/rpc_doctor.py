@@ -607,6 +607,36 @@ def _safe_mode_findings() -> list[HealthFinding]:
     ]
 
 
+_NOT_RESUMED_CAUSES = {
+    "restart_requested": "the turn asked for the restart itself",
+    "attempts_exhausted": "resume attempts used up",
+    "max_age": "older than 24 hours",
+    "route_unknown": "the chat to answer is not recorded",
+}
+
+
+def _not_resumed_causes(recoveries: list[dict[str, Any]], snapshot: dict[str, Any]) -> str:
+    """Why the not-resumed turns were not resumed, from their recorded reasons."""
+    causes: list[str] = []
+    for item in recoveries:
+        state, reason = item.get("state"), str(item.get("reason") or "")
+        if state not in ("tombstoned", "reported", "expired"):
+            continue
+        if reason in _NOT_RESUMED_CAUSES:
+            cause = _NOT_RESUMED_CAUSES[reason]
+        elif state == "reported":
+            cause = (
+                "automatic resume is off"
+                if not snapshot.get("auto_resume")
+                else "the gateway was in safe mode"
+            )
+        else:
+            cause = reason.replace("_", " ") or "unknown"
+        if cause not in causes:
+            causes.append(cause)
+    return "; ".join(causes) or "unknown"
+
+
 def _turn_recovery_findings() -> list[HealthFinding]:
     """Turns a restart or crash interrupted: being resumed, or left for the user."""
     from agentos.gateway.turn_recovery import get_turn_recovery
@@ -633,11 +663,7 @@ def _turn_recovery_findings() -> list[HealthFinding]:
                 detail=(
                     "A gateway restart or crash stopped these turns and they were not "
                     "continued automatically ("
-                    + (
-                        "automatic resume is off"
-                        if not snapshot.get("auto_resume")
-                        else "attempts used up, too old, or safe mode"
-                    )
+                    + _not_resumed_causes(recovery.recoveries(), snapshot)
                     + "). Each session has a note; a new message there continues it."
                 ),
                 evidence=evidence,
