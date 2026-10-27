@@ -139,8 +139,10 @@ class TurnTail:
       ``pending_tool_use_ids`` is not empty, the calls of the next round were
       issued and their outcome is unknown (they may have run).
 
-    ``trailing_user_entries`` are user rows after the deciding row (follow-ups
-    queued while the turn ran, or the unanswered input itself).
+    ``trailing_user_entries`` are user rows the deciding row's turn does not
+    replay itself (follow-ups queued while the turn ran, or the unanswered
+    input itself), oldest first; rows steered into the turn are not among
+    them.
     """
 
     status: TurnTailStatus
@@ -151,36 +153,82 @@ class TurnTail:
     trailing_user_entries: tuple[Any, ...] = field(default_factory=tuple)
 
 
+def _record_covered_ids(record: Any) -> set[str]:
+    """User rows a turn record replays itself: its input and steered rows."""
+    if not isinstance(record, dict):
+        return set()
+    covered: set[str] = set()
+    input_entry_id = record.get("input_entry_id")
+    if isinstance(input_entry_id, str) and input_entry_id:
+        covered.add(input_entry_id)
+    steered = record.get("steered_entry_ids")
+    if isinstance(steered, list):
+        covered.update(item for item in steered if isinstance(item, str) and item)
+    return covered
+
+
 def classify_transcript_tail(entries: Sequence[Any]) -> TurnTail:
-    """Classify the last turn of a transcript (rows oldest first)."""
-    trailing_users: list[Any] = []
-    for entry in reversed(entries):
-        role = getattr(entry, "role", None)
-        if role == "user":
-            trailing_users.insert(0, entry)
-            continue
-        if role == "system":
-            return _finished_or_unanswered(trailing_users)
-        if role != "assistant":
-            continue
-        marker = turn_progress_marker(entry)
-        if marker is None:
-            return _finished_or_unanswered(trailing_users)
-        record = _decode_json(getattr(entry, "provider_messages", None))
-        raw_round = marker.get("round")
-        round_index = raw_round if isinstance(raw_round, int) and raw_round > 0 else 0
-        pending = tuple(_unanswered_tool_use_ids(record))
-        completed = round_index if not pending else max(0, round_index - 1)
-        input_entry_id = record.get("input_entry_id") if isinstance(record, dict) else None
-        return TurnTail(
-            status="interrupted",
-            rounds_completed=completed,
-            pending_tool_use_ids=pending,
-            progress_entry=entry,
-            input_entry_id=input_entry_id if isinstance(input_entry_id, str) else None,
-            trailing_user_entries=tuple(trailing_users),
-        )
-    return _finished_or_unanswered(trailing_users, empty_if_none=True)
+    """Classify the last turn of a transcript (rows oldest first).
+
+    The deciding row is the newest assistant or system row. User rows its
+    turn record replays itself (the turn's input, rows steered into it) are
+    part of that turn, never trailing input, wherever they sort: each
+    progress write replaces the in-progress row at the end of the
+    transcript, so a row steered in (or a follow-up queued) mid-turn ends up
+    *before* the newest in-progress row. For an interrupted turn, the
+    trailing rows are therefore the user rows after its input row the record
+    does not name, on either side of the in-progress row. A steered row the
+    in-progress row does not name yet (the process died between writing the
+    row and the next progress write) is trailing: the model never met it on
+    record, and a history load replays it after the turn, where it belongs.
+    """
+    deciding_index: int | None = None
+    for index in range(len(entries) - 1, -1, -1):
+        if getattr(entries[index], "role", None) in ("assistant", "system"):
+            deciding_index = index
+            break
+    if deciding_index is None:
+        users = [entry for entry in entries if getattr(entry, "role", None) == "user"]
+        return _finished_or_unanswered(users, empty_if_none=True)
+
+    deciding = entries[deciding_index]
+    record = None
+    if getattr(deciding, "role", None) == "assistant":
+        record = _decode_json(getattr(deciding, "provider_messages", None))
+    covered = _record_covered_ids(record)
+
+    def _trailing(rows: Sequence[Any]) -> list[Any]:
+        return [
+            entry
+            for entry in rows
+            if getattr(entry, "role", None) == "user"
+            and getattr(entry, "message_id", None) not in covered
+        ]
+
+    after = _trailing(entries[deciding_index + 1 :])
+    marker = turn_progress_marker(deciding)
+    if marker is None:
+        return _finished_or_unanswered(after)
+
+    input_entry_id = record.get("input_entry_id") if isinstance(record, dict) else None
+    before: list[Any] = []
+    if isinstance(input_entry_id, str) and input_entry_id:
+        for index in range(deciding_index - 1, -1, -1):
+            if getattr(entries[index], "message_id", None) == input_entry_id:
+                before = _trailing(entries[index + 1 : deciding_index])
+                break
+    raw_round = marker.get("round")
+    round_index = raw_round if isinstance(raw_round, int) and raw_round > 0 else 0
+    pending = tuple(_unanswered_tool_use_ids(record))
+    completed = round_index if not pending else max(0, round_index - 1)
+    return TurnTail(
+        status="interrupted",
+        rounds_completed=completed,
+        pending_tool_use_ids=pending,
+        progress_entry=deciding,
+        input_entry_id=input_entry_id if isinstance(input_entry_id, str) else None,
+        trailing_user_entries=tuple(before + after),
+    )
 
 
 def _finished_or_unanswered(trailing_users: list[Any], *, empty_if_none: bool = False) -> TurnTail:
@@ -201,19 +249,43 @@ def hide_live_turn_progress(entries: list[Any], in_flight_run: Any) -> list[Any]
     (``in_flight_run``); listing its in-progress row as well would show its
     tool calls twice. Rows of an earlier, interrupted turn (written before the
     live run started) stay visible.
+
+    A live row with a message steered into it keeps its part up to the newest
+    steer marker (``agentos.engine.steering.STEER_SEGMENT_TYPE``): that work
+    is settled, the live stream restarts at the steer, and the steered user
+    row shows between the two.
     """
     if not isinstance(in_flight_run, dict) or not entries:
         return entries
     started_at = in_flight_run.get("started_at")
     started = int(started_at) if isinstance(started_at, (int, float)) else None
     kept: list[Any] = []
+    changed = False
     for entry in entries:
         if is_turn_progress_entry(entry):
             created_at = getattr(entry, "created_at", None)
             if started is None or not isinstance(created_at, int) or created_at >= started:
+                changed = True
+                settled = _settled_before_last_steer(entry)
+                if settled is not None:
+                    kept.append(settled)
                 continue
         kept.append(entry)
-    return kept if len(kept) != len(entries) else entries
+    return kept if changed else entries
+
+
+def _settled_before_last_steer(entry: Any) -> Any:
+    """A copy of a live in-progress row cut after its newest steer marker."""
+    from agentos.engine.steering import is_steer_segment
+
+    segments = getattr(entry, "tool_calls", None)
+    if not isinstance(segments, list):
+        return None
+    last = max((i for i, segment in enumerate(segments) if is_steer_segment(segment)), default=-1)
+    copy = getattr(entry, "model_copy", None)
+    if last < 0 or not callable(copy):
+        return None
+    return copy(update={"tool_calls": segments[: last + 1]})
 
 
 # ---------------------------------------------------------------------------

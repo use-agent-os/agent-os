@@ -3349,6 +3349,15 @@ class Agent:
                         )
                         if steered is not None:
                             yield steered
+                            if self._turn_progress_sink is not None:
+                                # The answer and the message taken after it
+                                # are on record before the next model call.
+                                sealed_len = self._seal_transcript(turn_messages, sealed_len)
+                                await self._report_turn_progress(
+                                    turn_messages,
+                                    round_index=iterations,
+                                    phase=PHASE_ROUND_COMPLETE,
+                                )
                             yield self._transition(AgentState.THINKING)
                             continue
                     break
