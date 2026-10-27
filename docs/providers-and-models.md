@@ -292,6 +292,60 @@ are clamped to 0–300 s.
 The 30 s cap is `AgentConfig.rate_limit_retry_after_cap_seconds` for embedded
 callers; `0` turns the behaviour off. It has no `agentos.toml` key.
 
+## Repetitive Output Guard
+
+A model occasionally gets stuck writing the same line, paragraph or short
+phrase over and over. Left alone it streams until `max_tokens`, which costs
+tokens and time and leaves a wall of repeated text. AgentOS watches the visible
+text and, separately, the reasoning of every response while it streams:
+
+- Nothing is checked until the text passes `first_check_chars` (default
+  `16000`). After that a check runs each time the text has grown by as much
+  again (16k, 32k, 64k, then every 64k), and each check reads only the last
+  `tail_chars` (default `64000`), so the cost stays flat however long the reply
+  gets.
+- A check trips when the tail repeats itself exactly — the same unit at
+  least `min_repeats` times in a row (default `5`), found from a
+  `window_chars`-long anchor (default `60`) — or when one line repeats that
+  often with only small changes between its copies, and in either case the
+  loop fills at least `min_coverage` of the tail (default `0.5`).
+- On a trip the engine stops reading and closes the provider stream, keeps the
+  text up to the end of the first repeated copy, drops every tool call the cut
+  response had started (none of them run), and logs
+  `provider.repetition_detected`. The response is then continued once, like a
+  response cut by the output limit, and the client gets a
+  `repetition_detected` warning. A second loop in the same step ends the turn
+  with the error code `repetition_detected`.
+- The saved reply has the repeated part removed; a client that rendered the
+  stream live already showed it until the cut.
+
+Long legitimate output — a big table, generated code that repeats the same
+boilerplate, a numbered list of hundreds of items — differs from row to row, so
+it is never exactly periodic and does not trip. A response that really should
+repeat one block verbatim many times (a zero-filled matrix, a template printed
+50 times) can trip; raise the thresholds or turn the guard off:
+
+```toml
+[llm.repetition_guard]
+enabled = true
+first_check_chars = 16000
+tail_chars = 64000
+window_chars = 60
+min_repeats = 5
+min_coverage = 0.5
+```
+
+```sh
+agentos config set llm.repetition_guard.enabled false
+```
+
+A cut response never reaches the provider's usage event, so AgentOS counts an
+estimate for it instead: input from the request-size estimate, output from the
+length of the text and reasoning it streamed (about four characters per
+token). The estimate feeds the turn totals, the session usage and the
+`max_turn_input_tokens` / `max_turn_output_tokens` budgets; with no
+provider-billed figure the turn's cost is the pricing-table estimate.
+
 ## Provider Troubleshooting
 
 Start with:

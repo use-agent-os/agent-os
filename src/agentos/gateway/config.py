@@ -406,6 +406,26 @@ class LlmCircuitBreakerConfig(BaseModel):
     max_cooldown_seconds: float = Field(default=600.0, gt=0)
 
 
+class LlmRepetitionGuardConfig(BaseModel):
+    """Stop a streamed response that degenerates into repeated output.
+
+    Checks start once the text (or the reasoning) of one response passes
+    ``first_check_chars`` and look only at the last ``tail_chars``. A response
+    trips when an exactly repeating unit (anchored on ``window_chars``
+    characters) or one repeated line covers ``min_coverage`` of that tail with
+    at least ``min_repeats`` copies. The response is cut after the first copy
+    and continued once; a second trip ends the turn with
+    ``repetition_detected``.
+    """
+
+    enabled: bool = True
+    first_check_chars: int = Field(default=16_000, ge=1_000)
+    tail_chars: int = Field(default=64_000, ge=1_000)
+    window_chars: int = Field(default=60, ge=8, le=1_000)
+    min_repeats: int = Field(default=5, ge=2)
+    min_coverage: float = Field(default=0.5, gt=0, le=1)
+
+
 class LlmProviderConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENTOS_LLM_")
 
@@ -425,6 +445,8 @@ class LlmProviderConfig(BaseSettings):
     provider_routing: dict[str, str] = Field(default_factory=dict)
     # Health-aware failover: see LlmCircuitBreakerConfig.
     circuit_breaker: LlmCircuitBreakerConfig = Field(default_factory=LlmCircuitBreakerConfig)
+    # Degenerate-output guard: see LlmRepetitionGuardConfig.
+    repetition_guard: LlmRepetitionGuardConfig = Field(default_factory=LlmRepetitionGuardConfig)
 
     @model_validator(mode="after")
     def _normalize_direct_deepseek_model(self) -> LlmProviderConfig:

@@ -143,6 +143,19 @@ base_url = "https://openrouter.ai/api/v1"
 # cooldown_seconds = 60       # skip window; doubles per consecutive trip
 # max_cooldown_seconds = 600  # cap on the doubling
 
+# Stop a response that degenerates into the same line, paragraph or phrase
+# over and over instead of letting it run to max_tokens. The response is cut
+# after the first repeated copy and continued once; a second loop ends the
+# turn with repetition_detected. Defaults favour missing a loop over cutting
+# a long legitimate answer.
+# [llm.repetition_guard]
+# enabled = true
+# first_check_chars = 16000   # no check before the reply (or reasoning) is this long
+# tail_chars = 64000          # each check looks only at this many trailing chars
+# window_chars = 60           # anchor length used to find a repeating unit
+# min_repeats = 5             # copies of the unit needed to trip
+# min_coverage = 0.5          # share of the inspected tail the loop must fill
+
 # Provider quick reference. Support levels marked compat_mock_verified are
 # verified by local mocked-contract tests, not by live vendor calls.
 #

@@ -75,6 +75,9 @@ class StopReason(StrEnum):
     STOP_SEQUENCE = "stop_sequence"
     REFUSAL = "refusal"
     PAUSE_TURN = "pause_turn"
+    # Set by the engine, never by a provider: the response degenerated into
+    # repeated output and the engine stopped reading the stream.
+    REPETITION = "repetition_detected"
     UNKNOWN = "unknown"
 
 
@@ -97,7 +100,8 @@ _STOP_REASON_ALIASES: dict[str, StopReason] = {
     # OpenAI Responses API (``status`` / ``incomplete_details.reason``)
     "completed": StopReason.END_TURN,
     "max_output_tokens": StopReason.MAX_TOKENS,
-    # Our own canonical value, so normalizing is idempotent
+    # Our own canonical values, so normalizing is idempotent
+    "repetition_detected": StopReason.REPETITION,
     "unknown": StopReason.UNKNOWN,
 }
 

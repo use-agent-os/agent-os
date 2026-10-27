@@ -57,6 +57,7 @@ _PARTIAL_CODES = frozenset(
         "tool_failure_loop_exhausted",
         "output_truncated",
         "provider_output_truncated",
+        "repetition_detected",
     }
 )
 _BLOCKED_CODES = frozenset(

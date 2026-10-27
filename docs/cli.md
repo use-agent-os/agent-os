@@ -1759,6 +1759,15 @@ with `loop_detected` if it tries again. To only log those decisions instead:
 agentos config set tools.loop_guard observe
 ```
 
+A reply that loops on the same line, paragraph or phrase is cut after its first
+copy and continued once (`[llm.repetition_guard]`, on by default; see
+[providers-and-models.md](providers-and-models.md#repetitive-output-guard)).
+To let such replies run to the output limit instead:
+
+```sh
+agentos config set llm.repetition_guard.enabled false
+```
+
 Every CLI command logs to stderr at `INFO` and above, so its output is only
 the command's own. Set `AGENTOS_LOG_LEVEL=debug` to see the debug-level events
 too (the gateway process keeps its own configured `log_level`, `DEBUG` by

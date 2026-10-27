@@ -44,6 +44,7 @@ if TYPE_CHECKING:
         CompactionEvent,
         DoneEvent,
         ErrorEvent,
+        RepetitionStopEvent,
         TextDeltaEvent,
         ToolResultEvent,
         ToolUseStartEvent,
@@ -399,7 +400,11 @@ class _ErrorHandler:
                 message=_LLM_TIMEOUT_ENVELOPE["user_message"],
                 code=_LLM_TIMEOUT_ENVELOPE["error_class"],
             )
-        if event.code in {"incomplete_tool_stream", "provider_output_truncated"}:
+        if event.code in {
+            "incomplete_tool_stream",
+            "provider_output_truncated",
+            "repetition_detected",
+        }:
             state.turn_segments[:] = _drop_unpaired_tool_use_segments(state.turn_segments)
         # Text still held back pending disambiguation (it merely resembled the
         # start of a tool-protocol marker) is genuine assistant output once
@@ -412,6 +417,48 @@ class _ErrorHandler:
             state.current_text_parts.append(pending_text)
         state.error_message = event.message or "Unknown error"
         state.pending_error_event = event
+        return _SUPPRESS
+
+
+class _RepetitionStopHandler:
+    """Take a cut, repeating response back out of the reply being accumulated.
+
+    The repeated text already went out as deltas; dropping it here keeps it
+    out of the persisted reply. Tool calls the cut response started never run,
+    so their unpaired ``tool_use`` segments go too. Returns ``_SUPPRESS``: the
+    event is engine-internal.
+    """
+
+    def handle(
+        self,
+        event: RepetitionStopEvent,
+        state: _StreamState,
+    ) -> object:
+        from agentos.engine.runtime import _drop_unpaired_tool_use_segments
+
+        pending_text = state.protocol_text_guard.flush()
+        if pending_text:
+            state.final_text_parts.append(pending_text)
+            state.current_text_parts.append(pending_text)
+        state.turn_segments[:] = _drop_unpaired_tool_use_segments(state.turn_segments)
+        removed = event.removed_text
+        if not removed:
+            return _SUPPRESS
+        current_text = "".join(state.current_text_parts)
+        final_text = "".join(state.final_text_parts)
+        if current_text.endswith(removed) and final_text.endswith(removed):
+            kept_current = current_text[: -len(removed)]
+            kept_final = final_text[: -len(removed)]
+            state.current_text_parts[:] = [kept_current] if kept_current else []
+            state.final_text_parts[:] = [kept_final] if kept_final else []
+        else:
+            # The reply diverged from the raw stream (a protocol-marker strip,
+            # a tool segment flush); leave it whole rather than cut blindly.
+            log.debug(
+                "stream_consumer.repetition_trim_skipped",
+                removed_chars=len(removed),
+                current_chars=len(current_text),
+            )
         return _SUPPRESS
 
 
@@ -858,6 +905,7 @@ class StreamConsumerStage:
         self._tool_result_handler = _ToolResultHandler()
         self._artifact_handler = _ArtifactHandler()
         self._error_handler = _ErrorHandler()
+        self._repetition_stop_handler = _RepetitionStopHandler()
         self._warning_handler = _WarningHandler(warning_transformer)
         self._done_handler = _DoneHandler()
         self._compaction_handler = _CompactionHandler(
@@ -876,6 +924,7 @@ class StreamConsumerStage:
             CompactionEvent,
             DoneEvent,
             ErrorEvent,
+            RepetitionStopEvent,
             TextDeltaEvent,
             ToolResultEvent,
             ToolUseStartEvent,
@@ -903,6 +952,8 @@ class StreamConsumerStage:
                 transformed = self._error_handler.handle(event, state)
             elif isinstance(event, WarningEvent):
                 transformed = self._warning_handler.handle(event)
+            elif isinstance(event, RepetitionStopEvent):
+                transformed = self._repetition_stop_handler.handle(event, state)
             elif isinstance(event, DoneEvent):
                 transformed, extra_yields = self._done_handler.handle(event, inp, state)
             elif isinstance(event, CompactionEvent):

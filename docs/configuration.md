@@ -540,6 +540,20 @@ To keep the old behaviour — decisions are only written to the turn call log:
 loop_guard = "observe"   # default "enforce"
 ```
 
+### Repetitive output guard
+
+A response that degenerates into the same line, paragraph or phrase over and
+over is cut after the first repeated copy, its provider stream is closed, and
+it is continued once; a second loop ends the turn with `repetition_detected`.
+On by default with conservative thresholds; see
+[Providers and Models — Repetitive Output Guard](providers-and-models.md#repetitive-output-guard)
+for how it decides. To turn it off:
+
+```toml
+[llm.repetition_guard]
+enabled = false
+```
+
 ## Prompt Cache Configuration
 
 Controls prompt prefix caching for LLM providers that support it (Anthropic, OpenAI, DeepSeek, OpenRouter, etc.):

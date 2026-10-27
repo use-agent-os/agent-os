@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
+from agentos.engine.repetition_guard import RepetitionGuardSettings
 from agentos.execution_status import ExecutionStatus
 from agentos.tool_boundary import ToolCall as ToolCall
 from agentos.tool_boundary import ToolResult as ToolResult
@@ -219,6 +220,23 @@ class WarningEvent:
 
 
 @dataclass
+class RepetitionStopEvent:
+    """The agent cut a provider response that had started repeating itself.
+
+    Engine-internal: the stream consumer uses it to drop ``removed_text`` from
+    the end of the reply it is accumulating (that text was already streamed as
+    deltas) and the tool calls the cut response had started, then suppresses
+    it. User-facing notice travels as a ``repetition_detected`` warning.
+    """
+
+    kind: Literal["repetition_stop"] = field(default="repetition_stop", init=False)
+    channel: str = "text"
+    signal: str = ""
+    period: int = 0
+    removed_text: str = ""
+
+
+@dataclass
 class CompactionEvent:
     """Emitted when Agent completes inline compaction. Captured by TurnRunner for DB persistence."""
 
@@ -257,6 +275,7 @@ AgentEvent = (
     | ErrorEvent
     | DoneEvent
     | CompactionEvent
+    | RepetitionStopEvent
     | WarningEvent
     | RouterDecisionEvent
 )
@@ -335,6 +354,9 @@ class AgentConfig:
     # instead of failing over, and does not trip the provider's circuit
     # breaker. 0 disables honouring the hint.
     rate_limit_retry_after_cap_seconds: float = 30.0
+    # Stop a response that degenerates into repeated output
+    # (``[llm.repetition_guard]``); one continuation, then a terminal error.
+    repetition_guard: RepetitionGuardSettings = field(default_factory=RepetitionGuardSettings)
     # Prompt caching breakpoints (list of {"text": ..., "cache": "true"})
     cache_breakpoints: list[dict[str, str]] | None = None
     cache_mode: Literal["off", "auto", "on"] = "off"

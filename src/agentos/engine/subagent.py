@@ -218,6 +218,13 @@ class SubagentManager:
             async for event in child_agent.run_turn(spec.task):
                 if hasattr(event, "text") and event.kind == "text_delta":  # type: ignore[union-attr]
                     collected.append(event.text)  # type: ignore[union-attr]
+                elif event.kind == "repetition_stop":  # type: ignore[union-attr]
+                    # The child's reply was cut mid-loop: drop the repeated
+                    # text it already streamed from the result.
+                    removed = getattr(event, "removed_text", "")
+                    text = "".join(collected)
+                    if removed and text.endswith(removed):
+                        collected[:] = [text[: -len(removed)]]
                 elif event.kind == "done":  # type: ignore[union-attr]
                     break
             return "".join(collected)

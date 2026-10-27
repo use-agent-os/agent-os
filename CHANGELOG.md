@@ -100,6 +100,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Calls whose results change, and status polls, are not refused (polls get a
   much larger allowance). The guard and the repeated-failure streak both reset
   on every new message. `[tools] loop_guard = "observe"` restores log-only.
+### Added
+- Engine: a repetition guard stops a streamed response that degenerates into
+  the same line, paragraph or short phrase over and over, instead of letting it
+  run to `max_tokens`. It watches the visible text and the reasoning
+  separately, starts checking at 16k characters and reads only the last 64k on
+  a growing schedule, so its cost stays bounded. On a trip the provider stream
+  is closed, the text is kept up to the first repeated copy, tool calls the cut
+  response started are dropped, and the response is continued once (like an
+  output-limit cut); a second loop ends the turn with `repetition_detected`.
+  The cut call's usage is counted as an estimate (request-size estimate in,
+  streamed text and reasoning out), so turn totals and token budgets include
+  it. Tune or disable it under `[llm.repetition_guard]`.
 
 ## [2026.10.27] - 2026-10-27
 
