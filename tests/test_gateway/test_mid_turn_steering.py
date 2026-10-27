@@ -32,6 +32,7 @@ class SteerableRunner:
         self.release = asyncio.Event()
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.steered: list[str] = []
+        self.no_capture: list[bool] = []
         self.steered_ids: list[str] = []
 
     async def run(self, message: str, session_key: str, **kwargs: Any) -> AsyncIterator[Any]:
@@ -45,6 +46,7 @@ class SteerableRunner:
             event = await take_steering(source, messages, self.steered_ids)
             if event is not None:
                 self.steered.append(event.text)
+                self.no_capture.append(event.no_memory_capture)
                 yield event
         yield DoneEvent(text="done")
 
@@ -219,6 +221,7 @@ async def test_steer_into_a_turn_that_checks_no_queue_still_interrupts(tmp_path:
         rows = await _user_rows(rig)
 
     assert second["queue_mode"] == "interrupt"
+    assert second["steer_fallback"] == "no_steerable_turn"
     assert stopped.status == AgentTaskStatus.CANCELLED
     assert rows == ["first", "replace it"]
 
@@ -236,6 +239,26 @@ async def test_send_without_an_explicit_steer_keeps_the_old_default(tmp_path: Pa
         stopped = await rig.runtime.status(first["task_id"])
 
     assert second["queue_mode"] == "interrupt"
+    assert "steer_fallback" not in second  # it never asked to steer
     assert stopped.status == AgentTaskStatus.CANCELLED
     assert runner.steered == []
     assert runner.calls[1][0] == "plain message"
+
+
+async def test_no_memory_capture_steer_still_joins_the_running_turn(tmp_path: Path) -> None:
+    runner = SteerableRunner()
+    async with turn_rig(tmp_path, runner) as rig:
+        first = await _send(rig, "first")
+        await asyncio.wait_for(runner.started.wait(), timeout=3)
+        second = await _send(rig, "off the record", queueMode="steer", noMemoryCapture=True)
+        runner.release.set()
+        await rig.runtime.wait(first["task_id"], timeout=3)
+        steered = await rig.runtime.status(second["task_id"])
+        first_record = await rig.runtime.status(first["task_id"])
+
+    assert second["queue_mode"] == "steer"
+    assert "steer_fallback" not in second
+    assert runner.steered == ["off the record"]
+    assert runner.no_capture == [True]
+    assert steered.terminal_reason == "steered"
+    assert first_record.status == AgentTaskStatus.SUCCEEDED

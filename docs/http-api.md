@@ -447,8 +447,12 @@ before relying on it.
   takes the message; until then it is not in the transcript. A message no
   checkpoint takes runs as the next turn. When the running turn does not check
   (a coding-harness turn, a turn still starting) `steer` still replaces it.
-  The send answer carries `task_id` and the effective `queue_mode` (`steer`,
-  `interrupt`, `followup`, `collect`). `chat.history` (unless paging with
+  A `noMemoryCapture` message steers too; the turn it joins then skips
+  memory capture. The send answer carries `task_id` and the effective
+  `queue_mode` (`steer`, `interrupt`, `followup`, `collect`); an explicit
+  `steer` that fell back to interrupt also carries `steer_fallback`:
+  `attachments` (a message with attachments always starts its own turn) or
+  `no_steerable_turn` (nothing running takes steering messages). `chat.history` (unless paging with
   `before`) returns `pending_inputs`: the session's queued messages, oldest
   first, as `{task_id, queue_mode, text, text_truncated?, queued_at,
   attachments, steer, message_id?}`; `message_id` is set when the user row is

@@ -130,6 +130,7 @@ from agentos.engine.types import (
     DoneEvent,
     ErrorEvent,
     RouterControlReplayEvent,
+    SteeringEvent,
     ThinkingLevel,
     ToolResultEvent,
     WarningEvent,
@@ -3226,6 +3227,9 @@ class TurnRunner:
                     router_control_replay_event = event
                     yield event
                     break
+                if isinstance(event, SteeringEvent) and event.no_memory_capture:
+                    # A message steered in asked to stay out of memory.
+                    no_memory_capture = True
                 yield event
             timing.stage_end("stream_consumer")
             if router_control_replay_event is not None:

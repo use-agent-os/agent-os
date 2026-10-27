@@ -985,29 +985,40 @@ async def persisted_send_answer(
 _PERSISTED_IDEMPOTENCY_SCAN = 50
 
 
-def _steers_running_turn(
+#: ``steer_fallback`` of an explicit ``steer`` send that interrupted instead:
+#: it carries attachments (they need a new turn's setup), or the session has
+#: no running turn that takes steering messages (nothing runs, a turn still
+#: starting, a coding-harness turn).
+STEER_FALLBACK_ATTACHMENTS = "attachments"
+STEER_FALLBACK_NO_STEERABLE_TURN = "no_steerable_turn"
+
+
+def _steer_fallback_reason(
     task_runtime: Any,
     session_key: str,
     *,
     requested_mode: object,
     has_attachments: bool,
-    no_memory_capture: bool,
-) -> bool:
-    """Whether a send goes to the session's running turn as a steering message.
+) -> str | None:
+    """``None`` when a send joins the running turn as a steering message.
 
-    Only a plain text ``steer`` message does: attachments need the turn
-    setup a new turn gets, and a message that must not reach memory capture
-    cannot join a turn that captures.
+    Otherwise, for an explicit ``steer`` send, why it falls back to
+    interrupt (a ``STEER_FALLBACK_*`` value); ``""`` for any other mode.
+    A ``noMemoryCapture`` message does steer: the turn it joins then skips
+    memory capture (``SteeringEvent.no_memory_capture``).
     """
-    if requested_mode != "steer" or has_attachments or no_memory_capture:
-        return False
+    if requested_mode != "steer":
+        return ""
+    if has_attachments:
+        return STEER_FALLBACK_ATTACHMENTS
     accepts = getattr(task_runtime, "accepts_steering", None)
     if not callable(accepts):
-        return False
+        return STEER_FALLBACK_NO_STEERABLE_TURN
     try:
-        return bool(accepts(session_key))
+        accepted = bool(accepts(session_key))
     except Exception:  # noqa: BLE001 - steering is an optimisation over interrupt
-        return False
+        accepted = False
+    return None if accepted else STEER_FALLBACK_NO_STEERABLE_TURN
 
 
 def _recorded_idempotency(params: dict[str, Any], field: str) -> str | None:
@@ -1208,13 +1219,13 @@ async def _sessions_send_impl(params: dict | None, ctx: RpcContext) -> dict:
     # is written where the turn takes it. The session's default queue mode
     # (also ``steer``) keeps its old meaning, interrupt, so a client that does
     # not ask for steering sees no change.
-    steer_running_turn = _steers_running_turn(
+    steer_fallback = _steer_fallback_reason(
         task_runtime,
         key,
         requested_mode=params.get("queueMode") or params.get("queue_mode"),
         has_attachments=bool(raw_attachments),
-        no_memory_capture=bool(capture_controls["no_memory_capture"]),
     )
+    steer_running_turn = steer_fallback is None
 
     # 1. Persist user message to transcript (include attachment metadata).
     # Hold the per-session lock used by /reset so a concurrent reset cannot
@@ -1415,6 +1426,7 @@ async def _sessions_send_impl(params: dict | None, ctx: RpcContext) -> dict:
             "key": key,
             "task_id": handle.task_id,
             "queue_mode": runtime_mode,
+            **({"steer_fallback": steer_fallback} if steer_fallback else {}),
         }
 
     # 2. Run agent turn in background via TurnRunner

@@ -249,6 +249,8 @@ class SteeringEvent:
     text: str = ""
     message_id: str | None = None
     task_id: str | None = None
+    #: The message must not reach memory capture, so the turn skips it.
+    no_memory_capture: bool = False
 
 
 @dataclass

@@ -163,7 +163,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   turn about to end continues with it. Its user row is written where the turn
   takes it, not at send time; a message no checkpoint takes runs as the next
   turn. Turns that never check (coding-harness turns) keep `steer` =
-  interrupt. Capability `mid-turn-steering`.
+  interrupt, and the answer says why in `steer_fallback`. A `noMemoryCapture`
+  message steers too and keeps the turn it joins out of memory capture.
+  Capability `mid-turn-steering`.
 - Gateway: server-side pending inputs. `chat.send` / `sessions.send` answer
   with the turn's `task_id` and the effective `queue_mode` (`chat.send` now
   accepts `queueMode`); `chat.history` lists `pending_inputs` (queued messages,

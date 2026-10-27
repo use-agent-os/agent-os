@@ -956,7 +956,12 @@ class TaskRuntime:
             running_task_id=running.task_id,
             session_key=running.envelope.session_key,
         )
-        return SteeringMessage(text=text, message_id=message_id, task_id=candidate.task_id)
+        return SteeringMessage(
+            text=text,
+            message_id=message_id,
+            task_id=candidate.task_id,
+            no_memory_capture=candidate.no_memory_capture,
+        )
 
     async def _write_deferred_input(self, task: _RuntimeTask) -> None:
         """Write a deferred message that no running turn took, before its own turn."""
