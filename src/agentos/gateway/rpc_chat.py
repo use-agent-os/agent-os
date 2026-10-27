@@ -11,6 +11,7 @@ import structlog
 from agentos.chat.conversation import ChatSendRequest, sessions_send_params
 from agentos.chat.history import transcript_entries_to_chat_messages
 from agentos.chat.source import chat_source_metadata
+from agentos.engine.steering import is_steer_segment
 from agentos.engine.turn_progress import hide_live_turn_progress
 from agentos.gateway.access import CONTROL_AND_CHANNEL, CONTROL_ONLY
 from agentos.gateway.config import GatewayConfig
@@ -249,6 +250,172 @@ def _budgeted_messages(
         [message for _, message in kept if message is not None],
         cut,
     )
+
+
+# Fields of a split assistant message that belong to the turn as a whole:
+# only its last part (which keeps the row's own ids) carries them.
+_TURN_LEVEL_MESSAGE_KEYS = frozenset(
+    {
+        "transcript_id",
+        "has_thinking",
+        "attachments",
+        "artifacts",
+        "usage",
+        "model",
+        "input",
+        "output",
+        "input_tokens",
+        "output_tokens",
+        "cost_usd",
+    }
+)
+
+
+def _steer_marker_ids(message: dict[str, Any]) -> list[str | None] | None:
+    """The steer markers of an assistant message, in order; ``None`` if it has none."""
+    if message.get("role") != "assistant" or message.get("placeholder"):
+        return None
+    segments = message.get("tool_calls")
+    if not isinstance(segments, list):
+        return None
+    ids: list[str | None] = []
+    for segment in segments:
+        if is_steer_segment(segment):
+            raw = segment.get("message_id")
+            ids.append(raw if isinstance(raw, str) and raw else None)
+    return ids or None
+
+
+def _segments_text(segments: list[Any]) -> str:
+    return "".join(
+        segment["text"]
+        for segment in segments
+        if isinstance(segment, dict)
+        and segment.get("type") == "text"
+        and isinstance(segment.get("text"), str)
+    )
+
+
+def _chunk_has_content(segments: list[Any]) -> bool:
+    for segment in segments:
+        if not isinstance(segment, dict):
+            continue
+        if segment.get("type") != "text" or str(segment.get("text") or "").strip():
+            return True
+    return False
+
+
+def _split_steered_message(
+    message: dict[str, Any], steered: list[dict[str, Any] | None]
+) -> list[dict[str, Any]]:
+    """*message* cut at its steer markers, with each steered user message between."""
+    chunks: list[list[Any]] = [[]]
+    for segment in message.get("tool_calls") or []:
+        if is_steer_segment(segment):
+            chunks.append([])
+        else:
+            chunks[-1].append(segment)
+    # (chunk, user message that follows it)
+    layout: list[tuple[list[Any] | None, dict[str, Any] | None]] = []
+    for index, segments in enumerate(chunks):
+        follower = steered[index] if index < len(steered) else None
+        layout.append((segments if _chunk_has_content(segments) else None, follower))
+    emitted = [index for index, (kept, _) in enumerate(layout) if kept is not None]
+    last_part = emitted[-1] if emitted else len(layout) - 1
+    if not emitted:
+        layout[last_part] = (chunks[last_part], layout[last_part][1])
+
+    message_id = message.get("message_id") or message.get("id")
+    raw_text = message.get("text")
+    remainder: str = raw_text if isinstance(raw_text, str) else ""
+    out: list[dict[str, Any]] = []
+    part_number = 0
+    for index, (chunk, follower) in enumerate(layout):
+        if chunk is not None:
+            part_number += 1
+            part_text = _segments_text(chunk).strip()
+            if index == last_part:
+                part = {**message, "tool_calls": chunk}
+                # The row's text may carry more than its segments (a notice
+                # appended at the end): keep whatever the earlier parts did
+                # not show.
+                part["text"] = remainder.strip() if remainder.strip() else part_text
+            else:
+                part = {
+                    key: value
+                    for key, value in message.items()
+                    if key not in _TURN_LEVEL_MESSAGE_KEYS
+                }
+                part_id = f"{message_id}#part{part_number}" if message_id else None
+                part.update({"id": part_id, "message_id": part_id, "split_from": message_id})
+                part["tool_calls"] = chunk
+                part["text"] = part_text
+                if follower is not None and follower.get("timestamp") is not None:
+                    part["timestamp"] = follower.get("timestamp")
+                found = remainder.find(part_text) if part_text else -1
+                if found >= 0:
+                    remainder = remainder[found + len(part_text) :]
+            out.append(part)
+        if follower is not None:
+            out.append(follower)
+    return out
+
+
+def _split_steered_turns(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Show a turn that took steered messages in the order things happened.
+
+    A message steered into a running turn (``agentos.engine.steering``) is
+    its own user row, written when the turn took it, so it sorts before the
+    turn's single assistant row, which also holds the work done before the
+    message. That row's segments mark the point (``steer`` segments): the
+    assistant message is cut there and the steered user message (when it is
+    on this page) moves between the parts -- the work before it, the
+    message, the work after it. The last part keeps the row's ids, usage and
+    artifacts; earlier parts get ``<message_id>#partN`` ids and
+    ``split_from``. Messages without a marker are returned as they are.
+    """
+    marked = {
+        index: ids
+        for index, message in enumerate(messages)
+        if (ids := _steer_marker_ids(message)) is not None
+    }
+    if not marked:
+        return messages
+    user_index = {
+        message.get("message_id"): index
+        for index, message in enumerate(messages)
+        if message.get("role") == "user" and message.get("message_id")
+    }
+    moved: set[int] = set()
+    replacements: dict[int, list[dict[str, Any]]] = {}
+    for index, ids in marked.items():
+        steered: list[dict[str, Any] | None] = []
+        for steered_id in ids:
+            found = user_index.get(steered_id) if steered_id else None
+            if found is None or found in moved:
+                steered.append(None)
+                continue
+            moved.add(found)
+            steered.append(messages[found])
+        replacements[index] = _split_steered_message(messages[index], steered)
+    out: list[dict[str, Any]] = []
+    for index, message in enumerate(messages):
+        if index in moved:
+            continue
+        out.extend(replacements.get(index, [message]))
+    return out
+
+
+def _steered_ids_outside(messages: list[dict[str, Any]]) -> set[str]:
+    """Steered row ids *messages* name but do not contain."""
+    named = {
+        steered_id
+        for message in messages
+        for steered_id in (_steer_marker_ids(message) or [])
+        if steered_id
+    }
+    present = {message.get("message_id") for message in messages}
+    return named - present
 
 
 def _session_summary_to_chat_payload(summary: object) -> dict[str, Any]:
@@ -756,24 +923,35 @@ async def _handle_chat_history(params: dict | None, ctx: RpcContext) -> dict:
                 newest_first=False,
                 max_rows=CHAT_HISTORY_DELTA_MAX_ROWS,
             )
-            if not _control_ui_show_thinking(ctx):
-                for message in delta_messages:
-                    message.pop("has_thinking", None)
-            return {
-                "kind": "delta",
-                "messages": _annotate_transcript_attachment_downloads(
-                    delta_messages, session_key=session_key
-                ),
-                # More rows after these: ask again from ``newest_cursor``.
-                "has_more": delta_more,
-                "newest_cursor": (
-                    _chat_history_cursor(delta_entries[-1]) if delta_entries else str(delta_cursor)
-                ),
-                "loaded_count": len(delta_entries),
-                "canonical_available": canonical_available,
-                "in_flight_run": in_flight_run,
-                "pending_inputs": pending_inputs,
-            }
+            outside = _steered_ids_outside(delta_messages)
+            if not outside or not any(
+                getattr(entry, "message_id", None) in outside
+                for entry in transcript[: cursor_index + 1]
+            ):
+                delta_messages = _split_steered_turns(delta_messages)
+                if not _control_ui_show_thinking(ctx):
+                    for message in delta_messages:
+                        message.pop("has_thinking", None)
+                return {
+                    "kind": "delta",
+                    "messages": _annotate_transcript_attachment_downloads(
+                        delta_messages, session_key=session_key
+                    ),
+                    # More rows after these: ask again from ``newest_cursor``.
+                    "has_more": delta_more,
+                    "newest_cursor": (
+                        _chat_history_cursor(delta_entries[-1])
+                        if delta_entries
+                        else str(delta_cursor)
+                    ),
+                    "loaded_count": len(delta_entries),
+                    "canonical_available": canonical_available,
+                    "in_flight_run": in_flight_run,
+                    "pending_inputs": pending_inputs,
+                }
+            # A steered turn whose steered message the client already has
+            # (at or before the cursor): the message has to move between the
+            # turn's parts, which a delta cannot do; send the latest page.
         # The cursor names no row (compaction, reset, another session): the
         # client must replace what it has with the latest page.
         kind = "reset"
@@ -793,6 +971,7 @@ async def _handle_chat_history(params: dict | None, ctx: RpcContext) -> dict:
     )
     if budget_cut:
         has_more = True
+    messages = _split_steered_turns(messages)
     summaries = await _chat_history_summaries(
         mgr,
         session_key,

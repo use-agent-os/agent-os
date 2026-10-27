@@ -71,6 +71,11 @@ class _LiveRun:
     text_truncated: bool = False
     plan: Any = None
     events: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=_LIVE_EVENTS_MAX))
+    # Text since the newest message steered into the run (``None``: none
+    # was). The snapshot shows only this part: the part before it is listed
+    # by ``chat.history`` from the run's in-progress row, above the steered
+    # message.
+    text_since_steer: str | None = None
 
     def append_text(self, chunk: str) -> None:
         if not chunk:
@@ -79,6 +84,11 @@ class _LiveRun:
         if len(self.text) > _LIVE_TEXT_MAX_CHARS:
             self.text = self.text[-_LIVE_TEXT_MAX_CHARS:]
             self.text_truncated = True
+        if self.text_since_steer is not None:
+            self.text_since_steer = (self.text_since_steer + chunk)[-_LIVE_TEXT_MAX_CHARS:]
+
+    def steered(self) -> None:
+        self.text_since_steer = ""
 
 
 def _progress_event(event_name: str, payload: dict[str, Any], stream_seq: int) -> dict[str, Any]:
@@ -147,8 +157,8 @@ def project_live_run(
         if size <= remaining:
             snapshot["plan"] = live.plan
             remaining -= size
-    text = live.text
-    truncated = live.text_truncated
+    text = live.text if live.text_since_steer is None else live.text_since_steer
+    truncated = live.text_truncated if live.text_since_steer is None else False
     # Shrink from the front until the encoded text fits; JSON escaping makes
     # the encoded size larger than the raw text, so re-measure each round.
     while text and _json_size(text) > max(0, remaining):
@@ -291,6 +301,9 @@ class SessionStreamRegistry:
             text = payload.get("text")
             if isinstance(text, str):
                 live.append_text(text)
+        elif event_name == "session.event.steering":
+            live.steered()
+            live.events.append(_progress_event(event_name, payload, stream_seq))
         elif event_name in (
             "session.event.tool_use_start",
             "session.event.tool_result",

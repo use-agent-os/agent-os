@@ -923,7 +923,7 @@ def _make_task_session_lifecycle_listener(
 #: Stream events that end a text segment: text held back by the display strip
 #: is released (or dropped) before them, as the console starts a new segment.
 _TEXT_SEGMENT_BOUNDARY_EVENTS = frozenset(
-    {"tool_use_start", "tool_result", "artifact", "done", "error"}
+    {"tool_use_start", "tool_result", "artifact", "done", "error", "steering"}
 )
 
 

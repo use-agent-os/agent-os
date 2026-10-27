@@ -457,7 +457,16 @@ before relying on it.
   taskId}`) withdraws a queued message — `{withdrawn: true, aborted: [],
   removed_message_id?}`, the task ends `cancelled` / `withdrawn` — stops just
   that run when it is the running one, and answers `delivered: true` when a
-  running turn already took it.
+  running turn already took it. When a turn takes the message it emits
+  `session.event.steering {text, message_id, task_id}` and adds a
+  `{"type": "steer", "message_id"}` segment to its row's `tool_calls`.
+  `chat.history` cuts such an assistant message at each `steer` segment and
+  moves the steered user message between the parts (work before, message,
+  work after); the last part keeps the row's ids, usage and artifacts, earlier
+  parts get `<message_id>#partN` ids and `split_from`. While the turn runs,
+  its part up to the newest steer is listed and `in_flight_run.text` holds
+  only the text after it. A `delta_cursor` read whose turn would move a
+  steered message the client already has answers `kind: "reset"`.
 - **`idempotency-keys`** — `chat.send`, `sessions.send`, `sessions.create`,
   `cron.add`, `exec.approval.resolve` and `plugin.approval.resolve` accept an
   optional `idempotency_key`. The same key within five minutes returns the first

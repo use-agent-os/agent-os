@@ -283,3 +283,56 @@ describe('tail following', () => {
     expect(thread.scrollTop).toBe(1000)
   })
 })
+
+describe('mid-turn steering in the live view', () => {
+  beforeEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('closes the live bubble, shows the steered message, and streams the rest below it', () => {
+    const thread = document.createElement('div')
+    document.body.appendChild(thread)
+    const addMessage = vi.fn((role: string, text: string) => {
+      const row = document.createElement('div')
+      row.className = `msg ${role}`
+      row.textContent = text
+      thread.appendChild(row)
+      return row
+    })
+    const stampHistoryElement = vi.fn((row: HTMLElement, stable: string) => {
+      if (stable) row.dataset.messageId = stable
+    })
+    const controller = createStreamController(
+      { current: thread },
+      { getSessionKey: () => 'agent:main:webchat:test', addMessage, stampHistoryElement },
+    )
+
+    controller.startStreaming()
+    controller.appendDelta('Looking at the red one.')
+    const before = controller.getStreamBubble()
+    controller.splitStreamAtSteer('use the blue one', 'u-2')
+    controller.appendDelta('Switched to blue.')
+    const after = controller.getStreamBubble()
+
+    expect(after).not.toBe(before)
+    const rows = Array.from(thread.querySelectorAll('.msg')).map((el) => [
+      el.classList.contains('user') ? 'user' : 'assistant',
+      (el.querySelector('.msg-body') ?? el).textContent?.trim(),
+    ])
+    expect(rows).toEqual([
+      ['assistant', 'Looking at the red one.'],
+      ['user', 'use the blue one'],
+      ['assistant', 'Switched to blue.'],
+    ])
+    expect(before).not.toHaveClass('streaming')
+    expect(thread.querySelector('[data-message-id="u-2"]')).not.toBeNull()
+
+    // The done frame carries the whole turn's text: the part above the
+    // steered message is not repeated in the last bubble.
+    controller.reconcileFinalStreamText('Looking at the red one.Switched to blue. Done.')
+    controller.flushPendingTextSegment()
+    expect(after?.querySelector('.msg-body')?.textContent?.trim()).toBe('Switched to blue. Done.')
+    controller.endStreaming()
+    controller.clearViewLocalStreamState('test_cleanup')
+  })
+})
