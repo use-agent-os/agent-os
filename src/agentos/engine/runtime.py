@@ -63,6 +63,7 @@ from agentos.engine.proactive_compaction import ProactiveCompactionScheduler
 from agentos.engine.router_decision import build_router_decision_event
 from agentos.engine.transcript import transcript_record_of
 from agentos.engine.turn_policy import resolve_turn_policy
+from agentos.engine.turn_progress import TurnProgressWriter
 from agentos.engine.turn_runner import (
     AgentBootstrapStage,
     AgentBootstrapStageInput,
@@ -2604,6 +2605,29 @@ class TurnRunner:
             return
         yield
 
+    def _new_turn_progress_writer(
+        self,
+        session_key: str,
+        run_kind: str,
+        segments: list[dict],
+    ) -> TurnProgressWriter | None:
+        """The turn's in-progress row writer, or ``None`` when none is kept.
+
+        Internal turns persist nothing; a session manager that cannot replace
+        a row (test doubles, older stores) gets no mid-turn rows either.
+        """
+        from agentos.engine.turn_runner.turn_finalizer_stage import _is_internal_turn
+
+        if _is_internal_turn(run_kind) or not TurnProgressWriter.supported(self._session_manager):
+            return None
+        return TurnProgressWriter(
+            session_key=session_key,
+            session_manager=self._session_manager,
+            segments=segments,
+            write_context=self._session_write_context,
+            tool_use_input=_persisted_tool_use_input,
+        )
+
     async def _append_session_message(self, session_key: str, **append_kwargs: Any) -> Any:
         if self._session_manager is None:
             return None
@@ -2806,6 +2830,9 @@ class TurnRunner:
         turn_segments: list[dict] = []
         turn_artifacts: list[dict[str, Any]] = []
         artifact_delivery_failures: list[str] = []
+        # Mid-turn durability: the in-progress row after each tool round.
+        turn_progress = self._new_turn_progress_writer(session_key, run_kind, turn_segments)
+        turn_progress_agent: Any = None
         self._emit_turn_event(
             "turn_start",
             trace_context,
@@ -3155,6 +3182,11 @@ class TurnRunner:
             done_event: DoneEvent | None = None
             turn_input = att_out.turn_input
 
+            if turn_progress is not None:
+                set_progress_sink = getattr(agent, "set_turn_progress_sink", None)
+                if callable(set_progress_sink):
+                    set_progress_sink(turn_progress.record)
+                    turn_progress_agent = agent
             stream_state = _StreamState(
                 current_text_parts=current_text_parts,
                 final_text_parts=final_text_parts,
@@ -3193,6 +3225,10 @@ class TurnRunner:
                 yield event
             timing.stage_end("stream_consumer")
             if router_control_replay_event is not None:
+                # The replay re-runs the whole turn; what this run recorded
+                # is superseded, as its in-memory segments are.
+                if turn_progress is not None:
+                    await turn_progress.discard()
                 async for replayed_event in self._run_turn(
                     message,
                     session_key,
@@ -3263,10 +3299,18 @@ class TurnRunner:
                     heartbeat_ack_max_chars=heartbeat_ack_max_chars,
                     no_memory_capture=no_memory_capture,
                     provider_messages=transcript_record_of(agent, artifacts=turn_artifacts),
+                    replaces_message_id=(
+                        turn_progress.message_id if turn_progress is not None else None
+                    ),
                 )
             )
             timing.stage_end("turn_finalizer")
             fin_out = fin_outcome.require_output()
+            if turn_progress is not None:
+                if fin_out.transcript_appended:
+                    turn_progress.replaced()
+                else:
+                    await turn_progress.discard()
             final_text = fin_out.final_text
             turn_segments = fin_out.turn_segments
 
@@ -3364,12 +3408,19 @@ class TurnRunner:
                             {"text": body, "artifacts": turn_artifacts},
                             ensure_ascii=False,
                         )
+                    cancel_kwargs: dict[str, Any] = {}
+                    if turn_progress is not None and turn_progress.message_id is not None:
+                        # The partial row takes the in-progress row's place.
+                        cancel_kwargs["replaces_message_id"] = turn_progress.message_id
                     await self._append_session_message(
                         session_key,
                         role="assistant",
                         content=body,
                         tool_calls=turn_segments if turn_segments else None,
+                        **cancel_kwargs,
                     )
+                    if turn_progress is not None:
+                        turn_progress.replaced()
                     log.info(
                         "turn_runner.cancelled_partial_persisted",
                         session_key=session_key,
@@ -3471,6 +3522,8 @@ class TurnRunner:
             # here. A reservation that outlived its turn would permanently
             # shrink the ceiling for everyone else.
             self._release_spend_budget(budget_reservation)
+            if turn_progress_agent is not None:
+                turn_progress_agent.set_turn_progress_sink(None)
             emit_turn_timing_log(timing, session_key=session_key, turn_id=turn_id)
 
     @staticmethod

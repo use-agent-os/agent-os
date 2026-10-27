@@ -555,3 +555,52 @@ def test_api_chat_history_forwards_query_params() -> None:
         assert data["canonical_available"] is False
         assert len(data["messages"]) == 2
         assert data["page_size"] == 2
+
+
+def _progress_entry(idx: int) -> TranscriptEntry:
+    return TranscriptEntry(
+        id=idx,
+        session_id="parent",
+        session_key="agent:main:webchat:test",
+        role="assistant",
+        content="",
+        tool_calls=[{"type": "tool_use", "tool_use_id": f"call-{idx}", "name": "act", "input": {}}],
+        provider_messages={
+            "kind": "agentos.provider_messages",
+            "v": 1,
+            "mode": "append",
+            "messages": [],
+            "turn_progress": {"state": "running", "round": 1},
+        },
+        created_at=idx,
+        message_id=f"progress-{idx}",
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_history_hides_the_running_turns_progress_row(monkeypatch) -> None:
+    import agentos.gateway.rpc_sessions as rpc_sessions
+
+    # An earlier turn that was interrupted, then the live turn's rows.
+    entries = [_entry(1), _progress_entry(2), _entry(3), _progress_entry(4)]
+    in_flight = {"run_id": "t", "task_id": "t", "status": "running", "started_at": 3}
+
+    async def _running(_ctx, _key):
+        return in_flight
+
+    monkeypatch.setattr(rpc_sessions, "session_in_flight_run", _running)
+    ctx = RpcContext(conn_id="test", session_manager=_FakeSessionManager(entries))
+    result = await _handle_chat_history({"sessionKey": "agent:main:webchat:test"}, ctx)
+    assert [msg["message_id"] for msg in result["messages"]] == ["msg-1", "progress-2", "msg-3"]
+
+    async def _idle(_ctx, _key):
+        return None
+
+    monkeypatch.setattr(rpc_sessions, "session_in_flight_run", _idle)
+    result = await _handle_chat_history({"sessionKey": "agent:main:webchat:test"}, ctx)
+    assert [msg["message_id"] for msg in result["messages"]] == [
+        "msg-1",
+        "progress-2",
+        "msg-3",
+        "progress-4",
+    ]

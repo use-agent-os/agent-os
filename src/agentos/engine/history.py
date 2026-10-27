@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, TypeGuard
 
 from agentos.execution_status import (
     normalize_execution_status,
@@ -59,9 +59,7 @@ def limit_turns(messages: list[Message], max_turns: int) -> list[Message]:
                 # so cut at the first non-excluded index, which is i+1 only if i+1 is a user msg.
                 # Simpler: scan forward from i+1 to find the next user message.
                 cut_index = i + 1
-                while cut_index < len(messages) and not _is_real_user_turn(
-                    messages[cut_index]
-                ):
+                while cut_index < len(messages) and not _is_real_user_turn(messages[cut_index]):
                     cut_index += 1
                 break
 
@@ -71,13 +69,61 @@ def limit_turns(messages: list[Message], max_turns: int) -> list[Message]:
     return messages[cut_index:]
 
 
+# What the model reads for a tool call whose result never reached history
+# (the process stopped while the call ran, or the turn was cut short). It must
+# neither claim the call failed nor that it succeeded: it may have run.
+UNKNOWN_TOOL_OUTCOME_TEXT = (
+    "No result was recorded for this tool call: the turn stopped before the "
+    "result came back (for example, the process was restarted). The call may "
+    "or may not have run, and its effects are unknown. Check the current state "
+    "before repeating it."
+)
+UNKNOWN_TOOL_OUTCOME_REASON = "missing_tool_result"
+
+
+def unknown_tool_outcome_result(tool_use_id: str) -> ContentBlockToolResult:
+    """The stand-in result for a call that has none in history."""
+    return ContentBlockToolResult(
+        tool_use_id=tool_use_id,
+        content=UNKNOWN_TOOL_OUTCOME_TEXT,
+        is_error=True,
+        execution_status={
+            "version": 1,
+            "status": "error",
+            "exit_code": None,
+            "timed_out": False,
+            "truncated": False,
+            "reason": UNKNOWN_TOOL_OUTCOME_REASON,
+            "source": "replay",
+            "preservation_class": "diagnostic",
+        },
+    )
+
+
+def is_unknown_tool_outcome_result(block: Any) -> bool:
+    status = getattr(block, "execution_status", None)
+    return (
+        isinstance(block, ContentBlockToolResult)
+        and isinstance(status, dict)
+        and status.get("reason") == UNKNOWN_TOOL_OUTCOME_REASON
+    )
+
+
+def _is_tool_use_block(block: Any) -> TypeGuard[ContentBlockToolUse]:
+    return isinstance(block, ContentBlockToolUse)
+
+
+def _is_tool_result_block(block: Any) -> TypeGuard[ContentBlockToolResult]:
+    return isinstance(block, ContentBlockToolResult)
+
+
 def _extract_tool_use_ids(content: Any) -> set[str]:
     """Extract tool_use IDs from message content."""
     ids: set[str] = set()
     if isinstance(content, list):
         for block in content:
             # ContentBlockToolUse has 'id' field
-            if hasattr(block, "id") and hasattr(block, "name") and hasattr(block, "input"):
+            if _is_tool_use_block(block):
                 ids.add(block.id)
     return ids
 
@@ -87,65 +133,139 @@ def _extract_tool_result_ids(content: Any) -> set[str]:
     ids: set[str] = set()
     if isinstance(content, list):
         for block in content:
-            if hasattr(block, "tool_use_id") and hasattr(block, "is_error"):
+            if _is_tool_result_block(block):
                 ids.add(block.tool_use_id)
     return ids
 
 
+def _ordered_call_ids(message: Message) -> list[str]:
+    if message.role != "assistant" or not isinstance(message.content, list):
+        return []
+    return list(dict.fromkeys(block.id for block in message.content if _is_tool_use_block(block)))
+
+
+def _without_tool_results(message: Message) -> Message | None:
+    """*message* minus its tool_result blocks (``None`` when nothing is left)."""
+    if not isinstance(message.content, list):
+        return message
+    kept = [block for block in message.content if not _is_tool_result_block(block)]
+    if len(kept) == len(message.content):
+        return message
+    if not kept:
+        return None
+    return Message(
+        role=message.role,
+        content=kept,
+        reasoning_content=message.reasoning_content,
+        reasoning_details=message.reasoning_details,
+    )
+
+
+def _frame_is_paired(call_ids: list[str], span: list[Message]) -> bool:
+    """True when *span* opens with results for exactly *call_ids*, once each."""
+    wanted = set(call_ids)
+    seen: list[str] = []
+    index = 0
+    while index < len(span):
+        message = span[index]
+        if message.role != "user" or not _extract_tool_result_ids(message.content):
+            break
+        for block in message.content:
+            if _is_tool_result_block(block):
+                seen.append(block.tool_use_id)
+        index += 1
+    if len(seen) != len(set(seen)) or set(seen) != wanted:
+        return False
+    # No stray results later in the frame.
+    return not any(_extract_tool_result_ids(message.content) for message in span[index:])
+
+
+def _repair_frame(call_ids: list[str], span: list[Message]) -> list[Message]:
+    """Results for *call_ids* right after the call, in call order.
+
+    A result found anywhere in the frame is moved up; a call without one gets
+    :func:`unknown_tool_outcome_result`. Results that answer no call of this
+    frame are dropped; the rest of every message is kept where it was.
+    """
+    wanted = set(call_ids)
+    found: dict[str, Any] = {}
+    for message in span:
+        if not isinstance(message.content, list):
+            continue
+        for block in message.content:
+            if (
+                _is_tool_result_block(block)
+                and block.tool_use_id in wanted
+                and block.tool_use_id not in found
+            ):
+                found[block.tool_use_id] = block
+    results = [found.get(call_id) or unknown_tool_outcome_result(call_id) for call_id in call_ids]
+    repaired: list[Message] = [Message(role="user", content=results)]
+    for message in span:
+        rest = _without_tool_results(message)
+        if rest is not None:
+            repaired.append(rest)
+    return repaired
+
+
 def repair_tool_pairing(messages: list[Message]) -> list[Message]:
-    """Remove messages with malformed tool_use/tool_result adjacency.
+    """Make every tool call answered, and answered right after it.
 
-    OpenAI-compatible providers require an assistant message with tool calls to
-    be followed immediately by tool result messages for every requested
-    ``tool_call_id``. A matching ID elsewhere in the transcript is not enough:
-    ordinary user/context messages between the call and result still make the
-    provider request invalid.
+    OpenAI-compatible providers require an assistant message with tool calls
+    to be followed immediately by tool result messages for every requested
+    ``tool_call_id``; Anthropic requires the same of the next user message. A
+    matching ID elsewhere in the transcript is not enough.
 
-    Returns original list reference if no repairs needed.
+    The assistant message is always kept, text included: a call that is in
+    history may have happened, and forgetting it invites the model to repeat
+    a side effect. Per assistant message with tool calls (its *frame* runs to
+    the next assistant message):
+
+    * results already in place are left untouched;
+    * a result that sits later in the frame is moved up next to its call;
+    * a call with no result gets an unknown-outcome error result
+      (:data:`UNKNOWN_TOOL_OUTCOME_TEXT`) telling the model to check the
+      current state before repeating it;
+    * results that answer no call of their frame are dropped.
+
+    Deterministic, so a repaired prefix is byte-identical on every load.
+    Returns the original list reference if no repairs are needed.
     """
     if not messages:
         return messages
 
-    valid_tool_call_indices: set[int] = set()
-    valid_tool_result_indices: set[int] = set()
-
-    for index, message in enumerate(messages[:-1]):
-        use_ids = _extract_tool_use_ids(message.content)
-        if not use_ids:
-            continue
-        if message.role != "assistant":
-            continue
-
-        result_indices: set[int] = set()
-        result_ids: set[str] = set()
-        for result_index in range(index + 1, len(messages)):
-            next_result_ids = _extract_tool_result_ids(messages[result_index].content)
-            if not next_result_ids:
-                break
-            result_ids.update(next_result_ids)
-            if not result_ids.issubset(use_ids):
-                break
-            result_indices.add(result_index)
-            if result_ids == use_ids:
-                break
-
-        if result_ids == use_ids:
-            valid_tool_call_indices.add(index)
-            valid_tool_result_indices.update(result_indices)
-
     repaired: list[Message] = []
-    for index, message in enumerate(messages):
-        use_ids = _extract_tool_use_ids(message.content)
-        result_ids = _extract_tool_result_ids(message.content)
+    changed = False
+    index = 0
+    total = len(messages)
+    while index < total:
+        message = messages[index]
+        call_ids = _ordered_call_ids(message)
+        if message.role == "assistant":
+            repaired.append(message)
+            start = index + 1
+        else:
+            # Messages before the first assistant message pair with nothing.
+            start = index
+        end = index + 1
+        while end < total and messages[end].role != "assistant":
+            end += 1
+        span = messages[start:end]
+        if not call_ids:
+            # Nothing to answer here: any tool result is an orphan.
+            for item in span:
+                rest = _without_tool_results(item)
+                changed = changed or rest is not item
+                if rest is not None:
+                    repaired.append(rest)
+        elif _frame_is_paired(call_ids, span):
+            repaired.extend(span)
+        else:
+            repaired.extend(_repair_frame(call_ids, span))
+            changed = True
+        index = end
 
-        if use_ids and index not in valid_tool_call_indices:
-            continue
-        if result_ids and index not in valid_tool_result_indices:
-            continue
-
-        repaired.append(message)
-
-    return messages if len(repaired) == len(messages) else repaired
+    return repaired if changed else messages
 
 
 def _coerce_tool_input(raw: Any) -> dict[str, Any]:
@@ -156,7 +276,7 @@ def _coerce_tool_input(raw: Any) -> dict[str, Any]:
     fabricating a fallback key like ``{"_raw": ...}`` produces a shape no real
     schema declares, so on any non-dict payload we emit ``{}`` — a faithful
     "input missing" marker. Matching tool_result blocks still pair via
-    tool_use_id, and ``repair_tool_pairing`` prunes any remaining orphan.
+    tool_use_id, and ``repair_tool_pairing`` answers a call left without one.
     """
     if isinstance(raw, dict):
         return raw
@@ -190,9 +310,9 @@ def reconstruct_messages_from_entry(
     Whatever arrives after (text or tool_use) starts the next iteration — so we
     flush the accumulated assistant + user(tool_result) pair first.
 
-    Returns ``[]`` for entries that contribute nothing. Orphan tool_use blocks
+    Returns ``[]`` for entries that contribute nothing. Tool_use blocks
     without a matching tool_result are preserved here; ``repair_tool_pairing``
-    prunes them later if they stay orphan across the whole conversation.
+    gives them an unknown-outcome result later.
     """
     if role not in ("user", "assistant"):
         return []

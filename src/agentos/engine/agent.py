@@ -77,6 +77,13 @@ from agentos.engine.transcript import (
 from agentos.engine.transcript import (
     TOOL_ARGUMENT_PROJECTION_PREFIX as _TOOL_ARGUMENT_PROJECTION_PREFIX,
 )
+from agentos.engine.turn_progress import (
+    PHASE_ROUND_COMPLETE,
+    PHASE_TOOLS_RUNNING,
+    TurnProgress,
+    TurnProgressPhase,
+    TurnProgressSink,
+)
 from agentos.engine.turn_timing import NULL_TURN_TIMING, TurnTiming
 from agentos.engine.verification_ledger import (
     MUTATING_TOOL_NAMES as _MUTATING_TOOL_NAMES,
@@ -752,6 +759,9 @@ class Agent:
         self._turn_record: TranscriptRecord | None = None
         self._turn_compaction_declined_tokens: int | None = None
         self._message_sizes = MessageSizeCache(Agent._live_request_jsonable)
+        # Durable mid-turn progress (``agentos.engine.turn_progress``); set by
+        # the runtime for the turn it runs, ``None`` when nothing persists.
+        self._turn_progress_sink: TurnProgressSink | None = None
 
     def _context_overflow_error(self) -> ErrorEvent:
         reason = self._last_compaction_refusal_reason
@@ -3047,6 +3057,13 @@ class Agent:
 
                 tool_deadline = _loop.time() + self.config.iteration_timeout
 
+                # The calls are on record before they run: a crash from here
+                # on leaves them in history with an unknown outcome instead of
+                # losing them.
+                await self._report_turn_progress(
+                    turn_messages, round_index=iterations, phase=PHASE_TOOLS_RUNNING
+                )
+
                 # ------ STREAMING → TOOL_CALLING ------
                 yield self._transition(AgentState.TOOL_CALLING)
 
@@ -3201,6 +3218,14 @@ class Agent:
                     break
                 if turn_yielded:
                     break
+
+                if self._turn_progress_sink is not None:
+                    # The round is complete: seal it now (the next request
+                    # would seal it unchanged) and put it on record.
+                    sealed_len = self._seal_transcript(turn_messages, sealed_len)
+                    await self._report_turn_progress(
+                        turn_messages, round_index=iterations, phase=PHASE_ROUND_COMPLETE
+                    )
 
                 # ------ TOOL_CALLING → THINKING ------
                 yield self._transition(AgentState.THINKING)
@@ -3631,17 +3656,46 @@ class Agent:
         self._transcript_input_entry_id = entry_id
         self._transcript_input_entry_content = content if entry_id is not None else None
 
-    def _record_turn_transcript(self, messages: list[Message]) -> None:
+    def _turn_transcript_record(self, messages: list[Message]) -> TranscriptRecord:
         if self._turn_reset:
             appended = list(messages)
         else:
             appended = list(messages[self._turn_base_len :])
-        self._turn_record = TranscriptRecord(
+        return TranscriptRecord(
             messages=persistable_messages(appended),
             mode="reset" if self._turn_reset else "append",
             input_entry_id=self._transcript_input_entry_id,
             compaction_id=self._turn_compaction_id,
         )
+
+    def _record_turn_transcript(self, messages: list[Message]) -> None:
+        self._turn_record = self._turn_transcript_record(messages)
+
+    def set_turn_progress_sink(self, sink: TurnProgressSink | None) -> None:
+        """Receive the turn's record after each tool round (``None`` stops it)."""
+        self._turn_progress_sink = sink
+
+    async def _report_turn_progress(
+        self,
+        messages: list[Message],
+        *,
+        round_index: int,
+        phase: TurnProgressPhase,
+    ) -> None:
+        sink = self._turn_progress_sink
+        if sink is None:
+            return
+        try:
+            record = encode_transcript_record(self._turn_transcript_record(messages))
+            await sink(TurnProgress(record=record, round=round_index, phase=phase))
+        except Exception:  # noqa: BLE001 - progress is best-effort
+            logger.warning(
+                "agent.turn_progress_failed",
+                session_key=self._session_key,
+                round=round_index,
+                phase=phase,
+                exc_info=True,
+            )
 
     def transcript_record(self) -> dict[str, Any] | None:
         """The structured record of the last successful turn, for persistence.

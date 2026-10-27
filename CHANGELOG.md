@@ -27,6 +27,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   across compactions and capped, so the model can neither drop nor invent
   them. Applies to the in-turn, the proactive (between-turns) and the manual
   (`/compact`, `sessions.compact`) compaction.
+- Engine: a turn's tool rounds are now durable while it runs. The turn keeps
+  one in-progress transcript row, rewritten when a round's calls are issued
+  and again when their results are in, and the final row replaces it in the
+  same transaction, so a finished turn still leaves exactly one row and its
+  usage is rolled up once. A crash or kill mid-turn no longer loses calls
+  that already ran (a trade, a sent message, a file write): they stay in
+  history, and `chat.history` shows them once the turn is no longer live.
+- Engine: a tool call without a recorded result is no longer deleted from
+  history together with the assistant text around it. It is kept and given an
+  error result saying its outcome is unknown and to check the current state
+  before repeating it; a real result that sits elsewhere in the same step is
+  moved next to its call.
 
 ## [2026.10.27] - 2026-10-27
 

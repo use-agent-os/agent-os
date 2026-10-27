@@ -127,6 +127,7 @@ class TranscriptAppendPort(Protocol):
         turn_usage: dict[str, Any] | None,
         token_count: int | None,
         provider_messages: dict[str, Any] | None = None,
+        replaces_message_id: str | None = None,
     ) -> bool: ...
 
 
@@ -346,6 +347,10 @@ class TurnFinalizerStageInput:
     # (``agentos.engine.transcript``), persisted next to the flat segments.
     provider_messages: dict[str, Any] | None = None
 
+    # The turn's in-progress row (``agentos.engine.turn_progress``), if one
+    # was written; the final row replaces it in the same transaction.
+    replaces_message_id: str | None = None
+
 
 @dataclass(frozen=True)
 class TurnFinalizerStageOutput:
@@ -501,6 +506,8 @@ class TurnFinalizerStage:
             append_kwargs: dict[str, Any] = {}
             if inp.provider_messages is not None:
                 append_kwargs["provider_messages"] = inp.provider_messages
+            if inp.replaces_message_id is not None:
+                append_kwargs["replaces_message_id"] = inp.replaces_message_id
             transcript_appended = await self._transcript_append.append_message(
                 inp.session_key,
                 role="assistant",

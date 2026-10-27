@@ -1364,13 +1364,30 @@ class SessionStorage:
 
     @_serialized_write
     async def append_transcript_entry(
-        self, entry: TranscriptEntry, *, expected_epoch: int | None = None
+        self,
+        entry: TranscriptEntry,
+        *,
+        expected_epoch: int | None = None,
+        replaces_message_id: str | None = None,
     ) -> None:
+        """Insert *entry*; with *replaces_message_id*, swap that row out for it.
+
+        The replaced row(s) of the same session are deleted in the same
+        transaction as the insert, so a reader (or a crash) sees either the
+        old row or the new one, never both and never neither. A refused
+        insert (stale epoch) rolls the delete back too.
+        """
         entry.session_key = canonicalize_session_key(entry.session_key)
         data = entry.model_dump(exclude={"id"})
         cols = list(data.keys())
         placeholders = ", ".join("?" for _ in cols)
         values = [_serialize(data[c]) for c in cols]
+
+        if replaces_message_id:
+            await self.conn.execute(
+                "DELETE FROM transcript_entries WHERE session_id = ? AND message_id = ?",
+                (entry.session_id, replaces_message_id),
+            )
 
         if expected_epoch is not None:
             # Atomic guard: INSERT only when the session epoch matches.

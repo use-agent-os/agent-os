@@ -11,6 +11,7 @@ import structlog
 from agentos.chat.conversation import ChatSendRequest, sessions_send_params
 from agentos.chat.history import transcript_entries_to_chat_messages
 from agentos.chat.source import chat_source_metadata
+from agentos.engine.turn_progress import hide_live_turn_progress
 from agentos.gateway.access import CONTROL_AND_CHANNEL, CONTROL_ONLY
 from agentos.gateway.config import GatewayConfig
 from agentos.gateway.context_overflow import apply_context_overflow_policy
@@ -710,6 +711,9 @@ async def _handle_chat_history(params: dict | None, ctx: RpcContext) -> dict:
         from agentos.gateway.rpc_sessions import session_in_flight_run
 
         in_flight_run = await session_in_flight_run(ctx, session_key)
+        # The running turn is shown from ``in_flight_run``; its in-progress
+        # transcript row would list the same tool calls a second time.
+        transcript = hide_live_turn_progress(transcript, in_flight_run)
 
     kind: str | None = None
     if delta_cursor is not None:

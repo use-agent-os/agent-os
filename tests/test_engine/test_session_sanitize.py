@@ -1137,7 +1137,7 @@ async def test_agent_request_context_is_request_only_after_history() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_provider_view_prunes_non_adjacent_tool_results() -> None:
+async def test_agent_provider_view_moves_non_adjacent_tool_result_next_to_its_call() -> None:
     provider = CapturingProvider()
     agent = Agent(provider=provider, config=AgentConfig(max_iterations=1))
     agent.set_history(
@@ -1170,12 +1170,16 @@ async def test_agent_provider_view_prunes_non_adjacent_tool_results() -> None:
     events = [event async for event in agent.run_turn("continue")]
 
     assert any(event.kind == "done" for event in events)
-    replay_payload = json.dumps(
-        [message.model_dump(mode="json") for message in provider.calls[0]["messages"]],
-        ensure_ascii=False,
-    )
-    assert "call_lookup" not in replay_payload
-    assert "ordinary user message before the tool result" in replay_payload
+    sent = provider.calls[0]["messages"]
+    # The call is kept (it may have had effects) and its real result is moved
+    # right after it; the ordinary user message follows.
+    assert [message.role for message in sent[:4]] == ["user", "assistant", "user", "user"]
+    assert isinstance(sent[1].content[0], ContentBlockToolUse)
+    result = sent[2].content[0]
+    assert isinstance(result, ContentBlockToolResult)
+    assert result.tool_use_id == "call_lookup"
+    assert result.content == "lookup result"
+    assert sent[3].content == "ordinary user message before the tool result"
 
 
 @pytest.mark.asyncio
