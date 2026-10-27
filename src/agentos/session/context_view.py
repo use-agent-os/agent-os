@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 from agentos.provider.types import ContentBlockCompaction, Message
 from agentos.session.compaction_state import (
+    REVISES_COMPACTION_ID_KEY,
     StructuredCompactionSummary,
     render_structured_summary,
 )
@@ -141,6 +142,23 @@ def build_compaction_context_items(
     ]
 
 
+def _revised_compaction_ids(
+    context_states: Sequence[SessionContextState],
+    summaries: Sequence[SessionSummary],
+) -> set[str]:
+    """Compaction ids that a given summary or structured state says it revised."""
+    payloads: list[object] = [state.payload for state in context_states]
+    payloads += [summary.summary_payload for summary in summaries]
+    revised: set[str] = set()
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        value = payload.get(REVISES_COMPACTION_ID_KEY)
+        if isinstance(value, str) and value.strip():
+            revised.add(value.strip())
+    return revised
+
+
 def build_compaction_context_records(
     *,
     context_states: Sequence[SessionContextState],
@@ -160,7 +178,12 @@ def build_compaction_context_records(
         for state in ordered_context_states(context_states)
         if _valid_structured_summary_state(state, now_ms=now)
     ]
-    for state in latest_context_states_by_covered_through_id(structured_states):
+    chosen_states = latest_context_states_by_covered_through_id(structured_states)
+    # A summary that revised an earlier one contains it; the earlier one is
+    # not replayed next to it. Only revisions among the records replayed here
+    # count, so a summary is never hidden behind one that is not shown.
+    revised = _revised_compaction_ids(chosen_states, summaries)
+    for state in chosen_states:
         if state.covered_through_id in state_covered_ids:
             continue
         try:
@@ -168,12 +191,14 @@ def build_compaction_context_records(
         except Exception:
             continue
         rendered = render_structured_summary(structured)
+        compaction_id = None
+        if isinstance(state.payload, dict):
+            raw_compaction_id = state.payload.get("compaction_id")
+            if isinstance(raw_compaction_id, str) and raw_compaction_id.strip():
+                compaction_id = raw_compaction_id.strip()
+        if compaction_id is not None and compaction_id in revised:
+            continue
         if rendered.strip():
-            compaction_id = None
-            if isinstance(state.payload, dict):
-                raw_compaction_id = state.payload.get("compaction_id")
-                if isinstance(raw_compaction_id, str) and raw_compaction_id.strip():
-                    compaction_id = raw_compaction_id.strip()
             items.append(
                 CompactionContextItem(
                     text=rendered,
@@ -186,6 +211,8 @@ def build_compaction_context_records(
 
     for summary in summaries:
         if summary.covered_through_id in state_covered_ids:
+            continue
+        if summary.compaction_id and summary.compaction_id in revised:
             continue
         text = summary.summary_text.strip()
         if text:

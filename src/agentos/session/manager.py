@@ -137,6 +137,18 @@ def _stable_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def _summary_to_revise(summaries: list[SessionSummary]) -> SessionSummary | None:
+    """The newest durable summary, which a manual compaction revises.
+
+    Only a summary with a compaction id can be superseded in replay (the new
+    summary names it), so one without is left to replay on its own.
+    """
+    for summary in reversed(summaries):
+        if summary.summary_text.strip():
+            return summary if summary.compaction_id else None
+    return None
+
+
 def _compaction_entry_payloads(entries: list[TranscriptEntry]) -> list[dict[str, Any]]:
     return [
         {
@@ -1486,6 +1498,7 @@ class SessionManager:
             entries = await self._storage.get_transcript(node.session_id)
             preimage = _transcript_preimage(entries)
             raw = _compaction_entry_payloads(entries)
+            previous = _summary_to_revise(await self._storage.get_all_summaries(node.session_id))
 
         result = await compact_context(
             CompactionRequest(
@@ -1494,6 +1507,13 @@ class SessionManager:
                 context_window_tokens=context_window_tokens,
                 config=config or CompactionConfig(),
                 custom_instructions=custom_instructions,
+                previous_summary=previous.summary_text if previous else None,
+                previous_compaction_id=previous.compaction_id if previous else None,
+                previous_summary_payload=(
+                    dict(previous.summary_payload)
+                    if previous is not None and isinstance(previous.summary_payload, dict)
+                    else None
+                ),
             )
         )
 

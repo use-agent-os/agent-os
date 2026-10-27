@@ -764,3 +764,121 @@ async def test_proactive_service_appends_and_merges_the_file_lists() -> None:
     text, files = split_file_activity(result.summary)
     assert text == SUMMARY
     assert files == FileActivity(read=("docs/plan.md",), modified=("src/a.py", "src/b.py"))
+
+
+class _NumberedSummaries(_Provider):
+    """Numbers each summary so a test can tell which compaction wrote it."""
+
+    def chat(self, messages: list[Message], tools=None, config=None) -> AsyncIterator[Any]:
+        if str(getattr(config, "system", "") or "").startswith("You are a conversation compactor"):
+            self.summarizer_requests.append(list(messages))
+            return self._numbered(len(self.summarizer_requests))
+        return super().chat(messages, tools, config)
+
+    async def _numbered(self, number: int) -> AsyncIterator[Any]:
+        yield ProviderText(text=f"## Goal\n- summary number {number}")
+        yield ProviderDone(stop_reason="end_turn", input_tokens=10, output_tokens=1)
+
+
+async def test_manual_compact_after_a_compaction_revises_and_replaces_its_summary(
+    tmp_path: Path, storages: list[SessionStorage]
+) -> None:
+    """``sessions.compact`` after an automatic compaction and one more turn:
+    the new summary is a revision of the earlier one, and only the revision
+    is replayed (not the two side by side)."""
+    from agentos.session.compaction import CompactionConfig
+
+    manager = await _manager(tmp_path, storages)
+    provider = _NumberedSummaries()
+    runner = _runner(provider, manager, tmp_path)
+    await _seed(manager, KEY, rounds=2)
+    await _turn(runner, manager, KEY, "deploy status?", tmp_path)
+    await _scheduler(runner).wait_idle(KEY)
+    await _turn(runner, manager, KEY, "and the logs? " + "L" * 3000, tmp_path)
+    await _scheduler(runner).wait_idle(KEY)
+    (first,) = await manager.get_summaries(KEY)
+    assert first.summary_text == "## Goal\n- summary number 1"
+    calls_before = len(provider.summarizer_requests)
+
+    result = await manager.compact_with_result(
+        KEY, 600, CompactionConfig(provider=provider, model="m", safety_margin=1.0)
+    )
+
+    assert result.removed_count > 0
+    # The manual summarizer revised the earlier summary.
+    request = str(provider.summarizer_requests[calls_before][0].content)
+    assert "[Earlier summary]\n## Goal\n- summary number 1\n" in request
+    summaries = await manager.get_summaries(KEY)
+    assert len(summaries) == 2
+    newest = summaries[-1]
+    assert newest.summary_payload is not None
+    assert newest.summary_payload["revises_compaction_id"] == first.compaction_id
+
+    await _turn(runner, manager, KEY, "third", tmp_path)
+
+    sent = str(provider.turn_requests[-1][-1].content)
+    assert "[Compacted Session Summaries]" in sent
+    assert newest.summary_text in sent
+    assert "summary number 1" not in sent
+    assert "[Summary 2]" not in sent
+
+
+class _CarryingSummaries(_NumberedSummaries):
+    """A summarizer that keeps every fact it is shown: each earlier
+    ``- summary number N`` line in its input, then its own line."""
+
+    def chat(self, messages: list[Message], tools=None, config=None) -> AsyncIterator[Any]:
+        if str(getattr(config, "system", "") or "").startswith("You are a conversation compactor"):
+            self.summarizer_requests.append(list(messages))
+            shown = [
+                line.strip()
+                for line in str(messages[0].content).splitlines()
+                if line.strip().startswith("- summary number")
+            ]
+            return self._carry([*dict.fromkeys(shown)], len(self.summarizer_requests))
+        return super().chat(messages, tools, config)
+
+    async def _carry(self, shown: list[str], number: int) -> AsyncIterator[Any]:
+        lines = "\n".join([*shown, f"- summary number {number}"])
+        yield ProviderText(text=f"## Goal\n{lines}")
+        yield ProviderDone(stop_reason="end_turn", input_tokens=10, output_tokens=1)
+
+
+async def test_a_manual_summary_survives_the_next_automatic_compaction(
+    tmp_path: Path, storages: list[SessionStorage]
+) -> None:
+    """``sessions.compact``, more turns, then automatic compactions: what the
+    manual summary said still reaches the next request. The turns after the
+    manual compaction carry it in their persisted request context, and the
+    automatic compaction that folds them hands it to the summarizer, so a
+    summarizer that keeps what it is shown keeps it."""
+    from agentos.session.compaction import CompactionConfig
+
+    manager = await _manager(tmp_path, storages)
+    provider = _CarryingSummaries()
+    runner = _runner(provider, manager, tmp_path)
+    await _seed(manager, KEY, rounds=2)
+    await _turn(runner, manager, KEY, "deploy status?", tmp_path)
+    await _scheduler(runner).wait_idle(KEY)
+    await _turn(runner, manager, KEY, "and the logs? " + "L" * 3000, tmp_path)
+    await _scheduler(runner).wait_idle(KEY)
+    manual = await manager.compact_with_result(
+        KEY, 600, CompactionConfig(provider=provider, model="m", safety_margin=1.0)
+    )
+    assert manual.removed_count > 0
+    facts = [line for line in manual.summary.splitlines() if line.startswith("- summary number")]
+    assert facts
+    calls_after_manual = len(provider.summarizer_requests)
+
+    await _turn(runner, manager, KEY, "first follow-up " + "M" * 12_000, tmp_path)
+    await _scheduler(runner).wait_idle(KEY)
+    await _turn(runner, manager, KEY, "second follow-up " + "N" * 12_000, tmp_path)
+    await _scheduler(runner).wait_idle(KEY)
+    # An automatic compaction ran after the manual one.
+    assert len(provider.summarizer_requests) > calls_after_manual
+
+    await _turn(runner, manager, KEY, "where are we?", tmp_path)
+
+    payload = "\n".join(str(message.content) for message in provider.turn_requests[-1])
+    for fact in facts:
+        assert fact in payload

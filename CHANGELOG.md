@@ -174,6 +174,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   oldest first); `chat.abort {taskId}` / `sessions.abort {taskId}` withdraws a
   queued message (`withdrawn: true`, removing a follow-up's already written
   user row) or stops just that running turn.
+  (`/compact`, `sessions.compact`) compaction. A manual compaction revises
+  the newest stored summary and replaces it in replay, instead of adding a
+  second summary that knows nothing of the first.
 
 ## [2026.10.27] - 2026-10-27
 

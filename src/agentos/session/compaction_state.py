@@ -456,6 +456,62 @@ def build_structured_summary_from_text(
     return summary, coverage
 
 
+# Payload key a summary sets when it is a revision of an earlier durable
+# summary: the earlier one is fully contained in it, so replay shows only the
+# newer one. Rows without the key (every summary written before it existed)
+# replay exactly as before.
+REVISES_COMPACTION_ID_KEY = "revises_compaction_id"
+
+# List fields of :class:`StructuredCompactionSummary` that a revision carries
+# over from its predecessor, newest entries kept when capped.
+_MERGED_LIST_FIELDS = (
+    "completed_steps",
+    "open_steps",
+    "files_and_artifacts",
+    "tool_results_to_remember",
+    "decisions_and_rationale",
+    "known_failures",
+    "important_identifiers",
+    "constraints_and_preferences",
+    "do_not_repeat",
+    "unresolved_questions",
+    "critical_carry_forward",
+)
+_MERGED_LIST_MAX_ITEMS = 64
+
+
+def merge_structured_payloads(
+    previous: Mapping[str, Any] | None,
+    current: Mapping[str, Any],
+    *,
+    max_items: int = _MERGED_LIST_MAX_ITEMS,
+) -> dict[str, Any]:
+    """*current* with the list facts of *previous* it does not already hold.
+
+    The text (``current_status``) is *current*'s own -- it is the model's
+    revision of the previous text. Lists keep the previous entries first, then
+    the current ones, without duplicates, capped to the newest *max_items*.
+    """
+    merged = dict(current)
+    if not isinstance(previous, Mapping):
+        return merged
+    for name in _MERGED_LIST_FIELDS:
+        before = previous.get(name)
+        after = merged.get(name)
+        if not isinstance(before, list) or not before:
+            continue
+        items: list[Any] = []
+        for item in [*before, *(after if isinstance(after, list) else [])]:
+            if item in items:
+                items.remove(item)
+            items.append(item)
+        merged[name] = items[-max_items:]
+    for name in ("user_goal", "next_action"):
+        if not merged.get(name) and previous.get(name):
+            merged[name] = previous[name]
+    return merged
+
+
 def _string_value(value: Any) -> str:
     if value is None:
         return ""

@@ -1086,7 +1086,11 @@ estimate_calibration = true      # scale the size estimate by what providers rep
   `edit_file`, `apply_patch`), merged with the previous summary's lists and
   capped to the newest 20 of each. Shell commands are not parsed for paths.
   The in-turn, the proactive and the manual (`/compact`, `sessions.compact`)
-  compaction all write this format.
+  compaction all write this format. A manual compaction revises the newest
+  stored summary, and from then on only the revision is replayed, not the two
+  side by side; if its summarizer call fails, the earlier summary is kept and
+  replays on its own. Summaries stored before this behaviour existed replay
+  as they always did.
 - When the summarizer fails or times out, a deterministic digest bounded to an
   eighth of the context window is used instead, so a compaction still shrinks
   the history.

@@ -12,8 +12,10 @@ import structlog
 
 from agentos.provider.protocol import provider_connection_config
 from agentos.session.compaction_state import (
+    REVISES_COMPACTION_ID_KEY,
     build_structured_summary_from_text,
     extract_compaction_obligations,
+    merge_structured_payloads,
 )
 
 log = structlog.get_logger(__name__)
@@ -50,6 +52,11 @@ class CompactionRequest:
     # block, which is merged). Takes precedence over a ``__prev_summary__:``
     # line in ``custom_instructions``, which can carry one line only.
     previous_summary: str | None = None
+    # The durable summary row *previous_summary* came from. When the model
+    # revises it, the new summary records ``revises_compaction_id`` in its
+    # payload, and replay shows the new summary in place of the old one.
+    previous_compaction_id: str | None = None
+    previous_summary_payload: dict[str, Any] | None = None
 
 
 @dataclass
@@ -625,7 +632,9 @@ async def compact_context_new(request: CompactionRequest) -> CompactionResult:
     # as the first line.  Strip it before forwarding to ``_normalize_custom_instructions``.
     raw_ci = request.custom_instructions or ""
     prev_summary: str = ""
+    prev_from_marker = False
     if raw_ci.startswith("__prev_summary__:"):
+        prev_from_marker = True
         first_newline = raw_ci.find("\n")
         if first_newline == -1:
             prev_summary = raw_ci[len("__prev_summary__:") :]
@@ -636,6 +645,7 @@ async def compact_context_new(request: CompactionRequest) -> CompactionResult:
     custom_instructions = _normalize_custom_instructions(raw_ci or None)
     if request.previous_summary:
         prev_summary = request.previous_summary
+        prev_from_marker = False
 
     if not entries:
         return CompactionResult(
@@ -733,12 +743,20 @@ async def compact_context_new(request: CompactionRequest) -> CompactionResult:
 
     merged = _merge_summaries(([rolled] if rolled is not None else []) + digests)
 
-    # Without a model summary (which already revised it) the previous summary
-    # is carried as is (incremental accumulation).
-    if prev_summary and rolled is None:
+    # The new summary contains the previous one when the model revised it, or
+    # when a ``__prev_summary__`` marker asks for it to be carried as is.
+    # Otherwise (no model summary for a durable previous summary) the previous
+    # summary is left alone and keeps replaying on its own.
+    revised_previous = bool(prev_summary) and rolled is not None
+    carried_previous = bool(prev_summary) and rolled is None and prev_from_marker
+    if carried_previous:
         merged = f"[Previous context]\n{prev_summary}\n\n[New context]\n{merged}"
     merged = attach_file_activity(
-        merged, merge_file_activity(prev_files, file_activity_from_entries(to_compact))
+        merged,
+        merge_file_activity(
+            prev_files if revised_previous or carried_previous else None,
+            file_activity_from_entries(to_compact),
+        ),
     )
 
     tokens_after = _estimate_tokens(merged) + sum(_entry_tokens(e) for e in kept)
@@ -786,7 +804,17 @@ async def compact_context_new(request: CompactionRequest) -> CompactionResult:
         llm_model=cfg.model or "fallback",
         summary_source=summary_source,
         prev_summary_chars=len(prev_summary),
+        revised_previous=revised_previous,
     )
+
+    summary_payload = structured_summary.model_dump(mode="json")
+    if revised_previous and request.previous_compaction_id:
+        # The revised summary replaces its predecessor in replay; carry the
+        # predecessor's engine-extracted facts so nothing is lost with it.
+        summary_payload = merge_structured_payloads(
+            request.previous_summary_payload, summary_payload
+        )
+        summary_payload[REVISES_COMPACTION_ID_KEY] = request.previous_compaction_id
 
     return CompactionResult(
         summary=merged,
@@ -797,7 +825,7 @@ async def compact_context_new(request: CompactionRequest) -> CompactionResult:
         tokens_before=total_tokens,
         tokens_after=tokens_after,
         remaining_budget_tokens=max(window - tokens_after, 0),
-        summary_payload=structured_summary.model_dump(mode="json"),
+        summary_payload=summary_payload,
         summary_format="structured_v1",
         coverage_status=coverage.status,
         missing_obligations=coverage.missing_obligations,

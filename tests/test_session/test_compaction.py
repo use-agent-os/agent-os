@@ -632,3 +632,94 @@ async def test_compact_context_merges_the_previous_file_lists(monkeypatch):
     assert files is not None
     assert files.modified[:2] == ("setup.py", "src/a.py")
     assert files.read[0] == "README.md"
+
+
+@pytest.mark.asyncio
+async def test_a_revised_durable_summary_is_marked_and_keeps_its_predecessors_facts(monkeypatch):
+    from agentos.engine.compaction_files import (
+        FileActivity,
+        attach_file_activity,
+        split_file_activity,
+    )
+
+    bases: list[str | None] = []
+
+    async def fake_llm(**kwargs):
+        bases.append(kwargs.get("earlier_summary"))
+        return "## Goal\n- revised"
+
+    monkeypatch.setattr("agentos.session.compaction.call_compaction_llm", fake_llm)
+    previous = attach_file_activity("## Goal\n- before", FileActivity(modified=("setup.py",)))
+    entries = [
+        *_tool_entry(0, "edit_file", {"path": "src/a.py", "old_text": "a", "new_text": "b"}),
+        *_tool_entry(1, "read_file", {"path": "src/z.py"}),
+    ]
+
+    result = await compact_context(
+        CompactionRequest(
+            session_id="s1",
+            entries=entries,
+            context_window_tokens=400,
+            config=CompactionConfig(model="test/model", api_key="test-key"),
+            previous_summary=previous,
+            previous_compaction_id="cmp_prev",
+            previous_summary_payload={
+                "current_status": previous,
+                "important_identifiers": ["host-17"],
+                "critical_carry_forward": ["order 4711"],
+            },
+        )
+    )
+
+    assert bases[0] == "## Goal\n- before"
+    payload = result.summary_payload
+    assert payload is not None
+    assert payload["revises_compaction_id"] == "cmp_prev"
+    assert "host-17" in payload["important_identifiers"]
+    assert "order 4711" in payload["critical_carry_forward"]
+    _, files = split_file_activity(result.summary)
+    assert files is not None and files.modified == ("setup.py", "src/a.py")
+
+
+@pytest.mark.asyncio
+async def test_without_a_model_summary_the_durable_predecessor_is_left_alone():
+    from agentos.engine.compaction_files import split_file_activity
+
+    entries = [
+        *_tool_entry(0, "edit_file", {"path": "src/a.py", "old_text": "a", "new_text": "b"}),
+        *_tool_entry(1, "read_file", {"path": "src/z.py"}),
+    ]
+
+    result = await compact_context(
+        CompactionRequest(
+            session_id="s1",
+            entries=entries,
+            context_window_tokens=400,
+            config=CompactionConfig(),  # no model: deterministic digest only
+            previous_summary="## Goal\n- before",
+            previous_compaction_id="cmp_prev",
+        )
+    )
+
+    assert result.removed_count > 0
+    assert result.summary_payload is not None
+    # Not a revision: the previous summary keeps replaying on its own, and
+    # the digest does not copy it.
+    assert "revises_compaction_id" not in result.summary_payload
+    assert "- before" not in result.summary
+    _, files = split_file_activity(result.summary)
+    assert files is not None and files.modified == ("src/a.py",)
+
+
+def test_merge_structured_payloads_keeps_previous_facts_newest_last_and_capped() -> None:
+    from agentos.session.compaction_state import merge_structured_payloads
+
+    merged = merge_structured_payloads(
+        {"user_goal": "ship v2", "important_identifiers": ["a", "b"], "current_status": "old"},
+        {"user_goal": "", "important_identifiers": ["b", "c"], "current_status": "new"},
+        max_items=2,
+    )
+
+    assert merged["current_status"] == "new"
+    assert merged["user_goal"] == "ship v2"
+    assert merged["important_identifiers"] == ["b", "c"]
