@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Provider: each assistant message now records the provider, model and API
+  family that produced it (stored in the transcript record; older rows read
+  as unknown). After a model switch (router tier, failover, `/model`), a
+  request to a different model no longer replays the previous model's signed
+  thinking, `redacted_thinking`, OpenRouter `reasoning_details` or Gemini
+  `thought_signature`, and tool-call ids are rewritten to the target API's
+  format (Anthropic charset, OpenAI 40 characters, Mistral nine
+  alphanumerics) with their tool results kept paired. Plain text and
+  `reasoning_content` stay. Replays to the same model, and history without
+  provenance, are sent unchanged.
+
 ## [2026.10.27] - 2026-10-27
 
 ### Added

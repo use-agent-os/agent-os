@@ -61,6 +61,7 @@ def drop_reasoning(
                         reasoning_details=(
                             msg.reasoning_details if keep_reasoning_content else None
                         ),
+                        provenance=msg.provenance,
                     )
                 )
             else:
@@ -74,6 +75,7 @@ def drop_reasoning(
                         reasoning_details=(
                             msg.reasoning_details if keep_reasoning_content else None
                         ),
+                        provenance=msg.provenance,
                     )
                 )
             continue
@@ -103,7 +105,7 @@ def drop_reasoning(
         if not filtered:
             filtered = [ContentBlockText(text="")]
 
-        out.append(Message(role="assistant", content=filtered))
+        out.append(Message(role="assistant", content=filtered, provenance=msg.provenance))
 
     return out if touched else messages
 

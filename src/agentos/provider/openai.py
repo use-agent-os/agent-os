@@ -26,6 +26,7 @@ from .error_body import read_bounded_body, summarize_error_body
 from .openrouter_attribution import openrouter_app_headers
 from .protocol import ProviderConnectionConfig, ProviderMetadata
 from .reasoning import ThinkTagStreamSplitter
+from .replay import prepare_replay, provenance_for_provider
 from .request_proof import (
     ProviderRequestBudgetExceededError,
     prove_provider_payload_from_env,
@@ -903,11 +904,15 @@ def _replayable_reasoning_details(
 ) -> list[dict[str, Any]] | None:
     """``details`` when every block was produced by ``model``'s family, else None.
 
-    A message does not record which model produced it, and a router or
-    ``/model`` switch can put a different family on the next request. Claude
-    signatures, OpenAI / Gemini encrypted reasoning are only valid for the
-    family that issued them, so the blocks are replayed all-or-nothing: the
-    sequence may not be reordered or partially edited. Details whose
+    A router or ``/model`` switch can put a different family on the next
+    request. Messages that record their origin are already stripped of
+    another model's reasoning by :func:`agentos.provider.replay.prepare_replay`;
+    this check covers what that cannot see: messages persisted before
+    provenance was recorded, and a routing model id (``openrouter/auto``)
+    that answers with a different family from one request to the next.
+    Claude signatures, OpenAI / Gemini encrypted reasoning are only valid for
+    the family that issued them, so the blocks are replayed all-or-nothing:
+    the sequence may not be reordered or partially edited. Details whose
     ``format`` names no known family (plain-text reasoning from GLM, DeepSeek,
     ...) are only replayed to a model that is also outside the known families.
     """
@@ -1217,6 +1222,9 @@ class OpenAIProvider:
                 openai_messages.append({"role": "system", "content": content_blocks})
             else:
                 openai_messages.append({"role": "system", "content": cfg.system})
+        # Messages another model produced lose their signed reasoning and get
+        # tool ids this API accepts; same-model history is sent unchanged.
+        messages = prepare_replay(messages, provenance_for_provider(self))
         for m in messages:
             openai_messages.extend(
                 _build_openai_messages(

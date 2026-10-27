@@ -171,6 +171,7 @@ def project_historical_tool_payloads(
                     content=next_content,
                     reasoning_content=next_reasoning,
                     reasoning_details=next_details,
+                    provenance=message.provenance,
                 )
             )
         else:
@@ -216,6 +217,7 @@ def sanitize_session_messages(
                     content=content,
                     reasoning_content=message.reasoning_content,
                     reasoning_details=message.reasoning_details,
+                    provenance=message.provenance,
                 )
             )
         else:

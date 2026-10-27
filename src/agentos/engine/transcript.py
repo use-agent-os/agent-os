@@ -44,7 +44,8 @@ Record shape (``transcript_entries.provider_messages`` JSON)::
            {"type": "tool_use", "id": "...", "name": "...", "input": {...}}
          ],
          "reasoning_content": "...",
-         "reasoning_details": [{...}]},
+         "reasoning_details": [{...}],
+         "provenance": {"provider": "...", "model": "...", "api": "..."}},
         {"role": "user",
          "content": [{"type": "tool_result", "tool_use_id": "...", "content": "..."}]}
       ]
@@ -52,9 +53,13 @@ Record shape (``transcript_entries.provider_messages`` JSON)::
 
 ``append`` records extend the history; a ``reset`` record (written by a turn
 that compacted) replaces everything before it. Assistant messages also keep
-``reasoning_content`` and OpenRouter ``reasoning_details`` verbatim. Whether a
+``reasoning_content`` and OpenRouter ``reasoning_details`` verbatim, plus the
+``provenance`` (provider, model, API family) of the response that produced
+them; rows written before provenance existed read as unknown. Whether a
 later request replays reasoning is the provider's decision (and, for models
-that take none, an opt-in drop on load) -- never a storage one.
+that take none, an opt-in drop on load) -- never a storage one. A request to a
+different model drops the foreign signed reasoning in the request view only
+(:mod:`agentos.provider.replay`).
 """
 
 from __future__ import annotations
@@ -82,6 +87,7 @@ from agentos.provider.types import (
     ContentBlockToolResult,
     ContentBlockToolUse,
     Message,
+    MessageProvenance,
 )
 
 log = structlog.get_logger(__name__)
@@ -193,6 +199,7 @@ def _with_content(message: Message, content: Any) -> Message:
         content=content,
         reasoning_content=message.reasoning_content,
         reasoning_details=message.reasoning_details,
+        provenance=message.provenance,
     )
 
 
@@ -212,7 +219,21 @@ def encode_message(message: Message) -> dict[str, Any]:
         payload["reasoning_details"] = json.loads(
             json.dumps(message.reasoning_details, ensure_ascii=False, default=str)
         )
+    if message.provenance is not None:
+        payload["provenance"] = message.provenance.model_dump(mode="json", exclude_none=True)
     return payload
+
+
+def _decode_provenance(payload: Any) -> MessageProvenance | None:
+    """Read a stored provenance; anything unusable reads as unknown."""
+    if not isinstance(payload, dict):
+        return None
+    fields = {
+        key: value.strip()
+        for key in ("provider", "model", "api")
+        if isinstance(value := payload.get(key), str) and value.strip()
+    }
+    return MessageProvenance(**fields) if fields else None
 
 
 def decode_message(payload: Any) -> Message | None:
@@ -243,6 +264,7 @@ def decode_message(payload: Any) -> Message | None:
             if isinstance(details, list)
             else None
         ),
+        provenance=_decode_provenance(payload.get("provenance")),
     )
 
 

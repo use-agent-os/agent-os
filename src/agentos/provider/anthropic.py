@@ -14,6 +14,7 @@ import structlog
 from agentos.execution_status import derive_is_error
 
 from .error_body import read_bounded_body, summarize_error_body
+from .replay import prepare_replay, provenance_for_provider
 from .request_proof import (
     ProviderRequestBudgetExceededError,
     prove_provider_payload_from_env,
@@ -772,6 +773,9 @@ class AnthropicProvider:
                     "budget_tokens": budget_tokens,
                 }
 
+        # Messages another model produced lose their signed thinking and get
+        # tool ids this API accepts; same-model history is sent unchanged.
+        messages = prepare_replay(messages, provenance_for_provider(self))
         built_messages = [_build_message_payload(m, model=self._model) for m in messages]
         request_has_document = any(
             isinstance(m.get("content"), list)

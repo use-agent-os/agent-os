@@ -19,6 +19,7 @@ from agentos.secrets import clean_header_secret
 
 from .openai import _http_error_body_text, _resolve_llm_proxy
 from .protocol import ProviderConnectionConfig, ProviderMetadata
+from .replay import prepare_replay, provenance_for_provider
 from .retry_after import retry_after_from_response
 from .transport import PooledHttpClient, stream_timeouts
 from .types import (
@@ -244,7 +245,7 @@ class OpenAIResponsesProvider:
         config: ChatConfig | None = None,
     ) -> AsyncIterator[StreamEvent]:
         return self.chat_items(
-            _responses_input(messages),
+            _responses_input(prepare_replay(messages, provenance_for_provider(self))),
             tools=tools,
             config=config or ChatConfig(),
         )

@@ -121,6 +121,7 @@ from agentos.provider.failures import (
     honoured_retry_after,
     is_transport_timeout,
 )
+from agentos.provider.replay import provenance_for_provider
 from agentos.provider.request_proof import effective_proof_budget
 from agentos.provider.types import ContentBlockImage, StopReason, normalize_stop_reason
 from agentos.result_budget import (
@@ -672,6 +673,7 @@ def _strip_historical_image_blocks(messages: list[Message]) -> list[Message]:
                 content=kept,
                 reasoning_content=msg.reasoning_content,
                 reasoning_details=msg.reasoning_details,
+                provenance=msg.provenance,
             )
         )
     return sanitized
@@ -3012,6 +3014,9 @@ class Agent:
                             reasoning_details=getattr(
                                 provider_done_for_log, "reasoning_details", None
                             ),
+                            # Read after the stream: a failover wrapper now
+                            # reports the provider that actually answered.
+                            provenance=provenance_for_provider(self.provider),
                         )
                     )
 
@@ -3549,6 +3554,7 @@ class Agent:
                     content=blocks,
                     reasoning_content=message.reasoning_content,
                     reasoning_details=message.reasoning_details,
+                    provenance=message.provenance,
                 )
                 self._message_sizes.retain_only(messages)
 
