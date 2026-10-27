@@ -369,6 +369,7 @@ async def invoke_tool(
 ) -> tuple[int, dict[str, Any]]:
     """Run (or dry-run) one tool call; returns ``(status, json body)``."""
     from agentos.tool_boundary import ToolCall
+    from agentos.tools.argument_admission import REJECTED_ERROR_CLASS
     from agentos.tools.dispatch import build_tool_handler, preflight_tool_call
 
     tool = body.get("tool")
@@ -422,6 +423,15 @@ async def invoke_tool(
         }
     if denial is not None:
         envelope = _envelope(denial)
+        if envelope.get("error_class") == REJECTED_ERROR_CLASS:
+            # The arguments do not match the tool's schema: a bad request,
+            # not a policy refusal.
+            return _error(
+                400,
+                ErrorCode.INVALID_REQUEST,
+                str(envelope.get("user_message") or "Invalid tool arguments."),
+                error_class=REJECTED_ERROR_CLASS,
+            )
         return _error(
             403,
             ErrorCode.FORBIDDEN,

@@ -4,7 +4,11 @@ This module exposes :func:`build_tool_handler`, the single entry point used
 by every caller (gateway, CLI, cron, channel adapters). The pipeline is:
 
 1. Ingress injection guard — before registry lookup.
-2. Registry lookup — before any policy check.
+2. Registry lookup — before any policy check. A near-miss name resolves to
+   the one tool it unambiguously means
+   (:mod:`agentos.tools.tool_name_resolution`).
+2b. Argument admission — schema validation with lossless coercions
+   (:mod:`agentos.tools.argument_admission`); a mismatch is rejected here.
 3. Optional ``ToolHook.before_tool`` fan-out.
 4. Policy chain (:func:`agentos.tools.policy.run_chain_with_emit`) —
    first denial wins; chain log emission flows through one site.
@@ -17,6 +21,7 @@ by every caller (gateway, CLI, cron, channel adapters). The pipeline is:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import time
 import weakref
@@ -43,13 +48,21 @@ from agentos.safety.injection_guard import (
     extract_tool_call_refusal_reason,
 )
 from agentos.tool_boundary import AgentToolHandler, ToolCall, ToolResult
+from agentos.tools.argument_admission import (
+    REJECTED_ERROR_CLASS,
+    REJECTED_REASON,
+    ToolArgumentsRejectedError,
+    admit_tool_arguments,
+)
 from agentos.tools.envelope import build_tool_failure_envelope
 from agentos.tools.policy import DispatchInput, finalize, run_chain_with_emit
 from agentos.tools.registry import ToolRegistry
+from agentos.tools.tool_name_resolution import resolve_tool_name
 from agentos.tools.types import (
     CallerKind,
     InvalidToolArgumentsError,
     ProjectedToolArgumentsError,
+    RegisteredTool,
     ToolContext,
     current_tool_context,
 )
@@ -305,6 +318,84 @@ def _check_non_executable_arguments(
     return None
 
 
+def _lookup_registered(
+    registry: ToolRegistry,
+    tool_call: ToolCall,
+    ctx: ToolContext | None,
+) -> tuple[ToolCall, RegisteredTool | None]:
+    """Find the tool a call names, resolving a near-miss name on an exact miss.
+
+    A resolved call is returned under the registered name, so hooks, policy,
+    approvals and the result all see the tool that actually runs.
+    """
+    registered = registry.get(tool_call.tool_name)
+    if registered is not None:
+        return tool_call, registered
+    resolution = resolve_tool_name(tool_call.tool_name, registry, ctx)
+    if resolution is None:
+        return tool_call, None
+    registered = registry.get(resolution.resolved)
+    if registered is None:
+        return tool_call, None
+    log.info(
+        "dispatch.tool_name_resolved",
+        requested=resolution.requested,
+        tool=resolution.resolved,
+        rules=list(resolution.rules),
+        tool_use_id=tool_call.tool_use_id,
+        agent_id=ctx.agent_id if ctx else None,
+        session_key=ctx.session_key if ctx else None,
+    )
+    return dataclasses.replace(tool_call, tool_name=resolution.resolved), registered
+
+
+def _admit_arguments(
+    tool_call: ToolCall,
+    registered: RegisteredTool,
+    ctx: ToolContext | None,
+) -> ToolCall | ToolResult:
+    """Validate a call's arguments against its schema; coerce or reject.
+
+    A rejection is an ordinary failed call (``is_error``) with its own error
+    class and status reason, so failure-streak and progress tracking count it
+    like any other failure of the same call.
+    """
+    try:
+        admission = admit_tool_arguments(registered.spec, tool_call.arguments)
+    except Exception as exc:  # noqa: BLE001 - a validator bug must not block the tool
+        log.warning(
+            "dispatch.argument_admission_failed",
+            tool=tool_call.tool_name,
+            tool_use_id=tool_call.tool_use_id,
+            error=str(exc),
+        )
+        return tool_call
+    if not admission.ok:
+        log.warning(
+            "dispatch.tool_arguments_rejected",
+            tool=tool_call.tool_name,
+            tool_use_id=tool_call.tool_use_id,
+            agent_id=ctx.agent_id if ctx else None,
+            session_key=ctx.session_key if ctx else None,
+            paths=[issue.path for issue in admission.issues],
+        )
+        return _build_envelope_result(
+            tool_call,
+            exc=ToolArgumentsRejectedError(tool_call.tool_name, admission.issues),
+            error_class_override=REJECTED_ERROR_CLASS,
+            reason_override=REJECTED_REASON,
+        )
+    if not admission.coerced:
+        return tool_call
+    log.info(
+        "dispatch.tool_arguments_coerced",
+        tool=tool_call.tool_name,
+        tool_use_id=tool_call.tool_use_id,
+        paths=list(admission.coerced),
+    )
+    return dataclasses.replace(tool_call, arguments=admission.arguments)
+
+
 def _is_untrusted_caller(ctx: ToolContext | None) -> bool:
     """Return True when the caller cannot be trusted with tool-name disclosure.
 
@@ -397,13 +488,18 @@ async def preflight_tool_call(
     if injection_envelope is not None:
         return injection_envelope
 
-    registered = registry.get(tool_call.tool_name)
+    tool_call, registered = _lookup_registered(registry, tool_call, ctx)
     if registered is None:
         return _resolve_registry_miss(tool_call, known, ctx)
 
     non_executable_arguments = _check_non_executable_arguments(tool_call, ctx)
     if non_executable_arguments is not None:
         return non_executable_arguments
+
+    admitted = _admit_arguments(tool_call, registered, ctx)
+    if isinstance(admitted, ToolResult):
+        return admitted
+    tool_call = admitted
 
     dispatch_input = DispatchInput(
         tool_call=tool_call,
@@ -505,14 +601,20 @@ def build_tool_handler(
         if injection_envelope is not None:
             return injection_envelope
 
-        # 2. Registry lookup.
-        registered = registry.get(tool_call.tool_name)
+        # 2. Registry lookup (a near-miss name resolves to the one tool it means).
+        tool_call, registered = _lookup_registered(registry, tool_call, effective_ctx)
         if registered is None:
             return _resolve_registry_miss(tool_call, known, effective_ctx)
 
         non_executable_arguments = _check_non_executable_arguments(tool_call, effective_ctx)
         if non_executable_arguments is not None:
             return non_executable_arguments
+
+        # 2b. Argument admission: validate against the schema, coerce or reject.
+        admitted = _admit_arguments(tool_call, registered, effective_ctx)
+        if isinstance(admitted, ToolResult):
+            return admitted
+        tool_call = admitted
 
         # 3. ToolHook.before_tool — optional observability hook.
         hook_call = ToolHookCall(tool_call=tool_call, ctx=effective_ctx) if hooks else None

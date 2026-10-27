@@ -39,7 +39,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Awaitable, Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -500,6 +500,14 @@ class DeferredToolSurface:
         async def _guarded(tool_call: ToolCall) -> ToolResult:
             if surface.is_pending(tool_call.tool_name):
                 return not_loaded_result(tool_call)
+            if surface.registry.get(tool_call.tool_name) is None:
+                # Dispatch resolves a near-miss name; one that lands on an
+                # unloaded deferred tool must hit this guard too.
+                from agentos.tools.tool_name_resolution import resolve_tool_name
+
+                resolution = resolve_tool_name(tool_call.tool_name, surface.registry, surface.ctx)
+                if resolution is not None and surface.is_pending(resolution.resolved):
+                    return not_loaded_result(replace(tool_call, tool_name=resolution.resolved))
             return await handler(tool_call)
 
         _guarded.deferred_tool_surface = surface  # type: ignore[attr-defined]

@@ -273,7 +273,7 @@ is a category (`INVALID_REQUEST`, `FORBIDDEN`, `NOT_FOUND`, …) and
 | `200` `{"dryRun": true, "allowed": …, "policy": {…}}` | `dry_run`: the resolved policy (profile, caller, sandboxed, read-only, may-require-approval); nothing ran. |
 | `403` `FORBIDDEN` / `POLICY_DENIED` | The configured tool policy (`[tools]` profile/allow/deny, the agent's own entry) refuses it; `details.error_class` names the refusal. |
 | `403` `FORBIDDEN` / `APPROVAL_REQUIRED` | The tool needs a human approval. HTTP calls run unattended, so the tool refuses as on any unattended run; `details.approval_id` is included when it queued one. |
-| `400` `INVALID_REQUEST` | Bad body, or an argument that writes a file (`output_path`, `save_path`, `output_file`, `destination`, …), refused for every tool. |
+| `400` `INVALID_REQUEST` | Bad body, an argument that writes a file (`output_path`, `save_path`, `output_file`, `destination`, …), refused for every tool, or arguments that do not match the tool's schema (`details.error_class = "ToolArgumentsRejected"`, the message names each failing argument). |
 | `404` `NOT_FOUND` | Unknown tool **or** one the endpoint does not run — the two look the same. |
 | `409` `INVALID_REQUEST` / `REQUEST_CONFLICT` | The `idempotency_key` was used for a different request in the last ten minutes (a repeat of the same request replays its first answer with `idempotentReplay: true`). |
 | `504` `UNAVAILABLE` / `TOOL_TIMEOUT` | The tool did not finish within the tool timeout. |

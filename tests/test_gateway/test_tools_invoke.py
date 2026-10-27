@@ -159,6 +159,16 @@ class TestInvoke:
         assert calls[0]["action"] == "list"
         assert calls[0]["session_key"] == "agent:main:webchat:x"
 
+    def test_arguments_that_do_not_match_the_schema_are_a_bad_request(self) -> None:
+        calls: list[dict[str, Any]] = []
+        resp = _invoke(_client(_registry(calls)), {"tool": "lookup", "args": {"query": 42}})
+        assert resp.status_code == 400, resp.text
+        body = resp.json()
+        assert body["code"] == "INVALID_REQUEST"
+        assert body["details"]["error_class"] == "ToolArgumentsRejected"
+        assert "query: expected string, got integer 42" in body["error"]
+        assert calls == []
+
     @pytest.mark.parametrize(
         "tool",
         [

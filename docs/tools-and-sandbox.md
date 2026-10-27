@@ -66,6 +66,35 @@ Approvals are most important for:
 Use the Web UI approvals page when you want durable review outside the chat
 scrollback.
 
+## How a Tool Call Is Admitted
+
+Before a model's tool call reaches hooks, policy or an approval prompt, it is
+checked once:
+
+- **Name.** An exact name always wins. On a miss, a name the model decorated
+  is resolved to the one tool it clearly means: a `functions.` or `tools.`
+  prefix and a trailing `:<n>` counter are dropped, case is ignored, and `/`
+  reads as `_` (`functions.Read_File:0` and `web/search` run `read_file` and
+  `web_search`). Only tools visible to the session are candidates, and the
+  match must be unique; two tools that differ only by case, or no match at all,
+  still answer `ToolNotFound`. MCP tool names (`mcp_…`) are never matched
+  loosely, only exactly (a namespace prefix or counter around the exact name is
+  still dropped). The name is resolved against the tools offered to the model
+  as soon as the call arrives, so scheduling, timeouts, approvals, stream
+  events and the saved transcript all use the real tool name.
+- **Arguments.** They are validated against the tool's schema (`type`,
+  `properties`, `required`, `items`, `enum`, `additionalProperties`,
+  `anyOf`/`oneOf`). Lossless mistakes are repaired: `"5"` for an integer or
+  number, `5.0` for an integer, `"true"`/`"false"` for a boolean, and a
+  JSON-encoded string where an array or object is expected. Nothing is turned
+  into `null`, and arguments the schema does not mention are passed through
+  unchanged. Anything else is rejected without running the tool: the result is
+  an error with `error_class: "ToolArgumentsRejected"` (status reason
+  `invalid_arguments`) that names every failing argument path and the type it
+  expected. A rejected call counts as a failed call, so repeating it unchanged
+  trips the same failure-loop guard as any other failure. A tool whose schema
+  cannot be read is not validated.
+
 ## Calling a Tool Directly
 
 `POST /api/v1/tools/invoke` runs one tool without a model turn, for scripts,

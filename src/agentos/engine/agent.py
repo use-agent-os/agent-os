@@ -1935,16 +1935,17 @@ class Agent:
                                     ):
                                         ignored_post_delivery_tool_use = True
                                     continue
+                                start_tool_name = self._canonical_tool_name(raw_ev.tool_name)
                                 pending_tools[raw_ev.tool_use_id] = _StreamAccumulator(
                                     tool_use_id=raw_ev.tool_use_id,
-                                    tool_name=raw_ev.tool_name,
+                                    tool_name=start_tool_name,
                                     synthetic_from_text=raw_ev.synthetic_from_text,
                                 )
                                 tool_argument_heartbeat_chars[raw_ev.tool_use_id] = 0
                                 attempt_user_visible_emitted = True
                                 yield ToolUseStartEvent(
                                     tool_use_id=raw_ev.tool_use_id,
-                                    tool_name=raw_ev.tool_name,
+                                    tool_name=start_tool_name,
                                     synthetic_from_text=raw_ev.synthetic_from_text,
                                 )
 
@@ -1997,7 +1998,10 @@ class Agent:
                                 tool_calls.append(
                                     ToolCall(
                                         tool_use_id=raw_ev.tool_use_id,
-                                        tool_name=raw_ev.tool_name,
+                                        tool_name=self._canonical_tool_name(
+                                            raw_ev.tool_name,
+                                            tool_use_id=raw_ev.tool_use_id,
+                                        ),
                                         arguments=arguments,
                                         synthetic_from_text=synthetic_from_text,
                                         thought_signature=raw_ev.thought_signature,
@@ -4205,6 +4209,32 @@ class Agent:
                 reason="provider_projection_reused",
             )
         return tc
+
+    def _canonical_tool_name(self, name: str, *, tool_use_id: str | None = None) -> str:
+        """The offered tool name a model's near-miss name unambiguously means.
+
+        Applied where the stream hands over a tool call, so scheduling,
+        timeouts, approvals, events and the persisted ``tool_use`` block all
+        carry the registered name. Pass ``tool_use_id`` to log the rewrite.
+        """
+        offered = [definition.name for definition in self.tool_definitions]
+        if not offered or name in offered:
+            return name
+        from agentos.tools.tool_name_resolution import resolve_tool_name_among
+
+        resolution = resolve_tool_name_among(name, offered)
+        if resolution is None:
+            return name
+        if tool_use_id is not None:
+            logger.info(
+                "agent.tool_name_resolved",
+                session_key=self._session_key,
+                tool_use_id=tool_use_id,
+                requested=resolution.requested,
+                tool=resolution.resolved,
+                rules=list(resolution.rules),
+            )
+        return resolution.resolved
 
     async def _execute_tool(self, tc: ToolCall) -> ToolResult:
         """Dispatch a tool call to the registered handler."""
