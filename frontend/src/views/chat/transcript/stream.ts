@@ -564,6 +564,10 @@ export function createStreamController(
 
   // finalize/reconcile bookkeeping (chat.js:59-60)
   let _pendingFinalizedAssistantBubble: HTMLElement | null = null
+  // Text the run streamed before its newest steered message. It is shown in
+  // the bubble(s) above that message; the done frame's full text starts with
+  // it, so the final reconcile leaves it out of the last bubble.
+  let _textBeforeSteer = ''
   let _pendingFinalizedAssistantFallbackId = ''
 
   function isUserMessageElement(el: Element | null): el is HTMLElement {
@@ -981,6 +985,7 @@ export function createStreamController(
     _streamArtifacts = []
     _lastVisibleStreamEvent = ''
     _streamBubble = null
+    _textBeforeSteer = ''
     _autoScroll = true
     const th = thread()
     if (th) th.setAttribute('aria-busy', 'true')
@@ -1197,19 +1202,7 @@ export function createStreamController(
       markPendingFinalizedAssistantBubble(_streamBubble, cleanedText)
 
       // Final render: render each text segment with its own content.
-      for (const seg of _segments) {
-        if (seg.type !== 'text' || !seg.el) continue
-        const segText = stripProtocolTextLeak(
-          stripDirectiveTags(stripGeneratedArtifactMarkers(seg.raw)),
-        ).trim()
-        if (segText) {
-          seg.el.innerHTML = Markdown.render(segText)
-          Markdown.bindCopy(seg.el)
-          Markdown.bindHighlight?.(seg.el)
-        } else {
-          seg.el.remove()
-        }
-      }
+      renderFinalTextSegments()
 
       const body = _streamBubble.querySelector('.msg-body') as HTMLElement | null
       if (wasAborted && body && !body.querySelector('.msg-interrupt-mark')) {
@@ -1239,6 +1232,7 @@ export function createStreamController(
     if (_streamSessionKey) liveStreamStateBySession.delete(_streamSessionKey)
     _streamBubble = null
     _streamSessionKey = ''
+    _textBeforeSteer = ''
     _streamRaw = ''
     _segments = []
     _activeTextSeg = null
@@ -1247,6 +1241,54 @@ export function createStreamController(
     if (th) th.setAttribute('aria-busy', 'false')
     updateSendButton()
     diag('stream.end.done', { reason: reason || '', wasAborted })
+  }
+
+  function renderFinalTextSegments(): void {
+    for (const seg of _segments) {
+      if (seg.type !== 'text' || !seg.el) continue
+      const segText = stripProtocolTextLeak(
+        stripDirectiveTags(stripGeneratedArtifactMarkers(seg.raw)),
+      ).trim()
+      if (segText) {
+        seg.el.innerHTML = Markdown.render(segText)
+        Markdown.bindCopy(seg.el)
+        Markdown.bindHighlight?.(seg.el)
+      } else {
+        seg.el.remove()
+      }
+    }
+  }
+
+  /* ── mid-turn steering (session.event.steering) ───────────────────────── */
+
+  /**
+   * A message the user sent was taken by the running turn. Close the live
+   * bubble where it stands, show the message below it, and let the rest of
+   * the turn stream into a new bubble under the message: the order
+   * `chat.history` shows once the turn ends (work before, message, work
+   * after).
+   */
+  function splitStreamAtSteer(text: string, messageId = ''): void {
+    if (!_isStreaming) return
+    flushPendingTextSegment()
+    hideThinkingIndicator()
+    if (_streamBubble) {
+      _streamBubble.classList.remove('streaming')
+      renderFinalTextSegments()
+      attachHoverActions(_streamBubble, 'assistant')
+    }
+    _textBeforeSteer += _streamRaw
+    _streamBubble = null
+    _streamRaw = ''
+    _segments = []
+    _activeTextSeg = null
+    _activeTextRaw = ''
+    if (text) {
+      const row = addMessage('user', text, new Date().toISOString())
+      if (row) stampHistoryElement(row, messageId, 'user', text)
+    }
+    if (_autoScroll) scrollToBottom()
+    diag('stream.steer.split', { messageId, beforeLen: _textBeforeSteer.length })
   }
 
   /* ── reconcile final stream text (chat.js:6021-6058) ──────────────────── */
@@ -1277,6 +1319,11 @@ export function createStreamController(
 
   function reconcileFinalStreamText(finalText: string): void {
     // chat.js:6046-6058
+    // After a steer the bubbles above the steered message already show the
+    // start of the turn's text.
+    if (_textBeforeSteer && finalText.startsWith(_textBeforeSteer)) {
+      finalText = finalText.slice(_textBeforeSteer.length)
+    }
     if (!finalText || finalText === _streamRaw) return
     if (_streamRaw && finalText.startsWith(_streamRaw)) {
       appendDelta(finalText.slice(_streamRaw.length))
@@ -1663,6 +1710,7 @@ export function createStreamController(
     flushPendingTextSegment,
     endStreaming,
     reconcileFinalStreamText,
+    splitStreamAtSteer,
     getStreamBubble: () => _streamBubble,
     getThinkingIndicator: () => _thinkingEl,
     getCurrentSessionLiveUserAnchor: (key = getSessionKey() || '') =>

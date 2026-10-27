@@ -29,6 +29,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   resumed.
 
 ### Fixed
+- Engine, gateway: a message steered into a running turn now shows where it
+  came in. `chat.history` (web console, desktop app) shows the work done
+  before the message, then the message, then the work after it, instead of
+  the message above one assistant reply that also held the earlier work with
+  the texts run together; the live view splits the same way when
+  `session.event.steering` arrives, and a reload mid-turn lists the settled
+  part above the message while `in_flight_run.text` restarts at it. A message
+  taken when the model answered is put on record before the next model call,
+  so a crash during that call no longer loses the answer or reads the two
+  user rows as a fresh, unanswered input. `classify_transcript_tail` no longer
+  counts rows steered into the turn as trailing input, and now does count a
+  follow-up queued mid-turn that sorts before the rewritten in-progress row.
 - Provider: each assistant message now records the provider, model and API
   family that produced it (stored in the transcript record; older rows read
   as unknown). After a model switch (router tier, failover, `/model`), a

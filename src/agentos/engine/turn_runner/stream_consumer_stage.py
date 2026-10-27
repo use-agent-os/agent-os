@@ -45,6 +45,7 @@ if TYPE_CHECKING:
         DoneEvent,
         ErrorEvent,
         RepetitionStopEvent,
+        SteeringEvent,
         TextDeltaEvent,
         ToolResultEvent,
         ToolUseStartEvent,
@@ -359,6 +360,28 @@ class _ToolResultHandler:
                         segment["thought_signature"] = event.thought_signature
                     break
         state.turn_segments.append(_persisted_tool_result_segment(event))
+        return event
+
+
+class _SteeringHandler:
+    """Close the current text segment and mark where a steered message came in.
+
+    The marker (``agentos.engine.steering.steer_segment``) lets a reader of
+    the turn's row show the work before the message, the message, then the
+    work after it, instead of one block with the message above it.
+    """
+
+    def handle(self, event: SteeringEvent, state: _StreamState) -> SteeringEvent:
+        from agentos.engine.steering import steer_segment
+
+        pending_text = state.protocol_text_guard.flush()
+        if pending_text:
+            state.final_text_parts.append(pending_text)
+            state.current_text_parts.append(pending_text)
+        if state.current_text_parts:
+            state.turn_segments.append({"type": "text", "text": "".join(state.current_text_parts)})
+            state.current_text_parts[:] = []
+        state.turn_segments.append(steer_segment(event))
         return event
 
 
@@ -904,6 +927,7 @@ class StreamConsumerStage:
         self._tool_use_start_handler = _ToolUseStartHandler()
         self._tool_result_handler = _ToolResultHandler()
         self._artifact_handler = _ArtifactHandler()
+        self._steering_handler = _SteeringHandler()
         self._error_handler = _ErrorHandler()
         self._repetition_stop_handler = _RepetitionStopHandler()
         self._warning_handler = _WarningHandler(warning_transformer)
@@ -925,6 +949,7 @@ class StreamConsumerStage:
             DoneEvent,
             ErrorEvent,
             RepetitionStopEvent,
+            SteeringEvent,
             TextDeltaEvent,
             ToolResultEvent,
             ToolUseStartEvent,
@@ -959,6 +984,8 @@ class StreamConsumerStage:
             elif isinstance(event, CompactionEvent):
                 await self._compaction_handler.handle(event, inp)
                 transformed = _SUPPRESS
+            elif isinstance(event, SteeringEvent):
+                transformed = self._steering_handler.handle(event, state)
             else:
                 transformed = event
 

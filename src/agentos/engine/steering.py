@@ -20,8 +20,13 @@ One message is taken per checkpoint. Taking it writes the user row to the
 transcript, so the row lands at the point the model meets it, inside the
 turn, and the turn's structured record names the row
 (:attr:`agentos.engine.transcript.TranscriptRecord.steered_entry_ids`) so a
-reload does not replay it twice. A message no checkpoint takes before the turn
-ends is not lost: it is still a queued task and runs as the next turn.
+reload does not replay it twice. The turn's in-progress row
+(:mod:`agentos.engine.turn_progress`) is rewritten right after, so a crash
+from then on leaves the message on record exactly once. The turn's display
+segments get a :data:`STEER_SEGMENT_TYPE` marker at that point, which
+``chat.history`` uses to show the work before the message, the message, then
+the work after it. A message no checkpoint takes before the turn ends is not
+lost: it is still a queued task and runs as the next turn.
 
 The engine only sees the :class:`SteeringSource` protocol. The gateway binds
 one per running task (:func:`bind_steering`) for the duration of the turn;
@@ -34,7 +39,7 @@ from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from agentos.engine.types import SteeringEvent, ToolCall, ToolResult
 from agentos.execution_status import runtime_execution_status
@@ -48,6 +53,9 @@ SKIPPED_FOR_STEERING_CONTENT = (
 )
 #: ``execution_status.reason`` of a skipped tool call.
 SKIPPED_FOR_STEERING_REASON = "skipped_for_steering"
+#: ``type`` of the display segment (an assistant row's ``tool_calls``) that
+#: marks where a steered message met the turn; ``message_id`` names its row.
+STEER_SEGMENT_TYPE = "steer"
 
 
 @dataclass(frozen=True)
@@ -146,6 +154,19 @@ async def take_steering(
     if taken.message_id:
         steered_entry_ids.append(taken.message_id)
     return SteeringEvent(text=taken.text, message_id=taken.message_id, task_id=taken.task_id)
+
+
+def steer_segment(event: SteeringEvent) -> dict[str, Any]:
+    """The display segment recording that *event*'s message was taken here."""
+
+    segment: dict[str, Any] = {"type": STEER_SEGMENT_TYPE}
+    if event.message_id:
+        segment["message_id"] = event.message_id
+    return segment
+
+
+def is_steer_segment(segment: Any) -> bool:
+    return isinstance(segment, dict) and segment.get("type") == STEER_SEGMENT_TYPE
 
 
 class BatchSteeringCheckpoint:

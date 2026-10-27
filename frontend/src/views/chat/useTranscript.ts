@@ -1992,6 +1992,17 @@ export function useTranscript(opts: {
       }),
     )
 
+    // A message steered into the running turn: it shows after the work done
+    // so far, and the rest of the turn streams below it.
+    unsubs.push(
+      onEvent('session.event.steering', (payload: StreamEventPayload) => {
+        if (!gateStreamFrame('event.steering', payload)) return
+        controller.resetStreamIdleTimer()
+        const steer = payload as { text?: string; message_id?: string | null }
+        controller.splitStreamAtSteer(steer.text || '', steer.message_id || '')
+      }),
+    )
+
     // chat.js:4769 — artifact → controller artifact renderer (Task 5).
     unsubs.push(
       onEvent('session.event.artifact', (payload: StreamEventPayload) => {
