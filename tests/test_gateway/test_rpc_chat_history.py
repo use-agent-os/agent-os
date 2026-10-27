@@ -190,8 +190,9 @@ async def test_chat_history_returns_empty_for_missing_webchat_session(
         "page_size": 2,
         "canonical_available": False,
         "compaction_summaries": [],
-        # A session that does not exist yet runs nothing.
+        # A session that does not exist yet runs nothing and has nothing queued.
         "in_flight_run": None,
+        "pending_inputs": [],
     }
 
 

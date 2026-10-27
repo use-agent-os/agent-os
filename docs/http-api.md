@@ -436,6 +436,28 @@ before relying on it.
   through_stream_seq, text, text_truncated?, plan?, events?}` for the running
   turn. It is capped at 256 KiB, filled in that order of priority; text is cut
   from the front. `through_stream_seq` is the stream position it covers.
+- **`mid-turn-steering`** — a `chat.send` / `sessions.send` with an explicit
+  `queueMode: "steer"` while the session's turn runs joins that turn instead
+  of cancelling it (without `queueMode` the session's default still replaces
+  the running turn, as before). The turn takes one
+  waiting message per checkpoint: before starting the next call of an ordered
+  tool sequence (calls not started get a "skipped" tool result), after a tool
+  batch (the message follows the tool results), and when the model would end
+  the turn (it continues instead). The user row is written when the turn
+  takes the message; until then it is not in the transcript. A message no
+  checkpoint takes runs as the next turn. When the running turn does not check
+  (a coding-harness turn, a turn still starting) `steer` still replaces it.
+  The send answer carries `task_id` and the effective `queue_mode` (`steer`,
+  `interrupt`, `followup`, `collect`). `chat.history` (unless paging with
+  `before`) returns `pending_inputs`: the session's queued messages, oldest
+  first, as `{task_id, queue_mode, text, text_truncated?, queued_at,
+  attachments, steer, message_id?}`; `message_id` is set when the user row is
+  already in the transcript (a follow-up), so a client does not show it
+  twice. `chat.abort {sessionKey, taskId}` (and `sessions.abort {key,
+  taskId}`) withdraws a queued message — `{withdrawn: true, aborted: [],
+  removed_message_id?}`, the task ends `cancelled` / `withdrawn` — stops just
+  that run when it is the running one, and answers `delivered: true` when a
+  running turn already took it.
 - **`idempotency-keys`** — `chat.send`, `sessions.send`, `sessions.create`,
   `cron.add`, `exec.approval.resolve` and `plugin.approval.resolve` accept an
   optional `idempotency_key`. The same key within five minutes returns the first

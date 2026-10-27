@@ -112,6 +112,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   The cut call's usage is counted as an estimate (request-size estimate in,
   streamed text and reasoning out), so turn totals and token budgets include
   it. Tune or disable it under `[llm.repetition_guard]`.
+- Engine: a tool batch runs in the model's order again. Shared (`parallel` /
+  `keyed`) calls queued behind every exclusive call, so in `[write, read,
+  read, write]` the second write ran before the two reads.
+
+### Added
+- Gateway: mid-turn steering. A `chat.send` / `sessions.send` that asks for
+  `queueMode: "steer"` while the session's turn runs no longer cancels that
+  turn: the turn takes the message at its next checkpoint. Sends without an
+  explicit `queueMode` behave as before. Calls of an
+  ordered tool sequence that have not started get a "skipped" result, the
+  message is added after the tool results before the next model call, and a
+  turn about to end continues with it. Its user row is written where the turn
+  takes it, not at send time; a message no checkpoint takes runs as the next
+  turn. Turns that never check (coding-harness turns) keep `steer` =
+  interrupt. Capability `mid-turn-steering`.
+- Gateway: server-side pending inputs. `chat.send` / `sessions.send` answer
+  with the turn's `task_id` and the effective `queue_mode` (`chat.send` now
+  accepts `queueMode`); `chat.history` lists `pending_inputs` (queued messages,
+  oldest first); `chat.abort {taskId}` / `sessions.abort {taskId}` withdraws a
+  queued message (`withdrawn: true`, removing a follow-up's already written
+  user row) or stops just that running turn.
 
 ## [2026.10.27] - 2026-10-27
 

@@ -58,6 +58,9 @@ CAPABILITIES: frozenset[str] = frozenset(
         "config-reload",
         "idempotency-keys",
         "inflight-snapshot",
+        # `steer` sends join the running turn at its next checkpoint;
+        # chat.history `pending_inputs`; chat.abort / sessions.abort `taskId`.
+        "mid-turn-steering",
         "rpc-http",
         # /ready + /startupz states, STARTUP_SIDECARS during boot, and
         # `shutdown {reason, restart_expected_ms}` (gateway/readiness.py).

@@ -237,6 +237,21 @@ class RepetitionStopEvent:
 
 
 @dataclass
+class SteeringEvent:
+    """A message the user sent while the turn ran, now injected into it.
+
+    The message was written to the transcript (``message_id``) at the point
+    the model meets it: after the tool results it arrived during, before the
+    next model call. ``task_id`` is the queued task the message was sent as.
+    """
+
+    kind: Literal["steering"] = field(default="steering", init=False)
+    text: str = ""
+    message_id: str | None = None
+    task_id: str | None = None
+
+
+@dataclass
 class CompactionEvent:
     """Emitted when Agent completes inline compaction. Captured by TurnRunner for DB persistence."""
 
@@ -278,6 +293,7 @@ AgentEvent = (
     | RepetitionStopEvent
     | WarningEvent
     | RouterDecisionEvent
+    | SteeringEvent
 )
 
 

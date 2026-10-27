@@ -534,6 +534,10 @@ async def _chat_send(
             ("provenance_kind", "provenance_kind"),
             ("runKind", "runKind"),
             ("run_kind", "run_kind"),
+            # ``steer`` (join the running turn), ``followup``, ``interrupt``,
+            # ``collect``; unset uses the session's queue mode.
+            ("queueMode", "queueMode"),
+            ("queue_mode", "queue_mode"),
         ):
             if source_key in params:
                 extra[target_key] = params[source_key]
@@ -602,6 +606,13 @@ async def _handle_chat_suggest_next(params: dict | None, ctx: RpcContext) -> dic
 
 @_d.method("chat.abort")
 async def _handle_chat_abort(params: dict | None, ctx: RpcContext) -> dict:
+    """Stop the session's run; ``taskId`` withdraws one queued message instead.
+
+    ``taskId`` is the id ``chat.send`` answered with (also listed in
+    ``chat.history.pending_inputs``). A queued one is withdrawn
+    (``withdrawn: true``), a running one is stopped alone, and one a running
+    turn already took answers ``delivered: true``.
+    """
     raw_params = params or {}
     session_key = _canonical_webchat_session_key(raw_params.get("sessionKey"))
     # Fresh-WebUI / smoke path: abort always returns an ok envelope keyed by
@@ -611,14 +622,28 @@ async def _handle_chat_abort(params: dict | None, ctx: RpcContext) -> dict:
     _require_chat_session_manager(ctx)
     from agentos.gateway.rpc_sessions import _handle_sessions_abort
 
-    result = await _handle_sessions_abort(
-        {
-            "key": session_key,
-            "source": raw_params.get("source") or "webui_abort",
-        },
-        ctx,
-    )
+    abort_params: dict[str, Any] = {
+        "key": session_key,
+        "source": raw_params.get("source") or "webui_abort",
+    }
+    task_id = raw_params.get("taskId", raw_params.get("task_id"))
+    if isinstance(task_id, str) and task_id:
+        abort_params["taskId"] = task_id
+    result = await _handle_sessions_abort(abort_params, ctx)
     return {"sessionKey": session_key, **result}
+
+
+def _pending_inputs(ctx: RpcContext, session_key: str) -> list[dict[str, Any]]:
+    """The session's queued messages (``TaskRuntime.pending_inputs``)."""
+    runtime = getattr(ctx, "task_runtime", None)
+    probe = getattr(runtime, "pending_inputs", None)
+    if not callable(probe):
+        return []
+    try:
+        return list(probe(session_key))
+    except Exception:  # noqa: BLE001 - history must render without the queue
+        log.warning("chat.history.pending_inputs_failed", session_key=session_key, exc_info=True)
+        return []
 
 
 def _control_ui_show_thinking(ctx: RpcContext) -> bool:
@@ -670,7 +695,9 @@ async def _handle_chat_history(params: dict | None, ctx: RpcContext) -> dict:
     latest page when the cursor no longer names a row. Messages over
     ``CHAT_HISTORY_MESSAGE_BUDGET_BYTES`` come back as placeholders
     (``placeholder: true``, ``byte_size``, ``entry_id`` for ``chat.entry``).
-    Unless paging backwards, ``in_flight_run`` reports the running turn.
+    Unless paging backwards, ``in_flight_run`` reports the running turn and
+    ``pending_inputs`` the messages queued behind it or waiting to be steered
+    into it (``TaskRuntime.pending_inputs``), oldest first.
     """
     raw_params = params or {}
     session_key = _canonical_webchat_session_key(raw_params.get("sessionKey"))
@@ -703,10 +730,12 @@ async def _handle_chat_history(params: dict | None, ctx: RpcContext) -> dict:
             if delta_cursor is not None:
                 empty["kind"] = "reset"
             empty["in_flight_run"] = None
+            empty["pending_inputs"] = _pending_inputs(ctx, session_key)
             return empty
         raise
 
     in_flight_run: dict[str, Any] | None = None
+    pending_inputs: list[dict[str, Any]] = []
     if not before:
         from agentos.gateway.rpc_sessions import session_in_flight_run
 
@@ -714,6 +743,7 @@ async def _handle_chat_history(params: dict | None, ctx: RpcContext) -> dict:
         # The running turn is shown from ``in_flight_run``; its in-progress
         # transcript row would list the same tool calls a second time.
         transcript = hide_live_turn_progress(transcript, in_flight_run)
+        pending_inputs = _pending_inputs(ctx, session_key)
 
     kind: str | None = None
     if delta_cursor is not None:
@@ -742,6 +772,7 @@ async def _handle_chat_history(params: dict | None, ctx: RpcContext) -> dict:
                 "loaded_count": len(delta_entries),
                 "canonical_available": canonical_available,
                 "in_flight_run": in_flight_run,
+                "pending_inputs": pending_inputs,
             }
         # The cursor names no row (compaction, reset, another session): the
         # client must replace what it has with the latest page.
@@ -795,6 +826,7 @@ async def _handle_chat_history(params: dict | None, ctx: RpcContext) -> dict:
         payload["kind"] = kind
     if not before:
         payload["in_flight_run"] = in_flight_run
+        payload["pending_inputs"] = pending_inputs
     return payload
 
 

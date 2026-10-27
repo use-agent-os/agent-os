@@ -39,6 +39,15 @@ class BatchAdmission(Protocol):
     async def wait_turn(self) -> None: ...
 
 
+class SkippedForSteering(Exception):  # noqa: N818 - a signal, not an error
+    """Raised by :func:`wait_for_batch_turn` when the call must not run.
+
+    A message from the user arrived while the call waited for its turn (see
+    ``agentos.engine.steering``). The tool stops where it is; the executor
+    replaces whatever result the tool then produces with a "skipped" one.
+    """
+
+
 current_admission: ContextVar[BatchAdmission | None] = ContextVar(
     "tool_batch_admission", default=None
 )
@@ -74,7 +83,8 @@ async def wait_for_batch_turn() -> None:
     The call holds no batch admission while it waits and is admitted again
     under its declared concurrency before this returns. Returns at once when
     it is already the call's turn, for non-exclusive calls, and outside a
-    batch.
+    batch. Raises :class:`SkippedForSteering` when the user sent a message
+    meanwhile and the call is not to run; let it propagate.
     """
 
     admission = current_admission.get()

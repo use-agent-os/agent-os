@@ -37,6 +37,7 @@ async def start_turn_via_runtime(
     stream_event_sink: Callable[[Any], Awaitable[None]] | None = None,
     idempotency_key: str | None = None,
     idempotency_fingerprint: str | None = None,
+    deferred_input: Callable[[], Awaitable[tuple[str, str | None]]] | None = None,
 ) -> TaskHandle:
     """Enqueue a turn. Exceptions propagate — recovery is surface-specific.
 
@@ -53,7 +54,8 @@ async def start_turn_via_runtime(
     Forwarded only when set so legacy callers and mocks pre-dating the kwarg work.
 
     ``no_memory_capture`` is forwarded only when truthy for the same
-    legacy-compatibility reason.
+    legacy-compatibility reason, as is ``deferred_input`` (a ``steer``
+    message whose user row is written when a running turn takes it).
     """
     kwargs: dict[str, Any] = {
         "attachments": attachments,
@@ -76,4 +78,6 @@ async def start_turn_via_runtime(
         kwargs["idempotency_key"] = idempotency_key
         if idempotency_fingerprint:
             kwargs["idempotency_fingerprint"] = idempotency_fingerprint
+    if deferred_input is not None:
+        kwargs["deferred_input"] = deferred_input
     return await runtime.enqueue(envelope, message, **kwargs)

@@ -985,6 +985,31 @@ async def persisted_send_answer(
 _PERSISTED_IDEMPOTENCY_SCAN = 50
 
 
+def _steers_running_turn(
+    task_runtime: Any,
+    session_key: str,
+    *,
+    requested_mode: object,
+    has_attachments: bool,
+    no_memory_capture: bool,
+) -> bool:
+    """Whether a send goes to the session's running turn as a steering message.
+
+    Only a plain text ``steer`` message does: attachments need the turn
+    setup a new turn gets, and a message that must not reach memory capture
+    cannot join a turn that captures.
+    """
+    if requested_mode != "steer" or has_attachments or no_memory_capture:
+        return False
+    accepts = getattr(task_runtime, "accepts_steering", None)
+    if not callable(accepts):
+        return False
+    try:
+        return bool(accepts(session_key))
+    except Exception:  # noqa: BLE001 - steering is an optimisation over interrupt
+        return False
+
+
 def _recorded_idempotency(params: dict[str, Any], field: str) -> str | None:
     """The idempotency key / fingerprint to record on the turn's task.
 
@@ -1170,6 +1195,27 @@ async def _sessions_send_impl(params: dict | None, ctx: RpcContext) -> dict:
         )
     run_kind = capture_controls["run_kind"] or "session_turn"
 
+    task_runtime = getattr(ctx, "task_runtime", None)
+    requested_mode = (
+        params.get("queueMode")
+        or params.get("queue_mode")
+        or getattr(session, "queue_mode", None)
+        or "followup"
+    )
+    # Mid-turn steering: a plain message the client explicitly sends with
+    # ``queueMode: "steer"`` while the session's turn runs goes to that turn
+    # (agentos.engine.steering) instead of interrupting it, and its user row
+    # is written where the turn takes it. The session's default queue mode
+    # (also ``steer``) keeps its old meaning, interrupt, so a client that does
+    # not ask for steering sees no change.
+    steer_running_turn = _steers_running_turn(
+        task_runtime,
+        key,
+        requested_mode=params.get("queueMode") or params.get("queue_mode"),
+        has_attachments=bool(raw_attachments),
+        no_memory_capture=bool(capture_controls["no_memory_capture"]),
+    )
+
     # 1. Persist user message to transcript (include attachment metadata).
     # Hold the per-session lock used by /reset so a concurrent reset cannot
     # tear the append and leak an orphan user turn into the cleared transcript.
@@ -1225,13 +1271,23 @@ async def _sessions_send_impl(params: dict | None, ctx: RpcContext) -> dict:
             if persisted_entry is not None and isinstance(persisted_entry.content, str):
                 message_text = persisted_entry.content
 
-    if _persist_lock is None:
-        await _persist_user_message()
-    else:
-        async with _persist_lock:
+    async def _locked_persist_user_message() -> None:
+        if _persist_lock is None:
             await _persist_user_message()
+        else:
+            async with _persist_lock:
+                await _persist_user_message()
+
+    async def _deferred_user_message() -> tuple[str, str | None]:
+        await _locked_persist_user_message()
+        return message_text, getattr(persisted_entry, "message_id", None)
+
+    if not steer_running_turn:
+        await _locked_persist_user_message()
 
     async def _rollback_persisted_user_message(reason: str) -> tuple[str | None, bool]:
+        if persisted_entry is None and steer_running_turn:
+            return None, True  # a steering message is written only once taken
         message_id = getattr(persisted_entry, "message_id", None)
         if not message_id or not hasattr(ctx.session_manager, "remove_message"):
             return message_id, False
@@ -1255,15 +1311,14 @@ async def _sessions_send_impl(params: dict | None, ctx: RpcContext) -> dict:
             )
         return message_id, bool(removed)
 
-    task_runtime = getattr(ctx, "task_runtime", None)
     if task_runtime is not None:
-        requested_mode = (
-            params.get("queueMode")
-            or params.get("queue_mode")
-            or getattr(session, "queue_mode", None)
-            or "followup"
-        )
-        runtime_mode = "interrupt" if requested_mode == "steer" else requested_mode
+        if requested_mode == "steer":
+            # Nothing running takes it: ``steer`` keeps its old meaning and
+            # replaces whatever runs (a coding-harness turn, a turn still
+            # starting) with this message.
+            runtime_mode = "steer" if steer_running_turn else "interrupt"
+        else:
+            runtime_mode = requested_mode
         try:
             handle = await start_turn_via_runtime(
                 task_runtime,
@@ -1278,6 +1333,7 @@ async def _sessions_send_impl(params: dict | None, ctx: RpcContext) -> dict:
                 fresh_user_session=fresh_user_session,
                 idempotency_key=_recorded_idempotency(params, "key"),
                 idempotency_fingerprint=_recorded_idempotency(params, "fingerprint"),
+                deferred_input=_deferred_user_message if steer_running_turn else None,
             )
         except Exception as exc:
             # Ensure the uuid eviction does NOT fire on this
@@ -1354,7 +1410,12 @@ async def _sessions_send_impl(params: dict | None, ctx: RpcContext) -> dict:
                     await _store.evict(_u)
                 except Exception:  # noqa: BLE001 — eviction is best-effort
                     log.warning("uploads.evict_failed_post_turn uuid=%s", _u[:8])
-        return {"status": "accepted", "key": key, "task_id": handle.task_id}
+        return {
+            "status": "accepted",
+            "key": key,
+            "task_id": handle.task_id,
+            "queue_mode": runtime_mode,
+        }
 
     # 2. Run agent turn in background via TurnRunner
     async def _run() -> None:
@@ -1588,17 +1649,75 @@ async def _emit_to_subscribers(
                 log.warning("emit.send_failed", conn_id=conn_id, event=event_name)
 
 
+def _task_id_param(params: dict | None) -> str | None:
+    raw = (params or {}).get("taskId", (params or {}).get("task_id"))
+    return raw if isinstance(raw, str) and raw else None
+
+
+async def _withdraw_queued_task(
+    ctx: RpcContext, runtime: Any, key: str, task_id: str
+) -> dict[str, Any] | None:
+    """Withdraw ``task_id`` if it is a queued message; ``None`` when it runs.
+
+    A withdrawn follow-up's user row (written at send time) is removed too:
+    the message was taken back before any turn answered it.
+    """
+    withdraw = getattr(runtime, "withdraw", None)
+    if not callable(withdraw):
+        return {"aborted": [], "withdrawn": False, "key": key, "task_id": task_id}
+    outcome = await withdraw(task_id, session_key=key)
+    if outcome.status == "running":
+        return None
+    answer: dict[str, Any] = {
+        "aborted": [],
+        "withdrawn": outcome.status == "withdrawn",
+        "key": key,
+        "task_id": task_id,
+    }
+    if outcome.status == "delivered":
+        # A running turn already took the message; stopping that turn is a
+        # plain abort, not a withdrawal.
+        answer["delivered"] = True
+    message_id = outcome.persisted_user_message_id
+    remove_message = getattr(ctx.session_manager, "remove_message", None)
+    if answer["withdrawn"] and message_id and callable(remove_message):
+        try:
+            if await remove_message(key, message_id):
+                answer["removed_message_id"] = message_id
+        except Exception:  # noqa: BLE001 - the withdrawal itself already happened
+            log.warning(
+                "sessions.abort.withdrawn_row_remove_failed",
+                session_key=key,
+                task_id=task_id,
+                exc_info=True,
+            )
+    return answer
+
+
 @_d.method("sessions.abort", CONTROL_AND_CHANNEL)
 async def _handle_sessions_abort(params: dict | None, ctx: RpcContext) -> dict:
+    """Stop the session's runs; with ``taskId``, only that one.
+
+    ``taskId`` naming a queued message withdraws it (``withdrawn: true``); a
+    running one is stopped like a session abort limited to that run.
+    """
     key = _require_key(params)
+    task_id = _task_id_param(params)
     # Captured before the first await: what this abort stops is what was
     # running when it was asked, never a turn queued while it waits.
     runtime = getattr(ctx, "task_runtime", None)
     active_ids = getattr(runtime, "active_task_ids", None)
     captured_runs = list(active_ids(key)) if callable(active_ids) else None
+    if task_id is not None and captured_runs is not None:
+        captured_runs = [run_id for run_id in captured_runs if run_id == task_id]
 
     if ctx.session_manager is None:
         return {"aborted": False, "key": key}
+
+    if task_id is not None and runtime is not None:
+        withdrawn = await _withdraw_queued_task(ctx, runtime, key, task_id)
+        if withdrawn is not None:
+            return withdrawn
 
     storage = get_session_storage(ctx.session_manager)
     if storage:

@@ -31,6 +31,7 @@ from typing import Any, cast
 import structlog
 
 from agentos.engine.outcome import completed_outcome, outcome_from_error
+from agentos.engine.steering import SteeringMessage, bind_steering
 from agentos.gateway.routing import RouteEnvelope, SourceKind
 from agentos.gateway.session_lifecycle import TaskLifecycleEvent, TaskLifecycleListener
 from agentos.gateway.terminal_events import TerminalPublications, runtime_terminal_frame
@@ -99,6 +100,18 @@ TERMINAL_STATUSES = frozenset(
 _CHILD_RUN_KINDS = frozenset({"subagent", "acp"})
 
 TaskStreamEventSink = Callable[[Any], Awaitable[None]]
+#: Writes a deferred user message to the transcript; returns the stored text
+#: and the row's message id (see ``TaskRuntime.enqueue(deferred_input=...)``).
+DeferredUserInput = Callable[[], Awaitable[tuple[str, str | None]]]
+
+#: Queue mode of a message meant for the running turn (mid-turn steering).
+STEER_QUEUE_MODE = "steer"
+#: ``terminal_reason`` of a queued task whose message a running turn took.
+STEERED_TERMINAL_REASON = "steered"
+#: ``terminal_reason`` of a queued task its sender withdrew.
+WITHDRAWN_TERMINAL_REASON = "withdrawn"
+#: Longest message text a ``pending_inputs`` entry carries.
+PENDING_INPUT_TEXT_MAX_CHARS = 4000
 
 
 @dataclass(frozen=True)
@@ -222,6 +235,56 @@ class _RuntimeTask:
     #: Set once the task reached ``running``: only a run that started has a
     #: stream, so only it owes a terminal stream frame.
     started: bool = False
+    #: Writes the user message when the task is taken or starts, instead of
+    #: at send time (a ``steer`` message lands where the model meets it).
+    deferred_input: DeferredUserInput | None = None
+    #: The running task that took this queued message (mid-turn steering).
+    steered_into: str | None = None
+    queued_at_ms: int = field(default_factory=lambda: _epoch_time_ms())
+    #: Set when a running turn's agent picked up the steering source.
+    steering_attached: bool = False
+
+
+class _TaskSteeringSource:
+    """A running task's view of its session's steering queue.
+
+    Implements ``agentos.engine.steering.SteeringSource``. Bound for the whole
+    turn handler; the session only accepts ``steer`` sends for the running
+    task once the turn's agent picked it up (:meth:`attach`), so a turn that
+    never reaches a checkpoint (a coding-harness turn) keeps the old
+    ``steer`` = interrupt behaviour.
+    """
+
+    def __init__(self, runtime: TaskRuntime, task: _RuntimeTask) -> None:
+        self._runtime = runtime
+        self._task = task
+
+    @property
+    def session_key(self) -> str:
+        return self._task.envelope.session_key
+
+    def attach(self) -> None:
+        self._task.steering_attached = True
+
+    def has_pending(self) -> bool:
+        return self._runtime._steering_candidate(self._task) is not None
+
+    async def take(self) -> SteeringMessage | None:
+        return await self._runtime._take_steering(self._task)
+
+
+@dataclass(frozen=True)
+class WithdrawOutcome:
+    """What :meth:`TaskRuntime.withdraw` did with a task id.
+
+    ``status`` is ``withdrawn`` (it was queued and is now cancelled),
+    ``running`` (it already started; stop it with an abort), ``delivered``
+    (a running turn already took the message) or ``not_found``.
+    """
+
+    status: str
+    task_id: str
+    persisted_user_message_id: str | None = None
 
 
 TaskHandler = Callable[[TaskRun], Awaitable[Any]]
@@ -464,7 +527,15 @@ class TaskRuntime:
         overflow_policy: PendingOverflowPolicy | str | None = None,
         idempotency_key: str | None = None,
         idempotency_fingerprint: str | None = None,
+        deferred_input: DeferredUserInput | None = None,
     ) -> TaskHandle:
+        """Queue a turn for ``envelope.session_key``.
+
+        ``deferred_input`` writes the user message to the transcript later
+        instead of before the call: when a running turn takes it (mode
+        ``steer``, see ``agentos.engine.steering``) or, failing that, when the
+        task starts its own turn. ``message`` is then the text to send.
+        """
         if not self._admitting:
             raise TaskRuntimeNotAdmittingError()
         envelope = replace(
@@ -517,6 +588,8 @@ class TaskRuntime:
                 "fresh_user_session": fresh_user_session,
             },
         )
+        if deferred_input is not None and isinstance(record.details, dict):
+            record.details["deferred_user_message"] = True
         if idempotency_key and isinstance(record.details, dict):
             # On the task record, not the envelope: the cached envelope is
             # reused by later runtime sends, which must not inherit the key.
@@ -538,6 +611,7 @@ class TaskRuntime:
             persisted_user_message_id=persisted_user_message_id,
             fresh_user_session=fresh_user_session,
             stream_event_sink=stream_event_sink,
+            deferred_input=deferred_input,
         )
         async with self._state_lock:
             self._tasks[record.task_id] = runtime_task
@@ -713,6 +787,160 @@ class TaskRuntime:
             if task.envelope.session_key not in keys:
                 keys.append(task.envelope.session_key)
         return keys
+
+    # -- server-side pending inputs and mid-turn steering --------------------
+
+    def accepts_steering(self, session_key: str) -> bool:
+        """True when a ``steer`` send would be taken by the session's running turn."""
+        running = self._running_by_session.get(canonicalize_session_key(session_key))
+        return (
+            running is not None
+            and running.steering_attached
+            and running.status == AgentTaskStatus.RUNNING
+            and not running.cancel_requested
+            and not running.terminal_emitted
+        )
+
+    def pending_inputs(self, session_key: str) -> builtins.list[dict[str, Any]]:
+        """The session's queued messages, oldest first (``chat.history``).
+
+        Each entry: ``task_id``, ``queue_mode``, ``text`` (capped,
+        ``text_truncated`` when cut), ``queued_at`` (epoch ms), ``attachments``
+        (count), ``steer`` (the running turn will take it at its next
+        checkpoint) and ``message_id`` when the user row is in the transcript
+        already (a follow-up), so a client does not show it twice.
+        """
+        entries: builtins.list[dict[str, Any]] = []
+        for task in self._pending_by_session.get(canonicalize_session_key(session_key), ()):
+            if (
+                task.status != AgentTaskStatus.QUEUED
+                or task.cancel_requested
+                or task.terminal_emitted
+                or task.steered_into is not None
+            ):
+                continue
+            text = task.message
+            entry: dict[str, Any] = {
+                "task_id": task.task_id,
+                "queue_mode": task.queue_mode,
+                "text": text[:PENDING_INPUT_TEXT_MAX_CHARS],
+                "queued_at": task.queued_at_ms,
+                "attachments": len(task.attachments),
+                "steer": task.queue_mode == STEER_QUEUE_MODE and task.deferred_input is not None,
+            }
+            if len(text) > PENDING_INPUT_TEXT_MAX_CHARS:
+                entry["text_truncated"] = True
+            if task.persisted_user_message_id:
+                entry["message_id"] = task.persisted_user_message_id
+            entries.append(entry)
+        return entries
+
+    async def withdraw(self, task_id: str, *, session_key: str | None = None) -> WithdrawOutcome:
+        """Cancel ``task_id`` if it is still a queued message nobody took."""
+        if session_key is not None:
+            session_key = canonicalize_session_key(session_key)
+        async with self._state_lock:
+            task = self._tasks.get(task_id)
+            if task is None or (
+                session_key is not None and task.envelope.session_key != session_key
+            ):
+                return WithdrawOutcome(status="not_found", task_id=task_id)
+            if task.steered_into is not None:
+                return WithdrawOutcome(status="delivered", task_id=task_id)
+            if task.status == AgentTaskStatus.RUNNING:
+                return WithdrawOutcome(status="running", task_id=task_id)
+            if task.status in TERMINAL_STATUSES or task.terminal_emitted:
+                return WithdrawOutcome(status="not_found", task_id=task_id)
+            task.cancel_requested = True
+            task.cancel_source = "withdraw"
+            task.cancel_reason = WITHDRAWN_TERMINAL_REASON
+            asyncio_task = task.asyncio_task
+        if asyncio_task is not None and not asyncio_task.done():
+            asyncio_task.cancel()
+        await self._mark_terminal(
+            task,
+            AgentTaskStatus.CANCELLED,
+            terminal_reason=WITHDRAWN_TERMINAL_REASON,
+        )
+        return WithdrawOutcome(
+            status="withdrawn",
+            task_id=task_id,
+            persisted_user_message_id=task.persisted_user_message_id,
+        )
+
+    def _steering_candidate(self, running: _RuntimeTask) -> _RuntimeTask | None:
+        """The oldest queued ``steer`` message *running* may take, if any."""
+        if (
+            running.status != AgentTaskStatus.RUNNING
+            or running.cancel_requested
+            or running.terminal_emitted
+        ):
+            return None
+        for task in self._pending_by_session.get(running.envelope.session_key, ()):
+            if (
+                task.queue_mode == STEER_QUEUE_MODE
+                and task.deferred_input is not None
+                and task.steered_into is None
+                and task.status == AgentTaskStatus.QUEUED
+                and not task.cancel_requested
+                and not task.terminal_emitted
+            ):
+                return task
+        return None
+
+    async def _take_steering(self, running: _RuntimeTask) -> SteeringMessage | None:
+        """Hand the oldest queued ``steer`` message to the running turn.
+
+        The message is in flight from the claim until its user row is
+        written: it can no longer be withdrawn, and a failed write puts it
+        back where it was (it is still at its place in the queue). Once
+        written, its task ends ``succeeded`` / ``steered`` without a turn of
+        its own.
+        """
+        candidate = self._steering_candidate(running)
+        if candidate is None or candidate.deferred_input is None:
+            return None
+        candidate.steered_into = running.task_id
+        try:
+            text, message_id = await candidate.deferred_input()
+        except asyncio.CancelledError:
+            candidate.steered_into = None
+            raise
+        except Exception:
+            candidate.steered_into = None
+            log.warning(
+                "task_runtime.steering_write_failed",
+                task_id=candidate.task_id,
+                running_task_id=running.task_id,
+                exc_info=True,
+            )
+            return None
+        candidate.message = text
+        candidate.persisted_user_message_id = message_id
+        await self._mark_terminal(
+            candidate,
+            AgentTaskStatus.SUCCEEDED,
+            terminal_reason=STEERED_TERMINAL_REASON,
+        )
+        asyncio_task = candidate.asyncio_task
+        if asyncio_task is not None and not asyncio_task.done():
+            asyncio_task.cancel()
+        log.info(
+            "task_runtime.steered",
+            task_id=candidate.task_id,
+            running_task_id=running.task_id,
+            session_key=running.envelope.session_key,
+        )
+        return SteeringMessage(text=text, message_id=message_id, task_id=candidate.task_id)
+
+    async def _write_deferred_input(self, task: _RuntimeTask) -> None:
+        """Write a deferred message that no running turn took, before its own turn."""
+        deferred = task.deferred_input
+        if deferred is None or task.persisted_user_message_id is not None:
+            return
+        text, message_id = await deferred()
+        task.message = text
+        task.persisted_user_message_id = message_id
 
     async def shutdown(
         self,
@@ -993,6 +1221,8 @@ class TaskRuntime:
                     terminal_reason = (
                         "dropped_by_overflow" if task.overflow_dropped else "cancelled_before_start"
                     )
+                    if task.cancel_reason == WITHDRAWN_TERMINAL_REASON:
+                        terminal_reason = WITHDRAWN_TERMINAL_REASON
                     _emit_metric(
                         "turn_cancellations_total",
                         value=1,
@@ -1020,6 +1250,7 @@ class TaskRuntime:
                     await self._acquire_fair_slot(task)
                     async with write_lock:
                         pass
+                    await self._write_deferred_input(task)
                     heartbeat_task = self._start_running_heartbeat(task)
                     run = TaskRun(
                         task_id=task.task_id,
@@ -1039,6 +1270,7 @@ class TaskRuntime:
                     await self._run_turn_handler_with_write_lock_bypass(
                         run,
                         write_lock=write_lock,
+                        steering=_TaskSteeringSource(self, task),
                     )
                     if heartbeat_task is not None:
                         await self._stop_running_heartbeat(heartbeat_task)
@@ -1056,8 +1288,13 @@ class TaskRuntime:
                     if task.acquired_slot:
                         await self._release_slot(task)
         except asyncio.CancelledError:
+            if task.steered_into is not None and task.terminal_emitted:
+                # A running turn took this message; its task already ended.
+                return
             reason = "overflow_drop" if task.overflow_dropped else "interrupt"
             terminal_reason = "dropped_by_overflow" if task.overflow_dropped else "cancelled"
+            if task.cancel_reason == WITHDRAWN_TERMINAL_REASON:
+                terminal_reason = WITHDRAWN_TERMINAL_REASON
             _emit_metric(
                 "turn_cancellations_total",
                 value=1,
@@ -1120,8 +1357,13 @@ class TaskRuntime:
         run: TaskRun,
         *,
         write_lock: asyncio.Lock,
+        steering: _TaskSteeringSource | None = None,
     ) -> None:
-        """Run the handler while TurnRunner transcript writes use short locks."""
+        """Run the handler while TurnRunner transcript writes use short locks.
+
+        *steering* is bound for the handler (``agentos.engine.steering``) so
+        the turn's agent can take messages sent to it while it runs.
+        """
         from agentos.engine.runtime import (
             _SESSION_LOCK_BYPASS_ONLY,
             _SESSION_LOCK_OWNER,
@@ -1138,28 +1380,32 @@ class TaskRuntime:
         new_bypass.add(id(write_lock))
         bypass_token = _SESSION_LOCK_BYPASS_ONLY.set(new_bypass)
         try:
-            if self._turn_hard_deadline_s is not None:
-                deadline_start = time.monotonic()
-                try:
-                    await asyncio.wait_for(
-                        self._turn_handler(run),
-                        timeout=self._turn_hard_deadline_s,
-                    )
-                except TimeoutError as exc:
-                    # Only reclassify when the hard-deadline budget was actually
-                    # exhausted. A TimeoutError from inside the handler should
-                    # keep its original cause.
-                    elapsed = time.monotonic() - deadline_start
-                    if elapsed + 0.01 >= self._turn_hard_deadline_s:
-                        raise _TurnHardDeadlineExceeded(
-                            deadline_s=self._turn_hard_deadline_s,
-                        ) from exc
-                    raise
-            else:
-                await self._turn_handler(run)
+            with bind_steering(steering):
+                await self._call_turn_handler(run)
         finally:
             _SESSION_LOCK_BYPASS_ONLY.reset(bypass_token)
             _SESSION_LOCK_OWNER.reset(owner_token)
+
+    async def _call_turn_handler(self, run: TaskRun) -> None:
+        if self._turn_hard_deadline_s is not None:
+            deadline_start = time.monotonic()
+            try:
+                await asyncio.wait_for(
+                    self._turn_handler(run),
+                    timeout=self._turn_hard_deadline_s,
+                )
+            except TimeoutError as exc:
+                # Only reclassify when the hard-deadline budget was actually
+                # exhausted. A TimeoutError from inside the handler should
+                # keep its original cause.
+                elapsed = time.monotonic() - deadline_start
+                if elapsed + 0.01 >= self._turn_hard_deadline_s:
+                    raise _TurnHardDeadlineExceeded(
+                        deadline_s=self._turn_hard_deadline_s,
+                    ) from exc
+                raise
+        else:
+            await self._turn_handler(run)
 
     def _ensure_slot_cond(self) -> asyncio.Condition:
         if self._slot_cond is None:

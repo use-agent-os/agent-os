@@ -40,6 +40,14 @@ to that turn and re-queue at the back, as before. A call is not timed while
 it queues to be admitted again, and one admitted again after the batch
 deadline times out without running.
 
+A message the user sends while the batch runs (``steering_pending``) cuts the
+ordered part of the batch short: an ``exclusive`` call, or a shared call that
+would open a new group behind one, that has not started once another call has
+gets a synthetic "skipped" result instead of running
+(``agentos.engine.steering``). A call let in early for its approval passes
+that checkpoint in ``wait_for_batch_turn``. Shared calls already running
+together finish.
+
 The pairing guarantee holds whatever order calls finish in, and on timeout,
 cancellation or exception: ``outcomes`` has exactly one final result per
 tool_use, in the original call order, ready to be appended to the transcript.
@@ -58,6 +66,7 @@ from typing import Any, cast
 
 import structlog
 
+from agentos.engine.steering import BatchSteeringCheckpoint, skipped_for_steering
 from agentos.engine.types import (
     AgentEvent,
     ArtifactEvent,
@@ -70,7 +79,7 @@ from agentos.engine.types import (
 from agentos.execution_status import ExecutionStatusValue, runtime_execution_status
 from agentos.provider import ContentBlockToolResult
 from agentos.router_control import router_control_replay_event_from_payload
-from agentos.tools.batch_slot import current_admission
+from agentos.tools.batch_slot import SkippedForSteering, current_admission
 from agentos.tools.types import ToolConcurrency, ToolSpec
 
 _log = structlog.get_logger(__name__)
@@ -303,6 +312,11 @@ class _Admission:
     # Wraps the awaitable a call waits on outside its slot (an operator
     # approval), so the turn's timing can count that wait.
     outside_wait: Callable[[Awaitable[Any]], Awaitable[Any]] | None = None
+    # The steering checkpoint of a call started ahead of its turn
+    # (``early_approval``), passed once its turn comes (``wait_turn``); False
+    # means a user message arrived and the call must not run.
+    turn_checkpoint: Callable[[], bool] | None = None
+    skipped_for_steering: bool = False
 
     async def acquire(self) -> None:
         await self.slot.future
@@ -339,11 +353,22 @@ class _Admission:
         )
 
     async def wait_turn(self) -> None:
-        if self.yielded or self.in_turn():
+        if self.yielded:
             return
-        self.yielded = True
-        self.release()
-        await self._readmit()
+        if not self.in_turn():
+            self.yielded = True
+            self.release()
+            await self._readmit()
+        self._pass_turn_checkpoint()
+
+    def _pass_turn_checkpoint(self) -> None:
+        """Run the deferred steering checkpoint once the call is in its turn."""
+        if self.turn_checkpoint is None or not self.in_turn():
+            return
+        checkpoint, self.turn_checkpoint = self.turn_checkpoint, None
+        if not checkpoint():
+            self.skipped_for_steering = True
+            raise SkippedForSteering
 
     async def wait_outside[T](self, awaitable: Awaitable[T]) -> T:
         self.yielded = True
@@ -360,6 +385,7 @@ class _Admission:
             await self._readmit()
             raise
         await self._readmit()
+        self._pass_turn_checkpoint()
         return result
 
     async def _readmit(self) -> None:
@@ -490,6 +516,10 @@ class ToolBatchExecutor:
     call_log: Callable[..., None] = lambda _kind, **_payload: None
     iteration: int = 0
     clock: Callable[[], float] | None = None
+    # True while a user message waits to be steered into the turn: calls of
+    # an ordered sequence not started yet are then skipped
+    # (``agentos.engine.steering``).
+    steering_pending: Callable[[], bool] | None = None
 
     _outcomes: dict[int, ToolBatchOutcome] = field(default_factory=dict, init=False)
     _calls: list[ToolCall] = field(default_factory=list, init=False)
@@ -543,11 +573,30 @@ class ToolBatchExecutor:
             [index for index, policy in enumerate(policies) if policy.mode == "exclusive"]
         )
         gate = _OrderedGate(turns)
+        steering = BatchSteeringCheckpoint(
+            self.steering_pending,
+            [policy.mode == "exclusive" for policy in policies],
+        )
         semaphore = asyncio.Semaphore(max(1, int(self.max_concurrency)))
         key_locks: dict[Hashable, asyncio.Lock] = {}
         tasks: dict[asyncio.Task[ToolResult], _Job] = {}
 
-        async def _run_one(call: ToolCall, admission: _Admission) -> ToolResult:
+        async def _run_one(
+            call: ToolCall, admission: _Admission, index: int | None = None
+        ) -> ToolResult:
+            if index is not None and call.tool_use_id not in self.preflight_results:
+                # First run of a call: the steering checkpoint. A call let in
+                # ahead of its turn passes it when its turn comes instead.
+                if not admission.in_turn():
+                    admission.turn_checkpoint = functools.partial(steering.enter, index)
+                elif not steering.enter(index):
+                    self.call_log(
+                        "tool_skipped_for_steering",
+                        iteration=self.iteration,
+                        tool_use_id=call.tool_use_id,
+                        name=call.tool_name,
+                    )
+                    return skipped_for_steering(call)
             started = time.monotonic()
             self.call_log(
                 "tool_request",
@@ -576,6 +625,10 @@ class ToolBatchExecutor:
                         call,
                         self.iteration_timeout if admission.deadline_passed else tool_timeout,
                     )
+                except SkippedForSteering:
+                    result = skipped_for_steering(call)
+                if admission.skipped_for_steering:
+                    result = skipped_for_steering(call)
             self.call_log(
                 "tool_response",
                 iteration=self.iteration,
@@ -592,6 +645,11 @@ class ToolBatchExecutor:
             call: ToolCall, policy: ToolConcurrencyPolicy, order: int | None
         ) -> _Admission:
             exclusive = policy.mode == "exclusive"
+            # A first run queues at its call index whatever its mode, so a
+            # shared call is admitted before a later exclusive one (the gate
+            # is ordered by this rank). Only an exclusive call is held to a
+            # turn; a shared one re-queues at the back after stepping out.
+            queue_order = order
             if not exclusive:
                 order = None
             spec = self.spec_for(call.tool_name)
@@ -601,7 +659,7 @@ class ToolBatchExecutor:
                 # An exclusive first run is admitted in its turn, unless its
                 # tool asks for approval first and waits for the turn itself.
                 slot=gate.reserve(
-                    exclusive=exclusive, order=order, needs_turn=exclusive and not early
+                    exclusive=exclusive, order=queue_order, needs_turn=exclusive and not early
                 ),
                 exclusive=exclusive,
                 order=order,
@@ -616,18 +674,20 @@ class ToolBatchExecutor:
                 outside_wait=self.outside_wait,
             )
 
-        async def _run_admitted(call: ToolCall, admission: _Admission) -> ToolResult:
+        async def _run_admitted(
+            call: ToolCall, admission: _Admission, index: int | None = None
+        ) -> ToolResult:
             token = current_admission.set(admission)
             try:
                 await admission.acquire()
-                return await _run_one(call, admission)
+                return await _run_one(call, admission, index)
             finally:
                 admission.finish()
                 current_admission.reset(token)
 
         def _schedule(job: _Job) -> None:
             admission = _admission(job.call, policies[job.index], job.index)
-            task = asyncio.create_task(_run_admitted(job.call, admission))
+            task = asyncio.create_task(_run_admitted(job.call, admission, job.index))
             # A task cancelled before it first runs never reaches its
             # ``finally``; give its slot back so the gate cannot stall.
             task.add_done_callback(functools.partial(_release_admission, admission))

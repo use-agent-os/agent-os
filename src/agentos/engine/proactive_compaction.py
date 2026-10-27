@@ -495,6 +495,7 @@ class ProactiveCompactionScheduler:
                 mode="reset",
                 input_entry_id=record.input_entry_id,
                 compaction_id=compaction_id,
+                steered_entry_ids=record.steered_entry_ids,
             )
         )
         kept_entries: list[dict[str, Any]] = []

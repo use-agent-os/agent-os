@@ -1102,3 +1102,27 @@ async def test_inline_approval_wait_goes_through_outside_wait_hook() -> None:
 
     assert seen == ["enter", "exit", "body"]
     assert [o.result.content for o in executor.outcomes] == ["ran"]
+
+
+async def test_exclusive_call_does_not_overtake_shared_calls_emitted_before_it() -> None:
+    """[write, read, read, write] runs in the model's order.
+
+    Shared calls used to queue behind every exclusive call (no rank), so the
+    second write ran before the two reads the model emitted ahead of it.
+    """
+
+    specs = {"write": _spec("write"), "read": _spec("read", concurrency="parallel")}
+    started: list[str] = []
+
+    async def execute(call: ToolCall) -> ToolResult:
+        started.append(call.tool_use_id)
+        await asyncio.sleep(0)
+        return _ok(call)
+
+    executor = _executor(execute, specs)
+    calls = [_call(0, "write"), _call(1, "read"), _call(2, "read"), _call(3, "write")]
+    async for _event in executor.run(calls):
+        pass
+
+    assert started == ["t0", "t1", "t2", "t3"]
+    assert [o.result.tool_use_id for o in executor.outcomes] == ["t0", "t1", "t2", "t3"]
