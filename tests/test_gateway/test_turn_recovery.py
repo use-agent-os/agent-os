@@ -60,6 +60,7 @@ class _Runner:
                 "session_key": session_key,
                 "allowed_tools": None if ctx.allowed_tools is None else set(ctx.allowed_tools),
                 "provenance": dict(kwargs.get("input_provenance") or {}),
+                "persisted_user_message_id": kwargs.get("persisted_user_message_id"),
             }
         )
         if self.release is not None:
@@ -67,12 +68,14 @@ class _Runner:
         if self.fail > 0:
             self.fail -= 1
             raise RuntimeError("provider unavailable")
-        await self.manager.append_message(
-            session_key,
-            "user",
-            message,
-            provenance=kwargs.get("input_provenance"),
-        )
+        if not kwargs.get("persisted_user_message_id"):
+            # A recovery turn's input row is written by the recovery itself.
+            await self.manager.append_message(
+                session_key,
+                "user",
+                message,
+                provenance=kwargs.get("input_provenance"),
+            )
         await self.manager.append_message(session_key, "assistant", "Picked it back up.")
         if False:  # pragma: no cover - makes this an async generator
             yield None
@@ -480,6 +483,35 @@ async def test_three_failed_attempts_leave_a_tombstone(tmp_path: Path) -> None:
         await again.scan()
         await again.wait_idle(timeout=5)
         assert len(environment.runner.turns) == 3
+    finally:
+        await environment.close()
+
+
+async def test_retried_attempts_reuse_one_continuation_row(tmp_path: Path) -> None:
+    environment = _Env(tmp_path)
+    await environment.open(fail=2)
+    try:
+        record = await _interrupted_session(environment, tail="round_complete")
+        recovery = environment.recovery()
+        await recovery.scan()
+        await recovery.wait_idle(timeout=10)
+
+        assert environment.runner is not None and len(environment.runner.turns) == 3
+        state = await _state(environment, record.task_id)
+        assert (state["state"], state["attempts"]) == ("resumed", 3)
+        assert environment.manager is not None
+        rows = await environment.manager.get_transcript(KEY)
+        continuations = [
+            row
+            for row in rows
+            if row.role == "user" and str(row.content).startswith("[Restart recovery]")
+        ]
+        assert len(continuations) == 1
+        # Every attempt ran with that one row as its input.
+        ids = {turn["persisted_user_message_id"] for turn in environment.runner.turns}
+        assert ids == {continuations[0].message_id}
+        assert state["continuation_id"] == continuations[0].message_id
+        assert rows[-1].content == "Picked it back up."
     finally:
         await environment.close()
 

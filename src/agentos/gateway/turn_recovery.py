@@ -361,6 +361,8 @@ class _Recovery:
     restricted: bool = False
     unanswered_input: bool = False
     resume_task_ids: list[str] = field(default_factory=list)
+    # The continuation row the last attempt wrote; a retry reuses it.
+    continuation_id: str | None = None
     current_task_id: str | None = None
     cancelled: bool = False
     wake: asyncio.Event = field(default_factory=asyncio.Event)
@@ -375,6 +377,7 @@ class _Recovery:
             "attempts": self.attempts,
             "restricted": self.restricted,
             "resume_task_ids": list(self.resume_task_ids),
+            "continuation_id": self.continuation_id,
             "updated_at": _now_ms(),
         }
 
@@ -557,6 +560,9 @@ class TurnRecovery:
             attempts=int(prior.get("attempts") or 0),
             restricted=bool(prior.get("restricted")),
             resume_task_ids=[str(t) for t in prior.get("resume_task_ids") or []],
+            continuation_id=(
+                prior["continuation_id"] if isinstance(prior.get("continuation_id"), str) else None
+            ),
             origin=origin,
         )
         self._recoveries[origin.task_id] = recovery
@@ -851,7 +857,10 @@ class TurnRecovery:
                 restricted=recovery.restricted,
                 unanswered_input=recovery.unanswered_input,
             )
-            continuation_id = await self._write_continuation(recovery, text)
+            continuation_id = await self._reusable_continuation(recovery, text)
+            if continuation_id is None:
+                continuation_id = await self._write_continuation(recovery, text)
+            recovery.continuation_id = continuation_id
             try:
                 handle = await self._task_runtime.enqueue(
                     recovery.envelope,
@@ -863,6 +872,7 @@ class TurnRecovery:
                     persisted_user_message_id=continuation_id,
                 )
             except TaskRuntimeNotAdmittingError:
+                recovery.continuation_id = None
                 if continuation_id is not None:
                     with contextlib.suppress(Exception):
                         await self._session_manager.remove_message(
@@ -901,6 +911,27 @@ class TurnRecovery:
                 terminal_reason=getattr(record, "terminal_reason", None),
             )
         await self._finish(recovery, "tombstoned", "attempts_exhausted", hint=True)
+
+    async def _reusable_continuation(self, recovery: _Recovery, text: str) -> str | None:
+        """The previous attempt's continuation row, if a retry can take it over.
+
+        It can when it is still in the transcript with the same text and no
+        user or assistant row came after it (a failed attempt leaves at most
+        an error row), so retries do not stack copies of the instruction.
+        """
+        previous = recovery.continuation_id
+        if not previous:
+            return None
+        rows = await self._recent_rows(recovery.session_key)
+        index = next(
+            (i for i, row in enumerate(rows) if getattr(row, "message_id", None) == previous),
+            None,
+        )
+        if index is None or getattr(rows[index], "content", None) != text:
+            return None
+        if any(getattr(row, "role", None) in ("user", "assistant") for row in rows[index + 1 :]):
+            return None
+        return previous
 
     async def _write_continuation(self, recovery: _Recovery, text: str) -> str | None:
         """Persist the resume turn's input row, as a user send is persisted.
