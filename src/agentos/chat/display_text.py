@@ -5,7 +5,7 @@ A behavioural port of the web console's assistant-text sanitiser
 ``stripGeneratedArtifactMarkers``, ``stripProtocolTextLeak`` and
 ``stripAssistantText``) so the web console, the desktop app and channel
 deliveries hide the same transport details: reply-threading directives,
-generated-artifact omission markers and tool-protocol text a model leaked into
+generated-artifact omission markers and tool-scaffold text a model leaked into
 its prose. Keep the two in lockstep; ``tests/test_chat/test_display_text.py``
 carries the web console's cases.
 
@@ -13,6 +13,12 @@ The whole-text functions reproduce the JavaScript regex semantics, not
 Python's: ``\\s``, ``trim()`` and ``trimEnd()`` use the ECMAScript whitespace
 set, and ``\\b`` / the ``i`` flag are ASCII-only (a non-``u`` JS regex), so
 every pattern is compiled with ``re.ASCII`` and an explicit whitespace class.
+
+Tool-call markup a model wrote as text (``<invoke>``, ``<tool_call>``, ...)
+is deliberately not hidden here. The engine cuts the calls it ran from the
+reply (``agentos.engine.tool_text_compat``) and leaves every other call
+visible, so whatever markup reaches this layer never ran and must stay on
+screen. Only scaffolding that is not a call format is trimmed.
 
 :class:`AssistantTextStreamSanitizer` applies the same strip to a stream of
 ``text_delta`` chunks, holding back only the suffix a later chunk could still
@@ -64,31 +70,19 @@ _GENERATED_ARTIFACT_MARKER_RE = _js(r"\[generated artifact omitted:\s*[^\]\n]+?\
 # stripGeneratedArtifactMarkers only runs when this exact (case-sensitive)
 # text is present, even though the regex itself is case-insensitive.
 _GENERATED_ARTIFACT_GUARD = "[generated artifact omitted:"
-_PROTOCOL_TEXT_MARKER = (
-    r"<\s*(?:minimax:tool_call|tool_calls?|tvoe_calls|invoke\b|parameter\b|effect_calls\b"
-    r"|details\b|angle\s+brackets\b)"
-)
+_PROTOCOL_TEXT_MARKER = r"<\s*(?:effect_calls\b|details\b|angle\s+brackets\b)"
 _PROTOCOL_TEXT_MARKER_RE = _js(_PROTOCOL_TEXT_MARKER, _FLAGS_I)
 
 # looksLikeProtocolTextSuffix's patterns, keyed so the stream can remember
 # which ones it has already seen in a growing hold.
 _PROTOCOL_TEXT_PATTERNS = {
-    "namespaced_tool_call": r"<\s*minimax:tool_call\s*>",
-    "standalone": r"<\s*(?:parameter|effect_calls|tool_calls?|tvoe_calls|angle\s+brackets)\s*>",
+    "standalone": r"<\s*(?:effect_calls|angle\s+brackets)\s*>",
     "details": r"<\s*details\s*>\s*<\s*summary\s*>\s*View areas around line\b",
-    "parameter": r"<\s*parameter\s+name\s*=\s*[\"'](?:path|content|command|code|patch)[\"']",
-    "invoke": r"<\s*invoke\s+name\s*=\s*[\"'][A-Za-z_][A-Za-z0-9_.:-]*[\"']",
-    "close": r"<\/\s*invoke\s*>|<\/\s*(?:tool_calls?|tvoe_calls)\s*>",
-    "html": r"<!doctype\s+html\b|<html\b|<\/html\s*>",
 }
 # A suffix is a leak when every pattern of any one rule is present.
 _PROTOCOL_LEAK_RULES: tuple[tuple[str, ...], ...] = (
-    ("namespaced_tool_call",),
     ("standalone",),
     ("details",),
-    ("parameter",),
-    ("invoke", "close"),
-    ("html", "invoke"),
 )
 _PROTOCOL_CHECKS = {key: _js(source, _FLAGS_I) for key, source in _PROTOCOL_TEXT_PATTERNS.items()}
 _STREAM_PROTOCOL_CHECKS = {
@@ -113,11 +107,6 @@ _GENERATED_ARTIFACT_PREFIX_RE = re.compile(
     _FLAGS_I,
 )
 _PROTOCOL_MARKER_KEYWORDS = (
-    "minimax:tool_call",
-    "tool_calls",
-    "tvoe_calls",
-    "invoke",
-    "parameter",
     "effect_calls",
     "details",
     "angle",
@@ -257,7 +246,7 @@ def _tag_hold_start(text: str, floor: int) -> int:
 
 
 def _protocol_marker_hold_start(text: str) -> int:
-    """Where a trailing, not yet complete protocol marker (``<inv``) begins."""
+    """Where a trailing, not yet complete scaffold marker (``<det``) begins."""
     candidate = text.find("<", max(0, len(text) - _PROTOCOL_MARKER_HOLD_LIMIT))
     while candidate != -1:
         if _PROTOCOL_MARKER_PREFIX_RE.fullmatch(text, candidate):
@@ -289,7 +278,7 @@ class AssistantTextStreamSanitizer:
       512), and the whitespace run before it;
     * the trailing whitespace run, since a marker's pattern also eats the
       whitespace in front of it;
-    * once a protocol marker such as ``<invoke`` appears, everything from it
+    * once a scaffold marker such as ``<details`` appears, everything from it
       on: dropped for good when it turns out to be a leak, released at flush
       (or past 64 KiB) when it does not.
 

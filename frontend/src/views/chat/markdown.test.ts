@@ -110,4 +110,25 @@ describe('chat markdown renderer', () => {
 
     expect(math).toEqual(['$x^2$', '$$y_1 + y_2$$'])
   })
+
+  it('keeps a tool call written as text readable instead of dropping its tags', () => {
+    // Markup that reaches the console never ran; the user must see it as written.
+    const inline = fragment(
+      'Checking.\n<tool_call>{"name":"read_file","arguments":{"path":"a"}}</tool_call>',
+    )
+    expect(inline.textContent).toContain('<tool_call>{"name":"read_file"')
+    expect(inline.textContent).toContain('</tool_call>')
+
+    const block = fragment('<invoke name="exec">\n<parameter name="cmd">ls</parameter>\n</invoke>')
+    expect(block.textContent).toContain('<invoke name="exec">')
+    expect(block.textContent).toContain('<parameter name="cmd">ls</parameter>')
+    expect(block.querySelector('invoke, parameter')).toBeNull()
+  })
+
+  it('leaves ordinary html and code examples of tool calls alone', () => {
+    const root = fragment('<b>bold</b> and `<invoke name="x">`')
+
+    expect(root.querySelector('b')?.textContent).toBe('bold')
+    expect(root.querySelector('code.inline-code')?.textContent).toBe('<invoke name="x">')
+  })
 })

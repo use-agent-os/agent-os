@@ -297,46 +297,49 @@ def test_text_delta_handler_holds_split_malformed_tool_protocol_html() -> None:
     assert "<tvoe" not in "".join(state.final_text_parts)
 
 
-def test_tool_use_start_handler_drops_tool_scaffold_text_segment() -> None:
+def test_tool_use_start_handler_drops_promoted_text_call() -> None:
     state = _make_state()
     text_handler = _TextDeltaHandler()
     tool_handler = _ToolUseStartHandler()
 
     first = text_handler.handle(
-        TextDeltaEvent(
-            text=(
-                "Let me read the specific problematic areas to fix them.\n\n"
-                "<details>"
-            )
-        ),
+        TextDeltaEvent(text='Let me read the config.\n\n<invoke name="read_file">'),
         state,
     )
     second = text_handler.handle(
-        TextDeltaEvent(
-            text=(
-                "<summary>View areas around line 10393, 14751, and nearby"
-                "</summary>"
-            )
-        ),
+        TextDeltaEvent(text='<parameter name="path">a.toml</parameter></invoke>'),
         state,
     )
     tool_handler.handle(
         ToolUseStartEvent(
             tool_use_id="t1",
-            tool_name="exec_command",
-            synthetic_from_text=False,
+            tool_name="read_file",
+            synthetic_from_text=True,
         ),
         state,
     )
 
-    assert first.text == "Let me read the specific problematic areas to fix them."
+    assert first.text == "Let me read the config."
     assert second.text == ""
-    assert state.turn_segments[0] == {
-        "type": "text",
-        "text": "Let me read the specific problematic areas to fix them.",
-    }
-    assert "<details>" not in "".join(state.final_text_parts)
-    assert "<summary>" not in "".join(state.final_text_parts)
+    assert state.turn_segments[0] == {"type": "text", "text": "Let me read the config."}
+    assert "<invoke" not in "".join(state.final_text_parts)
+
+
+def test_tool_use_start_handler_releases_markup_before_a_native_call() -> None:
+    # A native call means the text markup was not promoted, so it never ran
+    # and must be shown rather than silently dropped.
+    state = _make_state()
+    text_handler = _TextDeltaHandler()
+    tool_handler = _ToolUseStartHandler()
+    markup = '<invoke name="read_file"><parameter name="path">a</parameter></invoke>'
+
+    text_handler.handle(TextDeltaEvent(text="Checking.\n" + markup), state)
+    tool_handler.handle(
+        ToolUseStartEvent(tool_use_id="t1", tool_name="exec", synthetic_from_text=False),
+        state,
+    )
+
+    assert "".join(state.final_text_parts) == "Checking.\n" + markup
 
 
 def test_tool_use_start_handler_flushes_text_and_appends_segment() -> None:
@@ -512,7 +515,7 @@ def test_error_handler_drops_unpaired_tool_use_on_output_truncation() -> None:
 def test_error_handler_flushes_pending_protocol_guard_text() -> None:
     """Regression for #1796: text held back by the protocol-leak guard
     because it merely resembled the start of a tool-protocol marker (e.g.
-    "<details>") is genuine assistant output once the stream ends in an
+    "<tool_c") is genuine assistant output once the stream ends in an
     error instead of continuing. It must be flushed into final_text_parts /
     current_text_parts the same way _DoneHandler and _ToolUseStartHandler
     already do, not silently dropped.
@@ -520,19 +523,19 @@ def test_error_handler_flushes_pending_protocol_guard_text() -> None:
     state = _make_state()
     delta_handler = _TextDeltaHandler()
 
-    delta_handler.handle(TextDeltaEvent(text="Sure, here is a collapsible section: "), state)
-    delta_handler.handle(TextDeltaEvent(text="<details>"), state)
+    delta_handler.handle(TextDeltaEvent(text="Sure, here is the tag:"), state)
+    delta_handler.handle(TextDeltaEvent(text="\n<tool_c"), state)
 
-    # The guard is holding "<details>" back pending disambiguation -- it
+    # The guard is holding "\n<tool_c" back pending disambiguation -- it
     # hasn't reached current_text_parts/final_text_parts yet.
-    assert "".join(state.final_text_parts) == "Sure, here is a collapsible section: "
+    assert "".join(state.final_text_parts) == "Sure, here is the tag:"
 
     handler = _ErrorHandler()
     result = handler.handle(ErrorEvent(message="boom", code="timeout"), state)
 
     assert result is _SUPPRESS
-    assert "".join(state.final_text_parts) == "Sure, here is a collapsible section: <details>"
-    assert "".join(state.current_text_parts) == "Sure, here is a collapsible section: <details>"
+    assert "".join(state.final_text_parts) == "Sure, here is the tag:\n<tool_c"
+    assert "".join(state.current_text_parts) == "Sure, here is the tag:\n<tool_c"
 
 
 def test_warning_handler_forwards_through_transformer() -> None:

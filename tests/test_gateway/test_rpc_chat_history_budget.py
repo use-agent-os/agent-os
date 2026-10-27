@@ -198,7 +198,7 @@ async def test_an_unusable_cursor_resets_to_the_latest_page() -> None:
 async def test_assistant_rows_arrive_display_clean() -> None:
     leaked = (
         "[[reply_to_current]] Useful answer [generated artifact omitted: chart.png (image/png)]\n"
-        '<invoke name="exec_command"><parameter name="command">pwd</parameter></invoke>'
+        "<angle brackets> leaked"
     )
     entries = [
         _entry(1, "[[reply_to_current]] keep my words", role="user"),

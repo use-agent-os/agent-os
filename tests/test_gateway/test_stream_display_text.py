@@ -48,12 +48,12 @@ async def test_a_directive_split_across_deltas_never_reaches_a_frame() -> None:
     assert done["text"] == "Sure. Here it is."
 
 
-async def test_leaked_tool_protocol_is_dropped_at_the_segment_end() -> None:
+async def test_leaked_tool_scaffold_is_dropped_at_the_segment_end() -> None:
     seen = await _emitted(
         [
             TextDeltaEvent(text="Checking.\n"),
-            TextDeltaEvent(text='<invoke name="exec_command">'),
-            TextDeltaEvent(text='<parameter name="command">pwd</parameter></invoke>'),
+            TextDeltaEvent(text="<details><summary>View areas "),
+            TextDeltaEvent(text="around line 12</summary>"),
             ToolUseStartEvent(tool_use_id="t1", tool_name="bash"),
             TextDeltaEvent(text="Done."),
             DoneEvent(text="Done."),
@@ -61,12 +61,26 @@ async def test_leaked_tool_protocol_is_dropped_at_the_segment_end() -> None:
     )
 
     names = [name for name, _ in seen]
-    assert "<invoke" not in _text(seen)
+    assert "<details" not in _text(seen)
     assert _text(seen) == "Checking.Done."
     # The first segment's text went out before the tool call, not after it.
     first_tool = names.index("session.event.tool_use_start")
     before = "".join(p["text"] for n, p in seen[:first_tool] if n == "session.event.text_delta")
     assert before == "Checking."
+
+
+async def test_tool_call_markup_that_reaches_display_is_shown() -> None:
+    # The engine cuts calls it ran; any markup still in the text never ran.
+    markup = '<invoke name="exec_command"><parameter name="command">pwd</parameter></invoke>'
+    seen = await _emitted(
+        [
+            TextDeltaEvent(text="Checking.\n"),
+            TextDeltaEvent(text=markup),
+            DoneEvent(text="Checking.\n" + markup),
+        ]
+    )
+
+    assert _text(seen) == "Checking.\n" + markup
 
 
 async def test_ordinary_angle_brackets_are_released_at_the_segment_end() -> None:

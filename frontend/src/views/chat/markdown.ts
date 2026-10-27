@@ -10,7 +10,7 @@ import python from 'highlight.js/lib/languages/python'
 import typescript from 'highlight.js/lib/languages/typescript'
 import yaml from 'highlight.js/lib/languages/yaml'
 import 'highlight.js/styles/github-dark.css'
-import { marked } from 'marked'
+import { Marked } from 'marked'
 import { toast } from 'sonner'
 import type { MarkdownDep } from './transcript/stream'
 import { qrDataUrl } from '@/lib/qr'
@@ -225,13 +225,30 @@ function openExternalLinksInNewTab(html: string): string {
   return template.innerHTML
 }
 
+// Raw HTML passes through the sanitizer, which drops tags it does not know.
+// A tool call the model wrote as text (<invoke>, <tool_call>, ...) reaches the
+// console only when it never ran, so its tags must stay readable instead of
+// vanishing: render them as literal text. Code spans and fences never produce
+// html tokens, so they are untouched.
+const TEXT_TOOL_CALL_TAG_RE =
+  /<\/?\s*(?:invoke|parameter|tool_calls?|tvoe_calls|function|minimax:tool_call)(?![\w-])/i
+
+const markdown = new Marked({
+  renderer: {
+    html({ text }) {
+      if (!TEXT_TOOL_CALL_TAG_RE.test(text)) return text
+      return escapeHtml(text).replace(/\n/g, '<br>')
+    },
+  },
+})
+
 /** Render untrusted assistant Markdown to sanitized terminal-chat HTML. */
 export function render(text: string): string {
   if (!text) return ''
 
   try {
     const { text: stashed, stash } = stashMath(inlineQrImages(text))
-    const parsed = marked.parse(stashed, { breaks: true, gfm: true, async: false })
+    const parsed = markdown.parse(stashed, { breaks: true, gfm: true, async: false })
     let html = String(DOMPurify.sanitize(parsed))
     html = wrapCodeBlocks(html)
     html = markInlineCode(html)

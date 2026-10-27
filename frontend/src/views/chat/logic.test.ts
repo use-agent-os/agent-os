@@ -216,17 +216,22 @@ describe('historyFallbackMessageIdentity', () => {
     const dca =
       '[generated artifact omitted: mandate-eth-20260928T054800Z.json (application/vnd.agentos.dca+json)]'
     expect(stripAssistantText(`Started.\n\n${dca}`)).toBe('Started.')
-    expect(
-      stripAssistantText('Done.\n<invoke name="exec_command"><parameter name="command">pwd'),
-    ).toBe('Done.')
   })
-  it('strips a positive protocol suffix but preserves ordinary angle-bracket text', () => {
-    const leaked =
-      'Useful answer\n<invoke name="exec_command"><parameter name="command">pwd</parameter></invoke>'
-    expect(stripProtocolTextLeak(leaked)).toBe('Useful answer')
+  it('strips a positive scaffold suffix but preserves ordinary angle-bracket text', () => {
+    expect(stripProtocolTextLeak('Useful answer\n<angle brackets> leaked')).toBe('Useful answer')
     expect(stripProtocolTextLeak('Use <details> for optional prose')).toBe(
       'Use <details> for optional prose',
     )
+  })
+  it('never hides a tool call written as text: reaching the console means it never ran', () => {
+    for (const text of [
+      'Useful answer\n<invoke name="exec_command"><parameter name="command">pwd</parameter></invoke>',
+      'Checking.\n<tool_call>{"name":"read_file","arguments":{}}</tool_call>',
+      'Ok <minimax:tool_call> x',
+      '<function=read_file><parameter=path>a</parameter></function>',
+    ]) {
+      expect(stripAssistantText(text)).toBe(text)
+    }
   })
 })
 

@@ -494,15 +494,12 @@ export function historyStableMessageIdentity(msg: ChatMessage): string {
 // transport details and must never leak into rendered text or fallback ids.
 const DIRECTIVE_TAG_RE = /\[\[\s*(?:reply_to_current|reply_to\s*:\s*[^\]\n]+)\s*\]\]\s*/g
 const GENERATED_ARTIFACT_MARKER_RE = /(?:^|\s*)\[generated artifact omitted:\s*[^\]\n]+?\]\s*/gi
-const PROTOCOL_TEXT_MARKER_RE =
-  /<\s*(?:minimax:tool_call|tool_calls?|tvoe_calls|invoke\b|parameter\b|effect_calls\b|details\b|angle\s+brackets\b)/i
-const PROTOCOL_TEXT_PARAMETER_RE =
-  /<\s*parameter\s+name\s*=\s*["'](?:path|content|command|code|patch)["']/i
-const PROTOCOL_TEXT_INVOKE_RE = /<\s*invoke\s+name\s*=\s*["'][A-Za-z_][A-Za-z0-9_.:-]*["']/i
-const PROTOCOL_TEXT_HTML_RE = /<!doctype\s+html\b|<html\b|<\/html\s*>/i
-const PROTOCOL_TEXT_CLOSE_RE = /<\/\s*invoke\s*>|<\/\s*(?:tool_calls?|tvoe_calls)\s*>/i
-const PROTOCOL_TEXT_STANDALONE_RE =
-  /<\s*(?:parameter|effect_calls|tool_calls?|tvoe_calls|angle\s+brackets)\s*>/i
+// Tool-call markup a model wrote as text (<invoke>, <tool_call>, ...) is not
+// hidden here: the engine cuts the calls it ran out of the reply and leaves
+// every other call visible, so markup that reaches the console never ran and
+// must stay on screen. Only scaffolding that is not a call format is trimmed.
+const PROTOCOL_TEXT_MARKER_RE = /<\s*(?:effect_calls\b|details\b|angle\s+brackets\b)/i
+const PROTOCOL_TEXT_STANDALONE_RE = /<\s*(?:effect_calls|angle\s+brackets)\s*>/i
 const PROTOCOL_TEXT_DETAILS_RE = /<\s*details\s*>\s*<\s*summary\s*>\s*View areas around line\b/i
 
 /** chat.js:387-389 — strip reply-threading control directives before display. */
@@ -525,16 +522,10 @@ export function stripGeneratedArtifactMarkers(text: string): string {
 }
 
 function looksLikeProtocolTextSuffix(suffix: string): boolean {
-  if (/<\s*minimax:tool_call\s*>/i.test(suffix)) return true
-  if (PROTOCOL_TEXT_STANDALONE_RE.test(suffix)) return true
-  if (PROTOCOL_TEXT_DETAILS_RE.test(suffix)) return true
-  if (PROTOCOL_TEXT_PARAMETER_RE.test(suffix)) return true
-  if (PROTOCOL_TEXT_INVOKE_RE.test(suffix) && PROTOCOL_TEXT_CLOSE_RE.test(suffix)) return true
-  if (PROTOCOL_TEXT_HTML_RE.test(suffix) && PROTOCOL_TEXT_INVOKE_RE.test(suffix)) return true
-  return false
+  return PROTOCOL_TEXT_STANDALONE_RE.test(suffix) || PROTOCOL_TEXT_DETAILS_RE.test(suffix)
 }
 
-/** chat.js:419-426 — trim only suffixes that positively match a tool-protocol leak. */
+/** chat.js:419-426 — trim only suffixes that positively match a tool-scaffold leak. */
 export function stripProtocolTextLeak(text: string): string {
   const value = String(text || '')
   if (!value) return value

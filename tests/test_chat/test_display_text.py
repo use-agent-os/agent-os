@@ -69,14 +69,10 @@ def test_strips_every_assistant_marker_through_one_shared_helper() -> None:
     assert strip_assistant_text(f"[[reply_to_current]] Done. {LP}") == "Done."
     assert strip_assistant_text(LP) == ""
     assert strip_assistant_text(f"Started.\n\n{DCA}") == "Started."
-    assert (
-        strip_assistant_text('Done.\n<invoke name="exec_command"><parameter name="command">pwd')
-        == "Done."
-    )
 
 
-def test_strips_a_positive_protocol_suffix_but_preserves_angle_bracket_text() -> None:
-    assert strip_protocol_text_leak(LEAK) == "Useful answer"
+def test_strips_a_positive_scaffold_suffix_but_preserves_angle_bracket_text() -> None:
+    assert strip_protocol_text_leak("Useful answer\n<angle brackets> leaked") == "Useful answer"
     assert strip_protocol_text_leak("Use <details> for optional prose") == (
         "Use <details> for optional prose"
     )
@@ -95,12 +91,26 @@ def test_strips_the_marker_from_text_segments_between_tool_calls() -> None:
     assert "generated artifact omitted" not in "".join(stripped)
 
 
-def test_sanitizes_an_assistant_body_with_a_directive_and_a_protocol_leak() -> None:
-    text = (
-        'answer [[reply_to_current]] <invoke name="tool"><parameter name="command">x'
-        "</parameter></invoke>"
-    )
-    assert strip_assistant_text(text) == "answer"
+def test_sanitizes_an_assistant_body_with_a_directive_but_keeps_call_markup() -> None:
+    call = '<invoke name="tool"><parameter name="command">x</parameter></invoke>'
+    assert strip_assistant_text(f"answer [[reply_to_current]] {call}") == f"answer {call}"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        LEAK,
+        'Done.\n<invoke name="exec_command"><parameter name="command">pwd',
+        'Checking.\n<tool_call>{"name":"read_file","arguments":{}}</tool_call>',
+        "Ok <minimax:tool_call> x",
+        "<function=read_file><parameter=path>a</parameter></function>",
+        "<|channel|>commentary to=functions.exec<|message|>{}<|call|>",
+    ],
+)
+def test_tool_call_markup_is_never_hidden(text: str) -> None:
+    # The engine cuts the calls it ran; markup that reaches display never ran.
+    assert strip_assistant_text(text) == text
+    assert _stream(list(text)) == text
 
 
 # --- JavaScript semantics ---------------------------------------------------
@@ -126,16 +136,16 @@ def test_none_and_empty_input_give_empty_text() -> None:
 # marker decides", and the whole-text whitespace normalisation.
 PARITY_CASES = [
     (
-        'Done.\ufeff\n<invoke name="a"><parameter name="command">pwd',
-        'Done.\ufeff\n<invoke name="a"><parameter name="command">pwd',
-        'Done.\ufeff\n<invoke name="a"><parameter name="command">pwd',
+        "Done.\ufeff\n<angle brackets> x",
+        "Done.\ufeff\n<angle brackets> x",
+        "Done.\ufeff\n<angle brackets> x",
         "Done.",
         "Done.",
     ),
     (
-        'Done.\x85\n<invoke name="a"><parameter name="command">pwd',
-        'Done.\x85\n<invoke name="a"><parameter name="command">pwd',
-        'Done.\x85\n<invoke name="a"><parameter name="command">pwd',
+        "Done.\x85\n<angle brackets> x",
+        "Done.\x85\n<angle brackets> x",
+        "Done.\x85\n<angle brackets> x",
         "Done.\x85",
         "Done.\x85",
     ),
@@ -175,9 +185,9 @@ PARITY_CASES = [
         "Answer <angle brac\u212aets> leaked",
     ),
     (
-        "Answer <parameter\xe9 <parameter>",
-        "Answer <parameter\xe9 <parameter>",
-        "Answer <parameter\xe9 <parameter>",
+        "Answer <effect_calls\xe9 <effect_calls>",
+        "Answer <effect_calls\xe9 <effect_calls>",
+        "Answer <effect_calls\xe9 <effect_calls>",
         "Answer",
         "Answer",
     ),
@@ -196,9 +206,9 @@ PARITY_CASES = [
         "ab",
     ),
     (
-        'Use <details> here.\n<invoke name="x"><parameter name="command">pwd',
-        'Use <details> here.\n<invoke name="x"><parameter name="command">pwd',
-        'Use <details> here.\n<invoke name="x"><parameter name="command">pwd',
+        "Use <details> here.\n<angle brackets> x",
+        "Use <details> here.\n<angle brackets> x",
+        "Use <details> here.\n<angle brackets> x",
         "Use",
         "Use",
     ),
@@ -255,15 +265,15 @@ PARITY_CASES = [
         'Page <invoke name="x"> and </invoke>',
         'Page <invoke name="x"> and </invoke>',
         'Page <invoke name="x"> and </invoke>',
-        "Page",
-        "Page",
+        'Page <invoke name="x"> and </invoke>',
+        'Page <invoke name="x"> and </invoke>',
     ),
     (
         '<tool_call>{"name": "exec"}</tool_call>',
         '<tool_call>{"name": "exec"}</tool_call>',
         '<tool_call>{"name": "exec"}</tool_call>',
-        "",
-        "",
+        '<tool_call>{"name": "exec"}</tool_call>',
+        '<tool_call>{"name": "exec"}</tool_call>',
     ),
     (
         "Answer <angle brackets> leaked",
@@ -276,8 +286,8 @@ PARITY_CASES = [
         "Ok <minimax:tool_call> x",
         "Ok <minimax:tool_call> x",
         "Ok <minimax:tool_call> x",
-        "Ok",
-        "Ok",
+        "Ok <minimax:tool_call> x",
+        "Ok <minimax:tool_call> x",
     ),
     (
         "See <details><summary>View areas around lines 3",
@@ -297,8 +307,8 @@ PARITY_CASES = [
         'Use <invoker name="x"> and <parameter>',
         'Use <invoker name="x"> and <parameter>',
         'Use <invoker name="x"> and <parameter>',
-        'Use <invoker name="x"> and',
-        'Use <invoker name="x"> and',
+        'Use <invoker name="x"> and <parameter>',
+        'Use <invoker name="x"> and <parameter>',
     ),
     (
         "a\r\n\r\n\r\n\r\nb [generated artifact omitted: c]",
@@ -335,9 +345,10 @@ def test_long_whitespace_runs_stay_linear() -> None:
 
 
 def test_looks_like_protocol_text_suffix() -> None:
-    assert looks_like_protocol_text_suffix('<parameter name="path">')
-    assert looks_like_protocol_text_suffix('<invoke name="x"></invoke>')
-    assert not looks_like_protocol_text_suffix('<invoke name="x">')
+    assert looks_like_protocol_text_suffix("<angle brackets>")
+    assert looks_like_protocol_text_suffix("<details><summary>View areas around line 4")
+    assert not looks_like_protocol_text_suffix('<invoke name="x"></invoke>')
+    assert not looks_like_protocol_text_suffix('<parameter name="path">')
     assert not looks_like_protocol_text_suffix("<details> for optional prose")
 
 
@@ -397,11 +408,11 @@ def test_stream_drops_newlines_only_at_the_start_of_a_segment() -> None:
     assert sanitizer.feed("\n\nthere") == "\n\nthere"
 
 
-def test_stream_discards_a_protocol_leak_and_the_rest_of_the_segment() -> None:
+def test_stream_discards_a_scaffold_leak_and_the_rest_of_the_segment() -> None:
     sanitizer = AssistantTextStreamSanitizer()
-    assert sanitizer.feed("Done.\n<inv") == "Done."
-    assert sanitizer.feed('oke name="exec_command">') == ""
-    assert sanitizer.feed('<parameter name="command">pwd') == ""
+    assert sanitizer.feed("Done.\n<ang") == "Done."
+    assert sanitizer.feed("le bra") == ""
+    assert sanitizer.feed("ckets> x") == ""
     assert sanitizer.feed(" and anything after") == ""
     assert sanitizer.flush() == ""
 
@@ -416,8 +427,8 @@ def test_stream_releases_an_unconfirmed_protocol_hold_at_flush() -> None:
 def test_stream_holds_a_partial_protocol_marker_only_while_it_can_match() -> None:
     sanitizer = AssistantTextStreamSanitizer()
     assert sanitizer.feed("a <") == "a"
-    assert sanitizer.feed("b> c <in") == " <b> c"
-    assert sanitizer.feed("put>") == " <input>"
+    assert sanitizer.feed("b> c <de") == " <b> c"
+    assert sanitizer.feed("ck>") == " <deck>"
 
 
 def test_stream_releases_a_protocol_hold_past_64_kib_and_stops_holding() -> None:
@@ -431,7 +442,7 @@ def test_stream_releases_a_protocol_hold_past_64_kib_and_stops_holding() -> None
 
 def test_stream_resets_after_flush() -> None:
     sanitizer = AssistantTextStreamSanitizer()
-    sanitizer.feed('<parameter name="path">x')
+    sanitizer.feed("<angle brackets> x")
     assert sanitizer.flush() == ""
     assert sanitizer.feed("\n\nNext segment") == "Next segment"
     assert sanitizer.flush() == ""

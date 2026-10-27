@@ -5,7 +5,6 @@ import json
 from agentos.engine.session_sanitize import sanitize_session_messages
 from agentos.engine.tool_text_compat import (
     ProtocolTextLeakGuard,
-    strip_protocol_text_leak,
     strip_synthetic_tool_call_suffix,
 )
 from agentos.provider.openai import _build_openai_messages, _usage_fields
@@ -55,13 +54,23 @@ def test_text_encoded_tool_call_suffix_is_removed_without_losing_prose() -> None
     assert strip_synthetic_tool_call_suffix(text, ["web_search"]) == "Here is the answer."
 
 
-def test_minimax_tool_call_text_is_removed_as_machine_payload() -> None:
-    text = "<minimax:tool_call>{}</minimax:tool_call>"
+def test_minimax_tool_call_text_is_removed_once_it_ran() -> None:
+    text = (
+        '<minimax:tool_call><invoke name="web_search">'
+        '<parameter name="query">agentos</parameter></invoke></minimax:tool_call>'
+    )
 
     assert strip_synthetic_tool_call_suffix(text, ["web_search"]) == ""
 
 
-def test_malformed_text_tool_protocol_is_removed_before_user_display() -> None:
+def test_unreadable_minimax_payload_is_not_hidden() -> None:
+    # Nothing can run from an empty payload, so nothing may be hidden either.
+    text = "<minimax:tool_call>{}</minimax:tool_call>"
+
+    assert strip_synthetic_tool_call_suffix(text, ["web_search"]) == text
+
+
+def test_malformed_text_tool_protocol_is_removed_once_it_ran() -> None:
     text = (
         "Let me write the dashboard now.\n\n"
         '<tvoe_calls><invoke name="write_file">'
@@ -70,10 +79,12 @@ def test_malformed_text_tool_protocol_is_removed_before_user_display() -> None:
         "</parameter></invoke></tvoe_calls>"
     )
 
-    assert strip_protocol_text_leak(text) == "Let me write the dashboard now."
+    assert strip_synthetic_tool_call_suffix(text, ["write_file"]) == (
+        "Let me write the dashboard now."
+    )
 
 
-def test_dsml_text_tool_protocol_is_removed_before_user_display() -> None:
+def test_dsml_text_tool_protocol_is_removed_once_it_ran() -> None:
     text = (
         "Let me create the printable daily record sheet as well:\n\n"
         '<｜DSML｜tool_calls><｜DSML｜invoke name="create_xlsx">'
@@ -85,22 +96,8 @@ def test_dsml_text_tool_protocol_is_removed_before_user_display() -> None:
         "</｜DSML｜parameter></｜DSML｜invoke></｜DSML｜tool_calls>"
     )
 
-    assert strip_protocol_text_leak(text) == (
+    assert strip_synthetic_tool_call_suffix(text, ["create_xlsx"]) == (
         "Let me create the printable daily record sheet as well:"
-    )
-
-
-def test_tool_scaffold_details_summary_is_removed_before_user_display() -> None:
-    text = (
-        "Let me read the specific problematic areas to fix them.\n\n"
-        "<details>"
-        "<summary>View areas around line 10393, 14751, and nearby</summary>\n\n"
-        "<parameter>\n\n"
-        "I see two real HTML issues."
-    )
-
-    assert strip_protocol_text_leak(text) == (
-        "Let me read the specific problematic areas to fix them."
     )
 
 
@@ -114,10 +111,11 @@ def test_streaming_protocol_guard_holds_split_tool_protocol() -> None:
         guard.push(
             '_calls><invoke name="write_file">'
             '<parameter name="content"><!DOCTYPE html><html></html>'
+            "</parameter></invoke></tvoe_calls>"
         )
         == ""
     )
-    assert guard.flush() == ""
+    assert guard.flush_before_tool_use(synthetic_from_text=True) == ""
 
 
 def test_streaming_protocol_guard_holds_split_dsml_tool_protocol() -> None:
@@ -131,40 +129,35 @@ def test_streaming_protocol_guard_holds_split_dsml_tool_protocol() -> None:
         )
         == ""
     )
+    assert guard.push("</｜DSML｜invoke></｜DSML｜tool_calls>") == ""
+    assert guard.flush_before_tool_use(synthetic_from_text=True) == ""
+
+
+def test_streaming_protocol_guard_releases_truncated_protocol_that_never_ran() -> None:
+    guard = ProtocolTextLeakGuard()
+
+    assert guard.push("Writing.\n\n<invoke") == "Writing."
+    assert guard.push(' name="write_file"><parameter name="content">abc') == ""
+    assert guard.flush() == '\n\n<invoke name="write_file"><parameter name="content">abc'
+
+
+def test_streaming_protocol_guard_passes_a_mid_line_marker_through() -> None:
+    guard = ProtocolTextLeakGuard()
+
+    assert guard.push("Explain literal <invoke") == "Explain literal <invoke"
     assert guard.flush() == ""
 
 
-def test_streaming_protocol_guard_releases_unconfirmed_literal_marker() -> None:
-    guard = ProtocolTextLeakGuard()
-
-    assert guard.push("Explain literal <invoke") == "Explain literal"
-    assert guard.flush() == " <invoke"
-
-
-def test_streaming_protocol_guard_drops_tool_scaffold_before_tool_use() -> None:
-    guard = ProtocolTextLeakGuard()
-
-    assert guard.push("Let me read the specific problematic areas.\n\n<details>") == (
-        "Let me read the specific problematic areas."
-    )
-    assert (
-        guard.push(
-            "<summary>View areas around line 10393, 14751, and nearby</summary>"
-        )
-        == ""
-    )
-    assert guard.flush_before_tool_use() == ""
-    assert guard.push("Fixed the issues.") == "Fixed the issues."
-
-
-def test_streaming_protocol_guard_releases_regular_details_without_tool_use() -> None:
+def test_streaming_protocol_guard_passes_html_through() -> None:
     guard = ProtocolTextLeakGuard()
 
     assert guard.push("Here is a collapsible note.\n\n<details>") == (
-        "Here is a collapsible note."
+        "Here is a collapsible note.\n\n<details>"
     )
-    assert guard.push("<summary>More</summary>Visible note.</details>") == ""
-    assert guard.flush() == "\n\n<details><summary>More</summary>Visible note.</details>"
+    assert guard.push("<summary>More</summary>Visible note.</details>") == (
+        "<summary>More</summary>Visible note.</details>"
+    )
+    assert guard.flush() == ""
 
 
 def test_session_sanitize_removes_block_metadata_without_mutating_original_content() -> None:

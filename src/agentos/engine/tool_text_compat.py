@@ -1,228 +1,188 @@
-"""Helpers for model text that encodes tool calls."""
+"""Keep text-form tool calls out of what the user sees, but only once they run.
+
+What counts as a text-form tool call is defined once, in
+:mod:`agentos.provider.text_tool_protocol`. The provider promotes such a reply
+into synthetic tool-use events; this module hides the same regions from the
+streamed text and from the stored reply. Anything the provider did not
+promote is released unchanged, so markup is never hidden without running.
+"""
 
 from __future__ import annotations
 
-import json
-import re
-
-_PLAIN_JSON_TOOL_CALL_RE = re.compile(
-    r"^\s*([A-Za-z_][A-Za-z0-9_.:-]*)\s*(\{.*\})\s*$",
-    re.DOTALL,
+from agentos.provider.text_tool_protocol import (
+    Fence,
+    find_text_tool_regions,
+    header_status,
+    next_fence_state,
+    opener_status,
+    parse_plain_json_tool_call,
+    promote_text_tool_calls,
 )
-_PLAIN_JSON_TOOL_PREFIX_RE = re.compile(
-    r"([A-Za-z_][A-Za-z0-9_.:-]*)\s*(?=\{)",
-)
-_TEXT_PROTOCOL_MARKER_RE = re.compile(
-    (
-        r"<\s*(?:minimax:tool_call|tool_calls?|tvoe_calls|invoke\b|"
-        r"parameter\b|effect_calls\b|details\b|angle\s+brackets\b|"
-        r"[|｜]\s*DSML\s*[|｜]\s*(?:tool_calls?|invoke\b|parameter\b))"
-    ),
-    re.IGNORECASE,
-)
-_TEXT_PROTOCOL_PARAMETER_RE = re.compile(
-    (
-        r"<\s*(?:parameter|[|｜]\s*DSML\s*[|｜]\s*parameter)\s+"
-        r"name\s*=\s*[\"'](?:path|content|command|code|patch|sheets)[\"']"
-    ),
-    re.IGNORECASE,
-)
-_TEXT_PROTOCOL_INVOKE_RE = re.compile(
-    (
-        r"<\s*(?:invoke|[|｜]\s*DSML\s*[|｜]\s*invoke)\s+"
-        r"name\s*=\s*[\"'][A-Za-z_][A-Za-z0-9_.:-]*[\"']"
-    ),
-    re.IGNORECASE,
-)
-_TEXT_PROTOCOL_HTML_RE = re.compile(
-    r"<!doctype\s+html\b|<html\b|</html\s*>",
-    re.IGNORECASE,
-)
-_TEXT_PROTOCOL_CLOSE_RE = re.compile(
-    (
-        r"</\s*(?:invoke|[|｜]\s*DSML\s*[|｜]\s*invoke)\s*>|"
-        r"</\s*(?:tool_calls?|tvoe_calls|[|｜]\s*DSML\s*[|｜]\s*tool_calls?)\s*>"
-    ),
-    re.IGNORECASE,
-)
-_TEXT_PROTOCOL_STANDALONE_MARKER_RE = re.compile(
-    (
-        r"<\s*(?:parameter|effect_calls|tool_calls?|tvoe_calls|angle\s+brackets|"
-        r"[|｜]\s*DSML\s*[|｜]\s*(?:tool_calls?|invoke|parameter))\b"
-    ),
-    re.IGNORECASE,
-)
-_TEXT_PROTOCOL_DETAILS_SUMMARY_RE = re.compile(
-    r"<\s*details\s*>\s*<\s*summary\s*>\s*View areas around line\b",
-    re.IGNORECASE,
-)
-_TEXT_PROTOCOL_PREFIXES = (
-    "<minimax:tool_call",
-    "<tool_call",
-    "<tool_calls",
-    "<tvoe_calls",
-    "<|dsml|tool_call",
-    "<|dsml|tool_calls",
-    "<|dsml|invoke",
-    "<|dsml|parameter",
-    "<｜dsml｜tool_call",
-    "<｜dsml｜tool_calls",
-    "<｜dsml｜invoke",
-    "<｜dsml｜parameter",
-    "<invoke",
-    "<parameter",
-    "<effect_calls",
-    "<details",
-    "<summary",
-    "<angle brackets",
-)
-_MAX_TEXT_PROTOCOL_PREFIX_LEN = max(len(prefix) for prefix in _TEXT_PROTOCOL_PREFIXES)
-
-
-def _find_trailing_tool_call_start(text: str, tool_name: str) -> int | None:
-    decoder = json.JSONDecoder()
-    for match in reversed(list(_PLAIN_JSON_TOOL_PREFIX_RE.finditer(text))):
-        if match.group(1) != tool_name:
-            continue
-        try:
-            arguments, end = decoder.raw_decode(text, match.end())
-        except json.JSONDecodeError:
-            continue
-        if text[end:].strip():
-            continue
-        if not isinstance(arguments, dict):
-            continue
-        return match.start()
-    return None
 
 
 def strip_synthetic_tool_call_text(text: str, tool_name: str) -> str:
-    """Remove trailing machine-readable tool-call text synthesized into a tool call."""
-
+    """Remove a trailing ``tool_name{...}`` that was promoted into a tool call."""
     if not text:
         return text
-
-    if "<minimax:tool_call>" in text:
-        return ""
-
-    lines = text.splitlines()
-    for index in range(len(lines) - 1, -1, -1):
-        if lines[index].strip():
-            candidate = lines[index]
-            break
-    else:
+    parsed = parse_plain_json_tool_call(text)
+    if parsed is None or parsed[0] != tool_name:
         return text
-
-    match = _PLAIN_JSON_TOOL_CALL_RE.match(candidate)
-    if match is None or match.group(1) != tool_name:
-        start = _find_trailing_tool_call_start(text, tool_name)
-        if start is None:
-            return text
-        return text[:start].rstrip()
-
-    prefix = "\n".join(lines[:index]).rstrip()
-    return prefix
-
-
-def _looks_like_text_tool_protocol_suffix(suffix: str) -> bool:
-    if re.search(r"<\s*minimax:tool_call\s*>", suffix, re.IGNORECASE):
-        return True
-    if _TEXT_PROTOCOL_STANDALONE_MARKER_RE.search(suffix):
-        return True
-    if _TEXT_PROTOCOL_DETAILS_SUMMARY_RE.search(suffix):
-        return True
-    if _TEXT_PROTOCOL_PARAMETER_RE.search(suffix):
-        return True
-    if _TEXT_PROTOCOL_INVOKE_RE.search(suffix) and _TEXT_PROTOCOL_CLOSE_RE.search(suffix):
-        return True
-    if _TEXT_PROTOCOL_HTML_RE.search(suffix) and _TEXT_PROTOCOL_INVOKE_RE.search(suffix):
-        return True
-    return False
-
-
-def strip_protocol_text_leak(text: str) -> str:
-    """Remove text-encoded tool protocol that should not be user-visible."""
-
-    if not text:
-        return text
-
-    for marker in _TEXT_PROTOCOL_MARKER_RE.finditer(text):
-        suffix = text[marker.start() :]
-        if _looks_like_text_tool_protocol_suffix(suffix):
-            return text[: marker.start()].rstrip()
-    return text
-
-
-def _find_protocol_marker_start(text: str) -> int | None:
-    marker = _TEXT_PROTOCOL_MARKER_RE.search(text)
-    return marker.start() if marker is not None else None
-
-
-def _find_protocol_prefix_suffix_start(text: str) -> int | None:
-    lower_text = text.lower()
-    start = max(0, len(text) - _MAX_TEXT_PROTOCOL_PREFIX_LEN)
-    for index in range(start, len(text)):
-        suffix = lower_text[index:]
-        if any(prefix.startswith(suffix) for prefix in _TEXT_PROTOCOL_PREFIXES):
-            return index
-    return None
-
-
-def _split_visible_prefix_before_protocol_candidate(text: str) -> tuple[str, str]:
-    marker_start = _find_protocol_marker_start(text)
-    if marker_start is None:
-        marker_start = _find_protocol_prefix_suffix_start(text)
-    if marker_start is None:
-        return text, ""
-
-    prefix = text[:marker_start]
-    visible_prefix = prefix.rstrip()
-    return visible_prefix, text[len(visible_prefix) :]
-
-
-class ProtocolTextLeakGuard:
-    """Stateful guard for streamed text that may contain tool protocol."""
-
-    def __init__(self) -> None:
-        self._pending = ""
-        self._suppressed = False
-
-    def push(self, text: str) -> str:
-        if not text or self._suppressed:
-            return ""
-
-        combined = self._pending + text
-        self._pending = ""
-        cleaned = strip_protocol_text_leak(combined)
-        if cleaned != combined:
-            self._suppressed = True
-            return cleaned
-
-        visible, pending = _split_visible_prefix_before_protocol_candidate(combined)
-        self._pending = pending
-        return visible
-
-    def flush(self) -> str:
-        if self._suppressed:
-            self._pending = ""
-            self._suppressed = False
-            return ""
-        pending = self._pending
-        self._pending = ""
-        return strip_protocol_text_leak(pending)
-
-    def flush_before_tool_use(self) -> str:
-        if self._suppressed:
-            self._pending = ""
-            self._suppressed = False
-            return ""
-        return self.flush()
+    return text[: parsed[2]].rstrip()
 
 
 def strip_synthetic_tool_call_suffix(text: str, tool_names: list[str]) -> str:
-    """Remove text-encoded tool calls for any of the supplied synthetic tools."""
+    """The reply text once the calls promoted from it are removed.
 
-    cleaned = text
-    for tool_name in tool_names:
-        cleaned = strip_synthetic_tool_call_text(cleaned, tool_name)
-    return cleaned
+    ``tool_names`` are the tools the provider synthesized from this text.
+    Promoting again against exactly those names reproduces the provider's
+    decision, so only what actually ran is cut.
+    """
+    if not text or not tool_names:
+        return text
+    promotion = promote_text_tool_calls(text, set(tool_names))
+    return text if promotion is None else promotion.visible_text
+
+
+# Only the start of a line matters for fence detection; a fence line is short.
+_LINE_KEEP = 512
+
+
+def _whitespace_run_start(text: str, end: int) -> int:
+    start = end
+    while start > 0 and text[start - 1].isspace():
+        start -= 1
+    return start
+
+
+class ProtocolTextLeakGuard:
+    """Streamed-text guard for text-form tool calls.
+
+    Text is passed through until a line opens a call-shaped region outside a
+    code fence. From there on everything is held until the turn decides:
+
+    * :meth:`flush_before_tool_use` with ``synthetic_from_text=True`` means
+      the provider promoted the reply, so the held regions are dropped and
+      any prose after them is released;
+    * any other flush releases the held text unchanged.
+
+    A held line whose opening tag turns out not to match any format is
+    released as soon as that is clear.
+    """
+
+    def __init__(self) -> None:
+        self._reset()
+
+    def _reset(self) -> None:
+        # Undecided tail: a whitespace run ending the text, or the start of a
+        # line that may still become an opener.
+        self._pending = ""
+        # Emitted text of the current line, and the fence state before it.
+        self._line = ""
+        self._fence: Fence | None = None
+        self._held: str | None = None
+        self._header_checked = False
+        self._emitted_any = False
+
+    def _advance(self, emitted: str) -> None:
+        if not emitted:
+            return
+        self._emitted_any = True
+        if "\n" not in emitted:
+            self._line = (self._line + emitted)[:_LINE_KEEP]
+            return
+        *complete, tail = (self._line + emitted).split("\n")
+        for line in complete:
+            self._fence = next_fence_state(self._fence, line)
+        self._line = tail[:_LINE_KEEP]
+
+    def _decide(self, buf: str) -> tuple[int, bool]:
+        """How much of ``buf`` is visible, and whether the rest is a held region."""
+        line, fence = self._line, self._fence
+        pos = 0
+        while True:
+            newline = buf.find("\n", pos)
+            if line == "" and fence is None:
+                head = buf[pos:] if newline < 0 else buf[pos:newline]
+                status = opener_status(head, complete=newline >= 0)
+                if status != "no":
+                    return _whitespace_run_start(buf, pos), status == "open"
+            if newline < 0:
+                break
+            fence = next_fence_state(fence, line + buf[pos:newline])
+            line = ""
+            pos = newline + 1
+        # Hold back a trailing run of blank lines: it is dropped if a hidden
+        # region follows it, and released with the next visible text otherwise.
+        visible_end = len(buf.rstrip())
+        if "\n" in buf[visible_end:]:
+            return visible_end, False
+        return len(buf), False
+
+    def _feed(self, text: str) -> str:
+        buf = self._pending + text
+        self._pending = ""
+        cut, hold = self._decide(buf)
+        visible = buf[:cut]
+        self._advance(visible)
+        if hold:
+            self._held = buf[cut:]
+            self._header_checked = False
+            return visible + self._check_header()
+        self._pending = buf[cut:]
+        return visible
+
+    def _check_header(self) -> str:
+        """Release the held text if its opener turned out not to be a call."""
+        held = self._held
+        if held is None or self._header_checked:
+            return ""
+        status = header_status(held)
+        if status == "pending":
+            return ""
+        if status == "valid":
+            self._header_checked = True
+            return ""
+        # Emit the false opener's line as plain text, then keep scanning.
+        self._held = None
+        start = len(held) - len(held.lstrip())
+        newline = held.find("\n", start)
+        line = held if newline < 0 else held[:newline]
+        self._advance(line)
+        return line + ("" if newline < 0 else self._feed(held[newline:]))
+
+    def push(self, text: str) -> str:
+        if not text:
+            return ""
+        if self._held is None:
+            return self._feed(text)
+        self._held += text
+        return self._check_header()
+
+    def flush(self) -> str:
+        """Release everything still held: nothing was promoted from it."""
+        released = self._pending + (self._held or "")
+        self._reset()
+        return released
+
+    def flush_before_tool_use(self, *, synthetic_from_text: bool = False) -> str:
+        """Settle held text before a tool call starts.
+
+        A synthetic call means the provider promoted the held regions, so they
+        are cut and only the prose around them is returned. A native call
+        leaves any held markup unexecuted, so it is released as written.
+        """
+        held = self._held
+        if not synthetic_from_text or held is None:
+            return self.flush()
+        emitted_any = self._emitted_any
+        self._reset()
+        valid = [region for region in find_text_tool_regions(held) if region.valid]
+        if not valid:
+            return held
+        rest = [held[a.end : b.start].strip() for a, b in zip(valid, valid[1:], strict=False)]
+        rest.append(held[valid[-1].end :].strip())
+        lead = held[: valid[0].start].strip()
+        visible = "\n\n".join(part for part in (lead, *rest) if part)
+        if visible and emitted_any:
+            return "\n\n" + visible
+        return visible

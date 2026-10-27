@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.engine.tool_text_compat import strip_protocol_text_leak
+from agentos.engine.tool_text_compat import ProtocolTextLeakGuard
 from agentos.provider.openai import _synthesize_text_tool_events
 from agentos.provider.types import ToolDefinition, ToolInputSchema, ToolUseEndEvent
 
@@ -73,8 +73,8 @@ def _end_events(text: str) -> list[ToolUseEndEvent]:
 
 @pytest.mark.parametrize("text", [TVOE_TEXT, DSML_TEXT, BARE_INVOKE_TEXT, MINIMAX_TEXT])
 def test_hidden_protocol_text_is_also_executed(text: str) -> None:
-    # The leak suppressor already treats each of these as tool-call protocol.
-    assert strip_protocol_text_leak(text) != text
+    # The stream guard holds each of these back from the user...
+    assert ProtocolTextLeakGuard().push(text) != text
 
     assert _end_events(text), "protocol was hidden from the user but never executed"
 

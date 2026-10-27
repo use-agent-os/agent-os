@@ -281,7 +281,9 @@ class _ToolUseStartHandler:
             strip_synthetic_tool_call_text,
         )
 
-        pending_text = state.protocol_text_guard.flush_before_tool_use()
+        pending_text = state.protocol_text_guard.flush_before_tool_use(
+            synthetic_from_text=event.synthetic_from_text
+        )
         if pending_text:
             state.final_text_parts.append(pending_text)
             state.current_text_parts.append(pending_text)
@@ -462,14 +464,12 @@ class _DoneHandler:
             state.final_text_parts.append(pending_text)
             state.current_text_parts.append(pending_text)
 
-        from agentos.engine.tool_text_compat import strip_protocol_text_leak
-
-        normalized_text = strip_protocol_text_leak(
-            _normalize_heartbeat_text(
-                event.text,
-                run_kind=inp.run_kind,
-                heartbeat_ack_max_chars=inp.heartbeat_ack_max_chars,
-            )
+        # Text-form tool calls were already cut from event.text where they
+        # ran; markup left in it did not run and stays visible.
+        normalized_text = _normalize_heartbeat_text(
+            event.text,
+            run_kind=inp.run_kind,
+            heartbeat_ack_max_chars=inp.heartbeat_ack_max_chars,
         )
         routed_tier = metadata.get("routed_tier")
         routing_source = metadata.get("routing_source", "none")

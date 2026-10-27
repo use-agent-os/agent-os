@@ -78,7 +78,9 @@ describe('message renderer', () => {
     )!
 
     expect(row.querySelector('.msg-body')).toHaveTextContent('answer')
-    expect(row.querySelector('.msg-body')).not.toHaveTextContent('invoke')
+    expect(row.querySelector('.msg-body')).not.toHaveTextContent('reply_to_current')
+    // A tool call left in the text never ran, so it is shown as written.
+    expect(row.querySelector('.msg-body')).toHaveTextContent('<invoke name="tool">')
     expect(row.querySelector('.cron-tag')).toHaveTextContent('Cron')
     expect(row.querySelectorAll('.msg-action')).toHaveLength(2)
     expect(row.querySelector('[aria-label="Regenerate response"]')).not.toBeNull()
