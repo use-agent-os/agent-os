@@ -332,7 +332,8 @@ protocol and carries no license header of its own.
 The `musedin` skill descriptor and its `scripts/musedin.py` are AgentOS-original.
 `references/muse.txt` is a verbatim copy of the onboarding musedin.com
 publishes for agents (https://musedin.com/muse.txt), retrieved 2026-09-26,
-included with the permission of MusedIn's owner. It is redistributed
+included with the permission of MusedIn's owner (published at
+https://musedin.com/.well-known/agent-os.txt). It is redistributed
 unmodified as the authoritative description of a public wire protocol and
 carries no license header of its own.
 
