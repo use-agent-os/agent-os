@@ -6,7 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.10.30] - 2026-10-30
+
 ### Added
+- Image Flows: a node-graph editor for image work in the desktop (Flows in the
+  sidebar), with the engine in the gateway (#3737). Seven typed nodes (text,
+  load image, join text, prompt writer, describe image, image, save) and two
+  link types; the image node does text-to-image, or edit and multi-reference
+  when images are linked. Runs reuse unchanged steps from a cache (variation
+  "keep" reruns at no cost), show a per-node price and a run total before
+  they start, book the real cost of in-flight calls on Stop, survive a gateway
+  restart, and embed the graph in saved PNGs (drop one on the canvas to
+  restore it). Models come from a registry with per-model options; Surplus
+  Intelligence is the default image provider (`SURPLUS_API_KEY`), alongside
+  OpenRouter and OpenAI, and the `image_generate` tool can use it too. New
+  config `[flows]` and `[image_generation.providers.surplus]`.
 - Image Flows from the terminal and from agents (docs/flows.md).
   `agentos flows list | show | nodes | models | run | runs | stop` talks to
   the gateway's `flows.*` RPC; `flows run <id|name> --input name=value --to
