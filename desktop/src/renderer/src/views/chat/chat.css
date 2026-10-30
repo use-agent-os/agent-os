@@ -5076,6 +5076,230 @@
   }
 }
 
+/* Image Flow run cards (docs/flows.md). The shared renderer (frontend
+   flowRun.ts) emits `flowrun-*` classes and stamps `data-flowrun-status` on
+   `.flowrun-card`. A sibling of the DCA plate: hairline plate, a 3 px rail
+   whose colour is the run's state (blue while it runs, green done, amber
+   failed, grey cancelled), figures in tabular mono, a contact strip of
+   thumbnails, and "Open in Flows" as a hairline ghost button. */
+.msg-artifact-flowrun-group {
+  display: grid;
+  gap: 8px;
+  max-width: min(38rem, 100%);
+}
+.msg-artifact-flowrun {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.msg-artifact-flowrun__body:empty {
+  display: none;
+}
+.msg-artifact-flowrun__status {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.msg-artifact-flowrun__status[hidden] {
+  display: none;
+}
+.flowrun-card {
+  --flowrun-rail: var(--dim);
+  position: relative;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px 10px 16px;
+  border-radius: var(--radius);
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--flowrun-rail) 7%, transparent),
+      transparent 38%
+    ),
+    color-mix(in srgb, var(--elevated) 92%, transparent);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+}
+.flowrun-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  border-radius: var(--radius) 0 0 var(--radius);
+  background: var(--flowrun-rail);
+}
+.flowrun-card[data-flowrun-status='queued'],
+.flowrun-card[data-flowrun-status='running'] {
+  --flowrun-rail: var(--info);
+}
+.flowrun-card[data-flowrun-status='done'] {
+  --flowrun-rail: var(--ok);
+}
+.flowrun-card[data-flowrun-status='failed'] {
+  --flowrun-rail: var(--warn);
+}
+.flowrun-card[data-flowrun-status='running']::before {
+  animation: flowrun-rail-run 1.6s ease-in-out infinite;
+}
+@keyframes flowrun-rail-run {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+.flowrun-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.flowrun-card__eyebrow {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.flowrun-card__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.flowrun-card__status {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: var(--radius-pill);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--flowrun-rail);
+  background: color-mix(in srgb, var(--flowrun-rail) 12%, transparent);
+}
+.flowrun-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.flowrun-card__fact {
+  white-space: nowrap;
+}
+.flowrun-card__progress {
+  color: var(--foreground);
+}
+.flowrun-card__bar {
+  flex: 1 1 80px;
+  height: 2px;
+  overflow: hidden;
+  background: var(--hairline);
+}
+.flowrun-card__bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--flowrun-rail);
+  transition: width 240ms ease;
+}
+.flowrun-card__thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: 6px;
+}
+.flowrun-thumb {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+}
+.flowrun-thumb__img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: calc(var(--radius) - 2px);
+  object-fit: cover;
+  background: color-mix(in srgb, var(--dim) 18%, transparent);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.flowrun-thumb__img--empty {
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  background: repeating-linear-gradient(
+    135deg,
+    transparent 0 6px,
+    color-mix(in srgb, var(--dim) 14%, transparent) 6px 7px
+  );
+}
+.flowrun-thumb__name {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+}
+.flowrun-card__more,
+.flowrun-card__empty {
+  align-self: center;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.flowrun-card__error {
+  margin: 0;
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--warn) 85%, var(--foreground));
+}
+.flowrun-card__foot {
+  display: flex;
+  justify-content: flex-end;
+}
+.flowrun-card__open {
+  height: 22px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  font: inherit;
+  font-size: 11px;
+  color: var(--foreground);
+  cursor: pointer;
+}
+.flowrun-card__open:hover {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--flowrun-rail) 60%, var(--hairline));
+}
+.flowrun-card__open:focus-visible {
+  outline: 1px solid var(--flowrun-rail);
+  outline-offset: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .flowrun-card[data-flowrun-status='running']::before {
+    animation: none;
+  }
+  .flowrun-card__bar-fill {
+    transition: none;
+  }
+}
+
 /* ── Ask / plan cards ────────────────────────────────────────────────────
    Built by the shared renderer (transcript/ask.ts, transcript/plan.ts). Its
    glyphs are bare `<svg viewBox>` elements with no width or height, so every

@@ -109,6 +109,19 @@ drops every grade recorded for that path.
 The Web UI also provides an approvals surface for reviewing pending actions
 outside the message scrollback.
 
+### Image Flow Spend Prompts
+
+An agent's `flow_run` (docs/flows.md) asks before it spends more than
+`[flows].agent_cost_limit_usd` on one run, or an amount that cannot be
+estimated, in its own namespace, `flow`. Every surface offers only **Allow
+once** and **Deny**: no "Always Allow", no "Bypass" / "Stop Asking", and the
+gateway ignores both for this namespace if a client sends them, so a spend
+approval never unlocks further spend or elevates the session. A session-wide
+bypass (`/elevated`, or "Stop Asking" on a shell prompt) releases pending
+`exec` prompts only, never a spend. A denial sticks: for 30 minutes every
+later `flow_run` of that flow in that session asks again, whatever its inputs
+or cost.
+
 ### Coding-Harness (ACP) Prompts
 
 Coding harnesses started with `sessions_spawn(runtime="acp")` (Claude Code,

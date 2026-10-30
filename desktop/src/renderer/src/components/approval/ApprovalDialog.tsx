@@ -6,6 +6,7 @@ import {
   approvalCommand,
   approvalMonitor,
   canAlwaysAllow,
+  canBypass,
   useApprovals,
   type Approval,
   type ApprovalAction,
@@ -130,14 +131,18 @@ export function ApprovalDialog() {
             {t('approval.always')}
           </Button>
         ) : null}
-        <Button
-          variant="ghost"
-          disabled={busy}
-          title={t('approval.bypass.title')}
-          onClick={() => void resolve('bypass')}
-        >
-          {t('approval.bypass')}
-        </Button>
+        {/* An agent's spend (an Image Flow run) is approved once or denied:
+            no "Always Allow", no "Stop Asking". */}
+        {canBypass(item) ? (
+          <Button
+            variant="ghost"
+            disabled={busy}
+            title={t('approval.bypass.title')}
+            onClick={() => void resolve('bypass')}
+          >
+            {t('approval.bypass')}
+          </Button>
+        ) : null}
       </div>
     </ModalShell>
   )

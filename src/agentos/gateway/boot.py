@@ -1323,6 +1323,8 @@ class GatewayServer:
     _boot_tracker: Any = field(default=None, repr=False)
     #: ``gateway.maintenance.GatewayMaintenance``: thaw detection + health sweep.
     _maintenance: Any = field(default=None, repr=False)
+    #: ``flows.FlowService``: Image Flows runs, stopped (interrupted) on close.
+    _flows: Any = field(default=None, repr=False)
 
     @property
     def shutdown_task(self) -> asyncio.Task | None:
@@ -1478,6 +1480,17 @@ class GatewayServer:
 
             if get_maintenance() is self._maintenance:
                 set_maintenance(None)
+        if self._flows is not None:
+            # In-flight flow runs end failed/interrupted rather than vanishing.
+            try:
+                await self._flows.close()
+            except Exception:  # noqa: BLE001 - shutdown must not raise
+                log.debug("gateway.flows_close_failed", exc_info=True)
+            from agentos.flows import peek_flow_service, reset_flow_service
+
+            if peek_flow_service() is self._flows:
+                reset_flow_service()
+            self._flows = None
         if self._config_watcher is not None:
             try:
                 await self._config_watcher.stop()
@@ -3519,6 +3532,19 @@ async def start_gateway_server(
         maintenance.start()
         server_handle._maintenance = maintenance
         set_maintenance(maintenance)
+
+        # Image Flows: built at boot so runs a previous process left queued or
+        # running are marked interrupted now, and run events reach control
+        # connections. RPC handlers reuse this instance (and refresh its config).
+        try:
+            from agentos.gateway.flows_wiring import flow_service
+            from agentos.gateway.rpc_flows import broadcast_flow_event
+
+            server_handle._flows = flow_service(
+                config, broadcast=broadcast_flow_event, usage_tracker=svc.usage_tracker
+            )
+        except Exception as exc:  # noqa: BLE001 - flows must never block the gateway
+            log.warning("gateway.flows_init_failed", error=str(exc))
 
     app.state.gateway_ready = True
     readiness.mark_serving()

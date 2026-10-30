@@ -155,7 +155,7 @@ async def _exec_approval_resolve(params: dict | None) -> dict[str, Any]:
 
 @_d.method("approval.list")
 async def _handle_approval_list(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
-    """Pending approvals across namespaces (exec, plugin, acp, acp_elicitation).
+    """Pending approvals across namespaces (exec, plugin, acp, acp_elicitation, flow).
 
     ``params.namespace`` (optional) narrows the list to one namespace.
     """

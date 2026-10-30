@@ -40,6 +40,7 @@ export { publishArtifactTargetName } from './tools'
 import { isCardsArtifact } from './cards'
 import { isChartArtifact } from './chart'
 import { isDcaArtifact } from './dca'
+import { isFlowRunArtifact } from './flowRunMime'
 import { isLpArtifact } from './lp'
 import { isMarketsArtifact } from './markets'
 import { isTriggerArtifact } from './trigger'
@@ -116,7 +117,7 @@ export function artifactExtension(name: string): string {
 
 // chat.js:7538-7549 — category: visual | audio | data | document | code | file,
 // plus the AgentOS-native 'chart' (chart.ts), 'cards' (cards.ts), 'lp' (lp.ts),
-// 'markets' (markets.ts), 'dca' (dca.ts) and 'trigger' (trigger.ts) categories, which have no legacy
+// 'markets' (markets.ts), 'dca' (dca.ts), 'trigger' (trigger.ts) and 'flowrun' (flowRun.ts) categories, which have no legacy
 // counterpart: they render inline rather than as a download chip.
 // NOTE: image/* maps to 'visual' (NOT 'image' — the brief example was wrong).
 export function artifactCategory(artifact: Artifact | null | undefined): string {
@@ -126,6 +127,7 @@ export function artifactCategory(artifact: Artifact | null | undefined): string 
   if (isMarketsArtifact(artifact)) return 'markets'
   if (isDcaArtifact(artifact)) return 'dca'
   if (isTriggerArtifact(artifact)) return 'trigger'
+  if (isFlowRunArtifact(artifact)) return 'flowrun'
   const mime = artifactMime(artifact)
   if (mime.startsWith('image/')) return 'visual'
   if (mime.startsWith('audio/')) return 'audio'
@@ -153,6 +155,8 @@ export function artifactCategoryLabel(category: string): string {
       return 'dca'
     case 'trigger':
       return 'trigger'
+    case 'flowrun':
+      return 'flow'
     case 'data':
       return 'data'
     case 'document':
@@ -514,7 +518,9 @@ export function createArtifactRenderer(deps: ArtifactRendererDeps) {
                     ? 'dca'
                     : category === 'trigger'
                       ? 'trigger'
-                      : 'file'
+                      : category === 'flowrun'
+                        ? 'flowrun'
+                        : 'file'
       if (groupKind !== openGroup) {
         closeGroup()
         html +=
@@ -532,7 +538,9 @@ export function createArtifactRenderer(deps: ArtifactRendererDeps) {
                       ? '<div class="msg-artifact-dca-group">'
                       : groupKind === 'trigger'
                         ? '<div class="msg-artifact-trigger-group">'
-                        : '<div class="msg-artifact-files">'
+                        : groupKind === 'flowrun'
+                          ? '<div class="msg-artifact-flowrun-group">'
+                          : '<div class="msg-artifact-files">'
         openGroup = groupKind
       }
       const name = artifactName(artifact)
@@ -614,6 +622,16 @@ export function createArtifactRenderer(deps: ArtifactRendererDeps) {
         html += `<div class="msg-artifact-trigger" data-trigger-src="${escAttr(payloadUrl)}" data-artifact-category="${escAttr(category)}" data-artifact-id="${escAttr(artifact?.id || '')}" data-artifact-name="${escAttr(name)}">
           <div class="msg-artifact-trigger__body"></div>
           <p class="msg-artifact-trigger__status">${escAttr(t('chat.triggerLoading'))}</p>
+        </div>`
+      } else if (category === 'flowrun') {
+        // A mount placeholder for an Image Flow run card (flowRun.ts,
+        // docs/flows.md): the flow-run mounter fetches `data-flowrun-src`,
+        // draws the card into `__body` and re-reads the run live. No download
+        // affordance; the saved images are their own artifacts.
+        const payloadUrl = artifactPreviewUrl(artifact || {}, { sessionKey, token })
+        html += `<div class="msg-artifact-flowrun" data-flowrun-src="${escAttr(payloadUrl)}" data-artifact-category="${escAttr(category)}" data-artifact-id="${escAttr(artifact?.id || '')}" data-artifact-name="${escAttr(name)}">
+          <div class="msg-artifact-flowrun__body"></div>
+          <p class="msg-artifact-flowrun__status">${escAttr(t('chat.flowRunLoading'))}</p>
         </div>`
       } else if (isImageArtifact(artifact)) {
         const previewUrl = artifactPreviewUrl(artifact || {}, { sessionKey, token })

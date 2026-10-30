@@ -10,6 +10,8 @@ _PRIVATE_MEMORY_READ_TOOL_NAMES: frozenset[str] = frozenset(
     {"memory_get", "memory_search", "session_search"}
 )
 _IMAGE_GENERATION_TOOL_NAMES: frozenset[str] = frozenset({"image_generate"})
+# Image Flows: hidden while flows are off or no image model has a key.
+_FLOW_TOOL_NAMES: frozenset[str] = frozenset({"flow_list", "flow_run"})
 _X_SEARCH_TOOL_NAMES: frozenset[str] = frozenset({"x_search"})
 _BROWSER_TOOL_NAMES: frozenset[str] = frozenset({"browser"})
 _SESSION_READ_TOOL_NAMES: frozenset[str] = frozenset(
@@ -43,6 +45,7 @@ class ToolSurfaceCapabilities:
     image_generation: bool = True
     x_search: bool = True
     browser: bool = True
+    flows: bool = True
 
 
 def private_memory_read_tools_blocked(ctx: ToolContext | None) -> bool:
@@ -79,6 +82,15 @@ def _detect_image_generation_capability() -> bool:
         return False
 
 
+def _detect_flows_capability() -> bool:
+    try:
+        from agentos.tools.builtin.flows import flows_available
+
+        return flows_available()
+    except Exception:
+        return False
+
+
 def _detect_x_search_capability() -> bool:
     try:
         from agentos.tools.builtin.x_search import x_search_available
@@ -108,6 +120,7 @@ def tool_surface_capabilities_from_runtime(
     image_generation: bool | None = None,
     x_search: bool | None = None,
     browser: bool | None = None,
+    flows: bool | None = None,
 ) -> ToolSurfaceCapabilities:
     """Build tool-surface capabilities from injected runtime dependencies."""
 
@@ -122,6 +135,7 @@ def tool_surface_capabilities_from_runtime(
         ),
         x_search=(_detect_x_search_capability() if x_search is None else x_search),
         browser=(_detect_browser_capability() if browser is None else browser),
+        flows=(_detect_flows_capability() if flows is None else flows),
     )
 
 
@@ -151,6 +165,8 @@ def resolve_runtime_tool_surface(
         denied_tools |= set(_X_SEARCH_TOOL_NAMES)
     if not caps.browser:
         denied_tools |= set(_BROWSER_TOOL_NAMES)
+    if not caps.flows:
+        denied_tools |= set(_FLOW_TOOL_NAMES)
     if not caps.session_manager:
         denied_tools |= set(
             _SESSION_READ_TOOL_NAMES | _SESSION_RUNTIME_TOOL_NAMES | _PROJECT_TOOL_NAMES
@@ -207,4 +223,5 @@ def detect_runtime_tool_surface_capabilities(
         image_generation=_detect_image_generation_capability(),
         x_search=_detect_x_search_capability(),
         browser=_detect_browser_capability(),
+        flows=_detect_flows_capability(),
     )

@@ -1,4 +1,6 @@
 import { createHashRouter, Navigate } from 'react-router'
+import { FlowEditorRoute } from '~/views/flows/FlowEditor'
+import { FlowsHome } from '~/views/flows/FlowsHome'
 import { ProjectView } from '~/views/projects/ProjectView'
 import { SessionRoute } from '~/views/trading/desk/SessionRoute'
 import { TradingRedirect } from '~/views/trading/desk/TradingRedirect'
@@ -18,6 +20,9 @@ import { AppShell } from './AppShell'
 // A project is a page (`projects/:id`), reached from its folder in the
 // sidebar: its brief and the chats filed in it.
 //
+// Image Flows are pages: `flows` lists them with the templates, `flows/:id`
+// is the node editor for one.
+//
 // `#/quick-ask` is not here: it is the Quick Ask panel's own window, which
 // App renders without the router, the shell or a gateway connection.
 export const router = createHashRouter([
@@ -30,6 +35,8 @@ export const router = createHashRouter([
       // trading desk around that same chat (views/trading/desk/SessionRoute).
       { path: 'sessions/:key?', Component: SessionRoute },
       { path: 'projects/:id', Component: ProjectView },
+      { path: 'flows', Component: FlowsHome },
+      { path: 'flows/:id', Component: FlowEditorRoute },
       // Trading is not a page: /trading forwards into the desk session.
       { path: 'trading', Component: TradingRedirect },
     ],

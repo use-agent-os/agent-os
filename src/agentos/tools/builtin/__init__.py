@@ -18,6 +18,7 @@ _NAMES = [
     "env_tools",
     "file_authoring",
     "filesystem",
+    "flows",
     "git",
     "media",
     "messaging",

@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Image Flows from the terminal and from agents (docs/flows.md).
+  `agentos flows list | show | nodes | models | run | runs | stop` talks to
+  the gateway's `flows.*` RPC; `flows run <id|name> --input name=value --to
+  NODE` waits for the run and prints its status, saved files, cost and cached
+  nodes (`--json`, `--no-wait`, `--timeout`). Two agent tools, `flow_list` and
+  `flow_run`, run a saved flow in-process: an estimate at or under
+  `[flows].agent_cost_limit_usd` (default $0.50) runs at once, a higher or
+  unknown one asks for approval first (unattended runs refuse), and a stopped
+  turn stops its run. Spend prompts have their own approval namespace, `flow`,
+  and offer only allow once or deny (no "Always Allow" or "Stop Asking", which
+  the gateway also ignores for it). A declined run sticks: for 30 minutes every
+  later run of that flow in that session asks again, whatever its inputs or
+  cost, and the agent is told not to work around the refusal. When
+  `image_generate` is unavailable, the system prompt points image requests at
+  the user's flows. Saved PNGs land in the chat as artifacts under an
+  `application/vnd.agentos.flow-run+json` run card (status, progress, cost,
+  cached count, thumbnails; "Open in Flows" on the desktop). Both tools are
+  offered only while flows are enabled and an image model has a key, and the
+  direct tool HTTP call never runs `flow_run`.
+- Deferred tool loading. `flow_list` and `flow_run` join the deferred set,
+  which now holds 27 rarely used builtins; deferral cuts a stock request from
+  66 to 40 tool schemas.
+
 ## [2026.10.27.post1] - 2026-10-27
 
 ### Added

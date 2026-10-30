@@ -113,7 +113,10 @@ _PRUNABLE_SQL = "MAX(created_at, COALESCE(expires_at, created_at)) <= ?"
 #: elevated mode.
 SESSION_REMEMBER_NAMESPACES = frozenset({"acp"})
 #: Namespaces whose resolve never changes the session's elevated mode.
-NO_ELEVATION_NAMESPACES = frozenset({"acp", "acp_elicitation"})
+#: ``flow`` is an agent's Image Flow spend (``flow_run``): approved once or
+#: denied, never turned into a session elevation (and, not being ``exec``, never
+#: remembered as an "always allow" intent).
+NO_ELEVATION_NAMESPACES = frozenset({"acp", "acp_elicitation", "flow"})
 
 
 class ApprovalQueue:

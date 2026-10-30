@@ -21,6 +21,8 @@ import { artifactAuthenticatedDownloadUrl } from './transcript/artifacts'
 import { createCardsMounter, type CardsMounter } from './transcript/cards'
 import { createChartMounter, type ChartMounter } from './transcript/chart'
 import { createDcaMounter, type DcaActions, type DcaMounter } from './transcript/dca'
+import type { FlowRunOpen } from './transcript/flowRun'
+import { createLazyFlowRunMounter, type LazyFlowRunMounter } from './transcript/flowRunLazy'
 import { createLpMounter, type LpActions, type LpMounter } from './transcript/lp'
 import {
   createMarketsMounter,
@@ -298,6 +300,13 @@ export function useTranscript(opts: {
    * carry no `.mk-swap`. Read live.
    */
   onMarketsSwap?: MarketsSwapHandler | null
+  /**
+   * "Open in Flows" on an Image Flow run card (flowRun.ts, docs/flows.md):
+   * called with the card's flow id. The desktop passes one that opens its
+   * Flows editor; the web console has no editor and passes none, so its cards
+   * carry no button. Read live.
+   */
+  onOpenFlow?: FlowRunOpen | null
   /**
    * Navigate to another session: the "Open session" action on a coding
    * harness's run card and completion card (transcript/acp.ts). The web
@@ -649,6 +658,34 @@ export function useTranscript(opts: {
       actions: () => triggerActionsRef.current,
     }),
   )
+  // Image Flow run cards (flowRun.ts). Read-only: the card re-reads its run
+  // (`flows.run.get`) on mount and while it runs, and fetches thumbnails with
+  // `flows.media`; both are reads every control connection may make. "Open in
+  // Flows" exists only while the caller hands over `onOpenFlow`.
+  const onOpenFlowRef = useRef<FlowRunOpen | null>(opts.onOpenFlow ?? null)
+  useEffect(() => {
+    onOpenFlowRef.current = opts.onOpenFlow ?? null
+  }, [opts.onOpenFlow])
+  // eslint-disable-next-line react-hooks/refs -- the factory stores the getter and reads .current only later, inside click handlers and renders outside React's render
+  const [flowRunMounter] = useState<LazyFlowRunMounter>(() =>
+    createLazyFlowRunMounter({
+      fetchPayload,
+      call: (method, params) => rpc.call(method, params),
+      openFlow: () => onOpenFlowRef.current,
+    }),
+  )
+  useEffect(() => {
+    const offRun = rpc.on('flows.run', (payload: unknown) => flowRunMounter.runEvent(payload))
+    const offNode = rpc.on('flows.node', (payload: unknown) => flowRunMounter.runEvent(payload))
+    const offState = rpc.on('_state', (state: unknown) => {
+      if (state === 'connected') flowRunMounter.reconnected()
+    })
+    return () => {
+      offRun()
+      offNode()
+      offState()
+    }
+  }, [rpc, flowRunMounter])
   // Coding-harness cards (acp.ts): the completion card of a subagent and the
   // run card of a `sessions_spawn(runtime="acp")`. Owns the one `acp.sessions`
   // poller of this transcript, armed only while a connected run card is
@@ -734,6 +771,7 @@ export function useTranscript(opts: {
       marketsMounter.mountMarkets(container)
       dcaMounter.mountDca(container)
       triggerMounter.mountTrigger(container)
+      flowRunMounter.mountFlowRuns(container)
     },
     [
       ticketResolver,
@@ -743,6 +781,7 @@ export function useTranscript(opts: {
       marketsMounter,
       dcaMounter,
       triggerMounter,
+      flowRunMounter,
     ],
   )
 
@@ -756,8 +795,17 @@ export function useTranscript(opts: {
       marketsMounter.destroyAll()
       dcaMounter.destroyAll()
       triggerMounter.destroyAll()
+      flowRunMounter.destroyAll()
     }
-  }, [chartMounter, cardsMounter, lpMounter, marketsMounter, dcaMounter, triggerMounter])
+  }, [
+    chartMounter,
+    cardsMounter,
+    lpMounter,
+    marketsMounter,
+    dcaMounter,
+    triggerMounter,
+    flowRunMounter,
+  ])
 
   // eslint-disable-next-line react-hooks/refs -- factory stores the refs and reads .current only later, inside methods invoked outside render (never at creation)
   const [controller] = useState<StreamController>(() =>

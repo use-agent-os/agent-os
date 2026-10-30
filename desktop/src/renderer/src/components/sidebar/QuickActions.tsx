@@ -1,4 +1,4 @@
-import { CalendarClock, PenSquare, Sparkles, type LucideIcon } from 'lucide-react'
+import { CalendarClock, PenSquare, Sparkles, Workflow, type LucideIcon } from 'lucide-react'
 import { Link } from 'react-router'
 import { t, type MessageKey } from '~/i18n'
 import { useUi } from '~/stores/ui'
@@ -18,6 +18,7 @@ export const QUICK_ACTIONS: readonly Action[] = [
   { to: '/sessions', label: 'sidebar.new', icon: PenSquare, shortcut: ['⌘', 'N'] },
   { panel: 'skills', label: 'sidebar.skills', icon: Sparkles },
   { panel: 'jobs', label: 'sidebar.jobs', icon: CalendarClock },
+  { to: '/flows', label: 'sidebar.flows', icon: Workflow },
 ]
 
 /** Fixed destinations above the session list. */

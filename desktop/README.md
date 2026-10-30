@@ -66,6 +66,8 @@ desktop/
             ├── views/jobs/   #   Scheduled jobs panel (a layer over the window, not a
             │                 #   route): job list + blueprints, detail pane, create/edit
             │                 #   sheet with the natural schedule builder
+            ├── views/flows/  #   Image Flows: home (`/flows`, list + templates) and the
+            │                 #   node editor (`/flows/:id`, @xyflow/react) over `flows.*`
             ├── views/projects/ # Project page (`/projects/:id`): renamable title,
             │                 #   self-saving brief, the chats filed there
             ├── views/quick-ask/ # The Quick Ask panel (its own window, `#/quick-ask`)

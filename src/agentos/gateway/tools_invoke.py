@@ -115,6 +115,7 @@ HARD_DENY_TOOLS: frozenset[str] = frozenset(
         "dubbing_download",
         # Paid media generation.
         "image_generate",
+        "flow_run",
         "music_generate",
         "song_generate",
         "tts",

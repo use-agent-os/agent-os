@@ -60,6 +60,8 @@ export const REQUIRED_METHODS: readonly string[] = [
   'env.reveal',
   'env.set',
   'env.unset',
+  'flows.media',
+  'flows.run.get',
   'gateway.restart',
   'logs.status',
   'logs.tail',

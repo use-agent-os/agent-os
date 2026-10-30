@@ -17,6 +17,7 @@ import {
   approvalCommand,
   approvalMonitor,
   canAlwaysAllow,
+  canBypass,
   saveApprovalMode,
   useApprovals,
   type Approval,
@@ -53,6 +54,7 @@ function ApprovalCard({
   // 900-char-truncated approvalDetail(); see approvalCardDetail in ./logic.
   const detail = approvalCardDetail(item)
   const showAlways = canAlwaysAllow(item)
+  const showBypass = canBypass(item)
   return (
     <article
       className="ap-card tone-warn"
@@ -111,15 +113,17 @@ function ApprovalCard({
               {t('approvals.cardAlways')}
             </Button>
           ) : null}
-          <Button
-            type="button"
-            variant="outline"
-            disabled={busy || answer.disabled}
-            title={t('approvals.cardBypassTitle')}
-            onClick={() => onResolve(item, 'bypass')}
-          >
-            {t('approvals.cardBypass')}
-          </Button>
+          {showBypass ? (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy || answer.disabled}
+              title={t('approvals.cardBypassTitle')}
+              onClick={() => onResolve(item, 'bypass')}
+            >
+              {t('approvals.cardBypass')}
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="destructive"
