@@ -4135,7 +4135,7 @@ wheels = [
 
 [[package]]
 name = "use-agent-os"
-version = "2026.10.27.post1"
+version = "2026.10.30"
 source = { editable = "." }
 dependencies = [
     { name = "agent-client-protocol" },
