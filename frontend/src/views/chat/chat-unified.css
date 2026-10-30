@@ -2011,6 +2011,193 @@
   }
 }
 
+/* Image Flow run cards (flowRun.ts, docs/flows.md). Read-only: the flow name,
+   a status pill, progress n/m with a thin bar, cost and cached count, and a
+   strip of thumbnails from `flows.media`. Status colours come from the theme's
+   --ok/--warn/--info tokens; the pill always carries the word too. */
+.chat-surface .msg-artifact-flowrun-group {
+  display: grid;
+  gap: 0.625rem;
+  max-width: min(40rem, 100%);
+}
+
+.chat-surface .msg-artifact-flowrun {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.chat-surface .msg-artifact-flowrun__body:empty {
+  display: none;
+}
+
+.chat-surface .msg-artifact-flowrun__status {
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-surface);
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+}
+
+.chat-surface .msg-artifact-flowrun__status[hidden] {
+  display: none;
+}
+
+.chat-surface .flowrun-card {
+  --flowrun-tone: var(--dim);
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-surface .flowrun-card:is([data-flowrun-status='queued'], [data-flowrun-status='running']) {
+  --flowrun-tone: var(--info);
+}
+
+.chat-surface .flowrun-card[data-flowrun-status='done'] {
+  --flowrun-tone: var(--ok);
+}
+
+.chat-surface .flowrun-card[data-flowrun-status='failed'] {
+  --flowrun-tone: var(--warn);
+}
+
+.chat-surface .flowrun-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.chat-surface .flowrun-card__eyebrow {
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.chat-surface .flowrun-card__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-surface .flowrun-card__status {
+  padding: 0.125rem 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--flowrun-tone) 45%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--flowrun-tone) 12%, transparent);
+  color: var(--flowrun-tone);
+  font-size: 0.6875rem;
+}
+
+.chat-surface .flowrun-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.chat-surface .flowrun-card__fact {
+  white-space: nowrap;
+}
+
+.chat-surface .flowrun-card__bar {
+  flex: 1 1 6rem;
+  height: 3px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--muted-foreground) 20%, transparent);
+}
+
+.chat-surface .flowrun-card__bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--flowrun-tone);
+  transition: width 0.3s ease;
+}
+
+.chat-surface .flowrun-card__thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+  gap: 0.5rem;
+}
+
+.chat-surface .flowrun-thumb {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+  margin: 0;
+}
+
+.chat-surface .flowrun-thumb__img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--radius-compact);
+  background: color-mix(in srgb, var(--muted-foreground) 12%, transparent);
+  object-fit: cover;
+}
+
+.chat-surface .flowrun-thumb__img--empty {
+  border: 1px dashed var(--border);
+  background: transparent;
+}
+
+.chat-surface .flowrun-thumb__name {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-surface .flowrun-card__more,
+.chat-surface .flowrun-card__empty {
+  align-self: center;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.chat-surface .flowrun-card__error {
+  margin: 0;
+  color: var(--warn);
+  font-size: 0.75rem;
+}
+
+.chat-surface .flowrun-card__foot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.chat-surface .flowrun-card__open {
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
 /* DCA mandate cards (dca.ts, docs/dca.md). One renderer, two layouts keyed by
    `.dca-card[data-dca-kind]` (mandate | mandates). It should read like an
    instrument, not a form: the plan as a large figure, a live countdown, a

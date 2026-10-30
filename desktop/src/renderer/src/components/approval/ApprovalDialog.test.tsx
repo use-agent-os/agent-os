@@ -51,6 +51,24 @@ describe('ApprovalDialog', () => {
     expect(screen.getByRole('alertdialog')).toBeInTheDocument()
   })
 
+  it('offers only Allow Once and Deny for an agent spend (Image Flow run)', () => {
+    setPending([
+      {
+        id: 'f1',
+        namespace: 'flow',
+        toolName: 'flow_run',
+        command: 'flow_run Poster GPT',
+        warning: 'Runs the Image Flow for an estimated ~$0.54, above the $0.50 agents may spend',
+      },
+    ])
+    render(<ApprovalDialog />)
+    const names = screen.getAllByRole('button').map((b) => b.textContent)
+    expect(names).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Always Allow' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Stop Asking' })).toBeNull()
+  })
+
   it('shows the command for a shell approval and offers Always Allow only for exec', async () => {
     setPending([{ id: 's1', namespace: 'exec', toolName: 'shell', command: 'rm -rf build' }])
     render(<ApprovalDialog />)

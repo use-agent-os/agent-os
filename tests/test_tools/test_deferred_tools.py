@@ -47,12 +47,12 @@ SESSION = "agent:main:deferred-test"
 MIN_SCHEMAS_SAVED = 19
 
 #: Pinned so the CHANGELOG, docs/configuration.md and the tool_search docstring
-#: cannot drift from the code: 25 builtins are marked deferred, all of them
+#: cannot drift from the code: 27 builtins are marked deferred, all of them
 #: visible on a stock gateway (builtins + skill + memory tools), whose request
-#: goes from 64 to 40 tool schemas.
-FLAGGED_BUILTINS = 25
-STOCK_DEFERRED = 25
-STOCK_FULL_SCHEMAS = 64
+#: goes from 66 to 40 tool schemas.
+FLAGGED_BUILTINS = 27
+STOCK_DEFERRED = 27
+STOCK_FULL_SCHEMAS = 66
 STOCK_REQUEST_SCHEMAS = 40
 
 

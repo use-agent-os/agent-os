@@ -3,8 +3,8 @@
 The request only carries the tools a typical turn needs; the rest are listed by
 name in this tool's description (see :mod:`agentos.tools.deferred`). Calling it
 loads the matches, so they are on the next request and every one after it for
-the rest of the session. On a stock gateway it stands in for 25 tools, taking
-a request from 64 to 40 tool schemas.
+the rest of the session. On a stock gateway it stands in for 27 tools, taking
+a request from 66 to 40 tool schemas.
 """
 
 from __future__ import annotations

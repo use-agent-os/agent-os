@@ -470,13 +470,14 @@ malformed or repetitive tool calls terminate predictably.
 ### Deferred tools
 
 By default a request carries only the tools a typical turn needs. The long tail
-— 25 builtins: audio generation, project and skill administration, `browser`,
-`x_search`, `http_request`, `subagents`, and a few more — is left out; the system prompt
+— 27 builtins: audio generation, project and skill administration, `browser`,
+`x_search`, `http_request`, `subagents`, the Image Flows tools `flow_list` /
+`flow_run`, and a few more — is left out; the system prompt
 lists each by name with a one-line summary under "Tools that must be loaded
 first", and so does the `tool_search` tool. The model calls `tool_search` to
 load the ones a task needs, and they stay loaded for the rest of the session (a
 reset starts lean again). On a stock gateway a request carries 40 tool schemas
-instead of 64. The spreadsheet/document builders and the git tools stay loaded:
+instead of 66. The spreadsheet/document builders and the git tools stay loaded:
 with them one load away the model reached for the shell instead. Reading a skill with `skill_view` also loads the tools that skill
 lists in `requires_tools`. Policy still applies: a tool the session may not use
 is neither listed nor loadable. A surface narrowed by an allowlist (an agent's
@@ -1489,6 +1490,28 @@ log_retention_sweep_interval_s = 3600.0
 - **Prometheus Metrics**: `metrics_enabled` (default `true`) exposes Prometheus metrics at `metrics_path` (default `"/metrics"`). Core metrics (`agentos_queue_depth`, `in_flight_turns_total`, `turn_cancellations_total`, `queue_full_errors_total`) are exported with bounded cardinality.
 - **OTLP Trace Export**: `otlp_enabled` (default `false`) sends trace events as OTLP spans over HTTP to `otlp_endpoint` (e.g. OpenTelemetry Collector).
 - **Log Retention**: `log_retention_days` (TTL) and `log_retention_max_total_mb` (total size cap) bound disk growth in `~/.agentos/logs`. Background sweeps run every `log_retention_sweep_interval_s`.
+
+## Image Flows
+
+`[flows]` configures the Image Flows engine (the desktop's Flows editor,
+`agentos flows`, and the agent tools `flow_list` / `flow_run`):
+
+```toml
+[flows]
+enabled = true              # off: every run is refused and the agent tools are hidden
+max_concurrent_runs = 1     # 1-8 runs at once; the rest wait in a FIFO queue
+agent_cost_limit_usd = 0.50 # flow_run above this estimate (or an unknown one) asks for approval
+cache_max_mb = 500          # node cache, least recently used evicted first
+```
+
+Env overrides use a single underscore after the section:
+`AGENTOS_FLOWS_ENABLED`, `AGENTOS_FLOWS_MAX_CONCURRENT_RUNS`,
+`AGENTOS_FLOWS_AGENT_COST_LIMIT_USD`, `AGENTOS_FLOWS_CACHE_MAX_MB`. Image
+provider keys and base URLs are not repeated here: flows use
+`[image_generation.providers.surplus]` (`SURPLUS_API_KEY`), `.openrouter`
+(`OPENROUTER_API_KEY`) and `.openai` (`OPENAI_API_KEY`), whatever
+`[image_generation].enabled` says (that flag only gates `image_generate`).
+See [`flows.md`](flows.md).
 
 ## Downloads, Web Push and Direct Tool Calls
 

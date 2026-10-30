@@ -14,6 +14,7 @@ import {
   approvalMeta,
   approvalMonitor,
   canAlwaysAllow,
+  canBypass,
   useApprovals,
   type Approval,
 } from '@/services/approval-monitor'
@@ -121,6 +122,7 @@ export function ApprovalPrompt({ onOpenInbox }: { onOpenInbox?: () => void } = {
   const detail = approvalDetail(item)
   const meta = approvalMeta(item, item.mode || mode)
   const showAlways = canAlwaysAllow(item)
+  const showBypass = canBypass(item)
   const toolLabel = item.toolName || item.actionKind || t('shell.approvalFallbackTool')
 
   async function resolve(action: 'once' | 'always' | 'bypass' | 'deny'): Promise<void> {
@@ -183,15 +185,17 @@ export function ApprovalPrompt({ onOpenInbox }: { onOpenInbox?: () => void } = {
               {t('shell.approvalAlways')}
             </Button>
           ) : null}
-          <Button
-            type="button"
-            variant="outline"
-            disabled={busy || answer.disabled}
-            title={t('shell.approvalBypassTitle')}
-            onClick={() => void resolve('bypass')}
-          >
-            {t('shell.approvalBypass')}
-          </Button>
+          {showBypass ? (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy || answer.disabled}
+              title={t('shell.approvalBypassTitle')}
+              onClick={() => void resolve('bypass')}
+            >
+              {t('shell.approvalBypass')}
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="destructive"

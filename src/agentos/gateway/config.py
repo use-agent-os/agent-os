@@ -1805,12 +1805,23 @@ class ImageGenerationOpenRouterProviderConfig(BaseModel):
     api_key_env: str = "OPENROUTER_API_KEY"
 
 
+class ImageGenerationSurplusProviderConfig(BaseModel):
+    """Surplus Intelligence images (used by Image Flows, not by ``image_generate``)."""
+
+    base_url: str = "https://api.surplusintelligence.ai/v1"
+    api_key: str = ""
+    api_key_env: str = "SURPLUS_API_KEY"
+
+
 class ImageGenerationProvidersConfig(BaseModel):
     openai: ImageGenerationOpenAIProviderConfig = Field(
         default_factory=ImageGenerationOpenAIProviderConfig
     )
     openrouter: ImageGenerationOpenRouterProviderConfig = Field(
         default_factory=ImageGenerationOpenRouterProviderConfig
+    )
+    surplus: ImageGenerationSurplusProviderConfig = Field(
+        default_factory=ImageGenerationSurplusProviderConfig
     )
 
 
@@ -1829,6 +1840,28 @@ class ImageGenerationConfig(BaseSettings):
     providers: ImageGenerationProvidersConfig = Field(
         default_factory=ImageGenerationProvidersConfig
     )
+
+
+class FlowsConfig(BaseSettings):
+    """Image Flows: the node-graph image engine (``[flows]``).
+
+    Provider keys and base URLs are not repeated here: flows reuse
+    ``[image_generation.providers.*]``. ``[image_generation].enabled`` gates
+    only the ``image_generate`` agent tool, not flows.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="AGENTOS_FLOWS_",
+        env_nested_delimiter="__",
+    )
+
+    enabled: bool = True
+    #: Runs executing at once; further runs wait in a FIFO queue.
+    max_concurrent_runs: int = Field(default=1, ge=1, le=8)
+    #: An agent's ``flow_run`` above this estimate (or with an unknown one) needs approval.
+    agent_cost_limit_usd: float = Field(default=0.50, ge=0)
+    #: Size of the node cache (LRU by bytes).
+    cache_max_mb: int = Field(default=500, ge=0)
 
 
 class AudioElevenLabsProviderConfig(BaseModel):
@@ -2715,6 +2748,7 @@ class GatewayConfig(BaseSettings):
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
     image_generation: ImageGenerationConfig = Field(default_factory=ImageGenerationConfig)
+    flows: FlowsConfig = Field(default_factory=FlowsConfig)
     audio: AudioConfig = Field(default_factory=AudioConfig)
     x_search: XSearchConfig = Field(default_factory=XSearchConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
@@ -3345,6 +3379,7 @@ _OMIT_WHEN_DEFAULT_SECTIONS: tuple[tuple[str, type[BaseModel]], ...] = (
     ("artifacts", ArtifactsConfig),
     ("push", PushConfig),
     ("hooks", HooksConfig),
+    ("flows", FlowsConfig),
 )
 
 

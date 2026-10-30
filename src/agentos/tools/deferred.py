@@ -79,8 +79,8 @@ LOADED_STATE_PROVIDER = "portable"
 #: and calling them directly once they were in the request.
 #:
 #: Deferred: tools a typical turn does not touch and whose absence the model
-#: can always repair with one ``tool_search`` call. 25 names, all visible on a
-#: stock gateway, whose request drops from 64 to 40 schemas.
+#: can always repair with one ``tool_search`` call. 27 names, all visible on a
+#: stock gateway, whose request drops from 66 to 40 schemas.
 #: ``test_deferred_tools`` pins these numbers.
 DEFERRED_BUILTIN_TOOLS: frozenset[str] = frozenset(
     {
@@ -113,6 +113,9 @@ DEFERRED_BUILTIN_TOOLS: frozenset[str] = frozenset(
         "agents_list",
         "browser",
         "env_list",
+        # Image Flows: the user's saved node graphs, reached when they name one.
+        "flow_list",
+        "flow_run",
         "http_request",
         "session_rename",
         "x_search",

@@ -160,6 +160,7 @@ def test_policy_runtime_builds_capabilities_from_injected_dependencies() -> None
         # the assertion below would then pass locally and fail in CI.
         x_search=False,
         browser=False,
+        flows=False,
     )
 
     assert caps == ToolSurfaceCapabilities(
@@ -171,6 +172,7 @@ def test_policy_runtime_builds_capabilities_from_injected_dependencies() -> None
         image_generation=False,
         x_search=False,
         browser=False,
+        flows=False,
     )
 
 

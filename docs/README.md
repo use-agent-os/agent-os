@@ -39,6 +39,8 @@ root release README with task-oriented guides.
   authoring.
 - [`features/browser.md`](features/browser.md) - browser automation and
   Chrome attachment.
+- [`flows.md`](flows.md) - Image Flows: node-graph image workflows, the
+  `agentos flows` CLI, the `flow_run` agent tool and its cost gate.
 - [`acp-agents.md`](acp-agents.md) - delegate coding work to Claude Code,
   Codex, Gemini CLI, Cursor and other ACP harnesses.
 - [`features/compaction-and-cache.md`](features/compaction-and-cache.md) -

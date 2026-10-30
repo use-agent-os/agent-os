@@ -123,6 +123,10 @@ APPROVED_PACKAGE_IMPORTS: frozenset[tuple[str, str]] = frozenset({
     # never imports back into the gateway (events arrive through an injected
     # broadcast callable), so this edge cannot form a cycle.
     ("gateway", "trading"),
+    # Image Flows is a leaf like trading: agentos.flows imports no other
+    # package; the gateway's flows_wiring injects providers, the auxiliary
+    # client and accounting, and events leave through a broadcast callable.
+    ("gateway", "flows"),
     ("identity", "safety"),
     ("identity", "session"),
     # MCP tool output is server-authored; discovery wraps it in the shared
@@ -183,6 +187,9 @@ APPROVED_PACKAGE_IMPORTS: frozenset[tuple[str, str]] = frozenset({
     ("tools", "agents"),
     ("tools", "channels"),
     ("tools", "engine"),
+    # The flow_list / flow_run tools call the Image Flows service in-process;
+    # agentos.flows is a leaf, so this edge cannot form a cycle.
+    ("tools", "flows"),
     ("tools", "gateway"),
     ("tools", "identity"),
     ("tools", "memory"),

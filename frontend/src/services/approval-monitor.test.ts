@@ -12,6 +12,7 @@ import {
   approvalsSettingsUrl,
   approvalsUrl,
   canAlwaysAllow,
+  canBypass,
   isApprovalBypassMode,
   readBrowserElevated,
   saveApprovalMode,
@@ -674,6 +675,26 @@ describe('approval-monitor service', () => {
       // Backfill after resolve.
       expect(fetchMock).toHaveBeenCalledTimes(2)
       expect(fetchMock.mock.calls[1]![0]).toBe('/api/approvals')
+    })
+
+    it('never sends "always" or an elevation for a once-only spend approval', async () => {
+      fetchMock
+        .mockResolvedValueOnce(okResponse({ ok: true }))
+        .mockResolvedValue(okResponse({ pending: [], mode: 'prompt' }))
+      const spend: Approval = { id: 'f1', namespace: 'flow', command: 'flow_run Poster' }
+      expect(canBypass(spend)).toBe(false)
+      expect(canAlwaysAllow(spend)).toBe(false)
+      expect(canBypass(item)).toBe(true)
+      await makeMonitor().resolve(spend, 'bypass')
+      const body = JSON.parse(fetchMock.mock.calls[0]![1].body as string)
+      expect(body).toMatchObject({
+        id: 'f1',
+        namespace: 'flow',
+        approved: true,
+        allowAlways: false,
+        rememberIntent: false,
+      })
+      expect(body.elevatedMode).toBeUndefined()
     })
 
     it('drops the item from the store as soon as the POST succeeds, before the backfill lands', async () => {

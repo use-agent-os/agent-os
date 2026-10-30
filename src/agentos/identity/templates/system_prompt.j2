@@ -136,14 +136,24 @@ These are installed but their schemas are not sent until loaded. When a task mat
 {% endif -%}
 
 {% set has_image_gen = tools and "image_generate" in tools -%}
+{% set has_flow_run = tools and "flow_run" in tools -%}
 {% if prompt_mode == "full" -%}
 {% if has_image_gen -%}
 ## Image Generation
 
 - To create a new image, you MUST call the `image_generate` tool. Never claim to have generated, drawn, or produced an image without actually invoking the tool.
+{% if has_flow_run -%}
+- When the user names one of their saved Image Flows, or asks to reuse or re-run one, use `flow_run` (see `flow_list`) instead of `image_generate`.
+{% endif -%}
 {% if has_code_tool -%}
 - For charts or plots of data you already have, prefer `execute_code` to render matplotlib/SVG output, then describe the file you produced.
 {% endif %}
+
+{% elif has_flow_run -%}
+## Image Generation
+
+- `image_generate` is not available here, but you can create images by running one of the user's saved Image Flows. Load `flow_list` and `flow_run` (`tool_search`), pick a flow that fits the request (a text-to-image flow takes the request as its prompt input) and run it. Never claim to have generated, drawn, or produced an image without a tool result.
+- If the user has no flow that fits, say so and tell them to create one in the Flows editor of the AgentOS desktop app (the "Text to image" template is enough); do not offer an SVG as if it were the image they asked for.
 
 {% else -%}
 ## Image Generation

@@ -361,6 +361,16 @@ function ConnectedChat({
     [navigate, sessionKey],
   )
 
+  // "Open in Flows" on an Image Flow run card (docs/flows.md): the editor
+  // for that flow, pushed so Back returns to this chat.
+  const openFlow = useCallback(
+    (flowId: string) => {
+      if (!flowId) return
+      void navigate(`/flows/${encodeURIComponent(flowId)}`)
+    },
+    [navigate],
+  )
+
   const {
     containerRef,
     routerFxDockRef,
@@ -391,6 +401,7 @@ function ConnectedChat({
     triggerActions: lpActions,
     onMarketsSwap,
     onOpenSession: openSession,
+    onOpenFlow: openFlow,
   })
   const attachments = useAttachments()
   // A coding harness's own chat (`agent:<agent>:acp:<id>`): its bar, and a

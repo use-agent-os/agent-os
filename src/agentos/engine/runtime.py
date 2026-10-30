@@ -4435,6 +4435,7 @@ class TurnRunner:
             image_generation=detected.image_generation,
             x_search=detected.x_search,
             browser=detected.browser,
+            flows=detected.flows,
         )
         return resolve_runtime_tool_surface(ctx, capabilities=capabilities)
 

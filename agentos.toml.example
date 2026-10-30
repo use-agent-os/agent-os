@@ -736,6 +736,14 @@ cron_default_mode = "bypass"            # off | bypass | full
 # ticketed URLs from the artifacts.download RPC.
 # legacy_session_key_urls = true
 
+# [flows]
+# Image Flows (docs/flows.md): node-graph image workflows built in the desktop
+# app. Provider keys come from [image_generation.providers.*].
+# enabled = true
+# max_concurrent_runs = 1        # further runs wait in a FIFO queue
+# agent_cost_limit_usd = 0.50    # an agent's flow_run above this needs approval
+# cache_max_mb = 500
+
 # [push]
 # Web Push for approval prompts (Settings -> "Push notifications for approvals").
 # web_enabled = true

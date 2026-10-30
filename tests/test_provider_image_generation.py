@@ -671,3 +671,82 @@ def test_image_generation_capability_does_not_expose_agent_tool_when_disabled(
     names = {tool.name for tool in tool_defs}
 
     assert "image_generate" not in names
+
+
+def test_image_generation_auto_detects_surplus_after_openai_and_openrouter(monkeypatch) -> None:
+    for name in ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "SURPLUS_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+    from agentos.gateway.config import ImageGenerationConfig
+    from agentos.tools.builtin.media import (
+        _resolve_image_generation_candidates,
+        configure_image_generation,
+        image_generation_available,
+    )
+
+    try:
+        config = ImageGenerationConfig(enabled=True)
+        configure_image_generation(config)
+        assert not image_generation_available()
+        assert "surplus/venice-nano-banana-2" not in _resolve_image_generation_candidates(
+            None, config
+        )
+
+        monkeypatch.setenv("SURPLUS_API_KEY", "inf_test")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "or-test")
+        configure_image_generation(config)
+        assert image_generation_available()
+        assert _resolve_image_generation_candidates(None, config) == [
+            "openai/gpt-image-1",
+            "openrouter/google/gemini-3.1-flash-image-preview",
+            "surplus/venice-nano-banana-2",
+        ]
+        # Explicit routing names Surplus directly and adds nothing else.
+        routed = ImageGenerationConfig(enabled=True, primary="surplus/venice-flux-2-pro")
+        assert _resolve_image_generation_candidates(None, routed) == ["surplus/venice-flux-2-pro"]
+    finally:
+        configure_image_generation(None)
+
+
+@pytest.mark.asyncio
+async def test_image_generation_falls_back_to_surplus(monkeypatch) -> None:
+    import httpx
+
+    from agentos.provider.image_generation import (
+        generate_with_fallbacks,
+        reset_image_generation_providers,
+    )
+
+    for name in ("OPENAI_API_KEY", "OPENROUTER_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("SURPLUS_API_KEY", "inf_test")
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    )
+    seen: list[httpx.Request] = []
+    real_client = httpx.AsyncClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={"data": [{"b64_json": base64.b64encode(png).decode()}]},
+            headers={"x-si-buyer-cost-micro": "12000"},
+        )
+
+    monkeypatch.setattr(
+        "agentos.provider.image_generation.httpx.AsyncClient",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    reset_image_generation_providers()
+    try:
+        result = await generate_with_fallbacks(
+            request=ImageGenerationRequest(prompt="a fox", model="x", size="1024x1024"),
+            candidates=["openai/gpt-image-1", "surplus/venice-nano-banana-2"],
+        )
+    finally:
+        reset_image_generation_providers()
+    assert result.provider == "surplus" and result.image_bytes == png
+    assert result.cost_usd == pytest.approx(0.012)
+    assert [a.provider for a in result.attempts] == ["openai"]  # no key: skipped over
+    assert json.loads(seen[0].content)["model"] == "venice-nano-banana-2"

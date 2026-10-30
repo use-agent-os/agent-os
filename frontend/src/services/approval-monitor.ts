@@ -3,7 +3,7 @@
  *
  * Event-driven: the gateway pushes `approval.requested` / `approval.resolved`
  * over the Control WebSocket whenever the approval queue changes (every
- * namespace: exec, plugin, acp, acp_elicitation), and the monitor applies each
+ * namespace: exec, plugin, acp, acp_elicitation, flow), and the monitor applies each
  * frame to the store as it arrives. REST is only the backfill: one
  * GET /api/approvals on every transition of the WS client to 'connected' (and
  * once at start when it is already connected), on window focus /
@@ -234,6 +234,19 @@ export function approvalMeta(item: Approval, mode: string): string {
 // commands.
 export function canAlwaysAllow(item: Approval): boolean {
   return item.namespace === 'exec' && !!item.command
+}
+
+/**
+ * Namespaces answered once at a time: an agent's Image Flow spend (`flow`,
+ * the `flow_run` cost gate, docs/flows.md) offers only allow-once and deny.
+ * "Always allow" or "Stop asking" there would read as unlimited agent spend;
+ * the gateway ignores both for this namespace anyway.
+ */
+export const ONCE_ONLY_NAMESPACES: ReadonlySet<string> = new Set(['flow'])
+
+/** Whether "Bypass approvals" / "Stop asking" may be offered for `item`. */
+export function canBypass(item: Approval): boolean {
+  return !ONCE_ONLY_NAMESPACES.has(item.namespace || 'exec')
 }
 
 export type ApprovalAction = 'once' | 'always' | 'bypass' | 'deny'
@@ -480,9 +493,12 @@ export class ApprovalMonitor {
     this.busy = true
     // approval_monitor.js:173-177
     const approved = action === 'once' || action === 'always' || action === 'bypass'
-    const allowAlways = action === 'always'
-    const rememberIntent = action === 'always'
-    const elevatedMode: ElevatedMode = action === 'bypass' ? 'bypass' : ''
+    // A once-only approval (an agent's spend) never carries "always" or an
+    // elevation, whichever surface sent it.
+    const onceOnly = ONCE_ONLY_NAMESPACES.has(item.namespace || 'exec')
+    const allowAlways = action === 'always' && !onceOnly
+    const rememberIntent = allowAlways
+    const elevatedMode: ElevatedMode = action === 'bypass' && !onceOnly ? 'bypass' : ''
     const body: Record<string, unknown> = {
       id: item.id,
       namespace: item.namespace || 'exec',

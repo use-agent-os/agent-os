@@ -64,6 +64,7 @@ import agentos.gateway.rpc_cron  # noqa: E402, F401
 import agentos.gateway.rpc_diagnostics  # noqa: E402, F401
 import agentos.gateway.rpc_doctor  # noqa: E402, F401
 import agentos.gateway.rpc_env  # noqa: E402, F401
+import agentos.gateway.rpc_flows  # noqa: E402, F401
 import agentos.gateway.rpc_gateway  # noqa: E402, F401
 import agentos.gateway.rpc_logs  # noqa: E402, F401
 import agentos.gateway.rpc_mcp  # noqa: E402, F401

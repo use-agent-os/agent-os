@@ -6,6 +6,7 @@ export const shell = {
   'sidebar.new': 'New session',
   'sidebar.jobs': 'Scheduled jobs',
   'sidebar.skills': 'Skills',
+  'sidebar.flows': 'Flows',
   'sidebar.search': 'Search sessions',
   'sidebar.sessions': 'Sessions',
   'sidebar.sessions.empty': 'Your sessions will collect here',

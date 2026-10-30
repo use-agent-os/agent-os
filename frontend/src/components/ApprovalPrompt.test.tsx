@@ -106,6 +106,15 @@ describe('ApprovalPrompt', () => {
     expect(screen.queryByRole('button', { name: /always allow/i })).not.toBeInTheDocument()
   })
 
+  it('offers only allow-once and deny for an agent spend (flow) approval', () => {
+    setPending([{ id: 'f1', namespace: 'flow', command: 'flow_run Poster', toolName: 'flow_run' }])
+    render(<ApprovalPrompt />)
+    expect(screen.getByRole('button', { name: /approve this time/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /deny/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /always allow/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /bypass/i })).not.toBeInTheDocument()
+  })
+
   it('falls back to actionKind / "Tool execution" for the tool label', () => {
     setPending([{ id: 'a1', namespace: 'plugin', actionKind: 'write_file' }])
     const { rerender } = render(<ApprovalPrompt />)

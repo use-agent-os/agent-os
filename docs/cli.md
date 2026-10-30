@@ -41,6 +41,7 @@ available without `uv tool list` or `pip show`.
 | `agentos search` | Configure and use web search. |
 | `agentos sandbox` | Inspect or change default sandbox posture. |
 | `agentos cron` | Manage scheduled AgentOS runs. |
+| `agentos flows` | List, inspect and run Image Flows (node-graph image workflows built in the desktop app): `list`, `show`, `nodes`, `models`, `run`, `runs`, `stop`. |
 | `agentos cost` | Inspect usage and estimated cost. |
 | `agentos cost savings` | Report what the Pilot Router saved against the priciest configured tier. |
 | `agentos context` | Show the fixed per-request context cost and what each tool profile would cost. |
@@ -1055,6 +1056,41 @@ project, `projects_list` returns knowledge text only for that project, and
 stays on the CLI/Web UI surface.
 
 Read: [`sessions.md`](sessions.md)
+
+## Image Flows
+
+```sh
+agentos flows list                                   # saved flows, newest first
+agentos flows show "Lighthouse study"                # nodes, links, public inputs
+agentos flows nodes                                  # node types
+agentos flows models                                 # image models, which have a key, prices
+agentos flows run "Lighthouse study" --input prompt="a red fox in snow" --input count=2
+agentos flows run flw_2af4f4b5 --to n2 --json        # only up to node n2; JSON summary
+agentos flows run flw_2af4f4b5 --no-wait             # queue it and print the run id
+agentos flows runs "Lighthouse study" --limit 10     # recent runs (all flows without an argument)
+agentos flows stop run_0123456789ab
+```
+
+Every command talks to the running gateway over the `flows.*` RPC, so a run
+started here shows up live in the desktop's Flows editor (`origin: cli`).
+`show`, `run` and `runs` take a flow id or its exact name (ids win; two
+flows with one name are refused). `--input name=value` overrides a public
+input only (`show` lists them); numbers and toggles take their string form.
+`run` waits (`--timeout`, default 600 s) and prints the status, `n/m` nodes,
+how many were cached, the cost against the estimate and the saved PNG
+paths; it exits 0 when the run is done, 1 when it failed, was cancelled or
+is still going at the timeout (it keeps running), and 2 for an input the
+engine refuses (unknown flow or input, a graph with errors: each node error
+is printed). `--json` prints one summary object; errors are a JSON envelope
+on stderr. `models` names the missing key for every unavailable model
+(`SURPLUS_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`).
+
+`run` and `stop` spend or change things, so from an agent's shell the
+gateway refuses them (`flows.operator_required`); agents use the `flow_run`
+tool, which asks for approval above `[flows].agent_cost_limit_usd` (default
+$0.50), e.g. `agentos config set flows.agent_cost_limit_usd 1.00`.
+
+Read: [`flows.md`](flows.md)
 
 ## Wallets and trading
 
