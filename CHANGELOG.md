@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.2] - 2026-11-02
+
 ### Added
 - Image Flows: agents can build and edit flows from chat (docs/flows.md,
   "Agents can build flows"). Three new agent tools: `flow_get` (without an
