@@ -88,6 +88,10 @@ def test_skill_md_is_the_authority_over_the_live_muse_txt() -> None:
 def test_the_install_scan_finds_nothing_dangerous() -> None:
     files: dict[str, str | bytes] = {}
     for path in SKILL_DIR.rglob("*"):
+        # A GitHub install never sees bytecode; other tests that import the
+        # script leave a __pycache__ here depending on test order.
+        if "__pycache__" in path.parts or path.suffix == ".pyc":
+            continue
         if path.is_file():
             raw = path.read_bytes()
             rel = path.relative_to(SKILL_DIR).as_posix()
