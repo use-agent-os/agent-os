@@ -802,3 +802,65 @@ def apply_inputs(doc: dict[str, Any], inputs: dict[str, Any] | None) -> dict[str
             )
         node.setdefault("values", {})[input_name] = _coerce(spec, value)
     return copy
+
+
+#: Image-node widgets a single run may override without editing the flow.
+RUN_OVERRIDE_FIELDS = ("model", "count", "aspect", "resolution", "size", "quality", "background")
+
+
+def apply_overrides(
+    doc: dict[str, Any], overrides: dict[str, dict[str, Any]] | None
+) -> dict[str, Any]:
+    """Return a copy of *doc* with per-run overrides applied to its image nodes.
+
+    ``overrides`` maps node id to ``{widget: value}``; only ``image`` nodes and
+    :data:`RUN_OVERRIDE_FIELDS` are allowed. A bad node or field is
+    ``flows.invalid`` (node_errors keyed by node id); the values themselves are
+    checked by the normal validator afterwards (range, options, availability).
+    """
+    import agentos.flows.nodes  # noqa: F401 - registers the built-in nodes
+
+    if not overrides:
+        return doc
+    if not isinstance(overrides, dict):
+        raise FlowError(
+            "flows.invalid",
+            "overrides must map a node id to {field: value}",
+            details={"node_errors": {}},
+        )
+    copy: dict[str, Any] = json.loads(json.dumps(doc))
+    by_id = {str(node.get("id")): node for node in copy.get("nodes") or []}
+    errors = Errors()
+    for node_id, fields in overrides.items():
+        node = by_id.get(str(node_id))
+        if node is None:
+            errors.add(FLOW_KEY, "unknown_node", f"overrides name an unknown node {node_id!r}")
+            continue
+        if node.get("type") != "image":
+            errors.add(
+                str(node_id),
+                "not_overridable",
+                f"Run overrides apply to image nodes only, not {node.get('type')}",
+            )
+            continue
+        if not isinstance(fields, dict):
+            errors.add(str(node_id), "invalid_value", "an override must be {field: value}")
+            continue
+        schema = NODE_TYPES["image"].schema
+        values = node.setdefault("values", {})
+        for name, value in fields.items():
+            if name not in RUN_OVERRIDE_FIELDS:
+                errors.add(
+                    str(node_id),
+                    "not_overridable",
+                    f"{name!r} cannot be overridden per run "
+                    f"(allowed: {', '.join(RUN_OVERRIDE_FIELDS)})",
+                    input=str(name),
+                )
+                continue
+            values[name] = _coerce(schema.input(name), value)
+    if errors:
+        raise FlowError(
+            "flows.invalid", "Invalid run overrides", details={"node_errors": errors.by_node}
+        )
+    return copy

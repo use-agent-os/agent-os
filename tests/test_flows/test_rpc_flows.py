@@ -32,6 +32,8 @@ METHODS = (
     "flows.media",
     "flows.upload",
     "flows.import_png",
+    "flows.revisions",
+    "flows.restore",
 )
 WRITES = (
     "flows.create",
@@ -111,7 +113,7 @@ async def test_happy_path_create_save_run_inspect(rpc_service, ctx, recorder) ->
         "flow"
     ]
     assert flow["rev"] == 1 and flow["name"] == "Lighthouse"
-    assert ("flows.changed", {"flow_id": flow["id"], "rev": 1}) in recorder.events
+    assert ("flows.changed", {"flow_id": flow["id"], "rev": 1, "author": "user"}) in recorder.events
     listed = (await ok("flows.list", {}, ctx))["flows"]
     assert listed == [
         {
@@ -121,6 +123,8 @@ async def test_happy_path_create_save_run_inspect(rpc_service, ctx, recorder) ->
             "updated": flow["updated"],
             "node_count": 3,
             "preview": None,
+            "created_by": "user",
+            "updated_by": "user",
         }
     ]
     assert (await ok("flows.get", {"id": flow["id"]}, ctx))["flow"] == flow
@@ -170,7 +174,7 @@ async def test_happy_path_create_save_run_inspect(rpc_service, ctx, recorder) ->
     assert (await ok("flows.list", {}, ctx))["flows"] == []
     assert (
         "flows.changed",
-        {"flow_id": flow["id"], "rev": 3, "deleted": True},
+        {"flow_id": flow["id"], "rev": 3, "author": "user", "deleted": True},
     ) in recorder.events
 
 
@@ -264,3 +268,47 @@ async def test_list_and_get_say_up_front_whether_writes_are_allowed(rpc_service,
         "This window is connected as an agent, so it can't change or run flows. "
         "Open Flows in the AgentOS app that manages this gateway."
     )
+
+
+async def test_revisions_and_restore_over_rpc(rpc_service, ctx, recorder) -> None:
+    flow = (await ok("flows.create", {"name": "H", "template": "text_to_image"}, ctx))["flow"]
+    flow["nodes"][0]["values"]["text"] = "second"
+    saved = (await ok("flows.save", {"flow": flow, "base_rev": 1}, ctx))["flow"]
+    assert (saved["created_by"], saved["updated_by"]) == ("user", "user")
+    revisions = (await ok("flows.revisions", {"id": flow["id"]}, ctx))["revisions"]
+    assert [(r["rev"], r["author"], r["summary"]) for r in revisions] == [
+        (
+            2,
+            "user",
+            'changed n1.text "A lighthouse on a rocky coast at dusk, w…" → "second"',
+        ),
+        (1, "user", "created with 3 nodes and 2 links"),
+    ]
+    assert set(revisions[0]) == {"rev", "author", "session_key", "kind", "created", "summary"}
+    restored = (await ok("flows.restore", {"id": flow["id"], "rev": 1, "base_rev": 2}, ctx))["flow"]
+    assert restored["rev"] == 3 and restored["nodes"][0]["values"]["text"] != "second"
+    assert ("flows.changed", {"flow_id": flow["id"], "rev": 3, "author": "user"}) in (
+        recorder.events
+    )
+    res = await call("flows.restore", {"id": flow["id"], "rev": 1, "base_rev": 2}, ctx)
+    assert res.error.code == "flows.conflict"
+    res = await call("flows.restore", {"id": flow["id"], "rev": 1}, ctx)
+    assert res.error.code == "flows.invalid"
+    res = await call("flows.revisions", {"id": "flw_nothere1"}, ctx)
+    assert res.error.code == "flows.not_found"
+    agent = _agent_ctx()
+    assert (await call("flows.revisions", {"id": flow["id"]}, agent)).ok  # reading is fine
+    denied = await call("flows.restore", {"id": flow["id"], "rev": 1, "base_rev": 3}, agent)
+    assert denied.error.code == "flows.operator_required"
+
+
+async def test_overrides_over_rpc(rpc_service, ctx, images) -> None:
+    flow = (await ok("flows.create", {"name": "O", "template": "text_to_image"}, ctx))["flow"]
+    overrides = {"n2": {"count": 2}}
+    est = await ok("flows.estimate", {"flow": flow, "overrides": overrides}, ctx)
+    assert est["total"]["usd"] == pytest.approx(0.1344)
+    queued = await ok("flows.run", {"flow_id": flow["id"], "overrides": overrides}, ctx)
+    run = await rpc_service.wait_run(queued["run_id"], timeout=5)
+    assert run["overrides"] == overrides and len(images.calls) == 2
+    res = await call("flows.run", {"flow_id": flow["id"], "overrides": {"n1": {"text": "x"}}}, ctx)
+    assert res.error.code == "flows.invalid"

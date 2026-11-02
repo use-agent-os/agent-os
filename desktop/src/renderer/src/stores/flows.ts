@@ -19,6 +19,7 @@ import type {
   FlowDoc,
   FlowEvent,
   FlowList,
+  FlowRevision,
   FlowSummary,
   FlowTemplate,
   ImageRef,
@@ -51,6 +52,7 @@ export const FLOWS_KEYS = {
   flow: (id: string) => ['flows', 'flow', id] as const,
   runs: (flowId?: string) => ['flows', 'runs', flowId ?? 'all'] as const,
   run: (runId: string) => ['flows', 'run', runId] as const,
+  revisions: (id: string) => ['flows', 'revisions', id] as const,
   media: (sha: string, maxSide?: number) => ['flows', 'media', sha, maxSide ?? 0] as const,
 }
 
@@ -94,6 +96,9 @@ export function flowsApi(rpc: WsRpcClient) {
       rpc.call<MediaResult>('flows.media', maxSide ? { sha256, max_side: maxSide } : { sha256 }),
     upload: (name: string, mime: string, dataB64: string) =>
       rpc.call<{ image: ImageRef }>('flows.upload', { name, mime, data_b64: dataB64 }),
+    revisions: (id: string) => rpc.call<{ revisions: FlowRevision[] }>('flows.revisions', { id }),
+    restore: (id: string, rev: number, baseRev: number) =>
+      rpc.call<WriteAccess & { flow: FlowDoc }>('flows.restore', { id, rev, base_rev: baseRev }),
     importPng: (dataB64: string) =>
       rpc.call<{ image: ImageRef; flow: FlowDoc | null }>('flows.import_png', {
         data_b64: dataB64,
@@ -255,6 +260,23 @@ export function useFlowRuns(flowId: string, limit = 30) {
       await rpc.waitForConnection()
       const res = await flowsApi(rpc).runs(flowId, limit)
       return Array.isArray(res?.runs) ? res.runs : []
+    },
+  })
+}
+
+/** A flow's saved versions, newest first; read while the history is open. */
+export function useFlowRevisions(id: string, enabled: boolean) {
+  const rpc = useRpc()
+  const connected = useConnected()
+  return useQuery<FlowRevision[]>({
+    queryKey: FLOWS_KEYS.revisions(id),
+    enabled: connected && enabled && Boolean(id),
+    staleTime: 0,
+    queryFn: async () => {
+      await rpc.waitForConnection()
+      const res = await flowsApi(rpc).revisions(id)
+      const list = Array.isArray(res?.revisions) ? res.revisions : []
+      return [...list].sort((a, b) => b.rev - a.rev)
     },
   })
 }

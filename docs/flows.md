@@ -127,7 +127,8 @@ them with `flows.operator_required`. Agents use `flow_run` instead.
 
 ## Agents: `flow_list` and `flow_run`
 
-Two built-in tools let an agent use the flows you built. Both are in the
+Two built-in tools let an agent use the flows you built (three more let it
+build and edit them: see [Agents can build flows](#agents-can-build-flows)). Both are in the
 deferred set (the model loads them with `tool_search`), and both are offered
 only while `[flows].enabled` is on and at least one image model has a key.
 
@@ -174,6 +175,15 @@ The approval mode applies as usual (`auto-approve` runs without a prompt,
 `auto-deny` refuses and counts as a "no"); an unattended run (cron,
 heartbeat) refuses instead of waiting. Direct tool calls over HTTP
 (`/tools/invoke`) never run `flow_run`.
+
+**One-off variants.** `flow_run(flow, overrides={"<image node>": {...}})`
+changes `model`, `count`, `aspect`, `resolution`, `size`, `quality` or
+`background` of an image node for that run only; the saved flow stays as it
+is. The cost gate uses the overridden estimate, and an approval is bound to
+those overrides (approving 2 images does not approve 4). The agent uses this
+for "make 4 of these with GPT Image 2" instead of saving that configuration.
+`count` stays at most 4 per image node: for more, the agent runs again (each
+run cost-gated on its own) or asks whether 4 will do.
 
 The tool waits for the run (`wait_seconds`, default 300, at most 900). A run
 still going then keeps running; the tool says so and the card updates when it
@@ -225,6 +235,87 @@ The tool's result (what the model reads) carries `status`, `run_id`, `flow
 flow has no Save node (`name` is then null). `progress.done` counts `done`
 and `cached` nodes. A client that has the run (`flows.run.get`) derives the
 same fields from the RunRecord.
+
+## Agents can build flows
+
+An agent can also create and edit your flows from the chat, with three more
+tools in the deferred set (found by `tool_search` for "create flow", "build
+workflow", "pipeline", "automate images", "edit flow", "add node"). Building a
+flow costs nothing, so there is no approval step; **running** it is still
+`flow_run`, with its cost gate. No tool deletes a flow, and every save, yours
+or the agent's, keeps the previous version: the editor's version history
+lists each revision with its author (you or the agent, and the chat it came
+from) and restores any of them.
+
+- `flow_get()` returns the node catalog (types, inputs with their widgets,
+  options and defaults, outputs), the image models (availability, edit
+  support, how many reference images, ratios, prices) and the spec format.
+  `flow_get(flow)` returns that flow as a spec, its revision, who created it,
+  and its public inputs.
+- `flow_create(spec)` validates the spec, lays the nodes out and saves a new
+  flow marked as created by the agent.
+- `flow_update(flow, spec, base_rev)` replaces the graph of an existing flow
+  (yours or the agent's). `base_rev` is required: the revision the agent read
+  with `flow_get` (or got back from its last save). If the flow changed since
+  (you edited it, or restored an older version), nothing is saved and the
+  agent is told the current revision and what changed, so it reads the flow
+  again and re-applies only the change you asked for; it never writes a graph
+  from memory over yours. Nodes keep their place by id, new ones are placed
+  for them; the name stays unless the spec renames it. The result says what
+  changed in one line.
+
+A spec has no positions and writes links as pairs:
+
+```json
+{"name": "AgentOS infographic",
+ "nodes": [{"id": "ref", "type": "load_image", "title": "Style reference",
+            "values": {"image": {"attachment": "latest"}}},
+           {"id": "content", "type": "text", "values": {"text": "..."}},
+           {"id": "gen", "type": "image", "values": {"model": "surplus/gpt-image-2", "aspect": "21:9"}},
+           {"id": "out", "type": "save"}],
+ "links": [["ref.image", "gen.images"], ["content.text", "gen.prompt"], ["gen.image", "out.images"]],
+ "inputs": {"content": "content.text"}}
+```
+
+A `load_image` value may be an image already in the Flows media store, or:
+
+- `{"attachment": "latest"}`: the image you attached most recently in this
+  chat (`"2"` is the one before, and so on), or its file name, or
+  `{"attachment": "<sha256>"}`;
+- `{"attachment": "<artifact id>"}`: an image published in this chat (for
+  example a flow run's saved PNG, whose `artifact_id` the agent sees);
+- `{"path": "<file>"}`: a PNG, JPEG, GIF or WebP inside the agent's
+  workspace. Anything outside it (an absolute path elsewhere, `..`, a symlink
+  that leads out) is refused.
+
+Chat images are read from this chat's transcript, where the gateway records
+each message you send with its attachments: an image up to 2 MB is stored in
+the message itself, a larger upload in the session's attachment store. An
+image from another chat cannot be reached, and the agent is told never to
+search the disk for your images; if it cannot find one, it asks you to attach
+it again. A spec that does not validate is
+not saved: the agent gets each problem by node (an unknown node type, a
+missing prompt, a model without edit support for a reference image, an image
+it could not resolve) and fixes it. A model whose provider has no key yet only
+matters at run time, so that saves with a warning.
+
+After a save the chat shows a **change card**
+(`application/vnd.agentos.flow-change+json`): the flow's name, created or
+updated, the one-line summary, the node count, the estimate per run and the
+revision; on the desktop it has **Open in Flows**. The agent then says what
+the flow does and offers to run it; it runs it straight away only when you
+asked for the image now.
+
+```json
+{"version": 1, "kind": "flow_change", "flow_id": "flw_2af4f4b5",
+ "name": "AgentOS infographic", "rev": 1, "change": "created",
+ "summary": "created with 4 nodes and 3 links", "node_count": 4,
+ "estimate": {"kind": "usd", "usd": 0.27, "approximate": true},
+ "fetchedAt": "2026-10-30T10:00:00Z"}
+```
+
+Direct tool calls over HTTP (`/tools/invoke`) never run `flow_create` or
+`flow_update`; `flow_get` is read-only.
 
 ## Configuration
 

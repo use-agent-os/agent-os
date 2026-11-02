@@ -25,6 +25,8 @@ export const DESKTOP_REQUIRED_METHODS: readonly string[] = [
   'flows.list',
   'flows.models',
   'flows.nodes',
+  'flows.restore',
+  'flows.revisions',
   'flows.run',
   'flows.runs',
   'flows.save',

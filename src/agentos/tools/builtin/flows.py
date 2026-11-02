@@ -1,4 +1,4 @@
-"""Image Flows agent tools: ``flow_list`` and ``flow_run``.
+"""Image Flows agent tools: ``flow_list`` and ``flow_run`` (authoring: flow_authoring.py).
 
 An Image Flow is a node graph the user builds in the desktop Flows editor
 (``docs/flows.md``). These tools let an agent find one and run it in-process
@@ -8,10 +8,9 @@ through :class:`agentos.flows.FlowService`, never through the ``flows.*`` RPC
 Spending is gated: ``flow_run`` asks the engine for an estimate first and
 queues the run directly only when the estimate is known and at or under
 ``[flows].agent_cost_limit_usd``. Anything above that, or an unknown estimate,
-goes through the approval queue (namespace ``exec``, the same prompt the
-operator answers for a shell command or a patch); the engine waits for the
-decision and retries the call with the ``approval_id``, which binds the
-approval to this flow, its revision and these inputs.
+goes through the approval queue (namespace ``flow``: allow once or deny); the
+engine waits for the decision and retries the call with the ``approval_id``,
+which binds the approval to this flow, its revision and these inputs.
 
 Saved PNGs are published into the current session as artifacts while the run
 executes, and a ``application/vnd.agentos.flow-run+json`` card marker is
@@ -43,7 +42,9 @@ log = structlog.get_logger(__name__)
 
 FLOW_RUN_MIME = "application/vnd.agentos.flow-run+json"
 CARD_VERSION = 1
-FLOW_TOOL_NAMES: frozenset[str] = frozenset({"flow_list", "flow_run"})
+FLOW_TOOL_NAMES: frozenset[str] = frozenset(
+    {"flow_list", "flow_run", "flow_get", "flow_create", "flow_update"}
+)
 
 #: Spend approvals have their own namespace: the queue never turns a resolve in
 #: it into a session elevation, "always allow" is not remembered for it, and a
@@ -371,10 +372,15 @@ def _artifact_sink(ctx: ToolContext | None) -> Any:
     return sink
 
 
-def _publish_card(
-    ctx: ToolContext | None, card: dict[str, Any], *, position: int
+def publish_json_card(
+    ctx: ToolContext | None,
+    card: dict[str, Any],
+    *,
+    name: str,
+    mime: str,
+    position: int | None = None,
 ) -> dict[str, Any] | None:
-    """Publish the card marker ahead of this call's image artifacts."""
+    """Publish a JSON card artifact into the session (at ``position`` in this call's list)."""
     target = _artifact_ctx(ctx)
     if target is None:
         return None
@@ -383,18 +389,31 @@ def _publish_card(
     body = json.dumps(card, ensure_ascii=False).encode("utf-8")
     try:
         ref = ArtifactStore(str(target.artifact_media_root)).publish_bytes(
-            body,
-            name=f"flow-run-{card.get('run_id')}.json",
-            mime=FLOW_RUN_MIME,
-            **_store_kwargs(target),
+            body, name=name, mime=mime, **_store_kwargs(target)
         )
-    except Exception as exc:  # noqa: BLE001 - the run already happened; the card is a bonus
-        log.warning("flow_run.card_publish_failed", error=str(exc))
+    except Exception as exc:  # noqa: BLE001 - the work already happened; the card is a bonus
+        log.warning("flows.card_publish_failed", mime=mime, error=str(exc))
         return None
     payload = artifact_payload(ref)
-    position = max(0, min(position, len(target.published_artifacts)))
-    target.published_artifacts.insert(position, payload)
+    if position is None:
+        target.published_artifacts.append(payload)
+    else:
+        position = max(0, min(position, len(target.published_artifacts)))
+        target.published_artifacts.insert(position, payload)
     return payload
+
+
+def _publish_card(
+    ctx: ToolContext | None, card: dict[str, Any], *, position: int
+) -> dict[str, Any] | None:
+    """Publish the run card ahead of this call's image artifacts."""
+    return publish_json_card(
+        ctx,
+        card,
+        name=f"flow-run-{card.get('run_id')}.json",
+        mime=FLOW_RUN_MIME,
+        position=position,
+    )
 
 
 def _public_artifact(artifact: dict[str, Any]) -> dict[str, Any]:
@@ -506,7 +525,10 @@ _DECLINED_MESSAGE = (
     "The user declined this run; nothing was queued and nothing was spent. Do not "
     "run this flow again, and do not work around the refusal (fewer images, other "
     "inputs, a cheaper model, another flow, or image_generate) unless the user asks "
-    "you to in a new message. Tell the user the run was not started."
+    "you to in a new message. For the next 30 minutes EVERY run of this flow in this "
+    "chat asks the user again first, whatever it costs, even one under the spending "
+    "limit: never offer a cheaper variant as if it would run without asking. Tell the "
+    "user the run was not started; you may offer to ask again."
 )
 
 
@@ -518,8 +540,65 @@ def _usd(value: float | None) -> str:
     return f"${value:.3f}" if value >= 0.01 else f"${value:.4f}"
 
 
-def _approval_args(doc: dict[str, Any], inputs: dict[str, Any]) -> dict[str, Any]:
-    return {"flow_id": doc["id"], "rev": int(doc.get("rev") or 0), "inputs": inputs}
+def _approval_args(
+    doc: dict[str, Any], inputs: dict[str, Any], overrides: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    args: dict[str, Any] = {"flow_id": doc["id"], "rev": int(doc.get("rev") or 0), "inputs": inputs}
+    if overrides:
+        args["overrides"] = overrides
+    return args
+
+
+#: What a one-off run may change on an image node (``flow_run`` ``overrides``).
+OVERRIDE_FIELDS = ("model", "count", "aspect", "resolution", "size", "quality", "background")
+
+
+def accepts(fn: Any, name: str) -> bool:
+    """Whether the engine callable takes keyword *name* (older engines do not)."""
+    import inspect
+
+    try:
+        return name in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _clean_overrides(raw: Any) -> dict[str, dict[str, Any]]:
+    if raw is None or raw == "" or raw == {}:
+        return {}
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError as exc:
+            raise ToolError("overrides must be an object of node id to fields") from exc
+    if not isinstance(raw, dict):
+        raise ToolError("overrides must be an object of node id to fields")
+    cleaned: dict[str, dict[str, Any]] = {}
+    for node_id, fields in raw.items():
+        if not isinstance(node_id, str) or not isinstance(fields, dict) or not fields:
+            raise ToolError('overrides look like {"<image node id>": {"model": "...", "count": 4}}')
+        row: dict[str, Any] = {}
+        for key, value in fields.items():
+            if key not in OVERRIDE_FIELDS:
+                raise ToolError(
+                    f"overrides.{node_id}.{key}: a run may only change "
+                    + ", ".join(OVERRIDE_FIELDS)
+                )
+            if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+                raise ToolError(f"overrides.{node_id}.{key} must be a string or a number")
+            row[key] = value
+        cleaned[node_id.strip()] = row
+    return cleaned
+
+
+def _override_text(overrides: dict[str, dict[str, Any]] | None) -> str:
+    if not overrides:
+        return ""
+    parts = [
+        f"{node_id}: " + ", ".join(f"{k} {v}" for k, v in fields.items())
+        for node_id, fields in overrides.items()
+    ]
+    return f" (this run only: {'; '.join(parts)})"
 
 
 def price_text(price: Any) -> str:
@@ -546,11 +625,12 @@ def _approval_params(
     ctx: ToolContext | None,
     *,
     declined_minutes_ago: int | None = None,
+    overrides: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """The approval row. ``estimateUsd`` is the upper bound the run is capped at."""
     from agentos.flows.types import price_upper_usd
 
-    name = str(doc.get("name") or doc["id"])
+    name = str(doc.get("name") or doc["id"]) + _override_text(overrides)
     estimate_usd = price_upper_usd(total) if total else None
     shown = price_text(total) if estimate_usd is not None else "unknown"
     if declined_minutes_ago is not None:
@@ -572,8 +652,8 @@ def _approval_params(
         )
     return {
         "toolName": _APPROVAL_TOOL,
-        "command": f"flow_run {name}",
-        "args": _approval_args(doc, inputs),
+        "command": f"flow_run {doc.get('name') or doc['id']}",
+        "args": _approval_args(doc, inputs, overrides),
         "estimateUsd": estimate_usd,
         "limitUsd": limit_usd,
         "warning": warning,
@@ -598,7 +678,11 @@ def _envelope(status: str, approval_id: str, params: dict[str, Any], message: st
 
 
 def _check_approval(
-    approval_id: str, doc: dict[str, Any], inputs: dict[str, Any], ctx: ToolContext | None
+    approval_id: str,
+    doc: dict[str, Any],
+    inputs: dict[str, Any],
+    ctx: ToolContext | None,
+    overrides: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[str | None, float | None]:
     """``(envelope, approved_limit)``: an envelope to return, or the amount approved."""
     from agentos.gateway.approval_queue import get_approval_queue
@@ -612,7 +696,7 @@ def _check_approval(
         raise ToolError(f"Approval does not belong to flow_run: {approval_id}")
     # Bound to the flow, its revision and these inputs: an approval for one
     # cheap run cannot be replayed for another flow or an edited graph.
-    if entry.params.get("args") != _approval_args(doc, inputs):
+    if entry.params.get("args") != _approval_args(doc, inputs, overrides):
         raise ToolError(
             "Approval does not match this run (the flow or its inputs changed); "
             "call flow_run again without approval_id"
@@ -746,8 +830,13 @@ async def flow_list() -> str:
         "picture from a prompt is image_generate. If no flow fits, tell the user to "
         "create one in the desktop Flows editor. A run whose estimate is above the agent "
         "spending limit, or unknown, waits for the user's approval; if the user declines, "
-        "do not retry or try a cheaper variant. The saved images and a run card are "
-        "delivered to the chat by this tool; do not publish them again."
+        "do not retry or try a cheaper variant, and for 30 minutes every run of that flow "
+        "in the chat asks again whatever it costs (never claim a cheaper one would run "
+        "without asking). For a one-off variant (another model, "
+        "more images, another aspect) pass overrides for this run instead of editing the "
+        "saved flow; never save an expensive configuration just to satisfy a run request. "
+        "The saved images and a run card are delivered to the chat by this tool; do not "
+        "publish them again."
     ),
     params={
         "flow": {
@@ -759,6 +848,16 @@ async def flow_list() -> str:
             "description": (
                 'Public input overrides, e.g. {"prompt": "a red fox", "count": 2}. '
                 "Only names flow_list reports are accepted."
+            ),
+        },
+        "overrides": {
+            "type": "object",
+            "description": (
+                'This run only, per image node: {"<node id>": {"model": '
+                '"surplus/gpt-image-2", "count": 4}}. Fields: model, count (1-4), aspect, '
+                "resolution, size, quality, background. The saved flow is not changed; "
+                "the cost gate uses the overridden estimate. For more than 4 images, run "
+                "again (each run is cost-gated) or ask the user whether 4 will do."
             ),
         },
         "wait_seconds": {
@@ -784,6 +883,7 @@ async def flow_run(
     inputs: dict[str, Any] | None = None,
     wait_seconds: int = _DEFAULT_WAIT_SECONDS,
     approval_id: str | None = None,
+    overrides: dict[str, Any] | None = None,
 ) -> str:
     from agentos.flows import FlowError
 
@@ -795,8 +895,12 @@ async def flow_run(
         raise ToolError("wait_seconds must be a number of seconds") from exc
     wait = max(0.0, min(float(_MAX_WAIT_SECONDS), wait))
     cleaned = _clean_inputs(inputs)
+    one_off = _clean_overrides(overrides)
     service = _service()
     ctx = current_tool_context.get()
+    if one_off and not accepts(service.submit_run, "overrides"):
+        raise ToolError("This gateway's flow engine cannot run with overrides; update AgentOS")
+    run_extra: dict[str, Any] = {"overrides": one_off} if one_off else {}
     try:
         doc = service.resolve_flow(flow.strip())
     except FlowError as exc:
@@ -804,7 +908,7 @@ async def flow_run(
 
     limit: float | None = service.agent_cost_limit_usd
     if approval_id:
-        envelope, limit = _check_approval(approval_id, doc, cleaned, ctx)
+        envelope, limit = _check_approval(approval_id, doc, cleaned, ctx, one_off)
         if envelope is not None:
             return envelope
     else:
@@ -813,7 +917,7 @@ async def flow_run(
         if declined is not None:
             # After a "no", nothing runs without a fresh yes, even under the limit.
             try:
-                total = service.estimate(doc, None, cleaned or None).get("total") or {}
+                total = service.estimate(doc, None, cleaned or None, **run_extra).get("total") or {}
             except FlowError as exc:
                 raise _flow_error(exc) from exc
             params = _approval_params(
@@ -823,6 +927,7 @@ async def flow_run(
                 service.agent_cost_limit_usd,
                 ctx,
                 declined_minutes_ago=declined,
+                overrides=one_off,
             )
             upper = params["estimateUsd"]
             envelope, approved_now = _request_approval(params, ctx)
@@ -838,6 +943,7 @@ async def flow_run(
         "origin": "agent",
         "session_key": ctx.session_key if ctx is not None else None,
         "artifact_sink": _artifact_sink(ctx),
+        **run_extra,
     }
     try:
         queued = await service.submit_run(doc["id"], max_cost_usd=limit, **submit)
@@ -865,6 +971,7 @@ async def flow_run(
             total if isinstance(total, dict) else {},
             service.agent_cost_limit_usd,
             ctx,
+            overrides=one_off,
         )
         upper = params["estimateUsd"]
         envelope, approved_now = _request_approval(params, ctx)

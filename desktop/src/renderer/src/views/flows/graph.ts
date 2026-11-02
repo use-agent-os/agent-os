@@ -15,6 +15,8 @@ export interface FlowNodeData extends Record<string, unknown> {
   type: string
   title: string | null
   values: Record<string, unknown>
+  /** Placed by the engine, not by a person: re-flowed by measured height until saved or dragged. */
+  autoPos?: boolean
 }
 
 export type FlowCanvasNode = Node<FlowNodeData, 'flow'>
@@ -37,7 +39,12 @@ export function docNodeToCanvas(n: FlowNodeDoc): FlowCanvasNode {
     id: n.id,
     type: 'flow',
     position: { x: n.pos?.[0] ?? 0, y: n.pos?.[1] ?? 0 },
-    data: { type: n.type, title: n.title ?? null, values: { ...(n.values ?? {}) } },
+    data: {
+      type: n.type,
+      title: n.title ?? null,
+      values: { ...(n.values ?? {}) },
+      ...(n.auto_pos ? { autoPos: true } : {}),
+    },
   }
 }
 

@@ -965,6 +965,106 @@
 .flw-pop--models {
   width: 320px;
 }
+/* ── Version history ─────────────────────────────────────────────────────── */
+
+.flw-pop--history {
+  width: 340px;
+}
+.flw-pop__head {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.flw-rev {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+.flw-rev:last-child {
+  border-bottom: 0;
+}
+.flw-rev[data-current] {
+  background: color-mix(in srgb, var(--primary) 5%, transparent);
+}
+.flw-rev__line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.flw-rev__num {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--foreground);
+}
+.flw-rev__age {
+  color: var(--dim);
+  font-size: 11px;
+}
+.flw-rev__current {
+  color: var(--primary);
+  font-size: 11px;
+}
+.flw-rev__restore {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--foreground);
+  font-size: 11px;
+}
+.flw-rev__restore:hover:not(:disabled) {
+  background: var(--accent);
+}
+.flw-rev__restore:disabled {
+  opacity: 0.45;
+}
+.flw-rev__summary {
+  margin-top: 3px;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  line-height: 1.4;
+  user-select: text;
+}
+.flw-author {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  color: var(--muted-foreground);
+  font-size: 10.5px;
+  line-height: 17px;
+}
+.flw-author[data-author='agent'] {
+  background: color-mix(in srgb, var(--info) 14%, transparent);
+  color: var(--info);
+}
+/* "by agent": on a flow's card and beside its name in the editor. */
+.flw-agent-tag {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--info) 12%, transparent);
+  color: var(--info);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 17px;
+  white-space: nowrap;
+}
+.flw-card__title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
 .flw-pop__search {
   display: flex;
   align-items: center;

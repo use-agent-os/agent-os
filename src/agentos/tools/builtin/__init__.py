@@ -19,6 +19,7 @@ _NAMES = [
     "file_authoring",
     "filesystem",
     "flows",
+    "flow_authoring",
     "git",
     "media",
     "messaging",

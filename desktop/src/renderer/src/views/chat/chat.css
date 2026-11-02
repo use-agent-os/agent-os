@@ -5081,7 +5081,10 @@
    `.flowrun-card`. A sibling of the DCA plate: hairline plate, a 3 px rail
    whose colour is the run's state (blue while it runs, green done, amber
    failed, grey cancelled), figures in tabular mono, a contact strip of
-   thumbnails, and "Open in Flows" as a hairline ghost button. */
+   thumbnails, and "Open in Flows" as a hairline ghost button. An agent's
+   change to a flow (flowChange.ts, `data-flowrun-kind="change"`) is the same
+   plate: green rail when it created the flow, blue when it updated one, the
+   one-line diff as `__summary`. */
 .msg-artifact-flowrun-group {
   display: grid;
   gap: 8px;
@@ -5133,10 +5136,12 @@
   background: var(--flowrun-rail);
 }
 .flowrun-card[data-flowrun-status='queued'],
-.flowrun-card[data-flowrun-status='running'] {
+.flowrun-card[data-flowrun-status='running'],
+.flowrun-card[data-flowrun-status='updated'] {
   --flowrun-rail: var(--info);
 }
-.flowrun-card[data-flowrun-status='done'] {
+.flowrun-card[data-flowrun-status='done'],
+.flowrun-card[data-flowrun-status='created'] {
   --flowrun-rail: var(--ok);
 }
 .flowrun-card[data-flowrun-status='failed'] {
@@ -5254,6 +5259,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--muted-foreground);
+}
+.flowrun-card__summary {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--foreground);
 }
 .flowrun-card__more,
 .flowrun-card__empty {

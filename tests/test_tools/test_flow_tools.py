@@ -201,6 +201,13 @@ async def test_denied_approval_is_a_clear_refusal(make_service, ctx) -> None:
     # The model is told plainly not to retry or work around the refusal.
     assert "Do not run this flow again" in denied["message"]
     assert "fewer images" in denied["message"] and "image_generate" in denied["message"]
+    # After a no, nothing runs without asking, not even a cheaper variant.
+    assert "EVERY run of this flow in this chat asks the user again" in denied["message"]
+    assert "even one under the spending limit" in denied["message"]
+    assert "never offer a cheaper variant as if it would run without asking" in denied["message"]
+    assert "you may offer to ask again" in denied["message"]
+    description = get_default_registry().get("flow_run").spec.description
+    assert "every run of that flow" in description and "never claim a cheaper one" in description
     assert service.list_runs() == []
 
 
@@ -512,3 +519,61 @@ def test_prompt_points_image_requests_at_flows_when_image_generate_is_off() -> N
     both = _prompt([*base, "image_generate", "flow_list", "flow_run"])
     assert "you MUST call the `image_generate` tool" in both
     assert "use `flow_run`" in both
+
+
+async def test_overrides_change_one_run_and_leave_the_flow_alone(make_service, ctx) -> None:
+    service = make_service()
+    flow = await stored(service, t2i_doc())
+
+    payload = json.loads(await flow_tools.flow_run(flow="Test", overrides={"i": {"count": 2}}))
+
+    assert payload["status"] == "done", payload
+    assert payload["image_count"] == 2
+    assert service.get_flow(flow["id"])["nodes"][1]["values"]["count"] == 1
+    assert service.get_flow(flow["id"])["rev"] == flow["rev"]
+
+
+async def test_overrides_are_cost_gated_on_their_own_estimate(make_service, ctx) -> None:
+    # count 1 (~$0.07) is under the $0.10 limit; the override to 2 (~$0.13) is not.
+    service = make_service(limit=0.10)
+    flow = await stored(service, t2i_doc())
+    one_off = {"i": {"count": 2}}
+
+    asked = json.loads(await flow_tools.flow_run(flow=flow["id"], overrides=one_off))
+
+    assert asked["status"] == "approval_required"
+    assert "this run only: i: count 2" in asked["warning"]
+    entry = get_approval_queue().get(asked["approval_id"])
+    assert entry.params["args"]["overrides"] == one_off
+    get_approval_queue().resolve(asked["approval_id"], True)
+    # The approval is for this variant only.
+    with pytest.raises(ToolError, match="does not match"):
+        await flow_tools.flow_run(
+            flow=flow["id"], overrides={"i": {"count": 4}}, approval_id=asked["approval_id"]
+        )
+    ran = json.loads(
+        await flow_tools.flow_run(
+            flow=flow["id"], overrides=one_off, approval_id=asked["approval_id"]
+        )
+    )
+    assert ran["status"] == "done" and ran["image_count"] == 2
+
+
+async def test_bad_overrides_are_refused_before_anything_runs(make_service, ctx) -> None:
+    service = make_service()
+    await stored(service, t2i_doc())
+
+    with pytest.raises(ToolError, match="may only change"):
+        await flow_tools.flow_run(flow="Test", overrides={"i": {"prompt": "x"}})
+    with pytest.raises(ToolError, match="node id"):
+        await flow_tools.flow_run(flow="Test", overrides={"i": 3})
+    with pytest.raises(ToolError, match="flows.invalid"):
+        await flow_tools.flow_run(flow="Test", overrides={"t": {"count": 2}})
+    assert service.list_runs() == []
+
+
+def test_flow_run_tells_the_model_to_use_overrides_for_one_off_variants() -> None:
+    spec = get_default_registry().get("flow_run").spec
+    assert "overrides" in spec.parameters
+    assert "instead of editing the saved flow" in spec.description
+    assert "never save an expensive configuration" in spec.description

@@ -196,4 +196,28 @@ export const flows = {
   'flows.shortcuts.delete': 'Delete selected nodes',
   'flows.shortcuts.fit': 'Fit the view',
   'flows.shortcuts.lock': 'Lock or unlock the variation of the selected image node',
+
+  'flows.history.title': 'Version history',
+  'flows.history.loading': 'Loading versions',
+  'flows.history.empty': 'No earlier versions yet',
+  'flows.history.failed': 'Could not load the version history',
+  'flows.history.version': 'Version {rev}',
+  'flows.history.current': 'Current',
+  'flows.history.you': 'You',
+  'flows.history.agent': 'Agent',
+  'flows.history.now': 'just now',
+  'flows.history.ago': '{age} ago',
+  'flows.history.restore': 'Restore',
+  'flows.history.restored': 'Restored version {rev}',
+  'flows.history.restoreFailed': 'Could not restore this version',
+  'flows.history.confirm.title': 'Restore version {rev}?',
+  'flows.history.confirm.body':
+    'The flow goes back to how it was in this version. Restoring saves it as a new version, so you can undo it from Version history.',
+  'flows.history.confirm.cancel': 'Cancel',
+  'flows.history.confirm.restore': 'Restore',
+  'flows.editor.byAgent': 'Updated by the agent',
+  'flows.editor.byAgentConflict':
+    'The agent changed this flow while you were editing. Its version is loaded; your last edits were not saved.',
+  'flows.badge.byAgent': 'by agent',
+  'flows.badge.byAgent.title': 'Made by the agent from chat',
 } as const

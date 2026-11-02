@@ -201,6 +201,26 @@ async def _flows_delete(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     return {"ok": True}
 
 
+@_d.method("flows.revisions")
+@_handler
+async def _flows_revisions(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    p = _params(params)
+    result = _service(ctx).revisions(_req(p, "id"))
+    return {"revisions": result["revisions"]}
+
+
+@_d.method("flows.restore")
+@_handler
+@_operator_only
+async def _flows_restore(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    p = _params(params)
+    rev, base_rev = _int(p, "rev"), _int(p, "base_rev")
+    if rev is None or base_rev is None:
+        raise ValueError("params.rev and params.base_rev are required")
+    flow = await _service(ctx).restore(_req(p, "id"), rev, base_rev, author="user")
+    return {"flow": flow}
+
+
 # ── analysis ──────────────────────────────────────────────────────────────
 
 
@@ -216,7 +236,10 @@ async def _flows_validate(params: dict | None, ctx: RpcContext) -> dict[str, Any
 async def _flows_estimate(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     p = _params(params)
     return _service(ctx).estimate(
-        _obj(p, "flow", required=True), _str(p, "to_node"), _obj(p, "inputs")
+        _obj(p, "flow", required=True),
+        _str(p, "to_node"),
+        _obj(p, "inputs"),
+        overrides=_obj(p, "overrides"),
     )
 
 
@@ -237,6 +260,7 @@ async def _flows_run(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
         inputs=_obj(p, "inputs"),
         to_node=_str(p, "to_node"),
         origin=origin,
+        overrides=_obj(p, "overrides"),
     )
 
 
