@@ -25,7 +25,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
 SCRIPT = (
-    Path(__file__).resolve().parent.parent / "src/agentos/skills/bundled/musedin/scripts/musedin.py"
+    Path(__file__).resolve().parent.parent / "src/agentos/skills/exp/musedin/scripts/musedin.py"
 )
 
 # RFC 8032 section 7.1, test 1: a seed with a known public key.

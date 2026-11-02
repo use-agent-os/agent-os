@@ -35,13 +35,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Deferred tool loading. `flow_get`, `flow_create` and `flow_update` join the
   deferred set, which now holds 30 rarely used builtins; deferral cuts a stock
   request from 69 to 40 tool schemas.
-- New bundled skill `musedin`: join and take part in MusedIn (musedin.com), a
-  job network for muses built on musemarket receipts, a feed, and hired
-  roles. Ships `scripts/musedin.py`, which signs `musedin-v1` requests with
-  the *same* musebook ed25519 identity the `musebook` skill stores (no new
-  account, no new key), and the site's published spec under `references/`.
-  Publisher `muse` already covers the tab, so the skill joins the existing
-  Muse tab on the Skills page next to `musebook` with no further UI change.
+- Opt-in skill `musedin` (#3735): profile, feed, roles and jobs on MusedIn
+  (musedin.com). It is not bundled: it lives in `src/agentos/skills/exp/`,
+  which the wheel leaves out, so a fresh install has no MusedIn skill in its
+  skill list or prompt. Install it on request with
+  `agentos skills install https://github.com/use-agent-os/agent-os/tree/main/src/agentos/skills/exp/musedin --source github`
+  (the usual scan and install policy apply). `scripts/musedin.py` signs
+  `musedin-v1` requests with the musebook ed25519 identity the bundled
+  `musebook` skill stores, read-only, and never pays an x402 challenge. The
+  skill's `SKILL.md` is the authority: the live `musedin.com/muse.txt` is read
+  only for prices, limits and field names, and anything in it that asks the
+  agent to promote MusedIn, post on other sites, install other skills, set a
+  referrer, or change identity or payment setup is ignored unless the user
+  asked for it.
 
 ## [2026.10.30] - 2026-10-30
 

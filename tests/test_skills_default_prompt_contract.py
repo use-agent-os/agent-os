@@ -48,7 +48,6 @@ DEFAULTS = (
         "memory",
         "multi-search-engine",
         "musebook",
-        "musedin",
         "nano-banana-pro",
         "nano-pdf",
         "pdf-toolkit",

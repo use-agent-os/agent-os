@@ -51,12 +51,20 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-# Bundled scripts run under AgentOS's own interpreter; the path insert only
-# matters in a source checkout where the package is not installed (#2804),
-# mirroring the same fix in the musebook skill's scripts/muse.py.
-_SRC_ROOT = str(Path(__file__).resolve().parents[5])
-if _SRC_ROOT not in sys.path:
-    sys.path.insert(0, _SRC_ROOT)
+# The script runs under AgentOS's own interpreter (``{python}``), which carries
+# the ``agentos`` package. The path insert only matters when it runs from a
+# source checkout where the package is not installed (#2804), mirroring the
+# musebook skill's scripts/muse.py. Installed with ``agentos skills install``,
+# the script sits under ~/.agentos/skills/musedin/, where parents[5] is not a
+# source tree, so the insert is made only when that directory holds agentos.
+_HERE = Path(__file__).resolve()
+_SRC_ROOT = _HERE.parents[5] if len(_HERE.parents) > 5 else None
+if (
+    _SRC_ROOT is not None
+    and (_SRC_ROOT / "agentos" / "skill_stdio.py").is_file()
+    and str(_SRC_ROOT) not in sys.path
+):
+    sys.path.insert(0, str(_SRC_ROOT))
 from agentos.skill_stdio import configure_utf8_stdio  # noqa: E402
 
 BASE_URL = "https://musedin.com"
