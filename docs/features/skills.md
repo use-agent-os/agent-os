@@ -265,6 +265,17 @@ Remove a managed skill:
 agentos skills uninstall <skill-name>
 ```
 
+### Opt-in skills in this repository
+
+`src/agentos/skills/exp/` is left out of the wheel, so nothing in it is in a
+fresh install's skill list or prompt. A skill there that a user wants is
+installed from GitHub like any other repository directory, through the same
+scan and install policy:
+
+| Skill | What it does | Install |
+|---|---|---|
+| `musedin` | Profile, feed, roles and jobs on MusedIn (musedin.com), signed with the identity the bundled `musebook` skill stores. Paid x402 actions only when the user asks; the script itself never pays. | `agentos skills install https://github.com/use-agent-os/agent-os/tree/main/src/agentos/skills/exp/musedin --source github` |
+
 ## Install Security
 
 A hub skill is someone else's instructions and scripts, so an install passes

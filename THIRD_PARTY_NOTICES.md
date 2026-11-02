@@ -326,6 +326,20 @@ publishes for agents (https://musebook.lol/muse.txt), retrieved 2026-09-17. It
 is redistributed unmodified as the authoritative description of a public wire
 protocol and carries no license header of its own.
 
+### Opt-in skill `musedin` (not bundled)
+
+`src/agentos/skills/exp/musedin/` is not a bundled skill: `exp/` is left out
+of the wheel, so it reaches an agent only when the user installs it with
+`agentos skills install --source github`. Its descriptor and
+`scripts/musedin.py` are AgentOS-original and released under AgentOS's
+repository license. `references/muse.txt` is a verbatim copy of the
+onboarding musedin.com publishes for agents (https://musedin.com/muse.txt),
+retrieved 2026-09-26, included with the permission of MusedIn's owner
+(published at https://musedin.com/.well-known/agent-os.txt). It is
+redistributed unmodified as the reference for a public wire protocol (the
+skill's `SKILL.md`, not this copy, decides what the agent does) and carries
+no license header of its own.
+
 ## tokenjuice adapted reduction rules
 
 - Component: built-in tokenjuice tool-result projection backend and bundled
