@@ -25,6 +25,11 @@ export interface FlowNodeDoc {
   title?: string | null
   /** Keyed by input name; a missing key means "use the schema default". */
   values: Record<string, unknown>
+  /**
+   * The engine placed this node itself (an agent wrote the flow) from
+   * estimated heights. The canvas re-flows it once measured; a save drops it.
+   */
+  auto_pos?: boolean
 }
 
 export interface FlowLinkDoc {
@@ -56,6 +61,20 @@ export interface FlowDoc {
    */
   writable?: boolean
   read_only_reason?: string | null
+  /** Who made the flow and who saved it last; absent reads as "user". */
+  created_by?: FlowAuthor
+  updated_by?: FlowAuthor
+}
+
+export type FlowAuthor = 'user' | 'agent'
+
+/** One saved version of a flow (`flows.revisions`), newest first. */
+export interface FlowRevision {
+  rev: number
+  author: FlowAuthor
+  session_key?: string | null
+  created: string
+  summary?: string | null
 }
 
 // ── Node schema (§3) ────────────────────────────────────────────────────────
@@ -158,6 +177,8 @@ export interface FlowSummary {
   updated: string
   node_count: number
   preview: ImageRef | null
+  created_by?: FlowAuthor
+  updated_by?: FlowAuthor
   writable?: boolean
   read_only_reason?: string | null
 }
@@ -285,6 +306,8 @@ export interface ChangedEvent {
   flow_id: string
   rev: number
   deleted?: boolean
+  /** Who saved: the person in the app, or the agent from chat. */
+  author?: FlowAuthor
 }
 
 export type FlowEvent = ({ kind: 'run' } & RunEvent) | ({ kind: 'node' } & NodeEvent)

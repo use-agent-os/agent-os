@@ -1,6 +1,7 @@
 import './flows.css'
 import { useQueryClient } from '@tanstack/react-query'
 import {
+  Bot,
   Eye,
   ImagePlus,
   MoreHorizontal,
@@ -260,7 +261,15 @@ function FlowCard({
             <Workflow className="size-6 text-dim" strokeWidth={1.25} />
           )}
         </span>
-        <span className="flw-card__name">{flow.name}</span>
+        <span className="flw-card__title">
+          <span className="flw-card__name">{flow.name}</span>
+          {flow.created_by === 'agent' ? (
+            <span className="flw-agent-tag" title={t('flows.badge.byAgent.title')}>
+              <Bot className="size-3" strokeWidth={2} aria-hidden />
+              {t('flows.badge.byAgent')}
+            </span>
+          ) : null}
+        </span>
         <span className="flw-card__meta">
           {flow.node_count} {nodes}
           {updated ? (

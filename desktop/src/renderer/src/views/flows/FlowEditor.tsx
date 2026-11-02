@@ -3,6 +3,7 @@ import './flows.css'
 import {
   Background,
   BackgroundVariant,
+  getViewportForBounds,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
@@ -17,6 +18,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import {
   CloudOff,
   FileWarning,
+  History,
   Maximize,
   Minus,
   Plus,
@@ -68,10 +70,19 @@ import { ImageViewer, type ViewerSource } from './ImageViewer'
 import { ModelPicker } from './ModelPicker'
 import { estimateChip } from './price'
 import { ResultsTray, trayRuns } from './ResultsTray'
+import { RestoreVersionConfirm, VersionHistory } from './VersionHistory'
 import { isTerminal, runView } from './run-tracker'
 import { schemaIndex } from './schema-logic'
 import type { TypeFilter } from './search'
-import type { FlowDoc, ImageRef, ModelsPayload, NodeSchema, NodesPayload } from './types'
+import type {
+  FlowAuthor,
+  FlowDoc,
+  FlowRevision,
+  ImageRef,
+  ModelsPayload,
+  NodeSchema,
+  NodesPayload,
+} from './types'
 
 const NODE_TYPES: NodeTypes = { flow: FlowNode }
 
@@ -144,7 +155,28 @@ function FlowEditorLoader({ id, gatewayState }: { id: string; gatewayState: stri
 }
 
 /** The one fit an editor does by itself (a flow with no saved view); ⌘0 / Fit use it too. */
-const FIT_OPTIONS = { padding: 0.2, maxZoom: 1 } as const
+const FIT_OPTIONS = { padding: 0.12, minZoom: 0.25, maxZoom: 1 } as const
+
+/**
+ * Fit / ⌘0: the whole graph in view. Zooms out as far as it takes (down to
+ * 25%) and never in past 100%. Computed from the measured nodes and set
+ * directly, rather than queued through xyflow's fitView (which waits for
+ * every node to report a size and could leave the view where it was).
+ */
+export function fitViewportFor(
+  bounds: { x: number; y: number; width: number; height: number },
+  width: number,
+  height: number,
+) {
+  return getViewportForBounds(
+    bounds,
+    width,
+    height,
+    FIT_OPTIONS.minZoom,
+    FIT_OPTIONS.maxZoom,
+    FIT_OPTIONS.padding,
+  )
+}
 const DELETE_KEYS = ['Backspace', 'Delete']
 
 interface AddMenuState {
@@ -193,6 +225,28 @@ function Editor({
     const r = canvasRef.current?.getBoundingClientRect()
     setCanvasBox(r ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom } : null)
   }
+  const fitAll = useCallback(() => {
+    const all = rf.getNodes()
+    const box = canvasRef.current?.getBoundingClientRect()
+    if (!all.length || !box?.width || !box.height) return
+    void rf.setViewport(fitViewportFor(rf.getNodesBounds(all), box.width, box.height), {
+      duration: 200,
+    })
+  }, [rf])
+
+  // Engine-placed nodes (an agent wrote the flow) are stacked by their real,
+  // measured heights; again whenever one of them grows (a run's outputs).
+  const autoLayoutKey = useStore(store, (s) => {
+    let key = ''
+    for (const n of s.nodes) {
+      if (n.data.autoPos) key += `${n.id}:${Math.round(n.measured?.height ?? 0)}|`
+    }
+    return key
+  })
+  useEffect(() => {
+    if (autoLayoutKey) store.getState().reflowAuto()
+  }, [autoLayoutKey, store])
+
   /** Set when the gateway refuses this window's writes: the gateway's own words. */
   // Known up front from `flows.get` (writable / read_only_reason); a refusal
   // later (the gateway changed its mind) lands here too.
@@ -212,6 +266,19 @@ function Editor({
     })
   }, [])
   const editable = readOnly === null
+
+  // ── Version history ───────────────────────────────────────────────────────
+  const queryClient = useQueryClient()
+  const historyBtnRef = useRef<HTMLButtonElement>(null)
+  const [historyAt, setHistoryAt] = useState<Box | null>(null)
+  const [restoreAsk, setRestoreAsk] = useState<FlowRevision | null>(null)
+  const [restoring, setRestoring] = useState(false)
+  /** Our own restore is on the wire: its `flows.changed` is not news. */
+  const restoringRef = useRef(false)
+  const openHistory = useCallback(() => {
+    const r = historyBtnRef.current?.getBoundingClientRect()
+    if (r) setHistoryAt({ left: r.left, top: r.top, right: r.right, bottom: r.bottom })
+  }, [])
 
   const uploadImage = useCallback(
     async (nodeId: string, input: string, file: File) => {
@@ -271,6 +338,7 @@ function Editor({
   const save = useAutosave(store, api, flowId, () => rf.getViewport(), {
     paused: offline || readOnly !== null,
     onRefused: markReadOnly,
+    onShowHistory: openHistory,
   })
   useEstimate(store, api, !shownRun || isTerminal(shownRun.status))
   useRevalidate(store, api)
@@ -281,8 +349,43 @@ function Editor({
       void navigate('/flows')
       return
     }
-    save.noteRemoteRev(ev.rev)
+    void queryClient.invalidateQueries({ queryKey: FLOWS_KEYS.revisions(flowId) })
+    if (restoringRef.current) return
+    save.noteRemoteRev(ev.rev, ev.author)
   })
+
+  /** Back to an older version: saves it as a new one (the gateway keeps the rest). */
+  const restoreVersion = useCallback(
+    async (rev: FlowRevision) => {
+      if (!editable) return
+      restoringRef.current = true
+      setRestoring(true)
+      try {
+        // Edits not yet saved become a version of their own first, so the
+        // restore never silently throws them away.
+        const saved = await save.flush()
+        if (!saved.ok) return
+        const res = await api.restore(flowId, rev.rev, store.getState().meta.rev)
+        store.getState().loadDoc(docWithAccess(res))
+        setRestoreAsk(null)
+        setHistoryAt(null)
+        toast.success(t('flows.history.restored').replace('{rev}', String(rev.rev)))
+      } catch (err) {
+        const code = flowsErrorCode(err)
+        if (code === FLOW_ERRORS.operatorRequired) markReadOnly(err)
+        else if (code === FLOW_ERRORS.conflict) {
+          setRestoreAsk(null)
+          await save.reload('conflict')
+        } else toast.error(t('flows.history.restoreFailed'), { description: errorText(err) })
+      } finally {
+        restoringRef.current = false
+        setRestoring(false)
+        void queryClient.invalidateQueries({ queryKey: FLOWS_KEYS.revisions(flowId) })
+        void queryClient.invalidateQueries({ queryKey: FLOWS_KEYS.list })
+      }
+    },
+    [editable, save, api, flowId, store, markReadOnly, queryClient],
+  )
 
   // ── Graph ─────────────────────────────────────────────────────────────────
   const nodes = useStore(store, (s) => s.nodes)
@@ -552,7 +655,7 @@ function Editor({
   )
   useKeyboardShortcut({ combo: 'mod+0', description: t('flows.shortcuts.fit'), category }, (e) => {
     e.preventDefault()
-    void rf.fitView({ ...FIT_OPTIONS, duration: 200 })
+    fitAll()
   })
   useKeyboardShortcut({ combo: 'l', description: t('flows.shortcuts.lock'), category }, (e) => {
     if (!editable) return
@@ -644,6 +747,7 @@ function Editor({
     }),
     [store, schemas],
   )
+  const currentRev = useStore(store, (s) => s.meta.rev)
   const tray = useMemo(() => trayRuns(summaries, tracker, kinds), [summaries, tracker, kinds])
   const empty = nodes.length === 0
 
@@ -663,6 +767,9 @@ function Editor({
                 : null
           }
           editable={editable}
+          historyRef={historyBtnRef}
+          historyOpen={historyAt !== null}
+          onHistory={() => (historyAt ? setHistoryAt(null) : openHistory())}
           onRun={() => void run()}
           onStop={() => void stop()}
         />
@@ -761,6 +868,7 @@ function Editor({
             }}
             store={store}
             canAdd={editable}
+            onFit={fitAll}
           />
         </div>
         <ResultsTray
@@ -792,13 +900,38 @@ function Editor({
         />
       ) : null}
       {viewer ? <ImageViewer source={viewer} onClose={() => setViewer(null)} /> : null}
+      {historyAt ? (
+        <VersionHistory
+          flowId={flowId}
+          currentRev={currentRev}
+          anchor={historyAt}
+          canRestore={editable && !offline}
+          blockedReason={
+            !editable ? t('flows.readOnly.title') : offline ? t('flows.editor.offline') : null
+          }
+          onRestore={(rev) => {
+            // The confirmation takes over: the popover would float above its overlay.
+            setHistoryAt(null)
+            setRestoreAsk(rev)
+          }}
+          onClose={() => setHistoryAt(null)}
+        />
+      ) : null}
+      {restoreAsk ? (
+        <RestoreVersionConfirm
+          rev={restoreAsk.rev}
+          busy={restoring}
+          onCancel={() => setRestoreAsk(null)}
+          onConfirm={() => void restoreVersion(restoreAsk)}
+        />
+      ) : null}
       {restore ? (
         <RestorePrompt
           onCancel={() => setRestore(null)}
           onRestore={() => {
             store.getState().replaceGraph(restore.flow)
             setRestore(null)
-            requestAnimationFrame(() => void rf.fitView({ ...FIT_OPTIONS, duration: 200 }))
+            requestAnimationFrame(() => fitAll())
           }}
           onJustAdd={() => {
             addLoadImage(restore.image, restore.at)
@@ -821,6 +954,9 @@ function EditorBar({
   starting,
   blocked,
   editable,
+  historyRef,
+  historyOpen,
+  onHistory,
   onRun,
   onStop,
 }: {
@@ -832,10 +968,14 @@ function EditorBar({
   blocked: string | null
   /** False while the gateway refuses this window's writes. */
   editable: boolean
+  historyRef: React.RefObject<HTMLButtonElement | null>
+  historyOpen: boolean
+  onHistory: () => void
   onRun: () => void
   onStop: () => void
 }) {
   const name = useStore(store, (s) => s.meta.name)
+  const byAgent = useStore(store, (s) => s.createdBy === 'agent')
   const estimate = useStore(store, (s) => s.estimate)
   const canUndo = useStore(store, (s) => s.history.past.length > 0)
   const canRedo = useStore(store, (s) => s.history.future.length > 0)
@@ -861,12 +1001,33 @@ function EditorBar({
           readOnly={!editable}
           onRename={(next) => store.getState().setName(next)}
         />
+        {byAgent ? (
+          <span className="flw-agent-tag" title={t('flows.badge.byAgent.title')}>
+            {t('flows.badge.byAgent')}
+          </span>
+        ) : null}
         <span className="flw-crumb__status" data-status={status} aria-live="polite">
           · {statusText}
         </span>
       </nav>
       <span className="flex-1" />
       <span className="flw-bar__history">
+        <button
+          ref={historyRef}
+          type="button"
+          className="flw-icon-btn"
+          aria-label={t('flows.history.title')}
+          title={t('flows.history.title')}
+          aria-haspopup="dialog"
+          aria-expanded={historyOpen}
+          onMouseDown={(e) => {
+            // The open panel closes on an outside press; let this click toggle it instead.
+            if (historyOpen) e.stopPropagation()
+          }}
+          onClick={onHistory}
+        >
+          <History className="size-3.5" strokeWidth={1.75} aria-hidden />
+        </button>
         <button
           type="button"
           className="flw-icon-btn"
@@ -973,10 +1134,12 @@ function CanvasControls({
   onAdd,
   store,
   canAdd,
+  onFit,
 }: {
   onAdd: (rect: DOMRect) => void
   store: EditorStore
   canAdd: boolean
+  onFit: () => void
 }) {
   const rf = useReactFlow()
   const { zoom } = useViewport()
@@ -1019,7 +1182,7 @@ function CanvasControls({
           aria-label={t('flows.editor.fit')}
           title={`${t('flows.editor.fit')} (⌘0)`}
           disabled={count === 0}
-          onClick={() => void rf.fitView({ ...FIT_OPTIONS, duration: 200 })}
+          onClick={onFit}
         >
           <Maximize className="size-3" strokeWidth={2} aria-hidden />
         </button>
@@ -1082,7 +1245,7 @@ function useAutosave(
   api: FlowsApi,
   flowId: string,
   viewport: () => { x: number; y: number; zoom: number },
-  opts: { paused: boolean; onRefused: (err: unknown) => void },
+  opts: { paused: boolean; onRefused: (err: unknown) => void; onShowHistory: () => void },
 ) {
   const queryClient = useQueryClient()
   const key = useStore(store, currentDocKey)
@@ -1093,10 +1256,14 @@ function useAutosave(
   const remoteRev = useRef(0)
   const viewportRef = useRef(viewport)
   const refusedRef = useRef(opts.onRefused)
+  const historyRef = useRef(opts.onShowHistory)
+  /** Who made the last change announced from elsewhere (the agent, from chat?). */
+  const remoteAuthor = useRef<FlowAuthor | undefined>(undefined)
   useEffect(() => {
     viewportRef.current = viewport
     refusedRef.current = opts.onRefused
-  }, [viewport, opts.onRefused])
+    historyRef.current = opts.onShowHistory
+  }, [viewport, opts.onRefused, opts.onShowHistory])
 
   const reload = useCallback(
     async (why: 'conflict' | 'remote') => {
@@ -1104,7 +1271,17 @@ function useAutosave(
         const res = docWithAccess(await api.get(flowId))
         store.getState().loadDoc(res)
         if (!res.writable) refusedRef.current(new Error(res.read_only_reason ?? ''))
-        if (why === 'conflict') toast.warning(t('flows.editor.conflict'))
+        // The agent edits flows from chat by itself: say it was the agent, and
+        // where its change can be undone.
+        const byAgent = remoteAuthor.current === 'agent' || res.updated_by === 'agent'
+        remoteAuthor.current = undefined
+        const history = {
+          action: { label: t('flows.history.title'), onClick: () => historyRef.current() },
+        }
+        if (why === 'conflict') {
+          if (byAgent) toast.warning(t('flows.editor.byAgentConflict'), history)
+          else toast.warning(t('flows.editor.conflict'))
+        } else if (byAgent) toast.message(t('flows.editor.byAgent'), history)
         else toast.message(t('flows.editor.reloaded'))
       } catch (err) {
         toast.error(t('flows.offline.loadFailed'), { description: errorText(err) })
@@ -1184,8 +1361,9 @@ function useAutosave(
   )
 
   const noteRemoteRev = useCallback(
-    (rev: number) => {
+    (rev: number, author?: FlowAuthor) => {
       if (rev <= store.getState().meta.rev) return
+      remoteAuthor.current = author
       if (inFlight.current) {
         remoteRev.current = Math.max(remoteRev.current, rev)
         return
@@ -1203,7 +1381,7 @@ function useAutosave(
       : key === savedKey
         ? 'saved'
         : 'edited'
-  return { status, flush, noteRemoteRev }
+  return { status, flush, noteRemoteRev, reload }
 }
 
 /** `flows.estimate` a moment after the graph settles, and again when a run settles. */

@@ -25,9 +25,10 @@
 // base64 and an `image/*` mime only.
 
 import { t } from '@/i18n'
-import '@/i18n/en/chat'
+import '@/i18n/en/flowcards'
 
 export { FLOW_RUN_ARTIFACT_MIME, isFlowRunArtifact } from './flowRunMime'
+import { normalizeFlowChangePayload, renderFlowChange } from './flowChange'
 
 /** Longest side of a card thumbnail (px), as asked of `flows.media`. */
 export const FLOW_RUN_THUMB_SIDE = 256
@@ -212,17 +213,17 @@ export function formatFlowUsd(value: number | null): string {
 export function flowRunStatusLabel(value: FlowRunStatus): string {
   switch (value) {
     case 'queued':
-      return t('chat.flowRunStatusQueued')
+      return t('flowcards.runStatusQueued')
     case 'running':
-      return t('chat.flowRunStatusRunning')
+      return t('flowcards.runStatusRunning')
     case 'done':
-      return t('chat.flowRunStatusDone')
+      return t('flowcards.runStatusDone')
     case 'failed':
-      return t('chat.flowRunStatusFailed')
+      return t('flowcards.runStatusFailed')
     case 'cancelled':
-      return t('chat.flowRunStatusCancelled')
+      return t('flowcards.runStatusCancelled')
     default:
-      return t('chat.flowRunStatusUnknown')
+      return t('flowcards.runStatusUnknown')
   }
 }
 
@@ -271,7 +272,7 @@ export function renderFlowRun(
   root.setAttribute('data-flowrun-id', card.runId)
 
   const head = el('div', 'flowrun-card__head')
-  const eyebrow = el('span', 'flowrun-card__eyebrow', t('chat.flowRunEyebrow'))
+  const eyebrow = el('span', 'flowrun-card__eyebrow', t('flowcards.eyebrow'))
   const title = el('span', 'flowrun-card__title', card.flowName || card.flowId)
   title.title = card.flowId
   const badge = el('span', 'flowrun-card__status', flowRunStatusLabel(card.status))
@@ -281,18 +282,18 @@ export function renderFlowRun(
   const meta = el('div', 'flowrun-card__meta')
   const progress =
     card.progress.total > 0
-      ? t('chat.flowRunProgress', {
+      ? t('flowcards.runProgress', {
           done: String(card.progress.done),
           total: String(card.progress.total),
         })
       : ''
   const parts: string[] = []
   if (progress) parts.push(progress)
-  if (card.cached > 0) parts.push(t('chat.flowRunCached', { count: String(card.cached) }))
+  if (card.cached > 0) parts.push(t('flowcards.runCached', { count: String(card.cached) }))
   if (card.costUsd !== null)
-    parts.push(t('chat.flowRunCost', { cost: formatFlowUsd(card.costUsd) }))
+    parts.push(t('flowcards.runCost', { cost: formatFlowUsd(card.costUsd) }))
   else if (card.estUsd !== null)
-    parts.push(t('chat.flowRunEstimate', { cost: formatFlowUsd(card.estUsd) }))
+    parts.push(t('flowcards.runEstimate', { cost: formatFlowUsd(card.estUsd) }))
   parts.forEach((part, index) => {
     const span = el('span', 'flowrun-card__fact', part)
     if (index === 0 && progress) span.classList.add('flowrun-card__progress')
@@ -312,7 +313,7 @@ export function renderFlowRun(
     card.images.slice(0, FLOW_RUN_MAX_THUMBS).forEach((img, index) => {
       const figure = el('figure', 'flowrun-thumb')
       figure.setAttribute('data-flowrun-sha', img.sha256)
-      const label = img.name || t('chat.flowRunImage', { n: String(index + 1) })
+      const label = img.name || t('flowcards.runImage', { n: String(index + 1) })
       const src = options.thumb(img.sha256)
       if (src) {
         const picture = document.createElement('img')
@@ -331,10 +332,10 @@ export function renderFlowRun(
     })
     const more = card.images.length - FLOW_RUN_MAX_THUMBS
     if (more > 0)
-      grid.append(el('span', 'flowrun-card__more', t('chat.flowRunMore', { count: String(more) })))
+      grid.append(el('span', 'flowrun-card__more', t('flowcards.runMore', { count: String(more) })))
     root.append(grid)
   } else if (isTerminalFlowRun(card)) {
-    root.append(el('p', 'flowrun-card__empty', t('chat.flowRunNoImages')))
+    root.append(el('p', 'flowrun-card__empty', t('flowcards.runNoImages')))
   }
 
   if (card.error) {
@@ -343,7 +344,7 @@ export function renderFlowRun(
 
   if (options.openFlow && card.flowId) {
     const foot = el('div', 'flowrun-card__foot')
-    const open = el('button', 'flowrun-card__open', t('chat.flowRunOpen'))
+    const open = el('button', 'flowrun-card__open', t('flowcards.open'))
     open.type = 'button'
     open.setAttribute('data-flowrun-action', 'open')
     open.setAttribute('data-flowrun-flow', card.flowId)
@@ -491,14 +492,27 @@ export function createFlowRunMounter(deps: FlowRunMounterDeps) {
   async function mountOne(host: HTMLElement): Promise<void> {
     const url = host.dataset.flowrunSrc || ''
     if (!url) {
-      setStatus(host, t('chat.flowRunUnavailable'))
+      setStatus(host, t('flowcards.runUnavailable'))
       return
     }
     try {
       const raw = await deps.fetchPayload(url)
       const snapshot = normalizeFlowRunPayload(raw)
+      const change = snapshot ? null : normalizeFlowChangePayload(raw)
+      if (change) {
+        // An agent's change to a flow: a snapshot of that save, nothing to re-read.
+        if (!host.isConnected || !claimed.has(host)) {
+          claimed.delete(host)
+          return
+        }
+        wire(host)
+        renderFlowChange(host, change, { openFlow: getOpen() })
+        setStatus(host, '')
+        diag('flowchange.mount.done', { flowId: change.flowId, rev: change.rev })
+        return
+      }
       if (!snapshot) {
-        setStatus(host, t('chat.flowRunUnreadable'))
+        setStatus(host, t('flowcards.runUnreadable'))
         return
       }
       if (!host.isConnected || !claimed.has(host)) {
@@ -515,7 +529,7 @@ export function createFlowRunMounter(deps: FlowRunMounterDeps) {
       // may be behind the run.
       void refresh(shown.runId)
     } catch (error) {
-      setStatus(host, t('chat.flowRunFailed'))
+      setStatus(host, t('flowcards.runFailed'))
       diag('flowrun.mount.error', { url, error: String(error) })
     }
   }

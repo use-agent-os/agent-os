@@ -629,8 +629,8 @@ to the chat itself, so do not `publish_artifact` them. If the user declines,
 stop: do not retry with fewer images, other inputs, a cheaper model, another
 flow or `image_generate`; for 30 minutes any run of that flow asks them
 again. When `image_generate` is unavailable, an image request can still be met
-by running a fitting flow; if none fits, tell the user to create one in the
-desktop Flows editor (never fake it with an SVG). The tools are hidden
+by running a fitting flow; if none fits, build one (below) and offer to run
+it (never fake it with an SVG). The tools are hidden
 when flows are off or no image model has a key; `agentos flows models`
 names the missing key.
 
@@ -642,6 +642,69 @@ agentos flows runs --json                             # recent runs and their st
 
 `agentos flows run` / `stop` are the user's commands; from an agent's shell
 they fail with `flows.operator_required`. Contract: `docs/flows.md`.
+
+**Building and editing flows.** You can create and change the user's flows
+yourself with `flow_get`, `flow_create` and `flow_update` (deferred; load
+them with `tool_search`, e.g. "create flow"). Authoring is free and needs no
+approval; only `flow_run` spends. There is no delete tool, and every save
+keeps a revision the user can restore in the editor (Version history).
+
+1. `flow_get` with no argument: node types (inputs, widgets, options,
+   defaults, outputs), image models (`available`, `ops.edit`, `max_images`,
+   ratios, prices) and the spec format. Pick an available model that can do
+   the job: `ops.edit` when images are linked into an image node.
+2. If the user names a flow or means one they have, call `flow_get(flow)`
+   right before editing, change only what the user asked for in the spec it
+   returns (never rebuild it from memory: the user may have edited or
+   restored it), and send the whole spec back with `flow_update(flow, spec,
+   base_rev=<the rev flow_get returned>)`. If the flow changed meanwhile,
+   nothing is saved and you are told what changed: `flow_get` again and
+   re-apply just your change. Do not create a copy. Otherwise `flow_create`.
+3. The spec: `nodes` (`id`, `type`, optional `title`, `values`), `links` as
+   `["node.output", "node.input"]`, `inputs` naming what `flow_run` may
+   override. No positions needed. A `load_image` takes
+   `{"attachment": "latest"}` (the image the user attached in this chat; `"2"`
+   is the one before, or use its file name), `{"attachment": "<artifact_id>"}`
+   (an image from an earlier tool result in this chat) or
+   `{"path": "<file in your workspace>"}`; nothing outside the workspace.
+   Never search the disk or copy files to find the user's images; if one
+   cannot be found, ask the user to attach it again. On an image node,
+   `variation: "new"` calls the model every run and `"keep"` only reuses the
+   cached result of the same inputs (no new image); neither makes an image
+   resemble an earlier one: link that image into `images` instead.
+4. A spec that does not validate is not saved: the result lists the problems
+   per node; fix them and call again.
+5. Say in a sentence what the flow does and offer to run it. Call `flow_run`
+   right away only if the user asked for the image now.
+
+Worked example: "make an infographic about AgentOS in the style of this
+image" (the user attached a reference). Style reference + content text into
+one edit call on GPT Image 2, then Save:
+
+```json
+{
+  "name": "AgentOS infographic",
+  "nodes": [
+    {"id": "ref", "type": "load_image", "title": "Style reference",
+     "values": {"image": {"attachment": "latest"}}},
+    {"id": "content", "type": "text", "title": "Content",
+     "values": {"text": "An infographic in the style of the reference image: AgentOS, a local agent runtime. Three panels: one gateway, many channels; a router that picks the cheapest capable model; a sandbox around every tool. Keep the reference's palette, typography and layout."}},
+    {"id": "gen", "type": "image",
+     "values": {"model": "surplus/gpt-image-2", "aspect": "21:9", "quality": "high", "count": 1}},
+    {"id": "out", "type": "save"}
+  ],
+  "links": [["ref.image", "gen.images"], ["content.text", "gen.prompt"], ["gen.image", "out.images"]],
+  "inputs": {"content": "content.text"}
+}
+```
+
+`flow_create` returns the flow id, the estimate per run and a card in the
+chat; the user can then ask for "the same for our pricing page" and you run it
+with `flow_run(flow, inputs={"content": "..."})`. A one-off variant ("this
+time 4 images, 16:9") is `flow_run(flow, overrides={"gen": {"count": 4,
+"aspect": "16:9"}})`: it changes that run only and is cost-gated on its own
+estimate; do not save it into the flow. `count` is at most 4 per image node:
+for "6 images", run twice (each run is cost-gated) or ask whether 4 will do.
 
 ### Day-two operations
 

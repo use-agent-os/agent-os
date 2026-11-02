@@ -2059,11 +2059,16 @@
   font-variant-numeric: tabular-nums;
 }
 
-.chat-surface .flowrun-card:is([data-flowrun-status='queued'], [data-flowrun-status='running']) {
+.chat-surface
+  .flowrun-card:is(
+    [data-flowrun-status='queued'],
+    [data-flowrun-status='running'],
+    [data-flowrun-status='updated']
+  ) {
   --flowrun-tone: var(--info);
 }
 
-.chat-surface .flowrun-card[data-flowrun-status='done'] {
+.chat-surface .flowrun-card:is([data-flowrun-status='done'], [data-flowrun-status='created']) {
   --flowrun-tone: var(--ok);
 }
 
@@ -2167,6 +2172,10 @@
   font-size: 0.6875rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-surface .flowrun-card__summary {
+  margin: 0;
 }
 
 .chat-surface .flowrun-card__more,

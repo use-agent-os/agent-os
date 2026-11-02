@@ -23,6 +23,21 @@ _FLOW_ID_RE = re.compile(r"^flw_[a-z0-9]{4,32}$")
 _RUN_ID_RE = re.compile(r"^run_[a-z0-9]{4,32}$")
 MAX_NAME_CHARS = 120
 MAX_NODES = 500
+#: Who wrote a flow or a revision.
+AUTHORS = ("user", "agent")
+#: Revisions kept per flow (older ones are pruned).
+MAX_REVISIONS = 50
+
+
+def clean_author(raw: Any) -> str:
+    return raw if raw in AUTHORS else "user"
+
+
+def with_provenance(doc: dict[str, Any]) -> dict[str, Any]:
+    """*doc* with ``created_by`` / ``updated_by`` filled in (old docs read as "user")."""
+    doc["created_by"] = clean_author(doc.get("created_by"))
+    doc["updated_by"] = clean_author(doc.get("updated_by"))
+    return doc
 
 
 def new_flow_id() -> str:
@@ -170,7 +185,7 @@ class FlowStore:
     def exists(self, flow_id: str) -> bool:
         return is_flow_id(flow_id) and self._path(flow_id).is_file()
 
-    def create(self, doc: dict[str, Any]) -> dict[str, Any]:
+    def create(self, doc: dict[str, Any], *, author: str = "user") -> dict[str, Any]:
         with self._lock:
             flow_id = new_flow_id()
             while self.exists(flow_id):
@@ -180,10 +195,17 @@ class FlowStore:
             stored["name"] = clean_name(doc.get("name"))
             stored["rev"] = 1
             stored["updated"] = utc_now_iso()
+            stored["created_by"] = clean_author(author)
+            stored["updated_by"] = clean_author(author)
             self._write(stored)
             return stored
 
-    def save(self, doc: Any, base_rev: int) -> dict[str, Any]:
+    def save(self, doc: Any, base_rev: int, *, author: str = "user") -> dict[str, Any]:
+        """Write *doc* as ``base_rev + 1``; ``flows.conflict`` when the stored rev moved.
+
+        ``created_by`` always comes from the stored flow (a client cannot rewrite
+        it); ``updated_by`` is *author*.
+        """
         stored = normalize_doc(doc)
         flow_id = stored.get("id")
         if not isinstance(flow_id, str):
@@ -200,6 +222,8 @@ class FlowStore:
             stored["name"] = clean_name(stored.get("name") or current.get("name"))
             stored["rev"] = base_rev + 1
             stored["updated"] = utc_now_iso()
+            stored["created_by"] = clean_author(current.get("created_by"))
+            stored["updated_by"] = clean_author(author)
             self._write(stored)
             return stored
 
@@ -273,6 +297,18 @@ CREATE TABLE IF NOT EXISTS flow_cache (
     last_hit REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS flow_cache_lru ON flow_cache (last_hit);
+CREATE TABLE IF NOT EXISTS flow_revisions (
+    flow_id TEXT NOT NULL,
+    rev INTEGER NOT NULL,
+    author TEXT NOT NULL,
+    session_key TEXT,
+    kind TEXT NOT NULL DEFAULT 'save',
+    created TEXT NOT NULL,
+    created_ts REAL NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    doc_json TEXT NOT NULL,
+    PRIMARY KEY (flow_id, rev)
+);
 """
 
 _RUN_JSON_COLUMNS = {
@@ -283,6 +319,7 @@ _RUN_JSON_COLUMNS = {
     "error": "error_json",
     "estimate": "est_json",
     "preview": "preview_json",
+    "overrides": "overrides_json",
 }
 
 
@@ -301,6 +338,9 @@ class FlowDB:
         self._conn.execute("PRAGMA synchronous=NORMAL;")
         with self._lock:
             self._conn.executescript(_SCHEMA)
+            columns = {row[1] for row in self._conn.execute("PRAGMA table_info(flow_runs)")}
+            if "overrides_json" not in columns:  # databases created before run overrides
+                self._conn.execute("ALTER TABLE flow_runs ADD COLUMN overrides_json TEXT")
 
     def close(self) -> None:
         with self._lock:
@@ -313,8 +353,8 @@ class FlowDB:
             self._conn.execute(
                 "INSERT INTO flow_runs (run_id, flow_id, rev, status, origin, session_key, "
                 "to_node, created, created_ts, inputs_json, graph_json, node_state_json, "
-                "outputs_json, est_json, est_usd, seq) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "outputs_json, est_json, est_usd, seq, overrides_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     record["run_id"],
                     record["flow_id"],
@@ -332,6 +372,7 @@ class FlowDB:
                     json.dumps(record.get("estimate")),
                     record.get("est_usd"),
                     int(record.get("seq") or 0),
+                    json.dumps(record.get("overrides")) if record.get("overrides") else None,
                 ),
             )
 
@@ -425,6 +466,117 @@ class FlowDB:
     def delete_runs(self, flow_id: str) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM flow_runs WHERE flow_id = ?", (flow_id,))
+
+    # ── revisions ──────────────────────────────────────────────────────
+
+    def add_revision(
+        self,
+        doc: dict[str, Any],
+        *,
+        author: str,
+        session_key: str | None,
+        kind: str,
+        summary: str,
+        keep: int = MAX_REVISIONS,
+    ) -> None:
+        """Record *doc* (at its own rev) and prune the flow to its last *keep* revisions."""
+        flow_id, rev = str(doc["id"]), int(doc["rev"])
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO flow_revisions (flow_id, rev, author, session_key, kind, "
+                "created, created_ts, summary, doc_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    flow_id,
+                    rev,
+                    clean_author(author),
+                    session_key,
+                    kind,
+                    utc_now_iso(),
+                    time.time(),
+                    summary,
+                    json.dumps(doc),
+                ),
+            )
+            self._conn.execute(
+                "DELETE FROM flow_revisions WHERE flow_id = ? AND rev NOT IN "
+                "(SELECT rev FROM flow_revisions WHERE flow_id = ? ORDER BY rev DESC LIMIT ?)",
+                (flow_id, flow_id, max(1, keep)),
+            )
+
+    def amend_revision(self, flow_id: str, old_rev: int, doc: dict[str, Any], summary: str) -> None:
+        """Move the latest revision row to *doc*'s rev (coalesced editor saves)."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE flow_revisions SET rev = ?, doc_json = ?, summary = ?, created = ?, "
+                "created_ts = ? WHERE flow_id = ? AND rev = ?",
+                (
+                    int(doc["rev"]),
+                    json.dumps(doc),
+                    summary,
+                    utc_now_iso(),
+                    time.time(),
+                    flow_id,
+                    old_rev,
+                ),
+            )
+
+    @staticmethod
+    def _revision_row(row: sqlite3.Row, *, with_doc: bool) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "rev": row["rev"],
+            "author": row["author"],
+            "session_key": row["session_key"],
+            "kind": row["kind"],
+            "created": row["created"],
+            "created_ts": row["created_ts"],
+            "summary": row["summary"],
+        }
+        if with_doc:
+            out["doc"] = json.loads(row["doc_json"])
+        return out
+
+    def list_revisions(self, flow_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM flow_revisions WHERE flow_id = ? ORDER BY rev DESC", (flow_id,)
+            ).fetchall()
+        return [self._revision_row(row, with_doc=False) for row in rows]
+
+    def latest_revision(self, flow_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM flow_revisions WHERE flow_id = ? ORDER BY rev DESC LIMIT 1",
+                (flow_id,),
+            ).fetchone()
+        return self._revision_row(row, with_doc=True) if row is not None else None
+
+    def get_revision(self, flow_id: str, rev: int) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM flow_revisions WHERE flow_id = ? AND rev = ?", (flow_id, rev)
+            ).fetchone()
+        return self._revision_row(row, with_doc=True) if row is not None else None
+
+    def previous_revision(self, flow_id: str, rev: int) -> dict[str, Any] | None:
+        """The newest revision older than *rev*."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM flow_revisions WHERE flow_id = ? AND rev < ? "
+                "ORDER BY rev DESC LIMIT 1",
+                (flow_id, rev),
+            ).fetchone()
+        return self._revision_row(row, with_doc=True) if row is not None else None
+
+    def delete_revisions(self, flow_id: str) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM flow_revisions WHERE flow_id = ?", (flow_id,))
+
+    def revisions_reference(self, sha: str) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM flow_revisions WHERE doc_json LIKE ? LIMIT 1", (f"%{sha}%",)
+            ).fetchone()
+        return row is not None
 
     def runs_reference(self, sha: str) -> bool:
         pattern = f"%{sha}%"

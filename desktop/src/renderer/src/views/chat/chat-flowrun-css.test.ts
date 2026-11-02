@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { normalizeFlowChangePayload, renderFlowChange } from '@/views/chat/transcript/flowChange'
 import { normalizeFlowRunPayload, renderFlowRun } from '@/views/chat/transcript/flowRun'
 
 // The desktop skins the shared Image Flow run card (frontend flowRun.ts) in
@@ -64,5 +65,42 @@ describe('desktop Image Flow run card skin', () => {
   it('draws the placeholder group like the other inline cards', () => {
     expect(css).toMatch(/\.msg-artifact-flowrun-group\s*{\s*display: grid;/)
     expect(css).toContain('.msg-artifact-flowrun__status[hidden]')
+  })
+})
+
+describe('desktop Image Flow change card skin', () => {
+  function change(kind: 'created' | 'updated') {
+    const host = document.createElement('div')
+    host.innerHTML = '<div class="msg-artifact-flowrun__body"></div>'
+    document.body.append(host)
+    const payload = normalizeFlowChangePayload({
+      kind: 'flow_change',
+      flow_id: 'flw_ab12cd34',
+      name: 'AgentOS infographic',
+      rev: 2,
+      change: kind,
+      summary: 'added writer (prompt_writer)',
+      node_count: 4,
+      estimate: { kind: 'usd', usd: 0.27, approximate: true },
+    })!
+    return renderFlowChange(host, payload, { openFlow: () => {} })
+  }
+
+  it('has a rule for every class the change card emits', () => {
+    const root = change('updated')
+    const classes = new Set<string>()
+    ;[root, ...root.querySelectorAll<HTMLElement>('*')].forEach((node) =>
+      node.classList.forEach((name) => classes.add(name)),
+    )
+    classes.delete('flowrun-card--change') // a hook; the plate is .flowrun-card
+    for (const name of classes) {
+      expect(css, `.${name} has no desktop rule`).toContain(`.${name}`)
+    }
+  })
+
+  it('tones the rail for a created and an updated flow', () => {
+    expect(change('created').dataset.flowrunStatus).toBe('created')
+    expect(css).toContain(".flowrun-card[data-flowrun-status='created']")
+    expect(css).toContain(".flowrun-card[data-flowrun-status='updated']")
   })
 })

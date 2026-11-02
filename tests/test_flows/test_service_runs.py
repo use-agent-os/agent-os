@@ -783,3 +783,68 @@ async def test_resaving_a_cached_image_is_not_a_new_result(service, images) -> N
     assert second["images"] == second["outputs"]["e"]["images"]  # only the edit is new
     assert second["preview"] == second["outputs"]["e"]["images"][0]
     assert second["image_count"] == 1
+
+
+# ── run-time overrides ────────────────────────────────────────────────────
+
+
+async def test_overrides_change_one_run_only(service, images) -> None:
+    flow = await stored(service, t2i_doc(count=1))
+    overrides = {"i": {"model": "openai/gpt-image-1", "count": "3", "quality": "low"}}
+    est = service.estimate(service.get_flow(flow["id"]), overrides=overrides)
+    assert est["nodes"]["i"] == {"kind": "range", "min": 0.033, "max": 0.048, "approximate": True}
+    run = await _run(service, flow["id"], overrides=overrides)
+    assert run["status"] == "done"
+    assert [(entry, req.n, req.quality) for entry, req in images.calls] == [
+        ("openai/gpt-image-1", 3, "low")
+    ]
+    assert run["overrides"] == overrides
+    used = {n["id"]: n for n in run["graph"]["nodes"]}["i"]["values"]
+    assert (used["model"], used["count"], used["quality"]) == ("openai/gpt-image-1", 3, "low")
+    stored_flow = service.get_flow(flow["id"])
+    assert stored_flow["rev"] == flow["rev"]  # the flow itself is untouched
+    assert {n["id"]: n for n in stored_flow["nodes"]}["i"]["values"]["count"] == 1
+    assert service.get_run(run["run_id"])["overrides"] == overrides  # persisted
+    plain = await _run(service, flow["id"])
+    assert plain["overrides"] is None
+
+
+async def test_bad_overrides_are_refused_before_anything_runs(service, images) -> None:
+    flow = await stored(service, t2i_doc())
+    for overrides, key, code in (
+        ({"t": {"text": "x"}}, "t", "not_overridable"),
+        ({"i": {"prompt": "x"}}, "i", "not_overridable"),
+        ({"zz": {"count": 2}}, "_flow", "unknown_node"),
+        ({"i": {"count": 9}}, "i", "out_of_range"),
+        ({"i": {"model": "acme/none"}}, "i", "unknown_model"),
+    ):
+        with pytest.raises(FlowError) as excinfo:
+            await service.submit_run(flow["id"], overrides=overrides)
+        assert excinfo.value.code == "flows.invalid"
+        codes = [e["code"] for e in excinfo.value.details["node_errors"][key]]
+        assert code in codes, (overrides, codes)
+    assert images.calls == [] and service.list_runs(flow["id"]) == []
+
+
+def test_old_run_tables_gain_the_overrides_column(tmp_path) -> None:
+    import sqlite3
+
+    from agentos.flows.store import FlowDB
+
+    path = tmp_path / "flows.db"
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE flow_runs (run_id TEXT PRIMARY KEY, flow_id TEXT NOT NULL, rev INTEGER "
+        "NOT NULL, status TEXT NOT NULL, origin TEXT NOT NULL DEFAULT 'canvas', session_key "
+        "TEXT, to_node TEXT, created TEXT NOT NULL, created_ts REAL NOT NULL, started TEXT, "
+        "ended TEXT, inputs_json TEXT NOT NULL DEFAULT '{}', graph_json TEXT NOT NULL, "
+        "node_state_json TEXT NOT NULL DEFAULT '{}', outputs_json TEXT NOT NULL DEFAULT '{}', "
+        "error_json TEXT, est_json TEXT, est_usd REAL, cost_usd REAL, preview_json TEXT, "
+        "image_count INTEGER NOT NULL DEFAULT 0, seq INTEGER NOT NULL DEFAULT 0)"
+    )
+    conn.commit()
+    conn.close()
+    db = FlowDB(path)
+    columns = {row[1] for row in db._conn.execute("PRAGMA table_info(flow_runs)")}
+    assert "overrides_json" in columns
+    db.close()

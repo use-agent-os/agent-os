@@ -126,4 +126,19 @@ describe('FlowsHome', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'More' })[0]!)
     expect(screen.getByRole('menuitem', { name: /Delete…/ })).toBeDisabled()
   })
+
+  it('marks the flows the agent made', async () => {
+    const base = rpcCall.getMockImplementation()!
+    rpcCall.mockImplementation(async (method: string, params: Record<string, unknown>) => {
+      if (method === 'flows.list') {
+        return { flows: [{ ...FLOWS[0]!, created_by: 'agent' }, FLOWS[1]!] }
+      }
+      return base(method, params)
+    })
+    mount()
+    const agentCard = (await screen.findByText('Product shot cleanup')).closest('li')!
+    expect(within(agentCard).getByText('by agent')).toBeInTheDocument()
+    const userCard = screen.getByText('Lighthouse study').closest('li')!
+    expect(within(userCard).queryByText('by agent')).toBeNull()
+  })
 })

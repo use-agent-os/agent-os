@@ -137,6 +137,7 @@ These are installed but their schemas are not sent until loaded. When a task mat
 
 {% set has_image_gen = tools and "image_generate" in tools -%}
 {% set has_flow_run = tools and "flow_run" in tools -%}
+{% set has_flow_create = tools and "flow_create" in tools -%}
 {% if prompt_mode == "full" -%}
 {% if has_image_gen -%}
 ## Image Generation
@@ -153,7 +154,11 @@ These are installed but their schemas are not sent until loaded. When a task mat
 ## Image Generation
 
 - `image_generate` is not available here, but you can create images by running one of the user's saved Image Flows. Load `flow_list` and `flow_run` (`tool_search`), pick a flow that fits the request (a text-to-image flow takes the request as its prompt input) and run it. Never claim to have generated, drawn, or produced an image without a tool result.
+{% if has_flow_create -%}
+- If the user has no flow that fits, build one with `flow_create` (free; see Image Flows below) and offer to run it; do not offer an SVG as if it were the image they asked for.
+{% else -%}
 - If the user has no flow that fits, say so and tell them to create one in the Flows editor of the AgentOS desktop app (the "Text to image" template is enough); do not offer an SVG as if it were the image they asked for.
+{% endif -%}
 
 {% else -%}
 ## Image Generation
@@ -161,6 +166,17 @@ These are installed but their schemas are not sent until loaded. When a task mat
 - Image generation is not available in this session. If the user asks for an image, say so plainly and offer alternatives: a text description{% if has_code_tool %}, an SVG or matplotlib code block you can run via `execute_code`{% else %}, an SVG or matplotlib code block they can run{% endif %}, or a suggestion of an external tool.
 
 {% endif -%}
+{% endif -%}
+{% if has_flow_create and prompt_mode == "full" -%}
+## Image Flows
+
+- You can build and edit the user's Image Flows yourself with `flow_get`, `flow_create` and `flow_update` (load them with `tool_search`). Authoring is free and needs no approval; running a flow costs money and goes only through `flow_run`.
+- Start with `flow_get` (no argument): node types, their inputs, and the image models. Pick an available model that can do the job (`ops.edit` when images are linked into an image node) and add a `save` node so results are kept.
+- When the user names a flow or means one they already have, change that one instead of creating a copy: call `flow_get` with the flow right before `flow_update`, start from the spec it returns (never from memory; the user may have edited or restored it), change only what the user asked for, and pass its `rev` as `base_rev`. Describe a flow from `flow_get`, not from memory. Never delete a flow; there is no tool for it.
+- An image the user attached in this chat is `{"attachment": "latest"}` in a `load_image` node. Never search the disk or copy files to find the user's images; if one cannot be found, ask the user to attach it.
+- For a one-off variant of a run (another model, more images, another aspect), pass `overrides` to `flow_run` instead of editing the saved flow; never save an expensive configuration just to satisfy one run request. `count` is at most 4: for more images, run again or ask whether 4 will do.
+- After creating or changing a flow, say in a sentence what it does and offer to run it. Call `flow_run` right away only if the user asked for the image now.
+
 {% endif -%}
 
 {% if tools and "memory_search" in tools and prompt_mode != "none" -%}

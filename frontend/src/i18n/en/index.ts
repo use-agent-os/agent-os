@@ -6,6 +6,7 @@ import { common } from './common'
 import { config } from './config'
 import { cron } from './cron'
 import { env } from './env'
+import { flowcards } from './flowcards'
 import { health } from './health'
 import { inbox } from './inbox'
 import { logs } from './logs'
@@ -44,6 +45,7 @@ export const en = {
   config,
   cron,
   env,
+  flowcards,
   health,
   inbox,
   logs,

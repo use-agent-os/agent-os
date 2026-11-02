@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Image Flows: agents can build and edit flows from chat (docs/flows.md,
+  "Agents can build flows"). Three new agent tools: `flow_get` (without an
+  argument the node catalog, the image models with their capabilities and
+  prices, and the spec format; with a flow its graph as a spec plus its public
+  inputs), `flow_create` and `flow_update`. A spec needs no positions, takes
+  links as `["node.output", "node.input"]` pairs, and a `load_image` value may
+  name the chat image the user sent (`{"attachment": "latest"}`, a number for
+  older ones, an artifact id) or a file inside the agent workspace
+  (`{"path": ...}`; anything outside it is refused). Authoring needs no
+  approval because it costs nothing; running stays behind `flow_run`'s cost
+  gate, no tool deletes a flow, and every save keeps a revision the user can
+  restore. A spec that does not validate is not saved and the problems go
+  back to the agent per node. Each change posts an
+  `application/vnd.agentos.flow-change+json` card (name, created or updated,
+  what changed, node count, estimate per run; "Open in Flows" on the
+  desktop). The direct tool HTTP call never runs `flow_create` or
+  `flow_update`. `flow_update` requires the `base_rev` the agent read, and a
+  flow that changed since (an edit or a restore in the editor) is not
+  overwritten: the agent is told what changed and re-reads it. Chat images
+  are found in the session transcript (inline composer images and staged
+  uploads alike), and the agent is told never to search the disk for them.
+- Image Flows: `flow_run` takes `overrides` for one run (model, count, aspect,
+  resolution, size, quality, background per image node), cost-gated on the
+  overridden estimate and bound to it in the approval; the saved flow is not
+  changed.
+- Deferred tool loading. `flow_get`, `flow_create` and `flow_update` join the
+  deferred set, which now holds 30 rarely used builtins; deferral cuts a stock
+  request from 69 to 40 tool schemas.
+
 ## [2026.10.30] - 2026-10-30
 
 ### Added

@@ -18,6 +18,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import inspect
+import json
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -30,6 +33,16 @@ from agentos.flows.adapters import (
     UnwiredImageAdapter,
     UnwiredTextAdapter,
 )
+from agentos.flows.authoring import (
+    compact_nodes,
+    diff_summary,
+    doc_to_spec,
+    layout,
+    parse_spec,
+    public_inputs,
+    spec_invalid,
+    spec_to_doc,
+)
 from agentos.flows.executor import ExecutorDeps, RunExecutor, RunHandle, produced_images
 from agentos.flows.media import MediaStore
 from agentos.flows.models import REGISTRY, ModelEntry, ModelRegistry
@@ -37,6 +50,7 @@ from agentos.flows.planner import (
     Analysis,
     analyse,
     apply_inputs,
+    apply_overrides,
     build_plan,
     estimate,
 )
@@ -45,10 +59,12 @@ from agentos.flows.schema import node_catalog_wire
 from agentos.flows.store import (
     FlowDB,
     FlowStore,
+    clean_author,
     clean_name,
     is_run_id,
     new_run_id,
     normalize_doc,
+    with_provenance,
 )
 from agentos.flows.surplus import CATALOG_FILENAME, SurplusCatalog
 from agentos.flows.templates import template_doc
@@ -64,6 +80,15 @@ log = structlog.get_logger(__name__)
 
 Broadcast = Callable[[str, dict[str, Any]], Awaitable[None]]
 ArtifactSink = Callable[[Path, str], dict[str, Any] | None]
+#: Resolves a ``load_image`` reference (``{"attachment": ...}`` / ``{"path": ...}``)
+#: for node ``node_id`` to an ImageRef (or its wire dict); may be async. Raise
+#: ``FlowError`` / ``ValueError`` to report the reference as invalid.
+ImageResolver = Callable[[str, dict[str, Any]], Any]
+#: Validation codes that do not stop an agent from saving a flow (a key can be
+#: added later); they come back as ``warnings``.
+AUTHORING_WARNING_CODES = frozenset({"model_unavailable", "no_default_model"})
+#: Consecutive editor saves by the same author within this window share one revision.
+REVISION_COALESCE_S = 300.0
 #: ``(tracker, run_id, session_key, cost_usd, model_id, provider_id)``.
 CostRecorder = Callable[[Any, str, str | None, float, str, str], None]
 
@@ -130,6 +155,7 @@ def run_wire(record: dict[str, Any]) -> dict[str, Any]:
             "to_node": record.get("to_node"),
             "estimate": record.get("estimate"),
             "seq": record.get("seq") or 0,
+            "overrides": record.get("overrides"),
             "images": produced_images(
                 record.get("graph"), record.get("nodes"), record.get("outputs")
             ),
@@ -316,6 +342,7 @@ class FlowService:
     def list_flows(self) -> dict[str, Any]:
         flows = []
         for doc in self.store.all():
+            with_provenance(doc)
             flows.append(
                 {
                     "id": doc["id"],
@@ -324,13 +351,15 @@ class FlowService:
                     "updated": doc.get("updated"),
                     "node_count": len(doc.get("nodes") or []),
                     "preview": self.db.latest_preview(doc["id"]),
+                    "created_by": doc["created_by"],
+                    "updated_by": doc["updated_by"],
                 }
             )
         flows.sort(key=lambda item: str(item.get("updated") or ""), reverse=True)
         return {"flows": flows}
 
     def get_flow(self, flow_id: str) -> dict[str, Any]:
-        return self.store.get(flow_id)
+        return with_provenance(self.store.get(flow_id))
 
     def resolve_flow(self, ref: str) -> dict[str, Any]:
         """A flow by id or by exact name (for the CLI and agent tools)."""
@@ -344,16 +373,166 @@ class FlowService:
             raise FlowError("flows.invalid", f"Several flows are named {ref!r}: {ids}")
         raise FlowError("flows.not_found", f"No flow with id or name {ref!r}")
 
-    async def create_flow(self, name: Any, template: str | None = None) -> dict[str, Any]:
-        doc = self.store.create(template_doc(template, clean_name(name)))
-        await self._emit("flows.changed", {"flow_id": doc["id"], "rev": doc["rev"]})
+    # ── revisions ───────────────────────────────────────────────────────
+
+    def _record_revision(
+        self,
+        doc: dict[str, Any],
+        previous: dict[str, Any] | None,
+        *,
+        author: str,
+        session_key: str | None,
+        kind: str,
+        summary: str | None = None,
+    ) -> str:
+        """Keep *doc* as a revision; returns its one-line summary.
+
+        ``kind`` is ``create | save | update | restore``. A flow saved before
+        history existed first gets its pre-save document as a ``baseline`` row,
+        so the previous version is always recoverable. Editor saves (``save``)
+        by the same author and session within ``REVISION_COALESCE_S`` of the
+        latest ``save`` row amend that row instead of adding one, so autosave
+        does not push real history out of the 50 kept revisions.
+        """
+        flow_id = str(doc["id"])
+        latest = self.db.latest_revision(flow_id)
+        if latest is None and previous is not None:
+            self.db.add_revision(
+                previous,
+                author=clean_author(previous.get("updated_by")),
+                session_key=None,
+                kind="baseline",
+                summary="before history was kept",
+            )
+            latest = self.db.latest_revision(flow_id)
+        if (
+            kind == "save"
+            and latest is not None
+            and latest["kind"] == "save"
+            and latest["author"] == clean_author(author)
+            and latest["session_key"] == session_key
+            and latest["rev"] == int(doc["rev"]) - 1
+            and time.time() - float(latest["created_ts"]) <= REVISION_COALESCE_S
+        ):
+            before = self.db.previous_revision(flow_id, int(latest["rev"]))
+            text = summary or diff_summary(before["doc"] if before else None, doc)
+            self.db.amend_revision(flow_id, int(latest["rev"]), doc, text)
+            return text
+        text = summary or diff_summary(previous, doc)
+        self.db.add_revision(doc, author=author, session_key=session_key, kind=kind, summary=text)
+        return text
+
+    def revisions(self, flow: str) -> dict[str, Any]:
+        """``{"flow_id", "revisions": [{"rev","author","session_key","kind","created","summary"}]}``
+        newest first (at most 50)."""
+        doc = self.resolve_flow(flow)
+        rows = self.db.list_revisions(doc["id"])
+        for row in rows:
+            row.pop("created_ts", None)
+        return {"flow_id": doc["id"], "revisions": rows}
+
+    async def restore(
+        self,
+        flow_id: str,
+        rev: int,
+        base_rev: int,
+        *,
+        author: str = "user",
+        session_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Save revision *rev*'s document as a NEW revision (``base_rev + 1``).
+
+        ``flows.not_found`` if the revision is gone; ``flows.conflict`` if the
+        flow is no longer at *base_rev*. Returns the saved FlowDoc.
+        """
+        for name, value in (("rev", rev), ("base_rev", base_rev)):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise FlowError("flows.invalid", f"{name} must be an integer")
+        current = self.store.get(flow_id)
+        row = self.db.get_revision(flow_id, rev)
+        if row is None:
+            raise FlowError("flows.not_found", f"Flow {flow_id} has no revision {rev}")
+        body = dict(row["doc"])
+        body["id"] = flow_id
+        saved = with_provenance(self.store.save(body, base_rev, author=author))
+        summary = f"restored rev {rev}"
+        change = diff_summary(current, saved)
+        if change not in ("no changes",):
+            summary = f"{summary}: {change}"
+        self._record_revision(
+            saved,
+            current,
+            author=author,
+            session_key=session_key,
+            kind="restore",
+            summary=summary,
+        )
+        await self._changed(saved, author)
+        return saved
+
+    def summary_since(self, current: dict[str, Any], base_rev: int) -> str:
+        """One line: what changed between *base_rev* and *current*.
+
+        Diffs against the kept revision at *base_rev* (or the newest kept one
+        before it, since editor autosaves share a row); without any, lists the
+        summaries of the newer revisions.
+        """
+        flow_id = str(current["id"])
+        base = self.db.get_revision(flow_id, base_rev) or self.db.previous_revision(
+            flow_id, base_rev + 1
+        )
+        if base is not None:
+            return diff_summary(base["doc"], current)
+        newer = [r for r in self.db.list_revisions(flow_id) if int(r["rev"]) > base_rev]
+        if not newer:
+            return f"rev {base_rev} is not in the kept history"
+        return "; ".join(f"rev {r['rev']} ({r['author']}): {r['summary']}" for r in newer)[:300]
+
+    async def _changed(self, doc: dict[str, Any], author: str, *, deleted: bool = False) -> None:
+        payload: dict[str, Any] = {
+            "flow_id": doc["id"],
+            "rev": int(doc.get("rev") or 0),
+            "author": clean_author(author),
+        }
+        if deleted:
+            payload["deleted"] = True
+        await self._emit("flows.changed", payload)
+
+    async def create_flow(
+        self,
+        name: Any,
+        template: str | None = None,
+        *,
+        author: str = "user",
+        session_key: str | None = None,
+    ) -> dict[str, Any]:
+        doc = with_provenance(
+            self.store.create(template_doc(template, clean_name(name)), author=author)
+        )
+        self._record_revision(doc, None, author=author, session_key=session_key, kind="create")
+        await self._changed(doc, author)
         return doc
 
-    async def save_flow(self, doc: Any, base_rev: Any) -> dict[str, Any]:
+    async def save_flow(
+        self,
+        doc: Any,
+        base_rev: Any,
+        *,
+        author: str = "user",
+        session_key: str | None = None,
+    ) -> dict[str, Any]:
         if isinstance(base_rev, bool) or not isinstance(base_rev, int):
             raise FlowError("flows.invalid", "base_rev must be an integer")
-        saved = self.store.save(doc, base_rev)
-        await self._emit("flows.changed", {"flow_id": saved["id"], "rev": saved["rev"]})
+        previous = None
+        if isinstance(doc, dict) and isinstance(doc.get("id"), str):
+            try:
+                previous = self.store.get(doc["id"])
+            except FlowError:
+                previous = None
+        body = layout(doc) if isinstance(doc, dict) else doc
+        saved = with_provenance(self.store.save(body, base_rev, author=author))
+        self._record_revision(saved, previous, author=author, session_key=session_key, kind="save")
+        await self._changed(saved, author)
         return saved
 
     async def delete_flow(self, flow_id: str) -> None:
@@ -366,10 +545,241 @@ class FlowService:
             raise FlowError("flows.busy", f"Flow {flow_id} has runs in progress: {', '.join(busy)}")
         current = self.store.get(flow_id)
         self.store.delete(flow_id)
-        await self._emit(
-            "flows.changed",
-            {"flow_id": flow_id, "rev": int(current.get("rev") or 0), "deleted": True},
+        self.db.delete_revisions(flow_id)
+        await self._changed(current, "user", deleted=True)
+
+    # ── authoring (agent spec) ──────────────────────────────────────────
+
+    def catalog(self) -> dict[str, Any]:
+        """Compact node catalog + image models, for an agent writing a spec.
+
+        ``{"link_format", "nodes": [{"type","description","inputs","outputs"}],
+        "models": [{"id","display","provider","available","unavailable_reason",
+        "ops","max_images","ratios","tiers","sizes","qualities","transparent_bg",
+        "n_max","price"}], "default_model"}``.
+        """
+        models = []
+        for entry in self.models.entries:
+            available, reason = self.models.availability(entry)
+            price: dict[str, Any] = {
+                "per_image": dict(entry.per_image),
+                "approximate": entry.price_approximate,
+            }
+            if entry.per_image_max:
+                price["per_image_max"] = dict(entry.per_image_max)
+            if entry.edit_per_image:
+                price["edit_per_image"] = dict(entry.edit_per_image)
+            if entry.per_ref:
+                price["per_ref"] = entry.per_ref
+            models.append(
+                {
+                    "id": entry.id,
+                    "display": entry.display,
+                    "provider": entry.provider,
+                    "available": available,
+                    "unavailable_reason": None if available else reason,
+                    "ops": {"t2i": entry.t2i, "edit": entry.edit},
+                    "max_images": entry.max_images,
+                    "ratios": list(entry.ratios),
+                    "tiers": list(entry.tiers),
+                    "sizes": list(entry.sizes),
+                    "qualities": list(entry.qualities),
+                    "transparent_bg": entry.transparent_bg,
+                    "n_max": entry.n_max,
+                    "price": price,
+                }
+            )
+        return {
+            "link_format": '["<node>.<output>", "<node>.<input>"]',
+            "nodes": compact_nodes(),
+            "models": models,
+            "default_model": self.models.default_id(),
+        }
+
+    def get_spec(self, flow: str | dict[str, Any]) -> dict[str, Any]:
+        """A flow in the agent spec format.
+
+        ``{"flow_id","name","rev","created_by","updated_by","spec": {name, nodes,
+        links, inputs},"public_inputs": [{"name","target","value","widget"}]}``.
+        """
+        doc = (
+            with_provenance(dict(flow))
+            if isinstance(flow, dict)
+            else self.get_flow(self.resolve_flow(flow)["id"])
         )
+        return {
+            "flow_id": doc.get("id"),
+            "name": doc.get("name") or "",
+            "rev": int(doc.get("rev") or 0),
+            "created_by": doc["created_by"],
+            "updated_by": doc["updated_by"],
+            "spec": doc_to_spec(doc),
+            "public_inputs": public_inputs(doc),
+        }
+
+    def ingest_image(self, data: bytes, mime: str | None = None) -> dict[str, Any]:
+        """Store image bytes (an attachment, a workspace file) and return its ImageRef wire."""
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise FlowError("flows.invalid", f"image is larger than {MAX_UPLOAD_BYTES >> 20} MB")
+        try:
+            return self.media.put(data, mime).to_wire()
+        except ValueError as exc:
+            raise FlowError("flows.invalid", str(exc)) from exc
+
+    async def _doc_from_spec(
+        self,
+        spec: Any,
+        *,
+        name: str | None,
+        image_resolver: ImageResolver | None,
+    ) -> dict[str, Any]:
+        parsed = parse_spec(spec, require_name=name is None)
+        errors: dict[str, list[dict[str, Any]]] = {}
+        for node_id, value in parsed.image_refs:
+            node = next(n for n in parsed.nodes if n["id"] == node_id)
+            if image_resolver is None:
+                errors.setdefault(node_id, []).append(
+                    {
+                        "code": "unresolved_image",
+                        "input": "image",
+                        "message": "attachment/path images need the tool layer to resolve them",
+                    }
+                )
+                continue
+            try:
+                resolved = image_resolver(node_id, value)
+                if inspect.isawaitable(resolved):
+                    resolved = await resolved
+            except (FlowError, ValueError) as exc:
+                message = exc.message if isinstance(exc, FlowError) else str(exc)
+                errors.setdefault(node_id, []).append(
+                    {"code": "invalid_image", "input": "image", "message": message}
+                )
+                continue
+            ref = resolved if isinstance(resolved, ImageRef) else ImageRef.from_wire(resolved)
+            if ref is None:
+                errors.setdefault(node_id, []).append(
+                    {"code": "invalid_image", "input": "image", "message": "not an image"}
+                )
+                continue
+            node["values"] = {**node["values"], "image": ref.to_wire()}
+        if errors:
+            raise spec_invalid(errors, "The flow spec has errors")
+        return spec_to_doc(parsed, name=parsed.name or name or "")
+
+    def _check_authored(self, doc: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+        """Run the graph validator; raise on errors, return the non-blocking warnings."""
+        analysis = analyse(doc, models=self.models, media_exists=self.media.exists)
+        errors: dict[str, list[dict[str, Any]]] = {}
+        warnings: dict[str, list[dict[str, Any]]] = {}
+        for node_id, items in analysis.node_errors().items():
+            for item in items:
+                bucket = warnings if item["code"] in AUTHORING_WARNING_CODES else errors
+                bucket.setdefault(node_id, []).append(item)
+        if errors:
+            raise spec_invalid(errors, "The flow has errors; nothing was saved")
+        return warnings
+
+    def _authored_result(
+        self, doc: dict[str, Any], *, change: str, summary: str, warnings: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {
+            "flow": doc,
+            "flow_id": doc["id"],
+            "name": doc.get("name") or "",
+            "rev": int(doc["rev"]),
+            "node_count": len(doc.get("nodes") or []),
+            "change": change,
+            "summary": summary,
+            "estimate": self.estimate(doc)["total"],
+            "warnings": warnings,
+        }
+
+    async def create_from_spec(
+        self,
+        spec: Any,
+        *,
+        author: str = "agent",
+        session_key: str | None = None,
+        image_resolver: ImageResolver | None = None,
+    ) -> dict[str, Any]:
+        """Validate an agent spec, auto-layout it and save it as a new flow.
+
+        Returns ``{"flow","flow_id","name","rev","node_count","change": "created",
+        "summary","estimate": Price,"warnings": {node_id: [...]}}``. Any error
+        raises ``flows.invalid`` with ``details.node_errors``; nothing is saved.
+        """
+        doc = layout(await self._doc_from_spec(spec, name=None, image_resolver=image_resolver))
+        warnings = self._check_authored(doc)
+        saved = with_provenance(self.store.create(doc, author=author))
+        summary = self._record_revision(
+            saved, None, author=author, session_key=session_key, kind="create"
+        )
+        await self._changed(saved, author)
+        return self._authored_result(saved, change="created", summary=summary, warnings=warnings)
+
+    async def update_from_spec(
+        self,
+        flow: str,
+        spec: Any,
+        *,
+        author: str = "agent",
+        session_key: str | None = None,
+        image_resolver: ImageResolver | None = None,
+        base_rev: int | None = None,
+    ) -> dict[str, Any]:
+        """Replace an existing flow's graph with *spec* (id or exact name).
+
+        With ``base_rev`` (the rev the author last read) a flow that moved on
+        since is refused with ``flows.conflict`` and ``details: {"current_rev",
+        "summary_since"}`` (one line: what changed since ``base_rev``); nothing
+        is saved.
+
+        Nodes whose id already existed keep their position (and their title
+        when the spec gives none); new nodes are auto-placed; the name and
+        viewport stay unless the spec renames it. Saved against the flow's
+        current rev, as a new revision. Returns like :meth:`create_from_spec`
+        with ``change: "updated"`` and a one-line diff ``summary``.
+        """
+        current = self.get_flow(self.resolve_flow(flow)["id"])
+        if base_rev is not None:
+            if isinstance(base_rev, bool) or not isinstance(base_rev, int):
+                raise FlowError("flows.invalid", "base_rev must be an integer")
+            current_rev = int(current.get("rev") or 0)
+            if current_rev != base_rev:
+                raise FlowError(
+                    "flows.conflict",
+                    f"Flow {current['id']} is at rev {current_rev}, not {base_rev}; "
+                    "read it again and re-apply your change",
+                    details={
+                        "current_rev": current_rev,
+                        "summary_since": self.summary_since(current, base_rev),
+                    },
+                )
+        doc = await self._doc_from_spec(
+            spec, name=str(current.get("name") or ""), image_resolver=image_resolver
+        )
+        old_nodes = {str(n.get("id")): n for n in current.get("nodes") or []}
+        for node in doc["nodes"]:
+            before = old_nodes.get(node["id"])
+            if before is None:
+                continue
+            if "pos" not in node and before.get("pos") is not None:
+                node["pos"] = list(before["pos"])
+                if before.get("auto_pos"):
+                    node["auto_pos"] = True
+            if node.get("title") is None and before.get("title"):
+                node["title"] = before["title"]
+        doc["id"] = current["id"]
+        doc["viewport"] = current.get("viewport") or doc["viewport"]
+        doc = layout(doc)
+        warnings = self._check_authored(doc)
+        saved = with_provenance(self.store.save(doc, int(current["rev"]), author=author))
+        summary = self._record_revision(
+            saved, current, author=author, session_key=session_key, kind="update"
+        )
+        await self._changed(saved, author)
+        return self._authored_result(saved, change="updated", summary=summary, warnings=warnings)
 
     # ── analysis ────────────────────────────────────────────────────────
 
@@ -389,14 +799,17 @@ class FlowService:
         doc: Any,
         to_node: str | None = None,
         inputs: dict[str, Any] | None = None,
+        overrides: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Per-node prices and the total of what would run (cached excluded).
 
-        Node-level problems (a missing prompt, a model without a key) do not
-        stop an estimate; a structural one (cycle, bad link) leaves the plan
-        empty and the total free.
+        ``inputs`` (public inputs) and ``overrides`` (per-run image-node
+        widgets, see :data:`~agentos.flows.planner.RUN_OVERRIDE_FIELDS`) are
+        applied first, as :meth:`submit_run` would. Node-level problems (a
+        missing prompt, a model without a key) do not stop an estimate; a
+        structural one (cycle, bad link) leaves the plan empty and the total free.
         """
-        normalised = apply_inputs(normalize_doc(doc), inputs)
+        normalised = apply_overrides(apply_inputs(normalize_doc(doc), inputs), overrides)
         _, analysis = self._analyse(normalised, to_node)
         plan = None
         structural = {"unknown_type", "unknown_link", "type_mismatch", "multiple_links", "cycle"}
@@ -424,8 +837,14 @@ class FlowService:
         session_key: str | None = None,
         max_cost_usd: float | None = None,
         artifact_sink: ArtifactSink | None = None,
+        overrides: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Validate, plan and queue a run; returns ``{"run_id", "status": "queued"}``.
+
+        ``overrides`` (``{node_id: {field: value}}``, image nodes only, fields in
+        :data:`~agentos.flows.planner.RUN_OVERRIDE_FIELDS`) change this run only:
+        the flow is not saved; the run record keeps them under ``overrides``
+        and its ``graph`` shows the values actually used.
 
         ``flow`` (optional) is saved first with ``base_rev = flow.rev``.
         ``max_cost_usd`` makes the call refuse with ``flows.cost_gate`` when
@@ -447,7 +866,7 @@ class FlowService:
         if len(self._queue) >= MAX_QUEUED_RUNS:
             raise FlowError("flows.busy", f"{len(self._queue)} runs are already waiting")
 
-        graph = apply_inputs(doc, inputs)
+        graph = apply_overrides(apply_inputs(doc, inputs), overrides)
         normalised, analysis = self._analyse(graph, to_node)
         if not analysis.ok:
             raise FlowError(
@@ -489,6 +908,7 @@ class FlowService:
             "started": None,
             "ended": None,
             "inputs": dict(inputs or {}),
+            "overrides": json.loads(json.dumps(overrides)) if overrides else None,
             "graph": normalised,
             "nodes": nodes,
             "outputs": {},
@@ -622,6 +1042,7 @@ class FlowService:
             self.db.cache_references(sha)
             or self.db.runs_reference(sha)
             or self.store.references(sha)
+            or self.db.revisions_reference(sha)
             or any(sha in str(h.record.get("outputs")) for h in self._handles.values())
         )
 

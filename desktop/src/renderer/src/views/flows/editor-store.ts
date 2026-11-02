@@ -20,6 +20,7 @@ import {
   type GraphSnapshot,
 } from './graph'
 import { canRedo, canUndo, commit, createHistory, redo, reset, undo, type History } from './history'
+import { reflowColumns } from './layout'
 import type { EstimateResult, FlowDoc, NodeErrors } from './types'
 import type { RunView } from './run-tracker'
 
@@ -32,6 +33,8 @@ import type { RunView } from './run-tracker'
 
 export interface EditorState {
   meta: DocMeta
+  /** Who made this flow (the agent can, from chat); shown, never saved from here. */
+  createdBy: 'user' | 'agent'
   nodes: FlowCanvasNode[]
   edges: FlowCanvasEdge[]
   inputs: Record<string, string>
@@ -67,6 +70,12 @@ export interface EditorActions {
   replaceGraph: (doc: Pick<FlowDoc, 'nodes' | 'links' | 'inputs'>) => void
   /** The gateway's copy wins: reload it, history starts over. */
   loadDoc: (doc: FlowDoc) => void
+  /**
+   * Engine-placed nodes stacked by their measured heights (`reflowAuto` in
+   * layout terms). Not an undo step: it becomes the baseline, and the next
+   * save carries the positions (without the flag).
+   */
+  reflowAuto: () => void
   /** A save went through: `rev` is the gateway's new revision, `key` what was sent. */
   markSaved: (rev: number, key: string) => void
   setRun: (run: RunView | null) => void
@@ -116,6 +125,7 @@ export function createEditorStore(doc: FlowDoc): EditorStore {
       inputs,
       history,
       savedKey: docKey(doc.name, history.key),
+      createdBy: doc.created_by === 'agent' ? 'agent' : 'user',
       run: null,
       estimate: null,
       errors: {},
@@ -133,7 +143,17 @@ export function createEditorStore(doc: FlowDoc): EditorStore {
         }
         // A move is committed once, when the drag lets go.
         const dragEnded = changes.some((c) => c.type === 'position' && c.dragging === false)
-        set({ nodes, edges, inputs: inputsNext })
+        // A node the person drags is theirs to place: the engine's layout lets go of it.
+        const dragged = new Set<string>()
+        for (const c of changes) if (c.type === 'position' && c.dragging) dragged.add(c.id)
+        const placed = dragged.size
+          ? nodes.map((n) =>
+              dragged.has(n.id) && n.data.autoPos
+                ? { ...n, data: { ...n.data, autoPos: false } }
+                : n,
+            )
+          : nodes
+        set({ nodes: placed, edges, inputs: inputsNext })
         if (removed.size || dragEnded) record()
       },
 
@@ -290,6 +310,7 @@ export function createEditorStore(doc: FlowDoc): EditorStore {
         const nextInputs = { ...(next.inputs ?? {}) }
         const h = reset(present(g.nodes, g.edges, nextInputs), snapshotKey)
         set({
+          createdBy: next.created_by === 'agent' ? 'agent' : 'user',
           meta: { id: next.id, name: next.name, rev: next.rev },
           nodes: g.nodes.map(stripRuntime),
           edges: g.edges,
@@ -300,8 +321,39 @@ export function createEditorStore(doc: FlowDoc): EditorStore {
         })
       },
 
+      reflowAuto: () => {
+        const s = get()
+        if (!s.nodes.some((n) => n.data.autoPos) || s.nodes.some((n) => n.dragging)) return
+        const moves = reflowColumns(
+          s.nodes.map((n) => ({
+            id: n.id,
+            x: n.position.x,
+            y: n.position.y,
+            height: n.measured?.height ?? 0,
+            auto: n.data.autoPos === true,
+          })),
+        )
+        if (!Object.keys(moves).length) return
+        const clean = currentDocKey(s) === s.savedKey
+        const nodes = s.nodes.map((n) => (moves[n.id] ? { ...n, position: moves[n.id]! } : n))
+        // The re-flowed graph is the baseline undo returns to; what goes out
+        // on the next save. A clean editor stays clean (no save for a layout).
+        const snap = present(nodes, s.edges, s.inputs)
+        const key = snapshotKey(snap)
+        set({
+          nodes,
+          history: { ...s.history, present: snap, key },
+          savedKey: clean ? docKey(s.meta.name, key) : s.savedKey,
+        })
+      },
+
       markSaved: (rev, key) => {
-        set({ meta: { ...get().meta, rev }, savedKey: key })
+        // Saved positions are the person's now: the engine's flag is gone.
+        const nodes = get().nodes
+        const placed = nodes.some((n) => n.data.autoPos)
+          ? nodes.map((n) => (n.data.autoPos ? { ...n, data: { ...n.data, autoPos: false } } : n))
+          : nodes
+        set({ meta: { ...get().meta, rev }, savedKey: key, nodes: placed })
       },
 
       setRun: (run) => set({ run }),
