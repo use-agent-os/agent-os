@@ -139,7 +139,7 @@ async def test_flow_run_under_the_limit_runs_and_publishes_card_then_images(
     card_ref = ctx.published_artifacts[0]
     store = ArtifactStore(ctx.artifact_media_root)
     _ref, card_path = store.resolve_for_download(card_ref["id"], session_id="session-1")
-    card = json.loads(card_path.read_text())
+    card = json.loads(card_path.read_text(encoding="utf-8"))
     assert card["run_id"] == payload["run_id"] and card["flow_name"] == "Test"
     assert card["status"] == "done" and card["progress"] == {"done": 3, "total": 3}
     assert card["images"][0]["name"] == Path(image["path"]).name

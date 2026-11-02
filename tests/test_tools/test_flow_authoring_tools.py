@@ -171,7 +171,7 @@ def _cards(ctx: ToolContext) -> list[dict[str, Any]]:
             _ref, path = store.resolve_for_download(
                 artifact["id"], session_id=ctx.artifact_session_id
             )
-            out.append(json.loads(path.read_text()))
+            out.append(json.loads(path.read_text(encoding="utf-8")))
     return out
 
 
