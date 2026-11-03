@@ -20,7 +20,6 @@ import {
 import type { SettingsSnapshot } from '@/views/settings/snapshot'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
-import { useGateway } from '~/stores/gateway'
 import {
   ROUTER_THINKING,
   routerDirty,
@@ -32,6 +31,7 @@ import {
   type TierRow,
 } from '../logic'
 import { Card, Head, Notice, Pill, Row, Segmented } from '../parts'
+import { PendingRestartNotice } from '../PendingRestartNotice'
 import { useConfigSnapshot, withRevision } from '../use-snapshot'
 
 interface ConfigureResult {
@@ -82,7 +82,6 @@ function RouterBody({
   const provider = configuredProvider(snapshot.status ?? {}, config)
   const spec = catalog.providers?.find((p) => p.providerId === provider)
   const profile = catalog.routerProfiles?.profiles?.find((p) => p.providerId === provider)
-  const restartGateway = useGateway((s) => s.restart)
 
   const save = useMutation({
     mutationFn: (params: Record<string, unknown>) =>
@@ -109,13 +108,7 @@ function RouterBody({
       {snapshot.writeBlocked ? (
         <Notice tone="danger">{t('settings.writeBlocked')}</Notice>
       ) : snapshot.pendingRestart ? (
-        <Notice
-          action={
-            <Button onClick={() => void restartGateway()}>{t('settings.restartGateway')}</Button>
-          }
-        >
-          {t('settings.pendingRestart')}
-        </Notice>
+        <PendingRestartNotice />
       ) : null}
       <RouterForm
         key={`${provider}:${snapshot.revision ?? ''}`}
