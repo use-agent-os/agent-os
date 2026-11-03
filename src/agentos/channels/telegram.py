@@ -156,6 +156,13 @@ class TelegramChannelConfig(BaseModel):
     group_mention_required: bool = True
     transcribe_voice: bool = False
     max_voice_duration_s: int = Field(default=120, gt=0)
+    stream_replies: bool = False
+    """Live-edit the reply as tokens arrive instead of sending it once.
+
+    Off by default: the chat shows Telegram's typing status for the whole run
+    and the finished reply lands in one go, rather than a message that keeps
+    rewriting itself while the model writes.
+    """
 
     model_config = {}
 
@@ -432,6 +439,17 @@ class TelegramChannel:
     @property
     def transport_name(self) -> str:
         return self.config.transport_name
+
+    @property
+    def stream_update_strategy(self) -> str:
+        """How dispatch keeps the chat informed while a reply is produced.
+
+        ``send_streaming`` is always available, so without this the stream
+        policy would pick live edits for every Telegram channel. Unless the
+        channel opts in with ``stream_replies``, it gets the typing keepalive
+        for the whole run and one final message instead.
+        """
+        return "adapter_stream" if self.config.stream_replies else "typing_final"
 
     @property
     def capability_profile(self) -> ChannelCapabilityProfile:

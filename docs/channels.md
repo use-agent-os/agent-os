@@ -324,21 +324,32 @@ interception as the fallback for platforms without native command menus.
 
 ## In-Flight Reply Feedback
 
-Slack, Discord, Telegram and Microsoft Teams stream the reply itself: AgentOS
-posts one message as soon as text is available and edits it as the answer
-grows. Telegram edits at most once every 1.2 seconds — its rate limit is far
-stricter than Slack's — and rolls over into a second message when an answer
-passes the 4096-character ceiling. If Telegram starts answering `429`, the
-edit loop stops and the remainder is delivered as one final message instead of
-fighting the limiter; no text is lost either way. Forum topic replies stream
-into the originating topic.
+Slack, Discord and Microsoft Teams stream the reply itself: AgentOS posts one
+message as soon as text is available and edits it as the answer grows.
 
-Streaming adapters that also have a typing indicator — Telegram and Discord —
-show it while the model is still thinking, and drop it the moment the first
-chunk reaches the chat. Nothing can be streamed until the first token exists,
-and with tool calls in the loop that wait is often tens of seconds, so the
-indicator covers exactly that gap and then hands the chat over to the
-live-edited message.
+Telegram does not stream by default. The chat shows Telegram's typing status
+for the whole turn, and the finished reply arrives in one go (split into
+several messages only past the 4096-character ceiling). Set `stream_replies =
+true` on a Telegram channel to live-edit instead:
+
+```sh
+agentos channels add telegram --name personal --token <bot-token> \
+  --field stream_replies=true
+```
+
+A streaming Telegram channel edits at most once every 1.2 seconds — its rate
+limit is far stricter than Slack's — and rolls over into a second message when
+an answer passes the 4096-character ceiling. If Telegram starts answering
+`429`, the edit loop stops and the remainder is delivered as one final message
+instead of fighting the limiter; no text is lost either way. Forum topic
+replies go to the originating topic in both modes.
+
+Streaming adapters that also have a typing indicator — Discord, and Telegram
+with `stream_replies` — show it while the model is still thinking, and drop it
+the moment the first chunk reaches the chat. Nothing can be streamed until the
+first token exists, and with tool calls in the loop that wait is often tens of
+seconds, so the indicator covers exactly that gap and then hands the chat over
+to the live-edited message.
 
 Adapters without a streaming surface fall back to their native typing
 indicator for the whole turn. Telegram refreshes `sendChatAction` every four

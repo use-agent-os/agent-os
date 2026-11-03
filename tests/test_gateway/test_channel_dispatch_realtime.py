@@ -1319,6 +1319,44 @@ async def test_direct_channel_turn_honors_final_only_stream_policy() -> None:
 
 
 @pytest.mark.asyncio
+async def test_direct_telegram_turn_sends_the_whole_reply_once_by_default() -> None:
+    """Default Telegram never live-edits: the finished text lands in one message."""
+    channel = TelegramChannel(TelegramChannelConfig(token="token"))
+    calls: list[tuple[str, dict[str, Any] | None]] = []
+
+    async def fake_api(method: str, payload: dict[str, Any] | None = None) -> Any:
+        calls.append((method, payload))
+        return {"message_id": len(calls)} if method == "sendMessage" else True
+
+    channel._api = fake_api  # type: ignore[method-assign]  # noqa: SLF001
+
+    class FakeTurnRunner:
+        async def run(self, message: str, session_key: str, **kwargs):
+            yield TextDeltaEvent(text="Hello ")
+            yield TextDeltaEvent(text="world")
+            yield DoneEvent()
+
+    config = SimpleNamespace(
+        agent_stream_heartbeat_interval_seconds=0.0,
+        agent_stream_idle_timeout_seconds=1.0,
+    )
+
+    await _run_turn_with_streaming(
+        channel,
+        FakeTurnRunner(),
+        IncomingMessage(sender_id="u1", channel_id="-100123", content="hello"),
+        "agent:main:telegram-final",
+        _FakeEventBridge(),
+        None,
+        config,
+    )
+
+    assert [method for method, _ in calls] == ["sendMessage"]
+    assert calls[0][1] is not None
+    assert calls[0][1]["text"] == "Hello world"
+
+
+@pytest.mark.asyncio
 async def test_direct_streaming_path_falls_back_when_adapter_stream_fails() -> None:
     class FailingStreamingChannel(_FakeChannel):
         def __init__(self) -> None:

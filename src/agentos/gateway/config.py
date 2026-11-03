@@ -2097,6 +2097,7 @@ class TelegramChannelEntry(ConfiguredChannelEntry):
     group_mention_required: bool = True
     transcribe_voice: bool = False
     max_voice_duration_s: int = Field(default=120, gt=0)
+    stream_replies: bool = False
 
     @field_validator("group_chat_ids", mode="before")
     @classmethod

@@ -55,8 +55,10 @@ def _texts(calls: list[ApiCall], method: str) -> list[str]:
     return [payload["text"] for name, payload in calls if name == method]
 
 
-def test_telegram_send_streaming_selects_adapter_stream_policy() -> None:
-    policy = resolve_channel_stream_policy(TelegramChannel(TelegramChannelConfig()))
+def test_telegram_stream_replies_selects_adapter_stream_policy() -> None:
+    channel = TelegramChannel(TelegramChannelConfig(stream_replies=True))
+
+    policy = resolve_channel_stream_policy(channel)
 
     assert policy.mode == "adapter_stream"
     assert policy.relay_stream is True

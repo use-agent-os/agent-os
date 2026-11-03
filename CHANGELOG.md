@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- Telegram channels no longer stream replies by default. The chat shows
+  Telegram's typing status until the reply is finished, then the whole reply
+  arrives at once instead of a message that keeps rewriting itself while the
+  model writes. Set `stream_replies = true` on the channel (or toggle
+  **Stream replies** in the channel form) to keep live edits. Docs:
+  `docs/channels.md` ("In-Flight Reply Feedback").
+
 ### Fixed
 - Desktop app: with an external gateway, the toolbar no longer asks to
   **Restart gateway** when the engine on this Mac is newer than the gateway
