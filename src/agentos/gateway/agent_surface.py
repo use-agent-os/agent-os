@@ -18,6 +18,17 @@ from these signals, strongest first:
    path for agent shells, so the agent cannot read the file. A connection
    that presents either secret at the handshake is the operator's and is
    never an agent's.
+1b. **The gateway token, from another machine.** Neither secret can reach a
+   gateway on another host (a container behind a reverse proxy): the desktop
+   app in External mode, the web console and a remote CLI only hold the
+   gateway's bearer token. A Control WebSocket that proved that token from
+   a non-loopback peer is the operator's too, unless it also presents an
+   agent token (2 wins over this). The peer is the socket's own address,
+   never an ``X-Forwarded-For`` claim (``ws_transport``). An agent shell on
+   the gateway host reaches it over loopback, so its CLI never qualifies;
+   the trade-off is that a process on the gateway host which reads the
+   token and dials a non-loopback address does. HTTP RPC does not apply
+   this rule: it cannot see past uvicorn's proxy-header rewrite.
 2. **An agent token.** When an agent turn spawns a shell (or the scheduler
    runs a cron script), a token is minted here and passed to the child as
    ``AGENTOS_AGENT_TOKEN``. The CLI presents it back; the connection is bound
@@ -32,8 +43,8 @@ from these signals, strongest first:
    *unbound* (``via="unbound"``) and gets the agent's rules too. Being
    anonymous is never a way to become the operator: a process an agent
    detached (``setsid``, ``nohup``, a double fork) that connects after the
-   window closed is still treated as the agent's. Only the operator secret
-   proves the operator.
+   window closed is still treated as the agent's. Only an operator secret,
+   or the gateway token from another machine (1b), proves the operator.
 
 Nothing here is a full sandbox: a same-user process can still read the
 user's files. It is the difference between a guardrail the prompt can talk
@@ -44,6 +55,7 @@ from __future__ import annotations
 
 import contextlib
 import hmac
+import ipaddress
 import os
 import secrets
 import tempfile
@@ -56,6 +68,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from agentos.gateway.access import ConnectionSurface
 from agentos.paths import default_agentos_home
 
 if TYPE_CHECKING:
@@ -306,12 +319,16 @@ class AgentSurface:
 
     # ── admission ──────────────────────────────────────────────────────
 
-    def bind(self, auth_params: dict[str, Any] | None) -> AgentBinding | None:
+    def bind(
+        self, auth_params: dict[str, Any] | None, *, remote_operator: bool = False
+    ) -> AgentBinding | None:
         """The binding for a connection presenting ``auth_params``.
 
-        ``None`` means the operator, and only an operator secret earns it. A
-        connection that proves nothing is bound as ``via="unbound"``: it gets
-        the agent's rules, whether or not a shell happens to be running.
+        ``None`` means the operator: an operator secret earns it, and so does
+        ``remote_operator`` (the gateway token proved from another machine,
+        see :meth:`attach`) unless an agent token says otherwise. A connection
+        that proves nothing is bound as ``via="unbound"``: it gets the agent's
+        rules, whether or not a shell happens to be running.
         """
         params = auth_params if isinstance(auth_params, dict) else {}
         if self.is_operator(params.get("operatorSecret")):
@@ -319,13 +336,22 @@ class AgentSurface:
         token = self.resolve_token(params.get("agentToken"))
         if token is not None:
             return token
+        if remote_operator:
+            return None
         window = self._window_binding()
         if window is not None:
             return window
         return AgentBinding(via="unbound")
 
-    def attach(self, access: AccessContext, auth_params: dict[str, Any] | None) -> AccessContext:
-        binding = self.bind(auth_params)
+    def attach(
+        self,
+        access: AccessContext,
+        auth_params: dict[str, Any] | None,
+        *,
+        peer_ip: str | None = None,
+    ) -> AccessContext:
+        """Mark *access* with its binding; *peer_ip* is the transport peer."""
+        binding = self.bind(auth_params, remote_operator=_token_proved_remotely(access, peer_ip))
         if binding is None:
             return access
         log.debug(
@@ -344,6 +370,26 @@ class AgentSurface:
             self._env_secret = None
             self._file_secret = None
             self._operator_file = None
+
+
+def _token_proved_remotely(access: AccessContext, peer_ip: str | None) -> bool:
+    """A Control connection that proved the gateway token from another machine.
+
+    ``credential_verified`` is only set by token auth. The peer must be a
+    literal non-loopback IP: an agent shell on the gateway host dials
+    loopback, and anything unparsable (a test client, a socket path) fails
+    closed.
+    """
+    if not access.credential_verified or access.surface != ConnectionSurface.CONTROL:
+        return False
+    host = (peer_ip or "").strip().strip("[]").split("%", 1)[0]
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        return not addr.ipv4_mapped.is_loopback
+    return not addr.is_loopback
 
 
 _surface = AgentSurface()

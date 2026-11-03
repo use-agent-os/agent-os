@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Desktop app with an external (remote) gateway: **Create wallet**, **Import
+  wallet** and every other wallet or approval action on the Trading page no
+  longer fail with "wallet.create is the user's action; an agent cannot do
+  it". The app cannot hand a gateway on another host the operator secret, so
+  the gateway now treats a Control WebSocket that authenticated with its
+  bearer token from a non-loopback address as the operator (an agent token
+  presented alongside still wins). The same applies to the web console and a
+  remote CLI. The address is the socket's own peer, never `X-Forwarded-For`,
+  so an agent shell on the gateway host, which dials loopback, keeps the
+  agent's rules. Docs: `docs/features/trading.md` ("Who is the agent?").
+
 ## [2026.11.3.post1] - 2026-11-03
 
 ### Changed

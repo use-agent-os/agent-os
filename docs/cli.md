@@ -1220,8 +1220,13 @@ proves themself with a secret: the desktop app hands the gateway one at
 spawn, and the gateway writes its own to
 `~/.agentos/wallets/operator.secret` (mode 0600, rotated at every boot). The
 CLI reads that file on its own when `AGENTOS_AGENT_TOKEN` is not set and the
-gateway is local; against a remote gateway it presents nothing and gets the
-agent's rules. An agent-bound connection is an agent whatever it declares
+gateway is local. Against a gateway on another machine the gateway token is
+the proof: a control WebSocket that authenticates with it from a
+non-loopback address (the desktop app in External mode, the web console, a
+remote CLI) is the operator's, unless it also presents an agent token. The
+address is the socket's own peer, never an `X-Forwarded-For` claim, so a
+process on the gateway's own host (which dials loopback) never becomes the
+operator by the token alone. An agent-bound connection is an agent whatever it declares
 (`--as-agent` only forces the agent rules for a person). For the agent: an
 order above `trading.approval_threshold_usd` (default 100) or above
 `trading.agent_max_price_impact_pct` (default 5; "price impact" is the

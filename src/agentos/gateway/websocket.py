@@ -52,7 +52,7 @@ from agentos.gateway.protocol import (
     validation_error_details,
 )
 from agentos.gateway.rpc import RpcContext, RpcDispatcher
-from agentos.gateway.ws_transport import raise_message_limit
+from agentos.gateway.ws_transport import TRANSPORT_PEER_EXTENSION, raise_message_limit
 from agentos.session.keys import canonicalize_session_key
 
 log = structlog.get_logger(__name__)
@@ -718,9 +718,10 @@ class ConnectionRegistry:
 
         Channel and node connections never see these frames, nor a connection
         that presented an agent token (the CLI an agent turn spawned). The
-        web console presents no operator secret, so it counts as *unbound*
-        under the agent surface's fail-safe rules; it still gets them, as it
-        can read the same list from ``GET /api/approvals``.
+        web console on the gateway's own host presents no operator secret, so
+        it counts as *unbound* under the agent surface's fail-safe rules; it
+        still gets them, as it can read the same list from
+        ``GET /api/approvals``.
         """
         for conn in self.all():
             access = conn.access
@@ -894,6 +895,7 @@ async def handle_ws_connection(
             config,
             dispatcher,
             peer_ip=peer_ip,
+            transport_peer=_transport_peer_ip(ws),
             client_ip=client_ip,
             origin=origin,
             auth_guard=auth_guard,
@@ -1027,6 +1029,25 @@ def _revoke_download_grants(conn_id: str) -> None:
     get_download_grants().revoke_connection(conn_id)
 
 
+def _transport_peer_ip(ws: WebSocket) -> str | None:
+    """The address the socket itself saw, never one an ``X-Forwarded-For`` claimed.
+
+    :class:`~agentos.gateway.ws_transport.GatewayWebSocketProtocol` records it
+    before uvicorn's proxy-header middleware can rewrite ``ws.client`` (which
+    it does for any loopback peer). Without that record, ``ws.client`` is only
+    trusted when no forwarding header could have rewritten it; otherwise the
+    answer is ``None``, which never earns the operator.
+    """
+    scope = getattr(ws, "scope", None)
+    extensions = scope.get("extensions") if isinstance(scope, dict) else None
+    if isinstance(extensions, dict) and TRANSPORT_PEER_EXTENSION in extensions:
+        peer = extensions[TRANSPORT_PEER_EXTENSION]
+        return str(peer[0]) if isinstance(peer, (tuple, list)) and peer else None
+    if request_is_forwarded(ws.headers):
+        return None
+    return ws.client.host if ws.client is not None else None
+
+
 async def _handshake(
     conn: WsConnection,
     config: GatewayConfig,
@@ -1036,6 +1057,7 @@ async def _handshake(
     client_ip: str,
     origin: str | None,
     auth_guard: AuthGuard | None,
+    transport_peer: str | None = None,
 ) -> HelloOk | None:
     """``connect.challenge`` → ``connect`` → ``hello-ok``; ``None`` when refused.
 
@@ -1210,7 +1232,7 @@ async def _handshake(
     # handlers read this instead of trusting an ``initiator`` param.
     from agentos.gateway.agent_surface import get_agent_surface
 
-    access = get_agent_surface().attach(access, auth_params)
+    access = get_agent_surface().attach(access, auth_params, peer_ip=transport_peer)
 
     # Step 5: Negotiate protocol version
     negotiated = negotiate_protocol(params.min_protocol, params.max_protocol)

@@ -15,6 +15,12 @@ refused with close 1009 without being buffered. The gateway raises the limit
 to ``hello-ok.policy.max_payload`` once the handshake succeeds, through the
 callable it publishes in the ASGI scope under :data:`FRAME_LIMIT_EXTENSION`.
 
+It also records the socket's own peer under :data:`TRANSPORT_PEER_EXTENSION`
+before the app runs. uvicorn's proxy-header middleware rewrites
+``scope["client"]`` from ``X-Forwarded-For`` whenever the peer is loopback,
+so any local process can claim to be a remote address there; the agent
+surface needs the address the socket actually saw.
+
 The limit is read when the payload arrives, not when the read starts: the
 reader is already waiting for the first post-handshake message while the
 handshake is being answered.
@@ -34,6 +40,8 @@ from agentos.gateway.protocol import MAX_PREAUTH_PAYLOAD_BYTES
 
 #: ASGI scope extension holding ``set_limit(bytes | None)`` for a connection.
 FRAME_LIMIT_EXTENSION = "agentos.ws.message_limit"
+#: ASGI scope extension holding the socket's ``(host, port)`` peer, unrewritten.
+TRANSPORT_PEER_EXTENSION = "agentos.ws.transport_peer"
 
 _DATA_OPCODES = frozenset({OP_TEXT, OP_BINARY, OP_CONT})
 # Frame header reads are at most 8 bytes; anything larger is a payload read.
@@ -82,6 +90,8 @@ class GatewayWebSocketProtocol(WebSocketProtocol):
             extensions = {}
             scope["extensions"] = extensions
         extensions[FRAME_LIMIT_EXTENSION] = self.set_message_limit
+        # Before the app (and uvicorn's proxy-header middleware) sees the scope.
+        extensions[TRANSPORT_PEER_EXTENSION] = scope.get("client")
         await super().run_asgi()
 
     async def read_frame(self, max_size: int | None) -> Frame:
