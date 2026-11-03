@@ -220,8 +220,21 @@ for every admitted connection from three signals, strongest first:
    at every boot); the CLI reads it automatically when `AGENTOS_AGENT_TOKEN`
    is not set and the gateway is local, and an agent's shell cannot read it
    (`~/.agentos/wallets` is a denied path). A connection presenting either
-   at the handshake is the operator's, never an agent's. Against a remote
-   gateway the CLI presents nothing and gets the agent's rules.
+   at the handshake is the operator's, never an agent's.
+
+   **From another machine, the gateway token.** Neither secret reaches a
+   gateway on another host (a container behind a reverse proxy), so a
+   Control WebSocket that authenticated with the gateway's bearer token
+   from a non-loopback peer is the operator's too: the desktop app in
+   External mode, the web console and a remote CLI can create, import and
+   unlock wallets and approve orders. An agent token presented alongside
+   still wins. The peer is the socket's own address: an `X-Forwarded-For`
+   header never counts (uvicorn rewrites the client address from it for
+   loopback peers). An agent shell on the gateway host reaches the gateway
+   over loopback, so its CLI never qualifies; the trade-off is that a
+   process on that host which reads the token (from `config.toml` or the
+   environment) and dials a non-loopback address does. HTTP RPC
+   (`POST /api/v1/rpc`) does not apply this rule.
 2. **An agent token.** When an agent turn spawns a shell — or the scheduler
    runs a `cron --script` job — a token is minted and passed to the child
    as `AGENTOS_AGENT_TOKEN`; the CLI presents it back and the connection is

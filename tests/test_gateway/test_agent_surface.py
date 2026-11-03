@@ -167,6 +167,95 @@ class TestAttach:
         assert agent_binding(object()) is None
 
 
+class TestRemoteToken:
+    """The gateway token proved from another machine is the operator's."""
+
+    @pytest.mark.parametrize("peer", ["192.168.1.20", "172.30.0.5", "203.0.113.7", "2001:db8::1"])
+    def test_remote_token_is_the_operator(self, surface: AgentSurface, peer: str) -> None:
+        access = _access()
+        assert surface.attach(access, {}, peer_ip=peer) is access
+
+    @pytest.mark.parametrize(
+        "peer",
+        ["127.0.0.1", "127.8.9.10", "::1", "[::1]", "::ffff:127.0.0.1", None, "", "testclient"],
+    )
+    def test_loopback_or_unknown_peer_stays_unbound(
+        self, surface: AgentSurface, peer: str | None
+    ) -> None:
+        access = surface.attach(_access(), {}, peer_ip=peer)
+        assert access.agent == AgentBinding(via="unbound")
+
+    def test_unverified_or_node_access_is_not_the_operator(self, surface: AgentSurface) -> None:
+        unverified = AccessContext(
+            surface=ConnectionSurface.CONTROL, admitted=True, credential_verified=False
+        )
+        node = AccessContext(
+            surface=ConnectionSurface.NODE, admitted=True, credential_verified=True
+        )
+        for access in (unverified, node):
+            bound = surface.attach(access, {}, peer_ip="192.168.1.20")
+            assert bound.agent == AgentBinding(via="unbound")
+
+    def test_agent_token_still_wins(self, surface: AgentSurface) -> None:
+        token = surface.mint_token("agent:x", "trading")
+        access = surface.attach(_access(), {"agentToken": token}, peer_ip="192.168.1.20")
+        assert access.agent is not None and access.agent.session_key == "agent:x"
+
+    def test_remote_token_beats_an_open_window(self, surface: AgentSurface) -> None:
+        # The app reconnecting while an agent shell runs is still the user.
+        with surface.exec_window("agent:x"):
+            access = _access()
+            assert surface.attach(access, {}, peer_ip="192.168.1.20") is access
+            local = surface.attach(_access(), {}, peer_ip="127.0.0.1")
+            assert local.agent is not None and local.agent.via == "window"
+
+
+class TestRemoteTokenOverWebSocket:
+    """Through the real handshake, as the desktop app in External mode connects."""
+
+    _TOKEN = "correct-horse-battery-staple-0123456789"
+
+    def _rename(self, peer: str, headers: dict[str, str], auth: dict[str, str]) -> dict:
+        from starlette.testclient import TestClient
+
+        from agentos.gateway.app import create_gateway_app
+        from agentos.gateway.config import AuthConfig, GatewayConfig
+
+        config = GatewayConfig(host="0.0.0.0", auth=AuthConfig(mode="token", token=self._TOKEN))
+        client = TestClient(create_gateway_app(config), client=(peer, 50000))
+        with client.websocket_connect("/ws", headers=headers) as ws:
+            ws.receive_json()
+            params = {"minProtocol": 3, "maxProtocol": 3, "auth": {"token": self._TOKEN, **auth}}
+            ws.send_json({"type": "req", "id": "c", "method": "connect", "params": params})
+            assert ws.receive_json()["type"] == "hello-ok"
+            # No params: the operator gets past the guard to the params check,
+            # without touching a vault.
+            ws.send_json({"type": "req", "id": "r", "method": "wallet.rename", "params": {}})
+            while True:
+                frame = ws.receive_json()
+                if frame.get("type") == "res" and frame.get("id") == "r":
+                    return frame["error"]
+
+    _CONSOLE = {"origin": "http://192.168.1.20:18791", "host": "192.168.1.20:18791"}
+
+    def test_remote_app_reaches_operator_only_rpcs(self) -> None:
+        error = self._rename("192.168.1.20", self._CONSOLE, {})
+        assert error["code"] == "INVALID_REQUEST"
+        assert "params.address" in error["message"]
+
+    def test_loopback_cli_with_the_token_is_still_an_agent(self) -> None:
+        error = self._rename("127.0.0.1", {"host": "127.0.0.1:18791"}, {})
+        assert error["code"] == "trading.operator_required"
+
+    def test_remote_agent_token_is_still_an_agent(self) -> None:
+        from agentos.gateway.agent_surface import get_agent_surface
+
+        token = get_agent_surface().mint_token("agent:x", "trading")
+        error = self._rename("192.168.1.20", self._CONSOLE, {"agentToken": token})
+        assert error["code"] == "trading.operator_required"
+        assert error["details"]["sessionKey"] == "agent:x"
+
+
 class TestOperatorFile:
     """The gateway writes its own secret for the local CLI, rotated each boot."""
 
