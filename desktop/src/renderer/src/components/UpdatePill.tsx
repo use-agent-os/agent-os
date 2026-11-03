@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowDownToLine, LoaderCircle, RotateCw } from 'lucide-r
 import { releaseUpdate } from '@shared/updates'
 import { t } from '~/i18n'
 import { useGatewayStatus } from '~/lib/use-gateway-status'
+import { useSettings } from '~/stores/settings'
 import { useUi } from '~/stores/ui'
 import { useUpdates } from '~/stores/updates'
 
@@ -11,15 +12,18 @@ import { useUpdates } from '~/stores/updates'
  * engine and the app together. Unlike the toast, it stays until the release
  * is fully applied: "Update" while something can be fetched, the running
  * step while it is, "Restart" once the app has landed, "Restart gateway"
- * when only the running gateway lags the engine on disk. Clicking it opens
- * Settings › About, where the full cards and every button live.
+ * when only the running gateway lags the engine on disk, "Gateway outdated"
+ * when an external gateway runs an older release than the latest (it is
+ * updated on its own host). Clicking it opens Settings › About, where the
+ * full cards and every button live.
  */
 export function UpdatePill() {
   const engine = useUpdates((s) => s.engine)
   const app = useUpdates((s) => s.app)
+  const external = useSettings((s) => s.settings.gateway.mode === 'external')
   const status = useGatewayStatus()
   const openSettings = useUi((s) => s.openSettings)
-  const release = releaseUpdate(engine, app, status.data?.version)
+  const release = releaseUpdate(engine, app, status.data?.version, { external })
   if (release.kind === 'none') return null
 
   const Icon =
@@ -27,7 +31,7 @@ export function UpdatePill() {
       ? RotateCw
       : release.kind === 'working'
         ? LoaderCircle
-        : release.kind === 'failed'
+        : release.kind === 'failed' || release.kind === 'gateway-outdated'
           ? AlertTriangle
           : ArrowDownToLine
   const label =
@@ -41,7 +45,9 @@ export function UpdatePill() {
           ? t('updates.pill.restart')
           : release.kind === 'failed'
             ? t('updates.pill.failed')
-            : t('updates.pill.gateway')
+            : release.kind === 'gateway-outdated'
+              ? t('updates.pill.gatewayOutdated')
+              : t('updates.pill.gateway')
   const title = `${label} · AgentOS ${release.version}`.trim()
   return (
     <button

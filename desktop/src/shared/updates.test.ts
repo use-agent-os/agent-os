@@ -111,6 +111,70 @@ describe('releaseUpdate', () => {
       releaseUpdate(engine({ current: '2026.9.23' }), app({ phase: 'up-to-date' }), '2026.9.23'),
     ).toEqual({ kind: 'none' })
   })
+
+  describe('external gateway', () => {
+    const external = { external: true }
+
+    it('never asks to restart a gateway this app does not run', () => {
+      // A newer engine on this Mac's disk says nothing about a gateway on
+      // another host; the old answer was a "Restart gateway" that would
+      // have restarted nothing.
+      expect(
+        releaseUpdate(
+          engine({ current: '2026.11.3', latest: '2026.11.3', availability: 'up-to-date' }),
+          app({ phase: 'up-to-date', current: '2026.11.3', latest: '2026.11.3' }),
+          '2026.11.3',
+          external,
+        ),
+      ).toEqual({ kind: 'none' })
+    })
+
+    it('reports a remote gateway behind the latest release', () => {
+      expect(
+        releaseUpdate(
+          engine({ current: '2026.11.3', latest: '2026.11.3', availability: 'up-to-date' }),
+          app({ phase: 'up-to-date', current: '2026.11.3', latest: '2026.11.3' }),
+          '2026.11.2+abc',
+          external,
+        ),
+      ).toEqual({ kind: 'gateway-outdated', version: '2026.11.3', running: '2026.11.2' })
+    })
+
+    it('takes the latest version from the app check when the local engine was not checked', () => {
+      expect(
+        releaseUpdate(
+          engine({}),
+          app({ phase: 'up-to-date', current: '2026.11.3', latest: '2026.11.3' }),
+          '2026.11.2',
+          external,
+        ),
+      ).toEqual({ kind: 'gateway-outdated', version: '2026.11.3', running: '2026.11.2' })
+      // No latest known from either check: nothing to compare against.
+      expect(releaseUpdate(engine({}), app({}), '2026.11.2', external)).toEqual({ kind: 'none' })
+    })
+
+    it('ignores an outdated local engine: it is not the one running', () => {
+      expect(
+        releaseUpdate(
+          engine({ current: '2026.11.2', latest: '2026.11.3', availability: 'outdated' }),
+          app({ phase: 'up-to-date', current: '2026.11.3', latest: '2026.11.3' }),
+          '2026.11.3',
+          external,
+        ),
+      ).toEqual({ kind: 'none' })
+    })
+
+    it('still offers the app update first, then the gateway notice', () => {
+      expect(
+        releaseUpdate(
+          engine({ current: '2026.11.2', latest: '2026.11.3', availability: 'outdated' }),
+          app({ phase: 'available', current: '2026.11.2', latest: '2026.11.3' }),
+          '2026.11.2',
+          external,
+        ),
+      ).toEqual({ kind: 'available', version: '2026.11.3', engine: false, app: true })
+    })
+  })
 })
 
 describe('calverToSemver / semverToCalver', () => {

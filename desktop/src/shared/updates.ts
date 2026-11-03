@@ -115,9 +115,16 @@ export const APP_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000
  * - `restart`: the app is downloaded; only the relaunch is left.
  * - `gateway-restart`: a newer engine is installed on disk (a terminal ran
  *   `agentos upgrade`) but the managed gateway still runs the old one.
+ * - `gateway-outdated`: external run mode only. The gateway this app merely
+ *   connects to runs an older release than the latest known; it is updated
+ *   on its own host, so the notice has no action beyond opening About.
  * - `failed`: the app download or its restart failed while a newer build is
  *   known; "Try again" re-checks and re-downloads (the cache makes that fast).
  * - `none`: nothing to do.
+ *
+ * In external run mode the engine package on this machine is not the one
+ * running, so its state never produces a notice: no "Update" for an outdated
+ * local engine, no "Restart gateway" for a newer one on disk.
  */
 export type ReleaseUpdate =
   | { kind: 'none' }
@@ -125,12 +132,43 @@ export type ReleaseUpdate =
   | { kind: 'working'; version: string; step: 'engine' | 'app'; percent: number | null }
   | { kind: 'restart'; version: string; blocked: AppInstallBlock | null }
   | { kind: 'gateway-restart'; version: string; running: string }
+  | { kind: 'gateway-outdated'; version: string; running: string }
   | { kind: 'failed'; version: string; error: string }
+
+export interface ReleaseUpdateOptions {
+  /** The app only connects to the gateway (Settings › Gateway › Run mode External). */
+  external?: boolean
+}
+
+/**
+ * The newest release either check has seen. One release covers the engine
+ * and the app, so whichever check answered is a fair reading of "latest".
+ */
+export function latestRelease(engine: EngineUpdateState, app: AppUpdateState): string | null {
+  const known = [engine.latest, app.latest].filter((v): v is string => !!v)
+  return known.sort(compareVersions).at(-1) ?? null
+}
+
+/**
+ * An external gateway running behind the latest known release, as
+ * `{ running, latest }`; null when it is current or nothing is known.
+ */
+export function gatewayBehind(
+  engine: EngineUpdateState,
+  app: AppUpdateState,
+  gatewayVersion: string | null | undefined,
+): { running: string; latest: string } | null {
+  const running = gatewayVersion?.split('+')[0]
+  const latest = latestRelease(engine, app)
+  if (!running || !latest || !isNewer(latest, running)) return null
+  return { running, latest }
+}
 
 export function releaseUpdate(
   engine: EngineUpdateState,
   app: AppUpdateState,
   gatewayVersion: string | null | undefined,
+  { external = false }: ReleaseUpdateOptions = {},
 ): ReleaseUpdate {
   if (app.phase === 'downloaded' && app.latest) {
     return { kind: 'restart', version: app.latest, blocked: app.blocked }
@@ -149,7 +187,7 @@ export function releaseUpdate(
   if (app.phase === 'error' && app.latest && isNewer(app.latest, app.current)) {
     return { kind: 'failed', version: app.latest, error: app.error ?? '' }
   }
-  const engineOut = engine.availability === 'outdated' && !!engine.latest
+  const engineOut = !external && engine.availability === 'outdated' && !!engine.latest
   const appOut = app.phase === 'available' && !!app.latest
   if (engineOut || appOut) {
     const candidates = [engineOut ? engine.latest : null, appOut ? app.latest : null].filter(
@@ -157,6 +195,12 @@ export function releaseUpdate(
     )
     const version = candidates.sort(compareVersions).at(-1) ?? ''
     return { kind: 'available', version, engine: engineOut, app: appOut }
+  }
+  if (external) {
+    const behind = gatewayBehind(engine, app, gatewayVersion)
+    return behind
+      ? { kind: 'gateway-outdated', version: behind.latest, running: behind.running }
+      : { kind: 'none' }
   }
   const running = gatewayVersion?.split('+')[0]
   if (engine.current && running && isNewer(engine.current, running)) {

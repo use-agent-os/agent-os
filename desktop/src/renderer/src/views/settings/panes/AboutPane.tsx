@@ -7,9 +7,12 @@ import { useUpdatePreflight, type PreflightState } from '@/lib/update-preflight'
 import { useConnection } from '@/stores/connection'
 import type { AppInfo } from '@shared/app'
 import {
+  gatewayBehind,
   gatewaySupported,
   isNewer,
+  latestRelease,
   MIN_GATEWAY_VERSION,
+  type AppUpdateState,
   type EngineUpdateState,
 } from '@shared/updates'
 import { Button } from '~/components/ui/button'
@@ -53,6 +56,10 @@ export function AboutPane() {
   const checkAll = useUpdates((s) => s.checkAll)
   const updateAll = useUpdates((s) => s.updateAll)
   const applyEngine = useUpdates((s) => s.applyEngine)
+  // External run mode: the engine package on this machine is not the one
+  // running, so the Engine card gives way to a read-only Gateway card and
+  // "Update all" (which would install that engine) is not offered.
+  const external = useSettings((s) => s.settings.gateway.mode === 'external')
   // Every engine update restarts the gateway, so it goes through the
   // preflight first: what would be interrupted, blocked while an approval
   // waits, applied only once confirmed. Which update is waiting on it:
@@ -89,7 +96,7 @@ export function AboutPane() {
     engine.phase === 'restarting' ||
     app.phase === 'checking' ||
     app.phase === 'downloading'
-  const engineOutdated = engine.availability === 'outdated'
+  const engineOutdated = !external && engine.availability === 'outdated'
   const appOutdated = app.phase === 'available'
   const gatewayVersion = connected ? (status.data?.version ?? null) : null
 
@@ -140,22 +147,32 @@ export function AboutPane() {
         </Notice>
       ) : null}
 
-      <EngineCard
-        engine={engine}
-        gatewayVersion={gatewayVersion}
-        uptimeMs={connected ? status.data?.uptime_ms : undefined}
-        connected={connected}
-        onRestarted={() => void status.refetch()}
-        confirming={pendingUpdate !== null}
-        preflight={preflight}
-        onRequestUpdate={() => askToUpdate('engine')}
-        onCancelUpdate={() => setPendingUpdate(null)}
-        onConfirmUpdate={() => {
-          const which = pendingUpdate
-          setPendingUpdate(null)
-          void (which === 'all' ? updateAll() : applyEngine())
-        }}
-      />
+      {external ? (
+        <ExternalGatewayCard
+          engine={engine}
+          app={app}
+          gatewayVersion={gatewayVersion}
+          uptimeMs={connected ? status.data?.uptime_ms : undefined}
+          connected={connected}
+        />
+      ) : (
+        <EngineCard
+          engine={engine}
+          gatewayVersion={gatewayVersion}
+          uptimeMs={connected ? status.data?.uptime_ms : undefined}
+          connected={connected}
+          onRestarted={() => void status.refetch()}
+          confirming={pendingUpdate !== null}
+          preflight={preflight}
+          onRequestUpdate={() => askToUpdate('engine')}
+          onCancelUpdate={() => setPendingUpdate(null)}
+          onConfirmUpdate={() => {
+            const which = pendingUpdate
+            setPendingUpdate(null)
+            void (which === 'all' ? updateAll() : applyEngine())
+          }}
+        />
+      )}
 
       <AppCard />
 
@@ -191,6 +208,55 @@ export function AboutPane() {
   )
 }
 
+/**
+ * External run mode's stand-in for the Engine card: what the connected
+ * gateway runs and the latest release, nothing more. The local engine's
+ * "Installed" version is left out (it is not what runs) and there is no
+ * update button: the gateway is updated on its own host.
+ */
+function ExternalGatewayCard({
+  engine,
+  app,
+  gatewayVersion,
+  uptimeMs,
+  connected,
+}: {
+  engine: EngineUpdateState
+  app: AppUpdateState
+  gatewayVersion: string | null
+  uptimeMs: number | undefined
+  connected: boolean
+}) {
+  const latest = latestRelease(engine, app)
+  const behind = gatewayBehind(engine, app, gatewayVersion)
+  const checked = !!engine.checkedAt || !!app.checkedAt
+  const pill = !connected ? (
+    <Pill>{t('settings.about.remote.offline')}</Pill>
+  ) : behind ? (
+    <Pill tone="warn">{t('settings.about.outdated')}</Pill>
+  ) : gatewayVersion && latest ? (
+    <Pill tone="ok">{t('settings.about.upToDate')}</Pill>
+  ) : null
+  return (
+    <Card title={t('settings.about.remote')} blurb={t('settings.about.remote.blurb')} action={pill}>
+      <Row label={t('settings.about.remote.running')}>
+        <Value>{gatewayVersion ?? '—'}</Value>
+        {connected && uptimeMs !== undefined ? (
+          <span className="stg-row__help">
+            {t('settings.about.uptime').toLowerCase()} {formatUptime(uptimeMs)}
+          </span>
+        ) : null}
+      </Row>
+      <Row label={t('settings.about.remote.latest')}>
+        <Value tone={behind ? 'warn' : undefined}>
+          {latest ?? (checked ? '—' : t('settings.about.remote.unknown'))}
+        </Value>
+      </Row>
+      {behind ? <Notice tone="info">{t('settings.about.remote.behind')}</Notice> : null}
+    </Card>
+  )
+}
+
 const ENGINE_TONE: Record<string, Tone | undefined> = {
   'up-to-date': 'ok',
   outdated: 'warn',
@@ -221,7 +287,6 @@ function EngineCard({
   onConfirmUpdate: () => void
 }) {
   const rpc = useRpc()
-  const mode = useSettings((s) => s.settings.gateway.mode)
   const [dataCheck, setDataCheck] = useState<DataCheck | null>(null)
   const verifiedFor = useRef<string | null>(null)
 
@@ -283,17 +348,11 @@ function EngineCard({
           {engine.latest ?? (engine.checkedAt ? '—' : t('settings.about.engine.unknown'))}
         </Value>
         {engine.availability === 'outdated' && !running && !confirming ? (
-          mode === 'external' ? null : (
-            <Button variant="primary" onClick={onRequestUpdate}>
-              {t('settings.about.engine.update')}
-            </Button>
-          )
+          <Button variant="primary" onClick={onRequestUpdate}>
+            {t('settings.about.engine.update')}
+          </Button>
         ) : null}
       </Row>
-
-      {mode === 'external' && engine.availability === 'outdated' ? (
-        <Notice tone="info">{t('settings.about.engine.external')}</Notice>
-      ) : null}
 
       {confirming ? (
         <PreflightNotice preflight={preflight} onCancel={onCancelUpdate} onConfirm={start} />
