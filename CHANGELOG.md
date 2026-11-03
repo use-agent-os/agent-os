@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.3.post2] - 2026-11-03
+
 ### Fixed
 - Desktop app with an external (remote) gateway: **Create wallet**, **Import
   wallet** and every other wallet or approval action on the Trading page no
