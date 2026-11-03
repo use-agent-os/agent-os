@@ -51,7 +51,10 @@ server, a VPS, a home box. For an external gateway set:
   machine must enforce one (`auth.mode = "token"`); the app sends it as a
   bearer token on every request and on the WebSocket connect.
 
-Then press **Save**. A gateway on another host must also know the origin
+Then press **Save**. If the app was running a gateway of its own at that
+moment, it stops it — the app no longer manages one — and connects to the
+endpoint you entered; a gateway it had merely adopted (one started from a
+terminal) is left running. A gateway on another host must also know the origin
 the app will present, which is the gateway's own: declare it there with
 `agentos config set gateway.public_origin https://agent.example.com --config
 ~/.agentos/config.toml` and restart it. The recipes, and the `agentos

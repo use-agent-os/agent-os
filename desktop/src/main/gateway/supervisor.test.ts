@@ -269,6 +269,37 @@ describe('GatewaySupervisor.stop escalation', () => {
     }
   })
 
+  it('stops the managed child when the run mode turns external, then probes the endpoint', async () => {
+    const signals: string[] = []
+    let exit: (() => void) | null = null
+    const { sup, child } = await startedWithChild((signal) => {
+      signals.push(signal)
+      exit?.()
+    })
+    exit = () => queueMicrotask(() => child.emit('exit', 0, null))
+    expect(sup.current()).toMatchObject({ state: 'running', pid: 4343 })
+
+    await sup.modeChanged('managed', 'external')
+    expect(signals).toEqual(['SIGTERM'])
+    // The probe answers (the stand-in's counter is past zero), so the
+    // supervisor now reports the external gateway it re-probed, not a child.
+    expect(sup.current()).toMatchObject({ state: 'running', pid: null })
+
+    // Already external: nothing to stop, nothing to signal.
+    await sup.modeChanged('external', 'external')
+    expect(signals).toEqual(['SIGTERM'])
+  })
+
+  it('leaves an adopted gateway alone when the mode turns external', async () => {
+    const sup = new GatewaySupervisor(() => ({ ...external, mode: 'managed' }), {
+      probe: async () => true,
+      locate: () => null,
+    })
+    await sup.adopt()
+    await sup.modeChanged('managed', 'external')
+    expect(sup.current()).toMatchObject({ state: 'running', pid: null })
+  })
+
   it('sends nothing more once the gateway exits on the first SIGTERM', async () => {
     const signals: string[] = []
     let exit: (() => void) | null = null

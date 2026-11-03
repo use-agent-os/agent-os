@@ -23,7 +23,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   The sidebar light, Settings › Gateway and the menu bar show whether the
   gateway is reachable and no longer offer Start, Stop or Restart for a
   gateway the app does not run; Settings › Gateway offers **Reconnect**
-  instead when the saved endpoint differs from the connected one.
+  instead when the saved endpoint differs from the connected one. Saving
+  the switch to External stops the gateway the app had spawned (an adopted
+  one is left running) and connects to the configured endpoint.
 
 ## [2026.11.2] - 2026-11-02
 

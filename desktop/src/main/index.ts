@@ -156,7 +156,7 @@ if (!app.requestSingleInstanceLock()) {
     })
     installAppMenu(settings)
     createMainWindow(windowOptions(settings.get()))
-    mirrorSettingsToOs(settings, menuBar, quickAsk)
+    mirrorSettingsToOs(settings, gateway, menuBar, quickAsk)
     // The shell is only useful with a gateway behind it. The controller
     // finds the engine and starts the gateway, or offers to install the
     // engine first when this Mac has none (or an older one).
@@ -239,6 +239,7 @@ function windowOptions(s: DesktopSettings): { reduceTransparency: boolean; uiSca
  */
 function mirrorSettingsToOs(
   settings: SettingsStore,
+  gateway: GatewaySupervisor,
   menuBar: MenuBar,
   quickAsk: QuickAskController,
 ): void {
@@ -258,6 +259,11 @@ function mirrorSettingsToOs(
     }
     if (next.appearance.uiScale !== last?.appearance.uiScale) {
       applyUiScale(next.appearance.uiScale)
+    }
+    // Run mode turned external: the app stops the gateway it spawned instead
+    // of leaving it behind (see GatewaySupervisor.modeChanged).
+    if (last && next.gateway.mode !== last.gateway.mode) {
+      void gateway.modeChanged(last.gateway.mode, next.gateway.mode)
     }
     // Every write: the menu shows the gateway mode and endpoint, not just the toggle.
     menuBar.sync(next)
