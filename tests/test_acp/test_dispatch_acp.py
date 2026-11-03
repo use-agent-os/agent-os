@@ -88,8 +88,11 @@ async def test_spawned_acp_turn_streams_persists_and_announces(tmp_path) -> None
         stats = completions[-1]["stats"]
         assert stats.startswith("runtime ") and "tokens 1500 (in 1200 / out 300)" in stats
         assert "cost $0.0300" in stats
+        # The parent transcript row is written before the live event goes out.
+        assert await wait_until(
+            lambda: any(n == "session.event.subagent_completion" for _, n, _ in rig.events)
+        )
         live = [p for _, n, p in rig.events if n == "session.event.subagent_completion"]
-        assert live
         # Contract B: the persisted parent message and the live event carry the
         # harness identity and structured usage next to the Stats string.
         for payload in (completions[-1], live[-1]):
