@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.3.post1] - 2026-11-03
+
 ### Changed
 - Telegram channels no longer stream replies by default. The chat shows
   Telegram's typing status until the reply is finished, then the whole reply
