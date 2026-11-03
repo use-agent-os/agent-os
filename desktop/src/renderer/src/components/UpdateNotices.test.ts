@@ -27,7 +27,13 @@ const working: ReleaseUpdate = {
 }
 const restart: ReleaseUpdate = { kind: 'restart', version: '2026.9.23', blocked: null }
 
-const act = { update: vi.fn(), restart: vi.fn(), restartGateway: vi.fn(), retry: vi.fn() }
+const act = {
+  update: vi.fn(),
+  restart: vi.fn(),
+  restartGateway: vi.fn(),
+  retry: vi.fn(),
+  details: vi.fn(),
+}
 type Opts = { action: { onClick(): void }; description?: string; id: string }
 
 beforeEach(() => {
@@ -38,6 +44,7 @@ beforeEach(() => {
   act.update.mockClear()
   act.restart.mockClear()
   act.restartGateway.mockClear()
+  act.details.mockClear()
 })
 
 describe('announceRelease', () => {
@@ -92,6 +99,23 @@ describe('announceRelease', () => {
       act,
     )
     expect((toastFn.error.mock.calls[1] as [string])[0]).toMatch(/Quit and reopen AgentOS/)
+  })
+
+  it('says an external gateway is behind and only opens About for it', () => {
+    const behind: ReleaseUpdate = {
+      kind: 'gateway-outdated',
+      version: '2026.11.3',
+      running: '2026.11.2',
+    }
+    announceRelease(none, behind, act)
+    announceRelease(behind, { ...behind }, act)
+    expect(toastFn).toHaveBeenCalledTimes(1)
+    const [text, opts] = toastFn.mock.calls[0] as [string, Opts]
+    expect(text).toContain('2026.11.3')
+    expect(opts.description).toMatch(/runs 2026\.11\.2 on its own host/)
+    opts.action.onClick()
+    expect(act.details).toHaveBeenCalledTimes(1)
+    expect(act.restartGateway).not.toHaveBeenCalled()
   })
 
   it('says an engine-only update finished, and offers the gateway restart after a terminal upgrade', () => {
