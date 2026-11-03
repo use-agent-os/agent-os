@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Container image: every `v*` tag now publishes
+  `ghcr.io/use-agent-os/agent-os:<version>` and `:latest` for linux/amd64
+  and linux/arm64 (`.github/workflows/docker-image.yml`, one native runner
+  per platform, stitched into one manifest). `compose.yaml` runs it with
+  `AGENTOS_GATEWAY_IMAGE=ghcr.io/use-agent-os/agent-os:latest`; a local
+  `docker build` is no longer required. Docs: README "Docker".
 - Desktop app: an external gateway can be on another machine, over HTTPS.
   Settings › Gateway › Connection gains a **Protocol** switch (HTTP or
   HTTPS; the WebSocket follows as `ws://` or `wss://`), so a gateway behind

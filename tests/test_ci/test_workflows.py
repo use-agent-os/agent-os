@@ -465,7 +465,7 @@ def test_release_workflows_still_hydrate_lfs_at_checkout() -> None:
     published-artifact workflows keep the direct ``lfs: true`` + ``git lfs
     pull`` path, because their hydration asserts are the last line of defense
     against shipping a 130-byte pointer inside a wheel."""
-    for name in ("wheelhouse-release.yml", "pypi-publish.yml"):
+    for name in ("wheelhouse-release.yml", "pypi-publish.yml", "docker-image.yml"):
         text = (WORKFLOW_DIR / name).read_text(encoding="utf-8")
         assert "lfs: true" in text, f"{name} must hydrate LFS directly at checkout"
 
@@ -841,3 +841,32 @@ def test_desktop_release_hands_electron_builder_a_semver_package_version() -> No
         # Later steps (the signed-bundle check) read the CalVer back through
         # scripts/release-version.mjs, so the twin is only there for the build.
         assert save < swap < build < restore
+
+
+def test_docker_image_workflow_builds_on_tags_and_dispatch() -> None:
+    data = _workflow("docker-image.yml")
+    assert _trigger_keys(data) == {"push", "workflow_dispatch"}
+    assert data["on"]["push"]["tags"] == ["v*"]
+    assert "tag" in data["on"]["workflow_dispatch"]["inputs"]
+    assert data["permissions"] == {"contents": "read", "packages": "write"}
+
+
+def test_docker_image_workflow_hydrates_lfs_and_guards_pilot_bundle() -> None:
+    text = (WORKFLOW_DIR / "docker-image.yml").read_text(encoding="utf-8")
+    assert "lfs: true" in text
+    assert 'git lfs pull --include="src/agentos/memory/models/**"' in text
+    assert 'git lfs pull --include="src/agentos/agentos_router/models/**"' in text
+    assert "legacy v4_phase3 bundle leaked back into the tree" in text
+
+
+def test_docker_image_workflow_builds_native_multiarch_manifest() -> None:
+    """One native runner per platform, no QEMU emulation, and a manifest job
+    that stitches the per-arch digests into the versioned and latest tags."""
+    data = _workflow("docker-image.yml")
+    text = (WORKFLOW_DIR / "docker-image.yml").read_text(encoding="utf-8")
+    assert "ubuntu-24.04-arm" in text and "ubuntu-latest" in text
+    assert "docker/setup-qemu-action" not in text
+    assert "imagetools create" in text
+    assert "ghcr.io/use-agent-os/agent-os" in text
+    assert "manifest" in data["jobs"]
+    assert data["jobs"]["manifest"]["needs"] == "build"
