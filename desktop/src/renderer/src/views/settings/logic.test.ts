@@ -112,6 +112,7 @@ describe('gateway draft', () => {
   it('is dirty when anything meaningful changes', () => {
     expect(gatewayDirty(GW, { ...draftFromGateway(GW), port: '18792' })).toBe(true)
     expect(gatewayDirty(GW, { ...draftFromGateway(GW), mode: 'external' })).toBe(true)
+    expect(gatewayDirty(GW, { ...draftFromGateway(GW), scheme: 'https' })).toBe(true)
     expect(gatewayDirty(GW, { ...draftFromGateway(GW), host: ' 127.0.0.1 ' })).toBe(false)
   })
 
@@ -124,6 +125,13 @@ describe('gateway draft', () => {
     }
     expect(gatewayNeedsRestart(GW, running)).toBe(false)
     expect(gatewayNeedsRestart({ ...GW, port: 19000 }, running)).toBe(true)
+    expect(gatewayNeedsRestart({ ...GW, scheme: 'https' }, running)).toBe(true)
+    expect(
+      gatewayNeedsRestart(
+        { ...GW, scheme: 'https', host: 'gw.example.com', port: 443 },
+        { ...running, url: 'https://gw.example.com:443' },
+      ),
+    ).toBe(false)
     expect(gatewayNeedsRestart({ ...GW, port: 19000 }, { ...running, state: 'stopped' })).toBe(
       false,
     )

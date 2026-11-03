@@ -3,10 +3,10 @@ import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
-import type { DesktopSettings } from '@shared/settings'
+import { gatewayUrl, type DesktopSettings } from '@shared/settings'
 import { GatewaySupervisor } from './gateway/supervisor'
 import { registerIpc } from './ipc'
-import { installLoopbackCors } from './loopback-cors'
+import { gatewayOriginFor, installGatewayCors } from './loopback-cors'
 import { installAppMenu } from './menu'
 import { registerPetScheme, servePets } from './pets/protocol'
 import { QuickAskController } from './quick-ask/controller'
@@ -109,7 +109,9 @@ if (!app.requestSingleInstanceLock()) {
       optimizer.watchWindowShortcuts(win, { zoom: true }),
     )
 
-    installLoopbackCors(rendererAppOrigin())
+    installGatewayCors(rendererAppOrigin(), () =>
+      gatewayOriginFor(gatewayUrl(settings.get().gateway)),
+    )
     servePets(pets)
     // The pets that ship with the app, so Settings > Appearance has one to
     // offer before anyone reaches petdex.dev. Seeded once each; never fatal.
@@ -154,7 +156,7 @@ if (!app.requestSingleInstanceLock()) {
     })
     installAppMenu(settings)
     createMainWindow(windowOptions(settings.get()))
-    mirrorSettingsToOs(settings, menuBar, quickAsk)
+    mirrorSettingsToOs(settings, gateway, menuBar, quickAsk)
     // The shell is only useful with a gateway behind it. The controller
     // finds the engine and starts the gateway, or offers to install the
     // engine first when this Mac has none (or an older one).
@@ -237,6 +239,7 @@ function windowOptions(s: DesktopSettings): { reduceTransparency: boolean; uiSca
  */
 function mirrorSettingsToOs(
   settings: SettingsStore,
+  gateway: GatewaySupervisor,
   menuBar: MenuBar,
   quickAsk: QuickAskController,
 ): void {
@@ -256,6 +259,11 @@ function mirrorSettingsToOs(
     }
     if (next.appearance.uiScale !== last?.appearance.uiScale) {
       applyUiScale(next.appearance.uiScale)
+    }
+    // Run mode turned external: the app stops the gateway it spawned instead
+    // of leaving it behind (see GatewaySupervisor.modeChanged).
+    if (last && next.gateway.mode !== last.gateway.mode) {
+      void gateway.modeChanged(last.gateway.mode, next.gateway.mode)
     }
     // Every write: the menu shows the gateway mode and endpoint, not just the toggle.
     menuBar.sync(next)

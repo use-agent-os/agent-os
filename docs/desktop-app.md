@@ -21,7 +21,8 @@ three.
    install uses — with no terminal, Python or `uv` needed. If a gateway is
    already running on the configured endpoint, the app connects to it
    instead; **Connect to an existing gateway instead** does the same for a
-   gateway on another host.
+   gateway on another host (see [Using a gateway on another
+   machine](#using-a-gateway-on-another-machine)).
 4. Pick a provider. OpenCAP is listed first as **Recommended**; any provider
    in the catalog works. **Test key** checks the key against the provider
    before you save, and the last step tries it for real. **Skip for now**
@@ -30,6 +31,44 @@ three.
 The managed gateway's output goes to `~/Library/Logs/AgentOS/gateway.log`
 (Settings › Advanced › App logs). Settings › Advanced also has **Reinstall
 engine** and **Remove engine**; removing the engine keeps `~/.agentos`.
+
+## Using a gateway on another machine
+
+The app does not have to run the gateway itself. Settings › Gateway ›
+Connection has a **Run mode**: **Managed** (the default) starts and
+supervises `agentos gateway run` on this Mac; **External** only connects to
+a gateway that is already running, on this machine or on another one — a
+server, a VPS, a home box. For an external gateway set:
+
+- **Protocol**: **HTTP** for a plain bind (loopback, an SSH tunnel, a LAN
+  bind with a token) or **HTTPS** for a gateway behind TLS (a reverse proxy,
+  Tailscale Serve, `[tls]` in its config). The WebSocket follows: `ws://`
+  with HTTP, `wss://` with HTTPS.
+- **Host** and **Port**: where the gateway answers, as the app will reach
+  it. Behind a proxy on `https://agent.example.com` that is host
+  `agent.example.com`, port `443`.
+- **Auth token**: the gateway's `auth.token`. A gateway reached from another
+  machine must enforce one (`auth.mode = "token"`); the app sends it as a
+  bearer token on every request and on the WebSocket connect.
+
+Then press **Save**. If the app was running a gateway of its own at that
+moment, it stops it — the app no longer manages one — and connects to the
+endpoint you entered; a gateway it had merely adopted (one started from a
+terminal) is left running. A gateway on another host must also know the origin
+the app will present, which is the gateway's own: declare it there with
+`agentos config set gateway.public_origin https://agent.example.com --config
+~/.agentos/config.toml` and restart it. The recipes, and the `agentos
+doctor` checks to run before exposing anything, are in
+[Remote access](remote-access.md).
+
+In external mode the app only reports the gateway's state: the light in the
+sidebar footer, the Process row in Settings › Gateway and the menu bar
+item show whether it is reachable, and none of them starts, stops or
+restarts it — the gateway belongs to whoever runs it. The one action left
+is **Reconnect**, offered when the saved endpoint differs from the one the
+app is connected to. Configuration changes that need a restart (providers,
+channels, the router) still ask the gateway to restart itself in place, as
+they do from the Web UI.
 
 ## Chat and Trade
 
@@ -133,7 +172,8 @@ footer badge: **Ready**, **Degraded**, **Connecting**, **Blocked**,
 `Snapshot · 3 min`, `Unavailable`). Click it for the reason and one way
 forward. Because the app runs the gateway, a stopped gateway reads Offline
 and offers **Start gateway** (an external gateway offers **Retry
-connection** instead).
+connection** instead: the app never starts or stops a gateway it does not
+manage).
 
 The tray icon beside it opens **Needs you**: approvals of every kind, agent
 questions (`ask_user`) and runtime issues in one list, with a count on the

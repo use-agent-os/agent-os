@@ -1,10 +1,43 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_GATEWAY_SETTINGS,
   DEFAULT_NOTIFICATION_SETTINGS,
   DEFAULT_QUICK_ASK_SETTINGS,
+  gatewayUrl,
   mergeSettings,
   normalizeSettings,
 } from './settings'
+
+describe('gateway settings', () => {
+  it('reads a file written before the scheme existed as plain http', () => {
+    const s = normalizeSettings({ gateway: { mode: 'external', host: 'gw.example.com' } })
+    expect(s.gateway).toEqual({
+      ...DEFAULT_GATEWAY_SETTINGS,
+      mode: 'external',
+      host: 'gw.example.com',
+      scheme: 'http',
+    })
+  })
+
+  it('keeps https and drops any other scheme', () => {
+    expect(normalizeSettings({ gateway: { scheme: 'https' } }).gateway.scheme).toBe('https')
+    expect(normalizeSettings({ gateway: { scheme: 'wss' } }).gateway.scheme).toBe('http')
+    expect(normalizeSettings({ gateway: { scheme: 7 } }).gateway.scheme).toBe('http')
+  })
+
+  it('builds the base URL from scheme, host and port', () => {
+    expect(gatewayUrl(DEFAULT_GATEWAY_SETTINGS)).toBe('http://127.0.0.1:18791')
+    expect(
+      gatewayUrl({
+        ...DEFAULT_GATEWAY_SETTINGS,
+        scheme: 'https',
+        host: 'gw.example.com',
+        port: 443,
+      }),
+    ).toBe('https://gw.example.com:443')
+    expect(gatewayUrl({ ...DEFAULT_GATEWAY_SETTINGS, host: '[::1]' })).toBe('http://[::1]:18791')
+  })
+})
 
 describe('notification settings', () => {
   it('reads a legacy file with only the three old keys', () => {

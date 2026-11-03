@@ -32,8 +32,9 @@ vi.mock('electron', () => ({
 
 const {
   gatewayOriginFor,
-  installLoopbackCors,
-  LOOPBACK_URLS,
+  installGatewayCors,
+  isGatewayRequest,
+  GATEWAY_URL_PATTERNS,
   rendererCorsOrigin,
   withRendererOrigin,
 } = await import('./loopback-cors')
@@ -52,8 +53,32 @@ describe('gatewayOriginFor', () => {
     )
   })
 
+  it('folds wss onto https, dropping a default port as a browser would', () => {
+    expect(gatewayOriginFor('wss://gw.example.com/ws')).toBe('https://gw.example.com')
+    expect(gatewayOriginFor('wss://gw.example.com:443/ws')).toBe('https://gw.example.com')
+    expect(gatewayOriginFor('https://gw.example.com:8443/api')).toBe('https://gw.example.com:8443')
+  })
+
   it('is null for a URL that does not parse', () => {
     expect(gatewayOriginFor('garbage')).toBeNull()
+  })
+})
+
+describe('isGatewayRequest', () => {
+  it('admits loopback on any port whatever the configured endpoint', () => {
+    expect(isGatewayRequest('http://127.0.0.1:19000/api', 'https://gw.example.com')).toBe(true)
+    expect(isGatewayRequest('ws://localhost:18791/ws', null)).toBe(true)
+    expect(isGatewayRequest('http://[::1]:18791/api', null)).toBe(true)
+  })
+
+  it('admits the configured origin and nothing else off loopback', () => {
+    expect(isGatewayRequest('wss://gw.example.com/ws', 'https://gw.example.com')).toBe(true)
+    expect(isGatewayRequest('https://gw.example.com:443/api', 'https://gw.example.com')).toBe(true)
+    expect(isGatewayRequest('https://assets.coingecko.com/x.png', 'https://gw.example.com')).toBe(
+      false,
+    )
+    expect(isGatewayRequest('https://gw.example.com/api', null)).toBe(false)
+    expect(isGatewayRequest('garbage', 'https://gw.example.com')).toBe(false)
   })
 })
 
@@ -99,7 +124,7 @@ describe('withRendererOrigin', () => {
   })
 })
 
-describe('installLoopbackCors', () => {
+describe('installGatewayCors', () => {
   beforeEach(() => {
     hooks.filters = []
     hooks.before = null
@@ -107,8 +132,8 @@ describe('installLoopbackCors', () => {
   })
 
   it('presents the gateway origin on the way out and the renderer origin on the way back', () => {
-    installLoopbackCors('file:///app/out/renderer/')
-    expect(hooks.filters).toEqual([{ urls: LOOPBACK_URLS }, { urls: LOOPBACK_URLS }])
+    installGatewayCors('file:///app/out/renderer/', () => null)
+    expect(hooks.filters).toEqual([{ urls: GATEWAY_URL_PATTERNS }, { urls: GATEWAY_URL_PATTERNS }])
 
     expect(
       run(hooks.before, {
@@ -134,7 +159,7 @@ describe('installLoopbackCors', () => {
   })
 
   it('uses the dev server origin for a dev renderer', () => {
-    installLoopbackCors('http://localhost:5173')
+    installGatewayCors('http://localhost:5173', () => null)
     expect(
       run(hooks.received, {
         url: 'http://127.0.0.1:18791/control/api/bootstrap',
@@ -143,8 +168,42 @@ describe('installLoopbackCors', () => {
     ).toEqual({ responseHeaders: { 'access-control-allow-origin': 'http://localhost:5173' } })
   })
 
+  it('treats the configured remote gateway like loopback, read at request time', () => {
+    let configured: string | null = null
+    installGatewayCors('file:///app/out/renderer/', () => configured)
+    const before = {
+      url: 'wss://gw.example.com/ws',
+      requestHeaders: { Origin: 'file://', Accept: '*/*' },
+    }
+    // Not the gateway yet: nothing is presented.
+    expect(run(hooks.before, before)).toEqual({ requestHeaders: before.requestHeaders })
+
+    configured = 'https://gw.example.com'
+    expect(run(hooks.before, before)).toEqual({
+      requestHeaders: { Origin: 'https://gw.example.com', Accept: '*/*' },
+    })
+    expect(
+      run(hooks.received, {
+        url: 'https://gw.example.com/api/v1/artifacts/a',
+        responseHeaders: { 'access-control-allow-origin': ['https://gw.example.com'] },
+      }),
+    ).toEqual({ responseHeaders: { 'access-control-allow-origin': 'null' } })
+  })
+
+  it('leaves other https hosts alone', () => {
+    installGatewayCors('file:///app/out/renderer/', () => 'https://gw.example.com')
+    const headers = { Origin: 'file://', Accept: '*/*' }
+    expect(
+      run(hooks.before, { url: 'https://assets.coingecko.com/x.png', requestHeaders: headers }),
+    ).toEqual({ requestHeaders: headers })
+    const response = { 'access-control-allow-origin': ['*'] }
+    expect(
+      run(hooks.received, { url: 'https://assets.coingecko.com/x.png', responseHeaders: response }),
+    ).toEqual({ responseHeaders: response })
+  })
+
   it('leaves headers untouched when the request URL does not parse', () => {
-    installLoopbackCors('file:///app/out/renderer/')
+    installGatewayCors('file:///app/out/renderer/', () => null)
     expect(run(hooks.before, { url: 'garbage', requestHeaders: { Accept: '*/*' } })).toEqual({
       requestHeaders: { Accept: '*/*' },
     })

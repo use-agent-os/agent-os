@@ -5,6 +5,7 @@ import { discoverEngine, type ProbeResult } from './discovery'
 
 const managed: GatewaySettings = {
   mode: 'managed',
+  scheme: 'http',
   host: '127.0.0.1',
   port: 18791,
   token: null,

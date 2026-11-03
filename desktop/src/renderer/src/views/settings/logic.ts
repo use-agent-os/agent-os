@@ -1,4 +1,5 @@
 import {
+  gatewayUrl,
   isValidHost,
   isValidPort,
   type DesktopSettings,
@@ -14,6 +15,7 @@ import { mergeTiers, routerMode, TEXT_TIERS } from '@/views/setup/logic'
 /** What the Gateway pane edits: strings, so a half-typed port is representable. */
 export interface GatewayDraft {
   mode: GatewaySettings['mode']
+  scheme: GatewaySettings['scheme']
   host: string
   port: string
   token: string
@@ -23,6 +25,7 @@ export interface GatewayDraft {
 export function draftFromGateway(gw: GatewaySettings): GatewayDraft {
   return {
     mode: gw.mode,
+    scheme: gw.scheme,
     host: gw.host,
     port: String(gw.port),
     token: gw.token ?? '',
@@ -33,6 +36,7 @@ export function draftFromGateway(gw: GatewaySettings): GatewayDraft {
 export function gatewayFromDraft(draft: GatewayDraft): GatewaySettings {
   return {
     mode: draft.mode,
+    scheme: draft.scheme,
     host: draft.host.trim(),
     port: Number(draft.port.trim()),
     token: draft.token.trim() || null,
@@ -58,6 +62,7 @@ export function gatewayDirty(saved: GatewaySettings, draft: GatewayDraft): boole
   const next = gatewayFromDraft(draft)
   return (
     next.mode !== saved.mode ||
+    next.scheme !== saved.scheme ||
     next.host !== saved.host ||
     next.port !== saved.port ||
     next.token !== saved.token ||
@@ -73,7 +78,7 @@ export function gatewayDirty(saved: GatewaySettings, draft: GatewayDraft): boole
 export function gatewayNeedsRestart(saved: GatewaySettings, status: GatewayStatus): boolean {
   if (status.state !== 'running' && status.state !== 'starting') return false
   if (!status.url) return false
-  return status.url !== `http://${saved.host}:${saved.port}`
+  return status.url !== gatewayUrl(saved)
 }
 
 /* ── Provider (Models pane) ─────────────────────────────────────────────── */

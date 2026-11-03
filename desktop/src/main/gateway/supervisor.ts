@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { createWriteStream, mkdirSync, rmSync, writeFileSync, type WriteStream } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { GatewaySettings } from '@shared/settings'
+import { gatewayUrl, type GatewaySettings } from '@shared/settings'
 import { GATEWAY_EXIT_CONFIG, STOPPED_GATEWAY, type GatewayStatus } from '@shared/gateway'
 import { hardenedEnv, lastJson } from '../updates/engine-updater'
 import { locateCli } from './cli-locator'
@@ -176,7 +176,7 @@ export class GatewaySupervisor {
 
   async start(): Promise<GatewayStatus> {
     const cfg = this.getSettings()
-    const url = `http://${cfg.host}:${cfg.port}`
+    const url = gatewayUrl(cfg)
     const generation = ++this.startGeneration
 
     if (cfg.mode === 'external') {
@@ -363,7 +363,7 @@ export class GatewaySupervisor {
    */
   async adopt(): Promise<GatewayStatus | null> {
     const cfg = this.getSettings()
-    const url = `http://${cfg.host}:${cfg.port}`
+    const url = gatewayUrl(cfg)
     if (this.child && (this.status.state === 'running' || this.status.state === 'starting')) {
       return this.current()
     }
@@ -380,6 +380,22 @@ export class GatewaySupervisor {
   async restart(): Promise<GatewayStatus> {
     await this.stop()
     return this.start()
+  }
+
+  /**
+   * Settings saved with a different run mode. Switching to `external` means
+   * the app no longer runs a gateway, so a child it spawned is stopped
+   * rather than left behind, and the configured endpoint is probed in its
+   * place. An adopted gateway was never ours and stays up. Switching back to
+   * `managed` is left to the user: the external gateway may still be what
+   * they want to talk to, and Start is one click away.
+   */
+  async modeChanged(
+    previous: GatewaySettings['mode'],
+    next: GatewaySettings['mode'],
+  ): Promise<void> {
+    if (previous === next || next !== 'external' || !this.child) return
+    await this.restart()
   }
 
   async stop(): Promise<GatewayStatus> {

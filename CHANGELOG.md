@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Desktop app: an external gateway can be on another machine, over HTTPS.
+  Settings › Gateway › Connection gains a **Protocol** switch (HTTP or
+  HTTPS; the WebSocket follows as `ws://` or `wss://`), so a gateway behind
+  a reverse proxy or Tailscale Serve is reachable by hostname and port with
+  its token, not only through an SSH tunnel. The app presents the gateway's
+  own origin on every request to it, as it already did on loopback, so the
+  gateway must declare that origin (`[gateway] public_origin` or
+  `control_ui.allowed_origins`). A settings file written before the switch
+  existed reads as HTTP. Docs: `docs/desktop-app.md` ("Using a gateway on
+  another machine"), `docs/remote-access.md`.
+
+### Changed
+- Desktop app: in External run mode the gateway controls are state only.
+  The sidebar light, Settings › Gateway and the menu bar show whether the
+  gateway is reachable and no longer offer Start, Stop or Restart for a
+  gateway the app does not run; Settings › Gateway offers **Reconnect**
+  instead when the saved endpoint differs from the connected one. Saving
+  the switch to External stops the gateway the app had spawned (an adopted
+  one is left running) and connects to the configured endpoint.
+
 ## [2026.11.2] - 2026-11-02
 
 ### Added
