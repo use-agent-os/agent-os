@@ -55,7 +55,7 @@ while IFS= read -r path || [[ -n "${path}" ]]; do
     pyproject.toml | uv.lock)
       mark_dependency_changed
       ;;
-    .github/workflows/wheelhouse-release.yml | .github/workflows/pypi-publish.yml | .github/workflows/frontend.yml)
+    .github/workflows/wheelhouse-release.yml | .github/workflows/pypi-publish.yml | .github/workflows/docker-image.yml | .github/workflows/frontend.yml)
       mark_ci_changed
       mark_release_changed
       ;;

@@ -1,0 +1,221 @@
+name: Docker Image
+
+# Publishes the AgentOS container image to GitHub Container Registry on every
+# release tag. Each platform is built on its own native runner (no QEMU), the
+# per-arch images are pushed by digest, and one manifest job stitches them into
+# the versioned tag and `latest`.
+#
+# One-time setup after the first successful run: set the package
+# `ghcr.io/use-agent-os/agent-os` to public in the organization's package
+# settings so `docker pull` needs no token.
+
+"on":
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build, e.g. v2026.11.2
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-image-${{ github.event_name == 'push' && github.ref_name || github.event.inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/use-agent-os/agent-os
+  RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || github.event.inputs.tag }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    steps:
+      - name: Validate release tag
+        shell: bash
+        run: |
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]{4}[.][0-9]+[.][0-9]+([.]post[0-9]+|rc[0-9]+)?$ ]]; then
+            echo "Release tag must look like v2026.11.2, v2026.11.2.post1 or v2026.11.2rc1: ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          lfs: true
+          persist-credentials: false
+
+      - name: Hydrate LFS embedding and router model assets
+        run: |
+          git lfs pull --include="src/agentos/memory/models/**"
+          git lfs pull --include="src/agentos/agentos_router/models/**"
+
+      - name: Verify LFS assets are hydrated
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          roots = [
+              Path("src/agentos/memory/models"),
+              Path("src/agentos/agentos_router/models"),
+          ]
+          for root in roots:
+              for path in root.rglob("*"):
+                  if not path.is_file():
+                      continue
+                  prefix = path.read_bytes()[:64]
+                  assert not prefix.startswith(b"version https://git-lfs.github.com/spec/v1"), (
+                      f"LFS pointer not hydrated: {path}"
+                  )
+
+          # The legacy v4_phase3 model bundle must NOT ship anymore — it was
+          # removed to slim the wheel (~52MB). Same guard as the wheelhouse
+          # release, so both publish paths fail loudly if it leaks back.
+          legacy = Path("src/agentos/agentos_router/models/v4.2_phase3_inference")
+          assert not legacy.exists(), (
+              "legacy v4_phase3 bundle leaked back into the tree"
+          )
+
+          # Pilot router MiniLM INT8 export (T1). Lives under the
+          # memory/models LFS root checked above; listed explicitly so a
+          # non-hydrated LFS checkout can't silently ship a pointer file.
+          minilm = Path("src/agentos/memory/models/embeddings/all-MiniLM-L6-v2-int8")
+          for name in (
+              "config.json",
+              "model.onnx",
+              "special_tokens_map.json",
+              "tokenizer.json",
+              "tokenizer_config.json",
+              "vocab.txt",
+          ):
+              assert (minilm / name).is_file(), f"missing MiniLM asset: {name}"
+
+          # Pilot production bundle (strategy="pilot-v1", the default). A
+          # missing/non-hydrated model.onnx would silently degrade every turn
+          # to pilot_unavailable, so ship it or fail the publish loudly.
+          pilot = Path("src/agentos/agentos_router/models/pilot_v1")
+          for name in (
+              "model.onnx",
+              "manifest.json",
+          ):
+              assert (pilot / name).is_file(), f"missing pilot_v1 asset: {name}"
+          PY
+
+      - name: Check tag matches package version
+        run: |
+          python3 - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+
+          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          tag = os.environ["RELEASE_TAG"]
+          assert tag == f"v{version}", (
+              f"tag {tag!r} does not match pyproject version {version!r}"
+          )
+          PY
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ env.RELEASE_TAG }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,scope=${{ matrix.arch }},mode=max
+
+      - name: Export digest
+        shell: bash
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  manifest:
+    name: Publish multi-arch manifest
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create and push manifest
+        shell: bash
+        working-directory: /tmp/digests
+        run: |
+          version="${RELEASE_TAG#v}"
+          tags=(-t "${IMAGE}:${version}")
+          # Pre-releases never move `latest`.
+          if [[ ! "${version}" =~ rc[0-9]+$ ]]; then
+            tags+=(-t "${IMAGE}:latest")
+          fi
+          refs=()
+          for digest in *; do
+            refs+=("${IMAGE}@sha256:${digest}")
+          done
+          [[ ${#refs[@]} -eq 2 ]] || { echo "expected 2 per-arch digests, got ${#refs[@]}" >&2; exit 1; }
+          docker buildx imagetools create "${tags[@]}" "${refs[@]}"
+
+      - name: Verify manifest lists both platforms
+        shell: bash
+        run: |
+          version="${RELEASE_TAG#v}"
+          out=$(docker buildx imagetools inspect "${IMAGE}:${version}")
+          echo "${out}"
+          grep -q 'linux/amd64' <<<"${out}"
+          grep -q 'linux/arm64' <<<"${out}"

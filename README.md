@@ -648,9 +648,17 @@ before you bind to `0.0.0.0`.
 
 **Docker**
 
-The Docker Compose setup runs an `agentos:local` image that you
-build yourself. Build it from a source checkout, after pulling the
-Git LFS embedding-model files (see [Install from source](#install-from-source)
+A prebuilt multi-arch image (linux/amd64 and linux/arm64) is published
+for every release. Point Compose at it and nothing has to be built:
+
+```sh
+export AGENTOS_GATEWAY_IMAGE=ghcr.io/use-agent-os/agent-os:latest   # or :2026.11.2
+docker compose up -d
+```
+
+Without `AGENTOS_GATEWAY_IMAGE`, the Compose setup runs an `agentos:local`
+image that you build yourself. Build it from a source checkout, after pulling
+the Git LFS embedding-model files (see [Install from source](#install-from-source)
 for the clone and `git lfs pull` steps):
 
 ```sh
@@ -659,8 +667,8 @@ docker build -t agentos:local .
 
 `./start.sh` (or `start.ps1` on Windows) then runs `docker compose
 up -d` and shows the gateway logs. Docker means you don't need
-Python installed on your computer — but you still need to build the
-image locally first.
+Python installed on your computer — pull the published image or build
+one locally first.
 
 </details>
 
