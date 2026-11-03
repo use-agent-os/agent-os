@@ -166,6 +166,12 @@
   gap: 16px;
   padding: 16px 18px 8px;
 }
+/* A bare button in the head's action slot must not shrink and wrap its
+   label when the blurb is long; wrap several in .env-actions instead. */
+.stg-card__head > .mac-button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 .stg-card__head h2 {
   font-size: 14px;
   font-weight: 600;
@@ -402,6 +408,10 @@
 }
 .stg-notice > span {
   flex: 1;
+}
+.stg-notice > .mac-button {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .stg-notice[data-tone='ok'] {
   background: color-mix(in srgb, var(--ok) 10%, transparent);
