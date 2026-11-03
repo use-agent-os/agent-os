@@ -35,6 +35,7 @@ import {
   statusTone,
 } from '../channels-logic'
 import { Card, Head, Notice, Pill, Row, Value } from '../parts'
+import { PendingRestartNotice } from '../PendingRestartNotice'
 import { useConfigSnapshot, withRevision } from '../use-snapshot'
 import { ChannelSetupSheet } from './ChannelSetupSheet'
 
@@ -246,13 +247,7 @@ export function ChannelsPane() {
       {snapshot?.writeBlocked ? (
         <Notice tone="danger">{t('settings.writeBlocked')}</Notice>
       ) : snapshot?.pendingRestart ? (
-        <Notice
-          action={
-            <Button onClick={() => void restartGateway()}>{t('settings.restartGateway')}</Button>
-          }
-        >
-          {t('settings.pendingRestart')}
-        </Notice>
+        <PendingRestartNotice />
       ) : null}
 
       {list.isError ? (

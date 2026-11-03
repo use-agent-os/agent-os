@@ -16,6 +16,8 @@ export const settings = {
   'settings.restartRequired': 'Saved. Restart the gateway to apply.',
   'settings.restartGateway': 'Restart gateway',
   'settings.pendingRestart': 'The gateway is running an older configuration. Restart to apply.',
+  'settings.pendingRestart.external':
+    'The gateway is running an older configuration. Restart it on its host to apply.',
   'settings.writeBlocked':
     'config.toml changed outside AgentOS. Restart the gateway before editing here.',
 

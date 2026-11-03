@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useConnection } from '@/stores/connection'
 import { useGateway } from '~/stores/gateway'
+import { useSettings } from '~/stores/settings'
 import { ChannelsPane } from './ChannelsPane'
 
 vi.mock('sonner', () => ({
@@ -95,7 +96,14 @@ const ACCESS = {
   group_mention_required: true,
 }
 
-function wire(opts: { channels?: unknown[]; access?: unknown[]; statusReject?: boolean } = {}) {
+function wire(
+  opts: {
+    channels?: unknown[]
+    access?: unknown[]
+    statusReject?: boolean
+    snapshot?: Record<string, unknown>
+  } = {},
+) {
   rpcCall.mockImplementation(async (method: string) => {
     switch (method) {
       case 'channels.status':
@@ -104,7 +112,7 @@ function wire(opts: { channels?: unknown[]; access?: unknown[]; statusReject?: b
       case 'channels.pairing.list':
         return { channels: opts.access ?? [ACCESS] }
       case 'config.snapshot':
-        return SNAPSHOT
+        return { ...SNAPSHOT, ...opts.snapshot }
       case 'onboarding.channel.probe':
         return { status: 'ready', restartRequired: true }
       case 'onboarding.channel.upsert':
@@ -147,6 +155,9 @@ beforeEach(() => {
   vi.mocked(toast.error).mockClear()
   useConnection.setState({ state: 'connected' })
   useGateway.setState({ status: { state: 'running', pid: null, url: null, error: null } })
+  useSettings.setState((s) => ({
+    settings: { ...s.settings, gateway: { ...s.settings.gateway, mode: 'managed' } },
+  }))
   wire()
 })
 
@@ -427,6 +438,32 @@ describe('ChannelsPane', () => {
     expect(toast.success).toHaveBeenCalledWith('Saved. Restarting the gateway to apply.', {
       id: 'stg-channels',
     })
+  })
+
+  it('offers to restart a managed gateway running an older configuration', async () => {
+    wire({ snapshot: { pendingRestart: true } })
+    renderPane()
+    await loaded()
+    expect(
+      await screen.findByText('The gateway is running an older configuration. Restart to apply.'),
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Restart gateway' }))
+    await waitFor(() => expect(gatewayRestart).toHaveBeenCalled())
+  })
+
+  it('only tells an external gateway to restart on its host', async () => {
+    useSettings.setState((s) => ({
+      settings: { ...s.settings, gateway: { ...s.settings.gateway, mode: 'external' } },
+    }))
+    wire({ snapshot: { pendingRestart: true } })
+    renderPane()
+    await loaded()
+    expect(
+      await screen.findByText(
+        'The gateway is running an older configuration. Restart it on its host to apply.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Restart gateway' })).not.toBeInTheDocument()
   })
 
   it('sends an adapter without a guided form to config.toml', async () => {

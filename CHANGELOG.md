@@ -16,6 +16,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   the latest, no update button, a note to update it on its host. An outdated
   local engine no longer produces an update notice in that mode either.
   Docs: `docs/desktop-app.md` ("Updates").
+- Desktop app: with an external gateway, Settings › Channels, Providers and
+  Router no longer show a **Restart gateway** button on the "older
+  configuration" notice after a config change (the app does not run that
+  gateway, so the button did nothing). The notice now says to restart the
+  gateway on its host; a managed gateway keeps the button.
 
 ## [2026.11.3] - 2026-11-03
 

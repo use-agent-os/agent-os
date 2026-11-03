@@ -31,6 +31,7 @@ import {
 import { Card, Head, Notice, Pill, Row, Value } from '../parts'
 import { providerKeyUrl } from '../provider-links'
 import { ProviderLogo } from '../ProviderLogo'
+import { PendingRestartNotice } from '../PendingRestartNotice'
 import { useConfigSnapshot, withRevision } from '../use-snapshot'
 
 interface ConfigureResult {
@@ -159,13 +160,7 @@ function ProvidersBody({
       {snapshot.writeBlocked ? (
         <Notice tone="danger">{t('settings.writeBlocked')}</Notice>
       ) : snapshot.pendingRestart ? (
-        <Notice
-          action={
-            <Button onClick={() => void restartGateway()}>{t('settings.restartGateway')}</Button>
-          }
-        >
-          {t('settings.pendingRestart')}
-        </Notice>
+        <PendingRestartNotice />
       ) : null}
 
       <div className="prov-grid" role="radiogroup" aria-label={t('settings.providers.pick')}>

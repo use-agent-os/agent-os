@@ -222,8 +222,10 @@ it for an existing channel with the adapter and name locked, and a secret
 left blank keeps the one already stored. Each card has an Enabled switch,
 Restart and Remove, and a Telegram card lists who is waiting to pair and who
 is in, with Pair, Deny and Disconnect. Changes to the configuration restart
-a gateway the app manages so they apply at once; an external gateway is
-told to restart.
+a gateway the app manages so they apply at once; with an external gateway
+the pane only says to restart it on its host, with no **Restart gateway**
+button (the app does not run that process). Providers and Router do the
+same.
 
 Environment is the Web UI's Environment screen inside the app: every variable
 the gateway, its providers and your skills read, grouped by what uses it,
