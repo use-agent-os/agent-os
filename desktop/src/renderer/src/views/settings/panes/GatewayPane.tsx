@@ -2,7 +2,7 @@ import { Copy, Eye, EyeOff, ExternalLink } from 'lucide-react'
 import { useId, useState } from 'react'
 import { toast } from 'sonner'
 import type { GatewayState } from '@shared/gateway'
-import type { GatewaySettings } from '@shared/settings'
+import { gatewayUrl, type GatewaySettings } from '@shared/settings'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
 import { desktopApi, isDesktop } from '~/lib/desktop-api'
@@ -35,6 +35,9 @@ export function GatewayPane() {
   const needsRestart = gatewayNeedsRestart(saved, status)
   const running = status.state === 'running' || status.state === 'starting'
   const pulsing = status.state === 'starting' || status.state === 'stopping'
+  // An external gateway is not the app's to start or stop: the pane shows
+  // its state, and the one action left is reconnecting to a changed endpoint.
+  const external = saved.mode === 'external'
 
   function copyUrl() {
     if (!status.url) return
@@ -56,11 +59,11 @@ export function GatewayPane() {
         <Notice
           action={
             <Button disabled={busy} onClick={() => void restart()}>
-              {t('settings.gateway.restartNow')}
+              {external ? t('settings.gateway.reconnectNow') : t('settings.gateway.restartNow')}
             </Button>
           }
         >
-          {t('settings.gateway.restartNeeded')}
+          {external ? t('settings.gateway.reconnectNeeded') : t('settings.gateway.restartNeeded')}
         </Notice>
       ) : null}
 
@@ -74,7 +77,7 @@ export function GatewayPane() {
         }
       >
         <Row label={t('settings.gateway.endpoint')}>
-          <Value>{status.url ?? `http://${saved.host}:${saved.port}`}</Value>
+          <Value>{status.url ?? gatewayUrl(saved)}</Value>
           <Button
             variant="ghost"
             size="icon"
@@ -106,9 +109,11 @@ export function GatewayPane() {
               ? '—'
               : status.pid !== null
                 ? `pid ${status.pid}`
-                : t('settings.gateway.pid.adopted')}
+                : external
+                  ? t('settings.gateway.pid.external')
+                  : t('settings.gateway.pid.adopted')}
           </Value>
-          {running ? (
+          {external ? null : running ? (
             <>
               <Button disabled={busy} onClick={() => void restart()}>
                 {t('settings.gateway.restart')}
@@ -190,6 +195,17 @@ function ConnectionForm({
             { value: 'external', label: t('settings.gateway.mode.external') },
           ]}
           onChange={(mode) => setDraft((d) => ({ ...d, mode }))}
+        />
+      </Row>
+      <Row label={t('settings.gateway.scheme')} help={t('settings.gateway.scheme.help')}>
+        <Segmented
+          label={t('settings.gateway.scheme')}
+          value={draft.scheme}
+          options={[
+            { value: 'http', label: t('settings.gateway.scheme.http') },
+            { value: 'https', label: t('settings.gateway.scheme.https') },
+          ]}
+          onChange={(scheme) => setDraft((d) => ({ ...d, scheme }))}
         />
       </Row>
       <Row

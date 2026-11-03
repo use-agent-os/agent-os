@@ -15,6 +15,7 @@ import {
 
 const external: GatewaySettings = {
   mode: 'external',
+  scheme: 'http',
   host: '127.0.0.1',
   port: 18791,
   token: null,
@@ -31,6 +32,21 @@ describe('GatewaySupervisor (external mode)', () => {
     expect(status).toMatchObject({ state: 'running', url: 'http://127.0.0.1:18791', pid: null })
     expect(seen).toEqual(['starting', 'running'])
     expect(probe).toHaveBeenCalledWith('http://127.0.0.1:18791')
+  })
+
+  it('probes an https gateway on another host over https', async () => {
+    const probe = vi.fn().mockResolvedValue(true)
+    const remote: GatewaySettings = {
+      ...external,
+      scheme: 'https',
+      host: 'gw.example.com',
+      port: 443,
+    }
+    const sup = new GatewaySupervisor(() => remote, { probe })
+    const status = await sup.start()
+    expect(status).toMatchObject({ state: 'running', url: 'https://gw.example.com:443' })
+    expect(probe).toHaveBeenCalledWith('https://gw.example.com:443')
+    expect(await sup.adopt()).toMatchObject({ url: 'https://gw.example.com:443' })
   })
 
   it('reports an error when nothing answers', async () => {
@@ -118,6 +134,7 @@ describe('GatewaySupervisor (spawn arguments)', () => {
   it('binds host and port on the command line and passes the token through AuthConfig env', async () => {
     const managed: GatewaySettings = {
       mode: 'managed',
+      scheme: 'http',
       host: '127.0.0.1',
       port: 18999,
       token: 'secret',
@@ -303,6 +320,7 @@ function scriptedSpawn(
 
 const managedCli: GatewaySettings = {
   mode: 'managed',
+  scheme: 'http',
   host: '127.0.0.1',
   port: 18998,
   token: null,

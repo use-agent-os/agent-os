@@ -5,6 +5,7 @@ import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
 import { cn } from '~/lib/utils'
 import { useGateway } from '~/stores/gateway'
+import { useSettings } from '~/stores/settings'
 
 const LIGHT: Record<GatewayState, string> = {
   stopped: 'text-dim',
@@ -16,7 +17,8 @@ const LIGHT: Record<GatewayState, string> = {
 
 /**
  * Icon strip at the bottom of the sidebar. The gateway light lives here as a
- * button: one glance for state, one click to start or stop.
+ * button: one glance for state, one click to start or stop. An external
+ * gateway is not the app's to run, so for one the light is state only.
  *
  * Nothing else sits here on purpose. New session is the first quick action
  * (⌘N) and lands where Home does; the session and project lists follow the
@@ -25,9 +27,14 @@ const LIGHT: Record<GatewayState, string> = {
  */
 export function SidebarFooter() {
   const { status, busy, start, stop } = useGateway()
+  const external = useSettings((s) => s.settings.gateway.mode === 'external')
   const running = status.state === 'running' || status.state === 'starting'
   const pulsing = status.state === 'starting' || status.state === 'stopping'
-  const label = running ? t('gateway.stop') : t('gateway.start')
+  const label = external
+    ? t(`gateway.state.${status.state}`)
+    : running
+      ? t('gateway.stop')
+      : t('gateway.start')
 
   return (
     <div className="app-no-drag flex items-center gap-0.5 border-t border-hairline px-2 py-1.5">
@@ -49,7 +56,7 @@ export function SidebarFooter() {
       <Button
         variant="ghost"
         size="icon"
-        disabled={busy}
+        disabled={busy || external}
         aria-label={label}
         title={`${t(`gateway.state.${status.state}`)}${status.url ? ` · ${status.url}` : ''}${status.detail ? ` · ${status.detail}` : ''}${status.error ? ` · ${status.error}` : ''}`}
         onClick={() => void (running ? stop() : start())}

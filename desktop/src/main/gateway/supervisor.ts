@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { createWriteStream, mkdirSync, rmSync, writeFileSync, type WriteStream } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { GatewaySettings } from '@shared/settings'
+import { gatewayUrl, type GatewaySettings } from '@shared/settings'
 import { GATEWAY_EXIT_CONFIG, STOPPED_GATEWAY, type GatewayStatus } from '@shared/gateway'
 import { hardenedEnv, lastJson } from '../updates/engine-updater'
 import { locateCli } from './cli-locator'
@@ -176,7 +176,7 @@ export class GatewaySupervisor {
 
   async start(): Promise<GatewayStatus> {
     const cfg = this.getSettings()
-    const url = `http://${cfg.host}:${cfg.port}`
+    const url = gatewayUrl(cfg)
     const generation = ++this.startGeneration
 
     if (cfg.mode === 'external') {
@@ -363,7 +363,7 @@ export class GatewaySupervisor {
    */
   async adopt(): Promise<GatewayStatus | null> {
     const cfg = this.getSettings()
-    const url = `http://${cfg.host}:${cfg.port}`
+    const url = gatewayUrl(cfg)
     if (this.child && (this.status.state === 'running' || this.status.state === 'starting')) {
       return this.current()
     }

@@ -3,10 +3,10 @@ import { electronApp, optimizer } from '@electron-toolkit/utils'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
-import type { DesktopSettings } from '@shared/settings'
+import { gatewayUrl, type DesktopSettings } from '@shared/settings'
 import { GatewaySupervisor } from './gateway/supervisor'
 import { registerIpc } from './ipc'
-import { installLoopbackCors } from './loopback-cors'
+import { gatewayOriginFor, installGatewayCors } from './loopback-cors'
 import { installAppMenu } from './menu'
 import { registerPetScheme, servePets } from './pets/protocol'
 import { QuickAskController } from './quick-ask/controller'
@@ -109,7 +109,9 @@ if (!app.requestSingleInstanceLock()) {
       optimizer.watchWindowShortcuts(win, { zoom: true }),
     )
 
-    installLoopbackCors(rendererAppOrigin())
+    installGatewayCors(rendererAppOrigin(), () =>
+      gatewayOriginFor(gatewayUrl(settings.get().gateway)),
+    )
     servePets(pets)
     // The pets that ship with the app, so Settings > Appearance has one to
     // offer before anyone reaches petdex.dev. Seeded once each; never fatal.

@@ -7,6 +7,12 @@ import { DEFAULT_THEME_SETTINGS, normalizeThemeSettings, type ThemeSettings } fr
 export interface GatewaySettings {
   /** `managed`: the app spawns `agentos gateway run`. `external`: connect only. */
   mode: 'managed' | 'external'
+  /**
+   * How the app reaches the gateway: plain `http` (loopback, a LAN bind, an
+   * SSH tunnel) or `https` for a gateway behind TLS (a reverse proxy,
+   * Tailscale Serve, `[tls]` in its config). The WebSocket follows suit.
+   */
+  scheme: GatewayScheme
   host: string
   port: number
   /** Bearer token for gateways running with auth.mode = "token". */
@@ -15,12 +21,20 @@ export interface GatewaySettings {
   cliPath: string | null
 }
 
+export type GatewayScheme = 'http' | 'https'
+
 export const DEFAULT_GATEWAY_SETTINGS: GatewaySettings = {
   mode: 'managed',
+  scheme: 'http',
   host: '127.0.0.1',
   port: 18791,
   token: null,
   cliPath: null,
+}
+
+/** The gateway's base URL as the settings describe it, e.g. `https://gw.example.com:443`. */
+export function gatewayUrl(gw: Pick<GatewaySettings, 'scheme' | 'host' | 'port'>): string {
+  return `${gw.scheme}://${gw.host}:${gw.port}`
 }
 
 /** Behaviour of the shell itself: launch, quit, and how the composer sends. */
@@ -243,6 +257,8 @@ function normalizeGateway(raw: unknown): GatewaySettings {
   const port = Number(obj.port)
   return {
     mode: obj.mode === 'external' ? 'external' : 'managed',
+    // A file written before the scheme existed described a plain-http gateway.
+    scheme: obj.scheme === 'https' ? 'https' : 'http',
     host: isValidHost(obj.host) ? obj.host.trim() : DEFAULT_GATEWAY_SETTINGS.host,
     port: isValidPort(port) ? port : DEFAULT_GATEWAY_SETTINGS.port,
     token: typeof obj.token === 'string' && obj.token.trim() ? obj.token.trim() : null,

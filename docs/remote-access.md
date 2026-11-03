@@ -73,6 +73,12 @@ No AgentOS configuration changes: to the gateway the browser is a loopback
 peer, so the default `auth.mode = "none"` keeps working. Set a token anyway
 if other people have accounts on the remote host.
 
+The desktop app works through the tunnel as well: Settings › Gateway ›
+Connection, **Run mode** External, **Protocol** HTTP, host `127.0.0.1`,
+port `18791` (or the local port you forwarded), plus the token if one is
+set. See [Desktop app → Using a gateway on another
+machine](desktop-app.md#using-a-gateway-on-another-machine).
+
 ## Tailscale Serve
 
 [Tailscale Serve](https://tailscale.com/kb/1312/serve) publishes a loopback
@@ -110,7 +116,13 @@ admitted as if it sat at the keyboard.
    ```
 
 Open `https://<machine>.<tailnet>.ts.net/control/`, enter the token under
-Overview › Gateway connection › Token and press Connect.
+Overview › Gateway connection › Token and press Connect. The desktop app
+connects the same way: **Run mode** External, **Protocol** HTTPS, host
+`<machine>.<tailnet>.ts.net`, port `443`, and the token. The same settings
+reach a gateway behind a [reverse proxy](#reverse-proxy-with-trusted-proxy-mode),
+with that proxy's hostname; whichever path you take, the origin the app
+presents is the gateway's own, so it must be declared on the gateway as
+above (`control_ui.allowed_origins` or `[gateway] public_origin`).
 `tailscale serve status` shows what is published; `tailscale serve --https=443
 off` takes it down. Do not use Tailscale **Funnel** for the gateway: it
 publishes the port to the whole internet.

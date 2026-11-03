@@ -342,6 +342,7 @@ export const settings = {
   'settings.gateway.endpoint': 'Endpoint',
   'settings.gateway.pid': 'Process',
   'settings.gateway.pid.adopted': 'Adopted from outside the app',
+  'settings.gateway.pid.external': 'External gateway — the app only connects to it',
   'settings.gateway.start': 'Start',
   'settings.gateway.stop': 'Stop',
   'settings.gateway.restart': 'Restart',
@@ -352,6 +353,11 @@ export const settings = {
   'settings.gateway.mode.help': 'Managed starts the gateway with the app. External only connects.',
   'settings.gateway.mode.managed': 'Managed',
   'settings.gateway.mode.external': 'External',
+  'settings.gateway.scheme': 'Protocol',
+  'settings.gateway.scheme.help':
+    'HTTPS for a gateway behind TLS (a reverse proxy, Tailscale Serve); the WebSocket follows.',
+  'settings.gateway.scheme.http': 'HTTP',
+  'settings.gateway.scheme.https': 'HTTPS',
   'settings.gateway.host': 'Host',
   'settings.gateway.port': 'Port',
   'settings.gateway.token': 'Auth token',
@@ -370,6 +376,8 @@ export const settings = {
   'settings.gateway.invalid.port': 'A port between 1 and 65535.',
   'settings.gateway.restartNeeded': 'The running gateway still uses the previous settings.',
   'settings.gateway.restartNow': 'Restart now',
+  'settings.gateway.reconnectNeeded': 'The app is still connected to the previous endpoint.',
+  'settings.gateway.reconnectNow': 'Reconnect',
 
   // Appearance
   'settings.appearance.window': 'Window',
