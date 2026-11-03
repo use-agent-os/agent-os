@@ -255,6 +255,14 @@ The app and the engine update together from one release.
   with the failure streak, and the last error, in the job's detail pane.
 - After `agentos upgrade` in a terminal, the app offers **Restart gateway**
   so the running gateway picks up the new engine.
+- With an external gateway (Settings › Gateway › Run mode External) the
+  engine on this Mac is not the one running, so it is left out: no
+  **Update** for it, no **Restart gateway**. Instead, when the connected
+  gateway runs an older release than the latest, the toolbar shows
+  **Gateway outdated** and About has a **Gateway** card with only its
+  running version and the latest. There is no button: update the gateway on
+  its own host (`agentos upgrade`, or pull the new image) and restart it
+  there. The App card updates as usual.
 
 ## Keyboard Shortcuts
 

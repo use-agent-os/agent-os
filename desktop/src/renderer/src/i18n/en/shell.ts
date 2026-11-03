@@ -65,6 +65,9 @@ export const shell = {
   'updates.toast.engineInstalled': 'is installed.',
   'updates.toast.gatewayRuns': 'The gateway is still running',
   'updates.toast.restartGateway': 'Restart gateway',
+  'updates.toast.gatewayBehind': 'The gateway runs',
+  'updates.toast.gatewayBehind.rest': 'on its own host; update it there.',
+  'updates.toast.gatewayBehind.open': 'Details',
   'updates.toast.engineDone': 'Engine updated to',
   'updates.toast.failed': 'Could not update to',
   'updates.toast.retry': 'Try again',
@@ -75,6 +78,7 @@ export const shell = {
   'updates.pill.app': 'Downloading',
   'updates.pill.restart': 'Restart',
   'updates.pill.gateway': 'Restart gateway',
+  'updates.pill.gatewayOutdated': 'Gateway outdated',
   'updates.pill.failed': 'Update failed',
 
   // Approval prompt (components/approval/ApprovalDialog.tsx).

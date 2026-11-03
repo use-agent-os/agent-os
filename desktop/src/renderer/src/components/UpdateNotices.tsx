@@ -4,6 +4,7 @@ import { releaseUpdate, type ReleaseUpdate } from '@shared/updates'
 import { t } from '~/i18n'
 import { useGatewayStatus } from '~/lib/use-gateway-status'
 import { useGateway } from '~/stores/gateway'
+import { useSettings } from '~/stores/settings'
 import { useUi } from '~/stores/ui'
 import { useUpdates } from '~/stores/updates'
 import { useSessions } from '~/stores/sessions'
@@ -19,6 +20,8 @@ export interface NoticeActions {
   restartGateway(): void
   /** After a failed download or restart: check and download again. */
   retry(): void
+  /** An external gateway is behind: show About, there is nothing to run. */
+  details(): void
 }
 
 /**
@@ -65,6 +68,14 @@ export function announceRelease(
         duration: Infinity,
         description: `${t('updates.toast.gatewayRuns')} ${next.running}.`,
         action: { label: t('updates.toast.restartGateway'), onClick: act.restartGateway },
+      })
+      return
+    case 'gateway-outdated':
+      toast(`AgentOS ${next.version} ${t('updates.toast.available')}`, {
+        id: RELEASE_TOAST,
+        duration: Infinity,
+        description: `${t('updates.toast.gatewayBehind')} ${next.running} ${t('updates.toast.gatewayBehind.rest')}`,
+        action: { label: t('updates.toast.gatewayBehind.open'), onClick: act.details },
       })
       return
     case 'failed': {
@@ -118,6 +129,7 @@ export function UpdateNotices() {
   const engine = useUpdates((s) => s.engine)
   const app = useUpdates((s) => s.app)
   const loaded = useUpdates((s) => s.loaded)
+  const external = useSettings((s) => s.settings.gateway.mode === 'external')
   const status = useGatewayStatus()
   const { rows } = useSessions()
   const openSettings = useUi((s) => s.openSettings)
@@ -128,7 +140,7 @@ export function UpdateNotices() {
     liveRef.current = live
   }, [live])
 
-  const release = releaseUpdate(engine, app, status.data?.version)
+  const release = releaseUpdate(engine, app, status.data?.version, { external })
   const prev = useRef<ReleaseUpdate>({ kind: 'none' })
 
   useEffect(() => {
@@ -148,6 +160,7 @@ export function UpdateNotices() {
         else void useGateway.getState().restart()
       },
       retry: () => void useUpdates.getState().retryApp(),
+      details: () => openSettings('about'),
     }
     announceRelease(prev.current, release, act)
     prev.current = release

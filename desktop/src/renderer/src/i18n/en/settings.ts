@@ -558,8 +558,17 @@ export const settings = {
   'settings.about.engine.log': 'Progress',
   'settings.about.engine.tooOld': 'This app needs engine',
   'settings.about.engine.tooOld.rest': 'or newer; the gateway runs',
-  'settings.about.engine.external':
-    'The gateway runs outside this app. Update it where it runs with agentos upgrade.',
+
+  // About · gateway (external run mode: the app only connects to it)
+  'settings.about.remote': 'Gateway',
+  'settings.about.remote.blurb':
+    'The gateway this app connects to. It runs on its own host and is updated there, not from here.',
+  'settings.about.remote.running': 'Running',
+  'settings.about.remote.latest': 'Latest',
+  'settings.about.remote.unknown': 'Not checked yet',
+  'settings.about.remote.offline': 'Not connected',
+  'settings.about.remote.behind':
+    'A newer AgentOS is out. Update it on its host (agentos upgrade, or pull the new image) and restart the gateway there.',
 
   // About · app (this Electron shell)
   'settings.about.appCard': 'App',

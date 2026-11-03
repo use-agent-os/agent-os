@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Desktop app: with an external gateway, the toolbar no longer asks to
+  **Restart gateway** when the engine on this Mac is newer than the gateway
+  it connects to (the app does not run that gateway, so the restart did
+  nothing). It now shows **Gateway outdated** when the connected gateway
+  runs an older release than the latest known, and Settings › About replaces
+  the Engine card with a read-only **Gateway** card: the running version and
+  the latest, no update button, a note to update it on its host. An outdated
+  local engine no longer produces an update notice in that mode either.
+  Docs: `docs/desktop-app.md` ("Updates").
 - Desktop app: the **Add channel** button on the empty Settings › Channels
   card no longer squeezes into two lines that spill out of the button when
   the blurb beside it is long. A lone button in a settings card head or a

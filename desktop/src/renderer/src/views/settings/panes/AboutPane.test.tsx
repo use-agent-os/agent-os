@@ -198,6 +198,82 @@ describe('AboutPane · engine', () => {
   })
 })
 
+function setExternal() {
+  useSettings.setState((s) => ({
+    settings: { ...s.settings, gateway: { ...s.settings.gateway, mode: 'external' } },
+  }))
+}
+
+describe('AboutPane · external gateway', () => {
+  it('shows only the remote running version and the latest, with no update button', async () => {
+    setExternal()
+    rpcCall.mockImplementation(async (method: string) =>
+      method === 'status' ? { version: '2026.11.2', uptime_ms: 5000 } : {},
+    )
+    useUpdates.setState({
+      // The engine on this Mac is current; it is not the one running.
+      engine: {
+        ...IDLE_ENGINE,
+        current: '2026.11.3',
+        latest: '2026.11.3',
+        availability: 'up-to-date',
+        checkedAt: 1,
+      },
+      app: { ...idleAppState('2026.11.3'), phase: 'up-to-date', latest: '2026.11.3' },
+    })
+    renderPane()
+    const card = await screen.findByRole('region', { name: 'Gateway' })
+    expect(await within(card).findByText('2026.11.2')).toBeInTheDocument()
+    expect(within(card).getByText('2026.11.3')).toBeInTheDocument()
+    expect(within(card).queryByText('Installed')).toBeNull()
+    expect(within(card).getByText('Update available')).toBeInTheDocument()
+    expect(within(card).getByText(/update it on its host/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Update engine' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Update all' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Engine' })).toBeNull()
+  })
+
+  it('reads as up to date when the remote gateway runs the latest release', async () => {
+    setExternal()
+    rpcCall.mockImplementation(async (method: string) =>
+      method === 'status' ? { version: '2026.11.3+abc', uptime_ms: 5000 } : {},
+    )
+    useUpdates.setState({
+      // Even an outdated local engine changes nothing here.
+      engine: {
+        ...IDLE_ENGINE,
+        current: '2026.11.2',
+        latest: '2026.11.3',
+        availability: 'outdated',
+        checkedAt: 1,
+      },
+      app: { ...idleAppState('2026.11.3'), phase: 'up-to-date', latest: '2026.11.3' },
+    })
+    renderPane()
+    const card = await screen.findByRole('region', { name: 'Gateway' })
+    await within(card).findByText('2026.11.3+abc')
+    expect(within(card).getByText('Up to date')).toBeInTheDocument()
+    expect(within(card).queryByText(/update it on its host/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Update engine' })).toBeNull()
+  })
+
+  it('takes the latest from the app check when the local engine was never checked', async () => {
+    setExternal()
+    rpcCall.mockImplementation(async (method: string) =>
+      method === 'status' ? { version: '2026.11.2' } : {},
+    )
+    useUpdates.setState({
+      engine: { ...IDLE_ENGINE },
+      app: { ...idleAppState('2026.11.3'), phase: 'up-to-date', latest: '2026.11.3' },
+    })
+    renderPane()
+    const card = await screen.findByRole('region', { name: 'Gateway' })
+    await within(card).findByText('2026.11.2')
+    expect(within(card).getByText('2026.11.3')).toBeInTheDocument()
+    expect(within(card).getByText('Update available')).toBeInTheDocument()
+  })
+})
+
 /** Scoped to the App card: the Engine card has a Latest row of its own. */
 function appCard(): HTMLElement {
   return screen.getByRole('region', { name: 'App' })
