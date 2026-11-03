@@ -2,6 +2,7 @@
 
 | Version | Tag | Date | Notes |
 |---|---|---|---|
+| 2026.11.3.post1 | v2026.11.3.post1 | 2026-11-03 | Telegram shows typing and sends the whole reply at once by default, with `stream_replies = true` to keep live edits (#3752); the desktop app with an external gateway reports **Gateway outdated** and a read-only Gateway card instead of a Restart that did nothing (#3748, #3750); the Add channel button stays on one line (#3749). |
 | 2026.11.3 | v2026.11.3 | 2026-11-03 | Multi-arch container image published to GHCR on every tag (`ghcr.io/use-agent-os/agent-os`, linux/amd64 + linux/arm64; #3745), desktop app connects to an external gateway on another machine over HTTPS with a Protocol switch (#3744), and External run mode shows gateway state only with a Reconnect action. |
 | 2026.11.2 | v2026.11.2 | 2026-11-02 | Image Flows from chat: agents build and edit flows with `flow_get`, `flow_create` and `flow_update` (spec format, chat-image and workspace-file inputs, revisions, `base_rev` conflict checks, flow-change cards), and `flow_run` takes per-run `overrides` cost-gated on the overridden estimate (#3741). |
 | 2026.10.30 | v2026.10.30 | 2026-10-30 | Image Flows: a node-graph editor for image work in the desktop with the engine in the gateway, Surplus Intelligence as the default image provider, flow_list/flow_run agent tools behind a cost gate with sticky denials, and the agentos flows CLI (#3737). |
