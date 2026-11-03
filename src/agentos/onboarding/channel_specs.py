@@ -259,6 +259,10 @@ def _telegram_spec() -> ChannelSetupSpec:
                               "Every sender in these groups must still be paired."),
             ChannelSetupField("group_mention_required", "Require mention in groups", "bool",
                               required=False, default=True),
+            ChannelSetupField("stream_replies", "Stream replies", "bool",
+                              required=False, default=False,
+                              description="Edit the reply live as it is written. "
+                              "Off: show typing, then send the full reply at once."),
             ChannelSetupField("api_base", "API base", "text",
                               required=False, default="https://api.telegram.org"),
             ChannelSetupField("transport_name", "Transport", "select",

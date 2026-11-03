@@ -95,19 +95,26 @@ async def test_telegram_send_typing_without_target_is_unsupported() -> None:
     assert result.reason == "no chat target"
 
 
-class _TypingOnlyTelegramChannel(TelegramChannel):
-    """Telegram pinned to ``typing_final`` so the keepalive path stays covered.
+def test_telegram_defaults_to_typing_then_one_final_message() -> None:
+    """``send_streaming`` exists, but a default channel must not live-edit.
 
-    The real adapter streams now, and ``_start_typing_keepalive`` returns None
-    for streaming adapters — but the keepalive loop is still live for every
-    ``typing_final`` channel, and this is the only place it is exercised.
+    Without the adapter's own strategy the policy picks ``adapter_stream`` for
+    any adapter exposing ``send_streaming``; the default Telegram reply is the
+    typing status for the whole run and the finished text sent once.
     """
-
-    STREAM_UPDATE_STRATEGY = "typing_final"
-
-
-def test_telegram_streaming_capability_selects_adapter_stream_policy() -> None:
     channel = TelegramChannel(TelegramChannelConfig())
+
+    policy = resolve_channel_stream_policy(channel)
+
+    assert policy.mode == "typing_final"
+    assert policy.relay_stream is False
+    assert policy.typing_keepalive is True
+    assert policy.typing_preamble is False
+    assert 0 < channel.typing_keepalive_interval_s < 5
+
+
+def test_telegram_stream_replies_selects_adapter_stream_policy() -> None:
+    channel = TelegramChannel(TelegramChannelConfig(stream_replies=True))
 
     policy = resolve_channel_stream_policy(channel)
 
@@ -120,22 +127,11 @@ def test_telegram_streaming_capability_selects_adapter_stream_policy() -> None:
     assert 0 < channel.typing_keepalive_interval_s < 5
 
 
-def test_telegram_typing_final_override_selects_keepalive_policy() -> None:
-    channel = _TypingOnlyTelegramChannel(TelegramChannelConfig())
-
-    policy = resolve_channel_stream_policy(channel)
-
-    assert policy.mode == "typing_final"
-    assert policy.relay_stream is False
-    assert policy.typing_keepalive is True
-    assert policy.typing_preamble is False
-
-
 @pytest.mark.asyncio
 async def test_telegram_keepalive_uses_inbound_chat_topic_and_adapter_cadence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    channel = _TypingOnlyTelegramChannel(TelegramChannelConfig(token="token"))
+    channel = TelegramChannel(TelegramChannelConfig(token="token"))
     api_calls: list[tuple[str, dict[str, Any] | None]] = []
 
     async def fake_api(method: str, payload: dict[str, Any] | None = None) -> bool:
@@ -176,7 +172,7 @@ async def test_telegram_keepalive_uses_inbound_chat_topic_and_adapter_cadence(
 async def test_telegram_keepalive_treats_api_failure_as_best_effort(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    channel = _TypingOnlyTelegramChannel(TelegramChannelConfig(token="token"))
+    channel = TelegramChannel(TelegramChannelConfig(token="token"))
     attempts = 0
 
     async def failing_api(_method: str, _payload: dict[str, Any] | None = None) -> bool:
@@ -213,7 +209,7 @@ async def test_telegram_streaming_shows_typing_until_the_first_chunk() -> None:
     tool calls in the loop that wait is routinely tens of seconds — the
     preamble covers exactly that gap, then releases on the stop signal.
     """
-    channel = TelegramChannel(TelegramChannelConfig(token="token"))
+    channel = TelegramChannel(TelegramChannelConfig(token="token", stream_replies=True))
     api_calls: list[tuple[str, dict[str, Any] | None]] = []
     first_call = asyncio.Event()
 
@@ -248,7 +244,7 @@ async def test_telegram_streaming_shows_typing_until_the_first_chunk() -> None:
 @pytest.mark.asyncio
 async def test_telegram_streaming_typing_needs_a_stop_signal() -> None:
     """No signal, no preamble — never leave typing ticking under a live stream."""
-    channel = TelegramChannel(TelegramChannelConfig(token="token"))
+    channel = TelegramChannel(TelegramChannelConfig(token="token", stream_replies=True))
 
     async def unexpected_api(_method: str, _payload: dict[str, Any] | None = None) -> bool:
         raise AssertionError("typing must not start without a stop signal")
@@ -257,3 +253,21 @@ async def test_telegram_streaming_typing_needs_a_stop_signal() -> None:
     inbound = IncomingMessage(sender_id="user-1", channel_id="-100123", content="hello")
 
     assert channel_dispatch._start_typing_keepalive(channel, inbound) is None  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected_mode"),
+    [({}, "typing_final"), ({"stream_replies": True}, "adapter_stream")],
+)
+def test_telegram_stream_replies_reaches_the_adapter_from_gateway_config(
+    raw: dict[str, Any],
+    expected_mode: str,
+) -> None:
+    """The gateway entry is what users edit; the adapter config is what dispatch reads."""
+    from agentos.channels.registry import build_managed_channel, parse_channel_entry
+
+    entry = parse_channel_entry({"type": "telegram", "name": "tg", "token": "token", **raw})
+    channel = build_managed_channel(entry)
+
+    assert isinstance(channel, TelegramChannel)
+    assert resolve_channel_stream_policy(channel).mode == expected_mode

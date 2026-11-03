@@ -177,7 +177,8 @@ list <name>`, `approve <name> <code>`, `deny <name> <sender-id>`, `revoke
 <name> <sender-id>`, or `clear-pending <name>`. Pairing is binary and has no
 admin/owner tier. Telegram groups are disabled by default; enable them only
 with explicit `group_chat_ids`, paired senders, and the desired mention
-requirement.
+requirement. Telegram replies show typing for the whole turn and arrive as one
+finished message; `stream_replies = true` live-edits the reply instead.
 
 The `email` channel is IMAP polling in, SMTP out, and needs no platform app
 registration. `allowed_senders` is a required fail-closed From-address
