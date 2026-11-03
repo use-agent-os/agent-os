@@ -21,6 +21,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   configuration" notice after a config change (the app does not run that
   gateway, so the button did nothing). The notice now says to restart the
   gateway on its host; a managed gateway keeps the button.
+- Desktop app: the **Add channel** button on the empty Settings › Channels
+  card no longer squeezes into two lines that spill out of the button when
+  the blurb beside it is long. A lone button in a settings card head or a
+  notice now keeps its natural width on one line.
 
 ## [2026.11.3] - 2026-11-03
 
