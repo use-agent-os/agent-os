@@ -17,12 +17,14 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 from typing import Any
 
 import pytest
 import structlog
 
+import agentos.engine.agent as agent_module
 from agentos.engine.runtime import TurnRunner
 from agentos.engine.turn_runner.agent_bootstrap_stage import (
     AgentBootstrapStageInput,
@@ -494,7 +496,27 @@ async def _drive_three_turns(
         await storage.close()
 
 
-async def test_concurrent_setup_sends_byte_identical_requests(tmp_path: Path) -> None:
+_PINNED_NOW = datetime(2026, 11, 3, 6, 44, 30, tzinfo=UTC)
+
+
+class _PinnedClock:
+    """Stands in for ``datetime`` in ``agentos.engine.agent``: ``now()`` never moves.
+
+    The runtime context block the agent prepends to the user message carries
+    ``Current local date/time`` at minute resolution. The two setups below run
+    one after the other on the wall clock, so a run that straddled a minute
+    boundary (06:44 vs 06:45) made the requests differ by that one line.
+    """
+
+    @staticmethod
+    def now(tz: tzinfo | None = None) -> datetime:
+        return _PINNED_NOW if tz is None else _PINNED_NOW.astimezone(tz)
+
+
+async def test_concurrent_setup_sends_byte_identical_requests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(agent_module, "datetime", _PinnedClock)
     concurrent_dir = tmp_path / "concurrent"
     serial_dir = tmp_path / "serial"
     concurrent_dir.mkdir()
