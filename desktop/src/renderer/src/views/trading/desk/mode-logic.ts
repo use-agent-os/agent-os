@@ -1,11 +1,11 @@
 import { canonicalSessionKey, webchatSessionKey } from '@/views/chat/logic'
 import { sessionPath } from '~/components/sidebar/SessionRow'
-import { TRADING_AGENT_ID } from './agent'
+import { isTradingAgentKey, TRADING_AGENT_ID } from './agent'
 
 /**
  * Trading is not a page: it is what the chat becomes when the open session
- * is the desk's session. Pure rules for that derivation, the pill's
- * navigation and the one entrance animation, so the shell stays thin.
+ * is one of the desk's. Pure rules for that derivation, the pill's navigation
+ * and the one entrance animation, so the shell stays thin.
  */
 
 export type DeskMode = 'chat' | 'trading'
@@ -18,15 +18,24 @@ export function mintTradingSessionKey(): string {
   return webchatSessionKey(TRADING_AGENT_ID, 'trading-' + Math.random().toString(36).slice(2, 8))
 }
 
-/** The mode the route is in: the desk's own session, or any other chat. */
-export function deriveMode(paramKey: string | null | undefined, tradingKey: string): DeskMode {
-  if (!paramKey || !tradingKey) return 'chat'
-  return canonicalSessionKey(paramKey) === canonicalSessionKey(tradingKey) ? 'trading' : 'chat'
+/**
+ * The mode the route is in, read off the key alone so it holds for every desk
+ * chat in the sidebar, not just the newest. A conversation with the trading
+ * agent is a desk chat: minted by the desk (`agent:trading:webchat:…`) or by
+ * the desk project's "+" through `sessions.create` (`agent:trading:<id>`). Its
+ * scheduled runs, helpers and channels (`agent:trading:cron:…`) stay plain chats.
+ */
+export function deriveMode(paramKey: string | null | undefined): DeskMode {
+  if (!paramKey) return 'chat'
+  const key = canonicalSessionKey(paramKey)
+  if (!isTradingAgentKey(key)) return 'chat'
+  const rest = key.slice(`agent:${TRADING_AGENT_ID}:`.length)
+  return rest.startsWith('webchat:') || !rest.includes(':') ? 'trading' : 'chat'
 }
 
 /**
- * Where the pill goes. Into Trading: the desk session, remembering the chat
- * we left. Back to Chat: the remembered chat, or the keyless home.
+ * Where the pill goes. Into Trading: the newest desk chat, remembering the
+ * chat we left. Back to Chat: the remembered chat, or the keyless home.
  */
 export function toggleTarget(input: {
   mode: DeskMode

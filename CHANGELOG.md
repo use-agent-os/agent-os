@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Desktop: every chat with the trading agent, whether started at the Trading
+  Desk or with the "+" on its project folder, now reopens at the desk when
+  picked from the sidebar. Only the newest one did; the others opened in Chat
+  mode, without the wallets, orders and instruments beside them.
+
 ## [2026.11.4] - 2026-11-04
 
 ### Added

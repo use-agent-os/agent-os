@@ -1,7 +1,6 @@
 import { useCallback, useState } from 'react'
 import { useLocation, useParams } from 'react-router'
 import { canonicalSessionKey } from '@/views/chat/logic'
-import { readTradingSessionKey } from '~/stores/trading-ui'
 import { useGateway } from '~/stores/gateway'
 import { ChatView } from '~/views/chat/ChatView'
 import { t } from '~/i18n'
@@ -13,7 +12,7 @@ import { useEntrance } from './useEntrance'
 
 /**
  * `/sessions/:key?` in both of its lives. The mode is not a flag: it is
- * derived from whether the open session is the desk's own. Chat mode is the
+ * derived from whether the open session is one of the desk's. Chat mode is the
  * ordinary conversation with the pill in its strip; Trading mode is the same
  * ChatView — same tree position, same composer node — handed the desk's
  * instruments, with the BOOK beside it. Switching is a navigation, and
@@ -23,10 +22,7 @@ export function SessionRoute() {
   const { key: rawParam } = useParams()
   const location = useLocation()
   const paramKey = rawParam ? canonicalSessionKey(decodeURIComponent(rawParam)) : ''
-  // Read on every render: a key minted elsewhere (⌘⇧T from another page,
-  // the redirect, a fresh desk chat) must be seen by the very next route.
-  const tradingKey = readTradingSessionKey()
-  const mode: DeskMode = deriveMode(paramKey, tradingKey)
+  const mode: DeskMode = deriveMode(paramKey)
   const requested = Boolean((location.state as { enterDesk?: boolean } | null)?.enterDesk)
   const { toggle } = useDeskToggle()
   const onSwitchMode = useCallback(
