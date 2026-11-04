@@ -37,6 +37,7 @@ export const DESKTOP_REQUIRED_METHODS: readonly string[] = [
   'onboarding.channel.enable',
   'onboarding.channel.remove',
   'providers.probe',
+  'sessions.preview',
   'sessions.subscribe',
   'trading.allowances.list',
   'trading.allowances.revoke',

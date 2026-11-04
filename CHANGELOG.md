@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Desktop: a DCA order, trigger, bracket or mission no longer offers "other
+  chat" once the chat that created it has been deleted. The automation keeps
+  running and stays listed.
 - Desktop Trading page: a new desk chat no longer stays out of the "Trading
   desk" project, and so without its wallet rule and limits, when the filing
   attempt made as the chat starts fails. The first send in each chat now
