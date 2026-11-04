@@ -337,7 +337,7 @@ def test_failure_dest_channel_without_recipient() -> None:
         webhook_url=None,
         webhook_token=None,
     )
-    assert fd == {"mode": "channel", "channelName": "slack"}
+    assert fd == {"mode": "channel", "channelName": "Slack"}
 
 
 def test_failure_dest_webhook_requires_url() -> None:

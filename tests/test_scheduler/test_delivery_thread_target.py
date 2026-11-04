@@ -411,4 +411,20 @@ async def test_cron_delivers_through_an_entry_stored_in_lowercase() -> None:
     assert status == "delivered", status
     (message,) = adapter.messages
     assert message.content == "cron output"
-    assert message.metadata["channel"] == CHAT
+    assert message.reply_to == CHAT
+
+
+async def test_a_folded_name_still_addresses_the_message_for_the_entrys_channel_type() -> None:
+    """Slack reads its channel from metadata, so the entry's real type has to survive."""
+    adapter = _FakeAdapter()
+    chain = DeliveryChain(
+        channel_manager_ref=lambda: _named_manager({"OpsSlack": adapter}, channel_type="slack")
+    )
+
+    status = await chain._post_to_channel(  # noqa: SLF001
+        job_id="job-1", text="cron output", channel_name="opsslack", channel_id="C1"
+    )
+
+    assert status == "delivered", status
+    (message,) = adapter.messages
+    assert message.metadata["channel"] == "C1"
