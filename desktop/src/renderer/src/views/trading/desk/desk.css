@@ -725,9 +725,11 @@
   outline: 1px solid var(--ring);
   outline-offset: 1px;
 }
-/* A row another trading chat filed: the chip names that and opens the chat. */
-.trd-mctl__elsewhere {
+/* A row another trading chat filed: the chip names that and opens the chat.
+   Sized by its text: the row's 24px icon-button rule must not apply. */
+.trd-mctl__row .trd-mctl__elsewhere {
   display: inline-flex;
+  width: auto;
   flex-shrink: 0;
   align-items: center;
   gap: 3px;
