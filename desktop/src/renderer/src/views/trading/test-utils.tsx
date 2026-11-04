@@ -94,6 +94,57 @@ export function quote(extra: Partial<Quote> = {}): Quote {
   }
 }
 
+/**
+ * A bridge order as the engine files it: 0.01 ETH leaving Base for
+ * Robinhood Chain through Relay, parked for the user. `chainId`/`tokenIn`
+ * are the origin, `tokenOut` the destination token.
+ */
+export function bridgeOrder(extra: Partial<Order> = {}): Order {
+  return order({
+    kind: 'bridge',
+    chainId: 8453,
+    tokenIn: ETH,
+    tokenOut: { ...ETH, chainId: 4663 },
+    amountIn: '0.01',
+    amountInRaw: '10000000000000000',
+    expectedOut: '0.0099',
+    minOut: '0.0098',
+    receivedOut: null,
+    valueUsd: 25,
+    priceImpactPct: null,
+    gasUsd: 0.02,
+    recipient: '0xa5f565650890fba1824ee0f21ebbbf660a179934',
+    recipientLabel: 'Relay solver',
+    provider: 'relay',
+    note: null,
+    bridge: {
+      originChainId: 8453,
+      destinationChainId: 4663,
+      destinationChain: {
+        chainId: 4663,
+        key: 'robinhood',
+        name: 'Robinhood Chain',
+        nativeSymbol: 'ETH',
+        explorerUrl: 'https://explorer.robinhood.com',
+      },
+      asset: 'ETH',
+      requestId: null,
+      fillStatus: null,
+      feesUsd: 0.12,
+      fees: { gasUsd: 0.02, relayerUsd: 0.1, appUsd: 0 },
+      rate: '0.99',
+      timeEstimateSeconds: 30,
+      approvalTxHash: null,
+      depositTxHash: null,
+      depositExplorerUrl: null,
+      destinationTxHash: null,
+      destinationExplorerUrl: null,
+      checkedAt: null,
+    },
+    ...extra,
+  })
+}
+
 export function order(extra: Partial<Order> = {}): Order {
   const now = Date.now()
   return {

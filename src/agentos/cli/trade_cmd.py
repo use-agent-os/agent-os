@@ -197,12 +197,17 @@ def _order_legs(order: dict[str, Any]) -> str:
         return f"revoke {token_symbol(order.get('tokenIn'))} for {who}"
     if kind in LP_KINDS:
         return _lp_legs(order)
+    if kind == "bridge":
+        bridge = _dict(order.get("bridge"))
+        dest = chain_label(bridge.get("destinationChainId"))
+        out = order.get("receivedOut") or order.get("expectedOut")
+        return f"{amount} → {dest} ({amount_text(out)} {token_symbol(order.get('tokenOut'))})"
     return f"{amount} → {token_symbol(order.get('tokenOut'))}"
 
 
 #: Order kinds of the Uniswap V4 LP writes (``trade lp collect|remove|add``).
 LP_KINDS = ("lp_collect", "lp_remove", "lp_add")
-ORDER_KINDS = ("swap", "send", "revoke", *LP_KINDS)
+ORDER_KINDS = ("swap", "send", "revoke", "bridge", *LP_KINDS)
 
 
 def _lp_pair(order: dict[str, Any]) -> str:
@@ -268,31 +273,41 @@ def _print_order(order: dict[str, Any]) -> None:
     recipient = order.get("recipient")
     if recipient and order.get("recipientLabel"):
         recipient = f"{recipient} ({order['recipientLabel']})"
+    bridge = _dict(order.get("bridge")) if kind == "bridge" else {}
+    out_amount = (
+        order.get("receivedOut") if order.get("status") == "confirmed" else order.get("expectedOut")
+    )
     for field, value in (
         ("kind", kind if kind != "swap" else None),
         ("batch", order.get("batchId")),
         ("status", order.get("status")),
         ("reason", order.get("reason")),
         ("chain", chain_label(order.get("chainId"))),
+        ("to chain", chain_label(bridge.get("destinationChainId")) if bridge else None),
         ("wallet", order.get("wallet")),
-        ("to" if kind == "send" else "spender", recipient),
+        ("to" if kind == "send" else "spender", recipient if kind != "bridge" else None),
         (
             "allowance" if kind == "revoke" else "in",
             f"{amount_text(order.get('amountIn'))} {token_symbol(order.get('tokenIn'))}",
         ),
         (
             "out",
-            f"{amount_text(order.get('expectedOut'))} {token_symbol(order.get('tokenOut'))}"
-            if kind == "swap"
+            f"{amount_text(out_amount)} {token_symbol(order.get('tokenOut'))}"
+            if kind in ("swap", "bridge")
             else None,
         ),
         ("min out", order.get("minOut")),
         ("value", money(order.get("valueUsd"))),
         ("price impact", percent(order.get("priceImpactPct"))),
         ("gas", money(order.get("gasUsd"))),
+        ("fees", money(bridge.get("feesUsd")) if bridge else None),
         ("initiator", order.get("initiator")),
+        ("request", bridge.get("requestId")),
+        ("fill", bridge.get("fillStatus")),
         ("tx", order.get("txHash")),
         ("explorer", order.get("explorerUrl")),
+        ("destination tx", bridge.get("destinationTxHash")),
+        ("destination explorer", bridge.get("destinationExplorerUrl")),
         ("expires", order.get("expiresAt")),
         ("note", order.get("note")),
     ):
@@ -1617,6 +1632,262 @@ lp_app = typer.Typer(
     ),
 )
 app.add_typer(lp_app, name="lp")
+
+
+# ── bridge (Base ⇄ Robinhood Chain through Relay; docs/bridge.md) ─────────────
+
+bridge_app = typer.Typer(
+    cls=_JsonUsageGroup,
+    help=(
+        "Bridge ETH or the USD stable (USDC ⇄ USDG) between Base and Robinhood Chain "
+        "through Relay. From an agent a bridge always waits for your approval; the order "
+        "is confirmed only once the funds have landed on the destination chain."
+    ),
+)
+app.add_typer(bridge_app, name="bridge")
+
+#: Engine refusals of a bridge that mean "fix the input", answered as exit 2.
+_BRIDGE_USAGE_CODES = frozenset(
+    {
+        "trading.invalid",
+        "trading.bridge.unsupported_route",
+        "trading.unpriced",
+        "trading.unknown_token",
+        "trading.insufficient_balance",
+        "trading.unsupported_chain",
+    }
+)
+#: Registry symbols the engine resolves itself: never searched as a symbol
+#: (bare ``USDC`` on Robinhood Chain resolves to lookalikes).
+_BRIDGE_SYMBOLS = frozenset({"ETH", "USDC", "USDG"})
+
+
+def _bridge_params(
+    chain: str,
+    to_chain: str,
+    token: str,
+    amount: str | None,
+    usd: float | None,
+    pct: float | None,
+    wallet: str | None,
+    *,
+    json_output: bool,
+) -> dict[str, Any]:
+    given = [x for x in (amount, usd, pct) if x is not None]
+    if len(given) != 1:
+        _bad_argument("Use exactly one of --amount, --usd or --pct", json_output=json_output)
+    if usd is not None and usd <= 0:
+        _bad_argument("--usd must be above 0", json_output=json_output)
+    if pct is not None and not 0 < pct <= 100:
+        _bad_argument("--pct must be within (0, 100]", json_output=json_output)
+    params: dict[str, Any] = {
+        "chainId": chain_id_from_arg(chain),
+        "toChainId": chain_id_from_arg(to_chain),
+        "token": token.strip(),
+    }
+    if amount is not None:
+        params["amount"] = amount
+    if usd is not None:
+        params["amountUsd"] = usd
+    if pct is not None:
+        params["amountPct"] = pct
+    if wallet:
+        params["wallet"] = wallet
+    return params
+
+
+async def _bridge_token(client: Any, params: dict[str, Any]) -> str:
+    text = str(params["token"])
+    if text.upper() in _BRIDGE_SYMBOLS:
+        return text.upper()
+    return await resolve_token(client, int(params["chainId"]), text)
+
+
+def _bridge_call(
+    method: str,
+    params: dict[str, Any],
+    *,
+    wait: bool,
+    wait_seconds: int,
+    json_output: bool,
+) -> dict[str, Any]:
+    async def _run(client):
+        from agentos.cli.gateway_client import GatewayRPCError
+
+        params["token"] = await _bridge_token(client, params)
+        try:
+            result = await client.call(method, params)
+        except GatewayRPCError as exc:
+            if exc.code not in _BRIDGE_USAGE_CODES:
+                raise
+            emit_error(exc.message, json_output=json_output, code=exc.code, details=exc.data)
+            raise typer.Exit(2) from exc
+        order = _dict(result).get("order")
+        if wait and isinstance(order, dict) and order.get("status") in _PENDING_STATUSES:
+            waited = await client.call(
+                "trading.orders.wait",
+                {"orderId": order.get("orderId"), "timeoutSeconds": wait_seconds},
+            )
+            if isinstance(waited, dict) and isinstance(waited.get("order"), dict):
+                result = waited
+        return result
+
+    try:
+        return _dict(run_gateway_sync(_run, json_output=json_output))
+    except TokenResolutionError as exc:
+        _exit_token_error(exc, json_output=json_output)
+        raise typer.Exit(2) from exc
+
+
+def _print_bridge_quote(quote: dict[str, Any]) -> None:
+    table = Table(title="Bridge quote", show_header=False)
+    table.add_column("Field", style=ACCENT)
+    table.add_column("Value")
+    route = _dict(quote.get("route"))
+    guard = _dict(quote.get("guard"))
+    for field, value in (
+        (
+            "route",
+            f"{chain_label(quote.get('originChainId'))} → "
+            f"{chain_label(quote.get('destinationChainId'))} ({route.get('asset')})",
+        ),
+        ("wallet", quote.get("wallet")),
+        ("in", f"{amount_text(quote.get('amountIn'))} {token_symbol(quote.get('tokenIn'))}"),
+        ("out", f"≈ {amount_text(quote.get('expectedOut'))} {token_symbol(quote.get('tokenOut'))}"),
+        ("min out", quote.get("minOut")),
+        ("rate", quote.get("rate")),
+        ("fees", money(quote.get("feesUsd"))),
+        ("value", money(quote.get("valueUsd"))),
+        (
+            "time",
+            f"~{quote.get('timeEstimateSeconds')} s" if quote.get("timeEstimateSeconds") else None,
+        ),
+        ("balance", f"{amount_text(quote.get('balance'))} {token_symbol(quote.get('tokenIn'))}"),
+        ("guard", f"{guard.get('decision')} — {guard.get('reason')}" if guard else None),
+        ("request", quote.get("requestId")),
+    ):
+        if value in (None, "", "—"):
+            continue
+        table.add_row(field, markup_escape(str(value)))
+    console.print(table)
+
+
+@bridge_app.command("quote")
+def trade_bridge_quote(
+    chain: str = typer.Option(..., "--chain", help="Origin chain: base or robinhood"),
+    to_chain: str = typer.Option(..., "--to-chain", help="Destination chain: base or robinhood"),
+    token: str = typer.Option(..., "--token", help="ETH, USDC, USDG, or an address on the origin"),
+    amount: str | None = typer.Option(None, "--amount", help="Amount to bridge, human units"),
+    usd: float | None = typer.Option(None, "--usd", help="US dollars' worth of --token"),
+    pct: float | None = typer.Option(None, "--pct", help="Share of the balance, 0 < pct <= 100"),
+    wallet: str | None = typer.Option(None, "--wallet", help="Wallet address (default primary)"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Price a bridge: what arrives on the other chain, the fees, and whether it would wait."""
+
+    params = _bridge_params(
+        chain, to_chain, token, amount, usd, pct, wallet, json_output=json_output
+    )
+    params["initiator"] = initiator_for(False)
+    result = _bridge_call(
+        "trading.bridge.quote", params, wait=False, wait_seconds=0, json_output=json_output
+    )
+    if json_output:
+        print_json(result)
+        return
+    _print_bridge_quote(_dict(result.get("quote")))
+
+
+@bridge_app.command("create")
+def trade_bridge_create(
+    chain: str = typer.Option(..., "--chain", help="Origin chain: base or robinhood"),
+    to_chain: str = typer.Option(..., "--to-chain", help="Destination chain: base or robinhood"),
+    token: str = typer.Option(..., "--token", help="ETH, USDC, USDG, or an address on the origin"),
+    amount: str | None = typer.Option(None, "--amount", help="Amount to bridge, human units"),
+    usd: float | None = typer.Option(None, "--usd", help="US dollars' worth of --token"),
+    pct: float | None = typer.Option(None, "--pct", help="Share of the balance, 0 < pct <= 100"),
+    wallet: str | None = typer.Option(None, "--wallet", help="Wallet address (default primary)"),
+    note: str | None = typer.Option(None, "--note", help="Why (kept in history)"),
+    client_id: str | None = typer.Option(
+        None,
+        "--client-id",
+        help=(
+            "Idempotency key; re-running with the same id returns the same order "
+            "instead of bridging twice"
+        ),
+    ),
+    wait: bool = typer.Option(
+        False, "--wait", help="Block until the funds have landed on the destination chain"
+    ),
+    wait_seconds: int = typer.Option(
+        300, "--wait-seconds", help="How long --wait blocks", min=1, max=900
+    ),
+    as_agent: bool = typer.Option(
+        False, "--as-agent", help="Apply the agent rules (every bridge waits for approval)"
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Bridge a token to the other chain. From an agent the order always waits for approval."""
+
+    params = _bridge_params(
+        chain, to_chain, token, amount, usd, pct, wallet, json_output=json_output
+    )
+    params["initiator"] = initiator_for(as_agent)
+    session_key = os.environ.get("AGENTOS_SESSION_KEY", "").strip()
+    if session_key:
+        params["sessionKey"] = session_key
+    if note:
+        params["note"] = note
+    if client_id:
+        params["clientOrderId"] = client_id.strip()
+    result = _bridge_call(
+        "trading.bridge.create",
+        params,
+        wait=wait,
+        wait_seconds=wait_seconds,
+        json_output=json_output,
+    )
+    if json_output:
+        print_json(result)
+        return
+    order = _dict(result.get("order"))
+    _print_order(order)
+    if order.get("status") == "awaiting_approval":
+        console.print(
+            f"Waiting for approval in the app (or: agentos trade approve {order.get('orderId')})."
+        )
+    elif order.get("status") == "submitted":
+        console.print(
+            "The deposit is on chain; the funds land on the destination once Relay fills it "
+            f"(agentos trade bridge status {order.get('orderId')})."
+        )
+
+
+@bridge_app.command("status")
+def trade_bridge_status(
+    reference: str = typer.Argument(..., help="Order id, or Relay request id (0x…)"),
+    json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+) -> None:
+    """Where a bridge stands: the deposit, the fill on the other chain, the final status."""
+
+    key = "requestId" if reference.strip().lower().startswith("0x") else "orderId"
+
+    async def _run(client):
+        from agentos.cli.gateway_client import GatewayRPCError
+
+        try:
+            return await client.call("trading.bridge.status", {key: reference.strip()})
+        except GatewayRPCError as exc:
+            if exc.code not in (*_BRIDGE_USAGE_CODES, "trading.bridge.not_found"):
+                raise
+            emit_error(exc.message, json_output=json_output, code=exc.code, details=exc.data)
+            raise typer.Exit(2) from exc
+
+    result = _dict(run_gateway_sync(_run, json_output=json_output))
+    if json_output:
+        print_json(result)
+        return
+    _print_order(_dict(result.get("order")))
 
 
 def _lp_chain(chains: list[str] | None, command: str, *, json_output: bool) -> int | None:

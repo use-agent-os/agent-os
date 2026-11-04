@@ -7,6 +7,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Trading: the wallet vault can **bridge** between Base and Robinhood Chain
+  through Relay — ETH↔ETH and USDC↔USDG, both directions — as a new order
+  kind `bridge` (`agentos trade bridge quote|create|status`,
+  `trading.bridge.quote|create|status|routes`, `trade orders --kind bridge`).
+  A bridge is judged like a send: from an agent it always parks for the
+  user's approval and counts toward the daily cap; the engine re-quotes Relay
+  right before signing (a quote that moved below the approved floor is sent
+  back for approval), signs only a deposit to the pinned Relay solver with
+  Relay's calldata (an exact `approve` to that solver first for USDC/USDG),
+  books the deposit as a withdrawal on the origin chain, and keeps the order
+  `submitted` until Relay reports the fill, which it books as a deposit on the
+  destination chain before the order is `confirmed`; a failure or refund fails
+  the order, and a restart resumes the fill tracking. The `wallet-trading`
+  skill, the Trading desk's agent and the desktop's order cards gained the
+  bridge; the skill was also condensed so the whole of it fits the
+  `skill_view` budget. Contract: [docs/bridge.md](docs/bridge.md).
 - Desktop Trading page: an **Auto** tab in the BOOK panel lists every
   automation in one place — scheduled missions, DCA mandates, price
   triggers and brackets — grouped by what you have to do about them

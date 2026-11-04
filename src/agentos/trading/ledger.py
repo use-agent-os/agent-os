@@ -59,9 +59,12 @@ ENTRY_KINDS = (
 # provider; a send moves one token to an address the user named; a revoke
 # sets an ERC-20 allowance back to zero. Sends in one multisend share a
 # batch_id and are decided together. The lp_* kinds are Uniswap V4 position
-# writes (docs/lp-write.md): their plan lives in quote_json.
+# writes (docs/lp-write.md): their plan lives in quote_json. A bridge moves
+# one token to the other chain through Relay: the row is the origin side
+# (chain_id, token_in/out, recipient = the Relay solver) and the destination
+# side, quote and fill live in quote_json (docs/bridge.md).
 LP_ORDER_KINDS = ("lp_collect", "lp_remove", "lp_add")
-ORDER_KINDS = ("swap", "send", "revoke", *LP_ORDER_KINDS)
+ORDER_KINDS = ("swap", "send", "revoke", "bridge", *LP_ORDER_KINDS)
 # LP orders that bring tokens in: they spend nothing, so they never count
 # toward an agent's daily cap while they are in flight.
 _NON_SPENDING_KINDS = ("lp_collect", "lp_remove")

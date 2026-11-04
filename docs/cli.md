@@ -1119,13 +1119,16 @@ agentos trade swap  --chain robinhood --in ETH --out <addr> --amount 0.01 --wall
 agentos trade swap  --chain base --in USDC --out ETH --amount 20 --all-wallets --note "DCA" [--as-agent]   # the daily cap is per wallet: this spends up to N caps
 agentos trade swap  --chain base --in USDC --out ETH --amount 20 --client-id dca-eth-$(date +%Y%m%dT%H%M)   # idempotency key: one id per intended order, the same id on every retry; minute resolution so sub-daily jobs never collide
 agentos trade swap  --chain base --in ETH --out USDC --amount 0.01 --expected-out-raw <quote.expectedOutRaw> --min-out-raw <quote.minOutRaw>   # pin the fill to the quote shown; worse than 2× slippage → trading.price_moved
-agentos trade orders [--status awaiting_approval] [--wallet <addr>] [--kind swap|send|revoke|lp_collect|lp_remove|lp_add] [--limit N]
+agentos trade orders [--status awaiting_approval] [--wallet <addr>] [--kind swap|send|revoke|bridge|lp_collect|lp_remove|lp_add] [--limit N]
 agentos trade order <id> --wait --wait-seconds 600 / approve <id> / reject <id> [--reason <text>]   # --wait-seconds without --wait returns at once
 agentos trade send --chain base --token USDC --to <addr> --amount 25 [--wallet <addr>] [--note <text>] [--client-id <id>] [--wait] [--wait-seconds 1..900] [--as-agent]
 agentos trade send --chain base --token ETH --to <a> --to <b> --usd 5        # multisend: one batch, $5 of ETH to each
 agentos trade send --chain base --token USDC --to <a>=10 --to <b>=20 --file recipients.txt   # ADDR=AMOUNT per --to; file lines 'ADDR' or 'ADDR,AMOUNT'
 agentos trade allowances [--chain base|robinhood] [--wallet <addr>] [--full] [--wait/--no-wait] [--wait-seconds 1..3600]   # live ERC-20 allowances, spender labels, exposure; --wait polls until the scan has caught up
 agentos trade revoke --chain base --token <addr> --spender <addr> [--wallet <addr>] [--note <text>] [--wait] [--wait-seconds 1..900]   # approve(spender, 0)
+agentos trade bridge quote  --chain base --to-chain robinhood --token ETH (--amount 0.01 | --usd 20 | --pct 50) [--wallet <addr>] [--json]   # Relay: what arrives on the other chain, fees, whether it would wait
+agentos trade bridge create --chain base --to-chain robinhood --token USDC --amount 25 [--wallet <addr>] [--note <text>] [--client-id <id>] [--wait] [--wait-seconds 1..900] [--as-agent] [--json]   # ETH↔ETH or USDC↔USDG, both directions; from an agent it always waits for approval; confirmed = funds landed on the destination
+agentos trade bridge status <orderId|requestId> [--json]   # the deposit, Relay's fill on the other chain, the final status
 agentos trade decode --chain base <txhash> / --data <0x…> [--to <addr>]   # what a transaction called and what moved
 agentos trade network [--fresh]             # head block, block age, gas, RPC latency and health per chain
 agentos trade lp pool <token|TOKEN/QUOTE|poolId> [--chain base|robinhood] [--quote <token>] [--fee <tier>] [--json] [--no-card]   # Uniswap V4: a token's deepest pool (or the one on --fee) — reserves, TVL, mcap, launcher, LP lock, biggest ranges
@@ -1278,7 +1281,14 @@ approved, rejected and reported as one. Guardrails differ from swaps on
 purpose: an **agent-initiated** send or revoke always waits for the user's
 approval — there is no threshold under which the agent sends alone — while
 the daily cap still counts the batch's total; a send typed by a person runs
-at once. Each leg is booked as a `withdraw` entry under its order. `trade
+at once. Each leg is booked as a `withdraw` entry under its order.
+`trade bridge` moves ETH or the USD stable (USDC on Base, USDG on Robinhood Chain)
+to the other chain through Relay: it is judged like a send (an agent's
+always waits for approval and counts toward the cap), the engine re-quotes
+right before signing and sends only a deposit to the pinned Relay solver,
+the deposit is a `withdraw` on the origin chain and the fill a `deposit` on
+the destination, and the order stays `submitted` until that fill lands
+([`bridge.md`](bridge.md)). `trade
 allowances` scans the wallet's own `Approval` logs incrementally, reads
 every remembered (token, spender) allowance live, and shows what is at
 stake (`exposureUsd` = the smaller of the allowance and the balance, in

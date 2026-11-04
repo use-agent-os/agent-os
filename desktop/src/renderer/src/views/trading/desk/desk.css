@@ -1165,6 +1165,20 @@
 .trd-card__legs span {
   color: var(--dim);
 }
+/* A bridge's second line on the headline: what should arrive, what Relay keeps. */
+.trd-card__legs .trd-card__legs-sub {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.trd-card__actions--bridge {
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+.trd-card__txlabel {
+  font-size: 11px;
+  color: var(--dim);
+}
 .trd-card__facts {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));

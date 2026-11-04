@@ -29,6 +29,7 @@ import { useUnwrap } from '~/stores/trading'
 import { HIGH_RISK_USD, lpOrderAmounts, lpOrderLine } from './desk/desk-logic'
 import {
   approvalSecondsLeft,
+  chainName,
   errorText,
   formatAmount,
   formatClock,
@@ -234,6 +235,58 @@ function Legs({ order }: { order: Order }) {
         <span className="trd-order__leg trd-mono" title={order.recipient ?? ''}>
           {order.recipientLabel ?? shortAddress(order.recipient ?? '')}
         </span>
+      </>
+    )
+  }
+  if (kind === 'bridge') {
+    // The same asset lands on another chain: "0.01 ETH → Robinhood Chain
+    // (ETH, est. 0.0099)". Until the destination fills, the amount is
+    // Relay's estimate; once confirmed it is what arrived.
+    const bridge = order.bridge ?? null
+    const confirmed = order.status === 'confirmed'
+    const out = confirmed ? (order.receivedOut ?? order.expectedOut) : order.expectedOut
+    const to = bridge?.destinationChain?.name ?? chainName(bridge?.destinationChainId ?? NaN)
+    const fill = order.status === 'submitted' && bridge?.fillStatus ? bridge.fillStatus : null
+    return (
+      <>
+        <span className="trd-order__leg">
+          {formatAmount(order.amountIn)}{' '}
+          <Sym symbol={order.tokenIn.symbol} className="trd-order__sym" />
+        </span>
+        <ArrowRight className="trd-order__arrow size-3" strokeWidth={2} aria-hidden />
+        <span
+          className="trd-order__leg"
+          data-testid="order-bridge-to"
+          data-estimate={!confirmed && out ? 'true' : undefined}
+        >
+          {to}
+          {out ? (
+            <small className="trd-order__est">
+              {' '}
+              ({!confirmed ? `${t('trading.orders.est')} ` : ''}
+              {formatAmount(out)} <Sym symbol={order.tokenOut.symbol} />)
+            </small>
+          ) : null}
+        </span>
+        {fill ? (
+          <span
+            className="trd-status trd-order__fill"
+            data-tone={
+              fill === 'success'
+                ? 'ok'
+                : fill === 'pending'
+                  ? 'live'
+                  : fill === 'waiting'
+                    ? 'dim'
+                    : 'danger'
+            }
+            data-fill={fill}
+            data-testid="order-bridge-fill"
+            title={bridge?.requestId ?? ''}
+          >
+            {t(`trading.orders.bridge.fill.${fill}`)}
+          </span>
+        ) : null}
       </>
     )
   }
