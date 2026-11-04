@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Desktop Trading page: a new desk chat no longer stays out of the "Trading
+  desk" project, and so without its wallet rule and limits, when the filing
+  attempt made as the chat starts fails. The first send in each chat now
+  retries it; before, only the first send since launch did.
+
 ## [2026.11.4] - 2026-11-04
 
 ### Added
