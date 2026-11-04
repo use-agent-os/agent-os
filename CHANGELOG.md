@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.4] - 2026-11-04
+
 ### Added
 - Trading: the wallet vault can **bridge** between Base and Robinhood Chain
   through Relay — ETH↔ETH and USDC↔USDG, both directions — as a new order
