@@ -178,6 +178,24 @@ async def _list_scheduler_jobs(scheduler: Any) -> list[Any]:
     return result if isinstance(result, list) else []
 
 
+def _start_trading_engine(config: Any) -> None:
+    """Build the trading service and start its loop, so automations run from boot.
+
+    Nothing here touches the network: the service opens its ledger and vault
+    and schedules the loop; the loop's first pass does the rest. A failure
+    to build it (a bad trading config) is logged and leaves the lazy path —
+    the first trading RPC builds it then, as before.
+    """
+    try:
+        from agentos.gateway.rpc_trading import _broadcast
+        from agentos.trading import get_trading_service
+
+        get_trading_service(config, broadcast=_broadcast).ensure_started()
+        log.info("gateway.trading_engine_started")
+    except Exception as exc:  # pragma: no cover - defensive
+        log.warning("gateway.trading_engine_not_started", error=str(exc))
+
+
 async def _pause_orphaned_dream_crons(
     *,
     scheduler: Any,
@@ -3290,6 +3308,14 @@ async def start_gateway_server(
             await start_scheduler()
             log.info("gateway.cron_scheduler_started")
 
+    # The trading engine's clock (DCA buys, price triggers, brackets, wallet
+    # sync) used to start on the first trading RPC, so after a restart every
+    # mandate and stop-loss waited until someone opened the Trading page or
+    # ran a trade command. It starts with the gateway, as the cron scheduler
+    # does; safe mode holds it back the same way and its resume hook starts it.
+    if not held_back["scheduler"]:
+        _start_trading_engine(config)
+
     # Build channel adapters (don't start yet -- app doesn't exist)
     webhook_routes: list = []
     if channel_manager is None and config.channels.channels:
@@ -3474,9 +3500,11 @@ async def start_gateway_server(
                 await _log_channel_results(channel_manager, await start_stopped())
             else:
                 await _start_all_channels(channel_manager)
-        if held_back["scheduler"] and svc.cron_scheduler is not None:
+        if held_back["scheduler"]:
             held_back["scheduler"] = False
-            await svc.cron_scheduler.start()
+            if svc.cron_scheduler is not None:
+                await svc.cron_scheduler.start()
+            _start_trading_engine(config)
         if held_back["heartbeat"]:
             held_back["heartbeat"] = False
             await heartbeat_loop.start()

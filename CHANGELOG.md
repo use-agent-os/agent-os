@@ -21,6 +21,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   upgrades, backups and what the image leaves out.
 
 ### Fixed
+- Trading automations now run from the moment the gateway starts. The
+  engine's clock (DCA buys, price triggers, brackets, wallet sync) used to
+  start on the first trading RPC, so after a gateway or app restart every
+  mandate and stop-loss sat idle until someone opened the Trading page or
+  ran a trade command. Safe mode holds it back like the cron scheduler and
+  starts it on resume.
+- A slow wallet sync no longer delays DCA buys and trigger checks. Sync and
+  housekeeping shared one pass, so a wallet days behind on a chain (an
+  eight-minute catch-up was measured) held every due buy and every
+  stop-loss check for as long as it ran. The sync now runs beside the
+  housekeeping clock, one pass at a time.
 - Cron jobs no longer lose their channel delivery when the job is saved. The
   Jobs form and `agentos cron add --channel` / `--failure-channel` lowercased
   the channel name, so a channel named `MyTele` was stored as `mytele` and

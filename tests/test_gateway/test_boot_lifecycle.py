@@ -357,6 +357,12 @@ async def _boot_in_safe_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(boot, "emit_skill_filter_banner", lambda config: None)
     monkeypatch.setattr("agentos.gateway.pidlock.GatewayPidLock.acquire", lambda self: None)
     monkeypatch.setattr("agentos.gateway.pidlock.GatewayPidLock.release", lambda self: None)
+    captured["trading_engine_starts"] = 0
+
+    def fake_start_trading_engine(config: Any) -> None:
+        captured["trading_engine_starts"] += 1
+
+    monkeypatch.setattr(boot, "_start_trading_engine", fake_start_trading_engine)
 
     db = tmp_path / "state" / "sessions.db"
     clock = _Clock()
@@ -386,6 +392,8 @@ async def test_boot_in_safe_mode_holds_back_channels_cron_and_heartbeat(
         assert captured["start_scheduler"] is False
         assert manager.calls == []
         assert scheduler.started == 0
+        # The trading engine (DCA buys, triggers) is held back with the scheduler.
+        assert captured["trading_engine_starts"] == 0
         assert server.app.state.boot_tracker is tracker
         ready = TestClient(server.app, base_url="http://localhost").get("/ready")
         assert ready.status_code == 200
@@ -415,6 +423,8 @@ async def test_boot_in_safe_mode_holds_back_channels_cron_and_heartbeat(
         assert tracker.safe_mode_active is False
         assert manager.calls == ["start_channel:tg", "start_stopped"]
         assert scheduler.started == 1
+        # The resume starts the trading engine it held back, once.
+        assert captured["trading_engine_starts"] == 1
         again = TestClient(server.app, base_url="http://localhost").get("/ready")
         assert again.json()["state"] == "ready"
     finally:
@@ -480,6 +490,8 @@ async def test_boot_outside_safe_mode_starts_everything(
     monkeypatch.setattr(boot, "build_services", fake_build_services)
     monkeypatch.setattr(boot, "_setup_file_logging", lambda config: None)
     monkeypatch.setattr(boot, "emit_skill_filter_banner", lambda config: None)
+    engine_starts: list[Any] = []
+    monkeypatch.setattr(boot, "_start_trading_engine", engine_starts.append)
     monkeypatch.setattr("agentos.gateway.pidlock.GatewayPidLock.acquire", lambda self: None)
     monkeypatch.setattr("agentos.gateway.pidlock.GatewayPidLock.release", lambda self: None)
     config = GatewayConfig(
@@ -501,6 +513,9 @@ async def test_boot_outside_safe_mode_starts_everything(
             "handler:script_run",
             "start",
         ]
+        # The trading engine (DCA buys, price triggers, wallet sync) starts
+        # with the gateway, not on the first trading RPC.
+        assert len(engine_starts) == 1
         assert server.readiness.state(gateway_ready=True) == "ready"
         assert server.readiness.startup_complete() is True
     finally:
