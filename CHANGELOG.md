@@ -13,6 +13,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   upgrades, backups and what the image leaves out.
 
 ### Fixed
+- Cron jobs no longer lose their channel delivery when the job is saved. The
+  Jobs form and `agentos cron add --channel` / `--failure-channel` lowercased
+  the channel name, so a channel named `MyTele` was stored as `mytele` and
+  every later run failed with `delivery target resolution failed:
+  unsupported_target`. Names are now kept as typed, and delivery also accepts a
+  name that differs only by case, so jobs already stored that way work again
+  without being edited. The recipient picker in the Jobs form now lists the
+  chats of a channel whose name has capitals.
 - `compose.yaml` no longer sends the gateway into a restart loop. It bound
   `0.0.0.0` with no auth, which the gateway refuses (exit 78), so
   `docker compose up -d` never served. It now turns token auth on and requires

@@ -715,6 +715,11 @@ class ChannelManager:
         channel type such as ``slack`` when the type maps to one adapter.
         ``account_id`` currently selects a concrete entry until agentos grows a
         first-class multi-account channel config.
+
+        An exact entry name wins, then a channel type, then an entry name that
+        differs only by case. That last step is for jobs already stored with a
+        folded name (older clients lowercased what they saved), so ``mytele``
+        still reaches the entry named ``MyTele``.
         """
 
         target_name = target.strip()
@@ -753,14 +758,18 @@ class ChannelManager:
                 thread_id=thread,
             )
 
+        channel_type = target_type
         if not candidates:
-            return DeliveryTargetResolution(ok=False, reason="unsupported_target")
+            candidates = [name for name in self._channels if name.lower() == target_type]
+            if not candidates:
+                return DeliveryTargetResolution(ok=False, reason="unsupported_target")
+            channel_type = self._channel_types.get(candidates[0], candidates[0]).lower()
         if len(candidates) > 1:
             return DeliveryTargetResolution(ok=False, reason="ambiguous_account")
 
         return self._build_delivery_resolution(
             adapter_name=candidates[0],
-            channel_type=target_type,
+            channel_type=channel_type,
             to=to,
             account_id=account,
             thread_id=thread,

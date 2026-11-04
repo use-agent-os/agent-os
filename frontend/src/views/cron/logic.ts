@@ -91,9 +91,12 @@ export function targetsForChannel(
   targets: DeliveryTargetMap | undefined,
   channel: string,
 ): DeliveryTarget[] {
-  const key = (channel || '').trim().toLowerCase()
+  const key = (channel || '').trim()
   if (!key || !targets) return []
-  return targets[key] ?? []
+  // A job saved by an older client may hold the channel's name lowercased.
+  const folded = key.toLowerCase()
+  const name = key in targets ? key : Object.keys(targets).find((n) => n.toLowerCase() === folded)
+  return (name && targets[name]) || []
 }
 
 /** A raw run-history row from cron.runs (all fields optional; snake or camel). */
@@ -1085,7 +1088,7 @@ export function buildFailureDest(form: CronForm): DeliveryBuild {
   const acct = form.fdAccount.trim()
   if (!ch) return { ok: false, error: t('cron.errFailureChannel') }
   const out: Record<string, unknown> = { mode: 'channel' }
-  if (ch) out.channelName = ch.toLowerCase()
+  if (ch) out.channelName = ch
   if (to) out.to = to
   if (acct) out.accountId = acct
   return { ok: true, delivery: out }
@@ -1126,7 +1129,7 @@ export function buildDelivery(form: CronForm): DeliveryBuild {
     const ch = form.deliveryChannel.trim()
     const to = form.deliveryTo.trim()
     const acct = form.deliveryAccount.trim()
-    if (ch) out.channelName = ch.toLowerCase()
+    if (ch) out.channelName = ch
     if (to) out.to = to
     if (acct) out.accountId = acct
     if (bestEffort) out.bestEffort = true

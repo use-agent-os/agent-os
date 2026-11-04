@@ -331,3 +331,100 @@ def test_resolution_without_a_thread_is_unchanged_everywhere() -> None:
         )
         assert resolved.ok, (channel_type, resolved.reason)
         assert resolved.thread_id == ""
+
+
+# --- channel names and case ------------------------------------------------
+
+
+def _named_manager(
+    names: dict[str, _FakeAdapter], channel_type: str = "telegram"
+) -> ChannelManager:
+    return ChannelManager(
+        _channels=names,  # type: ignore[arg-type]
+        _turn_runner=None,
+        _session_manager=None,
+        _channel_types=dict.fromkeys(names, channel_type),
+    )
+
+
+@pytest.mark.parametrize(
+    "stored", ["MyTele", "mytele", "MYTELE", " mytele ", "telegram", "Telegram"]
+)
+def test_a_channel_entry_resolves_whatever_case_the_job_stored(stored: str) -> None:
+    adapter = _FakeAdapter()
+
+    resolved = _named_manager({"MyTele": adapter}).resolve_delivery_target(target=stored, to=CHAT)
+
+    assert resolved.ok, resolved.reason
+    assert resolved.adapter is adapter
+    assert resolved.channel_type == "telegram"
+
+
+def test_an_exact_name_wins_over_one_differing_only_by_case() -> None:
+    exact, other = _FakeAdapter(), _FakeAdapter()
+    manager = _named_manager({"mytele": exact, "MyTele": other})
+
+    assert manager.resolve_delivery_target(target="mytele", to=CHAT).adapter is exact
+    assert manager.resolve_delivery_target(target="MyTele", to=CHAT).adapter is other
+
+
+def test_two_entries_a_folded_name_could_mean_are_refused_rather_than_guessed() -> None:
+    manager = _named_manager({"MyTele": _FakeAdapter(), "MYTELE": _FakeAdapter()})
+
+    resolved = manager.resolve_delivery_target(target="mytele", to=CHAT)
+
+    assert not resolved.ok
+    assert resolved.reason == "ambiguous_account"
+
+
+def test_a_channel_type_keeps_priority_over_an_entry_named_like_it() -> None:
+    """Folding names must not change what a bare channel type already meant."""
+    slack_entry, telegram_entry = _FakeAdapter(), _FakeAdapter()
+    manager = ChannelManager(
+        _channels={"Telegram": slack_entry, "MyTele": telegram_entry},  # type: ignore[dict-item]
+        _turn_runner=None,
+        _session_manager=None,
+        _channel_types={"Telegram": "slack", "MyTele": "telegram"},
+    )
+
+    assert manager.resolve_delivery_target(target="telegram", to=CHAT).adapter is telegram_entry
+
+
+def test_an_unknown_channel_name_is_still_refused() -> None:
+    resolved = _named_manager({"MyTele": _FakeAdapter()}).resolve_delivery_target(
+        target="otherbot", to=CHAT
+    )
+
+    assert not resolved.ok
+    assert resolved.reason == "unsupported_target"
+
+
+async def test_cron_delivers_through_an_entry_stored_in_lowercase() -> None:
+    """The job a form save left behind: ``mytele`` for the entry named ``MyTele``."""
+    adapter = _FakeAdapter()
+    chain = DeliveryChain(channel_manager_ref=lambda: _named_manager({"MyTele": adapter}))
+
+    status = await chain._post_to_channel(  # noqa: SLF001
+        job_id="job-1", text="cron output", channel_name="mytele", channel_id=CHAT
+    )
+
+    assert status == "delivered", status
+    (message,) = adapter.messages
+    assert message.content == "cron output"
+    assert message.reply_to == CHAT
+
+
+async def test_a_folded_name_still_addresses_the_message_for_the_entrys_channel_type() -> None:
+    """Slack reads its channel from metadata, so the entry's real type has to survive."""
+    adapter = _FakeAdapter()
+    chain = DeliveryChain(
+        channel_manager_ref=lambda: _named_manager({"OpsSlack": adapter}, channel_type="slack")
+    )
+
+    status = await chain._post_to_channel(  # noqa: SLF001
+        job_id="job-1", text="cron output", channel_name="opsslack", channel_id="C1"
+    )
+
+    assert status == "delivered", status
+    (message,) = adapter.messages
+    assert message.metadata["channel"] == "C1"
