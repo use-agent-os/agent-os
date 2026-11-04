@@ -2717,7 +2717,23 @@ def _engine_env(
     lib = unilp()
     overrides = dict(getattr(service.config, "rpc_urls", {}) or {})
     url = rpc_url_for(spec, overrides)
-    client = lib.rpc.RpcClient(dict(lib.chains.CHAINS[spec.key]), url)
+    references = dict(getattr(service.config, "rpc_header_env", {}) or {})
+    header_env = references.get(str(spec.chain_id), references.get(spec.key, {}))
+    rpc_class: Any = lib.rpc.RpcClient
+    if header_env:
+        # Reuse the chain's engine transport, never urllib's redirect-following path.
+        # The public log fallback below gets neither this client nor its credentials.
+        evm = service.evm(spec)
+
+        class AuthenticatedRpcClient(rpc_class):
+            def _post(self, payload: Any, label: str, retries: int = 3) -> Any:
+                self.request_count += 1
+                return _bridge(
+                    loop, evm.post_payload(payload, timeout=self.timeout), self.timeout + 1
+                )
+
+        rpc_class = AuthenticatedRpcClient
+    client = rpc_class(dict(lib.chains.CHAINS[spec.key]), url)
     log_client = (
         lib.rpc.RpcClient(dict(lib.chains.CHAINS[spec.key]), spec.rpc_url, timeout=20)
         if url.rstrip("/") != spec.rpc_url.rstrip("/")

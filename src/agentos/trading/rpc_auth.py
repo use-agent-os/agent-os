@@ -46,7 +46,11 @@ def resolve_header_env(references: Mapping[str, str]) -> dict[str, str]:
     headers: dict[str, str] = {}
     for name, env_name in references.items():
         value = os.environ.get(env_name, "")
-        if not value.strip() or any(ord(char) < 32 or ord(char) > 126 for char in value):
+        if (
+            not value
+            or value != value.strip()
+            or any(ord(char) < 32 or ord(char) > 126 for char in value)
+        ):
             raise ValueError(f"RPC header environment variable {env_name} is missing or invalid")
         headers[name] = value
     return headers

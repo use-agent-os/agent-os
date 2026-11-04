@@ -277,7 +277,11 @@ class EvmClient:
             **auth_headers,
         }
 
-    async def _post(self, payload: Any) -> Any:
+    async def post_payload(self, payload: Any, *, timeout: float | None = None) -> Any:
+        """Send an RPC envelope with scoped auth, redaction and redirect refusal.
+
+        LP uses this transport too, retaining its own ABI, batching and result decoding.
+        """
         headers = self._headers()
         credentials = [headers[name] for name in self._header_env]
         try:
@@ -285,7 +289,7 @@ class EvmClient:
                 self.url,
                 json=payload,
                 headers=headers,
-                timeout=self._timeout,
+                timeout=self._timeout if timeout is None else timeout,
                 follow_redirects=False,
             )
         except httpx.HTTPError as exc:
@@ -329,7 +333,7 @@ class EvmClient:
         req_id = self._next_id
         self._next_id += 1
         payload = {"jsonrpc": "2.0", "id": req_id, "method": method, "params": list(params or [])}
-        return self._unwrap(await self._post(payload))
+        return self._unwrap(await self.post_payload(payload))
 
     async def batch(self, calls: Sequence[tuple[str, Sequence[Any]]]) -> list[Any]:
         """Issue many calls in one round-trip; results keep the input order.
@@ -350,7 +354,7 @@ class EvmClient:
                 {"jsonrpc": "2.0", "id": req_id, "method": method, "params": list(params)}
             )
         try:
-            raw = await self._post(payload)
+            raw = await self.post_payload(payload)
         except EvmTransportError:
             raise
         if not isinstance(raw, list):
@@ -441,7 +445,7 @@ class EvmClient:
             payload.append(
                 {"jsonrpc": "2.0", "id": req_id, "method": method, "params": list(params)}
             )
-        raw = await self._post(payload)
+        raw = await self.post_payload(payload)
         if not isinstance(raw, list):
             results: list[Any] = []
             for method, params in calls:

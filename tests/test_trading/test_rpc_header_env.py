@@ -54,7 +54,9 @@ async def test_headers_are_chain_local_and_not_shared(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("value", [None, "", "  ", "bad\r\nheader", "non-ascii-密钥"])
+@pytest.mark.parametrize(
+    "value", [None, "", "  ", "bad\r\nheader", "non-ascii-密钥", " padded", "padded ", "ab\\c "]
+)
 async def test_missing_or_invalid_value_sends_nothing(
     monkeypatch: pytest.MonkeyPatch, value: str | None
 ) -> None:
