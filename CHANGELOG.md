@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Desktop Trading page: an **Auto** tab in the BOOK panel lists every
+  automation in one place — scheduled missions, DCA mandates, price
+  triggers and brackets — grouped by what you have to do about them
+  (Running · Needs you · Paused · Finished) with the same Pause / Resume /
+  Buy now / Fire now / Stop controls as the rows above the composer, the
+  reason a paused or finished one stopped in plain words, a chip naming the
+  chat that filed it, and, opened, its history: a DCA's buys with price and
+  explorer link, a trigger's fires, a mission's runs.
 - Docs: [Run the gateway in a container](docs/container-gateway.md), a walkthrough
   from the published image to the desktop app connected as an external gateway,
   over an SSH tunnel, Tailscale Serve, an HTTPS reverse proxy or a LAN port, with

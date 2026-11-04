@@ -334,6 +334,9 @@ export function useDeskFrame(input: {
         highlightOrder={null}
         entering={entering}
         onReject={rejectFromBook}
+        missions={missions}
+        sessionKey={sessionKey}
+        onOpenSession={(key) => void navigate(sessionPath(key))}
       />
     ) : null,
     fullDesk,

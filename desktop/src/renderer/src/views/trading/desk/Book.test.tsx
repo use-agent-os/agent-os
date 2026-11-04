@@ -64,9 +64,37 @@ beforeEach(() => {
   })
 })
 
+/** The desk's missions hook, idle: nothing listed, nothing awaiting, no write in flight. */
+function stubMissions(): React.ComponentProps<typeof Book>['missions'] {
+  const actions = { pending: null, busy: false } as unknown
+  return {
+    missions: [],
+    loading: false,
+    running: new Set<string>(),
+    create: vi.fn(async () => null),
+    update: vi.fn(async () => true),
+    setEnabled: vi.fn(),
+    runNow: vi.fn(),
+    remove: vi.fn(),
+    busy: false,
+    mandates: [],
+    awaitingMandates: [],
+    mandate: actions as React.ComponentProps<typeof Book>['missions']['mandate'],
+    triggers: [],
+    awaitingTriggers: [],
+    trigger: actions as React.ComponentProps<typeof Book>['missions']['trigger'],
+    brackets: [],
+    awaitingBrackets: [],
+    bracket: actions as React.ComponentProps<typeof Book>['missions']['bracket'],
+  }
+}
+
 function render(extra: Partial<React.ComponentProps<typeof Book>> = {}) {
   renderDesk(
     <Book
+      missions={stubMissions()}
+      sessionKey="agent:trading:webchat:trading-test"
+      onOpenSession={vi.fn()}
       wallets={[WALLET, SECOND]}
       primary={WALLET.address}
       provider="uniswap"
@@ -304,6 +332,7 @@ describe('Book · Markets and swaps asked for from anywhere', () => {
       'book-tab-markets',
       'book-tab-orders',
       'book-tab-history',
+      'book-tab-automations',
       'book-tab-tools',
     ])
   })

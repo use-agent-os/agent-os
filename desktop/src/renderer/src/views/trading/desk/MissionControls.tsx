@@ -115,7 +115,7 @@ export function useMandateClock(mandates: readonly Mandate[]): number {
 }
 
 /** "Paused by you" for the operator's own bare pause or stop; the engine's words otherwise. */
-function reasonTitle(m: Mandate): string | null {
+export function mandateTitle(m: Mandate): string | null {
   const reason = mandateReason(m)
   if (reason !== 'user') return reason
   return m.status === 'paused' ? t('trading.dca.reason.pausedByYou') : t('trading.dca.reason.byYou')
@@ -459,7 +459,7 @@ export function MissionControls({
  * the chip opens the chat that can tell its story. Nothing for a row of
  * this chat's, or an unfiled one.
  */
-function Elsewhere({
+export function Elsewhere({
   sessionKey,
   onOpen,
 }: {
@@ -540,15 +540,8 @@ function MandateRow({
   elsewhere?: string | null
   onOpenSession?: (sessionKey: string) => void
 }) {
-  const [armed, setArmed] = useState(false)
-  useEffect(() => {
-    if (!armed) return
-    const id = window.setTimeout(() => setArmed(false), STOP_ARM_MS)
-    return () => window.clearTimeout(id)
-  }, [armed])
-  const steerable = m.status === 'active' || m.status === 'paused'
   // Why it stopped or paused ("cap reached", "paused after 3 runs: …"), on hover.
-  const reason = reasonTitle(m)
+  const reason = mandateTitle(m)
   const misses = mandateMissesText(m)
   return (
     <div
@@ -577,84 +570,15 @@ function MandateRow({
       {m.status === 'awaiting_approval' ? (
         <span className="trd-mctl__hint">{t('trading.dca.review')}</span>
       ) : null}
-      {steerable ? (
-        <span className="trd-mctl__ctl">
-          {m.status === 'active' ? (
-            <Button
-              variant="ghost"
-              size="icon"
-              disabled={busy}
-              aria-label={t('trading.dca.pause')}
-              title={t('trading.dca.pause')}
-              onClick={() => onPause?.(m)}
-              data-testid="mandate-pause"
-            >
-              <Pause className="size-3.5" strokeWidth={1.75} aria-hidden />
-            </Button>
-          ) : (
-            <Button
-              variant="ghost"
-              size="icon"
-              disabled={busy}
-              aria-label={t('trading.dca.resume')}
-              title={t('trading.dca.resume')}
-              onClick={() => onResume?.(m)}
-              data-testid="mandate-resume"
-            >
-              <Play className="size-3.5" strokeWidth={1.75} aria-hidden />
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="icon"
-            disabled={busy}
-            aria-label={t('trading.dca.runNow')}
-            title={t('trading.dca.runNow')}
-            onClick={() => onRun?.(m)}
-            data-testid="mandate-run"
-          >
-            <Zap className="size-3.5" strokeWidth={1.75} aria-hidden />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            disabled={busy}
-            aria-label={t('trading.dca.edit')}
-            title={t('trading.dca.edit')}
-            onClick={() => onEdit?.(m)}
-            data-testid="mandate-edit"
-          >
-            <Pencil className="size-3.5" strokeWidth={1.75} aria-hidden />
-          </Button>
-          {armed ? (
-            <button
-              type="button"
-              className="trd-mctl__confirm app-no-drag"
-              disabled={busy}
-              onClick={() => {
-                setArmed(false)
-                onStop?.(m)
-              }}
-              data-testid="mandate-stop"
-              data-armed
-            >
-              {t('trading.dca.stopAgain')}
-            </button>
-          ) : (
-            <Button
-              variant="ghost"
-              size="icon"
-              disabled={busy}
-              aria-label={t('trading.dca.stop')}
-              title={t('trading.dca.stop')}
-              onClick={() => setArmed(true)}
-              data-testid="mandate-stop"
-            >
-              <OctagonX className="size-3.5" strokeWidth={1.75} aria-hidden />
-            </Button>
-          )}
-        </span>
-      ) : null}
+      <MandateControls
+        mandate={m}
+        busy={busy}
+        onPause={onPause}
+        onResume={onResume}
+        onRun={onRun}
+        onEdit={onEdit}
+        onStop={onStop}
+      />
     </div>
   )
 }
@@ -682,7 +606,7 @@ function useArm(settle: string): [boolean, (v: boolean) => void] {
 }
 
 /** "Paused by you" for the operator's own bare pause or stop; the engine's words otherwise. */
-function triggerTitle(tr: Trigger): string | null {
+export function triggerTitle(tr: Trigger): string | null {
   const reason = triggerReason(tr)
   if (reason !== 'user') return reason
   return tr.status === 'paused'
@@ -717,14 +641,8 @@ function TriggerRow({
   elsewhere?: string | null
   onOpenSession?: (sessionKey: string) => void
 }) {
-  const settle = `${tr.status}:${busy}`
-  const [stopArmed, setStopArmed] = useArm(settle)
-  const [fireArmed, setFireArmed] = useArm(settle)
-  const steerable = isSteerableTrigger(tr)
-  const stoppable = steerable || tr.status === 'triggered'
   // The engine's statusReason on hover: "paused: nothing to sell", "alerted at $3,790".
   const reason = triggerTitle(tr)
-  const fireLabel = t(fireNowKey(tr))
   const word = triggerWord(tr)
   return (
     <div
@@ -754,106 +672,20 @@ function TriggerRow({
       {tr.status === 'awaiting_approval' ? (
         <span className="trd-mctl__hint">{t('trading.trigger.review')}</span>
       ) : null}
-      {stoppable ? (
-        <span className="trd-mctl__ctl">
-          {steerable ? (
-            <>
-              {tr.status === 'armed' ? (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  disabled={busy}
-                  aria-label={t('trading.trigger.pause')}
-                  title={t('trading.trigger.pause')}
-                  onClick={() => onPause?.(tr)}
-                  data-testid="trigger-pause"
-                >
-                  <Pause className="size-3.5" strokeWidth={1.75} aria-hidden />
-                </Button>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  disabled={busy}
-                  aria-label={t('trading.trigger.resume')}
-                  title={t('trading.trigger.resume')}
-                  onClick={() => onResume?.(tr)}
-                  data-testid="trigger-resume"
-                >
-                  <Play className="size-3.5" strokeWidth={1.75} aria-hidden />
-                </Button>
-              )}
-              {fireArmed ? (
-                <button
-                  type="button"
-                  className="trd-mctl__confirm app-no-drag"
-                  data-tone="fire"
-                  disabled={busy}
-                  onClick={() => {
-                    setFireArmed(false)
-                    onFire?.(tr)
-                  }}
-                  data-testid="trigger-fire"
-                  data-armed
-                >
-                  {`${fireLabel} ${t('trading.trigger.fireAgain')}`}
-                </button>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  disabled={busy}
-                  aria-label={fireLabel}
-                  title={fireLabel}
-                  onClick={() => {
-                    setStopArmed(false)
-                    setFireArmed(true)
-                  }}
-                  data-testid="trigger-fire"
-                >
-                  <Zap className="size-3.5" strokeWidth={1.75} aria-hidden />
-                </Button>
-              )}
-            </>
-          ) : null}
-          {stopArmed ? (
-            <button
-              type="button"
-              className="trd-mctl__confirm app-no-drag"
-              disabled={busy}
-              onClick={() => {
-                setStopArmed(false)
-                onStop?.(tr)
-              }}
-              data-testid="trigger-stop"
-              data-armed
-            >
-              {t('trading.trigger.stopAgain')}
-            </button>
-          ) : (
-            <Button
-              variant="ghost"
-              size="icon"
-              disabled={busy}
-              aria-label={t('trading.trigger.stop')}
-              title={t('trading.trigger.stop')}
-              onClick={() => {
-                setFireArmed(false)
-                setStopArmed(true)
-              }}
-              data-testid="trigger-stop"
-            >
-              <OctagonX className="size-3.5" strokeWidth={1.75} aria-hidden />
-            </Button>
-          )}
-        </span>
-      ) : null}
+      <TriggerControls
+        trigger={tr}
+        busy={busy}
+        onPause={onPause}
+        onResume={onResume}
+        onFire={onFire}
+        onStop={onStop}
+      />
     </div>
   )
 }
 
 /** "Paused by you" for the operator's own bare pause or stop; the engine's words otherwise. */
-function bracketTitle(b: Bracket): string | null {
+export function bracketTitle(b: Bracket): string | null {
   const reason = bracketReason(b)
   if (reason !== 'user') return reason
   return b.status === 'paused'
@@ -887,13 +719,7 @@ function BracketRow({
   elsewhere?: string | null
   onOpenSession?: (sessionKey: string) => void
 }) {
-  const settle = `${b.status}:${busy}`
-  const [stopArmed, setStopArmed] = useArm(settle)
-  const [fireArmed, setFireArmed] = useArm(settle)
-  const steerable = isSteerableBracket(b)
-  const stoppable = steerable || b.status === 'triggered'
   const reason = bracketTitle(b)
-  const fireLabel = t(bracketFireKey(b))
   const word = bracketWord(b)
   return (
     <div
@@ -922,100 +748,366 @@ function BracketRow({
       {b.status === 'awaiting_approval' ? (
         <span className="trd-mctl__hint">{t('trading.trigger.review')}</span>
       ) : null}
-      {stoppable ? (
-        <span className="trd-mctl__ctl">
-          {steerable ? (
-            <>
-              {b.status === 'armed' ? (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  disabled={busy}
-                  aria-label={t('trading.trigger.pause')}
-                  title={t('trading.trigger.pause')}
-                  onClick={() => onPause?.(b)}
-                  data-testid="bracket-pause"
-                >
-                  <Pause className="size-3.5" strokeWidth={1.75} aria-hidden />
-                </Button>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  disabled={busy}
-                  aria-label={t('trading.trigger.resume')}
-                  title={t('trading.trigger.resume')}
-                  onClick={() => onResume?.(b)}
-                  data-testid="bracket-resume"
-                >
-                  <Play className="size-3.5" strokeWidth={1.75} aria-hidden />
-                </Button>
-              )}
-              {fireArmed ? (
-                <button
-                  type="button"
-                  className="trd-mctl__confirm app-no-drag"
-                  data-tone="fire"
-                  disabled={busy}
-                  onClick={() => {
-                    setFireArmed(false)
-                    onFire?.(b)
-                  }}
-                  data-testid="bracket-fire"
-                  data-armed
-                >
-                  {`${fireLabel} ${t('trading.trigger.fireAgain')}`}
-                </button>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  disabled={busy}
-                  aria-label={fireLabel}
-                  title={fireLabel}
-                  onClick={() => {
-                    setStopArmed(false)
-                    setFireArmed(true)
-                  }}
-                  data-testid="bracket-fire"
-                >
-                  <Zap className="size-3.5" strokeWidth={1.75} aria-hidden />
-                </Button>
-              )}
-            </>
-          ) : null}
-          {stopArmed ? (
+      <BracketControls
+        bracket={b}
+        busy={busy}
+        onPause={onPause}
+        onResume={onResume}
+        onFire={onFire}
+        onStop={onStop}
+      />
+    </div>
+  )
+}
+
+/**
+ * The controls a DCA mandate's state allows — Pause or Resume, Buy now,
+ * Edit (when the caller has a form to open), Stop — shared by the Missions
+ * row above the composer and the BOOK's Automations tab, so the same
+ * mandate is steered the same way everywhere. Nothing for a pending or a
+ * finished one. Stop is final, so it asks for a second click — inline,
+ * never a dialog.
+ */
+export function MandateControls({
+  mandate: m,
+  busy,
+  onPause,
+  onResume,
+  onRun,
+  onEdit,
+  onStop,
+}: {
+  mandate: Mandate
+  busy: boolean
+  onPause?: (m: Mandate) => void
+  onResume?: (m: Mandate) => void
+  onRun?: (m: Mandate) => void
+  onEdit?: (m: Mandate) => void
+  onStop?: (m: Mandate) => void
+}) {
+  const [armed, setArmed] = useArm(`${m.status}:${busy}`)
+  if (m.status !== 'active' && m.status !== 'paused') return null
+  return (
+    <span className="trd-mctl__ctl">
+      {m.status === 'active' ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          disabled={busy}
+          aria-label={t('trading.dca.pause')}
+          title={t('trading.dca.pause')}
+          onClick={() => onPause?.(m)}
+          data-testid="mandate-pause"
+        >
+          <Pause className="size-3.5" strokeWidth={1.75} aria-hidden />
+        </Button>
+      ) : (
+        <Button
+          variant="ghost"
+          size="icon"
+          disabled={busy}
+          aria-label={t('trading.dca.resume')}
+          title={t('trading.dca.resume')}
+          onClick={() => onResume?.(m)}
+          data-testid="mandate-resume"
+        >
+          <Play className="size-3.5" strokeWidth={1.75} aria-hidden />
+        </Button>
+      )}
+      <Button
+        variant="ghost"
+        size="icon"
+        disabled={busy}
+        aria-label={t('trading.dca.runNow')}
+        title={t('trading.dca.runNow')}
+        onClick={() => onRun?.(m)}
+        data-testid="mandate-run"
+      >
+        <Zap className="size-3.5" strokeWidth={1.75} aria-hidden />
+      </Button>
+      {onEdit ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          disabled={busy}
+          aria-label={t('trading.dca.edit')}
+          title={t('trading.dca.edit')}
+          onClick={() => onEdit(m)}
+          data-testid="mandate-edit"
+        >
+          <Pencil className="size-3.5" strokeWidth={1.75} aria-hidden />
+        </Button>
+      ) : null}
+      {armed ? (
+        <button
+          type="button"
+          className="trd-mctl__confirm app-no-drag"
+          disabled={busy}
+          onClick={() => {
+            setArmed(false)
+            onStop?.(m)
+          }}
+          data-testid="mandate-stop"
+          data-armed
+        >
+          {t('trading.dca.stopAgain')}
+        </button>
+      ) : (
+        <Button
+          variant="ghost"
+          size="icon"
+          disabled={busy}
+          aria-label={t('trading.dca.stop')}
+          title={t('trading.dca.stop')}
+          onClick={() => setArmed(true)}
+          data-testid="mandate-stop"
+        >
+          <OctagonX className="size-3.5" strokeWidth={1.75} aria-hidden />
+        </Button>
+      )}
+    </span>
+  )
+}
+
+/**
+ * The controls a trigger's state allows: Pause or Resume and Fire now while
+ * armed or paused, Stop also while triggered (an order is open). Fire now
+ * and Stop act on a second click — inline: one trades at once, the other is
+ * final. Shared by the Missions row and the Automations tab.
+ */
+export function TriggerControls({
+  trigger: tr,
+  busy,
+  onPause,
+  onResume,
+  onFire,
+  onStop,
+}: {
+  trigger: Trigger
+  busy: boolean
+  onPause?: (tr: Trigger) => void
+  onResume?: (tr: Trigger) => void
+  onFire?: (tr: Trigger) => void
+  onStop?: (tr: Trigger) => void
+}) {
+  const settle = `${tr.status}:${busy}`
+  const [stopArmed, setStopArmed] = useArm(settle)
+  const [fireArmed, setFireArmed] = useArm(settle)
+  const steerable = isSteerableTrigger(tr)
+  const stoppable = steerable || tr.status === 'triggered'
+  const fireLabel = t(fireNowKey(tr))
+  if (!stoppable) return null
+  return (
+    <span className="trd-mctl__ctl">
+      {steerable ? (
+        <>
+          {tr.status === 'armed' ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={busy}
+              aria-label={t('trading.trigger.pause')}
+              title={t('trading.trigger.pause')}
+              onClick={() => onPause?.(tr)}
+              data-testid="trigger-pause"
+            >
+              <Pause className="size-3.5" strokeWidth={1.75} aria-hidden />
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={busy}
+              aria-label={t('trading.trigger.resume')}
+              title={t('trading.trigger.resume')}
+              onClick={() => onResume?.(tr)}
+              data-testid="trigger-resume"
+            >
+              <Play className="size-3.5" strokeWidth={1.75} aria-hidden />
+            </Button>
+          )}
+          {fireArmed ? (
             <button
               type="button"
               className="trd-mctl__confirm app-no-drag"
+              data-tone="fire"
               disabled={busy}
               onClick={() => {
-                setStopArmed(false)
-                onStop?.(b)
+                setFireArmed(false)
+                onFire?.(tr)
               }}
-              data-testid="bracket-stop"
+              data-testid="trigger-fire"
               data-armed
             >
-              {t('trading.trigger.stopAgain')}
+              {`${fireLabel} ${t('trading.trigger.fireAgain')}`}
             </button>
           ) : (
             <Button
               variant="ghost"
               size="icon"
               disabled={busy}
-              aria-label={t('trading.trigger.stop')}
-              title={t('trading.trigger.stop')}
+              aria-label={fireLabel}
+              title={fireLabel}
               onClick={() => {
-                setFireArmed(false)
-                setStopArmed(true)
+                setStopArmed(false)
+                setFireArmed(true)
               }}
-              data-testid="bracket-stop"
+              data-testid="trigger-fire"
             >
-              <OctagonX className="size-3.5" strokeWidth={1.75} aria-hidden />
+              <Zap className="size-3.5" strokeWidth={1.75} aria-hidden />
             </Button>
           )}
-        </span>
+        </>
       ) : null}
-    </div>
+      {stopArmed ? (
+        <button
+          type="button"
+          className="trd-mctl__confirm app-no-drag"
+          disabled={busy}
+          onClick={() => {
+            setStopArmed(false)
+            onStop?.(tr)
+          }}
+          data-testid="trigger-stop"
+          data-armed
+        >
+          {t('trading.trigger.stopAgain')}
+        </button>
+      ) : (
+        <Button
+          variant="ghost"
+          size="icon"
+          disabled={busy}
+          aria-label={t('trading.trigger.stop')}
+          title={t('trading.trigger.stop')}
+          onClick={() => {
+            setFireArmed(false)
+            setStopArmed(true)
+          }}
+          data-testid="trigger-stop"
+        >
+          <OctagonX className="size-3.5" strokeWidth={1.75} aria-hidden />
+        </Button>
+      )}
+    </span>
+  )
+}
+
+/** The bracket's controls: both legs steered as one thing, as TriggerControls. */
+export function BracketControls({
+  bracket: b,
+  busy,
+  onPause,
+  onResume,
+  onFire,
+  onStop,
+}: {
+  bracket: Bracket
+  busy: boolean
+  onPause?: (b: Bracket) => void
+  onResume?: (b: Bracket) => void
+  onFire?: (b: Bracket) => void
+  onStop?: (b: Bracket) => void
+}) {
+  const settle = `${b.status}:${busy}`
+  const [stopArmed, setStopArmed] = useArm(settle)
+  const [fireArmed, setFireArmed] = useArm(settle)
+  const steerable = isSteerableBracket(b)
+  const stoppable = steerable || b.status === 'triggered'
+  const fireLabel = t(bracketFireKey(b))
+  if (!stoppable) return null
+  return (
+    <span className="trd-mctl__ctl">
+      {steerable ? (
+        <>
+          {b.status === 'armed' ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={busy}
+              aria-label={t('trading.trigger.pause')}
+              title={t('trading.trigger.pause')}
+              onClick={() => onPause?.(b)}
+              data-testid="bracket-pause"
+            >
+              <Pause className="size-3.5" strokeWidth={1.75} aria-hidden />
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={busy}
+              aria-label={t('trading.trigger.resume')}
+              title={t('trading.trigger.resume')}
+              onClick={() => onResume?.(b)}
+              data-testid="bracket-resume"
+            >
+              <Play className="size-3.5" strokeWidth={1.75} aria-hidden />
+            </Button>
+          )}
+          {fireArmed ? (
+            <button
+              type="button"
+              className="trd-mctl__confirm app-no-drag"
+              data-tone="fire"
+              disabled={busy}
+              onClick={() => {
+                setFireArmed(false)
+                onFire?.(b)
+              }}
+              data-testid="bracket-fire"
+              data-armed
+            >
+              {`${fireLabel} ${t('trading.trigger.fireAgain')}`}
+            </button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="icon"
+              disabled={busy}
+              aria-label={fireLabel}
+              title={fireLabel}
+              onClick={() => {
+                setStopArmed(false)
+                setFireArmed(true)
+              }}
+              data-testid="bracket-fire"
+            >
+              <Zap className="size-3.5" strokeWidth={1.75} aria-hidden />
+            </Button>
+          )}
+        </>
+      ) : null}
+      {stopArmed ? (
+        <button
+          type="button"
+          className="trd-mctl__confirm app-no-drag"
+          disabled={busy}
+          onClick={() => {
+            setStopArmed(false)
+            onStop?.(b)
+          }}
+          data-testid="bracket-stop"
+          data-armed
+        >
+          {t('trading.trigger.stopAgain')}
+        </button>
+      ) : (
+        <Button
+          variant="ghost"
+          size="icon"
+          disabled={busy}
+          aria-label={t('trading.trigger.stop')}
+          title={t('trading.trigger.stop')}
+          onClick={() => {
+            setFireArmed(false)
+            setStopArmed(true)
+          }}
+          data-testid="bracket-stop"
+        >
+          <OctagonX className="size-3.5" strokeWidth={1.75} aria-hidden />
+        </Button>
+      )}
+    </span>
   )
 }
