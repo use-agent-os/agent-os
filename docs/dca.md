@@ -51,8 +51,9 @@ create ──(operator)──────────────► active ─�
   expires **24 h** after creation (`expires_at`), not after the order TTL:
   a proposal should survive the user being away.
 - **Runs.** A run is due when `now >= next_run_at`. The engine's
-  `TradingService.tick()` (already every `sync_interval_seconds`, 30 s)
-  calls `dca.run_due()`. First run: at activation when `startNow` is true
+  housekeeping pass (`TradingService.housekeep()`, every
+  `sync_interval_seconds`, 30 s, from the moment the gateway starts) calls
+  `dca.run_due()`; the wallet sync runs beside it, never ahead of it. First run: at activation when `startNow` is true
   (default), otherwise one interval after activation. `next_run_at` is
   drift-free: `anchor_at + k * every_seconds` for the smallest `k` that is
   in the future. If the gateway was down and more than one interval passed,

@@ -921,6 +921,54 @@ class TestBackgroundLoop:
         await service.stop()
         assert service._task is None
 
+    async def test_housekeeping_keeps_its_clock_while_a_sync_runs(
+        self, funded_service: TradingService, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A wallet sync that takes minutes must not hold the DCA buys and trigger checks.
+
+        Seen 2026-11-04: a wallet four days behind on one chain synced for
+        eight minutes, and two due DCA mandates waited the whole time.
+        """
+        service = funded_service
+        service._background = True
+        real = service.config
+
+        class Quick:  # the real config, with the loop's clock sped up
+            sync_interval_seconds = 0.01
+
+            def __getattr__(self, name: str) -> object:
+                return getattr(real, name)
+
+        monkeypatch.setattr(service, "config", Quick())
+        passes = 0
+        sync_started = asyncio.Event()
+        sync_release = asyncio.Event()
+
+        async def slow_sync(**_: object) -> int:
+            sync_started.set()
+            await sync_release.wait()
+            return 0
+
+        async def count_pass() -> None:
+            nonlocal passes
+            passes += 1
+
+        monkeypatch.setattr(service, "sync_all", slow_sync)
+        monkeypatch.setattr(service, "dca_run_due", count_pass)
+        service.ensure_started()
+        try:
+            await asyncio.wait_for(sync_started.wait(), 2)
+            first = passes
+            # The sync is still running; housekeeping goes on ticking beside it.
+            await asyncio.sleep(0.1)
+            assert passes > first + 2
+            # And only one sync pass is in flight, however many ticks went by.
+            assert service._sync_task is not None and not service._sync_task.done()
+        finally:
+            sync_release.set()
+            await service.stop()
+        assert service._sync_task is None
+
 
 class TestRealSigning:
     def test_sign_tx_recovers_sender(self) -> None:

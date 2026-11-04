@@ -397,6 +397,8 @@ class TradingService:
         self._uniswap: UniswapClient | None = None
         self._uniswap_key = ""
         self._task: asyncio.Task[None] | None = None
+        # The wallet sync the loop last started; it runs beside the loop, not in it.
+        self._sync_task: asyncio.Task[None] | None = None
         self._confirm_tasks: set[asyncio.Task[Any]] = set()
         self._order_events: dict[str, asyncio.Event] = {}
         # One lock per wallet around sign-and-send: two orders for the same
@@ -596,6 +598,11 @@ class TradingService:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._task
             self._task = None
+        if self._sync_task is not None:
+            self._sync_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._sync_task
+            self._sync_task = None
         for task in list(self._confirm_tasks):
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -618,18 +625,46 @@ class TradingService:
         self.ledger.close()
 
     async def _run_loop(self) -> None:
+        """The engine's clock: housekeeping every interval, the wallet sync beside it.
+
+        Housekeeping (expiring approvals, DCA buys, trigger checks) and the
+        wallet sync used to be one pass, so a slow sync — a wallet days
+        behind on a chain catches up through many ``eth_getLogs`` calls —
+        held every due buy and every stop-loss check for as long as it ran
+        (eight minutes, seen 2026-11-04). The sync now runs as its own task:
+        housekeeping keeps its clock whatever the sync is doing, and a sync
+        still running when the next interval comes is simply left to finish.
+        """
         interval = float(getattr(self.config, "sync_interval_seconds", 30))
         while True:
             try:
-                await self.tick()
+                await self.housekeep()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # pragma: no cover - defensive
                 log.warning("trading.loop_error", error=str(exc))
+            self._kick_sync()
             await asyncio.sleep(interval)
 
-    async def tick(self) -> None:
-        """One pass of housekeeping: expire approvals, run DCA buys and triggers, settle, sync."""
+    def _kick_sync(self) -> None:
+        """Start a wallet sync beside the loop, unless one is still running."""
+        if not self.vault.initialized or self._sync_lock.locked():
+            return
+        if self._sync_task is not None and not self._sync_task.done():
+            return
+
+        async def _sync() -> None:
+            try:
+                await self.sync_all()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # pragma: no cover - defensive
+                log.warning("trading.sync_error", error=str(exc))
+
+        self._sync_task = asyncio.get_running_loop().create_task(_sync(), name="trading-sync-pass")
+
+    async def housekeep(self) -> None:
+        """One pass of housekeeping: expire approvals, run DCA buys and triggers, settle."""
         await self.expire_orders()
         try:
             await self.dca_run_due()
@@ -641,6 +676,11 @@ class TradingService:
             log.warning("trading.trigger_error", error=str(exc))
         if self.vault.initialized:
             await self.recover_submitted()
+
+    async def tick(self) -> None:
+        """Housekeeping and the wallet sync in one pass (tests, and callers that want both done)."""
+        await self.housekeep()
+        if self.vault.initialized:
             await self.sync_all()
 
     async def recover_submitted(self) -> None:
