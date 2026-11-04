@@ -329,7 +329,7 @@ def _build_failure_destination_dict(
         raise typer.BadParameter(
             "--failure-webhook-* requires --failure-mode=webhook"
         )
-    channel_norm = (channel or "").strip().lower()
+    channel_norm = (channel or "").strip()
     if not channel_norm:
         raise typer.BadParameter("--failure-mode=channel requires --failure-channel")
     fd = {"mode": "channel", "channelName": channel_norm}
@@ -392,8 +392,9 @@ def _build_delivery_params(
     # backend infer from the session's last route"; do not forward it as an
     # explicit channelName because the RPC's _parse_delivery_overrides treats
     # any channelName as an explicit override.
-    channel_norm = (channel or "").strip().lower()
-    has_target = bool(to) or (channel_norm not in ("", "last"))
+    channel_norm = (channel or "").strip()
+    is_last = channel_norm.lower() == "last"
+    has_target = bool(to) or (bool(channel_norm) and not is_last)
     if not announce and not has_target and not best_effort and not account:
         if failure_destination is not None:
             # FD-only — backend keeps inferred primary delivery and attaches FD.
@@ -401,7 +402,7 @@ def _build_delivery_params(
         return None  # nothing requested
 
     delivery = {"mode": "announce"}
-    if channel_norm and channel_norm != "last":
+    if channel_norm and not is_last:
         delivery["channelName"] = channel_norm
     if to:
         delivery["to"] = to

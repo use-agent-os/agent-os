@@ -126,6 +126,35 @@ def test_build_delivery_announce_with_target() -> None:
     assert d == {"mode": "announce", "channelName": "slack", "to": "C123"}
 
 
+def test_build_delivery_keeps_a_channel_name_as_typed() -> None:
+    """Entry names are case-sensitive: ``MyTele`` must reach the job as ``MyTele``."""
+    d = cron_cmd._build_delivery_params(
+        announce=True,
+        no_deliver=False,
+        channel=" MyTele ",
+        to=None,
+        account=None,
+        best_effort=False,
+        webhook_url=None,
+        webhook_token=None,
+    )
+    assert d == {"mode": "announce", "channelName": "MyTele"}
+
+
+def test_build_delivery_last_sentinel_ignores_case() -> None:
+    d = cron_cmd._build_delivery_params(
+        announce=True,
+        no_deliver=False,
+        channel="LAST",
+        to=None,
+        account=None,
+        best_effort=False,
+        webhook_url=None,
+        webhook_token=None,
+    )
+    assert d == {"mode": "announce"}
+
+
 def test_build_delivery_announce_with_last_omits_channel_name() -> None:
     """'last' is a CLI sentinel meaning 'let the backend infer'."""
     d = cron_cmd._build_delivery_params(
@@ -281,7 +310,7 @@ def test_failure_dest_channel() -> None:
     )
     assert fd == {
         "mode": "channel",
-        "channelName": "slack",
+        "channelName": "Slack",
         "to": "C-ops",
         "accountId": "acct-1",
     }

@@ -379,6 +379,7 @@ import {
   activeChatSessionKey,
   buildDelivery,
   buildFailureDest,
+  targetsForChannel,
   buildSavePayload,
   canonicalSessionKey,
   deliveryFormFromJob,
@@ -569,7 +570,7 @@ describe('buildFailureDest', () => {
       delivery: { mode: 'webhook', webhookUrl: 'https://h', webhookToken: 't' },
     })
   })
-  it('channel needs a channel name; lowercases the channel', () => {
+  it('channel needs a channel name; keeps it as typed', () => {
     expect(buildFailureDest(form({ fdMode: 'channel', fdTo: 'C1' }))).toEqual({
       ok: false,
       error: 'Failure-destination channel is required',
@@ -578,7 +579,7 @@ describe('buildFailureDest', () => {
       buildFailureDest(form({ fdMode: 'channel', fdChannel: 'Slack', fdTo: 'C1', fdAccount: 'a' })),
     ).toEqual({
       ok: true,
-      delivery: { mode: 'channel', channelName: 'slack', to: 'C1', accountId: 'a' },
+      delivery: { mode: 'channel', channelName: 'Slack', to: 'C1', accountId: 'a' },
     })
   })
 })
@@ -612,12 +613,14 @@ describe('buildDelivery', () => {
       delivery: { mode: 'webhook', webhookUrl: 'https://h', webhookToken: 't', bestEffort: true },
     })
   })
-  it('announce lowercases channel, includes to/account', () => {
+  it('announce keeps the channel name as typed, includes to/account', () => {
     expect(
-      buildDelivery(form({ deliveryMode: 'announce', deliveryChannel: 'Slack', deliveryTo: 'C1' })),
+      buildDelivery(
+        form({ deliveryMode: 'announce', deliveryChannel: 'MyTele', deliveryTo: 'C1' }),
+      ),
     ).toEqual({
       ok: true,
-      delivery: { mode: 'announce', channelName: 'slack', to: 'C1' },
+      delivery: { mode: 'announce', channelName: 'MyTele', to: 'C1' },
     })
   })
   it('nests a failure destination', () => {
@@ -1032,5 +1035,29 @@ describe('jobRuntimeHealth', () => {
 
   it('says nothing when the job carries neither', () => {
     expect(jobRuntimeHealth({ id: 'j', enabled: true })).toBeNull()
+  })
+})
+
+describe('targetsForChannel', () => {
+  const rows = [{ id: '1', label: 'Alice', kind: 'dm' }]
+  const targets = { MyTele: rows }
+
+  it('finds the recipients of a channel by its real name', () => {
+    expect(targetsForChannel(targets, 'MyTele')).toEqual(rows)
+  })
+
+  it('finds them for a job saved with the name in another case', () => {
+    expect(targetsForChannel(targets, ' mytele ')).toEqual(rows)
+  })
+
+  it('prefers an exact match over one differing only by case', () => {
+    const exact = [{ id: '2', label: 'Bob', kind: 'dm' }]
+    expect(targetsForChannel({ MyTele: rows, mytele: exact }, 'mytele')).toEqual(exact)
+  })
+
+  it('offers nothing for an unknown channel or no targets', () => {
+    expect(targetsForChannel(targets, 'other')).toEqual([])
+    expect(targetsForChannel(undefined, 'MyTele')).toEqual([])
+    expect(targetsForChannel(targets, '')).toEqual([])
   })
 })
