@@ -62,8 +62,10 @@ def test_wallet_trading_description_leads_with_execution_and_bridge() -> None:
     assert "bridge" in spec.triggers
 
 
-def test_wallet_trading_skill_fits_the_skill_view_budget() -> None:
-    assert len(SKILL_MD.read_bytes()) <= MAX_SKILL_BYTES
+def test_wallet_trading_skill_fits_the_skill_view_budget(skill: str) -> None:
+    # Measured on the text, not the file: a Windows checkout with autocrlf
+    # adds a byte per line, and the view budget is counted on the text.
+    assert len(skill.replace("\r\n", "\n").encode("utf-8")) <= MAX_SKILL_BYTES
 
 
 def test_wallet_trading_rules_are_pinned(skill: str) -> None:
