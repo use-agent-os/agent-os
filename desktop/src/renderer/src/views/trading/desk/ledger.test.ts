@@ -62,6 +62,117 @@ describe('parseTradeCommand', () => {
   })
 })
 
+describe('bridges (agentos trade bridge)', () => {
+  const create = parseTradeCommand(
+    'agentos trade bridge create --chain base --to-chain robinhood --token ETH --amount 0.01 --note "user: bridge" --client-id bridge-eth-1 --wait --wait-seconds 600 --json',
+  )!
+  const bridgeOrder = (extra: Record<string, unknown> = {}) => ({
+    orderId: 'o9',
+    kind: 'bridge',
+    status: 'awaiting_approval',
+    chainId: 8453,
+    amountIn: '0.01',
+    tokenIn: { symbol: 'ETH' },
+    tokenOut: { symbol: 'ETH' },
+    expectedOut: '0.0099',
+    provider: 'relay',
+    bridge: {
+      originChainId: 8453,
+      destinationChainId: 4663,
+      destinationChain: { chainId: 4663, key: 'robinhood', name: 'Robinhood Chain' },
+      fillStatus: null,
+    },
+    ...extra,
+  })
+
+  it('reads the three subcommands like the LP writes', () => {
+    expect(create).toMatchObject({
+      kind: 'bridge',
+      title: 'Bridge',
+      detail: '0.01 ETH · Base → Robinhood',
+    })
+    expect(
+      parseTradeCommand(
+        'agentos trade bridge quote --chain robinhood --to-chain base --token USDG --usd 20 --json',
+      ),
+    ).toMatchObject({
+      kind: 'bridge_quote',
+      title: 'Bridge quote',
+      detail: '$20 of USDG · Robinhood → Base',
+    })
+    expect(parseTradeCommand('agentos trade bridge status o9 --json')).toMatchObject({
+      kind: 'bridge_status',
+      title: 'Bridge status',
+      detail: 'o9',
+    })
+  })
+
+  it('reads `create` from `order`: parked, then sent, then confirmed with what landed', () => {
+    const parked = parseTradeResult(create, JSON.stringify({ order: bridgeOrder() }))
+    expect(parked.awaiting).toBe(true)
+    expect(parked.orderId).toBe('o9')
+    expect(parked.provider).toBe('relay')
+    expect(parked.summary).toBe('0.01 ETH → Robinhood Chain (≈ 0.0099 ETH) · awaiting approval')
+    const done = parseTradeResult(
+      create,
+      JSON.stringify({
+        order: bridgeOrder({
+          status: 'confirmed',
+          txHash: '0xdep',
+          explorerUrl: 'https://basescan.org/tx/0xdep',
+          receivedOut: '0.00985',
+          bridge: { ...bridgeOrder().bridge, fillStatus: 'success' },
+        }),
+      }),
+    )
+    expect(done.confirmed).toBe(true)
+    expect(done.txHash).toBe('0xdep')
+    expect(done.summary).toBe('0.01 ETH → Robinhood Chain (0.00985 ETH) · confirmed')
+  })
+
+  it('reads `status` from `order` and `bridge.fillStatus` while the fill is in flight', () => {
+    const status = parseTradeCommand('agentos trade bridge status o9 --json')!
+    const pending = parseTradeResult(
+      status,
+      JSON.stringify({
+        order: bridgeOrder({ status: 'submitted', txHash: '0xdep' }),
+        bridge: { requestId: 'req_1', fillStatus: 'pending' },
+      }),
+    )
+    expect(pending.status).toBe('submitted')
+    expect(pending.summary).toBe('0.01 ETH → Robinhood Chain (≈ 0.0099 ETH) · sent · fill pending')
+    expect(pending.confirmed).toBe(false)
+    const refunded = parseTradeResult(
+      status,
+      JSON.stringify({
+        order: bridgeOrder({ status: 'failed', reason: 'refund: relay refunded the deposit' }),
+        bridge: { fillStatus: 'refund' },
+      }),
+    )
+    expect(refunded.error).toBe('refund: relay refunded the deposit')
+    expect(refunded.summary).not.toContain('fill')
+  })
+
+  it('summarises a quote', () => {
+    const quote = parseTradeCommand(
+      'agentos trade bridge quote --chain base --to-chain robinhood --token ETH --amount 0.01 --json',
+    )!
+    const out = parseTradeResult(
+      quote,
+      JSON.stringify({
+        quote: {
+          expectedOut: '0.0099',
+          tokenOut: { symbol: 'ETH' },
+          feesUsd: 0.12,
+          timeEstimateSeconds: 30,
+        },
+      }),
+    )
+    expect(out.summary).toBe('≈ 0.0099 ETH · fees $0.12 · ~30s')
+    expect(out.error).toBeNull()
+  })
+})
+
 describe('parseTradeResult', () => {
   it('describes a projected-away result from the call itself, without error styling', () => {
     const call = parseTradeCommand(

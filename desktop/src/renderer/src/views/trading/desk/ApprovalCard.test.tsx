@@ -6,7 +6,7 @@ import { DEFAULT_SETTINGS, type TouchIdMode } from '@shared/settings'
 import { resetBiometricGateForTests, useTouchIdPrompt } from '~/lib/biometric-gate'
 import { useSettings } from '~/stores/settings'
 import { useOrderDecision } from '~/stores/trading'
-import { order, renderDesk, USDC, WALLET } from '../test-utils'
+import { bridgeOrder, order, renderDesk, USDC, WALLET } from '../test-utils'
 import type { Order } from '../types'
 import { ApprovalCard } from './ApprovalCard'
 import { ApprovalsRegion } from './ApprovalsRegion'
@@ -311,6 +311,75 @@ describe('ApprovalsRegion', () => {
     expect(screen.getByTestId('approval-stamp')).toContainElement(dismiss[0]!)
     fireEvent.click(dismiss[0]!)
     expect(onDismiss).toHaveBeenCalledWith('s1')
+  })
+})
+
+describe('ApprovalCard for a bridge', () => {
+  it('names the destination chain, the expected arrival and the fees, and marks it irreversible', () => {
+    renderDesk(
+      <ApprovalCard
+        order={bridgeOrder()}
+        wallets={[WALLET]}
+        deciding={false}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        focusOnMount={false}
+      />,
+    )
+    const card = screen.getByTestId('approval-card')
+    expect(card).toHaveAttribute('data-kind', 'bridge')
+    expect(card).toHaveTextContent('Approval needed · Bridge')
+    expect(screen.getByTestId('stamp-irreversible')).toBeInTheDocument()
+    const legs = screen.getByTestId('card-legs')
+    expect(legs).toHaveTextContent('0.01 ETH')
+    expect(legs).toHaveTextContent('Robinhood Chain')
+    expect(screen.getByTestId('card-bridge-out')).toHaveTextContent('≈ 0.0099 ETH')
+    expect(screen.getByTestId('card-bridge-fees')).toHaveTextContent('$0.12')
+    // Both chains are facts; the solver address is not a recipient to read.
+    expect(card).toHaveTextContent('From')
+    expect(card).toHaveTextContent('To')
+    expect(card).not.toHaveTextContent('0xa5f565650890fba1824ee0f21ebbbf660a179934')
+    expect(screen.getByTestId('card-approve')).toBeInTheDocument()
+  })
+
+  it('a settled bridge links the deposit and the destination receipt', () => {
+    renderDesk(
+      <ApprovalCard
+        order={bridgeOrder({
+          status: 'confirmed',
+          txHash: '0xdep',
+          explorerUrl: 'https://basescan.org/tx/0xdep',
+          receivedOut: '0.00985',
+          bridge: {
+            ...bridgeOrder().bridge!,
+            requestId: 'req_1',
+            fillStatus: 'success',
+            depositTxHash: '0xdep',
+            depositExplorerUrl: 'https://basescan.org/tx/0xdep',
+            destinationTxHash: '0xfill',
+            destinationExplorerUrl: 'https://explorer.robinhood.com/tx/0xfill',
+          },
+        })}
+        wallets={[WALLET]}
+        deciding={false}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        focusOnMount={false}
+      />,
+    )
+    const card = screen.getByTestId('approval-card')
+    expect(card).toHaveTextContent('Bridge')
+    expect(card).not.toHaveTextContent('Approval needed')
+    expect(screen.queryByTestId('stamp-irreversible')).toBeNull()
+    expect(screen.getByTestId('card-bridge-out')).toHaveTextContent('0.00985 ETH')
+    expect(screen.getByTestId('card-bridge-out')).not.toHaveTextContent('≈')
+    const txs = screen.getByTestId('card-bridge-txs')
+    const links = txs.querySelectorAll('a[data-testid="card-tx"]')
+    expect(links).toHaveLength(2)
+    expect(links[0]).toHaveAttribute('href', 'https://basescan.org/tx/0xdep')
+    expect(links[1]).toHaveAttribute('href', 'https://explorer.robinhood.com/tx/0xfill')
+    expect(txs).toHaveTextContent('Deposit')
+    expect(txs).toHaveTextContent('Arrival')
   })
 })
 

@@ -33,6 +33,8 @@ DEFAULT_PROVIDER_ID = "aggregator"
 PROVIDER_LABELS: dict[str, str] = {
     "aggregator": "AgentOS Aggregator",
     "uniswap": "Uniswap",
+    # Not a swap provider: the bridge an order of kind ``bridge`` runs through.
+    "relay": "Relay",
 }
 
 

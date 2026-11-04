@@ -41,7 +41,7 @@ from typing import Any
 
 import structlog
 
-from agentos.trading.chains import NATIVE_ADDRESS, ChainSpec, checksum_address
+from agentos.trading.chains import CHAINS, NATIVE_ADDRESS, ChainSpec, checksum_address
 from agentos.trading.decode import spender_label
 from agentos.trading.evm import EvmClient, TransferLog
 from agentos.trading.ledger import OPENING_NOTE, Ledger
@@ -315,7 +315,9 @@ class WalletSyncer:
         foreign = [t for t in logs if t.tx_hash not in own_tx]
         groups = await self._group_transfers(chain, address, foreign)
         swaps = [o for o in orders if _order_kind(o) == "swap"]
-        sends = [o for o in orders if _order_kind(o) == "send"]
+        # A bridge's origin side is a send to the Relay solver; its arrival
+        # on the other chain is that chain's own deposit (docs/bridge.md).
+        sends = [o for o in orders if _order_kind(o) in ("send", "bridge")]
         revokes = [o for o in orders if _order_kind(o) == "revoke"]
         lp_writes = [o for o in orders if _order_kind(o).startswith("lp_")]
 
@@ -486,7 +488,7 @@ class WalletSyncer:
                         ts,
                         tx_hash=tx_hash,
                         log_index=log_index,
-                        note=payload.get("note") or f"sent to {checksum_address(recipient)}",
+                        note=_withdraw_note(payload, recipient),
                         meta=metas[token],
                         priced=priced[(token, int(ts))],
                         initiator=str(payload.get("initiator") or "agent"),
@@ -705,11 +707,15 @@ class WalletSyncer:
         meta: TokenMeta | None = None,
         priced: Priced | None = None,
         airdrop: bool = False,
+        initiator: str = "external",
+        order_id: str | None = None,
+        session_key: str | None = None,
     ) -> bool:
         """Book an inbound amount as a deposit and open its lot.
 
         An ``airdrop`` keeps the spot price for information but has no
         value and a lot at cost zero: the whole holding is unrealized gain.
+        A bridge's arrival names the order that brought it (``order_id``).
         """
         meta = meta or await self._token_meta(chain, token)
         price, source = priced if priced is not None else await self._price_for(chain, token, ts)
@@ -728,7 +734,9 @@ class WalletSyncer:
             value_usd=value,
             price_out_usd=price,
             cost_basis_source=source,
-            initiator="external",
+            initiator=initiator,
+            order_id=order_id,
+            session_key=session_key,
             note=note,
         )
         if entry_id is None:
@@ -1076,10 +1084,18 @@ class WalletSyncer:
     # ── native / balances / snapshots ──────────────────────────────────
 
     def _has_open_orders(self, wallet: WalletRecord, chain: ChainSpec) -> bool:
-        return any(
-            int(o["chain_id"]) == chain.chain_id
-            for o in self.ledger.list_orders(status="submitted,approved", wallet=wallet.key)
-        )
+        """An order of this wallet is moving funds on ``chain`` right now.
+
+        A bridge counts on both its chains: the deposit leaves the origin,
+        and the solver's fill lands on the destination before the order's
+        own settlement books it.
+        """
+        for o in self.ledger.list_orders(status="submitted,approved", wallet=wallet.key):
+            if int(o["chain_id"]) == chain.chain_id:
+                return True
+            if bridge_destination_chain_id(o) == chain.chain_id:
+                return True
+        return False
 
     async def _reconcile_native(
         self, wallet: WalletRecord, chain: ChainSpec, evm: EvmClient
@@ -1211,6 +1227,34 @@ class WalletSyncer:
 
 def _order_kind(order: dict[str, Any]) -> str:
     return str(order.get("kind") or "swap")
+
+
+def bridge_destination_chain_id(order: dict[str, Any]) -> int | None:
+    """The chain a ``bridge`` order delivers to (from its plan), else ``None``."""
+    if _order_kind(order) != "bridge":
+        return None
+    try:
+        plan = json.loads(str(order.get("quote_json") or "{}"))
+    except ValueError:
+        return None
+    route = plan.get("route") if isinstance(plan, dict) else None
+    dest = route.get("destinationChainId") if isinstance(route, dict) else None
+    try:
+        return int(dest) if dest is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _withdraw_note(order: dict[str, Any], recipient: str) -> str:
+    """What a replayed send (or bridge deposit) says in the ledger."""
+    note = order.get("note")
+    if note:
+        return str(note)
+    if _order_kind(order) == "bridge":
+        dest = bridge_destination_chain_id(order)
+        name = CHAINS[dest].name if dest in CHAINS else "the other chain"
+        return f"bridged to {name} (Relay)"
+    return f"sent to {checksum_address(recipient)}"
 
 
 def _lp_settlement(order: dict[str, Any]) -> dict[str, Any]:

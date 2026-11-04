@@ -269,6 +269,14 @@ export function approvalFacts(
     if (order.expiresAt) push('expires', formatExpiryShort(order.expiresAt, now, locale))
     return facts
   }
+  if (kind === 'bridge') {
+    for (const f of bridgeFacts(order, labels)) facts.push(f)
+    if (order.valueUsd !== null) push('value', formatUsd(order.valueUsd))
+    if (order.gasUsd !== null) push('gas', formatUsd(order.gasUsd))
+    push('order', order.orderId)
+    if (order.expiresAt) push('expires', formatExpiryShort(order.expiresAt, now, locale))
+    return facts
+  }
   if (kind === 'send') {
     // Where the money goes is the one fact that may never be shortened.
     push('to', addressFact(order), undefined, true)
@@ -429,14 +437,14 @@ export function batchIdsOf(orders: readonly Pick<Order, 'batchId'>[]): string[] 
 /**
  * One line naming what an order moves, for a toast or a notification:
  * "0.2 ETH → USDC", "0.00001 ETH → 0x6c83…8312", "USDC ⛨ Permit2",
- * "0.25 ETH → 3 recipients". `legs` is every leg of a multisend.
+ * "0.25 ETH → 3 recipients", "0.01 ETH → Robinhood Chain". `legs` is every leg of a multisend.
  */
 export function orderLine(
   order: Pick<
     Order,
     'kind' | 'amountIn' | 'tokenIn' | 'tokenOut' | 'recipient' | 'recipientLabel' | 'batchId'
   > &
-    Partial<Pick<Order, 'plan' | 'valueUsd' | 'tokenId'>>,
+    Partial<Pick<Order, 'plan' | 'valueUsd' | 'tokenId' | 'bridge'>>,
   legs?: readonly Pick<Order, 'amountIn' | 'tokenIn'>[],
   recipientsWord = 'recipients',
 ): string {
@@ -446,6 +454,11 @@ export function orderLine(
   if (kind === 'revoke') {
     const spender = order.recipientLabel || shortAddress(order.recipient ?? '')
     return `${symbol || shortAddress(order.tokenIn?.address ?? '')} ⛨ ${spender}`.trim()
+  }
+  if (kind === 'bridge') {
+    // "0.01 ETH → Robinhood Chain": the asset keeps its name, the chain changes.
+    const to = bridgeDestinationName(order) || order.tokenOut?.symbol || ''
+    return `${formatAmount(order.amountIn)} ${symbol} → ${to}`.trim()
   }
   if (kind === 'send') {
     if (order.batchId && legs && legs.length > 1) {
@@ -641,6 +654,58 @@ function lpBounds(plan: LpPlan): [string, string | undefined] | null {
     usd: null,
   })
   return lpAmounts(amount(base), plan.token.symbol, amount(quote), plan.quote.symbol, null)
+}
+
+/** The destination chain's name on a bridge: the engine's, else our registry's, else the id. */
+export function bridgeDestinationName(order: Pick<Order, 'bridge'>): string {
+  const bridge = order.bridge
+  if (!bridge) return ''
+  return bridge.destinationChain?.name || chainName(bridge.destinationChainId)
+}
+
+/**
+ * The bridge facts, in the order the card lists them: the two chains, what
+ * leaves the origin, what Relay expects to land (what landed, once
+ * confirmed), and what the route keeps. `chain` above them is the origin.
+ */
+function bridgeFacts(order: Order, labels: Record<string, string>): Fact[] {
+  const bridge = order.bridge ?? null
+  const facts: Fact[] = []
+  const push = (key: string, pair: [string, string | undefined] | null) => {
+    if (!pair || !pair[0]) return
+    facts.push({
+      key,
+      label: labels[key] ?? key,
+      value: pair[0],
+      ...(pair[1] ? { full: pair[1] } : {}),
+    })
+  }
+  push('fromChain', [chainName(bridge?.originChainId ?? order.chainId), undefined])
+  push('toChain', [bridgeDestinationName(order), undefined])
+  push('send', amountWithSymbol(order.amountIn, order.tokenIn.symbol))
+  const confirmed = order.status === 'confirmed'
+  const out = confirmed ? (order.receivedOut ?? order.expectedOut) : order.expectedOut
+  if (out) {
+    const [shown, full] = amountWithSymbol(out, order.tokenOut.symbol)
+    push('receive', [
+      confirmed ? shown : `≈ ${shown}`,
+      full ? (confirmed ? full : `≈ ${full}`) : undefined,
+    ])
+  }
+  if (bridge && bridge.feesUsd !== null && bridge.feesUsd !== undefined) {
+    const parts = bridge.fees
+      ? [
+          ['gas', bridge.fees.gasUsd],
+          ['relayer', bridge.fees.relayerUsd],
+          ['app', bridge.fees.appUsd],
+        ]
+          .filter((p): p is [string, number] => typeof p[1] === 'number' && p[1] > 0)
+          .map(([k, v]) => `${k} ${formatUsd(v)}`)
+          .join(' · ')
+      : ''
+    push('bridgeFees', [formatUsd(bridge.feesUsd), parts || undefined])
+  }
+  return facts
 }
 
 /**
@@ -1124,7 +1189,8 @@ export function composeMissionPrompt(
   lines.push(
     'Rules: use the wallet-trading skill (`agentos trade … --json`). Quote before you swap. ' +
       'If a swap needs approval, wait for it with `agentos trade order <id> --wait --wait-seconds 600 --json` and report the outcome. ' +
-      'If nothing should be done this run, say so in one line. Always report order ids and explorer links.' +
+      'If nothing should be done this run, say so in one line. Always report order ids and explorer links. ' +
+      'A bridge between Base and Robinhood Chain goes through `agentos trade bridge create` and always waits for the user. ' +
       (budgeted
         ? ' Before any order in a mission with a budget: `agentos trade orders --json`, sum `valueUsd` of `confirmed` orders ' +
           `whose \`note\` starts with \`${name}:\`; if that sum plus this order would exceed the total budget, do nothing and reply \`${MISSION_COMPLETE_MARKER}\`. ` +
@@ -1524,7 +1590,7 @@ export function tradingProjectKnowledge(ctx: {
   return [
     'You are at the trading desk of the AgentOS desktop app. The user can see wallets, holdings and orders beside this chat.',
     `${wallets} Chains: ${chains}.`,
-    'Use the wallet-trading skill: `agentos wallet …` and `agentos trade … --json`. Prefer `--wait` on swaps and report the order id, status and explorer link.',
+    'Use the wallet-trading skill: `agentos wallet …` and `agentos trade … --json`. Prefer `--wait` on swaps and report the order id, status and explorer link. A bridge between the two chains goes through `agentos trade bridge create` and always waits for the user.',
     limits,
     'Never bypass an approval; if the user rejects an order they will say why in this chat.',
   ]

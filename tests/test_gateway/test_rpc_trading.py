@@ -20,6 +20,7 @@ from tests.test_trading.fakes import (
     WETH,
     FakeChain,
     FakePrices,
+    FakeRelay,
     FakeUniswap,
     fake_sign_tx,
     make_transport,
@@ -51,10 +52,12 @@ async def stack(tmp_path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[dict
             "decimals": 18,
         },
     ]
+    relay = FakeRelay()
     transport = make_transport(
         chains={"mainnet.base.org": base, "rpc.mainnet.chain.robinhood.com": robinhood},
         uniswap=uniswap,
         prices=prices,
+        relay=relay,
     )
     config = GatewayConfig()
     config.trading = TradingConfig(uniswap_api_key="test-key", price_ttl_seconds=1)
@@ -80,7 +83,9 @@ async def stack(tmp_path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[dict
             yield {
                 "service": service,
                 "base": base,
+                "robinhood": robinhood,
                 "uniswap": uniswap,
+                "relay": relay,
                 "events": events,
                 "config": config,
             }

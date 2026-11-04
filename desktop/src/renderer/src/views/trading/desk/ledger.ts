@@ -32,6 +32,9 @@ export type TradeKind =
   | 'lp_collect'
   | 'lp_remove'
   | 'lp_add'
+  | 'bridge'
+  | 'bridge_quote'
+  | 'bridge_status'
   | 'dca'
   | 'dca_list'
   | 'dca_create'
@@ -115,8 +118,8 @@ function shortAddr(value: string): string {
   return /^0x[0-9a-fA-F]{40}$/.test(value) ? `${value.slice(0, 6)}…${value.slice(-4)}` : value
 }
 
-function chainWord(args: string): string {
-  const c = (flag(args, 'chain') || '').toLowerCase()
+function chainWord(args: string, name = 'chain'): string {
+  const c = (flag(args, name) || '').toLowerCase()
   if (c === 'base' || c === '8453') return 'Base'
   if (c === 'robinhood' || c === '4663') return 'Robinhood'
   return ''
@@ -287,6 +290,13 @@ const LP_WRITES: Record<string, TradeKind> = {
   add: 'lp_add',
 }
 
+/** `agentos trade bridge <sub>`: a quote, the order itself, or a look at its fill. */
+const BRIDGE_SUBS: Record<string, TradeKind> = {
+  quote: 'bridge_quote',
+  create: 'bridge',
+  status: 'bridge_status',
+}
+
 /** "#48213" for a token id, the word as given otherwise. */
 function tokenIdWord(word: string | undefined): string {
   if (!word) return ''
@@ -346,6 +356,9 @@ const TITLES: Record<TradeKind, string> = {
   lp_collect: 'Collect fees',
   lp_remove: 'Remove liquidity',
   lp_add: 'Add liquidity',
+  bridge_quote: 'Bridge quote',
+  bridge: 'Bridge',
+  bridge_status: 'Bridge status',
   dca: 'DCA status',
   dca_list: 'DCA list',
   dca_create: 'Start DCA',
@@ -413,6 +426,8 @@ export function parseTradeCommand(command: string | null | undefined): TradeCall
       kind = sub as TradeKind
     } else if (sub === 'lp') {
       kind = LP_WRITES[(lpPositionals(args)[0] ?? '').toLowerCase()] ?? 'lp'
+    } else if (sub === 'bridge') {
+      kind = BRIDGE_SUBS[(lpPositionals(args)[0] ?? '').toLowerCase()] ?? 'bridge'
     } else if (sub === 'dca') {
       kind = DCA_SUBS[(lpPositionals(args)[0] ?? '').toLowerCase()] ?? 'dca'
     } else if (sub === 'trigger') {
@@ -491,6 +506,26 @@ export function parseTradeCommand(command: string | null | undefined): TradeCall
     const id = tokenIdWord(lpPositionals(args)[1])
     const pct = kind === 'lp_remove' ? `${(flag(args, 'pct') ?? '100').replace(/%$/, '')}%` : ''
     detail = [id, pct, chainWord(args)].filter(Boolean).join(' · ')
+  } else if (kind === 'bridge' || kind === 'bridge_quote') {
+    // `bridge create --chain base --to-chain robinhood --token ETH --amount 0.01`
+    // → "0.01 ETH · Base → Robinhood".
+    const token = flag(args, 'token') ?? ''
+    const amount = flag(args, 'amount')
+    const usd = flag(args, 'usd')
+    const pct = flag(args, 'pct')
+    const size = amount
+      ? `${amount} ${token}`
+      : usd
+        ? `$${usd} of ${token}`
+        : pct
+          ? `${pct}% of ${token}`
+          : token
+    const from = chainWord(args)
+    const to = chainWord(args, 'to-chain')
+    detail = [size.trim(), from && to ? `${from} → ${to}` : from || to].filter(Boolean).join(' · ')
+  } else if (kind === 'bridge_status') {
+    // `bridge status ord_123 --json` → "ord_123" (an order id or a Relay request id).
+    detail = lpPositionals(args)[1] ?? ''
   } else if (kind === 'lp_add') {
     // `lp add PEPE --usd 50 --range mcap:2M-10M` → "PEPE · $50 · Base"; the
     // result names the pair once it is known.
@@ -704,6 +739,17 @@ function orderLegs(o: Dict): string {
   const kind = str(o.kind) ?? 'swap'
   if (kind === 'lp_collect' || kind === 'lp_remove' || kind === 'lp_add') return lpOrderLegs(o)
   const amount = `${formatAmount(str(o.amountIn))} ${sym(o.tokenIn)}`
+  if (kind === 'bridge') {
+    // "0.01 ETH → Robinhood Chain (≈ 0.0099 ETH)": the asset keeps its name.
+    const bridge = isDict(o.bridge) ? o.bridge : null
+    const dest = bridge && isDict(bridge.destinationChain) ? bridge.destinationChain : null
+    const destId = bridge ? num(bridge.destinationChainId) : null
+    const to = (dest ? str(dest.name) : null) ?? (destId !== null ? `chain ${destId}` : '')
+    const confirmed = o.status === 'confirmed'
+    const out = confirmed ? (str(o.receivedOut) ?? str(o.expectedOut)) : str(o.expectedOut)
+    const landed = out ? ` (${confirmed ? '' : '≈ '}${formatAmount(out)} ${sym(o.tokenOut)})` : ''
+    return `${amount} → ${to}${landed}`.trim()
+  }
   if (kind === 'send') return `${amount} → ${shortAddr(str(o.recipient) ?? '')}`.trim()
   if (kind === 'revoke') {
     const who = str(o.recipientLabel) ?? shortAddr(str(o.recipient) ?? '')
@@ -1687,6 +1733,38 @@ export function parseTradeResult(call: TradeCall, text: string): TradeOutcome {
       const orders = Array.isArray(data.orders) ? data.orders.filter(isDict) : []
       const o = isDict(data.order) ? data.order : orders.length ? orders[0]! : data
       if (str(o.orderId) || str(o.status)) return fromOrder(o)
+      break
+    }
+    case 'bridge': {
+      // `bridge create` prints `{"order": …}`; a bare order is read the same.
+      const o = isDict(data.order) ? data.order : data
+      if (str(o.orderId) || str(o.status)) return fromOrder(o)
+      break
+    }
+    case 'bridge_status': {
+      // `bridge status` prints the order and, beside it, Relay's view of the
+      // fill: while the order is `submitted` that word is the whole news.
+      const o = isDict(data.order) ? data.order : null
+      if (!o) break
+      const base = fromOrder(o)
+      const fill =
+        (isDict(data.bridge) ? str(data.bridge.fillStatus) : null) ??
+        (isDict(o.bridge) ? str(o.bridge.fillStatus) : null)
+      return fill && base.status === 'submitted'
+        ? { ...base, summary: `${base.summary} · fill ${fill}` }
+        : base
+    }
+    case 'bridge_quote': {
+      const q = isDict(data.quote) ? data.quote : data
+      const out = str(q.expectedOut) ?? str(q.amountOut)
+      const fees = num(q.feesUsd)
+      const eta = num(q.timeEstimateSeconds)
+      const bits = [
+        out ? `≈ ${formatAmount(out)} ${sym(q.tokenOut)}`.trim() : '',
+        fees !== null ? `fees ${formatUsd(fees)}` : '',
+        eta !== null ? `~${eta}s` : '',
+      ].filter(Boolean)
+      if (bits.length) return { ...EMPTY, summary: bits.join(' · ') }
       break
     }
     case 'allowances': {

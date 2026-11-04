@@ -11,6 +11,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -723,6 +724,127 @@ class FakeIndexer:
         )
 
 
+RELAY_FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "relay"
+#: The Relay solver the recorded quotes deposit to.
+RELAY_SOLVER = "0x4cd00e387622c35bddb9b4c962c136462338bc31"
+USDG = "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
+NATIVE_ZERO = "0x0000000000000000000000000000000000000000"
+
+
+def relay_quote_fixtures() -> dict[tuple[int, int, str], dict[str, Any]]:
+    """The recorded ``/quote/v2`` bodies, keyed by (origin, destination, origin currency)."""
+    out: dict[tuple[int, int, str], dict[str, Any]] = {}
+    for name in RELAY_FIXTURES.glob("quote_*.json"):
+        body = json.loads(name.read_text(encoding="utf-8"))
+        details = body["details"]
+        origin = int(details["currencyIn"]["currency"]["chainId"])
+        destination = int(details["currencyOut"]["currency"]["chainId"])
+        token = str(details["currencyIn"]["currency"]["address"]).lower()
+        out[(origin, destination, token)] = body
+    return out
+
+
+@dataclass
+class FakeRelay:
+    """Relay's quote and status endpoints, answered from the recorded fixtures.
+
+    A quote is the fixture for the route, re-addressed to the caller (user,
+    recipient, ``from`` on every step, the ERC-20 deposit's depositor word)
+    and re-sized to the amount asked (``currencyIn``, ``currencyOut`` by the
+    fixture's rate times ``out_scale``, the native deposit's value, the
+    approve and deposit amount words). Every quote gets a fresh request id,
+    as Relay does. Statuses are played per request id in order; the last one
+    repeats, and an unknown id is ``waiting``.
+    """
+
+    quotes: dict[tuple[int, int, str], dict[str, Any]] = field(default_factory=relay_quote_fixtures)
+    statuses: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    #: One status sequence for whatever request id is asked (tests rarely know it).
+    default_statuses: list[dict[str, Any]] = field(default_factory=list)
+    calls: list[dict[str, Any]] = field(default_factory=list)
+    quote_error: tuple[int, dict[str, Any]] | None = None
+    status_error: tuple[int, dict[str, Any]] | None = None
+    mutate_quote: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+    out_scale: float = 1.0
+    request_ids: list[str] = field(default_factory=list)
+    _seq: int = 0
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == "/quote/v2":
+            body = json.loads(request.content or b"{}")
+            self.calls.append({"path": path, "body": body})
+            if self.quote_error is not None:
+                status, payload = self.quote_error
+                return httpx.Response(status, json=payload)
+            key = (
+                int(body["originChainId"]),
+                int(body["destinationChainId"]),
+                str(body["originCurrency"]).lower(),
+            )
+            template = self.quotes.get(key)
+            if template is None:
+                return httpx.Response(400, json={"message": "No routes found for this request"})
+            return httpx.Response(200, json=self._quote(template, body))
+        if path == "/intents/status/v3":
+            request_id = str(request.url.params.get("requestId") or "")
+            self.calls.append({"path": path, "requestId": request_id})
+            if self.status_error is not None:
+                status, payload = self.status_error
+                return httpx.Response(status, json=payload)
+            sequence = self.statuses.get(request_id)
+            if sequence is None:
+                sequence = self.default_statuses
+            if not sequence:
+                return httpx.Response(200, json={"status": "waiting"})
+            answer = sequence.pop(0) if len(sequence) > 1 else sequence[0]
+            return httpx.Response(200, json=answer)
+        return httpx.Response(404, json={"message": f"no fake for {path}"})
+
+    def _quote(self, template: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
+        quote = json.loads(json.dumps(template))
+        self._seq += 1
+        request_id = "0x" + format(0xFEED0000 + self._seq, "x").rjust(64, "0")
+        self.request_ids.append(request_id)
+        user = str(body["user"])
+        amount = int(body["amount"])
+        details = quote["details"]
+        template_in = int(details["currencyIn"]["amount"])
+        template_out = int(details["currencyOut"]["amount"])
+        out = int(amount * template_out / template_in * self.out_scale)
+        details["currencyIn"]["amount"] = str(amount)
+        details["currencyOut"]["amount"] = str(out)
+        details["currencyOut"]["amountFormatted"] = None
+        details["recipient"] = str(body["recipient"])
+        details["sender"] = user
+        native = str(body["originCurrency"]).lower() == NATIVE_ZERO
+        for step in quote["steps"]:
+            step["requestId"] = request_id
+            for item in step["items"]:
+                data = item["data"]
+                data["from"] = user
+                if step["id"] == "deposit":
+                    if native:
+                        data["value"] = str(amount)
+                    else:
+                        calldata = str(data["data"])
+                        data["data"] = (
+                            calldata[:10]
+                            + pad_address(user)
+                            + calldata[74:138]
+                            + pad_uint(amount)
+                            + calldata[202:]
+                        )
+                elif step["id"] == "approve":
+                    data["data"] = approve_calldata(RELAY_SOLVER, amount)
+                item.setdefault("check", {})["endpoint"] = (
+                    f"/intents/status/v3?requestId={request_id}"
+                )
+        if self.mutate_quote is not None:
+            quote = self.mutate_quote(quote)
+        return quote
+
+
 def make_transport(
     *,
     chains: dict[str, FakeChain],
@@ -730,6 +852,7 @@ def make_transport(
     prices: FakePrices,
     aggregator: FakeAggregator | None = None,
     indexer: FakeIndexer | None = None,
+    relay: FakeRelay | None = None,
 ) -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:
         host = request.url.host
@@ -737,6 +860,8 @@ def make_transport(
             return chains[host].handle(request)
         if host == "agg.useagentos.dev":
             return (aggregator or FakeAggregator()).handle(request)
+        if host == "api.relay.link":
+            return (relay or FakeRelay()).handle(request)
         if host == "trade-api.gateway.uniswap.org":
             return uniswap.handle(request)
         if host.endswith("blockscout.com"):

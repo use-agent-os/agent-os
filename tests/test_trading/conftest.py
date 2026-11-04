@@ -24,6 +24,7 @@ from tests.test_trading.fakes import (
     FakeChain,
     FakeIndexer,
     FakePrices,
+    FakeRelay,
     FakeUniswap,
     fake_sign_tx,
     make_transport,
@@ -139,6 +140,11 @@ def fake_indexer() -> FakeIndexer:
 
 
 @pytest.fixture
+def fake_relay() -> FakeRelay:
+    return FakeRelay()
+
+
+@pytest.fixture
 def transport(
     base_chain: FakeChain,
     robinhood_chain: FakeChain,
@@ -146,6 +152,7 @@ def transport(
     fake_aggregator: FakeAggregator,
     fake_prices: FakePrices,
     fake_indexer: FakeIndexer,
+    fake_relay: FakeRelay,
 ) -> httpx.MockTransport:
     return make_transport(
         chains={
@@ -156,6 +163,7 @@ def transport(
         aggregator=fake_aggregator,
         prices=fake_prices,
         indexer=fake_indexer,
+        relay=fake_relay,
     )
 
 
