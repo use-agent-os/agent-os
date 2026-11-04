@@ -46,7 +46,7 @@ import { deskTriggers } from './trigger-logic'
  * (docs/brackets.md): one row per bracket, never one per leg.
  */
 
-const MISSIONS_KEY = ['trading', 'missions'] as const
+export const MISSIONS_KEY = ['trading', 'missions'] as const
 
 interface CronListResult {
   jobs?: RawJob[]
@@ -123,6 +123,27 @@ export interface MissionsApi {
   awaitingBrackets: Bracket[]
   /** The bracket controls (approve, pause, sell now, stop …): one write for both legs. */
   bracket: BracketActions
+}
+
+/**
+ * Every cron job, from the same cache entry `useMissions` fills: the BOOK's
+ * Automations tab filters it to the trading desk's own. Reading the key
+ * again costs no second request and binds no second event listener.
+ */
+export function useAllJobs(enabled = true) {
+  const rpc = useRpc()
+  const connected = useConnection((s) => s.state === 'connected')
+  return useQuery<RawJob[]>({
+    queryKey: MISSIONS_KEY,
+    enabled: connected && enabled,
+    queryFn: async () => {
+      await rpc.waitForConnection()
+      const data = await rpc.call<RawJob[] | CronListResult>('cron.list', {})
+      return Array.isArray(data) ? data : (data.jobs ?? [])
+    },
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
+  })
 }
 
 export function useMissions(sessionKey: string, enabled = true): MissionsApi {

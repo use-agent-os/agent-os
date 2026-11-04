@@ -727,6 +727,7 @@
 }
 /* A row another trading chat filed: the chip names that and opens the chat.
    Sized by its text: the row's 24px icon-button rule must not apply. */
+.trd-mctl__elsewhere,
 .trd-mctl__row .trd-mctl__elsewhere {
   display: inline-flex;
   width: auto;
@@ -2510,7 +2511,8 @@ body[data-dragging] .trd-book__handle {
    Six columns need ~520 px; the rail stacks them into two lines:
    glyph · kind/sub · value · link, then legs · who/time under it. */
 .trd-book__body[data-tab='history'] > *,
-.trd-book__body[data-tab='orders'] > * {
+.trd-book__body[data-tab='orders'] > *,
+.trd-book__body[data-tab='automations'] > * {
   flex: 1;
   min-height: 0;
   overflow-x: hidden;
@@ -3447,4 +3449,292 @@ button.trd-tool[data-tone='danger']:hover {
   color: var(--primary);
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+/* ── Automations inside the BOOK ────────────────────────────────────────────
+   Every mission, DCA, trigger and bracket, grouped by what the user has to
+   do about it. A card per item: head (light · tag · name · disclose), the
+   state word, the figures, the reason when there is one, then the same
+   controls as the row above the composer. Opened, its history. */
+.trd-auto {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 12px;
+}
+.trd-auto__filters {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 12px 6px;
+  background: var(--background);
+}
+.trd-auto__filters .trd-chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.trd-auto__none {
+  padding: 16px 12px;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+.trd-auto__group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 12px 4px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.trd-auto__groupcount {
+  color: var(--muted-foreground);
+}
+.trd-auto__section[data-group='needs'] .trd-auto__group {
+  color: var(--warn);
+}
+.trd-auto__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0 10px;
+  list-style: none;
+}
+.trd-auto__item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 7px 8px 6px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+}
+.trd-auto__item[data-group='needs'] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 45%, transparent);
+}
+.trd-auto__item[data-state='running'] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 40%, transparent);
+}
+.trd-auto__item[data-group='finished'] {
+  opacity: 0.78;
+}
+.trd-auto__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.trd-auto__light {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+.trd-auto__item[data-group='running'] .trd-auto__light {
+  background: var(--ok);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--ok) 60%, transparent);
+}
+.trd-auto__item[data-group='needs'] .trd-auto__light {
+  background: var(--warn);
+}
+.trd-auto__item[data-state='triggered'] .trd-auto__light,
+.trd-auto__item[data-state='running'] .trd-auto__light {
+  background: var(--primary);
+  animation: trd-auto-pulse 1.4s ease-in-out infinite;
+}
+.trd-auto__item[data-state='failed'] .trd-auto__light,
+.trd-auto__item[data-state='rejected'] .trd-auto__light {
+  background: var(--danger);
+}
+@keyframes trd-auto-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+.trd-auto__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+.trd-auto__chev {
+  flex-shrink: 0;
+  color: var(--dim);
+  transition: transform 140ms ease-out;
+}
+.trd-auto__item[data-open] .trd-auto__chev {
+  transform: rotate(180deg);
+}
+.trd-auto__word {
+  padding-left: 12px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.trd-auto__item[data-group='running'] .trd-auto__word {
+  color: var(--ok);
+}
+.trd-auto__item[data-group='needs'] .trd-auto__word {
+  color: var(--warn);
+}
+.trd-auto__facts {
+  padding-left: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--muted-foreground);
+}
+.trd-auto__reason {
+  padding-left: 12px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--warn);
+  overflow-wrap: anywhere;
+}
+.trd-auto__item[data-group='finished'] .trd-auto__reason {
+  color: var(--dim);
+}
+.trd-auto__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding-left: 8px;
+}
+.trd-auto__foot .trd-mctl__ctl {
+  margin-left: auto;
+}
+.trd-auto__foot .trd-mctl__ctl button,
+.trd-auto__foot .trd-mctl__ctl .mac-button {
+  width: 24px;
+  height: 24px;
+}
+.trd-auto__foot .trd-mctl__elsewhere {
+  margin: 0;
+}
+/* History under an opened card. */
+.trd-auto__hist {
+  margin-top: 4px;
+  padding: 6px 0 2px 12px;
+  border-top: 0.5px solid var(--hairline);
+}
+.trd-auto__histhead {
+  margin-bottom: 4px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.trd-auto__runs {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.trd-auto__run {
+  display: grid;
+  grid-template-columns: 6px auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    'light at word link'
+    '. fig fig fig'
+    '. reason reason reason';
+  column-gap: 6px;
+  align-items: center;
+  min-width: 0;
+  font-size: 11px;
+}
+.trd-auto__runlight {
+  grid-area: light;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+.trd-auto__run[data-tone='ok'] .trd-auto__runlight {
+  background: var(--ok);
+}
+.trd-auto__run[data-tone='warn'] .trd-auto__runlight {
+  background: var(--warn);
+}
+.trd-auto__run[data-tone='danger'] .trd-auto__runlight {
+  background: var(--danger);
+}
+.trd-auto__run[data-tone='live'] .trd-auto__runlight {
+  background: var(--primary);
+}
+.trd-auto__runat {
+  grid-area: at;
+  font-size: 10px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.trd-auto__runword {
+  grid-area: word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--foreground);
+}
+.trd-auto__byhand {
+  color: var(--dim);
+}
+.trd-auto__runfig {
+  grid-area: fig;
+  font-size: 10.5px;
+  color: var(--muted-foreground);
+}
+.trd-auto__runreason {
+  grid-area: reason;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--dim);
+}
+.trd-auto__runlink {
+  grid-area: link;
+  display: inline-flex;
+  align-items: center;
+  color: var(--dim);
+}
+.trd-auto__runlink:hover {
+  color: var(--foreground);
+}
+.trd-auto__runlink + .trd-auto__runlink {
+  margin-left: 4px;
+}
+.trd-auto .trd-mctl__more {
+  margin: 4px 0 0;
+}
+.trd-auto__more {
+  margin: 4px 10px 0;
+}
+.trd-auto__hist .trd-auto__none {
+  padding: 2px 0 4px;
 }

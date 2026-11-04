@@ -1,6 +1,7 @@
 import {
   ArrowLeftRight,
   BookOpen,
+  Bot,
   ChevronsLeft,
   ChevronsRight,
   History as HistoryIcon,
@@ -49,7 +50,9 @@ import { SwapPanel, type SwapPrefill } from '../SwapPanel'
 import type { Holding, Order, ProviderId, Totals, Wallet } from '../types'
 import { WalletHead } from '../WalletHead'
 import { WalletSheet, type WalletSheetMode } from '../WalletSheet'
+import { Automations } from './Automations'
 import { BOOK_MAX, BOOK_MIN, watchTabStrip } from './desk-logic'
+import type { MissionsApi } from './missions'
 import { ToolsPanel } from './ToolsPanel'
 
 const TABS: readonly { id: BookTab; icon: typeof BookOpen }[] = [
@@ -58,6 +61,7 @@ const TABS: readonly { id: BookTab; icon: typeof BookOpen }[] = [
   { id: 'markets', icon: Layers },
   { id: 'orders', icon: ListChecks },
   { id: 'history', icon: HistoryIcon },
+  { id: 'automations', icon: Bot },
   { id: 'tools', icon: Wrench },
 ]
 
@@ -82,6 +86,9 @@ export function Book({
   highlightOrder,
   entering = false,
   onReject,
+  missions,
+  sessionKey,
+  onOpenSession,
 }: {
   wallets: Wallet[]
   primary: string | null
@@ -108,6 +115,14 @@ export function Book({
    * took the order; false leaves the plain decision to the BOOK.
    */
   onReject?: (order: Order) => boolean
+  /**
+   * The desk's one `useMissions` (it binds the cron events; a second would
+   * double every write). The Automations tab lists and steers through it.
+   */
+  missions: MissionsApi
+  /** The desk's chat: the tab names the automations filed by another one. */
+  sessionKey: string
+  onOpenSession: (sessionKey: string) => void
 }) {
   const tab = useTradingUi((s) => s.bookTab)
   const setTab = useTradingUi((s) => s.setBookTab)
@@ -165,6 +180,11 @@ export function Book({
     entering && !portfolio.isPending,
   )
   const pendingCount = orders.orders.filter(isAwaitingApproval).length
+  // The Automations tab's badge: proposals waiting on the operator, whichever chat made them.
+  const needsCount =
+    missions.awaitingMandates.length +
+    missions.awaitingTriggers.length +
+    missions.awaitingBrackets.length
   // The hero is coloured by the book's own result — what was banked plus
   // what is still open — never by the day's price move, which is only the
   // chip's business.
@@ -272,7 +292,7 @@ export function Book({
             data-testid={`book-spine-${id}`}
           >
             <Icon className="size-4" strokeWidth={1.75} aria-hidden />
-            {id === 'orders' && pendingCount > 0 ? (
+            {(id === 'orders' && pendingCount > 0) || (id === 'automations' && needsCount > 0) ? (
               <span className="trd-book__dot" aria-hidden />
             ) : null}
           </button>
@@ -323,6 +343,8 @@ export function Book({
               <span>{t(`trading.book.tab.${id}`)}</span>
               {id === 'orders' && pendingCount > 0 ? (
                 <span className="trd-book__count">{pendingCount}</span>
+              ) : id === 'automations' && needsCount > 0 ? (
+                <span className="trd-book__count">{needsCount}</span>
               ) : null}
             </button>
           ))}
@@ -487,6 +509,14 @@ export function Book({
                 onInspect={(o) => o.txHash && setInspect({ chainId: o.chainId, hash: o.txHash })}
               />
             </>
+          ) : tab === 'automations' ? (
+            <Automations
+              missions={missions}
+              sessionKey={sessionKey}
+              pendingApprovals={pendingCount}
+              enabled={!collapsed}
+              onOpenSession={onOpenSession}
+            />
           ) : tab === 'tools' ? (
             <ToolsPanel
               wallet={walletAddress ?? primary ?? undefined}
