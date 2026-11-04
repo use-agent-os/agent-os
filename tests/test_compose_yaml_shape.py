@@ -5,6 +5,8 @@ from pathlib import Path
 
 import yaml
 
+from agentos.gateway.config import AuthConfig, GatewayConfig, enforce_public_bind_auth_guard
+
 _ROOT = Path(__file__).parent.parent
 
 
@@ -46,6 +48,20 @@ def test_compose_gateway_environment_has_openrouter_key() -> None:
         assert "OPENROUTER_API_KEY" in keys, (
             f"OPENROUTER_API_KEY missing from environment list: {env}"
         )
+
+
+def test_compose_gateway_environment_starts_on_its_wildcard_bind() -> None:
+    env = _load_compose()["services"]["gateway"]["environment"]
+    assert env["AGENTOS_LISTEN"] == "0.0.0.0"
+    # An empty token would be replaced by a random one at each boot that no
+    # client knows, so Compose has to refuse to start without a value.
+    assert env["AGENTOS_AUTH_TOKEN"].startswith("${AGENTOS_AUTH_TOKEN:?")
+
+    config = GatewayConfig(
+        host=env["AGENTOS_LISTEN"],
+        auth=AuthConfig(mode=env.get("AGENTOS_AUTH_MODE", "none"), token="set-by-compose"),
+    )
+    enforce_public_bind_auth_guard(config)
 
 
 def _load_dockerfile() -> str:

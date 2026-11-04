@@ -649,12 +649,20 @@ before you bind to `0.0.0.0`.
 **Docker**
 
 A prebuilt multi-arch image (linux/amd64 and linux/arm64) is published
-for every release. Point Compose at it and nothing has to be built:
+for every release. Point Compose at it and set a gateway token, which it
+requires, and nothing has to be built:
 
 ```sh
-export AGENTOS_GATEWAY_IMAGE=ghcr.io/use-agent-os/agent-os:latest   # or :2026.11.3.post2
+cat > .env <<EOF
+AGENTOS_GATEWAY_IMAGE=ghcr.io/use-agent-os/agent-os:latest
+AGENTOS_AUTH_TOKEN=$(openssl rand -hex 32)
+EOF
 docker compose up -d
 ```
+
+[Run the gateway in a container](docs/container-gateway.md) covers the rest:
+providers, reaching it from another machine, connecting the desktop app,
+upgrades and backups.
 
 Without `AGENTOS_GATEWAY_IMAGE`, the Compose setup runs an `agentos:local`
 image that you build yourself. Build it from a source checkout, after pulling

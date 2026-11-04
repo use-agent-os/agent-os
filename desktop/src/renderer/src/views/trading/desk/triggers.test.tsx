@@ -234,7 +234,7 @@ describe('trigger logic', () => {
     expect(isNear(trigger({ market: { ...PAYLOAD.trigger.market, distancePct: 0 } }))).toBe(true)
   })
 
-  it('lists this chat’s triggers and unfiled ones; every finished one for an hour only', () => {
+  it('lists every live trigger, and this chat’s finished ones for an hour only', () => {
     const list = [
       trigger(),
       trigger({ id: 'other', sessionKey: 'agent:trading:webchat:other' }),
@@ -244,9 +244,17 @@ describe('trigger logic', () => {
     ]
     expect(deskTriggers(list, SESSION, NOW).map((tr) => tr.id)).toEqual([
       'trg_1a2b3c4d',
+      'other',
       'unfiled',
       'fresh',
     ])
+    expect(
+      deskTriggers(
+        [trigger({ id: 'od', status: 'stopped', sessionKey: 'agent:trading:webchat:other' })],
+        SESSION,
+        NOW,
+      ),
+    ).toEqual([])
     const finished = ['a', 'b', 'c'].map((id) => trigger({ id, status: 'expired' }))
     const { rows, more } = triggerRows([trigger(), ...finished])
     expect(rows.map((tr) => tr.id)).toEqual(['trg_1a2b3c4d', 'a', 'b'])
@@ -761,18 +769,15 @@ describe('useMissions · triggers', () => {
     return {}
   }
 
-  it('lists this desk’s triggers and every pending one, and leaves them armed on Start fresh', async () => {
+  it('lists every live trigger and every pending one, whichever chat filed them', async () => {
     rpcCall.mockImplementation(async (method: string, params: Record<string, unknown>) =>
       answer(method, params),
     )
     const { result } = renderHook(() => useMissions(SESSION), { wrapper })
     await waitFor(() => expect(result.current.triggers.length).toBeGreaterThan(0))
     expect(rpcCall).toHaveBeenCalledWith('trading.trigger.list', { all: true })
-    expect(result.current.triggers.map((tr) => tr.id)).toEqual(['trg_1a2b3c4d', 'trg_u'])
+    expect(result.current.triggers.map((tr) => tr.id)).toEqual(['trg_1a2b3c4d', 'trg_o', 'trg_u'])
     expect(result.current.awaitingTriggers.map((tr) => tr.id)).toEqual(['trg_99'])
-    await act(async () => {
-      await result.current.pauseAll()
-    })
     expect(rpcCall).not.toHaveBeenCalledWith('trading.trigger.pause', expect.anything())
   })
 

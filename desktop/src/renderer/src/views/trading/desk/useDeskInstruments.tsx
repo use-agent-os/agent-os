@@ -567,6 +567,8 @@ export function useDeskInstruments(
               })
             }
             onBracketStop={(b) => void missions.bracket.stop(b)}
+            sessionKey={sessionKey}
+            onOpenSession={(key) => void navigate(sessionPath(key))}
           />
         ) : null}
         <ComposerSeats

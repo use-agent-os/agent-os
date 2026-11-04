@@ -6,7 +6,9 @@ loopback (`127.0.0.1:18791`) by default, and the safest way to reach it from
 another machine is to keep it there and bring the connection to it.
 
 Use this page when you want the Web UI, the desktop app, the CLI or an MCP
-client on one machine to drive a gateway running on another.
+client on one machine to drive a gateway running on another. For a gateway in
+a container, follow [Run the gateway in a container](container-gateway.md): the
+steps start from the published image and differ in a few places.
 
 ## Pick a Path
 

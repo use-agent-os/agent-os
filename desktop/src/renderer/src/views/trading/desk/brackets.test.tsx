@@ -143,7 +143,7 @@ describe('bracket logic', () => {
     expect(isSteerableBracket(AWAITING)).toBe(false)
   })
 
-  it('lists this chat’s brackets and unfiled ones; finished ones for an hour only', () => {
+  it('lists every live bracket, and this chat’s finished ones for an hour only', () => {
     const list = [
       bracket(),
       bracket({ id: 'other', sessionKey: 'agent:trading:webchat:other' }),
@@ -153,9 +153,17 @@ describe('bracket logic', () => {
     ]
     expect(deskBrackets(list, SESSION, NOW).map((b) => b.id)).toEqual([
       'brk_1a2b3c4d',
+      'other',
       'unfiled',
       'fresh',
     ])
+    expect(
+      deskBrackets(
+        [bracket({ id: 'od', status: 'stopped', sessionKey: 'agent:trading:webchat:other' })],
+        SESSION,
+        NOW,
+      ),
+    ).toEqual([])
     const finished = ['a', 'b', 'c'].map((id) => bracket({ id, status: 'expired' }))
     const { rows, more } = bracketRows([bracket(), ...finished])
     expect(rows.map((b) => b.id)).toEqual(['brk_1a2b3c4d', 'a', 'b'])
@@ -597,18 +605,15 @@ describe('useMissions · brackets', () => {
     return {}
   }
 
-  it('lists this desk’s brackets and every pending one, and leaves them armed on Start fresh', async () => {
+  it('lists every live bracket and every pending one, whichever chat filed them', async () => {
     rpcCall.mockImplementation(async (method: string, params: Record<string, unknown>) =>
       answer(method, params),
     )
     const { result } = renderHook(() => useMissions(SESSION), { wrapper })
     await waitFor(() => expect(result.current.brackets.length).toBeGreaterThan(0))
     expect(rpcCall).toHaveBeenCalledWith('trading.bracket.list', { all: true })
-    expect(result.current.brackets.map((b) => b.id)).toEqual(['brk_1a2b3c4d', 'brk_u'])
+    expect(result.current.brackets.map((b) => b.id)).toEqual(['brk_1a2b3c4d', 'brk_o', 'brk_u'])
     expect(result.current.awaitingBrackets.map((b) => b.id)).toEqual(['brk_99'])
-    await act(async () => {
-      await result.current.pauseAll()
-    })
     expect(rpcCall).not.toHaveBeenCalledWith('trading.bracket.pause', expect.anything())
   })
 

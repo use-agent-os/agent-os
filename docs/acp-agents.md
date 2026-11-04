@@ -186,7 +186,7 @@ as the next turn, `steer` cancels the running turn and sends the new text.
 This works for a finished `oneshot` child too: the harness starts again
 with the recorded ACP session (`session/load`) and closes after the turn.
 If the harness cannot resume it, a fresh harness session starts in the
-same `cwd` and the turn's text begins with "Started a new <harness>
+same `cwd` and the turn's text begins with "Started a new `<harness>`
 session; the previous context could not be resumed." The user can also
 type into the child session directly; those turns are not announced to the
 parent. Only a session closed by an operator (`acp.close`, `agentos acp

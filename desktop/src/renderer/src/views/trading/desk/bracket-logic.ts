@@ -235,13 +235,17 @@ export function bracketFireKey(b: Pick<Bracket, 'kind'>): MessageKey {
 }
 
 /**
- * The brackets a desk lists beside its missions: filed to this session, or
- * unfiled (the operator's, every desk's). Live ones always, in the engine's
- * order; then every finished one for an hour after it ended, newest first.
+ * The brackets a desk lists beside its missions. Every live one, in the
+ * engine's order, whichever chat filed it (the row says where); then the
+ * finished ones for an hour after they ended, newest first — this session's
+ * and the unfiled ones (the operator's, every desk's).
  */
 export function deskBrackets(all: readonly Bracket[], sessionKey: string, now: number): Bracket[] {
   const mine = all.filter((b) => !b.sessionKey || b.sessionKey === sessionKey)
-  const live = mine.filter((b) => LIVE.has(b.status))
+  // Another chat's proposal is decided on its card; only what runs is listed here.
+  const live = all.filter(
+    (b) => LIVE.has(b.status) && (mine.includes(b) || b.status !== 'awaiting_approval'),
+  )
   const finished = mine
     .filter((b) => {
       if (!TERMINAL.has(b.status)) return false

@@ -328,7 +328,7 @@ describe('useDeskInstruments · a multisend card is the whole batch', () => {
 
 describe('useDeskFrame · start fresh', () => {
   const job = { id: 'j1', name: 'DCA ETH', enabled: true, targetSessionKey: SESSION }
-  it('pauses the running missions of the old session before minting a new one', async () => {
+  it('mints a new session and leaves the old session’s missions running', async () => {
     const focusBefore = useUi.getState().composerFocusRequest
     rpcCall.mockImplementation(
       answers({
@@ -343,41 +343,21 @@ describe('useDeskFrame · start fresh', () => {
       await Promise.resolve()
     })
     await waitFor(() => expect(startFresh).toHaveBeenCalledTimes(1))
-    const updates = rpcCall.mock.calls.filter((c) => c[0] === 'cron.update').map((c) => c[1])
-    expect(updates).toEqual([{ id: 'j1', enabled: false }])
+    // The engine runs a mission whatever chat is open: nothing is paused
+    // behind the user's back (a DCA paused this way stayed paused for good).
+    expect(rpcCall.mock.calls.some((c) => c[0] === 'cron.update')).toBe(false)
+    expect(rpcCall.mock.calls.some((c) => c[0] === 'trading.dca.pause')).toBe(false)
     // Issue #3524: the chat stays mounted across the new key, so the fresh
     // session asks it for the composer.
     expect(useUi.getState().composerFocusRequest).toBe(focusBefore + 1)
   })
-
-  it('stays put when a mission cannot be paused', async () => {
-    const focusBefore = useUi.getState().composerFocusRequest
-    rpcCall.mockImplementation(
-      answers({
-        'cron.list': () => ({ jobs: [job] }),
-        'cron.update': () => {
-          throw new Error('scheduler down')
-        },
-      }),
-    )
-    renderDesk(<Harness active />)
-    await screen.findByTestId('approval-card')
-    await waitFor(() => expect(rpcCall.mock.calls.some((c) => c[0] === 'cron.list')).toBe(true))
-    await act(async () => {
-      fireEvent.click(screen.getByTestId('start-fresh'))
-      await new Promise((r) => setTimeout(r, 20))
-    })
-    expect(rpcCall.mock.calls.some((c) => c[0] === 'cron.update')).toBe(true)
-    expect(startFresh).not.toHaveBeenCalled()
-    expect(useUi.getState().composerFocusRequest).toBe(focusBefore)
-  })
 })
 
 // Issue #3519: the shell's ⌘N reaches the desk's "Start fresh" through the
-// trading UI store, so it takes the same mission pause as the pen button.
+// trading UI store, so it stays at the desk like the pen button does.
 describe('useDeskFrame · start fresh from the shell', () => {
   const job = { id: 'j1', name: 'DCA ETH', enabled: true, targetSessionKey: SESSION }
-  it('publishes start fresh while the desk is up, and pauses missions first', async () => {
+  it('publishes start fresh while the desk is up, and pauses nothing', async () => {
     rpcCall.mockImplementation(answers({ 'cron.list': () => ({ jobs: [job] }) }))
     const view = renderDesk(<Harness active />)
     await screen.findByTestId('approval-card')
@@ -390,8 +370,7 @@ describe('useDeskFrame · start fresh from the shell', () => {
       await Promise.resolve()
     })
     await waitFor(() => expect(startFresh).toHaveBeenCalledTimes(1))
-    const updates = rpcCall.mock.calls.filter((c) => c[0] === 'cron.update').map((c) => c[1])
-    expect(updates).toEqual([{ id: 'j1', enabled: false }])
+    expect(rpcCall.mock.calls.some((c) => c[0] === 'cron.update')).toBe(false)
 
     view.unmount()
     expect(useTradingUi.getState().startFreshDesk).toBeNull()

@@ -1227,6 +1227,20 @@ export function isSessionMission(job: RawJob, sessionKey: string): boolean {
   return Boolean(sessionKey) && jobSessionKey(job) === sessionKey
 }
 
+/**
+ * Whether a desk lists the job: every mission of this session, and the
+ * enabled missions of every other trading chat — a mission that keeps
+ * trading after its chat was left must stay in view, with its chat named.
+ * A mission is a trading chat's when the trading agent runs it; a job of
+ * another agent's, or one with no chat to post into, is the Jobs panel's.
+ */
+export function isDeskMission(job: RawJob, sessionKey: string): boolean {
+  if (isSessionMission(job, sessionKey)) return true
+  if (job.enabled === false) return false
+  const target = jobSessionKey(job)
+  return Boolean(target) && target.startsWith(`agent:${TRADING_AGENT_ID}:`)
+}
+
 export type MissionState = 'running' | 'awaiting' | 'sleeping' | 'paused' | 'failed' | 'done'
 
 export interface MissionStatus {

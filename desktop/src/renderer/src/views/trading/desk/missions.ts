@@ -21,6 +21,7 @@ import { errorText } from '../logic'
 import type { Bracket, Mandate, Trigger } from '../types'
 import { deskBrackets } from './bracket-logic'
 import {
+  isDeskMission,
   isSessionMission,
   jobText,
   missionCronPayload,
@@ -103,27 +104,20 @@ export interface MissionsApi {
   setEnabled: (job: RawJob, enabled: boolean) => void
   runNow: (job: RawJob) => void
   remove: (job: RawJob) => void
-  /**
-   * Pause every mission of this session that is still enabled, and every
-   * active DCA mandate filed to it. True when they are all paused (or there
-   * were none); false when one refused (toasted) — the caller must not walk
-   * away from a mission still running.
-   */
-  pauseAll: () => Promise<boolean>
   busy: boolean
-  /** This desk's DCA mandates: filed to the session or unfiled; live, or finished within the hour. */
+  /** The DCA mandates listed here: every live one, and this desk's finished within the hour. */
   mandates: Mandate[]
   /** Every mandate awaiting the operator's approval, whichever chat proposed it. */
   awaitingMandates: Mandate[]
   /** The mandate controls (approve, pause, buy now, update …), toasting their own outcome. */
   mandate: MandateActions
-  /** This desk's price triggers: filed to the session or unfiled; live, or finished within the hour. */
+  /** The price triggers listed here: every live one, and this desk's finished within the hour. */
   triggers: Trigger[]
   /** Every trigger awaiting the operator's approval, whichever chat proposed it. */
   awaitingTriggers: Trigger[]
   /** The trigger controls (approve, pause, fire now, stop …), toasting their own outcome. */
   trigger: TriggerActions
-  /** This desk's brackets: filed to the session or unfiled; live, or finished within the hour. */
+  /** The brackets listed here: every live one, and this desk's finished within the hour. */
   brackets: Bracket[]
   /** Every bracket awaiting the operator's approval, whichever chat proposed it. */
   awaitingBrackets: Bracket[]
@@ -149,9 +143,17 @@ export function useMissions(sessionKey: string, enabled = true): MissionsApi {
     refetchOnWindowFocus: true,
   })
 
+  // Listed: this session's missions, and the enabled ones of every other
+  // trading chat — the scheduler keeps running a mission after its chat is
+  // left, and a desk that hid it would leave it trading unseen. Only this
+  // session's are settled below: another desk's mission is its own to stop.
   const missions = useMemo(
-    () => (query.data ?? []).filter((job) => isSessionMission(job, sessionKey)),
+    () => (query.data ?? []).filter((job) => isDeskMission(job, sessionKey)),
     [query.data, sessionKey],
+  )
+  const ownMissions = useMemo(
+    () => missions.filter((job) => isSessionMission(job, sessionKey)),
+    [missions, sessionKey],
   )
 
   // Every mandate, so a DCA that just finished (completed, stopped, rejected
@@ -279,7 +281,7 @@ export function useMissions(sessionKey: string, enabled = true): MissionsApi {
   useEffect(() => {
     if (!enabled || !connected) return
     let cancelled = false
-    for (const job of missions) {
+    for (const job of ownMissions) {
       const id = job.id
       if (!id || job.enabled === false || running.has(id)) continue
       // "After N runs" and "after <date>" are prose to the agent; the desk
@@ -305,7 +307,7 @@ export function useMissions(sessionKey: string, enabled = true): MissionsApi {
     return () => {
       cancelled = true
     }
-  }, [missions, running, rpc, enabled, connected, stopCompleted])
+  }, [ownMissions, running, rpc, enabled, connected, stopCompleted])
 
   const create = useMutation({
     mutationFn: async ({ form, prompt }: { form: MissionForm; prompt: string }) => {
@@ -407,39 +409,6 @@ export function useMissions(sessionKey: string, enabled = true): MissionsApi {
         onSuccess: () => toast.success(t('trading.mission.removed'), { id: `mission-${job.id}` }),
         onError: (err) => fail(t('trading.mission.failed'), err),
       })
-    },
-    pauseAll: async () => {
-      const active = missions.filter((job) => job.id && job.enabled !== false)
-      // Only the mandates filed to this session: an unfiled one is the
-      // operator's and stays on screen at the fresh desk too.
-      // Price triggers and brackets are left armed: a stop-loss guards the
-      // wallet, not this chat, and pausing one silently would be the
-      // dangerous default.
-      const running = mandates.filter((m) => m.status === 'active' && m.sessionKey === sessionKey)
-      if (active.length === 0 && running.length === 0) return true
-      try {
-        await Promise.all([
-          ...active.map((job) =>
-            update.mutateAsync({ id: job.id as string, patch: { enabled: false } }),
-          ),
-          ...running.map((m) =>
-            rpc.call('trading.dca.pause', { mandateId: m.id }).then(() => undefined),
-          ),
-        ])
-      } catch (err) {
-        fail(t('trading.mission.failed'), err)
-        return false
-      } finally {
-        if (running.length) void queryClient.invalidateQueries({ queryKey: ['trading', 'dca'] })
-      }
-      toast.success(
-        `${t('trading.mission.pausedForFresh')}: ${[
-          ...active.map((job) => job.name || job.id),
-          ...running.map((m) => m.name),
-        ].join(', ')}`,
-        { id: 'mission-pause-all' },
-      )
-      return true
     },
   }
 }

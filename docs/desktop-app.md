@@ -59,7 +59,8 @@ the app will present, which is the gateway's own: declare it there with
 `agentos config set gateway.public_origin https://agent.example.com --config
 ~/.agentos/config.toml` and restart it. The recipes, and the `agentos
 doctor` checks to run before exposing anything, are in
-[Remote access](remote-access.md).
+[Remote access](remote-access.md). For a full walkthrough from the published
+image, see [Run the gateway in a container](container-gateway.md).
 
 In external mode the app only reports the gateway's state: the light in the
 sidebar footer, the Process row in Settings › Gateway and the menu bar

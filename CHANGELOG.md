@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Docs: [Run the gateway in a container](docs/container-gateway.md), a walkthrough
+  from the published image to the desktop app connected as an external gateway,
+  over an SSH tunnel, Tailscale Serve, an HTTPS reverse proxy or a LAN port, with
+  upgrades, backups and what the image leaves out.
+
 ### Fixed
 - Cron jobs no longer lose their channel delivery when the job is saved. The
   Jobs form and `agentos cron add --channel` / `--failure-channel` lowercased
@@ -15,6 +21,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   name that differs only by case, so jobs already stored that way work again
   without being edited. The recipient picker in the Jobs form now lists the
   chats of a channel whose name has capitals.
+- `compose.yaml` no longer sends the gateway into a restart loop. It bound
+  `0.0.0.0` with no auth, which the gateway refuses (exit 78), so
+  `docker compose up -d` never served. It now turns token auth on and requires
+  `AGENTOS_AUTH_TOKEN`; set it in `.env` next to the Compose file
+  (`openssl rand -hex 32`). The README, the setup guide and the Docker
+  troubleshooting notes are updated to match.
+- Desktop Trading page: starting a new session (⌘N, `/new`, the pen button)
+  no longer pauses the DCA mandates and scheduled missions of the chat being
+  left, and no longer hides what the old chat set up. A DCA paused this way
+  stayed paused and out of sight, so it looked like the order was lost. The
+  engine runs mandates, triggers, brackets and missions regardless of which
+  chat is open, so the desk now lists every live one — the rows filed by
+  another trading chat carry an **other chat** chip that opens that chat —
+  while finished items still show only in the chat that filed them.
 
 ## [2026.11.3.post2] - 2026-11-03
 
