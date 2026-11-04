@@ -211,15 +211,21 @@ export const FINISHED_VISIBLE_MS = 3_600_000
 export const FINISHED_ROWS = 2
 
 /**
- * The mandates a desk lists beside its cron missions: the ones filed to this
- * session, plus the unfiled ones (created from the CLI, which belong to the
- * operator and so to every desk). Live ones always, in the engine's order;
- * then every finished one — completed, stopped, rejected or expired alike —
- * for an hour after it ended, newest first.
+ * The mandates a desk lists beside its cron missions. Every live one, in the
+ * engine's order, whichever chat filed it: the engine runs a mandate on its
+ * own, so a desk that hid the ones filed elsewhere would leave money moving
+ * unseen (the row says where it is filed). Then the finished ones —
+ * completed, stopped, rejected or expired alike — for an hour after they
+ * ended, newest first, but only this session's and the unfiled ones (the
+ * CLI's, which belong to the operator and so to every desk).
  */
 export function deskMandates(all: readonly Mandate[], sessionKey: string, now: number): Mandate[] {
   const mine = all.filter((m) => !m.sessionKey || m.sessionKey === sessionKey)
-  const live = mine.filter((m) => LIVE.has(m.status))
+  // A proposal from another chat is decided on its card in the approvals
+  // region (every pending one is listed there); only what runs is listed here.
+  const live = all.filter(
+    (m) => LIVE.has(m.status) && (mine.includes(m) || m.status !== 'awaiting_approval'),
+  )
   const finished = mine
     .filter((m) => {
       if (!TERMINAL.has(m.status)) return false

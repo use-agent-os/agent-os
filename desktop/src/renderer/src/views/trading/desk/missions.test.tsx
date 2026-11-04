@@ -186,44 +186,44 @@ describe('mission stop rules are enforced by the desk', () => {
   })
 })
 
-describe('pauseAll', () => {
+describe('missions of other trading chats', () => {
   beforeEach(() => {
     useConnection.getState().setState('connected')
     rpcCall.mockReset()
   })
 
-  it('pauses every enabled mission of the session and reports success', async () => {
+  it('lists another trading chat’s enabled mission, not its disabled one nor another agent’s', async () => {
     rpcCall.mockImplementation(async (method: string) => {
       if (method === 'cron.list')
         return [
           job({ id: 'a', last_run: null }),
           job({ id: 'b', last_run: null, enabled: false }),
-          job({ id: 'c', last_run: null, targetSessionKey: 'agent:other' }),
+          job({ id: 'c', last_run: null, targetSessionKey: 'agent:trading:webchat:trading-x' }),
+          job({
+            id: 'd',
+            last_run: null,
+            enabled: false,
+            targetSessionKey: 'agent:trading:webchat:trading-x',
+          }),
+          job({ id: 'e', last_run: null, targetSessionKey: 'agent:main:webchat:other' }),
         ]
       return {}
     })
     const { result } = renderHook(() => useMissions(SESSION), { wrapper })
     await settle()
-    let ok = false
-    await act(async () => {
-      ok = await result.current.pauseAll()
-    })
-    expect(ok).toBe(true)
-    expect(updates()).toEqual([{ id: 'a', enabled: false }])
+    expect(result.current.missions.map((j) => j.id)).toEqual(['a', 'b', 'c'])
   })
 
-  it('reports failure when the scheduler refuses', async () => {
+  it('settles only this chat’s missions against their last run', async () => {
     rpcCall.mockImplementation(async (method: string) => {
-      if (method === 'cron.list') return [job({ last_run: null })]
-      if (method === 'cron.update') throw new Error('nope')
+      if (method === 'cron.list')
+        return [job({ id: 'c', targetSessionKey: 'agent:trading:webchat:trading-x' })]
+      if (method === 'cron.runs') return [{ id: 'r1', summary: `done ${MISSION_COMPLETE_MARKER}` }]
       return {}
     })
-    const { result } = renderHook(() => useMissions(SESSION), { wrapper })
+    renderHook(() => useMissions(SESSION), { wrapper })
     await settle()
-    let ok = true
-    await act(async () => {
-      ok = await result.current.pauseAll()
-    })
-    expect(ok).toBe(false)
+    expect(methods()).not.toContain('cron.runs')
+    expect(updates()).toEqual([])
   })
 })
