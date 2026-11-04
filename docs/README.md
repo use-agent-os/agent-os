@@ -68,6 +68,8 @@ root release README with task-oriented guides.
   external apps and automation.
 - [`remote-access.md`](remote-access.md) - reach a gateway from another
   machine: SSH tunnel, Tailscale Serve, reverse proxy, token rotation.
+- [`container-gateway.md`](container-gateway.md) - run the gateway in a
+  container on a server and connect the desktop app as an external gateway.
 - [`mcp-server.md`](mcp-server.md) - MCP server bridge for MCP-capable clients.
 - [`usage-and-cost.md`](usage-and-cost.md) - token usage, estimated cost, and
   cost investigation workflow.

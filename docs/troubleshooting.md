@@ -298,9 +298,16 @@ must bind `0.0.0.0` (`--listen 0.0.0.0` or `AGENTOS_LISTEN=0.0.0.0`) so the
 port mapping reaches the gateway. Binding `127.0.0.1` inside the container is
 valid, but the process is then unreachable from the host.
 
+- A wildcard bind needs enforced auth: without it the gateway logs
+  `Refusing to serve: auth.mode='none'`, exits `78`, and a restart policy loops
+  it. The shipped `compose.yaml` requires `AGENTOS_AUTH_TOKEN` for this reason.
 - ONNX Runtime and Pilot Router may need extra system packages depending on
   the base image. The repo Dockerfile handles this; a custom image may not.
-- Mount `~/.agentos` if config and sessions should persist across restarts.
+- State lives under `AGENTOS_STATE_DIR`, `/var/lib/agentos` in the shipped image.
+  Mount a volume there if config and sessions should persist across restarts.
+
+More symptoms and fixes are in
+[Run the gateway in a container](container-gateway.md#troubleshooting).
 
 ## Still Stuck?
 

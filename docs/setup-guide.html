@@ -355,16 +355,19 @@ bash scripts/install_source.sh
 
         <!-- docker -->
         <div data-panel="docker" class="hidden p-6">
-          <p class="mb-4 text-[14px] text-[var(--text-dim)]">Build the image yourself, then bring the stack up with the helper script.</p>
+          <p class="mb-4 text-[14px] text-[var(--text-dim)]">Point Compose at the published image, set the gateway token it requires, then bring the stack up with the helper script.</p>
           <div data-code>
-<pre data-lang="bash">docker build -t agentos:local .
+<pre data-lang="bash">cat &gt; .env &lt;&lt;EOF
+AGENTOS_GATEWAY_IMAGE=ghcr.io/use-agent-os/agent-os:latest
+AGENTOS_AUTH_TOKEN=$(openssl rand -hex 32)
+EOF
 
 # macOS / Linux
 ./start.sh
 # Windows
 # ./start.ps1   →  runs: docker compose up -d</pre>
           </div>
-          <p class="mt-4 text-[13px] text-[var(--text-faint)]">There is no published image yet; you build <span class="mono">agentos:local</span> from the included Dockerfile.</p>
+          <p class="mt-4 text-[13px] text-[var(--text-faint)]">Leave out <span class="mono">AGENTOS_GATEWAY_IMAGE</span> to use an <span class="mono">agentos:local</span> image built from the included Dockerfile. See <a href="https://github.com/use-agent-os/agent-os/blob/main/docs/container-gateway.md" class="underline">Run the gateway in a container</a> for providers, remote access and the desktop app.</p>
         </div>
       </div>
     </section>
