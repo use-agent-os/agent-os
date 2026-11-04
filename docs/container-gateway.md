@@ -396,7 +396,7 @@ docker build -t agentos-custom:local .
 
 You can also build the base image from a source checkout with
 `docker build -t agentos:local .`, after `git lfs pull` fetches the model files.
-See [Install from source](../README.md#install-from-source).
+See [Install from source](https://github.com/use-agent-os/agent-os#install-from-source).
 
 ## Troubleshooting
 
