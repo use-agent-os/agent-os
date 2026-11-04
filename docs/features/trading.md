@@ -174,6 +174,37 @@ URL. `aggregator_base_url` must be `https`; `http` is accepted only for
 Get a key from the Uniswap developer dashboard; the desktop's **Settings →
 Trading** pane has a *Test key* button (`trading.probe`).
 
+### Authenticated RPC providers
+
+For a provider that requires a header, configure its RPC URL and the name of
+an environment variable available to the gateway process. Keep the credential
+out of TOML and command-line arguments:
+
+```toml
+[trading.rpc_urls]
+"4663" = "https://rpc-provider.example/robinhood"
+
+[trading.rpc_header_env."4663"]
+"x-api-key" = "ROBINHOOD_RPC_KEY"
+```
+
+`rpc_header_env` accepts chain IDs or keys (`base`, `robinhood`), just like
+`rpc_urls`; an ID takes precedence. Each configured header requires an explicit,
+non-empty `rpc_urls` override for that chain, so it cannot silently attach a
+credential to a public fallback. The URL must use HTTPS (loopback HTTP is
+allowed for local development). Header values are read from the gateway's
+environment before each request, never stored in configuration. A missing,
+blank, or invalid value stops the request. Changing the environment of an
+already-running gateway requires restarting it with the new environment.
+
+Headers are attached only to that chain's RPC calls, including batches, without
+modifying the shared HTTP client's defaults. They are not added to the other
+chain, price feeds, swap providers, or bridge requests. RPC redirects are
+refused, even if a shared HTTP client otherwise follows redirects. Protocol and
+hop-by-hop headers such as `Host`, `Content-Length`, and `User-Agent` cannot be
+overridden. Provider error messages redact the configured credential values;
+public configuration views contain references rather than resolved values.
+
 ## Security model
 
 - Keystores are standard Ethereum **keystore v3** JSON files under

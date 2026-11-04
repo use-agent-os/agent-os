@@ -446,13 +446,24 @@ class TradingService:
             if self._evm_factory is not None:
                 client = self._evm_factory(chain)
             else:
-                url = rpc_url_for(chain, dict(getattr(self.config, "rpc_urls", {}) or {}))
+                overrides = dict(getattr(self.config, "rpc_urls", {}) or {})
+                references = dict(getattr(self.config, "rpc_header_env", {}) or {})
+                header_env = references.get(str(chain.chain_id), references.get(chain.key, {}))
+                explicit_url = (overrides.get(str(chain.chain_id)) or "").strip() or (
+                    overrides.get(chain.key) or ""
+                ).strip()
+                if header_env and not explicit_url:
+                    raise EvmTransportError(
+                        "RPC authentication requires a trading.rpc_urls override"
+                    )
+                url = rpc_url_for(chain, overrides)
                 client = EvmClient(
                     url,
                     http=self._http,
                     max_log_span=chain.max_log_span,
                     max_priority_fee_wei=chain.max_priority_fee_wei,
                     max_fee_per_gas_wei=chain.max_fee_per_gas_wei,
+                    header_env=header_env,
                 )
             self._evm[chain.chain_id] = client
         return client

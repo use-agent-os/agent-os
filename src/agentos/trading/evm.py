@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,6 +21,12 @@ import structlog
 
 from agentos import __version__
 from agentos.trading.chains import redact_rpc_url
+from agentos.trading.rpc_auth import (
+    redact_rpc_errors,
+    redact_text,
+    resolve_header_env,
+    validate_header_env,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -229,7 +235,19 @@ class EvmClient:
         max_log_span: int = 2000,
         max_priority_fee_wei: int = 2 * 10**9,
         max_fee_per_gas_wei: int = 50 * 10**9,
+        header_env: Mapping[str, str] | None = None,
     ) -> None:
+        self._header_env = validate_header_env(header_env or {})
+        if self._header_env:
+            try:
+                parsed = httpx.URL(url)
+                safe_transport = parsed.scheme == "https" or (
+                    parsed.scheme == "http" and parsed.host in {"127.0.0.1", "localhost", "::1"}
+                )
+            except httpx.InvalidURL:
+                safe_transport = False
+            if not safe_transport:
+                raise EvmTransportError("Authenticated RPC must use https (or loopback http)")
         self.url = url
         # Provider keys live in the path (dRPC, Alchemy): errors show only the host.
         self.display_url = redact_rpc_url(url)
@@ -248,33 +266,49 @@ class EvmClient:
             await self._http.aclose()
 
     def _headers(self) -> dict[str, str]:
+        try:
+            auth_headers = resolve_header_env(self._header_env)
+        except ValueError as exc:
+            raise EvmTransportError(str(exc)) from None
         return {
             "content-type": "application/json",
             "accept": "application/json",
             "user-agent": USER_AGENT,
+            **auth_headers,
         }
 
     async def _post(self, payload: Any) -> Any:
+        headers = self._headers()
+        credentials = [headers[name] for name in self._header_env]
         try:
             response = await self._http.post(
-                self.url, json=payload, headers=self._headers(), timeout=self._timeout
+                self.url,
+                json=payload,
+                headers=headers,
+                timeout=self._timeout,
+                follow_redirects=False,
             )
         except httpx.HTTPError as exc:
-            raise EvmTransportError(f"{self.display_url}: {exc}") from exc
+            detail = redact_text(str(exc), credentials)
+            raise EvmTransportError(f"{self.display_url}: {detail}") from None
+        if 300 <= response.status_code < 400:
+            raise EvmTransportError(
+                f"{self.display_url}: HTTP {response.status_code}; RPC redirects refused"
+            )
         if response.status_code >= 400:
             detail = ""
             try:
                 body = response.json()
                 err = body.get("error") if isinstance(body, dict) else None
                 if isinstance(err, dict) and err.get("message"):
-                    detail = f" ({str(err['message'])[:160]})"
+                    detail = f" ({redact_text(str(err['message']), credentials)[:160]})"
             except ValueError:
                 pass
             raise EvmTransportError(f"{self.display_url}: HTTP {response.status_code}{detail}")
         try:
-            return response.json()
-        except ValueError as exc:
-            raise EvmTransportError(f"{self.display_url}: invalid JSON response") from exc
+            return redact_rpc_errors(response.json(), credentials)
+        except ValueError:
+            raise EvmTransportError(f"{self.display_url}: invalid JSON response") from None
 
     @staticmethod
     def _unwrap(item: Any) -> Any:

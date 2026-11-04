@@ -1543,6 +1543,9 @@ every error is `{"error": …}` on stderr and writes no card.
 `uniswap`), `aggregator_base_url` (default
 `https://agg.useagentos.dev`), `uniswap_api_key`, `uniswap_api_key_env`
 (default `UNISWAP_API_KEY`), `rpc_urls` (chain id → JSON-RPC URL),
+`rpc_header_env` (chain id/key → header name → gateway environment variable name;
+requires an explicit RPC URL, never stores the resolved credential; see
+[authenticated RPC configuration](features/trading.md#authenticated-rpc-providers)),
 `approval_threshold_usd`, `daily_cap_usd` (0 = agent swaps off),
 `approval_ttl_seconds`, `agent_max_price_impact_pct`,
 `agent_max_slippage_pct`, `default_slippage_pct` (unset = provider auto),

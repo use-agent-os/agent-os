@@ -2494,6 +2494,8 @@ class TradingConfig(BaseSettings):
     # When a chain has no entry, RPC_BASE_URL / RPC_ROBINHOOD_URL are tried
     # before the public default.
     rpc_urls: dict[str, str] = Field(default_factory=dict)
+    # Chain id/key -> header name -> environment variable name, not its value.
+    rpc_header_env: dict[str, dict[str, str]] = Field(default_factory=dict)
     approval_threshold_usd: float = Field(default=100.0, ge=0)
     # 0 switches agent swaps off entirely; there is no "unlimited" value.
     daily_cap_usd: float = Field(default=1000.0, ge=0)
@@ -2507,6 +2509,13 @@ class TradingConfig(BaseSettings):
     unlock_mode: Literal["auto", "manual"] = "auto"
     sync_interval_seconds: int = Field(default=30, ge=5)
     price_ttl_seconds: int = Field(default=20, ge=1)
+
+    @field_validator("rpc_header_env")
+    @classmethod
+    def _rpc_header_env_names(cls, value: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
+        from agentos.trading.rpc_auth import validate_header_env
+
+        return {chain: validate_header_env(headers) for chain, headers in value.items()}
 
     @field_validator("aggregator_base_url")
     @classmethod

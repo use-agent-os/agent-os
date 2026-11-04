@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Trading RPC providers can authenticate with per-chain headers resolved from
+  environment variables (`trading.rpc_header_env`). Credentials stay off the
+  shared HTTP client, RPC redirects are refused, and missing values stop the
+  request. Public RPC defaults and transaction approval rules are unchanged.
 - Desktop Trading page: an **Auto** tab in the BOOK panel lists every
   automation in one place — scheduled missions, DCA mandates, price
   triggers and brackets — grouped by what you have to do about them
