@@ -1,4 +1,4 @@
-import { OctagonX, Pause, Pencil, Play, Trash2, Zap } from 'lucide-react'
+import { ExternalLink, OctagonX, Pause, Pencil, Play, Trash2, Zap } from 'lucide-react'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { RawJob } from '@/views/cron/logic'
 import { Button } from '~/components/ui/button'
@@ -13,7 +13,7 @@ import {
   bracketWord,
   isSteerableBracket,
 } from './bracket-logic'
-import { missionStatus, type MissionState } from './desk-logic'
+import { jobSessionKey, missionStatus, type MissionState } from './desk-logic'
 import {
   mandateBuysText,
   mandateMissesText,
@@ -237,6 +237,8 @@ export function MissionControls({
   onBracketResume,
   onBracketFire,
   onBracketStop,
+  sessionKey = '',
+  onOpenSession,
 }: {
   missions: RawJob[]
   running: ReadonlySet<string>
@@ -281,7 +283,15 @@ export function MissionControls({
   onBracketResume?: (b: Bracket) => void
   onBracketFire?: (b: Bracket) => void
   onBracketStop?: (b: Bracket) => void
+  /** This desk's chat: a row filed by another chat says so, and opens it. */
+  sessionKey?: string
+  onOpenSession?: (sessionKey: string) => void
 }) {
+  // The chat a row was filed by, when it is not this one; null when it is,
+  // when the row is unfiled (the operator's and so every desk's), or when
+  // the list has no chat of its own to compare against.
+  const elsewhere = (filed: string | null | undefined): string | null =>
+    sessionKey && filed && filed !== sessionKey ? filed : null
   const now = useMandateClock(mandates)
   const [showAll, setShowAll] = useState(false)
   const { rows, more } = mandateRows(mandates, showAll)
@@ -306,6 +316,7 @@ export function MissionControls({
             <span className="trd-mctl__name" title={job.name}>
               {job.name}
             </span>
+            <Elsewhere sessionKey={elsewhere(jobSessionKey(job))} onOpen={onOpenSession} />
             {enabled ? (
               <Button
                 variant="ghost"
@@ -378,6 +389,8 @@ export function MissionControls({
           onRun={onMandateRun}
           onEdit={onMandateEdit}
           onStop={onMandateStop}
+          elsewhere={elsewhere(m.sessionKey)}
+          onOpenSession={onOpenSession}
         />
       ))}
       {more > 0 ? (
@@ -392,6 +405,8 @@ export function MissionControls({
           onResume={onBracketResume}
           onFire={onBracketFire}
           onStop={onBracketStop}
+          elsewhere={elsewhere(b.sessionKey)}
+          onOpenSession={onOpenSession}
         />
       ))}
       {bracketList.more > 0 ? (
@@ -411,6 +426,8 @@ export function MissionControls({
           onResume={onTriggerResume}
           onFire={onTriggerFire}
           onStop={onTriggerStop}
+          elsewhere={elsewhere(tr.sessionKey)}
+          onOpenSession={onOpenSession}
         />
       ))}
       {triggerList.more > 0 ? (
@@ -433,6 +450,35 @@ export function MissionControls({
         </button>
       ) : null}
     </div>
+  )
+}
+
+/**
+ * The chip on a row another trading chat filed: the engine runs it whatever
+ * chat is open, so the desk lists it rather than let it trade unseen, and
+ * the chip opens the chat that can tell its story. Nothing for a row of
+ * this chat's, or an unfiled one.
+ */
+function Elsewhere({
+  sessionKey,
+  onOpen,
+}: {
+  sessionKey: string | null
+  onOpen?: (sessionKey: string) => void
+}) {
+  if (!sessionKey) return null
+  return (
+    <button
+      type="button"
+      className="trd-mctl__elsewhere app-no-drag"
+      title={t('trading.mission.elsewhereTitle')}
+      onClick={() => onOpen?.(sessionKey)}
+      data-testid="mission-elsewhere"
+      data-session={sessionKey}
+    >
+      <ExternalLink className="size-3" strokeWidth={1.75} aria-hidden />
+      {t('trading.mission.elsewhere')}
+    </button>
   )
 }
 
@@ -480,6 +526,8 @@ function MandateRow({
   onRun,
   onEdit,
   onStop,
+  elsewhere = null,
+  onOpenSession,
 }: {
   mandate: Mandate
   now: number
@@ -489,6 +537,8 @@ function MandateRow({
   onRun?: (m: Mandate) => void
   onEdit?: (m: Mandate) => void
   onStop?: (m: Mandate) => void
+  elsewhere?: string | null
+  onOpenSession?: (sessionKey: string) => void
 }) {
   const [armed, setArmed] = useState(false)
   useEffect(() => {
@@ -515,6 +565,7 @@ function MandateRow({
       <span className="trd-mctl__name" title={reason ? `${m.name} · ${reason}` : m.name}>
         {m.name}
       </span>
+      <Elsewhere sessionKey={elsewhere} onOpen={onOpenSession} />
       <span className="trd-mctl__word" data-testid="mandate-word">
         {mandateWord(m, now)}
       </span>
@@ -654,6 +705,8 @@ function TriggerRow({
   onResume,
   onFire,
   onStop,
+  elsewhere = null,
+  onOpenSession,
 }: {
   trigger: Trigger
   busy: boolean
@@ -661,6 +714,8 @@ function TriggerRow({
   onResume?: (tr: Trigger) => void
   onFire?: (tr: Trigger) => void
   onStop?: (tr: Trigger) => void
+  elsewhere?: string | null
+  onOpenSession?: (sessionKey: string) => void
 }) {
   const settle = `${tr.status}:${busy}`
   const [stopArmed, setStopArmed] = useArm(settle)
@@ -688,6 +743,7 @@ function TriggerRow({
       <span className="trd-mctl__name" title={reason ? `${tr.name} · ${reason}` : tr.name}>
         {tr.name}
       </span>
+      <Elsewhere sessionKey={elsewhere} onOpen={onOpenSession} />
       {/* Ellipsized in a narrow column: the whole word on hover. */}
       <span className="trd-mctl__word" data-testid="trigger-word" title={word}>
         {word}
@@ -819,6 +875,8 @@ function BracketRow({
   onResume,
   onFire,
   onStop,
+  elsewhere = null,
+  onOpenSession,
 }: {
   bracket: Bracket
   busy: boolean
@@ -826,6 +884,8 @@ function BracketRow({
   onResume?: (b: Bracket) => void
   onFire?: (b: Bracket) => void
   onStop?: (b: Bracket) => void
+  elsewhere?: string | null
+  onOpenSession?: (sessionKey: string) => void
 }) {
   const settle = `${b.status}:${busy}`
   const [stopArmed, setStopArmed] = useArm(settle)
@@ -852,6 +912,7 @@ function BracketRow({
       <span className="trd-mctl__name" title={reason ? `${b.name} · ${reason}` : b.name}>
         {b.name}
       </span>
+      <Elsewhere sessionKey={elsewhere} onOpen={onOpenSession} />
       <span className="trd-mctl__word" data-testid="bracket-word" title={word}>
         {word}
       </span>

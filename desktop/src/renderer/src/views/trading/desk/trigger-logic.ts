@@ -301,14 +301,19 @@ export function triggerReason(tr: Pick<Trigger, 'statusReason'>): string | null 
 }
 
 /**
- * The triggers a desk lists beside its missions: the ones filed to this
- * session, plus the unfiled ones (created from the CLI, the operator's and
- * so every desk's). Live ones always, in the engine's order; then every
- * finished one for an hour after it ended, newest first.
+ * The triggers a desk lists beside its missions. Every live one, in the
+ * engine's order, whichever chat filed it (a stop-loss guards the wallet,
+ * not a chat; the row says where it is filed); then the finished ones for
+ * an hour after they ended, newest first — this session's and the unfiled
+ * ones (the CLI's, the operator's and so every desk's).
  */
 export function deskTriggers(all: readonly Trigger[], sessionKey: string, now: number): Trigger[] {
   const mine = all.filter((tr) => !tr.sessionKey || tr.sessionKey === sessionKey)
-  const live = mine.filter((tr) => LIVE.has(tr.status))
+  // Another chat's proposal is decided on its card (the approvals region
+  // lists every pending one); only what runs is listed here.
+  const live = all.filter(
+    (tr) => LIVE.has(tr.status) && (mine.includes(tr) || tr.status !== 'awaiting_approval'),
+  )
   const finished = mine
     .filter((tr) => {
       if (!TERMINAL.has(tr.status)) return false

@@ -27,6 +27,7 @@ import {
   composerPlaceholder,
   formatExpiryWhole,
   isDryRunText,
+  isDeskMission,
   isSessionMission,
   MISSION_COMPLETE_MARKER,
   missionCronPayload,
@@ -243,6 +244,13 @@ describe('missions', () => {
     expect(isSessionMission({ target_session_key: 's' }, 's')).toBe(true)
     expect(isSessionMission({ sessionKey: 'other' }, 's')).toBe(false)
     expect(isSessionMission({ targetSessionKey: 's' }, '')).toBe(false)
+    // A desk lists its own missions, and the enabled ones of other trading chats.
+    const other = 'agent:trading:webchat:trading-x'
+    expect(isDeskMission({ targetSessionKey: 's', enabled: false }, 's')).toBe(true)
+    expect(isDeskMission({ targetSessionKey: other }, 's')).toBe(true)
+    expect(isDeskMission({ targetSessionKey: other, enabled: false }, 's')).toBe(false)
+    expect(isDeskMission({ targetSessionKey: 'agent:main:webchat:x' }, 's')).toBe(false)
+    expect(isDeskMission({}, 's')).toBe(false)
   })
 
   it('reads a mission state from the job and the live signals', () => {

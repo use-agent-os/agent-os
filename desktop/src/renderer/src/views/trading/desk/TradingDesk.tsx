@@ -170,23 +170,20 @@ export function useDeskFrame(input: {
     [sessionKey],
   )
 
-  // "Start fresh" mints a new session key, and missions are filed by key: a
-  // mission left enabled on the old key would keep trading, unseen. Every
-  // active mission — and every active DCA mandate filed to this chat — is
-  // paused first; if one refuses, the desk stays here.
+  // "Start fresh" mints a new session key and nothing else: the missions,
+  // mandates, triggers and brackets of the old chat keep running (the engine
+  // runs them, not the chat) and stay listed at the fresh desk with their
+  // chat named, so nothing trades unseen. The desk used to pause them here,
+  // and a DCA paused that way stayed paused — and out of sight — for good.
   const { startFresh: mintFresh } = session
-  const { pauseAll } = missions
   const startFresh = useCallback(() => {
-    void pauseAll().then((ok) => {
-      if (!ok) return
-      mintFresh()
-      // The chat stays mounted across the new key: ask it for the composer.
-      useUi.getState().requestComposerFocus()
-    })
-  }, [pauseAll, mintFresh])
+    mintFresh()
+    // The chat stays mounted across the new key: ask it for the composer.
+    useUi.getState().requestComposerFocus()
+  }, [mintFresh])
 
   // The shell's ⌘N lands here while the desk is up (AppShell), so a new
-  // session from anywhere at the desk goes through the same mission pause.
+  // session from anywhere at the desk stays at the desk.
   const setStartFreshDesk = useTradingUi((s) => s.setStartFreshDesk)
   useEffect(() => {
     if (!active) return

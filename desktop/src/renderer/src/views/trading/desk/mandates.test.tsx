@@ -125,7 +125,7 @@ describe('mandate logic', () => {
     expect(mandateChip([done], NOW)).toBeNull()
   })
 
-  it('lists this chat’s mandates and unfiled ones; every finished one for an hour only', () => {
+  it('lists every live mandate, and this chat’s finished ones for an hour only', () => {
     const other = mandate({ id: 'dca_o', sessionKey: 'agent:trading:webchat:other' })
     const unfiled = mandate({ id: 'dca_u', sessionKey: null })
     // NOW is 05:48: 05:00 is 48 minutes ago, 04:40 over an hour.
@@ -143,8 +143,17 @@ describe('mandate logic', () => {
       SESSION,
       NOW,
     ).map((m) => m.id)
-    // Live first, then the finished ones newest first, whatever their status.
-    expect(ids).toEqual(['dca_1a2b3c4d', 'dca_u', 'dca_s', 'dca_x', 'dca_r', 'dca_d'])
+    // Live first — another chat's too, so nothing trades unseen — then this
+    // chat's finished ones newest first, whatever their status.
+    expect(ids).toEqual(['dca_1a2b3c4d', 'dca_o', 'dca_u', 'dca_s', 'dca_x', 'dca_r', 'dca_d'])
+    // Another chat's finished mandate is that chat's to review.
+    expect(
+      deskMandates(
+        [mandate({ id: 'dca_od', status: 'stopped', sessionKey: 'agent:trading:webchat:other' })],
+        SESSION,
+        NOW,
+      ),
+    ).toEqual([])
     // An hour after it ended, a finished mandate is gone.
     expect(
       deskMandates([stopped], SESSION, Date.parse('2026-09-28T06:30:00Z')).map((m) => m.id),
@@ -534,22 +543,17 @@ describe('useMissions · mandates', () => {
     return {}
   }
 
-  it('lists this desk’s mandates and every pending one, and pauses only its own on Start fresh', async () => {
+  it('lists every live mandate and every pending one, whichever chat filed them', async () => {
     rpcCall.mockImplementation(async (method: string, params: Record<string, unknown>) =>
       answer(method, params),
     )
     const { result } = renderHook(() => useMissions(SESSION), { wrapper })
     await waitFor(() => expect(result.current.mandates.length).toBeGreaterThan(0))
     expect(rpcCall).toHaveBeenCalledWith('trading.dca.list', { all: true })
-    expect(result.current.mandates.map((m) => m.id)).toEqual(['dca_1a2b3c4d', 'dca_u'])
+    expect(result.current.mandates.map((m) => m.id)).toEqual(['dca_1a2b3c4d', 'dca_o', 'dca_u'])
     expect(result.current.awaitingMandates.map((m) => m.id)).toEqual(['dca_99'])
-    let ok = false
-    await act(async () => {
-      ok = await result.current.pauseAll()
-    })
-    expect(ok).toBe(true)
-    const pauses = rpcCall.mock.calls.filter(([m]) => m === 'trading.dca.pause').map(([, p]) => p)
-    expect(pauses).toEqual([{ mandateId: 'dca_1a2b3c4d' }])
+    // Nothing is paused behind the user's back: the hook has no bulk pause.
+    expect(rpcCall).not.toHaveBeenCalledWith('trading.dca.pause', expect.anything())
   })
 
   it('creates, steers and toasts a mandate through trading.dca.*', async () => {

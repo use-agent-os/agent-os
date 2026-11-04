@@ -19,6 +19,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `AGENTOS_AUTH_TOKEN`; set it in `.env` next to the Compose file
   (`openssl rand -hex 32`). The README, the setup guide and the Docker
   troubleshooting notes are updated to match.
+- Desktop Trading page: starting a new session (⌘N, `/new`, the pen button)
+  no longer pauses the DCA mandates and scheduled missions of the chat being
+  left, and no longer hides what the old chat set up. A DCA paused this way
+  stayed paused and out of sight, so it looked like the order was lost. The
+  engine runs mandates, triggers, brackets and missions regardless of which
+  chat is open, so the desk now lists every live one — the rows filed by
+  another trading chat carry an **other chat** chip that opens that chat —
+  while finished items still show only in the chat that filed them.
 
 ## [2026.11.3.post2] - 2026-11-03
 

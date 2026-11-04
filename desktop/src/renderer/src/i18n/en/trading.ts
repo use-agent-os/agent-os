@@ -831,7 +831,10 @@ export const trading = {
   'trading.notify.rejected': 'rejected',
   // Missions.
   'trading.mission.stopRuleReached': 'Mission reached its stop rule; it has been stopped',
-  'trading.mission.pausedForFresh': 'Paused before starting fresh',
+  // A mission or order filed by another trading chat, listed here too; the
+  // chip opens that chat.
+  'trading.mission.elsewhere': 'other chat',
+  'trading.mission.elsewhereTitle': 'Filed by another trading chat — open it',
   // History: an approval set to zero is a revoke.
   'trading.history.kind.revoke': 'Revoke',
   // A tab of the BOOK / desk that threw while rendering: the rest stays up.
