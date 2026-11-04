@@ -2,7 +2,12 @@ services:
   gateway:
     image: ${AGENTOS_GATEWAY_IMAGE:-agentos:local}
     environment:
+      # Docker port publishing needs the wildcard bind, and the gateway refuses
+      # to serve one without enforced auth (exit 78), so the token is required.
+      # Host-side exposure is still decided by `ports:` below.
       AGENTOS_LISTEN: "0.0.0.0"
+      AGENTOS_AUTH_MODE: token
+      AGENTOS_AUTH_TOKEN: ${AGENTOS_AUTH_TOKEN:?Set AGENTOS_AUTH_TOKEN in .env, for example with openssl rand -hex 32}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
       TZ: ${TZ:-UTC}
