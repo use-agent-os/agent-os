@@ -81,6 +81,10 @@ The mode pill at the top of the window reads **Chat | Trade** (⌘⇧T switches)
 - **Trade** opens the Trading Desk: wallets, swaps, holdings, orders,
   history and allowances. See [Trading](features/trading.md).
 
+The pill enters Trade at your newest desk chat. Any chat with the trading
+agent, started from Trade or with the **+** on the Trading desk project folder,
+opens in Trade when you pick it in the sidebar; every other chat opens in Chat.
+
 The strip next to the pill shows **AWAITING** while a decision is waiting
 for you and **RUNNING** while a mission is in flight.
 
