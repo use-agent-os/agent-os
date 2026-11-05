@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Desktop trading: the wallet menus are no longer cut off. The switcher and the
+  wallet's `⋯` menu now extend past the value card, and a `⋯` menu in the wallet
+  list past the list, so Create, Import, Manage, Export and Remove stay
+  reachable. With many wallets the wallet rows scroll inside the switcher
+  instead of pushing those commands out of the window.
 - Desktop trading: chats started from Trade are now named from their first
   message, like every other chat, instead of all reading "Trading desk". A chat
   that already carries that label gets its name on its next message, and a name
