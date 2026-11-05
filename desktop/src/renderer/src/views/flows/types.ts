@@ -226,6 +226,8 @@ export type NodeStateKind = 'queued' | 'running' | 'cached' | 'done' | 'error' |
 
 export interface NodeOutputs {
   images?: ImageRef[]
+  /** Save only: the file each of `images` was written to, in the same order. */
+  files?: string[]
   text?: string
   /** A provider remark worth showing (it returned another size than asked). */
   note?: string

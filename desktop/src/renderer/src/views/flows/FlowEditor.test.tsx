@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { toast } from 'sonner'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RpcError } from '@/lib/ws-rpc'
 import { useConnection } from '@/stores/connection'
 import { useGateway } from '~/stores/gateway'
@@ -600,5 +601,199 @@ describe('FlowEditor', () => {
       expect(within(image).queryByLabelText(name)).toBeNull()
     }
     expect(image.querySelector('.flw-w__value')?.textContent).not.toBe('')
+  })
+
+  describe('downloading an image', () => {
+    const SAVED = '/state/flows/outputs/fl/Text-to-image_run_d_1.png'
+    const ev = { run_id: 'run_d', flow_id: DOC.id }
+    let blobs: Blob[]
+    let clicked: { download: string; href: string }[]
+
+    beforeEach(() => {
+      blobs = []
+      clicked = []
+      URL.createObjectURL = vi.fn((blob: Blob) => {
+        blobs.push(blob)
+        return `blob:download-${blobs.length}`
+      })
+      URL.revokeObjectURL = vi.fn()
+      vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+        this: HTMLAnchorElement,
+      ) {
+        clicked.push({ download: this.download, href: this.href })
+      })
+    })
+
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    async function finishRunWithSave() {
+      await screen.findByText('Prompt Writer', { selector: '.flw-node__title' })
+      emit('flows.run', { ...ev, seq: 1, status: 'running' })
+      emit('flows.node', {
+        ...ev,
+        seq: 2,
+        node_id: 'n7',
+        state: 'done',
+        outputs: { images: [IMG], files: [SAVED] },
+      })
+      emit('flows.run', { ...ev, seq: 3, status: 'done' })
+    }
+
+    function mediaCallsAtFullSize() {
+      return rpcCall.mock.calls.filter(
+        ([method, params]) =>
+          method === 'flows.media' && !('max_side' in (params as Record<string, unknown>)),
+      )
+    }
+
+    it('the Save node downloads the full image under the name Save gave it', async () => {
+      mount()
+      await finishRunWithSave()
+      const button = within(nodeEl('Save')).getByLabelText('Download image')
+      expect(mediaCallsAtFullSize()).toHaveLength(0)
+
+      fireEvent.click(button)
+
+      await waitFor(() =>
+        expect(clicked).toEqual([
+          { download: 'Text-to-image_run_d_1.png', href: 'blob:download-1' },
+        ]),
+      )
+      expect(mediaCallsAtFullSize()).toEqual([['flows.media', { sha256: IMG.sha256 }]])
+      expect(blobs[0]!.type).toBe('image/png')
+      // 'AAAA' in the fixture's data_b64 is three zero bytes, not the base64 text.
+      expect(blobs[0]!.size).toBe(3)
+    })
+
+    it('only output nodes carry the button on the canvas', async () => {
+      mount()
+      await screen.findByText('Prompt Writer', { selector: '.flw-node__title' })
+      emit('flows.run', { ...ev, seq: 1, status: 'running' })
+      emit('flows.node', {
+        ...ev,
+        seq: 2,
+        node_id: 'n5',
+        state: 'done',
+        outputs: { images: [IMG] },
+      })
+      const image = nodeEl('Image')
+      expect(within(image).getByLabelText('Open image')).toBeInTheDocument()
+      expect(within(image).queryByLabelText('Download image')).toBeNull()
+    })
+
+    it('the viewer opened from a result downloads under the saved name', async () => {
+      mount()
+      await finishRunWithSave()
+      const tray = screen.getByRole('region', { name: 'Results' })
+      fireEvent.click(within(tray).getByRole('button', { name: 'Open image' }))
+      const dialog = await screen.findByRole('dialog')
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Download image' }))
+
+      await waitFor(() => expect(clicked).toHaveLength(1))
+      expect(clicked[0]!.download).toBe('Text-to-image_run_d_1.png')
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+
+    it('a result read back from the run record keeps the saved name', async () => {
+      const base = rpcCall.getMockImplementation()!
+      rpcCall.mockImplementation(async (method: string, params: Record<string, unknown>) => {
+        if (method === 'flows.runs') {
+          return {
+            runs: [
+              {
+                run_id: 'run_old',
+                flow_id: DOC.id,
+                rev: 1,
+                status: 'done',
+                created: '2026-11-05T03:18:00Z',
+                preview: IMG,
+                origin: 'canvas',
+                error: null,
+                image_count: 1,
+              },
+            ],
+          }
+        }
+        if (method === 'flows.run.get') {
+          return {
+            run: {
+              run_id: 'run_old',
+              flow_id: DOC.id,
+              rev: 1,
+              status: 'done',
+              created: '2026-11-05T03:18:00Z',
+              preview: IMG,
+              origin: 'canvas',
+              error: null,
+              image_count: 1,
+              nodes: { n7: { state: 'done' } },
+              outputs: { n7: { images: [IMG], files: [SAVED] } },
+            },
+          }
+        }
+        return base(method, params)
+      })
+      mount()
+      const tray = await screen.findByRole('region', { name: 'Results' })
+      await waitFor(() => expect(within(tray).getByText(/1 image/)).toBeInTheDocument())
+      fireEvent.click(within(tray).getByRole('button', { name: 'Open image' }))
+      const dialog = await screen.findByRole('dialog')
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Download image' }))
+
+      await waitFor(() => expect(clicked).toHaveLength(1))
+      expect(clicked[0]!.download).toBe('Text-to-image_run_d_1.png')
+    })
+
+    it('an image no Save node wrote gets a name from its blob', async () => {
+      mount()
+      await screen.findByText('Prompt Writer', { selector: '.flw-node__title' })
+      emit('flows.run', { ...ev, seq: 1, status: 'running' })
+      emit('flows.node', {
+        ...ev,
+        seq: 2,
+        node_id: 'n5',
+        state: 'done',
+        outputs: { images: [IMG] },
+      })
+      fireEvent.click(within(nodeEl('Image')).getByLabelText('Open image'))
+      const dialog = await screen.findByRole('dialog')
+
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Download image' }))
+
+      await waitFor(() => expect(clicked).toHaveLength(1))
+      expect(clicked[0]!.download).toBe('agentos-flow-aaaaaaaa.png')
+    })
+
+    it('says so when the image cannot be read, and the button works again', async () => {
+      const failed = vi.spyOn(toast, 'error')
+      const base = rpcCall.getMockImplementation()!
+      rpcCall.mockImplementation(async (method: string, params: Record<string, unknown>) => {
+        if (method === 'flows.media' && !('max_side' in params)) {
+          throw new Error('image is not in the media store')
+        }
+        return base(method, params)
+      })
+      mount()
+      await finishRunWithSave()
+      const button = within(nodeEl('Save')).getByLabelText('Download image')
+
+      fireEvent.click(button)
+
+      expect(button).toBeDisabled()
+      await waitFor(
+        () =>
+          expect(failed).toHaveBeenCalledWith('Could not download the image', {
+            description: expect.stringContaining('media store'),
+          }),
+        { timeout: 4000 },
+      )
+      expect(clicked).toHaveLength(0)
+      expect(URL.createObjectURL).not.toHaveBeenCalled()
+      await waitFor(() => expect(button).toBeEnabled())
+    })
   })
 })
