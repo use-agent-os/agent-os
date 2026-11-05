@@ -458,9 +458,9 @@ function useChatDeleted(sessionKey: string | null): boolean {
 }
 
 /**
- * The chip on a row another trading chat filed: the engine runs it whatever
+ * The icon on a row another trading chat filed: the engine runs it whatever
  * chat is open, so the desk lists it rather than let it trade unseen, and
- * the chip opens the chat that can tell its story. Nothing for a row of
+ * the icon opens the chat that can tell its story. Nothing for a row of
  * this chat's, an unfiled one, or one whose chat has been deleted: the row
  * keeps running, but there is no story left to open.
  */
@@ -477,13 +477,13 @@ export function Elsewhere({
     <button
       type="button"
       className="trd-mctl__elsewhere app-no-drag"
+      aria-label={t('trading.mission.elsewhereTitle')}
       title={t('trading.mission.elsewhereTitle')}
       onClick={() => onOpen?.(sessionKey)}
       data-testid="mission-elsewhere"
       data-session={sessionKey}
     >
-      <ExternalLink className="size-3" strokeWidth={1.75} aria-hidden />
-      {t('trading.mission.elsewhere')}
+      <ExternalLink className="size-3.5" strokeWidth={1.75} aria-hidden />
     </button>
   )
 }
