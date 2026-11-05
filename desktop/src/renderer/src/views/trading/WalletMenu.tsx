@@ -1,10 +1,36 @@
 import { Copy, ExternalLink, KeyRound, Pencil, QrCode, Star, Trash2 } from 'lucide-react'
+import { useCallback, useRef, useState, type MouseEvent } from 'react'
 import { toast } from 'sonner'
-import { MenuItem } from '~/components/menu/PopMenu'
+import { MenuItem, type MenuPlace } from '~/components/menu/PopMenu'
 import { t } from '~/i18n'
 import { desktopApi } from '~/lib/desktop-api'
 import type { ChainStatus, Wallet } from './types'
 import type { WalletAction } from './WalletRail'
+
+/**
+ * A pop-up button's state, for a PopMenu. The desk's wallet menus all sit in
+ * something that clips: the head in .trd-hero, whose overflow: hidden keeps
+ * the corner light inside the card, and the rail's rows in their scrolling
+ * list. Hung from inside either, a menu loses its lower rows, so they float
+ * over the window instead.
+ */
+export function usePopUp(align: 'start' | 'end') {
+  // The anchor rect is captured on open, so no ref is read during render.
+  const [place, setPlace] = useState<MenuPlace | null>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const close = useCallback(() => {
+    // The menu is at the end of the document now, so Escape, Tab and a pick
+    // must bring focus back or the keyboard starts over from the top.
+    const fromMenu = Boolean(document.activeElement?.closest('[role="menu"]'))
+    setPlace(null)
+    if (fromMenu) triggerRef.current?.focus({ preventScroll: true })
+  }, [])
+  const toggle = (e: MouseEvent<HTMLButtonElement>) => {
+    const anchor = e.currentTarget.getBoundingClientRect()
+    setPlace((p) => (p ? null : { anchor, align }))
+  }
+  return { place, triggerRef, close, toggle }
+}
 
 /**
  * Everything you can do to one wallet, as menu rows.
