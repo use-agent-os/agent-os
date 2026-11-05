@@ -129,7 +129,7 @@ def test_dockerfile_runtime_installs_survive_a_recreate() -> None:
 
     # Last on PATH, so nothing written to the volume can shadow what the image
     # ships, such as `agentos` or the `curl` the health check runs.
-    assert f"PATH=$PATH:{home}/.local/bin" in dockerfile
+    assert "ENV PATH=$PATH:$NPM_CONFIG_PREFIX/bin" in dockerfile
 
 
 def test_dockerfile_entrypoint_creates_home_on_an_existing_volume() -> None:

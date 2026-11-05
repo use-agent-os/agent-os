@@ -121,8 +121,8 @@ ENV AGENTOS_STATE_DIR=/var/lib/agentos
 # and `uv tool install` land in ~/.local/bin and a tool's own login or config
 # stays with it. That directory comes last on PATH: an image upgrade replaces
 # what the image ships, and nothing on the volume can shadow it.
-ENV NPM_CONFIG_PREFIX=/var/lib/agentos/home/.local \
-    PATH=$PATH:/var/lib/agentos/home/.local/bin
+ENV NPM_CONFIG_PREFIX=/var/lib/agentos/home/.local
+ENV PATH=$PATH:$NPM_CONFIG_PREFIX/bin
 
 # Run as a non-root user — avoids shipping root creds into production.
 # The state root is created and owned by that user before the USER drop,
