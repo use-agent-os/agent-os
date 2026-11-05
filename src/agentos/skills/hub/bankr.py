@@ -37,6 +37,7 @@ import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 from urllib.parse import unquote, urlparse
 
 import structlog
@@ -59,6 +60,22 @@ _ALLOWED_SLUGS: tuple[str, ...] = ("bankr", "bankr-token-scam-analysis", "aero-s
 # now: ``stock-premium-lp-manager`` was retired in favour of the repo-published
 # ``aero-stock-lp`` above, which covers the same tokenized-equity LP workflow.
 _ALLOWED_USER_SKILLS: tuple[str, ...] = ()
+# How to install a command a repository skill requires but does not say how to
+# get. ``bankr`` declares ``requires.bins: [bankr]`` and names the package only in
+# prose, so it installs fine and then sits at "needs setup" with no way forward.
+# Keyed by slug and written under ``metadata.agentos``, which the loader overlays
+# on the skill's own namespace. An ``install`` the skill declares itself wins.
+_INSTALL_SPECS: dict[str, tuple[dict[str, Any], ...]] = {
+    "bankr": (
+        {
+            "id": "bankr-cli",
+            "kind": "npm",
+            "label": "Install Bankr CLI (npm)",
+            "package": "@bankr/cli",
+            "bins": ["bankr"],
+        },
+    ),
+}
 _USER_API_BASE = "https://api.bankr.bot/public/skills"
 _USER_PAGE_BASE = "https://bankr.bot/skills"
 _USER_HOSTS = {"bankr.bot", "www.bankr.bot"}
@@ -156,6 +173,42 @@ def _user_skill_markdown(name: str, description: str, tags: Sequence[str], conte
         width=4096,
     )
     return f"---\n{front}---\n\n{body}"
+
+
+def _with_install_specs(skill_md: str, specs: Sequence[dict[str, Any]]) -> str:
+    """Return ``skill_md`` with ``specs`` added to its frontmatter's install list.
+
+    Returns the input unchanged when the frontmatter cannot be parsed or already
+    declares an install: a skill that installs with a manual setup step beats one
+    that fails to install, and the skill's own answer is better than ours.
+    """
+    import yaml
+
+    from agentos.skills.loader import parse_frontmatter_yaml
+
+    if not skill_md.startswith("---"):
+        return skill_md
+    end = skill_md.find("\n---", 3)
+    body_start = skill_md.find("\n", end + 1) if end != -1 else -1
+    if body_start == -1:
+        return skill_md
+    frontmatter = parse_frontmatter_yaml(skill_md[4:end])
+    if frontmatter is None:
+        return skill_md
+    metadata = frontmatter.setdefault("metadata", {})
+    if not isinstance(metadata, dict):
+        return skill_md
+
+    namespaces = [metadata, *(value for value in metadata.values() if isinstance(value, dict))]
+    if any(namespace.get("install") for namespace in namespaces):
+        return skill_md
+    agentos = metadata.setdefault("agentos", {})
+    if not isinstance(agentos, dict):
+        return skill_md
+    agentos["install"] = [dict(spec) for spec in specs]
+
+    rendered = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True, width=4096)
+    return f"---\n{rendered}---\n{skill_md[body_start + 1 :]}"
 
 
 def _matches(meta: SkillMeta, query: str) -> bool:
@@ -270,7 +323,15 @@ class BankrSource(SkillSource):
         if not self._is_allowlisted(identifier):
             log.warning("bankr.identifier_rejected", op="fetch")
             return None
-        return await self._github.fetch(identifier)
+        bundle = await self._github.fetch(identifier)
+        ref = _parse_identifier(identifier)
+        specs = _INSTALL_SPECS.get(ref.skill_dir.strip("/")) if ref else None
+        if bundle is None or not specs:
+            return bundle
+        fetched_md = bundle.skill_md
+        if fetched_md:
+            bundle.files["SKILL.md"] = _with_install_specs(fetched_md, specs)
+        return bundle
 
     async def _load_catalog(self) -> list[SkillMeta]:
         async with self._lock:

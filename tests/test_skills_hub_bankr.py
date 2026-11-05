@@ -356,10 +356,111 @@ async def test_fetch_and_inspect_delegate_to_github(monkeypatch) -> None:
     monkeypatch.setattr(GitHubSource, "inspect", _fake_inspect)
 
     src = BankrSource()
-    ident = "https://github.com/BankrBot/skills/tree/main/bankr"
+    ident = "https://github.com/BankrBot/skills/tree/main/aero-stock-lp"
     assert await src.fetch(ident) == "bundle"
     assert await src.inspect(ident) == "meta"
     assert calls == {"fetch": ident, "inspect": ident}
+
+
+_BANKR_IDENT = "https://github.com/BankrBot/skills/tree/main/bankr"
+# Upstream's real shape: flow-style metadata with trailing commas, no `install`, and
+# a description whose "Chains:" makes the frontmatter invalid as strict YAML.
+_BANKR_SKILL_MD = """---
+name: bankr
+description: Bankr is an AI crypto agent, driven by the `bankr` CLI. Chains: Base, Solana.
+metadata:
+  {
+    "clawdbot":
+      {
+        "emoji": "📺",
+        "homepage": "https://bankr.bot",
+        "requires": { "bins": ["bankr"] },
+      },
+  }
+---
+
+# Bankr
+
+---
+
+Install with `npm install -g @bankr/cli`.
+"""
+
+
+async def _fetch_with_skill_md(monkeypatch, skill_md: str, ident: str = _BANKR_IDENT) -> str:
+    from agentos.skills.hub.github import GitHubSource
+    from agentos.skills.hub.source import SkillBundle
+
+    async def _fake_fetch(self: Any, identifier: str) -> SkillBundle:
+        return SkillBundle(name="bankr", files={"SKILL.md": skill_md, "catalog.json": "{}"})
+
+    monkeypatch.setattr(GitHubSource, "fetch", _fake_fetch)
+    bundle = await BankrSource().fetch(ident)
+    assert bundle is not None
+    assert bundle.files["catalog.json"] == "{}"
+    return str(bundle.files["SKILL.md"])
+
+
+@pytest.mark.asyncio
+async def test_bankr_skill_installs_with_a_way_to_get_its_cli(monkeypatch, tmp_path) -> None:
+    """The Install button comes from `metadata.install`, read by the real loader.
+
+    Upstream requires the `bankr` binary and declares no install, so a catalog
+    install ended at "needs setup" with nothing to press.
+    """
+    from agentos.skills.eligibility import EligibilityContext, diagnose_eligibility
+    from agentos.skills.install_kinds import render_install_command
+    from agentos.skills.loader import SkillLoader
+
+    skill_md = await _fetch_with_skill_md(monkeypatch, _BANKR_SKILL_MD)
+
+    skill_dir = tmp_path / "managed" / "bankr"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
+    spec = SkillLoader(managed_dir=tmp_path / "managed").get_by_name("bankr")
+
+    assert spec is not None
+    assert spec.metadata is not None
+    assert spec.metadata.requires is not None
+    assert spec.metadata.requires.bins == ["bankr"]
+    assert spec.metadata.emoji == "📺"
+    assert spec.description.endswith("Chains: Base, Solana.")
+    assert [s.id for s in spec.metadata.install] == ["bankr-cli"]
+    assert render_install_command(spec.metadata.install[0]) == (
+        "npm install -g --ignore-scripts @bankr/cli"
+    )
+    report = diagnose_eligibility(spec, EligibilityContext(has_bin_cache={"bankr": False}))
+    assert report.missing_bins == ["bankr"]
+
+    # Upstream's prose is untouched, including a `---` rule in the body.
+    assert skill_md.endswith(_BANKR_SKILL_MD[_BANKR_SKILL_MD.index("\n# Bankr") :])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "skill_md",
+    [
+        pytest.param("# No frontmatter\n", id="no-frontmatter"),
+        pytest.param("---\nname: [unterminated\n---\nbody\n", id="invalid-yaml"),
+        pytest.param("---\nname: bankr\nkey: a: b\n---\nbody\n", id="invalid-outside-description"),
+        pytest.param("---\nname: bankr\nmetadata: nope\n---\nbody\n", id="scalar-metadata"),
+        pytest.param(
+            "---\nname: bankr\nmetadata:\n  clawdbot:\n    install:\n      - kind: brew\n"
+            "        id: bankr\n---\nbody\n",
+            id="declares-its-own-install",
+        ),
+    ],
+)
+async def test_bankr_skill_md_is_left_alone_when_it_cannot_or_need_not_change(
+    monkeypatch, skill_md: str
+) -> None:
+    assert await _fetch_with_skill_md(monkeypatch, skill_md) == skill_md
+
+
+@pytest.mark.asyncio
+async def test_install_specs_apply_only_to_the_skill_they_name(monkeypatch) -> None:
+    ident = "https://github.com/BankrBot/skills/tree/main/aero-stock-lp"
+    assert await _fetch_with_skill_md(monkeypatch, _BANKR_SKILL_MD, ident) == _BANKR_SKILL_MD
 
 
 @pytest.mark.asyncio

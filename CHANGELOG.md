@@ -18,6 +18,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   schemas.
 
 ### Fixed
+- Skills: installing `bankr` from the Bankr catalog reported success and then the
+  skill never appeared, because a colon in its description made the frontmatter
+  invalid YAML and the loader skipped it without a word. Such a description now
+  loads, and an install the loader could not read fails and says so. The skill also
+  offers to install the Bankr CLI it requires. A copy already on disk starts working
+  once the gateway is upgraded; update it to get the install button.
 - Desktop trading: with several wallets, the "All wallets" label no longer runs
   into the wallet icons fanned beside it.
 - Image Flows: asking an agent to publish an image a flow already made no longer
