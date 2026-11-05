@@ -100,6 +100,40 @@ describe('desktop skin for the shared route picker', () => {
     expect([...rendered].filter((cls) => !styled.has(cls))).toEqual([])
   })
 
+  it('restyles every class the closed trigger renders', () => {
+    const { container } = render(<RoutePicker route={route()} />)
+    const rendered = classesIn(container)
+    expect(rendered).toContain('chat-route-trigger__label')
+
+    const selectors = css.match(/[^{}]+(?=\{)/g) ?? []
+    const styled = new Set(selectors.flatMap((s) => s.match(/(?<=\.)[\w-]+/g) ?? []))
+    expect(rendered.filter((cls) => !styled.has(cls))).toEqual([])
+  })
+
+  it('keeps a long route on one line and lets the textarea give way', () => {
+    // A long prompt widens the content-sized textarea beside the picker. The
+    // picker must not be what shrinks, or `Auto · c1 · claude-haiku-5.5` is
+    // squeezed onto three lines.
+    const wrap = rule('.chat-route-wrap')
+    expect(wrap).toMatch(/display: flex;/)
+    expect(wrap).toMatch(/flex: none;/)
+    expect(wrap).toMatch(/max-width: min\(\d+rem, \d+%\);/)
+
+    // Past the cap the trigger narrows inside the wrap and the label truncates.
+    const trigger = rule('.chat-route-trigger')
+    expect(trigger).toMatch(/min-width: 0;/)
+    expect(trigger).toMatch(/max-width: \d+rem;/)
+    expect(trigger).not.toMatch(/flex-shrink: 0;/)
+    const label = rule('.chat-route-trigger__label')
+    expect(label).toMatch(/min-width: 0;/)
+    expect(label).toMatch(/overflow: hidden;/)
+    expect(label).toMatch(/text-overflow: ellipsis;/)
+    expect(label).toMatch(/white-space: nowrap;/)
+    // Neither the icon nor the override badge is what gets squeezed instead.
+    expect(rule('.chat-route-trigger svg')).toMatch(/flex: none;/)
+    expect(rule('.chat-route-badge')).toMatch(/flex: none;/)
+  })
+
   it('keeps the footer inside the menu, below a list that is the only part to give way', () => {
     const menu = openMenu()
     // The markup half of the contract: search, then the listbox, then the footer.

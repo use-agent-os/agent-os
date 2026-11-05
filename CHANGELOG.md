@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   schemas.
 
 ### Fixed
+- Desktop chat: a long model route in the composer now stays on one line, cut off
+  with an ellipsis, instead of wrapping onto several lines beside a long prompt.
 - Desktop trading: with several wallets, the "All wallets" label no longer runs
   into the wallet icons fanned beside it.
 - Image Flows: asking an agent to publish an image a flow already made no longer
