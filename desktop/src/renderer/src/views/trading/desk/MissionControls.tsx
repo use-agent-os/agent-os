@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { ExternalLink, OctagonX, Pause, Pencil, Play, Trash2, Zap } from 'lucide-react'
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useRpc } from '@/app/providers'
 import type { RawJob } from '@/views/cron/logic'
 import { Button } from '~/components/ui/button'
@@ -15,7 +15,7 @@ import {
   bracketWord,
   isSteerableBracket,
 } from './bracket-logic'
-import { jobSessionKey, missionStatus, type MissionState } from './desk-logic'
+import { jobSessionKey, missionStatus, watchRowsBand, type MissionState } from './desk-logic'
 import {
   mandateBuysText,
   mandateMissesText,
@@ -287,8 +287,11 @@ export function MissionControls({
     askedBrackets.size ? brackets.filter((b) => !askedBrackets.has(b.id)) : brackets,
     showAllBrackets,
   )
+  // Every render: the rows it observes come and go with the props and the toggles.
+  const band = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => (band.current ? watchRowsBand(band.current) : undefined))
   return (
-    <div className="trd-mctl" data-testid="mission-controls">
+    <div ref={band} className="trd-mctl" data-testid="mission-controls">
       {missions.map((job) => {
         const live = Boolean(job.id && running.has(job.id))
         const s = missionStatus(job, { running: live, pendingApprovals })

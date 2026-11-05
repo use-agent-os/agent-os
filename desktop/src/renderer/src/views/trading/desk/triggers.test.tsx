@@ -943,8 +943,25 @@ describe('missions rows and the transcript floor · CSS contract', () => {
 
   it('caps the rows band and lets it scroll, so it cannot eat the transcript', () => {
     const band = rule('.trd-mctl')
-    expect(band).toMatch(/max-height: min\([\d.]+rem, \d+vh\);/)
+    expect(band).toMatch(/max-height: min\(var\(--mctl-cap, [\d.]+rem\), \d+vh\);/)
     expect(band).toMatch(/overflow-y: auto;/)
+  })
+
+  // Four DCAs took four lines above the composer, and a tall window would
+  // have shown a fifth. Three rows, then the band scrolls.
+  it('shows three rows at most, each on a line of its own, then scrolls', () => {
+    const band = rule('.trd-mctl')
+    const row = Number(/min-height: (\d+)px;/.exec(rule('.trd-mctl__row'))![1])
+    const gap = Number(/gap: (\d+)px;/.exec(band)![1])
+    const padY = Number(/padding: (\d+)px \d+px;/.exec(band)![1])
+    // The fallback before watchRowsBand has measured: three one-line rows.
+    const capPx = Number(/--mctl-cap, ([\d.]+)rem/.exec(band)![1]) * 16
+    expect(capPx).toBe(3 * row + 2 * gap + 2 * padY)
+    // Rows wrapped into a shared line would put more than three in that cap.
+    expect(band).toMatch(/flex-direction: column;/)
+    expect(band).not.toMatch(/flex-wrap: wrap;/)
+    // A row that cannot shrink keeps its second line when the band is full.
+    expect(rule('.trd-mctl > *')).toMatch(/flex-shrink: 0;/)
   })
 
   it('gives the desk transcript a floor and lets the approvals region yield instead', () => {
@@ -970,7 +987,7 @@ describe('missions rows and the transcript floor · CSS contract', () => {
   // At 1200×800 the region got 238px for a 275px trigger card: its
   // explanation, and a second proposal entirely, sat behind an inner scroll.
   it('folds the rows band while a proposal is docked, and gives the room to the region', () => {
-    const band = /max-height: min\(([\d.]+)rem, (\d+)vh\);/
+    const band = /max-height: min\((?:var\(--mctl-cap, )?([\d.]+)rem\)?, (\d+)vh\);/
     const capAt800 = (body: string) => {
       const m = band.exec(body)
       expect(m, body).toBeTruthy()
@@ -978,9 +995,10 @@ describe('missions rows and the transcript floor · CSS contract', () => {
     }
     const docked = rule('.chat-stage:has(> .trd-asks) .trd-mctl')
     const atRest = capAt800(rule('.trd-mctl'))
-    // About two rows (26px each, 6px apart), and at least 80px handed over.
+    // About two rows (26px each, 6px apart), and always less than at rest.
     expect(capAt800(docked)).toBeGreaterThanOrEqual(58)
-    expect(atRest - capAt800(docked)).toBeGreaterThanOrEqual(80)
+    expect(capAt800(docked)).toBeLessThanOrEqual(64)
+    expect(capAt800(docked)).toBeLessThan(atRest)
     // The region's own cap is never the limit at 800px: it may take 46vh.
     const asks = /max-height: min\((\d+)vh, ([\d.]+)rem\);/.exec(rule('.trd-asks'))!
     expect(Math.min((Number(asks[1]) / 100) * 800, Number(asks[2]) * 16)).toBeGreaterThanOrEqual(
@@ -997,7 +1015,7 @@ describe('missions rows and the transcript floor · CSS contract', () => {
       expect(r.body, r.selector).not.toMatch(/margin(-top)?: -/)
     }
     const more = rule('.trd-mctl > .trd-mctl__more')
-    expect(more).toMatch(/flex: 0 0 100%;/)
+    expect(more).toMatch(/align-self: stretch;/)
     const rowMin = /min-height: (\d+)px;/.exec(rule('.trd-mctl__row'))![1]
     expect(more).toMatch(new RegExp(`min-height: ${rowMin}px;`))
   })

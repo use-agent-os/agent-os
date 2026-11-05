@@ -439,8 +439,8 @@ not like the web card. `canWrite` is true only on the desktop desk
   controls Pause / Resume, Buy now, Edit, Stop (two-click). Buy now toasts
   the run's outcome (bought / placed / awaiting approval / skipped: reason /
   failed: reason). Finished mandates (any terminal status) stay for 1 h
-  after `updatedAt`, at most 2 rows newest first, then `+N more`. One
-  formatter drives every countdown (`buy due`, `N m`, `H h M m`, `D d H h`,
+  after `updatedAt`, at most 2 rows newest first, then `+N more`. The list
+  shows three rows, one to a line, and scrolls past that. One formatter drives every countdown (`buy due`, `N m`, `H h M m`, `D d H h`,
   rounding down) on a shared one-second clock. Mandates never replace the
   composer placeholder (cron missions still do). The **header status
   strip** summarises mandates as one chip — `DCA · next 59 m`, `DCA ×2 ·

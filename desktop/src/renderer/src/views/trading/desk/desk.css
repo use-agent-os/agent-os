@@ -536,17 +536,23 @@
 }
 /* Rows never outgrow the column: the controls are a band above the
    composer, and a row that ran under the BOOK put its Stop out of reach.
-   The list scrolls inside its own cap so the transcript keeps its floor. */
+   One row to a line, three rows, then the list scrolls inside that cap so the
+   transcript keeps its floor. watchRowsBand measures the cap, since a row can
+   wrap; the fallback is three one-line rows (26px, 6px apart, plus padding). */
 .trd-mctl {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 6px;
   min-width: 0;
-  max-height: min(9.5rem, 22vh);
+  max-height: min(var(--mctl-cap, 5.75rem), 22vh);
   padding: 1px 2px;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+/* In a column a full band would squash a wrapped row onto its min-height. */
+.trd-mctl > * {
+  flex-shrink: 0;
 }
 /* While a proposal is docked (the approvals region is a child of the stage)
    the decision is what the column is for: the rows band folds to about two
@@ -700,7 +706,7 @@
    rows. Its 26px line matches a row's, so the band's scroll stops on a whole
    line rather than a few pixels into the toggle. */
 .trd-mctl > .trd-mctl__more {
-  flex: 0 0 100%;
+  align-self: stretch;
   min-height: 26px;
   text-align: left;
 }

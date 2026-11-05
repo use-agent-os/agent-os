@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   the same.
 
 ### Fixed
+- Desktop Trade tab: the list of DCAs, missions and triggers above the composer
+  now shows at most three rows and scrolls past that, so a long list no longer
+  takes room from the chat.
 - Desktop trading: the wallet menus are no longer cut off. The switcher and the
   wallet's `⋯` menu now extend past the value card, and a `⋯` menu in the wallet
   list past the list, so Create, Import, Manage, Export and Remove stay
