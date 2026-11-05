@@ -12,6 +12,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   name and status fit. Hovering it says what it opens, and a screen reader reads
   the same.
 
+### Fixed
+- Desktop trading: the wallet menus are no longer cut off. The switcher and the
+  wallet's `⋯` menu now extend past the value card, and a `⋯` menu in the wallet
+  list past the list, so Create, Import, Manage, Export and Remove stay
+  reachable. With many wallets the wallet rows scroll inside the switcher
+  instead of pushing those commands out of the window.
+
 ## [2026.11.5.post1] - 2026-11-05
 
 ### Added
