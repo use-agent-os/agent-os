@@ -13,6 +13,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   name Save gave it and the flow inside it.
 
 ### Changed
+- Container image: now includes Node.js with `npm` and `npx`, `uv`, `git`, `gh`,
+  `jq`, `ripgrep` and `tmux`, so the git tools and the skills that need them work
+  out of the box. The container user's home moved onto the volume, at
+  `/var/lib/agentos/home`, so a tool installed with `npm install -g` or `uv tool
+  install`, and its login, survives an upgrade.
 - Deferred tool loading. `flow_publish` joins the deferred set, which now holds
   31 rarely used builtins; deferral cuts a stock request from 70 to 40 tool
   schemas.

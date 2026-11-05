@@ -18,8 +18,8 @@ FROM node:22-bookworm-slim AS control-ui-builder
 
 WORKDIR /build
 
-# The shared builder is Python stdlib-only. Keeping the Node toolchain in this
-# stage ensures the final runtime image contains neither npm nor node_modules.
+# The shared builder is Python stdlib-only. The console's own node_modules stay
+# in this stage; the runtime image takes only node and npm from it, below.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 \
     && rm -rf /var/lib/apt/lists/*
@@ -47,12 +47,27 @@ ENV AGENTOS_LISTEN=0.0.0.0 \
 
 WORKDIR /app
 
-# Build tooling for optional C-extension deps (jieba FTS5 tokenizer, etc.).
+# Build tooling for optional C-extension deps (jieba FTS5 tokenizer, etc.),
+# plus the tools the agent's git tools, shell and skills expect on PATH.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
         curl \
+        gh \
+        git \
+        jq \
+        ripgrep \
+        tmux \
     && rm -rf /var/lib/apt/lists/*
+
+# Node and npm for skills, MCP servers and coding-agent harnesses. Debian
+# bookworm's nodejs is Node 18, so take the version the console is built with.
+COPY --from=control-ui-builder /usr/local/bin/node /usr/local/bin/node
+COPY --from=control-ui-builder \
+    /usr/local/lib/node_modules/npm/ \
+    /usr/local/lib/node_modules/npm/
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 
 # Copy minimal build context — everything else is in .dockerignore.
 COPY pyproject.toml README.md README.release.md LICENSE NOTICE THIRD_PARTY_NOTICES.md ./
@@ -94,18 +109,27 @@ if missing or pointers:
     )
 PY
 
-RUN pip install ".[recommended]"
+RUN pip install ".[recommended]" "uv==0.13.7"
 
 # Persisted state root. The gateway writes config, state, logs, and the
 # workspace under AGENTOS_STATE_DIR — mounting a volume here (see
 # compose.yaml) is what makes a container's setup survive a recreate.
 ENV AGENTOS_STATE_DIR=/var/lib/agentos
 
+# Tools installed at runtime have to survive that recreate too, and the user
+# below cannot write to /usr/local. Home lives on the volume, so `npm install -g`
+# and `uv tool install` land in ~/.local/bin and a tool's own login or config
+# stays with it. That directory comes last on PATH: an image upgrade replaces
+# what the image ships, and nothing on the volume can shadow it.
+ENV NPM_CONFIG_PREFIX=/var/lib/agentos/home/.local
+ENV PATH=$PATH:$NPM_CONFIG_PREFIX/bin
+
 # Run as a non-root user — avoids shipping root creds into production.
 # The state root is created and owned by that user before the USER drop,
 # so a freshly initialized volume inherits writable, non-root ownership.
-RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin agentos \
-    && mkdir -p /var/lib/agentos \
+RUN mkdir -p /var/lib/agentos \
+    && useradd --create-home --home-dir /var/lib/agentos/home \
+        --uid 10001 --shell /usr/sbin/nologin agentos \
     && chown -R agentos:agentos /app /var/lib/agentos
 USER agentos
 
@@ -114,5 +138,8 @@ EXPOSE 18791
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl --fail --silent --show-error http://127.0.0.1:18791/healthz || exit 1
 
-ENTRYPOINT ["agentos"]
+# A volume created by an older image has no home directory yet, and Docker only
+# seeds a volume from the image when it is empty. A failure here must not stop
+# the gateway: an unwritable bind mount is reported by the gateway itself.
+ENTRYPOINT ["/bin/sh", "-c", "mkdir -p \"$HOME\" 2>/dev/null; exec agentos \"$@\"", "agentos"]
 CMD ["gateway", "run"]
