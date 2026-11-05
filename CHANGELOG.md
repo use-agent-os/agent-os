@@ -22,6 +22,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   message, like every other chat, instead of all reading "Trading desk". A chat
   that already carries that label gets its name on its next message, and a name
   you typed is kept.
+- Desktop Trade: the swap ticket showed "ETH" initials instead of the ETH logo
+  on a fresh ticket and after switching between Base and Robinhood, until ETH
+  was picked again from the token list.
 
 ## [2026.11.5.post1] - 2026-11-05
 

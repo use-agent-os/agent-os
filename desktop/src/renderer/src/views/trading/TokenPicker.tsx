@@ -8,6 +8,9 @@ import { NATIVE_ADDRESS, type Balance, type SearchToken, type Token } from './ty
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
+/** The engine's own art for the gas coin (NATIVE_LOGOS in src/agentos/trading/prices.py). */
+const ETH_LOGO_URL = 'https://assets.coingecko.com/coins/images/279/thumb/ethereum.png'
+
 export function nativeToken(chainId: number): Token {
   return {
     chainId,
@@ -15,7 +18,7 @@ export function nativeToken(chainId: number): Token {
     symbol: 'ETH',
     name: chainName(chainId),
     decimals: 18,
-    logoUrl: null,
+    logoUrl: ETH_LOGO_URL,
     native: true,
     verified: true,
   }

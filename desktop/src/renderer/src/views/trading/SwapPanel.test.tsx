@@ -341,6 +341,23 @@ describe('SwapPanel', () => {
   })
 })
 
+describe('SwapPanel · the gas coin logo', () => {
+  const payLogo = () => screen.getAllByTestId('token-button')[0]?.querySelector('img')
+
+  it('shows the ETH logo on a fresh ticket, before anything is picked', () => {
+    mount({ prefill: null })
+    expect(payLogo()?.getAttribute('src')).toContain('ethereum.png')
+  })
+
+  it('keeps the ETH logo when the ticket moves between chains', () => {
+    mount({ prefill: null })
+    fireEvent.click(screen.getByRole('radio', { name: 'Robinhood' }))
+    expect(payLogo()?.getAttribute('src')).toContain('ethereum.png')
+    fireEvent.click(screen.getByRole('radio', { name: 'Base' }))
+    expect(payLogo()?.getAttribute('src')).toContain('ethereum.png')
+  })
+})
+
 describe('SwapPanel · providers', () => {
   it('names the provider on the quote line', async () => {
     rpcCall.mockImplementation(async (method: string) =>
