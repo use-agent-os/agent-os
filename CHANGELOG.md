@@ -13,6 +13,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   name Save gave it and the flow inside it.
 
 ### Changed
+- Container image: now includes Node.js with `npm` and `npx`, `uv`, `git`, `gh`,
+  `jq`, `ripgrep` and `tmux`, so the git tools and the skills that need them work
+  out of the box. The container user's home moved onto the volume, at
+  `/var/lib/agentos/home`, so a tool installed with `npm install -g` or `uv tool
+  install`, and its login, survives an upgrade.
 - Deferred tool loading. `flow_publish` joins the deferred set, which now holds
   31 rarely used builtins; deferral cuts a stock request from 70 to 40 tool
   schemas.
@@ -24,6 +29,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   loads, and an install the loader could not read fails and says so. The skill also
   offers to install the Bankr CLI it requires. A copy already on disk starts working
   once the gateway is upgraded; update it to get the install button.
+- Desktop chat: a long model route in the composer now stays on one line, cut off
+  with an ellipsis, instead of wrapping onto several lines beside a long prompt.
 - Desktop trading: with several wallets, the "All wallets" label no longer runs
   into the wallet icons fanned beside it.
 - Image Flows: asking an agent to publish an image a flow already made no longer
