@@ -626,7 +626,10 @@ deferred: load them with `tool_search` ("flow"). A one-off picture from a
 prompt is `image_generate`, not a flow. `flow_run` estimates first: above
 `[flows].agent_cost_limit_usd` (default $0.50), or when the cost is unknown,
 it waits for the user's approval; it posts the saved images and a run card
-to the chat itself, so do not `publish_artifact` them. If the user declines,
+to the chat itself, so do not `publish_artifact` them. To post what a flow
+already made (for example a run from the editor), call `flow_publish` (free, no
+new run) instead of copying files: the flows `media/` store holds two blobs for
+each saved picture. If the user declines,
 stop: do not retry with fewer images, other inputs, a cheaper model, another
 flow or `image_generate`; for 30 minutes any run of that flow asks them
 again. When `image_generate` is unavailable, an image request can still be met

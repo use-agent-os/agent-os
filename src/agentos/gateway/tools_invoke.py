@@ -116,6 +116,8 @@ HARD_DENY_TOOLS: frozenset[str] = frozenset(
         # Paid media generation.
         "image_generate",
         "flow_run",
+        # Posts into a chat, like publish_artifact.
+        "flow_publish",
         # Image Flow authoring writes the user's flows (no unattended caller).
         "flow_create",
         "flow_update",
