@@ -685,7 +685,7 @@ describe('triggers among the missions', () => {
     // per trigger taken from the transcript.
     renderDesk(
       <>
-        <MissionStrip missions={[]} running={new Set()} pendingApprovals={0} mandates={[]} />
+        <MissionStrip missions={[]} running={new Set()} pendingApprovals={0} />
         <MissionControls
           missions={[]}
           running={new Set()}

@@ -149,27 +149,21 @@ function MandateProgress({ mandate }: { mandate: Mandate }) {
  * doing. Renders nothing when there is nothing running: a band that says
  * IDLE over an idle composer is chrome, not information.
  *
- * Price triggers are not named here: their rows in the controls below
- * already carry the state word, the price and the distance, and naming
- * them twice cost the transcript a line per trigger.
+ * Only cron missions are named here: their rows in the controls below have
+ * no state word, so this is where it is said. A DCA mandate's or a price
+ * trigger's row already carries its state and figures, and naming them twice
+ * cost the transcript a line each.
  */
 export function MissionStrip({
   missions,
   running,
   pendingApprovals,
-  mandates = NO_MANDATES,
 }: {
   missions: RawJob[]
   running: ReadonlySet<string>
   pendingApprovals: number
-  /** The desk's DCA mandates, listed after the cron missions. */
-  mandates?: Mandate[]
 }) {
-  const now = useMandateClock(mandates)
-  // The finished rows left out are counted (and opened) in the controls row
-  // below, once; the strip only names what it shows.
-  const { rows } = mandateRows(mandates)
-  if (missions.length === 0 && mandates.length === 0) return null
+  if (missions.length === 0) return null
   return (
     <div className="trd-mstrip" role="status" data-testid="mission-strip">
       {missions.map((job) => {
@@ -185,20 +179,6 @@ export function MissionStrip({
           </span>
         )
       })}
-      {rows.map((m) => (
-        <span
-          key={m.id}
-          className="trd-mstrip__item"
-          data-kind="mandate"
-          data-state={m.status}
-          data-testid="mission-strip-mandate"
-        >
-          <span className="trd-mstrip__dot" aria-hidden />
-          <b>{m.name}</b>
-          <span className="trd-mstrip__word">{mandateWord(m, now)}</span>
-          <span className="trd-mstrip__word trd-mono">{mandateProgressText(m)}</span>
-        </span>
-      ))}
     </div>
   )
 }

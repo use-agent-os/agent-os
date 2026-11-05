@@ -20,7 +20,7 @@ import {
   mandateState,
   parseEvery,
 } from './mandate-logic'
-import { MissionControls, MissionStrip, mandateWord } from './MissionControls'
+import { MissionControls, mandateWord } from './MissionControls'
 import { useMissions } from './missions'
 import { StatusStrip } from './StatusStrip'
 
@@ -449,35 +449,9 @@ describe('mandates among the missions', () => {
     expect(screen.getByTestId('mandate-more')).toHaveTextContent('+1 more')
   })
 
-  it('counts the hidden finished mandates once: in the controls row, never in the strip', () => {
-    const listed = [
-      mandate(),
-      mandate({ id: 'b', status: 'stopped', updatedAt: '2026-09-28T05:45:00Z' }),
-      mandate({ id: 'a', status: 'completed', updatedAt: '2026-09-28T05:40:00Z' }),
-      mandate({ id: 'c', status: 'rejected', updatedAt: '2026-09-28T05:30:00Z' }),
-    ]
+  it('sums mandates in one status strip chip', () => {
     renderDesk(
-      <MissionStrip missions={[]} running={new Set()} pendingApprovals={0} mandates={listed} />,
-    )
-    expect(screen.getAllByTestId('mission-strip-mandate')).toHaveLength(3)
-    expect(screen.getByTestId('mission-strip')).not.toHaveTextContent('more')
-    expect(screen.queryByTestId('mission-strip-more')).toBeNull()
-  })
-
-  it('names mandates in the strip above the composer; the status strip sums them in one chip', () => {
-    renderDesk(
-      <>
-        <MissionStrip
-          missions={[]}
-          running={new Set()}
-          pendingApprovals={0}
-          mandates={[mandate()]}
-        />
-        <StatusStrip mode="trading" onSwitchMode={vi.fn()} mandates={[mandate(), PENDING]} />
-      </>,
-    )
-    expect(screen.getByTestId('mission-strip-mandate')).toHaveTextContent(
-      'DCA ETHActive · next 3 h 12 m$120 / $300',
+      <StatusStrip mode="trading" onSwitchMode={vi.fn()} mandates={[mandate(), PENDING]} />,
     )
     const chip = screen.getByTestId('strip-mandates')
     expect(chip).toHaveTextContent(/^DCA ×2 · awaiting$/)
