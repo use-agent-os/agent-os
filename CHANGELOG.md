@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Desktop Image Flows: images can now be downloaded, from a button on each
+  image of a Save node and from the image viewer opened on the canvas or in
+  Results. It saves the full-size file; an image from a Save node keeps the
+  name Save gave it and the flow inside it.
+
 ## [2026.11.5] - 2026-11-05
 
 ### Fixed

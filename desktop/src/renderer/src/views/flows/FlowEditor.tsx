@@ -310,7 +310,7 @@ function Editor({
           },
         })
       },
-      openImages: (images, index) => setViewer({ images, index }),
+      openImages: (images, index, fileNames) => setViewer({ images, index, fileNames }),
       uploadImage,
       readOnly: !editable,
     }),
