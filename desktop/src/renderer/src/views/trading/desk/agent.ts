@@ -14,7 +14,7 @@
 export const TRADING_AGENT_ID = 'trading'
 
 /** Bump when the spec or the files below change: the desktop rewrites them once. */
-export const TRADING_AGENT_VERSION = 27
+export const TRADING_AGENT_VERSION = 28
 
 const MANAGED_MARK = `<!-- Managed by the AgentOS desktop app (trading agent v${TRADING_AGENT_VERSION}). Edits are overwritten. -->`
 
@@ -62,7 +62,7 @@ export function tradingAgentSpec(): TradingAgentSpec {
     id: TRADING_AGENT_ID,
     name: 'Trading desk',
     description:
-      'The AgentOS desktop trading desk. Swaps, portfolio, Uniswap V4 liquidity read-outs, markets (every pool a token trades in, on every DEX), DCA mandates, price triggers, brackets (take-profit + stop-loss as one) and missions on Base and Robinhood Chain through the wallet vault. Managed by the desktop app.',
+      'The AgentOS desktop trading desk. Swaps, portfolio, Uniswap V4 liquidity read-outs, markets (every pool a token trades in, on every DEX), DCA mandates, price triggers, brackets (take-profit + stop-loss as one), bridges between Base and Robinhood Chain (ETH, USDC↔USDG through Relay) and missions on Base and Robinhood Chain through the wallet vault. Managed by the desktop app.',
     tools: TRADING_AGENT_TOOLS,
   }
 }
@@ -318,20 +318,49 @@ Reading it:
 
 ## Bridging
 
-The desk cannot bridge: no command moves funds from one chain to another.
-\`--chain\` is where an order runs, and a swap or a send never leaves it.
-Any request to take funds from one chain to another is a bridge, whatever
-the verb: \`bridge 0.01 ETH to Robinhood\`, \`move my USDC from Base to
-Robinhood Chain\`, \`deposit ETH into Robinhood Chain\`, \`withdraw ETH back
-to Base\`. It is not a send, and it has no
-recipient to ask for.
+A bridge moves the SAME asset from one chain to the other: ETH on Base
+becomes ETH on Robinhood Chain, USDC on Base becomes USDG on Robinhood
+Chain (and back). It is not a swap and not a send: it has no pair to
+quote, no recipient to ask for, and \`--chain\` on a swap or a send never
+leaves the chain. Any request to take funds from one chain to the other is
+a bridge, whatever the verb: \`bridge 0.01 ETH to Robinhood\`, \`move my
+USDC from Base to Robinhood Chain\`, \`deposit ETH into Robinhood Chain\`,
+\`withdraw ETH back to Base\`.
 
-Answer it in one short message: bridging is not available in the desk yet;
-the desk swaps and sends within Base or within Robinhood Chain. Then stop.
-Run nothing for it, not even \`agentos trade status\`: no web search, no
-bridge site, API or contract, no send to a bridge address or to the
-wallet's own address, no swap into a wrapped or bridged token as a
-stand-in. Do not recommend, name or link a bridge.
+- Only two assets cross, in either direction between Base and Robinhood
+  Chain: ETH and USDC↔USDG. Anything else (another token, another chain,
+  a third-party bridge, a wrapped stand-in) is answered as unsupported in
+  one line; run nothing for it.
+- Leave a little ETH on the origin chain for gas; never bridge the whole
+  balance (\`--pct 100\` keeps the gas reserve back, as on a swap).
+- Quote only when the user asks for an estimate:
+  \`agentos trade bridge quote --chain base --to-chain robinhood --token ETH --amount 0.01 --json\`
+  (\`--usd 20\` or \`--pct 50\` size it the same way a swap does). Report
+  the expected amount, the fees and the time estimate, then wait.
+- The order is one line:
+  \`agentos trade bridge create --chain base --to-chain robinhood --token ETH --amount 0.01 --note "user: bridge 0.01 ETH to Robinhood" --client-id bridge-eth-20260920T1015 --wait --wait-seconds 600 --json\`
+  \`--chain\` is where the funds are now, \`--to-chain\` where they go,
+  \`--token\` the asset on the origin chain (\`ETH\` or \`USDC\` on Base,
+  \`ETH\` or \`USDG\` on Robinhood Chain). \`--note\` and \`--client-id\` work
+  as on a swap.
+- From you it ALWAYS answers \`status: "awaiting_approval"\`: the user
+  approves it on the card. Say so in one sentence with the order id, then
+  stop. Never approve it yourself and never retry it unchanged.
+- After the approval, \`--wait\` holds through the deposit on the origin
+  chain and Relay's fill on the destination: the order stays \`submitted\`
+  until the funds have arrived and only then reads \`confirmed\`. Report
+  the Relay \`bridge.requestId\`, the deposit tx (\`explorerUrl\`), the
+  destination tx (\`bridge.destinationExplorerUrl\`), the amount received
+  (\`receivedOut\` in the destination token) and the fees (\`bridge.feesUsd\`).
+- When the wait runs out while the order is still \`submitted\`,
+  \`agentos trade bridge status <orderId|requestId> --json\` reads where the
+  fill stands (\`bridge.fillStatus\`): at most a few times in a turn, never
+  a polling loop. A bridge can take minutes; say so and let the user come
+  back.
+- \`failed\` with a refund reason means the funds came back on the origin
+  chain; \`failed\` without one means nothing left the origin chain. Report
+  it plainly, with the reason, and do not retry on your own.
+- "my bridges" → \`agentos trade orders --kind bridge --json\`.
 
 ## The fast path
 
@@ -531,9 +560,14 @@ skill only repeats it. Do not open it or run \`--help\` to find a flag.
 - Sizes: \`--amount 0.01\` (token units, never wei), \`--usd 5\` (dollars of
   \`--in\`, sized by the engine at the current price), \`--pct 50\` (share of
   the balance; \`100\` keeps gas back). Exactly one of the three.
-- No command bridges: nothing moves funds from one chain to another, and
-  \`--chain\` is where an order runs. A bridge request gets an answer, not
-  a command (AGENTS.md, "Bridging").
+- Bridging (AGENTS.md, "Bridging"): the same asset to the other chain,
+  ETH or USDC↔USDG between Base and Robinhood Chain, through Relay.
+  \`agentos trade bridge quote --chain base --to-chain robinhood --token ETH --amount 0.01 --json\`
+  \`agentos trade bridge create --chain base --to-chain robinhood --token USDC --amount 25 --note '<the user’s words>' --client-id <id> --wait --wait-seconds 600 --json\`
+  \`agentos trade bridge status <orderId|requestId> --json\`
+  \`create\` always parks as \`awaiting_approval\` from you; \`--wait\`
+  returns \`confirmed\` only once the funds have arrived on the destination.
+  \`--chain\` on a swap or a send still never leaves its chain.
 - Readiness, once per conversation: \`agentos trade status --json\`
   (provider, API key, vault, limits). \`trading.provider\` means the
   aggregator is unreachable or erroring upstream (\`trading.uniswap\` for

@@ -195,6 +195,42 @@ def evaluate_transfer(
     return verdict("needs_approval", "a transfer leaves the wallet for good; it waits for you")
 
 
+def evaluate_bridge(
+    *,
+    initiator: str,
+    value_usd: float | None,
+    daily_cap_usd: float,
+    spent_today_usd: float,
+) -> GuardVerdict:
+    """A bridge is a transfer that leaves the chain: judged exactly like a send.
+
+    Manual bridges run; an agent's always waits for a human, is refused
+    outright when it would push the wallet over its daily cap (or the cap
+    is zero), and waits unpriced rather than slipping past the cap.
+    """
+    verdict = evaluate_transfer(
+        initiator=initiator,
+        value_usd=value_usd,
+        daily_cap_usd=daily_cap_usd,
+        spent_today_usd=spent_today_usd,
+    )
+    if verdict.decision != "needs_approval":
+        return verdict
+    reason = (
+        "value unknown (no price); a bridge always waits"
+        if verdict.value_usd is None
+        else "a bridge moves funds to the other chain for good; it waits for you"
+    )
+    return GuardVerdict(
+        decision=verdict.decision,
+        value_usd=verdict.value_usd,
+        spent_today_usd=verdict.spent_today_usd,
+        daily_cap_usd=verdict.daily_cap_usd,
+        threshold_usd=verdict.threshold_usd,
+        reason=reason,
+    )
+
+
 def evaluate_revoke(*, initiator: str) -> GuardVerdict:
     """A revoke spends only gas, but it is still the agent writing to chain."""
     decision: Decision = "allow" if initiator == "manual" else "needs_approval"

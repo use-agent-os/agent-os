@@ -15,11 +15,30 @@ import {
 const DESK = 'agent:trading:webchat:trading-abc123'
 
 describe('deriveMode', () => {
-  it('is trading only for the desk session', () => {
-    expect(deriveMode(DESK, DESK)).toBe('trading')
-    expect(deriveMode('agent:main:webchat:other', DESK)).toBe('chat')
-    expect(deriveMode('', DESK)).toBe('chat')
-    expect(deriveMode(DESK, '')).toBe('chat')
+  it('is trading for every chat the desk minted, not only the newest', () => {
+    expect(deriveMode(DESK)).toBe('trading')
+    expect(deriveMode('agent:trading:webchat:trading-older1')).toBe('trading')
+    expect(deriveMode(mintTradingSessionKey())).toBe('trading')
+  })
+  it('is trading for a chat started from the desk project\'s "+" (`sessions.create`)', () => {
+    expect(deriveMode('agent:trading:04d17d83')).toBe('trading')
+  })
+  it('is chat for anything that is not a conversation with the trading agent', () => {
+    expect(deriveMode('')).toBe('chat')
+    expect(deriveMode(null)).toBe('chat')
+    expect(deriveMode('agent:main:webchat:other')).toBe('chat')
+    // From before the desk had its own agent: it ran as `main`, and still does.
+    expect(deriveMode('agent:main:webchat:trading-old')).toBe('chat')
+    // The trading agent's scheduled runs and helpers are not desk chats.
+    expect(deriveMode('agent:trading:cron:job1:run:r1')).toBe('chat')
+    expect(deriveMode('agent:trading:subagent:s1')).toBe('chat')
+    expect(deriveMode('agent:trading:hook:h1')).toBe('chat')
+    expect(deriveMode('agent:trading:acp:3473e002')).toBe('chat')
+    // A channel routed to the trading agent answers there, not at this desk.
+    expect(deriveMode('agent:trading:telegram:direct:1245')).toBe('chat')
+    // The same shape under another agent, and an agent merely named like it.
+    expect(deriveMode('agent:main:04d17d83')).toBe('chat')
+    expect(deriveMode('agent:trading-bot:04d17d83')).toBe('chat')
   })
   it('mints desk keys under the desk agent', () => {
     expect(mintTradingSessionKey()).toMatch(/^agent:trading:webchat:trading-[a-z0-9]+$/)

@@ -4,7 +4,15 @@ import { copyLpText } from '@/views/chat/transcript/lp'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
 import { useTouchIdPrompt } from '~/lib/biometric-gate'
-import { formatAmount, initiatorKey, isAwaitingApproval, shortAddress, shortHash } from '../logic'
+import {
+  chainName,
+  formatAmount,
+  formatUsd,
+  initiatorKey,
+  isAwaitingApproval,
+  shortAddress,
+  shortHash,
+} from '../logic'
 import { StatusPill, Sym } from '../parts'
 import { isLpKind, type Order, type Wallet } from '../types'
 import {
@@ -55,6 +63,9 @@ const FACT_KEYS = [
   'lpMaximum',
   'lpApprovals',
   'lpSlippage',
+  'fromChain',
+  'toChain',
+  'bridgeFees',
   'none',
 ] as const
 
@@ -223,7 +234,7 @@ export function ApprovalCard({
         </h3>
         <span className="trd-card__stamps">
           <span className="trd-stamp">{t(`trading.card.by.${initiatorKey(order.initiator)}`)}</span>
-          {kind === 'send' && live ? (
+          {(kind === 'send' || kind === 'bridge') && live ? (
             <span className="trd-stamp" data-tone="warn" data-testid="stamp-irreversible">
               {t('trading.card.irreversible')}
             </span>
@@ -359,6 +370,19 @@ export function ApprovalCard({
                 : t('trading.approvals.approve')}
           </Button>
         </div>
+      ) : kind === 'bridge' && order.bridge?.destinationTxHash && order.txHash ? (
+        // A settled bridge has two receipts: the deposit on the origin chain
+        // and the fill on the destination. Both are links, each labelled.
+        <div className="trd-card__actions trd-card__actions--bridge" data-testid="card-bridge-txs">
+          <span className="trd-card__spacer" />
+          <span className="trd-card__txlabel">{t('trading.card.fact.deposit')}</span>
+          <TxLink hash={order.txHash} url={order.explorerUrl} />
+          <span className="trd-card__txlabel">{t('trading.card.fact.arrival')}</span>
+          <TxLink
+            hash={order.bridge.destinationTxHash}
+            url={order.bridge.destinationExplorerUrl ?? null}
+          />
+        </div>
       ) : order.txHash && !ask.batch ? (
         <div className="trd-card__actions">
           <span className="trd-card__spacer" />
@@ -478,6 +502,35 @@ function Legs({ ask }: { ask: Ask }) {
         </b>
         <span aria-hidden>⛨</span>
         <b>{recipientDisplay(lead) || shortAddress(lead.recipient ?? '')}</b>
+      </p>
+    )
+  }
+  if (ask.kind === 'bridge') {
+    // "0.01 ETH → Robinhood Chain · ≈ 0.0099 ETH · fees $0.12": the same
+    // asset on the other chain, what Relay expects to deliver, what it keeps.
+    const bridge = lead.bridge ?? null
+    const to = bridge?.destinationChain?.name ?? chainName(bridge?.destinationChainId ?? NaN)
+    const confirmed = lead.status === 'confirmed'
+    const out = confirmed ? (lead.receivedOut ?? lead.expectedOut) : lead.expectedOut
+    const fees = bridge?.feesUsd ?? null
+    return (
+      <p className="trd-card__legs trd-num" data-testid="card-legs">
+        <b>
+          {formatAmount(lead.amountIn)} <Sym symbol={lead.tokenIn.symbol} />
+        </b>
+        <span aria-hidden>→</span>
+        <b>{to}</b>
+        {out ? (
+          <span className="trd-card__legs-sub" data-testid="card-bridge-out">
+            {confirmed ? '' : '≈ '}
+            {formatAmount(out)} <Sym symbol={lead.tokenOut.symbol} />
+          </span>
+        ) : null}
+        {fees !== null ? (
+          <span className="trd-card__legs-sub" data-testid="card-bridge-fees">
+            {t('trading.card.fact.bridgeFees').toLowerCase()} {formatUsd(fees)}
+          </span>
+        ) : null}
       </p>
     )
   }

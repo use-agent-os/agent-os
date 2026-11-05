@@ -3,7 +3,7 @@ import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Orders } from './Orders'
 import { formatAmount } from './logic'
-import { order, renderDesk, USDC } from './test-utils'
+import { bridgeOrder, order, renderDesk, USDC } from './test-utils'
 import type { Order } from './types'
 
 const rpcCall = vi.fn()
@@ -357,6 +357,66 @@ describe('Orders · approvals', () => {
       />,
     )
     expect(screen.getByText('Nothing waiting')).toBeInTheDocument()
+  })
+})
+
+describe('Orders · bridge rows', () => {
+  function row(o: Order): HTMLElement {
+    renderDesk(
+      <Orders
+        orders={[o]}
+        approvalsOnly={false}
+        deciding={null}
+        onDecide={vi.fn()}
+        showWallet={false}
+        highlight={null}
+      />,
+    )
+    return screen.getByTestId('order-row')
+  }
+
+  it('a parked bridge names the destination chain and the estimate, with no fill pill', () => {
+    const el = row(bridgeOrder())
+    expect(el).toHaveTextContent('0.01 ETH')
+    const to = screen.getByTestId('order-bridge-to')
+    expect(to).toHaveTextContent('Robinhood Chain')
+    expect(to).toHaveTextContent('est. 0.0099 ETH')
+    expect(to).toHaveAttribute('data-estimate', 'true')
+    expect(el).toHaveTextContent('Needs approval')
+    // The Relay solver address is the deposit target, not a recipient to read.
+    expect(el).not.toHaveTextContent('0xa5f5')
+    expect(screen.queryByTestId('order-bridge-fill')).toBeNull()
+  })
+
+  it('a submitted bridge wears Relay’s fill status until the funds land', () => {
+    row(
+      bridgeOrder({
+        status: 'submitted',
+        txHash: '0xdep',
+        explorerUrl: 'https://basescan.org/tx/0xdep',
+        bridge: { ...bridgeOrder().bridge!, requestId: 'req_1', fillStatus: 'pending' },
+      }),
+    )
+    const pill = screen.getByTestId('order-bridge-fill')
+    expect(pill).toHaveTextContent('filling')
+    expect(pill).toHaveAttribute('data-fill', 'pending')
+    expect(pill).toHaveAttribute('title', 'req_1')
+  })
+
+  it('a confirmed bridge shows what arrived, without the estimate mark', () => {
+    row(
+      bridgeOrder({
+        status: 'confirmed',
+        txHash: '0xdep',
+        receivedOut: '0.00985',
+        bridge: { ...bridgeOrder().bridge!, fillStatus: 'success' },
+      }),
+    )
+    const to = screen.getByTestId('order-bridge-to')
+    expect(to).toHaveTextContent('0.00985 ETH')
+    expect(to).not.toHaveTextContent('est.')
+    expect(to).not.toHaveAttribute('data-estimate')
+    expect(screen.queryByTestId('order-bridge-fill')).toBeNull()
   })
 })
 

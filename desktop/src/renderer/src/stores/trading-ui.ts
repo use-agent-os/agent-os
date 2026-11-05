@@ -197,9 +197,11 @@ export const useTradingUi = create<TradingUiStore>((set) => ({
 }))
 
 /**
- * The desk's chat session, remembered across launches. A key from before the
- * desk had its own agent (`agent:main:…`) is not the desk's any more: it reads
- * as absent, so a fresh one is minted and the old chat stays in the sidebar.
+ * The desk's newest chat, remembered across launches: where the pill, ⌘⇧T and
+ * `/trading` enter. Older desk chats are still the desk's when opened from the
+ * sidebar (`deriveMode`). A key from before the desk had its own agent
+ * (`agent:main:…`) is not the desk's any more: it reads as absent, so a fresh
+ * one is minted and the old chat stays in the sidebar.
  */
 export function readTradingSessionKey(): string {
   try {

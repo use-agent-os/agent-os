@@ -18,6 +18,7 @@ from pydantic import (
     PrivateAttr,
     SerializeAsAny,
     ValidationError,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -2488,6 +2489,9 @@ class TradingConfig(BaseSettings):
     # Where the aggregator is served. Only change this to point at another
     # deployment of the same API.
     aggregator_base_url: str = "https://agg.useagentos.dev"
+    # Where Relay (the Base ⇄ Robinhood Chain bridge) is served; public and
+    # keyless. Only change this to point at another deployment of its API.
+    relay_base_url: str = "https://api.relay.link"
     uniswap_api_key: str = ""
     uniswap_api_key_env: str = "UNISWAP_API_KEY"
     # Chain id (as a string, TOML keys are strings) -> JSON-RPC URL override.
@@ -2517,18 +2521,19 @@ class TradingConfig(BaseSettings):
 
         return {chain: validate_header_env(headers) for chain, headers in value.items()}
 
-    @field_validator("aggregator_base_url")
+    @field_validator("aggregator_base_url", "relay_base_url")
     @classmethod
-    def _aggregator_url_must_be_https(cls, value: str) -> str:
-        """The aggregator hands back calldata the wallet signs: it must be
-        fetched over TLS. Plain ``http`` is allowed only for a loopback host
-        (a local mock or a dev deployment on this machine)."""
+    def _calldata_url_must_be_https(cls, value: str, info: ValidationInfo) -> str:
+        """The aggregator and Relay hand back calldata the wallet signs: they
+        must be fetched over TLS. Plain ``http`` is allowed only for a loopback
+        host (a local mock or a dev deployment on this machine)."""
         from urllib.parse import urlsplit
 
+        key = f"trading.{info.field_name}"
         text = (value or "").strip()
         parsed = urlsplit(text)
         if not parsed.scheme or not parsed.netloc:
-            raise ValueError("trading.aggregator_base_url must be an absolute http(s) URL")
+            raise ValueError(f"{key} must be an absolute http(s) URL")
         scheme = parsed.scheme.lower()
         if scheme == "https":
             return text
@@ -2536,8 +2541,7 @@ class TradingConfig(BaseSettings):
         if scheme == "http" and host in _LOOPBACK_HOSTS:
             return text
         raise ValueError(
-            "trading.aggregator_base_url must use https (http is allowed only for "
-            "127.0.0.1, localhost or ::1)"
+            f"{key} must use https (http is allowed only for 127.0.0.1, localhost or ::1)"
         )
 
     def resolved_uniswap_api_key(self) -> str:

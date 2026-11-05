@@ -80,6 +80,15 @@ describe('SessionRoute', () => {
     )
   })
 
+  it('opens an older desk chat at the desk, though a newer one is the remembered session', () => {
+    frameState.fullDesk = false
+    writeTradingSessionKey('agent:trading:webchat:trading-newer')
+    mount()
+    expect(useDeskFrame).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'trading', active: true, sessionKey: KEY }),
+    )
+  })
+
   it("hands the chat the strip's slot for its actions in Chat mode, and none at the desk", () => {
     frameState.fullDesk = false
     const { unmount } = mount('agent:main:webchat:plain')

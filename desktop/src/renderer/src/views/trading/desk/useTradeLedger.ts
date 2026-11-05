@@ -120,6 +120,10 @@ function glyphFor(call: TradeCall, outcome: TradeOutcome | null): string {
     case 'lp_remove':
     case 'lp_add':
       return '◇'
+    case 'bridge':
+    case 'bridge_quote':
+    case 'bridge_status':
+      return '⇉'
     default:
       return isDcaKind(call.kind)
         ? '↻'

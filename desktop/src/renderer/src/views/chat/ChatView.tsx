@@ -718,18 +718,19 @@ function ConnectedChat({
   })
 
   // The desk's own way in: a rejection reason, a mission prompt. The first
-  // send from the desk files its session into the "Trading desk" project.
-  const deskSentOnce = useRef(false)
+  // send of each session files it into the "Trading desk" project; this view
+  // stays mounted across "Start fresh", so "first" is per key, not per mount.
+  const deskSentFor = useRef('')
   const deskSendText = useCallback(
     (text: string) => {
       send(text, [], pendingIntentRef.current)
       pendingIntentRef.current = null
-      if (desk && !deskSentOnce.current) {
-        deskSentOnce.current = true
+      if (desk && deskSentFor.current !== sessionKey) {
+        deskSentFor.current = sessionKey
         desk.onFirstSend()
       }
     },
-    [send, desk],
+    [send, desk, sessionKey],
   )
   const deskSubmitText = useCallback((text: string) => void onComposerSend(text), [onComposerSend])
   // While a turn streams a direct send is dropped, so a message the agent
@@ -766,17 +767,13 @@ function ConnectedChat({
     setFocusOrderId,
     ownOrderIds,
   })
-  const lastSentRef = useRef('')
   useEffect(() => {
-    // Any send from the desk's composer counts as its first send too.
-    if (!desk || deskSentOnce.current) return
-    const last = history[history.length - 1] ?? ''
-    if (last && last !== lastSentRef.current) {
-      lastSentRef.current = last
-      deskSentOnce.current = true
-      desk.onFirstSend()
-    }
-  }, [history, desk])
+    // Any send from the desk's composer counts as its first send too. The
+    // history is per session and holds only this session's sends.
+    if (!desk || deskSentFor.current === sessionKey || history.length === 0) return
+    deskSentFor.current = sessionKey
+    desk.onFirstSend()
+  }, [history, desk, sessionKey])
 
   const onSlashKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean =>

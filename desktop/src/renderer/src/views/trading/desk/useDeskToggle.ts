@@ -1,12 +1,7 @@
 import { useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { canonicalSessionKey } from '@/views/chat/logic'
-import {
-  ensureTradingSessionKey,
-  readReturnSession,
-  readTradingSessionKey,
-  writeReturnSession,
-} from '~/stores/trading-ui'
+import { ensureTradingSessionKey, readReturnSession, writeReturnSession } from '~/stores/trading-ui'
 import { deriveMode, ENTER_STATE, mintTradingSessionKey, toggleTarget } from './mode-logic'
 
 /** The session key in the current route, if the route is a session. */
@@ -30,12 +25,12 @@ export function useDeskToggle(): { mode: 'chat' | 'trading'; toggle: () => void 
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const currentKey = sessionKeyFromPath(pathname)
-  const mode = deriveMode(currentKey, readTradingSessionKey())
+  const mode = deriveMode(currentKey)
 
   const toggle = useCallback(() => {
     const tradingKey = ensureTradingSessionKey(mintTradingSessionKey)
     const current = sessionKeyFromPath(pathname)
-    const now = deriveMode(current, tradingKey)
+    const now = deriveMode(current)
     const target = toggleTarget({
       mode: now,
       tradingKey,

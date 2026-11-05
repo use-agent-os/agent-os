@@ -189,23 +189,53 @@ describe('tradingAgentFiles · reading an order', () => {
       /`--pct 100` on ETH fails with `trading\.invalid` when the balance is at\s+or below the 0\.001 ETH gas reserve/,
     )
   })
-  it('answers a bridge request in one message and runs nothing for it', () => {
-    // No command moves funds between chains. Asked to "bridge" ETH to
-    // Robinhood Chain, a desk opened the skill to look for one; asked to
-    // "deposit 0.001 ETH into Robinhood Chain", it read a send there and
-    // asked the user for a recipient address.
-    const agents = files['AGENTS.md']
+  it('bridges the same asset between Base and Robinhood Chain through `trade bridge create`, and always waits (v28)', () => {
+    // Until v27 the desk refused every bridge. The engine now bridges ETH
+    // and USDC↔USDG through Relay; from the desk the order always parks for
+    // the user, and `--wait` only returns `confirmed` once the funds landed.
+    const agents = files['AGENTS.md'] ?? ''
+    expect(TRADING_AGENT_VERSION).toBeGreaterThanOrEqual(28)
     expect(agents).toContain('## Bridging')
-    expect(agents).toMatch(
-      /The desk cannot bridge: no command moves funds from one chain to another/,
+    const section = agents.slice(agents.indexOf('## Bridging'), agents.indexOf('## The fast path'))
+    expect(section).toMatch(/A bridge moves the SAME asset from one chain to the other/)
+    expect(section).toMatch(/It is not a swap and not a send/)
+    expect(section).toMatch(/is\s+a bridge, whatever the verb/)
+    expect(section).toContain('`deposit ETH into Robinhood Chain`')
+    expect(section).toContain('ETH and USDC↔USDG')
+    expect(section).toMatch(/answered as unsupported/)
+    expect(section).toMatch(/Leave a little ETH on the origin chain for gas/)
+    expect(section).toMatch(/Quote only when the user asks for an estimate/)
+    expect(section).toContain(
+      '`agentos trade bridge create --chain base --to-chain robinhood --token ETH --amount 0.01 --note "user: bridge 0.01 ETH to Robinhood" --client-id bridge-eth-20260920T1015 --wait --wait-seconds 600 --json`',
     )
-    expect(agents).toMatch(/is a bridge, whatever\s+the verb/)
-    expect(agents).toContain('`deposit ETH into Robinhood Chain`')
-    expect(agents).toMatch(/It is not a send, and it has no\s+recipient to ask for/)
-    expect(agents).toMatch(/Run nothing for it, not even `agentos trade status`/)
-    expect(agents).toMatch(/no send to a bridge address or to the\s+wallet's own address/)
-    expect(agents).toMatch(/Do not recommend, name or link a bridge/)
-    expect(files['TOOLS.md']).toMatch(/No command bridges: nothing moves funds from one chain/)
+    expect(section).toMatch(/ALWAYS answers `status: "awaiting_approval"`/)
+    expect(section).toMatch(/Never approve it yourself/)
+    expect(section).toMatch(/only then reads `confirmed`/)
+    for (const field of [
+      'bridge.requestId',
+      'destinationExplorerUrl',
+      'receivedOut',
+      'bridge.feesUsd',
+    ])
+      expect(section, field).toContain(field)
+    expect(section).toMatch(/`agentos trade bridge status <orderId\|requestId> --json`/)
+    expect(section).toMatch(/at most a few times in a turn, never\s+a polling loop/)
+    expect(section).toMatch(
+      /`failed` with a refund reason means the funds came back on the origin\s+chain/,
+    )
+    // The old refusal is gone everywhere.
+    expect(agents).not.toMatch(/The desk cannot bridge/)
+    expect(agents).not.toMatch(/Do not recommend, name or link a bridge/)
+    const tools = files['TOOLS.md'] ?? ''
+    expect(tools).not.toMatch(/No command bridges/)
+    expect(tools).toContain(
+      'agentos trade bridge quote --chain base --to-chain robinhood --token ETH',
+    )
+    expect(tools).toContain(
+      'agentos trade bridge create --chain base --to-chain robinhood --token USDC --amount 25',
+    )
+    expect(tools).toContain('agentos trade bridge status <orderId|requestId> --json')
+    expect(tradingAgentSpec().description).toMatch(/bridges between Base and Robinhood Chain/)
   })
   it('bumped the version with the text, so every desk rewrites its files', () => {
     expect(TRADING_AGENT_VERSION).toBeGreaterThanOrEqual(9)
@@ -504,8 +534,8 @@ describe('tradingAgentFiles · naming the markets sections (v27)', () => {
   const tools = files['TOOLS.md'] ?? ''
 
   it('bumped the version', () => {
-    expect(TRADING_AGENT_VERSION).toBe(27)
-    expect(agents).toContain('trading agent v27')
+    expect(TRADING_AGENT_VERSION).toBe(28)
+    expect(agents).toContain('trading agent v28')
   })
 
   it('says which section is which, and never calls USDG/WETH quote-side markets', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { order, WALLET } from '../test-utils'
+import { bridgeOrder, order, WALLET } from '../test-utils'
 import {
   watchTabStrip,
   approvalFacts,
@@ -813,9 +813,69 @@ describe('orderLine and orderKindWord · what a toast names', () => {
     expect(orderKindWord(legs[0]!, 1)).toBe('send')
     expect(orderKindWord(order())).toBe('swap')
   })
+  it('names a bridge by its destination chain, never by a recipient', () => {
+    const bridge = bridgeOrder()
+    expect(orderLine(bridge)).toBe('0.01 ETH → Robinhood Chain')
+    expect(orderKindWord(bridge)).toBe('bridge')
+    // No chain object from the engine: our registry names the id.
+    expect(orderLine(bridgeOrder({ bridge: { ...bridge.bridge!, destinationChain: null } }))).toBe(
+      '0.01 ETH → Robinhood Chain',
+    )
+    expect(rejectionMessage(bridge, '')).toBe(
+      'Rejected bridge o1. Do not retry it without asking first.',
+    )
+  })
   it('recognises the engine refusing a second decision', () => {
     expect(alreadyDecided('trading.invalid: order o1 is no longer awaiting approval')).toBe(true)
     expect(alreadyDecided('trading.invalid: no batch x')).toBe(false)
+  })
+})
+
+describe('approval facts · a bridge', () => {
+  const labels = {
+    chain: 'Chain',
+    fromChain: 'From',
+    toChain: 'To',
+    send: 'Send',
+    receive: 'Receive (expected)',
+    bridgeFees: 'Bridge fees',
+    value: 'Value',
+    gas: 'Gas',
+    order: 'Order',
+    expires: 'Expires',
+  }
+  it('lists both chains, what leaves, what should land and the fees — no recipient', () => {
+    const facts = approvalFacts(bridgeOrder(), [WALLET], labels)
+    expect(facts.map((f) => f.key)).toEqual([
+      'wallet',
+      'chain',
+      'fromChain',
+      'toChain',
+      'send',
+      'receive',
+      'bridgeFees',
+      'value',
+      'gas',
+      'order',
+      'expires',
+    ])
+    const by = (k: string) => facts.find((f) => f.key === k)!
+    expect(by('fromChain').value).toBe('Base')
+    expect(by('toChain').value).toBe('Robinhood Chain')
+    expect(by('send').value).toBe('0.01 ETH')
+    expect(by('receive').value).toBe('≈ 0.0099 ETH')
+    expect(by('bridgeFees').value).toBe('$0.12')
+    expect(by('bridgeFees').full).toBe('gas $0.02 · relayer $0.10')
+    expect(facts.some((f) => f.key === 'to')).toBe(false)
+    expect(facts.some((f) => f.wide)).toBe(false)
+  })
+  it('once confirmed, the receive row is what arrived, not the estimate', () => {
+    const facts = approvalFacts(
+      bridgeOrder({ status: 'confirmed', receivedOut: '0.00985' }),
+      [WALLET],
+      labels,
+    )
+    expect(facts.find((f) => f.key === 'receive')!.value).toBe('0.00985 ETH')
   })
 })
 

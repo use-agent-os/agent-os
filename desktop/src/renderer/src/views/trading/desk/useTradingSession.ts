@@ -22,8 +22,9 @@ const FILE_RETRY_MS = 1500
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
 /**
- * One chat per desk, remembered across launches. The session key is minted
- * here under the desk's own `trading` agent; the gateway creates the session
+ * The desk's newest chat, remembered across launches; older ones stay in the
+ * sidebar and still open at the desk. The session key is minted here under
+ * the desk's own `trading` agent; the gateway creates the session
  * on the first send. The agent itself is the desktop's: it is created (or
  * brought up to this build's spec) the first time the desk is active. Once
  * the session exists, it is filed into the "Trading desk" project (created

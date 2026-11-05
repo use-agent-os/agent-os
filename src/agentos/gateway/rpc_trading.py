@@ -673,6 +673,108 @@ async def _trading_send(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     return {"orders": orders, "batchId": orders[0].get("batchId") if orders else None}
 
 
+# ── trading.bridge.* (docs/bridge.md) ───────────────────────────────────────
+#
+# A bridge moves ETH or the USD stable between Base and Robinhood Chain through
+# Relay. An agent may quote and create (its order always parks for approval,
+# like a send); the operator approves through ``trading.orders.approve``.
+
+
+def _bridge_chains(p: dict[str, Any]) -> tuple[ChainSpec, ChainSpec]:
+    origin = _chain(p)
+    assert origin is not None
+    value = p.get("toChainId", p.get("toChain"))
+    if value is None or value == "":
+        raise ValueError("params.toChainId is required")
+    try:
+        destination = resolve_chain(value)
+    except ValueError as exc:
+        raise RpcHandlerError("trading.unsupported_chain", str(exc)) from exc
+    return origin, destination
+
+
+def _bridge_size(p: dict[str, Any]) -> dict[str, Any]:
+    """Exactly one of ``amount`` (human units), ``amountUsd`` or ``amountPct``."""
+    amount = _decimal_text(p, "amount")
+    usd = _number(p, "amountUsd")
+    pct = _number(p, "amountPct")
+    given = [x for x in (amount, usd, pct) if x is not None]
+    if len(given) != 1:
+        raise ValueError("params need exactly one of amount, amountUsd or amountPct")
+    return {"amount_in": amount, "amount_usd": usd, "amount_pct": pct}
+
+
+@_d.method("trading.bridge.routes")
+async def _trading_bridge_routes(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    """Every route the bridge serves (both directions)."""
+    from agentos.trading.bridge import list_routes
+
+    return {"routes": list_routes()}
+
+
+@_d.method("trading.bridge.quote")
+async def _trading_bridge_quote(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    """Price a bridge: what arrives on the other chain, fees, and the guard's verdict."""
+    p = _params(params)
+    origin, destination = _bridge_chains(p)
+    size = _bridge_size(p)
+    initiator, _session_key = _initiator(ctx, p)
+    service = _service(ctx)
+    try:
+        quote = await service.bridge_quote(
+            origin=origin,
+            destination=destination,
+            token=_str(p, "token", required=True) or "",
+            wallet=_str(p, "wallet"),
+            initiator=initiator,  # type: ignore[arg-type]
+            **size,
+        )
+    except Exception as exc:
+        raise _raise(exc) from exc
+    return {"quote": quote}
+
+
+@_d.method("trading.bridge.create")
+async def _trading_bridge_create(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    """Create a bridge order. An agent's always parks for approval; the user's runs."""
+    p = _params(params)
+    origin, destination = _bridge_chains(p)
+    size = _bridge_size(p)
+    initiator, session_key = _initiator(ctx, p)
+    service = _service(ctx)
+    try:
+        order = await service.bridge(
+            origin=origin,
+            destination=destination,
+            token=_str(p, "token", required=True) or "",
+            wallet=_str(p, "wallet"),
+            initiator=initiator,  # type: ignore[arg-type]
+            session_key=session_key,
+            note=_note(p),
+            wait=bool(p.get("wait")),
+            **size,
+            **_client_order_id(service, "bridge", p),
+        )
+    except Exception as exc:
+        raise _raise(exc) from exc
+    return {"order": order}
+
+
+@_d.method("trading.bridge.status")
+async def _trading_bridge_status(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
+    """A bridge order by ``orderId`` or Relay ``requestId``, its fill refreshed when in flight."""
+    p = _params(params)
+    order_id = _str(p, "orderId")
+    request_id = _str(p, "requestId")
+    if not order_id and not request_id:
+        raise ValueError("params.orderId or params.requestId is required")
+    service = _service(ctx)
+    try:
+        return await service.bridge_status(order_id=order_id, request_id=request_id)
+    except Exception as exc:
+        raise _raise(exc) from exc
+
+
 @_d.method("trading.orders.batch")
 async def _trading_orders_batch(params: dict | None, ctx: RpcContext) -> dict[str, Any]:
     p = _params(params)

@@ -75,7 +75,48 @@ export type Initiator = 'manual' | 'agent' | 'external'
  *  a revoke sets an ERC-20 allowance to zero; the three `lp_*` kinds collect
  *  fees from, take liquidity out of, or put liquidity into a Uniswap V4
  *  position (docs/lp-write.md). Older engines omit `kind`. */
-export type OrderKind = 'swap' | 'send' | 'revoke' | 'lp_collect' | 'lp_remove' | 'lp_add'
+export type OrderKind =
+  'swap' | 'send' | 'revoke' | 'lp_collect' | 'lp_remove' | 'lp_add' | 'bridge'
+
+/** Where a bridge's destination fill stands, as Relay reports it (docs/bridge.md). */
+export type BridgeFillStatus = 'waiting' | 'pending' | 'success' | 'failure' | 'refund' | 'unknown'
+
+/** The destination chain of a bridge, the same shape as the chain objects in `trade status`. */
+export interface BridgeChain {
+  chainId: number
+  key: string
+  name: string
+  nativeSymbol?: string | null
+  explorerUrl?: string | null
+}
+
+/**
+ * The `bridge` block of a `kind: "bridge"` order: the same asset moving
+ * from the origin chain (the order's `chainId`/`tokenIn`) to `destinationChain`
+ * through Relay. The deposit is the order's own tx; the destination tx
+ * arrives when Relay reports the fill.
+ */
+export interface BridgeInfo {
+  originChainId: number
+  destinationChainId: number
+  destinationChain: BridgeChain | null
+  /** The asset family crossing: ETH→ETH, or USD (USDC on Base ↔ USDG on Robinhood Chain). */
+  asset: 'ETH' | 'USD' | string
+  requestId: string | null
+  fillStatus: BridgeFillStatus | null
+  feesUsd: number | null
+  fees?: { gasUsd: number | null; relayerUsd: number | null; appUsd: number | null } | null
+  /** Destination units per origin unit, as a decimal string; null when unknown. */
+  rate?: string | number | null
+  timeEstimateSeconds?: number | null
+  approvalTxHash?: string | null
+  depositTxHash?: string | null
+  depositExplorerUrl?: string | null
+  destinationTxHash?: string | null
+  destinationExplorerUrl?: string | null
+  /** When the engine last asked Relay about the fill (ms). */
+  checkedAt?: number | null
+}
 
 /** A chain value as the LP plan carries it: raw base units, the decimal string, USD or null. */
 export interface LpPlanAmount {
@@ -201,7 +242,8 @@ export interface Order {
   expiresAt: number | null
   /** A swap to native ETH on an L2 that delivered WETH instead names it here. */
   deliveredToken?: Token | null
-  provider?: ProviderId
+  /** The swap route, or `relay` on a bridge (not a selectable route). */
+  provider?: ProviderId | 'relay'
   /** The caller's idempotency key, when it gave one. */
   clientOrderId?: string | null
   slippagePct?: number | null
@@ -213,6 +255,8 @@ export interface Order {
   spent?: { base: LpPlanAmount; quote: LpPlanAmount } | null
   /** A buy a DCA mandate fired carries the mandate's id (docs/dca.md); null otherwise. */
   mandateId?: string | null
+  /** bridge orders: the cross-chain leg (docs/bridge.md). `tokenOut` is the destination token. */
+  bridge?: BridgeInfo | null
   /** A swap a price trigger fired carries the trigger's id (docs/triggers.md); null otherwise. */
   triggerId?: string | null
 }
@@ -753,8 +797,11 @@ export const PROVIDERS: readonly { id: ProviderId; label: string }[] = [
 
 export const DEFAULT_PROVIDER: ProviderId = 'aggregator'
 
+/** The bridge route's label; `relay` is never a swap provider the menu offers. */
+const ROUTE_LABELS: Record<string, string> = { relay: 'Relay' }
+
 export function providerLabel(id: string | null | undefined): string {
-  return PROVIDERS.find((p) => p.id === id)?.label ?? (id ? String(id) : '')
+  return PROVIDERS.find((p) => p.id === id)?.label ?? (id ? (ROUTE_LABELS[id] ?? String(id)) : '')
 }
 
 export interface ProviderStatus {

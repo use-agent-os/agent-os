@@ -1,5 +1,7 @@
+import { useQuery } from '@tanstack/react-query'
 import { ExternalLink, OctagonX, Pause, Pencil, Play, Trash2, Zap } from 'lucide-react'
 import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useRpc } from '@/app/providers'
 import type { RawJob } from '@/views/cron/logic'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
@@ -454,10 +456,33 @@ export function MissionControls({
 }
 
 /**
+ * Whether the gateway says this chat no longer exists. It asks by key because
+ * `sessions.list` is capped: an old chat missing from it may well be alive.
+ * True only on that answer, so a slow or failed check keeps the way back. The
+ * query key sits under `sessions`, whose invalidation follows every delete.
+ */
+function useChatDeleted(sessionKey: string | null): boolean {
+  const rpc = useRpc()
+  const { data } = useQuery({
+    queryKey: ['sessions', 'deleted', sessionKey],
+    enabled: Boolean(sessionKey),
+    queryFn: async () => {
+      await rpc.waitForConnection()
+      const reply = await rpc.call<{ previews?: { key?: string }[] }>('sessions.preview', {
+        keys: [sessionKey],
+      })
+      return Array.isArray(reply?.previews) && !reply.previews.some((p) => p.key === sessionKey)
+    },
+  })
+  return data === true
+}
+
+/**
  * The chip on a row another trading chat filed: the engine runs it whatever
  * chat is open, so the desk lists it rather than let it trade unseen, and
  * the chip opens the chat that can tell its story. Nothing for a row of
- * this chat's, or an unfiled one.
+ * this chat's, an unfiled one, or one whose chat has been deleted: the row
+ * keeps running, but there is no story left to open.
  */
 export function Elsewhere({
   sessionKey,
@@ -466,7 +491,8 @@ export function Elsewhere({
   sessionKey: string | null
   onOpen?: (sessionKey: string) => void
 }) {
-  if (!sessionKey) return null
+  const deleted = useChatDeleted(sessionKey)
+  if (!sessionKey || deleted) return null
   return (
     <button
       type="button"

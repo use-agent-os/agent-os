@@ -31,6 +31,23 @@ import structlog
 from agentos import __version__
 from agentos.trading import dca, guardrails, triggers
 from agentos.trading.aggregator import AGGREGATOR_BASE, AggregatorClient, AggregatorProvider
+from agentos.trading.bridge import (
+    BRIDGE_FILL_GIVE_UP_S,
+    BRIDGE_FILL_POLL_S,
+    BRIDGE_FILL_TASK_S,
+    BRIDGE_PROVIDER,
+    BRIDGE_PROVIDER_LABEL,
+    BRIDGE_STATUS_MIN_INTERVAL_S,
+    BRIDGE_TOLERANCE_PCT,
+    FILL_FINAL,
+    RELAY_BASE_URL,
+    RELAY_SOLVERS,
+    BridgeRoute,
+    RelayClient,
+    RelayQuote,
+    resolve_route,
+    validate_steps,
+)
 from agentos.trading.chains import (
     CHAINS,
     NATIVE_ADDRESS,
@@ -387,6 +404,15 @@ class TradingService:
         self._aggregator_factory = aggregator_factory
         self._aggregator: AggregatorClient | None = None
         self._aggregator_base = ""
+        self._relay = RelayClient(
+            base_url=str(getattr(self.config, "relay_base_url", "") or RELAY_BASE_URL),
+            http=self._http,
+        )
+        # One Relay status read per bridge order at a time: the fill tracker
+        # and a status request must not both book the arrival.
+        self._bridge_locks: dict[str, asyncio.Lock] = {}
+        # The fill tracker's pause between polls; tests shorten it.
+        self._bridge_sleep: Callable[[float], Any] = asyncio.sleep
         self._broadcast = broadcast or _default_broadcast
         self._now = now
         self._sign_tx = sign_tx
@@ -2126,6 +2152,73 @@ class TradingService:
             "mandateId": row.get("mandate_id"),
             "triggerId": row.get("trigger_id"),
             **(self._lp_order_fields(row) if row.get("kind") in LP_ORDER_KINDS else {}),
+            **(self._bridge_order_fields(row) if row.get("kind") == "bridge" else {}),
+        }
+
+    def _bridge_plan(self, row: dict[str, Any]) -> dict[str, Any]:
+        """The BridgePlan a ``bridge`` order carries in ``quote_json`` (``docs/bridge.md``)."""
+        return self._lp_plan(row)
+
+    def _bridge_order_fields(self, row: dict[str, Any]) -> dict[str, Any]:
+        """What a bridge adds to the order JSON: the destination token and a ``bridge`` block.
+
+        The row's ``token_out`` is the origin token (every origin-side helper
+        reads it on ``chain_id``); the token the wallet receives lives on the
+        destination chain and is shown from the plan instead.
+        """
+        plan = self._bridge_plan(row)
+        route = plan.get("route") or {}
+        origin = CHAINS.get(int(row["chain_id"]))
+        dest_id = route.get("destinationChainId")
+        dest = CHAINS.get(int(dest_id)) if dest_id is not None else None
+        planned = route.get("tokenOut") or {}
+        token_out: dict[str, Any] = {}
+        if dest is not None and planned.get("address"):
+            token_out = dict(self._token_dict(dest.chain_id, str(planned["address"])) or {})
+        if not token_out.get("symbol"):
+            token_out.update({k: v for k, v in planned.items() if v is not None})
+            token_out.setdefault("chainId", dest_id)
+        decimals = int(token_out.get("decimals") or planned.get("decimals") or 18)
+
+        def fmt(raw: Any) -> str | None:
+            return format_amount(int(raw), decimals) if raw else None
+
+        quote = plan.get("quote") or {}
+        execution = plan.get("execution") or {}
+        fill = plan.get("fill") or {}
+        deposit_hash = execution.get("depositTxHash") or row.get("tx_hash")
+        dest_hash = fill.get("destinationTxHash")
+        checked = fill.get("checkedAt")
+        return {
+            "tokenOut": token_out,
+            "expectedOut": fmt(row.get("expected_out_raw")),
+            "minOut": fmt(row.get("min_out_raw")),
+            "receivedOut": fmt(row.get("received_out_raw")),
+            "provider": BRIDGE_PROVIDER,
+            "providerLabel": BRIDGE_PROVIDER_LABEL,
+            "recipientLabel": "Relay solver",
+            "bridge": {
+                "originChainId": int(row["chain_id"]),
+                "destinationChainId": int(dest_id) if dest_id is not None else None,
+                "destinationChain": dest.to_dict() if dest is not None else None,
+                "asset": route.get("asset"),
+                "requestId": execution.get("requestId") or quote.get("requestId"),
+                "fillStatus": fill.get("status"),
+                "feesUsd": quote.get("feesUsd"),
+                "fees": quote.get("fees"),
+                "rate": quote.get("rate"),
+                "timeEstimateSeconds": quote.get("timeEstimateSeconds"),
+                "approvalTxHash": execution.get("approvalTxHash") or row.get("approval_tx_hash"),
+                "depositTxHash": deposit_hash,
+                "depositExplorerUrl": (
+                    origin.tx_url(str(deposit_hash)) if origin and deposit_hash else None
+                ),
+                "destinationTxHash": dest_hash,
+                "destinationExplorerUrl": (
+                    dest.tx_url(str(dest_hash)) if dest and dest_hash else None
+                ),
+                "checkedAt": int(float(checked) * 1000) if checked else None,
+            },
         }
 
     @staticmethod
@@ -2503,6 +2596,298 @@ class TradingService:
             return await asyncio.to_thread(lambda: work(lp.start(env)))
         except Exception as exc:
             raise lp._as_trading_error(exc, chain) from exc
+
+    # ── bridge (Base ⇄ Robinhood Chain through Relay, docs/bridge.md) ──
+
+    @staticmethod
+    def _bridge_route(origin: ChainSpec, destination: ChainSpec, token: str) -> BridgeRoute:
+        try:
+            return resolve_route(origin, destination, token)
+        except Exception as exc:
+            raise _err(exc) from exc
+
+    def _bridge_route_of(self, plan: dict[str, Any]) -> BridgeRoute:
+        route = plan.get("route") or {}
+        origin = CHAINS[int(route["originChainId"])]
+        destination = CHAINS[int(route["destinationChainId"])]
+        return self._bridge_route(origin, destination, str(route["tokenIn"]["address"]))
+
+    async def _bridge_prepare(
+        self,
+        *,
+        origin: ChainSpec,
+        destination: ChainSpec,
+        token: str,
+        wallet: str | None,
+        amount_in: str | None,
+        amount_pct: float | None,
+        amount_usd: float | None,
+    ) -> tuple[BridgeRoute, WalletRecord, TokenMeta, TokenMeta, int, int, RelayQuote, float | None]:
+        """Route, wallet, both tokens, size, balance, a checked Relay quote and the USD value."""
+        route = self._bridge_route(origin, destination, token)
+        record = self.vault.resolve(wallet)
+        meta_in = await self.token_meta(origin, route.token_in.address)
+        meta_out = await self.token_meta(destination, route.token_out.address)
+        for meta, planned in ((meta_in, route.token_in), (meta_out, route.token_out)):
+            if meta.decimals != planned.decimals:
+                raise TradingError(
+                    "trading.bridge.unsupported_route",
+                    f"{planned.symbol} reports {meta.decimals} decimals, the bridge "
+                    f"expects {planned.decimals}",
+                )
+        amount_raw = await self._amount_for(
+            origin, record, meta_in, amount_in, amount_pct, amount_usd
+        )
+        if amount_raw <= 0:
+            raise TradingError("trading.invalid", "amount must be greater than zero")
+        balance = await self._balance_raw(origin, record, meta_in)
+        if balance < amount_raw:
+            raise TradingError(
+                "trading.insufficient_balance",
+                f"{record.label} holds {format_amount(balance, meta_in.decimals)} "
+                f"{meta_in.symbol or 'tokens'} on {origin.name}, the bridge needs "
+                f"{format_amount(amount_raw, meta_in.decimals)}",
+            )
+        try:
+            quote = await self._relay.quote(
+                route=route, wallet=record.address, amount_raw=amount_raw
+            )
+            validate_steps(quote, route=route, wallet=record.address, amount_raw=amount_raw)
+        except Exception as exc:
+            raise _err(exc) from exc
+        if quote.expected_out_raw is None:
+            raise TradingError("trading.bridge.provider", "Relay quoted no destination amount")
+        value = await self._value_usd(origin, meta_in, amount_raw)
+        if value is None:
+            value = quote.amount_in_usd
+        return route, record, meta_in, meta_out, amount_raw, balance, quote, value
+
+    @staticmethod
+    def _bridge_floor(expected_out_raw: int) -> int:
+        """How little the execution re-quote may deliver before the order is re-judged."""
+        return int(expected_out_raw * (1 - BRIDGE_TOLERANCE_PCT / 100.0))
+
+    def _bridge_quote_dict(
+        self,
+        *,
+        route: BridgeRoute,
+        record: WalletRecord,
+        meta_in: TokenMeta,
+        meta_out: TokenMeta,
+        amount_raw: int,
+        balance: int,
+        quote: RelayQuote,
+        value: float | None,
+        initiator: str,
+    ) -> dict[str, Any]:
+        expected = int(quote.expected_out_raw or 0)
+        floor = self._bridge_floor(expected)
+        verdict = guardrails.evaluate_bridge(
+            initiator=initiator,
+            value_usd=value,
+            daily_cap_usd=self.config.daily_cap_usd,
+            spent_today_usd=self._spent_today(record),
+        )
+        return {
+            "wallet": checksum_address(record.address),
+            "originChainId": route.origin.chain_id,
+            "destinationChainId": route.destination.chain_id,
+            "originChain": route.origin.to_dict(),
+            "destinationChain": route.destination.to_dict(),
+            "route": {"from": route.origin.key, "to": route.destination.key, "asset": route.asset},
+            "tokenIn": meta_in.to_dict(),
+            "tokenOut": meta_out.to_dict(),
+            "amountIn": format_amount(amount_raw, meta_in.decimals),
+            "amountInRaw": str(amount_raw),
+            "balance": format_amount(balance, meta_in.decimals),
+            "expectedOut": format_amount(expected, meta_out.decimals),
+            "expectedOutRaw": str(expected),
+            "minOut": format_amount(floor, meta_out.decimals),
+            "minOutRaw": str(floor),
+            "rate": quote.rate,
+            "feesUsd": quote.fees_usd,
+            "fees": quote.fees,
+            "timeEstimateSeconds": quote.time_estimate_s,
+            "requestId": quote.request_id,
+            "solver": quote.solver,
+            "valueUsd": value,
+            "fetchedAt": int(quote.fetched_at * 1000),
+            "provider": BRIDGE_PROVIDER,
+            "providerLabel": BRIDGE_PROVIDER_LABEL,
+            "guard": verdict.to_dict(),
+        }
+
+    async def bridge_quote(
+        self,
+        *,
+        origin: ChainSpec,
+        destination: ChainSpec,
+        token: str,
+        wallet: str | None = None,
+        amount_in: str | None = None,
+        amount_pct: float | None = None,
+        amount_usd: float | None = None,
+        initiator: Initiator = "manual",
+    ) -> dict[str, Any]:
+        """Price a bridge without creating anything: what arrives, what it costs, the guard."""
+        route, record, meta_in, meta_out, raw, balance, quote, value = await self._bridge_prepare(
+            origin=origin,
+            destination=destination,
+            token=token,
+            wallet=wallet,
+            amount_in=amount_in,
+            amount_pct=amount_pct,
+            amount_usd=amount_usd,
+        )
+        return self._bridge_quote_dict(
+            route=route,
+            record=record,
+            meta_in=meta_in,
+            meta_out=meta_out,
+            amount_raw=raw,
+            balance=balance,
+            quote=quote,
+            value=value,
+            initiator=initiator,
+        )
+
+    async def bridge(
+        self,
+        *,
+        origin: ChainSpec,
+        destination: ChainSpec,
+        token: str,
+        wallet: str | None,
+        amount_in: str | None,
+        amount_pct: float | None,
+        amount_usd: float | None,
+        initiator: Initiator,
+        session_key: str | None,
+        note: str | None,
+        wait: bool = False,
+        client_order_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a bridge order: quote with Relay, park it or run it under the guardrails.
+
+        The row is the origin side of the transfer (a send to the Relay
+        solver); the destination chain, the quote the user sees and the
+        fill's progress live in ``quote_json``. From an agent the order
+        always waits for a human, like a send; a manual one runs at once.
+        """
+        client_id, existing = self._lp_preflight(initiator, client_order_id)
+        if existing is not None:
+            return existing
+        route, record, meta_in, meta_out, raw, _balance, quote, value = await self._bridge_prepare(
+            origin=origin,
+            destination=destination,
+            token=token,
+            wallet=wallet,
+            amount_in=amount_in,
+            amount_pct=amount_pct,
+            amount_usd=amount_usd,
+        )
+        expected = int(quote.expected_out_raw or 0)
+        floor = self._bridge_floor(expected)
+        plan = {
+            "kind": "bridge",
+            "provider": BRIDGE_PROVIDER,
+            "route": route.to_dict(),
+            "amountRaw": str(raw),
+            "quote": quote.to_dict(),
+            "approved": {
+                "requestId": quote.request_id,
+                "expectedOutRaw": str(expected),
+                "minOutRaw": str(floor),
+            },
+            "execution": {},
+            "fill": {"status": None},
+        }
+        # Spend is read before the row exists, so the order does not count against itself.
+        spent = self._spent_today(record)
+        order_id = new_order_id()
+        now = self._now()
+        try:
+            self.ledger.insert_order(
+                {
+                    "order_id": order_id,
+                    "created_at": now,
+                    "updated_at": now,
+                    "chain_id": origin.chain_id,
+                    "wallet": record.key,
+                    "token_in": meta_in.address,
+                    "token_out": meta_in.address,
+                    "amount_raw": str(raw),
+                    "amount_human": format_amount(raw, meta_in.decimals),
+                    "expected_out_raw": str(expected),
+                    "min_out_raw": str(floor),
+                    "value_usd": value,
+                    "gas_usd": quote.fees.get("gasUsd"),
+                    "status": "quoted",
+                    "initiator": initiator,
+                    "session_key": session_key,
+                    "note": note,
+                    "kind": "bridge",
+                    "recipient": quote.solver,
+                    "quote_json": json.dumps(plan),
+                    "provider": BRIDGE_PROVIDER,
+                    "client_order_id": client_id,
+                }
+            )
+        except sqlite3.IntegrityError:
+            if client_id is not None:
+                twins = self.ledger.find_orders_by_client_id(client_id)
+                if twins:
+                    return self._order_dict(twins[0])
+            raise
+        verdict = guardrails.evaluate_bridge(
+            initiator=initiator,
+            value_usd=value,
+            daily_cap_usd=self.config.daily_cap_usd,
+            spent_today_usd=spent,
+        )
+        await self._decide_batch([order_id], verdict, batch_id=None, wait=wait)
+        await self._emit("trading.changed", {"reason": "order", "orderId": order_id})
+        return self.get_order(order_id)
+
+    async def bridge_status(
+        self, *, order_id: str | None = None, request_id: str | None = None
+    ) -> dict[str, Any]:
+        """A bridge order with its fill read from Relay (when it is still in flight)."""
+        row: dict[str, Any] | None = None
+        if order_id:
+            row = self.ledger.get_order(order_id)
+        elif request_id:
+            wanted = request_id.strip().lower()
+            for candidate in self.ledger.list_orders(kind="bridge", limit=500):
+                plan = self._bridge_plan(candidate)
+                ids = {
+                    str(x).lower()
+                    for x in (
+                        (plan.get("execution") or {}).get("requestId"),
+                        (plan.get("approved") or {}).get("requestId"),
+                        (plan.get("quote") or {}).get("requestId"),
+                    )
+                    if x
+                }
+                if wanted in ids:
+                    row = candidate
+                    break
+        else:
+            raise TradingError("trading.invalid", "orderId or requestId is required")
+        if row is None or str(row.get("kind") or "") != "bridge":
+            raise TradingError(
+                "trading.bridge.not_found", f"no bridge order {order_id or request_id}"
+            )
+        oid = str(row["order_id"])
+        if row["status"] == "submitted" and (self._bridge_plan(row).get("execution") or {}).get(
+            "depositBookedAt"
+        ):
+            try:
+                await self._refresh_bridge_fill(oid)
+            except Exception as exc:  # the stored fill is still the answer
+                log.warning("trading.bridge_status_failed", order=oid, error=str(exc))
+        order = self.get_order(oid)
+        return {"order": order, "bridge": order.get("bridge")}
 
     def _lp_preflight(
         self, initiator: str, client_order_id: str | None
@@ -3805,6 +4190,9 @@ class TradingService:
         if kind in LP_ORDER_KINDS:
             await self._execute_lp(row, wait=wait)
             return
+        if kind == "bridge":
+            await self._execute_bridge(row, wait=wait)
+            return
         chain = CHAINS[int(row["chain_id"])]
         record = self.vault.get(str(row["wallet"]))
         meta_in = await self.token_meta(chain, str(row["token_in"]))
@@ -3993,7 +4381,7 @@ class TradingService:
     async def _watch(self, order_id: str, tx_hash: str, pre: dict[str, int], *, wait: bool) -> None:
         """Settle the order from its receipt, now or in the background."""
         if wait:
-            await self._confirm(order_id, tx_hash, pre)
+            await self._confirm(order_id, tx_hash, pre, wait=True)
             return
         loop = asyncio.get_running_loop()
         task = loop.create_task(
@@ -4053,6 +4441,500 @@ class TradingService:
         await self._watch(
             order_id, tx_hash, {"in": balance, "out": 0, "native": pre_native}, wait=wait
         )
+
+    @staticmethod
+    def _check_bridge_tx(
+        tx: dict[str, Any], *, chain: ChainSpec, record: WalletRecord, native: bool, amount_raw: int
+    ) -> None:
+        """The deposit is signed only as the pattern says (a last look, after validate_steps)."""
+        to = str(tx.get("to") or "").lower()
+        if to not in RELAY_SOLVERS:
+            raise TradingError(
+                "trading.tx_failed", f"deposit target {to} is not a Relay solver this desk trusts"
+            )
+        if int(tx.get("chainId") or chain.chain_id) != chain.chain_id:
+            raise TradingError("trading.tx_failed", "deposit is not on the origin chain")
+        if str(tx.get("from") or record.address).lower() != record.address.lower():
+            raise TradingError("trading.tx_failed", "deposit is not from the order's wallet")
+        value = TradingService._tx_value(tx)
+        if native and value != amount_raw:
+            raise TradingError(
+                "trading.tx_failed", f"deposit value {value} is not the order's {amount_raw}"
+            )
+        if not native and value != 0:
+            raise TradingError("trading.tx_failed", "an ERC-20 deposit carries native value")
+        if len(str(tx.get("data") or "")) < 10:
+            raise TradingError("trading.tx_failed", "deposit carries no calldata")
+
+    async def _execute_bridge(self, row: dict[str, Any], *, wait: bool) -> None:
+        """Re-quote an approved bridge, approve the solver when needed, then deposit.
+
+        The quote the user approved is only a promise about the price: Relay
+        is asked again now, and a fill below the approved floor sends an
+        agent's order back for approval (a manual one fails
+        ``trading.price_moved``), as a swap does. The approval is exact and
+        goes through ``_send`` like a swap's; the deposit's target, value and
+        calldata are checked once more right before signing.
+        """
+        order_id = str(row["order_id"])
+        chain = CHAINS[int(row["chain_id"])]
+        record = self.vault.get(str(row["wallet"]))
+        key = self.vault.private_key(record.address)
+        plan = self._bridge_plan(row)
+        route = self._bridge_route_of(plan)
+        meta_in = await self.token_meta(chain, str(row["token_in"]))
+        amount_raw = int(row["amount_raw"])
+        evm = self.evm(chain)
+        for token in {NATIVE_ADDRESS, meta_in.address}:
+            await self.syncer.ensure_opening(record, chain, token, evm)
+        async with self._wallet_lock(record.key):
+            balance = await self._balance_raw(chain, record, meta_in)
+            if balance < amount_raw:
+                raise TradingError(
+                    "trading.insufficient_balance",
+                    f"{record.label} holds {format_amount(balance, meta_in.decimals)} "
+                    f"{meta_in.symbol or 'tokens'}, needs "
+                    f"{format_amount(amount_raw, meta_in.decimals)}",
+                )
+            try:
+                quote = await self._relay.quote(
+                    route=route, wallet=record.address, amount_raw=amount_raw
+                )
+                approve_tx, deposit_tx = validate_steps(
+                    quote, route=route, wallet=record.address, amount_raw=amount_raw
+                )
+            except Exception as exc:
+                raise _err(exc) from exc
+            expected = quote.expected_out_raw
+            if expected is None:
+                raise TradingError("trading.bridge.provider", "Relay quoted no destination amount")
+            floor = int(row.get("min_out_raw") or 0)
+            decimals = route.token_out.decimals
+            if floor and expected < floor:
+                reason = (
+                    "bridge quote moved below the approved floor (expected "
+                    f"{format_amount(int(row.get('expected_out_raw') or 0), decimals)}, now "
+                    f"{format_amount(expected, decimals)} {route.token_out.symbol}); "
+                    "approve again"
+                )
+                if row["initiator"] == "agent":
+                    plan["quote"] = quote.to_dict()
+                    plan["approved"] = {
+                        "requestId": quote.request_id,
+                        "expectedOutRaw": str(expected),
+                        "minOutRaw": str(self._bridge_floor(expected)),
+                    }
+                    self.ledger.update_order(
+                        order_id,
+                        status="awaiting_approval",
+                        reason=reason,
+                        expires_at=self._now() + int(self.config.approval_ttl_seconds),
+                        expected_out_raw=str(expected),
+                        min_out_raw=str(self._bridge_floor(expected)),
+                        quote_json=json.dumps(plan),
+                    )
+                    await self._emit(
+                        "trading.approval.requested", {"order": self.get_order(order_id)}
+                    )
+                    return
+                raise TradingError("trading.price_moved", reason)
+            value = row.get("value_usd")
+            if value is None:
+                value = await self._value_usd(chain, meta_in, amount_raw)
+                if value is None:
+                    value = quote.amount_in_usd
+            plan["quote"] = quote.to_dict()
+            plan["execution"] = {
+                "requestId": quote.request_id,
+                "quoteFetchedAt": quote.fetched_at,
+                "expectedOutRaw": str(expected),
+                "approvalTxHash": None,
+                "depositTxHash": None,
+            }
+            self.ledger.update_order(
+                order_id,
+                expected_out_raw=str(expected),
+                gas_usd=quote.fees.get("gasUsd"),
+                value_usd=value,
+                quote_json=json.dumps(plan),
+            )
+            solver = str(deposit_tx["to"]).lower()
+            if approve_tx is not None:
+                allowance = await evm.erc20_allowance(meta_in.address, record.address, solver)
+                if allowance < amount_raw:
+                    spender = self._check_approval_tx(
+                        approve_tx,
+                        token=meta_in.address,
+                        amount_raw=amount_raw,
+                        spenders=frozenset({solver}),
+                    )
+                    approve_tx = {**approve_tx, "data": encode_approve(spender, amount_raw)}
+                    approval_hash = await self._send(
+                        chain,
+                        record,
+                        key,
+                        approve_tx,
+                        order_id=order_id,
+                        hash_field="approval_tx_hash",
+                        value_usd=value,
+                    )
+                    receipt = await evm.wait_for_sealed_receipt(
+                        approval_hash, timeout_s=RECEIPT_TIMEOUT_S
+                    )
+                    if receipt is None:
+                        raise TradingError(
+                            "trading.tx_pending",
+                            f"approval {approval_hash} was not mined within the wait window; "
+                            "approve the order again once it lands",
+                        )
+                    if not receipt_succeeded(receipt):
+                        raise TradingError(
+                            "trading.tx_failed", f"approval transaction failed ({approval_hash})"
+                        )
+                    await self._record_gas(
+                        chain,
+                        record,
+                        receipt,
+                        kind="approval",
+                        order_id=order_id,
+                        initiator=str(row["initiator"]),
+                    )
+                    plan["execution"]["approvalTxHash"] = approval_hash
+                    self.ledger.update_order(order_id, quote_json=json.dumps(plan))
+                    await self._await_allowance(
+                        evm,
+                        token=meta_in.address,
+                        owner=record.address,
+                        spenders=frozenset({solver}),
+                        amount_raw=amount_raw,
+                    )
+            self._check_bridge_tx(
+                deposit_tx, chain=chain, record=record, native=meta_in.native, amount_raw=amount_raw
+            )
+            pre_native = await evm.get_balance(record.address)
+            tx_hash = await self._send(
+                chain, record, key, deposit_tx, order_id=order_id, value_usd=value
+            )
+            plan["execution"]["depositTxHash"] = tx_hash
+            self.ledger.update_order(order_id, quote_json=json.dumps(plan))
+        await self._emit("trading.changed", {"reason": "order", "orderId": order_id})
+        await self._watch(
+            order_id, tx_hash, {"in": balance, "out": 0, "native": pre_native}, wait=wait
+        )
+
+    async def _settle_bridge(
+        self,
+        order_id: str,
+        row: dict[str, Any],
+        tx_hash: str,
+        receipt: dict[str, Any],
+        pre: dict[str, int],
+        chain: ChainSpec,
+        record: WalletRecord,
+        meta: TokenMeta,
+        *,
+        wait: bool,
+    ) -> None:
+        """Book the mined deposit as a withdrawal, then follow the fill on the other chain.
+
+        The order stays ``submitted`` until Relay reports the fill: only
+        then are the funds where the user asked, and only then does it
+        ``confirm`` (``_refresh_bridge_fill``). A restart re-enters here
+        through ``recover_submitted`` with the deposit already booked; the
+        origin half is skipped and the tracker is started again.
+        """
+        plan = self._bridge_plan(row)
+        execution = plan.setdefault("execution", {})
+        fill = plan.setdefault("fill", {})
+        dest_id = (plan.get("route") or {}).get("destinationChainId")
+        dest = CHAINS.get(int(dest_id)) if dest_id is not None else None
+        if not execution.get("depositBookedAt"):
+            evm = self.evm(chain)
+            gas_wei = receipt_gas_wei(receipt)
+            gas_usd = await self._gas_usd(chain, gas_wei)
+            if not receipt_succeeded(receipt):
+                await self._settle_reverted(
+                    order_id,
+                    row,
+                    tx_hash,
+                    gas_wei,
+                    gas_usd,
+                    chain,
+                    record,
+                    note="reverted bridge deposit",
+                )
+                return
+            amount = int(row["amount_raw"])
+            solver = str(row.get("recipient") or "")
+            log_index = 0
+            if not meta.native:
+                for t in receipt_transfers(receipt):
+                    if t.token == meta.address and t.sender == record.key and t.recipient == solver:
+                        log_index = t.log_index
+                        break
+            block_number = int(str(receipt.get("blockNumber") or "0x0"), 16)
+            ts = await evm.block_timestamp(block_number) if block_number else None
+            await self.syncer._book_withdraw(
+                record,
+                chain,
+                meta.address,
+                amount,
+                float(ts or self._now()),
+                tx_hash=tx_hash,
+                log_index=log_index,
+                note=row.get("note")
+                or f"bridged to {dest.name if dest else 'the other chain'} (Relay)",
+                initiator=str(row["initiator"]),
+                order_id=order_id,
+                session_key=row.get("session_key"),
+                gas_usd=gas_usd,
+            )
+            if pre.get("native"):
+                spent_native = amount + gas_wei if meta.native else gas_wei
+                post_native = max(0, pre["native"] - spent_native)
+            else:
+                post_native = await self._native_after(evm, record.address, receipt)
+            self.ledger.set_balance(chain.chain_id, record.key, NATIVE_ADDRESS, post_native)
+            if not meta.native:
+                post_token = max(0, pre["in"] - amount) if pre.get("in") else None
+                if post_token is None:
+                    post_token = await self._balance_raw(chain, record, meta)
+                self.ledger.set_balance(chain.chain_id, record.key, meta.address, post_token)
+            execution["depositTxHash"] = tx_hash
+            execution["depositBookedAt"] = self._now()
+            execution["depositBlock"] = block_number
+            execution["depositGasWei"] = str(gas_wei)
+            fill.setdefault("status", "waiting")
+            if not fill.get("status"):
+                fill["status"] = "waiting"
+            updated = self.ledger.update_order(
+                order_id,
+                expect_status="submitted",
+                reason=f"waiting for the Relay fill on {dest.name if dest else 'the other chain'}",
+                spent_in_raw=str(amount),
+                gas_wei=str(gas_wei),
+                quote_json=json.dumps(plan),
+            )
+            if updated is None:
+                return
+            await self._emit("trading.changed", {"reason": "order", "orderId": order_id})
+        if wait:
+            await self._track_bridge_fill(order_id)
+            return
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(
+            self._track_bridge_fill(order_id), name=f"trading-confirm-{order_id}"
+        )
+        self._confirm_tasks.add(task)
+        task.add_done_callback(self._confirm_tasks.discard)
+
+    def _bridge_lock(self, order_id: str) -> asyncio.Lock:
+        lock = self._bridge_locks.get(order_id)
+        if lock is None:
+            lock = self._bridge_locks[order_id] = asyncio.Lock()
+        return lock
+
+    async def _track_bridge_fill(self, order_id: str) -> None:
+        """Poll Relay for the fill with a short backoff until the order is final.
+
+        One tracker lives at most ``BRIDGE_FILL_TASK_S``; past that the order
+        stays ``submitted`` with its reason, and every ``tick`` re-enters
+        ``_confirm`` → ``_settle_bridge``, which starts a fresh tracker, until
+        ``BRIDGE_FILL_GIVE_UP_S`` after creation marks it ``failed``.
+        """
+        started = time.monotonic()
+        attempt = 0
+        while True:
+            row = self.ledger.get_order(order_id)
+            if row is None or row["status"] != "submitted":
+                return
+            try:
+                fill = await self._refresh_bridge_fill(order_id, force=True)
+            except Exception as exc:  # Relay hiccups must not strand the order
+                log.warning("trading.bridge_fill_poll_failed", order=order_id, error=str(exc))
+                fill = None
+            if fill is not None and fill.get("status") in FILL_FINAL:
+                return
+            if time.monotonic() - started > BRIDGE_FILL_TASK_S:
+                return
+            delay = BRIDGE_FILL_POLL_S[min(attempt, len(BRIDGE_FILL_POLL_S) - 1)]
+            attempt += 1
+            await self._bridge_sleep(delay)
+
+    async def _refresh_bridge_fill(self, order_id: str, *, force: bool = False) -> dict[str, Any]:
+        """Read the fill from Relay and settle the order when it is final.
+
+        Rate-limited per order unless ``force``; one reader at a time per
+        order (the tracker and ``trading.bridge.status`` can overlap), so the
+        arrival is booked exactly once.
+        """
+        row = self.ledger.get_order(order_id)
+        if row is None:
+            raise TradingError("trading.bridge.not_found", f"no bridge order {order_id}")
+        plan = self._bridge_plan(row)
+        fill: dict[str, Any] = plan.setdefault("fill", {})
+        if row["status"] != "submitted":
+            return fill
+        now = self._now()
+        checked = fill.get("checkedAt")
+        if not force and checked and now - float(checked) < BRIDGE_STATUS_MIN_INTERVAL_S:
+            return fill
+        async with self._bridge_lock(order_id):
+            row = self.ledger.get_order(order_id)
+            if row is None or row["status"] != "submitted":
+                return fill
+            plan = self._bridge_plan(row)
+            fill = plan.setdefault("fill", {})
+            execution = plan.get("execution") or {}
+            request_id = str(
+                execution.get("requestId")
+                or (plan.get("approved") or {}).get("requestId")
+                or (plan.get("quote") or {}).get("requestId")
+                or ""
+            )
+            try:
+                result = await self._relay.status(request_id)
+            except Exception as exc:
+                fill["lastError"] = str(exc)
+                fill["checkedAt"] = self._now()
+                self.ledger.update_order(order_id, quote_json=json.dumps(plan))
+                raise _err(exc) from exc
+            now = self._now()
+            status = str(result.get("status") or "unknown")
+            fill.update(
+                {
+                    "status": status,
+                    "destinationTxHash": result.get("destinationTxHash")
+                    or fill.get("destinationTxHash"),
+                    "checkedAt": now,
+                    "attempts": int(fill.get("attempts") or 0) + 1,
+                    "lastError": None,
+                }
+            )
+            record = self.vault.get(str(row["wallet"]))
+            if status == "success":
+                received = await self._book_bridge_arrival(order_id, row, plan, record)
+                fill["receivedRaw"] = str(received)
+                fill["bookedAt"] = self._now()
+                settled = self.ledger.settle_order(
+                    order_id,
+                    expect_status="submitted",
+                    spend=self._spend_for(row, record),
+                    status="confirmed",
+                    reason=None,
+                    received_out_raw=str(received),
+                    quote_json=json.dumps(plan),
+                )
+                if settled is not None:
+                    self._wake(order_id)
+                    await self._order_finished(self.get_order(order_id))
+                    await self._emit("trading.changed", {"reason": "order", "orderId": order_id})
+                return fill
+            if status in ("failure", "refund"):
+                why = (
+                    "the funds were returned on the origin chain"
+                    if status == "refund"
+                    else "the solver did not deliver"
+                )
+                updated = self.ledger.update_order(
+                    order_id,
+                    expect_status="submitted",
+                    status="failed",
+                    reason=f"relay {status}: {why} (requestId {request_id})",
+                    quote_json=json.dumps(plan),
+                )
+                if updated is not None:
+                    self._wake(order_id)
+                    await self._order_finished(self.get_order(order_id))
+                    await self._emit("trading.changed", {"reason": "order", "orderId": order_id})
+                return fill
+            if now - float(row["created_at"]) > BRIDGE_FILL_GIVE_UP_S:
+                updated = self.ledger.update_order(
+                    order_id,
+                    expect_status="submitted",
+                    status="failed",
+                    reason=(
+                        "bridge not filled within 6 h; the deposit is on chain — check "
+                        f"Relay with requestId {request_id}"
+                    ),
+                    quote_json=json.dumps(plan),
+                )
+                if updated is not None:
+                    fill["status"] = "failure"
+                    self._wake(order_id)
+                    await self._order_finished(self.get_order(order_id))
+                    await self._emit("trading.changed", {"reason": "order", "orderId": order_id})
+                return fill
+            self.ledger.update_order(order_id, quote_json=json.dumps(plan))
+            return fill
+
+    async def _book_bridge_arrival(
+        self, order_id: str, row: dict[str, Any], plan: dict[str, Any], record: WalletRecord
+    ) -> int:
+        """Book what the solver delivered as a deposit on the destination chain; the amount.
+
+        The amount comes from the fill transaction (its ``Transfer`` to the
+        wallet, or its value for the gas coin), else from the quote. The
+        entry is keyed by that transaction and log index, so a sweep that saw
+        the transfer first has already booked it and this is a no-op.
+        """
+        route = plan.get("route") or {}
+        origin = CHAINS[int(row["chain_id"])]
+        dest = CHAINS[int(route["destinationChainId"])]
+        token_out = str((route.get("tokenOut") or {}).get("address") or NATIVE_ADDRESS).lower()
+        fill = plan.get("fill") or {}
+        dest_tx = fill.get("destinationTxHash")
+        evm_d = self.evm(dest)
+        meta_out = await self.token_meta(dest, token_out)
+        amount = int(row.get("expected_out_raw") or 0)
+        log_index = 0
+        ts = self._now()
+        if dest_tx:
+            receipt = None
+            for _attempt in range(5):
+                try:
+                    receipt = await evm_d.get_transaction_receipt(str(dest_tx))
+                except (EvmRpcError, EvmTransportError) as exc:
+                    log.warning("trading.bridge_receipt_error", order=order_id, error=str(exc))
+                if receipt is not None and receipt.get("blockNumber"):
+                    break
+                await self._bridge_sleep(1.0)
+            if receipt is not None:
+                if meta_out.native:
+                    tx = await evm_d.get_transaction(str(dest_tx))
+                    if tx and tx.get("value"):
+                        amount = int(str(tx["value"]), 0)
+                else:
+                    for t in receipt_transfers(receipt):
+                        if t.token == token_out and t.recipient == record.key:
+                            amount, log_index = t.amount, t.log_index
+                            break
+                block_number = int(str(receipt.get("blockNumber") or "0x0"), 16)
+                stamp = await evm_d.block_timestamp(block_number) if block_number else None
+                ts = float(stamp or ts)
+        for token in {NATIVE_ADDRESS, token_out}:
+            await self.syncer.ensure_opening(record, dest, token, evm_d)
+        await self.syncer._book_deposit(
+            record,
+            dest,
+            token_out,
+            amount,
+            ts,
+            tx_hash=str(dest_tx).lower() if dest_tx else None,
+            log_index=log_index,
+            note=row.get("note") or f"bridged from {origin.name} (Relay)",
+            meta=meta_out,
+            initiator=str(row["initiator"]),
+            order_id=order_id,
+            session_key=row.get("session_key"),
+        )
+        fresh = await self._balance_raw(dest, record, meta_out)
+        self.ledger.set_balance(dest.chain_id, record.key, token_out, fresh)
+        if not meta_out.native:
+            self.ledger.set_balance(
+                dest.chain_id, record.key, NATIVE_ADDRESS, await evm_d.get_balance(record.address)
+            )
+        return amount
 
     async def _execute_revoke(self, row: dict[str, Any], *, wait: bool) -> None:
         """``approve(spender, 0)`` on the token; the allowance is gone once it mines."""
@@ -4346,6 +5228,7 @@ class TradingService:
         pre: dict[str, int] | None,
         *,
         timeout_s: float = RECEIPT_TIMEOUT_S,
+        wait: bool = False,
     ) -> None:
         """Settle a submitted order from its receipt.
 
@@ -4354,6 +5237,8 @@ class TradingService:
         come from the receipt's logs and the order's own amount. No receipt
         within the window leaves the order ``submitted``: a transaction that
         has not mined yet is not a failed one, and ``tick`` keeps looking.
+        ``wait`` is the caller blocking for the final status: a bridge then
+        follows its destination fill inline instead of in a background task.
         """
         row = self.ledger.get_order(order_id)
         if row is None or row["status"] != "submitted":
@@ -4411,6 +5296,10 @@ class TradingService:
                 await self._settle_revoke(order_id, row, tx_hash, receipt, chain, record, meta_in)
             elif kind in LP_ORDER_KINDS:
                 await self._settle_lp(order_id, row, tx_hash, receipt, pre, chain, record)
+            elif kind == "bridge":
+                await self._settle_bridge(
+                    order_id, row, tx_hash, receipt, pre, chain, record, meta_in, wait=wait
+                )
             else:
                 await self._settle(
                     order_id, row, tx_hash, receipt, pre, chain, record, meta_in, meta_out
