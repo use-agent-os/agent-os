@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.5.post2] - 2026-11-05
+
 ### Changed
 - Desktop Trading page: the **other chat** chip on a row filed by another
   trading chat is now a bare external-link icon, so the row stays short and its
