@@ -3,6 +3,8 @@
  * session. Mirrors PLACEHOLDER_NAMES in src/agentos/gateway/session_titler.py:
  * the titler treats these as "still unnamed", and so does the UI, which shows
  * "New session" instead of, say, "WebChat" while the real title is on its way.
+ * The gateway's list also has "trading desk", which stays out of this one: that
+ * label is what an unsent desk chat should show until the titler replaces it.
  */
 export const PLACEHOLDER_SESSION_NAMES: ReadonlySet<string> = new Set([
   'webchat',

@@ -70,8 +70,14 @@ describe('useTradingSession filing', () => {
     })
     expect(patches).toBe(3)
     expect(readTradingSessionFiled()).toBe(true)
-    const patch = rpcCall.mock.calls.find(([m]) => m === 'sessions.patch')?.[1]
-    expect(patch).toMatchObject({ projectId: 'p1', displayName: 'Trading desk' })
+    const filed = rpcCall.mock.calls.filter(([m]) => m === 'sessions.patch').map(([, p]) => p)
+    // Before a send the row is only labelled; from the first send on the
+    // gateway is titling the chat, so filing must leave the name alone.
+    expect(filed[0]).toMatchObject({ projectId: 'p1', displayName: 'Trading desk' })
+    for (const patch of filed.slice(1)) {
+      expect(patch).toMatchObject({ projectId: 'p1' })
+      expect(patch).not.toHaveProperty('displayName')
+    }
     // The knowledge was refreshed on the way in: the primary rule is in it.
     const update = rpcCall.mock.calls.find(([m]) => m === 'projects.update')?.[1] as {
       knowledge: string

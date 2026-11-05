@@ -18,6 +18,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   list past the list, so Create, Import, Manage, Export and Remove stay
   reachable. With many wallets the wallet rows scroll inside the switcher
   instead of pushing those commands out of the window.
+- Desktop trading: chats started from Trade are now named from their first
+  message, like every other chat, instead of all reading "Trading desk". A chat
+  that already carries that label gets its name on its next message, and a name
+  you typed is kept.
 
 ## [2026.11.5.post1] - 2026-11-05
 
