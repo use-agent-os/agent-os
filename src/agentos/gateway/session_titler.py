@@ -9,8 +9,9 @@ for it, and a failure only means the placeholder name stays.
 Rules that keep it out of the operator's way:
 
 * It only names sessions that still carry a placeholder (``None``,
-  ``WebChat`` or the short session id). A name a person typed, or one the
-  agent set with ``session_rename``, is never overwritten.
+  ``WebChat``, the desktop's ``Trading desk`` label or the short session id).
+  A name a person typed, or one the agent set with ``session_rename``, is never
+  overwritten.
 * It runs once per session, keyed on the first send, and never on internal
   run kinds (cron, heartbeat, subagent). Channel turns (Telegram, Slack, …)
   count as a person's own turn, same as WebChat and the desktop app.
@@ -36,7 +37,11 @@ from agentos.session.naming import normalize_session_name
 log = structlog.get_logger()
 
 TASK = "session_title"
-PLACEHOLDER_NAMES = frozenset({"webchat", "chat", "new chat", "new session", "untitled"})
+# "trading desk" is the label the desktop files an unsent desk chat under: it
+# says where the chat lives, not what it is about, so the first send replaces it.
+PLACEHOLDER_NAMES = frozenset(
+    {"webchat", "chat", "new chat", "new session", "untitled", "trading desk"}
+)
 # Counted on whitespace, so Vietnamese syllables each count as one: a 6-word
 # title in the prompt's sense is often 9 or 10 here.
 MAX_TITLE_WORDS = 10

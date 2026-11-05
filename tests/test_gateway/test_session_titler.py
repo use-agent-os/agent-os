@@ -13,6 +13,9 @@ import pytest
 import pytest_asyncio
 
 from agentos.gateway import session_titler as titler_mod
+from agentos.gateway.config import GatewayConfig
+from agentos.gateway.rpc import RpcContext, get_dispatcher
+from agentos.gateway.rpc_chat import _schedule_session_title
 from agentos.gateway.session_titler import (
     SessionTitler,
     clean_title,
@@ -94,6 +97,12 @@ def test_placeholder_detection():
     assert is_placeholder_name("  webchat ")
     assert is_placeholder_name("abc12345", session_id="abc12345-ffff")
     assert not is_placeholder_name("Fix CI flake", session_id="abc12345-ffff")
+
+
+def test_the_desk_project_label_counts_as_unnamed():
+    assert is_placeholder_name("Trading desk")
+    assert is_placeholder_name("  trading desk ")
+    assert not is_placeholder_name("Trading desk review")
 
 
 def test_clean_title_strips_model_noise():
@@ -300,3 +309,97 @@ async def test_channel_turns_are_titled_with_a_per_call_broadcast(manager, monke
     node = await manager.get_session(key)
     assert node is not None and node.display_name == "Channel title"
     assert own == [key] and shared == []
+
+
+# ── desk sessions, through the real handlers ─────────────────────────────────
+
+DESK_KEY = "agent:trading:webchat:trading-abc123"
+
+
+@pytest.fixture
+def desk_ctx(manager) -> RpcContext:
+    context = RpcContext(conn_id="test-conn", config=GatewayConfig())
+    context.session_manager = manager
+    return context
+
+
+async def _file_desk_session(ctx: RpcContext, **fields: str) -> str:
+    """Create the desk project and file the unsent desk key into it."""
+    dispatcher = get_dispatcher()
+    created = await dispatcher.dispatch(
+        "r1", "projects.create", {"agentId": "trading", "name": "Trading desk"}, ctx
+    )
+    assert created.ok is True, created.error
+    project_id = created.payload["project"]["project_id"]
+    patched = await dispatcher.dispatch(
+        "r2", "sessions.patch", {"key": DESK_KEY, "projectId": project_id, **fields}, ctx
+    )
+    assert patched.ok is True, patched.error
+    return project_id
+
+
+async def _send_and_title(ctx: RpcContext, message: str) -> None:
+    _schedule_session_title(ctx, DESK_KEY, message, {})
+    await titler_for(ctx.session_manager).drain()
+
+
+async def _listed_name(ctx: RpcContext) -> str | None:
+    listed = await get_dispatcher().dispatch("r3", "sessions.list", {}, ctx)
+    assert listed.ok is True, listed.error
+    row = next(r for r in listed.payload["sessions"] if r["key"] == DESK_KEY)
+    return row["displayName"]
+
+
+@pytest.mark.asyncio
+async def test_a_desk_chat_filed_with_the_project_label_is_titled(manager, desk_ctx, monkeypatch):
+    # Every unsent desk chat is filed at mint under the project's name, and
+    # that label must not read as a name someone chose.
+    _stub_client(monkeypatch, "Mua ETH trên Base")
+    project_id = await _file_desk_session(desk_ctx, displayName="Trading desk")
+    assert await _listed_name(desk_ctx) == "Trading desk"
+
+    await _send_and_title(desk_ctx, "mua 100 đô ETH trên Base")
+
+    assert await _listed_name(desk_ctx) == "Mua ETH trên Base"
+    node = await manager.get_session(DESK_KEY)
+    assert node is not None and node.project_id == project_id
+
+
+@pytest.mark.asyncio
+async def test_a_titled_desk_chat_keeps_its_title_on_later_sends(desk_ctx, monkeypatch):
+    calls = _stub_client(monkeypatch, "Mua ETH trên Base")
+    await _file_desk_session(desk_ctx, displayName="Trading desk")
+
+    await _send_and_title(desk_ctx, "mua 100 đô ETH trên Base")
+    await _send_and_title(desk_ctx, "giờ bán hết đi")
+
+    assert await _listed_name(desk_ctx) == "Mua ETH trên Base"
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_desk_chat_filed_without_a_label_is_titled(manager, desk_ctx, monkeypatch):
+    # The retry on the first send files the chat without touching its name.
+    _stub_client(monkeypatch, "Mua ETH trên Base")
+    project_id = await _file_desk_session(desk_ctx)
+
+    await _send_and_title(desk_ctx, "mua 100 đô ETH trên Base")
+
+    assert await _listed_name(desk_ctx) == "Mua ETH trên Base"
+    node = await manager.get_session(DESK_KEY)
+    assert node is not None and node.project_id == project_id
+
+
+@pytest.mark.asyncio
+async def test_a_desk_chat_a_person_renamed_stays_named(desk_ctx, monkeypatch):
+    calls = _stub_client(monkeypatch, "Mua ETH trên Base")
+    await _file_desk_session(desk_ctx, displayName="Trading desk")
+    renamed = await get_dispatcher().dispatch(
+        "r4", "sessions.rename", {"key": DESK_KEY, "name": "DCA tuần này"}, desk_ctx
+    )
+    assert renamed.ok is True, renamed.error
+
+    await _send_and_title(desk_ctx, "mua 100 đô ETH trên Base")
+
+    assert await _listed_name(desk_ctx) == "DCA tuần này"
+    assert calls == []
