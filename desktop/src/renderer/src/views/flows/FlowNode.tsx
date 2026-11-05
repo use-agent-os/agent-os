@@ -7,7 +7,9 @@ import { t } from '~/i18n'
 import { cn } from '~/lib/utils'
 import { useNow } from '~/lib/use-now'
 import { useFlowThumb } from '~/stores/flows'
+import { DownloadImageButton } from './DownloadImageButton'
 import { typeColor, useEditorEnv } from './editor-context'
+import { savedFileNames } from './files'
 import type { FlowCanvasNode } from './graph'
 import { NodeIcon } from './icons'
 import { badgeText, formatElapsed, formatMs, usd } from './price'
@@ -248,6 +250,8 @@ export const FlowNode = memo(function FlowNode({ id, data, selected }: NodeProps
       {outputs?.images?.length || (state?.state === 'running' && multiImage) ? (
         <ImageGrid
           images={outputs?.images ?? []}
+          fileNames={savedFileNames(outputs)}
+          downloadable={schema.is_output}
           pending={
             state?.state === 'running' ? Math.max(0, expected - (outputs?.images?.length ?? 0)) : 0
           }
@@ -513,7 +517,18 @@ function WidgetRow({
   )
 }
 
-function ImageGrid({ images, pending }: { images: ImageRef[]; pending: number }) {
+function ImageGrid({
+  images,
+  fileNames,
+  downloadable,
+  pending,
+}: {
+  images: ImageRef[]
+  fileNames: Record<string, string>
+  /** Output nodes offer each image for download right on the canvas. */
+  downloadable?: boolean
+  pending: number
+}) {
   const env = useEditorEnv()
   const cells = images.length + pending
   return (
@@ -522,7 +537,9 @@ function ImageGrid({ images, pending }: { images: ImageRef[]; pending: number })
         <GridThumb
           key={`${img.sha256}:${i}`}
           image={img}
-          onOpen={() => env.openImages(images, i)}
+          fileName={fileNames[img.sha256]}
+          downloadable={downloadable}
+          onOpen={() => env.openImages(images, i, fileNames)}
         />
       ))}
       {Array.from({ length: pending }, (_, i) => (
@@ -534,17 +551,36 @@ function ImageGrid({ images, pending }: { images: ImageRef[]; pending: number })
   )
 }
 
-function GridThumb({ image, onOpen }: { image: ImageRef; onOpen: () => void }) {
+function GridThumb({
+  image,
+  fileName,
+  downloadable,
+  onOpen,
+}: {
+  image: ImageRef
+  fileName?: string
+  downloadable?: boolean
+  onOpen: () => void
+}) {
   const thumb = useFlowThumb(image)
   return (
-    <button
-      type="button"
-      className="flw-grid__cell nodrag"
-      aria-label={t('flows.node.openImage')}
-      onClick={onOpen}
-    >
-      {thumb.src ? <img src={thumb.src} alt="" draggable={false} /> : null}
-    </button>
+    <div className="flw-grid__item">
+      <button
+        type="button"
+        className="flw-grid__cell nodrag"
+        aria-label={t('flows.node.openImage')}
+        onClick={onOpen}
+      >
+        {thumb.src ? <img src={thumb.src} alt="" draggable={false} /> : null}
+      </button>
+      {downloadable ? (
+        <DownloadImageButton
+          image={image}
+          fileName={fileName}
+          className="flw-grid__download nodrag"
+        />
+      ) : null}
+    </div>
   )
 }
 

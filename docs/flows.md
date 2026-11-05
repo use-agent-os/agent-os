@@ -47,6 +47,12 @@ Two things make a flow worth having over a one-off `image_generate` call:
 
 `agentos flows nodes` lists them from the running gateway.
 
+In the desktop editor, each image on a Save node has a download button, and so
+does the image viewer you open by clicking any image on the canvas or in
+Results. It asks where to save and writes the stored file as it is, at full
+size. An image from a Save node keeps the name Save gave it and the flow inside
+it. Any other image is named after its hash (`agentos-flow-1a2b3c4d.png`).
+
 ### Models and keys
 
 `agentos flows models` lists every image model with whether it can be used,

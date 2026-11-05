@@ -885,6 +885,21 @@
 .flw-grid[data-single] {
   grid-template-columns: 1fr;
 }
+.flw-grid__item {
+  position: relative;
+  min-width: 0;
+}
+.flw-grid__item > .flw-grid__cell {
+  display: block;
+  width: 100%;
+}
+.flw-grid__download {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  background: color-mix(in srgb, var(--flw-well) 78%, transparent);
+  color: var(--foreground);
+}
 .flw-grid__cell,
 .flw-grid__wait {
   position: relative;

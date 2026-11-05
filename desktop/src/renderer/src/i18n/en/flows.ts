@@ -175,6 +175,8 @@ export const flows = {
   'flows.viewer.next': 'Next image',
   'flows.viewer.loading': 'Loading image',
   'flows.viewer.failed': 'Could not load the image',
+  'flows.viewer.download': 'Download image',
+  'flows.viewer.downloadFailed': 'Could not download the image',
 
   'flows.drop.title': 'Restore the graph from this image?',
   'flows.drop.body':

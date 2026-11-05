@@ -3,12 +3,15 @@ import { useEffect, useId, useState } from 'react'
 import { ModalShell } from '@/components/ModalShell'
 import { t } from '~/i18n'
 import { useFlowMedia, useFlowThumb } from '~/stores/flows'
+import { DownloadImageButton } from './DownloadImageButton'
 import type { ImageRef } from './types'
 
 /** The images to page through and where to start: the exact list the opener showed. */
 export interface ViewerSource {
   images: ImageRef[]
   index: number
+  /** Names to download under, by blob: the files Save wrote. */
+  fileNames?: Record<string, string>
 }
 
 /**
@@ -74,6 +77,13 @@ export function ImageViewer({ source, onClose }: { source: ViewerSource; onClose
               <ChevronRight className="size-4" strokeWidth={1.75} aria-hidden />
             </button>
           </>
+        ) : null}
+        {image ? (
+          <DownloadImageButton
+            key={image.sha256}
+            image={image}
+            fileName={source.fileNames?.[image.sha256]}
+          />
         ) : null}
         <button
           type="button"

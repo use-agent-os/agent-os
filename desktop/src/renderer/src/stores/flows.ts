@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react'
 import { useRpc } from '@/app/providers'
 import type { WsRpcClient } from '@/lib/ws-rpc'
 import { useConnection } from '@/stores/connection'
+import { base64ToBlob, imageFileName, saveBlob } from '~/views/flows/files'
 import {
   applySnapshot,
   emptyTracker,
@@ -313,18 +314,41 @@ export function useFlowMedia(sha256: string | null | undefined, maxSide?: number
   const rpc = useRpc()
   const connected = useConnected()
   const query = useQuery<MediaResult>({
-    queryKey: FLOWS_KEYS.media(sha256 ?? '', maxSide),
+    ...mediaQuery(rpc, sha256 ?? '', maxSide),
     enabled: connected && Boolean(sha256),
+    refetchOnWindowFocus: false,
+  })
+  return { ...query, src: mediaSrc(query.data) }
+}
+
+function mediaQuery(rpc: WsRpcClient, sha256: string, maxSide?: number) {
+  return {
+    queryKey: FLOWS_KEYS.media(sha256, maxSide),
     staleTime: Infinity,
     gcTime: 15 * 60_000,
     retry: 1,
-    refetchOnWindowFocus: false,
-    queryFn: async () => {
+    queryFn: async (): Promise<MediaResult> => {
       await rpc.waitForConnection()
-      return flowsApi(rpc).media(sha256!, maxSide)
+      return flowsApi(rpc).media(sha256, maxSide)
     },
-  })
-  return { ...query, src: mediaSrc(query.data) }
+  }
+}
+
+/**
+ * Save one image to disk: the stored bytes unchanged, so a Save node's PNG
+ * keeps the flow inside it. Shares the viewer's full-size cache entry.
+ */
+export function useFlowImageDownload() {
+  const rpc = useRpc()
+  const queryClient = useQueryClient()
+  return useCallback(
+    async (image: ImageRef, fileName?: string) => {
+      const media = await queryClient.fetchQuery(mediaQuery(rpc, image.sha256))
+      const blob = base64ToBlob(media.data_b64, media.mime || image.mime)
+      saveBlob(blob, fileName ?? imageFileName(image))
+    },
+    [rpc, queryClient],
+  )
 }
 
 export function useFlowThumb(image: ImageRef | null | undefined) {

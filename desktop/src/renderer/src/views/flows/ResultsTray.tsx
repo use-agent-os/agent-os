@@ -3,6 +3,7 @@ import { t, type MessageKey } from '~/i18n'
 import { cn } from '~/lib/utils'
 import { useNow } from '~/lib/use-now'
 import { useFlowRunRecord, useFlowThumb } from '~/stores/flows'
+import { runFileNames } from './files'
 import type { ViewerSource } from './ImageViewer'
 import { formatElapsed, usd } from './price'
 import {
@@ -21,6 +22,8 @@ export interface TrayRun {
   created: string | null
   /** Unique images of the run, or null while only its summary is known. */
   images: ImageRef[] | null
+  /** The files Save wrote, by blob, as far as the live view knows them. */
+  fileNames?: Record<string, string>
   preview: ImageRef | null
   cost: number | null
   est: number | null
@@ -57,6 +60,7 @@ export function trayRuns(
       status: view.status,
       created: summary?.created ?? view.created ?? null,
       images: unknown ? null : images,
+      fileNames: runFileNames(view.outputs),
       preview: summary?.preview ?? null,
       cost: view.cost_usd ?? summary?.cost_usd ?? null,
       est: view.est_usd ?? summary?.est_usd ?? null,
@@ -191,6 +195,7 @@ function RunGroup({
         ? [run.preview]
         : [])
   const known = run.images !== null || Boolean(record.data)
+  const fileNames = record.data ? runFileNames(record.data.outputs ?? {}) : run.fileNames
 
   const bits: string[] = []
   const time = clock(run.created)
@@ -235,7 +240,7 @@ function RunGroup({
           <TrayThumb
             key={`${img.sha256}:${i}`}
             image={img}
-            onOpen={() => onOpen({ images, index: i })}
+            onOpen={() => onOpen({ images, index: i, fileNames })}
           />
         ))}
         {!images.length && !isTerminal(run.status) ? (

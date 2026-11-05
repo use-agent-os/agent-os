@@ -13,7 +13,7 @@ export interface EditorEnv {
   nodes: NodesPayload
   models: ModelsPayload | undefined
   openModelPicker: (nodeId: string, anchor: DOMRect) => void
-  openImages: (images: ImageRef[], index: number) => void
+  openImages: (images: ImageRef[], index: number, fileNames?: Record<string, string>) => void
   uploadImage: (nodeId: string, input: string, file: File) => Promise<void>
   /** The gateway refuses this window's writes: nodes show, nothing edits. */
   readOnly: boolean
