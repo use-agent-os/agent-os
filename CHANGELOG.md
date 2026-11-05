@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- Desktop Trading page: the **other chat** chip on a row filed by another
+  trading chat is now a bare external-link icon, so the row stays short and its
+  name and status fit. Hovering it says what it opens, and a screen reader reads
+  the same.
+
 ### Fixed
 - Desktop trading: the wallet menus are no longer cut off. The switcher and the
   wallet's `⋯` menu now extend past the value card, and a `⋯` menu in the wallet

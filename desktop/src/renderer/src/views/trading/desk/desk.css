@@ -713,32 +713,27 @@
   outline: 1px solid var(--ring);
   outline-offset: 1px;
 }
-/* A row another trading chat filed: the chip names that and opens the chat.
-   Sized by its text: the row's 24px icon-button rule must not apply. */
-.trd-mctl__elsewhere,
-.trd-mctl__row .trd-mctl__elsewhere {
+/* A row another trading chat filed: a bare icon that opens that chat, its name
+   in the tooltip. The same 24px box as the row's other icon buttons. */
+.trd-mctl__elsewhere {
   display: inline-flex;
-  width: auto;
   flex-shrink: 0;
   align-items: center;
-  gap: 3px;
-  height: 18px;
-  margin-right: 4px;
-  padding: 0 6px;
-  border: 1px dashed color-mix(in srgb, var(--dim) 55%, transparent);
-  border-radius: var(--radius-pill);
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
   background: transparent;
   color: var(--dim);
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  white-space: nowrap;
   cursor: pointer;
 }
 .trd-mctl__elsewhere:hover {
   color: var(--fg);
-  border-color: var(--fg);
+}
+.trd-mctl__elsewhere:focus-visible {
+  outline: 1px solid var(--ring);
+  outline-offset: 1px;
 }
 .trd-mctl__hint {
   overflow: hidden;
@@ -3632,9 +3627,6 @@ button.trd-tool[data-tone='danger']:hover {
 .trd-auto__foot .trd-mctl__ctl .mac-button {
   width: 24px;
   height: 24px;
-}
-.trd-auto__foot .trd-mctl__elsewhere {
-  margin: 0;
 }
 /* History under an opened card. */
 .trd-auto__hist {

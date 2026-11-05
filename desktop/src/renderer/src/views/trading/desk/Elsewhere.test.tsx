@@ -34,6 +34,15 @@ beforeEach(() => {
 })
 
 describe('Elsewhere', () => {
+  it('is an icon with no text, and still names itself to a screen reader', async () => {
+    rpcCall.mockResolvedValue({ previews: [{ key: OTHER }] })
+    mount()
+    await answered()
+    const chip = screen.getByRole('button', { name: 'Filed by another trading chat — open it' })
+    expect(chip).toHaveTextContent(/^$/)
+    expect(chip.querySelector('svg')).not.toBeNull()
+  })
+
   it('asks the gateway about this one chat, not the capped session list', async () => {
     rpcCall.mockResolvedValue({ previews: [{ key: OTHER }] })
     mount()
