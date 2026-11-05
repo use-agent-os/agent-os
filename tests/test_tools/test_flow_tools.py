@@ -19,6 +19,7 @@ from agentos.flows import reset_flow_service, set_flow_service
 from agentos.flows.models import ModelRegistry
 from agentos.flows.service import FlowService
 from agentos.gateway.approval_queue import get_approval_queue, reset_approval_queue
+from agentos.gateway.tools_invoke import is_hard_denied
 from agentos.tools.builtin import control
 from agentos.tools.builtin import flows as flow_tools
 from agentos.tools.policy_runtime import ToolSurfaceCapabilities, resolve_runtime_tool_surface
@@ -31,7 +32,16 @@ from agentos.tools.types import (
     UnsupportedSurfaceError,
     current_tool_context,
 )
-from tests.test_flows.conftest import FakeImageAdapter, FakeTextAdapter, fake_auth, stored, t2i_doc
+from tests.test_flows.conftest import (
+    FakeImageAdapter,
+    FakeTextAdapter,
+    doc,
+    fake_auth,
+    link,
+    node,
+    stored,
+    t2i_doc,
+)
 
 
 def _config(limit: float = 0.50, enabled: bool = True) -> SimpleNamespace:
@@ -510,11 +520,13 @@ def test_prompt_points_image_requests_at_flows_when_image_generate_is_off() -> N
     with_flows = _prompt([*base, "flow_list", "flow_run"])
     assert "you can create images by running one of the user's saved Image Flows" in with_flows
     assert "create one in the Flows editor" in with_flows
+    assert "`flow_publish`" in with_flows
     assert "Image generation is not available in this session" not in with_flows
 
     without = _prompt(base)
     assert "Image generation is not available in this session" in without
     assert "flow_run" not in without
+    assert "flow_publish" not in without
 
     both = _prompt([*base, "image_generate", "flow_list", "flow_run"])
     assert "you MUST call the `image_generate` tool" in both
@@ -577,3 +589,136 @@ def test_flow_run_tells_the_model_to_use_overrides_for_one_off_variants() -> Non
     assert "overrides" in spec.parameters
     assert "instead of editing the saved flow" in spec.description
     assert "never save an expensive configuration" in spec.description
+
+
+# ---------------------------------------------------------------------------
+# flow_publish
+# ---------------------------------------------------------------------------
+
+
+async def _canvas_run(service: FlowService, flow: dict[str, Any]) -> dict[str, Any]:
+    """A run started in the editor: nothing is published to any chat."""
+    submitted = await service.submit_run(flow["id"])
+    return await service.wait_run(submitted["run_id"], timeout=30)
+
+
+def _published_bytes(ctx: ToolContext, artifact: dict[str, Any]) -> bytes:
+    store = ArtifactStore(ctx.artifact_media_root)
+    _ref, path = store.resolve_for_download(artifact["id"], session_id="session-1")
+    return path.read_bytes()
+
+
+async def test_flow_publish_posts_one_image_for_one_generation(
+    make_service, ctx, images, tmp_path
+) -> None:
+    service = make_service()
+    flow = await stored(service, t2i_doc())
+    run = await _canvas_run(service, flow)
+    # The trap this tool removes: one picture is two blobs in the media store.
+    blobs = [p for p in (tmp_path / "flows" / "media").iterdir() if p.is_file()]
+    assert len(images.calls) == 1 and len(blobs) == 2
+
+    payload = json.loads(await flow_tools.flow_publish(flow="Test"))
+
+    assert payload["run_id"] == run["run_id"] and payload["image_count"] == 1
+    assert len(images.calls) == 1  # nothing ran again
+    assert [a["mime"] for a in ctx.published_artifacts] == ["image/png"]
+    saved = Path(run["outputs"]["s"]["files"][0])
+    artifact = ctx.published_artifacts[0]
+    assert artifact["name"] == saved.name and payload["images"][0]["name"] == saved.name
+    assert payload["images"][0]["artifact_id"] == artifact["id"]
+    # The Save file itself, so the flow is still inside the PNG.
+    assert _published_bytes(ctx, artifact) == saved.read_bytes()
+    assert all("download_url" not in a for a in payload["artifacts"])
+
+
+async def test_flow_publish_without_a_flow_takes_the_most_recent_run(make_service, ctx) -> None:
+    service = make_service()
+    older = await stored(service, t2i_doc())
+    newer = await stored(service, {**t2i_doc(variation="new"), "name": "Newer"})
+    await _canvas_run(service, older)
+    run = await _canvas_run(service, newer)
+
+    payload = json.loads(await flow_tools.flow_publish())
+
+    assert payload["run_id"] == run["run_id"] and payload["flow_id"] == newer["id"]
+    assert len(ctx.published_artifacts) == 1
+
+
+async def test_flow_publish_skips_a_run_that_made_nothing_new(make_service, ctx) -> None:
+    service = make_service()
+    flow = await stored(service, t2i_doc())
+    first = await _canvas_run(service, flow)
+    # variation=keep: the image node is served from cache, so this run made no picture.
+    cached = await _canvas_run(service, flow)
+    assert cached["image_count"] == 0
+
+    payload = json.loads(await flow_tools.flow_publish(flow=flow["id"]))
+
+    assert payload["run_id"] == first["run_id"] and payload["image_count"] == 1
+
+
+async def test_flow_publish_lists_every_image_of_a_multi_image_run(make_service, ctx) -> None:
+    service = make_service()
+    flow = await stored(service, t2i_doc(count=3))
+    await _canvas_run(service, flow)
+
+    payload = json.loads(await flow_tools.flow_publish(flow="Test"))
+
+    assert payload["image_count"] == 3 and len(ctx.published_artifacts) == 3
+    assert len({a["name"] for a in ctx.published_artifacts}) == 3
+
+
+async def test_flow_publish_without_a_save_node_posts_the_generated_image(
+    make_service, ctx
+) -> None:
+    service = make_service()
+    graph = doc(
+        [
+            node("t", "text", text="a lighthouse"),
+            node("i", "image", model="openrouter/nano-banana-2", count=1),
+        ],
+        [link("l1", "t", "text", "i", "prompt")],
+    )
+    flow = await stored(service, graph)
+    run = await _canvas_run(service, flow)
+
+    payload = json.loads(await flow_tools.flow_publish(flow=flow["id"]))
+
+    assert payload["image_count"] == 1
+    artifact = ctx.published_artifacts[0]
+    assert artifact["name"].startswith(f"{flow['id']}_{run['run_id']}_1.")
+    sha = run["outputs"]["i"]["images"][0]["sha256"]
+    assert _published_bytes(ctx, artifact) == service.media.read(sha)[0]
+
+
+async def test_flow_publish_refuses_when_there_is_nothing_to_post(make_service, ctx) -> None:
+    service = make_service()
+    flow = await stored(service, t2i_doc())
+
+    with pytest.raises(ToolError, match="No run of this flow has made images"):
+        await flow_tools.flow_publish(flow=flow["id"])
+    with pytest.raises(ToolError, match="No flow with id or name"):
+        await flow_tools.flow_publish(flow="Nope")
+    assert ctx.published_artifacts == []
+
+
+async def test_flow_publish_needs_a_chat_session(make_service) -> None:
+    service = make_service()
+    flow = await stored(service, t2i_doc())
+    await _canvas_run(service, flow)
+    token = current_tool_context.set(ToolContext(caller_kind=CallerKind.WEB))
+    try:
+        with pytest.raises(ToolError, match="needs a chat session"):
+            await flow_tools.flow_publish(flow="Test")
+    finally:
+        current_tool_context.reset(token)
+
+
+def test_flow_publish_is_deferred_gated_and_not_invocable_unattended() -> None:
+    surface = resolve_runtime_tool_surface(
+        ToolContext(), capabilities=ToolSurfaceCapabilities(flows=False)
+    )
+    assert "flow_publish" in surface.denied_tools
+    assert get_default_registry().get("flow_publish").spec.defer_loading is True
+    assert is_hard_denied("flow_publish")

@@ -131,15 +131,22 @@ Running a flow spends money, so `flows run` and `flows stop` are the user's
 actions: from an agent's shell (an agent-bound connection) the gateway refuses
 them with `flows.operator_required`. Agents use `flow_run` instead.
 
-## Agents: `flow_list` and `flow_run`
+## Agents: `flow_list`, `flow_run` and `flow_publish`
 
-Two built-in tools let an agent use the flows you built (three more let it
-build and edit them: see [Agents can build flows](#agents-can-build-flows)). Both are in the
-deferred set (the model loads them with `tool_search`), and both are offered
+Three built-in tools let an agent use the flows you built (three more let it
+build and edit them: see [Agents can build flows](#agents-can-build-flows)). All are in the
+deferred set (the model loads them with `tool_search`), and all are offered
 only while `[flows].enabled` is on and at least one image model has a key.
 
 - `flow_list()` returns each flow's id, name, node count and public inputs
   with their current values, plus the default model and the agent cost limit.
+- `flow_publish(flow?)` posts the images of a flow's latest run that made
+  images to the chat, without running anything (free). With no `flow`, it
+  takes the most recent such run of any flow. Use it for a result you made in
+  the editor: one artifact per image of the run. The `media/` store under the
+  flows state directory is not a list of results: Save re-encodes each image
+  to add the flow's metadata and stores that as a second blob, so one picture
+  is two files there.
 - `flow_run(flow, inputs?, wait_seconds?)` runs a flow by id or exact name,
   with `inputs` overriding public inputs only. The tool descriptions steer the
   model to `flow_run` when you ask to run or reuse a flow you built, and to

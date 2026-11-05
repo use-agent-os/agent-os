@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import mimetypes
 import time
 from pathlib import Path
 from typing import Any
@@ -59,6 +60,8 @@ _MAX_DENIALS = 256
 _DEFAULT_WAIT_SECONDS = 300
 _MAX_WAIT_SECONDS = 900
 _TERMINAL = frozenset({"done", "failed", "cancelled"})
+#: How far back flow_publish looks for a run that made images.
+_PUBLISH_RUNS_SCANNED = 30
 _MAX_INPUT_CHARS = 8_000
 
 
@@ -1051,3 +1054,89 @@ def _result(
             "publish_artifact for them."
         )
     return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+# ---------------------------------------------------------------------------
+# flow_publish
+# ---------------------------------------------------------------------------
+
+
+def _latest_result(service: Any, flow_id: str | None) -> dict[str, Any] | None:
+    """The newest settled run that made new images (a run served from cache made none)."""
+    for summary in service.list_runs(flow_id, limit=_PUBLISH_RUNS_SCANNED):
+        if summary.get("status") in _TERMINAL and summary.get("image_count"):
+            run: dict[str, Any] = service.get_run(summary["run_id"])
+            return run
+    return None
+
+
+@tool(
+    name="flow_publish",
+    defer_loading=True,
+    description=(
+        "Post the images an Image Flow already made to this chat, without running it (free). "
+        "Use it when the user asks to publish, share or send the result of a flow they ran, "
+        "for example in the Flows editor. Posts exactly the images of that run: one artifact "
+        "per image. Do not copy files out of the flows state directory yourself: its media "
+        "store also keeps working copies of the same picture, so counting or publishing "
+        "those files doubles the result."
+    ),
+    params={
+        "flow": {
+            "type": "string",
+            "description": (
+                "Flow id or exact name (see flow_list). Omit it for the most recent run of "
+                "any flow."
+            ),
+        },
+    },
+)
+async def flow_publish(flow: str = "") -> str:
+    from agentos.artifacts import ArtifactStore, artifact_payload
+    from agentos.flows import FlowError
+
+    service = _service()
+    target = _artifact_ctx(current_tool_context.get())
+    if target is None:
+        raise ToolError("flow_publish needs a chat session to post the images into")
+    try:
+        doc = service.resolve_flow(flow.strip()) if flow.strip() else None
+        record = _latest_result(service, doc["id"] if doc else None)
+        if record is None:
+            raise ToolError("No run of this flow has made images yet; offer to run it (flow_run).")
+        store = ArtifactStore(str(target.artifact_media_root))
+        rows: list[dict[str, Any]] = []
+        artifacts: list[dict[str, Any]] = []
+        for number, image in enumerate(run_images(record), start=1):
+            data, mime = service.media.read(str(image.get("sha256")))
+            suffix = mimetypes.guess_extension(mime) or ".png"
+            name = image.get("name") or f"{record['flow_id']}_{record['run_id']}_{number}{suffix}"
+            ref = store.publish_bytes(data, name=name, mime=mime, **_store_kwargs(target))
+            payload = artifact_payload(ref)
+            target.published_artifacts.append(payload)
+            artifacts.append(payload)
+            rows.append(
+                {
+                    "name": name,
+                    "sha256": image.get("sha256"),
+                    "width": image.get("width"),
+                    "height": image.get("height"),
+                    "artifact_id": payload.get("id"),
+                }
+            )
+    except FlowError as exc:
+        raise _flow_error(exc) from exc
+    except (OSError, ValueError) as exc:
+        raise ToolError(f"Could not publish the images: {exc}") from exc
+    return json.dumps(
+        {
+            "run_id": record["run_id"],
+            "flow_id": record["flow_id"],
+            "images": rows,
+            "image_count": len(rows),
+            "artifacts": [_public_artifact(a) for a in artifacts],
+            "note_delivery": "These images are already in this chat. Do not publish them again.",
+        },
+        ensure_ascii=False,
+        default=str,
+    )

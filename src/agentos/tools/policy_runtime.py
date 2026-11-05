@@ -12,7 +12,7 @@ _PRIVATE_MEMORY_READ_TOOL_NAMES: frozenset[str] = frozenset(
 _IMAGE_GENERATION_TOOL_NAMES: frozenset[str] = frozenset({"image_generate"})
 # Image Flows: hidden while flows are off or no image model has a key.
 _FLOW_TOOL_NAMES: frozenset[str] = frozenset(
-    {"flow_list", "flow_run", "flow_get", "flow_create", "flow_update"}
+    {"flow_list", "flow_run", "flow_publish", "flow_get", "flow_create", "flow_update"}
 )
 _X_SEARCH_TOOL_NAMES: frozenset[str] = frozenset({"x_search"})
 _BROWSER_TOOL_NAMES: frozenset[str] = frozenset({"browser"})

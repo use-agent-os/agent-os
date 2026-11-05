@@ -12,6 +12,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Results. It saves the full-size file; an image from a Save node keeps the
   name Save gave it and the flow inside it.
 
+### Changed
+- Deferred tool loading. `flow_publish` joins the deferred set, which now holds
+  31 rarely used builtins; deferral cuts a stock request from 70 to 40 tool
+  schemas.
+
+### Fixed
+- Image Flows: asking an agent to publish an image a flow already made no longer
+  posts the same picture twice. With no tool for it, the agent copied files out of
+  the flows media store, which holds both the generated image and the copy Save
+  stamps with the flow. The new `flow_publish` tool posts exactly the images of the
+  flow's latest run, with no new run and no cost.
+
 ## [2026.11.5] - 2026-11-05
 
 ### Fixed
