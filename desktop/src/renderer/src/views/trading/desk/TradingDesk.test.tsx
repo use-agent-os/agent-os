@@ -65,6 +65,7 @@ function Harness({
       {frame.banner}
       {inst.region}
       {inst.dockAbove}
+      {inst.seats}
       <span data-testid="composer-placeholder">{inst.placeholder}</span>
       <button type="button" onClick={frame.desk?.onStartFresh} data-testid="start-fresh">
         fresh
@@ -398,12 +399,45 @@ describe('useDeskInstruments · the composer hint', () => {
   it('keeps the normal hint while a DCA mandate runs', async () => {
     rpcCall.mockImplementation(answers({ 'trading.dca.list': dcaList }))
     renderDesk(<Harness active />)
-    // The mandate is on the desk (the strip above the composer names it)…
-    await screen.findByTestId('mission-strip-mandate')
+    // The mandate is on the desk (its row above the composer names it)…
+    await screen.findByTestId('mandate-row')
     // …and the composer still says what it always says.
     const hint = screen.getByTestId('composer-placeholder')
     expect(hint).not.toHaveTextContent('Test DCA C')
     expect(PLACEHOLDERS).toContain(hint.textContent)
+  })
+
+  it('names a DCA once, in its row; the dot strip above the composer leaves it out', async () => {
+    rpcCall.mockImplementation(answers({ 'trading.dca.list': dcaList }))
+    renderDesk(<Harness active />)
+    await screen.findByTestId('mandate-row')
+    expect(screen.getAllByText('Test DCA C')).toHaveLength(1)
+    expect(screen.queryByTestId('mission-strip')).toBeNull()
+  })
+
+  it('keeps a cron mission’s state in the dot strip: its row has no state word', async () => {
+    rpcCall.mockImplementation(
+      answers({
+        'trading.dca.list': dcaList,
+        'cron.list': {
+          jobs: [
+            {
+              id: 'j1',
+              name: 'Watch ETH',
+              enabled: true,
+              sessionKey: SESSION,
+              scheduleKind: 'every',
+              scheduleRaw: 3600,
+            },
+          ],
+        },
+      }),
+    )
+    renderDesk(<Harness active />)
+    const strip = await screen.findByTestId('mission-strip')
+    expect(strip).toHaveTextContent(/^Watch ETH/)
+    expect(strip.querySelector('.trd-mstrip__word')).not.toBeEmptyDOMElement()
+    expect(strip).not.toHaveTextContent('Test DCA C')
   })
 
   it('still puts a cron mission’s state in the hint', async () => {

@@ -430,7 +430,8 @@ not like the web card. `canWrite` is true only on the desktop desk
   mandate form (token, USD per buy, every, cap, buys, max price, wallet,
   chain, name, start now) and states the limits are **enforced by the
   engine** (drop the "goals, not limits" note there). Edit → `trading.dca.update`.
-- **Missions list and strip** show mandates next to cron missions: name,
+- **Missions list** shows mandates next to cron missions (the dot strip
+  above it names cron missions only, so a mandate appears once): name,
   state word (`Awaiting approval`, `Active · next 3 h 12 m`, `Active · buy
   due`, `Paused`, `Done`, `Ended · no buys` when it finished with zero
   buys), `done/max buys` with a muted `· N skipped · N failed` suffix, a

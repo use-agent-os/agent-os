@@ -23,6 +23,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   the flows media store, which holds both the generated image and the copy Save
   stamps with the flow. The new `flow_publish` tool posts exactly the images of the
   flow's latest run, with no new run and no cost.
+- Desktop trading desk: a DCA is no longer listed twice above the composer. The
+  dot strip repeated each DCA row's name, state and spend, taking a line from the
+  chat; it now names cron missions only, whose rows don't say their state.
 
 ## [2026.11.5] - 2026-11-05
 

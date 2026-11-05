@@ -612,21 +612,9 @@
 
 /* DCA mandates beside the missions (docs/dca.md). The engine runs them, so a
    row reads its figures, not a schedule: a "DCA" micro-tag in info blue, the
-   state word, and spent of cap over a hairline gauge — all mono. The strip
-   and status strip share the state tones: amber while it waits for you,
-   green while it runs. */
-.trd-mstrip__item[data-state='active'] .trd-mstrip__dot {
-  background: var(--ok);
-}
-.trd-mstrip__item[data-state='awaiting_approval'] .trd-mstrip__dot {
-  background: var(--warn);
-}
-.trd-mstrip__item[data-state='awaiting_approval'] .trd-mstrip__word {
-  color: var(--warn);
-}
-.trd-mstrip__item[data-state='completed'] .trd-mstrip__dot {
-  background: var(--info);
-}
+   state word, and spent of cap over a hairline gauge — all mono. The status
+   strip shares the state tones: amber while it waits for you, green while it
+   runs. */
 .trd-strip__mission[data-state='awaiting_approval'] span {
   color: var(--warn);
 }

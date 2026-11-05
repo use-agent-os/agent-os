@@ -505,7 +505,6 @@ export function useDeskInstruments(
           missions={missions.missions}
           running={missions.running}
           pendingApprovals={pendingOrders.length}
-          mandates={missions.mandates}
         />
       </div>
     ),
