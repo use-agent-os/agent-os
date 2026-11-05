@@ -27,6 +27,7 @@ from agentos.skills.hub.lockfile import (
 from agentos.skills.hub.router import SourceRouter
 from agentos.skills.hub.scanner import ScanResult, scan_skill_bundle
 from agentos.skills.hub.source import SkillMeta
+from agentos.skills.loader import _parse_frontmatter
 from agentos.skills.paths import default_bundled_skills_dir, default_managed_skills_dir
 
 log = structlog.get_logger(__name__)
@@ -193,6 +194,18 @@ class SkillInstaller:
         skill_md = bundle.skill_md
         if not skill_md:
             return InstallResult(success=False, name=name, message="Bundle has no SKILL.md")
+
+        # The loader skips a skill it cannot read, so installing one would report
+        # success and leave nothing for the user or the agent to find.
+        if "name" not in _parse_frontmatter(skill_md)[0]:
+            return InstallResult(
+                success=False,
+                name=name,
+                message=(
+                    f"'{name}' cannot be loaded: its SKILL.md has no readable frontmatter "
+                    f"with a name. This needs fixing by the skill's publisher."
+                ),
+            )
 
         bundle_meta = bundle.meta
         if bundle_meta is None:

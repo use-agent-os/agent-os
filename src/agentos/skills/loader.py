@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import codecs
+import json
 import re
 from pathlib import Path
 from typing import Any, cast
@@ -63,6 +64,39 @@ def _read_skill_md(skill_file: Path) -> str:
     return skill_file.read_text(encoding="utf-8-sig")
 
 
+def _quote_plain_description(fm_text: str) -> str:
+    """Return ``fm_text`` with a single-line, unquoted ``description`` quoted."""
+    lines = fm_text.split("\n")
+    for index, line in enumerate(lines):
+        key, separator, value = line.partition(":")
+        if key == "description" and separator:
+            value = value.strip()
+            if value and value[0] not in "\"'|>":
+                lines[index] = f"description: {json.dumps(value, ensure_ascii=False)}"
+            break
+    return "\n".join(lines)
+
+
+def parse_frontmatter_yaml(fm_text: str) -> dict | None:
+    """Parse the text between a SKILL.md's ``---`` fences, or return ``None``.
+
+    A description is prose, and prose has colons: ``Chains: Base, Solana`` in an
+    unquoted one is invalid YAML. Other skill runtimes read frontmatter line by
+    line and accept it, so published skills ship this way, and failing on it
+    drops the whole skill. Only a document that has already failed is retried, so
+    a valid one always parses exactly as written, and no other field gets this
+    treatment: a ``name`` becomes a directory and an identity.
+    """
+    try:
+        frontmatter = yaml.safe_load(fm_text)
+    except yaml.YAMLError:
+        try:
+            frontmatter = yaml.safe_load(_quote_plain_description(fm_text))
+        except yaml.YAMLError:
+            return None
+    return frontmatter if isinstance(frontmatter, dict) else None
+
+
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
     """Parse YAML frontmatter from SKILL.md.
 
@@ -74,12 +108,8 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
         return {}, text
 
     fm_text, body = match.groups()
-    try:
-        frontmatter = yaml.safe_load(fm_text)
-    except yaml.YAMLError:
-        return {}, text
-
-    if not isinstance(frontmatter, dict):
+    frontmatter = parse_frontmatter_yaml(fm_text)
+    if frontmatter is None:
         return {}, text
 
     return frontmatter, body.strip()
@@ -567,6 +597,7 @@ class SkillLoader:
             frontmatter, body = _parse_frontmatter(text)
 
             if not frontmatter or "name" not in frontmatter:
+                log.warning("skill %s has no usable frontmatter, skipping", skill_dir.name)
                 return None
 
             name = frontmatter["name"]
