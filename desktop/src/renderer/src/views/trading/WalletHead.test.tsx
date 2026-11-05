@@ -93,6 +93,47 @@ describe('WalletHead · whose desk this is', () => {
     expect(onAction).toHaveBeenCalledWith({ kind: 'import' })
   })
 
+  // The head sits in .trd-hero, whose overflow: hidden keeps the corner light
+  // inside the card and would cut anything hanging out of it. jsdom has no
+  // layout, so what is held here is that neither menu is inside the card.
+  it.each([
+    ['switcher', () => screen.getByTestId('wallet-switcher')],
+    ['wallet actions', () => screen.getByRole('button', { name: 'Wallet actions' })],
+  ])('floats the %s menu out of the card that would clip it', (_, trigger) => {
+    render()
+    fireEvent.click(trigger())
+    const menu = screen.getByRole('menu')
+    expect(menu).toHaveAttribute('data-placement', 'float')
+    expect(menu.closest('.trd-head')).toBeNull()
+  })
+
+  it.each([
+    ['switcher', () => screen.getByTestId('wallet-switcher')],
+    ['wallet actions', () => screen.getByRole('button', { name: 'Wallet actions' })],
+  ])('closes the %s menu from its own button and hands focus back', (_, trigger) => {
+    render()
+    fireEvent.click(trigger())
+    // A press on the button is not a press outside: it must not close the
+    // menu only for the click that follows to open it again.
+    fireEvent.mouseDown(trigger())
+    fireEvent.click(trigger())
+    expect(screen.queryByRole('menu')).toBeNull()
+
+    fireEvent.click(trigger())
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(trigger()).toHaveFocus()
+  })
+
+  it('scrolls only the wallets, so the commands stay in reach with any number of them', () => {
+    render()
+    fireEvent.click(screen.getByTestId('wallet-switcher'))
+    const list = document.querySelector('.trd-head__wallets')!
+    expect(list).toContainElement(screen.getByRole('menuitemradio', { name: /Wallet 02/ }))
+    expect(list).not.toContainElement(screen.getByRole('menuitemradio', { name: /All wallets/ }))
+    expect(list).not.toContainElement(screen.getByRole('menuitem', { name: /Import/ }))
+  })
+
   it('opens the QR sheet for the wallet on show, not for some other one', () => {
     const { onAction } = render({ selected: SECOND.address })
     fireEvent.click(screen.getByRole('button', { name: 'Show QR' }))

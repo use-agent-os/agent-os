@@ -10,12 +10,11 @@ import {
   Settings2,
   Star,
 } from 'lucide-react'
-import { useState } from 'react'
-import { Menu, MenuItem, MenuSep } from '~/components/menu/PopMenu'
+import { MenuItem, MenuSep, PopMenu } from '~/components/menu/PopMenu'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
 import { blockieDataUrl } from './blockie'
-import { copyAddress, WalletMenuItems } from './WalletMenu'
+import { copyAddress, usePopUp, WalletMenuItems } from './WalletMenu'
 import { formatUsd, sameAddress, shortAddress, walletLabel } from './logic'
 import type { ChainStatus, Totals, Wallet } from './types'
 import type { WalletAction, WalletSelection } from './WalletRail'
@@ -62,8 +61,18 @@ export function WalletHead({
   /** Beside the chat rather than over the desk: smaller mark, smaller line. */
   compact?: boolean
 }) {
-  const [switcher, setSwitcher] = useState(false)
-  const [menu, setMenu] = useState(false)
+  const {
+    place: switcherPlace,
+    triggerRef: switcherRef,
+    close: closeSwitcher,
+    toggle: toggleSwitcher,
+  } = usePopUp('start')
+  const {
+    place: menuPlace,
+    triggerRef: menuRef,
+    close: closeMenu,
+    toggle: toggleMenu,
+  } = usePopUp('end')
   const wallet =
     selected === 'all' ? null : (wallets.find((w) => sameAddress(w.address, selected)) ?? null)
   const many = wallets.length > 1
@@ -76,15 +85,16 @@ export function WalletHead({
     <header className="trd-head" data-compact={compact ? 'true' : undefined}>
       <div className="trd-head__who">
         <button
+          ref={switcherRef}
           type="button"
           className="trd-head__id app-no-drag"
           aria-haspopup="menu"
-          aria-expanded={switcher}
+          aria-expanded={switcherPlace !== null}
           aria-label={t('trading.head.switch')}
           data-testid="wallet-switcher"
           // Even with one wallet the menu is where Create, Import and Manage
           // live, so it always opens; only the "all" row needs a second wallet.
-          onClick={() => setSwitcher((v) => !v)}
+          onClick={toggleSwitcher}
         >
           {wallet ? (
             <img className="trd-head__mark" src={blockieDataUrl(wallet.address, markSize)} alt="" />
@@ -116,8 +126,14 @@ export function WalletHead({
           </span>
         </button>
 
-        {switcher ? (
-          <Menu onClose={() => setSwitcher(false)} align="start" label={t('trading.head.switch')}>
+        {switcherPlace ? (
+          <PopMenu
+            place={switcherPlace}
+            triggerRef={switcherRef}
+            onClose={closeSwitcher}
+            label={t('trading.head.switch')}
+            className="trd-head__switcher"
+          >
             {many ? (
               <>
                 <MenuItem
@@ -130,23 +146,26 @@ export function WalletHead({
                 <MenuSep />
               </>
             ) : null}
-            {wallets.map((w) => {
-              const tt = totals.get(w.address.toLowerCase())
-              return (
-                <MenuItem
-                  key={w.address}
-                  role="menuitemradio"
-                  checked={selected !== 'all' && sameAddress(selected, w.address)}
-                  label={walletLabel(w)}
-                  aside={
-                    <span className="trd-mono">
-                      {tt ? formatUsd(tt.valueUsd, { compact: true }) : ''}
-                    </span>
-                  }
-                  onSelect={() => onSelect(w.address)}
-                />
-              )
-            })}
+            {/* The wallets scroll; the "all" row and the commands stay in reach. */}
+            <div className="trd-head__wallets">
+              {wallets.map((w) => {
+                const tt = totals.get(w.address.toLowerCase())
+                return (
+                  <MenuItem
+                    key={w.address}
+                    role="menuitemradio"
+                    checked={selected !== 'all' && sameAddress(selected, w.address)}
+                    label={walletLabel(w)}
+                    aside={
+                      <span className="trd-mono">
+                        {tt ? formatUsd(tt.valueUsd, { compact: true }) : ''}
+                      </span>
+                    }
+                    onSelect={() => onSelect(w.address)}
+                  />
+                )
+              })}
+            </div>
             <MenuSep />
             <MenuItem
               icon={Plus}
@@ -161,7 +180,7 @@ export function WalletHead({
             {onManage ? (
               <MenuItem icon={Settings2} label={t('trading.rail.manage')} onSelect={onManage} />
             ) : null}
-          </Menu>
+          </PopMenu>
         ) : null}
       </div>
 
@@ -213,14 +232,15 @@ export function WalletHead({
           </Button>
         ) : null}
         {wallet ? (
-          <span className="trd-head__menu">
+          <>
             <Button
+              ref={menuRef}
               variant="ghost"
               size="icon"
               aria-label={t('trading.rail.menu')}
               aria-haspopup="menu"
-              aria-expanded={menu}
-              onClick={() => setMenu((v) => !v)}
+              aria-expanded={menuPlace !== null}
+              onClick={toggleMenu}
             >
               <MoreHorizontal
                 className="size-4 text-muted-foreground"
@@ -228,17 +248,22 @@ export function WalletHead({
                 aria-hidden
               />
             </Button>
-            {menu ? (
-              <Menu onClose={() => setMenu(false)} label={t('trading.rail.menu')}>
+            {menuPlace ? (
+              <PopMenu
+                place={menuPlace}
+                triggerRef={menuRef}
+                onClose={closeMenu}
+                label={t('trading.rail.menu')}
+              >
                 <WalletMenuItems
                   wallet={wallet}
                   chains={chains}
                   onAction={onAction}
                   onSetPrimary={() => onSetPrimary(wallet)}
                 />
-              </Menu>
+              </PopMenu>
             ) : null}
-          </span>
+          </>
         ) : null}
       </div>
     </header>

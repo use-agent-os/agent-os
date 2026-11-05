@@ -300,11 +300,14 @@
 }
 .trd-wallet:hover .trd-wallet__menu,
 .trd-wallet:focus-within .trd-wallet__menu,
-.trd-wallet__menu[aria-expanded='true'] {
+.trd-wallet__menu:has([aria-expanded='true']) {
   opacity: 1;
 }
+/* The open menu floats outside the row, so a pointer on it no longer hovers
+   the row: the row keeps showing the button the menu belongs to. */
 .trd-wallet:hover .trd-wallet__value,
-.trd-wallet:focus-within .trd-wallet__value {
+.trd-wallet:focus-within .trd-wallet__value,
+.trd-wallet:has(.trd-wallet__menu [aria-expanded='true']) .trd-wallet__value {
   visibility: hidden;
 }
 
@@ -490,7 +493,6 @@
   gap: 16px;
 }
 .trd-head__who {
-  position: relative;
   min-width: 0;
 }
 /* The whole identity block is the switcher's trigger: a 40 px target that
@@ -586,8 +588,22 @@
   align-items: center;
   gap: 2px;
 }
-.trd-head__menu {
-  position: relative;
+/* The switcher never outgrows the window (PopMenu keeps 8 px off each edge).
+   Only the wallet rows scroll and give up height, about twelve at most, so
+   the "all" row and Create, Import and Manage are there at any wallet count. */
+.mac-menu.trd-head__switcher {
+  max-height: calc(100vh - 16px);
+}
+.mac-menu.trd-head__switcher > * {
+  flex-shrink: 0;
+}
+.mac-menu.trd-head__switcher > .trd-head__wallets {
+  flex-shrink: 1;
+}
+.trd-head__wallets {
+  min-height: 0;
+  max-height: 312px;
+  overflow-y: auto;
 }
 
 .trd-hero__tools {

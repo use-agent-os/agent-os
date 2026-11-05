@@ -1,6 +1,5 @@
 import { Download, Lock, MoreHorizontal, Plus, Star } from 'lucide-react'
-import { useState } from 'react'
-import { Menu } from '~/components/menu/PopMenu'
+import { PopMenu } from '~/components/menu/PopMenu'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
 import { cn } from '~/lib/utils'
@@ -16,7 +15,7 @@ import {
 } from './logic'
 import { Money } from './parts'
 import type { ChainStatus, Limits, Totals, Wallet } from './types'
-import { WalletMenuItems } from './WalletMenu'
+import { usePopUp, WalletMenuItems } from './WalletMenu'
 
 export type WalletSelection = 'all' | string
 
@@ -214,7 +213,7 @@ function WalletRow({
   onSetPrimary: () => void
   chains: ChainStatus[]
 }) {
-  const [menu, setMenu] = useState(false)
+  const { place, triggerRef, close, toggle } = usePopUp('end')
   const label = walletLabel(wallet)
   const delta = totals?.change24hUsd ?? null
   const pct = totals?.change24hPct ?? null
@@ -259,27 +258,33 @@ function WalletRow({
       </span>
       <span className="trd-wallet__menu">
         <Button
+          ref={triggerRef}
           variant="ghost"
           size="icon"
           aria-label={t('trading.rail.menu')}
           aria-haspopup="menu"
-          aria-expanded={menu}
+          aria-expanded={place !== null}
           onClick={(e) => {
             e.stopPropagation()
-            setMenu((v) => !v)
+            toggle(e)
           }}
         >
           <MoreHorizontal className="size-4 text-muted-foreground" strokeWidth={1.75} aria-hidden />
         </Button>
-        {menu ? (
-          <Menu onClose={() => setMenu(false)} label={t('trading.rail.menu')}>
+        {place ? (
+          <PopMenu
+            place={place}
+            triggerRef={triggerRef}
+            onClose={close}
+            label={t('trading.rail.menu')}
+          >
             <WalletMenuItems
               wallet={wallet}
               chains={chains}
               onAction={onAction}
               onSetPrimary={onSetPrimary}
             />
-          </Menu>
+          </PopMenu>
         ) : null}
       </span>
     </div>
