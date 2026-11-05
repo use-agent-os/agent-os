@@ -526,12 +526,13 @@
   border-radius: 11px;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 10%, transparent);
 }
-/* Every wallet at once has no one mark, so it gets the first three, fanned. */
+/* Every wallet at once has no one mark, so it gets the first three, fanned.
+   The fan is wider than a mark and sets its own width: in a box the mark's
+   size it spills across the gap onto the name beside it. */
 .trd-head__stack {
   display: flex;
   flex-shrink: 0;
   align-items: center;
-  width: 40px;
   height: 40px;
   padding-left: 4px;
 }
@@ -2948,13 +2949,13 @@ button:disabled > .trd-hero__spin {
   .trd-hero__figure > b {
     font-size: 30px;
   }
-  .trd-head__mark,
-  .trd-head__stack {
+  .trd-head__mark {
     width: 32px;
     height: 32px;
-  }
-  .trd-head__mark {
     border-radius: 9px;
+  }
+  .trd-head__stack {
+    height: 32px;
   }
   .trd-head__line {
     font-size: 15px;

@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   schemas.
 
 ### Fixed
+- Desktop trading: with several wallets, the "All wallets" label no longer runs
+  into the wallet icons fanned beside it.
 - Image Flows: asking an agent to publish an image a flow already made no longer
   posts the same picture twice. With no tool for it, the agent copied files out of
   the flows media store, which holds both the generated image and the copy Save
