@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Desktop Trade: the swap ticket showed "ETH" initials instead of the ETH logo
+  on a fresh ticket and after switching between Base and Robinhood, until ETH
+  was picked again from the token list.
+
 ## [2026.11.5.post1] - 2026-11-05
 
 ### Added

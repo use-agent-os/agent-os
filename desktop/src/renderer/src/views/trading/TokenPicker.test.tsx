@@ -28,6 +28,21 @@ function balance(token: Token, amount: string, valueUsd: number | null): Balance
 }
 
 describe('TokenPicker · an empty query', () => {
+  it('offers the gas coin with its logo even when the wallet holds none', () => {
+    renderDesk(
+      <TokenPicker
+        chainId={4663}
+        balances={[]}
+        exclude={null}
+        onPick={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    const eth = screen.getAllByTestId('token-pick')[0]
+    expect(eth?.textContent).toContain('ETH')
+    expect(eth?.querySelector('img')?.getAttribute('src')).toContain('ethereum.png')
+  })
+
   it('lists verified holdings before airdrop junk, whatever the junk claims to be worth', () => {
     renderDesk(
       <TokenPicker
