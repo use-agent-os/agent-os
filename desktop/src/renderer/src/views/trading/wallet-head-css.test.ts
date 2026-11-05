@@ -29,3 +29,40 @@ describe('wallet head stack CSS', () => {
     }
   })
 })
+
+function block(css: string, selector: string): string {
+  const open = css.indexOf(`\n${selector} {`)
+  expect(open).toBeGreaterThanOrEqual(0)
+  return css.slice(open, css.indexOf('}', open))
+}
+
+// A menu with no height limit runs off the foot of the window once enough
+// wallets are imported, and takes Create, Import and Manage with it.
+describe('wallet switcher height CSS', () => {
+  it('never grows past the window', () => {
+    expect(block(sheets.trading, '.mac-menu.trd-head__switcher')).toMatch(
+      /max-height:\s*calc\(100vh - 16px\)/,
+    )
+  })
+
+  it('scrolls the wallet rows and lets them give up height first', () => {
+    const list = block(sheets.trading, '.trd-head__wallets')
+    expect(list).toMatch(/overflow-y:\s*auto/)
+    expect(list).toMatch(/max-height:/)
+    expect(list).toMatch(/min-height:\s*0/)
+    expect(block(sheets.trading, '.mac-menu.trd-head__switcher > *')).toMatch(/flex-shrink:\s*0/)
+    expect(block(sheets.trading, '.mac-menu.trd-head__switcher > .trd-head__wallets')).toMatch(
+      /flex-shrink:\s*1/,
+    )
+  })
+})
+
+// The rail's open menu floats outside its row, so nothing there is hovered.
+describe('wallet rail open-menu CSS', () => {
+  it('keeps the row showing the button while its menu is open', () => {
+    expect(sheets.trading).toMatch(/\.trd-wallet__menu:has\(\[aria-expanded='true'\]\) \{/)
+    expect(sheets.trading).toMatch(
+      /\.trd-wallet:has\(\.trd-wallet__menu \[aria-expanded='true'\]\) \.trd-wallet__value/,
+    )
+  })
+})
