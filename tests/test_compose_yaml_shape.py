@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -92,6 +93,58 @@ def test_dockerfile_builds_control_ui_in_node_stage() -> None:
 
     assert "frontend/node_modules" in dockerignore
     assert "!scripts/build_control_ui.py" in dockerignore
+
+
+def test_dockerfile_ships_the_tools_agents_reach_for() -> None:
+    """The git tools and the skills' `requires.bins` fail without these."""
+    dockerfile = _load_dockerfile()
+    runtime = dockerfile[dockerfile.index("AS runtime") :]
+
+    packages = re.search(r"--no-install-recommends \\\n((?:\s+\S+ \\\n)+)", runtime)
+    assert packages, "runtime stage must apt-get install its tools"
+    installed = {line.strip(" \\") for line in packages.group(1).splitlines()}
+    assert {"curl", "gh", "git", "jq", "ripgrep", "tmux"} <= installed
+
+    # Node comes from the stage that builds the console: bookworm's own is 18.
+    assert "COPY --from=control-ui-builder /usr/local/bin/node /usr/local/bin/node" in runtime
+    assert "/usr/local/lib/node_modules/npm/" in runtime
+    assert "npm-cli.js /usr/local/bin/npm" in runtime
+    assert "npx-cli.js /usr/local/bin/npx" in runtime
+    assert re.search(r'RUN pip install "\.\[recommended\]" "uv==[\d.]+"', runtime)
+
+
+def test_dockerfile_runtime_installs_survive_a_recreate() -> None:
+    """A tool the agent installs must outlive `docker compose pull && up -d`.
+
+    Only the state root is on a volume, and the non-root user cannot write to
+    /usr/local, so home, the npm prefix and the PATH entry all have to agree on
+    a directory under it.
+    """
+    dockerfile = _load_dockerfile()
+    state_dir = re.search(r"AGENTOS_STATE_DIR=(\S+)", dockerfile).group(1)
+    home = f"{state_dir}/home"
+
+    assert f"--home-dir {home}" in dockerfile
+    assert f"NPM_CONFIG_PREFIX={home}/.local" in dockerfile
+
+    # Last on PATH, so nothing written to the volume can shadow what the image
+    # ships, such as `agentos` or the `curl` the health check runs.
+    assert f"PATH=$PATH:{home}/.local/bin" in dockerfile
+
+
+def test_dockerfile_entrypoint_creates_home_on_an_existing_volume() -> None:
+    """Docker seeds a volume from the image only while the volume is empty."""
+    dockerfile = _load_dockerfile()
+    entrypoint = re.search(r"^ENTRYPOINT (.+)$", dockerfile, re.MULTILINE)
+    assert entrypoint
+    argv = json.loads(entrypoint.group(1))
+
+    assert argv[:2] == ["/bin/sh", "-c"]
+    # `;` rather than `&&`: an unwritable mount must not stop the gateway, and
+    # `exec` keeps it as PID 1 so it receives the stop signal.
+    assert 'mkdir -p "$HOME" 2>/dev/null; exec agentos "$@"' == argv[2]
+    assert argv[3] == "agentos"
+    assert 'CMD ["gateway", "run"]' in dockerfile
 
 
 def test_dockerfile_gateway_port_matches_compose() -> None:

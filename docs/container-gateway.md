@@ -16,7 +16,7 @@ your machine reaches it, and point the desktop app at it.
 
 - A Linux host (`amd64` or `arm64`) with Docker Engine and Compose v2. Check with
   `docker compose version`.
-- About 1.1 GB of disk for the image, plus room for your state. The gateway idles
+- About 1.4 GB of disk for the image, plus room for your state. The gateway idles
   around 200 to 250 MiB of memory and uses more during turns.
 - An API key for an LLM provider.
 - SSH access to the host. The first connection below uses nothing else.
@@ -343,7 +343,8 @@ database, so restoring the backup is the reliable way back to an older release.
 ### Back Up and Restore
 
 Everything lives in one named volume mounted at `/var/lib/agentos`: config, the
-database, sessions, memory, the workspace, logs and wallets. Stop the gateway so
+database, sessions, memory, the workspace, logs, wallets and the home directory
+with any tools you installed. Stop the gateway so
 the database is consistent, then archive the volume:
 
 ```sh
@@ -367,8 +368,26 @@ with any wallets inside that you have not backed up.
 ## What Is in the Image
 
 The image runs as the non-root user `agentos` (uid `10001`), and holds the gateway,
-the Web UI, Python, `curl` and the bundled router and embedding models. It does
-**not** include `git`, Node.js, Chromium or bubblewrap, which has consequences:
+the Web UI, the bundled router and embedding models, and the tools most agent work
+reaches for: Python, a C toolchain, Node.js with `npm` and `npx`, `uv`, `git`, `gh`,
+`curl`, `jq`, `ripgrep` and `tmux`.
+
+**Anything else that installs without root goes on the volume.** The user's home is
+`/var/lib/agentos/home`, so a tool installed with `npm install -g` or `uv tool
+install`, and the login or config it keeps in its home directory, survives an
+upgrade. Skills offer these installs from the Skills page. To install one yourself:
+
+```sh
+docker compose exec gateway npm install -g gmgn-cli
+docker compose exec gateway agentos gateway restart
+```
+
+The restart is what makes the agent's prompt list a newly installed tool. These
+tools count towards your backup, and they are yours to update: replacing the image
+does not touch them.
+
+The image does **not** include `ffmpeg`, LibreOffice, Chromium or bubblewrap, which
+has consequences:
 
 - **No operating-system sandbox.** With bubblewrap missing, the container itself is
   the boundary around the agent's shell and file tools. Check your posture with
@@ -376,17 +395,17 @@ the Web UI, Python, `curl` and the bundled router and embedding models. It does
   [Tools and sandbox](tools-and-sandbox.md). Do not mount the Docker socket or
   host directories you would not hand to the agent. A bind-mounted directory must
   be writable by uid `10001`.
-- **Git tools and shell commands that need `git` fail**, as do skills and
-  [coding-agent harnesses](acp-agents.md) that need Node.js.
+- **Skills that need `ffmpeg` or LibreOffice stay unavailable.** They need system
+  packages, which only a custom image can add.
 - **The `browser` tool stays hidden.** See [Browser](features/browser.md).
 
-To add what you need, build on the published image and point
+To add what needs root, build on the published image and point
 `AGENTOS_GATEWAY_IMAGE` at the result:
 
 ```dockerfile
 FROM ghcr.io/use-agent-os/agent-os:latest
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 USER agentos
 ```
 
