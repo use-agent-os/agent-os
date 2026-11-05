@@ -1705,7 +1705,6 @@ body[data-dragging] .trd-book__handle {
   border-radius: 8px;
 }
 .trd-head[data-compact='true'] .trd-head__stack {
-  width: 30px;
   height: 30px;
   padding-left: 2px;
 }
