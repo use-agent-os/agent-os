@@ -23,7 +23,7 @@ const OLDER = 'agent:trading:webchat:trading-older1'
 const CTX = { wallets: [WALLET], chains: [8453], limits: null }
 
 const gateway = vi.hoisted(() => ({
-  patches: [] as { key: string; projectId: string; displayName: string }[],
+  patches: [] as { key: string; projectId: string; displayName?: string }[],
   sent: new Set<string>(),
   // What `sessions.patch` does with a key: resolve, or throw like the gateway.
   onPatch: (() => {}) as (key: string, nth: number) => void,
@@ -36,7 +36,7 @@ const rpc = vi.hoisted(() => ({
     if (method === 'projects.list')
       return { projects: [{ project_id: 'p1', name: 'Trading desk' }] }
     if (method === 'sessions.patch') {
-      const p = params as { key: string; projectId: string; displayName: string }
+      const p = params as { key: string; projectId: string; displayName?: string }
       const nth = gateway.patches.filter((x) => x.key === p.key).length
       gateway.patches.push(p)
       gateway.onPatch(p.key, nth)
@@ -194,6 +194,10 @@ describe('desk filing across fresh sessions in one mount', () => {
       expect(patchedKeys().filter((k) => k === second)).toHaveLength(2)
     })
     expect(readTradingSessionFiled()).toBe(true)
+    // The retry lands while the gateway titles the chat: it must not rename it.
+    const retry = gateway.patches.filter((p) => p.key === second)[1]
+    expect(retry).toMatchObject({ projectId: 'p1' })
+    expect(retry).not.toHaveProperty('displayName')
   })
 
   it('the same text as the last session still counts as this session first send', async () => {

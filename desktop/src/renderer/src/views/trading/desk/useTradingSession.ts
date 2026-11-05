@@ -103,8 +103,12 @@ export function useTradingSession(
   // the first send returns: `sessions.patch` then says "not found". So filing
   // retries for a while instead of waiting for the next launch, which is how
   // a chat once ran a whole order without the project's wallet rule.
+  //
+  // Only a chat nothing was sent in yet gets the project's name, as a label for
+  // its row. From the first send on the gateway is titling the chat from that
+  // message, and a retry landing after the title must not overwrite it.
   const fileSession = useCallback(
-    (attempts: number) => {
+    (attempts: number, label: boolean) => {
       if (filingRef.current || readTradingSessionFiled()) return
       filingRef.current = true
       void (async () => {
@@ -117,7 +121,7 @@ export function useTradingSession(
               await rpc.call('sessions.patch', {
                 key: sessionKey,
                 projectId: id,
-                displayName: TRADING_PROJECT_NAME,
+                ...(label ? { displayName: TRADING_PROJECT_NAME } : {}),
               })
               writeTradingSessionFiled(true)
               return
@@ -132,13 +136,13 @@ export function useTradingSession(
     },
     [rpc, sessionKey, syncProject],
   )
-  const ensureFiled = useCallback(() => fileSession(FILE_ATTEMPTS), [fileSession])
+  const ensureFiled = useCallback(() => fileSession(FILE_ATTEMPTS, false), [fileSession])
 
   // A session that already exists (previous launch) may still be unfiled.
   // One attempt only: a brand-new key has no session yet, and the retries
   // belong to the first send, not to every launch.
   useEffect(() => {
-    if (active && !readTradingSessionFiled()) fileSession(1)
+    if (active && !readTradingSessionFiled()) fileSession(1, true)
   }, [fileSession, active])
 
   // Wallets and limits change while the chat lives (a new wallet, a new
