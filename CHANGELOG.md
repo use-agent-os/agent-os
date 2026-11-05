@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.5] - 2026-11-05
+
 ### Fixed
 - Desktop: a DCA order, trigger, bracket or mission no longer offers "other
   chat" once the chat that created it has been deleted. The automation keeps
