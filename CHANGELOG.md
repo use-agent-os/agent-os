@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Desktop Trade tab: the list of DCAs, missions and triggers above the composer
+  now shows at most three rows and scrolls past that, so a long list no longer
+  takes room from the chat.
+
 ## [2026.11.5.post1] - 2026-11-05
 
 ### Added

@@ -1639,3 +1639,32 @@ export function watchTabStrip(el: HTMLElement): () => void {
     ro?.disconnect()
   }
 }
+
+const BAND_ROWS = 3
+
+/**
+ * Hold the Missions band above the composer to three rows; the rest scroll.
+ * Three rows have no fixed height: a narrow column wraps a row's controls to
+ * a second line, so a cap sized for one-line rows showed fewer than two. This
+ * measures the third row into `--mctl-cap`. While the band has no layout (a
+ * hidden tab) it leaves desk.css's one-line fallback alone. Returns the cleanup.
+ */
+export function watchRowsBand(el: HTMLElement): () => void {
+  const fit = () => {
+    const foot = el.children[Math.min(BAND_ROWS, el.children.length) - 1]?.getBoundingClientRect()
+    if (!foot?.height) {
+      el.style.removeProperty('--mctl-cap')
+      return
+    }
+    const padding = parseFloat(getComputedStyle(el).paddingBottom) || 0
+    const height = foot.bottom - el.getBoundingClientRect().top + el.scrollTop + padding
+    el.style.setProperty('--mctl-cap', `${height}px`)
+  }
+  fit()
+  if (typeof ResizeObserver === 'undefined') return () => {}
+  const ro = new ResizeObserver(fit)
+  ro.observe(el)
+  // A row re-wraps on its own: an armed Stop or a longer countdown widens it.
+  for (const row of Array.from(el.children)) ro.observe(row)
+  return () => ro.disconnect()
+}

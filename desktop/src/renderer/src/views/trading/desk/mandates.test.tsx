@@ -449,6 +449,64 @@ describe('mandates among the missions', () => {
     expect(screen.getByTestId('mandate-more')).toHaveTextContent('+1 more')
   })
 
+  // jsdom has no layout, so each child reports the rect a wrapped row has.
+  describe('three rows, then the band scrolls', () => {
+    afterEach(() => {
+      vi.restoreAllMocks()
+      vi.unstubAllGlobals()
+    })
+
+    const layout = (rowHeight: number) =>
+      vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+        this: HTMLElement,
+      ) {
+        const i = this.parentElement ? [...this.parentElement.children].indexOf(this) : 0
+        const isRow = this.dataset.testid === 'mandate-row'
+        const top = isRow ? 100 + i * (rowHeight + 6) : 100
+        return { top, bottom: top + rowHeight, height: rowHeight } as DOMRect
+      })
+    const rows = (n: number) => Array.from({ length: n }, (_, i) => mandate({ id: `m${i}` }))
+    const cap = () => screen.getByTestId('mission-controls').style.getPropertyValue('--mctl-cap')
+
+    it('caps the band at the foot of its third row, however tall the rows wrapped', () => {
+      layout(46)
+      controls(rows(5))
+      expect(cap()).toBe('150px') // 3 × 46 + 2 × 6
+    })
+
+    it('takes a band of fewer rows at its own height', () => {
+      layout(46)
+      controls(rows(2))
+      expect(cap()).toBe('98px') // 2 × 46 + 6
+    })
+
+    it('measures again when a row changes size', () => {
+      const spy = layout(26)
+      let resized: (() => void) | null = null
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          constructor(cb: () => void) {
+            resized = cb
+          }
+          observe() {}
+          disconnect() {}
+        },
+      )
+      controls(rows(4))
+      expect(cap()).toBe('90px')
+      spy.mockRestore()
+      layout(46)
+      resized!()
+      expect(cap()).toBe('150px')
+    })
+
+    it('leaves the stylesheet’s cap alone while the band has no layout', () => {
+      controls(rows(4))
+      expect(cap()).toBe('')
+    })
+  })
+
   it('sums mandates in one status strip chip', () => {
     renderDesk(
       <StatusStrip mode="trading" onSwitchMode={vi.fn()} mandates={[mandate(), PENDING]} />,
