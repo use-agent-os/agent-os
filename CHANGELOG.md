@@ -10,6 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Desktop Trade tab: a finished swap, send or bridge above the composer is now a
   single compact row (kind, amounts, transaction link, status, close) instead of
   a tall card, so recent results take far less room from the chat.
+- Desktop Trade tab: in the Wallets sheet, **Make primary** is now **Active**, on
+  every wallet, with a green enable mark instead of a star on the one in use.
+  That wallet is always listed first, and activating another moves it to the top.
 
 ## [2026.11.5.post2] - 2026-11-05
 

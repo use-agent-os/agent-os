@@ -41,6 +41,7 @@ export const trading = {
   'trading.rail.title': 'Wallets',
   'trading.rail.all': 'All wallets',
   'trading.rail.primary': 'Primary',
+  'trading.rail.active': 'Active',
   'trading.rail.add': 'Add wallet',
   'trading.rail.create': 'Create new',
   'trading.rail.import': 'Import',

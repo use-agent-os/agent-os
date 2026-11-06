@@ -303,13 +303,79 @@ describe('WalletSheet · manage', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(SECOND.address))
   })
 
-  it('offers make-primary only on the wallets that are not primary', async () => {
+  it('labels every wallet Active and turns on only the primary one', async () => {
     mockVault()
     renderDesk(<WalletSheet mode={{ kind: 'manage' }} onClose={vi.fn()} />)
     await screen.findAllByTestId('manage-address')
-    // Two wallets, one of them primary: exactly one offer to change that.
-    expect(screen.getAllByTestId('manage-primary')).toHaveLength(1)
+
+    const toggles = screen.getAllByTestId('manage-primary')
+    expect(toggles.map((n) => n.textContent)).toEqual(['Active', 'Active'])
+    expect(toggles.map((n) => n.getAttribute('aria-pressed'))).toEqual(['true', 'false'])
     expect(screen.getAllByTestId('manage-remove')).toHaveLength(2)
+    // The enable mark replaced the star, on the name and on the button alike.
+    expect(document.querySelector('.lucide-star')).toBeNull()
+    expect(screen.getAllByLabelText('Active')).toHaveLength(1)
+  })
+
+  it('sends nothing when the wallet that is already active is pressed', async () => {
+    mockVault()
+    renderDesk(<WalletSheet mode={{ kind: 'manage' }} onClose={vi.fn()} />)
+    await screen.findAllByTestId('manage-address')
+
+    fireEvent.click(screen.getAllByTestId('manage-primary')[0]!)
+    // A mutation starts on a later tick: let one run before saying it did not.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(rpcCall).not.toHaveBeenCalledWith('wallet.setPrimary', expect.anything())
+  })
+
+  it('lists the active wallet first, whatever order the vault returns', async () => {
+    mockVault()
+    const vault = rpcCall.getMockImplementation()!
+    rpcCall.mockImplementation(async (method: string, params: unknown) =>
+      method === 'wallet.list'
+        ? { wallets: [SECOND, WALLET], primary: WALLET.address }
+        : vault(method, params),
+    )
+    renderDesk(<WalletSheet mode={{ kind: 'manage' }} onClose={vi.fn()} />)
+
+    const rows = await screen.findAllByTestId('manage-address')
+    expect(rows.map((n) => n.textContent)).toEqual([WALLET.address, SECOND.address])
+  })
+
+  it('moves a newly activated wallet to the top, and scrolls up to it', async () => {
+    mockVault()
+    const vault = rpcCall.getMockImplementation()!
+    let primary = WALLET.address
+    rpcCall.mockImplementation(async (method: string, params: { address: string }) => {
+      if (method === 'wallet.setPrimary') {
+        primary = params.address
+        return {}
+      }
+      if (method === 'wallet.list')
+        return {
+          wallets: [WALLET, SECOND].map((w) => ({ ...w, primary: w.address === primary })),
+          primary,
+        }
+      return vault(method, params)
+    })
+    renderDesk(<WalletSheet mode={{ kind: 'manage' }} onClose={vi.fn()} />)
+    await screen.findAllByTestId('manage-address')
+
+    // The button is at the bottom of a long list by the time it is pressed.
+    const body = document.querySelector('.trd-modal__body')!
+    body.scrollTop = 400
+    fireEvent.click(screen.getAllByTestId('manage-primary')[1]!)
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId('manage-address').map((n) => n.textContent)).toEqual([
+        SECOND.address,
+        WALLET.address,
+      ]),
+    )
+    expect(rpcCall).toHaveBeenCalledWith('wallet.setPrimary', { address: SECOND.address })
+    expect(body.scrollTop).toBe(0)
   })
 
   it('greys out Export and Remove while the vault is locked, and says why', async () => {
