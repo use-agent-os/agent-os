@@ -637,6 +637,55 @@ describe('approvals region CSS contract', () => {
     // A settled stamp's tx row is not pinned.
     expect(rule('.trd-asks__stamp .trd-card__actions')).toMatch(/position: static;/)
   })
+
+  it('lays a settled stamp out as one row, not a stack', () => {
+    // The card flows sideways, and the header's title and status join that row.
+    const card = rule('.trd-asks__stamp .trd-card')
+    expect(card).toMatch(/display: flex;/)
+    expect(card).toMatch(/flex-wrap: wrap;/)
+    expect(rule('.trd-asks__stamp .trd-card__head')).toMatch(/display: contents;/)
+    // No stacked margins, and a headline sized for a row rather than a card.
+    const legs = rule('.trd-asks__stamp .trd-card__legs')
+    expect(legs).toMatch(/margin: 0;/)
+    expect(legs).toMatch(/font-size: 13px;/)
+    expect(rule('.trd-asks__stamp .trd-card__actions')).toMatch(/margin: 0;/)
+    expect(rule('.trd-asks__stamp .trd-card__lp')).toMatch(/margin: 0;/)
+    // The size has to survive the LP card's own later rule of equal specificity.
+    const order = (selector: string) => rules.findIndex((r) => r.selector === selector)
+    expect(order('.trd-asks__stamp .trd-card__legs')).toBeGreaterThan(
+      order('.trd-card__lp .trd-card__legs'),
+    )
+    // The tx link is drawn before the close button; the DOM test below pins the same order.
+    const drawn = (selector: string) => Number(/order: (\d+);/.exec(rule(selector))?.[1])
+    expect(drawn('.trd-asks__stamp .trd-card__actions')).toBeLessThan(
+      drawn('.trd-asks__stamp .trd-card__dismiss'),
+    )
+  })
+
+  it('tabs through a settled stamp in the order it is drawn', () => {
+    renderDesk(
+      <ApprovalsRegion
+        pending={[]}
+        settled={[
+          order({
+            orderId: 's1',
+            status: 'confirmed',
+            txHash: '0xabcdef1234',
+            explorerUrl: 'https://basescan.org/tx/0xabcdef1234',
+          }),
+        ]}
+        wallets={[WALLET]}
+        deciding={null}
+        onApprove={vi.fn()}
+        onReject={vi.fn()}
+        focusOrderId={null}
+        onDismiss={vi.fn()}
+      />,
+    )
+    const link = screen.getByTestId('card-tx')
+    const dismiss = screen.getByTestId('card-dismiss')
+    expect(link.compareDocumentPosition(dismiss) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
 })
 
 describe('ApprovalsRegion keeps the foot of the transcript in view', () => {

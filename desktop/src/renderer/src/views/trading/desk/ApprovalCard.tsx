@@ -259,18 +259,6 @@ export function ApprovalCard({
             </span>
           ) : null}
           {!live ? <StatusPill status={settledStatus} /> : null}
-          {onDismiss ? (
-            <button
-              type="button"
-              className="trd-card__dismiss app-no-drag"
-              onClick={onDismiss}
-              aria-label={t('trading.card.dismiss')}
-              title={t('trading.card.dismiss')}
-              data-testid="card-dismiss"
-            >
-              <X className="size-3" strokeWidth={2} aria-hidden />
-            </button>
-          ) : null}
         </span>
       </header>
 
@@ -388,6 +376,21 @@ export function ApprovalCard({
           <span className="trd-card__spacer" />
           <TxLink hash={order.txHash} url={order.explorerUrl} />
         </div>
+      ) : null}
+
+      {/* Last in the DOM: a stamp draws it at the row's end, after the tx link,
+          and keyboard focus has to reach them in that order. */}
+      {onDismiss ? (
+        <button
+          type="button"
+          className="trd-card__dismiss app-no-drag"
+          onClick={onDismiss}
+          aria-label={t('trading.card.dismiss')}
+          title={t('trading.card.dismiss')}
+          data-testid="card-dismiss"
+        >
+          <X className="size-3" strokeWidth={2} aria-hidden />
+        </button>
       ) : null}
     </article>
   )
