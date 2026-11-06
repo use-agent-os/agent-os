@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   DUST_USD,
+  activeFirst,
   SYMBOL_MAX,
   checksumAddress,
   checksumMismatch,
@@ -529,5 +530,17 @@ describe('clampSymbol', () => {
     const sym = 'USDC‮abcdefghijklmnop'
     expect(clampSymbol(sym)).toBe('USDC‮abcdef…')
     expect(Array.from(clampSymbol(sym))).toHaveLength(SYMBOL_MAX)
+  })
+})
+
+describe('activeFirst', () => {
+  it('puts the primary wallet first and keeps the others in order', () => {
+    const w = (label: string, primary = false) => ({ label, primary })
+    const input = [w('a'), w('b'), w('c', true), w('d')]
+    expect(activeFirst(input).map((x) => x.label)).toEqual(['c', 'a', 'b', 'd'])
+    // A copy: the input is React Query's cached list.
+    expect(input.map((x) => x.label)).toEqual(['a', 'b', 'c', 'd'])
+    // No primary at all (a fresh vault): nothing moves.
+    expect(activeFirst([w('a'), w('b')]).map((x) => x.label)).toEqual(['a', 'b'])
   })
 })

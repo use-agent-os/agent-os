@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ConfirmSwap } from './ConfirmSwap'
 import { SwapPanel } from './SwapPanel'
@@ -481,5 +481,19 @@ describe('SwapPanel · provider warnings', () => {
     fireEvent.click(screen.getByTestId('swap-review'))
     await screen.findByTestId('confirm-send')
     expect(screen.getAllByTestId('quote-warnings')).toHaveLength(2)
+  })
+})
+
+describe('SwapPanel · wallet picker', () => {
+  it('lists the active wallet first and marks it with a check, not a star', () => {
+    const second = {
+      ...WALLET,
+      address: '0x2222222222222222222222222222222222222222',
+      label: 'Second',
+      primary: false,
+    }
+    mount({ wallets: [second, WALLET] })
+    const options = within(screen.getByLabelText('From wallet')).getAllByRole('option')
+    expect(options.map((o) => o.textContent)).toEqual([`${WALLET.label} ✓`, second.label])
   })
 })

@@ -1,10 +1,12 @@
-import { Download, Lock, MoreHorizontal, Plus, Star } from 'lucide-react'
+import { CircleCheck, Download, Lock, MoreHorizontal, Plus } from 'lucide-react'
+import { useEffect, useRef } from 'react'
 import { PopMenu } from '~/components/menu/PopMenu'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
 import { cn } from '~/lib/utils'
 import { blockieDataUrl } from './blockie'
 import {
+  activeFirst,
   capUsage,
   formatPct,
   formatUsd,
@@ -29,8 +31,9 @@ export type WalletAction =
   | { kind: 'lock' }
 
 /**
- * The left column: every wallet with its total, the primary starred, "all"
- * on top, and under the list the agent's budget for today as a meter.
+ * The left column: every wallet with its total, the active (primary) one
+ * marked and first under "all", and under the list the agent's budget for
+ * today as a meter.
  * Selection is view state for the ledger and the ticket.
  */
 export function WalletRail({
@@ -73,8 +76,21 @@ export function WalletRail({
   const allPct =
     allBase > 0 && all.change24hUsd !== null ? (all.change24hUsd / allBase) * 100 : null
 
+  const ordered = activeFirst(wallets)
+
+  // Activating a wallet moves its row to the top of a list that may be scrolled
+  // down to it: follow it, or a different wallet is suddenly under the pointer.
+  // The list scrolls down; on a narrow desk the rail itself scrolls sideways.
+  const railRef = useRef<HTMLElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const activeAddress = ordered[0]?.primary ? ordered[0].address : null
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = 0
+    if (railRef.current) railRef.current.scrollLeft = 0
+  }, [activeAddress])
+
   return (
-    <aside className="trd-rail" aria-label={t('trading.rail.title')}>
+    <aside className="trd-rail" aria-label={t('trading.rail.title')} ref={railRef}>
       <div className="trd-rail__head">
         <span className="trd-rail__title">{t('trading.rail.title')}</span>
         {manualUnlock ? (
@@ -89,7 +105,12 @@ export function WalletRail({
           </Button>
         ) : null}
       </div>
-      <div className="trd-rail__list" role="listbox" aria-label={t('trading.rail.title')}>
+      <div
+        className="trd-rail__list"
+        role="listbox"
+        aria-label={t('trading.rail.title')}
+        ref={listRef}
+      >
         {wallets.length > 1 ? (
           <button
             type="button"
@@ -114,7 +135,7 @@ export function WalletRail({
             </span>
           </button>
         ) : null}
-        {wallets.map((w) => (
+        {ordered.map((w) => (
           <WalletRow
             key={w.address}
             wallet={w}
@@ -237,11 +258,10 @@ function WalletRow({
       <span className="trd-wallet__name">
         <span>{label}</span>
         {wallet.primary ? (
-          <Star
-            className="trd-wallet__star size-3"
+          <CircleCheck
+            className="trd-wallet__active size-3"
             strokeWidth={2}
-            fill="currentColor"
-            aria-label={t('trading.rail.primary')}
+            aria-label={t('trading.rail.active')}
           />
         ) : null}
       </span>

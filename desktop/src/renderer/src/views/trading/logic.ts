@@ -499,6 +499,14 @@ export function sameAddress(a: string | null | undefined, b: string | null | und
   return Boolean(a && b) && String(a).toLowerCase() === String(b).toLowerCase()
 }
 
+/**
+ * The active (primary) wallet first, the others in the vault's order. A copy,
+ * because the input is React Query's cached list; Array.sort is stable.
+ */
+export function activeFirst<T extends { primary: boolean }>(wallets: readonly T[]): T[] {
+  return [...wallets].sort((a, b) => Number(b.primary) - Number(a.primary))
+}
+
 /** A sane label for a wallet with none. */
 export function walletLabel(wallet: { label: string; address: string }): string {
   return wallet.label.trim() || shortAddress(wallet.address)

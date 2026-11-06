@@ -1,5 +1,6 @@
 import {
   ChevronDown,
+  CircleCheck,
   Copy,
   Download,
   MoreHorizontal,
@@ -8,14 +9,13 @@ import {
   Plus,
   QrCode,
   Settings2,
-  Star,
 } from 'lucide-react'
 import { MenuItem, MenuSep, PopMenu } from '~/components/menu/PopMenu'
 import { Button } from '~/components/ui/button'
 import { t } from '~/i18n'
 import { blockieDataUrl } from './blockie'
 import { copyAddress, usePopUp, WalletMenuItems } from './WalletMenu'
-import { formatUsd, sameAddress, shortAddress, walletLabel } from './logic'
+import { activeFirst, formatUsd, sameAddress, shortAddress, walletLabel } from './logic'
 import type { ChainStatus, Totals, Wallet } from './types'
 import type { WalletAction, WalletSelection } from './WalletRail'
 
@@ -76,6 +76,7 @@ export function WalletHead({
   const wallet =
     selected === 'all' ? null : (wallets.find((w) => sameAddress(w.address, selected)) ?? null)
   const many = wallets.length > 1
+  const ordered = activeFirst(wallets)
 
   const allUsd = [...totals.values()].reduce((sum, tt) => sum + tt.valueUsd, 0)
 
@@ -100,7 +101,7 @@ export function WalletHead({
             <img className="trd-head__mark" src={blockieDataUrl(wallet.address, markSize)} alt="" />
           ) : (
             <span className="trd-head__stack" aria-hidden>
-              {wallets.slice(0, 3).map((w) => (
+              {ordered.slice(0, 3).map((w) => (
                 <img key={w.address} src={blockieDataUrl(w.address, markSize - 16)} alt="" />
               ))}
             </span>
@@ -111,11 +112,10 @@ export function WalletHead({
                 {wallet ? shortAddress(wallet.address) : t('trading.rail.all')}
               </b>
               {wallet?.primary ? (
-                <Star
-                  className="trd-head__star size-3"
+                <CircleCheck
+                  className="trd-head__active size-3"
                   strokeWidth={2}
-                  fill="currentColor"
-                  aria-label={t('trading.rail.primary')}
+                  aria-label={t('trading.rail.active')}
                 />
               ) : null}
               <ChevronDown className="size-3.5" strokeWidth={2} aria-hidden />
@@ -148,7 +148,7 @@ export function WalletHead({
             ) : null}
             {/* The wallets scroll; the "all" row and the commands stay in reach. */}
             <div className="trd-head__wallets">
-              {wallets.map((w) => {
+              {ordered.map((w) => {
                 const tt = totals.get(w.address.toLowerCase())
                 return (
                   <MenuItem

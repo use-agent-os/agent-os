@@ -406,8 +406,8 @@ analysis, name which one it is.
 ## Which wallet
 
 Every order comes from exactly one wallet: the primary (★ in
-\`agentos wallet list\`, "primary" in the project knowledge, the wallet shown
-beside the composer) unless the instruction names another wallet or says
+\`agentos wallet list\`, "primary" in the project knowledge, "Active" in the
+app, the wallet shown beside the composer) unless the instruction names another wallet or says
 all wallets. That wallet is the only one you read, quote from and report on
 for the order. Never look up another wallet's balance "to be sure", never
 offer another wallet as a fallback, never sum across wallets: the user

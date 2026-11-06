@@ -1,5 +1,7 @@
 import {
   Check,
+  Circle,
+  CircleCheck,
   Copy,
   ExternalLink,
   KeyRound,
@@ -7,7 +9,6 @@ import {
   Pencil,
   Plus,
   QrCode,
-  Star,
   Trash2,
   TriangleAlert,
   Wallet as WalletIcon,
@@ -27,7 +28,7 @@ import {
   useWalletStatus,
 } from '~/stores/trading'
 import { ChainBadge } from './ChainMark'
-import { errorText, formatPct, pnlTone, shortAddress, walletLabel } from './logic'
+import { activeFirst, errorText, formatPct, pnlTone, shortAddress, walletLabel } from './logic'
 import { Money, Sheet } from './parts'
 import type { ChainStatus, Totals, UnlockMode, Wallet } from './types'
 
@@ -147,6 +148,9 @@ function ReceiveSheet({ wallet, onClose }: { wallet: Wallet; onClose: () => void
  *
  * The chain badges are the explorer links. One row per chain would have been
  * five more buttons on a surface that already carries four.
+ *
+ * The active wallet (the vault's primary, the one the agent spends from) is
+ * always the first card, so which one it is never takes a scroll to find.
  */
 function ManageSheet({
   onClose,
@@ -161,6 +165,7 @@ function ManageSheet({
   const vault = useWalletStatus()
   const chains = status.data?.chains ?? []
   const locked = Boolean(vault.data?.initialized && !vault.data.unlocked)
+  const listRef = useRef<HTMLDivElement>(null)
 
   const totalsByWallet = useMemo(() => {
     const m = new Map<string, Totals>()
@@ -168,6 +173,17 @@ function ManageSheet({
       m.set(row.wallet.address.toLowerCase(), row.totals)
     return m
   }, [portfolio.data])
+
+  const ordered = useMemo(() => activeFirst(wallets), [wallets])
+
+  // Activating a wallet moves its card to the top, out of a view that is
+  // usually scrolled down to it: follow it, or the press looks like it did
+  // nothing and the card underneath is suddenly a different wallet.
+  const activeAddress = ordered[0]?.primary ? ordered[0].address : null
+  useEffect(() => {
+    const body = listRef.current?.closest('.trd-modal__body')
+    if (body) body.scrollTop = 0
+  }, [activeAddress])
 
   return (
     <Sheet
@@ -219,8 +235,8 @@ function ManageSheet({
           {t('trading.sheet.manage.empty')}
         </p>
       ) : (
-        <div className="trd-wman">
-          {wallets.map((w) => (
+        <div className="trd-wman" ref={listRef}>
+          {ordered.map((w) => (
             <ManageRow
               key={w.address}
               wallet={w}
@@ -271,11 +287,10 @@ function ManageRow({
       <header className="trd-wman__top">
         <span className="trd-wman__name">
           {wallet.primary ? (
-            <Star
-              className="trd-wman__star size-3.5"
+            <CircleCheck
+              className="trd-wman__active size-3.5"
               strokeWidth={2}
-              fill="currentColor"
-              aria-label={t('trading.rail.primary')}
+              aria-label={t('trading.rail.active')}
             />
           ) : null}
           {label}
@@ -339,25 +354,32 @@ function ManageRow({
       ) : null}
 
       <footer className="trd-wman__acts">
-        {!wallet.primary ? (
-          <button
-            type="button"
-            className="trd-wman__act"
-            disabled={write.isPending}
-            data-testid="manage-primary"
-            onClick={() =>
-              write.mutate(
-                { method: 'wallet.setPrimary', params: { address: wallet.address } },
-                {
-                  onError: (err) => toast.error(`${t('trading.sheet.error')}: ${errorText(err)}`),
-                },
-              )
-            }
-          >
-            <Star className="size-3.5" strokeWidth={1.75} aria-hidden />
-            {t('trading.rail.setPrimary')}
-          </button>
-        ) : null}
+        {/* On every card, so "Active" is never a word only the inactive wallets
+            carry. One wallet is always active, so it switches on and not off. */}
+        <button
+          type="button"
+          className="trd-wman__act"
+          aria-pressed={wallet.primary}
+          aria-disabled={wallet.primary || undefined}
+          disabled={!wallet.primary && write.isPending}
+          data-testid="manage-primary"
+          onClick={() => {
+            if (wallet.primary) return
+            write.mutate(
+              { method: 'wallet.setPrimary', params: { address: wallet.address } },
+              {
+                onError: (err) => toast.error(`${t('trading.sheet.error')}: ${errorText(err)}`),
+              },
+            )
+          }}
+        >
+          {wallet.primary ? (
+            <CircleCheck className="size-3.5" strokeWidth={2} aria-hidden />
+          ) : (
+            <Circle className="size-3.5" strokeWidth={1.75} aria-hidden />
+          )}
+          {t('trading.rail.active')}
+        </button>
         <button
           type="button"
           className="trd-wman__act"

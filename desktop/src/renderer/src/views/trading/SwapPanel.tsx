@@ -12,6 +12,7 @@ import { useNow } from '~/lib/use-now'
 import { useBalances, useQuote, type QuoteParams } from '~/stores/trading'
 import { ConfirmSwap } from './ConfirmSwap'
 import {
+  activeFirst,
   amountFromPct,
   compareAmounts,
   formatAmount,
@@ -265,10 +266,10 @@ export function SwapPanel({
             value={wallet}
             onChange={(e) => setWallet(e.target.value)}
           >
-            {wallets.map((w) => (
+            {activeFirst(wallets).map((w) => (
               <option key={w.address} value={w.address}>
                 {walletLabel(w)}
-                {w.primary ? ' ★' : ''}
+                {w.primary ? ' ✓' : ''}
               </option>
             ))}
           </select>
