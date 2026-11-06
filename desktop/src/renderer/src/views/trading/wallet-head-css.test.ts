@@ -66,3 +66,17 @@ describe('wallet rail open-menu CSS', () => {
     )
   })
 })
+
+describe('wallet head active mark CSS', () => {
+  it('keeps the active mark green past the rule that greys the line icons', () => {
+    // jsdom has no cascade: `.trd-head__line > svg` outranks a bare class, so
+    // the selector has to carry the same weight, and come after it.
+    const grey = sheets.trading.indexOf('.trd-head__line > svg {')
+    const green = sheets.trading.indexOf('.trd-head__line > .trd-head__active {')
+    expect(grey).toBeGreaterThan(-1)
+    expect(green).toBeGreaterThan(grey)
+    expect(sheets.trading.slice(green, sheets.trading.indexOf('}', green))).toContain(
+      'color: var(--ok)',
+    )
+  })
+})

@@ -1,4 +1,13 @@
-import { Copy, ExternalLink, KeyRound, Pencil, QrCode, Star, Trash2 } from 'lucide-react'
+import {
+  Circle,
+  CircleCheck,
+  Copy,
+  ExternalLink,
+  KeyRound,
+  Pencil,
+  QrCode,
+  Trash2,
+} from 'lucide-react'
 import { useCallback, useRef, useState, type MouseEvent } from 'react'
 import { toast } from 'sonner'
 import { MenuItem, type MenuPlace } from '~/components/menu/PopMenu'
@@ -72,9 +81,15 @@ export function WalletMenuItems({
           }
         />
       ))}
-      {!wallet.primary ? (
-        <MenuItem icon={Star} label={t('trading.rail.setPrimary')} onSelect={onSetPrimary} />
-      ) : null}
+      {/* On every wallet, as in the Wallets sheet, so "Active" is never a word
+          only the inactive wallets carry. One is always active: it can't be off. */}
+      <MenuItem
+        icon={wallet.primary ? CircleCheck : Circle}
+        label={t('trading.rail.active')}
+        tone={wallet.primary ? 'ok' : undefined}
+        disabled={wallet.primary}
+        onSelect={onSetPrimary}
+      />
       <MenuItem
         icon={Pencil}
         label={t('trading.rail.rename')}

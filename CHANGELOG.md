@@ -13,6 +13,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Desktop Trade tab: in the Wallets sheet, **Make primary** is now **Active**, on
   every wallet, with a green enable mark instead of a star on the one in use.
   That wallet is always listed first, and activating another moves it to the top.
+- Desktop Trade tab: the rail, the wallet head, the swap ticket and the wallet
+  menus now match: a green enable mark instead of a star, the same **Active**
+  action, and the active wallet listed first. The seat beside the composer now
+  reads **Active wallet**.
 
 ## [2026.11.5.post2] - 2026-11-05
 

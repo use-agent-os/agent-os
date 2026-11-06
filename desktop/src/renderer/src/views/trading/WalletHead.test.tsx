@@ -155,4 +155,22 @@ describe('WalletHead · whose desk this is', () => {
     fireEvent.click(toggle)
     expect(onToggleRail).toHaveBeenCalled()
   })
+
+  it('marks the active wallet with the enable mark, not a star', () => {
+    render()
+    expect(screen.getByLabelText('Active')).toBeInTheDocument()
+    expect(document.querySelector('.lucide-star')).toBeNull()
+  })
+
+  it('lists the active wallet first in the switcher, whatever order the vault returns', () => {
+    render({ wallets: [SECOND, WALLET] })
+    fireEvent.click(screen.getByTestId('wallet-switcher'))
+
+    const rows = screen.getAllByRole('menuitemradio')
+    expect(rows.map((r) => r.textContent)).toEqual([
+      expect.stringContaining('All wallets'),
+      expect.stringContaining('Main'),
+      expect.stringContaining('Wallet 02'),
+    ])
+  })
 })

@@ -427,7 +427,7 @@ export function MenuItem({
   mark?: ReactNode
   label: string
   onSelect: () => void
-  tone?: 'danger'
+  tone?: 'danger' | 'ok'
   disabled?: boolean
   checked?: boolean
   /** Trailing text: a shortcut, a count. */

@@ -58,6 +58,13 @@ describe('ComposerSeats shrink chain', () => {
     }
   })
 
+  it('calls the wallet seat the active wallet', () => {
+    renderSeats()
+    const seat = screen.getByTestId('wallet-seat')
+    expect(seat.getAttribute('title')).toBe('Active wallet')
+    expect(seat.getAttribute('aria-label')).toMatch(/^Active wallet: /)
+  })
+
   it('keeps an accessible name on each seat once its label can be hidden', () => {
     renderSeats()
     for (const id of ['permission-seat', 'provider-seat', 'wallet-seat']) {

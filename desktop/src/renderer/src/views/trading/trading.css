@@ -250,9 +250,9 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.trd-wallet__star {
+.trd-wallet__active {
   flex-shrink: 0;
-  color: var(--primary);
+  color: var(--ok);
 }
 .trd-wallet__addr {
   grid-column: 2;
@@ -571,9 +571,9 @@
   flex-shrink: 0;
   color: var(--dim);
 }
-.trd-head__star {
-  flex-shrink: 0;
-  color: var(--primary);
+/* Past the rule above, which greys every icon on this line. */
+.trd-head__line > .trd-head__active {
+  color: var(--ok);
 }
 .trd-head__sub {
   overflow: hidden;

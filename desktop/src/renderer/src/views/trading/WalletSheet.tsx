@@ -28,7 +28,7 @@ import {
   useWalletStatus,
 } from '~/stores/trading'
 import { ChainBadge } from './ChainMark'
-import { errorText, formatPct, pnlTone, shortAddress, walletLabel } from './logic'
+import { activeFirst, errorText, formatPct, pnlTone, shortAddress, walletLabel } from './logic'
 import { Money, Sheet } from './parts'
 import type { ChainStatus, Totals, UnlockMode, Wallet } from './types'
 
@@ -174,11 +174,7 @@ function ManageSheet({
     return m
   }, [portfolio.data])
 
-  // Array.sort is stable, so the other wallets keep the vault's order.
-  const ordered = useMemo(
-    () => [...wallets].sort((a, b) => Number(b.primary) - Number(a.primary)),
-    [wallets],
-  )
+  const ordered = useMemo(() => activeFirst(wallets), [wallets])
 
   // Activating a wallet moves its card to the top, out of a view that is
   // usually scrolled down to it: follow it, or the press looks like it did

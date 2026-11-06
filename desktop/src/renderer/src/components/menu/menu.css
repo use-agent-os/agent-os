@@ -93,6 +93,10 @@
   color: #fff;
   background: var(--danger);
 }
+/* A state rather than a command: only ever on a disabled row, which has no hover. */
+.mac-menu__item[data-tone='ok'] {
+  color: var(--ok);
+}
 .mac-menu__item > svg {
   justify-self: center;
 }
