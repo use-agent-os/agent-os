@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.6] - 2026-11-06
+
 ### Changed
 - Desktop Trade tab: a finished swap, send or bridge above the composer is now a
   single compact row (kind, amounts, transaction link, status, close) instead of

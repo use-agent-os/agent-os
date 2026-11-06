@@ -61,7 +61,7 @@ Two things are worth knowing about this setup:
   enforced auth, so `compose.yaml` turns token auth on and will not start without
   `AGENTOS_AUTH_TOKEN`.
 
-Replace `latest` with a release version (`ghcr.io/use-agent-os/agent-os:2026.11.5.post2`)
+Replace `latest` with a release version (`ghcr.io/use-agent-os/agent-os:2026.11.6`)
 to choose when you upgrade. See [Upgrade](#upgrade).
 
 ## 2. Configure a Provider
