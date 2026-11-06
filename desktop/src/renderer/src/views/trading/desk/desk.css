@@ -1060,15 +1060,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.trd-asks__stamp .trd-card {
-  padding: 8px 14px;
-  box-shadow: inset 0 0 0 1px var(--hairline);
-  animation: none;
-}
-.trd-asks__stamp .trd-card__facts,
-.trd-asks__stamp .trd-card__note {
-  display: none;
-}
 @keyframes trd-card-in {
   from {
     opacity: 0;
@@ -1246,14 +1237,6 @@
   flex: 1 1 240px;
   height: 28px;
   font-size: 12px;
-}
-/* A settled stamp's row only holds the tx link: nothing to pin, no plate. */
-.trd-asks__stamp .trd-card__actions {
-  position: static;
-  margin: 8px 0 0;
-  padding: 0;
-  border-radius: 0;
-  background: none;
 }
 .trd-card__actions [data-armed] {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 30%, transparent);
@@ -2708,6 +2691,75 @@ body[data-dragging] .trd-book__handle {
 }
 .trd-asks__stamp .trd-card__legs-list {
   display: none;
+}
+
+/* A settled stamp is a receipt, not a decision: one row reading kind, what
+   moved, the tx, who filed it, the outcome, close. The transcript gets the room
+   back, and a narrow column wraps the tail under the headline instead of
+   squeezing it. These follow the LP rules so they win over their sizes. */
+.trd-asks__stamp + .trd-asks__stamp {
+  margin-top: -4px;
+}
+.trd-asks__stamp .trd-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px 10px;
+  padding: 5px 12px;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  animation: none;
+}
+.trd-asks__stamp .trd-card__facts,
+.trd-asks__stamp .trd-card__note,
+.trd-asks__stamp .trd-card__spacer {
+  display: none;
+}
+.trd-asks__stamp .trd-card__head {
+  display: contents;
+}
+.trd-asks__stamp .trd-card__title {
+  order: 1;
+  font-size: 10.5px;
+}
+.trd-asks__stamp .trd-card__lp,
+.trd-asks__stamp .trd-card > .trd-card__legs {
+  order: 2;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.trd-asks__stamp .trd-card__lp {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  margin: 0;
+}
+.trd-asks__stamp .trd-card__legs {
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+}
+.trd-asks__stamp .trd-card__legs .trd-card__legs-sub {
+  font-size: 12px;
+}
+.trd-asks__stamp .trd-card__lp-range {
+  margin: 0;
+}
+/* Only ever holds the tx link: nothing to pin, no plate. */
+.trd-asks__stamp .trd-card__actions {
+  position: static;
+  order: 3;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+}
+.trd-asks__stamp .trd-card__stamps {
+  order: 4;
+}
+.trd-asks__stamp .trd-card__dismiss {
+  order: 5;
 }
 
 /* ── Send sheet / decode sheet ───────────────────────────────────────────── */
