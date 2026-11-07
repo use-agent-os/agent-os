@@ -39,7 +39,7 @@ gateway RPC surface (`wallet.*`, `trading.*`).
   wallet never acted on it (never sold, sent, swapped or quoted it). Hidden
   tokens keep their ledger rows — the balance is real — but are left out of
   balances, portfolio, history, the totals, the agent's view and the sync's
-  every-30-seconds scan (they are re-read hourly and re-judged daily, so a
+  every-60-seconds scan (they are re-read hourly and re-judged daily, so a
   real launch that gains a pool resurfaces on its own). The desktop shows
   "N junk tokens hidden" with a Show toggle and a per-token hide/keep; the
   CLI has `--hidden` and `agentos trade hide`/`unhide`. A user's choice is
@@ -154,7 +154,7 @@ agent_max_price_impact_pct = 5.0     # agent orders above this wait for approval
 agent_max_slippage_pct = 5.0         # an agent asking for more slippage is refused
 default_slippage_pct = 0.5           # omit to let the provider pick (auto slippage)
 unlock_mode = "auto"                 # or "manual"
-sync_interval_seconds = 30
+sync_interval_seconds = 60
 price_ttl_seconds = 20
 
 [trading.rpc_urls]
@@ -164,7 +164,11 @@ price_ttl_seconds = 20
 
 RPC resolution order per chain: `trading.rpc_urls`, then the environment
 variables `RPC_BASE_URL` (8453) / `RPC_ROBINHOOD_URL` (4663), then the
-public default. Every `[trading]` key is also an environment variable with
+public default. A custom RPC serves everything that needs a fresh answer (orders,
+nonces, receipts, fees, the sync's block height, logs and native balance). The
+wallet sync's bulk ERC-20 balance read goes to the chain's public node first, as
+one Multicall3 call per wallet, and falls back to the custom RPC when the public
+node does not answer. Every `[trading]` key is also an environment variable with
 the `AGENTOS_TRADING_` prefix (`AGENTOS_TRADING_DAILY_CAP_USD=250`,
 `AGENTOS_TRADING_PROVIDER=uniswap`). The API key is redacted in
 `config.snapshot` and every public config view like any other `*_api_key`;

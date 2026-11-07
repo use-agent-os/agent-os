@@ -44,6 +44,7 @@ SEL_ALLOWANCE = "0xdd62ed3e"
 SEL_APPROVE = "0x095ea7b3"
 SEL_TRANSFER = "0xa9059cbb"
 SEL_TRANSFER_FROM = "0x23b872dd"
+SEL_AGGREGATE3 = "0x82ad56cb"
 
 UINT256_MAX = (1 << 256) - 1
 # Anything at or above this is an "unlimited" allowance in practice: wallets
@@ -79,6 +80,45 @@ def pad_uint(value: int) -> str:
 
 def encode_call(selector: str, *words: str) -> str:
     return selector + "".join(words)
+
+
+def encode_aggregate3(calls: Sequence[tuple[str, str]]) -> str:
+    """Calldata for ``aggregate3((address,bool,bytes)[])``, every call allowed to fail."""
+    offsets: list[str] = []
+    tails: list[str] = []
+    offset = 32 * len(calls)
+    for target, data in calls:
+        body = data.removeprefix("0x")
+        padded = body + "0" * (-len(body) % 64)
+        tail = pad_address(target) + pad_uint(1) + pad_uint(96) + pad_uint(len(body) // 2) + padded
+        offsets.append(pad_uint(offset))
+        tails.append(tail)
+        offset += len(tail) // 2
+    return SEL_AGGREGATE3 + pad_uint(32) + pad_uint(len(calls)) + "".join(offsets + tails)
+
+
+def decode_aggregate3(hex_data: str) -> list[tuple[bool, bytes]]:
+    """``(success, returnData)`` per call; ``ValueError`` on anything malformed."""
+    raw = bytes.fromhex(hex_data.removeprefix("0x"))
+
+    def word(at: int) -> int:
+        if at + 32 > len(raw):
+            raise ValueError("aggregate3 answer is truncated")
+        return int.from_bytes(raw[at : at + 32], "big")
+
+    start = word(0) + 32
+    count = word(start - 32)
+    if count > (len(raw) - start) // 32:
+        raise ValueError("aggregate3 answer is truncated")
+    out: list[tuple[bool, bytes]] = []
+    for index in range(count):
+        item = start + word(start + 32 * index)
+        data_at = item + word(item + 32)
+        size = word(data_at)
+        if data_at + 32 + size > len(raw):
+            raise ValueError("aggregate3 answer is truncated")
+        out.append((word(item) != 0, raw[data_at + 32 : data_at + 32 + size]))
+    return out
 
 
 def encode_transfer(recipient: str, amount: int) -> str:
@@ -217,6 +257,15 @@ def parse_approval_log(log: dict[str, Any]) -> ApprovalLog | None:
 # ── Client ─────────────────────────────────────────────────────────────────
 
 
+# Tokens per Multicall3 ``eth_call``; a bigger read is split.
+MULTICALL_CHUNK = 100
+# The public node answers a read the sync can do without for a moment, so it gets
+# less patience than the RPC itself, and a rest after failing: a pass reads once per
+# wallet/chain, and an outage must not cost each of them a timeout and a retry.
+READ_LANE_TIMEOUT_S = 5.0
+READ_LANE_COOLDOWN_S = 60.0
+
+
 class EvmClient:
     """One node, one URL. Safe to share across tasks."""
 
@@ -229,8 +278,15 @@ class EvmClient:
         max_log_span: int = 2000,
         max_priority_fee_wei: int = 2 * 10**9,
         max_fee_per_gas_wei: int = 50 * 10**9,
+        multicall3: str | None = None,
+        read_url: str | None = None,
     ) -> None:
         self.url = url
+        # Multicall3's address, and the node bulk balance reads go to first. Both
+        # only ever change how ``erc20_balances`` reads, never anything else.
+        self.multicall3 = multicall3
+        self.read_url = read_url
+        self._read_lane_down_until = 0.0
         # Provider keys live in the path (dRPC, Alchemy): errors show only the host.
         self.display_url = redact_rpc_url(url)
         self._own_http = http is None
@@ -254,13 +310,17 @@ class EvmClient:
             "user-agent": USER_AGENT,
         }
 
-    async def _post(self, payload: Any) -> Any:
+    async def _post(
+        self, payload: Any, *, url: str | None = None, timeout: float | None = None
+    ) -> Any:
+        target = url or self.url
+        display_url = self.display_url if url is None else redact_rpc_url(url)
         try:
             response = await self._http.post(
-                self.url, json=payload, headers=self._headers(), timeout=self._timeout
+                target, json=payload, headers=self._headers(), timeout=timeout or self._timeout
             )
         except httpx.HTTPError as exc:
-            raise EvmTransportError(f"{self.display_url}: {exc}") from exc
+            raise EvmTransportError(f"{display_url}: {exc}") from exc
         if response.status_code >= 400:
             detail = ""
             try:
@@ -270,11 +330,11 @@ class EvmClient:
                     detail = f" ({str(err['message'])[:160]})"
             except ValueError:
                 pass
-            raise EvmTransportError(f"{self.display_url}: HTTP {response.status_code}{detail}")
+            raise EvmTransportError(f"{display_url}: HTTP {response.status_code}{detail}")
         try:
             return response.json()
         except ValueError as exc:
-            raise EvmTransportError(f"{self.display_url}: invalid JSON response") from exc
+            raise EvmTransportError(f"{display_url}: invalid JSON response") from exc
 
     @staticmethod
     def _unwrap(item: Any) -> Any:
@@ -369,7 +429,11 @@ class EvmClient:
         )
 
     async def erc20_balances(self, owner: str, tokens: Iterable[str]) -> dict[str, int | None]:
-        """``balanceOf`` for every token in one batch.
+        """``balanceOf`` for every token, in as few requests as the chain allows.
+
+        Through Multicall3 when the chain has it, on ``read_url`` when one is
+        set; a token that gets no clean answer that way is read again on its
+        own from the RPC itself, in one batch.
 
         A token whose read failed maps to ``None``, never to ``0``: a balance
         the node could not answer is unknown, and a caller that wrote it down
@@ -378,21 +442,65 @@ class EvmClient:
         token_list = [t.lower() for t in tokens]
         if not token_list:
             return {}
+        out: dict[str, int | None] = {}
+        if self.multicall3:
+            out.update(await self._multicall_balances(owner, token_list))
+        pending = [token for token in token_list if token not in out]
+        if not pending:
+            return out
         calls: list[tuple[str, Sequence[Any]]] = [
             (
                 "eth_call",
                 [{"to": token, "data": encode_call(SEL_BALANCE_OF, pad_address(owner))}, "latest"],
             )
-            for token in token_list
+            for token in pending
         ]
-        out: dict[str, int | None] = {}
         results = await self._batch_lenient(calls)
-        for token, result in zip(token_list, results, strict=True):
+        for token, result in zip(pending, results, strict=True):
             try:
                 out[token] = decode_uint(result) if isinstance(result, str) else None
             except ValueError:
                 out[token] = None
         return out
+
+    async def _multicall_balances(self, owner: str, tokens: Sequence[str]) -> dict[str, int]:
+        """The balances Multicall3 answered cleanly; anything else is left out."""
+        data = encode_call(SEL_BALANCE_OF, pad_address(owner))
+        out: dict[str, int] = {}
+        for start in range(0, len(tokens), MULTICALL_CHUNK):
+            chunk = tokens[start : start + MULTICALL_CHUNK]
+            results = await self._aggregate3(encode_aggregate3([(t, data) for t in chunk]))
+            if results is None or len(results) != len(chunk):
+                continue
+            for token, (success, answer) in zip(chunk, results, strict=True):
+                # A call to no contract "succeeds" with no data: not an answer.
+                if success and len(answer) == 32:
+                    out[token] = int.from_bytes(answer, "big")
+        return out
+
+    async def _aggregate3(self, calldata: str) -> list[tuple[bool, bytes]] | None:
+        """Ask the read lane, then the RPC itself; ``None`` when neither answers."""
+        params = [{"to": self.multicall3, "data": calldata}, "latest"]
+        payload = {"jsonrpc": "2.0", "method": "eth_call", "params": params}
+        if self.read_url and time.monotonic() >= self._read_lane_down_until:
+            self._next_id += 1
+            try:
+                raw = await self._post(
+                    {**payload, "id": self._next_id},
+                    url=self.read_url,
+                    timeout=READ_LANE_TIMEOUT_S,
+                )
+                return decode_aggregate3(self._unwrap(raw))
+            except (EvmRpcError, EvmTransportError, ValueError, TypeError, AttributeError) as exc:
+                self._read_lane_down_until = time.monotonic() + READ_LANE_COOLDOWN_S
+                log.debug("trading.read_lane_failed", error=str(exc)[:200])
+        self._next_id += 1
+        try:
+            raw = await self._post({**payload, "id": self._next_id})
+            return decode_aggregate3(self._unwrap(raw))
+        except (EvmRpcError, EvmTransportError, ValueError, TypeError, AttributeError) as exc:
+            log.debug("trading.multicall_failed", error=str(exc)[:200])
+            return None
 
     async def _batch_lenient(self, calls: Sequence[tuple[str, Sequence[Any]]]) -> list[Any]:
         """Batch, but a per-item RPC error becomes ``None`` instead of raising."""

@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- Trading: `sync_interval_seconds` now defaults to 60 instead of 30. The same
+  clock paces DCA and trigger checks, and a trigger fires after two checks in a
+  row, so a stop-loss now fires about 60 to 120 seconds after its price is
+  crossed. A config that sets the key keeps its value.
+
+### Fixed
+- Trading wallet sync: an ordinary pass no longer reads the balance of
+  every token the ledger has met for every wallet. It now reads the tokens a
+  wallet holds, tokens that moved in that pass and tokens never read for that
+  wallet; the rest are read hourly, on a wallet's first pass and on a requested
+  sync. This removes most of the sync's `eth_call` traffic.
+- Trading wallet sync: a wallet's token balances are read in one Multicall3 call
+  instead of one `eth_call` per token. With a custom RPC set, this bulk read goes
+  to the chain's public node first and falls back to the custom RPC if that node
+  does not answer. Orders, nonces, receipts and single-token reads stay on the
+  custom RPC.
+- Trading token discovery: when the indexer does not answer, the wallet is not
+  asked about again until the discovery interval has passed, instead of up to
+  three times per sync pass.
+
 ## [2026.11.6] - 2026-11-06
 
 ### Changed

@@ -1122,3 +1122,105 @@ class TestSyncRails:
         assert await syncer.sync(_wallet(), BASE) is False
         deposits = ledger.list_entries(wallet=WALLET, kind="deposit")
         assert sorted(e["amount_out_raw"] for e in deposits if e["tx_hash"]) == ["5", "7"]
+
+
+def _balance_reads(chain: FakeChain) -> set[str]:
+    """The tokens this node was asked ``balanceOf`` for since ``chain.calls`` was cleared."""
+    return {
+        c["params"][0]["to"].lower()
+        for c in chain.calls
+        if c["method"] == "eth_call" and c["params"][0]["data"].startswith("0x70a08231")
+    }
+
+
+class TestBalanceReadsPerPass:
+    """An ordinary pass reads what the wallet holds, not every token the ledger has met.
+
+    7 wallets × 108 tokens every 30 s came to 2.3M ``eth_call`` a day on Base alone,
+    with about 9 in 10 of them answering zero. The ``eth_getLogs`` sweep sees every
+    token that moves, so a token read as zero only needs reading again once it does.
+    """
+
+    @pytest.fixture
+    async def settled(self, syncer: WalletSyncer, chain: FakeChain) -> WalletSyncer:
+        """A wallet past its first pass, holding USDC and no WETH."""
+        chain.set_erc20(USDC, WALLET, 5)
+        await syncer.sync(_wallet(), BASE)
+        assert _balance_reads(chain) == {USDC, WETH}
+        chain.calls.clear()
+        return syncer
+
+    async def test_ordinary_pass_skips_a_token_read_as_zero(
+        self, settled: WalletSyncer, chain: FakeChain
+    ) -> None:
+        await settled.sync(_wallet(), BASE)
+        assert _balance_reads(chain) == {USDC}
+
+    async def test_a_transfer_brings_a_zero_token_back(
+        self, settled: WalletSyncer, chain: FakeChain, ledger: Ledger
+    ) -> None:
+        chain.add_transfer(token=WETH, sender=OTHER, recipient=WALLET, amount=7, block=10_001)
+        chain.set_erc20(WETH, WALLET, 7)
+        chain.block = 10_001
+        await settled.sync(_wallet(), BASE)
+        assert WETH in _balance_reads(chain)
+        assert ledger.get_balance(8453, WALLET, WETH) == 7
+
+    async def test_a_held_token_is_read_until_it_reads_zero(
+        self, settled: WalletSyncer, chain: FakeChain, ledger: Ledger
+    ) -> None:
+        chain.set_erc20(USDC, WALLET, 0)
+        await settled.sync(_wallet(), BASE)
+        assert USDC in _balance_reads(chain)
+        assert ledger.get_balance(8453, WALLET, USDC) == 0
+        chain.calls.clear()
+        await settled.sync(_wallet(), BASE)
+        assert _balance_reads(chain) == set()
+
+    async def test_a_token_the_ledger_just_met_is_read_on_the_next_pass(
+        self,
+        settled: WalletSyncer,
+        chain: FakeChain,
+        ledger: Ledger,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """No row yet means never read: a wallet may hold it from before its lookback."""
+
+        async def watch(spec) -> list[str]:
+            return [USDC, WETH, AAPL]
+
+        monkeypatch.setattr(settled, "_watch_tokens", watch)
+        chain.tokens[AAPL] = ("AAPL", "Apple", 18)
+        chain.set_erc20(AAPL, WALLET, 9)
+        await settled.sync(_wallet(), BASE)
+        assert AAPL in _balance_reads(chain)
+        assert ledger.get_balance(8453, WALLET, AAPL) == 9
+
+    async def test_a_balance_that_moved_without_a_log_waits_for_the_hourly_pass(
+        self, settled: WalletSyncer, chain: FakeChain, ledger: Ledger
+    ) -> None:
+        chain.set_erc20(WETH, WALLET, 3)
+        await settled.sync(_wallet(), BASE)
+        assert ledger.get_balance(8453, WALLET, WETH) == 0
+        await settled.sync(_wallet(), BASE, include_hidden=True)
+        assert ledger.get_balance(8453, WALLET, WETH) == 3
+
+    async def test_a_lagging_zero_on_a_token_that_arrived_does_not_stick(
+        self, settled: WalletSyncer, chain: FakeChain, ledger: Ledger
+    ) -> None:
+        """Bulk reads may come from another node: its zero can trail the log it follows."""
+        chain.add_transfer(token=WETH, sender=OTHER, recipient=WALLET, amount=7, block=10_001)
+        chain.block = 10_001
+        await settled.sync(_wallet(), BASE)  # the balance read has not caught up
+        assert ledger.get_balance(8453, WALLET, WETH) == 0
+
+        chain.set_erc20(WETH, WALLET, 7)
+        chain.block = 10_100  # past the overlap: the sweep will not see this transfer again
+        await settled.sync(_wallet(), BASE)
+        assert ledger.get_balance(8453, WALLET, WETH) == 7
+
+    async def test_read_all_reads_every_token(
+        self, settled: WalletSyncer, chain: FakeChain
+    ) -> None:
+        await settled.sync(_wallet(), BASE, read_all=True)
+        assert _balance_reads(chain) == {USDC, WETH}

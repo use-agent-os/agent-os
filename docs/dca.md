@@ -52,7 +52,7 @@ create ──(operator)──────────────► active ─�
   a proposal should survive the user being away.
 - **Runs.** A run is due when `now >= next_run_at`. The engine's
   housekeeping pass (`TradingService.housekeep()`, every
-  `sync_interval_seconds`, 30 s, from the moment the gateway starts) calls
+  `sync_interval_seconds`, 60 s, from the moment the gateway starts) calls
   `dca.run_due()`; the wallet sync runs beside it, never ahead of it. First run: at activation when `startNow` is true
   (default), otherwise one interval after activation. `next_run_at` is
   drift-free: `anchor_at + k * every_seconds` for the smallest `k` that is

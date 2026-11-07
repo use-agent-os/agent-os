@@ -194,6 +194,30 @@ class TestTokensAndBalances:
         # Nothing phantom was written to the ledger on the way out.
         assert service.ledger.get_token(8453, elsewhere) is None
 
+    async def test_a_requested_sync_reads_every_token(
+        self,
+        funded_service: TradingService,
+        base_chain: FakeChain,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``trading.sync`` is someone asking: it reads what the ordinary pass skips."""
+        service = funded_service
+        wallet = service.test_wallet  # type: ignore[attr-defined]
+        await service.sync_all()
+        service._hidden_sync_at = service._now()  # the hourly pass is not due
+        stray = "0x9999000000000000000000000000000000000002"
+        service.ledger.upsert_token(8453, stray, symbol="S", name="Stray", decimals=18)
+        service.ledger.set_balance(8453, wallet.lower(), stray, 0)
+        base_chain.tokens[stray] = ("S", "Stray", 18)
+        base_chain.set_erc20(stray, wallet, 4)
+
+        await service.sync_all()
+        assert service.ledger.get_balance(8453, wallet, stray) == 0
+
+        service.request_sync(wallet=wallet)
+        await asyncio.gather(*service._confirm_tasks)
+        assert service.ledger.get_balance(8453, wallet, stray) == 4
+
     async def test_balances_and_portfolio(
         self, funded_service: TradingService, base_chain: FakeChain
     ) -> None:
@@ -293,12 +317,12 @@ class TestTokensAndBalances:
         # The fast lane no longer reads it; the hourly pass does.
         base_chain.calls.clear()
         await service.sync_all()
-        reads = [c["params"][0]["to"] for c in base_chain.calls if c["method"] == "eth_call"]
+        reads = base_chain.balance_reads()
         assert junk not in reads
         service._hidden_sync_at = 0.0
         base_chain.calls.clear()
         await service.sync_all()
-        reads = [c["params"][0]["to"] for c in base_chain.calls if c["method"] == "eth_call"]
+        reads = base_chain.balance_reads()
         assert junk in reads
 
         # Quoting it is meaning it: it comes back, for good.
@@ -852,7 +876,7 @@ class TestSwapFlow:
         assert chart["stats"]["changePct"] == pytest.approx(39.0)
 
     async def test_chart_thins_a_dense_snapshot_run(self, funded_service: TradingService) -> None:
-        """A day of 30-second snapshots is ~2,880 points; the wire carries 180."""
+        """A day of 60-second snapshots is ~1,440 points; the wire carries 180."""
         service = funded_service
         now = service._now()
         for i in range(2_000):

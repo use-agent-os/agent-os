@@ -76,6 +76,20 @@ class TestBlockscoutDiscovery:
         discovery.clock["now"] += 301  # type: ignore[attr-defined]
         assert await discovery.holdings(BASE, WALLET) == [USDC]
 
+    async def test_a_refused_request_is_not_repeated_within_the_ttl(
+        self, discovery: BlockscoutDiscovery, indexer: FakeIndexer
+    ) -> None:
+        """A pass asks three times per wallet: a 403 must not become three requests."""
+        indexer.status = 403
+        for _ in range(3):
+            assert await discovery.holdings(BASE, WALLET) == []
+        assert len(indexer.requests) == 1
+        # The refusal is held for the TTL, not forever.
+        indexer.status = 200
+        indexer.hold(WALLET, USDC, 5)
+        discovery.clock["now"] += 301  # type: ignore[attr-defined]
+        assert await discovery.holdings(BASE, WALLET) == [USDC]
+
     async def test_oversized_answer_is_no_answer(self, indexer: FakeIndexer) -> None:
         """An exchange wallet's 2.6 MB token list is not downloaded, and not trusted."""
         for i in range(50):

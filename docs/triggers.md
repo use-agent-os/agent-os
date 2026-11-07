@@ -70,7 +70,7 @@ create ──(operator)────────────► armed ──► t
 - **Arming** records `armed_at` and `armed_price_usd` (the price seen then,
   or `null`). For a `trail` condition the peak starts at the armed price and
   is raised on every later check where the price is higher.
-- **Checking.** `TradingService.tick()` (every `sync_interval_seconds`, 30 s)
+- **Checking.** `TradingService.tick()` (every `sync_interval_seconds`, 60 s)
   calls `trigger_check()`. One pass: expire proposals and `validUntil`,
   reconcile open fires, then for every `armed` trigger read the token's spot
   price (`PriceService.price`, batched per chain), store `last_price_usd` /
