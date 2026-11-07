@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.7] - 2026-11-07
+
 ### Changed
 - Trading: `sync_interval_seconds` now defaults to 60 instead of 30. The same
   clock paces DCA and trigger checks, and a trigger fires after two checks in a
