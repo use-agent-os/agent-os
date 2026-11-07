@@ -2509,7 +2509,7 @@ class TradingConfig(BaseSettings):
     # None = let the Uniswap API pick (``autoSlippage: DEFAULT``).
     default_slippage_pct: float | None = Field(default=None, ge=0, le=50)
     unlock_mode: Literal["auto", "manual"] = "auto"
-    sync_interval_seconds: int = Field(default=30, ge=5)
+    sync_interval_seconds: int = Field(default=60, ge=5)
     price_ttl_seconds: int = Field(default=20, ge=1)
 
     @field_validator("aggregator_base_url", "relay_base_url")

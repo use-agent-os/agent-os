@@ -13,6 +13,9 @@ from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 NATIVE_ADDRESS = "0x0000000000000000000000000000000000000000"
+# Multicall3's canonical address. Same bytecode, with ``aggregate3``, on Base and
+# Robinhood Chain (eth_getCode on both public nodes, 2026-11-07).
+MULTICALL3 = "0xca11bde05977b3631167028862be2a173976ca11"
 
 
 @dataclass(frozen=True)
@@ -43,6 +46,8 @@ class ChainSpec:
     # A Blockscout instance indexing this chain, used only to *discover* which
     # ERC-20s a wallet holds; every balance is then read from the RPC.
     blockscout_url: str | None = None
+    # Multicall3 on this chain: many ``balanceOf`` become one ``eth_call``.
+    multicall3: str | None = None
     # Gas ceilings for anything this desk signs. A fee quote comes from the
     # node (and a gas limit sometimes from the provider); neither is allowed
     # to name a number above these — a wild tip, a base-fee spike or an
@@ -89,6 +94,7 @@ BASE = ChainSpec(
     approval_log_span=100_000,
     aliases=("base-mainnet", "8453"),
     blockscout_url="https://base.blockscout.com",
+    multicall3=MULTICALL3,
 )
 
 ROBINHOOD = ChainSpec(
@@ -115,6 +121,7 @@ ROBINHOOD = ChainSpec(
     # is no discovery here: the sweep and the token registry are what find
     # a wallet's tokens on this chain.
     blockscout_url=None,
+    multicall3=MULTICALL3,
 )
 
 CHAINS: dict[int, ChainSpec] = {BASE.chain_id: BASE, ROBINHOOD.chain_id: ROBINHOOD}

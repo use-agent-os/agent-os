@@ -61,6 +61,10 @@ class BlockscoutDiscovery:
         self.max_tokens = max_tokens
         self.max_body_bytes = max_body_bytes
         self._cache: dict[tuple[int, str], tuple[float, list[str]]] = {}
+        # When the indexer last failed to answer for a wallet/chain. One sync pass
+        # asks several times per wallet, and an indexer that refuses this host
+        # (Base Blockscout 403s EC2) would otherwise be asked every time.
+        self._failed_at: dict[tuple[int, str], float] = {}
 
     async def holdings(self, chain: ChainSpec, address: str) -> list[str]:
         """Lower-cased ERC-20 addresses the indexer says ``address`` holds.
@@ -76,11 +80,17 @@ class BlockscoutDiscovery:
         cached = self._cache.get(key)
         if cached is not None and self._now() - cached[0] < self.ttl_s:
             return list(cached[1])
+        # Keep serving the last good answer while the indexer is down;
+        # an empty answer would silently shrink the scan set.
+        last_good = list(cached[1]) if cached is not None else []
+        failed_at = self._failed_at.get(key)
+        if failed_at is not None and self._now() - failed_at < self.ttl_s:
+            return last_good
         tokens = await self._fetch(chain, base, address)
         if tokens is None:
-            # Keep serving the last good answer while the indexer is down;
-            # an empty answer would silently shrink the scan set.
-            return list(cached[1]) if cached is not None else []
+            self._failed_at[key] = self._now()
+            return last_good
+        self._failed_at.pop(key, None)
         self._cache[key] = (self._now(), tokens)
         return list(tokens)
 

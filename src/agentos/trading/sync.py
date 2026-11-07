@@ -149,6 +149,7 @@ class WalletSyncer:
         *,
         full: bool = False,
         include_hidden: bool = False,
+        read_all: bool = False,
     ) -> bool:
         """One incremental pass for a wallet/chain; True if the ledger moved.
 
@@ -157,6 +158,11 @@ class WalletSyncer:
         service passes it once an hour, so junk still cannot drift for long.
         Their transfers are always recorded: the sweep does not know what is
         junk, and must not.
+
+        An ordinary pass reads only the tokens :meth:`_live_tokens` picks. The
+        wallet's first pass, ``include_hidden`` and ``read_all`` read them all,
+        which is what bounds how long a balance that moved without a log (a
+        non-standard token, a log the node served late) can stay wrong.
         """
         self.include_hidden = include_hidden
         address = wallet.key
@@ -180,11 +186,16 @@ class WalletSyncer:
             floor = int(oldest) if oldest is not None else 0
             start = max(floor, int(state["last_block"]) + 1 - SYNC_OVERLAP_BLOCKS)
         changed = False
+        moved: set[str] = set()
         if start <= latest:
             logs = await evm.transfer_logs(address, from_block=start, to_block=latest)
+            moved = {log.token for log in logs}
             changed = await self._record_transfers(wallet, chain, logs) or changed
         changed = await self._reconcile_native(wallet, chain, evm) or changed
-        read = await self._refresh_balances(wallet, chain, evm)
+        read_every_token = read_all or include_hidden or state is None
+        read = await self._refresh_balances(
+            wallet, chain, evm, moved=None if read_every_token else moved
+        )
         changed = read.changed or changed
         changed = await self._reconcile_openings(wallet, chain) or changed
         await self._snapshot_prices(wallet, chain)
@@ -1184,12 +1195,38 @@ class WalletSyncer:
             return False
         return await self._reconcile_openings(wallet, chain, tokens=[token])
 
+    def _live_tokens(
+        self, wallet: str, chain: ChainSpec, tokens: list[str], moved: set[str]
+    ) -> list[str]:
+        """Which of ``tokens`` an ordinary pass reads: all but those known to be zero.
+
+        The scan set is every token the ledger has met, for every wallet, and
+        most of it is zero for most wallets. The sweep sees every token that
+        moves, so a zero only needs reading again once it does. A token with no
+        row has never been read for this wallet, and an open position that
+        reads zero is a disagreement worth re-checking, so both are kept.
+        """
+        known = {
+            str(row["token"]): int(row["raw"])
+            for row in self.ledger.balances(wallet, chain.chain_id)
+        }
+        positions = {
+            pos.token for pos in self.ledger.positions(wallet) if pos.chain_id == chain.chain_id
+        }
+        return [t for t in tokens if known.get(t) != 0 or t in moved or t in positions]
+
     async def _refresh_balances(
-        self, wallet: WalletRecord, chain: ChainSpec, evm: EvmClient
+        self, wallet: WalletRecord, chain: ChainSpec, evm: EvmClient, *, moved: set[str] | None
     ) -> BalanceRead:
-        """Re-read every ERC-20 of interest; a failed read leaves its row alone."""
+        """Re-read the ERC-20s of interest; a failed read leaves its row alone.
+
+        ``moved`` is what this pass's sweep saw move, which narrows the read to
+        :meth:`_live_tokens`; ``None`` reads every token of interest.
+        """
         read = BalanceRead()
         tokens = await self.tokens_of_interest(wallet.key, chain)
+        if moved is not None:
+            tokens = self._live_tokens(wallet.key, chain, tokens, moved)
         if not tokens:
             return read
         balances = await evm.erc20_balances(wallet.address, tokens)

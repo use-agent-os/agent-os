@@ -1489,7 +1489,7 @@ size (`--pct` of the balance at fire time, a token `--amount`, or `--usd`),
 before anything is sent. `--below`/`--above` take a USD price (`3800`) or a
 percent of the price now (`--below -10%` or `10%`, `--above +15%` or `15%`),
 resolved to a price when the trigger is created. The engine checks the price
-every tick (30 s) and fires only after the condition held on two checks in a
+every tick (60 s) and fires only after the condition held on two checks in a
 row; an unknown price never fires. A sell or buy is one ordinary swap order
 (guardrails, approval threshold, daily cap, ledger) with the trigger's id and
 a `Stop-loss ETH · fired at $3,790` note; a fire that cannot act (nothing to
@@ -1552,7 +1552,8 @@ every error is `{"error": …}` on stderr and writes no card.
 `AGENTOS_TRADING_` prefix): `enabled`, `provider` (`aggregator` |
 `uniswap`), `aggregator_base_url` (default
 `https://agg.useagentos.dev`), `uniswap_api_key`, `uniswap_api_key_env`
-(default `UNISWAP_API_KEY`), `rpc_urls` (chain id → JSON-RPC URL),
+(default `UNISWAP_API_KEY`), `rpc_urls` (chain id → JSON-RPC URL; the wallet sync's bulk ERC-20
+balance read still tries the chain's public node first),
 `approval_threshold_usd`, `daily_cap_usd` (0 = agent swaps off),
 `approval_ttl_seconds`, `agent_max_price_impact_pct`,
 `agent_max_slippage_pct`, `default_slippage_pct` (unset = provider auto),

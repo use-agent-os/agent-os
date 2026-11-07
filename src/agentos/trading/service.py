@@ -192,7 +192,7 @@ LpEnvFactory = Callable[[ChainSpec, asyncio.AbstractEventLoop], Any]
 def _thin(points: list[dict[str, float]], limit: int) -> list[dict[str, float]]:
     """Even stride down to ``limit`` points, last one always kept.
 
-    A day of 30-second snapshots is 2,880 points for a line a few hundred
+    A day of 60-second snapshots is 1,440 points for a line a few hundred
     pixels wide. Striding is enough — the shape survives, and it keeps the
     payload and the chart's own work proportional to what is visible.
     """
@@ -479,6 +479,10 @@ class TradingService:
                     max_log_span=chain.max_log_span,
                     max_priority_fee_wei=chain.max_priority_fee_wei,
                     max_fee_per_gas_wei=chain.max_fee_per_gas_wei,
+                    multicall3=chain.multicall3,
+                    # A custom RPC is for what must be fresh (it may be metered);
+                    # the sync's bulk balance read goes to the public node first.
+                    read_url=chain.rpc_url if url != chain.rpc_url else None,
                 )
             self._evm[chain.chain_id] = client
         return client
@@ -661,7 +665,7 @@ class TradingService:
         housekeeping keeps its clock whatever the sync is doing, and a sync
         still running when the next interval comes is simply left to finish.
         """
-        interval = float(getattr(self.config, "sync_interval_seconds", 30))
+        interval = float(getattr(self.config, "sync_interval_seconds", 60))
         while True:
             try:
                 await self.housekeep()
@@ -1867,12 +1871,14 @@ class TradingService:
         full: bool = False,
         wallets: list[WalletRecord] | None = None,
         chains: list[ChainSpec] | None = None,
+        read_all: bool = False,
     ) -> int:
         """Sync every wallet × chain (or the given subset). 0 when a sync is already running.
 
         Returns how many wallet/chain pairs changed; each one has already
         been announced as ``trading.changed`` so clients re-read the ledger
-        the moment it moves, not on their next poll.
+        the moment it moves, not on their next poll. ``read_all`` reads every
+        token of interest, as the hourly pass does, instead of just the live ones.
         """
         if self._sync_lock.locked():
             return 0
@@ -1890,7 +1896,11 @@ class TradingService:
                     for chain in chains or self.chains():
                         try:
                             if await self.syncer.sync(
-                                record, chain, full=full, include_hidden=include_hidden
+                                record,
+                                chain,
+                                full=full,
+                                include_hidden=include_hidden,
+                                read_all=read_all,
                             ):
                                 changed += 1
                                 await self._emit(
@@ -1911,7 +1921,10 @@ class TradingService:
 
     def request_sync(self, *, wallet: str | None = None, full: bool = False) -> None:
         loop = asyncio.get_running_loop()
-        task = loop.create_task(self.sync_all(wallet=wallet, full=full), name="trading-sync-once")
+        # Someone asked for this pass: it re-reads everything, not just the live tokens.
+        task = loop.create_task(
+            self.sync_all(wallet=wallet, full=full, read_all=True), name="trading-sync-once"
+        )
         self._confirm_tasks.add(task)
         task.add_done_callback(self._confirm_tasks.discard)
 

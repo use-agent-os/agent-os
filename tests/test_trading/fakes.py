@@ -19,8 +19,10 @@ import httpx
 
 from agentos.trading.aggregator import ALLOWANCE_HOLDER
 from agentos.trading.aggregator import NATIVE_SENTINEL as AGG_NATIVE
+from agentos.trading.chains import MULTICALL3
 from agentos.trading.evm import (
     APPROVAL_TOPIC,
+    SEL_AGGREGATE3,
     SEL_ALLOWANCE,
     SEL_APPROVE,
     SEL_BALANCE_OF,
@@ -138,6 +140,10 @@ class FakeChain:
     revert_calls: bool = False
     # Tokens whose ``balanceOf`` the node refuses (per-item batch failure).
     fail_balance_of: set[str] = field(default_factory=set)
+    #: Whether Multicall3 is deployed; without it a call to its address answers ``0x``.
+    multicall_deployed: bool = True
+    #: Tokens whose ``balanceOf`` answers no data at all, as a call to no contract does.
+    answers_empty: set[str] = field(default_factory=set)
     # JSON-RPC methods that fail outright (a node outage for that method).
     fail_methods: set[str] = field(default_factory=set)
     #: Receipts as the sealed block has them, keyed by lowercase hash: until
@@ -307,9 +313,13 @@ class FakeChain:
         to = str(tx.get("to") or "").lower()
         data = str(tx.get("data") or "")
         selector = data[:10]
+        if selector == SEL_AGGREGATE3 and to == MULTICALL3.lower():
+            return self._aggregate3(data) if self.multicall_deployed else "0x"
         if selector == SEL_BALANCE_OF:
             if to in {t.lower() for t in self.fail_balance_of}:
                 raise _RpcFailError("execution timeout", -32000)
+            if to in {t.lower() for t in self.answers_empty}:
+                return "0x"
             owner = "0x" + data[10:74][-40:]
             return _enc_uint(self.get_erc20(to, owner))
         if selector == SEL_ALLOWANCE:
@@ -330,6 +340,39 @@ class FakeChain:
         if selector == SEL_DECIMALS:
             return _enc_uint(meta[2]) if meta else "0x"
         return "0x"
+
+    def balance_reads(self) -> list[str]:
+        """Every token asked ``balanceOf`` in ``calls``, directly or inside a Multicall3."""
+        from eth_abi import decode
+
+        out: list[str] = []
+        for call in self.calls:
+            if call["method"] != "eth_call":
+                continue
+            data = str(call["params"][0].get("data") or "")
+            if data.startswith(SEL_BALANCE_OF):
+                out.append(str(call["params"][0]["to"]).lower())
+            elif data.startswith(SEL_AGGREGATE3):
+                inner = decode(["(address,bool,bytes)[]"], bytes.fromhex(data[10:]))[0]
+                out.extend(
+                    c[0].lower() for c in inner if c[2].startswith(bytes.fromhex("70a08231"))
+                )
+        return out
+
+    def _aggregate3(self, data: str) -> str:
+        """Multicall3, decoded and encoded by ``eth_abi`` to check the client's own ABI code."""
+        from eth_abi import decode, encode
+
+        calls = decode(["(address,bool,bytes)[]"], bytes.fromhex(data[10:]))[0]
+        results: list[tuple[bool, bytes]] = []
+        for target, _allow_failure, call_data in calls:
+            try:
+                answer = self._eth_call({"to": target, "data": "0x" + call_data.hex()})
+            except _RpcFailError:
+                results.append((False, b""))
+            else:
+                results.append((True, bytes.fromhex(answer[2:])))
+        return "0x" + encode(["(bool,bytes)[]"], [results]).hex()
 
     def _get_logs(self, flt: dict[str, Any]) -> list[dict[str, Any]]:
         start = int(str(flt.get("fromBlock", "0x0")), 16)
