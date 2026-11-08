@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-from agentos.engine.agent import _omit_large_json_tool_fields
+from agentos.engine.tool_projection import _omit_large_json_tool_fields
 
 
 def test_large_body_fields_are_omitted_from_json_tool_result() -> None:
