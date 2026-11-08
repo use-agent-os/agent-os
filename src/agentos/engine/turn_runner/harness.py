@@ -442,6 +442,10 @@ class _TurnRunnerAgentConfigBuilderAdapter(AgentConfigBuilderPort):
             parallel_tool_calls=runner._resolve_parallel_tool_calls(),
             loop_guard=runner._resolve_loop_guard(),
             repetition_guard=runner._resolve_repetition_guard(),
+            retry_budget_seconds=getattr(runner._config, "agent_retry_budget_seconds", None),
+            timeout_context_recovery=getattr(
+                runner._config, "agent_timeout_context_recovery", None
+            ),
             tool_result_store_dir=str(media_root_from_config(runner._config) / "tool-results"),
             tool_result_store_session_id=session_id_for_log or session_key,
             tool_result_projection_max_inline_chars=getattr(

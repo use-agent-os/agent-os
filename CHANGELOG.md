@@ -13,6 +13,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   turn as finished. Such a run now ends with `session.event.error`.
 
 ### Changed
+- Provider retries: rate limits, overloads and transport blips are retried on
+  the same model up to 6 times (was 3) and within 90 s of waiting
+  (`agent_retry_budget_seconds`; `0` = count only). Waits back off with a
+  0.5x-1.5x random factor instead of a fixed small jitter. A timeout that
+  repeats now compacts older context and retries once before failing
+  (`agent_timeout_context_recovery`, default on). A `Retry-After` longer
+  than 30 s with no model to fail over to fails the turn instead of
+  retrying into the same limit. No failover happens after the model has
+  streamed visible text. Every failed attempt logs one `turn_policy_decision`.
+- HTTP 401 from any provider is now an authentication failure (not
+  retried), and the error says to check the provider's credentials.
 - Every agent turn now ends with exactly one `DoneEvent`, after the error on
   a failed turn. It carries `outcome`, the same record the task ledger stores
   as `details.turn_outcome`, and the `session.event.done` payload includes it.

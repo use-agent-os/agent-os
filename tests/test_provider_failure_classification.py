@@ -520,3 +520,34 @@ def test_not_found_error_stays_unknown_outside_the_anthropic_branch(provider: st
         classify_provider_error(provider, 404, raw_code="not_found_error")
         is ProviderFailureKind.UNKNOWN
     )
+
+
+@pytest.mark.parametrize(
+    ("status", "code", "message"),
+    [
+        (529, "529", "HTTP 529"),
+        (None, "overloaded_error", "Overloaded"),
+        (503, "503", "The model is overloaded, try again later"),
+    ],
+)
+def test_agent_fallback_classifies_explicit_overload_as_overloaded(
+    status: int | None, code: str, message: str
+) -> None:
+    policy = FallbackPolicy(max_retries=2)
+
+    kind = policy.classify_error(message, status_code=status, raw_code=code)
+
+    assert kind is ProviderErrorKind.OVERLOADED
+    assert policy.should_retry(kind, attempt=0) is True
+
+
+def test_401_from_an_unlisted_provider_family_is_auth_invalid() -> None:
+    assert (
+        classify_provider_error("my-custom-gateway", 401, raw_code="401", message="nope")
+        is ProviderFailureKind.AUTH_INVALID
+    )
+    # 403 stays unclassified: providers use it for policy / region refusals too.
+    assert (
+        classify_provider_error("my-custom-gateway", 403, raw_code="403", message="nope")
+        is not ProviderFailureKind.AUTH_INVALID
+    )

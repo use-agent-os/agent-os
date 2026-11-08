@@ -369,8 +369,16 @@ class AgentConfig:
     # router's cheapest text tier, filled in by the runtime.
     compaction_summary_timeout_seconds: float = 45.0
     compaction_summary_model_hint: tuple[str, str] = ("", "")
-    # Retry policy for transient LLM errors (429, 500, 503)
-    max_provider_retries: int = 3
+    # Retry policy for transient LLM errors (429, 500, 503): same-model retries
+    # are bounded by this count and by ``retry_budget_seconds`` of waiting
+    # (agentos.engine.policy.attempt).
+    max_provider_retries: int = 6
+    # Wall-clock seconds same-model retries of one provider call may spend,
+    # counted from its first failure. 0 = the count alone bounds them.
+    retry_budget_seconds: float = 90.0
+    # After a provider timeout has been retried, compact the context once and
+    # retry before failing over or failing the turn.
+    timeout_context_recovery: bool = True
     length_capped_continuations: int = 1
     retry_base_backoff_ms: int = 1000
     retry_max_backoff_ms: int = 30_000

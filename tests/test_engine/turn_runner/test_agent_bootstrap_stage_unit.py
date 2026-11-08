@@ -489,3 +489,39 @@ def test_value_objects_frozen() -> None:
 
 # replace lint suppress
 _ = replace
+
+
+@pytest.mark.asyncio
+async def test_retry_budget_and_timeout_recovery_thread_to_agent_config() -> None:
+    from dataclasses import replace as _replace
+
+    aux = _replace(_default_aux(), retry_budget_seconds=30.0, timeout_context_recovery=False)
+    stage = _make_stage(aux=_RecordingAgentConfigBuilder(aux=aux))
+
+    out = await stage.run(_make_input())
+
+    assert out.output.agent_config.retry_budget_seconds == 30.0
+    assert out.output.agent_config.timeout_context_recovery is False
+
+
+@pytest.mark.asyncio
+async def test_unset_retry_settings_keep_agent_config_defaults() -> None:
+    stage = _make_stage()
+
+    out = await stage.run(_make_input())
+
+    assert out.output.agent_config.retry_budget_seconds == 90.0
+    assert out.output.agent_config.timeout_context_recovery is True
+
+
+def test_gateway_config_accepts_and_validates_retry_settings() -> None:
+    from pydantic import ValidationError
+
+    from agentos.gateway.config import GatewayConfig
+
+    cfg = GatewayConfig(agent_retry_budget_seconds=45, agent_timeout_context_recovery=False)
+    assert cfg.agent_retry_budget_seconds == 45.0
+    assert cfg.agent_timeout_context_recovery is False
+    assert GatewayConfig().agent_retry_budget_seconds is None
+    with pytest.raises(ValidationError):
+        GatewayConfig(agent_retry_budget_seconds=-1)

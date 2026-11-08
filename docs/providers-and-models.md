@@ -278,16 +278,46 @@ whichever limit is spent (OpenAI's `x-ratelimit-reset-requests` /
 `x-ratelimit-reset-tokens`, Anthropic's `anthropic-ratelimit-*-reset`). Waits
 are clamped to 0–300 s.
 
-- When the wait is at most 30 s, the turn sleeps exactly that long (plus up to
-  10 % jitter, capped at 1 s) and retries the **same** model, so the prompt
-  cache and the price stay as they were. Each wait counts against the agent's
-  provider retries (`--max-provider-retries`, default `3`); once they are spent
-  the turn fails over to the next model in the chain.
-- A longer wait fails over straight away, as before.
+- When the wait is at most 30 s, the turn sleeps at least that long (plus up
+  to 10 % jitter, capped at 1 s) and retries the **same** model, so the prompt
+  cache and the price stay as they were.
+- A longer wait fails over straight away. With no model to fail over to, the
+  turn fails instead of retrying into the same limit.
 - A rate limit with a short wait does not count toward the circuit breaker.
   One without a wait, or with a longer one, still does, and so does an
   overload / 5xx whatever it says.
-- A rate limit with no wait at all keeps the exponential backoff.
+
+### Retrying transient failures
+
+Rate limits without a wait, overloads (HTTP 529, `overloaded_error`) and
+transport blips (connection resets, 502/504/52x) are retried on the same
+model. Each failed attempt gets exactly one recovery decision, which is
+recorded in the turn's call log as a `turn_policy_decision` entry with the
+failure kind and the chosen action (`retry`, `failover`, `compact_then_retry`
+or `fail`).
+
+- Retries are bounded by a count (`--max-provider-retries` /
+  `agent_max_provider_retries`, default `6`) **and** a wall-clock budget
+  (`agent_retry_budget_seconds`, default `90`). The budget counts the waits
+  and the failed attempts from the first failure; `0` leaves only the count.
+- Waits grow exponentially from 1 s, each multiplied by a random factor
+  between 0.5 and 1.5, so sessions that hit the same limit together do not
+  retry in lockstep.
+- When either bound is reached, the turn fails over once to the next model,
+  and fails if there is none.
+- No failover happens after the model already streamed visible text for that
+  attempt, so another model's reply is never spliced onto it.
+- A timeout is retried once. If it times out again, the turn compacts older
+  context and retries one more time before failing over or failing
+  (`agent_timeout_context_recovery`, default `true`).
+- An invalid API key (HTTP 401, from any provider) is not retried. The error
+  says to check the provider's credentials.
+
+```toml
+agent_max_provider_retries = 6
+agent_retry_budget_seconds = 90
+agent_timeout_context_recovery = true
+```
 
 The 30 s cap is `AgentConfig.rate_limit_retry_after_cap_seconds` for embedded
 callers; `0` turns the behaviour off. It has no `agentos.toml` key.

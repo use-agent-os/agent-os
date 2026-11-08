@@ -83,6 +83,10 @@ class _AgentConfigAuxiliaries:
     loop_guard: str = "enforce"
     # ``[llm.repetition_guard]``; ``None`` keeps the AgentConfig default.
     repetition_guard: RepetitionGuardSettings | None = None
+    # ``agent_retry_budget_seconds`` / ``agent_timeout_context_recovery``;
+    # ``None`` keeps the AgentConfig default.
+    retry_budget_seconds: float | None = None
+    timeout_context_recovery: bool | None = None
 
 @dataclass(frozen=True)
 class _MemorySnapshotResult:
@@ -438,6 +442,16 @@ class AgentBootstrapStage:
             ),
             tool_result_store_retention_seconds=(
                 aux.tool_result_store_retention_seconds
+            ),
+            retry_budget_seconds=(
+                aux.retry_budget_seconds
+                if aux.retry_budget_seconds is not None
+                else AgentConfig().retry_budget_seconds
+            ),
+            timeout_context_recovery=(
+                aux.timeout_context_recovery
+                if aux.timeout_context_recovery is not None
+                else AgentConfig().timeout_context_recovery
             ),
             metadata=agent_metadata,
         )

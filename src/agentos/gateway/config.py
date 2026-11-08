@@ -2929,6 +2929,13 @@ class GatewayConfig(BaseSettings):
     # Maximum provider-level retries for transient errors. ``None`` means
     # use the AgentConfig default.
     agent_max_provider_retries: int | None = None
+    # Wall-clock seconds same-model retries of one provider call may spend
+    # (rate limits, overloads, transport blips). ``None`` = AgentConfig
+    # default (90); ``0`` = only ``agent_max_provider_retries`` bounds them.
+    agent_retry_budget_seconds: float | None = Field(default=None, ge=0)
+    # After a provider timeout has been retried, compact the context once and
+    # retry before failing. ``None`` = AgentConfig default (on).
+    agent_timeout_context_recovery: bool | None = None
     # Agent model/tool loop budget for a single turn. 0 disables this cap.
     agent_max_iterations: int = Field(default=0, ge=0)
     # Provider request timeout (single LLM HTTP/streaming request).
