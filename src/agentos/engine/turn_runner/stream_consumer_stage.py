@@ -54,9 +54,17 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger(__name__)
 
-# Sentinel for "this event was consumed and should NOT be yielded
-# downstream" (CompactionEvent + ErrorEvent take this path -- the
-# loop continues instead of yielding).
+# Sentinel for "this event is not yielded from inside the stream loop".
+#
+# Terminal-event policy (OpenSpec ``agent-turn-lifecycle``): nothing terminal
+# is ever dropped here, only held. ``ErrorEvent`` is held in
+# ``pending_error_event`` so the runner yields it after the transcript is
+# persisted; the ``DoneEvent`` of a failed turn is held with it in
+# ``deferred_done_event`` and yielded right after, so every turn still ends
+# error -> done. ``CompactionEvent`` is consumed (the stage persists it). The
+# timeout rewrite in ``_ErrorHandler`` is cross-client message policy (CLI,
+# channels and web all show it), which is why it lives here and not in the
+# gateway serializer.
 _SUPPRESS: Final = object()
 
 # ---------------------------------------------------------------------------
@@ -184,6 +192,11 @@ class _StreamState:
     error_message: str | None = None
     pending_error_event: ErrorEvent | None = None
     done_event: DoneEvent | None = None
+    #: The transformed DoneEvent of a failed turn. The runner yields the
+    #: pending error only after the transcript is persisted, so a DoneEvent
+    #: that followed an error is held here and yielded after it: the turn's
+    #: last event is always its ``done``.
+    deferred_done_event: DoneEvent | None = None
     protocol_text_guard: ProtocolTextLeakGuard = field(default_factory=ProtocolTextLeakGuard)
 
     # PASSED IN by the harness -- references, not copies.
@@ -981,6 +994,9 @@ class StreamConsumerStage:
                 transformed = self._repetition_stop_handler.handle(event, state)
             elif isinstance(event, DoneEvent):
                 transformed, extra_yields = self._done_handler.handle(event, inp, state)
+                if state.pending_error_event is not None:
+                    state.deferred_done_event = transformed
+                    transformed = _SUPPRESS
             elif isinstance(event, CompactionEvent):
                 await self._compaction_handler.handle(event, inp)
                 transformed = _SUPPRESS

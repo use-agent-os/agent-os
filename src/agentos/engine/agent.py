@@ -36,6 +36,7 @@ from agentos.engine.loop_guard import (
     loop_guard_enforced,
     loop_guard_log_fields,
 )
+from agentos.engine.outcome import completed_outcome, outcome_from_error
 from agentos.engine.progress_watchdog import (
     ProgressDecision,
     ProgressObservation,
@@ -3649,38 +3650,38 @@ class Agent:
             done_billed_cost = turn_usage_delta.billed_cost
             cost_source = _cost_source_for_usage(done_cost, done_billed_cost)
 
-        has_usage = bool(
-            done_input_tokens
-            or done_output_tokens
-            or total_reasoning_tokens
-            or done_cached_tokens
-            or done_cache_write_tokens
-            or done_billed_cost
-        )
-        if terminal_error is None or has_usage:
-            if terminal_error is None:
-                yield self._transition(AgentState.DONE)
-            yield DoneEvent(
-                text="".join(final_text_parts),
-                input_tokens=done_input_tokens,
-                output_tokens=done_output_tokens,
-                reasoning_tokens=total_reasoning_tokens,
-                cached_tokens=done_cached_tokens,
-                cache_write_tokens=done_cache_write_tokens,
-                iterations=iterations,
-                cost_usd=done_cost,
-                billed_cost=done_billed_cost,
-                cost_source=cost_source,
-                model=done_model,
-                runtime_context_hash=runtime_context_hash,
-                runtime_context_chars=len(runtime_context),
-                reasoning_content=(
-                    "\n".join(final_reasoning_parts) if final_reasoning_parts else None
-                ),
-                session_totals=session_totals,
-                stop_reason=turn_stop_reason,
-                stop_details=turn_stop_details,
+        # Exactly one DoneEvent ends every turn, after any terminal error, so
+        # consumers read the result from ``outcome`` instead of guessing it
+        # from which events happened to arrive. A failed turn keeps its ERROR
+        # state; only a successful one transitions to DONE.
+        if terminal_error is None:
+            turn_outcome = completed_outcome()
+            yield self._transition(AgentState.DONE)
+        else:
+            turn_outcome = outcome_from_error(
+                code=terminal_error.code,
+                message=terminal_error.message,
             )
+        yield DoneEvent(
+            text="".join(final_text_parts),
+            input_tokens=done_input_tokens,
+            output_tokens=done_output_tokens,
+            reasoning_tokens=total_reasoning_tokens,
+            cached_tokens=done_cached_tokens,
+            cache_write_tokens=done_cache_write_tokens,
+            iterations=iterations,
+            cost_usd=done_cost,
+            billed_cost=done_billed_cost,
+            cost_source=cost_source,
+            model=done_model,
+            runtime_context_hash=runtime_context_hash,
+            runtime_context_chars=len(runtime_context),
+            reasoning_content=("\n".join(final_reasoning_parts) if final_reasoning_parts else None),
+            session_totals=session_totals,
+            stop_reason=turn_stop_reason,
+            stop_details=turn_stop_details,
+            outcome=turn_outcome,
+        )
         # Reset for next turn
         self._state = AgentState.IDLE
 

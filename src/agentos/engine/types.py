@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
+from agentos.engine.outcome import TurnOutcome
 from agentos.engine.repetition_guard import RepetitionGuardSettings
 from agentos.execution_status import ExecutionStatus
 from agentos.tool_boundary import ToolCall as ToolCall
@@ -171,6 +172,12 @@ class DoneEvent:
     # the provider attached, e.g. a refusal category.
     stop_reason: str | None = None
     stop_details: dict[str, Any] | None = None
+    #: How the turn ended (``agentos.engine.outcome``): the same taxonomy the
+    #: task ledger persists as ``details.turn_outcome``. Every turn ends with
+    #: exactly one DoneEvent, after any ErrorEvent, so ``outcome`` -- not the
+    #: presence of an error -- is what a consumer reads to learn the result.
+    #: ``None`` only on events built outside the agent loop (legacy callers).
+    outcome: TurnOutcome | None = None
 
     @property
     def upstream_cost_usd(self) -> float:

@@ -189,7 +189,8 @@ async def test_runtime_persists_usage_before_yielding_terminal_error() -> None:
 
         session = await manager.get_session(session_key)
         assert session is not None
-        assert any(event.kind == "done" for event in events)
+        # Usage is persisted before the terminal error is yielded; the turn's
+        # DoneEvent follows the error, after the point this consumer stopped.
         assert events[-1].kind == "error"
         assert session.input_tokens == 40
         assert session.output_tokens == 2

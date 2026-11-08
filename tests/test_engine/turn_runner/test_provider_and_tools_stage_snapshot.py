@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 
 from agentos.engine.runtime import TurnRunner
-from agentos.engine.types import ErrorEvent
+from agentos.engine.types import DoneEvent, ErrorEvent
 from agentos.tools.types import CallerKind, ToolContext
 
 
@@ -370,7 +370,8 @@ async def test_provider_and_tools_stage_snapshot(
         )
     elif expected["outcome"] == "early_yield":
         assert captured is None and raised is None
-        assert len(yielded) == 1 and isinstance(yielded[0], ErrorEvent)
+        assert len(yielded) == 2 and isinstance(yielded[0], ErrorEvent)
+        assert isinstance(yielded[1], DoneEvent) and yielded[1].outcome.kind == "failed"
         assert yielded[0].message == "No provider available"
         assert yielded[0].code == "no_provider"
         # Trace + persist parity
@@ -384,7 +385,8 @@ async def test_provider_and_tools_stage_snapshot(
         assert len(state.persist_error_calls) == 1
     else:  # exception — runtime's terminal handler converts to ErrorEvent
         assert raised is None and captured is None
-        assert len(yielded) == 1 and isinstance(yielded[0], ErrorEvent)
+        assert len(yielded) == 2 and isinstance(yielded[0], ErrorEvent)
+        assert isinstance(yielded[1], DoneEvent) and yielded[1].outcome.kind == "failed"
         assert yielded[0].code == "agent_error"
         assert len(state.emitted_turn_errors) == 1
         assert (

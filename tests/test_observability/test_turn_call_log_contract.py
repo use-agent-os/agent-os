@@ -303,8 +303,10 @@ async def test_runtime_writes_trace_when_provider_missing(tmp_path, monkeypatch)
     ]
 
     assert [(event.kind, getattr(event, "code", None)) for event in events] == [
-        ("error", "no_provider")
+        ("error", "no_provider"),
+        ("done", None),
     ]
+    assert events[-1].outcome.kind == "failed"
     [trace_log] = list(tmp_path.glob("traces-*.jsonl"))
     trace_records = [
         json.loads(line)

@@ -766,7 +766,10 @@ async def test_iteration_timeout_interrupts_stalled_provider_stream() -> None:
     assert state_index < error_index
     assert len(provider.calls) == 1
     assert provider.stream_closed is True
-    assert not any(isinstance(event, DoneEvent) for event in events)
+    # One DoneEvent still ends the turn, after the timeout error.
+    assert isinstance(events[-1], DoneEvent)
+    assert sum(isinstance(event, DoneEvent) for event in events) == 1
+    assert events[-1].outcome.kind == "interrupted"
 
 
 @pytest.mark.asyncio

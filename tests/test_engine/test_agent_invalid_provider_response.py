@@ -555,7 +555,10 @@ async def test_no_done_without_visible_output_retries_once_then_errors() -> None
         event.kind == "error" and event.code == "provider_stream_incomplete"
         for event in events
     )
-    assert not any(event.kind == "done" for event in events)
+    # The turn still ends with exactly one DoneEvent, after the error.
+    assert [e.kind for e in events if e.kind in ("error", "done")][-1] == "done"
+    assert sum(e.kind == "done" for e in events) == 1
+    assert events[-1].outcome.kind == "failed"
 
 
 @pytest.mark.asyncio
@@ -578,7 +581,10 @@ async def test_no_done_after_text_does_not_retry() -> None:
         event.kind == "error" and event.code == "provider_stream_incomplete"
         for event in events
     )
-    assert not any(event.kind == "done" for event in events)
+    # The turn still ends with exactly one DoneEvent, after the error.
+    assert [e.kind for e in events if e.kind in ("error", "done")][-1] == "done"
+    assert sum(e.kind == "done" for e in events) == 1
+    assert events[-1].outcome.kind == "failed"
 
 
 @pytest.mark.asyncio

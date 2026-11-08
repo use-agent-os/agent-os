@@ -24,7 +24,7 @@ from typing import Any
 import pytest
 
 from agentos.engine.runtime import TurnRunner
-from agentos.engine.types import ErrorEvent
+from agentos.engine.types import DoneEvent, ErrorEvent
 
 # Reuse upstream patch helpers from's equivalence harness — this
 # stage sits AFTER AgentBootstrapStage's slice so the same upstream
@@ -322,8 +322,10 @@ async def test_compaction_and_history_stage_snapshot(
         # handler -> ErrorEvent yielded; probe never fires.
         assert captured is None
         assert raised is None
-        assert len(yielded) == 1
+        # The runner's error, then the one DoneEvent that ends every turn.
+        assert len(yielded) == 2
         assert isinstance(yielded[0], ErrorEvent)
+        assert isinstance(yielded[1], DoneEvent) and yielded[1].outcome.kind == "failed"
         assert yielded[0].code == "agent_error"
         # History must have been attempted once before raising.
         assert len(call_log["history"]) == 1
