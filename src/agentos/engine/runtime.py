@@ -76,6 +76,7 @@ from agentos.engine.repetition_guard import (
     RepetitionGuardSettings,
     repetition_guard_settings_from,
 )
+from agentos.engine.router_loop import router_loop
 from agentos.engine.turn_policy import TurnPolicyResolver
 from agentos.engine.turn_progress import TurnProgressWriter
 from agentos.engine.turn_runner import (
@@ -4991,9 +4992,10 @@ class TurnRunner:
                 return await prompt_steps.apply_agentos_router(_copy_router_turn(turn))
 
             try:
+                # On the long-lived router loop (``engine.router_loop``): a
+                # blocking router still times out here and the turn fails open.
                 routed = await asyncio.wait_for(
-                    asyncio.to_thread(lambda: asyncio.run(_run_router_step())),
-                    timeout=router_timeout,
+                    router_loop().run(_run_router_step()), timeout=router_timeout
                 )
                 return commit_deferred_router_history(routed)
             except TimeoutError as exc:
