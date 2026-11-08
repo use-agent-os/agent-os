@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import json
+import time
+from collections.abc import Awaitable, Callable
 from typing import Any
+
+import structlog
 
 from agentos.gateway.session_lifecycle import session_status_for_task_status
 from agentos.gateway.task_runtime import SubagentCompletionEvent
+from agentos.session.models import AgentTaskStatus
 from agentos.session.terminal_reply import is_context_payload_too_large, sanitize_agent_error
+
+log = structlog.get_logger(__name__)
 
 _RESULT_MAX_CHARS = 12000
 _PARENT_WAKE_RESULTS_MAX_CHARS = 16000
@@ -189,6 +196,83 @@ async def announce_subagent_completion(
             task_runtime=task_runtime,
             completion_manager=_background_completion_manager,
         )
+
+
+#: ``details`` key marking a child already announced after a restart, so a
+#: second restart inside the recovery window does not wake its parent again.
+RESTART_ANNOUNCED_KEY = "restart_announced"
+_RESTART_CHILD_RUN_KINDS = frozenset({"subagent", "acp"})
+
+
+async def announce_restart_abandoned_children(
+    *,
+    storage: Any,
+    listener: Callable[[SubagentCompletionEvent], Awaitable[None]],
+    max_age_ms: int,
+    now_ms: int | None = None,
+) -> int:
+    """Report the child runs a restart cut off to their parents, once.
+
+    At startup ``SessionStorage.mark_abandoned_agent_tasks`` flips every child
+    that was queued or running to ``abandoned`` (``process_restart``) in one SQL
+    update, which publishes no terminal event, so a parent waiting on those
+    children was never woken. This sends each such child through the normal
+    completion path (*listener*, the runtime's terminal listener). Its spawn
+    group is treated as closed: the parent's own pre-restart run is over, so
+    the last child of the group wakes it once with every result.
+
+    Returns how many children were announced.
+    """
+
+    list_interrupted = getattr(storage, "list_interrupted_agent_tasks", None)
+    if not callable(list_interrupted):
+        return 0
+    now = now_ms if now_ms is not None else int(time.time() * 1000)
+    rows = await list_interrupted(["process_restart"], since_ms=now - max_age_ms)
+    announced = 0
+    # Oldest first, so a group's last child (the one that wakes the parent)
+    # is announced after its siblings.
+    for row in sorted(rows, key=lambda r: getattr(r, "created_at", 0) or 0):
+        if str(getattr(row, "run_kind", "")) not in _RESTART_CHILD_RUN_KINDS:
+            continue
+        details = row.details if isinstance(row.details, dict) else {}
+        if details.get(RESTART_ANNOUNCED_KEY):
+            continue
+        metadata = details.get("metadata")
+        metadata = metadata if isinstance(metadata, dict) else {}
+        parent_session_key = metadata.get("parent_session_key")
+        if not isinstance(parent_session_key, str) or not parent_session_key:
+            continue
+        parent_task_id = metadata.get("parent_task_id")
+        parent_task_id = parent_task_id if isinstance(parent_task_id, str) else None
+        if parent_task_id:
+            _tracker.mark_closed(parent_session_key, parent_task_id)
+        event = SubagentCompletionEvent(
+            parent_session_key=parent_session_key,
+            child_session_key=row.session_key,
+            task_id=row.task_id,
+            status=AgentTaskStatus.ABANDONED,
+            terminal_reason="process_restart",
+            agent_id=getattr(row, "agent_id", None),
+            parent_task_id=parent_task_id,
+        )
+        try:
+            await listener(event)
+        except Exception:  # noqa: BLE001 - one child must not stop the sweep
+            log.warning(
+                "subagent_announce.restart_announce_failed",
+                child_session_key=row.session_key,
+                parent_session_key=parent_session_key,
+                exc_info=True,
+            )
+            continue
+        update = getattr(storage, "update_agent_task", None)
+        if callable(update):
+            await update(row.task_id, details={**details, RESTART_ANNOUNCED_KEY: True})
+        announced += 1
+    if announced:
+        log.info("subagent_announce.restart_children_announced", count=announced)
+    return announced
 
 
 async def _is_superseded_acp_turn(

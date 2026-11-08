@@ -99,6 +99,16 @@ Abort stops the running turn if one exists, together with any coding-agent or
 subagent runs it spawned, and returns once they have ended. It does not delete
 the session.
 
+A turn that is aborted while tools are running leaves a transcript the next
+turn can replay as is. Every tool call that had not finished gets a
+"Cancelled" error result, and the turn ends with a note telling the model it
+was interrupted, so tools may have partly run.
+
+If the gateway restarts while subagent runs are in progress, they are not
+resumed. Each is marked `abandoned` (reason `process_restart`), and their
+parent is woken once with all of its children's results, so it does not wait
+forever. A second restart does not announce the same children again.
+
 ## Export a Transcript
 
 Export Markdown:
