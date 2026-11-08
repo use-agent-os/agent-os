@@ -3283,6 +3283,18 @@ class TurnRunner:
             if current_text_parts:
                 turn_segments.append({"type": "text", "text": "".join(current_text_parts)})
 
+            # A turn that stopped on a cooperative abort ended normally; give its
+            # partial reply the same "[interrupted]" marker a hard cancel writes.
+            done_outcome = getattr(done_event, "outcome", None)
+            if (
+                getattr(done_outcome, "kind", None) == "interrupted"
+                and getattr(done_outcome, "reason", None) == "cancelled"
+            ):
+                marked = _cancelled_partial_response_text(
+                    "".join(final_text_parts), turn_artifacts
+                )
+                final_text_parts[:] = [marked]
+
             # 10. Persist assistant response (filter sentinel tokens).
             # TurnFinalizerStage owns the slice. The four side effects
             # fire in legacy order: heartbeat normalize -> transcript

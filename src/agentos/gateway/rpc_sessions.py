@@ -45,6 +45,7 @@ from agentos.gateway.session_services import (
     set_session_epoch,
 )
 from agentos.gateway.session_streams import get_session_streams
+from agentos.gateway.terminal_events import mark_aborted_done
 from agentos.paths import media_root_from_config
 from agentos.session.compaction import (
     build_compaction_config_from_provider,
@@ -1527,6 +1528,8 @@ async def _sessions_send_impl(params: dict | None, ctx: RpcContext) -> dict:
                     continue
                 if event_kind == "done" and not show_thinking:
                     event_dict.pop("reasoning_content", None)
+                if event_kind == "done":
+                    mark_aborted_done(event_dict)
                 if event_kind in ("done", "error"):
                     await _emit_terminal_once(f"session.event.{event_kind}", event_dict)
                 else:

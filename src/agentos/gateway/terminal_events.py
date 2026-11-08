@@ -37,6 +37,27 @@ TerminalState = Literal["done", "error", "aborted"]
 _DEFAULT_MAX_RUNS = 10_000
 
 
+def mark_aborted_done(payload: dict[str, Any]) -> dict[str, Any]:
+    """Shape the ``done`` of a turn that stopped on a cooperative abort.
+
+    Such a turn ends on its own with a DoneEvent whose ``outcome`` is
+    ``interrupted`` / ``cancelled``. Its frame reports ``reason: "aborted"``
+    and ``partial_text``, the shape the runtime publishes for an aborted run,
+    so :func:`terminal_state` gives it state ``aborted``.
+    """
+
+    outcome = payload.get("outcome")
+    if (
+        isinstance(outcome, dict)
+        and outcome.get("kind") == "interrupted"
+        and outcome.get("reason") == "cancelled"
+    ):
+        payload["reason"] = "aborted"
+        text = payload.get("text")
+        payload.setdefault("partial_text", text if isinstance(text, str) else "")
+    return payload
+
+
 def terminal_state(event_name: str, payload: dict[str, Any] | None) -> TerminalState:
     """The ``state`` a terminal stream frame reports."""
 
