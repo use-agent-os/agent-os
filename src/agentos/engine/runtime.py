@@ -75,7 +75,7 @@ from agentos.engine.repetition_guard import (
     RepetitionGuardSettings,
     repetition_guard_settings_from,
 )
-from agentos.engine.turn_policy import resolve_turn_policy
+from agentos.engine.turn_policy import TurnPolicyResolver
 from agentos.engine.turn_progress import TurnProgressWriter
 from agentos.engine.turn_runner import (
     AgentBootstrapStage,
@@ -4004,43 +4004,20 @@ class TurnRunner:
     def _non_bool_int(value: Any) -> TypeGuard[int]:
         return not isinstance(value, bool) and isinstance(value, int)
 
+    def _turn_policy(self) -> TurnPolicyResolver:
+        # Built per call: tests and reloads swap the session manager and config.
+        return TurnPolicyResolver(
+            session_manager=self._session_manager, config=self._config, log=log
+        )
+
     def _resolve_agent_runtime_timeout(self, session_key: str) -> float:
-        """Resolve whole-turn runtime timeout.
+        """Whole-turn runtime timeout; ``0`` disables the runtime budget.
 
-        ``0`` is intentional and disables the runtime budget. The old
-        ``llm_timeout_seconds`` setting remains a legacy runtime alias.
+        The old ``llm_timeout_seconds`` setting remains a legacy runtime alias.
         """
-
-        sm = self._session_manager
-        if sm is not None and hasattr(sm, "get_session_config"):
-            try:
-                session_cfg = sm.get_session_config(session_key)
-                if session_cfg is not None:
-                    for attr in ("agent_runtime_timeout_seconds", "llm_timeout_seconds"):
-                        value = getattr(session_cfg, attr, None)
-                        if self._non_bool_number(value) and value >= 0:
-                            return float(value)
-            except Exception:  # noqa: BLE001
-                pass
-
-        env_timeout = os.environ.get("AGENTOS_TURN_TIMEOUT")
-        if env_timeout is not None and env_timeout.strip():
-            raw = env_timeout.strip()
-            try:
-                value = float(raw)
-            except ValueError:
-                log.warning("turn_runner.invalid_runtime_timeout", raw=raw)
-            else:
-                if value >= 0:
-                    return value
-                log.warning("turn_runner.negative_runtime_timeout", value=value)
-
-        for attr in ("agent_runtime_timeout_seconds", "llm_timeout_seconds"):
-            value = getattr(self._config, attr, None)
-            if self._non_bool_number(value) and value >= 0:
-                return float(value)
-
-        return _DEFAULT_AGENT_RUNTIME_TIMEOUT_SECONDS
+        return self._turn_policy().runtime_timeout(
+            session_key, default=_DEFAULT_AGENT_RUNTIME_TIMEOUT_SECONDS
+        )
 
     def _resolve_agent_max_iterations(
         self,
@@ -4048,63 +4025,7 @@ class TurnRunner:
         explicit: int | None = None,
     ) -> int:
         """Resolve model/tool loop budget for this turn."""
-
-        if explicit is not None:
-            if self._non_bool_int(explicit) and explicit >= 0:
-                self._last_agent_max_iterations_source = "explicit argument"
-                return int(explicit)
-            raise ValueError("max_iterations must be an integer >= 0")
-
-        sm = self._session_manager
-        session_value = None
-        if sm is not None and hasattr(sm, "get_session_config"):
-            try:
-                session_cfg = sm.get_session_config(session_key)
-                if session_cfg is not None:
-                    session_value = getattr(session_cfg, "agent_max_iterations", None)
-                    if session_value is not None and not (
-                        self._non_bool_int(session_value) and session_value >= 0
-                    ):
-                        log.warning(
-                            "turn_runner.invalid_agent_max_iterations",
-                            source="session",
-                            value=session_value,
-                        )
-            except Exception:  # noqa: BLE001
-                pass
-
-        env_value = os.environ.get("AGENTOS_AGENT_MAX_ITERATIONS")
-        if env_value is not None and env_value.strip():
-            raw = env_value.strip()
-            try:
-                parsed_env = int(raw)
-            except ValueError:
-                log.warning("turn_runner.invalid_agent_max_iterations", source="env", raw=raw)
-            else:
-                if parsed_env < 0:
-                    log.warning(
-                        "turn_runner.invalid_agent_max_iterations",
-                        source="env",
-                        value=parsed_env,
-                    )
-
-        config_value = getattr(self._config, "agent_max_iterations", None)
-        if config_value is not None and not (
-            self._non_bool_int(config_value) and config_value >= 0
-        ):
-            log.warning(
-                "turn_runner.invalid_agent_max_iterations",
-                source="config",
-                value=config_value,
-            )
-
-        policy = resolve_turn_policy(
-            session_key=session_key,
-            explicit_max_iterations=explicit,
-            session_manager=self._session_manager,
-            gateway_config=self._config,
-            env=os.environ,
-        )
+        policy = self._turn_policy().max_iterations(session_key, explicit)
         self._last_agent_max_iterations_source = policy.max_iterations_source
         return policy.max_iterations
 
@@ -4113,219 +4034,34 @@ class TurnRunner:
         session_key: str,
         explicit: float | None = None,
     ) -> float:
-        """Resolve per-iteration timeout for this turn.
-
-        Precedence: explicit arg > session config > env > gateway config > default.
-        """
-
-        if explicit is not None:
-            if self._non_bool_number(explicit) and explicit >= 0:
-                return float(explicit)
-            raise ValueError("iteration_timeout must be a non-negative number")
-
-        sm = self._session_manager
-        if sm is not None and hasattr(sm, "get_session_config"):
-            try:
-                session_cfg = sm.get_session_config(session_key)
-                if session_cfg is not None:
-                    value = getattr(session_cfg, "agent_iteration_timeout_seconds", None)
-                    if self._non_bool_number(value) and value >= 0:
-                        return float(value)
-                    if value is not None:
-                        log.warning(
-                            "turn_runner.invalid_agent_iteration_timeout",
-                            source="session",
-                            value=value,
-                        )
-            except Exception:  # noqa: BLE001
-                pass
-
-        env_value = os.environ.get("AGENTOS_AGENT_ITERATION_TIMEOUT")
-        if env_value is not None and env_value.strip():
-            raw = env_value.strip()
-            try:
-                value = float(raw)
-            except ValueError:
-                log.warning("turn_runner.invalid_agent_iteration_timeout", source="env", raw=raw)
-            else:
-                if value >= 0:
-                    return value
-                log.warning(
-                    "turn_runner.invalid_agent_iteration_timeout", source="env", value=value
-                )
-
-        value = getattr(self._config, "agent_iteration_timeout_seconds", None)
-        if self._non_bool_number(value) and value >= 0:
-            return float(value)
-        if value is not None:
-            log.warning(
-                "turn_runner.invalid_agent_iteration_timeout",
-                source="config",
-                value=value,
-            )
-
-        return AgentConfig().iteration_timeout
+        """Per-iteration timeout: explicit > session > env > gateway config > default."""
+        return self._turn_policy().iteration_timeout(session_key, explicit)
 
     def _resolve_agent_tool_timeout(
         self,
         session_key: str,
         explicit: float | None = None,
     ) -> float:
-        """Resolve per-tool execution timeout for this turn."""
-
-        if explicit is not None:
-            if self._non_bool_number(explicit) and explicit >= 0:
-                return float(explicit)
-            raise ValueError("tool_timeout must be a non-negative number")
-
-        sm = self._session_manager
-        if sm is not None and hasattr(sm, "get_session_config"):
-            try:
-                session_cfg = sm.get_session_config(session_key)
-                if session_cfg is not None:
-                    value = getattr(session_cfg, "agent_tool_timeout_seconds", None)
-                    if self._non_bool_number(value) and value >= 0:
-                        return float(value)
-                    if value is not None:
-                        log.warning(
-                            "turn_runner.invalid_agent_tool_timeout",
-                            source="session",
-                            value=value,
-                        )
-            except Exception:  # noqa: BLE001
-                pass
-
-        env_value = os.environ.get("AGENTOS_AGENT_TOOL_TIMEOUT")
-        if env_value is not None and env_value.strip():
-            raw = env_value.strip()
-            try:
-                value = float(raw)
-            except ValueError:
-                log.warning("turn_runner.invalid_agent_tool_timeout", source="env", raw=raw)
-            else:
-                if value >= 0:
-                    return value
-                log.warning("turn_runner.invalid_agent_tool_timeout", source="env", value=value)
-
-        value = getattr(self._config, "agent_tool_timeout_seconds", None)
-        if self._non_bool_number(value) and value >= 0:
-            return float(value)
-        if value is not None:
-            log.warning(
-                "turn_runner.invalid_agent_tool_timeout",
-                source="config",
-                value=value,
-            )
-
-        return AgentConfig().tool_timeout
+        """Per-tool execution timeout for this turn."""
+        return self._turn_policy().tool_timeout(session_key, explicit)
 
     def _resolve_agent_request_timeout(
         self,
         session_key: str,
         explicit: float | None = None,
     ) -> float:
-        """Resolve single LLM request timeout for this turn (agent-runtime path)."""
-
-        if explicit is not None:
-            if self._non_bool_number(explicit) and explicit > 0:
-                return float(explicit)
-            raise ValueError("request_timeout must be a positive number")
-
-        sm = self._session_manager
-        if sm is not None and hasattr(sm, "get_session_config"):
-            try:
-                session_cfg = sm.get_session_config(session_key)
-                if session_cfg is not None:
-                    value = getattr(session_cfg, "agent_request_timeout_seconds", None)
-                    if self._non_bool_number(value) and value > 0:
-                        return float(value)
-                    if value is not None:
-                        log.warning(
-                            "turn_runner.invalid_agent_request_timeout",
-                            source="session",
-                            value=value,
-                        )
-            except Exception:  # noqa: BLE001
-                pass
-
-        env_value = os.environ.get("AGENTOS_AGENT_REQUEST_TIMEOUT")
-        if env_value is not None and env_value.strip():
-            raw = env_value.strip()
-            try:
-                value = float(raw)
-            except ValueError:
-                log.warning("turn_runner.invalid_agent_request_timeout", source="env", raw=raw)
-            else:
-                if value > 0:
-                    return value
-                log.warning("turn_runner.invalid_agent_request_timeout", source="env", value=value)
-
-        value = getattr(self._config, "agent_request_timeout_seconds", None)
-        if self._non_bool_number(value) and value > 0:
-            return float(value)
-        if value is not None:
-            log.warning(
-                "turn_runner.invalid_agent_request_timeout",
-                source="config",
-                value=value,
-            )
-
-        return self._resolve_llm_timeout(session_key)
+        """Single LLM request timeout (agent-runtime path); falls back to the LLM timeout."""
+        return self._turn_policy().request_timeout(
+            session_key, explicit, default=lambda: self._resolve_llm_timeout(session_key)
+        )
 
     def _resolve_agent_max_provider_retries(
         self,
         session_key: str,
         explicit: int | None = None,
     ) -> int:
-        """Resolve max provider retries for this turn."""
-
-        if explicit is not None:
-            if self._non_bool_int(explicit) and explicit >= 0:
-                return int(explicit)
-            raise ValueError("max_provider_retries must be an integer >= 0")
-
-        sm = self._session_manager
-        if sm is not None and hasattr(sm, "get_session_config"):
-            try:
-                session_cfg = sm.get_session_config(session_key)
-                if session_cfg is not None:
-                    value = getattr(session_cfg, "agent_max_provider_retries", None)
-                    if self._non_bool_int(value) and value >= 0:
-                        return int(value)
-                    if value is not None:
-                        log.warning(
-                            "turn_runner.invalid_agent_max_provider_retries",
-                            source="session",
-                            value=value,
-                        )
-            except Exception:  # noqa: BLE001
-                pass
-
-        env_value = os.environ.get("AGENTOS_AGENT_MAX_PROVIDER_RETRIES")
-        if env_value is not None and env_value.strip():
-            raw = env_value.strip()
-            try:
-                value = int(raw)
-            except ValueError:
-                log.warning("turn_runner.invalid_agent_max_provider_retries", source="env", raw=raw)
-            else:
-                if value >= 0:
-                    return value
-                log.warning(
-                    "turn_runner.invalid_agent_max_provider_retries", source="env", value=value
-                )
-
-        value = getattr(self._config, "agent_max_provider_retries", None)
-        if self._non_bool_int(value) and value >= 0:
-            return int(value)
-        if value is not None:
-            log.warning(
-                "turn_runner.invalid_agent_max_provider_retries",
-                source="config",
-                value=value,
-            )
-
-        return AgentConfig().max_provider_retries
+        """Max provider retries for this turn."""
+        return self._turn_policy().max_provider_retries(session_key, explicit)
 
     def _resolve_turn_thinking(self, turn: Any) -> bool | ThinkingLevel:
         """Resolve explicit config thinking before agentos-router suggestions."""

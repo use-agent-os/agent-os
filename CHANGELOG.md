@@ -87,6 +87,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   router-control replay now reruns the turn in a loop instead of recursing,
   and the replaced run releases its spend reservation before the replay
   starts.
+- The per-turn budgets (iteration, tool and request timeouts, provider
+  retries, max iterations, runtime timeout) resolve through one
+  `TurnPolicyResolver`: explicit, then session, then env, then gateway
+  config, then default. Warnings and values are unchanged.
 - Subagents now run in a lane per parent session. At most
   `subagents.max_concurrent_children` children of one parent (default 2; an
   agent's own `subagents.max_concurrent_children` wins; `0` = no limit) run
