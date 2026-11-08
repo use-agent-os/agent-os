@@ -127,3 +127,6 @@ node_modules/
 # React frontend build output (built at release; never committed)
 src/agentos/gateway/static/dist/
 frontend/node_modules/
+
+# OpenSpec planning artifacts (local only; not committed)
+openspec/

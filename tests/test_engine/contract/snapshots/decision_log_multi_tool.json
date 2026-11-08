@@ -1,0 +1,90 @@
+{
+  "decision_entries": [
+    {
+      "cache_mode": "auto",
+      "model": "openai/gpt-6-luna",
+      "pipeline_steps": [
+        [
+          "resolve_model",
+          true
+        ],
+        [
+          "apply_agentos_router",
+          true
+        ],
+        [
+          "observe_reasoning_hint",
+          true
+        ],
+        [
+          "filter_skills",
+          true
+        ],
+        [
+          "inject_subagent_grounding",
+          false
+        ],
+        [
+          "inject_env_probe",
+          true
+        ],
+        [
+          "inject_platform_hint",
+          false
+        ],
+        [
+          "inject_plan_mode",
+          false
+        ],
+        [
+          "apply_prompt_cache",
+          true
+        ]
+      ],
+      "provider": "_SelectorFallbackProvider",
+      "refusal_category": null,
+      "resolved_model": "openai/gpt-6-luna",
+      "retrieval_mode": "hybrid",
+      "session_key": "agent:main:webchat:decision-snapshot",
+      "skill_count": 0,
+      "skills_invoked": [],
+      "stop_reason": "end_turn",
+      "tokens_input": 470,
+      "tokens_output": 60,
+      "tool_choice": "auto",
+      "tool_count": 3
+    }
+  ],
+  "event_kinds": [
+    "state_change",
+    "text_delta",
+    "tool_use_start",
+    "tool_use_start",
+    "state_change",
+    "tool_result",
+    "tool_result",
+    "state_change",
+    "tool_use_start",
+    "state_change",
+    "tool_result",
+    "state_change",
+    "text_delta",
+    "state_change",
+    "done"
+  ],
+  "provider_calls": 3,
+  "tool_results_seen_by_model": [
+    {
+      "id": "L1",
+      "is_error": false
+    },
+    {
+      "id": "S1",
+      "is_error": false
+    },
+    {
+      "id": "B1",
+      "is_error": true
+    }
+  ]
+}
