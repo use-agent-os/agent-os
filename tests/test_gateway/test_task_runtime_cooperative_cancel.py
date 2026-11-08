@@ -108,7 +108,9 @@ async def test_a_turn_that_ignores_the_abort_is_cancelled_after_the_grace() -> N
     await runtime.wait(handle.task_id, timeout=3)
 
     assert outcome == {"hard_cancelled": True}
-    assert loop.time() - began >= 0.1
+    # The grace was honoured. Windows' loop clock ticks in ~16 ms steps, so a
+    # 0.1 s wait can read as 0.094 s there.
+    assert loop.time() - began >= 0.1 - 0.02
     assert storage.records[handle.task_id].status == AgentTaskStatus.CANCELLED
 
 
