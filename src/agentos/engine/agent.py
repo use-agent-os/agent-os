@@ -92,7 +92,7 @@ from agentos.engine.thinking import drop_reasoning
 from agentos.engine.tokenjuice_adapter import reduce_tool_result_with_tokenjuice
 from agentos.engine.tool_batch import ToolBatchExecutor, registry_spec_lookup
 from agentos.engine.tool_projection import (
-    ToolResultProjectionMixin,
+    ToolResultProjector,
     _pending_approval_payload,
 )
 from agentos.engine.tool_text_compat import strip_synthetic_tool_call_suffix
@@ -624,7 +624,7 @@ def _strip_historical_image_blocks(messages: list[Message]) -> list[Message]:
 _StreamAccumulator = StreamAccumulator
 
 
-class Agent(ToolResultProjectionMixin):
+class Agent:
     """Explicit state-machine agent.
 
     Lifecycle per turn:
@@ -698,9 +698,13 @@ class Agent(ToolResultProjectionMixin):
         # User rows steered into the current turn (agentos.engine.steering).
         self._turn_steered_entry_ids: list[str] = []
         self._message_sizes = MessageSizeCache(Agent._live_request_jsonable)
+        # Tool-result projection and capping, composed (``engine.tool_projection``).
+        self._projection = ToolResultProjector(self)
         # Durable mid-turn progress (``agentos.engine.turn_progress``); set by
         # the runtime for the turn it runs, ``None`` when nothing persists.
         self._turn_progress_sink: TurnProgressSink | None = None
+
+    _positive_int = staticmethod(ToolResultProjector._positive_int)
 
     def _context_overflow_error(self) -> ErrorEvent:
         reason = self._last_compaction_refusal_reason
@@ -1057,7 +1061,7 @@ class Agent(ToolResultProjectionMixin):
             # persisted by TurnRunner as system errors, while their usage still
             # flows through the final DoneEvent below when provider usage exists.
             self._seal_transcript(t.turn_messages, t.sealed_len)
-            self._cap_turn_for_history(t.turn_messages)
+            self._projection._cap_turn_for_history(t.turn_messages)
             self._history = list(t.turn_messages)
             self._record_turn_transcript(self._history)
             self._write_context_stage("session:after", self._history)
@@ -3079,12 +3083,14 @@ class Agent(ToolResultProjectionMixin):
         t.terminal_projection_preflight_error = False
         resolved_tool_calls: list[ToolCall] = []
         for tc in t.tool_calls:
-            resolved = self._rehydrate_projected_tool_arguments(tc)
+            resolved = self._projection._rehydrate_projected_tool_arguments(tc)
             if isinstance(resolved, ToolResult):
                 t.preflight_tool_results[tc.tool_use_id] = resolved
-                if self._is_provider_context_projection_reuse_result(resolved):
+                if self._projection._is_provider_context_projection_reuse_result(resolved):
                     t.terminal_projection_preflight_error = True
-                resolved_tool_calls.append(self._sanitize_projected_tool_call_arguments(tc))
+                resolved_tool_calls.append(
+                    self._projection._sanitize_projected_tool_call_arguments(tc)
+                )
                 continue
             resolved_tool_calls.append(resolved)
         t.tool_calls = resolved_tool_calls
@@ -3223,7 +3229,7 @@ class Agent(ToolResultProjectionMixin):
         # tool_calls order, one result per tool_use.
         t.tool_batch = ToolBatchExecutor(
             execute=self._execute_tool,
-            project=self._project_tool_result_for_delivery,
+            project=self._projection._project_tool_result_for_delivery,
             timeout_for=self._tool_execution_timeout,
             spec_for=registry_spec_lookup(self._tool_registry),
             deadline=t.tool_deadline,
@@ -3585,7 +3591,7 @@ class Agent(ToolResultProjectionMixin):
         report = seal_window(
             messages,
             sealed_len,
-            shrink_tool_result=self._shrink_tool_result_for_transcript,
+            shrink_tool_result=self._projection._shrink_tool_result_for_transcript,
             repair_prompt=_PROVIDER_CONTEXT_REPAIR_PROMPT,
         )
         if report.replay_pairs_stripped:
@@ -4096,7 +4102,7 @@ class Agent(ToolResultProjectionMixin):
             )
         else:
             try:
-                resolved = self._rehydrate_projected_tool_arguments(tc)
+                resolved = self._projection._rehydrate_projected_tool_arguments(tc)
                 if isinstance(resolved, ToolResult):
                     result = resolved
                 else:

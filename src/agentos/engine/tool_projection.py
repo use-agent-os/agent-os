@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from typing import Any, Protocol
 
 import structlog
 
@@ -151,12 +151,8 @@ def _tool_result_content_has_artifact(content: str) -> bool:
     return payload.get("status") in {"published", "already_published"}
 
 
-class ToolResultProjectionMixin:
-    """Projection and capping of tool results and tool-call arguments.
-
-    Mixed into :class:`agentos.engine.agent.Agent`, which provides the state
-    and the three helpers declared below.
-    """
+class ToolResultProjectionHost(Protocol):
+    """What :class:`ToolResultProjector` reads from the agent it serves."""
 
     config: AgentConfig
     _session_key: str | None
@@ -164,24 +160,38 @@ class ToolResultProjectionMixin:
     _turn_base_len: int
     _turn_reset: bool
 
-    if TYPE_CHECKING:
+    def _context_budget_governor(self) -> ContextBudgetGovernor: ...
 
-        def _context_budget_governor(self) -> ContextBudgetGovernor: ...
+    def _write_turn_call_log(self, kind: str, **payload: Any) -> None: ...
 
-        def _write_turn_call_log(self, kind: str, **payload: Any) -> None: ...
+    def _tokenjuice_tool_reduction(
+        self,
+        *,
+        tool_name: str,
+        content: str,
+        is_error: bool,
+        tool_use_id: str,
+        arguments: dict[str, Any] | None = None,
+        command: str | None = None,
+        cwd: str | None = None,
+        max_inline_chars: int | None = None,
+    ) -> str | None: ...
 
-        def _tokenjuice_tool_reduction(
-            self,
-            *,
-            tool_name: str,
-            content: str,
-            is_error: bool,
-            tool_use_id: str,
-            arguments: dict[str, Any] | None = None,
-            command: str | None = None,
-            cwd: str | None = None,
-            max_inline_chars: int | None = None,
-        ) -> str | None: ...
+
+class ToolResultProjector:
+    """Projection and capping of tool results and tool-call arguments.
+
+    Composed into :class:`agentos.engine.agent.Agent` (``agent._projection``);
+    it reads the agent's config and turn state through the
+    :class:`ToolResultProjectionHost` it is built with.
+    """
+
+    def __init__(self, host: ToolResultProjectionHost) -> None:
+        self._host = host
+
+    @property
+    def config(self) -> AgentConfig:
+        return self._host.config
 
     @staticmethod
     def _positive_int(value: Any) -> int | None:
@@ -228,7 +238,7 @@ class ToolResultProjectionMixin:
         self,
         budget_class: ToolResultBudgetClass | None = None,
     ) -> int:
-        return self._context_budget_governor().tool_result_provider_chars_for(
+        return self._host._context_budget_governor().tool_result_provider_chars_for(
             self._context_budget_class(budget_class)
         )
 
@@ -287,8 +297,8 @@ class ToolResultProjectionMixin:
     ) -> ToolResultRecord | None:
         if not self.config.tool_result_store_dir:
             return None
-        session_id = self.config.tool_result_store_session_id or self._session_key
-        session_key = self.config.tool_result_store_session_key or self._session_key
+        session_id = self.config.tool_result_store_session_id or self._host._session_key
+        session_key = self.config.tool_result_store_session_key or self._host._session_key
         agent_id = self.config.tool_result_store_agent_id
         if not agent_id and session_key:
             from agentos.session.keys import parse_agent_id
@@ -364,7 +374,7 @@ class ToolResultProjectionMixin:
         self.config.metadata["tool_projection_attempts"] = (
             self.config.metadata.get("tool_projection_attempts", 0) + 1
         )
-        projected_content = self._tokenjuice_tool_reduction(
+        projected_content = self._host._tokenjuice_tool_reduction(
             tool_name=result.tool_name,
             content=result.content,
             is_error=result.is_error,
@@ -377,7 +387,7 @@ class ToolResultProjectionMixin:
             self.config.metadata["tool_projection_noops"] = (
                 self.config.metadata.get("tool_projection_noops", 0) + 1
             )
-            self._write_turn_call_log(
+            self._host._write_turn_call_log(
                 "tool_projection_noop",
                 tool_use_id=result.tool_use_id,
                 name=result.tool_name,
@@ -416,7 +426,7 @@ class ToolResultProjectionMixin:
             "tool_projection_tokens_saved", 0
         ) + max(0, tokens_before - tokens_after)
 
-        self._write_turn_call_log(
+        self._host._write_turn_call_log(
             "tool_projection_applied",
             tool_use_id=result.tool_use_id,
             name=result.tool_name,
@@ -540,7 +550,7 @@ class ToolResultProjectionMixin:
         touched again, so the next request re-sends this turn's tail once (one
         cache write) and every later request repeats it byte for byte.
         """
-        start = 2 if self._turn_reset else self._turn_base_len
+        start = 2 if self._host._turn_reset else self._host._turn_base_len
         if start >= len(messages):
             return
         cap = self._history_tool_payload_cap()
@@ -570,7 +580,7 @@ class ToolResultProjectionMixin:
                     reasoning_details=message.reasoning_details,
                     provenance=message.provenance,
                 )
-                self._message_sizes.retain_only(messages)
+                self._host._message_sizes.retain_only(messages)
 
     def _cap_tool_result(
         self,
@@ -725,7 +735,7 @@ class ToolResultProjectionMixin:
             )
             + 1
         )
-        self._write_turn_call_log(
+        self._host._write_turn_call_log(
             "tool_argument_projection_rehydrate_failed",
             tool_use_id=tc.tool_use_id,
             tool_name=tc.tool_name,
@@ -760,7 +770,7 @@ class ToolResultProjectionMixin:
             )
             + 1
         )
-        self._write_turn_call_log(
+        self._host._write_turn_call_log(
             "tool_argument_projection_rehydrate_failed",
             tool_use_id=tc.tool_use_id,
             tool_name=tc.tool_name,
