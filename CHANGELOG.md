@@ -33,6 +33,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `docs/tools-and-sandbox.md`.
 
 ### Fixed
+- Ollama: with thinking off, a thinking-family model (`qwen3`, `qwen3.5`,
+  `deepseek-r1`, `magistral`, …) was left at its default, which is to think.
+  After a tool round it could answer with reasoning only, and the turn failed
+  with `empty_response`. Such models are now sent `think: false`. `gpt-oss`
+  (which takes a thinking level) and models that reason in `<think>` tags
+  keep the old behaviour.
 - Subagent runs cut off by a gateway restart were marked `abandoned` with no
   completion event, so a parent waiting on them never woke up. After a
   restart, each such child is now reported to its parent through the normal

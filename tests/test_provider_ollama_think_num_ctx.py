@@ -109,7 +109,13 @@ def test_think_is_sent_only_to_thinking_models_with_thinking_on(
 
     assert _payload(monkeypatch, "qwen3:8b", on)["think"] is True
     assert _payload(monkeypatch, "deepseek-r1:14b", on)["think"] is True
-    assert "think" not in _payload(monkeypatch, "qwen3:8b", ChatConfig())
+    # Thinking off: a thinking family is told not to think (its default is on).
+    assert _payload(monkeypatch, "qwen3:8b", ChatConfig())["think"] is False
+    assert _payload(monkeypatch, "qwen3.5:9b", ChatConfig())["think"] is False
+    assert "think" not in _payload(monkeypatch, "llama3", ChatConfig())
+    assert "think" not in _payload(monkeypatch, "qwen3-coder:30b", ChatConfig())
+    # gpt-oss takes a level, not a boolean; leave its default.
+    assert "think" not in _payload(monkeypatch, "gpt-oss:20b", ChatConfig())
     # Ollama answers ``think`` for a non-thinking model with a 400.
     assert "think" not in _payload(monkeypatch, "llama3", on)
     assert "think" not in _payload(monkeypatch, "qwen3-coder:30b", on)
