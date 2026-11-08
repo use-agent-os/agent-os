@@ -393,6 +393,7 @@ class TaskRuntime:
         subagent_reserved_slots: int = 0,
         turn_hard_deadline_s: float | None = None,
         running_heartbeat_interval_s: float | None = 30.0,
+        cancel_grace_s: float = 5.0,
         pending_overflow_policy: PendingOverflowPolicy | str = (
             PendingOverflowPolicy.REJECT_NEWEST
         ),
@@ -407,6 +408,8 @@ class TaskRuntime:
             raise ValueError("turn_hard_deadline_s must be > 0 or None")
         if running_heartbeat_interval_s is not None and running_heartbeat_interval_s <= 0:
             raise ValueError("running_heartbeat_interval_s must be > 0 or None")
+        if cancel_grace_s < 0:
+            raise ValueError("cancel_grace_s must be >= 0")
         try:
             pending_overflow_policy = PendingOverflowPolicy(pending_overflow_policy)
         except ValueError as exc:
@@ -434,6 +437,11 @@ class TaskRuntime:
         self._subagent_reserved_slots = subagent_reserved_slots
         self._turn_hard_deadline_s = turn_hard_deadline_s
         self._running_heartbeat_interval_s = running_heartbeat_interval_s
+        # A running turn asked to stop gets this long to stop on its own (the
+        # cooperative abort: provider stream closed, tools told) before its
+        # task is cancelled. ``0`` cancels at once, as before.
+        self._cancel_grace_s = cancel_grace_s
+        self._cancel_fallbacks: set[asyncio.Task[None]] = set()
         self._pending_overflow_policy = pending_overflow_policy
         # Per-session write locks shared with TurnRunner and RPC ingress on
         # gateway-dispatched turns. These guard short transcript/session state
@@ -732,9 +740,38 @@ class TaskRuntime:
                 task.cancel_source = _clean_cancel_detail(source, "unknown")
                 task.stop_signal.shutdown = False
                 task.cancel_reason = _clean_cancel_detail(reason, "cancelled")
-                if task.asyncio_task is not None and not task.asyncio_task.done():
+                if task.asyncio_task is None or task.asyncio_task.done():
+                    continue
+                signal = task.stop_signal
+                if (
+                    task.started
+                    and self._cancel_grace_s > 0
+                    and signal.accepts_abort
+                    and not signal.in_tool_batch
+                ):
+                    # Cooperative first: an agent-loop turn that is streaming
+                    # or between steps stops at its next checkpoint; cancel
+                    # the task only if it does not. Anything else -- a tool
+                    # batch, an ACP harness turn -- is cancelled at once.
+                    task.stop_signal.request_abort(task.cancel_reason or "cancelled")
+                    fallback = asyncio.create_task(self._cancel_after_grace(task))
+                    self._cancel_fallbacks.add(fallback)
+                    fallback.add_done_callback(self._cancel_fallbacks.discard)
+                else:
                     task.asyncio_task.cancel()
         return len(tasks)
+
+    async def _cancel_after_grace(self, task: _RuntimeTask) -> None:
+        running = task.asyncio_task
+        if running is None:
+            return
+        try:
+            await asyncio.wait_for(asyncio.shield(running), timeout=self._cancel_grace_s)
+        except TimeoutError:
+            if not running.done():
+                running.cancel()
+        except BaseException:  # noqa: BLE001 - the task's own outcome is not ours to raise
+            return
 
     async def send(
         self,
@@ -1343,6 +1380,10 @@ class TaskRuntime:
                         heartbeat_task = None
                     if task.acquired_slot:
                         await self._release_slot(task)
+                    if task.cancel_requested and task.stop_signal.aborted:
+                        # The turn honoured the cooperative abort and ended on
+                        # its own; it is still a cancelled run.
+                        raise asyncio.CancelledError
                     await self._mark_terminal(
                         task,
                         AgentTaskStatus.SUCCEEDED,

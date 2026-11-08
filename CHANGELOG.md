@@ -58,6 +58,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   turn as finished. Such a run now ends with `session.event.error`.
 
 ### Changed
+- Stopping a turn (abort, kill, interrupt) now asks it to stop first when it
+  is streaming or between steps. The turn closes the model's stream, sends no
+  further request and ends on its own, reporting the run as aborted. It is
+  cancelled only if it has not stopped within
+  `task_runtime.turn_cancel_grace_seconds` (default 5 s). Turns running tools
+  and ACP harness turns are still cancelled at once.
 - Provider retries: rate limits, overloads and transport blips are retried on
   the same model up to 6 times (was 3) and within 90 s of waiting
   (`agent_retry_budget_seconds`; `0` = count only). Waits back off with a

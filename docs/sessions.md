@@ -99,6 +99,18 @@ Abort stops the running turn if one exists, together with any coding-agent or
 subagent runs it spawned, and returns once they have ended. It does not delete
 the session.
 
+A turn that is streaming or between steps when you stop it is asked to stop
+first. The model's stream is closed at once, no further request is sent, and
+the turn ends on its own with its reply so far marked `[interrupted]`. If it
+has not stopped within `task_runtime.turn_cancel_grace_seconds` (default `5`;
+`0` stops at once), its task is cancelled. A turn running tools, or an ACP
+harness turn, is cancelled at once, so a stop never waits on a long tool.
+
+```toml
+[task_runtime]
+turn_cancel_grace_seconds = 5
+```
+
 A turn that is aborted while tools are running leaves a transcript the next
 turn can replay as is. Every tool call that had not finished gets a
 "Cancelled" error result, and the turn ends with a note telling the model it

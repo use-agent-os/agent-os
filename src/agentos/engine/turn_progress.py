@@ -250,10 +250,52 @@ class TurnStopSignal:
     The task runtime binds one per turn (:func:`bind_turn_stop_signal`) and
     sets :attr:`shutdown` before the gateway's own shutdown cancels the turn.
     A mutable holder in a context variable, so tasks the turn spawns (stream
-    drivers) see the flag too.
+    drivers, tool calls) see it too.
+
+    It is also the turn's cooperative abort: :meth:`request_abort` asks the
+    turn to stop at its next checkpoint (the agent loop closes the provider
+    stream, skips the next request and seals the turn); a tool that runs for
+    long can poll :func:`turn_abort_requested` or await :meth:`wait_abort`.
+    Whoever requested the abort falls back to cancelling the task when the
+    turn does not stop in time.
     """
 
     shutdown: bool = False
+    aborted: bool = False
+    abort_reason: str | None = None
+    #: Set by the agent loop while it runs this turn: the turn honours
+    #: :meth:`request_abort`. Turns that do not (an ACP harness, a bare
+    #: handler) are cancelled at once.
+    accepts_abort: bool = False
+    #: Set by the agent loop while a tool batch runs. Tools are cancelled at
+    #: once (they clean up on ``CancelledError``), so a stop never waits on a
+    #: long tool.
+    in_tool_batch: bool = False
+    _abort_event: Any = field(default=None, repr=False, compare=False)
+
+    def request_abort(self, reason: str = "cancelled") -> None:
+        """Ask the turn to stop at its next checkpoint (idempotent)."""
+
+        if not self.aborted:
+            self.aborted = True
+            self.abort_reason = reason
+        event = self._abort_event
+        if event is not None:
+            event.set()
+
+    def abort_event(self) -> Any:
+        """An ``asyncio.Event`` set once the abort is requested (lazily bound)."""
+
+        import asyncio  # noqa: PLC0415 - keep this module importable without a loop
+
+        if self._abort_event is None:
+            self._abort_event = asyncio.Event()
+            if self.aborted:
+                self._abort_event.set()
+        return self._abort_event
+
+    async def wait_abort(self) -> None:
+        await self.abort_event().wait()
 
 
 _TURN_STOP_SIGNAL: ContextVar[TurnStopSignal | None] = ContextVar(
@@ -264,6 +306,19 @@ _TURN_STOP_SIGNAL: ContextVar[TurnStopSignal | None] = ContextVar(
 def bind_turn_stop_signal(signal: TurnStopSignal) -> None:
     """Bind *signal* to the current task's context (and tasks it creates)."""
     _TURN_STOP_SIGNAL.set(signal)
+
+
+def current_turn_stop_signal() -> TurnStopSignal | None:
+    """The stop signal bound to the running turn, if any."""
+
+    return _TURN_STOP_SIGNAL.get()
+
+
+def turn_abort_requested() -> bool:
+    """True once the running turn was asked to stop (cooperative abort)."""
+
+    signal = _TURN_STOP_SIGNAL.get()
+    return signal is not None and signal.aborted
 
 
 def stopped_by_shutdown() -> bool:

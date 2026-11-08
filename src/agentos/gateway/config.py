@@ -336,6 +336,10 @@ class TaskRuntimeConfig(BaseModel):
     # lock before the dead-turn breaker fires. ``None`` keeps the historical
     # behaviour (no breaker, jam tolerated).
     turn_hard_deadline_s: float | None = Field(default=None, gt=0)
+    # Seconds a running turn asked to stop (abort, kill, interrupt) gets to
+    # stop on its own -- provider stream closed, tools told -- before its task
+    # is cancelled. ``0`` cancels at once.
+    turn_cancel_grace_seconds: float = Field(default=5.0, ge=0)
     # Global default policy when ``max_pending_per_session`` is exceeded.
     # ``reject_newest`` preserves legacy reject-on-overflow. ``drop_oldest``
     # evicts the oldest QUEUED pending task on the session and accepts the

@@ -1013,7 +1013,7 @@ async def _emit_task_runtime_stream_events(
 
     from agentos.chat.display_text import AssistantTextStreamSanitizer, strip_assistant_text
     from agentos.engine.stream_wrappers import wrap_stream
-    from agentos.gateway.terminal_events import terminal_state
+    from agentos.gateway.terminal_events import mark_aborted_done, terminal_state
 
     display_text = AssistantTextStreamSanitizer()
 
@@ -1115,6 +1115,8 @@ async def _emit_task_runtime_stream_events(
             event_dict["error_message"] = safe_error_message
         event_name = f"session.event.{event_kind}"
         emit = True
+        if event_kind == "done":
+            mark_aborted_done(event_dict)
         if event_kind in ("done", "error"):
             event_dict["state"] = terminal_state(event_name, event_dict)
             if run_id:
@@ -3056,6 +3058,9 @@ async def start_gateway_server(
             getattr(getattr(config, "subagents", None), "subagent_reserved_slots", 0)
         ),
         turn_hard_deadline_s=_task_runtime_turn_hard_deadline_s(config),
+        cancel_grace_s=float(
+            getattr(getattr(config, "task_runtime", None), "turn_cancel_grace_seconds", 5.0)
+        ),
         pending_overflow_policy=getattr(
             config.task_runtime, "pending_overflow_policy", "reject_newest"
         ),
