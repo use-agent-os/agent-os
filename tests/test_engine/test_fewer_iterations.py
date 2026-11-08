@@ -15,7 +15,6 @@ from agentos.engine.steps.agentos_router import (
     _record_controller_thinking_metadata,
     _record_thinking_metadata,
 )
-from agentos.engine.turn_runner.harness import _TurnRunnerAgentConfigBuilderAdapter
 from agentos.engine.types import ThinkingLevel
 from agentos.gateway.config import AgentOSRouterConfig, ToolsConfig
 from agentos.identity.prompt import assemble_system_prompt
@@ -83,7 +82,8 @@ def test_tools_parallel_calls_config_reaches_agent_config() -> None:
             provider_selector=None,
             config=SimpleNamespace(tools=ToolsConfig(parallel_calls=value)),
         )
-        aux = _TurnRunnerAgentConfigBuilderAdapter(runner).build_auxiliaries(
+        aux = TurnRunner.build_auxiliaries(
+            runner,
             agent_id="main",
             session_key="agent:main:webchat:t",
             session_id_for_log=None,

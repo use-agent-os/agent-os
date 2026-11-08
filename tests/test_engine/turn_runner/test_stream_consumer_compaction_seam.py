@@ -327,10 +327,9 @@ async def test_persist_raises_preserves_recoverable_pre_compaction_state(
     """Failed DB persistence must not refresh false post-compaction state."""
 
     refresh_calls: list[dict] = []
-    import agentos.engine.turn_runner.harness as harness_mod
 
     original_refresh = (
-        harness_mod._TurnRunnerMemorySnapshotRefreshAdapter.refresh_snapshot
+        TurnRunner.refresh_snapshot
     )
 
     def _record_refresh(self, **kwargs):
@@ -338,7 +337,7 @@ async def test_persist_raises_preserves_recoverable_pre_compaction_state(
         return original_refresh(self, **kwargs)
 
     monkeypatch.setattr(
-        harness_mod._TurnRunnerMemorySnapshotRefreshAdapter,
+        TurnRunner,
         "refresh_snapshot",
         _record_refresh,
     )

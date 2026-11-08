@@ -310,7 +310,7 @@ async def test_bootstrap_awaits_the_early_warm_and_skips_its_own() -> None:
             return _AgentConfigAuxiliaries(False, "", "", 0, 0, 0, 0)
 
     class _Factory:
-        def build(self, **kwargs):
+        def build_agent(self, **kwargs):
             return object()
 
     class _Turn:

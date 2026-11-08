@@ -26,7 +26,6 @@ from typing import Any
 import pytest
 
 from agentos.engine.runtime import TurnRunner
-from agentos.engine.turn_runner.harness import _TurnRunnerAgentFactoryAdapter
 from agentos.engine.types import AgentConfig, ErrorEvent
 from agentos.tools.registry import ToolRegistry
 from agentos.tools.types import ToolContext
@@ -647,7 +646,8 @@ def test_agent_factory_forwards_registry_and_tool_context() -> None:
         tool_registry=registry,
     )
 
-    agent = _TurnRunnerAgentFactoryAdapter(runner).build(
+    agent = TurnRunner.build_agent(
+        runner,
         provider=_StubProvider("p"),
         config=AgentConfig(),
         tool_definitions=[],

@@ -7,7 +7,6 @@ from typing import Any, cast
 import pytest
 
 from agentos.engine.runtime import TurnRunner
-from agentos.engine.turn_runner.harness import _TurnRunnerPipelineExecutionAdapter
 from agentos.engine.turn_runner.input_stage import (
     ExtraContextResolver,
     InputStage,
@@ -114,13 +113,13 @@ async def test_prompt_assembler_passes_normalization_metadata_to_pipeline() -> N
 @pytest.mark.asyncio
 async def test_pipeline_execution_adapter_forwards_normalization_metadata() -> None:
     runner = _RecordingRunner()
-    adapter = _TurnRunnerPipelineExecutionAdapter(cast(TurnRunner, runner))
     normalization_metadata = {
         "guard_action": "generated_text_attachment",
         "material_estimated_tokens": 45_000,
     }
 
-    await adapter.run_pipeline(
+    await TurnRunner.run_pipeline(
+        cast(TurnRunner, runner),
         RunPipelineRequest(
             runtime_message="runtime",
             session_key="agent:main:s1",

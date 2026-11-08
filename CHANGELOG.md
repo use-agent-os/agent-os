@@ -80,6 +80,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   a test): `agentos.engine.core.run_agent_loop` runs the turn's iterations
   over the steps of a frozen `LoopConfig`, and the agent supplies those
   steps, with the turn's state in `engine/turn_state.TurnState`.
+- A turn is orchestrated by `agentos.engine.harness.TurnHarness`, which takes
+  the eight stages through its constructor; `TurnRunner._run_turn` packs its
+  arguments into a `TurnRequest` and delegates. The 25 `_TurnRunner*Adapter`
+  classes are gone: `TurnRunner` implements the stage ports itself. A
+  router-control replay now reruns the turn in a loop instead of recursing,
+  and the replaced run releases its spend reservation before the replay
+  starts.
 - Subagents now run in a lane per parent session. At most
   `subagents.max_concurrent_children` children of one parent (default 2; an
   agent's own `subagents.max_concurrent_children` wins; `0` = no limit) run

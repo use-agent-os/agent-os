@@ -102,13 +102,13 @@ async def test_turn_runner_passes_request_hooks_to_the_agent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from agentos.engine.runtime import TurnRunner
-    from agentos.engine.turn_runner.harness import _TurnRunnerAgentFactoryAdapter
 
     monkeypatch.setenv("AGENTOS_STATE_DIR", str(tmp_path))
     hook = _Hook(Veto("no"))
     runner = TurnRunner(provider_selector=SimpleNamespace(), request_hooks=[hook])
 
-    agent = _TurnRunnerAgentFactoryAdapter(runner).build(
+    agent = TurnRunner.build_agent(
+        runner,
         provider=ScriptedProvider([[done()]]),
         config=AgentConfig(),
         tool_definitions=[],

@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from agentos.engine.turn_runner.harness import _TurnRunnerAgentFactoryAdapter
+from agentos.engine.runtime import TurnRunner
 
 
 def test_agent_factory_adapter_passes_runner_tool_registry(monkeypatch) -> None:
@@ -32,9 +32,9 @@ def test_agent_factory_adapter_passes_runner_tool_registry(monkeypatch) -> None:
         _session_flush_service=None,
         _check_spend_budget=_check_spend_budget,
     )
-    adapter = _TurnRunnerAgentFactoryAdapter(runner)
 
-    adapter.build(
+    TurnRunner.build_agent(
+        runner,
         provider=object(),
         config=object(),
         tool_definitions=[],

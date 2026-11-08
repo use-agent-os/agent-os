@@ -20,7 +20,6 @@ from agentos.engine import Agent, AgentConfig
 from agentos.engine.runtime import TurnRunner
 from agentos.engine.turn_runner.harness import (
     CompactionPersistRejectedError,
-    _TurnRunnerCompactionPersistAdapter,
 )
 from agentos.session.manager import SessionManager, TranscriptSnapshot
 from agentos.session.storage import SessionStorage
@@ -105,9 +104,9 @@ async def test_queued_follow_up_survives_repeated_inline_compactions(
     runner = _runner(session_manager)
     await runner._load_history(_agent(), KEY, trim_last_user=True)
     queued = await session_manager.append_message(KEY, "user", "D", token_count=1)
-    adapter = _TurnRunnerCompactionPersistAdapter(runner)
 
-    await adapter.persist_and_notify(
+    await TurnRunner.persist_and_notify(
+        runner,
         session_key=KEY,
         summary="summary of A",
         kept_entries=[{"role": "assistant", "content": "B"}, {"role": "user", "content": "C"}],
@@ -120,7 +119,8 @@ async def test_queued_follow_up_survives_repeated_inline_compactions(
     assert runner._compaction_snapshots[KEY].through_message_id == live[1].message_id
 
     await session_manager.append_message(KEY, "user", "E", token_count=1)
-    await adapter.persist_and_notify(
+    await TurnRunner.persist_and_notify(
+        runner,
         session_key=KEY,
         summary="summary of A and B",
         kept_entries=[{"role": "user", "content": "C"}],
@@ -152,7 +152,8 @@ async def test_stale_snapshot_is_reported_as_a_failed_persist(
     before = await session_manager.get_transcript(KEY)
 
     with pytest.raises(CompactionPersistRejectedError, match="not persisted"):
-        await _TurnRunnerCompactionPersistAdapter(runner).persist_and_notify(
+        await TurnRunner.persist_and_notify(
+            runner,
             session_key=KEY,
             summary="summary of A",
             kept_entries=[{"role": "assistant", "content": "B"}, {"role": "user", "content": "C"}],
@@ -194,7 +195,8 @@ async def test_adapter_tolerates_a_persist_method_without_snapshot_support() -> 
     runner = _runner(_Legacy())
     runner._compaction_snapshots[KEY] = TranscriptSnapshot(session_id="s", through_message_id="m")
 
-    await _TurnRunnerCompactionPersistAdapter(runner).persist_and_notify(
+    await TurnRunner.persist_and_notify(
+        runner,
         session_key=KEY, summary="S", kept_entries=[1, 2]
     )
 

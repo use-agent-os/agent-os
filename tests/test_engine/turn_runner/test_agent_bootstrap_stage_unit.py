@@ -130,7 +130,7 @@ class _RecordingAgentFactory:
     last_kwargs: dict[str, Any] = field(default_factory=dict)
     calls: int = 0
 
-    def build(self, **kwargs: Any) -> Any:
+    def build_agent(self, **kwargs: Any) -> Any:
         self.calls += 1
         self.last_kwargs = dict(kwargs)
         return SimpleNamespace(
