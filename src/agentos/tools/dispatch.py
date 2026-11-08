@@ -30,7 +30,14 @@ from typing import Any
 
 import structlog
 
-from agentos.engine.hooks import ToolHook, ToolHookCall, ToolHookResult
+from agentos.engine.hooks import (
+    Block,
+    ReplaceResult,
+    Rewrite,
+    ToolHook,
+    ToolHookCall,
+    ToolHookResult,
+)
 from agentos.execution_status import normalize_execution_status
 from agentos.result_budget import (
     DEFAULT_TOOL_RESULT_BUDGET_POLICY,
@@ -63,6 +70,7 @@ from agentos.tools.types import (
     InvalidToolArgumentsError,
     ProjectedToolArgumentsError,
     RegisteredTool,
+    SafeToolError,
     ToolContext,
     current_tool_context,
 )
@@ -349,6 +357,69 @@ def _lookup_registered(
     return dataclasses.replace(tool_call, tool_name=resolution.resolved), registered
 
 
+def _run_before_tool_hooks(
+    hooks: Sequence[ToolHook], hook_call: ToolHookCall
+) -> tuple[Block | Rewrite | None, ToolHookCall]:
+    """Fan ``before_tool`` out in order; the first block wins.
+
+    A rewrite is shown to the hooks after it. A hook that raises is logged and
+    skipped, unless it is ``fail_closed``: then its failure blocks the call.
+    """
+
+    rewrite: Rewrite | None = None
+    for hook in hooks:
+        name = getattr(hook, "name", type(hook).__name__)
+        try:
+            decision = hook.before_tool(hook_call)
+        except Exception as exc:  # noqa: BLE001 - hooks must not break dispatch
+            log.warning(
+                "dispatch.tool_hook_failed",
+                hook=name,
+                phase="before_tool",
+                error=str(exc),
+                fail_closed=bool(getattr(hook, "fail_closed", False)),
+            )
+            if getattr(hook, "fail_closed", False):
+                return (
+                    Block(
+                        reason=(
+                            f"The tool guard {name!r} failed ({type(exc).__name__}), "
+                            "so this call was not run."
+                        )
+                    ),
+                    hook_call,
+                )
+            continue
+        if isinstance(decision, Block):
+            log.info(
+                "dispatch.tool_hook_blocked",
+                hook=name,
+                tool=hook_call.tool_call.tool_name,
+                tool_use_id=hook_call.tool_call.tool_use_id,
+            )
+            return decision, hook_call
+        if isinstance(decision, Rewrite):
+            rewrite = decision
+            hook_call = ToolHookCall(
+                tool_call=dataclasses.replace(
+                    hook_call.tool_call, arguments=dict(decision.arguments)
+                ),
+                ctx=hook_call.ctx,
+            )
+    return rewrite, hook_call
+
+
+def _hook_blocked_result(tool_call: ToolCall, reason: str) -> ToolResult:
+    return _build_envelope_result(
+        tool_call,
+        exc=SafeToolError(reason),
+        policy_denial=True,
+        error_class_override="ToolHookBlocked",
+        user_message_override=reason,
+        reason_override="hook_blocked",
+    )
+
+
 def _admit_arguments(
     tool_call: ToolCall,
     registered: RegisteredTool,
@@ -616,19 +687,30 @@ def build_tool_handler(
             return admitted
         tool_call = admitted
 
-        # 3. ToolHook.before_tool — optional observability hook.
+        # 3. ToolHook.before_tool: observe, block, or rewrite the arguments.
         hook_call = ToolHookCall(tool_call=tool_call, ctx=effective_ctx) if hooks else None
         if hook_call is not None:
-            for hook in hooks:
-                try:
-                    hook.before_tool(hook_call)
-                except Exception as exc:  # noqa: BLE001 - hooks must not break dispatch
-                    log.warning(
-                        "dispatch.tool_hook_failed",
-                        hook=getattr(hook, "name", type(hook).__name__),
-                        phase="before_tool",
-                        error=str(exc),
-                    )
+            hook_decision, hook_call = _run_before_tool_hooks(hooks, hook_call)
+            if isinstance(hook_decision, Block):
+                return _hook_blocked_result(tool_call, hook_decision.reason)
+            if isinstance(hook_decision, Rewrite):
+                log.info(
+                    "dispatch.tool_hook_rewrite",
+                    tool=tool_call.tool_name,
+                    tool_use_id=tool_call.tool_use_id,
+                    argument_keys=sorted(hook_decision.arguments),
+                )
+                # A rewrite is admitted like the model's own arguments, and the
+                # policy chain below runs on it: hooks cannot bypass either.
+                readmitted = _admit_arguments(
+                    dataclasses.replace(tool_call, arguments=dict(hook_decision.arguments)),
+                    registered,
+                    effective_ctx,
+                )
+                if isinstance(readmitted, ToolResult):
+                    return readmitted
+                tool_call = readmitted
+                hook_call = ToolHookCall(tool_call=tool_call, ctx=effective_ctx)
 
         # 4. Policy chain — first denial wins. Single emission site via run_chain_with_emit.
         dispatch_input = DispatchInput(
@@ -716,12 +798,13 @@ def build_tool_handler(
             await run_budget_tracker.abort_tool_result(reservation)
         finally:
             try:
-                # 6. ToolHook.after_tool — observability seam.
+                # 6. ToolHook.after_tool: observe, or replace the result.
+                replacement: ReplaceResult | None = None
                 if hook_call is not None:
                     outcome = ToolHookResult(result=raw_result, exception=exception)
                     for hook in hooks:
                         try:
-                            hook.after_tool(hook_call, outcome)
+                            after = hook.after_tool(hook_call, outcome)
                         except Exception as hook_exc:  # noqa: BLE001
                             log.warning(
                                 "dispatch.tool_hook_failed",
@@ -729,6 +812,9 @@ def build_tool_handler(
                                 phase="after_tool",
                                 error=str(hook_exc),
                             )
+                            continue
+                        if isinstance(after, ReplaceResult):
+                            replacement = after
                 if not isinstance(exception, asyncio.CancelledError):
                     await _emit_webresearch_tool_run_diagnostics(
                         tool_call=tool_call,
@@ -759,6 +845,21 @@ def build_tool_handler(
         # Reached only when no exception is propagating (CancelledError
         # re-raises above), so finalize has always run by this point.
         assert settled_result is not None
+        if replacement is not None:
+            log.info(
+                "dispatch.tool_hook_replaced_result",
+                tool=tool_call.tool_name,
+                tool_use_id=tool_call.tool_use_id,
+            )
+            settled_result = dataclasses.replace(
+                settled_result,
+                content=replacement.content,
+                is_error=(
+                    settled_result.is_error
+                    if replacement.is_error is None
+                    else replacement.is_error
+                ),
+            )
         return settled_result
 
     return _handler

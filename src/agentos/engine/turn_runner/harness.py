@@ -570,6 +570,7 @@ class _TurnRunnerAgentFactoryAdapter(AgentFactoryPort):
             tool_registry=self._runner._tool_registry,
             tool_context=tool_context,
             spend_budget_guard=self._runner._check_spend_budget,
+            request_hooks=getattr(self._runner, "_request_hooks", ()),
         )
 
 
