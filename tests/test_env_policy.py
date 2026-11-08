@@ -46,7 +46,6 @@ class TestDenylist:
             "AGENTOS_SAFE_BIN_ALLOW",
             "AGENTOS_AGENT_PERMISSIONS",
             "AGENTOS_TRUST_ENV",
-            "AGENTOS_HOOKS",
             "AGENTOS_GATEWAY_TOKEN",
             "AGENTOS_STATE_DIR",
             "AGENTOS_GATEWAY_PORT",

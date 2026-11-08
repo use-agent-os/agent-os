@@ -108,7 +108,6 @@ _SHELL_NAMES = (
 #   AGENTOS_SAFE_BIN_ALLOW/DENY/WARN  tools/builtin/shell_policy.py
 #   AGENTOS_AGENT_PERMISSIONS         cli/agent_cmd.py
 #   AGENTOS_TRUST_ENV                 env.py (honour ambient *_PROXY at all)
-#   AGENTOS_HOOKS                     engine/runtime.py
 #   AGENTOS_GATEWAY_TOKEN             cli/gateway_rpc.py
 #   AGENTOS_GATEWAY_CONFIG_PATH       gateway config resolution
 #   AGENTOS_STATE_DIR / _ROOT / …     paths.py and friends
@@ -126,7 +125,6 @@ _AGENTOS_POSTURE_NAMES = (
     "AGENTOS_SAFE_BIN_WARN",
     "AGENTOS_AGENT_PERMISSIONS",
     "AGENTOS_TRUST_ENV",
-    "AGENTOS_HOOKS",
     "AGENTOS_GATEWAY_TOKEN",
     "AGENTOS_GATEWAY_CONFIG_PATH",
     "AGENTOS_STATE_DIR",

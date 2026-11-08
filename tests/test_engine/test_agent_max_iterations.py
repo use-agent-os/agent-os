@@ -6,7 +6,6 @@ from typing import Any
 import pytest
 
 from agentos.engine import Agent, AgentConfig, ToolResult
-from agentos.engine.subagent import SubagentSpec
 from agentos.engine.types import ArtifactEvent, ErrorEvent
 from agentos.engine.usage import UsageTracker
 from agentos.provider import (
@@ -70,8 +69,6 @@ class _LoopingToolProvider:
         return []
 
 
-
-
 class _ToolThenProviderErrorProvider:
     provider_name = "fake"
 
@@ -102,6 +99,7 @@ class _ToolThenProviderErrorProvider:
 
     async def list_models(self) -> list[Any]:
         return []
+
 
 class _DoneUsageProvider:
     provider_name = "fake"
@@ -238,17 +236,6 @@ async def _artifact_tool(call: Any) -> ToolResult:
     )
 
 
-def test_agent_iteration_defaults_are_unbounded() -> None:
-    assert AgentConfig().max_iterations == 0
-    assert SubagentSpec(task="check").max_iterations == 0
-    assert AgentConfig().max_turn_llm_calls == 0
-    assert AgentConfig().max_turn_input_tokens == 0
-    assert AgentConfig().max_turn_output_tokens == 0
-    assert AgentConfig().max_turn_billed_cost_usd == 0.0
-    assert AgentConfig().max_turn_tool_errors == 0
-    assert AgentConfig().length_capped_continuations == 1
-
-
 @pytest.mark.asyncio
 async def test_agent_default_max_iterations_allows_long_tool_loop_to_finish() -> None:
     provider = _LoopingToolProvider(final_on_call=101)
@@ -281,9 +268,7 @@ async def test_agent_finalizes_when_tool_loop_reaches_max_iterations() -> None:
     assert len(provider.calls) == 2
     assert provider.calls[-1][-1].role == "user"
     assert "Do not call tools" in str(provider.calls[-1][-1].content)
-    assert "Do not call tools" not in "\n".join(
-        str(message.content) for message in agent._history
-    )
+    assert "Do not call tools" not in "\n".join(str(message.content) for message in agent._history)
     assert not any(event.kind == "state" and event.state.value == "error" for event in events)
     assert not any(event.kind == "error" and event.code == "max_iterations" for event in events)
     assert any(event.kind == "done" and event.text == "done" for event in events)
@@ -303,11 +288,7 @@ async def test_agent_reports_partial_max_iterations_after_finalization_attempt_f
 
     assert len(provider.calls) == 2
     assert not any(event.kind == "state" and event.state.value == "error" for event in events)
-    assert any(
-        event.kind == "done"
-        and "best partial result" in event.text
-        for event in events
-    )
+    assert any(event.kind == "done" and "best partial result" in event.text for event in events)
 
 
 @pytest.mark.asyncio
@@ -382,8 +363,7 @@ async def test_agent_synthesizes_final_artifact_response_without_provider_call()
     assert not any(isinstance(event, ErrorEvent) for event in events)
     assert not any(event.kind == "warning" for event in events)
     assert any(
-        event.kind == "done"
-        and event.text == "The generated file is ready: report.txt."
+        event.kind == "done" and event.text == "The generated file is ready: report.txt."
         for event in events
     )
 
@@ -405,8 +385,7 @@ async def test_agent_synthesizes_final_artifact_response_before_extra_llm_call()
     assert not any(isinstance(event, ErrorEvent) for event in events)
     assert not any(event.kind == "warning" for event in events)
     assert any(
-        event.kind == "done"
-        and event.text == "The generated file is ready: report.txt."
+        event.kind == "done" and event.text == "The generated file is ready: report.txt."
         for event in events
     )
 
@@ -453,8 +432,7 @@ async def test_agent_stops_when_turn_llm_call_budget_is_exceeded() -> None:
 
     assert len(provider.calls) == 1
     assert any(
-        event.kind == "error" and event.code == "turn_llm_call_budget_exceeded"
-        for event in events
+        event.kind == "error" and event.code == "turn_llm_call_budget_exceeded" for event in events
     )
 
 
@@ -571,3 +549,13 @@ async def test_agent_stops_when_turn_tool_error_budget_is_exceeded() -> None:
         event.kind == "error" and event.code == "turn_tool_error_budget_exceeded"
         for event in events
     )
+
+
+def test_agent_iteration_defaults_are_unbounded() -> None:
+    assert AgentConfig().max_iterations == 0
+    assert AgentConfig().max_turn_llm_calls == 0
+    assert AgentConfig().max_turn_input_tokens == 0
+    assert AgentConfig().max_turn_output_tokens == 0
+    assert AgentConfig().max_turn_billed_cost_usd == 0.0
+    assert AgentConfig().max_turn_tool_errors == 0
+    assert AgentConfig().length_capped_continuations == 1

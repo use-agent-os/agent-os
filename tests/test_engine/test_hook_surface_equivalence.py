@@ -300,7 +300,7 @@ def test_noop_compaction_hook_runs_clean() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Runtime feature flag: AGENTOS_HOOKS=new vs legacy must match
+# The hook fan-out writes the same TraceEvent as a direct trace write
 # ---------------------------------------------------------------------------
 
 
@@ -345,8 +345,7 @@ def _emit_through_runtime(
         ("turn_error", 2, None, {"error_type": "RuntimeError", "error_chars": 7}),
     ],
 )
-def test_emit_turn_event_legacy_matches_new(
-    monkeypatch: pytest.MonkeyPatch,
+def test_emit_turn_event_matches_a_direct_trace_write(
     trace_context: TraceContext,
     captured_events: list[TraceEvent],
     kind: str,
@@ -354,25 +353,27 @@ def test_emit_turn_event_legacy_matches_new(
     attrs: dict[str, Any] | None,
     payload: dict[str, Any],
 ) -> None:
-    """AGENTOS_HOOKS=legacy and =new must produce identical TraceEvents."""
+    """The default hook chain writes what a direct trace write would.
+
+    The ``AGENTOS_HOOKS=legacy`` escape hatch that bypassed the hook chain is
+    gone; this keeps the equivalence it guarded.
+    """
 
     runner = _make_runtime_with_default_hook()
 
-    monkeypatch.setenv("AGENTOS_HOOKS", "legacy")
-    _emit_through_runtime(runner, trace_context, kind=kind, seq=seq, attrs=attrs, payload=payload)
-    legacy = captured_events.pop()
+    TurnRunner._write_trace_event(kind, trace_context, seq=seq, attrs=attrs, payload=payload)
+    direct = captured_events.pop()
 
-    monkeypatch.setenv("AGENTOS_HOOKS", "new")
     _emit_through_runtime(runner, trace_context, kind=kind, seq=seq, attrs=attrs, payload=payload)
-    new = captured_events.pop()
+    via_hooks = captured_events.pop()
 
-    assert legacy.kind == new.kind
-    assert legacy.context == new.context
-    assert legacy.privacy == new.privacy
-    assert legacy.seq == new.seq
-    assert legacy.attrs == new.attrs
-    assert legacy.payload == new.payload
-    assert legacy.schema_version == new.schema_version
+    assert direct.kind == via_hooks.kind
+    assert direct.context == via_hooks.context
+    assert direct.privacy == via_hooks.privacy
+    assert direct.seq == via_hooks.seq
+    assert direct.attrs == via_hooks.attrs
+    assert direct.payload == via_hooks.payload
+    assert direct.schema_version == via_hooks.schema_version
 
 
 def test_emit_turn_event_with_none_context_is_noop(
@@ -389,14 +390,14 @@ def test_emit_turn_event_with_none_context_is_noop(
     assert captured_events == []
 
 
-def test_emit_turn_event_unknown_env_falls_back_to_default(
+def test_a_leftover_agentos_hooks_env_is_ignored(
     monkeypatch: pytest.MonkeyPatch,
     trace_context: TraceContext,
     captured_events: list[TraceEvent],
 ) -> None:
-    """An unrecognised env value must resolve to the active default (new)."""
+    """``AGENTOS_HOOKS=legacy`` was removed; setting it changes nothing."""
 
-    monkeypatch.setenv("AGENTOS_HOOKS", "garbage")
+    monkeypatch.setenv("AGENTOS_HOOKS", "legacy")
     runner = _make_runtime_with_default_hook()
     _emit_through_runtime(
         runner, trace_context, kind="turn_end", seq=2, attrs={"x": 1}, payload={"y": 2}
@@ -429,7 +430,6 @@ def test_runtime_hook_failure_does_not_break_emission(
         def on_event(self, ctx, event):  # type: ignore[no-untyped-def]
             raise RuntimeError("boom")
 
-    monkeypatch.setenv("AGENTOS_HOOKS", "new")
     runner = TurnRunner(
         provider_selector=None,
         turn_hooks=(_RaisingHook(), DefaultTraceEmitterHook()),

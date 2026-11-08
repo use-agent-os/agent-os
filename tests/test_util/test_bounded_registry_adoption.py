@@ -16,7 +16,6 @@ from agentos.application.approval_queue import ApprovalQueue
 from agentos.application.intent_cache import IntentApprovalCache
 from agentos.engine.cache_break_monitor import CacheBreakMonitor
 from agentos.engine.progress_watchdog import ProgressWatchdog
-from agentos.engine.subagent import SubagentRegistry
 from agentos.gateway.channel_dispatch import ChannelSessionPointers
 from agentos.gateway.session_streams import SessionStreamRegistry
 from agentos.plan_mode import PlanModeStore
@@ -37,7 +36,6 @@ def _field(owner: object, name: str) -> BoundedRegistry:
     [
         (SessionStreamRegistry, ["_seq_by_session", "_events_by_session", "_live_runs"]),
         (StaleOutputCache, ["_entries"]),
-        (SubagentRegistry, ["_archived"]),
         (PlanModeStore, ["_sessions"]),
         (DenialLedger, ["_sessions"]),
         (ProgressWatchdog, ["_repeat_counts", "_repeat_results"]),

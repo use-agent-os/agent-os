@@ -229,9 +229,6 @@ _ARTIFACT_DELIVERY_FAILURE_MARKER: Final[str] = "File delivery failed:"
 _ARTIFACT_DELIVERY_TOOL_NAME: Final[str] = "publish_artifact"
 _ARTIFACT_DELIVERY_FAILURE_MAX_CHARS: Final[int] = 360
 
-_HOOKS_FEATURE_ENV: Final[str] = "AGENTOS_HOOKS"
-
-
 def collect_invoked_skills(
     turn_segments: list[dict],
     *,
@@ -255,22 +252,6 @@ def collect_invoked_skills(
         seen.add(skill_name)
         result.append(skill_name)
     return result
-
-
-def _hooks_mode_from_env() -> str:
-    """Resolve the active hook mode from the ``AGENTOS_HOOKS`` env var.
-
-    Returns ``"legacy"`` only when explicitly set to ``legacy``
-    (case-insensitive); any other value (including unset) returns ``"new"``.
-    The default flipped to ``new`` after the equivalence harness showed zero
-    divergence between legacy and hook paths across the engine and tools test
-    suites. ``AGENTOS_HOOKS=legacy`` remains as an escape hatch for one
-    release cycle so any unforeseen drift can be diagnosed without rolling
-    back code.
-    """
-
-    raw = os.environ.get(_HOOKS_FEATURE_ENV, "").strip().lower()
-    return "legacy" if raw == "legacy" else "new"
 
 
 # Per-call-chain owner tracking for session-lock re-entry detection.
@@ -3621,24 +3602,9 @@ class TurnRunner:
         attrs: dict[str, Any] | None = None,
         payload: dict[str, Any] | None = None,
     ) -> None:
-        """Fan a turn event out through the registered ``TurnHook`` chain.
-
-        ``AGENTOS_HOOKS=legacy`` is honored as an escape hatch and routes
-        through the static :meth:`_write_trace_event` directly so any
-        unforeseen production drift can be confined to the hook fan-out
-        without rolling back the call sites.
-        """
+        """Fan a turn event out through the registered ``TurnHook`` chain."""
 
         if context is None:
-            return
-        if _hooks_mode_from_env() == "legacy":
-            self._write_trace_event(
-                kind,
-                context,
-                seq=seq,
-                attrs=attrs,
-                payload=payload,
-            )
             return
         hook_ctx = TurnHookContext(
             session_key=session_key,

@@ -38,12 +38,6 @@ from .types import (
 if TYPE_CHECKING:
     from .agent import Agent, ToolHandler
     from .context import ContextAssembly, ContextFiles
-    from .subagent import (
-        SubagentHandle,
-        SubagentManager,
-        SubagentRegistry,
-        SubagentSpec,
-    )
 
 
 # Map of lazy attribute name → (module_path, attribute_name). Loaded on
@@ -55,10 +49,6 @@ _LAZY_MAP: dict[str, tuple[str, str]] = {
     "ToolHandler": ("agentos.engine.agent", "ToolHandler"),
     "ContextAssembly": ("agentos.engine.context", "ContextAssembly"),
     "ContextFiles": ("agentos.engine.context", "ContextFiles"),
-    "SubagentHandle": ("agentos.engine.subagent", "SubagentHandle"),
-    "SubagentManager": ("agentos.engine.subagent", "SubagentManager"),
-    "SubagentRegistry": ("agentos.engine.subagent", "SubagentRegistry"),
-    "SubagentSpec": ("agentos.engine.subagent", "SubagentSpec"),
 }
 
 
@@ -85,10 +75,6 @@ __all__ = [
     "RouterControlReplayEvent",
     "RunHeartbeatEvent",
     "StateChangeEvent",
-    "SubagentHandle",
-    "SubagentManager",
-    "SubagentRegistry",
-    "SubagentSpec",
     "TextDeltaEvent",
     "ThinkingEvent",
     "ThinkingLevel",
