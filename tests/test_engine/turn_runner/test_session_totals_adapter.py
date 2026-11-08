@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agentos.engine.turn_runner.harness import _TurnRunnerSessionTotalsAdapter
+from agentos.engine.runtime import TurnRunner
 from agentos.engine.types import DoneEvent
 
 
@@ -49,7 +49,6 @@ class _Runner:
 @pytest.mark.asyncio
 async def test_session_totals_rollup_splits_mixed_turn_cost_components() -> None:
     runner = _Runner()
-    adapter = _TurnRunnerSessionTotalsAdapter(runner)  # type: ignore[arg-type]
     done = DoneEvent(
         input_tokens=100,
         output_tokens=10,
@@ -59,7 +58,8 @@ async def test_session_totals_rollup_splits_mixed_turn_cost_components() -> None
         model="deepseek/deepseek-v4-pro",
     )
 
-    result = await adapter.rollup(
+    result = await TurnRunner.rollup(
+        runner,
         session_key="agent:webchat:mixed-turn",
         done_event=done,
         resolved_model="deepseek/deepseek-v4-pro",

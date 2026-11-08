@@ -219,7 +219,7 @@ class AgentFactoryPort(Protocol):
     runner and forwards everything else from the call site.
     """
 
-    def build(
+    def build_agent(
         self,
         *,
         provider: LLMProvider,
@@ -471,7 +471,7 @@ class AgentBootstrapStage:
             )
 
         # 7. Construct the Agent from the typed runtime parameters.
-        agent = self._agent_factory.build(
+        agent = self._agent_factory.build_agent(
             provider=inp.provider,
             config=agent_config,
             tool_definitions=inp.turn.tool_defs,

@@ -12,7 +12,6 @@ from pydantic import ValidationError
 from agentos.engine import Agent, AgentConfig, DoneEvent, ErrorEvent, ToolResult
 from agentos.engine.outcome import outcome_from_error
 from agentos.engine.runtime import TurnRunner
-from agentos.engine.turn_runner.harness import _TurnRunnerAgentConfigBuilderAdapter
 from agentos.gateway.config import ToolsConfig
 from agentos.provider import ChatConfig, Message
 from agentos.provider import DoneEvent as ProviderDone
@@ -280,7 +279,8 @@ def test_tools_loop_guard_config_reaches_agent_config() -> None:
             provider_selector=None,
             config=SimpleNamespace(tools=ToolsConfig(loop_guard=value)),
         )
-        aux = _TurnRunnerAgentConfigBuilderAdapter(runner).build_auxiliaries(
+        aux = TurnRunner.build_auxiliaries(
+            runner,
             agent_id="main",
             session_key="agent:main:webchat:t",
             session_id_for_log=None,

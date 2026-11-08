@@ -469,7 +469,6 @@ class ProactiveCompactionScheduler:
             encode_transcript_record,
             persistable_messages,
         )
-        from agentos.engine.turn_runner.harness import _TurnRunnerCompactionPersistAdapter
         from agentos.session.compaction_lifecycle import (
             COMPACTION_PERSISTED_EVENT,
             compaction_effect_payload,
@@ -521,7 +520,7 @@ class ProactiveCompactionScheduler:
             try:
                 # Durable pre-image first; a failing checkpoint raises and
                 # nothing is archived (same rule as the in-turn path).
-                await _TurnRunnerCompactionPersistAdapter(runner)._record_checkpoint(
+                await runner._record_compaction_checkpoint(
                     session_key, compaction_id
                 )
                 persist = manager.persist_compaction_result
