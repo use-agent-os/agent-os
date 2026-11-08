@@ -1013,7 +1013,7 @@ async def _emit_task_runtime_stream_events(
 
     from agentos.chat.display_text import AssistantTextStreamSanitizer, strip_assistant_text
     from agentos.engine.stream_wrappers import wrap_stream
-    from agentos.gateway.terminal_events import terminal_state
+    from agentos.gateway.terminal_events import mark_aborted_done, terminal_state
 
     display_text = AssistantTextStreamSanitizer()
 
@@ -1115,6 +1115,8 @@ async def _emit_task_runtime_stream_events(
             event_dict["error_message"] = safe_error_message
         event_name = f"session.event.{event_kind}"
         emit = True
+        if event_kind == "done":
+            mark_aborted_done(event_dict)
         if event_kind in ("done", "error"):
             event_dict["state"] = terminal_state(event_name, event_dict)
             if run_id:
@@ -3045,6 +3047,18 @@ async def start_gateway_server(
 
         subagent_wake_worker = SubagentWakeWorker(_wake_outbox, _deliver_pending_wake)
 
+    async def _children_limit_resolver(parent_session_key: str) -> int | None:
+        """An agent's ``subagents.max_concurrent_children`` for its parent sessions."""
+
+        from agentos.session.keys import parse_agent_id
+        from agentos.tools.builtin.sessions import _resolve_subagent_policy
+
+        policy = await _resolve_subagent_policy(
+            svc.session_manager, parse_agent_id(parent_session_key)
+        )
+        value = policy.get("max_concurrent_children")
+        return int(value) if isinstance(value, int) and value >= 1 else None
+
     background_completion_manager = BackgroundCompletionManager(
         session_manager=svc.session_manager,
         event_emitter=runtime_event_bridge.emit,
@@ -3086,7 +3100,15 @@ async def start_gateway_server(
         subagent_reserved_slots=int(
             getattr(getattr(config, "subagents", None), "subagent_reserved_slots", 0)
         ),
+        max_concurrent_children=(
+            int(getattr(getattr(config, "subagents", None), "max_concurrent_children", 0) or 0)
+            or None
+        ),
+        children_limit_resolver=_children_limit_resolver,
         turn_hard_deadline_s=_task_runtime_turn_hard_deadline_s(config),
+        cancel_grace_s=float(
+            getattr(getattr(config, "task_runtime", None), "turn_cancel_grace_seconds", 5.0)
+        ),
         pending_overflow_policy=getattr(
             config.task_runtime, "pending_overflow_policy", "reject_newest"
         ),
@@ -3419,7 +3441,7 @@ async def start_gateway_server(
     app.state.gateway_ready = False
     app.state.readiness = readiness
     app.state.boot_tracker = boot_tracker
-    readiness.attach_active_turns(lambda: int(getattr(task_runtime, "_global_in_flight", 0)))
+    readiness.attach_active_turns(lambda: int(getattr(task_runtime, "active_turns", 0)))
     if svc.turn_recovery is not None:
         readiness.attach_turn_recovery(svc.turn_recovery.snapshot)
 

@@ -99,10 +99,39 @@ Abort stops the running turn if one exists, together with any coding-agent or
 subagent runs it spawned, and returns once they have ended. It does not delete
 the session.
 
+A turn that is streaming or between steps when you stop it is asked to stop
+first. The model's stream is closed at once, no further request is sent, and
+the turn ends on its own with its reply so far marked `[interrupted]`. If it
+has not stopped within `task_runtime.turn_cancel_grace_seconds` (default `5`;
+`0` stops at once), its task is cancelled. A turn running tools, or an ACP
+harness turn, is cancelled at once, so a stop never waits on a long tool.
+
+```toml
+[task_runtime]
+turn_cancel_grace_seconds = 5
+```
+
 A turn that is aborted while tools are running leaves a transcript the next
 turn can replay as is. Every tool call that had not finished gets a
 "Cancelled" error result, and the turn ends with a note telling the model it
 was interrupted, so tools may have partly run.
+
+Subagents of one parent session run at most two at a time by default. More
+spawns are accepted and wait in spawn order (`sessions_spawn` reports them as
+`queued`); children of other parents are not held back. Change the default
+with `subagents.max_concurrent_children` (`0` = no per-parent limit), or per
+agent with `subagents.max_concurrent_children` in its entry. The hard cap on
+how many children a parent may have at all is still
+`max_children_per_session`.
+
+```toml
+[subagents]
+max_concurrent_children = 2
+```
+
+A parent that waits on a child in the same turn (`sessions_yield` with a
+`session_key`) keeps its own slot. Its children run in a separate nested pool,
+so they still start when every shared slot is busy.
 
 If the gateway restarts while subagent runs are in progress, they are not
 resumed. Each is marked `abandoned` (reason `process_restart`), and their

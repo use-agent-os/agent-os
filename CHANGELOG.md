@@ -33,6 +33,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `docs/tools-and-sandbox.md`.
 
 ### Fixed
+- A parent waiting on its child in the same turn (`sessions_yield` with a
+  `session_key`) kept its slot. With the default reserved subagent slots,
+  two such parents could leave their children no slot at all and both waited
+  until the timeout. Children of a parent run that holds a slot now run in a
+  separate nested pool.
 - Parent wakes for finished subagent groups are now durable. A wake that
   failed to reach the task runtime was dropped, and the "already woken"
   marker lived only in memory, so a restart could lose a wake or repeat it.
@@ -64,6 +69,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   turn as finished. Such a run now ends with `session.event.error`.
 
 ### Changed
+- Subagents now run in a lane per parent session. At most
+  `subagents.max_concurrent_children` children of one parent (default 2; an
+  agent's own `subagents.max_concurrent_children` wins; `0` = no limit) run
+  at once, and the rest wait in spawn order instead of all competing for the
+  shared slots. Children of other parents are not held back.
+- Stopping a turn (abort, kill, interrupt) now asks it to stop first when it
+  is streaming or between steps. The turn closes the model's stream, sends no
+  further request and ends on its own, reporting the run as aborted. It is
+  cancelled only if it has not stopped within
+  `task_runtime.turn_cancel_grace_seconds` (default 5 s). Turns running tools
+  and ACP harness turns are still cancelled at once.
 - Every compaction (before a request, after a provider overflow, after a
   repeated timeout, and between turns) now goes through one
   `CompactionCoordinator` and logs one `compaction.decision` entry naming its

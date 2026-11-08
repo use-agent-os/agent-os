@@ -93,6 +93,8 @@ from agentos.engine.turn_progress import (
     TurnProgress,
     TurnProgressPhase,
     TurnProgressSink,
+    current_turn_stop_signal,
+    turn_abort_requested,
 )
 from agentos.engine.turn_timing import NULL_TURN_TIMING, TurnTiming
 from agentos.engine.verification_ledger import (
@@ -408,6 +410,15 @@ class _ProviderAttemptKind(StrEnum):
 
 class _IterationStreamTimeoutError(TimeoutError):
     """Raised when provider streaming exceeds the active Agent iteration budget."""
+
+
+class _TurnAbortedError(Exception):
+    """The turn was asked to stop (cooperative abort) and should end now."""
+
+
+def _raise_if_turn_aborted() -> None:
+    if turn_abort_requested():
+        raise _TurnAbortedError
 
 
 def _is_large_context_invalid_response(
@@ -987,8 +998,16 @@ class Agent(ToolResultProjectionMixin):
         Explicit state machine — no recursion. Tool loop iterates until
         the model finishes, unless config.max_iterations is a positive cap.
         """
-        async for event in self._turn_generator(message, extra_messages, semantic_message):
-            yield event
+        stop_signal = current_turn_stop_signal()
+        if stop_signal is not None:
+            stop_signal.accepts_abort = True
+        try:
+            async for event in self._turn_generator(message, extra_messages, semantic_message):
+                yield event
+        finally:
+            if stop_signal is not None:
+                stop_signal.accepts_abort = False
+                stop_signal.in_tool_batch = False
 
     async def _turn_generator(
         self,
@@ -1327,8 +1346,12 @@ class Agent(ToolResultProjectionMixin):
             )
 
         assistant_text_parts: list[str] = []
+        turn_aborted = False
         try:
             while True:
+                # Cooperative abort checkpoint: before every provider request,
+                # which is also right after the previous tool batch settled.
+                _raise_if_turn_aborted()
                 if self.config.max_iterations > 0 and iterations >= self.config.max_iterations:
                     max_iterations_source = str(
                         self.config.metadata.get("agent_max_iterations_source", "agent_config")
@@ -3180,10 +3203,17 @@ class Agent(ToolResultProjectionMixin):
                         None if steering is None else lambda: steering_pending(steering)
                     ),
                 )
-                async for event in self.turn_timing.tool_batch(
-                    tool_batch.run(tool_calls), calls=len(tool_calls)
-                ):
-                    yield event
+                batch_signal = current_turn_stop_signal()
+                if batch_signal is not None:
+                    batch_signal.in_tool_batch = True
+                try:
+                    async for event in self.turn_timing.tool_batch(
+                        tool_batch.run(tool_calls), calls=len(tool_calls)
+                    ):
+                        yield event
+                finally:
+                    if batch_signal is not None:
+                        batch_signal.in_tool_batch = False
                 tool_result_blocks = tool_batch.result_blocks()
                 executed_results = tool_batch.executed_results
                 turn_yielded = any(
@@ -3331,6 +3361,18 @@ class Agent(ToolResultProjectionMixin):
             self._history = sealed
             self._record_turn_transcript(sealed)
             raise
+        except _TurnAbortedError:
+            # Asked to stop (``TurnStopSignal.request_abort``): the provider
+            # stream is closed and no further request is sent. Same sealed
+            # record as a hard cancel, but the turn ends normally with one
+            # DoneEvent (outcome interrupted / cancelled) instead of raising.
+            turn_aborted = True
+            partial = "".join(assistant_text_parts)
+            if partial.strip():
+                final_text_parts.append(partial)
+            sealed = self._seal_cancelled_turn(turn_messages, partial)
+            self._history = sealed
+            self._record_turn_transcript(sealed)
         except TimeoutError:
             if artifact_delivery_final_response_pending:
                 yield _finish_artifact_delivery_degraded(
@@ -3346,7 +3388,7 @@ class Agent(ToolResultProjectionMixin):
                 )
                 yield terminal_error
 
-        if terminal_error is None:
+        if terminal_error is None and not turn_aborted:
             # Persist successful turns into in-memory history. Error turns are
             # persisted by TurnRunner as system errors, while their usage still
             # flows through the final DoneEvent below when provider usage exists.
@@ -3420,7 +3462,10 @@ class Agent(ToolResultProjectionMixin):
         # consumers read the result from ``outcome`` instead of guessing it
         # from which events happened to arrive. A failed turn keeps its ERROR
         # state; only a successful one transitions to DONE.
-        if terminal_error is None:
+        if turn_aborted:
+            turn_outcome = outcome_from_error(code="cancelled", message="The turn was stopped.")
+            yield self._transition(AgentState.DONE)
+        elif terminal_error is None:
             turn_outcome = completed_outcome()
             yield self._transition(AgentState.DONE)
         else:
@@ -3473,9 +3518,18 @@ class Agent(ToolResultProjectionMixin):
                 wait_budget = min(wait_budget, remaining_total)
 
             next_event: asyncio.Future[Any] = asyncio.ensure_future(stream_iter.__anext__())
+            stop_signal = current_turn_stop_signal()
+            abort_wait: asyncio.Future[Any] | None = (
+                asyncio.ensure_future(stop_signal.wait_abort()) if stop_signal is not None else None
+            )
             try:
-                done, _ = await asyncio.wait({next_event}, timeout=wait_budget)
+                waiting = {next_event} if abort_wait is None else {next_event, abort_wait}
+                done, _ = await asyncio.wait(
+                    waiting, timeout=wait_budget, return_when=asyncio.FIRST_COMPLETED
+                )
             except asyncio.CancelledError:
+                if abort_wait is not None:
+                    abort_wait.cancel()
                 # The pending __anext__ runs in its own task: cancelling this
                 # turn does not stop it, and the provider stream (and its HTTP
                 # connection) would stay open until GC. Stop it, close the
@@ -3485,6 +3539,18 @@ class Agent(ToolResultProjectionMixin):
                     await next_event
                 await self._close_provider_stream(stream_iter)
                 raise
+            if abort_wait is not None:
+                if abort_wait in done and next_event not in done:
+                    # Asked to stop mid-stream: stop the pending read, close
+                    # the stream (and its HTTP connection) and end the turn.
+                    next_event.cancel()
+                    with contextlib.suppress(
+                        asyncio.CancelledError, StopAsyncIteration, Exception
+                    ):
+                        await next_event
+                    await self._close_provider_stream(stream_iter)
+                    raise _TurnAbortedError
+                abort_wait.cancel()
             if not done:
                 next_event.cancel()
                 with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
