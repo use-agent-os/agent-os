@@ -76,6 +76,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   which re-emits the stream as agent events and ends with exactly one
   `AttemptResult` (done event, provider error, iteration timeout or
   repetition trip) instead of raising.
+- `Agent._turn_generator` is now a thin driver (under 300 lines, enforced by
+  a test): `agentos.engine.core.run_agent_loop` runs the turn's iterations
+  over the steps of a frozen `LoopConfig`, and the agent supplies those
+  steps, with the turn's state in `engine/turn_state.TurnState`.
 - Subagents now run in a lane per parent session. At most
   `subagents.max_concurrent_children` children of one parent (default 2; an
   agent's own `subagents.max_concurrent_children` wins; `0` = no limit) run

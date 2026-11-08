@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -121,7 +121,7 @@ async def stream_attempt(
     coerce_tool_arguments: Callable[[str, Any], Any],
     on_done: Callable[[ProviderDoneEvent], None],
     started_at: float | None = None,
-) -> AsyncIterator[AgentEvent | AttemptResult]:
+) -> AsyncGenerator[AgentEvent | AttemptResult, None]:
     """Consume one provider stream; yield agent events, then one result.
 
     ``tools_enabled`` is false when the request offered no tools: tool-use
