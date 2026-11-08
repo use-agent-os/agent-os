@@ -17,12 +17,18 @@ from contextlib import aclosing
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from functools import partial
 from typing import Any
 
 import structlog
 
 from agentos.artifacts import artifact_payload
 from agentos.context_budget import ContextBudgetGovernor
+from agentos.engine.approval_port import (
+    ApprovalWaiter,
+    default_approval_waiter,
+    wait_for_pending_approval,
+)
 from agentos.engine.cache_break_monitor import (
     check_response_for_cache_break,
     record_prompt_state,
@@ -278,22 +284,6 @@ async def _await_outside_slot(awaitable: Awaitable[Any]) -> Any:
     """Identity wrapper for an inline approval wait, so timing can wrap it."""
 
     return await awaitable
-
-
-async def _wait_for_pending_approval_resolution(
-    payload: dict[str, Any],
-    *,
-    timeout: float,
-) -> None:
-    approval_id = payload.get("approval_id")
-    if not isinstance(approval_id, str) or not approval_id:
-        return
-    try:
-        from agentos.gateway.approval_queue import get_approval_queue
-
-        await get_approval_queue().wait(approval_id, timeout=timeout)
-    except KeyError:
-        return
 
 
 def _artifact_event_kwargs(payload: dict[str, Any]) -> dict[str, Any]:
@@ -665,8 +655,11 @@ class Agent(ToolResultProjectionMixin):
         tool_context: ToolContext | None = None,
         spend_budget_guard: Callable[[str], tuple[bool, str | None]] | None = None,
         request_hooks: Sequence[RequestHook] | None = None,
+        approval_waiter: ApprovalWaiter | None = None,
     ) -> None:
         self.provider = provider
+        # Waits for a tool call's pending approval (``engine.approval_port``).
+        self._approval_waiter: ApprovalWaiter = approval_waiter or default_approval_waiter()
         self.config = config or AgentConfig()
         self.tool_definitions = tool_definitions or []
         self._tool_definition_by_name = {tool.name: tool for tool in self.tool_definitions}
@@ -3242,7 +3235,7 @@ class Agent(ToolResultProjectionMixin):
             approval_wait_timeout=self._approval_wait_timeout(),
             pending_approval=_pending_approval_payload,
             wait_for_approval=self.turn_timing.timed_approval(
-                _wait_for_pending_approval_resolution
+                partial(wait_for_pending_approval, self._approval_waiter)
             ),
             outside_wait=self.turn_timing.timed_approval(_await_outside_slot),
             artifact_event=lambda a: ArtifactEvent(**_artifact_event_kwargs(a)),

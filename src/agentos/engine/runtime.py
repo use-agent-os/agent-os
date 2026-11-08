@@ -49,6 +49,7 @@ from agentos.contracts.attachments import (
     attachment_size_limit_for_mime as _attachment_size_limit_for_mime,
 )
 from agentos.engine.agent import Agent, ToolHandler
+from agentos.engine.approval_port import default_approval_waiter
 from agentos.engine.cache_break_monitor import notify_compaction
 from agentos.engine.harness.ports import (
     AgentTurnRunner,
@@ -2254,6 +2255,8 @@ class TurnRunner:
             tool_context=tool_context,
             spend_budget_guard=self._check_spend_budget,
             request_hooks=getattr(self, "_request_hooks", ()),
+            # The process's approval queue, resolved when a wait starts.
+            approval_waiter=default_approval_waiter(),
         )
 
     # -- HistoryLoaderPort ----------
