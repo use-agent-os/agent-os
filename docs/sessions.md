@@ -109,6 +109,14 @@ resumed. Each is marked `abandoned` (reason `process_restart`), and their
 parent is woken once with all of its children's results, so it does not wait
 forever. A second restart does not announce the same children again.
 
+Waking the parent is durable. Each wake is written to the session database
+before it is sent, and counts as delivered only once the task runtime accepts
+it. If sending fails, for example while the runtime is draining, the wake is
+retried after 1 s, then 5 s, then 30 s, then every minute, for up to
+30 minutes. A wake still pending when the gateway stops is sent by the next
+boot. A parent is never woken twice for the same group of children, and an
+aborted parent is not woken at all.
+
 ## Export a Transcript
 
 Export Markdown:

@@ -33,6 +33,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `docs/tools-and-sandbox.md`.
 
 ### Fixed
+- Parent wakes for finished subagent groups are now durable. A wake that
+  failed to reach the task runtime was dropped, and the "already woken"
+  marker lived only in memory, so a restart could lose a wake or repeat it.
+  Wakes are now recorded in a `subagent_wakes` table (migration `V015`),
+  retried with backoff for up to 30 minutes, sent by the next boot when one
+  was cut off, and never delivered twice for the same spawn group.
 - Ollama: with thinking off, a thinking-family model (`qwen3`, `qwen3.5`,
   `deepseek-r1`, `magistral`, …) was left at its default, which is to think.
   After a tool round it could answer with reasoning only, and the turn failed
