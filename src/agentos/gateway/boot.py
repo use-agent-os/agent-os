@@ -3551,6 +3551,19 @@ async def start_gateway_server(
         if svc.turn_recovery is not None:
             svc.turn_recovery.start()
 
+        # Children a restart cut off were marked abandoned without an event;
+        # tell their parents now that channels and the runtime are up.
+        from agentos.gateway.subagent_announce import announce_restart_abandoned_children
+        from agentos.gateway.turn_recovery import MAX_AGE_MS as _RECOVERY_MAX_AGE_MS
+
+        create_background_task(
+            announce_restart_abandoned_children(
+                storage=get_session_storage(svc.session_manager) or svc.session_manager,
+                listener=_subagent_completion_listener,
+                max_age_ms=_RECOVERY_MAX_AGE_MS,
+            )
+        )
+
         # Thaw detection, the channel health sweep and safe-mode
         # re-evaluation share one 30 s tick (gateway/maintenance.py).
         from agentos.gateway.maintenance import GatewayMaintenance, set_maintenance

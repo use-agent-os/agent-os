@@ -33,6 +33,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `docs/tools-and-sandbox.md`.
 
 ### Fixed
+- Subagent runs cut off by a gateway restart were marked `abandoned` with no
+  completion event, so a parent waiting on them never woke up. After a
+  restart, each such child is now reported to its parent through the normal
+  completion path, and the parent is woken once per spawn group. A later
+  restart does not announce the same children again.
 - A cancelled turn now leaves a transcript the next turn can replay as is.
   Every tool call that was still running is paired with a "Cancelled" error
   result, and the turn ends with a note telling the model it was interrupted,
