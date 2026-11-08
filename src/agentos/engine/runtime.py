@@ -1694,6 +1694,18 @@ def _derive_router_tier_fallbacks(
     return fallbacks if fallbacks else None
 
 
+def _terminal_done_for(error: ErrorEvent) -> DoneEvent:
+    """The DoneEvent that ends a turn the runner itself failed.
+
+    Every turn ends with exactly one DoneEvent after any ErrorEvent; when the
+    agent loop never ran (a refused budget) or raised, the runner supplies it.
+    """
+
+    return DoneEvent(
+        outcome=outcome_from_error(code=error.code, message=error.message),
+    )
+
+
 class TurnRunner:
     """Orchestrates a complete agent turn: provider → tools → prompt → pipeline → Agent.
 
@@ -2897,8 +2909,12 @@ class TurnRunner:
             )
             await self._persist_turn_error(session_key, budget_error)
             yield budget_error
+            yield _terminal_done_for(budget_error)
             return
 
+        # Whether this turn already yielded its terminal DoneEvent: the error
+        # handler below adds one only when the turn did not.
+        done_yielded = False
         try:
             if budget_message:
                 yield self._handle_runtime_warning(
@@ -2970,6 +2986,8 @@ class TurnRunner:
                 )
                 await self._persist_turn_error(session_key, provider_error_event)
                 yield provider_error_event
+                done_yielded = True
+                yield _terminal_done_for(provider_error_event)
                 return
             pt_out = pt_outcome.require_output()
             provider = pt_out.provider
@@ -3230,6 +3248,8 @@ class TurnRunner:
                 if isinstance(event, SteeringEvent) and event.no_memory_capture:
                     # A message steered in asked to stay out of memory.
                     no_memory_capture = True
+                if isinstance(event, DoneEvent):
+                    done_yielded = True
                 yield event
             timing.stage_end("stream_consumer")
             if router_control_replay_event is not None:
@@ -3265,6 +3285,8 @@ class TurnRunner:
                     ingress_pipeline_steps=ingress_pipeline_steps,
                     router_control_replay_depth=router_control_replay_depth + 1,
                 ):
+                    if isinstance(replayed_event, DoneEvent):
+                        done_yielded = True
                     yield replayed_event
                 return
             # Read terminal state off the shared _StreamState. The
@@ -3398,6 +3420,10 @@ class TurnRunner:
             )
             if pending_error_event is not None:
                 yield pending_error_event
+            deferred_done = stream_state.deferred_done_event
+            if deferred_done is not None and not done_yielded:
+                done_yielded = True
+                yield deferred_done
 
         except asyncio.CancelledError:
             # Bug 2 partial-persistence: preserve whatever assistant text has
@@ -3530,7 +3556,15 @@ class TurnRunner:
                         "error_chars": len(str(exc)),
                     },
                 )
-            yield ErrorEvent(message=error_message, code=event_code)
+            if not done_yielded:
+                # After the turn's DoneEvent nothing more is emitted: the
+                # reply already reached the client, so a failure past that
+                # point (persisting, rollup) is logged and recorded above but
+                # does not re-open the finished turn with a second terminal.
+                runner_error = ErrorEvent(message=error_message, code=event_code)
+                yield runner_error
+                done_yielded = True
+                yield _terminal_done_for(runner_error)
 
         finally:
             # Success, error, cancellation, and an abandoned generator all land

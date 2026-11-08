@@ -424,7 +424,11 @@ before relying on it.
   `session.event.done` or `session.event.error`, whichever path ends it (a
   normal end, a cancel, a crash, `sessions.abort`). The frame carries `state`
   (`done`, `error` or `aborted`) and `task_id`; an aborted one also carries
-  `partial_text`. It is published after the task's terminal status is stored,
+  `partial_text`. A run that failed always ends with `session.event.error`,
+  even when it had already used tokens. A `done` frame also carries `outcome`
+  (`{kind, reason, ...}`, with `kind` one of `completed`, `partial`,
+  `budgetLimited`, `blocked`, `failed` or `interrupted`): the same record
+  the task stores as `details.turn_outcome`. It is published after the task's terminal status is stored,
   before `task.<status>`. `task.*` and `sessions.changed` frames are kept in
   the session's replay buffer with a `stream_seq`, so
   `sessions.messages.subscribe {key, since_stream_seq}` replays them (with

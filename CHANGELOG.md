@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- A turn that failed after the model had already used tokens (for example a
+  provider error after a tool call) ended its run with `session.event.done`
+  in state `done`. The error frame was dropped, so clients showed the failed
+  turn as finished. Such a run now ends with `session.event.error`.
+
+### Changed
+- Every agent turn now ends with exactly one `DoneEvent`, after the error on
+  a failed turn. It carries `outcome`, the same record the task ledger stores
+  as `details.turn_outcome`, and the `session.event.done` payload includes it.
+  Engine callers that read the result from whether an `ErrorEvent` arrived
+  keep working. Callers that assumed a failed turn has no `DoneEvent` must now
+  read `outcome` instead.
+- Removed the unused `agentos.engine.turn_control` module. Its codes
+  `permission_unavailable` and `no_progress` now classify as `blocked` in
+  `agentos.engine.outcome`.
+
 ## [2026.11.7] - 2026-11-07
 
 ### Changed

@@ -53,6 +53,8 @@ _BLOCKED_CODES = frozenset(
     {
         "human_decision_required",
         "approval_required",
+        "permission_unavailable",
+        "no_progress",
         "external_dependency",
         "provider_unavailable",
         "sandbox_threshold_exceeded",

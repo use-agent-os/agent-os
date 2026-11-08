@@ -27,7 +27,6 @@ from tests.fakes import FakeTool, FakeToolbox, Hang, ScriptedProvider, done, err
 
 SESSION = "agent:main:webchat:contract"
 
-PHASE1 = "Phase 1: one terminal done with an outcome on every exit path"
 PHASE4 = "Phase 4: cooperative abort and durable cancelled-turn state"
 
 
@@ -136,14 +135,12 @@ async def test_successful_turn_ends_with_exactly_one_done() -> None:
     assert isinstance(events[-1], DoneEvent)
 
 
-@pytest.mark.xfail(strict=True, reason=PHASE1)
 async def test_successful_turn_outcome_is_completed() -> None:
     events = await _run(_agent(ScriptedProvider([[text("hello"), done()]])))
 
     assert _outcome(events[-1]) == "completed"
 
 
-@pytest.mark.xfail(strict=True, reason=PHASE1)
 async def test_provider_failure_after_recovery_emits_error_then_done_failed() -> None:
     toolbox = FakeToolbox(FakeTool("read"))
     provider = ScriptedProvider(
@@ -163,7 +160,6 @@ async def test_provider_failure_after_recovery_emits_error_then_done_failed() ->
     assert _outcome(events[-1]) == "failed"
 
 
-@pytest.mark.xfail(strict=True, reason=PHASE1)
 async def test_failure_without_any_usage_still_emits_done_failed() -> None:
     provider = ScriptedProvider([[error("401", "invalid api key")]])
 
@@ -176,7 +172,6 @@ async def test_failure_without_any_usage_still_emits_done_failed() -> None:
 # ------------------------------------------- error events never end the stream
 
 
-@pytest.mark.xfail(strict=True, reason=PHASE1)
 async def test_consumer_waiting_for_done_sees_every_error_and_warning_first() -> None:
     provider = ScriptedProvider([[error("503", "busy")]])
 

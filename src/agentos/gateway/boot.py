@@ -1052,6 +1052,11 @@ async def _emit_task_runtime_stream_events(
                 if not key.startswith("_")
             }
         event_kind = event_dict.pop("kind", getattr(event, "kind", event.__class__.__name__))
+        if event_kind == "done" and error_message is not None:
+            # The engine ends every turn with a DoneEvent, after its error on
+            # a failed turn. The wire carries exactly one terminal frame per
+            # run, and for a failed run that frame is the error already sent.
+            continue
         if not show_thinking:
             if event_kind == "thinking":
                 continue

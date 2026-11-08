@@ -20,7 +20,6 @@ from agentos.engine.types import DoneEvent, ErrorEvent
 from agentos.provider import Message
 from tests.fakes import ChainSelector, ScriptedProvider, done, error, text
 
-PHASE1 = "Phase 1: one terminal done with an outcome on every exit path"
 PHASE2 = "Phase 2: single provider attempt policy"
 
 OVERFLOW = "This model's maximum context length is 1000 tokens"
@@ -213,7 +212,6 @@ async def test_overflow_that_compaction_cannot_shrink_fails_with_an_explanation(
     assert "did not reduce" in failure.message or "could not" in failure.message
 
 
-@pytest.mark.xfail(strict=True, reason=PHASE1)
 async def test_overflow_that_cannot_shrink_ends_with_done_failed(sleeps: list[float]) -> None:
     provider = ScriptedProvider([[error("400", OVERFLOW)]])
 

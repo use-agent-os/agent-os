@@ -275,10 +275,11 @@ async def test_turn_is_refused_at_the_hard_limit() -> None:
 
     events = await _collect(runner)
 
-    assert len(events) == 1
+    assert [type(e).__name__ for e in events] == ["ErrorEvent", "DoneEvent"]
     error = events[0]
     assert isinstance(error, ErrorEvent)
     assert error.code == "budget_exceeded"
+    assert events[1].outcome.reason == "budget_exceeded"
     assert "budget limit" in error.message
     # The refusal is auditable in the transcript, not only in the log.
     assert manager.messages and manager.messages[0][1] == "system"
@@ -326,7 +327,7 @@ async def test_hard_stop_without_a_message_still_refuses_the_turn() -> None:
 
     events = await _collect(runner)
 
-    assert len(events) == 1
+    assert [type(e).__name__ for e in events] == ["ErrorEvent", "DoneEvent"]
     assert isinstance(events[0], ErrorEvent)
     assert events[0].code == "budget_exceeded"
     assert events[0].message

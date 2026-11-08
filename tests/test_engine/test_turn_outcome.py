@@ -24,3 +24,17 @@ def test_unknown_error_remains_failed() -> None:
 
     assert outcome.kind == "failed"
     assert outcome.retryable is False
+
+
+def test_codes_from_the_retired_turn_control_module_are_blocked() -> None:
+    # engine/turn_control.py named these as blocked reasons; outcome.py is now
+    # the only taxonomy, so they must classify there.
+    for code in ("permission_unavailable", "no_progress", "tool_policy_denied"):
+        assert outcome_from_error(code=code).kind == "blocked", code
+
+
+def test_cancellation_is_interrupted_with_reason_cancelled() -> None:
+    outcome = outcome_from_error(code="cancelled")
+
+    assert outcome.kind == "interrupted"
+    assert outcome.reason == "cancelled"

@@ -26,7 +26,7 @@ from typing import Any
 import pytest
 
 from agentos.engine.runtime import TurnRunner
-from agentos.engine.types import ErrorEvent
+from agentos.engine.types import DoneEvent, ErrorEvent
 from agentos.observability.prompt_report import PromptReport
 
 # ---------------------------------------------------------------------------
@@ -455,8 +455,10 @@ async def test_prompt_assembler_stage_snapshot(
         # ErrorEvent yielded; no probe capture.
         assert captured is None
         assert raised is None
-        assert len(yielded) == 1
+        # The runner's error, then the one DoneEvent that ends every turn.
+        assert len(yielded) == 2
         assert isinstance(yielded[0], ErrorEvent)
+        assert isinstance(yielded[1], DoneEvent) and yielded[1].outcome.kind == "failed"
         assert yielded[0].code == "agent_error"
         return
 
