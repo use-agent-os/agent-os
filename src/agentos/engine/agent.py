@@ -24,7 +24,8 @@ from agentos.engine.cache_break_monitor import (
     check_response_for_cache_break,
     record_prompt_state,
 )
-from agentos.engine.compaction_service import CompactionService, auxiliary_chunk_summarizer
+from agentos.engine.compaction_coordinator import CompactionCoordinator, CompactionTrigger
+from agentos.engine.compaction_service import CompactionService
 from agentos.engine.estimate_calibration import EstimateCalibration, request_has_media
 from agentos.engine.fallback import FallbackPolicy, backoff_sleep
 from agentos.engine.history import limit_turns, repair_tool_pairing
@@ -2864,6 +2865,7 @@ class Agent(ToolResultProjectionMixin):
                                 self.config.context_window_tokens + 1,
                                 turn_input_index=turn_input_index,
                                 force=True,
+                                trigger="timeout",
                             )
                             timeout_request = (
                                 self._provider_request_messages(timeout_outcome.messages)
@@ -3974,22 +3976,12 @@ class Agent(ToolResultProjectionMixin):
         )
         return round(self.estimate_calibration.factor(provider, model), 3)
 
+    def _compaction_coordinator(self) -> CompactionCoordinator:
+        return CompactionCoordinator(self.config, self.provider, self._session_key)
+
     def _compaction_service(self, *, window_tokens: int | None = None) -> CompactionService:
         del window_tokens
-        hint = getattr(self.config, "compaction_summary_model_hint", None) or ("", "")
-        return CompactionService(
-            provider=self.provider,
-            ratio=float(self.config.context_overflow_threshold),
-            session_key=self._session_key,
-            # Summaries go through the auxiliary side-task client (cheap model,
-            # no thinking, accounted as aux:compaction), never the turn's own
-            # model, and are bounded by their own timeout.
-            chunk_summarizer=auxiliary_chunk_summarizer(
-                hint=(str(hint[0] or ""), str(hint[1] or "")),
-                session_key=self._session_key,
-            ),
-            timeout=float(getattr(self.config, "compaction_summary_timeout_seconds", 45.0) or 45.0),
-        )
+        return self._compaction_coordinator().service()
 
     def _compaction_budget_tokens(self) -> int | None:
         """The provider's own no-rewrite request budget, in tokens.
@@ -4036,6 +4028,7 @@ class Agent(ToolResultProjectionMixin):
             max(1, int(estimated_context_tokens * scale)),
             turn_input_index=turn_input_index,
             token_scale=scale,
+            trigger="preflight",
         )
 
     async def _check_context_overflow(
@@ -4047,8 +4040,9 @@ class Agent(ToolResultProjectionMixin):
         compaction_window_tokens: int | None = None,
         force: bool = False,
         token_scale: float = 1.0,
+        trigger: CompactionTrigger = "overflow",
     ) -> CompactionOutcome | None:
-        """Run the compaction service; ``None`` signals a failed compaction."""
+        """Run compaction for *trigger*; ``None`` signals a failed compaction."""
         self._last_compaction_refusal_reason = None
         window_tokens = compaction_window_tokens or self.config.context_window_tokens
         input_index = len(messages) if turn_input_index is None else turn_input_index
@@ -4057,8 +4051,9 @@ class Agent(ToolResultProjectionMixin):
             # This turn already found compaction not worth it at about this
             # size; do not pay for (or log) the same attempt on every request.
             return CompactionOutcome(messages=messages, turn_input_index=input_index)
-        result = await self._compaction_service().compact(
+        result = await self._compaction_coordinator().compact(
             messages,
+            trigger=trigger,
             turn_input_index=input_index,
             estimated_tokens=estimated_context_tokens,
             window_tokens=window_tokens,
@@ -4238,5 +4233,3 @@ class Agent(ToolResultProjectionMixin):
     # ------------------------------------------------------------------
     # Subagent factory
     # ------------------------------------------------------------------
-
-

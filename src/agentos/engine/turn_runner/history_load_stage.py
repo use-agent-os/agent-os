@@ -3,18 +3,18 @@
 Owns the per-turn slice between the agent-bootstrap stage boundary (Agent
 construction) and the stream-consumer stage boundary (the
 ``async for event in agent.run_turn(...)`` loop). The harness invokes
-``CompactionAndHistoryStage.run`` once per turn, AFTER
+``HistoryLoadStage.run`` once per turn, AFTER
 AgentBootstrapStage and BEFORE the attachment-message build +
 stream-consumer loop.
 
-Compaction no longer runs here. The before-turn paths this stage used to
-own (T3-upgrade compaction, DB preflight compaction and the emergency
-request-scoped trim) were folded into the agent's single
-:class:`agentos.engine.compaction_service.CompactionService`, which checks
-the live request before every provider call -- including the first one of
-the turn -- and persists through the in-turn ``CompactionEvent`` path
-(``persist_compaction_result`` + the durable checkpoint receipt). The class
-name is kept so the runtime wiring and imports stay stable.
+Compaction does not run here. Every compaction trigger goes through
+:class:`agentos.engine.compaction_coordinator.CompactionCoordinator`, which
+checks the live request before every provider call -- including the first
+one of the turn -- and persists through the in-turn ``CompactionEvent`` path
+(``persist_compaction_result`` + the durable checkpoint receipt). The stage
+was called ``CompactionAndHistoryStage`` while it still compacted; its
+turn-timing key stays ``compaction_and_history`` so existing diagnostics
+keep their stage name.
 
 Side-effect contract:
 
@@ -112,7 +112,7 @@ class TurnStartObserverPort(Protocol):
 
 
 @dataclass(frozen=True)
-class CompactionAndHistoryStageInput:
+class HistoryLoadStageInput:
     """Inputs the stage needs at its boundary.
 
     ``agent`` comes from AgentBootstrapStage; ``session_key``, ``agent_id``
@@ -128,7 +128,7 @@ class CompactionAndHistoryStageInput:
 
 
 @dataclass(frozen=True)
-class CompactionAndHistoryStageOutput:
+class HistoryLoadStageOutput:
     """The pieces of state subsequent stages and the harness consume.
 
     - ``compaction_summary_context``: the string passed to the
@@ -149,7 +149,7 @@ class CompactionAndHistoryStageOutput:
 # ---------------------------------------------------------------------------
 
 
-class CompactionAndHistoryStage:
+class HistoryLoadStage:
     """Load history, prepend durable compaction context.
 
     Stable boundary: runs ONCE per turn, after ``AgentBootstrapStage``
@@ -163,7 +163,7 @@ class CompactionAndHistoryStage:
     terminal handler in ``_run_turn``.
     """
 
-    name = "compaction_and_history_stage"
+    name = "history_load_stage"
 
     def __init__(
         self,
@@ -178,8 +178,8 @@ class CompactionAndHistoryStage:
 
     async def run(
         self,
-        inp: CompactionAndHistoryStageInput,
-    ) -> StageOutcome[CompactionAndHistoryStageOutput]:
+        inp: HistoryLoadStageInput,
+    ) -> StageOutcome[HistoryLoadStageOutput]:
         # Local import keeps the module import-cycle-free.
         from agentos.engine.turn_runner.outcome import StageOutcome
 
@@ -209,7 +209,7 @@ class CompactionAndHistoryStage:
         )
 
         return StageOutcome.success(
-            CompactionAndHistoryStageOutput(
+            HistoryLoadStageOutput(
                 compaction_summary_context=compaction_summary_context,
                 final_request_context_prompt=final_request_context_prompt,
             )

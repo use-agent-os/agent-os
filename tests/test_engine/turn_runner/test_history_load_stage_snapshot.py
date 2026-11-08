@@ -1,4 +1,4 @@
-"""Snapshot regression net for ``CompactionAndHistoryStage`` through ``TurnRunner._run_turn``.
+"""Snapshot regression net for ``HistoryLoadStage`` through ``TurnRunner._run_turn``.
 
 The corpus enumerates every input shape the stage has been observed to
 handle and pins the output snapshot. The harness patches the BEFORE-turn
@@ -309,7 +309,7 @@ _CORPUS_IDS = [c[0] for c in _CORPUS]
 
 @pytest.mark.parametrize("case_id,case", _CORPUS, ids=_CORPUS_IDS)
 @pytest.mark.asyncio
-async def test_compaction_and_history_stage_snapshot(
+async def test_history_load_stage_snapshot(
     case_id: str,
     case: dict[str, Any],
 ) -> None:
@@ -336,22 +336,16 @@ async def test_compaction_and_history_stage_snapshot(
 
     expected_snapshot = {
         "outcome": "success",
-        "agent_request_context_prompt_after": case[
-            "expected_final_request_context"
-        ],
+        "agent_request_context_prompt_after": case["expected_final_request_context"],
         "agent_context_overflow_threshold": case["expected_threshold"],
     }
     assert captured == expected_snapshot, (
-        f"case={case_id}: snapshot diverged.\n"
-        f"  expected={expected_snapshot}\n  actual  ={captured}"
+        f"case={case_id}: snapshot diverged.\n  expected={expected_snapshot}\n  actual  ={captured}"
     )
 
     # History always loaded once, with the caller's trim flag.
     assert len(call_log["history"]) == 1
-    assert (
-        call_log["history"][0]["trim_last_user"]
-        is case["history_has_persisted_user"]
-    )
+    assert call_log["history"][0]["trim_last_user"] is case["history_has_persisted_user"]
 
 
 def test_runner_has_no_before_turn_compaction_paths() -> None:

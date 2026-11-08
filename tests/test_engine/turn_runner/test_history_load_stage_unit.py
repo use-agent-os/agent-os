@@ -1,4 +1,4 @@
-"""Unit tests for ``CompactionAndHistoryStage`` driven directly (no full
+"""Unit tests for ``HistoryLoadStage`` driven directly (no full
 TurnRunner stack).
 
 The stage no longer compacts: the before-turn T3-upgrade / DB-preflight /
@@ -16,9 +16,9 @@ from typing import Any
 
 import pytest
 
-from agentos.engine.turn_runner.compaction_and_history_stage import (
-    CompactionAndHistoryStage,
-    CompactionAndHistoryStageInput,
+from agentos.engine.turn_runner.history_load_stage import (
+    HistoryLoadStage,
+    HistoryLoadStageInput,
 )
 from agentos.engine.turn_runner.outcome import StageOutcome
 
@@ -83,10 +83,10 @@ def _make_input(
     session_key: str = "agent:main:s1",
     agent_id: str = "agent:main",
     history_has_persisted_user: bool = True,
-) -> CompactionAndHistoryStageInput:
+) -> HistoryLoadStageInput:
     if agent is None:
         agent = _make_agent_stub(request_context_prompt=request_context_prompt)
-    return CompactionAndHistoryStageInput(
+    return HistoryLoadStageInput(
         agent=agent,
         session_key=session_key,
         agent_id=agent_id,
@@ -98,10 +98,10 @@ def _make_stage(
     *,
     history: _RecordingHistoryLoader | None = None,
     prepender: _RecordingPrepender | None = None,
-) -> tuple[CompactionAndHistoryStage, _RecordingHistoryLoader, _RecordingPrepender]:
+) -> tuple[HistoryLoadStage, _RecordingHistoryLoader, _RecordingPrepender]:
     history = history or _RecordingHistoryLoader()
     prepender = prepender or _RecordingPrepender()
-    stage = CompactionAndHistoryStage(
+    stage = HistoryLoadStage(
         history_loader=history,
         request_context_prepender=prepender,
     )

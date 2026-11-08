@@ -48,10 +48,10 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from agentos.engine.compaction_coordinator import CompactionCoordinator
 from agentos.engine.compaction_service import (
     CompactionResult,
     CompactionService,
-    auxiliary_chunk_summarizer,
     is_ephemeral_session,
     is_summary_pair,
     summary_messages,
@@ -182,20 +182,13 @@ def _trigger_limit(agent: Any) -> int:
     )
 
 
+def _coordinator(agent: Any, session_key: str) -> CompactionCoordinator:
+    return CompactionCoordinator(agent.config, agent.provider, session_key)
+
+
 def _compaction_service(agent: Any, session_key: str) -> CompactionService:
     """The agent's own compaction service, reporting the proactive phase."""
-    hint = getattr(agent.config, "compaction_summary_model_hint", None) or ("", "")
-    return CompactionService(
-        provider=agent.provider,
-        ratio=float(agent.config.context_overflow_threshold),
-        session_key=session_key,
-        chunk_summarizer=auxiliary_chunk_summarizer(
-            hint=(str(hint[0] or ""), str(hint[1] or "")),
-            session_key=session_key,
-        ),
-        timeout=float(getattr(agent.config, "compaction_summary_timeout_seconds", 45.0) or 45.0),
-        phase=PROACTIVE_PHASE,
-    )
+    return _coordinator(agent, session_key).service(phase=PROACTIVE_PHASE)
 
 
 class ProactiveCompactionScheduler:
@@ -432,8 +425,10 @@ class ProactiveCompactionScheduler:
             limit_tokens=pending.limit_tokens,
         )
         budget_of = getattr(agent, "_compaction_budget_tokens", None)
-        result = await _compaction_service(agent, session_key).compact(
+        result = await _coordinator(agent, session_key).compact(
             messages,
+            trigger="proactive",
+            phase=PROACTIVE_PHASE,
             turn_input_index=len(prefix),
             estimated_tokens=estimated,
             window_tokens=int(agent.config.context_window_tokens),
