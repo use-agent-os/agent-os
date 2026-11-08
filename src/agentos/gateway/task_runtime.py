@@ -220,6 +220,15 @@ class SubagentCompletionEvent:
         return payload
 
 
+def _parent_session_of(task: _RuntimeTask) -> str | None:
+    """The parent session of a child run (subagent / ACP), else ``None``."""
+
+    if task.run_kind not in _CHILD_RUN_KINDS:
+        return None
+    parent = task.envelope.metadata.get("parent_session_key")
+    return parent if isinstance(parent, str) and parent else None
+
+
 @dataclass
 class _RuntimeTask:
     task_id: str
@@ -240,6 +249,9 @@ class _RuntimeTask:
     terminal_emitted: bool = False
     cancel_requested: bool = False
     acquired_slot: bool = False
+    #: The slot came from the nested pool: a child whose parent run held a
+    #: slot when it was admitted (see ``_acquire_fair_slot``).
+    nested_slot: bool = False
     overflow_dropped: bool = False
     cancel_source: str | None = None
     cancel_reason: str | None = None
@@ -391,6 +403,8 @@ class TaskRuntime:
         max_concurrency: int = 4,
         max_pending_per_session: int | None = 64,
         subagent_reserved_slots: int = 0,
+        max_concurrent_children: int | None = None,
+        children_limit_resolver: Callable[[str], Awaitable[int | None]] | None = None,
         turn_hard_deadline_s: float | None = None,
         running_heartbeat_interval_s: float | None = 30.0,
         pending_overflow_policy: PendingOverflowPolicy | str = (
@@ -403,6 +417,8 @@ class TaskRuntime:
             raise ValueError("max_pending_per_session must be >= 1")
         if subagent_reserved_slots < 0:
             raise ValueError("subagent_reserved_slots must be >= 0")
+        if max_concurrent_children is not None and max_concurrent_children < 1:
+            raise ValueError("max_concurrent_children must be >= 1 or None")
         if turn_hard_deadline_s is not None and turn_hard_deadline_s <= 0:
             raise ValueError("turn_hard_deadline_s must be > 0 or None")
         if running_heartbeat_interval_s is not None and running_heartbeat_interval_s <= 0:
@@ -432,6 +448,11 @@ class TaskRuntime:
         self._max_pending_per_session = max_pending_per_session
         self._max_concurrency = max_concurrency
         self._subagent_reserved_slots = subagent_reserved_slots
+        # Per-parent lane: at most this many children of one parent session run
+        # at once (``None`` = no per-parent limit); the resolver may override
+        # it per parent (an agent's ``subagents.max_concurrent_children``).
+        self._max_concurrent_children = max_concurrent_children
+        self._children_limit_resolver = children_limit_resolver
         self._turn_hard_deadline_s = turn_hard_deadline_s
         self._running_heartbeat_interval_s = running_heartbeat_interval_s
         self._pending_overflow_policy = pending_overflow_policy
@@ -472,6 +493,12 @@ class TaskRuntime:
         # They drive the reserved-slot fairness gate for subagent runs.
         self._global_in_flight = 0
         self._subagent_in_flight = 0
+        # Children admitted through the nested pool (their parent run held a
+        # global slot): not counted in ``_global_in_flight``.
+        self._nested_in_flight = 0
+        # Per-parent lane state: running children and the FIFO of waiting ones.
+        self._parent_in_flight: dict[str, int] = {}
+        self._parent_queue: dict[str, deque[str]] = {}
         # Lazily constructed so the runtime can be instantiated outside an
         # event loop (some tests do this); the Condition is bound to the
         # running loop the first time a subagent waits on a slot.
@@ -508,6 +535,12 @@ class TaskRuntime:
         # Told about every task as it is admitted (restart recovery cancels a
         # pending resume when the user writes first). Called synchronously.
         self._enqueue_listeners: builtins.list[Callable[[AgentTaskRecord], None]] = []
+
+    @property
+    def active_turns(self) -> int:
+        """Turns holding a slot right now: the shared pool plus the nested one."""
+
+        return self._global_in_flight + self._nested_in_flight
 
     def stop_admission(self) -> None:
         """Refuse every further :meth:`enqueue` until :meth:`resume_admission`."""
@@ -1525,31 +1558,27 @@ class TaskRuntime:
         cond = self._ensure_fair_cond()
         agent_id = task.envelope.agent_id
         session_key = task.envelope.session_key
-
-        async with cond:
-            while True:
-                # Predicate 1: global slot available.
-                if self._global_in_flight >= self._max_concurrency:
-                    await cond.wait()
-                    continue
-                # Tie-break: when exactly one slot remains and this agent has
-                # multiple active sessions, only the deque-head session may
-                # take it.  All other sessions of this agent yield so that RR
-                # ordering is preserved without wasting the slot.
-                idle_slots = self._max_concurrency - self._global_in_flight
-                rr = self._agent_session_rr.get(agent_id)
-                if idle_slots == 1 and rr and len(rr) > 1 and rr[0] != session_key:
-                    await cond.wait()
-                    continue
-                # Predicate satisfied — rotate deque and claim the slot.
-                if rr and rr[0] == session_key:
-                    rr.rotate(-1)
-                self._global_in_flight += 1
-                if task.run_kind in _CHILD_RUN_KINDS:
-                    self._subagent_in_flight += 1
-                self._agent_in_flight[agent_id] = self._agent_in_flight.get(agent_id, 0) + 1
-                task.acquired_slot = True
-                break
+        parent = _parent_session_of(task)
+        parent_limit = await self._children_limit_for(parent) if parent is not None else None
+        if parent is not None:
+            async with cond:
+                self._parent_queue.setdefault(parent, deque()).append(task.task_id)
+        try:
+            await self._acquire_fair_slot_locked(
+                task, cond, agent_id, session_key, parent, parent_limit
+            )
+        finally:
+            if parent is not None:
+                async with cond:
+                    queue = self._parent_queue.get(parent)
+                    if queue is not None:
+                        try:
+                            queue.remove(task.task_id)
+                        except ValueError:
+                            pass
+                        if not queue:
+                            self._parent_queue.pop(parent, None)
+                    cond.notify_all()
 
         # Update storage and emit running metric outside the condition lock.
         await self._mark_running(task)
@@ -1559,11 +1588,103 @@ class TaskRuntime:
             session_key=task.envelope.session_key,
         )
 
+    async def _children_limit_for(self, parent_session_key: str) -> int | None:
+        limit = self._max_concurrent_children
+        if self._children_limit_resolver is not None:
+            try:
+                resolved = await self._children_limit_resolver(parent_session_key)
+            except Exception:  # noqa: BLE001 - fall back to the runtime default
+                resolved = None
+            if resolved is not None:
+                limit = resolved
+        return limit if limit is None or limit >= 1 else None
+
+    async def _acquire_fair_slot_locked(
+        self,
+        task: _RuntimeTask,
+        cond: asyncio.Condition,
+        agent_id: str,
+        session_key: str,
+        parent: str | None,
+        parent_limit: int | None,
+    ) -> None:
+        async with cond:
+            while True:
+                nested = False
+                if parent is not None:
+                    # Per-parent lane: FIFO among this parent's waiting
+                    # children, at most ``parent_limit`` running at once.
+                    queue = self._parent_queue.get(parent)
+                    if queue and queue[0] != task.task_id:
+                        await self._wait_for_slot_change(cond, recheck=True)
+                        continue
+                    if (
+                        parent_limit is not None
+                        and self._parent_in_flight.get(parent, 0) >= parent_limit
+                    ):
+                        await self._wait_for_slot_change(cond, recheck=True)
+                        continue
+                    # A parent run that holds a slot (for example waiting on
+                    # this child inline) must not starve it of one: its
+                    # children run in the nested pool, bounded per parent.
+                    nested = parent in self._running_by_session
+                if nested and parent is not None:
+                    self._nested_in_flight += 1
+                    self._subagent_in_flight += 1
+                    task.nested_slot = True
+                    self._parent_in_flight[parent] = self._parent_in_flight.get(parent, 0) + 1
+                    task.acquired_slot = True
+                    return
+                # Predicate 1: global slot available.
+                if self._global_in_flight >= self._max_concurrency:
+                    await self._wait_for_slot_change(cond, recheck=parent is not None)
+                    continue
+                # Tie-break: when exactly one slot remains and this agent has
+                # multiple active sessions, only the deque-head session may
+                # take it.  All other sessions of this agent yield so that RR
+                # ordering is preserved without wasting the slot.
+                idle_slots = self._max_concurrency - self._global_in_flight
+                rr = self._agent_session_rr.get(agent_id)
+                if idle_slots == 1 and rr and len(rr) > 1 and rr[0] != session_key:
+                    await self._wait_for_slot_change(cond, recheck=parent is not None)
+                    continue
+                # Predicate satisfied — rotate deque and claim the slot.
+                if rr and rr[0] == session_key:
+                    rr.rotate(-1)
+                self._global_in_flight += 1
+                if task.run_kind in _CHILD_RUN_KINDS:
+                    self._subagent_in_flight += 1
+                if parent is not None:
+                    self._parent_in_flight[parent] = self._parent_in_flight.get(parent, 0) + 1
+                self._agent_in_flight[agent_id] = self._agent_in_flight.get(agent_id, 0) + 1
+                task.acquired_slot = True
+                return
+
+    @staticmethod
+    async def _wait_for_slot_change(cond: asyncio.Condition, *, recheck: bool) -> None:
+        """Wait for a slot release; with *recheck*, wake at least every second.
+
+        A child also becomes admissible when its parent *starts* running (the
+        nested pool), and nothing notifies the condition for that.
+        """
+        if not recheck:
+            await cond.wait()
+            return
+        try:
+            await asyncio.wait_for(cond.wait(), timeout=1.0)
+        except TimeoutError:
+            pass
+
     async def _wait_for_subagent_slot(self, task: _RuntimeTask) -> None:
         """Block subagent tasks until at least ``reserved_slots+1`` capacity
         is free, so non-subagent tasks always have a fair runway.
         """
         if task.run_kind not in _CHILD_RUN_KINDS or self._subagent_reserved_slots <= 0:
+            return
+        parent = _parent_session_of(task)
+        if parent is not None and parent in self._running_by_session:
+            # Its parent run holds a slot (it may be waiting on this child
+            # inline); the child runs in the nested pool, not the shared one.
             return
         cond = self._ensure_slot_cond()
         async with cond:
@@ -1573,15 +1694,26 @@ class TaskRuntime:
     async def _release_slot(self, task: _RuntimeTask) -> None:
         async with self._state_lock:
             if task.acquired_slot:
-                self._global_in_flight = max(0, self._global_in_flight - 1)
                 if task.run_kind in _CHILD_RUN_KINDS:
                     self._subagent_in_flight = max(0, self._subagent_in_flight - 1)
-                agent_id = task.envelope.agent_id
-                new_count = max(0, self._agent_in_flight.get(agent_id, 0) - 1)
-                if new_count == 0:
-                    self._agent_in_flight.pop(agent_id, None)
+                parent = _parent_session_of(task)
+                if parent is not None:
+                    remaining = max(0, self._parent_in_flight.get(parent, 0) - 1)
+                    if remaining == 0:
+                        self._parent_in_flight.pop(parent, None)
+                    else:
+                        self._parent_in_flight[parent] = remaining
+                if task.nested_slot:
+                    self._nested_in_flight = max(0, self._nested_in_flight - 1)
+                    task.nested_slot = False
                 else:
-                    self._agent_in_flight[agent_id] = new_count
+                    self._global_in_flight = max(0, self._global_in_flight - 1)
+                    agent_id = task.envelope.agent_id
+                    new_count = max(0, self._agent_in_flight.get(agent_id, 0) - 1)
+                    if new_count == 0:
+                        self._agent_in_flight.pop(agent_id, None)
+                    else:
+                        self._agent_in_flight[agent_id] = new_count
                 task.acquired_slot = False
         # Wake all tasks waiting for a slot: both the subagent-reserved gate
         # (_slot_cond) and the fair-queuing gate (_fair_cond).
