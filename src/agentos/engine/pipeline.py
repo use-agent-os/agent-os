@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -15,6 +15,68 @@ from agentos.provider.protocol import LLMProvider
 log = structlog.get_logger(__name__)
 
 TurnStep = Callable[["TurnContext"], Awaitable["TurnContext"]]
+
+
+@dataclass(frozen=True)
+class PromptStepRegistry:
+    """The ordered names of the pre-turn prompt steps (#3819).
+
+    Steps are named, not held: :meth:`resolve` looks each one up in
+    ``agentos.engine.steps`` when a turn runs, so a replaced step (a test
+    double, a plugin) is the one that runs. ``overrides`` swaps a named step
+    for a wrapper, the way the runner bounds the router with its timeout.
+    """
+
+    names: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if len(set(self.names)) != len(self.names):
+            raise ValueError(f"duplicate prompt step in {self.names}")
+
+    def with_step(
+        self, name: str, *, after: str | None = None, before: str | None = None
+    ) -> PromptStepRegistry:
+        """A registry with ``name`` added after/before another step (default: last)."""
+        if (after is None) == (before is None) and after is not None:
+            raise ValueError("pass after= or before=, not both")
+        names = [n for n in self.names if n != name]
+        if after is not None:
+            index = names.index(after) + 1
+        elif before is not None:
+            index = names.index(before)
+        else:
+            index = len(names)
+        names.insert(index, name)
+        return PromptStepRegistry(tuple(names))
+
+    def without(self, name: str) -> PromptStepRegistry:
+        return PromptStepRegistry(tuple(n for n in self.names if n != name))
+
+    def resolve(self, overrides: Mapping[str, TurnStep] | None = None) -> list[TurnStep]:
+        """The step callables, in order, for one turn."""
+        import agentos.engine.steps as steps_module
+
+        overrides = overrides or {}
+        return [
+            overrides[name] if name in overrides else cast(TurnStep, getattr(steps_module, name))
+            for name in self.names
+        ]
+
+
+#: The prompt steps every turn runs, in order.
+DEFAULT_PROMPT_STEPS = PromptStepRegistry(
+    (
+        "resolve_model",
+        "apply_agentos_router",
+        "observe_reasoning_hint",
+        "filter_skills",
+        "inject_subagent_grounding",
+        "inject_env_probe",
+        "inject_platform_hint",
+        "inject_plan_mode",
+        "apply_prompt_cache",
+    )
+)
 
 
 @dataclass

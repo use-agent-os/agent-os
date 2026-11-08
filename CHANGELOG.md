@@ -91,6 +91,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   retries, max iterations, runtime timeout) resolve through one
   `TurnPolicyResolver`: explicit, then session, then env, then gateway
   config, then default. Warnings and values are unchanged.
+- `Agent` takes an `ApprovalWaiter` (`engine/approval_port.py`) instead of
+  importing the gateway approval queue, and composes a `ToolResultProjector`
+  instead of inheriting the projection mixin.
+- The pre-turn prompt steps run from `PromptStepRegistry`
+  (`DEFAULT_PROMPT_STEPS`, same order), resolved by name per turn.
+- The Pilot Router step runs on one long-lived router event loop
+  (`engine/router_loop.py`) instead of a new thread and event loop per turn.
+  A router that blocks still times out and the turn fails open.
 - Subagents now run in a lane per parent session. At most
   `subagents.max_concurrent_children` children of one parent (default 2; an
   agent's own `subagents.max_concurrent_children` wins; `0` = no limit) run

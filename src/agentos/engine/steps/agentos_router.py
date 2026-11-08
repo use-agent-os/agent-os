@@ -66,8 +66,8 @@ class RoutingHistoryStore:
     a session terminates, preventing unbounded growth in long-running
     deployments.
 
-    The router step now runs inside ``asyncio.to_thread`` (runtime.py) while
-    ``commit_deferred_router_history`` runs back on the main event loop, so
+    The router step runs on the router loop's thread (``engine.router_loop``)
+    while ``commit_deferred_router_history`` runs back on the main event loop, so
     ``get``/``set``/``setdefault``/``clear`` are genuinely called from multiple
     OS threads concurrently. Every access takes ``_lock`` so a worker-thread
     ``clear()`` cannot interleave between another thread's ``setdefault`` and

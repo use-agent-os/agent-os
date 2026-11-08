@@ -49,6 +49,7 @@ from agentos.contracts.attachments import (
     attachment_size_limit_for_mime as _attachment_size_limit_for_mime,
 )
 from agentos.engine.agent import Agent, ToolHandler
+from agentos.engine.approval_port import default_approval_waiter
 from agentos.engine.cache_break_monitor import notify_compaction
 from agentos.engine.harness.ports import (
     AgentTurnRunner,
@@ -68,13 +69,14 @@ from agentos.engine.hooks import (
     TurnHookContext,
 )
 from agentos.engine.outcome import outcome_from_error, turn_outcome_details
-from agentos.engine.pipeline import TurnContext
+from agentos.engine.pipeline import DEFAULT_PROMPT_STEPS, PromptStepRegistry, TurnContext
 from agentos.engine.pricing import PriceEntry, lookup_price
 from agentos.engine.proactive_compaction import ProactiveCompactionScheduler
 from agentos.engine.repetition_guard import (
     RepetitionGuardSettings,
     repetition_guard_settings_from,
 )
+from agentos.engine.router_loop import router_loop
 from agentos.engine.turn_policy import TurnPolicyResolver
 from agentos.engine.turn_progress import TurnProgressWriter
 from agentos.engine.turn_runner import (
@@ -1879,6 +1881,8 @@ class TurnRunner:
                 turn_finalizer=turn_finalizer_stage,
             ),
         )
+        # The pre-turn prompt steps, in order (``engine.pipeline``).
+        self._prompt_steps: PromptStepRegistry = DEFAULT_PROMPT_STEPS
         # Memory-nudge reviews running in the background (MemoryNudgePort).
         self._memory_nudge_pending: set[asyncio.Task[None]] = set()
 
@@ -2254,6 +2258,8 @@ class TurnRunner:
             tool_context=tool_context,
             spend_budget_guard=self._check_spend_budget,
             request_hooks=getattr(self, "_request_hooks", ()),
+            # The process's approval queue, resolved when a wait starts.
+            approval_waiter=default_approval_waiter(),
         )
 
     # -- HistoryLoaderPort ----------
@@ -4952,18 +4958,8 @@ class TurnRunner:
         engine pipeline records.
         """
         from agentos.agentos_router.llm_judge import DEFAULT_ROUTING_TIMEOUT_SECONDS
+        from agentos.engine import steps as prompt_steps
         from agentos.engine.pipeline import TurnContext, run_pipeline
-        from agentos.engine.steps import (
-            apply_agentos_router,
-            apply_prompt_cache,
-            filter_skills,
-            inject_env_probe,
-            inject_plan_mode,
-            inject_platform_hint,
-            inject_subagent_grounding,
-            observe_reasoning_hint,
-            resolve_model,
-        )
         from agentos.engine.steps.agentos_router import (
             commit_deferred_router_history,
         )
@@ -4993,12 +4989,13 @@ class TurnRunner:
 
         async def _bounded_apply_agentos_router(turn: TurnContext) -> TurnContext:
             async def _run_router_step() -> TurnContext:
-                return await apply_agentos_router(_copy_router_turn(turn))
+                return await prompt_steps.apply_agentos_router(_copy_router_turn(turn))
 
             try:
+                # On the long-lived router loop (``engine.router_loop``): a
+                # blocking router still times out here and the turn fails open.
                 routed = await asyncio.wait_for(
-                    asyncio.to_thread(lambda: asyncio.run(_run_router_step())),
-                    timeout=router_timeout,
+                    router_loop().run(_run_router_step()), timeout=router_timeout
                 )
                 return commit_deferred_router_history(routed)
             except TimeoutError as exc:
@@ -5061,17 +5058,7 @@ class TurnRunner:
         )
         turn = await run_pipeline(
             turn,
-            [
-                resolve_model,
-                _bounded_apply_agentos_router,
-                observe_reasoning_hint,
-                filter_skills,
-                inject_subagent_grounding,
-                inject_env_probe,
-                inject_platform_hint,
-                inject_plan_mode,
-                apply_prompt_cache,
-            ],
+            self._prompt_steps.resolve({"apply_agentos_router": _bounded_apply_agentos_router}),
         )
 
         # Apply routed model back to cloned selector (local, not shared)
