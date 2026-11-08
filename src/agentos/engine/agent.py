@@ -26,6 +26,12 @@ from agentos.engine.cache_break_monitor import (
 )
 from agentos.engine.compaction_coordinator import CompactionCoordinator, CompactionTrigger
 from agentos.engine.compaction_service import CompactionService
+from agentos.engine.core.turn_usage import (
+    TurnTotals,
+    cost_source_for_usage,
+    resolve_done_model,
+    settle_turn_usage,
+)
 from agentos.engine.estimate_calibration import EstimateCalibration, request_has_media
 from agentos.engine.fallback import FallbackPolicy, backoff_sleep
 from agentos.engine.history import limit_turns, repair_tool_pairing
@@ -229,14 +235,7 @@ _COMPACTION_DECLINE_REASONS = frozenset(
 )
 
 
-def _cost_source_for_usage(cost_usd: float, billed_cost: float) -> str:
-    if billed_cost > 0.0 and abs(cost_usd - billed_cost) <= 1e-9:
-        return "provider_billed"
-    if billed_cost > 0.0:
-        return "mixed"
-    if cost_usd > 0.0:
-        return "agentos_estimate"
-    return "unavailable"
+_cost_source_for_usage = cost_source_for_usage
 
 
 def _is_deepseek_model_id(model_id: str | None) -> bool:
@@ -3399,14 +3398,11 @@ class Agent(ToolResultProjectionMixin):
             self._write_context_stage("session:after", self._history)
 
         # ------ → DONE ------
-        # Compute per-turn cost from pricing table
-        done_model = last_actual_model
-        if not done_model and self._usage_tracker and self._session_key:
+        tracked_model = None
+        if not last_actual_model and self._usage_tracker and self._session_key:
             su = self._usage_tracker.get(self._session_key)
-            if su and su.model_id:
-                done_model = su.model_id
-        if not done_model:
-            done_model = self.config.model_id or ""
+            tracked_model = su.model_id if su else None
+        done_model = resolve_done_model(last_actual_model, tracked_model, self.config.model_id)
         from agentos.engine.pricing import lookup_price
 
         done_provider = provider_metadata(self.provider)
@@ -3414,19 +3410,6 @@ class Agent(ToolResultProjectionMixin):
             done_model,
             provider_id=done_provider.provider_kind or done_provider.provider_name,
         )
-        estimated_cost = (
-            total_input_tokens * price.input_per_m + total_output_tokens * price.output_per_m
-        ) / 1_000_000
-        if total_billed_cost > 0.0:
-            done_cost = total_billed_cost
-            cost_source = "provider_billed"
-        elif estimated_cost > 0.0:
-            done_cost = estimated_cost
-            cost_source = "agentos_static_estimate"
-        else:
-            done_cost = 0.0
-            cost_source = "unavailable"
-
         session_totals = (
             self._usage_tracker.session_snapshot(self._session_key)
             if self._usage_tracker and self._session_key
@@ -3437,26 +3420,18 @@ class Agent(ToolResultProjectionMixin):
             if self._usage_tracker and self._session_key
             else None
         )
-        done_input_tokens = total_input_tokens
-        done_output_tokens = total_output_tokens
-        done_cached_tokens = total_cached_tokens
-        done_cache_write_tokens = total_cache_write_tokens
-        done_billed_cost = total_billed_cost
-        if turn_usage_delta and (
-            turn_usage_delta.input_tokens
-            or turn_usage_delta.output_tokens
-            or turn_usage_delta.cache_read_tokens
-            or turn_usage_delta.cache_write_tokens
-            or turn_usage_delta.cost_usd
-            or turn_usage_delta.billed_cost
-        ):
-            done_input_tokens = turn_usage_delta.input_tokens
-            done_output_tokens = turn_usage_delta.output_tokens
-            done_cached_tokens = turn_usage_delta.cache_read_tokens
-            done_cache_write_tokens = turn_usage_delta.cache_write_tokens
-            done_cost = turn_usage_delta.cost_usd
-            done_billed_cost = turn_usage_delta.billed_cost
-            cost_source = _cost_source_for_usage(done_cost, done_billed_cost)
+        done_usage = settle_turn_usage(
+            TurnTotals(
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+                cached_tokens=total_cached_tokens,
+                cache_write_tokens=total_cache_write_tokens,
+                billed_cost=total_billed_cost,
+            ),
+            model=done_model,
+            price=price,
+            delta=turn_usage_delta,
+        )
 
         # Exactly one DoneEvent ends every turn, after any terminal error, so
         # consumers read the result from ``outcome`` instead of guessing it
@@ -3475,16 +3450,16 @@ class Agent(ToolResultProjectionMixin):
             )
         yield DoneEvent(
             text="".join(final_text_parts),
-            input_tokens=done_input_tokens,
-            output_tokens=done_output_tokens,
+            input_tokens=done_usage.input_tokens,
+            output_tokens=done_usage.output_tokens,
             reasoning_tokens=total_reasoning_tokens,
-            cached_tokens=done_cached_tokens,
-            cache_write_tokens=done_cache_write_tokens,
+            cached_tokens=done_usage.cached_tokens,
+            cache_write_tokens=done_usage.cache_write_tokens,
             iterations=iterations,
-            cost_usd=done_cost,
-            billed_cost=done_billed_cost,
-            cost_source=cost_source,
-            model=done_model,
+            cost_usd=done_usage.cost_usd,
+            billed_cost=done_usage.billed_cost,
+            cost_source=done_usage.cost_source,
+            model=done_usage.model,
             runtime_context_hash=runtime_context_hash,
             runtime_context_chars=len(runtime_context),
             reasoning_content=("\n".join(final_reasoning_parts) if final_reasoning_parts else None),

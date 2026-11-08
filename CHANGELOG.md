@@ -69,6 +69,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   turn as finished. Such a run now ends with `session.event.error`.
 
 ### Changed
+- The token and cost figures a turn reports on its `DoneEvent` are settled by
+  a pure `agentos.engine.core.settle_turn_usage`, the first piece of the agent
+  loop moved into `engine/core` (which may not import the gateway).
 - Subagents now run in a lane per parent session. At most
   `subagents.max_concurrent_children` children of one parent (default 2; an
   agent's own `subagents.max_concurrent_children` wins; `0` = no limit) run
