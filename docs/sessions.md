@@ -116,10 +116,35 @@ turn can replay as is. Every tool call that had not finished gets a
 "Cancelled" error result, and the turn ends with a note telling the model it
 was interrupted, so tools may have partly run.
 
+Subagents of one parent session run at most two at a time by default. More
+spawns are accepted and wait in spawn order (`sessions_spawn` reports them as
+`queued`); children of other parents are not held back. Change the default
+with `subagents.max_concurrent_children` (`0` = no per-parent limit), or per
+agent with `subagents.max_concurrent_children` in its entry. The hard cap on
+how many children a parent may have at all is still
+`max_children_per_session`.
+
+```toml
+[subagents]
+max_concurrent_children = 2
+```
+
+A parent that waits on a child in the same turn (`sessions_yield` with a
+`session_key`) keeps its own slot. Its children run in a separate nested pool,
+so they still start when every shared slot is busy.
+
 If the gateway restarts while subagent runs are in progress, they are not
 resumed. Each is marked `abandoned` (reason `process_restart`), and their
 parent is woken once with all of its children's results, so it does not wait
 forever. A second restart does not announce the same children again.
+
+Waking the parent is durable. Each wake is written to the session database
+before it is sent, and counts as delivered only once the task runtime accepts
+it. If sending fails, for example while the runtime is draining, the wake is
+retried after 1 s, then 5 s, then 30 s, then every minute, for up to
+30 minutes. A wake still pending when the gateway stops is sent by the next
+boot. A parent is never woken twice for the same group of children, and an
+aborted parent is not woken at all.
 
 ## Export a Transcript
 

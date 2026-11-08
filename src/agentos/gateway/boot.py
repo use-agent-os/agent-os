@@ -1321,6 +1321,7 @@ class GatewayServer:
     _channel_manager: Any = field(default=None, repr=False)
     _services: ServiceContainer | None = field(default=None, repr=False)
     _background_completion_manager: Any = field(default=None, repr=False)
+    _subagent_wake_worker: Any = field(default=None, repr=False)
     # The process-wide pid lock, released explicitly before an in-place
     # restart (``atexit`` does not run across ``execve``).
     _pid_lock: Any = field(default=None, repr=False)
@@ -1564,6 +1565,18 @@ class GatewayServer:
         if reason.startswith("restart"):
             await run_lifecycle_hooks(PRE_RESTART, config=config, reason=reason)
         await run_shutdown_hooks_once(config, reason)
+
+        if self._subagent_wake_worker is not None:
+            # Stop retrying wakes before the runtime drains; anything still
+            # pending stays in the outbox for the next boot.
+            try:
+                await self._subagent_wake_worker.stop()
+            except Exception:
+                log.debug("gateway.subagent_wake_worker_stop_failed", exc_info=True)
+            from agentos.gateway.subagent_wakes import set_wake_outbox
+
+            set_wake_outbox(None)
+            self._subagent_wake_worker = None
 
         if self._background_completion_manager is not None:
             try:
@@ -3016,6 +3029,36 @@ async def start_gateway_server(
 
     svc._approval_broadcaster = install_approval_broadcaster()
 
+    from agentos.gateway.subagent_announce import deliver_pending_wake
+    from agentos.gateway.subagent_wakes import (
+        SubagentWakeOutbox,
+        SubagentWakeWorker,
+        set_wake_outbox,
+    )
+
+    subagent_wake_worker: SubagentWakeWorker | None = None
+    _wake_storage = get_session_storage(svc.session_manager)
+    if _wake_storage is not None and hasattr(_wake_storage, "record_subagent_wake"):
+        _wake_outbox = SubagentWakeOutbox(_wake_storage)
+        set_wake_outbox(_wake_outbox)
+
+        async def _deliver_pending_wake(row: dict[str, Any]) -> None:
+            await deliver_pending_wake(row, task_runtime=task_runtime)
+
+        subagent_wake_worker = SubagentWakeWorker(_wake_outbox, _deliver_pending_wake)
+
+    async def _children_limit_resolver(parent_session_key: str) -> int | None:
+        """An agent's ``subagents.max_concurrent_children`` for its parent sessions."""
+
+        from agentos.session.keys import parse_agent_id
+        from agentos.tools.builtin.sessions import _resolve_subagent_policy
+
+        policy = await _resolve_subagent_policy(
+            svc.session_manager, parse_agent_id(parent_session_key)
+        )
+        value = policy.get("max_concurrent_children")
+        return int(value) if isinstance(value, int) and value >= 1 else None
+
     background_completion_manager = BackgroundCompletionManager(
         session_manager=svc.session_manager,
         event_emitter=runtime_event_bridge.emit,
@@ -3057,6 +3100,11 @@ async def start_gateway_server(
         subagent_reserved_slots=int(
             getattr(getattr(config, "subagents", None), "subagent_reserved_slots", 0)
         ),
+        max_concurrent_children=(
+            int(getattr(getattr(config, "subagents", None), "max_concurrent_children", 0) or 0)
+            or None
+        ),
+        children_limit_resolver=_children_limit_resolver,
         turn_hard_deadline_s=_task_runtime_turn_hard_deadline_s(config),
         cancel_grace_s=float(
             getattr(getattr(config, "task_runtime", None), "turn_cancel_grace_seconds", 5.0)
@@ -3393,7 +3441,7 @@ async def start_gateway_server(
     app.state.gateway_ready = False
     app.state.readiness = readiness
     app.state.boot_tracker = boot_tracker
-    readiness.attach_active_turns(lambda: int(getattr(task_runtime, "_global_in_flight", 0)))
+    readiness.attach_active_turns(lambda: int(getattr(task_runtime, "active_turns", 0)))
     if svc.turn_recovery is not None:
         readiness.attach_turn_recovery(svc.turn_recovery.snapshot)
 
@@ -3401,6 +3449,7 @@ async def start_gateway_server(
     server_handle._channel_manager = channel_manager
     server_handle._services = svc
     server_handle._background_completion_manager = background_completion_manager
+    server_handle._subagent_wake_worker = subagent_wake_worker
     server_handle._pid_lock = _pid_lock
     server_handle.readiness = readiness
     server_handle._boot_tracker = boot_tracker
@@ -3568,6 +3617,10 @@ async def start_gateway_server(
                 max_age_ms=_RECOVERY_MAX_AGE_MS,
             )
         )
+        # Parent wakes a failure or a previous process left pending are
+        # retried from the durable outbox.
+        if subagent_wake_worker is not None:
+            subagent_wake_worker.start()
 
         # Thaw detection, the channel health sweep and safe-mode
         # re-evaluation share one 30 s tick (gateway/maintenance.py).

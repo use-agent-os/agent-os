@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from collections.abc import Awaitable, Callable
@@ -10,6 +11,7 @@ from typing import Any
 import structlog
 
 from agentos.gateway.session_lifecycle import session_status_for_task_status
+from agentos.gateway.subagent_wakes import get_wake_outbox
 from agentos.gateway.task_runtime import SubagentCompletionEvent
 from agentos.session.models import AgentTaskStatus
 from agentos.session.terminal_reply import is_context_payload_too_large, sanitize_agent_error
@@ -188,6 +190,13 @@ async def announce_subagent_completion(
             return
         if event.cancel_source in _PARENT_ABORT_CANCEL_SOURCES:
             # Recorded on the parent above; the parent itself was aborted.
+            outbox = get_wake_outbox()
+            if outbox is not None:
+                await outbox.drop(
+                    parent_session_key=event.parent_session_key,
+                    parent_task_id=parent_task_id,
+                    reason="parent_aborted",
+                )
             return
         await _send_parent_wake(
             event.parent_session_key,
@@ -962,6 +971,37 @@ async def _send_parent_wake(
     group_key = (parent_session_key, parent_task_id) if parent_task_id else None
     if group_key is not None and _tracker.is_woken(group_key):
         return
+
+    outbox = get_wake_outbox()
+    if outbox is not None:
+        # Durable path: record first, so a failure or a restart does not lose
+        # the wake and a second delivery of the same group is refused.
+        if not await outbox.claim(
+            parent_session_key=parent_session_key,
+            parent_task_id=parent_task_id,
+            message=message,
+            provenance=provenance,
+            payloads=payloads,
+        ):
+            return
+        if group_key is not None:
+            _tracker.mark_woken(group_key)
+        try:
+            await _deliver_wake(
+                parent_session_key,
+                parent_task_id,
+                payloads,
+                message=message,
+                provenance=provenance,
+                task_runtime=task_runtime,
+                completion_manager=completion_manager,
+            )
+        except Exception as exc:  # noqa: BLE001 - the outbox worker retries it
+            await outbox.failed(parent_session_key, parent_task_id, f"{type(exc).__name__}: {exc}")
+            return
+        await outbox.delivered(parent_session_key, parent_task_id)
+        return
+
     if completion_manager is not None and parent_task_id:
         if group_key is not None:
             _tracker.mark_woken(group_key)
@@ -992,6 +1032,63 @@ async def _send_parent_wake(
         if group_key is not None:
             _tracker.discard_woken(group_key)
         raise
+
+
+async def _deliver_wake(
+    parent_session_key: str,
+    parent_task_id: str | None,
+    payloads: list[dict[str, Any]],
+    *,
+    message: str,
+    provenance: dict[str, Any],
+    task_runtime: Any,
+    completion_manager: Any | None,
+) -> None:
+    """Hand one wake to the task runtime; raise when it was not accepted."""
+
+    if completion_manager is not None and parent_task_id:
+        loop = asyncio.get_running_loop()
+        accepted: asyncio.Future[BaseException | None] = loop.create_future()
+
+        async def _on_enqueue_result(error: BaseException | None) -> None:
+            if not accepted.done():
+                accepted.set_result(error)
+
+        await completion_manager.send_parent_wake(
+            parent_session_key=parent_session_key,
+            parent_task_id=parent_task_id,
+            payloads=payloads,
+            task_runtime=task_runtime,
+            message=message,
+            provenance=provenance,
+            on_enqueue_result=_on_enqueue_result,
+        )
+        error = await accepted
+        if error is not None:
+            raise error
+        return
+    await task_runtime.send(parent_session_key, message, provenance=provenance)
+
+
+async def deliver_pending_wake(
+    row: dict[str, Any],
+    *,
+    task_runtime: Any,
+) -> None:
+    """Deliver a pending outbox row (``SubagentWakeWorker`` callback)."""
+
+    parent_task_id = row.get("parent_task_id") or None
+    await _deliver_wake(
+        row["parent_session_key"],
+        parent_task_id,
+        list(row.get("payloads") or []),
+        message=str(row.get("message") or ""),
+        provenance=dict(row.get("provenance") or {}),
+        task_runtime=task_runtime,
+        completion_manager=_background_completion_manager,
+    )
+    if parent_task_id:
+        _tracker.mark_woken((row["parent_session_key"], parent_task_id))
 
 
 def _group_closed(parent_session_key: str, parent_task_id: str) -> bool:

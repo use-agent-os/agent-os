@@ -363,6 +363,49 @@ CREATE INDEX IF NOT EXISTS idx_agent_tasks_status_updated
 ON agent_tasks(status, updated_at)
 """
 
+# Outbox of parent wakes for subagent spawn groups (gateway/subagent_wakes.py).
+# One row per group: ``pending`` until the task runtime accepted the wake,
+# then ``delivered``; ``dropped`` when it was given up on or must not happen.
+# Same DDL as migrations/V015__subagent_wakes.py.
+_CREATE_SUBAGENT_WAKES = """
+CREATE TABLE IF NOT EXISTS subagent_wakes (
+    group_key TEXT PRIMARY KEY,
+    parent_session_key TEXT NOT NULL,
+    parent_task_id TEXT,
+    state TEXT NOT NULL DEFAULT 'pending',
+    message TEXT NOT NULL DEFAULT '',
+    provenance TEXT NOT NULL DEFAULT '{}',
+    payloads TEXT NOT NULL DEFAULT '[]',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at INTEGER NOT NULL DEFAULT 0,
+    reason TEXT,
+    last_error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+)
+"""
+
+_CREATE_IDX_SUBAGENT_WAKES_DUE = """
+CREATE INDEX IF NOT EXISTS idx_subagent_wakes_due
+ON subagent_wakes(state, next_attempt_at)
+"""
+
+_SUBAGENT_WAKE_COLUMNS = (
+    "group_key",
+    "parent_session_key",
+    "parent_task_id",
+    "state",
+    "message",
+    "provenance",
+    "payloads",
+    "attempts",
+    "next_attempt_at",
+    "reason",
+    "last_error",
+    "created_at",
+    "updated_at",
+)
+
 _CREATE_MEMORY_DURABLE_RECEIPTS = """
 CREATE TABLE IF NOT EXISTS memory_durable_receipts (
     receipt_id TEXT PRIMARY KEY,
@@ -580,6 +623,8 @@ class SessionStorage:
         await self._conn.execute(_CREATE_AGENT_TASKS)
         await self._conn.execute(_CREATE_IDX_AGENT_TASKS_SESSION_STATUS)
         await self._conn.execute(_CREATE_IDX_AGENT_TASKS_STATUS_UPDATED)
+        await self._conn.execute(_CREATE_SUBAGENT_WAKES)
+        await self._conn.execute(_CREATE_IDX_SUBAGENT_WAKES_DUE)
         await self._conn.execute(_CREATE_MEMORY_DURABLE_RECEIPTS)
         await self._conn.execute(_CREATE_IDX_MEMORY_DURABLE_RECEIPTS_SESSION)
         # FTS5 full-text search index + auto-sync triggers
@@ -1359,6 +1404,90 @@ class SessionStorage:
         )
         await self.conn.commit()
         return int(cur.rowcount if cur.rowcount is not None else 0)
+
+    # ── Subagent wake outbox ─────────────────────────────────────────────────
+
+    @_serialized_write
+    async def record_subagent_wake(
+        self,
+        *,
+        group_key: str,
+        parent_session_key: str,
+        parent_task_id: str | None,
+        message: str,
+        provenance: dict[str, Any],
+        payloads: list[dict[str, Any]],
+        now_ms: int,
+        state: str = "pending",
+        reason: str | None = None,
+        next_attempt_at: int | None = None,
+    ) -> tuple[bool, dict[str, Any]]:
+        """Insert the group's wake row unless one exists; return ``(created, row)``."""
+
+        cur = await self.conn.execute(
+            """
+            INSERT OR IGNORE INTO subagent_wakes (
+                group_key, parent_session_key, parent_task_id, state, message,
+                provenance, payloads, attempts, next_attempt_at, reason,
+                last_error, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, ?, ?)
+            """,
+            (
+                group_key,
+                parent_session_key,
+                parent_task_id,
+                state,
+                message,
+                json.dumps(provenance, ensure_ascii=False),
+                json.dumps(payloads, ensure_ascii=False),
+                now_ms if next_attempt_at is None else next_attempt_at,
+                reason,
+                now_ms,
+                now_ms,
+            ),
+        )
+        created = bool(cur.rowcount)
+        await self.conn.commit()
+        row = await self.get_subagent_wake(group_key)
+        assert row is not None
+        return created, row
+
+    async def get_subagent_wake(self, group_key: str) -> dict[str, Any] | None:
+        async with self.conn.execute(
+            f"SELECT {', '.join(_SUBAGENT_WAKE_COLUMNS)} FROM subagent_wakes WHERE group_key = ?",
+            (group_key,),
+        ) as cur:
+            row = await cur.fetchone()
+        return _subagent_wake_row(row) if row is not None else None
+
+    @_serialized_write
+    async def update_subagent_wake(self, group_key: str, **fields: Any) -> None:
+        """Set *fields* (``state``, ``attempts``, ``next_attempt_at``, ...) on a row."""
+
+        allowed = {"state", "attempts", "next_attempt_at", "reason", "last_error", "updated_at"}
+        unknown = set(fields) - allowed
+        if unknown:
+            raise ValueError(f"unknown subagent_wakes fields: {sorted(unknown)}")
+        if not fields:
+            return
+        assignments = ", ".join(f"{name} = ?" for name in fields)
+        await self.conn.execute(
+            f"UPDATE subagent_wakes SET {assignments} WHERE group_key = ?",
+            (*fields.values(), group_key),
+        )
+        await self.conn.commit()
+
+    async def list_due_subagent_wakes(self, now_ms: int, limit: int = 50) -> list[dict[str, Any]]:
+        """Pending wake rows whose next attempt is due, oldest first."""
+
+        async with self.conn.execute(
+            f"SELECT {', '.join(_SUBAGENT_WAKE_COLUMNS)} FROM subagent_wakes "
+            "WHERE state = 'pending' AND next_attempt_at <= ? "
+            "ORDER BY created_at ASC, rowid ASC LIMIT ?",
+            (now_ms, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [_subagent_wake_row(row) for row in rows]
 
     async def list_interrupted_agent_tasks(
         self,
@@ -2143,3 +2272,13 @@ class SessionStorage:
 
     async def __aexit__(self, *_: Any) -> None:
         await self.close()
+
+
+def _subagent_wake_row(row: Any) -> dict[str, Any]:
+    data = dict(zip(_SUBAGENT_WAKE_COLUMNS, tuple(row), strict=True))
+    for key, default in (("provenance", {}), ("payloads", [])):
+        try:
+            data[key] = json.loads(data[key]) if data[key] else default
+        except (TypeError, ValueError):
+            data[key] = default
+    return data

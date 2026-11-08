@@ -33,6 +33,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `docs/tools-and-sandbox.md`.
 
 ### Fixed
+- A parent waiting on its child in the same turn (`sessions_yield` with a
+  `session_key`) kept its slot. With the default reserved subagent slots,
+  two such parents could leave their children no slot at all and both waited
+  until the timeout. Children of a parent run that holds a slot now run in a
+  separate nested pool.
+- Parent wakes for finished subagent groups are now durable. A wake that
+  failed to reach the task runtime was dropped, and the "already woken"
+  marker lived only in memory, so a restart could lose a wake or repeat it.
+  Wakes are now recorded in a `subagent_wakes` table (migration `V015`),
+  retried with backoff for up to 30 minutes, sent by the next boot when one
+  was cut off, and never delivered twice for the same spawn group.
 - Ollama: with thinking off, a thinking-family model (`qwen3`, `qwen3.5`,
   `deepseek-r1`, `magistral`, …) was left at its default, which is to think.
   After a tool round it could answer with reasoning only, and the turn failed
@@ -58,6 +69,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   turn as finished. Such a run now ends with `session.event.error`.
 
 ### Changed
+- Subagents now run in a lane per parent session. At most
+  `subagents.max_concurrent_children` children of one parent (default 2; an
+  agent's own `subagents.max_concurrent_children` wins; `0` = no limit) run
+  at once, and the rest wait in spawn order instead of all competing for the
+  shared slots. Children of other parents are not held back.
 - Stopping a turn (abort, kill, interrupt) now asks it to stop first when it
   is streaming or between steps. The turn closes the model's stream, sends no
   further request and ends on its own, reporting the run as aborted. It is

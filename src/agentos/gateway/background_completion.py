@@ -17,6 +17,17 @@ from agentos.session.terminal_reply import sanitize_agent_error
 log = structlog.get_logger(__name__)
 
 EventEmitter = Callable[[str, str, dict[str, Any]], Awaitable[None]]
+#: Told whether a parent wake reached the task runtime (``None`` = accepted).
+EnqueueResult = Callable[[BaseException | None], Awaitable[None]]
+
+
+async def _report(callback: EnqueueResult | None, error: BaseException | None) -> None:
+    if callback is None:
+        return
+    try:
+        await callback(error)
+    except Exception:  # noqa: BLE001 - a reporting failure must not break delivery
+        log.warning("background_completion.enqueue_report_failed", exc_info=True)
 ChannelManagerRef = Callable[[], Any | None]
 
 
@@ -140,8 +151,15 @@ class BackgroundCompletionManager:
         task_runtime: Any,
         message: str,
         provenance: dict[str, Any],
+        on_enqueue_result: EnqueueResult | None = None,
     ) -> None:
-        """Schedule a parent wake without waiting inline for same-session work."""
+        """Schedule a parent wake without waiting inline for same-session work.
+
+        *on_enqueue_result* is awaited once the wake was handed to the task
+        runtime: with ``None`` when it was accepted, with the exception when it
+        was not (the durable outbox in ``gateway/subagent_wakes.py`` then
+        retries). A group already being woken reports ``None``.
+        """
         group_id = self.group_id(parent_session_key, parent_task_id)
         delivery_target = await _capture_delivery_target(
             session_manager=self._session_manager,
@@ -151,27 +169,33 @@ class BackgroundCompletionManager:
         )
         task: asyncio.Task[None] | None = None
         async with self._state_lock:
-            if self._closing:
-                return
-            if group_id in self._wake_groups:
-                return
-            self._wake_groups.add(group_id)
-            self._waiting_groups.discard(group_id)
-            delivery_target = self._delivery_targets.get(group_id) or delivery_target
-            if delivery_target is not None:
-                self._delivery_targets[group_id] = delivery_target
-            task = asyncio.create_task(
-                self._enqueue_and_watch_parent_wake(
-                    parent_session_key=parent_session_key,
-                    parent_task_id=parent_task_id,
-                    payloads=payloads,
-                    task_runtime=task_runtime,
-                    message=message,
-                    provenance=provenance,
-                    delivery_target=delivery_target,
+            closing = self._closing
+            already_waking = not closing and group_id in self._wake_groups
+            if not closing and not already_waking:
+                self._wake_groups.add(group_id)
+                self._waiting_groups.discard(group_id)
+                delivery_target = self._delivery_targets.get(group_id) or delivery_target
+                if delivery_target is not None:
+                    self._delivery_targets[group_id] = delivery_target
+                task = asyncio.create_task(
+                    self._enqueue_and_watch_parent_wake(
+                        parent_session_key=parent_session_key,
+                        parent_task_id=parent_task_id,
+                        payloads=payloads,
+                        task_runtime=task_runtime,
+                        message=message,
+                        provenance=provenance,
+                        delivery_target=delivery_target,
+                        on_enqueue_result=on_enqueue_result,
+                    )
                 )
-            )
-            self._watch_tasks.add(task)
+                self._watch_tasks.add(task)
+        if closing:
+            await _report(on_enqueue_result, RuntimeError("completion manager is closing"))
+            return
+        if already_waking or task is None:
+            await _report(on_enqueue_result, None)
+            return
 
         task.add_done_callback(self._watch_tasks.discard)
 
@@ -245,6 +269,7 @@ class BackgroundCompletionManager:
         message: str,
         provenance: dict[str, Any],
         delivery_target: _DeliveryTarget | None,
+        on_enqueue_result: EnqueueResult | None = None,
     ) -> None:
         group_id = self.group_id(parent_session_key, parent_task_id)
         stream_collector = _SynthesisStreamCollector()
@@ -257,6 +282,7 @@ class BackgroundCompletionManager:
                 stream_event_sink=stream_collector,
             )
         except Exception as exc:  # noqa: BLE001 - failure becomes a group event.
+            await _report(on_enqueue_result, exc)
             error_class, error_message = sanitize_agent_error(
                 {
                     "status": "failed",
@@ -278,6 +304,7 @@ class BackgroundCompletionManager:
                 self._wake_groups.discard(group_id)
             return
 
+        await _report(on_enqueue_result, None)
         synthesis_task_id = getattr(handle, "task_id", None)
         payload = self._base_payload(
             parent_session_key=parent_session_key,
