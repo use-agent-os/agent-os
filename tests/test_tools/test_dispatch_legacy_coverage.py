@@ -39,6 +39,7 @@ _DISPATCH_SOURCE: Path = Path(_dispatch_module.__file__).resolve()
 # Executable line discovery via co_lines()
 # ---------------------------------------------------------------------------
 
+
 def _all_code_objects(code: types.CodeType):  # type: ignore[return]
     """Yield all code objects reachable from ``code`` (including nested closures)."""
     yield code
@@ -49,18 +50,12 @@ def _all_code_objects(code: types.CodeType):  # type: ignore[return]
 
 def _handler_executable_lines() -> set[int]:
     """Return executable line numbers inside the _handler closure."""
-    spec = importlib.util.spec_from_file_location(
-        _dispatch_module.__name__, str(_DISPATCH_SOURCE)
-    )
+    spec = importlib.util.spec_from_file_location(_dispatch_module.__name__, str(_DISPATCH_SOURCE))
     module_code = spec.loader.get_code(_dispatch_module.__name__)  # type: ignore[union-attr]
 
     executable: set[int] = set()
     build_tool_handler_code = next(
-        (
-            code
-            for code in _all_code_objects(module_code)
-            if code.co_name == "build_tool_handler"
-        ),
+        (code for code in _all_code_objects(module_code) if code.co_name == "build_tool_handler"),
         None,
     )
     if build_tool_handler_code is None:
@@ -78,6 +73,7 @@ def _handler_executable_lines() -> set[int]:
 # Executed line collection via stdlib trace
 # ---------------------------------------------------------------------------
 
+
 class _RaisingToolHook:
     """ToolHook that raises in every callback — drives the defensive
     ``except Exception`` branches around hook fan-out so the safety net
@@ -90,6 +86,56 @@ class _RaisingToolHook:
 
     def after_tool(self, call, outcome):  # type: ignore[no-untyped-def]
         raise RuntimeError("after_tool boom")
+
+
+class _DecidingToolHook:
+    """ToolHook that returns a decision -- drives the block / rewrite /
+    replace branches of the hook seam."""
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        before=None,
+        after=None,
+        rewrite_to=None,
+        raises: bool = False,
+        fail_closed: bool = False,
+    ) -> None:  # type: ignore[no-untyped-def]
+        self.name = name
+        self._before = before
+        self._after = after
+        self._rewrite_to = rewrite_to
+        self._raises = raises
+        self.fail_closed = fail_closed
+
+    def before_tool(self, call):  # type: ignore[no-untyped-def]
+        from agentos.engine.hooks import Rewrite
+
+        if self._raises:
+            raise RuntimeError("guard boom")
+        if self._rewrite_to is not None:
+            return Rewrite(self._rewrite_to(dict(call.tool_call.arguments)))
+        return self._before
+
+    def after_tool(self, call, outcome):  # type: ignore[no-untyped-def]
+        return self._after
+
+
+def _decision_hook_variants() -> tuple[tuple, ...]:
+    from agentos.engine.hooks import Block, ReplaceResult
+
+    return (
+        (_DecidingToolHook("blocking", before=Block("corpus block")),),
+        (_DecidingToolHook("rewrite_same", rewrite_to=lambda args: args),),
+        (
+            _DecidingToolHook(
+                "rewrite_invalid", rewrite_to=lambda args: {key: object() for key in args}
+            ),
+        ),
+        (_DecidingToolHook("replacing", after=ReplaceResult("replaced by hook")),),
+        (_DecidingToolHook("fail_closed", raises=True, fail_closed=True),),
+    )
 
 
 def _collect_executed_lines() -> set[int]:
@@ -112,6 +158,7 @@ def _collect_executed_lines() -> set[int]:
             (),
             (NoopToolHook(),),
             (_RaisingToolHook(),),
+            *_decision_hook_variants(),
         )
         for hooks in hook_variants:
             for case in ALL_CASES:
@@ -212,6 +259,7 @@ def _collect_executed_lines() -> set[int]:
 # The gate test
 # ---------------------------------------------------------------------------
 
+
 def test_dispatch_handler_line_coverage_from_corpus() -> None:
     """Assert the corpus achieves >=95% line coverage of the _handler body.
 
@@ -260,6 +308,5 @@ def test_dispatch_handler_line_coverage_from_corpus() -> None:
     # call, are exercised by the no-hook / NoopToolHook / RaisingToolHook
     # variants above.
     assert coverage_pct >= 95.0, (
-        f"dispatch.py _handler coverage {coverage_pct:.1f}% < 95% target."
-        f"{diagnostic}"
+        f"dispatch.py _handler coverage {coverage_pct:.1f}% < 95% target.{diagnostic}"
     )

@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 # Turn lifecycle
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class TurnHookContext:
     """Per-turn context handed to every TurnHook method.
@@ -39,6 +40,7 @@ class TurnHookContext:
     trace_context: TraceContext | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
+
 @dataclass(frozen=True)
 class TurnEvent:
     """A trace-bearing turn event emitted by the runtime.
@@ -51,6 +53,7 @@ class TurnEvent:
     seq: int | None = None
     attrs: dict[str, Any] = field(default_factory=dict)
     payload: dict[str, Any] = field(default_factory=dict)
+
 
 @dataclass(frozen=True)
 class TurnHookResult:
@@ -71,6 +74,7 @@ class TurnHookResult:
     input_provenance: dict[str, Any] | None = None
     no_memory_capture: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
+
 
 @runtime_checkable
 class TurnHook(Protocol):
@@ -96,9 +100,11 @@ class TurnHook(Protocol):
     def on_event(self, ctx: TurnHookContext, event: TurnEvent) -> None:
         """Fire for each structured turn event (synchronous, observability only)."""
 
+
 # ---------------------------------------------------------------------------
 # Tool dispatch surround
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class ToolHookCall:
@@ -110,6 +116,7 @@ class ToolHookCall:
 
     tool_call: ToolCall
     ctx: Any | None  # ToolContext | None — kept loose to avoid an import cycle
+
 
 @dataclass(frozen=True)
 class ToolHookResult:
@@ -123,23 +130,120 @@ class ToolHookResult:
     result: ToolResult | None = None
     exception: BaseException | None = None
 
-@runtime_checkable
-class ToolHook(Protocol):
-    """Surround a single tool dispatch with before/after observability.
 
-    ``before_tool`` runs after registry lookup but before the policy chain.
-    ``after_tool`` runs just before result finalization.
+@dataclass(frozen=True)
+class Allow:
+    """``before_tool`` decision: run the call as it is (same as returning None)."""
+
+
+@dataclass(frozen=True)
+class Block:
+    """``before_tool`` decision: do not run the call; the model sees ``reason``."""
+
+    reason: str
+
+
+@dataclass(frozen=True)
+class Rewrite:
+    """``before_tool`` decision: run the call with these arguments instead.
+
+    The rewritten arguments are validated against the tool's schema again and
+    still go through the policy chain and approval: a rewrite cannot bypass
+    either.
+    """
+
+    arguments: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ReplaceResult:
+    """``after_tool`` decision: replace the result the model and transcript see.
+
+    The replacement keeps the call's ``tool_use_id``; ``is_error=None`` keeps
+    the original error flag.
+    """
+
+    content: str
+    is_error: bool | None = None
+
+
+ToolHookDecision = Allow | Block | Rewrite
+
+
+# ---------------------------------------------------------------------------
+# Provider request surround
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RequestHookCall:
+    """What ``RequestHook.before_request`` sees about the next provider call."""
+
+    messages: tuple[Any, ...]  # the request's provider Messages, read-only
+    session_key: str | None
+    iteration: int
+    attempt: int
+
+
+@dataclass(frozen=True)
+class Amend:
+    """``before_request`` decision: add a request-scoped context note.
+
+    The note goes at the end of the request, after the cache-stable prefix,
+    and is not persisted to the transcript.
+    """
+
+    context: str
+
+
+@dataclass(frozen=True)
+class Veto:
+    """``before_request`` decision: do not call the provider; fail the turn."""
+
+    reason: str
+
+
+@runtime_checkable
+class RequestHook(Protocol):
+    """Runs before every provider request of the agent loop.
+
+    Returns ``None`` (send as is), :class:`Amend` or :class:`Veto`. A hook that
+    raises is logged and ignored unless it sets ``fail_closed = True``, in which
+    case its failure vetoes the request.
     """
 
     name: str
 
-    def before_tool(self, call: ToolHookCall) -> None: ...
+    def before_request(self, call: RequestHookCall) -> Amend | Veto | None: ...
 
-    def after_tool(self, call: ToolHookCall, outcome: ToolHookResult) -> None: ...
+
+@runtime_checkable
+class ToolHook(Protocol):
+    """Surround a single tool dispatch; observe it or decide on it.
+
+    ``before_tool`` runs after argument admission and before the policy chain.
+    It may return ``None`` / :class:`Allow` (run), :class:`Block` (do not run)
+    or :class:`Rewrite` (run with other arguments). Hooks run in registration
+    order; the first block wins. ``after_tool`` runs before result finalization
+    and may return :class:`ReplaceResult`.
+
+    A hook that raises is logged and treated as allowing the call, unless it
+    sets ``fail_closed = True``: then its failure blocks the call. Hooks
+    written against the observe-only interface (returning ``None``) keep
+    working unchanged.
+    """
+
+    name: str
+
+    def before_tool(self, call: ToolHookCall) -> ToolHookDecision | None: ...
+
+    def after_tool(self, call: ToolHookCall, outcome: ToolHookResult) -> ReplaceResult | None: ...
+
 
 # ---------------------------------------------------------------------------
 # Compaction lifecycle. This hook is active only when supplied to TurnRunner.
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class CompactionState:
@@ -155,6 +259,7 @@ class CompactionState:
     total_tokens: int = 0
     threshold_tokens: int = 0
     extra: dict[str, Any] = field(default_factory=dict)
+
 
 @runtime_checkable
 class CompactionHook(Protocol):

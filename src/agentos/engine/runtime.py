@@ -51,6 +51,7 @@ from agentos.engine.cache_break_monitor import notify_compaction
 from agentos.engine.hooks import (
     CompactionHook,
     DefaultTraceEmitterHook,
+    RequestHook,
     ToolHook,
     TurnEvent,
     TurnHook,
@@ -1743,6 +1744,7 @@ class TurnRunner:
         turn_hooks: Sequence[TurnHook] | None = None,
         compaction_hooks: Sequence[CompactionHook] | None = None,
         tool_hooks: Sequence[ToolHook] | None = None,
+        request_hooks: Sequence[RequestHook] | None = None,
     ) -> None:
         self._provider_selector = provider_selector
         self._tool_registry = tool_registry
@@ -1776,6 +1778,7 @@ class TurnRunner:
         )
         # ToolHook surface. build_tool_handler uses these to wrap tool execution.
         self._tool_hooks: tuple[ToolHook, ...] = tuple(tool_hooks) if tool_hooks else ()
+        self._request_hooks: tuple[RequestHook, ...] = tuple(request_hooks) if request_hooks else ()
         # Per-session lock provider.
         # Gateway path: task_runtime._get_session_lock_for_turn (wired in boot.py).
         # CLI/standalone path: _standalone_lock_provider from build_turn_runner_from_services.

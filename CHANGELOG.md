@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Tool hooks can now decide, not only observe. `before_tool` may block a
+  call or rewrite its arguments, and `after_tool` may replace the result
+  (for example to redact a secret).
+  - Rewritten arguments are validated again, and policy and approvals still
+    apply to them.
+  - A hook with `fail_closed = True` blocks the call if it crashes.
+- `RequestHook` (`TurnRunner(request_hooks=...)`) runs before every provider
+  request. It may add a request-only note after the cached prompt prefix, or
+  veto the request (error code `request_vetoed`).
+- Hooks that return nothing keep working. See "Tool and request hooks" in
+  `docs/tools-and-sandbox.md`.
+
 ### Fixed
 - A cancelled turn now leaves a transcript the next turn can replay as is.
   Every tool call that was still running is paired with a "Cancelled" error

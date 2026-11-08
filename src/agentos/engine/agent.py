@@ -29,6 +29,7 @@ from agentos.engine.compaction_service import CompactionService, auxiliary_chunk
 from agentos.engine.estimate_calibration import EstimateCalibration, request_has_media
 from agentos.engine.fallback import FallbackPolicy, backoff_sleep
 from agentos.engine.history import limit_turns, repair_tool_pairing
+from agentos.engine.hooks.types import Amend, RequestHook, RequestHookCall, Veto
 from agentos.engine.loop_guard import (
     append_guidance,
     blocked_batch_results,
@@ -668,6 +669,7 @@ class Agent(ToolResultProjectionMixin):
         tool_registry: ToolRegistry | None = None,
         tool_context: ToolContext | None = None,
         spend_budget_guard: Callable[[str], tuple[bool, str | None]] | None = None,
+        request_hooks: Sequence[RequestHook] | None = None,
     ) -> None:
         self.provider = provider
         self.config = config or AgentConfig()
@@ -685,6 +687,7 @@ class Agent(ToolResultProjectionMixin):
         # arbitrarily far past a ceiling, which is the shape a runaway
         # actually takes.
         self._spend_budget_guard = spend_budget_guard
+        self._request_hooks: tuple[RequestHook, ...] = tuple(request_hooks or ())
         self._pending_warnings: list[WarningEvent] = []
 
         self._state: AgentState = AgentState.IDLE
@@ -1479,6 +1482,22 @@ class Agent(ToolResultProjectionMixin):
                     )
                     attempt_nudge, _text_tool_call_nudge = _text_tool_call_nudge, []
                     request_messages.extend(attempt_nudge)
+                    if self._request_hooks:
+                        hook_veto, hook_notes = self._run_request_hooks(
+                            request_messages, iteration=iterations, attempt=_call_attempt
+                        )
+                        if hook_veto is not None:
+                            yield self._transition(AgentState.ERROR)
+                            terminal_error = ErrorEvent(
+                                message=hook_veto.reason, code="request_vetoed"
+                            )
+                            yield terminal_error
+                            break
+                        # Request-scoped like the nudge: after the cache-stable
+                        # prefix, never added to turn_messages.
+                        request_messages.extend(
+                            Message(role="user", content=note) for note in hook_notes
+                        )
                     self._write_context_stage(
                         "stream:context",
                         request_messages,
@@ -3515,6 +3534,39 @@ class Agent(ToolResultProjectionMixin):
         if finalization_message is not None:
             return [*messages, finalization_message]
         return list(messages)
+
+    def _run_request_hooks(
+        self, request_messages: list[Message], *, iteration: int, attempt: int
+    ) -> tuple[Veto | None, list[str]]:
+        """Fan ``before_request`` out; the first veto wins, amendments add up."""
+
+        call = RequestHookCall(
+            messages=tuple(request_messages),
+            session_key=self._session_key,
+            iteration=iteration,
+            attempt=attempt,
+        )
+        notes: list[str] = []
+        for hook in self._request_hooks:
+            name = getattr(hook, "name", type(hook).__name__)
+            try:
+                decision = hook.before_request(call)
+            except Exception as exc:  # noqa: BLE001 - a hook must not break the loop
+                logger.warning(
+                    "agent.request_hook_failed",
+                    hook=name,
+                    error=str(exc),
+                    fail_closed=bool(getattr(hook, "fail_closed", False)),
+                )
+                if getattr(hook, "fail_closed", False):
+                    return Veto(reason=f"The request guard {name!r} failed."), notes
+                continue
+            if isinstance(decision, Veto):
+                self._write_turn_call_log("request_hook_veto", hook=name, reason=decision.reason)
+                return decision, notes
+            if isinstance(decision, Amend) and decision.context.strip():
+                notes.append(decision.context)
+        return None, notes
 
     @staticmethod
     def _seal_cancelled_turn(messages: list[Message], partial_text: str) -> list[Message]:

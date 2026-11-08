@@ -256,6 +256,63 @@ If a tool does not run:
    agentos diagnostics on
    ```
 
+## Tool and request hooks (Python API)
+
+Code that embeds AgentOS can hook tool dispatch and provider requests by
+passing `tool_hooks=[...]` and `request_hooks=[...]` to `TurnRunner`.
+Hooks are plain objects with a `name`, from `agentos.engine.hooks`:
+
+```python
+from agentos.engine.hooks import Amend, Block, ReplaceResult, Rewrite, Veto
+
+
+class WorkspaceGuard:
+    name = "workspace-guard"
+    fail_closed = True  # a crash in this hook blocks the call instead of allowing it
+
+    def before_tool(self, call):
+        path = call.tool_call.arguments.get("path", "")
+        if path.startswith("/etc"):
+            return Block("writes outside the workspace are not allowed")
+        if path.startswith("~/"):
+            return Rewrite({**call.tool_call.arguments, "path": path[2:]})
+        return None  # run as is
+
+    def after_tool(self, call, outcome):
+        text = str(getattr(outcome.result, "content", "") or "")
+        if "sk-" in text:
+            return ReplaceResult(text.replace("sk-", "sk-[redacted]-"))
+        return None
+
+
+class SpendGate:
+    name = "spend-gate"
+
+    def before_request(self, call):
+        if over_budget(call.session_key):
+            return Veto("The daily spend limit is reached.")
+        return Amend("The user is on a phone; keep answers short.")
+```
+
+- **`before_tool`** returns `None`/`Allow`, `Block(reason)` or
+  `Rewrite(arguments)`.
+  - Hooks run in order, and the first block wins.
+  - A blocked call is not run. The model sees an error result with the
+    reason (`error_class: ToolHookBlocked`).
+  - Rewritten arguments are checked against the tool's schema again, and
+    the tool policy and approvals still apply to them. A hook cannot use a
+    rewrite to bypass either.
+- **`after_tool`** may return `ReplaceResult(content, is_error=None)`. The
+  replacement is what the model sees and what the transcript stores.
+- **`before_request`** may return `Amend(context)` or `Veto(reason)`.
+  - An amendment is added after the cached prompt prefix, for that request
+    only, and is not persisted.
+  - A veto fails the turn with error code `request_vetoed`.
+- **Errors in a hook** are logged and treated as "no decision". With
+  `fail_closed = True`, the error blocks the tool call or vetoes the request
+  instead.
+- **Older hooks** whose methods return nothing keep working unchanged.
+
 ---
 
 [Docs index](README.md) · [Product guide](../README.product.md) · [Improve this page](contributing-docs.md) · [Report a docs issue](https://github.com/use-agent-os/agent-os/issues/new?template=docs_report.yml)
