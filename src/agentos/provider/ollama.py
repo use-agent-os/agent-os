@@ -282,19 +282,29 @@ _GPT_OSS_THINK_LEVELS = {"minimal": "low", "low": "low", "medium": "medium", "hi
 def _ollama_think(cfg: ChatConfig, model: str) -> bool | str | None:
     """``think`` to send, or ``None`` to leave the model's default.
 
-    Only sent when thinking is on and the model is known to reason: Ollama
-    answers ``think`` for a non-thinking model with a 400, and the catalog
-    has no live capability data for local models, so a reasoning capability
-    or a known thinking family is required. gpt-oss takes a level instead of
-    a boolean.
+    Only sent to a model known to reason: Ollama answers ``think`` for a
+    non-thinking model with a 400, and the catalog has no live capability data
+    for local models, so a reasoning capability or a known thinking family is
+    required. gpt-oss takes a level instead of a boolean.
+
+    With thinking off, a known thinking family gets ``think: false``. Its
+    default is to think, and after a tool round such a model can answer with
+    reasoning only, which the loop can no longer retry with thinking disabled
+    because it already is.
     """
-    if not cfg.thinking:
-        return None
     caps = cfg.model_capabilities
     model_l = model.lower()
     known_family = any(family in model_l for family in _OLLAMA_THINKING_FAMILIES) and not any(
         variant in model_l for variant in _OLLAMA_NON_THINKING_VARIANTS
     )
+    if not cfg.thinking:
+        if (
+            known_family
+            and "gpt-oss" not in model_l
+            and (caps is None or caps.reasoning_format != "think_tags")
+        ):
+            return False
+        return None
     if not known_family and (caps is None or not caps.supports_reasoning):
         return None
     if caps is not None and caps.reasoning_format == "think_tags":
