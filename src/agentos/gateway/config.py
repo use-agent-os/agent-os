@@ -2166,6 +2166,11 @@ class AgentSubagentDefaults(BaseModel):
     cascade_on_parent_kill: bool = True
     """When ``True``, killing a parent session also cancels its descendants."""
 
+    max_concurrent_children: int | None = Field(default=None, ge=1)
+    """How many children of one parent session run at the same time. More
+    spawns wait, in spawn order, instead of being rejected. ``None`` → the
+    gateway-level ``subagents.max_concurrent_children``."""
+
 
 class AgentEntryConfig(BaseModel):
     """Gateway config entry for a durable, user-managed agent."""
@@ -2208,6 +2213,11 @@ class SubagentsGatewayConfig(BaseModel):
     subagent_reserved_slots: int = Field(default=2, ge=0)
     """Number of slots in ``task_runtime.max_concurrency`` reserved for
     non-subagent tasks so a fan-out parent never starves itself."""
+
+    max_concurrent_children: int = Field(default=2, ge=0)
+    """Default per-parent lane: at most this many children of one parent
+    session run at once; further spawns wait in spawn order. ``0`` = no
+    per-parent limit. An agent's ``subagents.max_concurrent_children`` wins."""
 
     prompt_compact: bool = False
     """When enabled, subagent bootstrap prompts keep only AGENTS.md and TOOLS.md."""

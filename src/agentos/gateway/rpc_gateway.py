@@ -151,5 +151,5 @@ async def _handle_gateway_status(params: dict | None, ctx: RpcContext) -> dict[s
 
 def _active_turns(ctx: RpcContext) -> int | None:
     runtime = getattr(ctx, "task_runtime", None)
-    value = getattr(runtime, "_global_in_flight", None)
+    value = getattr(runtime, "active_turns", None)
     return int(value) if isinstance(value, int) else None
