@@ -4,7 +4,7 @@ Owns the per-turn slice between the compaction/history stage boundary
 and the stream-consumer stage boundary: the
 ``_build_attachment_messages`` call and the immediately-following
 ``turn_input`` rebind. The harness invokes ``AttachmentStage.run`` once
-per turn, AFTER ``CompactionAndHistoryStage`` and BEFORE the
+per turn, AFTER ``HistoryLoadStage`` and BEFORE the
 ``async for event in agent.run_turn(...)`` loop.
 Side-effect contract: the stage is a pure transformation. The single
 port is synchronous; with attachments present it runs on a worker thread
@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from agentos.engine.turn_runner.outcome import StageOutcome
 
+
 @runtime_checkable
 class AttachmentMessageBuilderPort(Protocol):
     """Wraps ``TurnRunner._build_attachment_messages`` + media-root resolution.
@@ -59,6 +60,7 @@ class AttachmentMessageBuilderPort(Protocol):
         attachments: list[dict],
     ) -> list[Any] | None: ...
 
+
 @dataclass(frozen=True)
 class AttachmentStageInput:
     """Inputs the ``AttachmentStage`` needs at its boundary.
@@ -73,6 +75,7 @@ class AttachmentStageInput:
 
     effective_runtime_message: str
     attachments: list[dict] | None
+
 
 @dataclass(frozen=True)
 class AttachmentStageOutput:
@@ -90,11 +93,12 @@ class AttachmentStageOutput:
     extra_messages: list[Any] | None
     turn_input: str
 
+
 class AttachmentStage:
     """Build the multimodal attachment envelope and rebind ``turn_input``.
 
     Stable boundary: runs ONCE per turn, after
-    ``CompactionAndHistoryStage`` and before the
+    ``HistoryLoadStage`` and before the
     ``async for event in agent.run_turn(...)`` loop. The single port
     executes synchronously; the stage body is two statements (build +
     rebind).
@@ -131,9 +135,7 @@ class AttachmentStage:
             )
         else:
             extra_messages = self._builder.build(inp.effective_runtime_message, attachments)
-        turn_input = (
-            inp.effective_runtime_message if extra_messages is None else ""
-        )
+        turn_input = inp.effective_runtime_message if extra_messages is None else ""
         return StageOutcome.success(
             AttachmentStageOutput(
                 extra_messages=extra_messages,

@@ -64,6 +64,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   turn as finished. Such a run now ends with `session.event.error`.
 
 ### Changed
+- Every compaction (before a request, after a provider overflow, after a
+  repeated timeout, and between turns) now goes through one
+  `CompactionCoordinator` and logs one `compaction.decision` entry naming its
+  trigger and result. The before-turn history stage, which no longer
+  compacts, is renamed `HistoryLoadStage` (was `CompactionAndHistoryStage`);
+  its turn-timing key stays `compaction_and_history`.
 - Provider retries: rate limits, overloads and transport blips are retried on
   the same model up to 6 times (was 3) and within 90 s of waiting
   (`agent_retry_budget_seconds`; `0` = count only). Waits back off with a

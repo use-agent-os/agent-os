@@ -31,7 +31,7 @@ from agentos.engine.turn_runner.agent_bootstrap_stage import (
 from agentos.engine.turn_runner.attachment_stage import (
     AttachmentMessageBuilderPort,
 )
-from agentos.engine.turn_runner.compaction_and_history_stage import (
+from agentos.engine.turn_runner.history_load_stage import (
     HistoryLoaderPort,
     RequestContextPrependPort,
 )

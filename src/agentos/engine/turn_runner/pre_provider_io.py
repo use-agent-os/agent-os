@@ -23,7 +23,7 @@ Data dependencies between the pre-provider stages of ``TurnRunner._run_turn``
   parts: ``sync_manager.warm_session`` (index sync on the first turn of a
   session; independent of everything above) and the MEMORY.md snapshot capture
   (must stay after ``_assemble_prompt``).
-* ``CompactionAndHistoryStage``: agent -> history (transcript read).
+* ``HistoryLoadStage``: agent -> history (transcript read).
 * ``AttachmentStage``: post-pipeline message, attachments -> extra messages.
 
 So recall, project knowledge, hydrate, the router-context read and the memory

@@ -26,11 +26,11 @@ from agentos.engine.turn_runner.attachment_stage import (
     AttachmentStageInput,
     AttachmentStageOutput,
 )
-from agentos.engine.turn_runner.compaction_and_history_stage import (
-    CompactionAndHistoryStage,
-    CompactionAndHistoryStageInput,
-    CompactionAndHistoryStageOutput,
+from agentos.engine.turn_runner.history_load_stage import (
     HistoryLoaderPort,
+    HistoryLoadStage,
+    HistoryLoadStageInput,
+    HistoryLoadStageOutput,
     RequestContextPrependPort,
 )
 from agentos.engine.turn_runner.input_stage import (
@@ -92,9 +92,9 @@ __all__ = [
     "AttachmentStage",
     "AttachmentStageInput",
     "AttachmentStageOutput",
-    "CompactionAndHistoryStage",
-    "CompactionAndHistoryStageInput",
-    "CompactionAndHistoryStageOutput",
+    "HistoryLoadStage",
+    "HistoryLoadStageInput",
+    "HistoryLoadStageOutput",
     "CompactionPersistPort",
     "CostRollupResult",
     "ExtraContextResolver",

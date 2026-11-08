@@ -74,8 +74,8 @@ from agentos.engine.turn_runner import (
     AgentBootstrapStageInput,
     AttachmentStage,
     AttachmentStageInput,
-    CompactionAndHistoryStage,
-    CompactionAndHistoryStageInput,
+    HistoryLoadStage,
+    HistoryLoadStageInput,
     InputStage,
     InputStageInput,
     PromptAssemblerStage,
@@ -228,6 +228,7 @@ _IMAGE_GENERATION_TOOL_NAMES: Final[frozenset[str]] = frozenset({"image_generate
 _ARTIFACT_DELIVERY_FAILURE_MARKER: Final[str] = "File delivery failed:"
 _ARTIFACT_DELIVERY_TOOL_NAME: Final[str] = "publish_artifact"
 _ARTIFACT_DELIVERY_FAILURE_MAX_CHARS: Final[int] = 360
+
 
 def collect_invoked_skills(
     turn_segments: list[dict],
@@ -1751,7 +1752,7 @@ class TurnRunner:
             self._turn_hooks: tuple[TurnHook, ...] = (DefaultTraceEmitterHook(),)
         else:
             self._turn_hooks = tuple(turn_hooks)
-        # CompactionHook surface. CompactionAndHistoryStage fans
+        # CompactionHook surface. HistoryLoadStage fans
         # before/after-compact events out through these hooks. Empty tuple by
         # default means compaction runs with no hook fan-out.
         self._compaction_hooks: tuple[CompactionHook, ...] = (
@@ -1827,11 +1828,11 @@ class TurnRunner:
             memory_snapshot=_TurnRunnerMemorySnapshotAdapter(self),
             agent_factory=_TurnRunnerAgentFactoryAdapter(self),
         )
-        # TurnRunner stage decomposition CompactionAndHistoryStage instance. Holds no
+        # TurnRunner stage decomposition HistoryLoadStage instance. Holds no
         # per-turn state. Active unconditionally as of.
         # Between-turns (proactive) compaction + estimator calibration.
         self._proactive_compaction = ProactiveCompactionScheduler(self)
-        self._compaction_and_history_stage = CompactionAndHistoryStage(
+        self._history_load_stage = HistoryLoadStage(
             history_loader=_TurnRunnerHistoryLoaderAdapter(self),
             request_context_prepender=_RequestContextPrependAdapter(),
             turn_start_observer=self._proactive_compaction,
@@ -3132,8 +3133,8 @@ class TurnRunner:
             # the live request before every provider call (first one included)
             # with the configured ratio, and persists via CompactionEvent.
             timing.stage_start("compaction_and_history")
-            ch_outcome = await self._compaction_and_history_stage.run(
-                CompactionAndHistoryStageInput(
+            ch_outcome = await self._history_load_stage.run(
+                HistoryLoadStageInput(
                     agent=agent,
                     session_key=session_key,
                     agent_id=agent_id,

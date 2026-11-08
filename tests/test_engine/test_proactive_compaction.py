@@ -882,3 +882,28 @@ async def test_a_manual_summary_survives_the_next_automatic_compaction(
     payload = "\n".join(str(message.content) for message in provider.turn_requests[-1])
     for fact in facts:
         assert fact in payload
+
+
+async def test_proactive_compaction_goes_through_the_coordinator(
+    tmp_path: Path, storages: list[SessionStorage], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from agentos.engine.compaction_coordinator import CompactionCoordinator
+
+    triggers: list[str] = []
+    real_compact = CompactionCoordinator.compact
+
+    async def spy(self: Any, messages: Any, *, trigger: str, **kwargs: Any) -> Any:
+        triggers.append(trigger)
+        return await real_compact(self, messages, trigger=trigger, **kwargs)
+
+    monkeypatch.setattr(CompactionCoordinator, "compact", spy)
+    manager = await _manager(tmp_path, storages)
+    provider = _Provider()
+    runner = _runner(provider, manager, tmp_path)
+    await _seed(manager, KEY, rounds=2)
+
+    await _turn(runner, manager, KEY, "deploy status?", tmp_path)
+    await _scheduler(runner).wait_idle(KEY)
+
+    assert "proactive" in triggers
+    assert len(provider.summarizer_requests) == 1
