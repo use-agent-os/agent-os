@@ -11,7 +11,7 @@ import hashlib
 import json
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
@@ -26,6 +26,13 @@ from agentos.engine.cache_break_monitor import (
 )
 from agentos.engine.compaction_coordinator import CompactionCoordinator, CompactionTrigger
 from agentos.engine.compaction_service import CompactionService
+from agentos.engine.core.stream import (
+    TOOL_ARGUMENT_HEARTBEAT_CHARS,
+    AttemptResult,
+    IterationStreamTimeoutError,
+    StreamAccumulator,
+    stream_attempt,
+)
 from agentos.engine.core.turn_usage import (
     TurnTotals,
     cost_source_for_usage,
@@ -125,9 +132,7 @@ from agentos.provider import (
     ContentBlockToolUse,
     LLMProvider,
     Message,
-    ProviderHeartbeatEvent,
     ToolDefinition,
-    ToolUseEndEvent,
     provider_metadata,
 )
 from agentos.provider import (
@@ -135,15 +140,6 @@ from agentos.provider import (
 )
 from agentos.provider import (
     ErrorEvent as ProviderErrorEvent,
-)
-from agentos.provider import (
-    TextDeltaEvent as ProviderTextDelta,
-)
-from agentos.provider import (
-    ThinkingDeltaEvent as ProviderThinkingDelta,
-)
-from agentos.provider import (
-    ToolUseStartEvent as ProviderToolUseStart,
 )
 from agentos.provider.failures import (
     RETRY_AFTER_KINDS,
@@ -170,14 +166,11 @@ from .types import (
     DoneEvent,
     ErrorEvent,
     RepetitionStopEvent,
-    RunHeartbeatEvent,
     StateChangeEvent,
     TextDeltaEvent,
-    ThinkingEvent,
     ThinkingLevel,
     ToolCall,
     ToolResult,
-    ToolUseStartEvent,
     WarningEvent,
 )
 
@@ -248,7 +241,7 @@ def _is_direct_deepseek_v4_model_id(model_id: str | None) -> bool:
     return normalized in {"deepseek-v4-flash", "deepseek-v4-pro"}
 
 
-_TOOL_ARGUMENT_HEARTBEAT_CHARS = 4096
+_TOOL_ARGUMENT_HEARTBEAT_CHARS = TOOL_ARGUMENT_HEARTBEAT_CHARS
 _PROVIDER_CONTEXT_REPAIR_PROMPT = (
     "A previous tool call was rejected because it reused provider-only compacted "
     "tool arguments. Regenerate the complete tool arguments from the available "
@@ -407,8 +400,7 @@ class _ProviderAttemptKind(StrEnum):
     REPETITION = "repetition_detected"
 
 
-class _IterationStreamTimeoutError(TimeoutError):
-    """Raised when provider streaming exceeds the active Agent iteration budget."""
+_IterationStreamTimeoutError = IterationStreamTimeoutError
 
 
 class _TurnAbortedError(Exception):
@@ -627,24 +619,7 @@ def _strip_historical_image_blocks(messages: list[Message]) -> list[Message]:
     return sanitized
 
 
-@dataclass
-class _StreamAccumulator:
-    """Accumulates streaming fragments for a single tool call."""
-
-    tool_use_id: str
-    tool_name: str
-    synthetic_from_text: bool = False
-    json_buf: list[str] = field(default_factory=list)
-    json_chars: int = 0
-
-    def finish(self) -> dict[str, Any]:
-        raw = "".join(self.json_buf)
-        if not raw.strip():
-            return {}
-        try:
-            return json.loads(raw)  # type: ignore[no-any-return]
-        except json.JSONDecodeError:
-            return {"_raw": raw}
+_StreamAccumulator = StreamAccumulator
 
 
 class Agent(ToolResultProjectionMixin):
@@ -1429,7 +1404,6 @@ class Agent(ToolResultProjectionMixin):
                 assistant_text_parts = []
                 tool_calls: list[ToolCall] = []
                 pending_tools: dict[str, _StreamAccumulator] = {}
-                tool_argument_heartbeat_chars: dict[str, int] = {}
                 iter_input_tokens = 0
                 iter_output_tokens = 0
                 iter_reasoning_tokens = 0
@@ -1462,7 +1436,6 @@ class Agent(ToolResultProjectionMixin):
                     assistant_text_parts = []
                     tool_calls = []
                     pending_tools = {}
-                    tool_argument_heartbeat_chars = {}
                     iter_input_tokens = 0
                     iter_output_tokens = 0
                     iter_reasoning_tokens = 0
@@ -1645,8 +1618,6 @@ class Agent(ToolResultProjectionMixin):
                             model=self.config.model_id or "",
                         )
 
-                    _got_done_event = False
-                    attempt_user_visible_emitted = False
                     # Holds back text that may be a tool call written as text,
                     # while a retry for that is still available.
                     text_call_gate = (
@@ -1664,227 +1635,124 @@ class Agent(ToolResultProjectionMixin):
                         else None
                     )
                     repetition_trip: RepetitionTrip | None = None
-                    attempt_reasoning_parts: list[str] = []
-                    try:
-                        raw_stream = self.provider.chat(
-                            request_messages,
-                            tools=provider_tools_for_call,
-                            config=call_chat_cfg,
+
+                    def _on_provider_done(raw_ev: ProviderDoneEvent) -> None:
+                        nonlocal iter_input_tokens, iter_output_tokens, iter_reasoning_tokens
+                        nonlocal iter_reasoning_content, iter_thinking_signature, last_actual_model
+                        nonlocal total_billed_cost, total_input_tokens, total_output_tokens
+                        nonlocal total_reasoning_tokens, total_cached_tokens
+                        nonlocal total_cache_write_tokens
+                        # Make the estimator's drift visible: the
+                        # compaction trigger runs on this estimate,
+                        # scaled by the calibration it feeds.
+                        calibration_factor = self._observe_estimate(
+                            estimated_context_tokens,
+                            raw_ev.input_tokens,
+                            usage_estimated=raw_ev.usage_estimated,
+                            request_messages=request_messages,
                         )
-                        deadline_stream = self._stream_provider_events_with_deadline(
-                            raw_stream,
-                            loop=_loop,
-                            total_deadline=_total_deadline,
+                        logger.debug(
+                            "agent.context_estimate_vs_provider",
+                            session_key=self._session_key,
+                            call_id=call_id,
+                            estimated_tokens=estimated_context_tokens,
+                            provider_input_tokens=raw_ev.input_tokens,
+                            provider_cached_tokens=raw_ev.cached_tokens,
+                            provider_cache_write_tokens=raw_ev.cache_write_tokens,
+                            calibration_factor=calibration_factor,
                         )
-                        timed_stream = self.turn_timing.provider_stream(deadline_stream)
-                        async for raw_ev in timed_stream:
-                            if isinstance(raw_ev, ProviderTextDelta):
-                                assistant_text_parts.append(raw_ev.text)
-                                if raw_ev.text:
-                                    attempt_user_visible_emitted = True
-                                if text_call_gate is None:
-                                    yield TextDeltaEvent(text=raw_ev.text)
-                                elif shown_text := text_call_gate.push(raw_ev.text):
-                                    yield TextDeltaEvent(text=shown_text)
-                                if repetition_guard is not None and repetition_guard.feed_text(
-                                    raw_ev.text
-                                ):
-                                    repetition_trip = repetition_guard.trip
-                                    break
+                        iter_input_tokens = raw_ev.input_tokens
+                        iter_output_tokens = raw_ev.output_tokens
+                        iter_reasoning_tokens = raw_ev.reasoning_tokens
+                        iter_reasoning_content = raw_ev.reasoning_content
+                        iter_thinking_signature = raw_ev.thinking_signature
+                        total_billed_cost += raw_ev.billed_cost
+                        total_input_tokens += raw_ev.input_tokens
+                        total_output_tokens += raw_ev.output_tokens
+                        total_reasoning_tokens += raw_ev.reasoning_tokens
+                        total_cached_tokens += raw_ev.cached_tokens
+                        total_cache_write_tokens += raw_ev.cache_write_tokens
+                        if raw_ev.model:
+                            last_actual_model = raw_ev.model
+                        # Usage/cost accounting is billed-attempt based: discarded
+                        # invalid responses still consumed provider tokens, but
+                        # they must not be appended to conversation history or the
+                        # live context-window gauge below.
+                        if self._usage_tracker and self._session_key:
+                            # Forward the provider's real per-call billed_cost so
+                            # the per-model breakdown can show actual numbers
+                            # instead of the cache-blind pricing-table estimate.
+                            # See engine/usage.py:ModelUsage.billed_cost and
+                            # gateway/rpc_usage.py:_reconcile_breakdown_to_row
+                            # (the pro-rate fallback now skips when items
+                            # already carry real billed totals).
+                            metadata = provider_metadata(self.provider)
+                            self._usage_tracker.add(
+                                self._session_key,
+                                input_tokens=raw_ev.input_tokens,
+                                output_tokens=raw_ev.output_tokens,
+                                model_id=raw_ev.model or self.config.model_id or "",
+                                cache_read_tokens=raw_ev.cached_tokens,
+                                cache_write_tokens=raw_ev.cache_write_tokens,
+                                billed_cost=raw_ev.billed_cost,
+                                provider_id=(metadata.provider_kind or metadata.provider_name),
+                            )
 
-                            elif isinstance(raw_ev, ProviderThinkingDelta):
-                                # Reasoning is display-only: never mixed into the
-                                # reply text, never counted as user-visible output.
-                                if raw_ev.text and _thinking_shown_attempt in (
-                                    None,
-                                    _call_attempt,
-                                ):
-                                    _thinking_shown_attempt = _call_attempt
-                                    yield ThinkingEvent(text=raw_ev.text)
-                                attempt_reasoning_parts.append(raw_ev.text)
-                                if repetition_guard is not None and repetition_guard.feed_reasoning(
-                                    raw_ev.text
-                                ):
-                                    repetition_trip = repetition_guard.trip
-                                    break
-
-                            elif isinstance(raw_ev, ProviderToolUseStart):
-                                if not tools_supported_for_call:
-                                    if (
-                                        artifact_delivery_final_response_pending
-                                        or max_iterations_finalization_pending
-                                    ):
-                                        ignored_post_delivery_tool_use = True
-                                    continue
-                                if text_call_gate is not None and (
-                                    held_text := text_call_gate.release()
-                                ):
-                                    yield TextDeltaEvent(text=held_text)
-                                start_tool_name = self._canonical_tool_name(raw_ev.tool_name)
-                                pending_tools[raw_ev.tool_use_id] = _StreamAccumulator(
-                                    tool_use_id=raw_ev.tool_use_id,
-                                    tool_name=start_tool_name,
-                                    synthetic_from_text=raw_ev.synthetic_from_text,
-                                )
-                                tool_argument_heartbeat_chars[raw_ev.tool_use_id] = 0
-                                attempt_user_visible_emitted = True
-                                yield ToolUseStartEvent(
-                                    tool_use_id=raw_ev.tool_use_id,
-                                    tool_name=start_tool_name,
-                                    synthetic_from_text=raw_ev.synthetic_from_text,
-                                )
-
-                            elif raw_ev.kind == "tool_use_delta":
-                                if not tools_supported_for_call:
-                                    continue
-                                acc = pending_tools.get(raw_ev.tool_use_id)  # type: ignore[union-attr]
-                                if acc:
-                                    json_fragment = raw_ev.json_fragment  # type: ignore[union-attr]
-                                    acc.json_buf.append(json_fragment)
-                                    acc.json_chars += len(json_fragment)
-                                    last_heartbeat_chars = tool_argument_heartbeat_chars.get(
-                                        raw_ev.tool_use_id, 0
-                                    )
-                                    if (
-                                        acc.json_chars - last_heartbeat_chars
-                                        >= _TOOL_ARGUMENT_HEARTBEAT_CHARS
-                                    ):
-                                        tool_argument_heartbeat_chars[raw_ev.tool_use_id] = (
-                                            acc.json_chars
-                                        )
-                                        yield RunHeartbeatEvent(
-                                            phase="llm_tool_arguments",
-                                            elapsed_ms=int(
-                                                (time.monotonic() - call_started_at) * 1000
-                                            ),
-                                            idle_ms=0,
-                                            message=(f"Receiving {acc.tool_name} arguments"),
-                                        )
-
-                            elif isinstance(raw_ev, ToolUseEndEvent):
-                                if not tools_supported_for_call:
-                                    if (
-                                        artifact_delivery_final_response_pending
-                                        or max_iterations_finalization_pending
-                                    ):
-                                        ignored_post_delivery_tool_use = True
-                                    continue
-                                acc = pending_tools.pop(raw_ev.tool_use_id, None)
-                                tool_argument_heartbeat_chars.pop(raw_ev.tool_use_id, None)
-                                if acc and acc.json_buf:
-                                    arguments = acc.finish()
-                                else:
-                                    arguments = raw_ev.arguments
-                                synthetic_from_text = (
-                                    acc.synthetic_from_text
-                                    if acc is not None
-                                    else raw_ev.synthetic_from_text
-                                )
-                                end_tool_name = self._canonical_tool_name(
-                                    raw_ev.tool_name,
-                                    tool_use_id=raw_ev.tool_use_id,
-                                )
-                                tool_calls.append(
-                                    ToolCall(
-                                        tool_use_id=raw_ev.tool_use_id,
-                                        tool_name=end_tool_name,
-                                        arguments=self._coerce_tool_arguments(
-                                            end_tool_name, arguments
-                                        ),
-                                        synthetic_from_text=synthetic_from_text,
-                                        thought_signature=raw_ev.thought_signature,
-                                    )
-                                )
-
-                            elif isinstance(raw_ev, ProviderDoneEvent):
-                                provider_done_for_log = raw_ev
-                                _got_done_event = True
-                                # Make the estimator's drift visible: the
-                                # compaction trigger runs on this estimate,
-                                # scaled by the calibration it feeds.
-                                calibration_factor = self._observe_estimate(
-                                    estimated_context_tokens,
-                                    raw_ev.input_tokens,
-                                    usage_estimated=raw_ev.usage_estimated,
-                                    request_messages=request_messages,
-                                )
-                                logger.debug(
-                                    "agent.context_estimate_vs_provider",
-                                    session_key=self._session_key,
-                                    call_id=call_id,
-                                    estimated_tokens=estimated_context_tokens,
-                                    provider_input_tokens=raw_ev.input_tokens,
-                                    provider_cached_tokens=raw_ev.cached_tokens,
-                                    provider_cache_write_tokens=raw_ev.cache_write_tokens,
-                                    calibration_factor=calibration_factor,
-                                )
-                                iter_input_tokens = raw_ev.input_tokens
-                                iter_output_tokens = raw_ev.output_tokens
-                                iter_reasoning_tokens = raw_ev.reasoning_tokens
-                                iter_reasoning_content = raw_ev.reasoning_content
-                                iter_thinking_signature = raw_ev.thinking_signature
-                                total_billed_cost += raw_ev.billed_cost
-                                total_input_tokens += raw_ev.input_tokens
-                                total_output_tokens += raw_ev.output_tokens
-                                total_reasoning_tokens += raw_ev.reasoning_tokens
-                                total_cached_tokens += raw_ev.cached_tokens
-                                total_cache_write_tokens += raw_ev.cache_write_tokens
-                                if raw_ev.model:
-                                    last_actual_model = raw_ev.model
-                                # Usage/cost accounting is billed-attempt based: discarded
-                                # invalid responses still consumed provider tokens, but
-                                # they must not be appended to conversation history or the
-                                # live context-window gauge below.
-                                if self._usage_tracker and self._session_key:
-                                    # Forward the provider's real per-call billed_cost so
-                                    # the per-model breakdown can show actual numbers
-                                    # instead of the cache-blind pricing-table estimate.
-                                    # See engine/usage.py:ModelUsage.billed_cost and
-                                    # gateway/rpc_usage.py:_reconcile_breakdown_to_row
-                                    # (the pro-rate fallback now skips when items
-                                    # already carry real billed totals).
-                                    metadata = provider_metadata(self.provider)
-                                    self._usage_tracker.add(
-                                        self._session_key,
-                                        input_tokens=raw_ev.input_tokens,
-                                        output_tokens=raw_ev.output_tokens,
-                                        model_id=raw_ev.model or self.config.model_id or "",
-                                        cache_read_tokens=raw_ev.cached_tokens,
-                                        cache_write_tokens=raw_ev.cache_write_tokens,
-                                        billed_cost=raw_ev.billed_cost,
-                                        provider_id=(
-                                            metadata.provider_kind or metadata.provider_name
-                                        ),
-                                    )
-
-                            elif isinstance(raw_ev, ProviderErrorEvent):
-                                provider_error_for_log = raw_ev
-                                # One-shot thinking/reasoning fallback
-                                _err_lower = raw_ev.message.lower()
-                                if (
-                                    thinking_enabled
-                                    and not _thinking_fallback_done
-                                    and ("thinking" in _err_lower or "reasoning" in _err_lower)
-                                ):
-                                    _thinking_fallback_done = True
-                                    thinking_enabled = False
-                                    thinking_budget = 0
-                                    chat_cfg = _chat_config_with_thinking_disabled(chat_cfg)
-                                    _got_error = True
-                                    break  # break stream, retry
-
-                                provider_error = raw_ev
-                                _got_error = True
-                                break  # break stream loop
-
-                            elif isinstance(raw_ev, ProviderHeartbeatEvent):
-                                yield RunHeartbeatEvent(
-                                    phase=raw_ev.phase,
-                                    message=raw_ev.message,
-                                )
-                    except _IterationStreamTimeoutError:
-                        if text_call_gate is not None and (held_text := text_call_gate.release()):
-                            yield TextDeltaEvent(text=held_text)
+                    raw_stream = self.provider.chat(
+                        request_messages,
+                        tools=provider_tools_for_call,
+                        config=call_chat_cfg,
+                    )
+                    deadline_stream = self._stream_provider_events_with_deadline(
+                        raw_stream,
+                        loop=_loop,
+                        total_deadline=_total_deadline,
+                    )
+                    timed_stream = self.turn_timing.provider_stream(deadline_stream)
+                    attempt: AttemptResult | None = None
+                    async for stream_item in stream_attempt(
+                        timed_stream,
+                        text_parts=assistant_text_parts,
+                        tools_enabled=tools_supported_for_call,
+                        finalizing=(
+                            artifact_delivery_final_response_pending
+                            or max_iterations_finalization_pending
+                        ),
+                        text_gate=text_call_gate,
+                        repetition_guard=repetition_guard,
+                        show_thinking=_thinking_shown_attempt in (None, _call_attempt),
+                        thinking_fallback_allowed=thinking_enabled and not _thinking_fallback_done,
+                        canonical_tool_name=self._canonical_tool_name,
+                        coerce_tool_arguments=self._coerce_tool_arguments,
+                        on_done=_on_provider_done,
+                        started_at=call_started_at,
+                    ):
+                        if isinstance(stream_item, AttemptResult):
+                            attempt = stream_item
+                        else:
+                            yield stream_item
+                    assert attempt is not None
+                    tool_calls = attempt.tool_calls
+                    pending_tools = attempt.pending_tools
+                    attempt_reasoning_parts = attempt.reasoning_parts
+                    provider_done_for_log = attempt.done
+                    _got_done_event = attempt.done is not None
+                    provider_error_for_log = attempt.error_event
+                    provider_error = attempt.provider_error
+                    _got_error = attempt.got_error
+                    repetition_trip = attempt.repetition_trip
+                    attempt_user_visible_emitted = attempt.user_visible_emitted
+                    if attempt.ignored_tool_use:
+                        ignored_post_delivery_tool_use = True
+                    if attempt.showed_thinking:
+                        _thinking_shown_attempt = _call_attempt
+                    if attempt.thinking_fallback:
+                        # One-shot thinking/reasoning fallback: retry without thinking.
+                        _thinking_fallback_done = True
+                        thinking_enabled = False
+                        thinking_budget = 0
+                        chat_cfg = _chat_config_with_thinking_disabled(chat_cfg)
+                    if attempt.iteration_timeout:
                         if artifact_delivery_final_response_pending:
                             yield _finish_artifact_delivery_degraded(
                                 reason=(
@@ -3519,9 +3387,7 @@ class Agent(ToolResultProjectionMixin):
                     # Asked to stop mid-stream: stop the pending read, close
                     # the stream (and its HTTP connection) and end the turn.
                     next_event.cancel()
-                    with contextlib.suppress(
-                        asyncio.CancelledError, StopAsyncIteration, Exception
-                    ):
+                    with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration, Exception):
                         await next_event
                     await self._close_provider_stream(stream_iter)
                     raise _TurnAbortedError

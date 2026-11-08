@@ -72,6 +72,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - The token and cost figures a turn reports on its `DoneEvent` are settled by
   a pure `agentos.engine.core.settle_turn_usage`, the first piece of the agent
   loop moved into `engine/core` (which may not import the gateway).
+- One provider request is consumed by `agentos.engine.core.stream_attempt`,
+  which re-emits the stream as agent events and ends with exactly one
+  `AttemptResult` (done event, provider error, iteration timeout or
+  repetition trip) instead of raising.
 - Subagents now run in a lane per parent session. At most
   `subagents.max_concurrent_children` children of one parent (default 2; an
   agent's own `subagents.max_concurrent_children` wins; `0` = no limit) run

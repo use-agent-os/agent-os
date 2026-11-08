@@ -8,6 +8,12 @@ enforces that ``agentos.engine.core`` never imports from ``agentos.gateway``.
 
 from __future__ import annotations
 
+from agentos.engine.core.stream import (
+    AttemptResult,
+    IterationStreamTimeoutError,
+    StreamAccumulator,
+    stream_attempt,
+)
 from agentos.engine.core.turn_usage import (
     Price,
     TurnTotals,
@@ -19,6 +25,9 @@ from agentos.engine.core.turn_usage import (
 )
 
 __all__ = [
+    "AttemptResult",
+    "IterationStreamTimeoutError",
+    "StreamAccumulator",
     "Price",
     "TurnTotals",
     "TurnUsage",
@@ -26,4 +35,5 @@ __all__ = [
     "cost_source_for_usage",
     "resolve_done_model",
     "settle_turn_usage",
+    "stream_attempt",
 ]
