@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Removed
+- The in-process subagent path: `agentos.engine.subagent` (`SubagentManager`,
+  `SubagentSpec`, `SubagentRegistry`, `SubagentHandle`, also re-exported
+  from `agentos.engine`), `Agent.spawn_subagent` and the `Agent(...,
+  subagent_manager=...)` argument. Nothing in AgentOS used them; subagents
+  run through the `sessions_spawn` tool.
+- The `AGENTOS_HOOKS=legacy` escape hatch, kept "for one release" since the
+  hook chain became the default. Setting it now has no effect.
+- The unused `agentos.engine.turn_runner.TurnContext`.
+- The unused `agentos.engine.turn_control` module. Its codes
+  `permission_unavailable` and `no_progress` now classify as `blocked` in
+  `agentos.engine.outcome`.
+
 ### Added
 - Tool hooks can now decide, not only observe. `before_tool` may block a
   call or rewrite its arguments, and `after_tool` may replace the result
@@ -51,9 +64,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Engine callers that read the result from whether an `ErrorEvent` arrived
   keep working. Callers that assumed a failed turn has no `DoneEvent` must now
   read `outcome` instead.
-- Removed the unused `agentos.engine.turn_control` module. Its codes
-  `permission_unavailable` and `no_progress` now classify as `blocked` in
-  `agentos.engine.outcome`.
 
 ## [2026.11.7] - 2026-11-07
 

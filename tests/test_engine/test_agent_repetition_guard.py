@@ -407,20 +407,3 @@ async def test_reasoning_loop_usage_counts_reasoning_tokens() -> None:
     done = next(event for event in out if event.kind == "done")
     assert done.reasoning_tokens > 3_000
     assert done.output_tokens == done.reasoning_tokens + 5
-
-
-@pytest.mark.asyncio
-async def test_subagent_result_drops_the_cut_loop() -> None:
-    from agentos.engine.subagent import SubagentManager, SubagentSpec
-
-    provider = _Provider([_looping_text(), _finish()])
-    manager = SubagentManager()
-
-    handle = await manager.spawn(
-        SubagentSpec(task="check the logs"),
-        agent_factory=lambda spec, depth: Agent(provider=provider, config=_config()),
-    )
-    result = await handle.task
-
-    assert result.count("check the configuration file again") == 1
-    assert result.endswith("All checks passed.")

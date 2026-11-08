@@ -15,7 +15,6 @@ from agentos.engine import (
     DoneEvent,
     ErrorEvent,
     RunHeartbeatEvent,
-    SubagentSpec,
     TextDeltaEvent,
     ToolCall,
     ToolResult,
@@ -586,19 +585,6 @@ async def test_agent_provider_request_proof_budget_accepts_explicit_override() -
     assert provider.configs
     assert provider.configs[0] is not None
     assert provider.configs[0].provider_request_max_chars == 123_456
-
-
-def test_agent_child_config_inherits_tool_failure_loop_thresholds() -> None:
-    agent = Agent(
-        provider=_ContextOverflowProvider(success_after=1),
-        config=AgentConfig(
-            tool_failure_loop_block_threshold=7,
-        ),
-    )
-
-    child = agent._make_child_agent(SubagentSpec(task="child task"), depth=1)
-
-    assert child.config.tool_failure_loop_block_threshold == 7
 
 
 class _BudgetCheckingProvider:

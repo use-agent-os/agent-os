@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from agentos.engine import Agent, AgentConfig, DoneEvent, ErrorEvent, SubagentSpec, ToolResult
+from agentos.engine import Agent, AgentConfig, DoneEvent, ErrorEvent, ToolResult
 from agentos.engine.outcome import outcome_from_error
 from agentos.engine.runtime import TurnRunner
 from agentos.engine.turn_runner.harness import _TurnRunnerAgentConfigBuilderAdapter
@@ -287,10 +287,3 @@ def test_tools_loop_guard_config_reaches_agent_config() -> None:
             turn=SimpleNamespace(metadata={}),
         )
         assert aux.loop_guard == value
-
-
-def test_subagent_inherits_the_loop_guard_mode() -> None:
-    parent = _agent(_ScriptedProvider(lambda _n: None), _Handler(), loop_guard="observe")
-    child = parent._make_child_agent(SubagentSpec(task="t"), depth=1)
-
-    assert child.config.loop_guard == "observe"

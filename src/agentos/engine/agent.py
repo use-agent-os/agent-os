@@ -10,7 +10,6 @@ import contextlib
 import hashlib
 import json
 import time
-import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -152,7 +151,6 @@ from agentos.tools.registry import ToolRegistry
 from agentos.tools.types import ToolContext
 
 from .context import ContextAssembly
-from .subagent import SubagentManager, SubagentSpec
 from .types import (
     AgentConfig,
     AgentEvent,
@@ -661,7 +659,6 @@ class Agent(ToolResultProjectionMixin):
         config: AgentConfig | None = None,
         tool_definitions: list[ToolDefinition] | None = None,
         tool_handler: ToolHandler | None = None,
-        subagent_manager: SubagentManager | None = None,
         usage_tracker: Any | None = None,
         session_key: str | None = None,
         turn_call_logger: TurnCallLogger | None = None,
@@ -676,7 +673,6 @@ class Agent(ToolResultProjectionMixin):
         self.tool_definitions = tool_definitions or []
         self._tool_definition_by_name = {tool.name: tool for tool in self.tool_definitions}
         self.tool_handler = tool_handler
-        self.subagent_manager = subagent_manager or SubagentManager()
         self._usage_tracker = usage_tracker
         self._session_key = session_key
         self._turn_call_logger = turn_call_logger
@@ -4177,99 +4173,4 @@ class Agent(ToolResultProjectionMixin):
     # Subagent factory
     # ------------------------------------------------------------------
 
-    def _make_child_agent(self, spec: SubagentSpec, depth: int) -> Agent:
-        from agentos.session.keys import parse_agent_id
-        from agentos.tools.types import (
-            SUBAGENT_TOOL_DENY,
-            CallerKind,
-            InteractionMode,
-            ToolContext,
-            current_tool_context,
-        )
 
-        parent_session_key = self._session_key or "unknown"
-        subagent_label = spec.label or "subagent"
-
-        # Schema-time filtering: subagents cannot see dangerous tools
-        filtered_defs = [td for td in self.tool_definitions if td.name not in SUBAGENT_TOOL_DENY]
-        subagent_ctx = ToolContext(
-            caller_kind=CallerKind.SUBAGENT,
-            interaction_mode=InteractionMode.UNATTENDED,
-            subagent_depth=depth,
-            agent_id=parse_agent_id(parent_session_key),
-            workspace_dir=spec.workspace_dir or self.config.workspace_dir,
-            session_key=f"subagent:{parent_session_key}",
-            channel_kind="subagent",
-            channel_id=f"subagent:{parent_session_key}",
-            sender_id=parent_session_key,
-            denied_tools=set(SUBAGENT_TOOL_DENY),
-            tool_run_budget_key=(
-                f"subagent:{parent_session_key}:{subagent_label}:{depth}:{uuid.uuid4().hex}"
-            ),
-        )
-
-        async def _subagent_tool_handler(tc: ToolCall) -> ToolResult:
-            if self.tool_handler is None:
-                return ToolResult(
-                    tool_use_id=tc.tool_use_id,
-                    tool_name=tc.tool_name,
-                    content=f"No tool handler registered for tool '{tc.tool_name}'",
-                    is_error=True,
-                    execution_status=runtime_execution_status(
-                        "error",
-                        reason="runtime_error",
-                    ),
-                )
-            token = current_tool_context.set(subagent_ctx)
-            try:
-                return await self.tool_handler(tc)
-            finally:
-                current_tool_context.reset(token)
-
-        child_cfg = AgentConfig(
-            max_iterations=spec.max_iterations,
-            timeout=spec.timeout,
-            max_tokens=self.config.max_tokens,
-            max_turn_llm_calls=self.config.max_turn_llm_calls,
-            max_turn_input_tokens=self.config.max_turn_input_tokens,
-            max_turn_output_tokens=self.config.max_turn_output_tokens,
-            max_turn_billed_cost_usd=self.config.max_turn_billed_cost_usd,
-            max_turn_tool_errors=self.config.max_turn_tool_errors,
-            length_capped_continuations=self.config.length_capped_continuations,
-            context_window_tokens=self.config.context_window_tokens,
-            workspace_dir=spec.workspace_dir or self.config.workspace_dir,
-            tool_result_projection_max_inline_chars=(
-                self.config.tool_result_projection_max_inline_chars
-            ),
-            tool_result_provider_request_max_chars=(
-                self.config.tool_result_provider_request_max_chars
-            ),
-            provider_request_proof_max_chars=self.config.provider_request_proof_max_chars,
-            tool_use_argument_provider_request_max_chars=(
-                self.config.tool_use_argument_provider_request_max_chars
-            ),
-            tool_use_argument_projection_enabled=(self.config.tool_use_argument_projection_enabled),
-            tool_failure_loop_block_threshold=(self.config.tool_failure_loop_block_threshold),
-            loop_guard=self.config.loop_guard,
-            max_safe_tool_concurrency=self.config.max_safe_tool_concurrency,
-            parallel_tool_calls=self.config.parallel_tool_calls,
-            tool_result_store_dir=self.config.tool_result_store_dir,
-            tool_result_store_session_id=self.config.tool_result_store_session_id,
-            tool_result_store_session_key=self.config.tool_result_store_session_key,
-            tool_result_store_agent_id=self.config.tool_result_store_agent_id,
-            tool_result_store_max_bytes=self.config.tool_result_store_max_bytes,
-            tool_result_store_disk_budget_bytes=(self.config.tool_result_store_disk_budget_bytes),
-            tool_result_store_retention_seconds=(self.config.tool_result_store_retention_seconds),
-        )
-        return Agent(
-            provider=self.provider,
-            config=child_cfg,
-            tool_definitions=filtered_defs,
-            tool_handler=_subagent_tool_handler,
-            subagent_manager=SubagentManager(spawn_depth=depth),
-        )
-
-    async def spawn_subagent(self, spec: SubagentSpec) -> str:
-        """Spawn a subagent and return its run_id."""
-        handle = await self.subagent_manager.spawn(spec, self._make_child_agent)
-        return handle.run_id

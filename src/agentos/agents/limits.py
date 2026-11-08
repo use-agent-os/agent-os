@@ -1,9 +1,7 @@
 """Shared subagent governance limits.
 
-Single source of truth for spawn-depth caps and related governance constants.
-Both the in-process engine path (``engine/subagent.py``) and the canonical
-gateway path (``tools/builtin/sessions.py``) import from here so the cap
-cannot drift between codepaths.
+Single source of truth for spawn-depth caps and related governance constants,
+used by the subagent spawn path (``tools/builtin/sessions.py``).
 """
 
 from __future__ import annotations

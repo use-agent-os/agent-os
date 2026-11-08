@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 import structlog
 
-from agentos.engine import Agent, AgentConfig, SubagentSpec
+from agentos.engine import Agent, AgentConfig
 from agentos.engine.runtime import TurnRunner
 from agentos.engine.steps.agentos_router import (
     _record_controller_thinking_metadata,
@@ -90,15 +90,6 @@ def test_tools_parallel_calls_config_reaches_agent_config() -> None:
             turn=SimpleNamespace(metadata={}),
         )
         assert aux.parallel_tool_calls is value
-
-
-def test_subagent_inherits_parallel_setting() -> None:
-    for value in (True, False):
-        parent = Agent(
-            provider=_ConfigCapturingProvider(), config=AgentConfig(parallel_tool_calls=value)
-        )
-        child = parent._make_child_agent(SubagentSpec(task="t"), depth=1)
-        assert child.config.parallel_tool_calls is value
 
 
 # ---------------------------------------------------------------------------

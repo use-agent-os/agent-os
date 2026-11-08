@@ -1,9 +1,9 @@
 """TurnRunner stage decomposition — public exports.
 
 Re-exports the eight TurnRunner stages, their I/O dataclasses, the
-Protocol ports they accept, and the shared ``StageOutcome`` /
-``TurnContext`` types. Internal adapters and private dataclasses live
-in their owning submodules (``harness``, ``stream_consumer_stage``,
+Protocol ports they accept, and the shared ``StageOutcome`` type.
+Internal adapters and private dataclasses live in their owning
+submodules (``harness``, ``stream_consumer_stage``,
 ``agent_bootstrap_stage``) and are imported from there by code that
 needs them.
 """
@@ -33,7 +33,6 @@ from agentos.engine.turn_runner.compaction_and_history_stage import (
     HistoryLoaderPort,
     RequestContextPrependPort,
 )
-from agentos.engine.turn_runner.context import TurnContext
 from agentos.engine.turn_runner.input_stage import (
     ExtraContextResolver,
     InputStage,
@@ -131,7 +130,6 @@ __all__ = [
     "TimeoutBudgetPort",
     "ToolBuilderPort",
     "TranscriptAppendPort",
-    "TurnContext",
     "TurnErrorPersistPort",
     "TurnFinalizerStage",
     "TurnFinalizerStageInput",
