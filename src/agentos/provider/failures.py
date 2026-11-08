@@ -271,6 +271,10 @@ def classify_provider_error(
 
     if status_code == 429 or "rate limit" in text:
         return ProviderFailureKind.RATE_LIMITED
+    # 401 means "not authenticated" whatever the provider family; 403 is left
+    # alone because providers also use it for policy and region refusals.
+    if status_code == 401:
+        return ProviderFailureKind.AUTH_INVALID
     if status_code in _GATEWAY_TRANSIENT_STATUS_CODES or _is_gateway_transient(text):
         return ProviderFailureKind.PROVIDER_OVERLOADED
     if "malformed" in text or "invalid json" in text:

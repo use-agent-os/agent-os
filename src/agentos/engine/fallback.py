@@ -29,6 +29,13 @@ _FAILURE_KIND_MAP: dict[ProviderFailureKind, ProviderErrorKind] = {
 }
 
 
+def _reports_overload(status_code: int | None, raw_code: str, message: str) -> bool:
+    code = str(raw_code or "").strip().lower()
+    if status_code == 529 or code == "529":
+        return True
+    return "overload" in code or "overload" in str(message or "").lower()
+
+
 @dataclass
 class FallbackPolicy:
     """Policy for retrying failed provider calls and falling back to alternate models."""
@@ -56,6 +63,13 @@ class FallbackPolicy:
             raw_code=raw_code,
             message=message,
         )
+        if kind is ProviderFailureKind.PROVIDER_OVERLOADED and _reports_overload(
+            status_code, raw_code, message
+        ):
+            # The provider family lumps every 5xx together; a gateway blip
+            # (502/504/52x) stays transport-transient, an explicit overload
+            # (529, ``overloaded_error``) is its own kind.
+            return ProviderErrorKind.OVERLOADED
         return _FAILURE_KIND_MAP.get(kind, ProviderErrorKind.UNKNOWN)
 
     def should_retry(self, kind: ProviderErrorKind, attempt: int) -> bool:
@@ -112,7 +126,13 @@ def backoff_sleep(
     max_ms: int = 30_000,
     _fake: bool = False,
 ) -> float:
-    """Calculate exponential backoff delay with jitter.
+    """Calculate exponential backoff delay with multiplicative jitter.
+
+    The nominal delay ``base_ms * 2**attempt`` is multiplied by a random factor
+    in ``[0.5, 1.5]`` and then capped at ``max_ms``. A multiplicative spread
+    keeps sessions that hit the same limit at the same moment from retrying in
+    lockstep at every later attempt too (an additive jitter of a fixed size
+    becomes negligible once the delay grows).
 
     Args:
         attempt: 0-indexed retry attempt number.
@@ -125,8 +145,8 @@ def backoff_sleep(
     """
     import structlog
 
-    jitter = random.randint(0, base_ms // 2)  # noqa: S311
-    delay_ms = min(base_ms * (2**attempt) + jitter, max_ms)
+    factor = random.uniform(0.5, 1.5)  # noqa: S311
+    delay_ms = min(base_ms * (2**attempt) * factor, max_ms)
     delay_s = delay_ms / 1000.0
 
     if not _fake:

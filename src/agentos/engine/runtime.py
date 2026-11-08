@@ -272,11 +272,6 @@ def _hooks_mode_from_env() -> str:
     return "legacy" if raw == "legacy" else "new"
 
 
-def _is_deepseek_model_id(model: str) -> bool:
-    normalized = model.strip().lower()
-    return normalized.startswith("deepseek") or "/deepseek" in normalized
-
-
 # Per-call-chain owner tracking for session-lock re-entry detection.
 # A ContextVar is copied into child asyncio Tasks created while a turn is
 # running, which matters for stream wrappers such as heartbeat_stream. Treating

@@ -296,7 +296,8 @@ async def test_unhinted_429_keeps_the_exponential_backoff(sleeps: list[float]) -
 
     assert _text(events) == "after backoff"
     assert len(sleeps) == 1
-    assert sleeps[0] >= 10.0
+    # Exponential backoff with multiplicative jitter: 0.5x-1.5x the 10 s base.
+    assert 5.0 <= sleeps[0] <= 15.0
     assert "provider_retry_after_wait" not in _warning_codes(events)
 
 

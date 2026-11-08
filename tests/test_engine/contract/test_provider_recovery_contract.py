@@ -20,8 +20,6 @@ from agentos.engine.types import DoneEvent, ErrorEvent
 from agentos.provider import Message
 from tests.fakes import ChainSelector, ScriptedProvider, done, error, text
 
-PHASE2 = "Phase 2: single provider attempt policy"
-
 OVERFLOW = "This model's maximum context length is 1000 tokens"
 
 
@@ -89,7 +87,6 @@ def _outcome(event: Any) -> str | None:
 # ------------------------------------------------ one decision per failed attempt
 
 
-@pytest.mark.xfail(strict=True, reason=PHASE2)
 async def test_each_failed_attempt_records_exactly_one_recovery_decision(
     sleeps: list[float],
 ) -> None:
@@ -108,7 +105,6 @@ async def test_each_failed_attempt_records_exactly_one_recovery_decision(
 # ------------------------------------------------ overloaded is a distinct kind
 
 
-@pytest.mark.xfail(strict=True, reason=PHASE2)
 def test_529_is_classified_as_overloaded_not_transport() -> None:
     kind = FallbackPolicy.classify_error("overloaded", status_code=529, raw_code="529")
 
@@ -118,7 +114,6 @@ def test_529_is_classified_as_overloaded_not_transport() -> None:
 # ------------------------------------------------ wall-clock bounded retries
 
 
-@pytest.mark.xfail(strict=True, reason=PHASE2)
 async def test_burst_of_429s_keeps_retrying_within_the_default_budget(
     sleeps: list[float],
 ) -> None:
@@ -131,7 +126,6 @@ async def test_burst_of_429s_keeps_retrying_within_the_default_budget(
     assert _errors(events)
 
 
-@pytest.mark.xfail(strict=True, reason=PHASE2)
 async def test_configured_retry_budget_bounds_same_model_retries(sleeps: list[float]) -> None:
     provider = ScriptedProvider([[error("429", "rate limited")]])
 
@@ -172,7 +166,6 @@ async def test_long_retry_after_fails_over_without_waiting(sleeps: list[float]) 
 # ------------------------------------------------ multiplicative jitter
 
 
-@pytest.mark.xfail(strict=True, reason=PHASE2)
 def test_backoff_jitter_spreads_retries_multiplicatively() -> None:
     nominal = 4.0  # attempt 2 at a 1 s base
     samples = [backoff_sleep(2, 1000, 30_000, _fake=True) for _ in range(400)]
@@ -224,7 +217,6 @@ async def test_overflow_that_cannot_shrink_ends_with_done_failed(sleeps: list[fl
 # ------------------------------------------------ timeouts reduce context first
 
 
-@pytest.mark.xfail(strict=True, reason=PHASE2)
 async def test_timeout_on_large_context_compacts_and_retries_before_failing(
     sleeps: list[float],
 ) -> None:
@@ -276,7 +268,6 @@ async def test_invalid_api_key_is_not_retried(sleeps: list[float]) -> None:
     assert _errors(events)
 
 
-@pytest.mark.xfail(strict=True, reason=PHASE2)
 async def test_invalid_api_key_error_tells_the_operator_to_fix_credentials(
     sleeps: list[float],
 ) -> None:
@@ -286,3 +277,20 @@ async def test_invalid_api_key_error_tells_the_operator_to_fix_credentials(
 
     message = _errors(events)[-1].message.lower()
     assert "credential" in message or ("api key" in message and "config" in message)
+
+
+async def test_timeout_recovery_disabled_keeps_the_previous_failure(
+    sleeps: list[float],
+) -> None:
+    provider = ScriptedProvider([[error("timeout", "request timed out")]])
+    agent = _agent(provider, timeout_context_recovery=False)
+    agent.set_history(_long_history())
+
+    events = await _run(agent)
+
+    assert not any(e.kind == "compaction" for e in events)
+    assert len(provider.calls) == 2
+    message = _errors(events)[-1].message
+    assert "/c0" in message
+    # ``timeout`` is an interrupted outcome in agentos.engine.outcome.
+    assert _outcome(events[-1]) == "interrupted"
