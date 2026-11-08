@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- A cancelled turn now leaves a transcript the next turn can replay as is.
+  Every tool call that was still running is paired with a "Cancelled" error
+  result, and the turn ends with a note telling the model it was interrupted,
+  so tools may have partly run. Before, the history loader patched the gap
+  with an "unknown outcome" result on every reload.
+- Cancelling a turn while the model was streaming left the provider stream,
+  and its HTTP connection, open until garbage collection. It is now closed
+  at once.
 - A turn that failed after the model had already used tokens (for example a
   provider error after a tool call) ended its run with `session.event.done`
   in state `done`. The error frame was dropped, so clients showed the failed

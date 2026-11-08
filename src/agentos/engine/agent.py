@@ -112,6 +112,7 @@ from agentos.provider import (
     ChatConfig,
     ContentBlockText,
     ContentBlockThinking,
+    ContentBlockToolResult,
     ContentBlockToolUse,
     LLMProvider,
     Message,
@@ -173,6 +174,16 @@ from .types import (
 )
 
 logger = structlog.get_logger("agentos.engine.agent")
+
+#: Result content of a tool call the turn was cancelled before it finished.
+CANCELLED_TOOL_RESULT_CONTENT = (
+    "Cancelled: the user stopped the turn before this call finished. It may have "
+    "partly run; check its effects before relying on them."
+)
+#: Closing assistant text of a cancelled turn, replayed to the model.
+TURN_INTERRUPTED_NOTE = (
+    "[The user interrupted this turn before it finished. Tool calls may have partly run.]"
+)
 
 _PROVIDER_OUTPUT_TRUNCATED_REPLY = build_terminal_reply(
     {
@@ -1315,6 +1326,7 @@ class Agent(ToolResultProjectionMixin):
                 artifact_count=len(artifact_delivery_final_response_artifacts),
             )
 
+        assistant_text_parts: list[str] = []
         try:
             while True:
                 if self.config.max_iterations > 0 and iterations >= self.config.max_iterations:
@@ -1392,7 +1404,7 @@ class Agent(ToolResultProjectionMixin):
                 yield self._transition(AgentState.STREAMING)
 
                 # Collect this LLM response
-                assistant_text_parts: list[str] = []
+                assistant_text_parts = []
                 tool_calls: list[ToolCall] = []
                 pending_tools: dict[str, _StreamAccumulator] = {}
                 tool_argument_heartbeat_chars: dict[str, int] = {}
@@ -3293,6 +3305,15 @@ class Agent(ToolResultProjectionMixin):
                 yield self._transition(AgentState.THINKING)
                 # Loop continues
 
+        except asyncio.CancelledError:
+            # Leave a turn that is valid to replay: every tool call paired with
+            # a result, and a note telling the model the turn was cut short.
+            # The cancellation itself propagates; the runtime publishes the
+            # run's aborted terminal frame.
+            sealed = self._seal_cancelled_turn(turn_messages, "".join(assistant_text_parts))
+            self._history = sealed
+            self._record_turn_transcript(sealed)
+            raise
         except TimeoutError:
             if artifact_delivery_final_response_pending:
                 yield _finish_artifact_delivery_degraded(
@@ -3435,7 +3456,18 @@ class Agent(ToolResultProjectionMixin):
                 wait_budget = min(wait_budget, remaining_total)
 
             next_event: asyncio.Future[Any] = asyncio.ensure_future(stream_iter.__anext__())
-            done, _ = await asyncio.wait({next_event}, timeout=wait_budget)
+            try:
+                done, _ = await asyncio.wait({next_event}, timeout=wait_budget)
+            except asyncio.CancelledError:
+                # The pending __anext__ runs in its own task: cancelling this
+                # turn does not stop it, and the provider stream (and its HTTP
+                # connection) would stay open until GC. Stop it, close the
+                # stream, then let the cancellation through.
+                next_event.cancel()
+                with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration, Exception):
+                    await next_event
+                await self._close_provider_stream(stream_iter)
+                raise
             if not done:
                 next_event.cancel()
                 with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
@@ -3483,6 +3515,50 @@ class Agent(ToolResultProjectionMixin):
         if finalization_message is not None:
             return [*messages, finalization_message]
         return list(messages)
+
+    @staticmethod
+    def _seal_cancelled_turn(messages: list[Message], partial_text: str) -> list[Message]:
+        """The turn's messages made safe to replay after a cancellation.
+
+        Tool calls still waiting for a result get a cancelled error result, and
+        the turn ends with an assistant message holding any text that had
+        streamed plus :data:`TURN_INTERRUPTED_NOTE`, so the next request needs
+        no pairing repair and the model knows tools may have partly run.
+        """
+
+        sealed = list(messages)
+        answered = {
+            block.tool_use_id
+            for message in sealed
+            if isinstance(message.content, list)
+            for block in message.content
+            if isinstance(block, ContentBlockToolResult)
+        }
+        pending = [
+            block
+            for message in sealed
+            if message.role == "assistant" and isinstance(message.content, list)
+            for block in message.content
+            if isinstance(block, ContentBlockToolUse) and block.id not in answered
+        ]
+        if pending:
+            sealed.append(
+                Message(
+                    role="user",
+                    content=[
+                        ContentBlockToolResult(
+                            tool_use_id=block.id,
+                            content=CANCELLED_TOOL_RESULT_CONTENT,
+                            is_error=True,
+                        )
+                        for block in pending
+                    ],
+                )
+            )
+        text = partial_text.rstrip()
+        note = f"{text}\n\n{TURN_INTERRUPTED_NOTE}" if text else TURN_INTERRUPTED_NOTE
+        sealed.append(Message(role="assistant", content=[ContentBlockText(text=note)]))
+        return sealed
 
     def _seal_transcript(self, messages: list[Message], sealed_len: int) -> int:
         """Seal ``messages[sealed_len:]`` in place; return the new sealed length."""

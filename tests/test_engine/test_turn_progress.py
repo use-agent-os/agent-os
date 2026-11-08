@@ -434,10 +434,14 @@ async def test_cancelled_turn_replaces_its_progress_row(tmp_path: Path) -> None:
         assert [row.role for row in rows] == ["user", "assistant"]
         assert not is_turn_progress_entry(rows[1])
         assert "[interrupted]" in (rows[1].content or "")
-        history = repair_tool_pairing(build_history_from_transcript(rows).messages)
-        blocks = _blocks(history)
+        loaded = build_history_from_transcript(rows).messages
+        # The agent sealed the cancelled turn, so the persisted record already
+        # pairs act-2 (with a cancelled result) and needs no repair on load.
+        assert repair_tool_pairing(loaded) == loaded
+        blocks = _blocks(loaded)
         assert ("user", "tool_result:act-1", "acted 1") in blocks
-        assert ("user", "tool_result:act-2", "unknown") in blocks
+        act_2 = [label for _role, kind, label in blocks if kind == "tool_result:act-2"]
+        assert len(act_2) == 1 and act_2[0].startswith("Cancelled:")
     finally:
         await storage.close()
 

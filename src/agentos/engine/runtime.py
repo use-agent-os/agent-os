@@ -3434,9 +3434,12 @@ class TurnRunner:
                 # reply. The in-progress row (or the bare user message) stays
                 # the tail, so restart recovery sees how far the turn got.
                 log.info("turn_runner.cancelled_by_shutdown", session_key=session_key)
-            elif (
-                partial_text or turn_segments or turn_artifacts
-            ) and self._session_manager is not None:
+            elif self._session_manager is not None and (
+                partial_text
+                or turn_segments
+                or turn_artifacts
+                or transcript_record_of(turn_progress_agent) is not None
+            ):
                 try:
                     body = _cancelled_partial_response_text(partial_text, turn_artifacts)
                     if turn_artifacts:
@@ -3448,6 +3451,14 @@ class TurnRunner:
                     if turn_progress is not None and turn_progress.message_id is not None:
                         # The partial row takes the in-progress row's place.
                         cancel_kwargs["replaces_message_id"] = turn_progress.message_id
+                    # The agent sealed the cancelled turn (every tool call paired,
+                    # an interruption note at the end); persisting that record
+                    # lets the next turn replay it without pairing repair.
+                    cancelled_provider_messages = transcript_record_of(
+                        turn_progress_agent, artifacts=turn_artifacts
+                    )
+                    if cancelled_provider_messages is not None:
+                        cancel_kwargs["provider_messages"] = cancelled_provider_messages
                     await self._append_session_message(
                         session_key,
                         role="assistant",
