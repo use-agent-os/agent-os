@@ -474,7 +474,7 @@ function CuratedPanel({
           <User className="mt-0.5 size-4 text-text-muted" aria-hidden />
         )}
         <div className="min-w-0 flex-1">
-          <h3 className="font-semibold">{title}</h3>
+          <h2 className="font-semibold">{title}</h2>
           <p className="text-small text-text-muted">
             {target === 'memory'
               ? t('webSetCapabilities.memAgentBody')
@@ -1066,7 +1066,7 @@ function EmbeddingSettings() {
 
   return (
     <div className="flex flex-col">
-      <h3 className="font-semibold">{t('webSetCapabilities.memEmbeddingTitle')}</h3>
+      <h2 className="font-semibold">{t('webSetCapabilities.memEmbeddingTitle')}</h2>
       <p className="text-small text-text-muted">{t('webSetCapabilities.memEmbeddingBody')}</p>
       <ConfigField
         {...field(
@@ -1123,7 +1123,7 @@ function EmbeddingSettings() {
         />
       ) : null}
 
-      <h3 className="mt-4 font-semibold">{t('webSetCapabilities.memRetrievalTitle')}</h3>
+      <h2 className="mt-4 font-semibold">{t('webSetCapabilities.memRetrievalTitle')}</h2>
       <ConfigField
         {...field(
           'memory.retrieval_mode',

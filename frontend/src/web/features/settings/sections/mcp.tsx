@@ -398,12 +398,12 @@ export function McpSection() {
             className="size-10 shrink-0 rounded-md"
           />
           <div className="min-w-0 flex-1">
-            <h3 className="flex flex-wrap items-center gap-2 font-semibold">
+            <h2 className="flex flex-wrap items-center gap-2 font-semibold">
               {t('webSetCapabilities.mcpRobinhoodTitle')}
               <span className="rounded-full border border-border px-2 py-0.5 text-small font-normal">
                 {robinhood.label}
               </span>
-            </h3>
+            </h2>
             <p className="text-text-muted">{t('webSetCapabilities.mcpRobinhoodBody')}</p>
             <p className="text-small text-text-muted">
               {robinhood.detail} · {robinhood.tools}
@@ -437,9 +437,9 @@ export function McpSection() {
         className="flex flex-col gap-2"
       >
         <div className="flex flex-wrap items-center gap-2">
-          <h3 id="mcp-servers-title" className="font-semibold">
+          <h2 id="mcp-servers-title" className="font-semibold">
             {t('webSetCapabilities.mcpServers')}
-          </h3>
+          </h2>
           <span className="flex-1" />
           <Button size="sm" variant="ghost" onClick={() => void refresh()}>
             <RefreshCw aria-hidden />

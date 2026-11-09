@@ -43,31 +43,35 @@ function ChoiceRow<V extends string>({
 }) {
   const name = useId()
   return (
-    <fieldset data-field-id={id} className="flex flex-col gap-1 py-3">
-      <legend className="font-medium">{label}</legend>
-      {help ? <p className="text-small text-text-muted">{help}</p> : null}
-      <div className="mt-1 inline-flex w-fit rounded-md border border-border-control p-0.5">
-        {options.map((option) => (
-          <label
-            key={option.value}
-            className={cn(
-              'target cursor-pointer rounded px-3 py-1 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent',
-              value === option.value ? 'bg-surface-3 font-medium' : 'hover:bg-surface-2',
-            )}
-          >
-            <input
-              type="radio"
-              name={name}
-              value={option.value}
-              checked={value === option.value}
-              onChange={() => onChange(option.value)}
-              className="sr-only"
-            />
-            {option.label}
-          </label>
-        ))}
-      </div>
-    </fieldset>
+    // A rendered <legend> sits on the fieldset's top edge, above its padding, so the
+    // row's spacing lives on a wrapper or the title touches the divider above it.
+    <div className="py-3">
+      <fieldset data-field-id={id} className="flex flex-col gap-1">
+        <legend className="font-medium">{label}</legend>
+        {help ? <p className="text-small text-text-muted">{help}</p> : null}
+        <div className="mt-1 inline-flex w-fit rounded-md border border-border-control p-0.5">
+          {options.map((option) => (
+            <label
+              key={option.value}
+              className={cn(
+                'target cursor-pointer rounded px-3 py-1 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent',
+                value === option.value ? 'bg-surface-3 font-medium' : 'hover:bg-surface-2',
+              )}
+            >
+              <input
+                type="radio"
+                name={name}
+                value={option.value}
+                checked={value === option.value}
+                onChange={() => onChange(option.value)}
+                className="sr-only"
+              />
+              {option.label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+    </div>
   )
 }
 

@@ -1,4 +1,4 @@
-import { Menu, MoreHorizontal, PanelRight, PanelRightOpen, Scissors } from 'lucide-react'
+import { MoreHorizontal, PanelRight, PanelRightOpen, Scissors } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useRpc } from '@/app/providers'
@@ -23,7 +23,6 @@ import {
   sessionTitle,
   type SessionRow,
 } from '@/web/shell/session-list'
-import { useShell } from '@/web/shell/shell-store'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -72,16 +71,7 @@ export function ChatHeader(props: ChatHeaderProps) {
 
   return (
     <header className="sticky top-0 z-[var(--z-sticky)] flex min-h-12 items-center gap-2 border-b border-border bg-surface-0/95 px-3 py-1.5 backdrop-blur">
-      {phone ? (
-        <Button
-          size="icon"
-          variant="ghost"
-          aria-label={t('webChat.headerBack')}
-          onClick={() => useShell.getState().setDrawerOpen(true)}
-        >
-          <Menu />
-        </Button>
-      ) : null}
+      {/* Phones open navigation from the shell's top bar; a second ☰ here duplicated it. */}
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {editing ? (
           <form onSubmit={(e) => void submit(e)} className="flex min-w-0 flex-1 flex-col">

@@ -40,12 +40,14 @@ export function SetupPrompt() {
   return (
     <div
       role="status"
-      className="flex items-center gap-3 border-b border-accent/40 bg-accent-soft px-4 py-2"
+      className="flex items-center gap-3 border-b border-accent/40 bg-accent-soft px-4 py-2 max-sm:gap-2 max-sm:py-1.5"
     >
-      <Sparkles className="size-4 text-accent" aria-hidden />
+      <Sparkles className="size-4 shrink-0 text-accent" aria-hidden />
+      {/* Phones get one line: a short title and the action; the body stays for screen readers. */}
       <span className="min-w-0 flex-1">
-        <span className="font-medium">{t('webSettings.setupPromptTitle')}</span>{' '}
-        <span className="text-text-muted">{t('webSettings.setupPromptBody')}</span>
+        <span className="font-medium max-sm:hidden">{t('webSettings.setupPromptTitle')}</span>
+        <span className="font-medium sm:hidden">{t('webSettings.setupPromptTitleShort')}</span>{' '}
+        <span className="text-text-muted max-sm:sr-only">{t('webSettings.setupPromptBody')}</span>
       </span>
       <Link to="/settings/setup" className={buttonVariants({ size: 'sm', variant: 'primary' })}>
         {t('webSettings.setupPromptAction')}

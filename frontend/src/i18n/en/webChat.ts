@@ -58,7 +58,6 @@ export const webChat = defineNamespace('webChat', {
   headerPanels: 'Panels',
   headerMenu: 'Session actions',
   headerCompact: 'Compact',
-  headerBack: 'Open navigation',
   chipAgent: 'Agent: {value}',
   chipChannel: 'Channel: {value}',
   chipProject: 'Project: {value}',

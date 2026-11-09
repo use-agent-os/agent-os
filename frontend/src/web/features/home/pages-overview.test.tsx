@@ -76,6 +76,17 @@ describe('Home', () => {
     const feed = screen.getByRole('log', { name: 'Live events' })
     expect(within(feed).getByText('presence')).toBeInTheDocument()
   })
+  it('sets every figure in the same face and lets a long hint wrap instead of cutting it', async () => {
+    renderShell('/home', homeRpc().handle('status', { uptime_ms: 1000, version: '2026.11.7' }))
+    const provider = screen.getByRole('region', { name: 'Provider and route' })
+    // "Not configured" was set in monospace, unlike every other card's figure.
+    expect((await within(provider).findByText('Not configured')).className).not.toMatch(/font-mono/)
+    const next = screen.getByRole('region', { name: 'Next automation' })
+    const hint = await within(next).findByText(/Morning brief/)
+    expect(hint.className).toMatch(/line-clamp-2/)
+    expect(hint.className).not.toMatch(/(^|\s)truncate(\s|$)/)
+    expect(hint).toHaveAttribute('title', hint.textContent)
+  })
 })
 
 describe('Usage', () => {

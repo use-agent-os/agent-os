@@ -147,7 +147,7 @@ describe('trading cards', () => {
 })
 
 describe('mobile chat layout', () => {
-  it('has navigation, a title that opens Details as a sheet, and Panels', async () => {
+  it('leaves navigation to the shell top bar, has a title that opens Details as a sheet, and Panels', async () => {
     stubMatchMedia(
       (q) =>
         q.includes('max-width: 768px') ||
@@ -156,8 +156,13 @@ describe('mobile chat layout', () => {
     )
     const { composer } = await openChat()
     const header = screen.getAllByRole('banner').find((b) => b.querySelector('h1'))!
-    expect(within(header).getByRole('button', { name: 'Open navigation' })).toBeInTheDocument()
+    // One ☰ on phones: the shell's top bar owns it, not the session header.
+    expect(within(header).queryByRole('button', { name: 'Open navigation' })).toBeNull()
     expect(within(header).getByRole('button', { name: 'Panels' })).toBeInTheDocument()
+    // The route picker gives way on a narrow composer; Send was pushed past its edge at 360 px.
+    expect((await screen.findByRole('button', { name: /^Model route: / })).className).toMatch(
+      /(^|\s)min-w-0(\s|$)/,
+    )
     within(header).getByRole('heading', { level: 1 }).click()
     expect(await screen.findByRole('dialog', { name: 'Session details' })).toBeInTheDocument()
     // Inputs are at least 16px on touch so the browser does not zoom.

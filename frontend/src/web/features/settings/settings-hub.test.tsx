@@ -270,4 +270,33 @@ describe('guided setup', () => {
     ).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: 'Provider' })).toHaveValue('openrouter')
   })
+
+  it('shrinks to a short title and the action on phones, still dismissible', async () => {
+    const user = userEvent.setup()
+    renderShell(
+      '/home',
+      settingsRpc().handle('onboarding.status', { needsOnboarding: true, llmConfigured: false }),
+    )
+    const full = await screen.findByText('Finish setting up AgentOS')
+    const prompt = full.closest('[role="status"]') as HTMLElement
+    // At 360 px the title, body and action wrapped to seven lines (~190 px).
+    expect(full.className).toMatch(/max-sm:hidden/)
+    expect(within(prompt).getByText('Finish setup').className).toMatch(/(^|\s)sm:hidden/)
+    expect(
+      within(prompt).getByText('Choose a provider and router so the agent can answer.').className,
+    ).toMatch(/max-sm:sr-only/)
+    await user.click(within(prompt).getByRole('button', { name: 'Dismiss' }))
+    expect(screen.queryByText('Finish setting up AgentOS')).not.toBeInTheDocument()
+  })
+})
+
+describe('appearance', () => {
+  it('spaces each choice group below the divider (a legend ignores its fieldset padding)', async () => {
+    renderShell('/settings/appearance', settingsRpc())
+    for (const name of ['Theme', 'Text size', 'Send shortcut']) {
+      const group = await screen.findByRole('group', { name })
+      expect(group.className).not.toMatch(/(^|\s)py-3/)
+      expect(group.parentElement?.className).toMatch(/(^|\s)py-3(\s|$)/)
+    }
+  })
 })

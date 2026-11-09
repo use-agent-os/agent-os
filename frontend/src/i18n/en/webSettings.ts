@@ -66,6 +66,7 @@ export const webSettings = defineNamespace('webSettings', {
   summaryFailed: "Couldn't load the settings summary",
   sectionNotFound: 'No settings section called “{section}”',
   setupPromptTitle: 'Finish setting up AgentOS',
+  setupPromptTitleShort: 'Finish setup',
   setupPromptBody: 'Choose a provider and router so the agent can answer.',
   setupPromptAction: 'Open guided setup',
   setupPromptDismiss: 'Dismiss',

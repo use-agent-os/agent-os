@@ -109,9 +109,9 @@ function FindingCard({ finding, index }: { finding: Finding; index: number }) {
           <span className="text-warn">{t('webSetSystem.findingRestart')}</span>
         ) : null}
       </div>
-      <h4 className="mt-1 font-medium">
+      <h3 className="mt-1 font-medium">
         {finding.title || finding.id || t('webSetSystem.findingFallback', { index: index + 1 })}
-      </h4>
+      </h3>
       {finding.detail ? <p className="text-text-muted">{finding.detail}</p> : null}
       {evidence.length ? (
         <dl
@@ -163,7 +163,7 @@ function Findings({ findings }: { findings: Finding[] }) {
           <section key={kind} aria-label={copy.title} className="flex flex-col gap-2">
             <header className="flex items-baseline justify-between gap-2">
               <div>
-                <h3 className="font-semibold">{copy.title}</h3>
+                <h2 className="font-semibold">{copy.title}</h2>
                 <p className="text-small text-text-muted">{copy.note}</p>
               </div>
               <span className="text-small text-text-muted">{formatNumber(group.length)}</span>

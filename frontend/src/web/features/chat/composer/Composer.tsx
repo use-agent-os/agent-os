@@ -433,7 +433,7 @@ export function Composer(props: ComposerProps) {
           enterKeyHint={touch ? 'enter' : 'send'}
           className="block w-full resize-none bg-transparent px-4 pt-3 pb-1 text-[length:var(--text-prose)] leading-normal outline-none placeholder:text-text-muted max-md:text-base touch:text-base"
         />
-        <div className="flex items-center gap-1 px-2 pb-2">
+        <div className="flex min-w-0 items-center gap-1 px-2 pb-2">
           <input
             ref={fileInput}
             type="file"
@@ -461,7 +461,7 @@ export function Composer(props: ComposerProps) {
           <UsageReadout sessionKey={sessionKey} />
           <span className="flex-1" />
           {sendReason && hasDraft && primary === 'send' ? (
-            <span id="send-reason" className="text-small text-text-muted">
+            <span id="send-reason" className="min-w-0 truncate text-small text-text-muted">
               {sendReason}
             </span>
           ) : null}
@@ -510,9 +510,11 @@ function RoutePicker({ sessionKey }: { sessionKey: string }) {
           variant="ghost"
           aria-label={`${t('webChat.route')}: ${label}`}
           data-pinned={pin.isPinned || undefined}
+          // The one toolbar control that gives way on a narrow composer, so Send stays inside it.
+          className="min-w-0 shrink"
         >
           <Route />
-          <span className="max-w-32 truncate">{label}</span>
+          <span className="max-w-32 min-w-0 truncate">{label}</span>
           <ChevronDown className="size-3" />
         </Button>
       </DropdownMenuTrigger>

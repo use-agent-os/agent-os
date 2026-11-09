@@ -171,11 +171,26 @@ function Figure({
 }
 
 function Value({ children, className }: { children: ReactNode; className?: string }) {
-  return <p className={cn('truncate text-xl font-semibold tabular-nums', className)}>{children}</p>
+  return (
+    <p
+      title={typeof children === 'string' ? children : undefined}
+      className={cn('truncate text-xl font-semibold tabular-nums', className)}
+    >
+      {children}
+    </p>
+  )
 }
 
+/** Wraps to two lines (a one-line ellipsis hid most of the hint on a 1280 px card). */
 function Hint({ children }: { children: ReactNode }) {
-  return <p className="truncate text-small text-text-muted">{children}</p>
+  return (
+    <p
+      title={typeof children === 'string' ? children : undefined}
+      className="line-clamp-2 text-small break-words text-text-muted"
+    >
+      {children}
+    </p>
+  )
 }
 
 /** The live feed of gateway events (every frame, newest first, capped at 30). */
@@ -374,9 +389,7 @@ export function HomePage() {
           linkLabel={t('webPagesOverview.homeProviderLink')}
           query={status}
         >
-          <Value className="font-mono">
-            {status.data?.provider || t('webPagesOverview.homeProviderNone')}
-          </Value>
+          <Value>{status.data?.provider || t('webPagesOverview.homeProviderNone')}</Value>
           <Hint>
             {routeLabel
               ? t('webPagesOverview.homeRoute', { route: routeLabel })

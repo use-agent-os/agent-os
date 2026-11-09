@@ -215,24 +215,93 @@ async function runAxe(page) {
   return axeSummary(res.violations)
 }
 
+const CONTROL_SELECTOR = [
+  'a[href]',
+  'button',
+  'input:not([type=hidden])',
+  'select',
+  'textarea',
+  '[role=button]',
+  '[role=tab]',
+  '[role=switch]',
+  '[role=checkbox]',
+  '[role=menuitem]',
+  '[role=option]',
+  '[role=link]',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
+
+/**
+ * Interactive controls whose box leaves the viewport sideways, or is cut by a
+ * clipping ancestor (overflow hidden/clip), e.g. a Send button pushed past
+ * the composer's edge on a phone. Controls inside a strip that scrolls
+ * horizontally on purpose (tab strips, wide tables) are skipped: they can be
+ * scrolled into view. Vertical overflow is normal (the page scrolls).
+ */
+async function offViewportControls(page) {
+  return page.evaluate((sel) => {
+    const visible = (el) => {
+      const r = el.getBoundingClientRect()
+      if (r.width <= 1 || r.height <= 1) return false
+      const s = getComputedStyle(el)
+      if (s.visibility === 'hidden' || s.display === 'none' || Number(s.opacity) === 0) return false
+      if (s.clipPath && s.clipPath.startsWith('inset(50%')) return false
+      if (s.clip && s.clip !== 'auto') return false
+      return true
+    }
+    // A strip meant to scroll sideways (tabs, a wide table). Not <main> or a pane
+    // that scrolls vertically: those overflowing sideways is the defect itself
+    // (the Send button hid inside <main>'s horizontal overflow).
+    const scrollsSideways = (el) => {
+      for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+        if (a.tagName === 'MAIN') return false
+        const st = getComputedStyle(a)
+        if (!/(auto|scroll)/.test(st.overflowX) || a.scrollWidth <= a.clientWidth + 1) continue
+        if (a.scrollHeight > a.clientHeight + 1 && /(auto|scroll)/.test(st.overflowY)) continue
+        return true
+      }
+      return false
+    }
+    const clipper = (el) => {
+      for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) {
+        const st = getComputedStyle(a)
+        if (/(hidden|clip)/.test(st.overflowX)) return a
+      }
+      return null
+    }
+    const describe = (el) => {
+      const name =
+        el.getAttribute('aria-label') ||
+        el.getAttribute('title') ||
+        (el.textContent || '').trim().slice(0, 40) ||
+        ''
+      return `${el.tagName.toLowerCase()}[${el.getAttribute('role') || ''}] "${name}"`
+    }
+    const out = []
+    for (const el of document.querySelectorAll(sel)) {
+      if (!visible(el) || scrollsSideways(el)) continue
+      const r = el.getBoundingClientRect()
+      let left = 0
+      let right = window.innerWidth
+      const clip = clipper(el)
+      if (clip) {
+        const c = clip.getBoundingClientRect()
+        left = Math.max(left, c.left)
+        right = Math.min(right, c.right)
+      }
+      if (r.left < left - 1 || r.right > right + 1) {
+        out.push(
+          `${describe(el)} x ${Math.round(r.left)}..${Math.round(r.right)} outside ${Math.round(left)}..${Math.round(right)}`,
+        )
+      }
+    }
+    return out.slice(0, 8)
+  }, CONTROL_SELECTOR)
+}
+
 /** Interactive controls under 24x24 at the current viewport (WCAG 2.5.8). */
 async function smallTargets(page) {
-  return page.evaluate(() => {
-    const sel = [
-      'a[href]',
-      'button',
-      'input:not([type=hidden])',
-      'select',
-      'textarea',
-      '[role=button]',
-      '[role=tab]',
-      '[role=switch]',
-      '[role=checkbox]',
-      '[role=menuitem]',
-      '[role=option]',
-      '[role=link]',
-      '[tabindex]:not([tabindex="-1"])',
-    ].join(',')
+  return page.evaluate((sel) => {
     const visible = (el) => {
       const r = el.getBoundingClientRect()
       if (r.width === 0 || r.height === 0) return false
@@ -289,7 +358,7 @@ async function smallTargets(page) {
       out.push({ target: describe(r.el), w: Math.round(r.w), h: Math.round(r.h) })
     }
     return out
-  })
+  }, CONTROL_SELECTOR)
 }
 
 /**
@@ -357,6 +426,7 @@ async function auditMatrix(browser, projectId) {
           entry.status = response ? response.status() : 0
           await settle(page)
           Object.assign(entry, await pageMetrics(page))
+          entry.offViewport = await offViewportControls(page)
           const shot = path.join(OUT, `${route.id}-${vp.name}-${theme}.png`)
           entry.screenshot = shot
           const violations = await runAxe(page)
@@ -382,6 +452,9 @@ async function auditMatrix(browser, projectId) {
           problems.push(`horizontal scroll ${entry.scrollWidth}>${entry.innerWidth}`)
         }
         if (entry.notFound) problems.push('rendered Not found')
+        if (entry.offViewport && entry.offViewport.length) {
+          problems.push(`controls outside the viewport/clip box: ${entry.offViewport.join(' || ')}`)
+        }
         if (entry.collapsed && entry.collapsed.length) problems.push(`content clipped to 0px: ${entry.collapsed.join(' || ')}`)
         if (diag.consoleErrors.length) problems.push(`console: ${diag.consoleErrors.join(' || ')}`)
         if (diag.pageErrors.length) problems.push(`pageerror: ${diag.pageErrors.join(' || ')}`)

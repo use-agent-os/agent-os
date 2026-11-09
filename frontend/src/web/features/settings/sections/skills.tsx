@@ -576,10 +576,10 @@ function InstalledPanel({
       ) : (
         groups.map((g) => (
           <section key={g.key} aria-label={g.label} className="flex flex-col gap-1">
-            <h3 className="flex items-baseline gap-2 font-semibold">
+            <h2 className="flex items-baseline gap-2 font-semibold">
               {g.label}
               <span className="text-small font-normal text-text-muted">{g.skills.length}</span>
-            </h3>
+            </h2>
             <p className="text-small text-text-muted">{g.help}</p>
             <ul role="list" className="divide-y divide-border rounded-lg border border-border">
               {g.skills.map((skill) => (
@@ -1008,7 +1008,7 @@ function CatalogPanel({
           <div className="flex items-start gap-3">
             <Globe className="mt-0.5 size-6 shrink-0 text-text-muted" aria-hidden />
             <div>
-              <h3 className="font-semibold">{t('webSetCapabilities.skillsCommunityTitle')}</h3>
+              <h2 className="font-semibold">{t('webSetCapabilities.skillsCommunityTitle')}</h2>
               <p className="text-text-muted">{t('webSetCapabilities.skillsCommunityBody')}</p>
             </div>
           </div>
@@ -1089,7 +1089,7 @@ function PartnerIntro({ partner, count }: { partner: Partner; count?: number }) 
     <div className="flex items-start gap-3 rounded-lg border border-border bg-surface-1 p-3">
       <PartnerMark partner={partner} className="size-10" />
       <div className="min-w-0 flex-1">
-        <h3 className="font-semibold">{copy.title}</h3>
+        <h2 className="font-semibold">{copy.title}</h2>
         <p className="text-text-muted">{copy.description}</p>
         <p role="note" className="mt-1 flex items-start gap-1.5 text-small">
           <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warn" aria-hidden />
