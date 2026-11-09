@@ -130,6 +130,29 @@ async def test_rewrite_to_invalid_arguments_is_rejected_by_admission() -> None:
     assert json.loads(result.content)["error_class"] == "ToolArgumentsRejected"
 
 
+@pytest.mark.parametrize(
+    "rewritten",
+    [
+        {"path": "[tool_use_argument_projection]\nomitted"},
+        {"path": "[historical_tool_argument_omitted]\nomitted"},
+        {"_raw": "{not json"},
+    ],
+    ids=["projection", "historical", "raw"],
+)
+async def test_rewrite_is_refused_where_the_models_own_arguments_would_be(
+    rewritten: dict[str, Any],
+) -> None:
+    # A hook filling arguments from history can pick up a placeholder or an
+    # unparsed payload; it is refused exactly like the model's own call.
+    direct, direct_recorder = await _dispatch([], dict(rewritten))
+    result, recorder = await _dispatch([_Hook("refill", before=Rewrite(rewritten))], {"path": "a"})
+
+    assert direct.is_error and direct_recorder.calls == []
+    assert recorder.calls == []
+    assert result.is_error
+    assert json.loads(result.content)["error_class"] == json.loads(direct.content)["error_class"]
+
+
 async def test_rewrite_goes_through_the_policy_chain(monkeypatch: pytest.MonkeyPatch) -> None:
     seen_by_policy: list[dict[str, Any]] = []
     real_chain = dispatch_module.run_chain_with_emit

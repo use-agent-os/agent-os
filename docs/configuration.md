@@ -1025,6 +1025,31 @@ way. Set it to `false` to go back to running them one after another.
 concurrent_turn_setup = true
 ```
 
+### Stopping a turn
+
+A turn that is streaming or between steps when it is stopped is asked to stop
+first: the model's stream is closed, no further request is sent and the turn
+ends on its own. `[task_runtime] turn_cancel_grace_seconds` (default `5`;
+`0` cancels at once) is how long it gets before its task is cancelled. A turn
+running tools is cancelled at once. See [Sessions](sessions.md).
+
+```toml
+[task_runtime]
+turn_cancel_grace_seconds = 5
+```
+
+### Subagent lanes
+
+At most `[subagents] max_concurrent_children` (default `2`; `0` = no limit)
+children of one parent session run at once; further spawns wait in spawn
+order. An agent's own `subagents.max_concurrent_children` overrides it. See
+[Sessions](sessions.md).
+
+```toml
+[subagents]
+max_concurrent_children = 2
+```
+
 ### Interrupted turns
 
 A turn that a gateway restart or crash cut short is resumed on the next boot
