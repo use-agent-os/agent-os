@@ -586,18 +586,61 @@ distribution alongside the minified browser assets, so the exact copyright
 and permission notices shipped by each upstream project remain available even
 when multiple packages use the same license.
 
-- `@radix-ui/react-compose-refs@1.1.3` — MIT
-- `@radix-ui/react-slot@1.3.0` — MIT
+- `@floating-ui/core@1.8.0` — MIT
+- `@floating-ui/dom@1.8.0` — MIT
+- `@floating-ui/react-dom@2.1.9` — MIT
+- `@floating-ui/utils@0.2.12` — MIT
+- `@radix-ui/number@1.1.3` — MIT
+- `@radix-ui/primitive@1.2.0` — MIT
+- `@radix-ui/react-alert-dialog@1.2.1` — MIT
+- `@radix-ui/react-arrow@1.1.17` — MIT
+- `@radix-ui/react-collection@1.2.0` — MIT
+- `@radix-ui/react-compose-refs@1.1.5` — MIT
+- `@radix-ui/react-context@1.3.0` — MIT
+- `@radix-ui/react-context-menu@2.4.1` — MIT
+- `@radix-ui/react-dialog@1.3.1` — MIT
+- `@radix-ui/react-direction@1.2.0` — MIT
+- `@radix-ui/react-dismissable-layer@1.2.1` — MIT
+- `@radix-ui/react-dropdown-menu@2.2.1` — MIT
+- `@radix-ui/react-focus-guards@1.2.0` — MIT
+- `@radix-ui/react-focus-scope@1.3.1` — MIT
+- `@radix-ui/react-id@1.1.4` — MIT
+- `@radix-ui/react-menu@2.2.1` — MIT
+- `@radix-ui/react-popover@1.3.1` — MIT
+- `@radix-ui/react-popper@1.4.0` — MIT
+- `@radix-ui/react-portal@1.2.0` — MIT
+- `@radix-ui/react-presence@1.1.11` — MIT
+- `@radix-ui/react-primitive@2.2.0` — MIT
+- `@radix-ui/react-roving-focus@1.2.1` — MIT
+- `@radix-ui/react-select@2.4.1` — MIT
+- `@radix-ui/react-separator@1.2.0` — MIT
+- `@radix-ui/react-slot@1.5.0` — MIT
+- `@radix-ui/react-switch@1.4.1` — MIT
+- `@radix-ui/react-tabs@1.2.1` — MIT
+- `@radix-ui/react-tooltip@1.4.1` — MIT
+- `@radix-ui/react-use-callback-ref@1.1.5` — MIT
+- `@radix-ui/react-use-controllable-state@1.3.0` — MIT
+- `@radix-ui/react-use-effect-event@0.0.5` — MIT
+- `@radix-ui/react-use-is-hydrated@0.1.3` — MIT
+- `@radix-ui/react-use-layout-effect@1.1.4` — MIT
+- `@radix-ui/react-use-rect@1.1.4` — MIT
+- `@radix-ui/react-use-size@1.1.5` — MIT
+- `@radix-ui/react-visually-hidden@1.2.13` — MIT
+- `@radix-ui/rect@1.1.3` — MIT
 - `@tabler/icons@3.45.0` — MIT
 - `@tabler/icons-react@3.45.0` — MIT
 - `@tanstack/query-core@5.101.2` — MIT
 - `@tanstack/react-query@5.101.2` — MIT
+- `aria-hidden@1.2.6` — MIT
 - `class-variance-authority@0.7.1` — Apache-2.0
 - `clsx@2.1.1` — MIT
+- `cmdk@1.1.1` — MIT
 - `cookie@1.1.1` — MIT
+- `detect-node-es@1.1.0` — MIT
 - `dompurify@3.4.12` — MPL-2.0 or Apache-2.0
 - `fancy-canvas@2.1.0` — MIT
 - `framer-motion@12.42.2` — MIT
+- `get-nonce@1.0.1` — MIT
 - `highlight.js@11.11.1` — BSD-3-Clause
 - `lightweight-charts@5.2.0` — Apache-2.0
 - `lucide-react@1.25.0` — ISC
@@ -608,12 +651,17 @@ when multiple packages use the same license.
 - `qrcode-generator@1.5.2` — MIT
 - `react@19.2.7` — MIT
 - `react-dom@19.2.7` — MIT
+- `react-remove-scroll@2.7.2` — MIT
+- `react-remove-scroll-bar@2.3.8` — MIT
 - `react-router@7.18.1` — MIT
+- `react-style-singleton@2.2.3` — MIT
 - `scheduler@0.27.0` — MIT
 - `set-cookie-parser@2.7.2` — MIT
 - `sonner@2.0.7` — MIT
 - `tailwind-merge@3.6.0` — MIT
 - `tslib@2.8.1` — 0BSD
+- `use-callback-ref@1.3.3` — MIT
+- `use-sidecar@1.1.3` — MIT
 - `zustand@5.0.14` — MIT
 
 The type-only `@types/*` and `csstype` packages installed to compile the
@@ -634,7 +682,11 @@ publishes only its sources, README and type declarations. The MIT text from
 https://github.com/kazuhikoarase/qrcode-generator (Copyright (c) 2009 Kazuhiko
 Arase) is kept verbatim at
 `frontend/vendor-licenses/qrcode-generator-LICENSE.txt` and appended the same
-way. Packages that ship no license and have no vendored copy still fail the
+way. `react-remove-scroll-bar@2.3.8` (a dependency of the Radix dialog and menu
+primitives) ships only `dist/` and `constants/`; its MIT text from
+https://github.com/theKashey/react-remove-scroll-bar (Copyright (c) 2025 Anton
+Korzunov) is kept verbatim at
+`frontend/vendor-licenses/react-remove-scroll-bar-LICENSE.txt`. Packages that ship no license and have no vendored copy still fail the
 build.
 
 ### React Control UI fonts

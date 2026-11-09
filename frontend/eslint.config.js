@@ -77,6 +77,57 @@ const NO_HARDCODED_COPY = [
   },
 ]
 
+// The rebuilt web console (openspec change overhaul-control-ui, D2) may lean on
+// the kept transport and logic layers only — never on the legacy UI it replaces.
+// Inside web/**, relative imports stay within the web tree (at most one `../`,
+// which from any web/<area>/ file still lands inside web/); everything else goes
+// through the `@/` alias, which is what the patterns below inspect.
+const LEGACY = '^(@/|(\\.\\./){2,})'
+const WEB_BOUNDARY = {
+  paths: [
+    {
+      name: '@/views/chat/Attachments',
+      allowImportNames: ['useAttachments'],
+      message: 'Only the useAttachments hook is kept; build the tray in web/.',
+    },
+  ],
+  patterns: [
+    {
+      regex: '^(\\.\\./){2,}',
+      message: 'Leave the web tree through @/ (e.g. @/lib/…, @/web/…), not ../../.',
+    },
+    {
+      regex: `${LEGACY}views/chat/useTranscript$`,
+      message: 'The legacy DOM transcript engine is desktop-only. Use web/features/chat/model.',
+    },
+    {
+      regex: `${LEGACY}views/chat/transcript/`,
+      importNamePattern: '^create\\w*Renderer$',
+      message: 'create*Renderer builds legacy DOM. Import only the pure helpers.',
+    },
+    {
+      regex: `${LEGACY}views/.*Page$`,
+      message: 'Legacy page components are being replaced, not reused.',
+    },
+    {
+      regex: `${LEGACY}views/chat/(Composer|Toolbar|SlashMenu|RoutePicker|PendingQueue|ElevatedPill|SessionChip|ChatPage)$`,
+      message: 'Legacy chat components are desktop-only. Use the kept hooks instead.',
+    },
+    {
+      regex: `${LEGACY}app/(?!providers$)`,
+      message: 'The legacy app shell is replaced by web/app and web/shell.',
+    },
+    {
+      regex: `${LEGACY}components/(?!(KeyboardShortcuts|overlay-layer|shortcut-combo)$)`,
+      message: 'Legacy components are replaced by web/components.',
+    },
+    {
+      regex: '^(?!@/web/|\\.{1,2}/).*\\.css$',
+      message: 'web/** may import only its own stylesheets (web/styles).',
+    },
+  ],
+}
+
 export default tseslint.config(
   ...tseslint.configs.recommended,
   {
@@ -98,5 +149,27 @@ export default tseslint.config(
     files: I18N_MIGRATED,
     ignores: ['**/*.test.{ts,tsx}'],
     rules: { 'no-restricted-syntax': ['error', NO_MODULE_SCOPE_T, ...NO_HARDCODED_COPY] },
+  },
+  {
+    files: ['src/web/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': ['error', NO_MODULE_SCOPE_T, ...NO_HARDCODED_COPY],
+      'no-restricted-imports': ['error', WEB_BOUNDARY],
+    },
+  },
+  {
+    // Tests may reach legacy fixtures and the legacy sanitizer (parity tests),
+    // but never the legacy UI components themselves.
+    files: ['src/web/**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: WEB_BOUNDARY.paths,
+          patterns: WEB_BOUNDARY.patterns.filter((p) => !p.regex.startsWith('^(\\.\\./)')),
+        },
+      ],
+    },
   },
 )
