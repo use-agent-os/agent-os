@@ -18,15 +18,23 @@ export function sessionRow(
 }
 
 export function shellRpc(sessions: Record<string, unknown>[] = []): FakeRpc {
-  return new FakeRpc()
-    .handle('sessions.list', () => ({ sessions: structuredClone(sessions) }))
-    .handle('agents.list', {
-      agents: [
-        { id: 'main', name: 'main' },
-        { id: 'research', name: 'research' },
-      ],
-    })
-    .handle('projects.list', { projects: [{ project_id: 'p1', name: 'Alpha' }] })
+  return (
+    new FakeRpc()
+      .handle('sessions.list', () => ({ sessions: structuredClone(sessions) }))
+      .handle('agents.list', {
+        agents: [
+          { id: 'main', name: 'main' },
+          { id: 'research', name: 'research' },
+        ],
+      })
+      .handle('projects.list', { projects: [{ project_id: 'p1', name: 'Alpha' }] })
+      // What the Home and Usage pages read, so a shell test can land on them quietly.
+      .handle('doctor.status', { status: 'ok', ready: true, counts: {}, findings: [] })
+      .handle('status', { uptime_seconds: 60, provider: 'openrouter' })
+      .handle('config.get', {})
+      .handle('usage.status', { sessions: [] })
+      .handle('cron.list', { jobs: [] })
+  )
 }
 
 export function resetShellState(): void {

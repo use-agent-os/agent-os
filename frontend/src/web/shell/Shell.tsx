@@ -8,9 +8,6 @@ import { listenForPushNavigation } from '@/services/web-push-navigation'
 import { Button } from '@/web/components/ui/button'
 import { Toaster } from '@/web/components/ui/toaster'
 import { PaletteHost } from '@/web/features/palette/PaletteHost'
-import { ApprovalTray } from './ApprovalTray'
-import { ConnectionNotices } from './ConnectionNotices'
-import { SetupPrompt } from './SetupPrompt'
 import { useConnectGate } from './connection-gate'
 import { useEdgeSwipe } from './edge-swipe'
 import { Rail } from './Rail'
@@ -23,6 +20,16 @@ import { useRouteHandle } from './use-destination'
 // their own chunk so the rail and the route paint without waiting for them.
 const ListPane = lazy(async () => ({ default: (await import('./ListPane')).ListPane }))
 const MobileDrawer = lazy(async () => ({ default: (await import('./MobileDrawer')).MobileDrawer }))
+
+// Notices and the approval tray render nothing most of the time; they load
+// just after first paint.
+const ConnectionNotices = lazy(async () => ({
+  default: (await import('./ConnectionNotices')).ConnectionNotices,
+}))
+const ApprovalTray = lazy(async () => ({ default: (await import('./ApprovalTray')).ApprovalTray }))
+
+// The first-run prompt carries the Settings copy; keep it out of the entry.
+const SetupPrompt = lazy(async () => ({ default: (await import('./SetupPrompt')).SetupPrompt }))
 
 // Rare screens: only fetched when a tab actually needs them.
 const ConnectScreen = lazy(async () => ({
@@ -133,8 +140,12 @@ function Workspace() {
             </Button>
           </header>
         ) : null}
-        <ConnectionNotices />
-        <SetupPrompt />
+        <Suspense fallback={null}>
+          <ConnectionNotices />
+        </Suspense>
+        <Suspense fallback={null}>
+          <SetupPrompt />
+        </Suspense>
         <main
           id="main-content"
           ref={mainRef}
@@ -149,7 +160,9 @@ function Workspace() {
           <MobileDrawer />
         </Suspense>
       ) : null}
-      <ApprovalTray />
+      <Suspense fallback={null}>
+        <ApprovalTray />
+      </Suspense>
       <PaletteHost />
       <GatewayUrlConfirm />
       <Toaster />

@@ -147,9 +147,11 @@ describe('pages and titles', () => {
     expect(within(pages).getByText('Scheduled jobs and their runs')).toBeInTheDocument()
     await user.click(within(pages).getByRole('link', { name: /Automations/ }))
     expect(router.state.location.pathname).toBe('/automations')
-    expect(within(pages).getByRole('link', { name: /Automations/ })).toHaveAttribute(
-      'aria-current',
-      'page',
+    await waitFor(() =>
+      expect(within(pages).getByRole('link', { name: /Automations/ })).toHaveAttribute(
+        'aria-current',
+        'page',
+      ),
     )
   })
 
