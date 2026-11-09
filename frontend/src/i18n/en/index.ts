@@ -21,6 +21,7 @@ import { shell } from './shell'
 import { skills } from './skills'
 import { usage } from './usage'
 import { webCommon } from './webCommon'
+import { webConnection } from './webConnection'
 import { webSettings } from './webSettings'
 import { webShell } from './webShell'
 
@@ -63,6 +64,7 @@ export const en = {
   skills,
   usage,
   webCommon,
+  webConnection,
   webSettings,
   webShell,
 } as const

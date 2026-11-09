@@ -86,17 +86,13 @@ import {
   type PendingAttachment,
 } from './logic'
 import type { ChatMessage, Role, StreamEventPayload } from './types'
+import { readStoredToken } from '@/lib/credentials'
 
 // app.js:200-207 `getAuthToken` reads the connection token from sessionStorage
 // (providers.tsx uses the same key). The artifact renderer appends it to
 // preview/download URLs + the download Authorization header (chat.js:7575/7657).
-const WS_TOKEN_KEY = 'agentos.wsToken'
 function getAuthToken(): string {
-  try {
-    return sessionStorage.getItem(WS_TOKEN_KEY) || ''
-  } catch {
-    return ''
-  }
+  return readStoredToken()
 }
 
 /**

@@ -10,9 +10,7 @@ import { bindPendingQuestions } from '@/lib/pending-questions'
 import { bindRuntimeSignals } from '@/lib/runtime-signals'
 import type { RpcState } from '@/lib/ws-rpc'
 import { KeyboardShortcutProvider } from '@/components/KeyboardShortcuts'
-
-const WS_URL_KEY = 'agentos.wsUrl'
-const WS_TOKEN_KEY = 'agentos.wsToken'
+import { readStoredToken, readStoredWsUrl } from '@/lib/credentials'
 
 // Exported so an off-gateway host (the desktop shell) can supply its own
 // connected client to the same hooks and views.
@@ -63,18 +61,8 @@ export function AppProviders({ children }: { children: ReactNode }) {
         // app.js:197-203 — URL override from localStorage; the auth token
         // lives in sessionStorage (per-tab session tier, NOT localStorage).
         // Both reads tolerate storage access errors like legacy.
-        let storedUrl = ''
-        let token = ''
-        try {
-          storedUrl = localStorage.getItem(WS_URL_KEY) || ''
-        } catch {
-          /* storage unavailable */
-        }
-        try {
-          token = sessionStorage.getItem(WS_TOKEN_KEY) || ''
-        } catch {
-          /* storage unavailable */
-        }
+        const storedUrl = readStoredWsUrl()
+        const token = readStoredToken()
         // Stored override wins verbatim (legacy loadConnectionSettings returned
         // it unchanged). Otherwise use the server-computed ws_url, but restore
         // the legacy location-derived scheme when a proxy drops x-forwarded-proto

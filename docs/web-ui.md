@@ -211,9 +211,53 @@ skips them) and keep the query parameters that still apply:
 | Logs | Inspect runtime logs and diagnostics. |
 | Approvals | Respond to sensitive tool-call approval requests. |
 
+## Gateway connection
+
+### Connect screen
+
+When the gateway requires a token (`auth.mode = "token"`) and this browser tab
+has none, or the gateway refuses the tab's token, the console shows a
+full-page **Connect** screen instead of the workspace. Nothing behind it is
+rendered or requested. It takes the gateway token and, when the console should
+reach a different gateway, its WebSocket URL; it shows the gateway's address
+and where the token comes from (`auth.token`, or `AGENTOS_GATEWAY_TOKEN`).
+
+- A rejected token keeps the screen up with "The gateway rejected this token."
+  and keeps the URL you entered.
+- Too many failed sign-ins (`AUTH_RATE_LIMITED`) disable the form and say that
+  sign-in is rate limited. The console does not retry by itself.
+
+### Credentials in a link
+
+A link may carry the token once, as `?token=…` or `#token=…`, for example
+`http://127.0.0.1:18791/control/chat#token=abc`. Before anything else runs,
+the console stores it for this tab only (`sessionStorage`, key
+`agentos.wsToken`) and replaces the URL, so the address bar and Back never show
+it. A new tab starts without a token. A `gatewayUrl` parameter is never applied
+silently: a dialog names the target host first, and the URL is only used after
+you confirm, and only in a top-level window (never inside a frame).
+
+### Short drops and restarts
+
+A connection loss shorter than 2 seconds changes nothing on screen: the status
+stays as it was and no control is disabled. After that, the status changes and
+disabled controls say why. A message sent while the socket is reconnecting is
+delivered once when it is back, or shown as not sent with **Retry**; it is
+never lost silently.
+
+When the gateway announces an in-place restart (`shutdown` with
+`restart_expected_ms`, for example after **Restart gateway** in Settings), the
+console shows **Restarting gateway…** instead of an error, reconnects on the
+gateway's timing, and refreshes the open view once the hello succeeds.
+
+If an open tab's console is older than an upgraded gateway
+(`PROTOCOL_MISMATCH`), the console says a newer console is available and offers
+**Reload**. It may reload by itself, but at most once per console version
+within 60 seconds, so it can never loop.
+
 ## Runtime status (truth badge)
 
-The status bar at the bottom of the sidebar answers "is what I am seeing true
+The status button at the bottom of the rail answers "is what I am seeing true
 and fresh". It shows one of six states and how fresh the view is:
 
 | State | Meaning |
@@ -227,7 +271,7 @@ and fresh". It shows one of six states and how fresh the view is:
 
 Next to the state is the source and its age: `Live · 12 s` (age of the last
 frame the gateway sent), `Snapshot · 3 min` (the connection dropped; data is
-from before), or `Unavailable` (never connected). Press the badge for the
+from before), or `Unavailable` (never connected). Open the status menu for the
 reason and exactly one recovery action: **Retry connection** (reconnects at
 once, skipping the backoff, and opens a new socket when the current one still
 looks open but has gone silent), **Open attention inbox**, or **Open
@@ -644,7 +688,13 @@ state, session state, and user-visible errors.
 
 ## Update Banner
 
-If a newer release of `use-agent-os` is available on PyPI, a dismissible banner is displayed at the top of the Web UI console. The banner matches the 24h throttling behavior of the CLI update checks, and dismissing the banner suppresses it for that release version (persisted in local storage). This banner honors both the global `updates.notify` setting and the `AGENTOS_NO_UPDATE_NOTICE` environment flag.
+If a newer release of `use-agent-os` is available on PyPI, the status menu
+shows an **Update available** badge, and a dismissible notice at the top of
+the console links to Settings › Updates. The check matches the 24h throttling
+behavior of the CLI update checks. Dismissing the notice suppresses it for that
+release version (persisted in local storage); the badge in the status menu
+stays. Both honor the global `updates.notify` setting and the
+`AGENTOS_NO_UPDATE_NOTICE` environment flag.
 
 **Update now** opens a preflight before anything runs. The update restarts
 the gateway, so the preflight lists what that would interrupt: running

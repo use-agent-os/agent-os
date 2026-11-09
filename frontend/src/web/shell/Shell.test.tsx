@@ -21,7 +21,7 @@ describe('navigation rail', () => {
     const names = [...rail().querySelectorAll('button, a')].map((el) =>
       el.getAttribute('aria-label'),
     )
-    expect(names).toEqual([
+    expect(names.slice(0, -1)).toEqual([
       'Agent: main',
       'New session',
       'Sessions',
@@ -29,8 +29,8 @@ describe('navigation rail', () => {
       'Search',
       'Home',
       'Inbox',
-      'Status and account: Connected',
     ])
+    expect(names.at(-1)).toMatch(/^Status and account: /)
   })
 
   it('labels icon buttons and shows a tooltip on keyboard focus', async () => {

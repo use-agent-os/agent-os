@@ -2,12 +2,15 @@ import { Menu, Plus } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useRef } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router'
 import { useKeyboardShortcut } from '@/components/KeyboardShortcuts'
+import { pendingGatewayUrlRequest } from '@/lib/credentials'
 import { t } from '@/i18n'
 import '@/i18n/en/webShell'
 import { listenForPushNavigation } from '@/services/web-push-navigation'
 import { Button } from '@/web/components/ui/button'
 import { Toaster } from '@/web/components/ui/toaster'
 import { ApprovalTray } from './ApprovalTray'
+import { ConnectionNotices } from './ConnectionNotices'
+import { useConnectGate } from './connection-gate'
 import { useEdgeSwipe } from './edge-swipe'
 import { Rail } from './Rail'
 import { useShell } from './shell-store'
@@ -19,6 +22,23 @@ import { useRouteHandle } from './use-destination'
 // their own chunk so the rail and the route paint without waiting for them.
 const ListPane = lazy(async () => ({ default: (await import('./ListPane')).ListPane }))
 const MobileDrawer = lazy(async () => ({ default: (await import('./MobileDrawer')).MobileDrawer }))
+
+// Rare screens: only fetched when a tab actually needs them.
+const ConnectScreen = lazy(async () => ({
+  default: (await import('./ConnectScreen')).ConnectScreen,
+}))
+const GatewayUrlConfirmLazy = lazy(async () => ({
+  default: (await import('./GatewayUrlConfirm')).GatewayUrlConfirm,
+}))
+
+function GatewayUrlConfirm() {
+  if (!pendingGatewayUrlRequest()) return null
+  return (
+    <Suspense fallback={null}>
+      <GatewayUrlConfirmLazy />
+    </Suspense>
+  )
+}
 
 function ListPaneFallback() {
   const width = useShell((s) => s.paneWidth)
@@ -33,9 +53,26 @@ function ListPaneFallback() {
 
 /**
  * The application shell (D6): `rail | list pane | main` on desktop; a header
- * with a navigation drawer on phones (<= 768 px).
+ * with a navigation drawer on phones (<= 768 px). Until the gateway accepts
+ * this tab's credentials, the Connect screen stands in for all of it.
  */
 export function Shell() {
+  const gate = useConnectGate()
+  if (gate) {
+    return (
+      <>
+        <Suspense fallback={null}>
+          <ConnectScreen reason={gate} />
+        </Suspense>
+        <GatewayUrlConfirm />
+        <Toaster />
+      </>
+    )
+  }
+  return <Workspace />
+}
+
+function Workspace() {
   const phone = useMediaQuery(PHONE_QUERY)
   const paneOpen = useShell((s) => s.paneOpen)
   const togglePane = useShell((s) => s.togglePane)
@@ -110,6 +147,7 @@ export function Shell() {
             </Button>
           </header>
         ) : null}
+        <ConnectionNotices />
         <main
           id="main-content"
           ref={mainRef}
@@ -125,6 +163,7 @@ export function Shell() {
         </Suspense>
       ) : null}
       <ApprovalTray />
+      <GatewayUrlConfirm />
       <Toaster />
     </div>
   )

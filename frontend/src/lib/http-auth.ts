@@ -1,12 +1,8 @@
-const WS_TOKEN_KEY = 'agentos.wsToken'
+import { readStoredToken } from './credentials'
 
 /** Read the per-tab gateway token without letting blocked storage break a request. */
 export function sessionAuthToken(): string {
-  try {
-    return sessionStorage.getItem(WS_TOKEN_KEY) || ''
-  } catch {
-    return ''
-  }
+  return readStoredToken()
 }
 
 /** Add the gateway bearer token to a same-origin REST request when configured. */
