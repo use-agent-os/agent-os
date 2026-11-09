@@ -18,10 +18,8 @@ import { useSettingsFields } from './fields'
 import { findSection, SETTINGS_GROUPS, SETTINGS_SECTIONS } from './registry'
 import { searchSettings } from './search'
 
-type SectionModule = Record<string, ComponentType>
-
-function section(load: () => Promise<SectionModule>, name: string) {
-  return lazy(async () => ({ default: (await load())[name]! }))
+function section(load: () => Promise<Record<string, unknown>>, name: string) {
+  return lazy(async () => ({ default: (await load())[name] as ComponentType }))
 }
 
 /** Section components, each in its own chunk. */

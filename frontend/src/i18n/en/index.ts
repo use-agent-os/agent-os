@@ -23,6 +23,8 @@ import { usage } from './usage'
 import { webChat } from './webChat'
 import { webCommon } from './webCommon'
 import { webConnection } from './webConnection'
+import { webPagesOverview } from './webPagesOverview'
+import { webPagesWork } from './webPagesWork'
 import { webPalette } from './webPalette'
 import { webSetAccess } from './webSetAccess'
 import { webSetCapabilities } from './webSetCapabilities'
@@ -72,6 +74,8 @@ export const en = {
   webChat,
   webCommon,
   webConnection,
+  webPagesOverview,
+  webPagesWork,
   webPalette,
   webSetAccess,
   webSetCapabilities,

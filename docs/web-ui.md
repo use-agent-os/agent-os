@@ -193,23 +193,18 @@ skips them) and keep the query parameters that still apply:
 
 ## Main Areas
 
-| Area | Use it for |
-| --- | --- |
-| Chat | Run and resume chat sessions, inspect tool activity, publish artifacts, and use manual compact controls. |
-| Inbox | Everything waiting on you in one list: approvals, agent questions and runtime issues, answered in place. |
-| Projects | Group chat sessions, edit each project's shared knowledge (injected into every member session), and start new chats inside a project. |
-| Overview / Health | See readiness, provider state, memory state, sandbox posture, and recovery hints. |
-| Channels | Inspect configured channel adapter status and jump to Agent Setup for configuration changes. |
-| Skills | Browse installed skills grouped by where they came from, see whether the agent is actually being offered each one, and install more from a hub. |
-| Sessions | Inspect durable conversations and operational state. |
-| Agents | Manage durable agent entries. |
-| Usage | Inspect token and estimated-cost rollups. |
-| Cron | View and manage scheduled runs. |
-| MCP Servers | Add local or remote MCP servers, connect tools live, and complete OAuth authorization. |
-| Agent Setup | Configure the agent through Guided capability setup or the complete Advanced Form/YAML editor. |
-| Environment | Set, replace, and remove the environment variables skills and providers read. |
-| Logs | Inspect runtime logs and diagnostics. |
-| Approvals | Respond to sensitive tool-call approval requests. |
+Chat is the center of the console; everything else is a page in the rail's
+**Pages** view or a section of [Settings](#settings).
+
+| Page | Route | Use it for |
+| --- | --- | --- |
+| Chat | `/chat/…` | Run and resume sessions, follow tool activity, read artifacts and cards, compact. |
+| Home | `/home` | Readiness, provider and route, uptime, sessions, today's tokens and cost, the next automation run, and a live event feed. Each figure loads on its own and links to its detail. |
+| Sessions | `/sessions` | Search and filter every session, stat tiles, inline rename, bulk delete, move to a project, a new-session dialog that can create an agent, orphan flags. |
+| Projects | `/projects` | Group sessions, edit each project's shared knowledge (injected into every member session), and start a new chat inside a project. |
+| Usage | `/usage` | Token and estimated-cost rollups by session and model, CSV export. |
+| Automations | `/automations` | Scheduled jobs and their run health; create, edit, run now, pause, delete, run history. |
+| Inbox | `/inbox` | Everything waiting on you: approvals, agent questions and runtime issues, answered in place. |
 
 ## Gateway connection
 
@@ -289,14 +284,15 @@ changes, not the ageing freshness.
 
 ## Attention inbox
 
-**Inbox** (`g i`) lists everything that waits on you, with a count on its
-nav item:
+**Inbox** (`/inbox`, `g i`, or the rail's Inbox button) lists everything that
+waits on you. The rail button carries a badge with the count, and a new item is
+announced to screen readers:
 
-- **Approvals** of every namespace (the same queue as the Approvals page).
+- **Approvals** of every namespace (the same queue as Settings › Approvals and
+  the approval tray).
   The same command waiting in several sessions is one item, "Seen in N
   sessions", and each occurrence keeps its own **Approve once** / **Deny**
-  and a link into its session. "Always allow" and "Bypass" stay on the
-  Approvals page. The global approval prompt does not pop over the inbox.
+  and a link into its session.
 - **Agent questions** (`ask_user`): the option chips and a free-text reply,
   sent as your next message in that session (to every session, when the
   same question was asked in several). The gateway has no listing of
@@ -312,7 +308,7 @@ nav item:
   While the console is offline only the connection issue is listed; the
   last doctor report is not repeated as if it were current.
 
-Approvals come from the same store as the Approvals page, which the gateway
+Approvals come from the same store as Settings › Approvals, which the gateway
 keeps current with `approval.requested` / `approval.resolved` events (one
 backfill per connect), and the list updates when that store changes; the
 inbox adds no timer and no polling of its own (**Re-check** asks for one
@@ -386,45 +382,62 @@ Press `g`, then a destination key within **1.5 seconds**:
 > and while a dialog is open. `Mod+` shortcuts (the palette, the sidebar, the
 > overview, New session) also work from the composer.
 
-## Agent Setup
+## Settings
 
-Open **Settings > Agent Setup**, or go directly to:
+Everything you configure lives under **Settings** (`/control/settings`, or
+**Settings** in the status menu). A **Search settings** field at the top of its
+sidebar matches section names, descriptions and field labels; choosing a field
+opens its section and focuses it. `/control/settings` itself summarizes
+readiness and setup progress.
 
-```text
-http://127.0.0.1:18791/control/settings
-```
+| Group | Section | Holds |
+| --- | --- | --- |
+| General | Appearance | Theme (System, Light, Dark), text size, send shortcut, show thinking, visual effects. Browser-only; applies at once. |
+| General | Notifications | The Web Push toggle for approval notifications. |
+| Connections | Gateway | Connection URL, auth mode, version and identity; change credentials, reconnect, restart. |
+| Connections | Channels | Adapter status, pairing approve, deny and revoke, and the channel setup dialog. |
+| Agents | Agents | Create, edit, customize and delete agents. |
+| Agents | Models & routing | Provider setup, Pilot Router mode and tiers, subscription logins. |
+| Agents | Search | Web search and X search setup. |
+| Agents | Skills | Installed, partner and community skills; install, remove, update, dependencies, missing env keys. |
+| Agents | MCP | The runtime toggle, servers, connect and disconnect, OAuth. |
+| Agents | Memory | Curated memory, the knowledge base, raw sources, search, reindex, embeddings. |
+| Agents | Media | Image generation and audio. |
+| Security | Approvals | Default mode, approval strategy, browser elevated mode, pending requests. |
+| Security | Environment | Set, unset, reveal and import environment variables. |
+| System | Health | Doctor findings with fix steps. |
+| System | Logs | The live log tail, filters, follow and export. |
+| System | Advanced | The full configuration editor: a form built from `config.schema`, or YAML. |
+| System | Debug | Snapshots of status, health, doctor, models and the last heartbeat, recent events, and (with diagnostics enabled) a manual RPC tool. |
+| System | Updates | Check for and apply updates, with the preflight. |
+| System | About | The version and third-party licenses. |
 
-The workspace has two modes:
+**Guided setup** (`/control/settings/setup`) walks through provider, router,
+extras (search, memory embeddings, image generation, audio) and a finish
+summary. While setup is incomplete, a prompt at the top of the console links to
+it. **Advanced** builds its form from the gateway's `config.schema`: enum
+values become choices, descriptions become help, sensitive fields are masked
+until revealed, read-only keys (`host`, `port`, `config_path`, `auth.token`,
+`auth.password`) are shown but not editable, and a key the schema does not
+describe is still editable, typed from its value. The YAML view applies the
+whole document with `config.apply`.
 
-- **Guided** configures the provider, Pilot Router, channels, search, memory,
-  image generation, audio, and readiness through the specialized onboarding
-  operations for each capability.
-- **Advanced** exposes Form and YAML editors for the complete current gateway
-  configuration. Form mode groups every current `GatewayConfig` key, keeps an
-  **Other** section for future keys, searches across all sections, supports
-  keyboard tab navigation, and provides accessible show/hide controls for
-  sensitive inputs.
-
-The workspace uses one redacted `config.snapshot` composite for a coherent view
-of the catalog, readiness, active configuration, revision, persistence target,
-restart state, and runtime/disk coherence. Writes still use the narrowly scoped
+The hub reads one redacted `config.snapshot` composite for a coherent view of
+the catalog, readiness, active configuration, revision, persistence target,
+restart state, and runtime/disk coherence. Writes use the narrowly scoped
 onboarding operations or `config.patch` / `config.apply`; the snapshot itself is
-read-only. A legacy gateway fallback is used only when `config.snapshot` is not
-implemented, not when the snapshot call fails or returns an invalid payload.
-
-Existing bookmarks remain valid: `/control/setup` opens Guided mode and
-`/control/config` opens Advanced mode. Both are compatibility paths into the
-same Agent Setup workspace, not separate sidebar destinations. Guided and
-Advanced stay mounted while you switch between them so in-progress drafts are
-not discarded merely by changing modes.
+read-only.
 
 ### Configuration write safety
 
-Guided and Advanced are two editors for the same persisted configuration. Each
-write carries the snapshot `revision` as `expectedRevision` when available. If
-another editor advances that revision while a local draft is open, Save is
-disabled until the stale draft is explicitly discarded and the latest snapshot
-is loaded. A one-time secret is cleared from the saved form immediately after a
+Every section that writes the gateway configuration keeps unsaved edits in a
+sticky save bar ("2 unsaved changes", **Review changes** as `path: old → new`,
+**Discard**, **Save**), and asks before you navigate away with edits. Each write
+carries the loaded `revision` as `expectedRevision`. If another client saved in
+the meantime nothing is written: **Reload** loads the newer configuration and
+**Overwrite** reapplies your edits on top of it. A validation error is shown
+at the field it names and every edit stays in place. When a save needs a
+restart, a notice names why and offers **Restart gateway** or **Later**. A one-time secret is cleared from the saved form immediately after a
 successful write, even when the follow-up refresh cannot complete.
 
 Gateway configuration writes are persist-first transactions:
@@ -442,8 +455,8 @@ reason instead of reporting the change as fully live.
 
 An external edit to the active config file is fail-closed. In that state,
 `config.snapshot` returns `revision: null`, `diskDiverged: true`, and
-`writeBlocked: true`; Agent Setup shows **Out of sync** and disables both Guided
-and Advanced writes. Reload or restart the gateway with that file before
+`writeBlocked: true`; Settings disables Guided setup and Advanced writes until
+the file is reloaded. Reload or restart the gateway with that file before
 editing again. Refreshing only the browser cannot reconcile a stale running
 configuration.
 
@@ -461,6 +474,130 @@ areas such as memory, channels, sandbox/bind posture, task runtime, server
 middleware, MCP discovery, tools/skills loading, state paths, heartbeat, and
 diagnostics. Treat a restart advisory as part of completing the change rather
 than as a save failure.
+
+### MCP
+
+Open **Settings › MCP** to add and manage external MCP connections. The
+screen supports local `stdio`, legacy SSE, and Streamable HTTP servers. Remote
+servers can use custom headers or OAuth. OAuth tokens are stored separately
+from `config.toml` in the AgentOS state directory. AgentOS applies mode `0600`
+inside a `0700` directory on POSIX systems; Windows uses the current user's
+state-directory ACL.
+
+The featured Robinhood Trading connection uses:
+
+```text
+https://agent.robinhood.com/mcp/trading
+```
+
+It is configured as Streamable HTTP with OAuth. Saving the connection opens the
+provider authorization flow and loads its tools without requiring a gateway
+restart. Agentic trading involves significant risk. Review the server's access
+and action permissions before authorizing it.
+
+### Skills
+
+Open **Settings › Skills** (`/control/settings/skills`) to see what is installed
+and what the agent can actually reach.
+
+The **Installed** tab groups cards by where a skill came from, not by which
+directory holds it:
+
+| Group | Contains |
+| --- | --- |
+| Partners | Skills published by an AgentOS partner |
+| Shipped with AgentOS | Skills that ship with the release |
+| Installed from a hub | Skills you installed with `agentos skills install` or from this screen |
+| Your local skills | Skill directories you added yourself |
+
+Partners wins over the other three, so a partner's skills stay under one
+heading whether they shipped with AgentOS or you installed them from that
+partner's hub. Partner identity comes from an allowlist inside AgentOS: a skill
+manifest can only select a recognized publisher by id, so a third-party skill
+cannot borrow a partner's name, link, or logo by writing them into its own
+frontmatter. Only a skill that ships with the release may select an id at all —
+an installed one is branded by the hub catalog row it came from — so dropping a
+directory into a skills path cannot put a card in the Partners group.
+
+The storage layer (`bundled`, `managed`, `personal`, …) is still shown, as a
+chip on each card, because it decides which skill wins a name collision. It no
+longer decides what heading the card sits under.
+
+**Update** and **Remove** follow what the install record actually supports
+rather than the layer. A hub-installed skill whose files no longer sit where
+the lockfile recorded them keeps Update — an update re-fetches by identifier —
+but loses Remove, and the dialog says why instead of offering a button that
+would fail.
+
+#### Ready is not the same as offered
+
+A card's status dot answers "is this skill set up". A second, separate label
+answers "is the agent being offered it right now", and a skill can be fully
+ready and still withheld. When it is, the card and its dialog say which of
+these applies: the manifest disables model invocation, a requirement is
+missing, a tool it needs is not enabled in this session, a native tool
+supersedes it, relevance filtering skipped it for that message, or the injected
+skills block hit its character budget. Nothing is shown when the skill is
+offered — the absence of a label is the normal case.
+
+#### Community tab
+
+Browsing and searching a hub also surfaces skills you have already installed
+from that source, including ones the catalog does not list — a skill installed
+straight from a GitHub URL appears alongside catalog rows rather than vanishing
+from the page it was installed on. Installed rows are marked and appear after
+catalog results. Installing or removing a skill updates the Installed marker
+immediately, without a page reload.
+
+### Environment
+
+Open **Settings › Environment** (`/control/settings/environment`) to manage the
+variables in `~/.agentos/.env` without touching a shell.
+
+Variables are grouped by what needs them — LLM provider, search, memory, each
+installed skill, and your own additions — with the description and, where the
+skill declared one, a link to where the credential is obtained. A skill listed
+as needing setup can be fixed from its own dialog in Settings › Skills too: the
+Missing block offers **Set &lt;VAR&gt;** next to the existing install action.
+
+A variable that is not set but is already obtainable elsewhere shows a **Use
+&lt;source&gt;** button instead of asking you to go find a value — today that is
+the GitHub CLI for `GITHUB_TOKEN` and `GH_TOKEN`, when `gh auth login` has been
+run. Deciding whether to offer it never reads the credential, and importing
+only happens when you click. The imported value is a copy and will not follow
+that tool's own rotation.
+
+Values are masked. **Reveal** asks for confirmation, is rate limited, writes an
+audit line, and hides the value again after thirty seconds. Setting a variable
+applies it to the running gateway, so a skill that was ineligible becomes
+eligible immediately — on this screen, in Settings › Skills, and for the agent
+itself on its next turn. Provider keys additionally need a restart, and the
+screen says so when that is the case.
+
+Two things the screen deliberately makes visible:
+
+- **Locked variables.** Names that steer subprocess execution or AgentOS
+  runtime posture, or outbound routing (`PATH`, `LD_PRELOAD`,
+  `AGENTOS_AGENT_PERMISSIONS`, `HTTP_PROXY`, …) show a lock instead of an edit
+  control. See
+  [configuration.md](configuration.md#what-cannot-be-written-through-agentos).
+- **Shadowed variables.** If the shell that started the gateway exported a
+  variable, that value wins over the file and editing here has no effect until
+  the export is removed. The screen warns rather than letting you save
+  repeatedly and conclude it is broken.
+
+### Logs and diagnostics
+
+For local diagnosis:
+
+```sh
+agentos diagnostics on
+agentos gateway status
+agentos doctor
+```
+
+Use Settings › Logs and Settings › Health to correlate provider readiness, channel
+state, session state, and user-visible errors.
 
 ## Chat Sessions
 
@@ -647,7 +784,18 @@ later** swaps it for a small dock ("1 approval waiting", **Answer now**,
 new approval brings the prompt back. The [attention inbox](#attention-inbox)
 lists the same approvals next to agent questions and runtime issues.
 
-## Cron job health
+## Automations
+
+**Automations** (`/automations`, `g r`) is the former Cron view. Each job is a
+card with its schedule (and a plain-language explanation with the next runs),
+delivery target, payload and run health. **New automation** opens the editor,
+which also sets the failure destination; an empty page explains that scheduled
+jobs appear there and offers **New automation** with presets. Cards offer
+**Run now**, **Pause**/**Resume**, **Delete** (confirmed first) and the run
+history with each run's output; the page refreshes when a run finishes
+(`cron.run.finished`).
+
+### Run health
 
 A job that keeps failing is marked on its card: a **Degraded** badge, the
 consecutive failure count and the last error. They come from the `health`
@@ -659,137 +807,6 @@ policy (`concurrency`), an **Overlap** picker sets it (`forbid` skips a run whil
 `cron.update`; it does not appear when the job has no `concurrency`. **Run**
 and **Pause** are disabled, with the reason, while the gateway is offline or
 after the scheduler answered that it is not running.
-
-## MCP Servers
-
-Open **Settings > MCP Servers** to add and manage external MCP connections. The
-screen supports local `stdio`, legacy SSE, and Streamable HTTP servers. Remote
-servers can use custom headers or OAuth. OAuth tokens are stored separately
-from `config.toml` in the AgentOS state directory. AgentOS applies mode `0600`
-inside a `0700` directory on POSIX systems; Windows uses the current user's
-state-directory ACL.
-
-The featured Robinhood Trading connection uses:
-
-```text
-https://agent.robinhood.com/mcp/trading
-```
-
-It is configured as Streamable HTTP with OAuth. Saving the connection opens the
-provider authorization flow and loads its tools without requiring a gateway
-restart. Agentic trading involves significant risk. Review the server's access
-and action permissions before authorizing it.
-
-## Skills
-
-Open **Skills** to see what is installed and what the agent can actually reach:
-
-```text
-http://127.0.0.1:18791/control/skills
-```
-
-The **Installed** tab groups cards by where a skill came from, not by which
-directory holds it:
-
-| Group | Contains |
-| --- | --- |
-| Partners | Skills published by an AgentOS partner |
-| Shipped with AgentOS | Skills that ship with the release |
-| Installed from a hub | Skills you installed with `agentos skills install` or from this screen |
-| Your local skills | Skill directories you added yourself |
-
-Partners wins over the other three, so a partner's skills stay under one
-heading whether they shipped with AgentOS or you installed them from that
-partner's hub. Partner identity comes from an allowlist inside AgentOS: a skill
-manifest can only select a recognized publisher by id, so a third-party skill
-cannot borrow a partner's name, link, or logo by writing them into its own
-frontmatter. Only a skill that ships with the release may select an id at all —
-an installed one is branded by the hub catalog row it came from — so dropping a
-directory into a skills path cannot put a card in the Partners group.
-
-The storage layer (`bundled`, `managed`, `personal`, …) is still shown, as a
-chip on each card, because it decides which skill wins a name collision. It no
-longer decides what heading the card sits under.
-
-**Update** and **Remove** follow what the install record actually supports
-rather than the layer. A hub-installed skill whose files no longer sit where
-the lockfile recorded them keeps Update — an update re-fetches by identifier —
-but loses Remove, and the dialog says why instead of offering a button that
-would fail.
-
-### Ready is not the same as offered
-
-A card's status dot answers "is this skill set up". A second, separate label
-answers "is the agent being offered it right now", and a skill can be fully
-ready and still withheld. When it is, the card and its dialog say which of
-these applies: the manifest disables model invocation, a requirement is
-missing, a tool it needs is not enabled in this session, a native tool
-supersedes it, relevance filtering skipped it for that message, or the injected
-skills block hit its character budget. Nothing is shown when the skill is
-offered — the absence of a label is the normal case.
-
-### Community tab
-
-Browsing and searching a hub also surfaces skills you have already installed
-from that source, including ones the catalog does not list — a skill installed
-straight from a GitHub URL appears alongside catalog rows rather than vanishing
-from the page it was installed on. Installed rows are marked and appear after
-catalog results. Installing or removing a skill updates the Installed marker
-immediately, without a page reload.
-
-## Environment
-
-Open **Settings > Environment** to manage the variables in
-`~/.agentos/.env` without touching a shell:
-
-```text
-http://127.0.0.1:18791/control/env
-```
-
-Variables are grouped by what needs them — LLM provider, search, memory, each
-installed skill, and your own additions — with the description and, where the
-skill declared one, a link to where the credential is obtained. A skill listed
-as needing setup can be fixed from its own dialog on the Skills screen too: the
-Missing block offers **Set &lt;VAR&gt;** next to the existing install action.
-
-A variable that is not set but is already obtainable elsewhere shows a **Use
-&lt;source&gt;** button instead of asking you to go find a value — today that is
-the GitHub CLI for `GITHUB_TOKEN` and `GH_TOKEN`, when `gh auth login` has been
-run. Deciding whether to offer it never reads the credential, and importing
-only happens when you click. The imported value is a copy and will not follow
-that tool's own rotation.
-
-Values are masked. **Reveal** asks for confirmation, is rate limited, writes an
-audit line, and hides the value again after thirty seconds. Setting a variable
-applies it to the running gateway, so a skill that was ineligible becomes
-eligible immediately — on this screen, on the Skills screen, and for the agent
-itself on its next turn. Provider keys additionally need a restart, and the
-screen says so when that is the case.
-
-Two things the screen deliberately makes visible:
-
-- **Locked variables.** Names that steer subprocess execution or AgentOS
-  runtime posture, or outbound routing (`PATH`, `LD_PRELOAD`,
-  `AGENTOS_AGENT_PERMISSIONS`, `HTTP_PROXY`, …) show a lock instead of an edit
-  control. See
-  [configuration.md](configuration.md#what-cannot-be-written-through-agentos).
-- **Shadowed variables.** If the shell that started the gateway exported a
-  variable, that value wins over the file and editing here has no effect until
-  the export is removed. The screen warns rather than letting you save
-  repeatedly and conclude it is broken.
-
-## Logs and Diagnostics
-
-For local diagnosis:
-
-```sh
-agentos diagnostics on
-agentos gateway status
-agentos doctor
-```
-
-Use the Web UI logs and health views to correlate provider readiness, channel
-state, session state, and user-visible errors.
 
 ## Update Banner
 

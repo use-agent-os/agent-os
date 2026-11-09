@@ -69,6 +69,8 @@ export type SaveState =
 export interface ConfigEditor {
   ready: boolean
   config: ConfigData
+  /** The revision the editor loaded (sent as expectedRevision). */
+  revision: string | null
   value(path: string): unknown
   set(path: string, value: unknown): void
   changes: PendingChange[]
@@ -172,6 +174,7 @@ export function useConfigEditor(): ConfigEditor {
   return {
     ready: snapshot.isSuccess,
     config,
+    revision: snapshot.data?.revision ?? null,
     value,
     set,
     changes,

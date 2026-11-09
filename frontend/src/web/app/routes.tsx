@@ -42,6 +42,27 @@ const ChatPage = lazy(async () => ({
 const SettingsPage = lazy(async () => ({
   default: (await import('@/web/features/settings/SettingsPage')).SettingsPage,
 }))
+const NewSessionPage = lazy(async () => ({
+  default: (await import('@/web/features/chat/NewSessionPage')).NewSessionPage,
+}))
+const HomePage = lazy(async () => ({
+  default: (await import('@/web/features/home/HomePage')).HomePage,
+}))
+const UsagePage = lazy(async () => ({
+  default: (await import('@/web/features/usage/UsagePage')).UsagePage,
+}))
+const InboxPage = lazy(async () => ({
+  default: (await import('@/web/features/inbox/InboxPage')).InboxPage,
+}))
+const SessionsPage = lazy(async () => ({
+  default: (await import('@/web/features/sessions/SessionsPage')).SessionsPage,
+}))
+const ProjectsPage = lazy(async () => ({
+  default: (await import('@/web/features/projects/ProjectsPage')).ProjectsPage,
+}))
+const AutomationsPage = lazy(async () => ({
+  default: (await import('@/web/features/automations/AutomationsPage')).AutomationsPage,
+}))
 const ChatIndex = lazy(async () => ({
   default: (await import('@/web/features/chat/ChatPage')).ChatIndex,
 }))
@@ -78,14 +99,70 @@ export const DESTINATION_ROUTES: RouteObject[] = [
       <ChatPage />
     </Lazy>,
   ),
-  destination('new', 'new', 'webShell.pageNew'),
-  destination('home', 'home', 'webShell.pageHome'),
-  destination('sessions', 'sessions', 'webShell.pageSessions'),
-  destination('projects', 'projects', 'webShell.pageProjects'),
-  destination('projects/:projectId', 'projects', 'webShell.pageProjects'),
-  destination('usage', 'usage', 'webShell.pageUsage'),
-  destination('automations', 'automations', 'webShell.pageAutomations'),
-  destination('inbox', 'inbox', 'webShell.pageInbox'),
+  destination(
+    'new',
+    'new',
+    'webShell.pageNew',
+    <Lazy>
+      <NewSessionPage />
+    </Lazy>,
+  ),
+  destination(
+    'home',
+    'home',
+    'webShell.pageHome',
+    <Lazy>
+      <HomePage />
+    </Lazy>,
+  ),
+  destination(
+    'sessions',
+    'sessions',
+    'webShell.pageSessions',
+    <Lazy>
+      <SessionsPage />
+    </Lazy>,
+  ),
+  destination(
+    'projects',
+    'projects',
+    'webShell.pageProjects',
+    <Lazy>
+      <ProjectsPage />
+    </Lazy>,
+  ),
+  destination(
+    'projects/:projectId',
+    'projects',
+    'webShell.pageProjects',
+    <Lazy>
+      <ProjectsPage />
+    </Lazy>,
+  ),
+  destination(
+    'usage',
+    'usage',
+    'webShell.pageUsage',
+    <Lazy>
+      <UsagePage />
+    </Lazy>,
+  ),
+  destination(
+    'automations',
+    'automations',
+    'webShell.pageAutomations',
+    <Lazy>
+      <AutomationsPage />
+    </Lazy>,
+  ),
+  destination(
+    'inbox',
+    'inbox',
+    'webShell.pageInbox',
+    <Lazy>
+      <InboxPage />
+    </Lazy>,
+  ),
   destination(
     'settings',
     'settings',

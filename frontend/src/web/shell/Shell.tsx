@@ -10,6 +10,7 @@ import { Toaster } from '@/web/components/ui/toaster'
 import { PaletteHost } from '@/web/features/palette/PaletteHost'
 import { ApprovalTray } from './ApprovalTray'
 import { ConnectionNotices } from './ConnectionNotices'
+import { SetupPrompt } from './SetupPrompt'
 import { useConnectGate } from './connection-gate'
 import { useEdgeSwipe } from './edge-swipe'
 import { Rail } from './Rail'
@@ -133,6 +134,7 @@ function Workspace() {
           </header>
         ) : null}
         <ConnectionNotices />
+        <SetupPrompt />
         <main
           id="main-content"
           ref={mainRef}

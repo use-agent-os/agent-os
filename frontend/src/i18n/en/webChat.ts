@@ -148,6 +148,17 @@ export const webChat = defineNamespace('webChat', {
   flowChangeTitle: 'Flow {kind}: {name}',
   chartTitle: 'Chart: {name}',
 
+  // New session
+  newTitle: 'New session',
+  newAgent: 'Agent',
+  newProject: 'Project',
+  newProjectNone: 'No project',
+  newPrompt: 'First message',
+  newStart: 'Start',
+  newStarting: 'Starting…',
+  newLoading: 'Loading agents and projects…',
+  newFailed: "Couldn't start the session: {message}",
+
   // Side panel
   panelTitle: 'Side panel',
   panelClose: 'Close side panel',

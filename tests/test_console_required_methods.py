@@ -58,7 +58,8 @@ def test_list_parses_to_unique_method_names(label: str) -> None:
     assert len(methods) > 10, f"{label}: suspiciously short list, the parser may have broken"
     assert len(methods) == len(set(methods)), f"{label}: duplicate entries"
     for method in methods:
-        assert re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)*", method), method
+        # Hyphens appear in a few legacy gateway names (``last-heartbeat``).
+        assert re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*(\.[A-Za-z0-9_-]+)*", method), method
 
 
 @pytest.mark.parametrize("label", sorted(_LISTS))

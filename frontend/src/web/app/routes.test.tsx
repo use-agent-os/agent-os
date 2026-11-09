@@ -18,20 +18,15 @@ describe('web routes', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/chat'))
   })
 
-  it.each([
-    '/new',
-    '/home',
-    '/sessions',
-    '/projects',
-    '/projects/p1',
-    '/usage',
-    '/automations',
-    '/inbox',
-  ])('renders %s as a deep link without redirecting', async (path) => {
-    const { router } = open(path)
-    expect(await screen.findByText(/is being rebuilt/)).toBeInTheDocument()
-    expect(router.state.location.pathname).toBe(path)
-  })
+  it.each(['/home', '/sessions', '/projects', '/projects/p1', '/usage', '/automations', '/inbox'])(
+    'renders %s as a deep link without redirecting',
+    async (path) => {
+      const { router } = open(path)
+      await new Promise((r) => setTimeout(r, 20))
+      expect(screen.queryByTestId('not-found-path')).not.toBeInTheDocument()
+      expect(router.state.location.pathname).toBe(path)
+    },
+  )
 
   it.each([
     ['/overview', '/home'],

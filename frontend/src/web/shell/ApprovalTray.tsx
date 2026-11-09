@@ -13,7 +13,9 @@ import {
   type Approval,
   type ApprovalAction,
 } from '@/services/approval-monitor'
+import { gate, requireConnection } from '@/lib/disabled-reason'
 import { Button } from '@/web/components/ui/button'
+import { useDisplayedConnection } from './use-displayed-connection'
 import { pathToSessionKey, sessionKeyToPath } from './session-url'
 
 /** Whether an approval belongs to (or is visible from) the open session. */
@@ -28,6 +30,8 @@ function errorMessage(error: unknown): string {
 }
 
 export function ApprovalCard({ item }: { item: Approval }) {
+  const connection = useDisplayedConnection()
+  const offline = gate(requireConnection(connection))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const command = approvalCommand(item)
@@ -76,21 +80,42 @@ export function ApprovalCard({ item }: { item: Approval }) {
           {error}
         </p>
       ) : null}
+      {offline.reason ? <p className="text-small text-text-muted">{offline.reason}</p> : null}
       <div className="flex flex-wrap gap-1.5">
-        <Button size="sm" variant="primary" disabled={busy} onClick={() => void decide('once')}>
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={busy || offline.disabled}
+          onClick={() => void decide('once')}
+        >
           {t('webShell.trayAllowOnce')}
         </Button>
         {canAlwaysAllow(item) ? (
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void decide('always')}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || offline.disabled}
+            onClick={() => void decide('always')}
+          >
             {t('webShell.trayAlwaysAllow')}
           </Button>
         ) : null}
         {canBypass(item) ? (
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void decide('bypass')}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy || offline.disabled}
+            onClick={() => void decide('bypass')}
+          >
             {t('webShell.trayBypass')}
           </Button>
         ) : null}
-        <Button size="sm" variant="danger" disabled={busy} onClick={() => void decide('deny')}>
+        <Button
+          size="sm"
+          variant="danger"
+          disabled={busy || offline.disabled}
+          onClick={() => void decide('deny')}
+        >
           {t('webShell.trayDeny')}
         </Button>
       </div>
