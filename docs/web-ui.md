@@ -62,6 +62,24 @@ doctor` clears on the next run, and a gateway restart clears the boot-time log
 line. Wheel installs ship no frontend sources and are never flagged, and the
 check is skipped entirely when the Control UI is disabled.
 
+A real-browser UI audit is opt-in and never part of the default test run. It
+boots two `agentos gateway run` processes on throwaway state directories (the
+default base path and a custom one) and checks every destination at 360, 768
+and 1280 px in light and dark: page-level horizontal scroll, console and
+network errors, axe-core (serious and critical violations fail), content
+clipped to zero size, target sizes, a keyboard-only pass (visible focus at
+3:1, no trap outside modals, Escape closes the top layer and focus returns to
+the opener), reduced motion, forced colors, deep links with reload, and legacy
+redirects. Screenshots and `results-*.json` land in `/tmp/agentos-ui-audit`:
+
+```sh
+npm --prefix frontend exec -- playwright install chromium
+AGENTOS_WEBUI_UI_AUDIT=1 uv run pytest tests/functional/test_webui_ui_audit.py -q -s
+```
+
+`AUDIT_ONLY` (`matrix`, `targets`, `keyboard`, `motion`, `forced`, `deep`) and
+`AUDIT_VIEWPORTS` (`360`, `768`, `1280`) run a subset.
+
 For hot reload during frontend work, run the gateway and Vite together:
 
 ```sh
