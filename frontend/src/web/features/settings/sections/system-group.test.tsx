@@ -95,7 +95,7 @@ describe('Health', () => {
           surface: 'provider',
           title: 'No provider configured',
           detail: 'The agent cannot answer.',
-          evidence: { configPath: '/home/me/.agentos/config.yaml' },
+          evidence: { configPath: '~/.agentos/config.yaml' },
           fixSteps: [{ label: 'Configure a provider', command: 'agentos setup' }],
         },
       ],

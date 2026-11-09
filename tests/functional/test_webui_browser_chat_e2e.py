@@ -187,7 +187,9 @@ def test_react_chat_public_controls_work_without_sending_to_provider(
               const phone = await page.evaluate(() => ({
                 horizontalScroll: document.documentElement.scrollWidth > window.innerWidth,
                 composerBottom:
-                  document.querySelector("[data-composer-input]")?.getBoundingClientRect().bottom ?? 0,
+                  document
+                    .querySelector("[data-composer-input]")
+                    ?.getBoundingClientRect().bottom ?? 0,
                 viewport: window.innerHeight,
                 inputFont: parseFloat(
                   getComputedStyle(document.querySelector("[data-composer-input]")).fontSize

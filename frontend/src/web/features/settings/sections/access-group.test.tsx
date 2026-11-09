@@ -47,7 +47,7 @@ function channelsRpc() {
 function envRpc() {
   return shellRpc()
     .handle('env.list', {
-      envFilePath: '/home/me/.agentos/.env',
+      envFilePath: '~/.agentos/.env',
       setCount: 1,
       totalCount: 1,
       shadowedCount: 0,

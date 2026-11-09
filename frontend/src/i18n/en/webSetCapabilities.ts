@@ -77,7 +77,8 @@ export const webSetCapabilities = defineNamespace('webSetCapabilities', {
     'Wallet, token-launch and on-chain execution skills maintained by the Capminal team.',
   skillsCapminalNotice: 'The capminal skill is required for every skill in this catalog.',
   skillsCommunityTitle: 'Community catalog',
-  skillsCommunityBody: 'Discover skills published by the wider AgentOS community.',
+  skillsCommunityBody:
+    'Discover skills from the ClawHub community source, published by the wider AgentOS community.',
   skillsCount_one: '{count} skill',
   skillsCount_other: '{count} skills',
   skillsSearchLabel: 'Search the {label} catalog',
