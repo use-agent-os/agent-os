@@ -414,6 +414,30 @@ def _raise_if_turn_aborted() -> None:
         raise _TurnAbortedError
 
 
+async def _sleep_unless_aborted(delay: float) -> None:
+    """Wait *delay* seconds between attempts; end the turn if it is asked to stop.
+
+    A retry backoff is a checkpoint like the one before every request: an
+    abort that lands while the turn waits must not be followed by another
+    provider request.
+    """
+
+    _raise_if_turn_aborted()
+    signal = current_turn_stop_signal()
+    if signal is None:
+        await asyncio.sleep(delay)
+        return
+    sleeper = asyncio.ensure_future(asyncio.sleep(delay))
+    aborter = asyncio.ensure_future(signal.wait_abort())
+    try:
+        await asyncio.wait({sleeper, aborter}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        sleeper.cancel()
+        aborter.cancel()
+        await asyncio.gather(sleeper, aborter, return_exceptions=True)
+    _raise_if_turn_aborted()
+
+
 def _is_large_context_invalid_response(
     kind: _ProviderAttemptKind,
     *,
@@ -1656,6 +1680,7 @@ class Agent:
         )
         attempt_nudge, t.text_tool_call_nudge = t.text_tool_call_nudge, []
         t.request_messages.extend(attempt_nudge)
+        hook_messages: list[Message] = []
         if self._request_hooks:
             hook_veto, hook_notes = self._run_request_hooks(
                 t.request_messages, iteration=t.iterations, attempt=t.call_attempt
@@ -1668,7 +1693,8 @@ class Agent:
                 return
             # Request-scoped like the nudge: after the cache-stable
             # prefix, never added to turn_messages.
-            t.request_messages.extend(Message(role="user", content=note) for note in hook_notes)
+            hook_messages = [Message(role="user", content=note) for note in hook_notes]
+            t.request_messages.extend(hook_messages)
         self._write_context_stage(
             "stream:context",
             t.request_messages,
@@ -1767,6 +1793,9 @@ class Agent:
                 ),
             )
             t.request_messages.extend(attempt_nudge)
+            # The request is rebuilt from the compacted transcript: the
+            # hooks' request-only notes go back on its tail.
+            t.request_messages.extend(hook_messages)
             # Calibrate against the request actually sent.
             t.estimated_context_tokens = self._estimate_live_request_tokens(
                 t.request_messages,
@@ -1878,6 +1907,10 @@ class Agent:
 
     async def _attempt_stream(self, t: TurnState) -> AsyncGenerator[AgentEvent, None]:
         """Send the request and stream the response (``core.stream_attempt``)."""
+        # The retry budget charges failed attempts from the moment their
+        # request goes out: an earlier successful stream (a continuation, a
+        # text-tool-call retry) or a compaction before it is not recovery time.
+        t.attempt_started_at = t.loop.time()
         t.raw_stream = self.provider.chat(
             t.request_messages,
             tools=t.provider_tools_for_call,
@@ -2468,7 +2501,7 @@ class Agent:
                     code="provider_empty_retry",
                     message="The provider returned an empty response; retrying once.",
                 )
-                await asyncio.sleep(delay)
+                await _sleep_unless_aborted(delay)
                 t.call_attempt += 1
                 t.attempt_flow = AttemptFlow.RETRY
                 return
@@ -2492,7 +2525,7 @@ class Agent:
                     code="provider_empty_retry",
                     message=("The provider stream ended before completion; retrying once."),
                 )
-                await asyncio.sleep(delay)
+                await _sleep_unless_aborted(delay)
                 t.call_attempt += 1
                 t.attempt_flow = AttemptFlow.RETRY
                 return
@@ -2750,7 +2783,7 @@ class Agent:
                         "execution; retrying once."
                     ),
                 )
-                await asyncio.sleep(delay)
+                await _sleep_unless_aborted(delay)
                 t.retry_attempt += 1
                 t.call_attempt += 1
                 t.attempt_flow = AttemptFlow.RETRY
@@ -2977,7 +3010,7 @@ class Agent:
                         code="provider_timeout_retry",
                         message=("The upstream model timed out; retrying before giving up."),
                     )
-                await asyncio.sleep(decision.delay_s)
+                await _sleep_unless_aborted(decision.delay_s)
                 t.attempt_history.note_retry(decision.delay_s, timeout=_is_timeout)
                 t.retry_attempt += 1
                 t.call_attempt += 1
@@ -3133,6 +3166,10 @@ class Agent:
                     provenance=provenance_for_provider(self.provider),
                 )
             )
+        # The response is on record (turn_messages, final_text_parts): it is
+        # no longer a partial reply, so a cancel or abort from here on must
+        # not seal it a second time.
+        t.assistant_text_parts = []
 
         # Detect incomplete tool calls (stream interrupted mid-generation)
         if t.pending_tools and not t.tool_calls:
@@ -3252,6 +3289,11 @@ class Agent:
             clock=t.loop.time,
             steering_pending=(None if t.steering is None else lambda: steering_pending(t.steering)),
         )
+        # Cooperative abort checkpoint: the last one before tools run. A stop
+        # that landed after the response streamed (or while the consumer
+        # handled its events) ends the turn here; the sealed record pairs
+        # these calls with cancelled results.
+        _raise_if_turn_aborted()
         batch_signal = current_turn_stop_signal()
         if batch_signal is not None:
             batch_signal.in_tool_batch = True
@@ -3450,9 +3492,12 @@ class Agent:
                 await self._close_provider_stream(stream_iter)
                 raise
             if abort_wait is not None:
-                if abort_wait in done and next_event not in done:
+                if abort_wait in done:
                     # Asked to stop mid-stream: stop the pending read, close
                     # the stream (and its HTTP connection) and end the turn.
+                    # The abort wins over an event that was already buffered
+                    # in the same tick: a stop must not let a buffered
+                    # tool call through.
                     next_event.cancel()
                     with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration, Exception):
                         await next_event
