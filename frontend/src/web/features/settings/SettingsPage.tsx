@@ -263,7 +263,11 @@ export function SettingsPage() {
           Tab to (e.g. Notifications without Web Push) still scrolls by keyboard. */}
       <div
         role="region"
-        aria-label={meta ? t(meta.titleKey) : t('webShell.pageSettings')}
+        aria-label={
+          meta
+            ? t('webSettings.sectionPane', { section: t(meta.titleKey) })
+            : t('webShell.pageSettings')
+        }
         tabIndex={0}
         className="min-w-0 flex-1 focus-visible:-outline-offset-2 md:overflow-auto md:overscroll-contain"
       >

@@ -8,6 +8,8 @@ export const webSettings = defineNamespace('webSettings', {
   groupSecurity: 'Security',
   groupSystem: 'System',
   allSettings: 'All settings',
+  // Distinct from the section's own landmarks (axe landmark-unique).
+  sectionPane: '{section} settings',
 
   appearance: 'Appearance',
   appearanceDescription: 'Theme, text size and how the composer sends',

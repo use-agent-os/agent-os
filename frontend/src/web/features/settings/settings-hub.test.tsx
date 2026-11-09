@@ -95,13 +95,13 @@ describe('settings hub', () => {
     expect(back).toHaveAttribute('href', '/settings')
     expect(back.className).toMatch(/md:hidden/)
     // The pane only scrolls on its own from md up; on phones the page scrolls.
-    const pane = screen.getByRole('region', { name: 'Environment' })
+    const pane = screen.getByRole('region', { name: 'Environment settings' })
     expect(pane.className).not.toMatch(/(^|\s)(scroll-contained|overflow-auto)(\s|$)/)
   })
 
   it('keeps the section pane keyboard-scrollable even with nothing to Tab to', async () => {
     renderShell('/settings/environment', settingsRpc())
-    const pane = await screen.findByRole('region', { name: 'Environment' })
+    const pane = await screen.findByRole('region', { name: 'Environment settings' })
     expect(pane).toHaveAttribute('tabindex', '0')
   })
 })
