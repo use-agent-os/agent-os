@@ -1039,10 +1039,53 @@ const FORCED_CHECK = () => {
       bad.push(`${el.tagName.toLowerCase()}[${el.getAttribute('role') || el.type || ''}] "${name}"`)
     }
   }
+  // Switches: the thumb must paint (non-zero box, colour unlike its track)
+  // and on/off must differ by track colour or thumb position.
+  const paint = (node) => {
+    for (let n = node; n; n = n.parentElement) {
+      const bg = getComputedStyle(n).backgroundColor
+      if (bg && bg !== 'transparent' && !/^rgba\(.*,\s*0\)$/.test(bg)) return bg
+    }
+    return 'rgb(255, 255, 255)'
+  }
+  const switches = []
+  for (const el of document.querySelectorAll('[role=switch]')) {
+    const r = el.getBoundingClientRect()
+    if (r.width === 0 || r.height === 0) continue
+    const thumb = el.firstElementChild
+    const tr = thumb ? thumb.getBoundingClientRect() : { width: 0, height: 0, left: r.left }
+    switches.push({
+      name: (el.getAttribute('aria-label') || (el.id && document.querySelector(`label[for="${el.id}"]`)?.textContent) ||
+        el.closest('label')?.textContent || el.id || '').trim().slice(0, 40),
+      checked: el.getAttribute('aria-checked') === 'true',
+      thumbSize: [Math.round(tr.width), Math.round(tr.height)],
+      thumbBg: thumb ? paint(thumb) : null,
+      trackBg: paint(el),
+      offset: Math.round(tr.left - r.left),
+    })
+  }
   return {
     forced: matchMedia('(forced-colors: active)').matches,
     bad: [...new Set(bad)],
+    switches,
   }
+}
+
+function switchDefects(switches) {
+  return switches
+    .filter((s) => !(s.thumbSize[0] > 0 && s.thumbSize[1] > 0) || s.thumbBg === s.trackBg)
+    .map((s) => `switch "${s.name}" (${s.checked ? 'on' : 'off'}): thumb ${s.thumbSize.join('x')} ${s.thumbBg} on track ${s.trackBg}`)
+}
+
+// Every on switch must look unlike every off switch seen in the same run.
+function switchStateDefects(switches) {
+  const sig = (s) => `${s.trackBg}|${s.offset}`
+  const on = new Set(switches.filter((s) => s.checked).map(sig))
+  const off = new Set(switches.filter((s) => !s.checked).map(sig))
+  const out = []
+  if (!on.size || !off.size) out.push(`need both on and off switches to compare (on=${on.size}, off=${off.size})`)
+  for (const s of on) if (off.has(s)) out.push(`on and off switches look identical: track|offset ${s}`)
+  return out
 }
 
 const FORCED_ROUTES = [
@@ -1063,6 +1106,7 @@ async function auditForcedColors(browser) {
   for (const vp of [DESKTOP, PHONE]) {
     const context = await newContext(browser, { ...vp, theme: 'dark', forcedColors: 'active' })
     const page = await context.newPage()
+    const seen = []
     for (const [id, p] of FORCED_ROUTES) {
       const entry = { route: id, viewport: vp.name }
       try {
@@ -1076,10 +1120,16 @@ async function auditForcedColors(browser) {
       } catch (error) {
         entry.error = String(error.message || error)
       }
-      entry.pass = !entry.error && entry.forced === true && entry.bad.length === 0 && !(entry.layout || []).length
-      if (!entry.pass) fail('forcedColors', { route: id, viewport: vp.name, error: entry.error, forced: entry.forced, bad: entry.bad, layout: entry.layout })
+      entry.switchBad = switchDefects(entry.switches || [])
+      seen.push(...(entry.switches || []))
+      entry.pass = !entry.error && entry.forced === true && entry.bad.length === 0 && !entry.switchBad.length && !(entry.layout || []).length
+      if (!entry.pass) fail('forcedColors', { route: id, viewport: vp.name, error: entry.error, forced: entry.forced, bad: entry.bad, switchBad: entry.switchBad, layout: entry.layout })
       results.forcedColors.push(entry)
     }
+    const states = { route: 'switch-states', viewport: vp.name, switchBad: switchStateDefects(seen) }
+    states.pass = states.switchBad.length === 0
+    if (!states.pass) fail('forcedColors', states)
+    results.forcedColors.push(states)
     await context.close()
   }
 }

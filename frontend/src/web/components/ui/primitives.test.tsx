@@ -14,6 +14,7 @@ import {
 } from './dropdown-menu'
 import { Sheet, SheetContent, SheetTitle } from './sheet'
 import { EmptyState, ErrorState, Skeleton, StaleBadge } from './states'
+import { Switch } from './switch'
 import { SimpleTooltip, TooltipProvider } from './tooltip'
 
 afterEach(() => {
@@ -274,5 +275,30 @@ describe('view states', () => {
   it('marks snapshot data as stale in words, not only colour', () => {
     render(<StaleBadge since="10:42" />)
     expect(screen.getByText('Snapshot from 10:42')).toBeInTheDocument()
+  })
+})
+
+describe('Switch', () => {
+  it('paints track and thumb with system colours in forced colors', () => {
+    render(
+      <>
+        <Switch aria-label="Off" />
+        <Switch aria-label="On" defaultChecked />
+      </>,
+    )
+    const on = screen.getByRole('switch', { name: 'On' })
+    const thumb = on.querySelector('span')!
+    // Without forced-color-adjust the thumb collapses to Canvas and vanishes.
+    expect(on).toHaveClass(
+      'forced-colors:forced-color-adjust-none',
+      'forced-colors:bg-[Canvas]',
+      'forced-colors:data-[state=checked]:bg-[Highlight]',
+    )
+    expect(thumb).toHaveClass(
+      'forced-colors:bg-[ButtonText]',
+      'forced-colors:data-[state=checked]:bg-[HighlightText]',
+    )
+    expect(thumb).toHaveAttribute('data-state', 'checked')
+    expect(screen.getByRole('switch', { name: 'Off' })).toHaveAttribute('data-state', 'unchecked')
   })
 })
