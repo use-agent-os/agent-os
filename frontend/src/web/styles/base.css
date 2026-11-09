@@ -1,0 +1,199 @@
+/* Entry stylesheet of the rebuilt web console (overhaul-control-ui, D3/D12).
+ * Tailwind utilities, the semantic tokens, bundled fonts and the shared
+ * accessibility baselines: focus, target size, motion and forced colors. */
+
+@import 'tailwindcss';
+@import './tokens.css';
+
+/* Theme selection is `data-theme` on <html>, not shadcn's `.dark` class. */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+/* Coarse (touch) pointers get 44px targets; see the `touch:` utilities. */
+@custom-variant touch (@media (pointer: coarse));
+
+/* Served from the console bundle — never from a third-party font host. */
+@font-face {
+  font-family: 'Inter Variable';
+  src: url('../../assets/fonts/Inter-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono Variable';
+  src: url('../../assets/fonts/JetBrainsMono-Variable.woff2') format('woff2');
+  font-weight: 100 800;
+  font-display: swap;
+}
+
+@layer base {
+  html {
+    background: var(--surface-0);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background: var(--surface-0);
+    overflow-x: hidden;
+  }
+
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: var(--font-mono);
+    font-size: 0.93em;
+  }
+
+  ::selection {
+    background: var(--accent-soft);
+    color: var(--text);
+  }
+
+  /* Visible keyboard focus everywhere; pointer clicks may omit it. The offset
+     keeps the ring clear of the element's own fill so it is never covered. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  /* iOS zooms into inputs under 16px; keep them at 16px on touch. */
+  @media (pointer: coarse) {
+    input,
+    textarea,
+    select {
+      font-size: max(16px, 1em);
+    }
+  }
+
+  [hidden] {
+    display: none !important;
+  }
+}
+
+@layer utilities {
+  /* Interactive targets: 24px minimum, 44px where the pointer is coarse. */
+  .target {
+    min-width: var(--target-min);
+    min-height: var(--target-min);
+  }
+  @media (pointer: coarse) {
+    .target {
+      min-width: 44px;
+      min-height: 44px;
+    }
+  }
+
+  /* Motion utilities. Durations never exceed --duration-slow (300ms), and an
+     exit is never slower than its entrance (both use the same duration). */
+  .motion-fade {
+    transition: opacity var(--duration-base) var(--ease-out);
+  }
+  .motion-panel {
+    transition:
+      transform var(--duration-slow) var(--ease-out),
+      opacity var(--duration-slow) var(--ease-out);
+  }
+  .anim-overlay-in[data-state='open'] {
+    animation: agentos-fade-in var(--duration-base) var(--ease-out);
+  }
+  .anim-overlay-in[data-state='closed'] {
+    animation: agentos-fade-out var(--duration-base) var(--ease-out);
+  }
+  .anim-dialog-in[data-state='open'] {
+    animation: agentos-pop-in var(--duration-base) var(--ease-out);
+  }
+  .anim-dialog-in[data-state='closed'] {
+    animation: agentos-fade-out var(--duration-fast) var(--ease-out);
+  }
+  .anim-drawer-in[data-state='open'] {
+    animation: agentos-slide-in var(--duration-slow) var(--ease-out);
+  }
+  .anim-drawer-in[data-state='closed'] {
+    animation: agentos-slide-out var(--duration-base) var(--ease-out);
+  }
+
+  .scroll-contained {
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+}
+
+@keyframes agentos-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes agentos-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes agentos-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+@keyframes agentos-slide-in {
+  from {
+    transform: translateX(-100%);
+  }
+}
+@keyframes agentos-slide-out {
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+/* Reduced motion: dialogs, the drawer, panels, smooth scrolling and message
+   entry become instant. A running indicator is status, not decoration, so it
+   keeps a (slow, opacity-only) pulse via .motion-status. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0s !important;
+    scroll-behavior: auto !important;
+  }
+  .motion-status {
+    animation-duration: 2s !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+
+/* Forced colors (Windows high contrast): keep every control, boundary, focus
+   ring and status icon visible; drop decorative imagery. */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 2px solid CanvasText;
+  }
+  button,
+  [role='button'],
+  [role='menuitem'],
+  [role='tab'],
+  input,
+  textarea,
+  select {
+    border: 1px solid ButtonText;
+  }
+  [data-status-icon],
+  .motion-status {
+    forced-color-adjust: none;
+    color: CanvasText;
+  }
+  [data-decorative] {
+    display: none;
+  }
+}

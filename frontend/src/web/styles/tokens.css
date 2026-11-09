@@ -1,0 +1,201 @@
+/* Semantic design tokens for the rebuilt web console (overhaul-control-ui, D3).
+ *
+ * One token set per theme. Components use the semantic names (surface, text,
+ * accent, status) through the Tailwind mapping at the bottom, never raw hex.
+ * Every text, control-boundary and focus pair below is asserted against its
+ * WCAG threshold by tokens.test.ts — change a value there and here together.
+ *
+ * The theme is selected by `data-theme` on <html> (stores/theme.ts, applied
+ * before first paint by public/theme-bootstrap.js). The dark block doubles as
+ * the default so an unset attribute still renders a complete theme.
+ */
+
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --surface-0: #0e0f12; /* canvas */
+  --surface-1: #15171b; /* rail, list pane */
+  --surface-2: #1c1f24; /* cards, inputs, popovers */
+  --surface-3: #252930; /* hover, pressed, selected rows */
+  --text: #eceef1;
+  --text-muted: #a1a7b0;
+  --border: #2a2e35; /* decorative dividers */
+  --border-control: #68707b; /* input and control boundaries (3:1) */
+
+  --accent: #ccff00; /* AgentOS lime */
+  --accent-fg: #0f1400;
+  --accent-soft: #232d0a;
+
+  --ok: #4ade80;
+  --ok-fg: #0e0f12;
+  --warn: #fbbf24;
+  --warn-fg: #0e0f12;
+  --danger: #f87171;
+  --danger-fg: #0e0f12;
+  --info: #60a5fa;
+  --info-fg: #0e0f12;
+
+  --ring: var(--accent);
+  --scrim: rgb(0 0 0 / 0.6);
+  --shadow-color: 0 0% 0%;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --surface-0: #fafaf7;
+  --surface-1: #ffffff;
+  --surface-2: #f1f2ec;
+  --surface-3: #e6e8e0;
+  --text: #16181d;
+  --text-muted: #5b616b;
+  --border: #e1e3dc;
+  --border-control: #7a7f88;
+
+  --accent: #4d6600; /* olive: lime fails contrast on light surfaces */
+  --accent-fg: #ffffff;
+  --accent-soft: #eef3dc;
+
+  --ok: #166534;
+  --ok-fg: #ffffff;
+  --warn: #854d0e;
+  --warn-fg: #ffffff;
+  --danger: #b91c1c;
+  --danger-fg: #ffffff;
+  --info: #1d4ed8;
+  --info-fg: #ffffff;
+
+  --ring: var(--accent);
+  --scrim: rgb(22 24 29 / 0.4);
+  --shadow-color: 220 10% 20%;
+}
+
+/* Theme-independent scales. */
+:root {
+  /* Text size preference (stores/preferences.ts sets data-text-size). Scales
+     chat prose, the composer, tool rows and side panels — not the rail. */
+  --text-scale: 1;
+  --leading-prose: 1.6;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --elevation-1: 0 1px 2px hsl(var(--shadow-color) / 0.12);
+  --elevation-2: 0 4px 12px hsl(var(--shadow-color) / 0.16);
+  --elevation-3: 0 12px 32px hsl(var(--shadow-color) / 0.24);
+
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-drawer: 40;
+  --z-overlay: 50;
+  --z-popover: 60;
+  --z-toast: 70;
+  --z-tooltip: 80;
+
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 300ms; /* the ceiling for any interface transition */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+
+  --rail-width: 56px;
+  --list-pane-min: 240px;
+  --list-pane-max: 420px;
+  --list-pane-default: 288px;
+  --target-min: 24px;
+}
+
+:root[data-text-size='small'] {
+  --text-scale: 0.93;
+}
+:root[data-text-size='large'] {
+  --text-scale: 1.1;
+}
+
+/* shadcn/ui variable names, aliased onto the semantic set so copied
+   components work unchanged. shadcn's own `--accent` (a hover surface) is NOT
+   aliased: here `accent` is the brand accent, and primitives use surface-3. */
+:root {
+  --background: var(--surface-0);
+  --foreground: var(--text);
+  --card: var(--surface-2);
+  --card-foreground: var(--text);
+  --popover: var(--surface-2);
+  --popover-foreground: var(--text);
+  --primary: var(--accent);
+  --primary-foreground: var(--accent-fg);
+  --secondary: var(--surface-3);
+  --secondary-foreground: var(--text);
+  --muted: var(--surface-2);
+  --muted-foreground: var(--text-muted);
+  --destructive: var(--danger);
+  --destructive-foreground: var(--danger-fg);
+  --input: var(--border-control);
+}
+
+@theme inline {
+  --font-sans: 'Inter Variable', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-border: var(--border);
+  --color-border-control: var(--border-control);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-ok: var(--ok);
+  --color-ok-fg: var(--ok-fg);
+  --color-warn: var(--warn);
+  --color-warn-fg: var(--warn-fg);
+  --color-danger: var(--danger);
+  --color-danger-fg: var(--danger-fg);
+  --color-info: var(--info);
+  --color-info-fg: var(--info-fg);
+  --color-ring: var(--ring);
+  --color-scrim: var(--scrim);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-input: var(--input);
+
+  --shadow-1: var(--elevation-1);
+  --shadow-2: var(--elevation-2);
+  --shadow-3: var(--elevation-3);
+
+  /* Chat prose, composer, tool rows and side panels scale with the text-size
+     preference; interface chrome (text-ui) does not. */
+  --text-prose: calc(15px * var(--text-scale));
+}
+
+@theme {
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --text-ui: 14px;
+  --text-ui--line-height: 1.45;
+  --text-small: 12px; /* the floor: nothing renders smaller */
+  --text-small--line-height: 1.4;
+}
