@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AppProviders } from './providers'
 
 // Class instance methods delegate to shared spies so tests can assert on
-// connect() regardless of which WsRpcClient instance AppProviders creates.
+// connect regardless of which WsRpcClient instance AppProviders creates.
 const connectMock = vi.fn()
 vi.mock('@/lib/ws-rpc', () => ({
   WsRpcClient: class {
@@ -62,7 +62,7 @@ describe('AppProviders connection settings', () => {
     setLocation('http://localhost:3000/')
   })
 
-  it('reads the auth token from sessionStorage, not localStorage (app.js:201)', async () => {
+  it('reads the auth token from sessionStorage, not localStorage', async () => {
     stubFetchOk()
     sessionStorage.setItem('agentos.wsToken', 'session-tok')
     // A token in localStorage must be ignored — legacy never read that tier.
@@ -73,7 +73,7 @@ describe('AppProviders connection settings', () => {
     )
   })
 
-  it('connects without a token when sessionStorage has none (app.js:186-190)', async () => {
+  it('connects without a token when sessionStorage has none', async () => {
     stubFetchOk()
     localStorage.setItem('agentos.wsToken', 'stale-local-tok')
     renderProviders()
@@ -82,7 +82,7 @@ describe('AppProviders connection settings', () => {
     )
   })
 
-  it('prefers the stored wsUrl override over bootstrap ws_url (app.js:197-203)', async () => {
+  it('prefers the stored wsUrl override over bootstrap ws_url', async () => {
     stubFetchOk()
     localStorage.setItem('agentos.wsUrl', 'ws://10.0.0.5:19999/ws')
     renderProviders()
@@ -101,7 +101,7 @@ describe('AppProviders connection settings', () => {
     expect(connectMock).toHaveBeenCalledWith(`${proto}//${location.host}/ws`, undefined)
   })
 
-  it('connects with the location-derived wss default when bootstrap ws_url downgrades a same-host https page to ws:// (app.js:191-195)', async () => {
+  it('connects with the location-derived wss default when bootstrap ws_url downgrades a same-host https page to ws://', async () => {
     // Proxy dropped x-forwarded-proto → server emitted ws:// for an https page.
     setLocation('https://console.example.com/control/')
     vi.stubGlobal(

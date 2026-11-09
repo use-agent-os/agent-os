@@ -18,26 +18,26 @@ const att = (name: string): PendingAttachment => ({
 })
 
 describe('PendingQueue', () => {
-  it('renders nothing when the queue is empty (chat.js:8476-8480)', () => {
+  it('renders nothing when the queue is empty', () => {
     const { container } = render(
       <PendingQueue queue={[]} onRemove={vi.fn()} onClearAll={vi.fn()} />,
     )
     expect(container.firstChild).toBeNull()
   })
 
-  it('renders the Pending N/5 count label (chat.js:8484)', () => {
+  it('renders the Pending N/5 count label', () => {
     render(<PendingQueue queue={[item('one')]} onRemove={vi.fn()} onClearAll={vi.fn()} />)
     expect(screen.getByText('Pending 1/5')).toBeInTheDocument()
   })
 
-  it('renders one chip per queued item with a 30-char preview (chat.js:8489-8500)', () => {
+  it('renders one chip per queued item with a 30-char preview', () => {
     const long = 'x'.repeat(50)
     render(<PendingQueue queue={[item(long)]} onRemove={vi.fn()} onClearAll={vi.fn()} />)
     // 30 chars + ellipsis.
     expect(screen.getByText('x'.repeat(30) + '…')).toBeInTheDocument()
   })
 
-  it('shows the attachment count chip when an item carries attachments (chat.js:8492-8493)', () => {
+  it('shows the attachment count chip when an item carries attachments', () => {
     render(
       <PendingQueue
         queue={[item('with files', [att('a'), att('b')])]}
@@ -48,12 +48,12 @@ describe('PendingQueue', () => {
     expect(screen.getByText('📎2')).toBeInTheDocument()
   })
 
-  it('labels an attachment-only item as (attachment only) (chat.js:8490)', () => {
+  it('labels an attachment-only item as (attachment only)', () => {
     render(<PendingQueue queue={[item('', [att('a')])]} onRemove={vi.fn()} onClearAll={vi.fn()} />)
     expect(screen.getByText('(attachment only)')).toBeInTheDocument()
   })
 
-  it('hides Clear all with a single item, shows it at 2+ (chat.js:8482)', () => {
+  it('hides Clear all with a single item, shows it at 2+', () => {
     const { rerender } = render(
       <PendingQueue queue={[item('a')]} onRemove={vi.fn()} onClearAll={vi.fn()} />,
     )
@@ -73,7 +73,7 @@ describe('PendingQueue', () => {
     expect(screen.getAllByRole('button', { name: /^Remove Pending message/ })).toHaveLength(5)
   })
 
-  it('calls onRemove with the chip index (chat.js:8459-8463)', () => {
+  it('calls onRemove with the chip index', () => {
     const onRemove = vi.fn()
     render(<PendingQueue queue={[item('a'), item('b')]} onRemove={onRemove} onClearAll={vi.fn()} />)
     const removeButtons = screen.getAllByRole('button', { name: /^Remove Pending message/ })
@@ -81,7 +81,7 @@ describe('PendingQueue', () => {
     expect(onRemove).toHaveBeenCalledWith(1)
   })
 
-  it('calls onClearAll when Clear all is clicked (chat.js:8466-8471)', () => {
+  it('calls onClearAll when Clear all is clicked', () => {
     const onClearAll = vi.fn()
     render(
       <PendingQueue queue={[item('a'), item('b')]} onRemove={vi.fn()} onClearAll={onClearAll} />,

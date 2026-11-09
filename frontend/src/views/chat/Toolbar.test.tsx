@@ -95,7 +95,7 @@ describe('Toolbar', () => {
     vi.stubGlobal('fetch', fetchSpy)
     render(<Toolbar sessionKey={SESSION} />)
 
-    // Click the pill -> a destructive confirm appears (chat.js:1376-1382).
+    // Click the pill -> a destructive confirm appears.
     fireEvent.click(await screen.findByRole('button', { name: /approval prompts/i }))
     const confirm = await screen.findByRole('button', { name: /enable bypass/i })
     fireEvent.click(confirm)
@@ -113,10 +113,10 @@ describe('Toolbar', () => {
         }),
       )
     })
-    // The POST body carries the session key + the bypass mode (chat.js:2283).
+    // The POST body carries the session key + the bypass mode.
     const body = JSON.parse((fetchSpy.mock.calls[0]![1] as RequestInit).body as string)
     expect(body).toMatchObject({ sessionKey: SESSION, mode: 'bypass' })
-    // Shared storage is written under version 2 (chat.js:19,2252-2253).
+    // Shared storage is written under version 2.
     expect(localStorage.getItem(ELEVATED_MODE_KEY)).toBe('bypass')
     expect(localStorage.getItem(ELEVATED_MODE_VERSION_KEY)).toBe('2')
     // The pill reflects the active session override.
@@ -132,7 +132,7 @@ describe('Toolbar', () => {
     vi.stubGlobal('fetch', fetchSpy)
     render(<Toolbar sessionKey={SESSION} />)
 
-    // No confirm on clear (chat.js:1372-1374): clicking an active pill clears it.
+    // No confirm on clear: clicking an active pill clears it.
     fireEvent.click(await screen.findByRole('button', { name: /session bypass/i }))
 
     await waitFor(() => {
@@ -207,7 +207,7 @@ describe('Toolbar', () => {
   })
 
   it('re-polls approvals immediately when the elevated-mode POST resolvedPending', async () => {
-    // chat.js:2305-2308 — resolvedPending>0 auto-approved pending items, so the
+    // resolvedPending>0 auto-approved pending items, so the
     // badge/modal must refresh now rather than on the next ~1.5s tick.
     const pollSpy = vi.spyOn(approvalMonitor, 'pollNow').mockResolvedValue(undefined)
     const fetchSpy = fetchOk({ mode: 'bypass', resolvedPending: 3 })
@@ -239,7 +239,7 @@ describe('Toolbar', () => {
   })
 
   it('reflects the stored Visual-effects pref (OFF) on mount', async () => {
-    // chat.js:1483-1485 — hydrate the toggle from the stored `agentos-router-fx`.
+    // hydrate the toggle from the stored `agentos-router-fx`.
     localStorage.setItem(ROUTER_FX_PREF_KEY, JSON.stringify({ enabled: false }))
     render(<Toolbar sessionKey={SESSION} />)
     const toggle = await screen.findByRole('checkbox', { name: /visual effects/i })
@@ -262,7 +262,7 @@ describe('Toolbar', () => {
   })
 
   it('toggling Visual effects OFF writes the agentos-router-fx pref shape', async () => {
-    // chat.js:1425-1426/3411-3416 — write `{enabled}` under the exact key.
+    // write `{enabled}` under the exact key.
     render(<Toolbar sessionKey={SESSION} />)
     const toggle = await screen.findByRole('checkbox', { name: /visual effects/i })
     expect(toggle).toBeChecked()
@@ -276,7 +276,7 @@ describe('Toolbar', () => {
 
   it('delegates to the controller setter (live pref) when threaded in', async () => {
     // The controller mutates its LIVE `_routerFx` object + persists, so an
-    // already-mounted engine picks up the change (chat.js:1425). Here we assert
+    // already-mounted engine picks up the change. Here we assert
     // the toolbar routes the toggle to that setter rather than persisting itself.
     const setEnabled = vi.fn((enabled: boolean) => {
       const pref: RouterFxPref = { enabled, variant: 'default' }
@@ -295,7 +295,7 @@ describe('Toolbar', () => {
   })
 
   it('reflects the live routerFxEnabled prop on mount over localStorage', async () => {
-    // chat.js:1484-1485 — the toggle mirrors the live `_routerFx.enabled`.
+    // the toggle mirrors the live `_routerFx.enabled`.
     localStorage.setItem(ROUTER_FX_PREF_KEY, JSON.stringify({ enabled: true }))
     render(<Toolbar sessionKey={SESSION} routerFxEnabled={false} onRouterFxToggle={vi.fn()} />)
     const toggle = await screen.findByRole('checkbox', { name: /visual effects/i })

@@ -58,7 +58,7 @@ export const chat = defineNamespace('chat', {
   bypassConfirmNote: 'Sensitive-path checks remain active.',
   bypassConfirmAction: 'Enable bypass',
 
-  // Elevated-mode pill (chat.js:2314-2343).
+  // Elevated-mode pill.
   pillUnavailable: 'Bypass N/A',
   pillTitleUnavailable:
     'Bypass requires an admitted Control connection. Reconnect with the configured Control token.',
@@ -815,7 +815,7 @@ export const chat = defineNamespace('chat', {
   msgShowFullMissing: 'The message is no longer in this session.',
   msgShowFullFailed: 'Could not load the full message: {message}',
 
-  // Transcript: thinking indicator verbs (chat.js:381-382).
+  // Transcript: thinking indicator verbs.
   verbWatching: 'Watching',
   verbTracking: 'Tracking',
   verbSensing: 'Sensing',

@@ -5,17 +5,17 @@
   "tsx": true,
   "tailwind": {
     "config": "",
-    "css": "src/styles/globals.css",
+    "css": "src/web/styles/tokens.css",
     "baseColor": "neutral",
     "cssVariables": true,
     "prefix": ""
   },
   "iconLibrary": "lucide",
   "aliases": {
-    "components": "@/components",
+    "components": "@/web/components",
     "utils": "@/lib/utils",
-    "ui": "@/components/ui",
+    "ui": "@/web/components/ui",
     "lib": "@/lib",
-    "hooks": "@/hooks"
+    "hooks": "@/web/hooks"
   }
 }

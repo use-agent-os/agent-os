@@ -65,10 +65,10 @@ function wrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>
 }
 
-/** An RPC whose `commands.list_for_surface` call hangs until `resolve()` is
+/** An RPC whose `commands.list_for_surface` call hangs until `resolve` is
  * invoked — used to simulate `execute` racing ahead of the mount effect's
- * catalog load (chat.js:2843 `if (!_slashCatalogLoaded) await
- * _loadSlashCommands();`). */
+ * catalog load (`if (!_slashCatalogLoaded) await
+ * _loadSlashCommands;`). */
 function makeDeferredRpc(catalog: unknown[] = CATALOG) {
   let resolveCatalog!: () => void
   const rpc = {
@@ -99,14 +99,14 @@ describe('useSlashCommands', () => {
     vi.mocked(toast.error).mockClear()
   })
 
-  it('loads the catalog via commands.list_for_surface with surface: web_chat (chat.js:2619)', async () => {
+  it('loads the catalog via commands.list_for_surface with surface: web_chat', async () => {
     const { result } = renderHook(() => useSlashCommands({ sessionKey: 'k' }), { wrapper })
     await waitFor(() => expect(result.current.commands.length).toBe(4))
     expect(mockRpc.waitForConnection).toHaveBeenCalled()
     expect(mockRpc.call).toHaveBeenCalledWith('commands.list_for_surface', { surface: 'web_chat' })
   })
 
-  it('execute("/reset") calls sessions.reset with the session key (chat.js:2723)', async () => {
+  it('execute("/reset") calls sessions.reset with the session key', async () => {
     const { result } = renderHook(
       () => useSlashCommands({ sessionKey: 'agent:main:webchat:default' }),
       { wrapper },
@@ -122,7 +122,7 @@ describe('useSlashCommands', () => {
     )
   })
 
-  it('execute("/usage") calls usage.status and toasts the token count (chat.js:2772)', async () => {
+  it('execute("/usage") calls usage.status and toasts the token count', async () => {
     const { result } = renderHook(() => useSlashCommands({ sessionKey: 'k' }), { wrapper })
     await waitFor(() => expect(result.current.commands.length).toBe(4))
     act(() => {
@@ -132,7 +132,7 @@ describe('useSlashCommands', () => {
     await waitFor(() => expect(toast.info).toHaveBeenCalled())
   })
 
-  it('execute("/c3") pins the router tier via router.hold.set (chat.js:2822)', async () => {
+  it('execute("/c3") pins the router tier via router.hold.set', async () => {
     const { result } = renderHook(() => useSlashCommands({ sessionKey: 'k' }), { wrapper })
     await waitFor(() => expect(result.current.commands.length).toBe(4))
     act(() => {
@@ -143,7 +143,7 @@ describe('useSlashCommands', () => {
     )
   })
 
-  it('execute("/new") delegates to onSessionAction (chat.js:2692 session-swap seam)', async () => {
+  it('execute("/new") delegates to onSessionAction', async () => {
     const onSessionAction = vi.fn()
     const { result } = renderHook(() => useSlashCommands({ sessionKey: 'k', onSessionAction }), {
       wrapper,
@@ -155,7 +155,7 @@ describe('useSlashCommands', () => {
     expect(onSessionAction).toHaveBeenCalledWith('new_chat', expect.anything(), '')
   })
 
-  it('execute("/typo") toasts an unsupported-command warning and still returns true (chat.js:2848)', async () => {
+  it('execute("/typo") toasts an unsupported-command warning and still returns true', async () => {
     const { result } = renderHook(() => useSlashCommands({ sessionKey: 'k' }), { wrapper })
     await waitFor(() => expect(result.current.commands.length).toBe(4))
     let handled = false
@@ -166,7 +166,7 @@ describe('useSlashCommands', () => {
     expect(toast.warning).toHaveBeenCalledWith('Unsupported command: /typo')
   })
 
-  it('execute() before the catalog resolves awaits the load then still runs the command (chat.js:2843 lazy-load guard)', async () => {
+  it('execute() before the catalog resolves awaits the load then still runs the command', async () => {
     const { rpc, resolveCatalog } = makeDeferredRpc()
     mockRpc = rpc
     const { result } = renderHook(
@@ -175,7 +175,7 @@ describe('useSlashCommands', () => {
     )
     // The catalog RPC is in flight; the mount effect's load has not resolved.
     expect(result.current.commands).toEqual([])
-    // Wait for the mount effect's `loadCatalog()` to get past `waitForConnection`
+    // Wait for the mount effect's `loadCatalog` to get past `waitForConnection`
     // and actually issue the (still-pending) `commands.list_for_surface` call.
     await waitFor(() =>
       expect(
@@ -184,7 +184,7 @@ describe('useSlashCommands', () => {
     )
 
     // Submit "/reset" before the catalog has loaded — legacy still executes
-    // it (chat.js:2843 `if (!_slashCatalogLoaded) await _loadSlashCommands()`)
+    // it (`if (!_slashCatalogLoaded) await _loadSlashCommands`)
     // rather than toasting "Unsupported command".
     let executePromise!: Promise<boolean>
     act(() => {
@@ -208,7 +208,7 @@ describe('useSlashCommands', () => {
     )
   })
 
-  it('survives a catalog RPC failure with an empty catalog (chat.js:2630 catch)', async () => {
+  it('survives a catalog RPC failure with an empty catalog', async () => {
     mockRpc = makeRpc(CATALOG, true)
     const { result } = renderHook(() => useSlashCommands({ sessionKey: 'k' }), { wrapper })
     // The load rejects → catalog stays empty; no throw.

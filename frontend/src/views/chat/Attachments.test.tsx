@@ -5,7 +5,7 @@ import { LARGE_PASTE_CHARS, PAGE_DUMP_CHARS, hasPendingAttachmentWork } from './
 
 // The attachment tray is a real React component (idiomatic, not the imperative
 // legacy `_renderAttachmentPreview`). `useAttachments` owns the pending buffer +
-// the FileReader / staged-upload lifecycle (chat.js:8052-8161); `<Attachments>`
+// the FileReader / staged-upload lifecycle; `<Attachments>`
 // renders the previews + cap-rejection message. These RTL tests exercise both.
 
 vi.mock('sonner', () => ({
@@ -52,7 +52,7 @@ afterEach(() => {
 })
 
 describe('Attachments tray', () => {
-  it('accepts an image file and shows a preview thumbnail (chat.js:8069/8359)', async () => {
+  it('accepts an image file and shows a preview thumbnail', async () => {
     renderTray()
     await act(async () => {
       api.addFiles([makeFile('photo.png', 'image/png', 1234)])
@@ -65,7 +65,7 @@ describe('Attachments tray', () => {
     expect(api.attachments[0]?.mime).toBe('image/png')
   })
 
-  it('accepts a text file and shows a file chip (chat.js:8069/8370)', async () => {
+  it('accepts a text file and shows a file chip', async () => {
     renderTray()
     await act(async () => {
       api.addFiles([makeFile('notes.md', 'text/markdown', 500, '# hi')])
@@ -77,7 +77,7 @@ describe('Attachments tray', () => {
     expect(screen.queryByRole('img', { name: 'notes.md' })).not.toBeInTheDocument()
   })
 
-  it('rejects an oversized file inline with the allowed-types label (chat.js:8059)', async () => {
+  it('rejects an oversized file inline with the allowed-types label', async () => {
     renderTray()
     await act(async () => {
       // 6 MB image > the 5 MB image cap.
@@ -89,7 +89,7 @@ describe('Attachments tray', () => {
     expect(screen.getByText(/huge\.png/)).toBeInTheDocument()
   })
 
-  it('rejects an unsupported mime with the allowed-types label (chat.js:8055)', async () => {
+  it('rejects an unsupported mime with the allowed-types label', async () => {
     renderTray()
     await act(async () => {
       api.addFiles([makeFile('virus.exe', 'application/x-msdownload', 10)])
@@ -101,7 +101,7 @@ describe('Attachments tray', () => {
     ).toBeInTheDocument()
   })
 
-  it('removes a pending attachment when its remove button is clicked (chat.js:8379)', async () => {
+  it('removes a pending attachment when its remove button is clicked', async () => {
     renderTray()
     await act(async () => {
       api.addFiles([makeFile('a.png', 'image/png', 100)])
@@ -113,7 +113,7 @@ describe('Attachments tray', () => {
 })
 
 describe('useAttachments paste normalization', () => {
-  it('converts a >=20k paste into a generated .txt attachment (chat.js:8017)', async () => {
+  it('converts a >=20k paste into a generated .txt attachment', async () => {
     renderTray()
     const paste = 'x'.repeat(LARGE_PASTE_CHARS)
     let normalized: Awaited<ReturnType<typeof api.normalizeForSend>>
@@ -124,7 +124,7 @@ describe('useAttachments paste normalization', () => {
     expect(normalized!.attachments.some((a) => a.generated)).toBe(true)
   })
 
-  it('converts a >=8k page dump into a page-dump attachment (chat.js:8035)', async () => {
+  it('converts a >=8k page dump into a page-dump attachment', async () => {
     renderTray()
     const body =
       'CHAT SESSION agent:main:webchat: Still waiting for agent response\n' +
@@ -139,7 +139,7 @@ describe('useAttachments paste normalization', () => {
 })
 
 describe('useAttachments send-enable + pending-work', () => {
-  it('reports pending work while a file is being read (chat.js:8067)', async () => {
+  it('reports pending work while a file is being read', async () => {
     renderTray()
     // Add a file but do not flush the FileReader; the entry starts inline_pending.
     act(() => {

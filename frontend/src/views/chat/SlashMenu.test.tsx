@@ -41,7 +41,7 @@ function renderMenu(props: {
 }
 
 describe('SlashMenu', () => {
-  it('opens and filters the slash menu on a "/" prefix (chat.js:2643)', async () => {
+  it('opens and filters the slash menu on a "/" prefix', async () => {
     const { rerender } = renderMenu({ value: '/' })
     // All commands visible for a bare "/".
     expect(await screen.findByText('/help')).toBeInTheDocument()
@@ -53,22 +53,22 @@ describe('SlashMenu', () => {
     expect(screen.queryByText('/compact')).not.toBeInTheDocument()
   })
 
-  it('does NOT open for the "//" literal-slash escape (chat.js:2640)', () => {
+  it('does NOT open for the "//" literal-slash escape', () => {
     renderMenu({ value: '//help' })
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
     expect(screen.queryByText('/help')).not.toBeInTheDocument()
   })
 
-  it('renders nothing when the filter matches no command (chat.js:2644)', () => {
+  it('renders nothing when the filter matches no command', () => {
     renderMenu({ value: '/zzz' })
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
   })
 
-  it('moves the active item with ArrowDown/ArrowUp via the keyboard handle (chat.js:2654-2662)', async () => {
+  it('moves the active item with ArrowDown/ArrowUp via the keyboard handle', async () => {
     const handleRef = createRef<SlashMenuHandle>()
     renderMenu({ value: '/', handleRef })
     await screen.findByText('/help')
-    // First item active by default (chat.js:2646 _slashIdx = 0).
+    // First item active by default (_slashIdx = 0).
     const options = () => screen.getAllByRole('option')
     expect(options()[0]).toHaveAttribute('aria-selected', 'true')
     act(() => {
@@ -110,7 +110,7 @@ describe('SlashMenu', () => {
     )
   })
 
-  it('Enter executes the active command (chat.js:2851 _selectSlashCmd)', async () => {
+  it('Enter executes the active command', async () => {
     const onExecute = vi.fn()
     const handleRef = createRef<SlashMenuHandle>()
     renderMenu({ value: '/comp', onExecute, handleRef })
@@ -118,11 +118,11 @@ describe('SlashMenu', () => {
     act(() => {
       handleRef.current!.handleKeyDown({ key: 'Enter', preventDefault() {} } as never)
     })
-    // The active command's text is dispatched for execution (chat.js:2842).
+    // The active command's text is dispatched for execution.
     expect(onExecute).toHaveBeenCalledWith('/compact')
   })
 
-  it('a click on an item executes that command (chat.js:2669)', async () => {
+  it('a click on an item executes that command', async () => {
     const onExecute = vi.fn()
     renderMenu({ value: '/', onExecute })
     const item = await screen.findByText('/new')
@@ -130,7 +130,7 @@ describe('SlashMenu', () => {
     expect(onExecute).toHaveBeenCalledWith('/new')
   })
 
-  it('Escape closes the menu (chat.js:2675 _closeSlashMenu)', async () => {
+  it('Escape closes the menu', async () => {
     const onClose = vi.fn()
     const handleRef = createRef<SlashMenuHandle>()
     renderMenu({ value: '/', onClose, handleRef })

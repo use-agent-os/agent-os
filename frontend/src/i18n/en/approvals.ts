@@ -11,7 +11,7 @@ export const approvals = defineNamespace('approvals', {
   refresh: 'Refresh',
   refreshing: 'Refreshing…',
 
-  // Approval-strategy options (approvals.js:82-86).
+  // Approval-strategy options.
   modePromptLabel: 'Ask every time',
   modePromptDesc: 'Every risky tool execution opens an approval prompt.',
   modeAutoApproveLabel: 'Auto approve',
@@ -19,7 +19,7 @@ export const approvals = defineNamespace('approvals', {
   modeAutoDenyLabel: 'Auto deny',
   modeAutoDenyDesc: 'All tool executions are automatically denied.',
 
-  // Effective execution mode (approvals.js:194-216).
+  // Effective execution mode.
   scopeSession: 'Session',
   scopeGlobal: 'Global',
   execLabel: '{scope} {mode}',

@@ -78,7 +78,7 @@ describe('usesDefaultGatewayUrl', () => {
   it('is true when the stored URL equals the default (legacy stores the default routinely)', () => {
     expect(usesDefaultGatewayUrl(DEFAULT, DEFAULT)).toBe(true)
   })
-  it('ignores query and hash — only protocol/host/pathname compare (health.js:230-234)', () => {
+  it('ignores query and hash — only protocol/host/pathname compare', () => {
     expect(usesDefaultGatewayUrl('ws://127.0.0.1:18791/ws?x=1#y', DEFAULT)).toBe(true)
   })
   it('falls back to the default when the gateway URL is empty', () => {
@@ -101,7 +101,7 @@ describe('evidence', () => {
     const entries = visibleEvidenceEntries({ a: 1, restartRequired: true, b: null })
     expect(entries).toEqual([['a', 1]])
   })
-  it('labels camelCase keys keeping each hump capitalized (health.js:453-460)', () => {
+  it('labels camelCase keys keeping each hump capitalized', () => {
     // Legacy only upper-cases the leading char and leaves the rest untouched,
     // so a camelCase hump stays capitalized: gatewayUrl -> "Gateway Url".
     expect(evidenceLabel('gatewayUrl')).toBe('Gateway Url')

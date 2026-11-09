@@ -21,44 +21,44 @@ import '@/i18n/en/chat'
  * Chat attachments — the pending-attachment buffer + tray (React).
  *
  * Ported from the imperative legacy attachment surface in
- * static/js/views/chat.js: `_addAttachment` (chat.js:8052), the FileReader
- * inline path + staged `_uploadAttachmentStaged` (chat.js:8069/8127),
- * `_removeAttachmentByLocalId` (chat.js:8303), the outgoing-payload
- * normalization `_normalizeOutgoingComposerPayload` (chat.js:7982), and the
- * preview renderer `_renderAttachmentPreview` (chat.js:8346). Unlike the legacy
+ * static/js/views/chat.js: `_addAttachment`, the FileReader
+ * inline path + staged `_uploadAttachmentStaged` ,
+ * `_removeAttachmentByLocalId`, the outgoing-payload
+ * normalization `_normalizeOutgoingComposerPayload`, and the
+ * preview renderer `_renderAttachmentPreview`. Unlike the legacy
  * imperative DOM this is idiomatic React: `useAttachments` owns the buffer +
  * lifecycle, `<Attachments>` renders it.
  *
  * The staged upload (image/PDF > 2 MB) is NOT an RPC — it is a multipart POST to
- * the bridge endpoint `/api/v1/files/upload` (chat.js:8128-8144), returning a
+ * the bridge endpoint `/api/v1/files/upload`, returning a
  * `{ file_uuid }` the outgoing payload references. The connection token (same
  * key useTranscript reads) is sent as `Authorization: Bearer …`.
  */
 
-// chat.js:322 — the local-id counter (monotonic per view). A module-scope ref-
+// the local-id counter (monotonic per view). A module-scope ref-
 // equivalent held in the hook so ids stay unique across adds within a session.
 let nextAttachmentIdSeed = 1
 
 /** The public surface of `useAttachments`, threaded to `<Attachments>` + Composer. */
 export interface UseAttachments {
-  /** The live pending buffer (chat.js:323 `_pendingAttachments`). */
+  /** The live pending buffer. */
   attachments: PendingAttachment[]
-  /** Stage files (drop / paste / file-picker) → chat.js:8052 `_addAttachment` per file. */
+  /** Stage files (drop / paste / file-picker) → `_addAttachment` per file. */
   addFiles: (files: File[] | FileList) => void
-  /** Remove one entry by local id (chat.js:8303 `_removeAttachmentByLocalId`). */
+  /** Remove one entry by local id. */
   remove: (localId: number) => void
-  /** Clear the whole buffer after a successful send (chat.js:6173). */
+  /** Clear the whole buffer after a successful send. */
   clear: () => void
   /**
-   * Replace the whole buffer (chat.js:8546/8611 — the pending drain / recover
+   * Replace the whole buffer (— the pending drain / recover
    * paths write `_pendingAttachments` directly). Used by the pending-queue
    * recover/drain to stack the queued attachments into the composer buffer.
    */
   setAll: (attachments: PendingAttachment[]) => void
-  /** The inline cap/mime rejection to show in the tray (chat.js:8055/8059), or null. */
+  /** The inline cap/mime rejection to show in the tray , or null. */
   rejection: string | null
   /**
-   * Normalize the outgoing payload for send (chat.js:7982). Merges the current
+   * Normalize the outgoing payload for send. Merges the current
    * pending buffer with any generated large-paste / page-dump attachment; returns
    * null (and toasts) when the paste exceeds the text hard cap.
    */
@@ -85,20 +85,20 @@ export function useAttachments(opts?: {
   }, [])
 
   const remove = useCallback((localId: number) => {
-    // chat.js:8303-8306 — drop the entry, re-render (React handles the re-render).
+    // drop the entry, re-render (React handles the re-render).
     setAttachments((prev) => prev.filter((att) => att.local_id !== localId))
   }, [])
 
   const clear = useCallback(() => setAttachments([]), [])
 
-  // chat.js:8546/8611 — replace the buffer wholesale (pending drain / recover).
+  // replace the buffer wholesale (pending drain / recover).
   const setAll = useCallback((next: PendingAttachment[]) => setAttachments(next), [])
 
-  // chat.js:8127-8161 `_uploadAttachmentStaged` — multipart POST to the bridge.
+  // `_uploadAttachmentStaged` — multipart POST to the bridge.
   const defaultUpload = useCallback(
     async (file: File, mime: string): Promise<{ file_uuid: string }> => {
       const form = new FormData()
-      // Re-wrap so the multipart part carries the resolved mime (chat.js:8131-8133).
+      // Re-wrap so the multipart part carries the resolved mime.
       const uploadFile =
         file.type === mime || typeof File !== 'function'
           ? file
@@ -121,12 +121,12 @@ export function useAttachments(opts?: {
   )
   const upload = opts?.upload ?? defaultUpload
 
-  // chat.js:8052-8125 `_addAttachment`, ported per-file. Returns whether it staged.
+  // `_addAttachment`, ported per-file. Returns whether it staged.
   const addOne = useCallback(
     (file: File): boolean => {
       const mime = resolveAttachmentMime(file)
       if (!isAllowedAttachmentMime(mime)) {
-        // chat.js:8055 — unsupported mime, with the allowed-types label.
+        // unsupported mime, with the allowed-types label.
         const message = `Unsupported file: ${file.name || 'attachment'} (${mime}). Allowed: ${ATTACHMENT_ALLOWED_LABEL}`
         setRejection(message)
         toast.warning(message)
@@ -134,7 +134,7 @@ export function useAttachments(opts?: {
       }
       const hardCap = attachmentHardCapBytes(mime)
       if (file.size > hardCap) {
-        // chat.js:8059 — over the per-type hard cap.
+        // over the per-type hard cap.
         const message = `File too large: ${file.name || 'attachment'} (max ${Math.round(
           hardCap / 1024 / 1024,
         )} MB)`
@@ -145,7 +145,7 @@ export function useAttachments(opts?: {
       setRejection(null)
       const localId = nextLocalId()
 
-      // ≤ 2 MB → inline base64-on-frame (chat.js:8069).
+      // ≤ 2 MB → inline base64-on-frame.
       if (file.size <= INLINE_THRESHOLD_BYTES) {
         setAttachments((prev) => [
           ...prev,
@@ -179,7 +179,7 @@ export function useAttachments(opts?: {
         return true
       }
 
-      // > 2 MB and not stageable (text-family) → reject (chat.js:8103).
+      // > 2 MB and not stageable (text-family) → reject.
       if (!canStageAttachmentMime(mime)) {
         const message = `File too large: ${file.name || 'attachment'} (text-family attachments are limited to ${Math.round(
           ATTACHMENT_TEXT_HARD_CAP_BYTES / 1000 / 1000,
@@ -189,7 +189,7 @@ export function useAttachments(opts?: {
         return false
       }
 
-      // > 2 MB image/PDF → staged upload (chat.js:8112).
+      // > 2 MB image/PDF → staged upload.
       setAttachments((prev) => [
         ...prev,
         { kind: 'uploading', local_id: localId, name: file.name, mime, size: file.size },
@@ -244,7 +244,7 @@ export function useAttachments(opts?: {
   return { attachments, addFiles, remove, clear, setAll, rejection, normalizeForSend }
 }
 
-/* ── Presentational tray (chat.js:8346 `_renderAttachmentPreview`) ─────────── */
+/* ── Presentational tray ─────────── */
 
 export interface AttachmentsProps {
   api: UseAttachments
@@ -253,9 +253,9 @@ export interface AttachmentsProps {
 /**
  * The attachment tray — previews of the pending buffer + the inline cap/mime
  * rejection message. Hidden entirely when there is nothing pending and no
- * rejection (chat.js:8348 hides the preview when the buffer is empty). Image
+ * rejection (hides the preview when the buffer is empty). Image
  * entries render a thumbnail; everything else a file chip with a busy state
- * while reading/uploading (chat.js:8355-8377).
+ * while reading/uploading.
  */
 export function Attachments({ api }: AttachmentsProps) {
   const { attachments, remove, rejection } = api

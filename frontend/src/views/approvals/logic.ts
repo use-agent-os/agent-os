@@ -21,10 +21,10 @@ import { t } from '@/i18n'
 // implementation. The chat toolbar shares the same source.
 export { normalizeElevatedMode }
 
-// approvals.js:314-322 (_approvalDetail) — the pending-card Details body: the
+// (_approvalDetail) — the pending-card Details body: the
 // warning text when present, else the FULL pretty-printed args/params JSON with
 // NO length cap. This is deliberately distinct from the modal contract's
-// approvalDetail() (services/approval-monitor.ts), which truncates at 900 chars
+// approvalDetail (services/approval-monitor.ts), which truncates at 900 chars
 // for the compact prompt; the legacy VIEW rendered args in full.
 export function approvalCardDetail(item: Approval): string {
   if (item.warning) return String(item.warning)
@@ -43,7 +43,7 @@ export interface ModeOption {
   desc: string
 }
 
-// approvals.js:82-86 — the three approval-strategy choices, in legacy order.
+// the three approval-strategy choices, in legacy order.
 export function modeOptions(): ReadonlyArray<ModeOption> {
   return [
     {
@@ -64,13 +64,13 @@ export function modeOptions(): ReadonlyArray<ModeOption> {
   ]
 }
 
-// approvals.js:87 — active option else the first (prompt) as the fallback.
+// active option else the first (prompt) as the fallback.
 export function activeModeOption(mode: string): ModeOption {
   const options = modeOptions()
   return options.find((m) => m.value === mode) || options[0]!
 }
 
-// approvals.js:310-314 — strategy mode -> status tone. Legacy returned the
+// strategy mode -> status tone. Legacy returned the
 // legacy status-class names ('warn'/'err'/'ok'); rebuilt on the design-system
 // --tone tokens: auto-deny is danger (was 'err'), auto-approve warn, else ok.
 export type Tone = 'ok' | 'warn' | 'danger'
@@ -80,7 +80,7 @@ export function modeStateTone(mode: string): Tone {
   return 'ok'
 }
 
-// approvals.js:234-243 — read the persisted browser elevated mode, downgrading a
+// read the persisted browser elevated mode, downgrading a
 // legacy 'full' written under an older storage version to 'bypass'. Delegates to
 // the service's readBrowserElevated (single source; the store hydrates from the
 // same reader) so the localStorage read + version-downgrade live in one place.
@@ -93,7 +93,7 @@ export interface ExecutionModeSummary {
   desc: string
 }
 
-// approvals.js:194-216 — "<Scope> <MODE>" label + a scope/mode-specific blurb.
+// "<Scope> <MODE>" label + a scope/mode-specific blurb.
 // `scope` is the DISPLAY word, so the session/global branch compares against the
 // translated scope label rather than a hardcoded 'Session'. resolveExecutionMode
 // below passes exactly these values, so the two stay in step in every locale.
@@ -116,7 +116,7 @@ export function executionModeSummary(scope: string, mode: string): ExecutionMode
 }
 
 /**
- * approvals.js:176-192 — the pure derivation behind _loadExecutionModeSummary:
+ * the pure derivation behind _loadExecutionModeSummary:
  * a browser session elevated mode wins ('Session'); else the normalized global
  * `permissions.default_mode` from config.get ('Global'); else the neutral
  * "Approval prompts" fallback. The async config.get fetch stays in the page (an

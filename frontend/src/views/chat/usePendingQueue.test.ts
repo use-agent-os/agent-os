@@ -47,7 +47,7 @@ describe('usePendingQueue', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
-  it('enqueues while busy and clears the composer (chat.js:8505-8531)', () => {
+  it('enqueues while busy and clears the composer', () => {
     const { bridge, state } = makeBridge()
     state.text = 'draft'
     const { result } = renderHook(() => usePendingQueue(bridge))
@@ -57,11 +57,11 @@ describe('usePendingQueue', () => {
     })
     expect(ok).toBe(true)
     expect(result.current.length).toBe(1)
-    // chat.js:8525-8528 — composer/attachments/intent cleared after enqueue.
+    // composer/attachments/intent cleared after enqueue.
     expect(state.text).toBe('')
   })
 
-  it('rejects the 6th enqueue at MAX_PENDING (chat.js:8511)', () => {
+  it('rejects the 6th enqueue at MAX_PENDING', () => {
     const { bridge } = makeBridge()
     const { result } = renderHook(() => usePendingQueue(bridge))
     for (let i = 0; i < 5; i++) act(() => void result.current.enqueue(item(`m${i}`)))
@@ -73,7 +73,7 @@ describe('usePendingQueue', () => {
     expect(result.current.length).toBe(5)
   })
 
-  it('pops all pending into the composer, FIFO-joined (chat.js:8596)', () => {
+  it('pops all pending into the composer, FIFO-joined', () => {
     const { bridge, state } = makeBridge()
     const { result } = renderHook(() => usePendingQueue(bridge))
     act(() => void result.current.enqueue(item('alpha')))
@@ -87,7 +87,7 @@ describe('usePendingQueue', () => {
     expect(state.text).toBe('alpha\nbeta')
   })
 
-  it('pops just the tail on Alt+↑ (chat.js:8560)', () => {
+  it('pops just the tail on Alt+↑', () => {
     const { bridge, state } = makeBridge()
     const { result } = renderHook(() => usePendingQueue(bridge))
     act(() => void result.current.enqueue(item('one')))
@@ -97,7 +97,7 @@ describe('usePendingQueue', () => {
     expect(state.text).toBe('two')
   })
 
-  it('drains the head after a terminal event when idle (chat.js:8644-8650)', () => {
+  it('drains the head after a terminal event when idle', () => {
     const { bridge, state } = makeBridge()
     const { result } = renderHook(() => usePendingQueue(bridge))
     act(() => void result.current.enqueue(item('first')))
@@ -111,7 +111,7 @@ describe('usePendingQueue', () => {
     expect(result.current.length).toBe(1)
   })
 
-  it('does NOT drain when a stream resumed before the debounce fires (chat.js:8649)', () => {
+  it('does NOT drain when a stream resumed before the debounce fires', () => {
     const { bridge, state } = makeBridge()
     const { result } = renderHook(() => usePendingQueue(bridge))
     act(() => void result.current.enqueue(item('queued')))
@@ -125,7 +125,7 @@ describe('usePendingQueue', () => {
     expect(result.current.length).toBe(1)
   })
 
-  it('clearAll empties the queue and cancels the drain timer (chat.js:8466/8637)', () => {
+  it('clearAll empties the queue and cancels the drain timer', () => {
     const { bridge, state } = makeBridge()
     const { result } = renderHook(() => usePendingQueue(bridge))
     act(() => void result.current.enqueue(item('q')))

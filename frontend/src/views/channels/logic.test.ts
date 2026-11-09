@@ -15,7 +15,7 @@ import {
   type RawChannel,
 } from './logic'
 
-describe('mergeChannels (channels.js:85-95)', () => {
+describe('mergeChannels', () => {
   it('drops channels explicitly configured:false', () => {
     const channels: RawChannel[] = [
       { name: 'a', configured: true },
@@ -38,7 +38,7 @@ describe('mergeChannels (channels.js:85-95)', () => {
   })
 })
 
-describe('sortChannels (channels.js:96-103)', () => {
+describe('sortChannels', () => {
   const withPending = (n: number): ChannelAccess => ({
     pending: Array.from({ length: n }, () => ({})),
   })
@@ -88,7 +88,7 @@ describe('sortChannels (channels.js:96-103)', () => {
   })
 })
 
-describe('needsAttention (channels.js:398-400)', () => {
+describe('needsAttention', () => {
   it('is true for dead/restarting/exhausted', () => {
     expect(needsAttention('dead')).toBe(true)
     expect(needsAttention('restarting')).toBe(true)
@@ -101,7 +101,7 @@ describe('needsAttention (channels.js:398-400)', () => {
   })
 })
 
-describe('channelStats (channels.js:113-121)', () => {
+describe('channelStats', () => {
   it('counts connected/attention/inactive/disabled, sums restarts + pending, counts types', () => {
     const channels: MergedChannel[] = [
       { status: 'running', type: 'telegram', restart_attempts: 2, access: { pending: [{}, {}] } },
@@ -136,7 +136,7 @@ describe('channelStats (channels.js:113-121)', () => {
   })
 })
 
-describe('inactiveHint (channels.js:402-406)', () => {
+describe('inactiveHint', () => {
   it('reports no inactive channels', () => {
     expect(inactiveHint(0, 0)).toBe('no inactive channels')
   })
@@ -148,7 +148,7 @@ describe('inactiveHint (channels.js:402-406)', () => {
   })
 })
 
-describe('channelDisplay (channels.js:203-217)', () => {
+describe('channelDisplay', () => {
   it('resolves running/connected to the ok tone', () => {
     const d = channelDisplay({ name: 'tg', status: 'running', access: null })
     expect(d.status).toBe('running')
@@ -188,7 +188,7 @@ describe('channelDisplay (channels.js:203-217)', () => {
   })
 })
 
-describe('statusHint (channels.js:388-396)', () => {
+describe('statusHint', () => {
   const base = { status: 'running', isRunning: true, isDead: false, enabled: true, name: 'tg' }
   it('flags a disabled channel first regardless of status', () => {
     expect(statusHint({ ...base, enabled: false })).toContain('Disabled in config')
@@ -216,7 +216,7 @@ describe('statusHint (channels.js:388-396)', () => {
   })
 })
 
-describe('isAccessLocked (channels.js:253)', () => {
+describe('isAccessLocked', () => {
   const now = 1_000_000_000_000 // fixed clock (ms)
   it('is true when locked_until*1000 is in the future', () => {
     expect(isAccessLocked(now / 1000 + 3600, now)).toBe(true)
@@ -228,7 +228,7 @@ describe('isAccessLocked (channels.js:253)', () => {
   })
 })
 
-describe('senderLabel (channels.js:373-377)', () => {
+describe('senderLabel', () => {
   it('prefers @username', () => {
     expect(senderLabel({ username: 'ada', display_name: 'Ada L', sender_id: 7 })).toBe('@ada')
   })
@@ -241,7 +241,7 @@ describe('senderLabel (channels.js:373-377)', () => {
   })
 })
 
-describe('senderMeta (channels.js:379-386)', () => {
+describe('senderMeta', () => {
   it('joins the identity bits with " · " and drops a duplicate display_name', () => {
     // username label is "@ada", so display_name "Ada L" is distinct → included.
     const meta = senderMeta({ username: 'ada', display_name: 'Ada L', sender_id: 7, source: 'dm' })

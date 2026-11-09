@@ -116,14 +116,14 @@ describe('Composer', () => {
     expect(onSend).not.toHaveBeenCalled()
   })
 
-  it('aborts on Escape while busy (chat.js:2530 _onDocKeydown → _onStop)', () => {
+  it('aborts on Escape while busy', () => {
     const onAbort = vi.fn()
     render(<Composer onSend={() => {}} onAbort={onAbort} busy={true} />)
     fireEvent.keyDown(textbox(), { key: 'Escape' })
     expect(onAbort).toHaveBeenCalledTimes(1)
   })
 
-  it('clears the input on Escape when not busy (chat.js:2449)', () => {
+  it('clears the input on Escape when not busy', () => {
     render(<Composer onSend={() => {}} busy={false} />)
     const ta = textbox()
     fireEvent.change(ta, { target: { value: 'draft' } })
@@ -131,7 +131,7 @@ describe('Composer', () => {
     expect(ta.value).toBe('')
   })
 
-  it('cycles backwards through sent history on ArrowUp when empty (chat.js:8711)', () => {
+  it('cycles backwards through sent history on ArrowUp when empty', () => {
     render(<Composer onSend={() => {}} busy={false} history={['first', 'second']} />)
     const ta = textbox()
     fireEvent.keyDown(ta, { key: 'ArrowUp' })
@@ -156,32 +156,32 @@ describe('Composer', () => {
     render(<Composer onSend={() => {}} busy={false} history={['old']} />)
     const ta = textbox()
     fireEvent.change(ta, { target: { value: 'my draft' } })
-    // ArrowUp with a non-empty textarea does NOT enter nav (chat.js:2475-2476).
+    // ArrowUp with a non-empty textarea does NOT enter nav.
     fireEvent.keyDown(ta, { key: 'ArrowUp' })
     expect(ta.value).toBe('my draft')
   })
 
-  it('does not cycle forward with ArrowDown when not navigating (chat.js:2486)', () => {
+  it('does not cycle forward with ArrowDown when not navigating', () => {
     render(<Composer onSend={() => {}} busy={false} history={['a']} />)
     const ta = textbox()
     fireEvent.keyDown(ta, { key: 'ArrowDown' })
     expect(ta.value).toBe('')
   })
 
-  it('enables send with empty text when attachments are pending (chat.js:6064)', () => {
+  it('enables send with empty text when attachments are pending', () => {
     render(<Composer onSend={() => {}} busy={false} hasPendingAttachments={true} />)
     // Empty composer, but a pending attachment → Send is enabled.
     expect(screen.getByRole('button', { name: /send/i })).toBeEnabled()
   })
 
-  it('sends an attachments-only composer (empty text) on click (chat.js:6118)', () => {
+  it('sends an attachments-only composer (empty text) on click', () => {
     const onSend = vi.fn()
     render(<Composer onSend={onSend} busy={false} hasPendingAttachments={true} />)
     fireEvent.click(screen.getByRole('button', { name: /send/i }))
     expect(onSend).toHaveBeenCalledWith('')
   })
 
-  it('blocks send and warns while attachment work is in flight (chat.js:6067)', async () => {
+  it('blocks send and warns while attachment work is in flight', async () => {
     const onSend = vi.fn()
     const { toast } = await import('sonner')
     render(
@@ -209,10 +209,10 @@ describe('Composer', () => {
     expect(screen.getByRole('button', { name: 'Send' }).querySelector('svg')).not.toBeNull()
   })
 
-  it('grows the textarea with content (auto-resize, chat.js:2584)', () => {
+  it('grows the textarea with content (auto-resize)', () => {
     render(<Composer onSend={() => {}} busy={false} />)
     const ta = textbox()
-    // Empty: no explicit inline height (legacy clears it, chat.js:2586-2588).
+    // Empty: no explicit inline height (legacy clears it, ).
     expect(ta.style.height).toBe('')
     Object.defineProperty(ta, 'scrollHeight', { configurable: true, value: 120 })
     fireEvent.change(ta, { target: { value: 'a\nb\nc' } })
@@ -241,10 +241,10 @@ describe('Composer', () => {
     ])
   })
 
-  // ── ESC priority chain (chat.js:2530-2538 / 2449) ──────────────────────────
+  // ── ESC priority chain ──────────────────────────
 
   describe('ESC priority chain (abort > pending-recover > clear)', () => {
-    it('ESC while streaming aborts the turn — the top rung (chat.js:2530)', () => {
+    it('ESC while streaming aborts the turn — the top rung', () => {
       const onAbort = vi.fn()
       const onRecoverPending = vi.fn()
       render(
@@ -262,7 +262,7 @@ describe('Composer', () => {
       expect(onRecoverPending).not.toHaveBeenCalled()
     })
 
-    it('ESC while idle with a non-empty queue recovers pending — the middle rung (chat.js:2535)', () => {
+    it('ESC while idle with a non-empty queue recovers pending — the middle rung', () => {
       const onRecoverPending = vi.fn(() => true)
       render(
         <Composer
@@ -281,7 +281,7 @@ describe('Composer', () => {
       expect(ta.value).toBe('draft')
     })
 
-    it('ESC while idle with an empty queue clears the input — the bottom rung (chat.js:2449)', () => {
+    it('ESC while idle with an empty queue clears the input — the bottom rung', () => {
       const onRecoverPending = vi.fn()
       render(
         <Composer
@@ -300,7 +300,7 @@ describe('Composer', () => {
   })
 
   describe('pending Alt-key affordances', () => {
-    it('Alt+↑ pops the most-recent pending item when the queue is non-empty (chat.js:2457)', () => {
+    it('Alt+↑ pops the most-recent pending item when the queue is non-empty', () => {
       const onPopPendingTail = vi.fn()
       render(
         <Composer
@@ -314,7 +314,7 @@ describe('Composer', () => {
       expect(onPopPendingTail).toHaveBeenCalledTimes(1)
     })
 
-    it('Alt+↓ enqueues the current text when there is room (chat.js:2464)', () => {
+    it('Alt+↓ enqueues the current text when there is room', () => {
       const onEnqueueCurrent = vi.fn()
       render(
         <Composer
@@ -330,7 +330,7 @@ describe('Composer', () => {
       expect(onEnqueueCurrent).toHaveBeenCalledTimes(1)
     })
 
-    it('Alt+↓ does NOT enqueue when the queue is at the cap (chat.js:2464)', () => {
+    it('Alt+↓ does NOT enqueue when the queue is at the cap', () => {
       const onEnqueueCurrent = vi.fn()
       render(
         <Composer
@@ -347,7 +347,7 @@ describe('Composer', () => {
     })
   })
 
-  it('exposes setValue on the imperative handle — the pending-recover write (chat.js:8608)', () => {
+  it('exposes setValue on the imperative handle — the pending-recover write', () => {
     const ref = { current: null } as React.RefObject<import('./Composer').ComposerHandle | null>
     render(<Composer onSend={() => {}} busy={false} composerRef={ref} />)
     ref.current?.setValue('recovered text')

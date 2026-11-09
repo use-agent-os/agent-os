@@ -1,32 +1,17 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { createBrowserRouter, RouterProvider } from 'react-router'
-import { AppProviders } from './app/providers'
-import { AppShell } from './app/AppShell'
-import { routeChildren } from './app/routes'
-import { RouteErrorBoundary } from './app/RouteErrorBoundary'
-import { controlBasePath } from './lib/control-base'
-import './styles/globals.css'
-import './styles/control-surface.css'
+import { consumeUrlCredentials } from './lib/credentials'
+import { createWebRouter, WebApp } from './web/app/WebApp'
+import './web/styles/base.css'
 
-const basename = controlBasePath()
-const router = createBrowserRouter(
-  [
-    {
-      element: <AppShell />,
-      errorElement: <RouteErrorBoundary />,
-      children: routeChildren,
-    },
-  ],
-  {
-    basename,
-  },
-)
+// Before the router (or anything else) reads the URL: take a `token` /
+// `gatewayUrl` link parameter out of the address bar and history.
+consumeUrlCredentials()
+
+const router = createWebRouter()
 
 createRoot(document.getElementById('app')!).render(
   <StrictMode>
-    <AppProviders>
-      <RouterProvider router={router} />
-    </AppProviders>
+    <WebApp router={router} />
   </StrictMode>,
 )

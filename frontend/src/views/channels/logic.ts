@@ -45,7 +45,7 @@ export interface ChannelAccess {
   [key: string]: unknown
 }
 
-/** A channel merged with its access entry (channels.js:93-95). */
+/** A channel merged with its access entry. */
 export interface MergedChannel extends RawChannel {
   access: ChannelAccess | null
 }
@@ -53,7 +53,7 @@ export interface MergedChannel extends RawChannel {
 export type Tone = 'ok' | 'danger' | 'off'
 
 /**
- * channels.js:85-90,93-95 — filter out channels explicitly configured:false,
+ * filter out channels explicitly configured:false,
  * then attach each channel's access entry keyed by name (null when unmatched).
  */
 export function mergeChannels(
@@ -71,7 +71,7 @@ export function mergeChannels(
     }))
 }
 
-// channels.js:92 — operator-urgency status order; unknown statuses fall to 1.
+// operator-urgency status order; unknown statuses fall to 1.
 export const STATUS_ORDER: Record<string, number> = {
   running: 0,
   connected: 0,
@@ -83,7 +83,7 @@ export const STATUS_ORDER: Record<string, number> = {
 }
 
 /**
- * channels.js:96-103 — sort by pending-access count desc, then status urgency.
+ * sort by pending-access count desc, then status urgency.
  * Non-mutating (operates on a copy) so callers can pass query data directly.
  */
 export function sortChannels(channels: MergedChannel[]): MergedChannel[] {
@@ -97,7 +97,7 @@ export function sortChannels(channels: MergedChannel[]): MergedChannel[] {
   })
 }
 
-/** channels.js:398-400 — statuses that need operator attention. */
+/** — statuses that need operator attention. */
 export function needsAttention(status: string | undefined): boolean {
   return status === 'dead' || status === 'restarting' || status === 'exhausted'
 }
@@ -113,7 +113,7 @@ export interface ChannelStats {
   typeCount: number
 }
 
-/** channels.js:113-121 — derive the stat-row numbers from the merged channels. */
+/** — derive the stat-row numbers from the merged channels. */
 export function channelStats(channels: MergedChannel[]): ChannelStats {
   const total = channels.length
   const connected = channels.filter(
@@ -140,7 +140,7 @@ export function channelStats(channels: MergedChannel[]): ChannelStats {
   }
 }
 
-/** channels.js:402-406 — Inactive-tile hint text. */
+/** — Inactive-tile hint text. */
 export function inactiveHint(inactive: number, disabled: number): string {
   if (!inactive) return t('channels.inactiveNone')
   if (disabled) return t('channels.inactiveDisabled', { count: disabled })
@@ -158,7 +158,7 @@ export interface ChannelDisplay {
 }
 
 /**
- * channels.js:203-217,388-396 — resolve the display fields for one channel
+ * resolve the display fields for one channel
  * card: effective status, the ok/danger/off tone (status color ONLY via
  * --tone), restart-attempt string, and the pretty-printed adapter config.
  */
@@ -178,7 +178,7 @@ export function channelDisplay(ch: MergedChannel): ChannelDisplay {
   return { name, status, isRunning, isDead, tone, attempts, configJson }
 }
 
-/** channels.js:388-396 — the status-hint footnote for a channel card. */
+/** — the status-hint footnote for a channel card. */
 export function statusHint(args: {
   status: string
   isRunning: boolean
@@ -195,12 +195,12 @@ export function statusHint(args: {
   return t('channels.hintConfigured')
 }
 
-/** channels.js:253 — pairing approval is locked while locked_until*1000 > now. */
+/** — pairing approval is locked while locked_until*1000 > now. */
 export function isAccessLocked(lockedUntil: number | undefined, now: number = Date.now()): boolean {
   return Number(lockedUntil || 0) * 1000 > now
 }
 
-/** channels.js:373-377 — the primary label for a Telegram account. */
+/** — the primary label for a Telegram account. */
 export function senderLabel(item: AccessAccount): string {
   if (item.username) return '@' + item.username
   if (item.display_name) return item.display_name
@@ -209,7 +209,7 @@ export function senderLabel(item: AccessAccount): string {
   })
 }
 
-/** channels.js:379-386 — the secondary meta line (bits joined with " · "). */
+/** — the secondary meta line (bits joined with " · "). */
 export function senderMeta(item: AccessAccount): string {
   const bits: string[] = []
   if (item.display_name && item.display_name !== senderLabel(item)) bits.push(item.display_name)

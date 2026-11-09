@@ -7,7 +7,7 @@
  * frame to the store as it arrives. REST is only the backfill: one
  * GET /api/approvals on every transition of the WS client to 'connected' (and
  * once at start when it is already connected), on window focus /
- * visibilitychange, after a resolve, and whenever a caller asks via pollNow().
+ * visibilitychange, after a resolve, and whenever a caller asks via pollNow.
  * There is no interval timer. Decisions still go out over
  * POST /api/approvals/resolve.
  *
@@ -19,14 +19,14 @@
  * The pending list + count are published to a zustand store (useApprovals) so
  * the nav badge and the <ApprovalPrompt /> modal render off React state instead
  * of the legacy imperative DOM writes (_setBadge / _openModal). elevatedMode
- * persistence, the toast-on-new-pending hook, and pollNow() are preserved.
+ * persistence, the toast-on-new-pending hook, and pollNow are preserved.
  */
 import { create } from 'zustand'
 import { apiUrl } from '@/lib/api-origin'
 import { authenticatedHeaders } from '@/lib/http-auth'
 import { toast } from 'sonner'
 
-// approval_monitor.js:4-8 — elevated-mode storage constants.
+// elevated-mode storage constants.
 export const ELEVATED_MODE_KEY = 'agentos.elevatedMode'
 export const ELEVATED_MODE_VERSION_KEY = 'agentos.elevatedMode.version'
 export const ELEVATED_MODE_STORAGE_VERSION = '2'
@@ -68,7 +68,7 @@ export type ElevatedMode = 'on' | 'bypass' | 'full' | ''
 
 /**
  * The slice of the WS-RPC client the monitor needs (WsRpcClient satisfies it).
- * `state`, when present, lets start() backfill at once if the client is
+ * `state`, when present, lets start backfill at once if the client is
  * already connected instead of waiting for the next 'connected' transition.
  */
 export interface ApprovalEventSource {
@@ -79,21 +79,20 @@ export interface ApprovalEventSource {
 // The reactive surface consumed by the nav badge + modal. The legacy service
 // pushed the same data through a CustomEvent ('agentos:approvals-pending') and
 // imperative DOM writes; the store replaces both.
-//
 // `count` backs the nav badge (legacy #approval-count); `pending` backs the
 // modal (legacy pinned _modal to pending[0] at open). These are deliberately
 // decoupled: a transient backfill failure must zero the BADGE without
-// dismissing an OPEN prompt (approval_monitor.js:71-74,92-97 — the error/non-ok
+// dismissing an OPEN prompt (— the error/non-ok
 // branch only calls _setBadge(0) and NEVER touches _modal). So failure paths
-// call zeroBadge() (count → 0, pending untouched); a successful backfill
-// replaces the pending list via setFromPoll(), and pushed events edit it one
-// item at a time via upsert() / remove().
+// call zeroBadge (count → 0, pending untouched); a successful backfill
+// replaces the pending list via setFromPoll, and pushed events edit it one
+// item at a time via upsert / remove.
 interface ApprovalsState {
   pending: Approval[]
   count: number
   mode: string
-  // The browser session elevated mode (approval_monitor.js:227-239 / legacy
-  // approvals.js:234-243). Kept in the store so the approvals view's
+  // The browser session elevated mode (/ legacy
+  // ). Kept in the store so the approvals view's
   // "Effective execution mode" readout re-renders reactively after an in-view
   // Bypass resolve persists it (setBrowserElevated) — legacy re-ran _loadData
   // after resolve; the store now backs that refresh live. Hydrated from
@@ -107,7 +106,7 @@ interface ApprovalsState {
   upsert(item: Approval): void
   // Drop the item with this id (resolved, expired, or decided here).
   remove(id: string): void
-  // approval_monitor.js:71-74,92-97 — zero the badge count on backfill failure
+  // zero the badge count on backfill failure
   // while leaving any pending item backing an open prompt intact.
   zeroBadge(): void
   setElevatedMode(mode: ElevatedMode): void
@@ -115,12 +114,12 @@ interface ApprovalsState {
 }
 
 /**
- * approvals.js:234-243 — read the persisted browser elevated mode, downgrading a
+ * read the persisted browser elevated mode, downgrading a
  * legacy 'full' written under an older storage version to 'bypass'. Used to
  * hydrate the store on load so the readout starts from the stored value. (The
- * approvals view re-exports this as browserElevatedMode() from its logic.ts.)
+ * approvals view re-exports this as browserElevatedMode from its logic.ts.)
  */
-// approvals.js:245-247 / chat.js:2217-2219 (_normalizeElevatedMode) — only
+// (_normalizeElevatedMode) — only
 // on/bypass/full are valid elevated modes; anything else is the empty string.
 // The single source of truth for the elevated-mode model (shared by the chat
 // toolbar + the approvals readout, both of which re-export it from here).
@@ -128,7 +127,7 @@ export function normalizeElevatedMode(mode: string | null | undefined): Elevated
   return mode === 'on' || mode === 'bypass' || mode === 'full' ? mode : ''
 }
 
-// chat.js:2225-2227 (_isApprovalBypassMode) — bypass + full skip approval
+// (_isApprovalBypassMode) — bypass + full skip approval
 // prompts; on/'' keep them. Shared with the chat toolbar (which derives the
 // glow/dot state from the effective mode) and the approvals readout, so it
 // lives in the single elevated-mode source of truth alongside the reader.
@@ -173,7 +172,7 @@ export const useApprovals = create<ApprovalsState>((set) => ({
   clear: () => set({ pending: [], count: 0 }),
 }))
 
-// approval_monitor.js:227-239 — normalize + persist the browser elevated mode
+// normalize + persist the browser elevated mode
 // under storage version '2'. Only on/bypass/full are valid; anything else
 // clears the keys. Returns the normalized value for the resolve toast copy.
 export function setBrowserElevated(mode: string): ElevatedMode {
@@ -196,7 +195,7 @@ export function setBrowserElevated(mode: string): ElevatedMode {
   return normalized
 }
 
-// approval_monitor.js:241-246 — derive the command line shown in the modal.
+// derive the command line shown in the modal.
 export function approvalCommand(item: Approval): string {
   if (item.command) return String(item.command)
   if (Array.isArray(item.argv) && item.argv.length > 0) return item.argv.map(String).join(' ')
@@ -205,7 +204,7 @@ export function approvalCommand(item: Approval): string {
   return ''
 }
 
-// approval_monitor.js:248-258 — detail body: warning text, else pretty-printed
+// detail body: warning text, else pretty-printed
 // args/params truncated at 900 chars.
 export function approvalDetail(item: Approval): string {
   if (item.warning) return String(item.warning)
@@ -219,7 +218,7 @@ export function approvalDetail(item: Approval): string {
   }
 }
 
-// approval_monitor.js:148-152 — the modal meta line ("Namespace · Mode · Session").
+// the modal meta line ("Namespace · Mode · Session").
 export function approvalMeta(item: Approval, mode: string): string {
   return [
     item.namespace ? 'Namespace: ' + item.namespace : '',
@@ -230,7 +229,7 @@ export function approvalMeta(item: Approval, mode: string): string {
     .join(' · ')
 }
 
-// approval_monitor.js:145 — "Always Allow This Type" only offered for exec
+// "Always Allow This Type" only offered for exec
 // commands.
 export function canAlwaysAllow(item: Approval): boolean {
   return item.namespace === 'exec' && !!item.command
@@ -311,8 +310,8 @@ interface InFlightEvents {
 /**
  * The approval-monitor singleton. start(rpc) subscribes to the pushed approval
  * events, backfills on every (re)connect, and wires focus/visibility backfill;
- * stop() tears everything down. pollNow() is the backfill hook the approvals
- * view calls after it mutates settings. resolve() posts a decision, drops the
+ * stop tears everything down. pollNow is the backfill hook the approvals
+ * view calls after it mutates settings. resolve posts a decision, drops the
  * item locally, and backfills. The class is instantiated once (approvalMonitor)
  * but kept a class so tests can spin up isolated instances.
  */
@@ -325,17 +324,15 @@ export class ApprovalMonitor {
   private inflight: Promise<void> | null = null
   private pollAgain = false
   private inflightEvents: InFlightEvents | null = null
-  // Bumped by stop(): a fetch that started before it must not repopulate the
+  // Bumped by stop: a fetch that started before it must not repopulate the
   // store it just cleared (e.g. the desktop switching gateways).
   private generation = 0
 
   private onFocus = (): void => {
-    // approval_monitor.js:107-110
     void this.poll()
   }
 
   private onVisibilityChange = (): void => {
-    // approval_monitor.js:100-105
     if (document.visibilityState === 'visible') void this.poll()
   }
 
@@ -391,7 +388,6 @@ export class ApprovalMonitor {
     if (rpc.state === undefined || rpc.state === 'connected') void this.poll()
   }
 
-  // approval_monitor.js:25-32
   stop(): void {
     this.started = false
     this.generation += 1
@@ -403,7 +399,7 @@ export class ApprovalMonitor {
     useApprovals.getState().clear()
   }
 
-  // approval_monitor.js:34-36 — the backfill hook consumed by the approvals view.
+  // the backfill hook consumed by the approvals view.
   async pollNow(): Promise<void> {
     await this.poll()
   }
@@ -429,7 +425,7 @@ export class ApprovalMonitor {
     return this.inflight
   }
 
-  // approval_monitor.js:63-98 — the backfill body.
+  // the backfill body.
   private async fetchPending(): Promise<void> {
     const generation = this.generation
     const seen: InFlightEvents = { added: new Map(), removed: new Set() }
@@ -441,7 +437,7 @@ export class ApprovalMonitor {
       })
       if (generation !== this.generation) return
       if (!resp.ok) {
-        // approval_monitor.js:71-74 — zero the badge only; an open prompt keeps
+        // zero the badge only; an open prompt keeps
         // its pinned item (legacy never touched _modal on a failed poll).
         useApprovals.getState().zeroBadge()
         return
@@ -456,7 +452,7 @@ export class ApprovalMonitor {
       useApprovals.getState().setFromPoll(pending, mode)
       if (pending.some((p) => !before.has(p.id))) this.toastRequired()
     } catch {
-      // approval_monitor.js:92-97 — same as the non-ok branch: zero the badge,
+      // same as the non-ok branch: zero the badge,
       // preserve any pending item behind an open prompt.
       if (generation === this.generation) useApprovals.getState().zeroBadge()
     } finally {
@@ -474,14 +470,14 @@ export class ApprovalMonitor {
     useApprovals.getState().remove(id)
   }
 
-  // approval_monitor.js:83-88 — one toast per approval that newly enters the
+  // one toast per approval that newly enters the
   // queue (a repeated frame or a backfill that only confirms it stays quiet).
   private toastRequired(): void {
     toast.warning('Approval required', { id: 'approval-required', duration: 2500 })
   }
 
   /**
-   * approval_monitor.js:171-220 — resolve a pending approval. Maps the modal
+   * resolve a pending approval. Maps the modal
    * button action to the (approved, allowAlways, rememberIntent, elevatedMode)
    * tuple, POSTs it, persists elevated mode on success, drops the item from the
    * store so the prompt closes at once, toasts the outcome, and backfills.
@@ -491,7 +487,6 @@ export class ApprovalMonitor {
   async resolve(item: Approval, action: ApprovalAction): Promise<void> {
     if (this.busy) return
     this.busy = true
-    // approval_monitor.js:173-177
     const approved = action === 'once' || action === 'always' || action === 'bypass'
     // A once-only approval (an agent's spend) never carries "always" or an
     // elevation, whichever surface sent it.
@@ -516,7 +511,7 @@ export class ApprovalMonitor {
       if (!resp.ok) throw new Error('HTTP ' + resp.status)
       if (elevatedMode) setBrowserElevated(elevatedMode)
       this.dropLocal(item.id)
-      // approval_monitor.js:207-211 — outcome toast. Legacy tone is
+      // outcome toast. Legacy tone is
       // `approved ? 'info' : 'warn'`; a bypass sets approved=true → 'info', and
       // the port maps info→toast.success. So bypass toasts success, not warning.
       if (elevatedMode) {
@@ -526,7 +521,7 @@ export class ApprovalMonitor {
       } else {
         toast.warning('Approval denied', { id: 'approval-outcome', duration: 2500 })
       }
-      // approval_monitor.js:213 — legacy re-polled after 150ms; backfill now
+      // legacy re-polled after 150ms; backfill now
       // (a bypass may have released other queued items server-side).
       await this.poll()
     } catch (err) {
@@ -560,7 +555,7 @@ function mergeSnapshot(snapshot: Approval[], seen: InFlightEvents): Approval[] {
 }
 
 /**
- * approval_monitor.js:67 — the backfill endpoint. Legacy fetched the
+ * the backfill endpoint. Legacy fetched the
  * ROOT-absolute '/api/approvals'; these routes are registered at the gateway
  * root (app.py: 535-537), NOT under control_ui.base_path, and the gateway's
  * dedicated approvals rate-limit bucket keys off the bare '/api/approvals'
@@ -571,7 +566,7 @@ function mergeSnapshot(snapshot: Approval[], seen: InFlightEvents): Approval[] {
  *
  * That bucket (rate_limit.approvals_max_requests, default 300/min) is a bound,
  * not an exemption. The monitor no longer polls on a timer; it calls this only
- * on (re)connect, focus/visibility, after a resolve and on pollNow(), which
+ * on (re)connect, focus/visibility, after a resolve and on pollNow, which
  * keeps it far below the limit.
  */
 export function approvalsUrl(): string {
@@ -582,18 +577,18 @@ export function approvalsResolveUrl(): string {
   return apiUrl('/api/approvals/resolve')
 }
 
-// approvals.js:291 — the approval-strategy settings endpoint. Root-absolute like
+// the approval-strategy settings endpoint. Root-absolute like
 // the backfill/resolve endpoints (same rationale as approvalsUrl above).
 export function approvalsSettingsUrl(): string {
   return apiUrl('/api/approvals/settings')
 }
 
 /**
- * approvals.js:291-301 — persist the approval strategy (prompt / auto-approve /
+ * persist the approval strategy (prompt / auto-approve /
  * auto-deny). POSTs { mode } to the root-absolute settings endpoint with the
  * session Bearer token, throwing on a non-ok response so the caller can revert
  * its optimistic UI. The caller backfills (pollNow) after a success, mirroring
- * the legacy _loadData() + ApprovalMonitor.pollNow() at approvals.js:298-299.
+ * the legacy _loadData + ApprovalMonitor.pollNow.
  */
 export async function saveApprovalMode(mode: string): Promise<void> {
   const resp = await fetch(approvalsSettingsUrl(), {

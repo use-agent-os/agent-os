@@ -20,8 +20,8 @@ export interface RawSkill {
   status_detail?: string
   eligible?: boolean
   /** Switched off by config (`skills.disabled`, or absent from `skills.enabled`).
-   *  The wire `status` folds this into `needs_setup`; `skillBucket` splits it back
-   *  out, because nothing about a disabled skill needs setting up. */
+   * The wire `status` folds this into `needs_setup`; `skillBucket` splits it back
+   * out, because nothing about a disabled skill needs setting up. */
   disabled?: boolean
   triggers?: string[]
   homepage?: string
@@ -165,7 +165,7 @@ export interface RegistryItem {
   [key: string]: unknown
 }
 
-/** The status-filter keys the metric pills toggle (skills.js:352-366). */
+/** The status-filter keys the metric pills toggle. */
 export type StatusFilter = 'all' | 'ready' | 'needs-setup' | 'disabled'
 
 /**
@@ -174,16 +174,16 @@ export type StatusFilter = 'all' | 'ready' | 'needs-setup' | 'disabled'
  * Two regroupings happen here, both display decisions:
  *
  * 1. `not_declared` joins `ready`. The wire keeps them apart to record whether
- *    AgentOS verified anything, but for someone reading the list they mean the
- *    same thing — the skill runs. Splitting them put working skills in a
- *    separate bucket that read as a defect, and no action ever followed.
- *    `status_detail` still distinguishes "3/3 satisfied" from "no dependencies
- *    declared" in the tooltip, which is where that nuance belongs.
+ * AgentOS verified anything, but for someone reading the list they mean the
+ * same thing — the skill runs. Splitting them put working skills in a
+ * separate bucket that read as a defect, and no action ever followed.
+ * `status_detail` still distinguishes "3/3 satisfied" from "no dependencies
+ * declared" in the tooltip, which is where that nuance belongs.
  * 2. `disabled` leaves `needs_setup`. The gateway folds it in because both mean
- *    `eligible: false`, but they are opposite problems: a disabled skill needs
- *    nothing installed, and listing it under "Needs setup" both inflates that
- *    count and offers a fix that does not exist. `disabled` is already on the
- *    wire (`rpc_skills.py`), so the split costs no protocol change.
+ * `eligible: false`, but they are opposite problems: a disabled skill needs
+ * nothing installed, and listing it under "Needs setup" both inflates that
+ * count and offers a fix that does not exist. `disabled` is already on the
+ * wire (`rpc_skills.py`), so the split costs no protocol change.
  */
 export type SkillBucket = 'ready' | 'needs-setup' | 'disabled'
 
@@ -192,7 +192,6 @@ export function skillBucket(skill: RawSkill): SkillBucket {
   // Via `skillStatus`, not the raw field: a payload without `status` (an older
   // gateway, a hand-built row) used to count in no pill at all and vanish from
   // every filter except All.
-  //
   // Only `needs_setup` is a problem. Anything else — `ready`, `not_declared`,
   // or a value a newer gateway invented — is a skill that runs. Amber is a call
   // to action, and inventing one for a status this build cannot read would send
@@ -200,7 +199,7 @@ export function skillBucket(skill: RawSkill): SkillBucket {
   return skillStatus(skill) === 'needs_setup' ? 'needs-setup' : 'ready'
 }
 
-// ── Constants (skills.js:36-58) ──────────────────────────────────────────────
+// ── Constants ──────────────────────────────────────────────
 
 // `layer` is a location, not a provenance: it says which directory a SKILL.md
 // was loaded from. It is still shown as a per-card detail chip, but it no
@@ -248,10 +247,10 @@ export function catLabel(category: string): string {
   return labels[category] || category
 }
 
-/** skills.js:210,220 — the registry-search debounce interval (ms). */
+/** — the registry-search debounce interval (ms). */
 export const REGISTRY_SEARCH_DEBOUNCE_MS = 250
 
-// ── Layer label/help (skills.js:1070-1076) ───────────────────────────────────
+// ── Layer label/help ───────────────────────────────────
 
 export function layerLabel(layer?: string): string {
   return (layer && layerLabels()[layer]) || layer || t('skills.layerUnknown')
@@ -261,7 +260,7 @@ export function layerHelp(layer?: string): string {
   return (layer && layerHelps()[layer]) || t('skills.layerHelpFallback')
 }
 
-// ── Installed stats (skills.js:342-367) ──────────────────────────────────────
+// ── Installed stats ──────────────────────────────────────
 
 export interface SkillStats {
   total: number
@@ -280,10 +279,10 @@ export function skillStats(skills: RawSkill[]): SkillStats {
   }
 }
 
-// ── Installed filter (skills.js:374-388) ─────────────────────────────────────
+// ── Installed filter ─────────────────────────────────────
 
 /**
- * skills.js:374-388 — filter installed skills by the free-text filter (name /
+ * filter installed skills by the free-text filter (name /
  * description / triggers, case-insensitive) then the active status pill.
  * `filterText` is expected already-lowercased (legacy keeps `_filterText`
  * lowercased); we lowercase again defensively so the helper is order-safe.
@@ -307,7 +306,7 @@ export function filterSkills(
   return out
 }
 
-/** skills.js:391-399 — the empty-state message for the installed list. */
+/** — the empty-state message for the installed list. */
 export function installedEmptyMessage(filterText: string, statusFilter: StatusFilter): string {
   if (filterText) return t('skills.emptyMatch', { query: filterText })
   if (statusFilter === 'ready') return t('skills.emptyReady')
@@ -316,10 +315,10 @@ export function installedEmptyMessage(filterText: string, statusFilter: StatusFi
   return t('skills.emptyNone')
 }
 
-// ── Provenance grouping + ready-first sort (skills.js:407-442) ────────────────
+// ── Provenance grouping + ready-first sort ────────────────
 
 /**
- * skills.js:407-411 — sort rank, usable first.
+ * sort rank, usable first.
  *
  * ready(0) < disabled(1) < needs_setup(2). Disabled sorts above needs-setup
  * because nothing is broken about it: it is one config line away from working,
@@ -458,7 +457,7 @@ export interface SkillGroup {
   skills: RawSkill[]
 }
 
-/** Sort a bucket ready-first (skills.js:407-411) then name-asc. */
+/** Sort a bucket ready-first then name-asc. */
 function sortByReady(list: RawSkill[]): RawSkill[] {
   return list.sort((a, b) => {
     const ra = skillRank(a)
@@ -469,7 +468,7 @@ function sortByReady(list: RawSkill[]): RawSkill[] {
 }
 
 /**
- * skills.js:413-442, regrouped — bucket the filtered skills by provenance,
+ * Regrouped — bucket the filtered skills by provenance,
  * sort each bucket ready-first then name-asc, and emit groups in
  * SKILL_GROUP_ORDER (skipping empties). A skill lands in exactly one group.
  */
@@ -493,17 +492,17 @@ export function groupSkills(skills: RawSkill[]): SkillGroup[] {
   return out
 }
 
-// ── Card status → tone/label (skills.js:447-465, 779-789) ─────────────────────
+// ── Card status → tone/label ─────────────────────
 
 /** The card status dot class: ready / needs / off. */
 export type SkillDot = 'is-ready' | 'is-needs' | 'is-off'
 
-/** skills.js:448 — resolve a skill's effective status (falls back to eligible). */
+/** — resolve a skill's effective status (falls back to eligible). */
 export function skillStatus(skill: RawSkill): string {
   return skill.status || (skill.eligible ? 'ready' : 'needs_setup')
 }
 
-/** skills.js:449-452 — the status-dot class for a card. */
+/** — the status-dot class for a card. */
 export function skillDotClass(skill: RawSkill): SkillDot {
   const bucket = skillBucket(skill)
   if (bucket === 'ready') return 'is-ready'
@@ -523,7 +522,7 @@ export function skillBucketLabel(bucket: SkillBucket): string {
   return labels[bucket]
 }
 
-/** skills.js:454 — the dot tooltip. */
+/** — the dot tooltip. */
 export function skillDotTitle(skill: RawSkill): string {
   if (skill.disabled) return skill.status_detail || t('skills.dotDisabled')
   return skill.status_detail || (skill.eligible ? t('skills.dotReady') : t('skills.dotNeedsSetup'))
@@ -596,7 +595,7 @@ export function isPartnerSkill(skill: RawSkill): boolean {
   return skillPublisherId(skill) !== ''
 }
 
-/** The installed skills of one partner, name-sorted (skills.js:484-486). */
+/** The installed skills of one partner, name-sorted. */
 export function skillsByPublisher(skills: RawSkill[], publisherId: string): RawSkill[] {
   const want = (publisherId || '').trim().toLowerCase()
   if (!want) return []
@@ -622,12 +621,12 @@ export function partnerEmptyMessage(
 // ── Registry (community / bankr) derivations ──────────────────────────────────
 
 /**
- * skills.js:503-505 — when a partner has its own tab, Community excludes that
+ * when a partner has its own tab, Community excludes that
  * partner's rows; a partner whose tab is hidden falls through into Community.
  *
  * Takes the hidden source ids rather than one boolean per partner. The
  * positional-boolean form was already ambiguous at two partners and has no
- * readable shape at four — the same trap `registryIntro()` documents.
+ * readable shape at four — the same trap `registryIntro` documents.
  */
 export function communityFilter(
   results: RegistryItem[],
@@ -637,7 +636,7 @@ export function communityFilter(
   return results.filter((r) => !hidden.has(String(r.source || '')))
 }
 
-/** skills.js:560-564 — category → count map over a registry list. */
+/** — category → count map over a registry list. */
 export function categoriesFor(list: RegistryItem[]): Record<string, number> {
   const counts: Record<string, number> = {}
   list.forEach((r) => {
@@ -655,7 +654,7 @@ export interface CategoryChip {
 }
 
 /**
- * skills.js:567-587 — chips derive from the FULL snapshot only (never change on
+ * chips derive from the FULL snapshot only (never change on
  * keystrokes). No chips when there are no items, or only the 'other' category.
  * 'all' leads, then categories sorted by count desc.
  */
@@ -689,7 +688,7 @@ export interface RegistryFilterOptions {
 }
 
 /**
- * skills.js:610-620 — apply the category filter then the case-insensitive text
+ * apply the category filter then the case-insensitive text
  * filter to a registry list. `query` is trimmed + lowercased here (legacy
  * trims/lowercases inline).
  *
@@ -721,7 +720,7 @@ export function filterRegistry(
   return out
 }
 
-/** skills.js:622-626 — the empty message for a registry group + query. */
+/** — the empty message for a registry group + query. */
 export function registryEmptyMessage(
   group: 'bankr' | 'capminal' | 'aeon' | 'community',
   query: string,
@@ -734,7 +733,7 @@ export function registryEmptyMessage(
   return t('skills.registryEmptyCommunity')
 }
 
-/** skills.js:662,715,283 — the stable identifier key for a registry row. */
+/** — the stable identifier key for a registry row. */
 export function registryKey(r: RegistryItem): string {
   return r.identifier || r.name || ''
 }
@@ -765,12 +764,12 @@ export function mergeRegistryRows(base: RegistryItem[], extra: RegistryItem[]): 
   return out
 }
 
-// ── Install-action state (skills.js:633-641) ──────────────────────────────────
+// ── Install-action state ──────────────────────────────────
 
 export type InstallActionKind = 'installed' | 'force' | 'install'
 
 /**
- * skills.js:633-641 — the install button's state for a registry row: already
+ * the install button's state for a registry row: already
  * installed → a static badge; force-armed (post security-block) → a danger
  * force-install; otherwise a normal install.
  */
@@ -781,12 +780,12 @@ export function installAction(r: RegistryItem, forceArmed: Set<string>): Install
   return 'install'
 }
 
-/** skills.js:254,640 — the source to install from (default 'clawhub'). */
+/** — the source to install from (default 'clawhub'). */
 export function installSource(r: RegistryItem): string {
   return r.source || 'clawhub'
 }
 
-// ── deps.install still-missing (skills.js:894-896) ────────────────────────────
+// ── deps.install still-missing ────────────────────────────
 
 export interface DepsInstallResult {
   success?: boolean
@@ -794,27 +793,27 @@ export interface DepsInstallResult {
   missing_still?: { bins?: string[]; env?: string[] }
 }
 
-/** skills.js:894-896 — count of deps still missing after a deps.install. */
+/** — count of deps still missing after a deps.install. */
 export function stillMissingCount(res: DepsInstallResult): number {
   const still = res.missing_still || {}
   return (still.bins || []).length + (still.env || []).length
 }
 
-// ── update result unwrap (skills.js:1000-1007) ────────────────────────────────
+// ── update result unwrap ────────────────────────────────
 
 export interface UpdateResult {
   results?: Array<{ success?: boolean; message?: string }>
   message?: string
 }
 
-/** skills.js:1000 — skills.update returns a results[] array; take the first. */
+/** — skills.update returns a results[] array; take the first. */
 export function firstUpdateResult(res: UpdateResult): { success?: boolean; message?: string } {
   return (res.results || [])[0] || {}
 }
 
 // ── Small utilities ──────────────────────────────────────────────────────────
 
-/** skills.js:1019-1023 — provider/name initials for a logo fallback. */
+/** — provider/name initials for a logo fallback. */
 export function initials(text?: string): string {
   const words = (text || '').trim().split(/\s+/).filter(Boolean)
   const first = words[0]
@@ -823,14 +822,14 @@ export function initials(text?: string): string {
   return ((first[0] ?? '') + (second ? (second[0] ?? '') : '')).toUpperCase()
 }
 
-/** skills.js:1030-1033 — allow only http(s) URLs from remote catalogs. */
+/** — allow only http(s) URLs from remote catalogs. */
 export function safeUrl(url?: string): string {
   const u = String(url || '').trim()
   return /^https?:\/\//i.test(u) ? u : ''
 }
 
 /**
- * skills.js:911-924 — flip `installed` on rows matching by identifier or name
+ * flip `installed` on rows matching by identifier or name
  * across a cached registry list. Returns a NEW array (React-friendly) rather
  * than mutating, but preserves the legacy match semantics.
  *

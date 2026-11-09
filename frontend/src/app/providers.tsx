@@ -9,10 +9,8 @@ import { approvalMonitor } from '@/services/approval-monitor'
 import { bindPendingQuestions } from '@/lib/pending-questions'
 import { bindRuntimeSignals } from '@/lib/runtime-signals'
 import type { RpcState } from '@/lib/ws-rpc'
-import { KeyboardShortcutProvider } from '@/components/KeyboardShortcuts'
-
-const WS_URL_KEY = 'agentos.wsUrl'
-const WS_TOKEN_KEY = 'agentos.wsToken'
+import { KeyboardShortcutProvider, type ShortcutHelpRenderer } from '@/components/KeyboardShortcuts'
+import { readStoredToken, readStoredWsUrl } from '@/lib/credentials'
 
 // Exported so an off-gateway host (the desktop shell) can supply its own
 // connected client to the same hooks and views.
@@ -35,14 +33,21 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 5_000, retry: 1 } },
 })
 
-export function AppProviders({ children }: { children: ReactNode }) {
+export function AppProviders({
+  children,
+  shortcutHelp,
+}: {
+  children: ReactNode
+  /** Replaces the built-in shortcut sheet (the rebuilt web console's own dialog). */
+  shortcutHelp?: ShortcutHelpRenderer
+}) {
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null)
   const [rpc] = useState(() => new WsRpcClient())
 
   useEffect(() => {
     initTheme()
     // Constant today. When the gateway starts advertising a locale this becomes
-    // setLocale(b.locale) inside the bootstrap .then() below, before setBootstrap.
+    // setLocale(b.locale) inside the bootstrap.then below, before setBootstrap.
     initLocale()
     let cancelled = false
     const unsubscribe = rpc.on('_state', (s) => useConnection.getState().setState(s as RpcState))
@@ -53,28 +58,18 @@ export function AppProviders({ children }: { children: ReactNode }) {
     fetchBootstrap()
       // Legacy served bootstrap inline (it could not fail): the shell always
       // rendered and _autoConnect used the location-derived default WS URL with
-      // infinite WS reconnect backoff (app.js:186-203, rpc.js:226-231). A
+      // infinite WS reconnect backoff. A
       // transient /api/bootstrap failure must never wedge the app on the
       // "Connecting…" placeholder.
       .catch(() => fallbackBootstrap())
       .then((b) => {
         if (cancelled) return
         setBootstrap(b)
-        // app.js:197-203 — URL override from localStorage; the auth token
+        // URL override from localStorage; the auth token
         // lives in sessionStorage (per-tab session tier, NOT localStorage).
         // Both reads tolerate storage access errors like legacy.
-        let storedUrl = ''
-        let token = ''
-        try {
-          storedUrl = localStorage.getItem(WS_URL_KEY) || ''
-        } catch {
-          /* storage unavailable */
-        }
-        try {
-          token = sessionStorage.getItem(WS_TOKEN_KEY) || ''
-        } catch {
-          /* storage unavailable */
-        }
+        const storedUrl = readStoredWsUrl()
+        const token = readStoredToken()
         // Stored override wins verbatim (legacy loadConnectionSettings returned
         // it unchanged). Otherwise use the server-computed ws_url, but restore
         // the legacy location-derived scheme when a proxy drops x-forwarded-proto
@@ -105,7 +100,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
     <BootstrapContext.Provider value={bootstrap}>
       <RpcContext.Provider value={rpc}>
         <QueryClientProvider client={queryClient}>
-          <KeyboardShortcutProvider>{children}</KeyboardShortcutProvider>
+          <KeyboardShortcutProvider renderHelp={shortcutHelp}>{children}</KeyboardShortcutProvider>
         </QueryClientProvider>
       </RpcContext.Provider>
     </BootstrapContext.Provider>

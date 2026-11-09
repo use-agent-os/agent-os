@@ -56,7 +56,7 @@ export interface MessageRendererDeps {
   getSessionKey: () => string
   isStreaming: () => boolean
   scrollToBottom: () => void
-  /** chat.js:7833/7840 — shared day cursor + human separator label. */
+  /** — shared day cursor + human separator label. */
   dayKey?: (timestamp: string | number | null | undefined) => string
   dayLabel?: (dayKey: string) => string
   /** Shared legacy `_lastHeaderDay` / `_lastHeaderRole` cursor. */
@@ -385,7 +385,7 @@ export function createMessageRenderer(deps: MessageRendererDeps) {
   }
 
   /**
-   * chat.js:5983-6009 — reconcile a row header after history identity reuse.
+   * reconcile a row header after history identity reuse.
    * `sameGroup` is calculated by the history traversal rather than from the
    * current DOM, because unconsumed rows and a live stream tail remain mounted
    * while pagination is being rebuilt.
@@ -445,7 +445,7 @@ export function createMessageRenderer(deps: MessageRendererDeps) {
     if (!thread) return null
     thread.querySelector('.chat-empty')?.remove()
 
-    // chat.js:7856-7866 — every non-stream row participates in the SAME day
+    // every non-stream row participates in the SAME day
     // cursor as history and streaming. This keeps a live prompt on the correct
     // side of midnight and prevents the stream from inserting a separator
     // between that prompt and its response.

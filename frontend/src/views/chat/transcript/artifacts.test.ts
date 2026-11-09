@@ -1,11 +1,9 @@
-// Pure-helper parity tests for the artifact renderer (chat.js:7480-7593).
-//
+// Pure-helper parity tests for the artifact renderer.
 // These are the sanctioned unit-test surface for Task 5: the pure classification
 // / URL helpers, verified against the legacy source. The imperative artifact-card
 // DOM (appendArtifact / renderArtifacts / renderStreamArtifacts / downloadArtifact)
 // is verified by a live-browser sweep (parity matrix), NOT here — it needs the
 // live streaming controller + a real gateway serving the download.
-//
 // The one exception is the chart placeholder, which has no legacy counterpart:
 // it renders no visible card of its own, so a broken placeholder shows the user
 // nothing at all rather than a wrong-looking chip. Its hooks and its handoff to
@@ -37,9 +35,9 @@ import { MARKETS_ARTIFACT_MIME } from './markets'
 import { TRIGGER_ARTIFACT_MIME } from './trigger'
 import { LP_ARTIFACT_MIME } from './lp'
 
-/* ── artifactMime / artifactName (chat.js:7523-7529) ────────────────────── */
+/* ── artifactMime / artifactName ────────────────────── */
 
-describe('artifactMime (parity chat.js:7523)', () => {
+describe('artifactMime', () => {
   it('lowercases a present mime', () => {
     expect(artifactMime({ mime: 'Image/PNG' } as never)).toBe('image/png')
   })
@@ -49,7 +47,7 @@ describe('artifactMime (parity chat.js:7523)', () => {
   })
 })
 
-describe('artifactName (parity chat.js:7527)', () => {
+describe('artifactName', () => {
   it('returns the name when present', () => {
     expect(artifactName({ name: 'report.md' } as never)).toBe('report.md')
   })
@@ -59,9 +57,9 @@ describe('artifactName (parity chat.js:7527)', () => {
   })
 })
 
-/* ── artifactExtension (chat.js:7531) ───────────────────────────────────── */
+/* ── artifactExtension ───────────────────────────────────── */
 
-describe('artifactExtension (parity chat.js:7531)', () => {
+describe('artifactExtension', () => {
   it('derives a lowercased extension from a name', () => {
     expect(artifactExtension('report.md')).toBe('md')
     expect(artifactExtension('DATA.CSV')).toBe('csv')
@@ -78,11 +76,11 @@ describe('artifactExtension (parity chat.js:7531)', () => {
   })
 })
 
-/* ── artifactCategory (chat.js:7538) ────────────────────────────────────── */
+/* ── artifactCategory ────────────────────────────────────── */
 
-describe('artifactCategory (parity chat.js:7538)', () => {
+describe('artifactCategory', () => {
   it('classifies an image/* mime as "visual" (NOT "image")', () => {
-    // Legacy chat.js:7540 returns 'visual', not the brief-example 'image'.
+    // returns 'visual', not the brief-example 'image'.
     expect(artifactCategory({ mime: 'image/png', name: 'x.png' } as never)).toBe('visual')
   })
   it('classifies an audio/* mime as "audio"', () => {
@@ -150,9 +148,9 @@ describe('artifactCategory (parity chat.js:7538)', () => {
   })
 })
 
-/* ── artifactCategoryLabel (chat.js:7551) ───────────────────────────────── */
+/* ── artifactCategoryLabel ───────────────────────────────── */
 
-describe('artifactCategoryLabel (parity chat.js:7551)', () => {
+describe('artifactCategoryLabel', () => {
   it('maps category → chip label', () => {
     expect(artifactCategoryLabel('data')).toBe('data')
     expect(artifactCategoryLabel('document')).toBe('doc')
@@ -171,9 +169,9 @@ describe('artifactCategoryLabel (parity chat.js:7551)', () => {
   })
 })
 
-/* ── isImageArtifact / isAudioArtifact (chat.js:7561/7565) ──────────────── */
+/* ── isImageArtifact / isAudioArtifact ──────────────── */
 
-describe('isImageArtifact / isAudioArtifact (parity chat.js:7561/7565)', () => {
+describe('isImageArtifact / isAudioArtifact', () => {
   it('isImageArtifact is true only for the "visual" category', () => {
     expect(isImageArtifact({ mime: 'image/gif', name: 'x.gif' } as never)).toBe(true)
     expect(isImageArtifact({ mime: 'audio/wav', name: 'x.wav' } as never)).toBe(false)
@@ -186,9 +184,9 @@ describe('isImageArtifact / isAudioArtifact (parity chat.js:7561/7565)', () => {
   })
 })
 
-/* ── artifactDownloadUrl (chat.js:7480) ─────────────────────────────────── */
+/* ── artifactDownloadUrl ─────────────────────────────────── */
 
-describe('artifactDownloadUrl (parity chat.js:7480)', () => {
+describe('artifactDownloadUrl', () => {
   it('uses download_url verbatim (relative path)', () => {
     expect(artifactDownloadUrl({ download_url: '/api/v1/artifacts/42' } as never)).toBe(
       '/api/v1/artifacts/42',
@@ -210,9 +208,9 @@ describe('artifactDownloadUrl (parity chat.js:7480)', () => {
   })
 })
 
-/* ── artifactPreviewUrl (chat.js:7569) ──────────────────────────────────── */
+/* ── artifactPreviewUrl ──────────────────────────────────── */
 
-describe('artifactPreviewUrl (parity chat.js:7569)', () => {
+describe('artifactPreviewUrl', () => {
   it('adds sessionKey + token onto the download url', () => {
     const url = artifactPreviewUrl({ download_url: '/api/v1/artifacts/7' } as never, {
       sessionKey: 'sess-1',
@@ -233,9 +231,9 @@ describe('artifactPreviewUrl (parity chat.js:7569)', () => {
   })
 })
 
-/* ── artifactAuthenticatedDownloadUrl (chat.js:7583) ────────────────────── */
+/* ── artifactAuthenticatedDownloadUrl ────────────────────── */
 
-describe('artifactAuthenticatedDownloadUrl (parity chat.js:7583)', () => {
+describe('artifactAuthenticatedDownloadUrl', () => {
   it('adds sessionKey + token onto a raw url', () => {
     expect(
       artifactAuthenticatedDownloadUrl('/api/v1/artifacts/5', {

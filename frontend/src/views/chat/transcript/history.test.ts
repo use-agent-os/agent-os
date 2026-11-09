@@ -134,7 +134,7 @@ beforeEach(() => {
   document.body.innerHTML = ''
 })
 
-describe('messagePageIdentity (parity chat.js:5350)', () => {
+describe('messagePageIdentity', () => {
   it('keys on the stable message_id when present', () => {
     const msg = { role: 'user', text: 'hi', message_id: 'abc' } as unknown as ChatMessage
     expect(messagePageIdentity(msg)).toBe('stable:abc')
@@ -147,7 +147,7 @@ describe('messagePageIdentity (parity chat.js:5350)', () => {
 
   it('falls back to role|text identity when neither id is present', () => {
     const msg = { role: 'user', text: 'hello' } as unknown as ChatMessage
-    // parity: fallback:_historyFallbackMessageIdentity(role, text) = `${role}|${text.trim()}`
+    // parity: fallback:_historyFallbackMessageIdentity(role, text) = `${role}|${text.trim}`
     expect(messagePageIdentity(msg)).toBe('fallback:user|hello')
   })
 
@@ -176,7 +176,7 @@ describe('history replay scroll behavior', () => {
   })
 })
 
-describe('mergeHistoryMessagePages (parity chat.js:5357)', () => {
+describe('mergeHistoryMessagePages', () => {
   it('prepends older messages without duplicating the overlap boundary', () => {
     const current = [
       { role: 'user', text: 'b' },
@@ -217,8 +217,8 @@ describe('mergeHistoryMessagePages (parity chat.js:5357)', () => {
   })
 
   it('dedups two id-less rows with the same role+text via the fallback identity', () => {
-    // parity chat.js:5350-5354 — with no stable id, identity is
-    // `fallback:${role}|${text.trim()}` (always truthy), so identical id-less
+    // with no stable id, identity is
+    // `fallback:${role}|${text.trim}` (always truthy), so identical id-less
     // rows across the page boundary collapse to one.
     const older = [{ role: 'system', text: 'ping' }]
     const current = [{ role: 'system', text: 'ping' }]

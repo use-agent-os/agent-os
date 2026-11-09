@@ -12,7 +12,6 @@ import {
   isControlPlaneToolName,
 } from './tools'
 
-const chatCss = readFileSync('src/views/chat/chat.css', 'utf8')
 const toolSource = readFileSync('src/views/chat/transcript/tools.ts', 'utf8')
 
 function createToolHarness(searchProvider = '') {
@@ -42,7 +41,7 @@ function createToolHarness(searchProvider = '') {
 // Pure-helper parity tests. Every asserted string/format is confirmed against
 // the legacy source (static/js/views/chat.js) at the cited line, NOT guessed.
 
-describe('toolDisplayName (parity chat.js:7049)', () => {
+describe('toolDisplayName', () => {
   it('returns the raw name for a non-publish tool', () => {
     expect(toolDisplayName('bash', '')).toBe('bash')
   })
@@ -52,7 +51,7 @@ describe('toolDisplayName (parity chat.js:7049)', () => {
   })
 
   it('appends the basename target for publish_artifact (object input)', () => {
-    // chat.js:7050-7053 → `${name} - ${basename(name||path)}`
+    // → `${name} - ${basename(name||path)}`
     expect(toolDisplayName('publish_artifact', { path: '/tmp/out/report.md' })).toBe(
       'publish_artifact - report.md',
     )
@@ -84,32 +83,32 @@ describe('toolIconName', () => {
   })
 })
 
-describe('fmtToolDuration (parity chat.js:7107)', () => {
+describe('fmtToolDuration', () => {
   it('returns "" for falsy or negative input', () => {
     expect(fmtToolDuration(0)).toBe('')
     expect(fmtToolDuration(-5)).toBe('')
   })
 
   it('renders sub-10s durations to one decimal second', () => {
-    // chat.js:7110 — s < 10 → `${s.toFixed(1)}s`
+    // s < 10 → `${s.toFixed(1)}s`
     expect(fmtToolDuration(450)).toBe('0.5s')
     expect(fmtToolDuration(1500)).toBe('1.5s')
   })
 
   it('rounds 10s..60s to whole seconds', () => {
-    // chat.js:7111 — s < 60 → `${Math.round(s)}s`
+    // s < 60 → `${Math.round(s)}s`
     expect(fmtToolDuration(12000)).toBe('12s')
     expect(fmtToolDuration(59400)).toBe('59s')
   })
 
   it('renders >=60s as `${m}m${s}s`', () => {
-    // chat.js:7112 — `${Math.floor(s/60)}m${Math.round(s%60)}s`
+    // `${Math.floor(s/60)}m${Math.round(s%60)}s`
     expect(fmtToolDuration(75000)).toBe('1m15s')
     expect(fmtToolDuration(125000)).toBe('2m5s')
   })
 })
 
-describe('toolResultIsError (parity chat.js:7206)', () => {
+describe('toolResultIsError', () => {
   it('is true when execution_status.status is error/timeout/cancelled', () => {
     expect(toolResultIsError({ execution_status: { status: 'error' } })).toBe(true)
     expect(toolResultIsError({ execution_status: { status: 'timeout' } })).toBe(true)
@@ -132,7 +131,7 @@ describe('toolResultIsError (parity chat.js:7206)', () => {
   })
 })
 
-describe('toolResultIsTruncated (parity chat.js:7221)', () => {
+describe('toolResultIsTruncated', () => {
   it('is true only when execution_status.truncated is truthy', () => {
     expect(toolResultIsTruncated({ execution_status: { truncated: true } })).toBe(true)
     expect(toolResultIsTruncated({ execution_status: { truncated: false } })).toBe(false)
@@ -141,7 +140,7 @@ describe('toolResultIsTruncated (parity chat.js:7221)', () => {
   })
 })
 
-describe('parseSubagentCompletion (parity chat.js:7817)', () => {
+describe('parseSubagentCompletion', () => {
   it('parses a subagent_completion JSON payload', () => {
     const text = JSON.stringify({ type: 'subagent_completion', child_session_key: 'a:b' })
     expect(parseSubagentCompletion(text)).toEqual({
@@ -159,7 +158,7 @@ describe('parseSubagentCompletion (parity chat.js:7817)', () => {
   })
 })
 
-describe('isControlPlaneToolName (parity chat.js:7057)', () => {
+describe('isControlPlaneToolName', () => {
   it('is true only for router_control', () => {
     expect(isControlPlaneToolName('router_control')).toBe(true)
     expect(isControlPlaneToolName('bash')).toBe(false)
@@ -325,30 +324,5 @@ describe('reconstructToolCalls text segments', () => {
     // while the whole-message path did not; both now share one helper.
     const transcript = readFileSync('src/views/chat/useTranscript.ts', 'utf8')
     expect(transcript).toMatch(/stripText: stripAssistantText,/)
-  })
-})
-
-describe('tool activity stylesheet contract', () => {
-  it('replaces native disclosure chrome with the modern activity-surface treatment', () => {
-    expect(chatCss).toContain('.chat-tools-collapse {')
-    expect(chatCss).toContain('background: color-mix(in srgb, var(--foreground) 3%, transparent)')
-    expect(chatCss).toContain('.chat-tools-summary::-webkit-details-marker')
-    expect(chatCss).toContain('.chat-tools-collapse[open] > .chat-tools-summary::after')
-    expect(chatCss).toContain('.chat-tools-name {')
-    expect(chatCss).toContain('.chat-tools-status {')
-    expect(chatCss).toContain("content: 'INPUT'")
-    expect(chatCss).toContain("content: 'OUTPUT'")
-    expect(chatCss).toMatch(
-      /\.chat-tools-icon \{[\s\S]*?color: var\(--primary\);[\s\S]*?\.chat-tools-icon::before \{[\s\S]*?mask: var\(--tool-icon-mask\)/,
-    )
-  })
-
-  it('styles every tool state and provides a reduced-motion fallback', () => {
-    expect(chatCss).toContain('.chat-tools-collapse--running')
-    expect(chatCss).toContain('.chat-tools-collapse--success')
-    expect(chatCss).toContain('.chat-tools-collapse--error')
-    expect(chatCss).toContain('.chat-tools-collapse--unknown')
-    expect(chatCss).toContain('@keyframes chat-tool-spin')
-    expect(chatCss).toContain('@media (prefers-reduced-motion: reduce)')
   })
 })

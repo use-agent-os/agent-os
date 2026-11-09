@@ -1,0 +1,83 @@
+import { Brain, ChevronRight } from 'lucide-react'
+import { useState } from 'react'
+import { useRpc } from '@/app/providers'
+import { t } from '@/i18n'
+import '@/i18n/en/webChat'
+import { cn } from '@/lib/utils'
+import { usePreferences } from '@/stores/preferences'
+import type { Item } from '../model/types'
+import { useChatActions } from './context'
+
+type ThinkingItem = Extract<Item, { kind: 'thinkingRef' }>
+
+/**
+ * Model reasoning as a collapsed "Thinking" block (chat spec "Thinking
+ * display"). Restored turns load the content with chat.thinking on first
+ * expand; the show-thinking preference hides the block entirely.
+ */
+export function ThinkingBlock({ item, live }: { item: ThinkingItem; live?: boolean }) {
+  const show = usePreferences((s) => s.showThinking)
+  const rpc = useRpc()
+  const { sessionKey } = useChatActions()
+  const [open, setOpen] = useState(false)
+  const [loaded, setLoaded] = useState<string | null>(null)
+  const [state, setState] = useState<'idle' | 'loading' | 'error'>('idle')
+  const [error, setError] = useState('')
+  if (!show) return null
+
+  const text = item.text ?? loaded
+  const toggle = () => {
+    const next = !open
+    setOpen(next)
+    if (next && text === null && item.messageId && state === 'idle') {
+      setState('loading')
+      rpc
+        .call<{ reasoning?: string | null }>('chat.thinking', {
+          sessionKey,
+          messageId: item.messageId,
+        })
+        .then((res) => {
+          setLoaded(res?.reasoning ?? '')
+          setState('idle')
+        })
+        .catch((e: unknown) => {
+          setError(e instanceof Error ? e.message : String(e))
+          setState('error')
+        })
+    }
+  }
+
+  return (
+    <div className="rounded-md text-text-muted">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={toggle}
+        className="target flex items-center gap-1.5 rounded px-1 text-ui hover:text-text"
+      >
+        <ChevronRight
+          className={cn('size-3.5 transition-transform', open && 'rotate-90')}
+          aria-hidden
+        />
+        <Brain className="size-4" aria-hidden />
+        {live ? t('webChat.thinkingLive') : t('webChat.thinking')}
+      </button>
+      {open ? (
+        <div
+          className="mt-1 border-l-2 border-border pl-3 text-[length:var(--text-prose)] whitespace-pre-wrap"
+          aria-live="polite"
+        >
+          {state === 'loading' ? (
+            <span role="status">{t('webChat.thinkingLoading')}</span>
+          ) : state === 'error' ? (
+            <span role="alert" className="text-danger">
+              {t('webChat.thinkingFailed', { message: error })}
+            </span>
+          ) : (
+            text
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}

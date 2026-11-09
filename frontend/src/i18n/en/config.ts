@@ -90,7 +90,7 @@ export const config = defineNamespace('config', {
   toastNoChanges: 'No changes to save',
   toastReloadBlocked: 'Discard pending changes before reloading the configuration.',
 
-  // Per-field help (config.js:32-125), keyed by config path.
+  // Per-field help, keyed by config path.
   helpHost:
     'Network interface the gateway binds to. Read-only here — set via agentos gateway run --bind (CLI only). Defaults to 127.0.0.1 (loopback); 0.0.0.0 exposes on all interfaces and requires auth.',
   helpPort:

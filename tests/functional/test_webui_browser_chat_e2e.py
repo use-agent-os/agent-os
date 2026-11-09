@@ -117,8 +117,11 @@ def test_react_chat_public_controls_work_without_sending_to_provider(
             const { chromium } = require("playwright");
 
             (async () => {
-              const browser = await chromium.launch({ headless: true });
-              const page = await browser.newPage();
+              const browser = await chromium.launch({
+                headless: true,
+                executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
+              });
+              const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
               const diagnostics = {
                 pageErrors: [],
                 consoleErrors: [],
@@ -141,79 +144,68 @@ def test_react_chat_public_controls_work_without_sending_to_provider(
                 });
               });
 
+              // The legacy ?session= link redirects to the path-based chat URL.
               const response = await page.goto(process.env.TARGET_URL, {
                 waitUntil: "domcontentloaded",
                 timeout: 30000,
               });
-              await page.getByRole("heading", { name: "Chat" }).waitFor({ timeout: 15000 });
-              await page
-                .getByRole("region", { name: "Chat toolbar" })
-                .waitFor({ timeout: 15000 });
-
-              const sessionGroup = page.getByRole("group", { name: "Chat session controls" });
-              const switchSession = page.getByRole("button", { name: "Switch chat session" });
-              const newChat = page.getByRole("button", { name: "New chat" });
               const message = page.getByRole("textbox", { name: "Message" });
+              await message.waitFor({ timeout: 15000 });
+              const rail = page.getByRole("navigation", { name: "Main navigation" });
               const send = page.getByRole("button", { name: "Send" });
-              const runModes = page.getByRole("button", { name: "Run modes" });
 
               const controlCounts = {
-                toolbar: await page.getByRole("region", { name: "Chat toolbar" }).count(),
-                sessionGroup: await sessionGroup.count(),
-                switchSession: await switchSession.count(),
-                newChat: await newChat.count(),
+                rail: await rail.count(),
+                newSession: await rail.getByRole("button", { name: "New session" }).count(),
+                log: await page.getByRole("log", { name: "Conversation" }).count(),
                 message: await message.count(),
                 send: await send.count(),
-                runModes: await runModes.count(),
+                capabilities: await page.getByRole("button", { name: "Capabilities" }).count(),
+                route: await page.getByRole("button", { name: /^Model route:/ }).count(),
+                details: await page.getByRole("button", { name: "Details" }).count(),
               };
 
-              await switchSession.click();
-              await page.getByRole("dialog", { name: "Switch session" }).waitFor();
+              await page.getByRole("button", { name: "Capabilities" }).click();
+              const capabilityMenu = await page.getByRole("menu").count();
               await page.keyboard.press("Escape");
-
-              const sessionBefore = (await switchSession.textContent()).trim();
-              await newChat.click();
-              await page.waitForFunction(
-                previous =>
-                  document
-                    .querySelector('[aria-label="Switch chat session"]')
-                    ?.textContent?.trim() !== previous,
-                sessionBefore
-              );
-              const sessionAfter = (await switchSession.textContent()).trim();
-              const composerFocusedAfterNewChat = await message.evaluate(
-                element => element === document.activeElement
-              );
 
               await message.fill("Browser smoke draft — intentionally not sent");
               const sendEnabledForDraft = await send.isEnabled();
               const draft = await message.inputValue();
-
-              await runModes.click();
-              const runModesDialog = page.getByRole("dialog", { name: "Run modes" });
-              await runModesDialog.waitFor();
-              const runModesDialogCount = await runModesDialog.count();
-              await page.getByRole("button", { name: "Close run modes" }).click();
-              await runModesDialog.waitFor({ state: "detached" });
 
               const legacy = await page.evaluate(() => ({
                 app: typeof window.App,
                 router: typeof window.Router,
                 dataNode: document.querySelector("#agentos-data") !== null,
               }));
-              const currentSession = new URL(page.url()).searchParams.get("session");
+              const path = new URL(page.url()).pathname;
+              const title = await page.title();
+
+              // Phone layout: header navigation, composer in view, no page scroll.
+              await page.setViewportSize({ width: 390, height: 780 });
+              await page.getByRole("button", { name: "Open navigation" }).first().waitFor();
+              const phone = await page.evaluate(() => ({
+                horizontalScroll: document.documentElement.scrollWidth > window.innerWidth,
+                composerBottom:
+                  document
+                    .querySelector("[data-composer-input]")
+                    ?.getBoundingClientRect().bottom ?? 0,
+                viewport: window.innerHeight,
+                inputFont: parseFloat(
+                  getComputedStyle(document.querySelector("[data-composer-input]")).fontSize
+                ),
+              }));
+
               const result = {
                 status: response ? response.status() : 0,
-                title: await page.title(),
+                title,
+                path,
                 controlCounts,
-                sessionBefore,
-                sessionAfter,
-                currentSession,
-                composerFocusedAfterNewChat,
+                capabilityMenu,
                 sendEnabledForDraft,
                 draft,
-                runModesDialogCount,
                 legacy,
+                phone,
                 diagnostics,
               };
               await browser.close();
@@ -263,24 +255,25 @@ def test_react_chat_public_controls_work_without_sending_to_provider(
         _stop_process(server)
 
     assert payload["status"] == 200
-    assert payload["title"] == "Chat - AgentOS Control"
+    assert payload["path"] == "/control/chat/main/webchat/browser-smoke"
+    assert payload["title"].endswith("· AgentOS")
     assert payload["controlCounts"] == {
-        "toolbar": 1,
-        "sessionGroup": 1,
-        "switchSession": 1,
-        "newChat": 1,
+        "rail": 1,
+        "newSession": 1,
+        "log": 1,
         "message": 1,
         "send": 1,
-        "runModes": 1,
+        "capabilities": 1,
+        "route": 1,
+        "details": 1,
     }
-    assert payload["sessionBefore"] == "agent:main:webchat:browser-smoke"
-    assert payload["sessionAfter"] != payload["sessionBefore"]
-    assert payload["currentSession"] == payload["sessionAfter"]
-    assert payload["composerFocusedAfterNewChat"] is True
+    assert payload["capabilityMenu"] == 1
     assert payload["sendEnabledForDraft"] is True
     assert payload["draft"] == "Browser smoke draft — intentionally not sent"
-    assert payload["runModesDialogCount"] == 1
     assert payload["legacy"] == {"app": "undefined", "router": "undefined", "dataNode": False}
+    assert payload["phone"]["horizontalScroll"] is False
+    assert payload["phone"]["composerBottom"] <= payload["phone"]["viewport"]
+    assert payload["phone"]["inputFont"] >= 16
     assert payload["diagnostics"]["pageErrors"] == []
     assert payload["diagnostics"]["consoleErrors"] == []
     assert payload["diagnostics"]["requestFailures"] == []

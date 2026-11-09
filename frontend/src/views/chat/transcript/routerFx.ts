@@ -1,48 +1,45 @@
 // Chat transcript — router-fx animation engine (imperative).
-//
 // This module is part of the reviewed imperative boundary of the
 // chat-view migration (design §2.1): the router-fx subsystem is a self-contained
 // imperative animation engine (DOM + timers + rAF), ported near-verbatim from
-// static/js/views/chat.js (the router-fx range, chat.js:3263-4680) — it is NOT
+// static/js/views/chat.js (the router-fx range, ) — it is NOT
 // reactified. Each function carries the cited legacy line range it was ported
 // from. It composes into `createStreamController` exactly how `createToolRenderer`
 // / `createArtifactRenderer` do.
-//
 // Split into two surfaces (mirroring tools.ts / artifacts.ts):
-//   1. Pure helpers (top-level exports) — no DOM, no timers, no module globals.
-//      The provider/label/request-kind/seed-key/identity/tier helpers plus the
-//      tier REGISTRY (`createRouterFxRegistry`) and the registry-driven roster
-//      builders (`routerFxVisualEntries` / `routerFxHasMultipleCandidates`),
-//      made pure by taking the registry explicitly. These are the sanctioned
-//      unit-test surface for this task (routerFx.test.ts).
-//   2. `createRouterFxRenderer(deps)` — a factory the streaming controller
-//      composes. The DOM/animation methods (mount/build/position/ping/scan/
-//      settle/lock/normalize) need view state (the dock element, the thread,
-//      the session key, per-turn scan bookkeeping, the pending-decision cache)
-//      injected as `deps` or held as instance fields — the legacy module-globals
-//      rebind to the SAME registry the config loader feeds. DOM/animation
-//      behavior is verified by a live-browser sweep (parity matrix), not RTL.
-//
+// 1. Pure helpers (top-level exports) — no DOM, no timers, no module globals.
+// The provider/label/request-kind/seed-key/identity/tier helpers plus the
+// tier REGISTRY (`createRouterFxRegistry`) and the registry-driven roster
+// builders (`routerFxVisualEntries` / `routerFxHasMultipleCandidates`),
+// made pure by taking the registry explicitly. These are the sanctioned
+// unit-test surface for this task (routerFx.test.ts).
+// 2. `createRouterFxRenderer(deps)` — a factory the streaming controller
+// composes. The DOM/animation methods (mount/build/position/ping/scan/
+// settle/lock/normalize) need view state (the dock element, the thread,
+// the session key, per-turn scan bookkeeping, the pending-decision cache)
+// injected as `deps` or held as instance fields — the legacy module-globals
+// rebind to the SAME registry the config loader feeds. DOM/animation
+// behavior is verified by a live-browser sweep (parity matrix), not RTL.
 // Storage keys ported EXACTLY: the visualisation pref `agentos-router-fx`
-// (chat.js:3392) and the seed-cache prefix `osq.routerFx.seed:` (chat.js:3591).
+// and the seed-cache prefix `osq.routerFx.seed:`.
 
 /* ── Constants (ported verbatim from chat.js) ───────────────────────────── */
 
-// chat.js:3375 — default tier ids until config replaces them.
+// default tier ids until config replaces them.
 import { t } from '@/i18n'
 import '@/i18n/en/chat'
 
 export const ROUTER_FX_DEFAULT_TIERS = ['c0', 'c1', 'c2', 'c3'] as const
-// chat.js:3392 — per-browser visualisation preference key.
+// per-browser visualisation preference key.
 export const ROUTER_FX_PREF_KEY = 'agentos-router-fx'
-// chat.js:3395-3396 — fixed scan window + start-grace delay.
+// fixed scan window + start-grace delay.
 export const ROUTER_FX_SCAN_MS = 600
 export const ROUTER_FX_START_DELAY_MS = 280
-// chat.js:3589-3590 — localStorage seed-cache soft cap + trim target.
+// localStorage seed-cache soft cap + trim target.
 export const ROUTER_FX_SEED_CACHE_MAX = 300
 export const ROUTER_FX_SEED_CACHE_TRIM = 250
 
-// chat.js:3591 — seed cache key prefix.
+// seed cache key prefix.
 export function routerFxSeedCachePrefix(): string {
   return 'osq.routerFx.seed:'
 }
@@ -91,7 +88,7 @@ export interface RouterFxHistoryOptions {
   turnIndex: number | string
 }
 
-/** A deduped roster entry for one visual grid cell (chat.js:3543-3548). */
+/** A deduped roster entry for one visual grid cell. */
 export interface RouterFxVisualEntry {
   key: string
   tiers: string[]
@@ -103,7 +100,7 @@ export type RouterFxRequestKind = 'image' | 'text'
 
 /* ── Pure helpers (unit-tested) ─────────────────────────────────────────── */
 
-// chat.js:3444-3449 — Normalize user-facing model labels without changing
+// Normalize user-facing model labels without changing
 // stored/provider ids. "z-ai/glm-5.1" -> "glm-5.1"; "glm-5.1-20260406" -> "glm-5.1".
 export function modelDisplayName(name: string): string {
   if (!name || typeof name !== 'string') return name as string
@@ -112,12 +109,10 @@ export function modelDisplayName(name: string): string {
   return stripped.replace(/-\d{8}$/, '')
 }
 
-// chat.js:3451-3453
 export function routerFxStripProvider(name: string): string {
   return modelDisplayName(name)
 }
 
-// chat.js:3455-3462
 export function routerFxRequestKindFromAttachments(
   attachments: Array<{ mime?: string; type?: string }>,
 ): RouterFxRequestKind {
@@ -129,14 +124,12 @@ export function routerFxRequestKindFromAttachments(
   return 'text'
 }
 
-// chat.js:3464-3466
 export function routerFxNormalizeRequestKind(
   requestKind: string | undefined | null,
 ): RouterFxRequestKind {
   return requestKind === 'image' ? 'image' : 'text'
 }
 
-// chat.js:3419-3428
 export function routerFxSortTiers(list: string[]): string[] {
   return list.slice().sort((a, b) => {
     const am = /^c(\d+)$/.exec(a)
@@ -148,13 +141,11 @@ export function routerFxSortTiers(list: string[]): string[] {
   })
 }
 
-// chat.js:3430-3433
 export function routerFxNormalizeTier(tier: string | undefined | null): string {
   if (typeof tier !== 'string' || !tier) return ''
   return tier.toLowerCase().replace(/^t([0-3])$/, 'c$1')
 }
 
-// chat.js:3494-3498
 export function routerFxTierMatchesRequestKind(
   tierConfig: RouterFxTierConfig,
   requestKind: string | undefined | null,
@@ -164,7 +155,6 @@ export function routerFxTierMatchesRequestKind(
   return !tierConfig.imageOnly
 }
 
-// chat.js:3500-3506
 export function routerFxRequestKindFromDecision(
   decision: RouterFxDecision | null | undefined,
   fallbackKind: string | undefined | null,
@@ -176,12 +166,11 @@ export function routerFxRequestKindFromDecision(
   return 'text'
 }
 
-// chat.js:3582-3584 — seed cache key: prefix + sessionKey + 1-indexed turn + tier.
+// seed cache key: prefix + sessionKey + 1-indexed turn + tier.
 export function routerFxSeedCacheKey(sessionKey: string, turnIndex: number, tier: string): string {
   return routerFxSeedCachePrefix() + (sessionKey || '') + ':' + (turnIndex | 0) + ':' + tier
 }
 
-// chat.js:3631-3636
 export function routerFxIdentity(model: string, tier: string): string {
   const modelPart = typeof model === 'string' ? model.trim().toLowerCase() : ''
   const tierPart = routerFxNormalizeTier(tier)
@@ -189,7 +178,6 @@ export function routerFxIdentity(model: string, tier: string): string {
   return modelPart + '|' + tierPart
 }
 
-// chat.js:3637-3640
 export function routerFxDecisionIdentity(decision: RouterFxDecision | null | undefined): string {
   if (!decision || typeof decision !== 'object') return ''
   return routerFxIdentity(
@@ -198,7 +186,6 @@ export function routerFxDecisionIdentity(decision: RouterFxDecision | null | und
   )
 }
 
-// chat.js:3641-3644
 export function routerFxUsageIdentity(
   usage: { routed_model?: string; model?: string; routed_tier?: string } | null | undefined,
 ): string {
@@ -210,33 +197,33 @@ export function routerFxUsageIdentity(
 }
 
 /* ── Tier registry (chat.js module-globals _routerFxSlotList / _routerFxModels
- *   / _routerFxTierConfigs / _routerFxConfigTiers, chat.js:3376-3384) ─────── */
+ * / _routerFxTierConfigs / _routerFxConfigTiers, ) ─────── */
 
 /**
  * The router tier registry: the mutable tier bookkeeping the legacy view held
- * as IIFE module-globals and fed from `_loadFeatureToggles` (chat.js:1502-1531).
+ * as IIFE module-globals and fed from `_loadFeatureToggles`.
  * Extracted here as a small stateful object so the roster builders below stay
  * pure over it (unit-testable), while the chat config loader populates it via
  * `setTierConfig`/`rememberTierDecision`/`setConfigTiers`.
  */
 export interface RouterFxRegistry {
-  // chat.js:3376 — ordered slot list; chat.js:3377 tier→model; chat.js:3378
-  // tier→config; chat.js:3383 authoritative config-tier set (null = unknown).
+  // ordered slot list; tier→model;
+  // tier→config; authoritative config-tier set (null = unknown).
   slotList: string[]
   models: Record<string, string>
   tierConfigs: Record<string, RouterFxTierConfig>
   configTiers: Set<string> | null
-  /** chat.js:3468-3477 — resolve a tier's config (falls back to a bare model). */
+  /** — resolve a tier's config (falls back to a bare model). */
   tierConfig(tier: string): RouterFxTierConfig
-  /** chat.js:3435-3440 — register a normalized tier into the sorted slot list. */
+  /** — register a normalized tier into the sorted slot list. */
   registerTier(tier: string): void
-  /** chat.js:3479-3492 — remember a tier→model decision, warming the cache. */
+  /** — remember a tier→model decision, warming the cache. */
   rememberTierDecision(tier: string, model: string): void
-  /** chat.js:1513-1519 — set a tier's full config (config-load path). */
+  /** — set a tier's full config (config-load path). */
   setTierConfig(tier: string, config: RouterFxTierConfig): void
-  /** chat.js:1528 — set the authoritative config-tier set. */
+  /** — set the authoritative config-tier set. */
   setConfigTiers(tiers: Set<string> | null): void
-  /** chat.js:1530 — replace the slot list from config (sorted). */
+  /** — replace the slot list from config (sorted). */
   setSlotList(tiers: string[]): void
 }
 
@@ -247,7 +234,6 @@ export function createRouterFxRegistry(): RouterFxRegistry {
     tierConfigs: {},
     configTiers: null,
     tierConfig(tier: string): RouterFxTierConfig {
-      // chat.js:3468-3477
       const norm = typeof tier === 'string' ? tier.toLowerCase() : ''
       const known = norm ? reg.tierConfigs[norm] : null
       if (known) return known
@@ -258,14 +244,12 @@ export function createRouterFxRegistry(): RouterFxRegistry {
       }
     },
     registerTier(tier: string): void {
-      // chat.js:3435-3440
       const norm = routerFxNormalizeTier(tier)
       if (!norm) return
       if (reg.slotList.indexOf(norm) >= 0) return
       reg.slotList = routerFxSortTiers(reg.slotList.concat([norm]))
     },
     rememberTierDecision(tier: string, model: string): void {
-      // chat.js:3479-3492
       if (typeof tier !== 'string' || !tier) return
       const norm = tier.toLowerCase()
       reg.registerTier(norm)
@@ -296,9 +280,8 @@ export function createRouterFxRegistry(): RouterFxRegistry {
   return reg
 }
 
-/* ── Roster builders (pure over the registry, chat.js:3508-3552) ─────────── */
+/* ── Roster builders (pure over the registry, ) ─────────── */
 
-// chat.js:3508-3549
 export function routerFxVisualEntries(
   reg: RouterFxRegistry,
   requestKind: string | undefined | null,
@@ -345,7 +328,6 @@ export function routerFxVisualEntries(
   }))
 }
 
-// chat.js:3551-3553
 export function routerFxHasMultipleCandidates(
   reg: RouterFxRegistry,
   requestKind: string | undefined | null,
@@ -354,7 +336,7 @@ export function routerFxHasMultipleCandidates(
   return routerFxVisualEntries(reg, requestKind, decision).length > 1
 }
 
-/* ── Preference load/save (chat.js:3398-3417) ───────────────────────────── */
+/* ── Preference load/save ───────────────────────────── */
 
 /** The router-fx visualisation pref (chat.js `_routerFx`). */
 export interface RouterFxPref {
@@ -362,7 +344,7 @@ export interface RouterFxPref {
   variant: string
 }
 
-// chat.js:3398-3410 — defaults stand unless a stored pref overrides.
+// defaults stand unless a stored pref overrides.
 export function routerFxLoadPref(pref: RouterFxPref): void {
   pref.variant = 'default'
   try {
@@ -377,7 +359,6 @@ export function routerFxLoadPref(pref: RouterFxPref): void {
   }
 }
 
-// chat.js:3411-3417
 export function routerFxSavePref(pref: RouterFxPref): void {
   try {
     localStorage.setItem(ROUTER_FX_PREF_KEY, JSON.stringify({ enabled: pref.enabled }))
@@ -386,9 +367,9 @@ export function routerFxSavePref(pref: RouterFxPref): void {
   }
 }
 
-/* ── Seed cache (localStorage) — chat.js:3592-3630 ──────────────────────── */
+/* ── Seed cache (localStorage) — ──────────────────────── */
 
-// chat.js:3592-3613 — trim the localStorage seed cache to the soft cap.
+// trim the localStorage seed cache to the soft cap.
 export function routerFxSeedCacheTrim(): void {
   try {
     const prefix = routerFxSeedCachePrefix()
@@ -417,7 +398,7 @@ export function routerFxSeedCacheTrim(): void {
   }
 }
 
-// chat.js:3614-3627 — resolve (or generate + cache) the per-turn seed.
+// resolve (or generate + cache) the per-turn seed.
 export function routerFxResolveSeed(
   sessionKey: string,
   turnIndex: number,
@@ -442,7 +423,6 @@ export function routerFxResolveSeed(
   return fresh
 }
 
-// chat.js:3628-3630
 export function routerFxResolveLayoutSeed(
   sessionKey: string,
   hintTimestamp?: number | string,
@@ -490,7 +470,7 @@ export interface RouterFxRendererDeps {
   thread: () => HTMLElement | null
   /**
    * chat.js `_routerFxDock` — the composer dock element that hosts strips. All
-   * strips live here (chat.js:3897-3902); returns null until the React composer
+   * strips live here; returns null until the React composer
    * dock exists, preserving the legacy `if (!_routerFxDock)` suppression gate.
    */
   dock: () => HTMLElement | null
@@ -511,20 +491,20 @@ export interface RouterFxRendererDeps {
    * Default: never pinned.
    */
   isRoutePinned?: () => boolean
-  /** chat.js:661 — HTML-escape. */
+  /** — HTML-escape. */
   esc: (s: string) => string
   /** chat.js `_scrollToBottom`. */
   scrollToBottom: () => void
-  /** chat.js:3263 — compaction-turn suppression predicate. Default: false. */
+  /** — compaction-turn suppression predicate. Default: false. */
   isSuppressedForCompactionTurn?: (turnIndex: string) => boolean
-  /** chat.js:8660 — compaction-in-flight for the current session. Default: false. */
+  /** — compaction-in-flight for the current session. Default: false. */
   isCompactInFlightForCurrentSession?: () => boolean
   /** chat.js `_historyHasRendered` — has the history render completed. Default: true. */
   historyHasRendered?: () => boolean
   /** chat.js `_historyHydrating` — is the history render in progress. Default: false. */
   historyHydrating?: () => boolean
   /**
-   * chat.js:3569-3575 — await the config-ready gate (with its own ceiling).
+   * await the config-ready gate (with its own ceiling).
    * Default: resolve immediately (config already known / no gate).
    */
   awaitConfig?: () => Promise<void>
@@ -579,17 +559,16 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
   const sessionKey = (): string => getSessionKey() || ''
 
   /* ── instance fields (legacy module-globals) ──────────────────────────── */
-  // chat.js:61-63 — pending-anchor cache + delayed-scan bookkeeping.
+  // pending-anchor cache + delayed-scan bookkeeping.
   const _pendingRouterDecisions = new Map<string, RouterFxDecision>()
   let _routerFxScanDelayTimer: ReturnType<typeof setTimeout> | null = null
   let _routerFxScanPending: RouterFxScanPending | null = null
-  // chat.js:3269-3282 — compaction suppression sticky state.
+  // compaction suppression sticky state.
   let _compactSuppressedRouterSessionKey = ''
   let _compactSuppressedRouterTurnIndex = ''
 
-  /* ── request-kind + roster (chat.js:3691-3706) ────────────────────────── */
+  /* ── request-kind + roster ────────────────────────── */
 
-  // chat.js:3691-3693
   function realEntries(
     decision: RouterFxDecision | null | undefined,
     requestKind: string | undefined | null,
@@ -597,7 +576,6 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     return routerFxVisualEntries(reg, requestKind, decision)
   }
 
-  // chat.js:3697-3706
   function buildGridCells(entries: RouterFxVisualEntry[]): RouterFxGridCell[] {
     const orderedRealEntries = entries
       .slice()
@@ -609,7 +587,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     }))
   }
 
-  // chat.js:4039-4045 — winner label for settled semantics / assistive text.
+  // winner label for settled semantics / assistive text.
   function winnerName(decision: RouterFxDecision | null | undefined): string {
     const model = decision && (decision.model || decision.routed_model)
     if (model) return routerFxStripProvider(String(model))
@@ -618,7 +596,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     return tier || ''
   }
 
-  /* ── build (chat.js:3708-3783) ────────────────────────────────────────── */
+  /* ── build ────────────────────────────────────────── */
 
   function buildRouterFxElement(
     decision: RouterFxDecision,
@@ -648,7 +626,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
       wrap.dataset.rolloutPhase =
         typeof decision.rollout_phase === 'string' ? decision.rollout_phase : 'observe'
     }
-    // Style-variant seam (chat.js:3726-3732): stamp only non-default values.
+    // Style-variant seam: stamp only non-default values.
     const variant = (opts.variant != null ? opts.variant : pref.variant) || 'default'
     if (variant && variant !== 'default') wrap.dataset.variant = variant
 
@@ -700,7 +678,6 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     return wrap
   }
 
-  // chat.js:3785-3793
   function winnerCellIndex(wrap: RouterFxStripElement, tier: string): number {
     if (!wrap || !tier) return -1
     const cells = wrap._fxGridCells || []
@@ -712,7 +689,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     return -1
   }
 
-  /* ── selector position + ping (chat.js:3797-3822) ─────────────────────── */
+  /* ── selector position + ping ─────────────────────── */
 
   function positionSelector(
     selector: HTMLElement,
@@ -743,7 +720,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     setTimeout(() => cell.classList.remove('pinging'), 220)
   }
 
-  /* ── timers + residue + settled semantics (chat.js:3824-3895) ─────────── */
+  /* ── timers + residue + settled semantics ─────────── */
 
   function clearAnimationTimers(wrap: RouterFxStripElement): void {
     if (!wrap) return
@@ -851,7 +828,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     })
   }
 
-  /* ── dock mount (chat.js:3900-3927) ───────────────────────────────────── */
+  /* ── dock mount ───────────────────────────────────── */
 
   function strips(selector = '.router-fx'): RouterFxStripElement[] {
     const d = dock()
@@ -886,7 +863,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     })
   }
 
-  /* ── settle + burst (chat.js:3929-3968) ───────────────────────────────── */
+  /* ── settle + burst ───────────────────────────────── */
 
   function settleRouterFxImmediate(
     wrap: RouterFxStripElement,
@@ -928,8 +905,8 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     setTimeout(() => burst.remove(), 700)
   }
 
-  /* ── one-shot animate (chat.js:3970-4036) — retained for parity, unused by
-   *   the delayed-scan path but part of the engine. ──────────────────────── */
+  /* ── one-shot animate — retained for parity, unused by
+   * the delayed-scan path but part of the engine. ──────────────────────── */
 
   function animateRouterFx(wrap: RouterFxStripElement, winnerIdx: number): void {
     const grid = wrap.querySelector('.router-fx-grid')
@@ -990,7 +967,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     })
   }
 
-  /* ── scan → lock (chat.js:4047-4379) ──────────────────────────────────── */
+  /* ── scan → lock ──────────────────────────────────── */
 
   function pendingRouterFxScanMatchesCurrentTurn(): boolean {
     if (!_routerFxScanPending) return false
@@ -1338,7 +1315,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     }
   }
 
-  /* ── anchor lookups (chat.js:4388-4413) ───────────────────────────────── */
+  /* ── anchor lookups ───────────────────────────────── */
 
   function countUserMessages(): number {
     const th = thread()
@@ -1368,7 +1345,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     return null
   }
 
-  /* ── label fit (chat.js:4419-4472) ────────────────────────────────────── */
+  /* ── label fit ────────────────────────────────────── */
 
   function measureLabels(wrap: RouterFxStripElement): void {
     if (!wrap || !wrap.isConnected) return
@@ -1415,17 +1392,17 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
   }
 
   function insertAnchored(wrap: RouterFxStripElement): void {
-    // chat.js:4465-4472 — the strip mounts in the composer dock; the legacy
+    // the strip mounts in the composer dock; the legacy
     // reference-assistant param is dropped (the dock mount ignores it).
     fitLabels(wrap)
     mountStrip(wrap)
   }
 
-  /* ── compaction suppression (chat.js:3263-3282) ───────────────────────── */
+  /* ── compaction suppression ───────────────────────── */
 
   function routerFxIsSuppressedForCompactionTurn(turnIndex: string): boolean {
     // Prefer an injected predicate when the compaction owner wires one; else
-    // fall back to the ported sticky-state logic (chat.js:3263-3266).
+    // fall back to the ported sticky-state logic.
     if (deps.isSuppressedForCompactionTurn) return isSuppressedForCompactionTurn(turnIndex)
     if (!_compactSuppressedRouterTurnIndex) return false
     if (String(turnIndex || '') !== _compactSuppressedRouterTurnIndex) return false
@@ -1435,7 +1412,6 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
   }
 
   function suppressForCompaction(payload: { key?: string } = {}): void {
-    // chat.js:3269-3282
     cancelPendingRouterFxScan('compaction')
     if (!thread()) return
     const turnIndex = String(countUserMessages())
@@ -1451,7 +1427,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     diag('router_scan.suppressed_for_compaction', { key, turnIndex })
   }
 
-  /* ── pending-decision cache (chat.js:3652-3685) ───────────────────────── */
+  /* ── pending-decision cache ───────────────────────── */
 
   function pendingRouterDecisionKey(turnIndex: number | string): string {
     return `${sessionKey()}:${turnIndex || 'latest'}`
@@ -1485,7 +1461,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     }
   }
 
-  /* ── live entry point (chat.js:4480-4631) ─────────────────────────────── */
+  /* ── live entry point ─────────────────────────────── */
 
   async function handleRouterDecision(payload: RouterFxDecision): Promise<void> {
     diag('router_decision.handle.start', summarizePayload(payload))
@@ -1631,7 +1607,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     scrollToBottom()
   }
 
-  /* ── history entry point (chat.js:4637-4680 / 5611-5770) ─────────────── */
+  /* ── history entry point ─────────────── */
 
   /**
    * Apply the history-only render gates and normalize persisted usage into the
@@ -1682,7 +1658,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
   }
 
   /**
-   * chat.js:5611-5616 — remove dock residue that cannot belong to this history
+   * remove dock residue that cannot belong to this history
    * rebuild. A stamped strip for the current session survives so the per-turn
    * reconciliation below can reuse it without visually reordering the cells.
    */
@@ -1695,7 +1671,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
   }
 
   /**
-   * chat.js:5712-5741 — reconcile one persisted assistant turn into the singleton
+   * reconcile one persisted assistant turn into the singleton
    * composer dock. The caller walks history oldest-to-newest, so the latest
    * eligible turn naturally replaces older settled receipts. A current-session
    * live scan always wins and is never overwritten by history hydration.
@@ -1747,7 +1723,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
   }
 
   /**
-   * chat.js:5751-5770 — run after the history owner marks hydration complete.
+   * run after the history owner marks hydration complete.
    * Pending replay decisions can now find a user anchor; stale/unstamped strips
    * are then pruned, with the visual preference acting as the final sweep.
    */
@@ -1783,7 +1759,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     // pending-anchor cache (flushed by the history renderer once an anchor exists)
     cachePendingRouterDecision,
     flushPendingRouterDecisions,
-    // stream-lifecycle hooks (composed into the controller — chat.js:6585/6907/…)
+    // stream-lifecycle hooks (composed into the controller — /…)
     settleForOutput,
     cancelPendingRouterFxScan,
     staticizeCompletedStrips,
@@ -1811,7 +1787,7 @@ export function createRouterFxRenderer(deps: RouterFxRendererDeps) {
     // controller's park/restore call site stays uniform.
     insertLiveRouterStripForAnchor: (el: HTMLElement): void =>
       insertAnchored(el as RouterFxStripElement),
-    // dock predicate for stream.ts's `if (routerFxDock())`
+    // dock predicate for stream.ts's `if (routerFxDock)`
     hasDock: (): boolean => !!dock(),
     // one-shot animate (parity; retained)
     animateRouterFx,

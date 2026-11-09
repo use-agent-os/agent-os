@@ -325,8 +325,8 @@ describe('parseCron', () => {
     expect(p!.dow.set!.has(0)).toBe(true)
   })
   it('mirrors the legacy out-of-range guard: a bare 7 (>max 6) yields an empty dow set', () => {
-    // cron.js:1274 returns early when the token exceeds max, so `7` is never
-    // added — the 7→0 fold at cron.js:1304 is legacy dead code we keep for
+    // returns early when the token exceeds max, so `7` is never
+    // added — the 7→0 fold is legacy dead code we keep for
     // 1:1 fidelity but which never fires for a plain `7`.
     const p = parseCron('0 9 * * 7')
     expect(p).not.toBeNull()

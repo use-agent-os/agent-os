@@ -82,6 +82,34 @@ def test_custom_base_path_serves_deep_link_and_assets(dist_dir: Path) -> None:
     assert asset.status_code == 200
 
 
+@pytest.mark.parametrize("base_path", ["/control", "/console"])
+@pytest.mark.parametrize(
+    "route",
+    [
+        "/chat/main/webchat/x",
+        "/chat/~/cron%3Ajob-1",
+        "/settings/channels",
+        "/projects/p1",
+    ],
+)
+def test_nested_deep_link_serves_spa_shell_with_runtime_base(
+    dist_dir: Path, base_path: str, route: str
+) -> None:
+    # The rebuilt console's path routes nest several segments deep
+    # (/chat/<agent>/<parts…>, /settings/<section>); every one must reach the
+    # SPA shell with the runtime <base>, not a 404 or the index redirect.
+    config = GatewayConfig()
+    config.control_ui.base_path = base_path
+    response = _client(config).get(f"{base_path}{route}")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert (
+        f'<base data-agentos-control-base="{base_path}" href="{base_path}/static/dist/">'
+        in response.text
+    )
+
+
 @pytest.mark.parametrize(
     "base_path",
     (

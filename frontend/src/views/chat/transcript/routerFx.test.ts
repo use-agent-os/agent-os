@@ -17,9 +17,9 @@ import {
   type RouterFxRegistry,
 } from './routerFx'
 
-/* ── modelDisplayName / routerFxStripProvider (parity chat.js:3444/3451) ── */
+/* ── modelDisplayName / routerFxStripProvider ── */
 
-describe('modelDisplayName (parity chat.js:3444)', () => {
+describe('modelDisplayName', () => {
   it('strips a provider prefix at the last "/"', () => {
     expect(modelDisplayName('anthropic/claude-x')).toBe('claude-x')
     expect(modelDisplayName('z-ai/glm-5.1')).toBe('glm-5.1')
@@ -42,16 +42,16 @@ describe('modelDisplayName (parity chat.js:3444)', () => {
   })
 })
 
-describe('routerFxStripProvider (parity chat.js:3451)', () => {
+describe('routerFxStripProvider', () => {
   it('delegates to modelDisplayName', () => {
     expect(routerFxStripProvider('anthropic/claude-x')).toBe('claude-x')
     expect(routerFxStripProvider('glm-5.1-20260406')).toBe('glm-5.1')
   })
 })
 
-/* ── routerFxNormalizeRequestKind (parity chat.js:3464) ── */
+/* ── routerFxNormalizeRequestKind ── */
 
-describe('routerFxNormalizeRequestKind (parity chat.js:3464)', () => {
+describe('routerFxNormalizeRequestKind', () => {
   it('maps only "image" to image, everything else to text', () => {
     expect(routerFxNormalizeRequestKind('image')).toBe('image')
     expect(routerFxNormalizeRequestKind('text')).toBe('text')
@@ -63,9 +63,9 @@ describe('routerFxNormalizeRequestKind (parity chat.js:3464)', () => {
   })
 })
 
-/* ── routerFxRequestKindFromAttachments (parity chat.js:3455) ── */
+/* ── routerFxRequestKindFromAttachments ── */
 
-describe('routerFxRequestKindFromAttachments (parity chat.js:3455)', () => {
+describe('routerFxRequestKindFromAttachments', () => {
   it('returns image when any attachment has an image/* mime', () => {
     expect(routerFxRequestKindFromAttachments([{ mime: 'image/png' }])).toBe('image')
   })
@@ -82,9 +82,9 @@ describe('routerFxRequestKindFromAttachments (parity chat.js:3455)', () => {
   })
 })
 
-/* ── routerFxSeedCacheKey (parity chat.js:3582) ── */
+/* ── routerFxSeedCacheKey ── */
 
-describe('routerFxSeedCacheKey (parity chat.js:3582)', () => {
+describe('routerFxSeedCacheKey', () => {
   it('assembles the exact prefixed key with turnIndex coerced via | 0', () => {
     expect(routerFxSeedCacheKey('agent:main', 3, 'c1')).toBe('osq.routerFx.seed:agent:main:3:c1')
   })
@@ -94,9 +94,9 @@ describe('routerFxSeedCacheKey (parity chat.js:3582)', () => {
   })
 })
 
-/* ── routerFxNormalizeTier / routerFxSortTiers (parity chat.js:3430/3419) ── */
+/* ── routerFxNormalizeTier / routerFxSortTiers ── */
 
-describe('routerFxNormalizeTier (parity chat.js:3430)', () => {
+describe('routerFxNormalizeTier', () => {
   it('lowercases and rewrites t0-t3 to c0-c3', () => {
     expect(routerFxNormalizeTier('T2')).toBe('c2')
     expect(routerFxNormalizeTier('t0')).toBe('c0')
@@ -113,7 +113,7 @@ describe('routerFxNormalizeTier (parity chat.js:3430)', () => {
   })
 })
 
-describe('routerFxSortTiers (parity chat.js:3419)', () => {
+describe('routerFxSortTiers', () => {
   it('orders c<n> numerically, ahead of non-c tiers which sort lexically', () => {
     expect(routerFxSortTiers(['c10', 'c2', 'zeta', 'c1', 'alpha'])).toEqual([
       'c1',
@@ -130,9 +130,9 @@ describe('routerFxSortTiers (parity chat.js:3419)', () => {
   })
 })
 
-/* ── identity helpers (parity chat.js:3631-3643) ── */
+/* ── identity helpers ── */
 
-describe('routerFxIdentity (parity chat.js:3631)', () => {
+describe('routerFxIdentity', () => {
   it('joins lowercased trimmed model and normalized tier with "|"', () => {
     expect(routerFxIdentity('  Anthropic/Claude  ', 'T1')).toBe('anthropic/claude|c1')
   })
@@ -145,7 +145,7 @@ describe('routerFxIdentity (parity chat.js:3631)', () => {
   })
 })
 
-describe('routerFxDecisionIdentity / routerFxUsageIdentity (parity chat.js:3637/3641)', () => {
+describe('routerFxDecisionIdentity / routerFxUsageIdentity', () => {
   it('reads decision model/tier with routed_* fallbacks', () => {
     expect(routerFxDecisionIdentity({ model: 'M', tier: 't1' })).toBe('m|c1')
     expect(routerFxDecisionIdentity({ routed_model: 'M2', routed_tier: 't2' })).toBe('m2|c2')
@@ -160,7 +160,7 @@ describe('routerFxDecisionIdentity / routerFxUsageIdentity (parity chat.js:3637/
   })
 })
 
-/* ── routerFxVisualEntries / routerFxHasMultipleCandidates (parity chat.js:3508/3551) ── */
+/* ── routerFxVisualEntries / routerFxHasMultipleCandidates ── */
 
 function seededRegistry() {
   const reg = createRouterFxRegistry()
@@ -172,7 +172,7 @@ function seededRegistry() {
   return reg
 }
 
-describe('routerFxVisualEntries (parity chat.js:3508)', () => {
+describe('routerFxVisualEntries', () => {
   it('returns [] until config tiers are known', () => {
     const reg = createRouterFxRegistry()
     expect(routerFxVisualEntries(reg, 'text', null)).toEqual([])
@@ -198,7 +198,7 @@ describe('routerFxVisualEntries (parity chat.js:3508)', () => {
   })
 })
 
-describe('routerFxHasMultipleCandidates (parity chat.js:3551)', () => {
+describe('routerFxHasMultipleCandidates', () => {
   it('is true when more than one candidate exists', () => {
     const reg = seededRegistry()
     expect(routerFxHasMultipleCandidates(reg, 'text', null)).toBe(true)
@@ -268,7 +268,7 @@ function makeHistoryRenderer(
 }
 
 describe('createRouterFxRenderer (factory smoke)', () => {
-  it('buildRouterFxElement returns null with <= 1 candidate (chat.js:3749)', () => {
+  it('buildRouterFxElement returns null with <= 1 candidate', () => {
     const reg = createRouterFxRegistry()
     reg.rememberTierDecision('c1', 'only-model')
     reg.setConfigTiers(new Set(['c1']))
@@ -388,7 +388,7 @@ describe('createRouterFxRenderer (factory smoke)', () => {
     expect(reg.models['c1']).toBe('anthropic/claude-a')
   })
 
-  it('handleRouterDecision skips a payload with no tier (chat.js:4486)', async () => {
+  it('handleRouterDecision skips a payload with no tier', async () => {
     const reg = seededRegistry()
     const renderer = makeRenderer(reg, document.createElement('div'))
     await expect(renderer.handleRouterDecision({ model: 'x' })).resolves.toBeUndefined()
@@ -454,7 +454,7 @@ describe('createRouterFxRenderer route-pin suppression', () => {
 
   it('sweeps a stale settled strip when a pin blocks scheduleBeginScan', () => {
     // Regression for issue #345, path 2: the pin was chosen before the send
-    // flow ran, so scheduleBeginScan early-returns at isRoutePinned(). It must
+    // flow ran, so scheduleBeginScan early-returns at isRoutePinned. It must
     // still sweep the dock — otherwise the previous turn's settled strip sits
     // above the composer for the whole pinned turn, until the router_decision
     // event finally arrives.
@@ -804,7 +804,7 @@ describe('createRouterFxRenderer history reconciliation', () => {
     // strip survived a reload and read as the pinned turn's selection.
     const harness = makeHistoryRenderer()
     try {
-      // Two persisted user turns in the thread so countUserMessages() == 2.
+      // Two persisted user turns in the thread so countUserMessages == 2.
       const threadEl = harness.host.firstElementChild!
       const u1 = document.createElement('div')
       u1.className = 'msg user'

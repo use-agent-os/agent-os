@@ -36,7 +36,7 @@ export interface HealthReport {
 
 const HIDDEN_EVIDENCE_KEYS = new Set(['restart_required', 'restartRequired'])
 
-/** health.js:403-411 — readinessImpact passthrough else severity mapping. */
+/** — readinessImpact passthrough else severity mapping. */
 export function impactValue(f: Pick<Finding, 'readinessImpact' | 'severity'>): Impact {
   const impact = String(f?.readinessImpact || '')
   if (['blocks_ready', 'degrades', 'optional', 'none'].includes(impact)) return impact as Impact
@@ -47,7 +47,7 @@ export function impactValue(f: Pick<Finding, 'readinessImpact' | 'severity'>): I
   return 'none'
 }
 
-/** health.js:413-420 — derive impact counts from severity counts. */
+/** — derive impact counts from severity counts. */
 export function impactCountsFromSeverity(counts: Record<string, number>): Record<Impact, number> {
   return {
     blocks_ready: Number(counts.error || 0),
@@ -57,7 +57,7 @@ export function impactCountsFromSeverity(counts: Record<string, number>): Record
   }
 }
 
-/** health.js:462-472 — readiness label incl. "Ready with warnings". */
+/** — readiness label incl. "Ready with warnings". */
 export function statusLabel(status: string, ready?: boolean): string {
   if (ready && status === 'degraded') return t('health.statusReadyWithWarnings')
   if (ready) return t('health.statusReady')
@@ -70,7 +70,7 @@ export function statusLabel(status: string, ready?: boolean): string {
   return labels[status] || status
 }
 
-/** health.js:316-322 — impact -> finding group kind. */
+/** — impact -> finding group kind. */
 export function findingGroupKind(f: Finding): GroupKind {
   const impact = impactValue(f)
   if (impact === 'blocks_ready') return 'action'
@@ -79,21 +79,21 @@ export function findingGroupKind(f: Finding): GroupKind {
   return 'ready'
 }
 
-/** health.js:244-248 — shell-quote unless the value is in the safe charset. */
+/** — shell-quote unless the value is in the safe charset. */
 export function shellArg(value: string): string {
   const text = String(value || '')
   if (/^[A-Za-z0-9_@%+=:,./~-]+$/.test(text)) return text
   return `'${text.replace(/'/g, `'\\''`)}'`
 }
 
-/** health.js:250-254 — a gateway URL is local when it resolves to a loopback host. */
+/** — a gateway URL is local when it resolves to a loopback host. */
 export function isLocalGatewayUrl(url: string): boolean {
   const target = gatewayStatusTarget(url)
   if (!target) return true
   return ['127.0.0.1', '::1', 'localhost', '0.0.0.0'].includes(target.host)
 }
 
-/** health.js:256-268 — parse host/port, normalize wildcard hosts, default port. */
+/** — parse host/port, normalize wildcard hosts, default port. */
 export function gatewayStatusTarget(url: string): { host: string; port: string } | null {
   try {
     const parsed = new URL(url)
@@ -110,10 +110,10 @@ export function gatewayStatusTarget(url: string): { host: string; port: string }
 }
 
 /**
- * health.js:227-238 — a gateway URL "uses the default" when it equals the
+ * a gateway URL "uses the default" when it equals the
  * default RPC URL on protocol+host+pathname (query/hash ignored), NOT when the
  * localStorage override is merely absent: legacy saveConnectionSettings
- * (app.js:210) routinely stores the default URL itself. An empty gatewayUrl
+ * routinely stores the default URL itself. An empty gatewayUrl
  * falls back to the default (=== true); an unparsable URL or unknown default
  * returns false, mirroring the legacy try/catch + missing-App guard.
  */
@@ -133,12 +133,11 @@ export function usesDefaultGatewayUrl(gatewayUrl: string, defaultRpcUrl: string)
 }
 
 function configOption(configPath: string): string {
-  // health.js:240-242
   return configPath ? ` --config ${shellArg(configPath)}` : ''
 }
 
 /**
- * health.js:197-225 — synthetic fix steps for the gateway.unavailable finding.
+ * synthetic fix steps for the gateway.unavailable finding.
  * `usesDefault` mirrors legacy `_usesDefaultGatewayUrl(gatewayUrl) && configPath`:
  * when the URL matches the bootstrap default and a config path is known we target
  * the config file instead of an explicit --gateway/--bind pair.
@@ -183,7 +182,7 @@ export function gatewayUnavailableFixSteps(
   ]
 }
 
-/** health.js:448-451 — drop hidden restart keys and null/undefined values. */
+/** — drop hidden restart keys and null/undefined values. */
 export function visibleEvidenceEntries(e?: Record<string, unknown>): Array<[string, unknown]> {
   return Object.entries(e || {}).filter(
     ([key, value]) => value !== undefined && value !== null && !HIDDEN_EVIDENCE_KEYS.has(key),
@@ -191,7 +190,7 @@ export function visibleEvidenceEntries(e?: Record<string, unknown>): Array<[stri
 }
 
 /**
- * health.js:453-460 — camelCase / snake_case -> "Title-ish" label: split
+ * camelCase / snake_case -> "Title-ish" label: split
  * camel-humps and _/- separators into words and capitalize only the leading
  * character, leaving each word's own casing intact. So `gatewayUrl` ->
  * `Gateway Url` (each hump keeps its capital), matching legacy 1:1.
@@ -205,7 +204,7 @@ export function evidenceLabel(key: string): string {
   return label ? label.charAt(0).toUpperCase() + label.slice(1) : ''
 }
 
-/** health.js:474-483 — stringify value, truncating JSON at 120 chars. */
+/** — stringify value, truncating JSON at 120 chars. */
 export function evidenceValue(value: unknown): string {
   if (typeof value === 'string') return value
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)

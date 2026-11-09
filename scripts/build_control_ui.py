@@ -46,6 +46,9 @@ VENDORED_PACKAGE_LICENSES = {
     # qrcode-generator's npm tarball has an npm `files` allowlist of its
     # sources, README and types; the MIT text lives only in the repository.
     "qrcode-generator": "qrcode-generator-LICENSE.txt",
+    # react-remove-scroll-bar (pulled in by the Radix dialog/menu primitives)
+    # publishes only dist/ and constants/; its MIT text lives in the repository.
+    "react-remove-scroll-bar": "react-remove-scroll-bar-LICENSE.txt",
 }
 REQUIRED_DIST_FILES = ("theme-bootstrap.js",)
 TYPE_ONLY_PACKAGES = frozenset({"csstype"})

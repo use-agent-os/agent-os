@@ -79,7 +79,8 @@ in both gateway and `--standalone` modes:
 - `/auto` — restore automatic Pilot Router routing (clear the pin).
 - `/plan [off]` — toggle plan mode (gateway mode only): the session becomes
   research-only until the plan the agent presents via `exit_plan_mode` is
-  approved (Web UI plan card, or `/plan off` + telling it to proceed).
+  approved (the plan card's **Approve plan** in Web UI chat, or `/plan off` +
+  telling it to proceed).
 
 A pin withdraws the model's own `router_control` tool, so it cannot route
 around the choice. Image turns still go to a vision tier (they are routed
@@ -287,7 +288,7 @@ agentos configure x-search --api-key-env XAI_API_KEY   # or use an xAI API key
 ```
 
 A subscription login is preferred over a key when both exist. The Web UI has
-the same controls under Capabilities. Billing goes to the user's xAI account
+the same controls under Settings › Search. Billing goes to the user's xAI account
 and does not appear in `agentos cost`.
 
 ### Sign the user in to xAI (SuperGrok / X Premium+) from a conversation

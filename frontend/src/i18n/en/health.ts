@@ -8,7 +8,7 @@ export const health = defineNamespace('health', {
   refresh: 'Refresh',
   checking: 'Checking',
 
-  // Readiness labels (health.js:462-472).
+  // Readiness labels.
   statusReadyWithWarnings: 'Ready with warnings',
   statusReady: 'Ready',
   statusActionRequired: 'Action required',
@@ -38,7 +38,7 @@ export const health = defineNamespace('health', {
   countOptional: 'Optional',
   countNone: 'Ready',
 
-  // Impact labels on a finding meta line (health.js:422-430).
+  // Impact labels on a finding meta line.
   impactBlocksReady: 'Blocks readiness',
   impactDegrades: 'Degrades',
   impactOptional: 'Optional',
@@ -51,7 +51,7 @@ export const health = defineNamespace('health', {
   contextRequestedConfig: 'Requested config',
   contextAgent: 'Agent',
 
-  // Finding groups (health.js:281-301).
+  // Finding groups.
   groupActionTitle: 'Needs action',
   groupActionNote: 'Fix these first to make AgentOS ready.',
   groupDegradedTitle: 'Degraded capabilities',
@@ -90,7 +90,7 @@ export const health = defineNamespace('health', {
   stepStartGateway: 'Start local gateway',
   stepInspectGateway: 'Inspect local gateway',
 
-  // Synthetic gateway.unavailable finding (health.js:86-115).
+  // Synthetic gateway.unavailable finding.
   gatewayUnavailableTitle: 'Gateway health report unavailable',
   gatewayUnavailableDetail: 'Cannot load doctor.status from {url}. {reason}',
 } as const)

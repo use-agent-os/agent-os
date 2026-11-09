@@ -14,14 +14,14 @@ export interface LogLine {
   raw: string
 }
 
-// logs.js:10 — filter chips, in legacy order.
+// filter chips, in legacy order.
 export const LEVELS: ReadonlyArray<Level> = ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR']
 
-// logs.js:11-13 — gateway file logging defaults to DEBUG, so TRACE is the only
+// gateway file logging defaults to DEBUG, so TRACE is the only
 // level hidden by default.
 export const DEFAULT_LEVELS: ReadonlySet<Level> = new Set<Level>(['DEBUG', 'INFO', 'WARN', 'ERROR'])
 
-/** logs.js:219-227 — substring scan ERROR>WARN>INFO>DEBUG>TRACE else INFO. */
+/** — substring scan ERROR>WARN>INFO>DEBUG>TRACE else INFO. */
 export function guessLevel(line: string): Level {
   const u = String(line).toUpperCase()
   if (u.includes('ERROR')) return 'ERROR'
@@ -32,7 +32,7 @@ export function guessLevel(line: string): Level {
   return 'INFO'
 }
 
-/** logs.js:182 — response line key fallback: data.lines ?? data.entries ?? []. */
+/** — response line key fallback: data.lines ?? data.entries ?? []. */
 export function extractLines(data: unknown): unknown[] {
   if (!data || typeof data !== 'object') return []
   const record = data as { lines?: unknown; entries?: unknown }
@@ -41,7 +41,7 @@ export function extractLines(data: unknown): unknown[] {
   return []
 }
 
-/** logs.js:189-200 — a raw tail entry (string or object) -> a LogLine. */
+/** — a raw tail entry (string or object) -> a LogLine. */
 export function normalizeEntry(entry: unknown): LogLine {
   if (typeof entry === 'string') {
     return { level: guessLevel(entry), message: entry, raw: entry }
@@ -62,13 +62,13 @@ export function normalizeEntry(entry: unknown): LogLine {
   return line
 }
 
-/** logs.js:201 — keep only the last 2000 accumulated lines. */
+/** — keep only the last 2000 accumulated lines. */
 export function clampBuffer(lines: LogLine[]): LogLine[] {
   return lines.length > 2000 ? lines.slice(lines.length - 2000) : lines
 }
 
-/** logs.js:296-300 — a line passes when its level is active and (no search or
- *  the search term is a case-insensitive substring of the message). */
+/** — a line passes when its level is active and (no search or
+ * the search term is a case-insensitive substring of the message). */
 export function matchesFilter(
   line: LogLine,
   activeLevels: ReadonlySet<Level>,
@@ -79,7 +79,7 @@ export function matchesFilter(
   return true
 }
 
-/** logs.js:296-300 — filter the buffer by active levels + search. */
+/** — filter the buffer by active levels + search. */
 export function filterLines(
   lines: LogLine[],
   activeLevels: ReadonlySet<Level>,
@@ -96,7 +96,7 @@ export interface LevelCounts {
   debug: number
 }
 
-/** logs.js:232-236 — level tallies for the stat row (TRACE folds into debug). */
+/** — level tallies for the stat row (TRACE folds into debug). */
 export function countByLevel(lines: LogLine[]): LevelCounts {
   return {
     total: lines.length,
@@ -107,7 +107,7 @@ export function countByLevel(lines: LogLine[]): LevelCounts {
   }
 }
 
-/** logs.js:237 — the filtered ("in view") line count. */
+/** — the filtered ("in view") line count. */
 export function visibleCount(
   lines: LogLine[],
   activeLevels: ReadonlySet<Level>,
@@ -116,7 +116,7 @@ export function visibleCount(
   return filterLines(lines, activeLevels, search).length
 }
 
-/** logs.js:313 — a timestamp sliced to its first 23 chars, "" when absent. */
+/** — a timestamp sliced to its first 23 chars, "" when absent. */
 export function sliceTs(ts: string | number | null | undefined): string {
   if (ts === null || ts === undefined) return ''
   return String(ts).slice(0, 23)
@@ -127,8 +127,8 @@ export interface HighlightSegment {
   match: boolean
 }
 
-/** logs.js:325-330 — split a message into text/match segments around a
- *  case-insensitive, regex-escaped search term (empty term -> one text seg). */
+/** — split a message into text/match segments around a
+ * case-insensitive, regex-escaped search term (empty term -> one text seg). */
 export function splitHighlight(message: string, search: string): HighlightSegment[] {
   if (!search) return [{ text: message, match: false }]
   const term = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -152,7 +152,7 @@ export function splitHighlight(message: string, search: string): HighlightSegmen
   return segments.length ? segments : [{ text: message, match: false }]
 }
 
-/** logs.js:343-346 — one export line per filtered entry: "<ts> [LEVEL] msg". */
+/** — one export line per filtered entry: "<ts> [LEVEL] msg". */
 export function buildExportText(lines: LogLine[]): string {
   return lines
     .map((line) => {

@@ -243,7 +243,7 @@ export interface SetupConfig {
   [key: string]: unknown
 }
 
-// ── constants (setup.js:4-36) ───────────────────────────────────────────────
+// ── constants ───────────────────────────────────────────────
 
 export const TEXT_TIERS = ['c0', 'c1', 'c2', 'c3'] as const
 
@@ -266,7 +266,7 @@ function readinessLabels(): Record<string, string> {
   }
 }
 
-/** setup.js:27-36 — section id → setup step id (shared by initial-step + reasons). */
+/** — section id → setup step id (shared by initial-step + reasons). */
 export const SECTION_STEPS: Array<[string, string]> = [
   ['llm', 'provider'],
   ['provider', 'provider'],
@@ -281,7 +281,7 @@ export const SECTION_STEPS: Array<[string, string]> = [
 export type StepId = 'provider' | 'router' | 'channels' | 'extras' | 'finish'
 
 /**
- * setup.js:4-10 — the ordered stepper steps. `label` is a getter: the array is a
+ * the ordered stepper steps. `label` is a getter: the array is a
  * module constant, so a resolved label would freeze at module-evaluation time
  * and keep the boot locale (#258).
  */
@@ -314,24 +314,24 @@ export const STEPS: Array<{ id: StepId; label: string }> = [
 
 // ── small utilities ─────────────────────────────────────────────────────────
 
-/** setup.js:2010-2012 — snake_case → camelCase for RPC param keys. */
+/** — snake_case → camelCase for RPC param keys. */
 export function camel(name: string): string {
   return String(name || '').replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase())
 }
 
-/** setup.js:660-662 — tier label with a c1 fallback. */
+/** — tier label with a c1 fallback. */
 export function tierLabel(tier: string | undefined): string {
   return tierLabels()[tier ?? ''] || tier || t('setup.tierC1')
 }
 
-// ── status / readiness derivation (setup.js:125-305) ────────────────────────
+// ── status / readiness derivation ────────────────────────
 
 export interface StepStatus {
   label: string
   tone: 'is-ok' | 'is-warn' | 'is-muted'
 }
 
-/** setup.js:485-491 — provider env missing + selected env key. */
+/** — provider env missing + selected env key. */
 export function providerEnvMissing(status: OnboardingStatus): boolean {
   return status.llmSource === 'missing_env'
 }
@@ -340,7 +340,7 @@ export function providerEnvKey(config: SetupConfig): string {
   return (config.llm || {}).api_key_env || 'the selected API key environment variable'
 }
 
-/** setup.js:165-173 — a section detail needs action. */
+/** — a section detail needs action. */
 export function stepDetailNeedsAction(detail: SectionDetail | undefined): boolean {
   return Boolean(
     detail &&
@@ -351,7 +351,7 @@ export function stepDetailNeedsAction(detail: SectionDetail | undefined): boolea
   )
 }
 
-/** setup.js:158-163 — status of a single detail-backed step. */
+/** — status of a single detail-backed step. */
 export function detailStepStatus(detail: SectionDetail | undefined): StepStatus {
   if (!detail) return { label: t('setup.chipReview'), tone: 'is-muted' }
   if (stepDetailNeedsAction(detail)) return { label: t('setup.chipNeedsAction'), tone: 'is-warn' }
@@ -362,7 +362,7 @@ export function detailStepStatus(detail: SectionDetail | undefined): StepStatus 
   }
 }
 
-/** setup.js:146-156 — aggregate several sections into one step status. */
+/** — aggregate several sections into one step status. */
 export function aggregateStepStatus(status: OnboardingStatus, sectionNames: string[]): StepStatus {
   const details = status.sectionDetails || {}
   const entries = sectionNames.map((name) => details[name]).filter(Boolean) as SectionDetail[]
@@ -375,14 +375,14 @@ export function aggregateStepStatus(status: OnboardingStatus, sectionNames: stri
   return { label: t('setup.chipOptional'), tone: 'is-muted' }
 }
 
-/** setup.js:261-270 — any pending setup action anywhere. */
+/** — any pending setup action anywhere. */
 export function hasSetupAction(status: OnboardingStatus): boolean {
   if (status.needsOnboarding) return true
   const details = status.sectionDetails || {}
   return Object.values(details).some((detail) => stepDetailNeedsAction(detail))
 }
 
-/** setup.js:125-144 — per-step status chip. `provider` is the effective provider. */
+/** — per-step status chip. `provider` is the effective provider. */
 export function stepStatus(
   stepId: StepId,
   status: OnboardingStatus,
@@ -409,13 +409,13 @@ export function stepStatus(
   return { label: t('setup.chipReview'), tone: 'is-muted' }
 }
 
-/** setup.js:302-305 — the step that fixes a given section. */
+/** — the step that fixes a given section. */
 export function stepForSection(name: string): StepId {
   const entry = SECTION_STEPS.find(([section]) => section === name)
   return (entry ? entry[1] : 'provider') as StepId
 }
 
-/** setup.js:286-300 — auto-select the initial step from status. */
+/** — auto-select the initial step from status. */
 export function initialStepFromStatus(status: OnboardingStatus): StepId {
   const details = status.sectionDetails || {}
   const entry = SECTION_STEPS.find(
@@ -428,7 +428,7 @@ export function initialStepFromStatus(status: OnboardingStatus): StepId {
   return 'provider'
 }
 
-// ── header headline + onboarding reasons (setup.js:177-259) ─────────────────
+// ── header headline + onboarding reasons ─────────────────
 
 export interface SetupHeadline {
   title: string
@@ -442,7 +442,7 @@ export interface Reason {
   step: StepId
 }
 
-/** setup.js:251-259 — reason text for a section (env-key aware). */
+/** — reason text for a section (env-key aware). */
 export function setupActionReason(name: string, detail: SectionDetail): string {
   const missingEnvPrefix = 'env key not visible: '
   const detailText = String(detail.detail || '')
@@ -454,7 +454,7 @@ export function setupActionReason(name: string, detail: SectionDetail): string {
 }
 
 /**
- * setup.js:219-249 — the tiered clickable reasons list. Blocking = detail.blocking
+ * the tiered clickable reasons list. Blocking = detail.blocking
  * || status === 'missing'; optional otherwise. providerEnvKey + connect-provider
  * are special-cased; empty list unless there is a pending action.
  */
@@ -497,7 +497,7 @@ export function onboardingReasons(status: OnboardingStatus, config: SetupConfig)
   return reasons
 }
 
-/** setup.js:177-192 — header headline + status chip tiered by reasons. */
+/** — header headline + status chip tiered by reasons. */
 export function setupHeadline(reasons: Reason[]): SetupHeadline {
   const blocking = reasons.filter((reason) => reason.tier === 'blocking').length
   const optional = reasons.length - blocking
@@ -518,16 +518,16 @@ export function setupHeadline(reasons: Reason[]): SetupHeadline {
   return { title: t('setup.headlineReady'), chip: t('setup.chipReady'), tone: 'is-ok' }
 }
 
-// ── env recovery command lookup (setup.js:501-507) ──────────────────────────
+// ── env recovery command lookup ──────────────────────────
 
-/** setup.js:501-507 — the env recovery command for a section, or ''. */
+/** — the env recovery command for a section, or ''. */
 export function envRecoveryCommand(status: OnboardingStatus, section: string): string {
   const commands = Array.isArray(status.envRecoveryCommands) ? status.envRecoveryCommands : []
   const entry = commands.find((e) => e && e.section === section && e.command)
   return entry ? entry.command! : ''
 }
 
-// ── provider derivation (setup.js:406-483) ──────────────────────────────────
+// ── provider derivation ──────────────────────────────────
 
 export function providerRouterSupportText(spec: ProviderSpec | null | undefined): string {
   if (!spec || !spec.providerId) return 'choose provider'
@@ -541,13 +541,13 @@ export function providerRouterSupportTone(
   return spec.routerSupported === true ? 'is-ready' : 'is-direct'
 }
 
-/** setup.js:416-419 — the saved config for a provider (only if it is the current one). */
+/** — the saved config for a provider (only if it is the current one). */
 export function providerConfigFor(config: SetupConfig, providerId: string): SetupConfig['llm'] {
   const current = config.llm || {}
   return current.provider === providerId ? current : {}
 }
 
-/** setup.js:421-428 — the configured (persisted + trusted) provider id, or ''. */
+/** — the configured (persisted + trusted) provider id, or ''. */
 export function configuredProvider(status: OnboardingStatus, config: SetupConfig): string {
   const provider = String((config.llm || {}).provider || '').trim()
   if (!provider) return ''
@@ -558,7 +558,7 @@ export function configuredProvider(status: OnboardingStatus, config: SetupConfig
 }
 
 /**
- * setup.js:437-439 — the effective provider: a draft selection (if provided)
+ * the effective provider: a draft selection (if provided)
  * else the configured provider. `draftProviderId` is the live `<select>` value
  * or a restored draft (read at the edge in the component).
  */
@@ -570,7 +570,7 @@ export function effectiveProvider(
   return draftProviderId || configuredProvider(status, config)
 }
 
-/** setup.js:441-447 — is a provider field "advanced" (base_url/proxy/optional-model)? */
+/** — is a provider field "advanced" (base_url/proxy/optional-model)? */
 export function isProviderAdvancedField(field: FieldSpec, spec: ProviderSpec): boolean {
   if (['base_url', 'proxy'].includes(field.name)) return true
   if (field.name === 'model') {
@@ -579,7 +579,7 @@ export function isProviderAdvancedField(field: FieldSpec, spec: ProviderSpec): b
   return false
 }
 
-/** setup.js:449-456 — a provider field's seed value from the saved config. */
+/** — a provider field's seed value from the saved config. */
 export function providerFieldValue(
   field: FieldSpec,
   current: NonNullable<SetupConfig['llm']>,
@@ -594,7 +594,7 @@ export function providerFieldValue(
   return ''
 }
 
-/** setup.js:458-466 — should the advanced provider section open by default? */
+/** — should the advanced provider section open by default? */
 export function providerAdvancedOpen(
   fields: FieldSpec[],
   current: NonNullable<SetupConfig['llm']>,
@@ -608,9 +608,9 @@ export function providerAdvancedOpen(
   })
 }
 
-// ── credential / needs-list helpers (setup.js:333-353) ──────────────────────
+// ── credential / needs-list helpers ──────────────────────
 
-/** setup.js:333-345 — rewrite generic credential needs to name the env key. */
+/** — rewrite generic credential needs to name the env key. */
 export function credentialNeedList(
   items: string[] | undefined,
   envKey: string | undefined,
@@ -629,7 +629,7 @@ export function credentialNeedList(
   })
 }
 
-/** setup.js:347-353 — the memory-embedding needs list (auto drops remote-fallback cred). */
+/** — the memory-embedding needs list (auto drops remote-fallback cred). */
 export function memoryNeedList(
   spec: ProviderSpec | undefined,
   providerId: string,
@@ -642,9 +642,9 @@ export function memoryNeedList(
   return spec?.requiresApiKey ? credentialNeedList(items, envKey || spec.envKey) : items
 }
 
-// ── capability status text (setup.js:971-1058) ──────────────────────────────
+// ── capability status text ──────────────────────────────
 
-/** setup.js:971-975 — the "$KEY not visible" status text (falls back when no key). */
+/** — the "$KEY not visible" status text (falls back when no key). */
 export function missingEnvStatusText(
   capability: string,
   envKey: string | undefined,
@@ -655,7 +655,7 @@ export function missingEnvStatusText(
   return t('setup.missingEnvStatus', { capability, key })
 }
 
-/** setup.js:977-992 — web search status text. */
+/** — web search status text. */
 export function searchStatusText(status: OnboardingStatus, config: SetupConfig): string {
   if (!config.search_provider) {
     return t('setup.searchOff')
@@ -698,7 +698,7 @@ export function xSearchCredentialText(auth: AuthStatus, config: SetupConfig): st
   return t('setup.xSearchOauthAbsent', { envKey })
 }
 
-/** setup.js:994-1012 — image generation status text. */
+/** — image generation status text. */
 export function imageGenerationStatusText(status: OnboardingStatus): string {
   if (status.imageGenerationEnabled === false) {
     return t('setup.imageDisabled')
@@ -719,7 +719,7 @@ export function imageGenerationStatusText(status: OnboardingStatus): string {
   return t('setup.imageNeedsKey')
 }
 
-/** setup.js:1014-1029 — voice audio status text. */
+/** — voice audio status text. */
 export function audioStatusText(status: OnboardingStatus): string {
   if (status.audioEnabled === false) {
     return t('setup.audioDisabled')
@@ -733,7 +733,7 @@ export function audioStatusText(status: OnboardingStatus): string {
   return t('setup.audioNeedsKey')
 }
 
-/** setup.js:1031-1058 — memory-embedding status text for the selected provider. */
+/** — memory-embedding status text for the selected provider. */
 export function memoryEmbeddingStatusText(
   status: OnboardingStatus,
   config: SetupConfig,
@@ -767,7 +767,7 @@ export function memoryEmbeddingStatusText(
   return t('setup.memoryNeedsKey')
 }
 
-// ── memory-embedding provider control enablement (setup.js:741-749,1560-1575) ──
+// ── memory-embedding provider control enablement ──
 
 export interface MemoryControlFlags {
   remoteControlEnabled: boolean
@@ -776,7 +776,7 @@ export interface MemoryControlFlags {
   hasRemoteOptions: boolean
 }
 
-/** setup.js:741-749 — which memory-embedding controls are live for a provider. */
+/** — which memory-embedding controls are live for a provider. */
 export function memoryControlFlags(
   providerId: string,
   spec: ProviderSpec | undefined,
@@ -794,14 +794,14 @@ export function memoryControlFlags(
   }
 }
 
-// ── router derivation (setup.js:550-635,1767-1855) ──────────────────────────
+// ── router derivation ──────────────────────────
 
-/** setup.js:566 — the human-selectable router strategies (jev is experimental, opt-in). */
+/** — the human-selectable router strategies (jev is experimental, opt-in). */
 export const ROUTER_STRATEGIES = ['pilot-v1', 'llm_judge', 'jev'] as const
 export type RouterMode = 'pilot-v1' | 'llm_judge' | 'jev' | 'disabled'
 
 /**
- * setup.js:567-569 — the Mode value: 'disabled' when router.enabled === false,
+ * the Mode value: 'disabled' when router.enabled === false,
  * else the persisted strategy if it is one of the selectable ones, else the
  * pilot-v1 fallback (v4_phase3 / unknown force-migrate to pilot-v1).
  */
@@ -813,7 +813,7 @@ export function routerMode(router: NonNullable<SetupConfig['agentos_router']>): 
     : 'pilot-v1'
 }
 
-/** setup.js:557 — merge catalog profile tiers under the config's saved tiers. */
+/** — merge catalog profile tiers under the config's saved tiers. */
 export function mergeTiers(
   profileTiers: Record<string, TierSpec> | undefined,
   configTiers: Record<string, TierSpec> | undefined,
@@ -821,17 +821,17 @@ export function mergeTiers(
   return Object.assign({}, profileTiers || {}, configTiers || {})
 }
 
-/** setup.js:626 — only text tiers + the image_model row are shown/saved. */
+/** — only text tiers + the image_model row are shown/saved. */
 export function isVisibleTier(name: string): boolean {
   return (TEXT_TIERS as readonly string[]).includes(name) || name === 'image_model'
 }
 
 /**
- * setup.js:1767-1788 — resolve the judge-model RPC param from the dropdown state.
+ * resolve the judge-model RPC param from the dropdown state.
  * null preserves the persisted judge (incl. a CLI-configured local endpoint that
  * the cloud-only dropdown can't represent); '' clears to AUTO; a model id pins.
- * @param value   the current `<select>` value
- * @param loaded  the value the dropdown was rendered with (data-judge-loaded)
+ * @param value the current `<select>` value
+ * @param loaded the value the dropdown was rendered with (data-judge-loaded)
  * @param isLocal whether a local judge endpoint is persisted (data-judge-local)
  */
 export function resolveJudgeModelParam(
@@ -869,7 +869,7 @@ export interface RouterConfigureParams {
 }
 
 /**
- * setup.js:1801-1846 — assemble the onboarding.router.configure payload from the
+ * assemble the onboarding.router.configure payload from the
  * collected tier rows + mode/default/judge/threshold. `sel` is the Mode value.
  * The pilot threshold is forwarded ONLY for pilot-v1 with a finite value; the
  * jev key/threshold ONLY for jev (blank key → null = preserve, threshold only
@@ -929,7 +929,7 @@ export function buildRouterConfigureParams(input: {
   return params
 }
 
-// ── scoped-field read + required validation (setup.js:1705-1741) ────────────
+// ── scoped-field read + required validation ────────────
 
 /** A minimal editable field the scoped reader/validator understands. */
 export interface ScopedField {
@@ -944,7 +944,7 @@ export interface ScopedField {
 }
 
 /**
- * setup.js:1705-1716 — read visible scoped fields into an RPC params object.
+ * read visible scoped fields into an RPC params object.
  * `scope` 'channel' keeps snake_case names; every other scope camelCases them.
  * Checkboxes → bool; blank secrets are omitted (never send an empty secret).
  */
@@ -960,7 +960,7 @@ export function readScopedFields(fields: ScopedField[], scope: string): Record<s
 }
 
 /**
- * setup.js:1718-1730 — the first missing required field's label, or '' when all
+ * the first missing required field's label, or '' when all
  * required fields are satisfied. A blank secret is allowed only when the caller
  * says an existing secret can be kept (`canKeepSecret`, channel-only in legacy).
  */
@@ -980,7 +980,7 @@ export function validateScopedRequiredFields(
   return ''
 }
 
-// ── capability payload builders (setup.js:1877-1994) ────────────────────────
+// ── capability payload builders ────────────────────────
 
 /** A capability field read at the edge (already knows its disabled/secret state). */
 export interface CapabilityField {
@@ -993,7 +993,7 @@ export interface CapabilityField {
 }
 
 /**
- * setup.js:1877-1882 — onboarding.memory_embedding.configure params. Disabled
+ * onboarding.memory_embedding.configure params. Disabled
  * fields are skipped; a blank secret is omitted; keys are camelCased.
  */
 export function buildMemoryConfigureParams(
@@ -1009,7 +1009,7 @@ export function buildMemoryConfigureParams(
 }
 
 /**
- * setup.js:1929-1935 — onboarding.search.configure params. A blank secret is
+ * onboarding.search.configure params. A blank secret is
  * skipped; checkboxes → bool; number fields → parseInt; keys camelCased.
  */
 export function buildSearchConfigureParams(
@@ -1046,7 +1046,7 @@ export function buildXSearchConfigureParams(
 }
 
 /**
- * setup.js:1947-1951 — onboarding.imageGeneration.configure params. `enabled`
+ * onboarding.imageGeneration.configure params. `enabled`
  * from the toggle; blank secrets skipped; keys camelCased.
  */
 export function buildImageConfigureParams(
@@ -1062,7 +1062,7 @@ export function buildImageConfigureParams(
 }
 
 /**
- * setup.js:1972-1976 — onboarding.audio.configure params. `enabled` from the
+ * onboarding.audio.configure params. `enabled` from the
  * toggle; blank secrets skipped; keys camelCased.
  */
 export function buildAudioConfigureParams(
@@ -1077,7 +1077,7 @@ export function buildAudioConfigureParams(
   return params
 }
 
-/** setup.js:1907-1912 — the memory-settings config.patch patches object. */
+/** — the memory-settings config.patch patches object. */
 export function buildMemorySettingsPatches(input: {
   providerName: string
   memoryLimit: string
@@ -1093,7 +1093,7 @@ export function buildMemorySettingsPatches(input: {
 }
 
 /**
- * setup.js:776-778 — the memory-settings over-budget heuristic. ~310 chars of
+ * the memory-settings over-budget heuristic. ~310 chars of
  * header/separator overhead per curated block; over budget when the two curated
  * limits + overhead exceed the injection limit.
  */
@@ -1107,13 +1107,13 @@ export function memorySettingsOverBudget(
   return memoryLimit + userLimit + MEMORY_SETTINGS_OVERHEAD_CHARS > injectLimit
 }
 
-// ── env-reference save advisory (setup.js:1060-1075) ────────────────────────
+// ── env-reference save advisory ────────────────────────
 
 export type EnvSaveAdvisory =
   { kind: 'none' } | { kind: 'warn'; message: string } | { kind: 'info'; message: string }
 
 /**
- * setup.js:1060-1075 — the env-reference save advisory. Suppressed entirely when
+ * the env-reference save advisory. Suppressed entirely when
  * there is no env key or an inline key was pasted; warns to restart when the key
  * is missing / a restart is required; else an info "keep it set" note.
  */
@@ -1138,16 +1138,16 @@ export function envReferenceSaveAdvisory(input: {
   }
 }
 
-// ── Finish CLI command assembly (setup.js:1077-1208,2014-2022) ──────────────
+// ── Finish CLI command assembly ──────────────
 
-/** setup.js:2018-2022 — POSIX shell-quote a value if it needs quoting. */
+/** — POSIX shell-quote a value if it needs quoting. */
 export function shellArg(value: string | undefined): string {
   const text = String(value || '')
   if (/^[A-Za-z0-9_@%+=:,./~-]+$/.test(text)) return text
   return `'${text.replace(/'/g, `'\\''`)}'`
 }
 
-/** setup.js:2014-2016 — the `--config <path>` CLI arg suffix (empty when no path). */
+/** — the `--config <path>` CLI arg suffix (empty when no path). */
 export function configCliArg(configPath: string | undefined): string {
   return configPath ? ` --config ${shellArg(configPath)}` : ''
 }
@@ -1157,7 +1157,7 @@ export interface CliCommand {
   command: string
 }
 
-/** setup.js:1089-1097 — the env-recovery commands surfaced on Finish. */
+/** — the env-recovery commands surfaced on Finish. */
 export function finishEnvRecoveryCommands(status: OnboardingStatus): CliCommand[] {
   return (Array.isArray(status.envRecoveryCommands) ? status.envRecoveryCommands : [])
     .map((entry) => ({
@@ -1167,7 +1167,7 @@ export function finishEnvRecoveryCommands(status: OnboardingStatus): CliCommand[
     .filter((entry) => entry.command)
 }
 
-/** setup.js:1187-1196 — the "Fix now" command group (env fixes + gateway restart). */
+/** — the "Fix now" command group (env fixes + gateway restart). */
 export function envFixCommands(envRecoveryCommands: CliCommand[], configArg: string): CliCommand[] {
   if (!envRecoveryCommands.length) return []
   return [
@@ -1176,7 +1176,7 @@ export function envFixCommands(envRecoveryCommands: CliCommand[], configArg: str
   ]
 }
 
-/** setup.js:1098-1107 — the CLI-handoff command group. */
+/** — the CLI-handoff command group. */
 export function handoffCommands(configArg: string): CliCommand[] {
   return [
     { label: t('setup.cliGuided'), command: `agentos onboard --if-needed${configArg}` },
@@ -1184,7 +1184,7 @@ export function handoffCommands(configArg: string): CliCommand[] {
   ]
 }
 
-/** setup.js:1108-1133 — the CLI-recipes command group. */
+/** — the CLI-recipes command group. */
 export function recipeCommands(configArg: string): CliCommand[] {
   return [
     {
@@ -1202,7 +1202,7 @@ export function recipeCommands(configArg: string): CliCommand[] {
   ]
 }
 
-// ── Finish summary + readiness (setup.js:1077-1288) ─────────────────────────
+// ── Finish summary + readiness ─────────────────────────
 
 export interface FinishSummary {
   provider: string
@@ -1212,7 +1212,7 @@ export interface FinishSummary {
   channels: string
 }
 
-/** setup.js:1078-1150 — the Finish summary rows. */
+/** — the Finish summary rows. */
 export function finishSummary(status: OnboardingStatus, config: SetupConfig): FinishSummary {
   const router = config.agentos_router || {}
   const configured = configuredProvider(status, config)
@@ -1231,7 +1231,7 @@ export function finishSummary(status: OnboardingStatus, config: SetupConfig): Fi
   }
 }
 
-/** setup.js:1250-1254 — the router readiness row needs a provider first. */
+/** — the router readiness row needs a provider first. */
 export function routerNeedsProvider(detail: SectionDetail, name: string): boolean {
   return (
     name === 'router' &&
@@ -1240,7 +1240,7 @@ export function routerNeedsProvider(detail: SectionDetail, name: string): boolea
   )
 }
 
-/** setup.js:1277-1282 — readiness-row tone. */
+/** — readiness-row tone. */
 export function readinessTone(
   detail: SectionDetail,
   name: string,
@@ -1251,14 +1251,14 @@ export function readinessTone(
   return 'is-muted'
 }
 
-/** setup.js:1284-1288 — readiness-row status label. */
+/** — readiness-row status label. */
 export function readinessStatusLabel(detail: SectionDetail, name: string): string {
   if (routerNeedsProvider(detail, name)) return t('setup.chipProviderFirst')
   if (detail.blocking || detail.actionRequired) return t('setup.chipNeedsAction')
   return readinessLabels()[detail.status ?? ''] || t('setup.chipOptional')
 }
 
-/** setup.js:1256-1261 — readiness action button label. */
+/** — readiness action button label. */
 export function readinessActionLabel(detail: SectionDetail, name: string): string {
   if (routerNeedsProvider(detail, name)) return t('setup.chipChooseProvider')
   if (detail.blocking || detail.actionRequired) return 'Fix'
@@ -1266,7 +1266,7 @@ export function readinessActionLabel(detail: SectionDetail, name: string): strin
   return t('setup.chipConfigure')
 }
 
-/** setup.js:1241-1248 — the setup step a readiness row jumps to (''=no jump). */
+/** — the setup step a readiness row jumps to (''=no jump). */
 export function setupStepForSection(name: string, detail: SectionDetail): StepId | '' {
   if (routerNeedsProvider(detail, name)) return 'provider'
   if (name === 'llm' || name === 'provider') return 'provider'
@@ -1278,15 +1278,15 @@ export function setupStepForSection(name: string, detail: SectionDetail): StepId
   return ''
 }
 
-// ── capability badge / save-button tone (setup.js:959-969) ──────────────────
+// ── capability badge / save-button tone ──────────────────
 
-/** setup.js:959-964 — a capability save button is primary when it needs action. */
+/** — a capability save button is primary when it needs action. */
 export function capabilityIsPrimary(status: OnboardingStatus, name: string): boolean {
   const detail = (status.sectionDetails || {})[name] || {}
   return Boolean(detail.blocking || detail.actionRequired)
 }
 
-/** setup.js:966-969 — a capability readiness badge (tone + label). */
+/** — a capability readiness badge (tone + label). */
 export function capabilityBadge(
   status: OnboardingStatus,
   name: string,
@@ -1296,20 +1296,17 @@ export function capabilityBadge(
 }
 
 // ── router tier model catalog (#142) ────────────────────────────────────────
-//
 // Two sources, and they have to be unioned rather than chosen between:
-//
-//   `models.list` (rpc_models.py:33) is live but partial — it aggregates the
-//   currently configured provider chain, and a full `ModelCatalog` is only
-//   fetched for some providers. It answers nothing at all before an API key is
-//   saved, which is exactly when this form is being filled in.
-//
-//   `onboarding.catalog.routerProfiles` ships with the package, is per
-//   provider, and carries the recommended model for every tier including
-//   `image_model`. It is small, and it is the source the tier rows are seeded
-//   from — so treating it as authoritative on its own would flag ids the
-//   gateway does know, and treating it as absent would flag the form's own
-//   defaults.
+// `models.list` (rpc_models.py:33) is live but partial — it aggregates the
+// currently configured provider chain, and a full `ModelCatalog` is only
+// fetched for some providers. It answers nothing at all before an API key is
+// saved, which is exactly when this form is being filled in.
+// `onboarding.catalog.routerProfiles` ships with the package, is per
+// provider, and carries the recommended model for every tier including
+// `image_model`. It is small, and it is the source the tier rows are seeded
+// from — so treating it as authoritative on its own would flag ids the
+// gateway does know, and treating it as absent would flag the form's own
+// defaults.
 
 /** A model the tier picker can offer, from either source. */
 export interface ModelOption {

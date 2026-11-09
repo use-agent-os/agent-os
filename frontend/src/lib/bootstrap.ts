@@ -20,7 +20,7 @@ export async function fetchBootstrap(): Promise<Bootstrap> {
   return (await resp.json()) as Bootstrap
 }
 
-/** app.js:192-195 — location-derived default RPC URL. */
+/** — location-derived default RPC URL. */
 export function defaultWsUrl(): string {
   // Off-gateway hosts (desktop) derive the socket from the configured API
   // origin; the served console derives it from its own location.
@@ -32,7 +32,7 @@ export function defaultWsUrl(): string {
 
 /**
  * Resolve the WS URL to connect with, given the server-computed bootstrap
- * ws_url. Legacy (app.js:186-203) never used a server value — _autoConnect
+ * ws_url. Legacy never used a server value — _autoConnect
  * always derived the scheme from location.protocol via getDefaultRpcUrl, so
  * an https page always produced wss://. The new console prefers the
  * server-computed ws_url, which is correct behind a well-configured proxy but
@@ -62,7 +62,7 @@ export function resolveWsUrl(bootstrapWsUrl: string): string {
 /**
  * Legacy inlined bootstrap data into the served HTML, so the shell could never
  * be blocked by a bootstrap failure: it always rendered, and _autoConnect
- * (app.js:186-203) connected with the location-derived default WS URL backed
+ * connected with the location-derived default WS URL backed
  * by infinite reconnect backoff. When /api/bootstrap fails transiently, this
  * fallback keeps that contract instead of wedging on a placeholder.
  */

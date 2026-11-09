@@ -29,7 +29,7 @@ export interface RawAgent {
 /** Tone token for a card gutter/chip (status color ONLY via --tone). */
 export type AgentTone = 'ok' | 'info'
 
-/** agents.js:97,144-146 — an agent is built-in via `type==='builtin'` or the flag. */
+/** — an agent is built-in via `type==='builtin'` or the flag. */
 export function isBuiltinAgent(agent: RawAgent): boolean {
   return agent.type === 'builtin' || agent.isBuiltin === true
 }
@@ -42,7 +42,7 @@ export interface AgentStats {
   tools: number
 }
 
-/** agents.js:93-118 — stat-row numbers: totals, builtin/custom split, distinct
+/** — stat-row numbers: totals, builtin/custom split, distinct
  * models and total tools wired across all agents. */
 export function agentStats(agents: RawAgent[]): AgentStats {
   const total = agents.length
@@ -72,7 +72,7 @@ export interface AgentDisplay {
 
 const TOOL_CHIP_LIMIT = 8
 
-/** agents.js:141-179 — resolve one card's display fields: id/name/type, the
+/** — resolve one card's display fields: id/name/type, the
  * ok/info tone (builtin→ok, custom→info; status color ONLY via --tone),
  * counts, and the first-8 tool chips with an overflow remainder. */
 export function agentDisplay(agent: RawAgent): AgentDisplay {
@@ -109,7 +109,7 @@ export interface AgentForm {
   enabled: boolean
 }
 
-/** agents.js:260-270 — seed the edit form from an agent (enabled defaults true). */
+/** — seed the edit form from an agent (enabled defaults true). */
 export function agentToForm(agent: RawAgent): AgentForm {
   return {
     id: agent.id || '',
@@ -122,7 +122,7 @@ export function agentToForm(agent: RawAgent): AgentForm {
   }
 }
 
-/** agents.js:376 — parse the comma-separated tools input into a clean list. */
+/** — parse the comma-separated tools input into a clean list. */
 export function parseToolsInput(value: string): string[] {
   return String(value || '')
     .split(',')
@@ -136,7 +136,7 @@ export interface CreateInput {
   name: string
 }
 
-/** agents.js:226,228 — the agent ID is required (trimmed, non-empty). */
+/** — the agent ID is required (trimmed, non-empty). */
 export function validateAgentId(id: string): string | null {
   return id.trim() ? null : t('agents.fieldIdRequired')
 }
@@ -152,7 +152,7 @@ export function validateCreate(input: CreateInput): CreateErrors {
   return errors
 }
 
-/** agents.js:226-230 — the agents.create payload: {id} always, name only when
+/** — the agents.create payload: {id} always, name only when
  * provided (both trimmed). */
 export function buildCreatePayload(input: CreateInput): { id: string; name?: string } {
   const id = input.id.trim()
@@ -162,7 +162,7 @@ export function buildCreatePayload(input: CreateInput): { id: string; name?: str
   return payload
 }
 
-/** agents.js:272-275 — is the edited form dirty relative to its seed? A
+/** — is the edited form dirty relative to its seed? A
  * structural (JSON) comparison, matching the legacy dirty-tracker. */
 export function isFormDirty(initial: AgentForm, current: AgentForm): boolean {
   try {
@@ -172,13 +172,13 @@ export function isFormDirty(initial: AgentForm, current: AgentForm): boolean {
   }
 }
 
-/** agents.js:432-437 — an update payload that carries only {id} changes
+/** — an update payload that carries only {id} changes
  * nothing, so the save is a no-op (skip the RPC, toast 'Nothing to save'). */
 export function isNoOpUpdate(payload: Record<string, unknown>): boolean {
   return Object.keys(payload).length <= 1
 }
 
-/** agents.js:467-476 — diff the seed vs the edited form: {id} plus only the
+/** — diff the seed vs the edited form: {id} plus only the
  * changed keys. Tools compared structurally. */
 export function buildUpdatePayload(
   initial: AgentForm,

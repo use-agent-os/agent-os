@@ -156,8 +156,8 @@ export const TABS: readonly TabDef[] = [
   },
 ]
 
-// config.js:32-125 — per-field help, keyed by config path. Falls back to a
-// generic message (config.js:127-130).
+// per-field help, keyed by config path. Falls back to a
+// generic message.
 function helpMap(): Record<string, string> {
   return {
     host: t('config.helpHost'),
@@ -224,14 +224,14 @@ function helpMap(): Record<string, string> {
   }
 }
 
-/** config.js:127-130 — per-field help text; generic fallback when unknown. */
+/** — per-field help text; generic fallback when unknown. */
 export function helpFor(key: string): string {
   const help = helpMap()
   if (key in help) return help[key]!
   return t('config.helpNone')
 }
 
-// config.js:422 — max object levels to descend before falling back to a
+// max object levels to descend before falling back to a
 // JSON-blob field. Top-level entries are depth 0, so three descents expose the
 // depth-3 leaf memory.embedding.local.model; a 4th object level blobs out.
 const FLATTEN_MAX_DEPTH = 3
@@ -241,7 +241,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * config.js:430-450 — flatten object-valued entries into dotted-key leaf
+ * flatten object-valued entries into dotted-key leaf
  * fields. Recurse while the value is a plain object AND depth < the limit.
  * Arrays, null, and scalars are leaves; an empty object or an object still
  * nested at the depth limit is emitted whole (the JSON-blob field renders it).
@@ -264,7 +264,7 @@ export function flattenEntries(entries: Entry[]): Entry[] {
   return out
 }
 
-/** config.js:876-883 — lowercased, JSON-stringified search haystack for a value. */
+/** — lowercased, JSON-stringified search haystack for a value. */
 export function searchBlob(value: unknown): string {
   if (value === null || value === undefined) return ''
   if (typeof value === 'object') {
@@ -278,7 +278,7 @@ export function searchBlob(value: unknown): string {
 }
 
 /**
- * config.js:452-461 — the flattened leaf entries a tab collects: top-level keys
+ * the flattened leaf entries a tab collects: top-level keys
  * whose lowercased name matches any of the tab's prefixes (exact / prefix+dot /
  * prefix+underscore), flattened, then filtered by the (already-lowercased)
  * search text over key OR value.
@@ -311,7 +311,7 @@ export interface FieldGroup {
   entries: Entry[]
 }
 
-/** config.js:491-495 — the group id for a leaf: its top dotted segment, or the
+/** — the group id for a leaf: its top dotted segment, or the
  * bare key when the value is an object, else 'general'. */
 export function groupIdForKey(k: string, v: unknown): string {
   if (k.includes('.')) return k.split('.')[0]!
@@ -319,7 +319,7 @@ export function groupIdForKey(k: string, v: unknown): string {
   return 'general'
 }
 
-/** config.js:497-500 — a group title: de-cased separators, title-cased words. */
+/** — a group title: de-cased separators, title-cased words. */
 export function groupTitle(id: string): string {
   if (id === 'general') return t('config.groupGeneral')
   const acronyms: Record<string, string> = {
@@ -336,7 +336,7 @@ export function groupTitle(id: string): string {
     .join(' ')
 }
 
-/** config.js:481-489 — bundle leaf entries into ordered groups (insertion order). */
+/** — bundle leaf entries into ordered groups (insertion order). */
 export function groupEntries(entries: Entry[]): FieldGroup[] {
   const groups = new Map<string, FieldGroup>()
   entries.forEach(([k, v]) => {
@@ -347,7 +347,7 @@ export function groupEntries(entries: Entry[]): FieldGroup[] {
   return Array.from(groups.values())
 }
 
-/** config.js:505-510 — the field label: the dotted key with its group prefix
+/** — the field label: the dotted key with its group prefix
  * stripped (a flattened leaf reads `provider.name` under Memory). The full key
  * stays as the data key for save + masking. */
 export function fieldLabel(k: string, groupId: string): string {
@@ -374,11 +374,11 @@ export function isReadonlyKey(k: string): boolean {
   return READONLY_KEYS.has(k)
 }
 
-// config.js:519 — sensitive-key masking tests the FULL dotted key, so a nested
+// sensitive-key masking tests the FULL dotted key, so a nested
 // leaf like memory.embedding.remote.api_key is still masked after flattening.
 const SENSITIVE_KEY_RE = /key|token|secret|password|api_key/i
 
-/** config.js:519 — does this key hold a secret (masked input + redacted preview)? */
+/** — does this key hold a secret (masked input + redacted preview)? */
 export function isSensitiveKey(k: string): boolean {
   return SENSITIVE_KEY_RE.test(k)
 }
@@ -386,7 +386,7 @@ export function isSensitiveKey(k: string): boolean {
 /** The editor control kind for a leaf value. */
 export type FieldKind = 'readonly' | 'boolean' | 'number' | 'object' | 'string'
 
-/** config.js:516-565 — pick the editor control for a leaf: readonly (host/port)
+/** — pick the editor control for a leaf: readonly (host/port)
  * wins, then boolean / number / object(JSON) by value type, else string. */
 export function fieldKind(k: string, v: unknown): FieldKind {
   if (isReadonlyKey(k)) return 'readonly'
@@ -396,7 +396,7 @@ export function fieldKind(k: string, v: unknown): FieldKind {
   return 'string'
 }
 
-/** config.js:629-637 — read the loaded config value at a (possibly dotted) leaf
+/** — read the loaded config value at a (possibly dotted) leaf
  * key: a literal top-level key wins, else descend the dotted path. */
 export function configValueAt(config: ConfigData, key: string): unknown {
   if (key in config) return config[key]
@@ -415,7 +415,7 @@ export function configValueAt(config: ConfigData, key: string): unknown {
 export type ParseResult = { ok: true; value: unknown } | { ok: false }
 
 /**
- * config.js:585-616 — coerce a raw editor value to its typed config value.
+ * coerce a raw editor value to its typed config value.
  * boolean = the checkbox state; number = Number(text); json = JSON.parse (which
  * can fail → {ok:false}, the inline "Invalid JSON" gate); string passes through.
  */
@@ -451,7 +451,7 @@ export type InvalidJsonMap = Record<string, true>
 export type DirtyResult = { dirty: false } | { dirty: true; old: unknown; new: unknown }
 
 /**
- * config.js:606-612 — THE dirty/no-op derivation. Diff a pending leaf value
+ * THE dirty/no-op derivation. Diff a pending leaf value
  * against the loaded config value: equal by reference OR by structural JSON is
  * a no-op (clears the dirty entry); anything else is dirty and carries the
  * old + new for the diff view. This is what gates the sticky bar and the save.
@@ -464,24 +464,24 @@ export function computeDirty(config: ConfigData, key: string, newVal: unknown): 
   return { dirty: true, old: oldVal, new: newVal }
 }
 
-/** config.js:671 — the number of pending dirty leaves. */
+/** — the number of pending dirty leaves. */
 export function dirtyCount(dirty: DirtyMap): number {
   return Object.keys(dirty).length
 }
 
-/** config.js:735 — is there any invalid-JSON leaf? (blocks form-mode save). */
+/** — is there any invalid-JSON leaf? (blocks form-mode save). */
 export function hasInvalidJson(invalid: InvalidJsonMap): boolean {
   return Object.keys(invalid).length > 0
 }
 
-/** config.js:739 — the config.patch payload: { patches: { dottedKey: newValue } }. */
+/** — the config.patch payload: { patches: { dottedKey: newValue } }. */
 export function buildPatchPayload(dirty: DirtyMap): { patches: Record<string, unknown> } {
   const patches: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(dirty)) patches[k] = v.new
   return { patches }
 }
 
-/** config.js:731 — the config.apply payload: the edited YAML + the loaded
+/** — the config.apply payload: the edited YAML + the loaded
  * baseline the operator was shown (so the server diffs & persists only edits). */
 export function buildApplyPayload(
   configYaml: string,
@@ -493,7 +493,7 @@ export function buildApplyPayload(
 const SECRET_KEY_RE = /token|key|secret|password/i
 const STR_TRUNC = 40
 
-/** config.js:843-855 — a compact, secret-redacted preview of a value for the
+/** — a compact, secret-redacted preview of a value for the
  * object-field summary line. */
 export function formatPreviewValue(key: string, value: unknown): string {
   if (SECRET_KEY_RE.test(key)) return '"***"'
@@ -509,7 +509,7 @@ export function formatPreviewValue(key: string, value: unknown): string {
   return JSON.stringify(value)
 }
 
-/** config.js:857-874 — the one-line "JSON · …" summary shown on a collapsed
+/** — the one-line "JSON · …" summary shown on a collapsed
  * object/array field (with a redacted key/value preview). */
 export function objectSummary(value: unknown): string {
   if (Array.isArray(value)) {
@@ -535,7 +535,7 @@ export function objectSummary(value: unknown): string {
   return 'JSON · value'
 }
 
-/** config.js:707-711 — a JSON-encoded, 120-char-truncated diff value for the
+/** — a JSON-encoded, 120-char-truncated diff value for the
  * sticky-bar diff rows. */
 export function summariseDiffValue(v: unknown): string {
   const s = JSON.stringify(v)
@@ -543,7 +543,7 @@ export function summariseDiffValue(v: unknown): string {
   return s.length > 120 ? s.slice(0, 117) + '…' : s
 }
 
-/** config.js:886-912 — a minimal, dependency-free object→YAML serialiser (the
+/** — a minimal, dependency-free object→YAML serialiser (the
  * YAML-mode baseline text). Scalars inline; structural strings get JSON-quoted;
  * objects and lists render as indented blocks; empty collections inline. */
 export function objToYaml(obj: unknown, indent = 0): string {

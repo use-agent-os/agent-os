@@ -11,7 +11,7 @@ afterEach(() => {
   useApprovals.setState({ pending: [], count: 0 })
 })
 
-describe('computeHasPendingForSession (chat.js:4686-4689)', () => {
+describe('computeHasPendingForSession', () => {
   it('is true when a pending item matches the session (camel alias)', () => {
     expect(computeHasPendingForSession([approval('sess-1')], 'sess-1')).toBe(true)
   })
@@ -39,7 +39,7 @@ describe('computeHasPendingForSession (chat.js:4686-4689)', () => {
   })
 })
 
-describe('useApprovalPending — idle-pause gate (chat.js:6216-6233)', () => {
+describe('useApprovalPending — idle-pause gate', () => {
   it('pauses (true) when a matching approval is pending for the session', () => {
     const setPaused = vi.fn()
     act(() => {

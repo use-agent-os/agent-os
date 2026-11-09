@@ -66,7 +66,23 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true
 }
 
-export function KeyboardShortcutProvider({ children }: { children: React.ReactNode }) {
+/**
+ * Renders the shortcut overview in place of the built-in sheet. The web console
+ * passes its own dialog; desktop keeps the default.
+ */
+export type ShortcutHelpRenderer = (props: {
+  open: boolean
+  shortcuts: RegisteredShortcut[]
+  onClose: () => void
+}) => React.ReactNode
+
+export function KeyboardShortcutProvider({
+  children,
+  renderHelp,
+}: {
+  children: React.ReactNode
+  renderHelp?: ShortcutHelpRenderer
+}) {
   const [shortcuts, setShortcuts] = useState<RegisteredShortcut[]>([])
   const [isHelpOpen, setHelpOpenState] = useState(false)
   // Keep the sheet's chunk mounted after the first open so its exit animation
@@ -214,7 +230,9 @@ export function KeyboardShortcutProvider({ children }: { children: React.ReactNo
     <RegisterContext.Provider value={register}>
       <HelpContext.Provider value={help}>
         {children}
-        {overlayLoaded ? (
+        {renderHelp ? (
+          renderHelp({ open: isHelpOpen, shortcuts, onClose: closeHelp })
+        ) : overlayLoaded ? (
           <Suspense fallback={null}>
             <ShortcutOverlay open={isHelpOpen} shortcuts={shortcuts} onClose={closeHelp} />
           </Suspense>

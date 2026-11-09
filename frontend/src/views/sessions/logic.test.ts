@@ -20,7 +20,7 @@ import {
   type RawSession,
 } from './logic'
 
-// ── agentIdFromKey (sessions.js:720-724) ─────────────────────────────────────
+// ── agentIdFromKey ─────────────────────────────────────
 describe('agentIdFromKey', () => {
   it('pulls the agent id from an "agent:<id>:..." key', () => {
     expect(agentIdFromKey('agent:main:chat:abc')).toBe('main')
@@ -33,7 +33,7 @@ describe('agentIdFromKey', () => {
   })
 })
 
-// ── normalizeRunStatus (sessions.js:726-734) ─────────────────────────────────
+// ── normalizeRunStatus ─────────────────────────────────
 describe('normalizeRunStatus', () => {
   it('maps abandoned → interrupted', () => {
     expect(normalizeRunStatus('abandoned')).toBe('interrupted')
@@ -55,7 +55,7 @@ describe('normalizeRunStatus', () => {
   })
 })
 
-// ── terminalRunStatus (sessions.js:748-754) ──────────────────────────────────
+// ── terminalRunStatus ──────────────────────────────────
 describe('terminalRunStatus', () => {
   it('returns the normalized status only when terminal', () => {
     expect(terminalRunStatus({ last_task: { status: 'failed' } })).toBe('failed')
@@ -68,7 +68,7 @@ describe('terminalRunStatus', () => {
   })
 })
 
-// ── sessionRunStatus (sessions.js:736-746) ───────────────────────────────────
+// ── sessionRunStatus ───────────────────────────────────
 describe('sessionRunStatus', () => {
   it('prefers an active queued/running task', () => {
     expect(sessionRunStatus({ active_task: { status: 'running' } })).toBe('running')
@@ -84,7 +84,7 @@ describe('sessionRunStatus', () => {
   })
 })
 
-// ── sessionVisualStatus (sessions.js:756-761) ────────────────────────────────
+// ── sessionVisualStatus ────────────────────────────────
 describe('sessionVisualStatus', () => {
   it('surfaces failed / timeout run statuses directly', () => {
     expect(sessionVisualStatus({ active_task: { status: 'failed' }, status: 'running' })).toBe(
@@ -106,7 +106,7 @@ describe('sessionVisualStatus', () => {
   })
 })
 
-// ── sessionStatusChip (components.js:256-281) ────────────────────────────────
+// ── sessionStatusChip ────────────────────────────────
 describe('sessionStatusChip', () => {
   it('maps statuses to chip tone tokens', () => {
     expect(sessionStatusChip('running')).toBe('ok')
@@ -121,7 +121,7 @@ describe('sessionStatusChip', () => {
   })
 })
 
-// ── runStatusBadge (sessions.js:763-790) ─────────────────────────────────────
+// ── runStatusBadge ─────────────────────────────────────
 describe('runStatusBadge', () => {
   it('returns a label + chip tone for run-status states that carry a badge', () => {
     expect(runStatusBadge({ active_task: { status: 'running' } })).toEqual({
@@ -159,7 +159,7 @@ describe('dotTone', () => {
   })
 })
 
-// ── relTimeLabel (components.js:228-241) ─────────────────────────────────────
+// ── relTimeLabel ─────────────────────────────────────
 describe('relTimeLabel', () => {
   it('returns "just now" for a very recent time', () => {
     expect(relTimeLabel(Date.now())).toBe('just now')
@@ -174,7 +174,7 @@ describe('relTimeLabel', () => {
   })
 })
 
-// ── filterSessions (sessions.js:162-176) ─────────────────────────────────────
+// ── filterSessions ─────────────────────────────────────
 const SESSIONS: RawSession[] = [
   { key: 'agent:main:chat:aaa', model: 'gpt-x', message_count: 3, updated_at: '3' },
   {
@@ -220,7 +220,7 @@ describe('sessionName', () => {
   })
 })
 
-// ── sortSessions (sessions.js:180-194) ───────────────────────────────────────
+// ── sortSessions ───────────────────────────────────────
 describe('sortSessions', () => {
   it('sorts updated_at numerically (desc by default semantics via asc flag)', () => {
     const asc = sortSessions(SESSIONS, 'updated_at', true).map((s) => s.updated_at)
@@ -243,7 +243,7 @@ describe('sortSessions', () => {
   })
 })
 
-// ── sessionStats (sessions.js:196-241) ───────────────────────────────────────
+// ── sessionStats ───────────────────────────────────────
 describe('sessionStats', () => {
   it('counts totals, lifecycle buckets, executing runs, messages and distinct agents', () => {
     const rows: RawSession[] = [
@@ -280,7 +280,7 @@ describe('sessionStats', () => {
   })
 })
 
-// ── agentSubline (sessions.js:796-824) ───────────────────────────────────────
+// ── agentSubline ───────────────────────────────────────
 describe('agentSubline', () => {
   const agents = new Map([['bot', { id: 'bot', name: 'Support Bot' }]])
   it('returns null for blank agent id', () => {
@@ -300,7 +300,7 @@ describe('agentSubline', () => {
   })
 })
 
-// ── buildDeleteParams (sessions.js:509,538) ──────────────────────────────────
+// ── buildDeleteParams ──────────────────────────────────
 describe('buildDeleteParams', () => {
   it('builds a single-key delete param', () => {
     expect(buildDeleteParams(['k1'])).toEqual({ key: 'k1' })
@@ -310,7 +310,7 @@ describe('buildDeleteParams', () => {
   })
 })
 
-// ── parseBulkDeleteResult (sessions.js:510-516) ──────────────────────────────
+// ── parseBulkDeleteResult ──────────────────────────────
 describe('parseBulkDeleteResult', () => {
   it('reads ok/err counts from deleted[]/errors[]', () => {
     expect(parseBulkDeleteResult({ deleted: ['a', 'b'], errors: ['c'] }, 3)).toEqual({
@@ -324,7 +324,7 @@ describe('parseBulkDeleteResult', () => {
   })
 })
 
-// ── parseSingleDeleteResult (sessions.js:539-549) ────────────────────────────
+// ── parseSingleDeleteResult ────────────────────────────
 describe('parseSingleDeleteResult', () => {
   it('is ok when errors is empty and the key is in deleted[]', () => {
     expect(parseSingleDeleteResult({ deleted: ['k1'], errors: [] }, 'k1')).toEqual({ ok: true })
