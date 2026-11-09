@@ -26,14 +26,14 @@ export const overview = defineNamespace('overview', {
   tileUptime: 'Uptime',
   tileVersion: 'v{version}',
 
-  // Readiness status labels (overview.js:352-365).
+  // Readiness status labels.
   readyReady: 'Ready',
   readyDegraded: 'Degraded',
   readyActionRequired: 'Action required',
   readyUnavailable: 'Unavailable',
   readyUnknown: 'Unknown',
 
-  // Session status labels (components.js:249-269).
+  // Session status labels.
   sessionRunning: 'Running',
   sessionDone: 'Completed',
   sessionFailed: 'Failed',

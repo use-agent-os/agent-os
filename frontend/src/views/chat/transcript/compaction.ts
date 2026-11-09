@@ -1,35 +1,33 @@
 // Chat transcript — compaction separators + controls (imperative).
-//
 // This module is part of the reviewed imperative boundary of the
 // chat-view migration (design §2.1): the compaction context-separator region is
 // ported as near-verbatim imperative DOM + timers from static/js/views/chat.js
-// (the compaction range, chat.js:2916-3397 + the in-flight controls,
-// chat.js:8654-8710), NOT reactified. Each function carries the cited legacy
+// (the compaction range, + the in-flight controls,
+// ), NOT reactified. Each function carries the cited legacy
 // line range it was ported from. It composes into `createStreamController`
 // exactly how `createToolRenderer` / `createArtifactRenderer` /
 // `createRouterFxRenderer` do.
-//
 // Split into two surfaces (mirroring tools.ts / artifacts.ts / routerFx.ts):
-//   1. Pure helpers (top-level exports) — no DOM, no timers, no module globals:
-//      the terminal-status / tone / label / persistence / visibility /
-//      skip-message / detail / failure-classification / semantic-notice /
-//      safe-message-redaction helpers, plus the toast-dedup window factory
-//      (made pure by injecting `now`/`getSessionKey`). These are the sanctioned
-//      unit-test surface for this task (compaction.test.ts).
-//   2. `createCompactionRenderer(deps)` — a factory the streaming controller
-//      composes. The separator DOM builders + timers need view state (the
-//      thread, the streaming bubble, the current session key, auto-scroll, the
-//      history compaction summaries) and side-effect deps (in-flight send-button
-//      sync, thinking-indicator hide, router-fx compaction suppression, history
-//      resync, pending-queue recovery, toast) injected as `deps`. The legacy
-//      module-globals (`_compactionSeparatorEl`, `_compactionSeparatorTimer`,
-//      `_compactInFlight`, `_compactInFlightKey`, `_lastCompactionToastSig`,
-//      `_lastCompactionToastAt`) rebind to instance fields here. DOM/timer
-//      behavior is verified by a live-browser sweep (parity matrix), not RTL.
+// 1. Pure helpers (top-level exports) — no DOM, no timers, no module globals:
+// the terminal-status / tone / label / persistence / visibility /
+// skip-message / detail / failure-classification / semantic-notice /
+// safe-message-redaction helpers, plus the toast-dedup window factory
+// (made pure by injecting `now`/`getSessionKey`). These are the sanctioned
+// unit-test surface for this task (compaction.test.ts).
+// 2. `createCompactionRenderer(deps)` — a factory the streaming controller
+// composes. The separator DOM builders + timers need view state (the
+// thread, the streaming bubble, the current session key, auto-scroll, the
+// history compaction summaries) and side-effect deps (in-flight send-button
+// sync, thinking-indicator hide, router-fx compaction suppression, history
+// resync, pending-queue recovery, toast) injected as `deps`. The legacy
+// module-globals (`_compactionSeparatorEl`, `_compactionSeparatorTimer`,
+// `_compactInFlight`, `_compactInFlightKey`, `_lastCompactionToastSig`,
+// `_lastCompactionToastAt`) rebind to instance fields here. DOM/timer
+// behavior is verified by a live-browser sweep (parity matrix), not RTL.
 
 /* ── Constants (ported verbatim from chat.js) ───────────────────────────── */
 
-// chat.js:2991-2998 — the six terminal compaction statuses.
+// the six terminal compaction statuses.
 import { t } from '@/i18n'
 import '@/i18n/en/chat'
 
@@ -42,7 +40,7 @@ const COMPACTION_TERMINAL_STATUSES = new Set([
   'emergency_ephemeral',
 ])
 
-// chat.js:3200-3208 — skip reasons that are internal book-keeping (never shown
+// skip reasons that are internal book-keeping (never shown
 // to the user as a distinct notice; the separator collapses to "no compaction
 // needed" and the detail is suppressed).
 export const INTERNAL_COMPACTION_SKIP_REASONS = new Set([
@@ -55,7 +53,7 @@ export const INTERNAL_COMPACTION_SKIP_REASONS = new Set([
   'within_compaction_budget',
 ])
 
-// chat.js:3210-3216 — manual-compact user-facing skip messages by reason.
+// manual-compact user-facing skip messages by reason.
 function compactionSkipMessages(): Record<string, string> {
   return {
     coverage_blocked: t('chat.compactSkipCoverage'),
@@ -66,7 +64,7 @@ function compactionSkipMessages(): Record<string, string> {
   }
 }
 
-// chat.js:3218-3225 — short separator-detail strings by reason.
+// short separator-detail strings by reason.
 function compactionSkipDetails(): Record<string, string> {
   return {
     coverage_blocked: t('chat.compactDetailCoverage'),
@@ -78,7 +76,7 @@ function compactionSkipDetails(): Record<string, string> {
   }
 }
 
-// chat.js:2973 — default separator auto-removal delay.
+// default separator auto-removal delay.
 export const COMPACTION_SEPARATOR_REMOVAL_MS = 4500
 
 /* ── Shapes ─────────────────────────────────────────────────────────────── */
@@ -108,7 +106,7 @@ export interface CompactionPayload {
   [k: string]: unknown
 }
 
-/** Overrides threaded through `syncCompactionSeparator` (chat.js:3043). */
+/** Overrides threaded through `syncCompactionSeparator`. */
 export interface CompactionSeparatorOverrides {
   tone?: string
   label?: string | null
@@ -124,17 +122,15 @@ export interface CompactionSummary {
 
 /* ── Pure helpers (unit-tested) ─────────────────────────────────────────── */
 
-// chat.js:3227-3229 — the payload's reason (reason → skip_reason → "").
+// the payload's reason (reason → skip_reason → "").
 export function compactionReason(payload: CompactionPayload | null | undefined): string {
   return String((payload && (payload.reason || payload.skip_reason)) || '')
 }
 
-// chat.js:3000-3002
 export function compactionTerminalStatus(status: string | null | undefined): boolean {
   return COMPACTION_TERMINAL_STATUSES.has(String(status || '').toLowerCase())
 }
 
-// chat.js:3004-3009
 export function compactionSeparatorAnimated(
   status: string,
   overrides: CompactionSeparatorOverrides = {},
@@ -145,10 +141,9 @@ export function compactionSeparatorAnimated(
   return status === 'started' || status === 'observed'
 }
 
-// chat.js:3011-3017
 export function shouldPersistCompactionSeparator(
   status: string,
-  // chat.js:3011 signature carries `source`; the body never reads it (parity).
+  // signature carries `source`; the body never reads it (parity).
   _source: string,
   overrides: CompactionSeparatorOverrides = {},
 ): boolean {
@@ -159,7 +154,6 @@ export function shouldPersistCompactionSeparator(
   return status === 'completed'
 }
 
-// chat.js:3019-3033
 export function compactionStatusLabel(
   payload: CompactionPayload | null | undefined,
   source: string,
@@ -180,7 +174,6 @@ export function compactionStatusLabel(
   return source === 'manual' ? 'manual compact' : 'context maintenance'
 }
 
-// chat.js:3035-3041
 export function compactionSeparatorTone(status: string, payload: CompactionPayload = {}): string {
   if (status === 'completed') return 'ok'
   if (status === 'failed' || status === 'error') return 'err'
@@ -189,7 +182,6 @@ export function compactionSeparatorTone(status: string, payload: CompactionPaylo
   return 'info'
 }
 
-// chat.js:3231-3241
 export function compactionUserVisible(
   payload: CompactionPayload | null | undefined,
   source: string,
@@ -206,7 +198,6 @@ export function compactionUserVisible(
   return true
 }
 
-// chat.js:3243-3251
 export function compactionSkipMessage(
   payload: CompactionPayload | null | undefined,
   source: string,
@@ -220,7 +211,6 @@ export function compactionSkipMessage(
   return t('chat.compactWithinBudget')
 }
 
-// chat.js:3253-3261
 export function compactionStatusDetail(
   payload: CompactionPayload | null | undefined,
   source = '',
@@ -236,7 +226,6 @@ export function compactionStatusDetail(
   return ''
 }
 
-// chat.js:3158-3178
 export function compactFailureBlocksPending(
   payload: CompactionPayload | null | undefined,
 ): boolean {
@@ -261,7 +250,6 @@ export function compactFailureBlocksPending(
   ].includes(reason)
 }
 
-// chat.js:3180-3189
 export function compactSemanticMemoryNotice(payload: CompactionPayload | null | undefined): string {
   const semantic = (payload && (payload.semanticMemory || payload.semantic_memory)) || null
   const safety = (payload && (payload.memorySafety || payload.memory_safety)) || null
@@ -273,7 +261,7 @@ export function compactSemanticMemoryNotice(payload: CompactionPayload | null | 
   return ''
 }
 
-// chat.js:3191-3198 — redact any checkpoint path to "[memory checkpoint]".
+// redact any checkpoint path to "[memory checkpoint]".
 export function compactSafeMessageDetail(payload: CompactionPayload | null | undefined): string {
   const message = payload && payload.message ? String(payload.message) : ''
   if (!message) return ''
@@ -284,7 +272,7 @@ export function compactSafeMessageDetail(payload: CompactionPayload | null | und
 }
 
 /**
- * chat.js:2916-2928 — the duplicate-toast suppression window. Factored out as a
+ * the duplicate-toast suppression window. Factored out as a
  * small stateful object so it is unit-testable (injected `now`/`getSessionKey`).
  * The legacy module-globals `_lastCompactionToastSig` / `_lastCompactionToastAt`
  * become closure fields here. Returns `true` to SUPPRESS a duplicate.
@@ -325,37 +313,37 @@ export interface CompactionRendererDeps {
   thread: () => HTMLElement | null
   /** chat.js `_sessionKey` — the active session key, read live. */
   getSessionKey: () => string
-  /** chat.js:661 — HTML-escape a string. */
+  /** — HTML-escape a string. */
   esc: (s: string) => string
   /** chat.js `_streamBubble` — the live streaming bubble (placement anchor). */
   getStreamBubble: () => HTMLElement | null
   /** chat.js `_isStreaming` — is a stream in progress (placement branch). */
   isStreaming: () => boolean
-  /** chat.js:5918 `_isCurrentSessionStreamBubble` — is `el` the current stream bubble. */
+  /** `_isCurrentSessionStreamBubble` — is `el` the current stream bubble. */
   isCurrentSessionStreamBubble: (el: HTMLElement | null) => boolean
   /** chat.js `_autoScroll` — should the view stick to the bottom. */
   getAutoScroll: () => boolean
-  /** chat.js:7924 `_scrollToBottom`. */
+  /** `_scrollToBottom`. */
   scrollToBottom: () => void
   /**
    * chat.js `_historyCompactionSummaries` — the summary rows the history load
    * populates, read live (the history renderer owns the array).
    */
   getHistoryCompactionSummaries: () => CompactionSummary[]
-  /** chat.js:7002 `_updateSendButton` — refresh the Send/Stop affordance. */
+  /** `_updateSendButton` — refresh the Send/Stop affordance. */
   updateSendButton?: () => void
-  /** chat.js:6486 `_hideThinkingIndicator`. */
+  /** `_hideThinkingIndicator`. */
   hideThinkingIndicator?: () => void
-  /** chat.js:6379 `_showThinkingIndicator`. */
+  /** `_showThinkingIndicator`. */
   showThinkingIndicator?: () => void
-  /** chat.js:3269 `_suppressRouterFxForCompaction` — the router-fx renderer's
-   *  `suppressForCompaction`, composed in the controller (Task 6). */
+  /** `_suppressRouterFxForCompaction` — the router-fx renderer's
+   * `suppressForCompaction`, composed in the controller (Task 6). */
   suppressRouterFxForCompaction?: (payload: { key?: string }) => void
-  /** chat.js:5305 `_scheduleHistorySync` — debounced history refresh. */
+  /** `_scheduleHistorySync` — debounced history refresh. */
   scheduleHistorySync?: () => void
-  /** chat.js:8644 `_schedulePendingDrainAfterTerminal` — drain the pending queue. */
+  /** `_schedulePendingDrainAfterTerminal` — drain the pending queue. */
   schedulePendingDrainAfterTerminal?: () => void
-  /** chat.js:8596 `_popAllPendingIntoComposer` — recover pending → composer input. */
+  /** `_popAllPendingIntoComposer` — recover pending → composer input. */
   popAllPendingIntoComposer?: () => boolean
   /** chat.js `_pendingQueue.length` — count of queued pending messages. */
   pendingQueueLength?: () => number
@@ -388,21 +376,20 @@ export function createCompactionRenderer(deps: CompactionRendererDeps) {
   const toast = deps.toast ?? (() => {})
 
   /* ── instance fields (legacy module-globals) ──────────────────────────── */
-  // chat.js:344-345 — the live session separator element + its removal timer.
+  // the live session separator element + its removal timer.
   let _compactionSeparatorEl: HTMLElement | null = null
   let _compactionSeparatorTimer: ReturnType<typeof setTimeout> | null = null
-  // chat.js:338-339 — compaction-in-flight tracking (drives the Send button).
+  // compaction-in-flight tracking (drives the Send button).
   let _compactInFlight = false
   let _compactInFlightKey = ''
 
-  // chat.js:2916-2928 — duplicate-toast suppression window.
+  // duplicate-toast suppression window.
   const toastDedup = createCompactionToastDedup({ getSessionKey })
 
   const sessionKey = (): string => getSessionKey() || ''
 
-  /* ── separator timer + placement (chat.js:2930-2980) ──────────────────── */
+  /* ── separator timer + placement ──────────────────── */
 
-  // chat.js:2930-2935
   function clearCompactionSeparatorTimer(): void {
     if (_compactionSeparatorTimer) {
       clearTimeout(_compactionSeparatorTimer)
@@ -410,7 +397,6 @@ export function createCompactionRenderer(deps: CompactionRendererDeps) {
     }
   }
 
-  // chat.js:2937-2943
   function hideCompactionSeparator(): void {
     clearCompactionSeparatorTimer()
     if (_compactionSeparatorEl && _compactionSeparatorEl.parentNode) {
@@ -419,7 +405,6 @@ export function createCompactionRenderer(deps: CompactionRendererDeps) {
     _compactionSeparatorEl = null
   }
 
-  // chat.js:2945-2959
   function placeCompactionSeparator(): void {
     const th = thread()
     if (!th || !_compactionSeparatorEl) return
@@ -440,7 +425,6 @@ export function createCompactionRenderer(deps: CompactionRendererDeps) {
     }
   }
 
-  // chat.js:2961-2971
   function ensureCompactionSeparator(): HTMLElement | null {
     const th = thread()
     if (!th) return null
@@ -455,7 +439,6 @@ export function createCompactionRenderer(deps: CompactionRendererDeps) {
     return _compactionSeparatorEl
   }
 
-  // chat.js:2973-2980
   function scheduleCompactionSeparatorRemoval(delayMs = COMPACTION_SEPARATOR_REMOVAL_MS): void {
     clearCompactionSeparatorTimer()
     const separator = _compactionSeparatorEl
@@ -465,7 +448,6 @@ export function createCompactionRenderer(deps: CompactionRendererDeps) {
     }, delayMs)
   }
 
-  // chat.js:2982-2989
   function buildCompactionSeparator(label: string, tone = 'info', extraClass = ''): HTMLElement {
     const el = document.createElement('div')
     el.className = ['chat-context-separator', extraClass, `chat-context-separator--${tone}`]
@@ -475,7 +457,7 @@ export function createCompactionRenderer(deps: CompactionRendererDeps) {
     return el
   }
 
-  /* ── live session separator sync (chat.js:3043-3079) ──────────────────── */
+  /* ── live session separator sync ──────────────────── */
 
   function syncCompactionSeparator(
     payload: CompactionPayload | null | undefined,
@@ -526,29 +508,25 @@ export function createCompactionRenderer(deps: CompactionRendererDeps) {
     }
   }
 
-  /* ── history summary separators (chat.js:3081-3156) ───────────────────── */
+  /* ── history summary separators ───────────────────── */
 
-  // chat.js:3081-3084
   function clearCompactionSummarySeparators(): void {
     const th = thread()
     if (!th) return
     th.querySelectorAll('.chat-compaction-separator').forEach((el) => el.remove())
   }
 
-  // chat.js:3092-3096
   function summaryCoveredThroughId(summary: CompactionSummary): number | null {
     const raw = summary && summary.covered_through_id
     const value = Number(raw)
     return Number.isFinite(value) ? value : null
   }
 
-  // chat.js:3098-3101
   function messageElementTranscriptId(el: HTMLElement): number | null {
     const value = Number(el && el.dataset ? el.dataset.transcriptId : NaN)
     return Number.isFinite(value) ? value : null
   }
 
-  // chat.js:3103-3117
   function insertCompactionSummarySeparator(
     marker: HTMLElement,
     target: HTMLElement,
@@ -572,7 +550,6 @@ export function createCompactionRenderer(deps: CompactionRendererDeps) {
     return true
   }
 
-  // chat.js:3119-3156
   function renderCompactionSummarySeparators(
     messages: unknown[] | null | undefined,
   ): HTMLElement | null {
@@ -616,22 +593,19 @@ export function createCompactionRenderer(deps: CompactionRendererDeps) {
     return firstMarker
   }
 
-  /* ── in-flight controls (chat.js:8654-8689) ───────────────────────────── */
+  /* ── in-flight controls ───────────────────────────── */
 
-  // chat.js:8654-8658
   function setCompactInFlight(active: boolean, key?: string): void {
     _compactInFlight = !!active
     _compactInFlightKey = active ? String(key || sessionKey() || '') : ''
     updateSendButton()
   }
 
-  // chat.js:8660-8663
   function isCompactInFlightForCurrentSession(): boolean {
     if (!_compactInFlight) return false
     return !_compactInFlightKey || _compactInFlightKey === sessionKey()
   }
 
-  // chat.js:8665-8689
   function settleCompactInFlight(
     payload: CompactionPayload = {},
     options: { recoverPending?: boolean; preservePending?: boolean } = {},
@@ -658,12 +632,12 @@ export function createCompactionRenderer(deps: CompactionRendererDeps) {
     } else if (options && options.recoverPending) {
       recovered = popAllPendingIntoComposer()
     }
-    // chat.js:8687 — re-show the thinking indicator if a stream is live w/o a bubble.
+    // re-show the thinking indicator if a stream is live w/o a bubble.
     if (isStreaming() && !getStreamBubble()) showThinkingIndicator()
     return recovered
   }
 
-  /* ── toast entry point (chat.js:3285-3362) ────────────────────────────── */
+  /* ── toast entry point ────────────────────────────── */
 
   function showCompactionToast(
     payload: CompactionPayload,

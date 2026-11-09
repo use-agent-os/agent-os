@@ -89,7 +89,7 @@ function backfillCalls(fetchMock: ReturnType<typeof vi.fn>): number {
 describe('approval-monitor service', () => {
   let fetchMock: ReturnType<typeof vi.fn>
   // Track every monitor a test creates so a failed assertion (which skips the
-  // test's own mon.stop()) can never leak a live focus/visibility listener or
+  // test's own mon.stop) can never leak a live focus/visibility listener or
   // an rpc subscription into the next test.
   const live: ApprovalMonitor[] = []
   function makeMonitor(): ApprovalMonitor {
@@ -489,7 +489,7 @@ describe('approval-monitor service', () => {
     })
 
     it('zeroes the badge but PRESERVES pending on a non-ok response (open prompt survives)', async () => {
-      // approval_monitor.js:71-74 — a failed poll only calls _setBadge(0); it
+      // a failed poll only calls _setBadge(0); it
       // never touches the open modal. So the badge count drops to 0 while the
       // pending item backing an open prompt stays put.
       useApprovals.getState().setFromPoll([{ id: 'x' }], 'prompt')
@@ -502,7 +502,7 @@ describe('approval-monitor service', () => {
     })
 
     it('zeroes the badge but PRESERVES pending when fetch throws', async () => {
-      // approval_monitor.js:92-97 — the catch branch mirrors the non-ok branch.
+      // the catch branch mirrors the non-ok branch.
       useApprovals.getState().setFromPoll([{ id: 'x' }], 'prompt')
       fetchMock.mockRejectedValue(new Error('offline'))
       const mon = makeMonitor()
@@ -644,7 +644,7 @@ describe('approval-monitor service', () => {
   describe('pollNow', () => {
     it('backfills on demand', async () => {
       const mon = makeMonitor()
-      // No start() — pollNow works standalone (approvals view calls it).
+      // No start — pollNow works standalone (approvals view calls it).
       await mon.pollNow()
       expect(fetchMock).toHaveBeenCalledTimes(1)
     })
@@ -739,7 +739,7 @@ describe('approval-monitor service', () => {
       expect(body.elevatedMode).toBe('bypass')
       expect(localStorage.getItem(ELEVATED_MODE_KEY)).toBe('bypass')
       expect(localStorage.getItem(ELEVATED_MODE_VERSION_KEY)).toBe('2')
-      // approval_monitor.js:208-209 — bypass sets approved=true → legacy 'info'
+      // bypass sets approved=true → legacy 'info'
       // tone, which the port maps to toast.success (not warning).
       expect(toast.success).toHaveBeenCalledWith('Approval bypass enabled', expect.anything())
       expect(toast.warning).not.toHaveBeenCalledWith('Approval bypass enabled', expect.anything())
@@ -942,7 +942,7 @@ describe('approval-monitor pure helpers', () => {
     })
   })
 
-  // chat.js:2225-2227 (_isApprovalBypassMode) / approvals share the elevated-mode
+  // (_isApprovalBypassMode) / approvals share the elevated-mode
   // model — bypass + full both skip approval prompts; on/'' do not.
   describe('isApprovalBypassMode', () => {
     it('is true only for bypass and full', () => {

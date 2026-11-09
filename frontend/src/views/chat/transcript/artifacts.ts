@@ -1,28 +1,25 @@
 // Chat transcript — artifact cards + publish rendering (imperative).
-//
 // This module is part of the reviewed imperative boundary of the
 // chat-view migration (design §2.1): the artifact-card region is ported as
 // near-verbatim imperative DOM code (innerHTML string templates) from
 // static/js/views/chat.js, NOT reactified. Each function carries the cited
 // legacy line range it was ported from.
-//
 // Split into two surfaces (mirroring tools.ts):
-//   1. Pure helpers (top-level exports) — no DOM, no controller state, no
-//      module globals. The classification + URL builders. These are the
-//      sanctioned unit-test surface for this task (artifacts.test.ts). The two
-//      legacy URL builders that read `_sessionKey` + `App.getAuthToken()`
-//      globals (`_artifactPreviewUrl`, `_artifactAuthenticatedDownloadUrl`) are
-//      made pure here by taking `{ sessionKey, token }` explicitly; the DOM
-//      factory below supplies those from injected deps.
-//   2. `createArtifactRenderer(deps)` — a factory the streaming controller
-//      composes (exactly how it composes `createToolRenderer`). The DOM builders
-//      need controller-internal state (the streaming bubble, the stream-artifact
-//      list, auto-scroll, scroll-to-bottom) + the session key / auth token /
-//      toast, injected as `deps`. DOM behavior is verified by a live-browser
-//      sweep (parity matrix), not RTL.
-//
+// 1. Pure helpers (top-level exports) — no DOM, no controller state, no
+// module globals. The classification + URL builders. These are the
+// sanctioned unit-test surface for this task (artifacts.test.ts). The two
+// legacy URL builders that read `_sessionKey` + `App.getAuthToken`
+// globals (`_artifactPreviewUrl`, `_artifactAuthenticatedDownloadUrl`) are
+// made pure here by taking `{ sessionKey, token }` explicitly; the DOM
+// factory below supplies those from injected deps.
+// 2. `createArtifactRenderer(deps)` — a factory the streaming controller
+// composes (exactly how it composes `createToolRenderer`). The DOM builders
+// need controller-internal state (the streaming bubble, the stream-artifact
+// list, auto-scroll, scroll-to-bottom) + the session key / auth token /
+// toast, injected as `deps`. DOM behavior is verified by a live-browser
+// sweep (parity matrix), not RTL.
 // The `publish_artifact` target-name helper (`_publishArtifactTargetName`,
-// chat.js:7043) is NOT re-ported here — Task 4 already ported it into tools.ts;
+// ) is NOT re-ported here — Task 4 already ported it into tools.ts;
 // this module re-exports it from there so there is one definition (DRY).
 
 import { apiOrigin, urlBase } from '@/lib/api-origin'
@@ -57,9 +54,8 @@ export interface Artifact {
   [k: string]: unknown
 }
 
-/* ── Classification maps (ported verbatim from chat.js:7494-7521) ───────── */
+/* ── Classification maps (ported verbatim ) ───────── */
 
-// chat.js:7494-7504
 const ARTIFACT_MIME_CATEGORIES: Record<string, string> = {
   'application/json': 'data',
   'application/ndjson': 'data',
@@ -72,7 +68,6 @@ const ARTIFACT_MIME_CATEGORIES: Record<string, string> = {
   'text/tab-separated-values': 'data',
 }
 
-// chat.js:7506-7521
 const ARTIFACT_EXTENSION_CATEGORIES: Record<string, string> = {
   csv: 'data',
   htm: 'document',
@@ -90,22 +85,22 @@ const ARTIFACT_EXTENSION_CATEGORIES: Record<string, string> = {
   txt: 'document',
 }
 
-// chat.js:7545 — audio extensions when the mime is empty/unknown.
+// audio extensions when the mime is empty/unknown.
 const AUDIO_EXTENSIONS = ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'flac', 'webm']
 
 /* ── Pure helpers (unit-tested) ─────────────────────────────────────────── */
 
-// chat.js:7523-7525 — lowercased mime, or "".
+// lowercased mime, or "".
 export function artifactMime(artifact: Artifact | null | undefined): string {
   return artifact && artifact.mime ? String(artifact.mime).toLowerCase() : ''
 }
 
-// chat.js:7527-7529 — the name, or the literal "artifact" fallback.
+// the name, or the literal "artifact" fallback.
 export function artifactName(artifact: Artifact | null | undefined): string {
   return artifact && artifact.name ? String(artifact.name) : 'artifact'
 }
 
-// chat.js:7531-7536 — lowercased extension; "" when no dot or a trailing dot.
+// lowercased extension; "" when no dot or a trailing dot.
 export function artifactExtension(name: string): string {
   const trimmed = String(name || '')
     .trim()
@@ -115,7 +110,7 @@ export function artifactExtension(name: string): string {
   return trimmed.slice(idx + 1)
 }
 
-// chat.js:7538-7549 — category: visual | audio | data | document | code | file,
+// category: visual | audio | data | document | code | file,
 // plus the AgentOS-native 'chart' (chart.ts), 'cards' (cards.ts), 'lp' (lp.ts),
 // 'markets' (markets.ts), 'dca' (dca.ts), 'trigger' (trigger.ts) and 'flowrun' (flowRun.ts) categories, which have no legacy
 // counterpart: they render inline rather than as a download chip.
@@ -140,7 +135,7 @@ export function artifactCategory(artifact: Artifact | null | undefined): string 
   return 'file'
 }
 
-// chat.js:7551-7559 — category → chip glyph label.
+// category → chip glyph label.
 export function artifactCategoryLabel(category: string): string {
   switch (category) {
     case 'chart':
@@ -325,12 +320,12 @@ export function artifactSummary(artifact: Artifact | null | undefined): string {
     .join(' · ')
 }
 
-// chat.js:7561-7563 — image = the 'visual' category.
+// image = the 'visual' category.
 export function isImageArtifact(artifact: Artifact | null | undefined): boolean {
   return artifactCategory(artifact) === 'visual'
 }
 
-// chat.js:7565-7567 — audio = the 'audio' category.
+// audio = the 'audio' category.
 export function isAudioArtifact(artifact: Artifact | null | undefined): boolean {
   return artifactCategory(artifact) === 'audio'
 }
@@ -356,7 +351,7 @@ function gatewayHref(url: URL): string {
   return apiOrigin() ? url.href : url.pathname + url.search + url.hash
 }
 
-// chat.js:7480-7492 — the clean (session-key-stripped) download URL.
+// the clean (session-key-stripped) download URL.
 export function artifactDownloadUrl(artifact: Artifact | null | undefined): string {
   let raw = artifact && artifact.download_url ? String(artifact.download_url) : ''
   if (!raw && artifact && artifact.id) raw = `/api/v1/artifacts/${encodeURIComponent(artifact.id)}`
@@ -377,8 +372,8 @@ export interface ArtifactUrlContext {
   token: string
 }
 
-// chat.js:7569-7581 — inline preview URL (image/audio): the download URL with
-// sessionKey + token appended. Legacy read `_sessionKey`/`App.getAuthToken()`
+// inline preview URL (image/audio): the download URL with
+// sessionKey + token appended. Legacy read `_sessionKey`/`App.getAuthToken`
 // globals; here they arrive via `ctx` so the helper stays pure.
 export function artifactPreviewUrl(
   artifact: Artifact | null | undefined,
@@ -396,7 +391,7 @@ export function artifactPreviewUrl(
   }
 }
 
-// chat.js:7583-7593 — authenticated download href for a raw URL: append
+// authenticated download href for a raw URL: append
 // sessionKey + token. Same globals→ctx treatment as above.
 export function artifactAuthenticatedDownloadUrl(raw: string, ctx: ArtifactUrlContext): string {
   if (!raw) return ''
@@ -436,7 +431,7 @@ export interface ArtifactRendererDeps {
   getStreamArtifacts: () => Artifact[]
   /** chat.js `_sessionKey` — the active session (preview/download URL params). */
   getSessionKey: () => string
-  /** chat.js `App.getAuthToken()` — the auth token (preview/download URL params). */
+  /** chat.js `App.getAuthToken` — the auth token (preview/download URL params). */
   getAuthToken: () => string
   /** chat.js `_esc` (logic.ts esc) — HTML-entity escape. */
   esc: (s: string) => string
@@ -484,7 +479,7 @@ export function createArtifactRenderer(deps: ArtifactRendererDeps) {
     token: deps.getAuthToken() || '',
   })
 
-  /* ── render artifact cards HTML (chat.js:7595-7651) ───────────────────── */
+  /* ── render artifact cards HTML ───────────────────── */
 
   function renderArtifacts(artifacts: Artifact[] | null | undefined): string {
     if (!Array.isArray(artifacts) || artifacts.length === 0) return ''
@@ -556,9 +551,8 @@ export function createArtifactRenderer(deps: ArtifactRendererDeps) {
         // A mount placeholder, not a finished card: the chart mounter fetches
         // `data-chart-src` and draws into `__canvas`. Geometry is reserved in
         // CSS so the transcript does not jump when the chart lands.
-        //
         // The download button exports the rendered chart as an image (PNG) via
-        // chart.takeScreenshot(). `data-artifact-download` stays OFF both the
+        // chart.takeScreenshot. `data-artifact-download` stays OFF both the
         // host and the button so delegated transcript download handling does
         // not intercept it or fetch the raw JSON artifact payload.
         const payloadUrl = artifactPreviewUrl(artifact || {}, { sessionKey, token })
@@ -674,7 +668,7 @@ export function createArtifactRenderer(deps: ArtifactRendererDeps) {
     return html
   }
 
-  /* ── append a single artifact during streaming (chat.js:7457-7467) ─────── */
+  /* ── append a single artifact during streaming ─────── */
 
   function appendArtifact(payload: Artifact | null | undefined): void {
     if (!payload) return
@@ -691,7 +685,7 @@ export function createArtifactRenderer(deps: ArtifactRendererDeps) {
     diag('artifact.append.done', { name: payload.name, mime: payload.mime })
   }
 
-  /* ── re-render all stream artifacts after a reconcile (chat.js:7469-7478) ─ */
+  /* ── re-render all stream artifacts after a reconcile ─ */
 
   function renderStreamArtifacts(): void {
     const bubble = deps.getStreamBubble()
@@ -707,7 +701,7 @@ export function createArtifactRenderer(deps: ArtifactRendererDeps) {
     }
   }
 
-  /* ── download an artifact via authenticated fetch (chat.js:7653-7679) ──── */
+  /* ── download an artifact via authenticated fetch ──── */
 
   // A same-document link: the only way a script hands the browser a download.
   function clickDownloadLink(href: string, name: string): void {

@@ -5,11 +5,11 @@ import { AUTO_SCROLL_BOTTOM_GAP_PX, createSeqGate, createStreamController } from
 // The seq gate is the one pure, timing-independent core of the streaming
 // renderer. It is ported verbatim from legacy chat.js
 // (_markSessionStreamSeqSeen / _sessionStreamSeq / _setSessionStreamSeq /
-// _sessionStreamSeqSeen, chat.js:1645-1682) which _acceptStreamSeq
-// (chat.js:6345-6350) drives. The DOM-mutation side of the renderer is
+// _sessionStreamSeqSeen, ) which _acceptStreamSeq
+// drives. The DOM-mutation side of the renderer is
 // verified by a live-browser sweep (see the parity matrix), NOT here.
 
-describe('stream seq gate (parity chat.js:6345-6378, 1645-1682)', () => {
+describe('stream seq gate', () => {
   it('accepts strictly increasing seqs and rejects duplicates within the 800 window', () => {
     const gate = createSeqGate()
     expect(gate.accept('s1', 1)).toBe(true)
@@ -25,7 +25,7 @@ describe('stream seq gate (parity chat.js:6345-6378, 1645-1682)', () => {
 
   it('accepts out-of-order (lower-than-highwater) seqs that have not been seen', () => {
     // Legacy dedupes on a Set membership, not on a monotonic counter: a lower
-    // seq that was never seen is still accepted (chat.js:1670 seen.has check).
+    // seq that was never seen is still accepted (seen.has check).
     const gate = createSeqGate()
     expect(gate.accept('s1', 10)).toBe(true)
     expect(gate.accept('s1', 3)).toBe(true) // never seen, below high-water → accept
@@ -46,7 +46,7 @@ describe('stream seq gate (parity chat.js:6345-6378, 1645-1682)', () => {
   })
 
   it('treats non-finite / non-number seqs and empty keys as pass-through (returns true)', () => {
-    // chat.js:1668 — a missing key or a non-finite seq is not gated.
+    // a missing key or a non-finite seq is not gated.
     const gate = createSeqGate()
     expect(gate.accept('', 1)).toBe(true)
     expect(gate.accept('', 1)).toBe(true) // empty key never dedupes
@@ -55,7 +55,7 @@ describe('stream seq gate (parity chat.js:6345-6378, 1645-1682)', () => {
   })
 
   it('prunes seen entries below (high-water - 800) once the window is exceeded so an old seq can re-enter', () => {
-    // chat.js:1674-1680 — after the seen set exceeds the 800 window it drops
+    // after the seen set exceeds the 800 window it drops
     // every value below (highWater - 800). A seq that predates that cutoff is
     // pruned, so the same low seq is accepted again (the seen memory is bounded).
     const gate = createSeqGate()

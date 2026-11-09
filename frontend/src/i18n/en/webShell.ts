@@ -24,8 +24,6 @@ export const webShell = defineNamespace('webShell', {
   pageNotFound: 'Not found',
 
   // Placeholders and fallbacks
-  rebuildingTitle: '{name} is being rebuilt',
-  rebuildingBody: 'This part of the console is moving to the new layout and will return here.',
   notFoundTitle: 'Page not found',
   notFoundBody: 'Nothing lives at {path}.',
   notFoundHome: 'Go to Home',

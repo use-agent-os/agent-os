@@ -30,7 +30,7 @@ describe('theme store', () => {
     expect(useTheme.getState().mode).toBe('dark')
   })
 
-  // Parity: js/theme.js:8-16,35 — with no stored value the mode resolves from
+  // with no stored value the mode resolves from
   // `prefers-color-scheme`. Mock matchMedia both ways to prove the branch.
   it('initTheme resolves the system default (dark) when nothing is stored', () => {
     stubPrefersDark(true)
@@ -47,7 +47,7 @@ describe('theme store', () => {
   })
 
   // A stored preference must win over the system default (guards against a
-  // regression where systemDefault() shadows the stored value).
+  // regression where systemDefault shadows the stored value).
   it('initTheme prefers a stored value over the system default', () => {
     stubPrefersDark(true)
     localStorage.setItem('agentos-theme', 'light')

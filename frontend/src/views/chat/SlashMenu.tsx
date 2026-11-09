@@ -24,27 +24,27 @@ const SLASH_SHORTCUTS = [
 /**
  * The slash-command menu (React).
  *
- * Ported from the imperative legacy menu in static/js/views/chat.js:2637-2684:
- * the input parse `_handleSlashInput` (chat.js:2637), the menu render
- * `_renderSlashMenu` (chat.js:2654), the close `_closeSlashMenu` (chat.js:2675),
- * and select `_selectSlashCmd` (chat.js:2684). Unlike the legacy imperative DOM
+ * Ported from the imperative legacy menu:
+ * the input parse `_handleSlashInput`, the menu render
+ * `_renderSlashMenu`, the close `_closeSlashMenu`,
+ * and select `_selectSlashCmd`. Unlike the legacy imperative DOM
  * this is idiomatic React: the composer value drives the open/filter state (via
  * the pure `parseSlashInput` + the legacy prefix filter), a real listbox renders
  * the filtered commands, and command execution is an injected callback
  * (`onExecute`) so the menu stays decoupled from the send/dispatch path.
  *
- * The catalog (`commands`) is loaded once by `useSlashCommands` (chat.js:2615
+ * The catalog (`commands`) is loaded once by `useSlashCommands` (
  * `_loadSlashCommands`, RPC `commands.list_for_surface` / `{ surface: 'web_chat' }`)
  * and shared with the composer send path — the menu is a pure renderer over it.
  *
- * The `//` literal-slash escape (chat.js:2640/6072) is owned here: `parseSlashInput`
+ * The `//` literal-slash escape is owned here: `parseSlashInput`
  * returns inactive for a `//`-prefixed value, so the menu never opens and the
  * composer's send path treats `//literal` as text (see ChatPage's send wiring).
  *
  * Keyboard nav is exposed via `handleRef` (an imperative handle) so the Composer
  * — which owns the textarea and its keydown — can consult the menu BEFORE its own
  * history/send handling: while the menu is open, ↑/↓ move the active item, Enter
- * executes it, and Escape closes it (chat.js:2654-2662 arrow/enter, 2675 escape).
+ * executes it, and Escape closes it (arrow/enter, escape).
  */
 
 /** The composer-facing keyboard handle. `handleKeyDown` returns true when the
@@ -60,19 +60,19 @@ export interface SlashMenuHandle {
 }
 
 export interface SlashMenuProps {
-  /** The live composer value — drives open/filter (chat.js:2639). */
+  /** The live composer value — drives open/filter. */
   value: string
-  /** The normalized catalog (chat.js:2620 `_slashCmds`), owned by useSlashCommands. */
+  /** The normalized catalog, owned by useSlashCommands. */
   commands: SlashCommand[]
   /**
-   * Execute a slash command's raw text (chat.js:2842 `_executeSlashCommand`).
+   * Execute a slash command's raw text.
    * ChatPage wires this to the send path so dispatch/RPC lives in one place.
    */
   onExecute: (text: string) => void
   /** Fired when the menu closes (Escape / after a select), so the composer can
    * clear its own open-state mirror if it tracks one. */
   onClose?: () => void
-  /** The imperative keyboard handle for the composer to consult (chat.js:2654). */
+  /** The imperative keyboard handle for the composer to consult. */
   handleRef?: React.Ref<SlashMenuHandle>
   /** Stable listbox ID referenced by the composer textarea. */
   listboxId?: string
@@ -94,15 +94,15 @@ export function SlashMenu({
   // Registered from the always-mounted component (it renders null when closed),
   // so the overlay lists these whether or not the menu happens to be open.
   useShortcutDocs('Slash commands', SLASH_SHORTCUTS)
-  // The active index into the filtered list (chat.js:2646 `_slashIdx`).
+  // The active index into the filtered list.
   const [activeIdx, setActiveIdx] = useState(0)
-  // Escape dismisses the menu for the CURRENT input (chat.js:2675 sets
+  // Escape dismisses the menu for the CURRENT input (sets
   // `_slashOpen = false` + empties the DOM). Reset when the input changes so
   // typing re-opens it — parity with `_handleSlashInput` re-rendering on input.
   const [dismissed, setDismissed] = useState(false)
 
   // Reset the active index to the top + clear any Escape-dismiss whenever the
-  // input changes (chat.js:2646 sets `_slashIdx = 0` on each `_handleSlashInput`,
+  // input changes (sets `_slashIdx = 0` on each `_handleSlashInput`,
   // which also re-opens the menu when the input still matches). React's
   // "adjust state during render on a prop change" pattern (react.dev/learn/
   // you-might-not-need-an-effect) — track the previous value in STATE so the
@@ -114,16 +114,16 @@ export function SlashMenu({
     setDismissed(false)
   }
 
-  // ── Filter the catalog for the current input (chat.js:2637-2643) ──────────
+  // ── Filter the catalog for the current input ──────────
   // The pure parse decides active/query (and owns the `//` escape); the legacy
-  // prefix filter (chat.js:2643 `c.cmd.slice(1).startsWith(query)`) narrows.
+  // prefix filter narrows.
   const filtered = useMemo<SlashCommand[]>(() => {
     const parsed = parseSlashInput(value)
     if (!parsed.active) return []
     return commands.filter((c) => c.cmd.slice(1).startsWith(parsed.query))
   }, [value, commands])
 
-  // chat.js:2655/2644 — the menu is "open" only when at least one command
+  // the menu is "open" only when at least one command
   // matches AND it has not been Escape-dismissed for this input.
   const open = filtered.length > 0 && !dismissed
 
@@ -147,22 +147,22 @@ export function SlashMenu({
     onClose?.()
   }, [onClose])
 
-  // chat.js:2684/2842 — select → dispatch the command text for execution. Legacy
+  // select → dispatch the command text for execution. Legacy
   // `_selectSlashCmd` closes the menu + clears the textarea then runs the action;
   // here execution (and the composer clear) is the injected `onExecute`'s job.
   const execute = useCallback(
     (cmd: SlashCommand | undefined) => {
       if (!cmd) return
       onClose?.()
-      // `_executeSlashCommand` dispatches on the command text (chat.js:2844); the
+      // `_executeSlashCommand` dispatches on the command text; the
       // command's own `cmd`/`name` is the canonical text (with no args from the
-      // menu path — args only arrive via a typed send, chat.js:2844).
+      // menu path — args only arrive via a typed send, ).
       onExecute(cmd.cmd || cmd.name || '')
     },
     [onClose, onExecute],
   )
 
-  // ── The composer keyboard handle (chat.js:2654-2662 arrow/enter, 2675 esc) ──
+  // ── The composer keyboard handle (arrow/enter, esc) ──
   // Snapshot the live open/filtered/index into a ref so the (stable) keyboard
   // handle reads the latest without capturing stale render values. Written in an
   // effect (never during render).
@@ -222,7 +222,7 @@ export function SlashMenu({
           className={`chat-slash-item${i === boundedIdx ? ' chat-slash-item--active' : ''}`}
           // preventDefault on mousedown so the composer textarea does not blur
           // before the click selection runs; the click itself executes (legacy
-          // click bind, chat.js:2669).
+          // click bind, ).
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => execute(cmd)}
         >

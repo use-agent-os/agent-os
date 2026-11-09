@@ -12,7 +12,7 @@ interface RunTask {
 }
 
 /** A raw session row from sessions.list (all fields optional; both snake_case
- *  and camelCase variants appear across backend/CLI payloads). */
+ * and camelCase variants appear across backend/CLI payloads). */
 import { t } from '@/i18n'
 import '@/i18n/en/sessions'
 
@@ -53,17 +53,17 @@ export interface AgentEntry {
 export type Tone = 'ok' | 'warn' | 'danger' | 'info' | 'dim'
 
 /** Page size the WebUI asks sessions.list for. Larger than the CLI default
- *  (50) because the Sessions and Projects views render, filter and count the
- *  whole list client-side and share the ['sessions'] query cache, so both
- *  callers must request the same window or the cache flips between two
- *  different truncations depending on which view loaded first. */
+ * (50) because the Sessions and Projects views render, filter and count the
+ * whole list client-side and share the ['sessions'] query cache, so both
+ * callers must request the same window or the cache flips between two
+ * different truncations depending on which view loaded first. */
 export const SESSIONS_LIST_LIMIT = 500
 
 // ── Key parsing ──────────────────────────────────────────────────────────────
 
-/** sessions.js:720-724 — pull the agent id from a key like
- *  "agent:<id>:<kind>:<short>". Returns '' when the prefix doesn't match or the
- *  input isn't a string. */
+/** — pull the agent id from a key like
+ * "agent:<id>:<kind>:<short>". Returns '' when the prefix doesn't match or the
+ * input isn't a string. */
 export function agentIdFromKey(key: unknown): string {
   if (typeof key !== 'string') return ''
   const m = /^agent:([^:]+):/.exec(key)
@@ -74,9 +74,9 @@ export function agentIdFromKey(key: unknown): string {
 
 const KNOWN_RUN_STATUSES = ['queued', 'running', 'interrupted', 'failed', 'timeout', 'cancelled']
 
-/** sessions.js:726-734 — normalize a raw run status: abandoned→interrupted,
- *  succeeded/success/complete→idle, known tokens pass through lowercased, else
- *  idle. */
+/** — normalize a raw run status: abandoned→interrupted,
+ * succeeded/success/complete→idle, known tokens pass through lowercased, else
+ * idle. */
 export function normalizeRunStatus(status?: string | null): string {
   const value = String(status || '').toLowerCase()
   if (value === 'abandoned') return 'interrupted'
@@ -85,9 +85,9 @@ export function normalizeRunStatus(status?: string | null): string {
   return 'idle'
 }
 
-/** sessions.js:748-754 — the terminal run status of a row (from last_task /
- *  terminal_status), but only when it is one of failed/timeout/cancelled/
- *  interrupted; otherwise ''. */
+/** — the terminal run status of a row (from last_task /
+ * terminal_status), but only when it is one of failed/timeout/cancelled/
+ * interrupted; otherwise ''. */
 export function terminalRunStatus(row: RawSession): string {
   const lastTask = row.last_task || row.lastTask || null
   const rawStatus = lastTask?.status || row.terminal_status || row.terminalStatus || ''
@@ -95,9 +95,9 @@ export function terminalRunStatus(row: RawSession): string {
   return ['failed', 'timeout', 'cancelled', 'interrupted'].includes(status) ? status : ''
 }
 
-/** sessions.js:736-746 — the effective run status of a session: a live
- *  active queued/running task wins; else a terminal status; else the raw
- *  run_status (normalized), defaulting to idle. */
+/** — the effective run status of a session: a live
+ * active queued/running task wins; else a terminal status; else the raw
+ * run_status (normalized), defaulting to idle. */
 export function sessionRunStatus(row: RawSession): string {
   const active = row.active_task || row.activeTask || null
   const activeStatus = active ? normalizeRunStatus(active.status) : ''
@@ -109,9 +109,9 @@ export function sessionRunStatus(row: RawSession): string {
   return runStatus
 }
 
-/** sessions.js:756-761 — the status used to color the row: failed/timeout run
- *  statuses surface directly; cancelled/interrupted → 'killed'; otherwise the
- *  lifecycle status (lowercased, 'unknown' fallback). */
+/** — the status used to color the row: failed/timeout run
+ * statuses surface directly; cancelled/interrupted → 'killed'; otherwise the
+ * lifecycle status (lowercased, 'unknown' fallback). */
 export function sessionVisualStatus(row: RawSession): string {
   const runStatus = sessionRunStatus(row)
   if (runStatus === 'failed' || runStatus === 'timeout') return runStatus
@@ -119,7 +119,7 @@ export function sessionVisualStatus(row: RawSession): string {
   return String(row?.status || 'unknown').toLowerCase()
 }
 
-// ── Status → chip / dot tone mapping (components.js:249-287) ──────────────────
+// ── Status → chip / dot tone mapping ──────────────────
 
 const SESSION_STATUS_DOT: Record<string, string> = {
   running: 'ok',
@@ -145,28 +145,28 @@ function sessionStatusLabels(): Record<string, string> {
   }
 }
 
-/** components.js:272-275 — dot color variant ("ok"/"warn"/"err"/"off"). */
+/** — dot color variant ("ok"/"warn"/"err"/"off"). */
 export function sessionStatusClass(status?: string | null): string {
   const k = String(status || '').toLowerCase()
   return SESSION_STATUS_DOT[k] || 'off'
 }
 
-/** components.js:284-287 — tooltip label; raw string else "Unknown" when empty. */
+/** — tooltip label; raw string else "Unknown" when empty. */
 export function sessionStatusLabel(status?: string | null): string {
   const k = String(status || '').toLowerCase()
   return sessionStatusLabels()[k] || (status ? String(status) : t('sessions.statusUnknown'))
 }
 
-/** components.js:278-281 — chip color modifier mapped to a --tone token. The
- *  legacy '' (muted) variant maps to the 'dim' tone; status color stays on the
- *  --tone primitive, never hardcoded. */
+/** — chip color modifier mapped to a --tone token. The
+ * legacy '' (muted) variant maps to the 'dim' tone; status color stays on the
+ * tone primitive, never hardcoded. */
 export function sessionStatusChip(status?: string | null): Tone {
   const k = String(status || '').toLowerCase()
   return SESSION_STATUS_CHIP[k] || 'dim'
 }
 
 /** components.js dot variant ("ok"/"warn"/"err"/"off") → --tone token name.
- *  Accepts a raw session status (folds through sessionStatusClass first). */
+ * Accepts a raw session status (folds through sessionStatusClass first). */
 export function dotTone(status?: string | null): Tone {
   const dot = sessionStatusClass(status)
   if (dot === 'ok') return 'ok'
@@ -175,9 +175,9 @@ export function dotTone(status?: string | null): Tone {
   return 'dim'
 }
 
-/** components.js:228-241 — relative time. Numeric input is treated as an epoch
- *  (seconds when < 1e10, else millis); strings parse as ISO or a numeric epoch.
- *  Invalid → "—". */
+/** — relative time. Numeric input is treated as an epoch
+ * (seconds when < 1e10, else millis); strings parse as ISO or a numeric epoch.
+ * Invalid → "—". */
 export function relTimeLabel(isoOrTs: string | number): string {
   const numeric =
     typeof isoOrTs === 'number'
@@ -196,7 +196,7 @@ export function relTimeLabel(isoOrTs: string | number): string {
   return t('sessions.relDays', { count: Math.floor(diff / 86_400) })
 }
 
-// ── Run-status badge (sessions.js:763-790) ───────────────────────────────────
+// ── Run-status badge ───────────────────────────────────
 
 function runStatusLabels(): Record<string, string> {
   return {
@@ -221,9 +221,9 @@ export interface RunBadge {
   tone: Tone
 }
 
-/** sessions.js:784-790 — the run-status badge for a row, or null when the run
- *  status carries no badge (e.g. idle, or cancelled which has a label but no
- *  chip class in the legacy map → still shown, tone falls back to dim). */
+/** — the run-status badge for a row, or null when the run
+ * status carries no badge (e.g. idle, or cancelled which has a label but no
+ * chip class in the legacy map → still shown, tone falls back to dim). */
 export function runStatusBadge(row: RawSession): RunBadge | null {
   const runStatus = sessionRunStatus(row)
   const label = runStatusLabels()[runStatus]
@@ -235,19 +235,19 @@ export function runStatusBadge(row: RawSession): RunBadge | null {
 
 /** The user-set session name, or '' when the session has never been renamed.
  *
- *  Deliberately does NOT fall back to `derived_title`: the gateway derives that
- *  from the short session id when no name is set, and prefilling the rename
- *  input with an id would make "clear the name" impossible to express. Search
- *  still scores `derived_title` — see `filterSessions`. */
+ * Deliberately does NOT fall back to `derived_title`: the gateway derives that
+ * from the short session id when no name is set, and prefilling the rename
+ * input with an id would make "clear the name" impossible to express. Search
+ * still scores `derived_title` — see `filterSessions`. */
 export function sessionName(s: RawSession): string {
   return String(s.display_name || s.displayName || '')
 }
 
-// ── Filtering (sessions.js:162-176) ──────────────────────────────────────────
+// ── Filtering ──────────────────────────────────────────
 
-/** sessions.js:162-176 — filter sessions by a lowercased query across
- *  key/model/display_name/subject/derived_title. Empty query returns a copy of
- *  the whole list (never mutates the input). */
+/** — filter sessions by a lowercased query across
+ * key/model/display_name/subject/derived_title. Empty query returns a copy of
+ * the whole list (never mutates the input). */
 export function filterSessions(sessions: RawSession[], query: string): RawSession[] {
   const q = query.trim().toLowerCase()
   if (!q) return [...sessions]
@@ -271,13 +271,13 @@ export function filterSessions(sessions: RawSession[], query: string): RawSessio
   )
 }
 
-// ── Sorting (sessions.js:180-194) ────────────────────────────────────────────
+// ── Sorting ────────────────────────────────────────────
 
 export type SortColumn = 'key' | 'updated_at' | 'message_count'
 
-/** sessions.js:180-194 — sort a copy of the sessions by a column. message_count
- *  / updated_at compare numerically; other columns compare as lowercased
- *  strings. `asc` toggles direction. Never mutates the input. */
+/** — sort a copy of the sessions by a column. message_count
+ * / updated_at compare numerically; other columns compare as lowercased
+ * strings. `asc` toggles direction. Never mutates the input. */
 export function sortSessions(
   sessions: RawSession[],
   column: SortColumn,
@@ -299,7 +299,7 @@ export function sortSessions(
   })
 }
 
-// ── Stat row (sessions.js:196-241) ───────────────────────────────────────────
+// ── Stat row ───────────────────────────────────────────
 
 export interface SessionStats {
   total: number
@@ -312,10 +312,10 @@ export interface SessionStats {
   agents: number
 }
 
-/** sessions.js:196-218 — the stat-row aggregates: total sessions, lifecycle
- *  'running' count, executing runs (run status queued/running), visual done /
- *  failed-or-timeout / killed buckets, total messages, and the count of
- *  distinct agents derived from the key prefix. */
+/** — the stat-row aggregates: total sessions, lifecycle
+ * 'running' count, executing runs (run status queued/running), visual done /
+ * failed-or-timeout / killed buckets, total messages, and the count of
+ * distinct agents derived from the key prefix. */
 export function sessionStats(sessions: RawSession[]): SessionStats {
   const total = sessions.length
   const lifecycleOpen = sessions.filter((s) => s.status === 'running').length
@@ -347,7 +347,7 @@ export function sessionStats(sessions: RawSession[]): SessionStats {
   }
 }
 
-// ── Orphan-agent subline (sessions.js:796-824) ───────────────────────────────
+// ── Orphan-agent subline ───────────────────────────────
 
 export interface AgentSubline {
   /** Agent display name (or the raw id when unknown). */
@@ -356,11 +356,11 @@ export interface AgentSubline {
   orphan: boolean
 }
 
-/** sessions.js:796-824 — resolve the per-row agent subline. Blank id or the
- *  built-in `main` return null (no noise). A known agent → its name. An unknown
- *  agent → orphaned, but ONLY once the registry has actually loaded; before
- *  first load the raw id is shown as plain text (orphan:false) so a transient
- *  agents.list failure doesn't flood the table with false warnings. */
+/** — resolve the per-row agent subline. Blank id or the
+ * built-in `main` return null (no noise). A known agent → its name. An unknown
+ * agent → orphaned, but ONLY once the registry has actually loaded; before
+ * first load the raw id is shown as plain text (orphan:false) so a transient
+ * agents.list failure doesn't flood the table with false warnings. */
 export function agentSubline(
   agentId: string,
   agentsById: Map<string, AgentEntry>,
@@ -377,15 +377,15 @@ export function agentSubline(
   return { name: agentId, orphan: true }
 }
 
-// ── Delete params (sessions.js:509,538) ──────────────────────────────────────
+// ── Delete params ──────────────────────────────────────
 
-/** sessions.js:509,538 — the sessions.delete param shape: a single key uses
- *  {key}; multiple keys use the batch {keys:[…]} form (partial-failure aware). */
+/** — the sessions.delete param shape: a single key uses
+ * {key}; multiple keys use the batch {keys:[…]} form (partial-failure aware). */
 export function buildDeleteParams(keys: string[]): { key: string } | { keys: string[] } {
   return keys.length === 1 ? { key: keys[0]! } : { keys }
 }
 
-// ── Delete result parsing (sessions.js:510-516,539-549) ──────────────────────
+// ── Delete result parsing ──────────────────────
 
 export interface DeleteResult {
   deleted?: unknown[]
@@ -397,18 +397,18 @@ export interface DeleteOutcome {
   errCount: number
 }
 
-/** sessions.js:510-516 — parse a batch sessions.delete response into ok/err
- *  counts. okCount falls back to (requested - errCount) when the backend omits
- *  the deleted[] array. */
+/** — parse a batch sessions.delete response into ok/err
+ * counts. okCount falls back to (requested - errCount) when the backend omits
+ * the deleted[] array. */
 export function parseBulkDeleteResult(res: DeleteResult | null, requested: number): DeleteOutcome {
   const errCount = Array.isArray(res?.errors) ? res!.errors.length : 0
   const okCount = Array.isArray(res?.deleted) ? res!.deleted.length : requested - errCount
   return { okCount, errCount }
 }
 
-/** sessions.js:539-546 — decide whether a single-key delete succeeded, and the
- *  reason string when it did not. Success requires no errors AND the key present
- *  in deleted[]. */
+/** — decide whether a single-key delete succeeded, and the
+ * reason string when it did not. Success requires no errors AND the key present
+ * in deleted[]. */
 export function parseSingleDeleteResult(
   res: DeleteResult | null,
   key: string,

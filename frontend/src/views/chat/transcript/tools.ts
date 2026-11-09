@@ -1,21 +1,19 @@
 // Chat transcript — tool-activity + subagent-disclosure imperative renderer.
-//
 // This module is part of the reviewed imperative boundary of the
 // chat-view migration (design §2.1): the tool-card / subagent region is ported
 // as near-verbatim imperative DOM code (createElement/appendChild/innerHTML)
 // from static/js/views/chat.js, NOT reactified. Each function carries the cited
 // legacy line range it was ported from.
-//
 // Split into two surfaces:
-//   1. Pure helpers (top-level exports) — no DOM, no controller state — that
-//      are unit-tested in isolation (tools.test.ts). These are the sanctioned
-//      test surface for this task.
-//   2. `createToolRenderer(deps)` — a factory the streaming controller composes.
-//      The DOM builders need controller-internal state (the streaming bubble,
-//      the segment list, auto-scroll, scroll-to-bottom); those are injected as
-//      `deps` so the legacy module-globals rebind to the SAME controller fields
-//      the streaming path mutates. DOM behavior is verified by a live-browser
-//      sweep (parity matrix), not RTL.
+// 1. Pure helpers (top-level exports) — no DOM, no controller state — that
+// are unit-tested in isolation (tools.test.ts). These are the sanctioned
+// test surface for this task.
+// 2. `createToolRenderer(deps)` — a factory the streaming controller composes.
+// The DOM builders need controller-internal state (the streaming bubble,
+// the segment list, auto-scroll, scroll-to-bottom); those are injected as
+// `deps` so the legacy module-globals rebind to the SAME controller fields
+// the streaming path mutates. DOM behavior is verified by a live-browser
+// sweep (parity matrix), not RTL.
 
 import { t } from '@/i18n'
 import '@/i18n/en/chat'
@@ -97,13 +95,13 @@ function toolTitle(source: unknown): string {
 
 /* ── Pure helpers (unit-tested) ─────────────────────────────────────────── */
 
-// chat.js:953-956 — truncate with a single-char ellipsis suffix.
+// truncate with a single-char ellipsis suffix.
 function truncate(s: string, max = 200): string {
   if (!s || s.length <= max) return s || ''
   return s.slice(0, max) + '…'
 }
 
-// chat.js:661-667 — minimal HTML-entity escape.
+// minimal HTML-entity escape.
 function esc(s: string): string {
   return String(s)
     .replace(/&/g, '&amp;')
@@ -112,7 +110,7 @@ function esc(s: string): string {
     .replace(/"/g, '&quot;')
 }
 
-// chat.js:7022-7034 — coerce a tool input into a plain object (parse a JSON
+// coerce a tool input into a plain object (parse a JSON
 // string that starts with `{`), else null.
 function toolInputObject(input: unknown): Record<string, unknown> | null {
   if (!input) return null
@@ -128,7 +126,7 @@ function toolInputObject(input: unknown): Record<string, unknown> | null {
   }
 }
 
-// chat.js:7036-7041 — the trailing path segment.
+// the trailing path segment.
 function basename(path: unknown): string {
   const raw = String(path || '').trim()
   if (!raw) return ''
@@ -136,7 +134,7 @@ function basename(path: unknown): string {
   return parts.length ? (parts[parts.length - 1] as string) : raw
 }
 
-// chat.js:7043-7047 — publish_artifact target basename (name || path).
+// publish_artifact target basename (name || path).
 // Exported so the artifact renderer (artifacts.ts) reuses this one definition
 // rather than duplicating it (DRY — it is the SAME legacy `_publishArtifactTargetName`).
 export function publishArtifactTargetName(input: unknown): string {
@@ -145,7 +143,7 @@ export function publishArtifactTargetName(input: unknown): string {
   return basename(obj.name || obj.path)
 }
 
-// chat.js:7049-7055 — display name; publish_artifact appends the target basename.
+// display name; publish_artifact appends the target basename.
 // A coding harness's tool (`acp:<kind>`) reads as its human title ("Read
 // src/app.py", "Run pytest -q") when the segment carries one: an explicit
 // `title`, or the `title` its input was persisted with (acp/projector.py).
@@ -162,12 +160,12 @@ export function toolDisplayName(name: string, input: unknown, title = ''): strin
   return name || 'tool'
 }
 
-// chat.js:7057-7059 — control-plane tools are hidden from the transcript.
+// control-plane tools are hidden from the transcript.
 export function isControlPlaneToolName(name: string): boolean {
   return name === 'router_control'
 }
 
-// chat.js:7107-7113 — human duration. NOTE: there is no "ms" branch in the
+// human duration. NOTE: there is no "ms" branch in the
 // legacy source; sub-second values render as `0.Ns` via `.toFixed(1)`.
 export function fmtToolDuration(ms: number): string {
   if (!ms || ms < 0) return ''
@@ -177,14 +175,14 @@ export function fmtToolDuration(ms: number): string {
   return `${Math.floor(s / 60)}m${Math.round(s % 60)}s`
 }
 
-// chat.js:7201-7204 — the execution_status object (accepts snake/camel).
+// the execution_status object (accepts snake/camel).
 function toolExecutionStatus(payload: StreamEventPayload): Record<string, unknown> | null {
   const p = payload as { execution_status?: unknown; executionStatus?: unknown } | undefined
   const status = p && (p.execution_status || p.executionStatus)
   return status && typeof status === 'object' ? (status as Record<string, unknown>) : null
 }
 
-// chat.js:7206-7212 — error predicate: execution_status.status ∈
+// error predicate: execution_status.status ∈
 // {error,timeout,cancelled}, else the is_error/isError/error flags.
 export function toolResultIsError(payload: StreamEventPayload): boolean {
   const status = toolExecutionStatus(payload)
@@ -195,7 +193,7 @@ export function toolResultIsError(payload: StreamEventPayload): boolean {
   return !!(p && (p.is_error || p.isError || p.error))
 }
 
-// chat.js:7214-7219 — the settled-state CSS class.
+// the settled-state CSS class.
 function toolResultStateClass(payload: StreamEventPayload): string {
   const status = toolExecutionStatus(payload)
   if (status && status.status === 'success') return 'chat-tools-collapse--success'
@@ -203,13 +201,13 @@ function toolResultStateClass(payload: StreamEventPayload): string {
   return toolResultIsError(payload) ? 'chat-tools-collapse--error' : 'chat-tools-collapse--success'
 }
 
-// chat.js:7221-7224 — truncation flag lives on execution_status.truncated.
+// truncation flag lives on execution_status.truncated.
 export function toolResultIsTruncated(payload: StreamEventPayload): boolean {
   const status = toolExecutionStatus(payload)
   return !!(status && status.truncated)
 }
 
-// chat.js:7226-7239 — the displayable result content (result | content | output),
+// the displayable result content (result | content | output),
 // JSON-stringified when non-string.
 function toolResultContent(payload: StreamEventPayload): string {
   if (!payload) return ''
@@ -226,7 +224,7 @@ function toolResultContent(payload: StreamEventPayload): string {
   return rendered == null ? '' : rendered
 }
 
-// chat.js:480-493 — resolve the search provider from a payload/segment or the
+// resolve the search provider from a payload/segment or the
 // JSON-ish result content.
 function toolResultProvider(payloadOrSegment: StreamEventPayload, content: string): string {
   const p = payloadOrSegment as
@@ -243,7 +241,7 @@ function toolResultProvider(payloadOrSegment: StreamEventPayload, content: strin
   }
 }
 
-// chat.js:7817-7825 — parse a subagent_completion payload, else null.
+// parse a subagent_completion payload, else null.
 export function parseSubagentCompletion(
   text: string,
 ): (Record<string, unknown> & { type: 'subagent_completion' }) | null {
@@ -258,7 +256,7 @@ export function parseSubagentCompletion(
   return null
 }
 
-// chat.js:7241-7258 — parse memory_search source rows (max 6).
+// parse memory_search source rows (max 6).
 interface MemorySourceRow {
   index: string
   path: string
@@ -286,7 +284,7 @@ function memorySearchSourceRows(content: string): MemorySourceRow[] {
   return rows
 }
 
-// chat.js:7260-7282 — memory_search source-badge DOM.
+// memory_search source-badge DOM.
 function buildMemorySearchSourceDOM(content: string): HTMLElement | null {
   const rows = memorySearchSourceRows(content)
   if (!rows.length) return null
@@ -311,15 +309,15 @@ function buildMemorySearchSourceDOM(content: string): HTMLElement | null {
   return wrap
 }
 
-/* ── Summary-status helpers (chat.js:7115-7141) ─────────────────────────── */
+/* ── Summary-status helpers ─────────────────────────── */
 
-// chat.js:7115-7119 — running renders no text; settled rows show a duration.
+// running renders no text; settled rows show a duration.
 function visibleToolSummaryStatus(status: string, durationMs: number): string {
   if (status === 'success' || status === 'error') return fmtToolDuration(durationMs)
   return ''
 }
 
-// chat.js:7121-7128 — write the status glyph state + visible text onto the span.
+// write the status glyph state + visible text onto the span.
 function applyToolSummaryStatus(statusSpan: HTMLElement, status: string, durationMs = 0): void {
   const visibleStatus = visibleToolSummaryStatus(status || '', durationMs | 0)
   statusSpan.dataset.status = status || ''
@@ -344,7 +342,7 @@ function applyToolSummaryStatus(statusSpan: HTMLElement, status: string, duratio
   else statusSpan.removeAttribute('aria-label')
 }
 
-// chat.js:7130-7141 — ensure + update the summary status span on a details el.
+// ensure + update the summary status span on a details el.
 function setToolSummaryStatus(details: HTMLElement | null, status: string, durationMs = 0): void {
   if (!details) return
   const summary = details.querySelector('.chat-tools-summary')
@@ -358,14 +356,14 @@ function setToolSummaryStatus(details: HTMLElement | null, status: string, durat
   applyToolSummaryStatus(statusSpan, status || '', durationMs | 0)
 }
 
-/* ── Provider-badge helpers (chat.js:446-478) ───────────────────────────── */
+/* ── Provider-badge helpers ───────────────────────────── */
 
-// chat.js:446-448 — trim the provider label.
+// trim the provider label.
 function normalizeProvider(provider: unknown): string {
   return String(provider || '').trim()
 }
 
-// chat.js:450-461 — inject / update the search-provider badge on a summary.
+// inject / update the search-provider badge on a summary.
 function injectProviderBadge(summary: Element | null, providerRaw: string): void {
   const provider = normalizeProvider(providerRaw)
   if (!summary || !provider) return
@@ -380,9 +378,9 @@ function injectProviderBadge(summary: Element | null, providerRaw: string): void
   badge.title = t('chat.toolSearchProvider', { provider })
 }
 
-/* ── DOM lookup helpers (chat.js:7167-7179) ─────────────────────────────── */
+/* ── DOM lookup helpers ─────────────────────────────── */
 
-// chat.js:7167-7172 — find a tool <details> by tool_use_id under a root.
+// find a tool <details> by tool_use_id under a root.
 function findToolDetailsById(root: Element | null, toolId: string): HTMLElement | null {
   if (!root || !toolId) return null
   return (
@@ -392,7 +390,7 @@ function findToolDetailsById(root: Element | null, toolId: string): HTMLElement 
   )
 }
 
-// chat.js:7174-7179 — find a rendered tool-result block by tool_use_id.
+// find a rendered tool-result block by tool_use_id.
 function findToolResultById(root: Element | null, toolId: string): HTMLElement | null {
   if (!root || !toolId) return null
   return (
@@ -486,7 +484,7 @@ export function createToolRenderer(deps: ToolRendererDeps) {
   const diag = deps.diag ?? (() => {})
   const openModal = deps.openModal ?? (() => {})
 
-  /* ── retitle (chat.js:7143-7165) ──────────────────────────────────────── */
+  /* ── retitle ──────────────────────────────────────── */
 
   function retitleToolCallDOM(
     details: HTMLElement | null,
@@ -519,7 +517,7 @@ export function createToolRenderer(deps: ToolRendererDeps) {
     summary.appendChild(statusSpan)
   }
 
-  /* ── build tool-call DOM (chat.js:7061-7105) ──────────────────────────── */
+  /* ── build tool-call DOM ──────────────────────────── */
 
   function buildToolCallDOM(
     name: string,
@@ -571,7 +569,7 @@ export function createToolRenderer(deps: ToolRendererDeps) {
     return details
   }
 
-  /* ── build tool-result DOM (chat.js:7284-7318) ────────────────────────── */
+  /* ── build tool-result DOM ────────────────────────── */
 
   function buildToolResultDOM(
     content: string,
@@ -617,7 +615,7 @@ export function createToolRenderer(deps: ToolRendererDeps) {
     return div
   }
 
-  /* ── settle a result card (chat.js:7181-7199) ─────────────────────────── */
+  /* ── settle a result card ─────────────────────────── */
 
   function settleToolResultCard(payload: StreamEventPayload, isError: boolean): HTMLElement | null {
     const toolId = (payload && (payload as { tool_use_id?: string }).tool_use_id) || ''
@@ -652,7 +650,7 @@ export function createToolRenderer(deps: ToolRendererDeps) {
     return details
   }
 
-  /* ── append a tool call (chat.js:7320-7366) ───────────────────────────── */
+  /* ── append a tool call ───────────────────────────── */
 
   function appendToolCall(payload: StreamEventPayload): void {
     if (!payload) return
@@ -703,7 +701,7 @@ export function createToolRenderer(deps: ToolRendererDeps) {
     diag('tool_call.append.done', { toolId, name })
   }
 
-  /* ── append a tool result (chat.js:7368-7448) ─────────────────────────── */
+  /* ── append a tool result ─────────────────────────── */
 
   function appendToolResult(payload: StreamEventPayload): void {
     if (!payload) return
@@ -842,7 +840,7 @@ export function createToolRenderer(deps: ToolRendererDeps) {
     diag('tool_result.append.done', { toolId, toolName })
   }
 
-  /* ── reconstruct tool calls from persisted segments (chat.js:7681-7758) ── */
+  /* ── reconstruct tool calls from persisted segments ── */
 
   function reconstructToolCalls(
     bubbleDiv: HTMLElement,
@@ -992,7 +990,7 @@ export function createToolRenderer(deps: ToolRendererDeps) {
     }
   }
 
-  /* ── subagent completion (chat.js:7796-7815) ──────────────────────────── */
+  /* ── subagent completion ──────────────────────────── */
 
   function appendSubagentCompletion(payload: StreamEventPayload): void {
     if (!payload) return
@@ -1026,7 +1024,7 @@ export function createToolRenderer(deps: ToolRendererDeps) {
     reconstructToolCalls,
     appendSubagentCompletion,
     // Exposed for the controller's `_refreshRunningSearchProviderBadges`
-    // (chat.js:463-469), which re-badges still-running web_search cards.
+    //which re-badges still-running web_search cards.
     injectProviderBadge: (summary: Element | null, provider: string): void =>
       injectProviderBadge(summary, provider),
   }

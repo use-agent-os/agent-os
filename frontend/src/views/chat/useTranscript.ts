@@ -88,9 +88,9 @@ import {
 import type { ChatMessage, Role, StreamEventPayload } from './types'
 import { readStoredToken } from '@/lib/credentials'
 
-// app.js:200-207 `getAuthToken` reads the connection token from sessionStorage
+// `getAuthToken` reads the connection token from sessionStorage
 // (providers.tsx uses the same key). The artifact renderer appends it to
-// preview/download URLs + the download Authorization header (chat.js:7575/7657).
+// preview/download URLs + the download Authorization header .
 function getAuthToken(): string {
   return readStoredToken()
 }
@@ -128,14 +128,14 @@ function legacyMediaUrl(raw: string): string {
  * scroll container). Task 2 built the streaming renderer. THIS hook (Task 3)
  * adds the two pieces that make streaming end-to-end drivable in a browser:
  *
- *  1. **History read + pagination** via react-query (`chat.history`), matching
- *     legacy `_loadHistory` (chat.js:5440) / `_loadEarlierHistory` (chat.js:5492).
- *     The result is rendered by the imperative, controller-driven history
- *     renderer (design §2.1 — history DOM rendering is NOT reactified).
- *  2. **The live WS subscription** — `sessions.messages.subscribe` on mount /
- *     `unsubscribe` on cleanup (chat.js:2857 / 2909) — plus EVERY `rpc.on(...)`
- *     handler the legacy view registers (chat.js:4699-5181), each dispatching
- *     into the transcript controller or an explicit observer seam.
+ * 1. **History read + pagination** via react-query (`chat.history`), matching
+ * legacy `_loadHistory` / `_loadEarlierHistory`.
+ * The result is rendered by the imperative, controller-driven history
+ * renderer (design §2.1 — history DOM rendering is NOT reactified).
+ * 2. **The live WS subscription** — `sessions.messages.subscribe` on mount /
+ * `unsubscribe` on cleanup — plus EVERY `rpc.on(...)`
+ * handler the legacy view registers, each dispatching
+ * into the transcript controller or an explicit observer seam.
  *
  * StrictMode: the subscription effect is idempotent + fully tears down (every
  * `rpc.on` unsubscribe is collected and called on cleanup, and the effect
@@ -148,39 +148,39 @@ function legacyMediaUrl(raw: string): string {
  * tests observe the same frames without replacing production behavior.
  */
 export interface TranscriptEventSeams {
-  /** Task 4 — tool_use_start / tool_result rendering (chat.js:4730/4750). */
+  /** Task 4 — tool_use_start / tool_result rendering . */
   appendToolCall?: (payload: StreamEventPayload) => void
   appendToolResult?: (payload: StreamEventPayload) => void
-  /** Task 5 — artifact rendering (chat.js:4769). */
+  /** Task 5 — artifact rendering. */
   appendArtifact?: (payload: StreamEventPayload) => void
-  /** Task 6 — router decision strip (chat.js:4699). */
+  /** Task 6 — router decision strip. */
   handleRouterDecision?: (payload: StreamEventPayload) => void
-  /** Task 7 — compaction toast (chat.js:4881). */
+  /** Task 7 — compaction toast. */
   showCompactionToast?: (payload: StreamEventPayload, meta: Record<string, unknown>) => void
-  /** Observe a rendered subagent completion row (chat.js:4788). */
+  /** Observe a rendered subagent completion row. */
   appendSubagentCompletion?: (payload: StreamEventPayload) => void
-  /** Observe a rendered cron result row (chat.js:4860). */
+  /** Observe a rendered cron result row. */
   appendCronResult?: (payload: StreamEventPayload) => void
-  /** Observe a non-persistent turn warning toast (chat.js:4891). */
+  /** Observe a non-persistent turn warning toast. */
   showWarningToast?: (message: string) => void
-  /** Observe a run-status update (chat.js:1767). */
+  /** Observe a run-status update. */
   applySessionRunState?: (state: Record<string, unknown>) => void
-  /** Observe task-group activity (chat.js:4936-4962). */
+  /** Observe task-group activity. */
   noteTaskGroupActive?: (payload: StreamEventPayload) => void
   noteTaskGroupTerminal?: (payload: StreamEventPayload, status: 'succeeded' | 'failed') => void
-  /** Observe the `*` wildcard terminal/done/error handling (chat.js:4965). */
+  /** Observe the `*` wildcard terminal/done/error handling. */
   handleGenericEvent?: (
     event: string,
     payload: StreamEventPayload,
     meta: Record<string, unknown>,
   ) => void
-  /** Observe a session epoch bump (chat.js:4899). */
+  /** Observe a session epoch bump. */
   onEpochChanged?: (payload: StreamEventPayload) => void
   /** chat.js:* — the diagnostics ring (legacy `_chatDiag`). Default: no-op. */
   diag?: (event: string, detail: Record<string, unknown>) => void
 }
 
-/** The current-session predicate: legacy `_isCurrentSessionPayload` (chat.js:1636). */
+/** The current-session predicate: legacy `_isCurrentSessionPayload`. */
 function isCurrentSessionPayload(
   payload: StreamEventPayload | undefined,
   sessionKey: string,
@@ -192,17 +192,17 @@ function isCurrentSessionPayload(
 
 /**
  * Pending-queue drain/recover delegates the controller calls on terminal /
- * compaction-settle events (chat.js:8644/8596/8681). The QUEUE itself lives in
+ * compaction-settle events . The QUEUE itself lives in
  * ChatPage (composer-adjacent state); ChatPage installs these via
  * `setPendingDelegates` so the controller can drive the real drain without the
  * queue leaking into the transcript layer.
  */
 export interface PendingDelegates {
-  /** chat.js:8644 — debounced FIFO drain after a natural terminal event. */
+  /** — debounced FIFO drain after a natural terminal event. */
   schedulePendingDrainAfterTerminal: () => void
-  /** chat.js:8596 — recover the whole queue into the composer (returns recovered). */
+  /** — recover the whole queue into the composer (returns recovered). */
   popAllPendingIntoComposer: () => boolean
-  /** chat.js:8683 — the current queue length (for preservePending). */
+  /** — the current queue length (for preservePending). */
   pendingQueueLength: () => number
 }
 
@@ -236,7 +236,7 @@ function createRouterConfigGate(): { promise: Promise<void>; resolve: () => void
   }
 }
 
-/** chat.js:3569-3575 — config readiness gate with the legacy 1500ms ceiling. */
+/** — config readiness gate with the legacy 1500ms ceiling. */
 export function awaitRouterConfigReady(
   configReady: Promise<void>,
   timeoutMs = 1500,
@@ -259,7 +259,7 @@ export function awaitRouterConfigReady(
 export function useTranscript(opts: {
   sessionKey: string
   seams?: TranscriptEventSeams
-  /** Opens the full tool-result dialog rendered by ChatPage (chat.js:7311). */
+  /** Opens the full tool-result dialog rendered by ChatPage. */
   openModal?: (title: string, html: string, buttons: Array<Record<string, unknown>>) => void
   onEditMessage?: (text: string) => void
   onRegenerateMessage?: (text: string) => void
@@ -315,12 +315,12 @@ export function useTranscript(opts: {
   routerFxDockRef: React.RefObject<HTMLDivElement | null>
   controller: StreamController
   /**
-   * Send composed text + optional attachments (chat.js:6062 `_onSend` →
-   * `chat.send`, chat.js:6193). Attachments ride on the RPC params as legacy
-   * (`displayText` + `attachments` + `inputProvenance`, chat.js:6157-6167).
+   * Send composed text + optional attachments (`_onSend` →
+   * `chat.send`, ). Attachments ride on the RPC params as legacy
+   * (`displayText` + `attachments` + `inputProvenance`, ).
    */
   send: (text: string, attachments?: PendingAttachment[], intent?: string | null) => void
-  /** Abort the in-flight turn (chat.js:8439 `_onStop` → `chat.abort`, chat.js:8444). */
+  /** Abort the in-flight turn (`_onStop` → `chat.abort`, ). */
   abort: (source?: string) => void
   /** Reactive streaming flag (legacy `_isStreaming`) — drives the composer's busy prop. */
   busy: boolean
@@ -328,7 +328,7 @@ export function useTranscript(opts: {
   routerFxEnabled: boolean
   /** Persist and apply the router visual preference. */
   setRouterFxEnabled: (enabled: boolean) => void
-  /** The user's sent-message history, oldest→newest (legacy `_messages`, chat.js:8712). */
+  /** The user's sent-message history, oldest→newest (legacy `_messages`, ). */
   history: string[]
   /**
    * chat.js `_addMessage('system', …)` — append a local system row (the
@@ -347,20 +347,20 @@ export function useTranscript(opts: {
   /** Return to the newest row AND re-arm tail following. */
   scrollToTail: () => void
   /**
-   * True while a compaction is in flight for the CURRENT session (chat.js:8660
+   * True while a compaction is in flight for the CURRENT session (
    * `_isCompactInFlightForCurrentSession`). ChatPage reads it for the
-   * enqueue-while-busy branch (chat.js:6091).
+   * enqueue-while-busy branch.
    */
   isCompactInFlightForCurrentSession: () => boolean
   /**
-   * chat.js:2738-2763 — `/compact` for the CURRENT session: mark the
+   * `/compact` for the CURRENT session: mark the
    * compaction in flight and show its separator before the RPC goes out (a
    * message sent meanwhile queues behind it), then settle both from the
    * result through the same path the `session.event.compaction` frames take.
    */
   compactContext: () => void
   /**
-   * chat.js:6216 `_setStreamIdlePausedForApproval` — pause the idle timer + flip
+   * `_setStreamIdlePausedForApproval` — pause the idle timer + flip
    * run-status to `approval_pending` (or resume). Wired to `useApprovalPending`.
    */
   setStreamIdlePausedForApproval: (paused: boolean) => void
@@ -380,7 +380,7 @@ export function useTranscript(opts: {
   const routePinnedRef = useRef(false)
   const [routerConfigGate] = useState(createRouterConfigGate)
 
-  // chat.js:1470-1535 `_loadFeatureToggles` — the animation engine needs the
+  // `_loadFeatureToggles` — the animation engine needs the
   // configured tier roster before a decision can become a multi-candidate strip.
   // Keep this global config read independent of the session-keyed history query.
   const routerConfigQuery = useQuery<ChatRouterConfigResponse>({
@@ -393,7 +393,7 @@ export function useTranscript(opts: {
     staleTime: 0,
     refetchOnWindowFocus: true,
   })
-  // chat.js:1203-1209 — warm the web_search badge on view entry. Tool-result
+  // warm the web_search badge on view entry. Tool-result
   // payloads remain the fallback source when this optional lookup fails.
   const searchProviderQuery = useQuery<SearchProviderResponse>({
     queryKey: ['tools.search_provider', 'chat'],
@@ -408,7 +408,7 @@ export function useTranscript(opts: {
 
   // Reactive mirror of the imperative `_isStreaming` flag. The controller's
   // `updateSendButton` dep fires on every stream lifecycle transition
-  // (chat.js:6571) — we re-read `controller.isStreaming()` there to sync React.
+  // we re-read `controller.isStreaming` there to sync React.
   const [busy, setBusy] = useState(false)
 
   const idleRunState = sessionRunStatus(undefined)
@@ -423,7 +423,7 @@ export function useTranscript(opts: {
   }, [])
 
   // The user's sent-message history (legacy derives from `_messages` filtered
-  // to role 'user', chat.js:8712-8714). Held as React state so ↑/↓ cycling in
+  // to role 'user', ). Held as React state so ↑/↓ cycling in
   // the composer stays in sync with what was actually sent this session.
   const [history, setHistory] = useState<string[]>([])
 
@@ -463,7 +463,7 @@ export function useTranscript(opts: {
   // real getter is installed in an effect once `pagingRef` exists.
   const historyCompactionSummariesRef = useRef<() => CompactionSummary[]>(() => [])
 
-  // Pending-queue drain/recover delegates (chat.js:8596/8644/8681). The QUEUE is
+  // Pending-queue drain/recover delegates . The QUEUE is
   // owned by ChatPage (composer-adjacent); ChatPage installs the real delegates
   // via `setPendingDelegates` after mount. Held in a ref so the once-created
   // controller reads the latest without re-creating. Faithful no-ops until wired.
@@ -473,8 +473,8 @@ export function useTranscript(opts: {
     pendingQueueLength: () => 0,
   })
 
-  // Reset the abort flag for a new turn (legacy `_aborted`, chat.js:6121). The
-  // controller drops deltas while aborted (chat.js:6652); a fresh send clears it.
+  // Reset the abort flag for a new turn (legacy `_aborted`, ). The
+  // controller drops deltas while aborted; a fresh send clears it.
   // Declared BEFORE the controller init so the `isAborted` dep can read it (refs
   // are stable, so identifier ordering — not creation timing — is what matters).
   const abortedRef = useRef(false)
@@ -832,14 +832,14 @@ export function useTranscript(opts: {
       approvePlan: () => approvePlanRef.current?.() ?? false,
       harnessCard: (spec, options) => acpMounter.harnessCard(spec, options),
       // Artifact preview/download URLs + download Authorization header
-      // (chat.js:7575/7657 `App.getAuthToken()`), for a gateway without tickets.
+      // (`App.getAuthToken`), for a gateway without tickets.
       getAuthToken,
       resolveTicket: (url, options) => ticketResolver.resolveUrl(url, options),
       applySessionRunState: (state) => {
         applySessionRunState(state)
         seamsRef.current.applySessionRunState?.(state)
       },
-      // chat.js:6571 — the Send/Stop affordance refresh fires on every stream
+      // the Send/Stop affordance refresh fires on every stream
       // lifecycle transition (start/end/park/restore). Re-read the imperative
       // `_isStreaming` flag here to keep the reactive `busy` mirror in sync so
       // the composer swaps between Send and Abort.
@@ -850,34 +850,34 @@ export function useTranscript(opts: {
       // live (chat.js `_historyCompactionSummaries`), read via a late-bound
       // getter ref (installed in an effect) so this initializer stays ref-free.
       getHistoryCompactionSummaries: () => historyCompactionSummariesRef.current(),
-      // chat.js:5305 `_scheduleHistorySync` → invalidate the history query so a
+      // `_scheduleHistorySync` → invalidate the history query so a
       // completed/skipped compaction refetches the (now-summarized) transcript.
       scheduleHistorySync: () =>
         void queryClient.invalidateQueries({
           queryKey: ['chat', 'history', sessionKeyRef.current],
         }),
-      // Pending-queue drain/recovery (chat.js:8596/8644). Task 13 fills these
+      // Pending-queue drain/recovery . Task 13 fills these
       // seams: the pending QUEUE lives in ChatPage (composer-adjacent), so the
       // delegates are installed via `setPendingDelegates` after mount and read
       // lazily through `pendingDelegatesRef` — the controller's compaction-settle
-      // (chat.js:8681/8685) then drives the real drain/recover. The initial safe
+      // then drives the real drain/recover. The initial safe
       // defaults cover the short interval before ChatPage installs those delegates.
       schedulePendingDrainAfterTerminal: () =>
         pendingDelegatesRef.current.schedulePendingDrainAfterTerminal(),
       popAllPendingIntoComposer: () => pendingDelegatesRef.current.popAllPendingIntoComposer(),
       pendingQueueLength: () => pendingDelegatesRef.current.pendingQueueLength(),
-      // chat.js:6652 — the abort flag `appendDelta` guards on (stream.ts:839): a
+      // the abort flag `appendDelta` guards on (stream.ts:839): a
       // late `text_delta` buffered on the socket after the user hit Stop must NOT
-      // re-open the killed stream bubble. `abort()` sets `abortedRef.current=true`
+      // re-open the killed stream bubble. `abort` sets `abortedRef.current=true`
       // and a fresh send/session-switch clears it, matching legacy `_aborted`.
       isAborted: () => abortedRef.current,
-      // chat.js:7851 `_addMessage` (3-arg timeout/error/keep-alive form). The
+      // `_addMessage` (3-arg timeout/error/keep-alive form). The
       // idle-timeout row (stream.ts:522) and keep-alive row (stream.ts:653) call
       // this — without it a stalled stream ends with no user-visible explanation.
       // Shares the real message builder with `addMessageWithOptions` below.
       addMessage: (role, text, timestamp) =>
         messageRendererRef.current?.addMessage(role, text, timestamp) ?? null,
-      // Subagent-completion system row (chat.js:7814 `_addMessage`) through the
+      // Subagent-completion system row through the
       // same real builder used by live and history rows.
       addMessageWithOptions: (role, text, timestamp, options) =>
         messageRendererRef.current?.addMessage(role, text, timestamp, options) ?? null,
@@ -996,7 +996,7 @@ export function useTranscript(opts: {
     syncPinnedToTail()
   }, [controller, syncPinnedToTail])
 
-  // chat.js:2575-2579 — streaming follows the tail only while the reader is
+  // streaming follows the tail only while the reader is
   // already near it. Passive scroll tracking lets a manual upward scroll pause
   // auto-follow until the reader returns within the legacy 60px threshold.
   useEffect(() => {
@@ -1016,13 +1016,11 @@ export function useTranscript(opts: {
   // that changed the transcript's height WITHOUT going through one of those
   // seams left the reader stranded above the bottom with no way back but a
   // manual drag, because a height change fires no scroll event:
-  //
-  //   - a <details> tool/thinking row expanding or collapsing (the turn-end
-  //     `collapseLiveThinkingBlock` does exactly this, AFTER the last delta),
-  //   - images / charts / cards that mount or decode a frame later,
-  //   - late syntax highlighting and web-font swaps reflowing a code block,
-  //   - a window resize narrowing the column so every row rewraps taller.
-  //
+  // a <details> tool/thinking row expanding or collapsing (the turn-end
+  // `collapseLiveThinkingBlock` does exactly this, AFTER the last delta),
+  // images / charts / cards that mount or decode a frame later,
+  // late syntax highlighting and web-font swaps reflowing a code block,
+  // a window resize narrowing the column so every row rewraps taller.
   // A mutation + resize watcher closes that gap: while the reader is pinned, any
   // height change re-pins on the next frame. It is a no-op whenever auto-follow
   // is paused, so it never fights a reader who scrolled up.
@@ -1064,11 +1062,10 @@ export function useTranscript(opts: {
     }
   }, [controller, syncPinnedToTail])
 
-  // chat.js:916-932 `_bindHoverActions` — every artifact (and gateway-stored
+  // `_bindHoverActions` — every artifact (and gateway-stored
   // attachment) target downloads through `downloadArtifact`: a ticket when the
   // gateway mints them, else the authenticated fetch, so token/session headers
   // and failure toasts work. A chip's own href carries no credential.
-  //
   // The one exception is an anchor on the gateway-served console once the
   // gateway is known to have no tickets: there the browser's native download
   // keeps the legacy behavior. Off gateway (the desktop renderer, loaded from
@@ -1278,7 +1275,7 @@ export function useTranscript(opts: {
   // Keep the session-key + seams holders current (effect, never during render).
   // Declared BEFORE the subscription effect so on a session-key change this body
   // runs first (React runs effect bodies in declaration order) — the controller's
-  // `getSessionKey()` therefore returns the NEW key by the time the subscription
+  // `getSessionKey` therefore returns the NEW key by the time the subscription
   // effect re-subscribes + restores. On teardown, cleanups run before any body,
   // so the subscription effect's cleanup still sees the OLD key when it parks.
   useEffect(() => {
@@ -1300,24 +1297,24 @@ export function useTranscript(opts: {
     setBusyRef.current = () => setBusy(controller.isStreaming())
   }, [controller])
 
-  /* ── Send / Abort (chat.js:6062 `_onSend` / 8439 `_onStop`) ─────────────── */
+  /* ── Send / Abort (`_onSend` / `_onStop`) ─────────────── */
 
-  // `abortedRef` (legacy `_aborted`, chat.js:6121) is declared above the
+  // `abortedRef` (legacy `_aborted`, ) is declared above the
   // controller init so the `isAborted` dep can read it. Set true on abort, and
   // cleared on a fresh send / session switch below.
 
-  // Legacy `_stopRequestedByUser` (chat.js:346). `abort()` (the `_onStop` path,
-  // chat.js:8442) sets it true right before `abortAndRecover` recovers pending
-  // into the composer; the `.done`-wasAborted drain (chat.js:5126-5128) then
+  // Legacy `_stopRequestedByUser`. `abort` (the `_onStop` path,
+  // ) sets it true right before `abortAndRecover` recovers pending
+  // into the composer; the `.done`-wasAborted drain then
   // SKIPS its own recover when this is already set — otherwise a message enqueued
   // in the abort→done window would be pulled into the composer twice. Reset per
-  // turn on a fresh send and after the guarded drain runs (chat.js:5127).
+  // turn on a fresh send and after the guarded drain runs.
   const stopRequestedByUserRef = useRef(false)
   // Bumped by every send, so a subscribe answer can tell that the user started
   // a turn while it was in flight (replayed frames restart a stream too).
   const sendCountRef = useRef(0)
 
-  // chat.js:6062-6205 `_onSend`. ChatPage owns enqueue-while-streaming, slash
+  // `_onSend`. ChatPage owns enqueue-while-streaming, slash
   // commands and attachment normalization; this action renders the user turn,
   // starts the stream UI and sends the fully normalized RPC payload.
   const send = useCallback(
@@ -1325,7 +1322,7 @@ export function useTranscript(opts: {
       const trimmed = (text ?? '').trim()
       const sessionKey = sessionKeyRef.current
       const atts = attachments ?? []
-      // chat.js:6064/6118 — `hasPayload = text || _pendingAttachments.length > 0`;
+      // `hasPayload = text || _pendingAttachments.length > 0`;
       // an attachments-only send (empty text) is allowed. No session, no payload,
       // or already streaming (the caller queues in that case) is a no-op.
       const hasPayload = Boolean(trimmed) || atts.length > 0
@@ -1334,14 +1331,14 @@ export function useTranscript(opts: {
       abortedRef.current = false
       sendCountRef.current += 1
       // A new turn clears the stop-recover guard (legacy resets `_stopRequestedByUser`
-      // per turn — chat.js:1722/8799) so the next abort→done cycle re-arms cleanly.
+      // per turn — ) so the next abort→done cycle re-arms cleanly.
       stopRequestedByUserRef.current = false
-      // chat.js:6128 — history/↑↓ tracks the user's display text (not the provider
+      // history/↑↓ tracks the user's display text (not the provider
       // fallback). Only record non-empty text so an attachments-only send doesn't
       // seed a blank history entry.
       if (trimmed) setHistory((prev) => [...prev, trimmed])
 
-      // chat.js:6129 — the model receives a fallback prompt when text is empty but
+      // the model receives a fallback prompt when text is empty but
       // attachments are present ("Describe these attachments").
       const userText = trimmed
       const providerText = trimmed || t('chat.attachmentsPrompt')
@@ -1352,7 +1349,7 @@ export function useTranscript(opts: {
       if (userDiv) {
         userDiv.dataset.historyTs = userTs
         userDiv.dataset.historyRawText = userText
-        // chat.js:6136-6147 — attachments replace the body, then the hover row is
+        // attachments replace the body, then the hover row is
         // re-attached because the innerHTML write removes it.
         if (atts.length > 0) {
           const body = userDiv.querySelector('.msg-body') as HTMLElement | null
@@ -1368,7 +1365,7 @@ export function useTranscript(opts: {
         }
       }
 
-      // Start streaming UI + the delayed router scan (chat.js:6178-6190). Config
+      // Start streaming UI + the delayed router scan. Config
       // usually resolves before the first send; the gate also handles a fast send
       // during cold start without letting an empty registry suppress the strip.
       controller.startStreaming()
@@ -1381,13 +1378,13 @@ export function useTranscript(opts: {
       controller.showThinkingIndicator()
       controller.scrollToBottom()
 
-      // chat.js:6150-6167 — the RPC params. Attachments ride as `displayText` +
+      // the RPC params. Attachments ride as `displayText` +
       // `attachments` (staged → file_uuid, else inline base64) + `inputProvenance`
       // for a normalization-generated attachment.
       const params: Record<string, unknown> = { message: providerText, sessionKey }
       const elevatedMode = useApprovals.getState().elevatedMode
       if (elevatedMode) params._source = { elevated: elevatedMode }
-      // chat.js:6153-6156 — the per-send session intent rides on the params.
+      // the per-send session intent rides on the params.
       if (intent) params.intent = intent
       if (atts.length > 0) {
         params.displayText = userText
@@ -1415,7 +1412,7 @@ export function useTranscript(opts: {
         .catch((err: unknown) => {
           const message = err instanceof Error ? err.message : String(err)
           seamsRef.current.diag?.('send.rpc.error', { message })
-          // chat.js:6202-6203 — end streaming + surface the failure inline.
+          // end streaming + surface the failure inline.
           if (controller.isStreaming()) controller.endStreaming()
           const errorRow = messageRendererRef.current?.addMessage(
             'error',
@@ -1430,7 +1427,7 @@ export function useTranscript(opts: {
   // Late-bind the ask_user card's answer path to the freshest `send` so a
   // card built mid-stream still sends through the current session wiring.
   // Reports success so the card only locks itself once the answer went out
-  // (send() is a no-op while the ended turn's stream is still settling).
+  // (send is a no-op while the ended turn's stream is still settling).
   useEffect(() => {
     sendUserAnswerRef.current = (text) => {
       if (controller.isStreaming()) return false
@@ -1464,17 +1461,17 @@ export function useTranscript(opts: {
     }
   }, [controller, rpc, send, queryClient])
 
-  // chat.js:8439-8450 `_onStop`. Abort only while streaming; set the abort flag,
-  // fire `chat.abort` with `{ sessionKey, source }` (chat.js:8444), and end the
+  // `_onStop`. Abort only while streaming; set the abort flag,
+  // fire `chat.abort` with `{ sessionKey, source }`, and end the
   // stream locally with `reason:'aborted'`. ChatPage composes this with the
-  // pending-queue recovery path from chat.js:8448.
+  // pending-queue recovery path.
   const abort = useCallback(
     (source = 'webui_stop_button') => {
       if (!controller.isStreaming()) return
       abortedRef.current = true
-      // chat.js:8442 — mark that the user-initiated stop path ran (its caller,
+      // mark that the user-initiated stop path ran (its caller,
       // `abortAndRecover`, recovers pending immediately after) so the later
-      // `.done`-wasAborted drain skips a second recover (chat.js:5126-5128).
+      // `.done`-wasAborted drain skips a second recover.
       stopRequestedByUserRef.current = true
       const src = typeof source === 'string' && source ? source : 'webui_stop_button'
       rpc.call('chat.abort', { sessionKey: sessionKeyRef.current, source: src }).catch(() => {})
@@ -1515,7 +1512,7 @@ export function useTranscript(opts: {
 
   // A session swap clears the abort/stop flags so a prior session's pending stop
   // can't gate the new session's drain (legacy resets these on the session
-  // transition / destroy — chat.js:1722/8799). Ref writes live in an effect (not
+  // transition / destroy — ). Ref writes live in an effect (not
   // render) per the react-hooks/refs rule.
   useEffect(() => {
     abortedRef.current = false
@@ -1526,7 +1523,7 @@ export function useTranscript(opts: {
     headerStateRef.current.day = ''
     headerStateRef.current.role = ''
     controller.clearRouterFxVisuals('session_switch')
-    // chat.js:1819-1820 — a compaction marked in flight belongs to the session
+    // a compaction marked in flight belongs to the session
     // it ran in. Its frames stop arriving once that session is unsubscribed, so
     // the flag would otherwise outlive it and queue every send on the way back.
     controller.setCompactInFlight(false)
@@ -1536,7 +1533,7 @@ export function useTranscript(opts: {
     applySessionRunState({ run_status: 'idle' })
   }, [applySessionRunState, controller, opts.sessionKey])
 
-  /* ── History read via react-query (chat.js:5440 `_loadHistory`) ─────────── */
+  /* ── History read via react-query ─────────── */
 
   const historyQuery = useQuery<HistoryResponse>({
     queryKey: ['chat', 'history', opts.sessionKey],
@@ -1570,7 +1567,7 @@ export function useTranscript(opts: {
           // An older gateway, or a transient failure: the full read decides.
         }
       }
-      // Legacy `_loadHistory` params (chat.js:5457-5462): `sessionKey`, `limit`,
+      // Legacy `_loadHistory` params: `sessionKey`, `limit`,
       // `includeCanonical:false`, `includeSummaries:true`.
       const page = await rpc.call<HistoryResponse>('chat.history', {
         sessionKey: opts.sessionKey,
@@ -1590,7 +1587,7 @@ export function useTranscript(opts: {
   })
 
   // Render the initial page whenever a fresh history response settles for the
-  // CURRENT session (chat.js:5467-5479). The render is imperative; gate on the
+  // CURRENT session. The render is imperative; gate on the
   // response identity so we render each settled page exactly once.
   const renderedResponseAtRef = useRef(0)
   useLayoutEffect(() => {
@@ -1635,7 +1632,7 @@ export function useTranscript(opts: {
       // The rebuild above replaced every row, so any chart from the previous
       // session (or the previous page of this one) is now detached.
       chartMounter.pruneDetached()
-      // chat.js:3119 — overlay the history compaction-summary separators once
+      // overlay the history compaction-summary separators once
       // the message rows exist.
       controller.renderCompactionSummarySeparators(messages)
       historySettledSessionRef.current = opts.sessionKey
@@ -1653,7 +1650,7 @@ export function useTranscript(opts: {
     subscriptionSettleRevision,
   ])
 
-  // Surface a history-load error into the scope row (chat.js:5484-5488).
+  // Surface a history-load error into the scope row.
   useLayoutEffect(() => {
     if (!historyQuery.isError) return
     historyHydratingRef.current = false
@@ -1670,7 +1667,7 @@ export function useTranscript(opts: {
     subscriptionSettleRevision,
   ])
 
-  /* ── Backward pagination (chat.js:5492 `_loadEarlierHistory`) ───────────── */
+  /* ── Backward pagination ───────────── */
 
   const loadingEarlierGuard = useRef(false)
   useEffect(() => {
@@ -1687,7 +1684,7 @@ export function useTranscript(opts: {
       historyRenderer.renderHistoryScopeRow(state)
       try {
         await rpc.waitForConnection()
-        // chat.js:5507-5513 — the load-earlier params add `before: <oldestCursor>`.
+        // the load-earlier params add `before: <oldestCursor>`.
         const data = await rpc.call<HistoryResponse>('chat.history', {
           sessionKey: requestSessionKey,
           limit: CHAT_HISTORY_PAGE_SIZE,
@@ -1767,7 +1764,7 @@ export function useTranscript(opts: {
     void queryClient.invalidateQueries({ queryKey: ['chat', 'history', sessionKeyRef.current] })
   }, [applySessionRunState, controller, historyRenderer, queryClient])
 
-  /* ── Live WS subscription + all rpc.on handlers (chat.js:2857/4699-5181) ── */
+  /* ── Live WS subscription + all rpc.on handlers ── */
 
   useEffect(() => {
     const sessionKey = opts.sessionKey
@@ -1857,7 +1854,7 @@ export function useTranscript(opts: {
       return true
     }
 
-    // ── Subscribe (chat.js:2857 `_subscribeSession`) ──────────────────────
+    // ── Subscribe ──────────────────────
     const subscribe = async () => {
       let gatewayState: Record<string, unknown> | null = null
       let sentDuringSubscribe = false
@@ -1909,7 +1906,7 @@ export function useTranscript(opts: {
           controller.showThinkingIndicator()
         }
         // A replay gap means we may have missed live events → warn only for an
-        // unexpected gap reason, then resync history (chat.js:2874-2887).
+        // unexpected gap reason, then resync history.
         if (res && res.replay_complete === false) {
           const gapReason = res.replay_gap_reason || res.replayGapReason || ''
           if (replayGapShouldWarn(gapReason)) {
@@ -1942,13 +1939,13 @@ export function useTranscript(opts: {
       }
     }
 
-    // chat.js:2909 `_unsubscribeSession`.
+    // `_unsubscribeSession`.
     const unsubscribe = () => {
       rpc.call('sessions.messages.unsubscribe', { key: sessionKey }).catch(() => {})
     }
 
     // Common pre-dispatch gate for a session.event.* streaming frame: drop
-    // foreign-session payloads (chat.js:1688), then the seq gate (Task-2).
+    // foreign-session payloads, then the seq gate (Task-2).
     const gateStreamFrame = (event: string, payload: StreamEventPayload): boolean => {
       if (isForeign(payload)) {
         diag(`${event}.drop.foreign_session`, {})
@@ -1977,7 +1974,7 @@ export function useTranscript(opts: {
 
     // ── Register EVERY rpc.on(...) the legacy view registers ──────────────
 
-    // chat.js:4699 — router_decision → controller router-fx renderer (Task 6).
+    // router_decision → controller router-fx renderer (Task 6).
     unsubs.push(
       onEvent(
         'session.event.router_decision',
@@ -1998,7 +1995,7 @@ export function useTranscript(opts: {
       ),
     )
 
-    // chat.js:4714 — text_delta → Task-2 controller stream path.
+    // text_delta → Task-2 controller stream path.
     unsubs.push(
       onEvent('session.event.text_delta', (payload: StreamEventPayload) => {
         if (!gateStreamFrame('event.text_delta', payload)) return
@@ -2016,7 +2013,7 @@ export function useTranscript(opts: {
       }),
     )
 
-    // chat.js:4730 — tool_use_start → controller tool renderer (Task 4).
+    // tool_use_start → controller tool renderer (Task 4).
     unsubs.push(
       onEvent('session.event.tool_use_start', (payload: StreamEventPayload) => {
         if (!gateStreamFrame('event.tool_use_start', payload)) return
@@ -2026,7 +2023,7 @@ export function useTranscript(opts: {
       }),
     )
 
-    // chat.js:4750 — tool_result → controller tool renderer (Task 4).
+    // tool_result → controller tool renderer (Task 4).
     unsubs.push(
       onEvent('session.event.tool_result', (payload: StreamEventPayload) => {
         if (!gateStreamFrame('event.tool_result', payload)) return
@@ -2047,7 +2044,7 @@ export function useTranscript(opts: {
       }),
     )
 
-    // chat.js:4769 — artifact → controller artifact renderer (Task 5).
+    // artifact → controller artifact renderer (Task 5).
     unsubs.push(
       onEvent('session.event.artifact', (payload: StreamEventPayload) => {
         if (!gateStreamFrame('event.artifact', payload)) return
@@ -2057,7 +2054,7 @@ export function useTranscript(opts: {
       }),
     )
 
-    // chat.js:4788 — subagent_completion → controller tool renderer (Task 4).
+    // subagent_completion → controller tool renderer (Task 4).
     unsubs.push(
       onEvent('session.event.subagent_completion', (payload: StreamEventPayload) => {
         if (!gateStreamFrame('event.subagent_completion', payload)) return
@@ -2066,7 +2063,7 @@ export function useTranscript(opts: {
       }),
     )
 
-    // chat.js:4807 — state_change → thinking indicator (Task-2 controller).
+    // state_change → thinking indicator (Task-2 controller).
     unsubs.push(
       onEvent('session.event.state_change', (payload: StreamEventPayload) => {
         if (!payload) return
@@ -2083,7 +2080,7 @@ export function useTranscript(opts: {
           >,
         )
         // Only SHOW thinking on a thinking transition; hiding is owned by the
-        // controller's ensureStreamBubble (chat.js:4824-4832).
+        // controller's ensureStreamBubble.
         if (to === 'thinking' && !controller.isStreaming()) {
           controller.startStreaming()
           controller.showThinkingIndicator()
@@ -2093,7 +2090,7 @@ export function useTranscript(opts: {
       }),
     )
 
-    // chat.js:4835 — run_heartbeat → keep-alive + awaiting-model hint / thinking.
+    // run_heartbeat → keep-alive + awaiting-model hint / thinking.
     unsubs.push(
       onEvent('session.event.run_heartbeat', (payload: StreamEventPayload) => {
         if (!gateStreamFrame('event.run_heartbeat', payload)) return
@@ -2113,7 +2110,7 @@ export function useTranscript(opts: {
       }),
     )
 
-    // chat.js:4860-4878 — persistent cron result row.
+    // persistent cron result row.
     unsubs.push(
       onEvent('session.event.cron_result', (payload: StreamEventPayload) => {
         if (!gateStreamFrame('event.cron_result', payload)) return
@@ -2132,7 +2129,7 @@ export function useTranscript(opts: {
       }),
     )
 
-    // chat.js:4881 — compaction → controller compaction renderer (Task 7). The
+    // compaction → controller compaction renderer (Task 7). The
     // renderer drives the in-thread context separator + in-flight controls +
     // router-fx compaction-turn suppression; the seam remains an optional
     // observer hook (it never replaces the real handler).
@@ -2147,7 +2144,7 @@ export function useTranscript(opts: {
       ),
     )
 
-    // chat.js:4891 — warning → toast only, never written to the transcript.
+    // warning → toast only, never written to the transcript.
     unsubs.push(
       onEvent('session.event.warning', (payload: StreamEventPayload) => {
         if (isForeign(payload)) return
@@ -2158,7 +2155,7 @@ export function useTranscript(opts: {
       }),
     )
 
-    // chat.js:4899-4905 — epoch bump drops stale pre-reset frames, and (since
+    // epoch bump drops stale pre-reset frames, and (since
     // the bump only ever comes from `sessions.reset`) clears the thread the
     // reset just emptied server-side.
     unsubs.push(
@@ -2173,7 +2170,7 @@ export function useTranscript(opts: {
       }),
     )
 
-    // chat.js:4909 — sessions.changed → terminal resync or run-state apply.
+    // sessions.changed → terminal resync or run-state apply.
     unsubs.push(
       onEvent('sessions.changed', (payload: StreamEventPayload) => {
         if (isStaleEpoch(payload)) return
@@ -2185,7 +2182,7 @@ export function useTranscript(opts: {
           return
         }
         // Terminal session change → end streaming + resync history
-        // (chat.js:1713 `_syncTerminalSessionChange`). We conservatively resync
+        //. We conservatively resync
         // history + apply run-state; terminal pending recovery is handled by the
         // wildcard completion/error path below.
         if (sessionChangeIsTerminal(payload)) {
@@ -2201,7 +2198,7 @@ export function useTranscript(opts: {
       }),
     )
 
-    // chat.js:4919 — task.queued → run-state seam.
+    // task.queued → run-state seam.
     unsubs.push(
       onEvent('task.queued', (payload: StreamEventPayload) => {
         if (!isCurrentSessionPayload(payload, sessionKeyRef.current)) return
@@ -2220,7 +2217,7 @@ export function useTranscript(opts: {
       }),
     )
 
-    // chat.js:4928 — task.running → run-state seam.
+    // task.running → run-state seam.
     unsubs.push(
       onEvent('task.running', (payload: StreamEventPayload) => {
         if (!isCurrentSessionPayload(payload, sessionKeyRef.current)) return
@@ -2234,7 +2231,7 @@ export function useTranscript(opts: {
       }),
     )
 
-    // chat.js:4936-4962 — task_group.{waiting,synthesizing,done,failed}.
+    // task_group.{waiting,synthesizing,done,failed}.
     unsubs.push(
       onEvent('session.event.task_group.waiting', (payload: StreamEventPayload) => {
         if (!gateStreamFrame('event.task_group.waiting', payload)) return
@@ -2294,7 +2291,7 @@ export function useTranscript(opts: {
       }),
     )
 
-    // chat.js:4965 — the `*` wildcard: terminal task events + `.done`/`.error`
+    // the `*` wildcard: terminal task events + `.done`/`.error`
     // finalization, per-turn usage metadata and pending-queue recovery. The
     // optional observer receives the raw frame without replacing production
     // behavior.
@@ -2305,8 +2302,8 @@ export function useTranscript(opts: {
         const rawPayload = (rawPayloadArg as StreamEventPayload) ?? {}
         const rawMeta = (rawMetaArg as Record<string, unknown>) ?? {}
         seams().handleGenericEvent?.(rawEvent, rawPayload, rawMeta)
-        // The observer never replaces the production finalizer (chat.js:5033
-        // `.done` / 5142 `.error`); it only receives the same raw frame.
+        // The observer never replaces the production finalizer (
+        // `.done` / `.error`); it only receives the same raw frame.
         if (!isCurrentSessionPayload(rawPayload, sessionKeyRef.current)) {
           // A task terminal for a session parked off-screen: its turn is over,
           // so the parked live view must not come back streaming on the next
@@ -2361,7 +2358,7 @@ export function useTranscript(opts: {
                 },
           )
           if (taskTerminal === 'succeeded') {
-            // chat.js:6256-6273 — task.succeeded is a terminal backstop for
+            // task.succeeded is a terminal backstop for
             // providers whose chat.done frame is missing or delayed. Give the
             // normal done path 75ms to win; otherwise end only the same stream
             // generation, resync history and release the pending queue.
@@ -2437,15 +2434,15 @@ export function useTranscript(opts: {
               )
             }
           }
-          // chat.js:5120-5131 — on abort recover pending into the composer (the
+          // on abort recover pending into the composer (the
           // user explicitly stopped, so auto-firing queued sends is wrong); on
           // a natural completion drain the queue head (FIFO).
           if (wasAborted) {
             abortedRef.current = false
-            // chat.js:5126-5128 — the user-stop path (`abortAndRecover`) already
+            // the user-stop path (`abortAndRecover`) already
             // recovered pending; this branch is only for the server-initiated
             // cancel (timeout/external abort) where it never ran. Skip a second
-            // recover when the stop flag is already set, then clear it (5127) so
+            // recover when the stop flag is already set, then clear it so
             // a message enqueued in the abort→done window isn't pulled in twice.
             if (stopRequestedByUserRef.current) {
               stopRequestedByUserRef.current = false
@@ -2491,7 +2488,7 @@ export function useTranscript(opts: {
             // A stopped turn is a notice, not a failure.
             if (code.includes('cancel')) errorRow.dataset.tone = 'notice'
           }
-          // chat.js:5146 — recover pending after a failed turn.
+          // recover pending after a failed turn.
           pendingDelegatesRef.current.popAllPendingIntoComposer()
           applySessionRunState(
             activeTaskGroupsRef.current.size > 0
@@ -2506,7 +2503,7 @@ export function useTranscript(opts: {
       }),
     )
 
-    // chat.js:5159 — `_state`: on (re)connect, apply policy + (re)subscribe +
+    // `_state`: on (re)connect, apply policy + (re)subscribe +
     // resync history; on disconnect while streaming, keep the thinking indicator.
     unsubs.push(
       rpc.on('_state', (state: unknown) => {
@@ -2526,7 +2523,7 @@ export function useTranscript(opts: {
       }),
     )
 
-    // chat.js:5173 — `_hello`: apply the negotiated RPC policy (idle grace, …).
+    // `_hello`: apply the negotiated RPC policy (idle grace, …).
     unsubs.push(
       rpc.on('_hello', (hello: unknown) => {
         const policy = (hello as { policy?: Record<string, unknown> })?.policy
@@ -2534,7 +2531,7 @@ export function useTranscript(opts: {
       }),
     )
 
-    // chat.js:5177 — `_gap`: a live-stream frame gap → clear the idle timer,
+    // `_gap`: a live-stream frame gap → clear the idle timer,
     // warn, and resync terminal history (`_syncTerminalSessionChange` path).
     unsubs.push(
       rpc.on('_gap', () => {
@@ -2543,15 +2540,15 @@ export function useTranscript(opts: {
         toast.warning(t('chat.streamGap'))
         seams().showWarningToast?.(t('chat.streamGap'))
         // Terminal-history resync: the socket will reconnect and re-subscribe
-        // (chat.js:1713 / 5177) — refresh history so the transcript is whole.
+        // — refresh history so the transcript is whole.
         resyncHistory()
       }),
     )
 
     // Restore any live stream state PARKED for this session on a previous switch
-    // (chat.js:1831 `_restoreLiveStreamStateForSession`, called from
+    // (`_restoreLiveStreamStateForSession`, called from
     // `_switchToSession` right before re-subscribing). The park map is a
-    // controller-lifetime module state (chat.js:57), so a session we switch back
+    // controller-lifetime module state, so a session we switch back
     // to gets its in-flight stream bubble / router strips / thinking indicator
     // re-attached. On a first mount for a key this is a no-op (nothing parked).
     // `sessionKeyRef` is already the NEW key here (its effect runs before this
@@ -2566,9 +2563,9 @@ export function useTranscript(opts: {
       succeededTerminalTimers.forEach((timer) => window.clearTimeout(timer))
       succeededTerminalTimers.clear()
       // Park the OUTGOING session's live stream state before we tear the
-      // subscription down (chat.js:1813 `_parkCurrentSessionStreamState`, called
+      // subscription down (`_parkCurrentSessionStreamState`, called
       // from `_switchToSession` before `_unsubscribeSession`). Cleanups run
-      // before any effect body on a re-render, so `getSessionKey()` still returns
+      // before any effect body on a re-render, so `getSessionKey` still returns
       // the OLD key here — the state is stashed under the session we're leaving
       // and restored if we switch back. On real unmount the final cleanup at the
       // bottom of this hook clears view-local stream state unconditionally.
@@ -2598,7 +2595,7 @@ export function useTranscript(opts: {
   // On unmount, tear down any live stream timers/rAF (parity legacy destroy —
   // see the Task-2 report). `clearViewLocalStreamState` does not itself cancel
   // the stream-active-mark reveal timer, so call it explicitly to match
-  // destroy's unconditional cleanup (chat.js:8788).
+  // destroy's unconditional cleanup.
   useEffect(() => {
     return () => {
       controller.clearViewLocalStreamState('unmount')
@@ -2612,7 +2609,7 @@ export function useTranscript(opts: {
     pendingDelegatesRef.current = delegates
   }, [])
 
-  // chat.js:6216 `_setStreamIdlePausedForApproval` — a stable pass-through to the
+  // `_setStreamIdlePausedForApproval` — a stable pass-through to the
   // controller so `useApprovalPending` can pause/resume the idle timer + chip.
   const setStreamIdlePausedForApproval = useCallback(
     (paused: boolean) => controller.setStreamIdlePausedForApproval(paused),
@@ -2623,13 +2620,13 @@ export function useTranscript(opts: {
     messageRendererRef.current?.addMessage('system', text, Date.now())
   }, [])
 
-  // chat.js:8660 — the enqueue-while-busy branch (chat.js:6091) queries this.
+  // the enqueue-while-busy branch queries this.
   const isCompactInFlightForCurrentSession = useCallback(
     () => controller.isCompactInFlightForCurrentSession(),
     [controller],
   )
 
-  // chat.js:2738-2763 — the slash command's manual compaction. The gateway
+  // the slash command's manual compaction. The gateway
   // also broadcasts the lifecycle as `session.event.compaction`, and those
   // frames go out before the RPC returns: when they have already settled the
   // compaction, the result has nothing left to add (legacy fed it through

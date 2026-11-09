@@ -20,19 +20,19 @@ afterEach(() => {
 })
 
 describe('modeOptions / activeModeOption', () => {
-  it('lists prompt, auto-approve, auto-deny in legacy order (approvals.js:82-86)', () => {
+  it('lists prompt, auto-approve, auto-deny in legacy order', () => {
     expect(modeOptions().map((o) => o.value)).toEqual(['prompt', 'auto-approve', 'auto-deny'])
   })
   it('selects the option matching the active mode', () => {
     expect(activeModeOption('auto-deny').label).toBe('Auto deny')
   })
-  it('falls back to the first option (prompt) for an unknown mode (approvals.js:87)', () => {
+  it('falls back to the first option (prompt) for an unknown mode', () => {
     expect(activeModeOption('nonsense')).toEqual(modeOptions()[0])
     expect(activeModeOption('')).toEqual(modeOptions()[0])
   })
 })
 
-describe('approvalCardDetail (approvals.js:314-322 — the VIEW, full args)', () => {
+describe('approvalCardDetail', () => {
   it('returns the warning text when present', () => {
     expect(approvalCardDetail({ id: '1', warning: 'danger!' })).toBe('danger!')
   })
@@ -55,7 +55,7 @@ describe('approvalCardDetail (approvals.js:314-322 — the VIEW, full args)', ()
   })
 })
 
-describe('modeStateTone (approvals.js:310-314)', () => {
+describe('modeStateTone', () => {
   it('maps auto-approve to warn', () => {
     expect(modeStateTone('auto-approve')).toBe('warn')
   })
@@ -68,7 +68,7 @@ describe('modeStateTone (approvals.js:310-314)', () => {
   })
 })
 
-describe('normalizeElevatedMode (approvals.js:245-247)', () => {
+describe('normalizeElevatedMode', () => {
   it('passes on/bypass/full through', () => {
     expect(normalizeElevatedMode('on')).toBe('on')
     expect(normalizeElevatedMode('bypass')).toBe('bypass')
@@ -81,13 +81,13 @@ describe('normalizeElevatedMode (approvals.js:245-247)', () => {
   })
 })
 
-describe('browserElevatedMode (approvals.js:234-243)', () => {
+describe('browserElevatedMode', () => {
   it('returns the normalized stored mode', () => {
     localStorage.setItem(ELEVATED_MODE_KEY, 'bypass')
     localStorage.setItem(ELEVATED_MODE_VERSION_KEY, ELEVATED_MODE_STORAGE_VERSION)
     expect(browserElevatedMode()).toBe('bypass')
   })
-  it('downgrades a legacy "full" stored under an old storage version to "bypass" (approvals.js:241)', () => {
+  it('downgrades a legacy "full" stored under an old storage version to "bypass"', () => {
     localStorage.setItem(ELEVATED_MODE_KEY, 'full')
     localStorage.setItem(ELEVATED_MODE_VERSION_KEY, '1')
     expect(browserElevatedMode()).toBe('bypass')
@@ -102,7 +102,7 @@ describe('browserElevatedMode (approvals.js:234-243)', () => {
   })
 })
 
-describe('executionModeSummary (approvals.js:194-216)', () => {
+describe('executionModeSummary', () => {
   it('uppercases scope + mode into the label', () => {
     expect(executionModeSummary('Session', 'bypass').label).toBe('Session BYPASS')
     expect(executionModeSummary('Global', 'full').label).toBe('Global FULL')
@@ -119,7 +119,7 @@ describe('executionModeSummary (approvals.js:194-216)', () => {
   })
 })
 
-describe('resolveExecutionMode (approvals.js:176-192)', () => {
+describe('resolveExecutionMode', () => {
   it('prefers the browser session elevated mode when present', () => {
     localStorage.setItem(ELEVATED_MODE_KEY, 'bypass')
     localStorage.setItem(ELEVATED_MODE_VERSION_KEY, ELEVATED_MODE_STORAGE_VERSION)

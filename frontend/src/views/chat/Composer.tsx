@@ -28,31 +28,31 @@ const COMPOSER_SHORTCUTS = [
  * The chat command line (React).
  *
  * Ported from the legacy imperative composer in static/js/views/chat.js: the
- * keydown bindings (chat.js:2415-2498), the document-level ESC abort
- * (chat.js:2518-2539), the textarea auto-resize (chat.js:2584-2593), sent-
- * message history cycling on ↑/↓ (chat.js:8711-8741), and autofocus
- * (chat.js:1353-1360). Unlike the transcript region this is idiomatic React —
+ * keydown bindings, the document-level ESC abort
+ *the textarea auto-resize, sent-
+ * message history cycling on ↑/↓, and autofocus
+ *. Unlike the transcript region this is idiomatic React —
  * local state drives the value, and send/abort are injected callbacks so the
  * component stays decoupled from RPC. ChatPage wires `onSend` to the
- * useTranscript send action (chat.js:6062 `_onSend` → `chat.send`) and
- * `onAbort` to the abort action (chat.js:8439 `_onStop` → `chat.abort`).
+ * useTranscript send action (`_onSend` → `chat.send`) and
+ * `onAbort` to the abort action (`_onStop` → `chat.abort`).
  *
  * Task 9 (attachments): the composer is now attachment-aware. `onSend` still
  * receives the raw composer text — ChatPage normalizes it against the pending
- * buffer (`normalizeOutgoingComposerPayload`, chat.js:7982) and fires chat.send
- * with the attachments (chat.js:6157). The send-enable + no-op-guard here honor
- * legacy `hasPayload = text || _pendingAttachments.length > 0` (chat.js:6064):
+ * buffer (`normalizeOutgoingComposerPayload`, ) and fires chat.send
+ * with the attachments. The send-enable + no-op-guard here honor
+ * legacy `hasPayload = text || _pendingAttachments.length > 0`:
  * an attachments-only send (empty text) is allowed. The pending-work guard
- * (chat.js:6067 — "Wait for file attachment processing to finish") blocks a send
+ * (— "Wait for file attachment processing to finish") blocks a send
  * while a read/upload is in flight.
  *
- * ChatPage also composes the enqueue-while-streaming branch (chat.js:6091) and
- * slash-command handling (chat.js:6113), keeping the input component focused on
+ * ChatPage also composes the enqueue-while-streaming branch and
+ * slash-command handling, keeping the input component focused on
  * keyboard/input behavior rather than RPC ownership.
  */
 
-const MIN_TEXTAREA_HEIGHT = 40 // chat.js:2590 fallback when minHeight is unset.
-const MAX_TEXTAREA_HEIGHT = 160 // chat.js:2592 cap.
+const MIN_TEXTAREA_HEIGHT = 40 // fallback when minHeight is unset.
+const MAX_TEXTAREA_HEIGHT = 160 // cap.
 
 /** Imperative handle exposed via `composerRef` — clears / sets the textarea. */
 export interface ComposerHandle {
@@ -61,36 +61,36 @@ export interface ComposerHandle {
   focus: () => void
   /**
    * Programmatically set the composer value + focus with the caret at the end
-   * (chat.js:8608-8618 — the pending-recover / drain-head write path). Resets the
-   * ↑/↓ history cursor since the content is now user-editable text (chat.js:8623).
+   * (— the pending-recover / drain-head write path). Resets the
+   * ↑/↓ history cursor since the content is now user-editable text.
    */
   setValue: (text: string) => void
-  /** The current composer text (chat.js:6063 `_textarea.value.trim()` reads). */
+  /** The current composer text` reads). */
   getValue: () => string
 }
 
 export interface ComposerProps {
-  /** Send the composed text. Wired to chat.send by ChatPage (chat.js:6193). */
+  /** Send the composed text. Wired to chat.send by ChatPage. */
   onSend: (text: string) => void
   /**
    * The live composer value, pushed up so ChatPage can drive the slash menu's
-   * open/filter state (chat.js:2639 `_handleSlashInput` reads `_textarea.value`).
+   * open/filter state (`_handleSlashInput` reads `_textarea.value`).
    * Called on every input change; the composer remains the value's owner.
    */
   onValueChange?: (value: string) => void
   /**
-   * Slash-menu keyboard intercept (chat.js:2654-2662/2675). Consulted BEFORE the
+   * Slash-menu keyboard intercept . Consulted BEFORE the
    * composer's own history/send/ESC handling while the menu is open; returns true
    * when the menu consumed the key (the composer then does nothing further).
    */
   onSlashKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => boolean
   /**
    * Imperative handle so an out-of-band selection (a slash-menu mouse click,
-   * chat.js:2686 `_textarea.value = ''`) can clear the composer's textarea.
+   * `_textarea.value = ''`) can clear the composer's textarea.
    */
   composerRef?: React.Ref<ComposerHandle>
   /**
-   * The rendered slash menu, mounted above the input row (chat.js:2664 inserts
+   * The rendered slash menu, mounted above the input row (inserts
    * the menu just above the composer). Null / absent when there is no menu.
    */
   slashMenu?: React.ReactNode
@@ -98,7 +98,7 @@ export interface ComposerProps {
   slashListboxId?: string
   /** ID of the currently active slash-command option, when the listbox is open. */
   slashActiveDescendant?: string
-  /** Abort the in-flight turn. Wired to chat.abort by ChatPage (chat.js:8444). */
+  /** Abort the in-flight turn. Wired to chat.abort by ChatPage. */
   onAbort?: () => void
   /** Streaming in flight (legacy `_isStreaming`) — drives the Abort affordance. */
   busy: boolean
@@ -106,17 +106,17 @@ export interface ComposerProps {
   pendingCompaction?: boolean
   /**
    * The user's sent-message history, oldest→newest (legacy derives this from
-   * `_messages` filtered to role 'user', chat.js:8712-8714). Drives ↑/↓ cycling.
+   * `_messages` filtered to role 'user', ). Drives ↑/↓ cycling.
    */
   history?: string[]
   /**
-   * Whether attachments are pending (chat.js:6064 `_pendingAttachments.length`).
+   * Whether attachments are pending.
    * Enables an attachments-only send (empty text) and is passed to
    * `sendButtonState`. Default false (no attachments).
    */
   hasPendingAttachments?: boolean
   /**
-   * Whether a read/upload is in flight (chat.js:6067 `_hasPendingAttachmentWork`).
+   * Whether a read/upload is in flight.
    * When true, a send toasts "Wait for file attachment processing to finish" and
    * no-ops rather than sending a half-processed attachment.
    */
@@ -128,7 +128,7 @@ export interface ComposerProps {
   onAttachFiles?: (files: File[] | FileList) => void
   /**
    * Optional slot for the attachment tray, rendered above the input row so the
-   * previews sit with the composer (chat.js:8346 `_renderAttachmentPreview`).
+   * previews sit with the composer.
    */
   tray?: React.ReactNode
   /** Imperative router-fx mount point, rendered as a compact status above the input row. */
@@ -141,25 +141,25 @@ export interface ComposerProps {
   routePicker?: React.ReactNode
   /**
    * Optional composer-settings toolbar (execution mode + Pilot Router + usage),
-   * mounted behind a gear trigger in the input bar (chat.js:1248-1281
+   * mounted behind a gear trigger in the input bar (
    * `chat-toolbar-wrap`). Absent when the view has no toolbar.
    */
   toolbar?: React.ReactNode
   /**
    * The current pending-queue length (legacy `_pendingQueue.length`). Drives the
-   * ESC priority chain (chat.js:2449/2535) + the Alt+↓ enqueue cap guard
-   * (chat.js:2464). Default 0.
+   * ESC priority chain + the Alt+↓ enqueue cap guard
+   *. Default 0.
    */
   pendingCount?: number
   /**
-   * ESC pending-recover rung (chat.js:2535 `_popAllPendingIntoComposer`). Called
+   * ESC pending-recover rung. Called
    * when ESC is pressed while NOT streaming but the queue is non-empty. ChatPage
    * owns the queue → recovers it into the composer. Returns true if it recovered.
    */
   onRecoverPending?: () => boolean
-  /** Alt+↑ — pop the most-recent pending item into the composer (chat.js:2457). */
+  /** Alt+↑ — pop the most-recent pending item into the composer. */
   onPopPendingTail?: () => void
-  /** Alt+↓ — enqueue the current composer text (chat.js:2464). */
+  /** Alt+↓ — enqueue the current composer text. */
   onEnqueueCurrent?: () => void
   /**
    * The suggested next prompt (`chat.suggestNext`). Shown as the placeholder
@@ -236,11 +236,11 @@ export function Composer({
   }, [toolbarOpen])
 
   // History-cycle cursor (legacy `_inputHistoryIdx` / `_inputHistoryDraft`,
-  // chat.js:369). `null` = not navigating; the draft holds the pre-nav text.
+  // ). `null` = not navigating; the draft holds the pre-nav text.
   const historyIdxRef = useRef<number | null>(null)
   const historyDraftRef = useRef('')
 
-  // chat.js:2584-2593 `_autoResizeTextarea` — grow to fit content between a min
+  // `_autoResizeTextarea` — grow to fit content between a min
   // and a 160px cap; an empty value clears the inline height entirely.
   const autoResize = useCallback(() => {
     const ta = textareaRef.current
@@ -254,9 +254,9 @@ export function Composer({
     ta.style.height = Math.max(minHeight, Math.min(ta.scrollHeight, MAX_TEXTAREA_HEIGHT)) + 'px'
   }, [])
 
-  // chat.js:8695-8706 `_setTextareaProgrammatic` — write value + move the caret
+  // `_setTextareaProgrammatic` — write value + move the caret
   // to the end WITHOUT resetting the history cursor (the input handler's reset
-  // is gated on user typing, chat.js:2405). In React the reset is keyed off the
+  // is gated on user typing, ). In React the reset is keyed off the
   // input event vs. programmatic writes, so we set state directly and resize.
   const setProgrammatic = useCallback(
     (text: string) => {
@@ -272,7 +272,7 @@ export function Composer({
         }
       }
       // Programmatic writes (send-clear, ESC-clear, history cycling) also drive
-      // the slash-menu mirror so it re-evaluates on the new value (chat.js:2405
+      // the slash-menu mirror so it re-evaluates on the new value (
       // — `_handleSlashInput` runs on every `_textarea.value` change).
       onValueChange?.(text)
       autoResize()
@@ -280,14 +280,14 @@ export function Composer({
     [autoResize, onValueChange],
   )
 
-  // Autofocus on mount when the environment warrants it (chat.js:1353-1360).
+  // Autofocus on mount when the environment warrants it.
   useEffect(() => {
     if (typeof window !== 'undefined' && shouldAutofocusComposer(window)) {
       textareaRef.current?.focus({ preventScroll: true })
     }
   }, [])
 
-  // Out-of-band clear (chat.js:2686 — a slash-menu mouse click clears the input).
+  // Out-of-band clear (— a slash-menu mouse click clears the input).
   useImperativeHandle(
     composerRef,
     (): ComposerHandle => ({
@@ -297,7 +297,7 @@ export function Composer({
         historyDraftRef.current = ''
       },
       focus: () => textareaRef.current?.focus({ preventScroll: true }),
-      // chat.js:8608-8624 — the pending-recover / drain write: set the value,
+      // the pending-recover / drain write: set the value,
       // focus with the caret at the end, and reset the history cursor since the
       // content is now user-editable text.
       setValue: (text: string) => {
@@ -311,7 +311,7 @@ export function Composer({
     [setProgrammatic],
   )
 
-  // chat.js:8711-8741 `_cycleHistory`. dir < 0 = older, dir > 0 = newer.
+  // `_cycleHistory`. dir < 0 = older, dir > 0 = newer.
   // Returns true when the cursor moved (so the caller can preventDefault).
   const cycleHistory = useCallback(
     (dir: number): boolean => {
@@ -343,16 +343,16 @@ export function Composer({
 
   const doSend = useCallback(() => {
     const text = value.trim()
-    // chat.js:6067 — block while a read/upload is in flight so a half-processed
+    // block while a read/upload is in flight so a half-processed
     // attachment is never sent ("Wait for file attachment processing to finish").
     if (hasPendingWork) {
       toast.warning('Wait for file attachment processing to finish')
       return
     }
-    // chat.js:6064/6118 — `hasPayload = text || _pendingAttachments.length > 0`;
+    // `hasPayload = text || _pendingAttachments.length > 0`;
     // an attachments-only send (empty text) is allowed. When busy, we STILL call
     // `onSend` — ChatPage's `_onSend` port owns the enqueue-while-streaming/
-    // compacting decision (chat.js:6091-6110), enqueuing rather than sending. The
+    // compacting decision, enqueuing rather than sending. The
     // composer no longer swallows the busy send; it just clears its input, since
     // either a send fired or the payload moved to the pending queue.
     if (!text && !hasPendingAttachments) return
@@ -364,10 +364,10 @@ export function Composer({
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      // IME composition guard (chat.js:2416).
+      // IME composition guard.
       if (e.nativeEvent.isComposing || e.keyCode === 229) return
 
-      // Slash menu first (chat.js:2654-2662/2675 — arrow/enter/escape are owned by
+      // Slash menu first (— arrow/enter/escape are owned by
       // the open menu). When it consumes the key the composer does nothing else.
       if (onSlashKeyDown?.(e)) return
 
@@ -389,14 +389,14 @@ export function Composer({
         return
       }
 
-      // ESC priority chain (chat.js:2530-2538 doc-level + 2449 textarea):
-      //   1. streaming        → abort the turn (chat.js:2530-2533 `_onStop`; the
-      //      stop path itself recovers pending, so the recover rung is skipped).
-      //   2. pending non-empty → recover the whole queue into the composer
-      //      (chat.js:2535-2537 `_popAllPendingIntoComposer`).
-      //   3. has text          → clear the input (chat.js:2449-2453).
+      // ESC priority chain (doc-level textarea):
+      // 1. streaming → abort the turn (`_onStop`; the
+      // stop path itself recovers pending, so the recover rung is skipped).
+      // 2. pending non-empty → recover the whole queue into the composer
+      //.
+      // 3. has text → clear the input.
       // (The from-anywhere variant of rungs 1–2 lives on ChatPage's document
-      //  keydown; this handles ESC while the composer itself is focused.)
+      // keydown; this handles ESC while the composer itself is focused.)
       if (e.key === 'Escape') {
         if (busy) {
           e.preventDefault()
@@ -419,14 +419,14 @@ export function Composer({
       }
 
       // Alt+↑ — pop the most-recent pending item into the composer for editing
-      // (chat.js:2457-2460). Only when the queue is non-empty.
+      //. Only when the queue is non-empty.
       if (e.key === 'ArrowUp' && e.altKey && pendingCount > 0) {
         e.preventDefault()
         onPopPendingTail?.()
         return
       }
 
-      // Alt+↓ — enqueue the current composer text (chat.js:2464-2467). Only when
+      // Alt+↓ — enqueue the current composer text. Only when
       // there is text and the queue is not at the cap (MAX_PENDING).
       if (
         e.key === 'ArrowDown' &&
@@ -440,7 +440,7 @@ export function Composer({
       }
 
       // Plain ↑: walk backwards through sent history when the textarea is empty
-      // (entering nav) OR already navigating (chat.js:2475-2481).
+      // (entering nav) OR already navigating.
       if (
         e.key === 'ArrowUp' &&
         !e.altKey &&
@@ -453,7 +453,7 @@ export function Composer({
         }
       }
 
-      // Plain ↓: walk forward only when already navigating (chat.js:2486-2491).
+      // Plain ↓: walk forward only when already navigating.
       if (e.key === 'ArrowDown' && !e.altKey && !e.shiftKey && historyIdxRef.current !== null) {
         if (cycleHistory(1)) {
           e.preventDefault()
@@ -461,7 +461,7 @@ export function Composer({
         }
       }
 
-      // Enter to send (no shift) — Shift+Enter inserts a newline (chat.js:2494).
+      // Enter to send (no shift) — Shift+Enter inserts a newline.
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
         doSend()
@@ -482,8 +482,8 @@ export function Composer({
     ],
   )
 
-  // chat.js:2402-2409 — user typing resets the history cursor + resizes. The
-  // value is pushed up (chat.js:2405 `_handleSlashInput`) so the slash menu can
+  // user typing resets the history cursor + resizes. The
+  // value is pushed up so the slash menu can
   // re-open/filter/close from the current input.
   const onChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {

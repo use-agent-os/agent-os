@@ -22,7 +22,7 @@ describe('resolveWsUrl', () => {
 
   it('prefers the location-derived wss default when the server downgrades a same-host https page to ws://', () => {
     // TLS proxy dropped x-forwarded-proto: server saw http and emitted ws://
-    // for a page served over https (app.js:191-195 always derived wss:// here).
+    // for a page served over https (always derived wss:// here).
     setLocation('https://console.example.com/control/')
     expect(resolveWsUrl('ws://console.example.com/ws')).toBe('wss://console.example.com/ws')
   })
@@ -54,7 +54,7 @@ describe('resolveWsUrl', () => {
 
   it('returns a same-host ws:// URL unchanged on an http page (early return, not rewrite)', () => {
     // Kills the surviving mutant: without the non-https early return, this
-    // same-host ws input would be rewritten to defaultWsUrl()'s /ws path.
+    // same-host ws input would be rewritten to defaultWsUrl's /ws path.
     setLocation('http://localhost:3000/')
     expect(resolveWsUrl('ws://localhost:3000/custom-path')).toBe('ws://localhost:3000/custom-path')
   })

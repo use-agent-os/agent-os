@@ -68,7 +68,7 @@ import {
 
 const detail = (d: Partial<SectionDetail>): SectionDetail => d
 
-describe('camel (setup.js:2010-2012)', () => {
+describe('camel', () => {
   it('converts snake_case to camelCase', () => {
     expect(camel('api_key_env')).toBe('apiKeyEnv')
     expect(camel('max_results')).toBe('maxResults')
@@ -77,7 +77,7 @@ describe('camel (setup.js:2010-2012)', () => {
   })
 })
 
-describe('tierLabel (setup.js:660-662)', () => {
+describe('tierLabel', () => {
   it('maps known tiers and falls back to Route c1', () => {
     expect(tierLabel('c0')).toBe('Route c0')
     expect(tierLabel('c3')).toBe('Route c3')
@@ -86,7 +86,7 @@ describe('tierLabel (setup.js:660-662)', () => {
   })
 })
 
-describe('detailStepStatus (setup.js:158-173)', () => {
+describe('detailStepStatus', () => {
   it('reviews when detail absent', () => {
     expect(detailStepStatus(undefined)).toEqual({ label: 'Review', tone: 'is-muted' })
   })
@@ -107,7 +107,7 @@ describe('detailStepStatus (setup.js:158-173)', () => {
   })
 })
 
-describe('aggregateStepStatus (setup.js:146-156)', () => {
+describe('aggregateStepStatus', () => {
   const mk = (details: Record<string, SectionDetail>): OnboardingStatus => ({
     sectionDetails: details,
   })
@@ -126,7 +126,7 @@ describe('aggregateStepStatus (setup.js:146-156)', () => {
   })
 })
 
-describe('hasSetupAction (setup.js:261-270)', () => {
+describe('hasSetupAction', () => {
   it('true when needsOnboarding', () => {
     expect(hasSetupAction({ needsOnboarding: true })).toBe(true)
   })
@@ -139,7 +139,7 @@ describe('hasSetupAction (setup.js:261-270)', () => {
   })
 })
 
-describe('stepStatus (setup.js:125-144)', () => {
+describe('stepStatus', () => {
   it('provider needs action when env missing', () => {
     expect(stepStatus('provider', { llmSource: 'missing_env' }, 'openai').tone).toBe('is-warn')
   })
@@ -166,7 +166,7 @@ describe('stepStatus (setup.js:125-144)', () => {
   })
 })
 
-describe('stepForSection / initialStepFromStatus (setup.js:280-305)', () => {
+describe('stepForSection / initialStepFromStatus', () => {
   it('maps sections to steps', () => {
     expect(stepForSection('router')).toBe('router')
     expect(stepForSection('search')).toBe('extras')
@@ -186,7 +186,7 @@ describe('stepForSection / initialStepFromStatus (setup.js:280-305)', () => {
   })
 })
 
-describe('onboardingReasons + setupHeadline (setup.js:177-259)', () => {
+describe('onboardingReasons + setupHeadline', () => {
   it('empty when no action', () => {
     expect(onboardingReasons({}, {})).toEqual([])
     expect(setupHeadline([])).toEqual({ title: 'Ready to run', chip: 'Ready', tone: 'is-ok' })
@@ -240,7 +240,7 @@ describe('onboardingReasons + setupHeadline (setup.js:177-259)', () => {
   })
 })
 
-describe('envRecoveryCommand (setup.js:501-507)', () => {
+describe('envRecoveryCommand', () => {
   it('finds by section', () => {
     const status: OnboardingStatus = {
       envRecoveryCommands: [{ section: 'search', command: 'export X=1' }],
@@ -250,7 +250,7 @@ describe('envRecoveryCommand (setup.js:501-507)', () => {
   })
 })
 
-describe('provider derivation (setup.js:406-483)', () => {
+describe('provider derivation', () => {
   const spec = (p: Partial<ProviderSpec>): ProviderSpec => ({ providerId: 'openai', ...p })
   it('router-support text/tone', () => {
     expect(providerRouterSupportText(spec({ routerSupported: true }))).toBe('Pilot Router ready')
@@ -309,7 +309,7 @@ describe('provider derivation (setup.js:406-483)', () => {
   })
 })
 
-describe('credentialNeedList / memoryNeedList (setup.js:333-353)', () => {
+describe('credentialNeedList / memoryNeedList', () => {
   it('rewrites credential lines with the env key', () => {
     const items = ['API key via OLD_KEY or a one-time paste.', 'other']
     expect(credentialNeedList(items, 'NEW_KEY')).toEqual([
@@ -340,7 +340,7 @@ describe('credentialNeedList / memoryNeedList (setup.js:333-353)', () => {
   })
 })
 
-describe('capability status text (setup.js:977-1058)', () => {
+describe('capability status text', () => {
   it('xSearchSignedIn accepts either casing the gateway might send', () => {
     expect(xSearchSignedIn({ xai: { logged_in: true } })).toBe(true)
     expect(xSearchSignedIn({ xai: { loggedIn: true } })).toBe(true)
@@ -408,7 +408,7 @@ describe('capability status text (setup.js:977-1058)', () => {
   })
 })
 
-describe('memoryControlFlags (setup.js:741-749)', () => {
+describe('memoryControlFlags', () => {
   it('auto enables remote + apiKey, not local', () => {
     expect(memoryControlFlags('auto', undefined)).toEqual({
       remoteControlEnabled: true,
@@ -430,7 +430,7 @@ describe('memoryControlFlags (setup.js:741-749)', () => {
   })
 })
 
-describe('router derivation (setup.js:550-635,1767-1846)', () => {
+describe('router derivation', () => {
   it('routerMode force-migrates v4_phase3 / unknown to pilot-v1', () => {
     expect(routerMode({ enabled: false })).toBe('disabled')
     expect(routerMode({ strategy: 'pilot-v1' })).toBe('pilot-v1')
@@ -604,7 +604,7 @@ describe('router derivation (setup.js:550-635,1767-1846)', () => {
   })
 })
 
-describe('readScopedFields / validateScopedRequiredFields (setup.js:1705-1741)', () => {
+describe('readScopedFields / validateScopedRequiredFields', () => {
   const f = (o: Partial<ScopedField>): ScopedField => ({
     name: 'x',
     value: '',
@@ -648,7 +648,7 @@ describe('readScopedFields / validateScopedRequiredFields (setup.js:1705-1741)',
   })
 })
 
-describe('capability payload builders (setup.js:1877-1994)', () => {
+describe('capability payload builders', () => {
   const cf = (o: Partial<CapabilityField>): CapabilityField => ({
     name: 'x',
     value: '',
@@ -717,7 +717,7 @@ describe('capability payload builders (setup.js:1877-1994)', () => {
   })
 })
 
-describe('envReferenceSaveAdvisory (setup.js:1060-1075)', () => {
+describe('envReferenceSaveAdvisory', () => {
   it('none when no key or inline key pasted', () => {
     expect(envReferenceSaveAdvisory({ surface: 'X', envKey: '' }).kind).toBe('none')
     expect(envReferenceSaveAdvisory({ surface: 'X', envKey: 'K', hasInlineKey: 'sk-1' }).kind).toBe(
@@ -747,7 +747,7 @@ describe('envReferenceSaveAdvisory (setup.js:1060-1075)', () => {
   })
 })
 
-describe('Finish CLI assembly (setup.js:1077-1208,2014-2022)', () => {
+describe('Finish CLI assembly', () => {
   it('shellArg quotes only when needed', () => {
     expect(shellArg('/tmp/agentos.toml')).toBe('/tmp/agentos.toml')
     expect(shellArg('/has space/x.toml')).toBe("'/has space/x.toml'")
@@ -771,7 +771,7 @@ describe('Finish CLI assembly (setup.js:1077-1208,2014-2022)', () => {
   })
 })
 
-describe('finishSummary (setup.js:1078-1150)', () => {
+describe('finishSummary', () => {
   it('summarizes configured provider', () => {
     const status: OnboardingStatus = { channelCount: 2 }
     const config: SetupConfig = {
@@ -797,7 +797,7 @@ describe('finishSummary (setup.js:1078-1150)', () => {
   })
 })
 
-describe('readiness helpers (setup.js:1241-1288)', () => {
+describe('readiness helpers', () => {
   it('readinessTone', () => {
     expect(readinessTone(detail({ blocking: true }), 'search')).toBe('is-warn')
     expect(readinessTone(detail({ status: 'ok' }), 'search')).toBe('is-ok')
@@ -809,7 +809,7 @@ describe('readiness helpers (setup.js:1241-1288)', () => {
     expect(readinessStatusLabel(d, 'router')).toBe('Provider first')
     expect(setupStepForSection('router', d)).toBe('provider')
   })
-  it('setupStepForSection maps sections (audio omitted → "" per legacy setup.js:1246)', () => {
+  it('setupStepForSection maps sections (audio omitted → "")', () => {
     expect(setupStepForSection('llm', detail({}))).toBe('provider')
     expect(setupStepForSection('channels', detail({}))).toBe('channels')
     expect(setupStepForSection('search', detail({}))).toBe('extras')
@@ -822,7 +822,7 @@ describe('readiness helpers (setup.js:1241-1288)', () => {
   })
 })
 
-describe('capability badge / primary (setup.js:959-969)', () => {
+describe('capability badge / primary', () => {
   it('capabilityIsPrimary when detail needs action', () => {
     const status: OnboardingStatus = { sectionDetails: { search: detail({ blocking: true }) } }
     expect(capabilityIsPrimary(status, 'search')).toBe(true)

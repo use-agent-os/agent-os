@@ -9,7 +9,6 @@ import { env } from './env'
 import { flowcards } from './flowcards'
 import { health } from './health'
 import { inbox } from './inbox'
-import { logs } from './logs'
 import { mcp } from './mcp'
 import { memory } from './memory'
 import { overview } from './overview'
@@ -43,7 +42,7 @@ import { webShell } from './webShell'
  * It is NOT how the app loads copy. Importing this module pulls every
  * namespace into whichever chunk does so, which for anything reachable from
  * the entry graph is exactly the growth #261 fixed. Runtime code must import
- * the one namespace it needs (`@/i18n/en/logs`) and let `t()` read the
+ * the one namespace it needs (`@/i18n/en/usage`) and let `t()` read the
  * registry; `i18n/chunking.test.ts` enforces that. `src/test/setup.ts` imports
  * this module once so unit tests see the complete catalog, standing in for the
  * views that register their own namespace in the browser.
@@ -60,7 +59,6 @@ export const en = {
   flowcards,
   health,
   inbox,
-  logs,
   mcp,
   memory,
   overview,

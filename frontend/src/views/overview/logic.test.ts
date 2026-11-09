@@ -20,7 +20,7 @@ describe('readinessStatusLabel', () => {
     ['action_required', 'Action required'],
     ['unavailable', 'Unavailable'],
     ['unknown', 'Unknown'],
-  ])('maps known status %s -> %s (overview.js:352-365)', (status, label) => {
+  ])('maps known status %s -> %s', (status, label) => {
     expect(readinessStatusLabel(status)).toBe(label)
   })
   it('Title-cases an unknown status token splitting _/-', () => {
@@ -33,8 +33,8 @@ describe('readinessStatusLabel', () => {
 })
 
 describe('formatUptime', () => {
-  it('formats uptime_ms as "Hh Mm Ss" (overview.js:234-242)', () => {
-    // 1h 2m 3s => 3600000 + 120000 + 3000 = 3723000 ms
+  it('formats uptime_ms as "Hh Mm Ss"', () => {
+    // 1h 2m 3s => 3600000 + 120000 = 3723000 ms
     expect(formatUptime(3723000)).toBe('1h 2m 3s')
   })
   it('zero uptime renders 0h 0m 0s', () => {
@@ -46,7 +46,7 @@ describe('formatUptime', () => {
   })
 })
 
-describe('sessionStatusClass (components.js:249-275)', () => {
+describe('sessionStatusClass', () => {
   it.each([
     ['running', 'ok'],
     ['done', 'off'],
@@ -62,7 +62,7 @@ describe('sessionStatusClass (components.js:249-275)', () => {
   })
 })
 
-describe('sessionStatusLabel (components.js:263-287)', () => {
+describe('sessionStatusLabel', () => {
   it.each([
     ['running', 'Running'],
     ['done', 'Completed'],
@@ -78,7 +78,7 @@ describe('sessionStatusLabel (components.js:263-287)', () => {
   })
 })
 
-describe('relTime (components.js:228-241)', () => {
+describe('relTime', () => {
   afterEach(() => vi.useRealTimers())
   it('returns "just now" for < 60s', () => {
     const now = Date.now()
@@ -105,7 +105,7 @@ describe('relTime (components.js:228-241)', () => {
   })
 })
 
-describe('formatEventPayload (overview.js:320-326)', () => {
+describe('formatEventPayload', () => {
   it('stringifies JSON and truncates over 80 chars with an ellipsis', () => {
     const big = { k: 'x'.repeat(200) }
     const out = formatEventPayload(big)
@@ -122,7 +122,7 @@ describe('formatEventPayload (overview.js:320-326)', () => {
   })
 })
 
-describe('formatEventTs (overview.js:318-319)', () => {
+describe('formatEventTs', () => {
   it('slices a Date to HH:MM:SS', () => {
     const d = new Date('2026-01-02T13:45:07.000Z')
     // toTimeString is local; assert the shape rather than the exact zone.
@@ -130,7 +130,7 @@ describe('formatEventTs (overview.js:318-319)', () => {
   })
 })
 
-describe('sortRecentSessions (overview.js:274-281)', () => {
+describe('sortRecentSessions', () => {
   const mk = (key: string, updated_at?: string): OverviewSession => ({ key, updated_at })
   it('sorts by updated_at descending and slices to 6', () => {
     const sessions = [
@@ -158,7 +158,7 @@ describe('sortRecentSessions (overview.js:274-281)', () => {
   })
 })
 
-describe('formatTokens (overview.js:263)', () => {
+describe('formatTokens', () => {
   it('localizes a token count', () => {
     expect(formatTokens(1234567)).toBe((1234567).toLocaleString())
   })
@@ -168,7 +168,7 @@ describe('formatTokens (overview.js:263)', () => {
   })
 })
 
-describe('formatCost (overview.js:266-268)', () => {
+describe('formatCost', () => {
   it('formats as $ with 4 decimals', () => {
     expect(formatCost(1.2)).toBe('$1.2000')
   })

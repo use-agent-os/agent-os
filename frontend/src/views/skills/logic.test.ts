@@ -485,8 +485,9 @@ describe('filterRegistry', () => {
   })
 
   it('still applies the category chip to server-filtered rows', () => {
-    expect(filterRegistry(rows, 'defi', 'anything', { serverFiltered: true }).map((r) => r.name)) //
-      .toEqual(['Swap'])
+    expect(
+      filterRegistry(rows, 'defi', 'anything', { serverFiltered: true }).map((r) => r.name),
+    ).toEqual(['Swap'])
   })
 })
 

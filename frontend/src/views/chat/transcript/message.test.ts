@@ -1,10 +1,7 @@
-import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from '../markdown'
 import { createMessageRenderer, historyTurnMeta, systemRowTone } from './message'
 import { createThinkingBlock } from './thinking'
-
-const chatCss = readFileSync('src/views/chat/chat.css', 'utf8')
 
 function makeRenderer(overrides: Record<string, unknown> = {}) {
   const thread = document.createElement('div')
@@ -252,14 +249,5 @@ describe('historyTurnMeta', () => {
       }),
     ).toMatchObject({ model: 'provider/model', input: 10, output: 4 })
     expect(historyTurnMeta({ text: 'no usage' })).toBeNull()
-  })
-})
-
-describe('retired SavingsFX CSS contract', () => {
-  it('does not ship saved, combo, or popup presentation rules', () => {
-    expect(chatCss).not.toContain('.msg-meta__saved')
-    expect(chatCss).not.toContain('.msg-meta__combo')
-    expect(chatCss).not.toContain('.savings-float')
-    expect(chatCss).not.toContain('@keyframes chat-savings')
   })
 })

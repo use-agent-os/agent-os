@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- **Breaking (web console): the Control UI is rebuilt.** The web console is a
+  new chat-first app: an icon rail with the Sessions list and a Pages catalog,
+  one Settings area with search, a ⌘K/Ctrl+K command palette, and a quieter
+  look (Inter, neutral surfaces with the AgentOS lime accent, System / Light /
+  Dark themes, text size). The terminal skin (scanlines, ASCII canvas,
+  `[ LABEL ]` buttons) is gone. The desktop app is unchanged.
+  - Chat turns fold their reasoning and tool calls into a "Worked for …"
+    disclosure; tool calls are compact rows; a Details column and a side
+    panel show session context, long output and artifacts; Markdown is
+    sanitized with theme-aware code highlighting.
+  - A full-page Connect screen replaces the token field on Overview. A
+    `?token=` / `#token=` link parameter is stored for the tab and removed
+    from the address bar.
+- **Breaking (URLs):** routes are path-based: `/chat/<agent>/<rest of session
+  key>`, `/new`, `/home`, `/sessions`, `/projects`, `/usage`, `/automations`,
+  `/inbox`, `/settings/<section>`. Every previous URL redirects (for example
+  `/overview` → `/home`, `/cron` → `/automations`, `/config` →
+  `/settings/advanced`, `/chat?session=…` → `/chat/…`), and
+  `/mcp/oauth/callback` keeps working. See `docs/web-ui.md`.
+- **Breaking (shortcuts):** the `g` navigation chords now point at the new
+  destinations (`g n` → Settings › Channels, `g r` → Automations, …); `g o`
+  opens Home. New: `Mod+K` palette, `Mod+B` sidebar, `Mod+/` shortcut overview.
+- **Breaking (approvals):** the blocking approval modal is replaced by a
+  non-modal approval tray on every page and an approval card docked above the
+  composer in the requesting session. Decisions, their endpoints and the
+  Inbox are unchanged.
+- The saved theme preference carries over; `system` is now a stored choice.
+
 ### Removed
 - The in-process subagent path: `agentos.engine.subagent` (`SubagentManager`,
   `SubagentSpec`, `SubagentRegistry`, `SubagentHandle`, also re-exported

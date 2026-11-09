@@ -17,16 +17,16 @@ import {
 } from './logic'
 
 describe('LEVELS / DEFAULT_LEVELS', () => {
-  it('lists levels in legacy order (logs.js:10)', () => {
+  it('lists levels in legacy order', () => {
     expect(LEVELS).toEqual(['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR'])
   })
-  it('defaults to DEBUG/INFO/WARN/ERROR active (TRACE off, logs.js:12)', () => {
+  it('defaults to DEBUG/INFO/WARN/ERROR active (TRACE off)', () => {
     expect([...DEFAULT_LEVELS].sort()).toEqual(['DEBUG', 'ERROR', 'INFO', 'WARN'])
     expect(DEFAULT_LEVELS.has('TRACE')).toBe(false)
   })
 })
 
-describe('guessLevel (logs.js:219-227)', () => {
+describe('guessLevel', () => {
   it.each([
     ['boom ERROR happened', 'ERROR'],
     ['a WARN line', 'WARN'],
@@ -47,7 +47,7 @@ describe('guessLevel (logs.js:219-227)', () => {
   })
 })
 
-describe('extractLines (logs.js:182)', () => {
+describe('extractLines', () => {
   it('reads data.lines', () => {
     expect(extractLines({ lines: [1, 2] })).toEqual([1, 2])
   })
@@ -60,7 +60,7 @@ describe('extractLines (logs.js:182)', () => {
   })
 })
 
-describe('normalizeEntry (logs.js:189-200)', () => {
+describe('normalizeEntry', () => {
   it('normalizes a string via guessLevel', () => {
     expect(normalizeEntry('a WARN line')).toEqual({
       level: 'WARN',
@@ -97,7 +97,7 @@ describe('normalizeEntry (logs.js:189-200)', () => {
   })
 })
 
-describe('clampBuffer (logs.js:201)', () => {
+describe('clampBuffer', () => {
   it('keeps the last 2000 when over the cap', () => {
     const lines = Array.from({ length: 2500 }, (_, i) => line(`m${i}`))
     const out = clampBuffer(lines)
@@ -111,7 +111,7 @@ describe('clampBuffer (logs.js:201)', () => {
   })
 })
 
-describe('matchesFilter / filterLines (logs.js:296-300,237)', () => {
+describe('matchesFilter / filterLines', () => {
   const lines: LogLine[] = [
     line('login ok', 'INFO'),
     line('DISK warning', 'WARN'),
@@ -136,7 +136,7 @@ describe('matchesFilter / filterLines (logs.js:296-300,237)', () => {
   })
 })
 
-describe('countByLevel / visibleCount (logs.js:229-260)', () => {
+describe('countByLevel / visibleCount', () => {
   const lines: LogLine[] = [
     line('a', 'ERROR'),
     line('b', 'ERROR'),
@@ -160,7 +160,7 @@ describe('countByLevel / visibleCount (logs.js:229-260)', () => {
   })
 })
 
-describe('sliceTs (logs.js:313)', () => {
+describe('sliceTs', () => {
   it('slices a timestamp to 23 chars', () => {
     expect(sliceTs('2026-01-01T00:00:00.123456Z')).toBe('2026-01-01T00:00:00.123')
   })
@@ -173,7 +173,7 @@ describe('sliceTs (logs.js:313)', () => {
   })
 })
 
-describe('splitHighlight (logs.js:325-330)', () => {
+describe('splitHighlight', () => {
   it('returns a single text segment when the term is empty', () => {
     expect(splitHighlight('hello world', '')).toEqual([{ text: 'hello world', match: false }])
   })
@@ -198,7 +198,7 @@ describe('splitHighlight (logs.js:325-330)', () => {
   })
 })
 
-describe('buildExportText (logs.js:337-346)', () => {
+describe('buildExportText', () => {
   it('prefixes the sliced ts when present and formats [LEVEL] message', () => {
     const lines: LogLine[] = [
       { level: 'ERROR', message: 'boom', ts: '2026-01-01T00:00:00.000000Z', raw: '' },

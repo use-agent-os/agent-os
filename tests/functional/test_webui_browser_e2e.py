@@ -138,7 +138,10 @@ def _run_browser(
             const { chromium } = require("playwright");
 
             (async () => {
-              const browser = await chromium.launch({ headless: true });
+              const browser = await chromium.launch({
+                headless: true,
+                executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
+              });
               const page = await browser.newPage();
               const diagnostics = { pageErrors: [], consoleErrors: [], requestFailures: [] };
               page.on("pageerror", error => diagnostics.pageErrors.push(String(error)));
@@ -156,9 +159,9 @@ def _run_browser(
                 waitUntil: "domcontentloaded",
                 timeout: 30000,
               });
-              await page.getByRole("heading", { name: process.env.EXPECTED_HEADING }).waitFor({
-                timeout: 15000,
-              });
+              await page
+                .getByRole("heading", { level: 1, name: process.env.EXPECTED_HEADING })
+                .waitFor({ timeout: 15000 });
 
               const base = process.env.EXPECTED_BASE;
               const bootstrap = await page.evaluate(async path => {
@@ -179,11 +182,19 @@ def _run_browser(
               const result = {
                 status: response ? response.status() : 0,
                 title: await page.title(),
+                path: new URL(page.url()).pathname,
+                currentSection: await page
+                  .getByRole("navigation", { name: "Settings" })
+                  .locator('[aria-current="page"]')
+                  .textContent()
+                  .catch(() => null),
                 appCount: await page.locator("#app").count(),
                 baseHref: await page
                   .locator("base[data-agentos-control-base]")
                   .getAttribute("href"),
-                mainNavCount: await page.getByRole("navigation", { name: "Main" }).count(),
+                mainNavCount: await page
+                  .getByRole("navigation", { name: "Main navigation" })
+                  .count(),
                 bootstrap,
                 assetUrls,
                 legacy,
@@ -243,15 +254,17 @@ def test_react_control_deep_link_loads_public_settings_surface(
         payload = _run_browser(
             tmp_path,
             playwright_node_modules,
-            target_url=f"http://127.0.0.1:{port}/control/settings",
+            target_url=f"http://127.0.0.1:{port}/control/settings/channels",
             expected_base="/control",
-            heading="Agent Setup",
+            heading="Channels",
         )
     finally:
         _stop_process(server)
 
     _assert_clean_react_surface(payload)
-    assert payload["title"] == "Agent Setup - AgentOS Control"
+    assert payload["path"] == "/control/settings/channels"
+    assert payload["currentSection"] == "Channels"
+    assert payload["title"] == "Settings · AgentOS"
     assert payload["baseHref"] == "/control/static/dist/"
     assert payload["bootstrap"]["status"] == 200
     assert payload["bootstrap"]["body"]["base_path"] == "/control"
@@ -268,6 +281,7 @@ def test_react_control_custom_base_serves_deep_link_assets_and_bootstrap(
         payload = _run_browser(
             tmp_path,
             playwright_node_modules,
+            # A legacy path under a custom base redirects to its Settings section.
             target_url=f"http://127.0.0.1:{port}/ops/health",
             expected_base="/ops",
             heading="Health",
@@ -276,7 +290,9 @@ def test_react_control_custom_base_serves_deep_link_assets_and_bootstrap(
         _stop_process(server)
 
     _assert_clean_react_surface(payload)
-    assert payload["title"] == "Health - AgentOS Control"
+    assert payload["path"] == "/ops/settings/health"
+    assert payload["currentSection"] == "Health"
+    assert payload["title"] == "Settings · AgentOS"
     assert payload["baseHref"] == "/ops/static/dist/"
     assert payload["bootstrap"]["status"] == 200
     assert payload["bootstrap"]["body"]["base_path"] == "/ops"

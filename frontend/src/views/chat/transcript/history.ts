@@ -1,11 +1,9 @@
 // Chat transcript — history load, pagination + render helpers.
-//
 // This module carries the two PURE, unit-tested helpers the brief calls out —
-// `messagePageIdentity` (chat.js:5350) and `mergeHistoryMessagePages`
-// (chat.js:5357-5368) — plus the imperative, controller-driven history-render
+// `messagePageIdentity` and `mergeHistoryMessagePages`
+// plus the imperative, controller-driven history-render
 // seam (design §2.1: the transcript region is the reviewed imperative
 // boundary; history DOM rendering is ported near-verbatim, NOT reactified).
-//
 // The react-query wiring that DRIVES these (fetch + backward pagination) lives
 // in useTranscript.ts (idiomatic React). Legacy source: static/js/views/chat.js.
 
@@ -21,11 +19,11 @@ import { historyFallbackMessageIdentity, historyStableMessageIdentity } from '..
 import { routerFxRequestKindFromAttachments, type RouterFxHistoryOptions } from './routerFx'
 import { createThinkingBlock, wireLazyThinkingBlock } from './thinking'
 
-/** chat.js:350 — history page size for `chat.history` reads. */
+/** — history page size for `chat.history` reads. */
 export const CHAT_HISTORY_PAGE_SIZE = 50
 
 /**
- * The identity a merged history page dedups on (chat.js:5350-5355). Prefers the
+ * The identity a merged history page dedups on. Prefers the
  * stable `message_id`/`id` (as `stable:<id>`); otherwise the role|text fallback
  * (as `fallback:<role>|<text>`). Returns `''` only for a nullish message — so a
  * present message always has a truthy identity (legacy `_messagePageIdentity`).
@@ -39,7 +37,7 @@ export function messagePageIdentity(msg: ChatMessage): string {
 
 /**
  * Merge an older page in FRONT of the current messages, deduping the overlap
- * boundary by identity (chat.js:5357-5368). First occurrence wins, so when the
+ * boundary by identity. First occurrence wins, so when the
  * older page's tail overlaps the current page's head the older instance is kept.
  * Nullish page arguments are tolerated (legacy `(olderMessages || [])`).
  */
@@ -80,9 +78,9 @@ export function historyMessageArtifacts(msg: ChatMessage | null | undefined): Ar
   return historyMessageRecords(msg, 'artifacts') as Artifact[]
 }
 
-/* ── History response metadata (chat.js:5329-5348) ──────────────────────── */
+/* ── History response metadata ──────────────────────── */
 
-/** The paging metadata a `chat.history` response carries (chat.js:5329-5338). */
+/** The paging metadata a `chat.history` response carries. */
 export interface HistoryMetadata {
   hasMore: boolean
   oldestCursor: string | null
@@ -124,7 +122,7 @@ export function applyHistoryDelta(
   }
 }
 
-/** chat.js:5329-5338 — normalize a `chat.history` response's paging metadata. */
+/** — normalize a `chat.history` response's paging metadata. */
 export function historyResponseMetadata(data: HistoryResponse | null | undefined): HistoryMetadata {
   return {
     hasMore: !!(data && data.has_more),
@@ -147,23 +145,23 @@ export function historyResponseMetadata(data: HistoryResponse | null | undefined
 export interface HistoryRenderDeps {
   /** The scroll container (legacy `_thread`). */
   thread: () => HTMLElement | null
-  /** chat.js:661 — HTML-escape a string. */
+  /** — HTML-escape a string. */
   esc: (s: string) => string
-  /** chat.js:673 — role → display label. */
+  /** — role → display label. */
   displayRoleLabel: (role: string) => string
-  /** chat.js:7833/7840 — day-separator key + human label. */
+  /** — day-separator key + human label. */
   dayKey: (iso: string) => string
   dayLabel: (dayKey: string) => string
   /** Shared legacy `_lastHeaderDay` / `_lastHeaderRole` cursor. */
   headerState?: TranscriptHeaderStateRef
-  /** chat.js:7851 — append a plain (non-streaming) message row. */
+  /** — append a plain (non-streaming) message row. */
   addMessage: (
     role: string,
     text: string,
     timestamp?: string | null,
     options?: Record<string, unknown>,
   ) => HTMLElement | null
-  /** chat.js:6011 — refresh a reused history row without replacing its DOM identity. */
+  /** — refresh a reused history row without replacing its DOM identity. */
   replaceMessage: (
     el: HTMLElement,
     role: string,
@@ -171,7 +169,7 @@ export interface HistoryRenderDeps {
     timestamp?: string | null,
     options?: Record<string, unknown>,
   ) => void
-  /** chat.js:5983-6009 — create/remove/refresh a row header after identity reuse. */
+  /** — create/remove/refresh a row header after identity reuse. */
   syncMessageHeader: (
     el: HTMLElement,
     displayRole: string,
@@ -179,16 +177,16 @@ export interface HistoryRenderDeps {
     options: Record<string, unknown>,
     sameGroup: boolean,
   ) => void
-  /** chat.js:6819/748 — attach the hover Copy/Regenerate toolbar. */
+  /** — attach the hover Copy/Regenerate toolbar. */
   attachHoverActions: (el: HTMLElement, role: string) => void
-  /** chat.js:5675-5676 — rebuild persisted tool segments inside the message body. */
+  /** — rebuild persisted tool segments inside the message body. */
   reconstructToolCalls: (el: HTMLElement, segments: Array<Record<string, unknown>>) => void
   /**
-   * chat.js:5684-5689/8327 — render one persisted attachment as escaped,
+   * render one persisted attachment as escaped,
    * insertion-safe HTML. The injected attachment renderer owns URL validation.
    */
   renderMessageAttachmentHtml: (attachment: Record<string, unknown>) => string
-  /** chat.js:5691-5694/7595 — render persisted artifact cards as escaped HTML. */
+  /** — render persisted artifact cards as escaped HTML. */
   renderArtifacts: (artifacts: Artifact[]) => string
   /**
    * chart.ts `mountCharts` — draw chart placeholders in a replayed row.
@@ -196,18 +194,18 @@ export interface HistoryRenderDeps {
    * need not supply it.
    */
   mountCharts?: (container: HTMLElement) => void
-  /** chat.js:5611-5616 — remove foreign/unstamped dock residue before a rebuild. */
+  /** — remove foreign/unstamped dock residue before a rebuild. */
   prepareHistoryRouterFx: () => void
-  /** chat.js:5712-5741 — rebuild a settled dock receipt from persisted usage. */
+  /** — rebuild a settled dock receipt from persisted usage. */
   reconcileHistoryRouterFx: (
     usage: TurnUsage | null | undefined,
     opts: RouterFxHistoryOptions,
   ) => HTMLElement | null
-  /** chat.js:5751-5770 — flush pending decisions and perform the final dock sweep. */
+  /** — flush pending decisions and perform the final dock sweep. */
   finishHistoryRouterFx: () => void
   /** Must set `_historyHasRendered` before pending router decisions flush. */
   markHistoryRendered: () => void
-  /** chat.js:5700-5745 — per-assistant history usage metadata. */
+  /** — per-assistant history usage metadata. */
   turnMetaForMessage?: (message: Record<string, unknown>, assistantIndex: number) => TurnMeta | null
   attachTurnMeta?: (
     el: HTMLElement,
@@ -217,7 +215,7 @@ export interface HistoryRenderDeps {
     usage: TurnUsage | null,
   ) => void
   resetMessageGrouping?: () => void
-  /** chat.js:5971 — stamp history identity onto a finalized bubble. */
+  /** — stamp history identity onto a finalized bubble. */
   stampHistoryElement: (
     el: HTMLElement,
     stableIdentity: string,
@@ -226,7 +224,7 @@ export interface HistoryRenderDeps {
     transcriptId?: string | null,
     ts?: string | number | null,
   ) => void
-  /** chat.js:389/391/419 — assistant display-text sanitizers (default identity). */
+  /** /419 — assistant display-text sanitizers (default identity). */
   stripProtocolTextLeak: (t: string) => string
   stripDirectiveTags: (t: string) => string
   stripGeneratedArtifactMarkers: (t: string) => string
@@ -240,7 +238,7 @@ export interface HistoryRenderDeps {
   isStreaming: () => boolean
   /** Preserve the reader-controlled auto-follow state during async history refreshes. */
   shouldAutoScroll: () => boolean
-  /** Live nodes preserved/reordered during a history refresh (chat.js:5554-5587/5753-5777). */
+  /** Live nodes preserved/reordered during a history refresh . */
   getStreamBubble: () => HTMLElement | null
   getThinkingIndicator: () => HTMLElement | null
   /** Live reasoning block row (AgentOS-native; kept alongside the stream bubble). */
@@ -289,9 +287,9 @@ export interface HistoryPagingState {
 
 /**
  * Create the imperative history renderer. It owns the `_thread` DOM for history
- * rows exactly like legacy `_renderHistoryMessages` (chat.js:5550) — day
- * separators (chat.js:5805), message rows via `addMessage`, and the scope row
- * (chat.js:5374). The controller-shaped surface is verified by the live-browser
+ * rows exactly like legacy `_renderHistoryMessages` — day
+ * separators, message rows via `addMessage`, and the scope row
+ *. The controller-shaped surface is verified by the live-browser
  * sweep (parity matrix), not RTL; only the pure merge/identity helpers above are
  * unit-tested (design §2.1).
  */
@@ -348,7 +346,7 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
   }
 
   function historyFallbackText(role: string, text: string): string {
-    // chat.js:5842-5846 — role-specific display-text strip pipeline.
+    // role-specific display-text strip pipeline.
     if (role === 'assistant') {
       return deps
         .stripProtocolTextLeak(
@@ -448,7 +446,6 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
   }
 
   function appendHistoryDaySeparator(timestamp: string | null | undefined): void {
-    // chat.js:5805-5819
     const th = deps.thread()
     if (!th) return
     const day = deps.dayKey(timestamp || '')
@@ -464,14 +461,12 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
   }
 
   function removeHistoryScopeRows(): void {
-    // chat.js:5369-5372
     const th = deps.thread()
     if (!th) return
     th.querySelectorAll('.chat-history-scope').forEach((el) => el.remove())
   }
 
   function renderHistoryScopeRow(state: HistoryPagingState): void {
-    // chat.js:5374-5438
     const th = deps.thread()
     if (!th) return
     removeHistoryScopeRows()
@@ -540,7 +535,7 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
   }
 
   /**
-   * Render a full history page into the thread (chat.js:5550-5796, focused
+   * Render a full history page into the thread (, focused
    * port). Rebuilds the message rows + day separators from `messages` and drops
    * the empty state. Cross-module behavior is dispatched through the injected
    * dependencies. `opts.preserveScroll` restores the scroll offset after a prepend
@@ -674,7 +669,7 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
         msg.role,
         displayText,
         (msg as { transcript_id?: string | null }).transcript_id ?? null,
-        // chat.js:5648 — export mirrors `ts: msg.timestamp || msg.ts || null`.
+        // export mirrors `ts: msg.timestamp || msg.ts || null`.
         timestamp,
       )
       appendHistoryElementInOrder(div)
@@ -687,7 +682,7 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
       deps.syncMessageHeader(div, displayRole, timestamp, messageOptions, sameGroup)
       if (collapsible) headerState.current.role = displayRole
 
-      // chat.js:5675-5694 — body additions have a strict order. Tool
+      // body additions have a strict order. Tool
       // reconstruction may replace the entire body; attachments follow those
       // segments, then generated artifacts follow the attachments.
       const toolCalls = historyMessageRecords(msg, 'tool_calls')
@@ -778,7 +773,7 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
 
       // Tool reconstruction and the user-attachment body rewrite above remove
       // the toolbar installed by addMessage. Re-attach only after every body
-      // mutation so actions are last and remain interactive (chat.js:5695-5698).
+      // mutation so actions are last and remain interactive.
       deps.attachHoverActions(div, msg.role)
       if (msg.role === 'assistant') {
         const meta = deps.turnMetaForMessage?.(
@@ -788,7 +783,7 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
         assistantIndex += 1
         if (meta) {
           const turnUsage = meta.saved ? { ...meta.saved } : null
-          // chat.js:991-996 `_savedUsageFromMeta` — older locally persisted
+          // `_savedUsageFromMeta` — older locally persisted
           // turn-meta rows can keep the model only on the outer record. Carry
           // that real value into the cloned usage payload so router identity
           // reconstruction does not silently lose the turn.
@@ -813,7 +808,7 @@ export function createHistoryRenderer(deps: HistoryRenderDeps) {
     })
 
     // Pending live/replayed decisions may now resolve against the reconstructed
-    // user anchors. Set the lifecycle flag before flushing them (chat.js:5751).
+    // user anchors. Set the lifecycle flag before flushing them.
     deps.markHistoryRendered()
     deps.finishHistoryRouterFx()
 

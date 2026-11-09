@@ -3,7 +3,7 @@ import { t } from '@/i18n'
 import '@/i18n/en/chat'
 
 // The elevated-mode pill titles, ported verbatim from _updateElevatedPill
-// (chat.js:2314-2343). Resolved per render rather than held as module
+//. Resolved per render rather than held as module
 // constants: a title frozen at module-evaluation time keeps the boot locale
 // forever (#258).
 
@@ -18,8 +18,8 @@ export interface ElevatedPillProps {
 }
 
 /**
- * The execution-mode pill in the composer toolbar (chat.js:2314-2343
- * `_updateElevatedPill` + the pill markup at chat.js:1259-1260).
+ * The execution-mode pill in the composer toolbar (
+ * `_updateElevatedPill` + the pill markup ).
  *
  * The SESSION override wins over the GLOBAL default for the label; the pill is
  * `is-active` whenever an effective elevated mode is in force. Status color
@@ -34,7 +34,7 @@ export function ElevatedPill({
   onToggle,
 }: ElevatedPillProps) {
   if (unavailable) {
-    // chat.js:2316-2322 — the latched unavailable state: disabled, distinct label.
+    // the latched unavailable state: disabled, distinct label.
     return (
       <button
         type="button"
@@ -54,15 +54,12 @@ export function ElevatedPill({
   let text: string
   let title: string
   if (sessionMode) {
-    // chat.js:2330-2333
     text = t('chat.pillSession', { mode: sessionMode.toUpperCase() })
     title = t('chat.pillTitleSession')
   } else if (globalMode) {
-    // chat.js:2334-2337
     text = t('chat.pillGlobal', { mode: globalMode.toUpperCase() })
     title = t('chat.pillTitleGlobal')
   } else {
-    // chat.js:2338-2341
     text = t('chat.pillNeutral')
     title = t('chat.pillTitleNeutral')
   }

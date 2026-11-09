@@ -16,33 +16,33 @@ import { resetSession } from './resetSession'
 /**
  * Slash-command catalog + execution (React).
  *
- * Ported from static/js/views/chat.js:2615-2853: the catalog load
- * `_loadSlashCommands` (chat.js:2615, RPC `commands.list_for_surface` with
- * `{ surface: 'web_chat' }`), the command map (chat.js:2621-2627), and the
- * dispatch `_executeSlashCommand` → `_selectSlashCmd` (chat.js:2842/2684).
+ * the catalog load
+ * `_loadSlashCommands` (, RPC `commands.list_for_surface` with
+ * `{ surface: 'web_chat' }`), the command map, and the
+ * dispatch `_executeSlashCommand` → `_selectSlashCmd` .
  *
  * The catalog + the command map live here (one source) so both <SlashMenu> (which
  * renders/filters) and the composer send path (which executes on Enter over a
  * typed `/cmd`) share them — DRY, and avoids two RPC loads.
  *
- * `_selectSlashCmd`'s action switch (chat.js:2691-2839) dispatches on the
+ * `_selectSlashCmd`'s action switch dispatches on the
  * serialized `execution.action` / `rpc_method`. The RPC-backed branches (reset /
  * usage / model / router.hold.set / router.hold.clear) are ported faithfully as
  * `rpc.call(...) + toast`, and `plan.mode.set` (newer than that switch) takes
  * the same shape. The two branches that cross into session/stream
- * ownership delegate through `onSessionAction`: `new_chat` (chat.js:2692-2715)
- * switches/persists/re-subscribes, while `compact_context` (chat.js:2738-2763)
+ * ownership delegate through `onSessionAction`: `new_chat`
+ * switches/persists/re-subscribes, while `compact_context`
  * uses the composed compaction controller for in-flight UI around the RPC.
  */
 
 export interface UseSlashCommands {
-  /** The normalized catalog (chat.js:2620 `_slashCmds`). */
+  /** The normalized catalog. */
   commands: SlashCommand[]
   /**
-   * Execute a typed slash-command line (chat.js:2842 `_executeSlashCommand`).
+   * Execute a typed slash-command line.
    * If the catalog hasn't loaded yet, awaits the same load the mount effect
-   * kicked off (chat.js:2843 `if (!_slashCatalogLoaded) await
-   * _loadSlashCommands();`) before looking the command up — this covers a
+   * kicked off (`if (!_slashCatalogLoaded) await
+   * _loadSlashCommands;`) before looking the command up — this covers a
    * user submitting a command before the catalog RPC has resolved. Then looks
    * the command up in the map, splits off args, and dispatches. Always
    * resolves true (so the caller does NOT also send the text as a chat
@@ -61,7 +61,7 @@ export function useSlashCommands(opts?: {
   /** Delegate the session/stream-mutating actions (new_chat / compact) to the
    * transcript owner. Receives the resolved action + the command + args. */
   onSessionAction?: (action: string, cmd: SlashCommand, args: string) => void
-  /** Append a system message row (chat.js:2814 `/model` result). */
+  /** Append a system message row (`/model` result). */
   addSystemMessage?: (text: string) => void
   /** A slash command changed the route hold (`/c0`–`/c3`, `/use`, `/auto`):
    * the composer's route chip re-reads it, since it only reads on its own. */
@@ -72,8 +72,8 @@ export function useSlashCommands(opts?: {
   const queryClient = useQueryClient()
   const sessionKey = opts?.sessionKey ?? ''
   const [commands, setCommands] = useState<SlashCommand[]>([])
-  // chat.js:2628 `_slashCatalogLoaded` — set once the catalog resolves (success
-  // or failure), so `execute` (chat.js:2843) knows whether it must await a load
+  // `_slashCatalogLoaded` — set once the catalog resolves (success
+  // or failure), so `execute` knows whether it must await a load
   // first. Held in a ref: read imperatively, never during render.
   const catalogLoadedRef = useRef(false)
   // In-flight load promise, shared between the mount effect and `execute` so a
@@ -95,15 +95,15 @@ export function useSlashCommands(opts?: {
     onRouteHoldChangeRef.current = opts?.onRouteHoldChange
   }, [sessionKey, opts?.onSessionAction, opts?.addSystemMessage, opts?.onRouteHoldChange])
 
-  // ── Catalog load (chat.js:2615-2635 `_loadSlashCommands`) ─────────────────
-  // Extracted so both the mount effect below AND `execute` (chat.js:2843
-  // `if (!_slashCatalogLoaded) await _loadSlashCommands();`) can trigger the
+  // ── Catalog load ─────────────────
+  // Extracted so both the mount effect below AND `execute` (
+  // `if (!_slashCatalogLoaded) await _loadSlashCommands;`) can trigger the
   // same load and share one in-flight promise — a command typed before the
   // catalog resolves awaits the load rather than firing a second RPC call.
-  // The command map (chat.js:2621-2627): name + every alias → the command. Held
+  // The command map: name + every alias → the command. Held
   // in a ref so the imperative `execute` always reads the latest synchronously.
   // `loadCatalog` writes this ref directly (not via a `useEffect` keyed off
-  // `commands` state) because `execute` awaits `loadCatalog()` and then reads
+  // `commands` state) because `execute` awaits `loadCatalog` and then reads
   // the map in the SAME async continuation — it cannot wait for a subsequent
   // render + effect flush to pick up the freshly loaded commands.
   const commandMapRef = useRef<Map<string, SlashCommand>>(new Map())
@@ -145,12 +145,12 @@ export function useSlashCommands(opts?: {
     // effect only needs to kick the load off once on mount.
   }, [loadCatalog])
 
-  // ── _selectSlashCmd action switch (chat.js:2684-2839), RPC-backed branches ──
+  // ── _selectSlashCmd action switch, RPC-backed branches ──
   const dispatch = useCallback(
     (cmd: SlashCommand, args: string) => {
       const key = sessionKeyRef.current
       const commandName = cmd?.cmd || cmd?.name || ''
-      // chat.js:2719 — a `/reset` command whose name is actually `/new` runs the
+      // a `/reset` command whose name is actually `/new` runs the
       // new_chat action. Resolve that remap here rather than recursing.
       let action = cmd?.execution?.action || cmd.cmd || cmd.name || ''
       if (
@@ -161,14 +161,14 @@ export function useSlashCommands(opts?: {
       }
 
       switch (action) {
-        // chat.js:2692-2715 — delegate the fully wired React session swap.
+        // delegate the fully wired React session swap.
         case 'new_chat':
         case '/new': {
           if (onSessionActionRef.current) onSessionActionRef.current('new_chat', cmd, args)
           else toast.info(t('chat.slashNewChatHint'))
           return
         }
-        // chat.js:2716-2737 — reset the current session. (The `/new`-named-but-
+        // reset the current session. (The `/new`-named-but-
         // reset-action remap is resolved above into `new_chat`.)
         case 'reset_session':
         case 'sessions.reset':
@@ -176,7 +176,7 @@ export function useSlashCommands(opts?: {
           void resetSession(rpc, key)
           return
         }
-        // chat.js:2738-2763 — manual compaction. The RPC is fired; the in-thread
+        // manual compaction. The RPC is fired; the in-thread
         // separator + in-flight controls belong to the compaction controller.
         case 'compact_context':
         case 'sessions.contextCompact':
@@ -197,7 +197,7 @@ export function useSlashCommands(opts?: {
             )
           return
         }
-        // chat.js:2764-2789 — usage status / cost.
+        // usage status / cost.
         case 'usage_status':
         case 'usage.status':
         case '/usage': {
@@ -267,7 +267,7 @@ export function useSlashCommands(opts?: {
             .finally(() => void queryClient.invalidateQueries({ queryKey: ['plan.mode.get', key] }))
           return
         }
-        // chat.js:2790-2818 — model list (optionally filtered), into a system row.
+        // model list (optionally filtered), into a system row.
         case 'models.list':
         case '/model': {
           const filter = args.trim().toLowerCase()
@@ -325,7 +325,7 @@ export function useSlashCommands(opts?: {
             )
           return
         }
-        // chat.js:2819-2829 — pin the router to a tier (/c0-/c3), or to a
+        // pin the router to a tier (/c0-/c3), or to a
         // directly-named model (/use <model-id>). Both ride the same RPC; the
         // command word says which parameter to send.
         case 'router.hold.set': {
@@ -369,7 +369,7 @@ export function useSlashCommands(opts?: {
             )
           return
         }
-        // chat.js:2830-2838 — restore automatic routing.
+        // restore automatic routing.
         case 'router.hold.clear': {
           rpc
             .call('router.hold.clear', { key })
@@ -426,14 +426,13 @@ export function useSlashCommands(opts?: {
     [rpc, queryClient],
   )
 
-  // chat.js:2842-2853 `_executeSlashCommand`: lazy-load the catalog if it
-  // hasn't resolved yet (chat.js:2843 `if (!_slashCatalogLoaded) await
-  // _loadSlashCommands();`), THEN split cmd + args, look up the map, toast on
+  // `_executeSlashCommand`: lazy-load the catalog if it
+  // hasn't resolved yet (`if (!_slashCatalogLoaded) await
+  // _loadSlashCommands;`), THEN split cmd + args, look up the map, toast on
   // an unknown command, else dispatch. This covers the narrow race where a
   // user submits e.g. `/reset⏎` before the mount effect's catalog load has
   // resolved — legacy still executes it; without this await the map would be
   // empty and every command would toast "Unsupported command".
-  //
   // Returns a Promise<boolean> (async, unlike legacy's fire-and-await-able
   // async function) — callers that don't need to block on it can ignore the
   // promise, mirroring how legacy callers rarely await `_executeSlashCommand`.

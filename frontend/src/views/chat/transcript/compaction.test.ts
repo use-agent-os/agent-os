@@ -16,9 +16,9 @@ import {
   INTERNAL_COMPACTION_SKIP_REASONS,
 } from './compaction'
 
-/* ── compactionTerminalStatus (parity chat.js:3000) ─────────────────────── */
+/* ── compactionTerminalStatus ─────────────────────── */
 
-describe('compactionTerminalStatus (parity chat.js:2991-3002)', () => {
+describe('compactionTerminalStatus', () => {
   it('is true for the six terminal statuses (case-insensitive)', () => {
     for (const s of [
       'completed',
@@ -42,9 +42,9 @@ describe('compactionTerminalStatus (parity chat.js:2991-3002)', () => {
   })
 })
 
-/* ── compactionSeparatorTone (parity chat.js:3035) ──────────────────────── */
+/* ── compactionSeparatorTone ──────────────────────── */
 
-describe('compactionSeparatorTone (parity chat.js:3035-3041)', () => {
+describe('compactionSeparatorTone', () => {
   it('maps completed → ok', () => {
     expect(compactionSeparatorTone('completed')).toBe('ok')
   })
@@ -67,9 +67,9 @@ describe('compactionSeparatorTone (parity chat.js:3035-3041)', () => {
   })
 })
 
-/* ── compactionStatusLabel (parity chat.js:3019) ────────────────────────── */
+/* ── compactionStatusLabel ────────────────────────── */
 
-describe('compactionStatusLabel (parity chat.js:3019-3033)', () => {
+describe('compactionStatusLabel', () => {
   it('started/observed → "context compacting"', () => {
     expect(compactionStatusLabel({}, '', 'started')).toBe('context compacting')
     expect(compactionStatusLabel({}, '', 'observed')).toBe('context compacting')
@@ -100,9 +100,9 @@ describe('compactionStatusLabel (parity chat.js:3019-3033)', () => {
   })
 })
 
-/* ── shouldPersistCompactionSeparator (parity chat.js:3011) ─────────────── */
+/* ── shouldPersistCompactionSeparator ─────────────── */
 
-describe('shouldPersistCompactionSeparator (parity chat.js:3011-3017)', () => {
+describe('shouldPersistCompactionSeparator', () => {
   it('honours an explicit persist override', () => {
     expect(shouldPersistCompactionSeparator('started', '', { persist: true })).toBe(true)
     expect(shouldPersistCompactionSeparator('completed', '', { persist: false })).toBe(false)
@@ -119,9 +119,9 @@ describe('shouldPersistCompactionSeparator (parity chat.js:3011-3017)', () => {
   })
 })
 
-/* ── compactionSeparatorAnimated (parity chat.js:3004) ──────────────────── */
+/* ── compactionSeparatorAnimated ──────────────────── */
 
-describe('compactionSeparatorAnimated (parity chat.js:3004-3009)', () => {
+describe('compactionSeparatorAnimated', () => {
   it('honours an explicit animated override', () => {
     expect(compactionSeparatorAnimated('completed', { animated: true })).toBe(true)
     expect(compactionSeparatorAnimated('started', { animated: false })).toBe(false)
@@ -134,9 +134,9 @@ describe('compactionSeparatorAnimated (parity chat.js:3004-3009)', () => {
   })
 })
 
-/* ── compactionUserVisible (parity chat.js:3231) ────────────────────────── */
+/* ── compactionUserVisible ────────────────────────── */
 
-describe('compactionUserVisible (parity chat.js:3231-3241)', () => {
+describe('compactionUserVisible', () => {
   it('honours an explicit user_visible flag', () => {
     expect(compactionUserVisible({ user_visible: false }, 'manual', 'started')).toBe(false)
     expect(compactionUserVisible({ user_visible: true }, 'auto', 'skipped')).toBe(true)
@@ -154,9 +154,9 @@ describe('compactionUserVisible (parity chat.js:3231-3241)', () => {
   })
 })
 
-/* ── compactionReason (parity chat.js:3227) ─────────────────────────────── */
+/* ── compactionReason ─────────────────────────────── */
 
-describe('compactionReason (parity chat.js:3227-3229)', () => {
+describe('compactionReason', () => {
   it('prefers reason, then skip_reason, else ""', () => {
     expect(compactionReason({ reason: 'a' })).toBe('a')
     expect(compactionReason({ skip_reason: 'b' })).toBe('b')
@@ -165,9 +165,9 @@ describe('compactionReason (parity chat.js:3227-3229)', () => {
   })
 })
 
-/* ── compactionSkipMessage (parity chat.js:3243) ────────────────────────── */
+/* ── compactionSkipMessage ────────────────────────── */
 
-describe('compactionSkipMessage (parity chat.js:3243-3251)', () => {
+describe('compactionSkipMessage', () => {
   it('manual: known reason → its message; unknown → budget default', () => {
     expect(compactionSkipMessage({ reason: 'no_entries' }, 'manual')).toBe(
       'No compactable chat history yet.',
@@ -189,9 +189,9 @@ describe('compactionSkipMessage (parity chat.js:3243-3251)', () => {
   })
 })
 
-/* ── compactionStatusDetail (parity chat.js:3253) ───────────────────────── */
+/* ── compactionStatusDetail ───────────────────────── */
 
-describe('compactionStatusDetail (parity chat.js:3253-3261)', () => {
+describe('compactionStatusDetail', () => {
   it('returns "" when not user-visible', () => {
     expect(compactionStatusDetail({ reason: 'within_budget' }, '', 'skipped')).toBe('')
   })
@@ -200,7 +200,7 @@ describe('compactionStatusDetail (parity chat.js:3253-3261)', () => {
       'Request-scoped; session history was not rewritten',
     )
   })
-  it('internal skip reason → "" (checked BEFORE the detail map, chat.js:3257)', () => {
+  it('internal skip reason → "" (checked BEFORE the detail map)', () => {
     expect(compactionStatusDetail({ reason: 'no_entries' }, 'manual', 'skipped')).toBe('')
   })
   it('mapped external reason → its detail; unmapped reason → underscore-spaced', () => {
@@ -213,9 +213,9 @@ describe('compactionStatusDetail (parity chat.js:3253-3261)', () => {
   })
 })
 
-/* ── compactFailureBlocksPending (parity chat.js:3158) ──────────────────── */
+/* ── compactFailureBlocksPending ──────────────────── */
 
-describe('compactFailureBlocksPending (parity chat.js:3158-3178)', () => {
+describe('compactFailureBlocksPending', () => {
   it('blocks on refused / safe_to_send false', () => {
     expect(compactFailureBlocksPending({ refused: true })).toBe(true)
     expect(compactFailureBlocksPending({ safe_to_send: false })).toBe(true)
@@ -231,9 +231,9 @@ describe('compactFailureBlocksPending (parity chat.js:3158-3178)', () => {
   })
 })
 
-/* ── compactSemanticMemoryNotice (parity chat.js:3180) ──────────────────── */
+/* ── compactSemanticMemoryNotice ──────────────────── */
 
-describe('compactSemanticMemoryNotice (parity chat.js:3180-3189)', () => {
+describe('compactSemanticMemoryNotice', () => {
   it('returns the notice when semantic memory is degraded and safety is not error', () => {
     expect(compactSemanticMemoryNotice({ semanticMemory: { status: 'degraded' } })).toBe(
       'Memory saved; organizing',
@@ -254,9 +254,9 @@ describe('compactSemanticMemoryNotice (parity chat.js:3180-3189)', () => {
   })
 })
 
-/* ── compactSafeMessageDetail (parity chat.js:3191) ─────────────────────── */
+/* ── compactSafeMessageDetail ─────────────────────── */
 
-describe('compactSafeMessageDetail (parity chat.js:3191-3198)', () => {
+describe('compactSafeMessageDetail', () => {
   it('redacts checkpoint paths to "[memory checkpoint]"', () => {
     expect(compactSafeMessageDetail({ message: 'failed at /var/checkpoint-42/x' })).toBe(
       'failed at [memory checkpoint]',
@@ -270,9 +270,9 @@ describe('compactSafeMessageDetail (parity chat.js:3191-3198)', () => {
   })
 })
 
-/* ── createCompactionToastDedup (parity chat.js:2916-2928) ──────────────── */
+/* ── createCompactionToastDedup ──────────────── */
 
-describe('createCompactionToastDedup (parity chat.js:2916-2928)', () => {
+describe('createCompactionToastDedup', () => {
   it('suppresses an identical signature within 1500ms, then allows a distinct one', () => {
     let now = 1000
     const dedup = createCompactionToastDedup({
@@ -294,9 +294,9 @@ describe('createCompactionToastDedup (parity chat.js:2916-2928)', () => {
   })
 })
 
-/* ── INTERNAL_COMPACTION_SKIP_REASONS (parity chat.js:3200-3208) ────────── */
+/* ── INTERNAL_COMPACTION_SKIP_REASONS ────────── */
 
-describe('INTERNAL_COMPACTION_SKIP_REASONS (parity chat.js:3200-3208)', () => {
+describe('INTERNAL_COMPACTION_SKIP_REASONS', () => {
   it('contains the seven internal reasons', () => {
     for (const r of [
       'already_attempted_this_turn',

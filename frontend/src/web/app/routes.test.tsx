@@ -24,6 +24,8 @@ describe('web routes', () => {
       const { router } = open(path)
       await new Promise((r) => setTimeout(r, 20))
       expect(screen.queryByTestId('not-found-path')).not.toBeInTheDocument()
+      // Every destination is rebuilt: none renders a stand-in.
+      expect(document.querySelector('[data-placeholder]')).toBeNull()
       expect(router.state.location.pathname).toBe(path)
     },
   )

@@ -3,14 +3,14 @@ import { describe, expect, it, vi } from 'vitest'
 import { ElevatedPill } from './ElevatedPill'
 
 describe('ElevatedPill', () => {
-  it('renders the neutral "Approval prompts" label when no mode is set (chat.js:2339)', () => {
+  it('renders the neutral "Approval prompts" label when no mode is set', () => {
     render(<ElevatedPill sessionMode="" globalMode="" unavailable={false} onToggle={vi.fn()} />)
     const pill = screen.getByRole('button')
     expect(pill).toHaveTextContent('Approval prompts')
     expect(pill).not.toHaveClass('is-active')
   })
 
-  it('shows the SESSION override in caps + is-active when a session mode is set (chat.js:2330-2331)', () => {
+  it('shows the SESSION override in caps + is-active when a session mode is set', () => {
     render(
       <ElevatedPill sessionMode="bypass" globalMode="" unavailable={false} onToggle={vi.fn()} />,
     )
@@ -19,14 +19,14 @@ describe('ElevatedPill', () => {
     expect(pill).toHaveClass('is-active')
   })
 
-  it('shows the GLOBAL default when only a global mode is set (chat.js:2334-2335)', () => {
+  it('shows the GLOBAL default when only a global mode is set', () => {
     render(<ElevatedPill sessionMode="" globalMode="on" unavailable={false} onToggle={vi.fn()} />)
     const pill = screen.getByRole('button')
     expect(pill).toHaveTextContent('Global ON')
     expect(pill).toHaveClass('is-active')
   })
 
-  it('renders the disabled "Bypass N/A" state when unavailable (chat.js:2316-2322)', () => {
+  it('renders the disabled "Bypass N/A" state when unavailable', () => {
     render(<ElevatedPill sessionMode="" globalMode="" unavailable={true} onToggle={vi.fn()} />)
     const pill = screen.getByRole('button')
     expect(pill).toHaveTextContent('Bypass N/A')

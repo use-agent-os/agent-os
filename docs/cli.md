@@ -425,7 +425,8 @@ printed instead.
 
 ### From the Control UI and the desktop app
 
-The web console's update banner has an **Update now** button: it calls the
+The web console's update notice (and Settings › Updates) has an **Update now**
+button: after a preflight it calls the
 `updates.apply` RPC, which spawns `agentos upgrade --json` as a detached job
 (it survives the gateway restart it causes) and records progress under
 `~/.agentos/state/upgrade_job.{json,log}`; `updates.status` reports
@@ -978,7 +979,7 @@ than over the page `--limit` would show, so `--limit` bounds how many matches
 are printed, not how far back the filter looks.
 
 Sessions are auto-named. `rename` gives one a human-readable label that shows
-up in `sessions list`, in the chat toolbar, and in the Web UI session list, and
+up in `sessions list`, in the chat toolbar, and in the Web UI Sessions list, and
 that `--search`, `resume`, and `show` all accept in place of the key. Inside a
 chat, `/rename <name>` does the same for the session you are in (no name
 clears it). Names are trimmed, collapsed to one line, and capped at 120
@@ -1045,7 +1046,7 @@ block — edit it and the next turn of every member session picks it up.
 Sessions of any agent can join the same project (the `--agent` on `create`
 only sets the default agent for new chats in the project). New sessions can
 start inside a project (`agentos chat` sessions join via `projects move`, the
-Web UI has a "New chat in project" button), and deleting a project never
+Web UI's project page starts a new chat in the project), and deleting a project never
 deletes sessions: they just detach and stop receiving the knowledge. Agents can manage projects from prompting through the
 `projects_create` / `projects_list` / `projects_update` /
 `projects_move_session` tools, and `session_search scope=project` searches

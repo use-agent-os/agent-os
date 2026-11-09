@@ -3,15 +3,15 @@ import { t } from '@/i18n'
 import '@/i18n/en/chat'
 
 /**
- * The pending-queue rail (chat.js:8474-8503 `_renderPendingQueue`).
+ * The pending-queue rail.
  *
  * A queued-send backlog shown above the composer while a turn is streaming or a
- * compaction is in flight. Sends enqueue here (chat.js:6091-6110) and drain FIFO
+ * compaction is in flight. Sends enqueue here and drain FIFO
  * after the terminal event; the user can recover them (ESC / Alt+↑) or drop them
  * (per-chip × / Clear all). This is a PRESENTATIONAL component: the queue array
  * and the mutation callbacks are owned by ChatPage's `usePendingQueue` (the
  * React equivalent of the legacy `_pendingQueue` module-global + the delegated
- * `_onPendingAreaClick` handler at chat.js:8455-8472).
+ * `_onPendingAreaClick` handler ).
  *
  * Terminal styling: one severity rail (never stacked gutters); lime stays
  * signal-only, so the label/chips render in the neutral mono treatment and only
@@ -20,17 +20,17 @@ import '@/i18n/en/chat'
 export interface PendingQueueProps {
   /** The queued sends, oldest→newest (legacy `_pendingQueue`). */
   queue: PendingItem[]
-  /** Remove the item at `idx` (chat.js:8459-8463). */
+  /** Remove the item at `idx`. */
   onRemove: (idx: number) => void
-  /** Clear the whole queue (chat.js:8466-8471). */
+  /** Clear the whole queue. */
   onClearAll: () => void
 }
 
 export function PendingQueue({ queue, onRemove, onClearAll }: PendingQueueProps) {
-  // chat.js:8476-8480 — hidden (nothing rendered) when the queue is empty.
+  // hidden (nothing rendered) when the queue is empty.
   if (queue.length === 0) return null
 
-  // chat.js:8482 — the Clear-all affordance appears only at 2+ queued items.
+  // the Clear-all affordance appears only at 2+ queued items.
   const showClearAll = queue.length >= 2
 
   return (
@@ -52,7 +52,7 @@ export function PendingQueue({ queue, onRemove, onClearAll }: PendingQueueProps)
       </div>
       <div className="chat-pending-chips">
         {queue.map((p, i) => {
-          // chat.js:8490-8494 — 30-char preview (ellipsis past 30), attachment
+          // 30-char preview (ellipsis past 30), attachment
           // count chip, and the full text as the chip title / aria label.
           const raw = p.text || (p.attachments.length ? t('chat.pendingAttachmentOnly') : '')
           const preview = raw.slice(0, 30) + (raw.length > 30 ? '…' : '')

@@ -28,7 +28,7 @@ describe('isBuiltinAgent', () => {
 })
 
 describe('agentStats', () => {
-  // agents.js:93-118 — total, built-in/custom split, distinct models, tools sum.
+  // total, built-in/custom split, distinct models, tools sum.
   it('counts totals, builtin/custom split, distinct models and tool sum', () => {
     const agents: RawAgent[] = [
       { id: 'main', type: 'builtin', model: 'gpt', tools: ['a', 'b'] },
@@ -56,7 +56,7 @@ describe('agentStats', () => {
 })
 
 describe('agentDisplay', () => {
-  // agents.js:141-179 — per-card derivation.
+  // per-card derivation.
   it('resolves id/name/type/tone and tool chips (first 8 + overflow)', () => {
     const tools = Array.from({ length: 10 }, (_, i) => `t${i}`)
     const d = agentDisplay({
@@ -99,7 +99,7 @@ describe('agentDisplay', () => {
 })
 
 describe('agentToForm', () => {
-  // agents.js:260-270 — seed the edit form from an agent.
+  // seed the edit form from an agent.
   it('maps agent fields to a form snapshot with defaults', () => {
     const f = agentToForm({
       id: 'a',
@@ -135,7 +135,7 @@ describe('agentToForm', () => {
 })
 
 describe('parseToolsInput', () => {
-  // agents.js:376 — split comma list, trim, drop blanks.
+  // split comma list, trim, drop blanks.
   it('splits, trims and drops blanks', () => {
     expect(parseToolsInput(' a , b ,, c ')).toEqual(['a', 'b', 'c'])
   })
@@ -146,7 +146,7 @@ describe('parseToolsInput', () => {
 })
 
 describe('validateAgentId', () => {
-  // agents.js:226,228 — id is required (trimmed non-empty) for create.
+  // id is required (trimmed non-empty) for create.
   it('rejects empty / whitespace-only ids', () => {
     expect(validateAgentId('')).toBe('Agent ID is required.')
     expect(validateAgentId('   ')).toBe('Agent ID is required.')
@@ -167,7 +167,7 @@ describe('validateCreate', () => {
 })
 
 describe('buildCreatePayload', () => {
-  // agents.js:226-230 — {id} always, name only when provided (trimmed).
+  // {id} always, name only when provided (trimmed).
   it('includes trimmed id and omits blank name', () => {
     expect(buildCreatePayload({ id: '  data ', name: '' })).toEqual({ id: 'data' })
     expect(buildCreatePayload({ id: 'data', name: '   ' })).toEqual({ id: 'data' })
@@ -181,7 +181,7 @@ describe('buildCreatePayload', () => {
 })
 
 describe('buildUpdatePayload', () => {
-  // agents.js:467-476 — diff initial vs current; {id} plus only changed keys.
+  // diff initial vs current; {id} plus only changed keys.
   const base = agentToForm({
     id: 'a',
     name: 'A',
@@ -217,7 +217,7 @@ describe('buildUpdatePayload', () => {
 })
 
 describe('isFormDirty', () => {
-  // agents.js:272-275 — structural comparison of the seed vs the current form.
+  // structural comparison of the seed vs the current form.
   const base = agentToForm({
     id: 'a',
     name: 'A',
@@ -240,7 +240,7 @@ describe('isFormDirty', () => {
 })
 
 describe('isNoOpUpdate', () => {
-  // agents.js:432-437 — an update payload with only {id} changes nothing.
+  // an update payload with only {id} changes nothing.
   it('is true when the payload has only id', () => {
     expect(isNoOpUpdate({ id: 'a' })).toBe(true)
   })

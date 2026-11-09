@@ -116,9 +116,9 @@ export interface RawRun {
   [key: string]: unknown
 }
 
-// ── job-kind label / class (cron.js:600-610) ────────────────────────────────
+// ── job-kind label / class ────────────────────────────────
 
-/** cron.js:600-605 — the human kind label for a job (reminder / system / agent). */
+/** — the human kind label for a job (reminder / system / agent). */
 export function jobKindLabel(job: RawJob): string {
   const kind = job.payloadKind || job.payload_kind
   if (kind === 'reminder') return t('cron.kindReminder')
@@ -128,7 +128,7 @@ export function jobKindLabel(job: RawJob): string {
 }
 
 /**
- * cron.js:607-610 — reminder→is-reminder, everything else→is-agent. Script jobs
+ * reminder→is-reminder, everything else→is-agent. Script jobs
  * join the reminder bucket: both deliver without ever reaching a model.
  */
 export function jobKindClass(job: RawJob): 'is-reminder' | 'is-agent' {
@@ -150,7 +150,7 @@ export function jobElevated(job: RawJob | null | undefined): string {
   return typeof nested === 'string' ? nested : ''
 }
 
-/** cron.js:622 — the session-target display (camel|snake|—). */
+/** — the session-target display (camel|snake|—). */
 export function jobTarget(job: RawJob): string {
   return String(job.sessionTarget || job.session_target || '—')
 }
@@ -168,15 +168,15 @@ export function shortCronId(id: string): string {
   return s.length > 16 ? `${s.slice(0, 8)}…${s.slice(-4)}` : s
 }
 
-/** cron.js:618 — the schedule expression display (expression|schedule|—). */
+/** — the schedule expression display (expression|schedule|—). */
 export function jobSchedule(job: RawJob): string {
   return String(job.expression || job.schedule || '—')
 }
 
-// ── run-status derivation (cron.js:355-377, 614, 624, 679-686) ──────────────
+// ── run-status derivation ──────────────
 
 /**
- * cron.js:355-360 — a job's next run is "upcoming" when it is enabled, not
+ * a job's next run is "upcoming" when it is enabled, not
  * currently running, and its next_run parses to a future timestamp.
  */
 export function isUpcomingRun(job: RawJob, now: number = Date.now()): boolean {
@@ -187,7 +187,7 @@ export function isUpcomingRun(job: RawJob, now: number = Date.now()): boolean {
 }
 
 /**
- * cron.js:614,624,686 — the status dot variant for a job row: off when
+ * the status dot variant for a job row: off when
  * disabled, error on a failed last run, else on. Status color is expressed via
  * the --tone primitive by the caller; this returns the semantic bucket.
  */
@@ -200,7 +200,7 @@ export function jobDotState(job: RawJob): CronDot {
   return 'on'
 }
 
-/** cron.js:400-402 — a last_status is "good" (ok/success) vs anything else. */
+/** — a last_status is "good" (ok/success) vs anything else. */
 export function isOkStatus(status: string | undefined | null): boolean {
   return status === 'ok' || status === 'success'
 }
@@ -276,10 +276,10 @@ export function concurrencyLabel(policy: ConcurrencyPolicy): string {
   return t('cron.concurrencyAllow')
 }
 
-// ── next-run text derivations (cron.js:362-377) ─────────────────────────────
+// ── next-run text derivations ─────────────────────────────
 
 /**
- * cron.js:362-370 — the "next run" cell text: '—' when disabled/absent/invalid,
+ * the "next run" cell text: '—' when disabled/absent/invalid,
  * 'running' while running, 'awaiting update' when the timestamp is already in
  * the past, else a human countdown ("in 5m 0s").
  */
@@ -294,7 +294,7 @@ export function nextRunText(job: RawJob, now: number = Date.now()): string {
 }
 
 /**
- * cron.js:372-377 — the absolute "next run" companion string ('' when
+ * the absolute "next run" companion string ('' when
  * disabled/running/absent/past, else a friendly today/tomorrow/date+time).
  */
 export function nextRunAbs(job: RawJob, now: number = Date.now()): string {
@@ -304,13 +304,13 @@ export function nextRunAbs(job: RawJob, now: number = Date.now()): string {
   return humanTime(ts, now)
 }
 
-// ── list sort (cron.js:539-553) ─────────────────────────────────────────────
+// ── list sort ─────────────────────────────────────────────
 
 export type SortCol =
   'name' | 'payloadKind' | 'sessionTarget' | 'expression' | 'last_run' | 'next_run'
 
 /**
- * cron.js:539-553 — non-mutating sort. Date columns (next_run/last_run) compare
+ * non-mutating sort. Date columns (next_run/last_run) compare
  * numerically, pushing missing timestamps to the far end (Infinity asc /
  * -Infinity desc); everything else compares as a lower-cased string. asc flag
  * flips the comparison.
@@ -333,10 +333,10 @@ export function sortJobs<T extends RawJob>(list: T[], col: string, asc: boolean)
   })
 }
 
-// ── search filter (cron.js:562-569) ─────────────────────────────────────────
+// ── search filter ─────────────────────────────────────────
 
 /**
- * cron.js:562-569 — case-insensitive filter across name / message|prompt /
+ * case-insensitive filter across name / message|prompt /
  * payloadKind / sessionTarget|session_target / creation source /
  * expression|schedule. Empty query keeps everything (returns a copy).
  */
@@ -356,7 +356,7 @@ export function filterJobs<T extends RawJob>(list: T[], search: string): T[] {
   )
 }
 
-// ── run-history row derivation (cron.js:894-909) ────────────────────────────
+// ── run-history row derivation ────────────────────────────
 
 export interface RunRow {
   timeLabel: string
@@ -384,7 +384,7 @@ export interface RunRow {
 }
 
 /**
- * cron.js:894-909 — derive one run-history table row. deliveryStatus may be an
+ * derive one run-history table row. deliveryStatus may be an
  * object ({channel, ws}) rendered as "ch: …, ws: …", a bare string, or absent.
  * `relTime` is injected so the pure helper stays clock/format-agnostic.
  */
@@ -418,9 +418,9 @@ export function runRow(run: RawRun, relTime: (ts: string | number) => string): R
   }
 }
 
-// ── time / duration formatters (cron.js:1446-1483) ──────────────────────────
+// ── time / duration formatters ──────────────────────────
 
-/** cron.js:1463-1472 — coarse duration: s / m+s / h+m / d+h. */
+/** — coarse duration: s / m+s / h+m / d+h. */
 export function formatDuration(ms: number): string {
   const s = Math.floor(ms / 1000)
   if (s < 60) return t('cron.durationSeconds', { seconds: s })
@@ -432,7 +432,7 @@ export function formatDuration(ms: number): string {
   return t('cron.durationDays', { days: d, hours: h % 24 })
 }
 
-/** cron.js:1446-1454 — signed countdown: "now" / "in <dur>" / "<dur> ago". */
+/** — signed countdown: "now" / "in <dur>" / "<dur> ago". */
 export function humanCountdown(date: Date, now: number = Date.now()): string {
   const diff = date.getTime() - now
   if (diff < 0) return t('cron.countdownAgo', { duration: formatDuration(-diff) })
@@ -440,7 +440,7 @@ export function humanCountdown(date: Date, now: number = Date.now()): string {
   return t('cron.countdownIn', { duration: formatDuration(diff) })
 }
 
-/** cron.js:1456-1461 — past-facing: "just now" / "<dur> ago" / "in <dur>". */
+/** — past-facing: "just now" / "<dur> ago" / "in <dur>". */
 export function humanCountdownPast(date: Date, now: number = Date.now()): string {
   const diff = now - date.getTime()
   if (diff < 0) return t('cron.countdownIn', { duration: formatDuration(-diff) })
@@ -448,7 +448,7 @@ export function humanCountdownPast(date: Date, now: number = Date.now()): string
   return t('cron.countdownAgo', { duration: formatDuration(diff) })
 }
 
-/** cron.js:1474-1483 — friendly clock: today/tomorrow HH:MM else weekday date. */
+/** — friendly clock: today/tomorrow HH:MM else weekday date. */
 export function humanTime(date: Date, now: number = Date.now()): string {
   const today = new Date(now)
   today.setHours(0, 0, 0, 0)
@@ -462,7 +462,7 @@ export function humanTime(date: Date, now: number = Date.now()): string {
   )
 }
 
-// ── cron expression parser (cron.js:1255-1343) ──────────────────────────────
+// ── cron expression parser ──────────────────────────────
 
 export interface CronField {
   all: boolean
@@ -491,7 +491,7 @@ function toNum(
   return n
 }
 
-/** cron.js:1255-1279 — parse one cron field (lists, ranges, steps, names). */
+/** — parse one cron field (lists, ranges, steps, names). */
 export function parseField(
   field: string,
   min: number,
@@ -533,7 +533,7 @@ export function parseField(
 }
 
 /**
- * cron.js:1291-1307 — parse a 5-field cron expression; returns null on any
+ * parse a 5-field cron expression; returns null on any
  * malformed input (wrong field count or a throwing field). 7→0 folds Sunday.
  */
 export function parseCron(expr: string): ParsedCron | null {
@@ -584,7 +584,7 @@ function matches(field: CronField, v: number): boolean {
 }
 
 /**
- * cron.js:1311-1343 — the next `count` fire times from `fromTs` (default now),
+ * the next `count` fire times from `fromTs` (default now),
  * scanning minute-by-minute up to a year out. Vixie DOM/DOW semantics: when both
  * are restricted, match either.
  */
@@ -626,7 +626,7 @@ export function nextRuns(parsed: ParsedCron | null, count: number, fromTs?: numb
   return results
 }
 
-// ── cron humanizer (cron.js:1345-1399) ──────────────────────────────────────
+// ── cron humanizer ──────────────────────────────────────
 
 function humanizeFieldList(field: CronField, allLabel: string, names?: string[]): string {
   if (field.all) return allLabel
@@ -642,7 +642,7 @@ function humanizeFieldList(field: CronField, allLabel: string, names?: string[])
 }
 
 /**
- * cron.js:1355-1399 — a best-effort English description of a cron expression;
+ * a best-effort English description of a cron expression;
  * '' when it does not parse. Covers the common patterns (every minute, hourly
  * at :mm, daily/weekday/weekend/date/month at HH:MM, every N minutes) and falls
  * back to a "at minute …, hour …" phrasing.
@@ -775,7 +775,7 @@ export interface CronForm {
   fdWebhookToken: string
 }
 
-/** A blank create form — matches _openPanel's new-job defaults (cron.js:937-966). */
+/** A blank create form — matches _openPanel's new-job defaults. */
 export const EMPTY_CRON_FORM: CronForm = {
   name: '',
   message: '',
@@ -809,9 +809,9 @@ export const EMPTY_CRON_FORM: CronForm = {
   fdWebhookToken: '',
 }
 
-// ── session-key helpers (cron.js:1496-1520) ─────────────────────────────────
+// ── session-key helpers ─────────────────────────────────
 
-/** cron.js:1496-1507 — normalize a session key to its canonical agent:main form. */
+/** — normalize a session key to its canonical agent:main form. */
 export function canonicalSessionKey(key: string | null | undefined): string {
   const value = (key || '').trim()
   if (!value) return ''
@@ -822,7 +822,7 @@ export function canonicalSessionKey(key: string | null | undefined): string {
   return value
 }
 
-/** cron.js:1509-1520 — resolve a job's bound session key across the field aliases. */
+/** — resolve a job's bound session key across the field aliases. */
 export function jobSessionKey(job: RawJob | null | undefined): string {
   if (!job) return ''
   return String(
@@ -837,7 +837,7 @@ export function jobSessionKey(job: RawJob | null | undefined): string {
 }
 
 /**
- * cron.js:1485-1494 — the active chat session key: the URL `?session=` param
+ * the active chat session key: the URL `?session=` param
  * (canonicalized) wins, else the `agentos_active_session` localStorage value.
  * The raw inputs are injected so the helper stays pure/testable; CronPage reads
  * window.location.search + localStorage and passes them in.
@@ -848,10 +848,10 @@ export function activeChatSessionKey(urlSession: string, storedSession: string):
   return canonicalSessionKey(storedSession)
 }
 
-// ── seed the form from a job (edit) or template (create) — cron.js:937-966 ──
+// ── seed the form from a job (edit) or template (create) — ──
 
 /**
- * cron.js:927-966 — build the initial form state. `job` non-null → edit seed;
+ * build the initial form state. `job` non-null → edit seed;
  * else a create seed from `template` (optional) + the active session key.
  */
 export function seedForm(
@@ -910,7 +910,7 @@ export function seedForm(
 }
 
 /**
- * cron.js:1083-1112 — map a job's delivery block onto the delivery/failure-dest
+ * map a job's delivery block onto the delivery/failure-dest
  * form fields. 'none' from the wire is a real user choice; ''/null means
  * "inferred". Webhook tokens are never echoed back (always blank).
  */
@@ -969,10 +969,10 @@ export function deliveryFormFromJob(
   }
 }
 
-// ── field-visibility derivations (cron.js:997-1081) ─────────────────────────
+// ── field-visibility derivations ─────────────────────────
 
 /**
- * cron.js:997-1057 — the session-target select's effective value + whether it is
+ * the session-target select's effective value + whether it is
  * locked, plus the message label, given the current payload kind and target.
  * system_event → locked 'main'; reminder → locked 'isolated'; agent_turn → user
  * choice, but a stale 'main' is coerced to current|isolated (main is not a valid
@@ -1061,14 +1061,14 @@ export function resolveTarget(
   }
 }
 
-// ── delivery / failure-destination payload builders (cron.js:1114-1178) ─────
+// ── delivery / failure-destination payload builders ─────
 
 /** Discriminates a validation failure from "no delivery block" in the builders. */
 export type DeliveryBuild =
   { ok: true; delivery: Record<string, unknown> | null } | { ok: false; error: string }
 
 /**
- * cron.js:1154-1178 — assemble the failureDestination block. Returns null when
+ * assemble the failureDestination block. Returns null when
  * disabled, an error when a required field is missing, else the block.
  */
 export function buildFailureDest(form: CronForm): DeliveryBuild {
@@ -1095,7 +1095,7 @@ export function buildFailureDest(form: CronForm): DeliveryBuild {
 }
 
 /**
- * cron.js:1114-1152 — assemble the delivery block. Returns null when nothing is
+ * assemble the delivery block. Returns null when nothing is
  * set, an error when a required field is missing (webhook URL, or a nested
  * failure-dest error), else the delivery block (which may carry failureDestination).
  */
@@ -1141,7 +1141,7 @@ export function buildDelivery(form: CronForm): DeliveryBuild {
   return { ok: true, delivery: null }
 }
 
-// ── save payload assembly (cron.js:1180-1251) ───────────────────────────────
+// ── save payload assembly ───────────────────────────────
 
 /** A save is either a validation error or a resolved {method, payload}. */
 export type SaveBuild =
@@ -1149,12 +1149,12 @@ export type SaveBuild =
   | { ok: false; error: string }
 
 /**
- * cron.js:1180-1251 — validate the form and assemble the cron.create/update
+ * validate the form and assemble the cron.create/update
  * payload. `editingJob` non-null → cron.update (payload carries {id}). Every
  * legacy guard is preserved: name required; interval must be a positive
  * integer; ISO time required for 'at'; current/named session-key required;
  * delivery/failure-dest validation. `activeSessionKey` binds current/reminder
- * origins the way the legacy _activeChatSessionKey() did.
+ * origins the way the legacy _activeChatSessionKey did.
  */
 export function buildSavePayload(
   form: CronForm,

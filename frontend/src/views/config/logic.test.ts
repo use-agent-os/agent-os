@@ -24,7 +24,7 @@ import {
   type DirtyMap,
 } from './logic'
 
-// ── flattenEntries — config.js:430-450 ──────────────────────────────────────
+// ── flattenEntries — ──────────────────────────────────────
 describe('flattenEntries', () => {
   it('leaves scalars, arrays and null as leaves', () => {
     const out = flattenEntries([
@@ -71,7 +71,7 @@ describe('flattenEntries', () => {
   })
 })
 
-// ── entriesForTab — config.js:452-461 ───────────────────────────────────────
+// ── entriesForTab — ───────────────────────────────────────
 describe('entriesForTab', () => {
   const core = TABS.find((t) => t.id === 'core')!
   const ai = TABS.find((t) => t.id === 'ai')!
@@ -194,7 +194,7 @@ describe('entriesForTab', () => {
   })
 })
 
-// ── grouping — config.js:481-510 ────────────────────────────────────────────
+// ── grouping — ────────────────────────────────────────────
 describe('groupEntries / groupTitle / fieldLabel', () => {
   it('groups dotted keys under their top segment; bare scalars under General', () => {
     const groups = groupEntries([
@@ -226,7 +226,7 @@ describe('groupEntries / groupTitle / fieldLabel', () => {
   })
 })
 
-// ── configValueAt — config.js:629-637 ───────────────────────────────────────
+// ── configValueAt — ───────────────────────────────────────
 describe('configValueAt', () => {
   const cfg = {
     host: '127.0.0.1',
@@ -249,7 +249,7 @@ describe('configValueAt', () => {
   })
 })
 
-// ── parseFieldValue — config.js:585-616 ─────────────────────────────────────
+// ── parseFieldValue — ─────────────────────────────────────
 describe('parseFieldValue', () => {
   it('coerces booleans', () => {
     expect(parseFieldValue('boolean', 'true')).toEqual({ ok: true, value: true })
@@ -271,7 +271,7 @@ describe('parseFieldValue', () => {
   })
 })
 
-// ── computeDirty — config.js:585-616 (THE dirty/no-op derivation) ────────────
+// ── computeDirty — (THE dirty/no-op derivation) ────────────
 describe('computeDirty', () => {
   const cfg = {
     debug: false,
@@ -350,7 +350,7 @@ describe('dirtyCount / buildPatchPayload / hasInvalidJson', () => {
   })
 })
 
-// ── buildApplyPayload — config.js:731 ───────────────────────────────────────
+// ── buildApplyPayload — ───────────────────────────────────────
 describe('buildApplyPayload', () => {
   it('carries the edited YAML text and the loaded baseline', () => {
     expect(buildApplyPayload('a: 1\n', 'a: 0\n')).toEqual({
@@ -360,7 +360,7 @@ describe('buildApplyPayload', () => {
   })
 })
 
-// ── sensitive/readonly keys — config.js:514,519 ─────────────────────────────
+// ── sensitive/readonly keys — ─────────────────────────────
 describe('isSensitiveKey / isReadonlyKey', () => {
   it('masks key/token/secret/password/api_key on the FULL dotted key', () => {
     expect(isSensitiveKey('memory.embedding.remote.api_key')).toBe(true)
@@ -381,7 +381,7 @@ describe('isSensitiveKey / isReadonlyKey', () => {
   })
 })
 
-// ── fieldKind — config.js:516-565 ───────────────────────────────────────────
+// ── fieldKind — ───────────────────────────────────────────
 describe('fieldKind', () => {
   it('classifies readonly first', () => {
     expect(fieldKind('host', '0.0.0.0')).toBe('readonly')
@@ -401,7 +401,7 @@ describe('fieldKind', () => {
   })
 })
 
-// ── objectSummary / searchBlob / summariseDiffValue — config.js:707-883 ─────
+// ── objectSummary / searchBlob / summariseDiffValue — ─────
 describe('objectSummary', () => {
   it('summarises arrays with a preview and count', () => {
     expect(objectSummary([])).toBe('JSON · empty list')
@@ -436,7 +436,7 @@ describe('summariseDiffValue', () => {
   })
 })
 
-// ── objToYaml — config.js:886-912 ───────────────────────────────────────────
+// ── objToYaml — ───────────────────────────────────────────
 describe('objToYaml', () => {
   it('renders scalars', () => {
     expect(objToYaml(true)).toBe('true')
@@ -453,7 +453,7 @@ describe('objToYaml', () => {
     expect(objToYaml({})).toBe('{}')
   })
   it('renders a nested object block (legacy trimStart posture)', () => {
-    // config.js:908 uses rendered.trimStart() for non-inline values, which
+    // uses rendered.trimStart for non-inline values, which
     // collapses the leading newline of the block onto the key line. This is a
     // 1:1 port of the legacy serialiser's exact (quirky) output.
     expect(objToYaml({ a: 1, b: { c: 2 } })).toBe('\na: 1\nb: c: 2')
@@ -463,7 +463,7 @@ describe('objToYaml', () => {
   })
 })
 
-// ── helpFor — config.js:127-130 ─────────────────────────────────────────────
+// ── helpFor — ─────────────────────────────────────────────
 describe('helpFor', () => {
   it('returns a specific message for a known key', () => {
     expect(helpFor('host')).toMatch(/Network interface/)

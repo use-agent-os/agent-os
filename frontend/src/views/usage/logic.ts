@@ -6,7 +6,7 @@
 // sort keys, chart bar-scaling math, cost-source mapping, model grouping, CSV).
 
 /** A per-model breakdown entry (usage.status sessions[].modelBreakdown[]).
- *  Backend emits camelCase here; snake variants tolerated defensively. */
+ * Backend emits camelCase here; snake variants tolerated defensively. */
 import { t, tPlural } from '@/i18n'
 import '@/i18n/en/usage'
 
@@ -23,7 +23,7 @@ export interface ModelBreakdownEntry {
 }
 
 /** A raw usage row from usage.status.sessions (all fields optional; both
- *  snake_case and camelCase variants appear across backend/CLI payloads). */
+ * snake_case and camelCase variants appear across backend/CLI payloads). */
 export interface UsageRow {
   session?: string
   sessionKey?: string
@@ -68,7 +68,7 @@ const DAY_MS = 86_400_000
 
 // ── Range ────────────────────────────────────────────────────────────────────
 
-/** usage.js:174-177 — validate a range string to {all,7,14,30}; default 7. */
+/** — validate a range string to {all,7,14,30}; default 7. */
 export function normalizeRange(range: unknown): UsageRange {
   const value = String(range ?? '7')
   return (['all', '7', '14', '30'] as const).includes(value as UsageRange)
@@ -76,9 +76,9 @@ export function normalizeRange(range: unknown): UsageRange {
     : '7'
 }
 
-// ── Row-value accessors (usage.js:194-214) ───────────────────────────────────
+// ── Row-value accessors ───────────────────────────────────
 
-/** usage.js:194-199 — first non-null value across candidate keys. */
+/** — first non-null value across candidate keys. */
 export function rowVal(row: Record<string, unknown>, ...keys: string[]): unknown {
   for (const key of keys) {
     const v = row[key]
@@ -87,7 +87,7 @@ export function rowVal(row: Record<string, unknown>, ...keys: string[]): unknown
   return null
 }
 
-/** usage.js:201-206 — numeric row value (finite), else null. */
+/** — numeric row value (finite), else null. */
 function numericRowVal(row: Record<string, unknown>, ...keys: string[]): number | null {
   const value = rowVal(row, ...keys)
   if (value == null || value === '') return null
@@ -100,8 +100,8 @@ function num(row: Record<string, unknown>, ...keys: string[]): number {
   return Number(rowVal(row, ...keys) ?? 0) || 0
 }
 
-/** usage.js:208-214 — first numeric timestamp across ended/updated/started/
- *  created (snake + camel), else null. */
+/** — first numeric timestamp across ended/updated/started/
+ * created (snake + camel), else null. */
 export function sessionTimestamp(row: UsageRow): number | null {
   for (const key of [
     'endedAt',
@@ -119,15 +119,15 @@ export function sessionTimestamp(row: UsageRow): number | null {
   return null
 }
 
-/** usage.js:216-220 — the cutoff timestamp (ms) for a range, or null for all. */
+/** — the cutoff timestamp (ms) for a range, or null for all. */
 export function rangeCutoffMs(range: UsageRange): number | null {
   if (range === 'all') return null
   return Date.now() - Number(range) * DAY_MS
 }
 
-/** usage.js:228-236 — rows whose timestamp is within the range window. `all`
- *  (or a range with no cutoff) returns the input list; undated rows drop out of
- *  a dated window. */
+/** — rows whose timestamp is within the range window. `all`
+ * (or a range with no cutoff) returns the input list; undated rows drop out of
+ * a dated window. */
 export function visibleSessions(rows: UsageRow[], range: UsageRange): UsageRow[] {
   const cutoff = rangeCutoffMs(range)
   if (cutoff == null) return rows
@@ -137,29 +137,29 @@ export function visibleSessions(rows: UsageRow[], range: UsageRange): UsageRow[]
   })
 }
 
-/** usage.js:238-241 — count of undated rows hidden by a dated range (0 on all). */
+/** — count of undated rows hidden by a dated range (0 on all). */
 export function undatedHiddenCount(rows: UsageRow[], range: UsageRange): number {
   if (range === 'all') return 0
   return rows.filter((row) => sessionTimestamp(row) == null).length
 }
 
-/** usage.js:254-258 — "N undated legacy session(s) hidden" or '' when none. */
+/** — "N undated legacy session(s) hidden" or '' when none. */
 export function rangeHiddenHint(rows: UsageRow[], range: UsageRange): string {
   const hidden = undatedHiddenCount(rows, range)
   if (hidden <= 0) return ''
   return tPlural('usage.hiddenSessions', hidden)
 }
 
-// ── Formatting (usage.js:187-192,515-521,228-241 relTime) ────────────────────
+// ── Formatting ────────────────────
 
-/** usage.js:187-192 — "$"+toFixed(decimals) (default 4); null → em dash. */
+/** — "$"+toFixed(decimals) (default 4); null → em dash. */
 export function formatCost(usd: number | null | undefined, opts?: { decimals?: number }): string {
   if (usd == null) return t('common.dash')
   const decimals = opts?.decimals != null ? opts.decimals : 4
   return '$' + Number(usd).toFixed(decimals)
 }
 
-/** usage.js:515-521 — abbreviate a token count (M/K one-decimal); null → dash. */
+/** — abbreviate a token count (M/K one-decimal); null → dash. */
 export function formatNum(n: number | null | undefined): string {
   if (n == null) return t('common.dash')
   const v = Number(n)
@@ -168,9 +168,9 @@ export function formatNum(n: number | null | undefined): string {
   return String(v)
 }
 
-/** components.js:228-241 (UI.relTime) — relative time. Numeric input is an
- *  epoch (seconds when < 1e10, else millis); strings parse as a numeric epoch
- *  or ISO. Invalid → "—". */
+/** (UI.relTime) — relative time. Numeric input is an
+ * epoch (seconds when < 1e10, else millis); strings parse as a numeric epoch
+ * or ISO. Invalid → "—". */
 export function formatRelTime(isoOrTs: string | number): string {
   const numeric =
     typeof isoOrTs === 'number'
@@ -189,7 +189,7 @@ export function formatRelTime(isoOrTs: string | number): string {
   return t('usage.relDays', { count: Math.floor(diff / 86_400) })
 }
 
-// ── Metrics (usage.js:243-252,385-423) ───────────────────────────────────────
+// ── Metrics ───────────────────────────────────────
 
 export interface UsageMetrics {
   input: number
@@ -203,8 +203,8 @@ export interface UsageMetrics {
   avgCost: number | null
 }
 
-/** usage.js:243-252,394-397 — sum input/output/cost/cache across rows and the
- *  running average cost per session. */
+/** — sum input/output/cost/cache across rows and the
+ * running average cost per session. */
 export function usageMetrics(rows: UsageRow[]): UsageMetrics {
   const acc = { input: 0, output: 0, cost: 0, cacheRead: 0, cacheWrite: 0 }
   for (const row of rows) {
@@ -228,7 +228,7 @@ export function usageMetrics(rows: UsageRow[]): UsageMetrics {
   }
 }
 
-// ── Cost-source badge (usage.js:266-322) ─────────────────────────────────────
+// ── Cost-source badge ─────────────────────────────────────
 
 const KNOWN_COST_SOURCES = [
   'provider_billed',
@@ -239,12 +239,12 @@ const KNOWN_COST_SOURCES = [
   'none',
 ]
 
-/** usage.js:266-268 — the (string) cost source of a row, default 'none'. */
+/** — the (string) cost source of a row, default 'none'. */
 export function costSource(row: Record<string, unknown>): string {
   return String(rowVal(row, 'cost_source', 'costSource') ?? 'none')
 }
 
-/** usage.js:270-274 — the CSS class suffix for a source (unknown → 'none'). */
+/** — the CSS class suffix for a source (unknown → 'none'). */
 function costSourceClass(source: string): string {
   return KNOWN_COST_SOURCES.includes(source) ? source : 'none'
 }
@@ -270,7 +270,7 @@ function costSourceToken(source: string, ephemeral: boolean): CostSourceToken {
   }
 }
 
-/** usage.js:276-290 — the human label for a source; ephemeral wins. */
+/** — the human label for a source; ephemeral wins. */
 function costSourceLabel(source: string, ephemeral: boolean): string {
   const labels: Record<CostSourceToken, string> = {
     ephemeral: t('usage.sourceEphemeral'),
@@ -283,7 +283,7 @@ function costSourceLabel(source: string, ephemeral: boolean): string {
   return labels[costSourceToken(source, ephemeral)]
 }
 
-/** usage.js:292-302 — the tooltip for a source; ephemeral wins. */
+/** — the tooltip for a source; ephemeral wins. */
 function costSourceTooltip(source: string, ephemeral: boolean): string {
   if (ephemeral) return t('usage.tipEphemeral')
   switch (source) {
@@ -309,8 +309,8 @@ export interface CostSourceBadge {
   ephemeral: boolean
 }
 
-/** usage.js:304-310 — the rendered cost-source badge descriptor for a row (or a
- *  per-model breakdown entry). */
+/** — the rendered cost-source badge descriptor for a row (or a
+ * per-model breakdown entry). */
 export function costSourceBadge(row: Record<string, unknown>): CostSourceBadge {
   const source = costSource(row)
   const ephemeral = Boolean(rowVal(row, 'cost_ephemeral', 'costEphemeral'))
@@ -322,8 +322,8 @@ export function costSourceBadge(row: Record<string, unknown>): CostSourceBadge {
   }
 }
 
-/** usage.js:312-322 — the cost-composition hint ("actual 2 · estimated 1 · …")
- *  over the given rows; only the five counted labels contribute. */
+/** — the cost-composition hint ("actual 2 · estimated 1 · …")
+ * over the given rows; only the five counted labels contribute. */
 export function sourceCompositionHint(rows: UsageRow[]): string {
   // Counted by token, not by the rendered label: keying on English wording
   // would stop matching the moment the badge label is translated.
@@ -355,7 +355,7 @@ export function sourceCompositionHint(rows: UsageRow[]): string {
     .join(' · ')
 }
 
-// ── Sorting (usage.js:324-343,431-438) ───────────────────────────────────────
+// ── Sorting ───────────────────────────────────────
 
 export type SortColumn =
   | 'session'
@@ -368,7 +368,7 @@ export type SortColumn =
   | 'cost_source'
   | 'model'
 
-/** usage.js:324-343 — the comparable value for a row + sort column. */
+/** — the comparable value for a row + sort column. */
 function sortVal(row: UsageRow, key: SortColumn): number | string {
   const r = row as Record<string, unknown>
   switch (key) {
@@ -391,8 +391,8 @@ function sortVal(row: UsageRow, key: SortColumn): number | string {
   }
 }
 
-/** usage.js:431-438 — sort a copy of the rows by a column; string values fold
- *  to lowercase; `asc` toggles direction. Never mutates the input. */
+/** — sort a copy of the rows by a column; string values fold
+ * to lowercase; `asc` toggles direction. Never mutates the input. */
 export function sortSessions(rows: UsageRow[], column: SortColumn, asc: boolean): UsageRow[] {
   return [...rows].sort((a, b) => {
     let va = sortVal(a, column)
@@ -404,7 +404,7 @@ export function sortSessions(rows: UsageRow[], column: SortColumn, asc: boolean)
   })
 }
 
-// ── Chart (usage.js:523-627) ─────────────────────────────────────────────────
+// ── Chart ─────────────────────────────────────────────────
 
 export interface ChartBar {
   key: string
@@ -418,7 +418,7 @@ export interface ChartBar {
 export interface ChartData {
   bars: ChartBar[]
   max: number
-  /** usage.js:528-534 — size of the non-zero-token pool the chart draws from. */
+  /** — size of the non-zero-token pool the chart draws from. */
   poolSize: number
   /** min(20, poolSize) — bars actually shown. */
   shown: number
@@ -429,9 +429,9 @@ function rowTotalTokens(row: UsageRow): number {
   return num(r, 'input_tokens', 'inputTokens') + num(r, 'output_tokens', 'outputTokens')
 }
 
-/** usage.js:540-627 — the chart bars for a mode. Zero-token rows are dropped,
- *  the rest sorted (total tokens or cost, desc) and capped at 20; percentages
- *  scale to the max (0 → 1 to avoid divide-by-zero). */
+/** — the chart bars for a mode. Zero-token rows are dropped,
+ * the rest sorted (total tokens or cost, desc) and capped at 20; percentages
+ * scale to the max (0 → 1 to avoid divide-by-zero). */
 export function chartRows(rows: UsageRow[], mode: ChartMode): ChartData {
   const pool = rows.filter((r) => rowTotalTokens(r) > 0)
   const sorted = [...pool].sort((a, b) => {
@@ -482,10 +482,10 @@ export function chartRows(rows: UsageRow[], mode: ChartMode): ChartData {
   return { bars, max, poolSize: pool.length, shown: Math.min(20, pool.length) }
 }
 
-// ── Model cell + expand (usage.js:629-724) ───────────────────────────────────
+// ── Model cell + expand ───────────────────────────────────
 
-/** usage.js:629-635 — the model-cell label: "auto · N models" for a multi-model
- *  breakdown, else the single model / row model / em dash. */
+/** — the model-cell label: "auto · N models" for a multi-model
+ * breakdown, else the single model / row model / em dash. */
 export function modelDisplayLabel(row: UsageRow): string {
   const bd = row.modelBreakdown
   if (Array.isArray(bd) && bd.length > 0) {
@@ -494,7 +494,7 @@ export function modelDisplayLabel(row: UsageRow): string {
   return row.model ?? '—'
 }
 
-/** usage.js:643 — whether the model cell should show an expand toggle. */
+/** — whether the model cell should show an expand toggle. */
 export function hasModelExpand(row: UsageRow): boolean {
   const bd = row.modelBreakdown
   return Array.isArray(bd) && bd.length > 1
@@ -518,8 +518,8 @@ export interface ExpandData {
   rows: ExpandModelRow[]
 }
 
-/** usage.js:651-724 — the expanded per-model breakdown for a row: totals, a
- *  prorated flag, and per-model provider/name split with cost share. */
+/** — the expanded per-model breakdown for a row: totals, a
+ * prorated flag, and per-model provider/name split with cost share. */
 export function sessionExpandRows(row: UsageRow): ExpandData {
   const bd = row.modelBreakdown ?? []
   const totalCost = bd.reduce((acc, m) => acc + (Number(m.costUsd) || 0), 0)
@@ -550,7 +550,7 @@ export function sessionExpandRows(row: UsageRow): ExpandData {
   return { count: bd.length, totalTokens, totalCost, anyProrated, rows }
 }
 
-// ── By-model breakdown grid (usage.js:754-831) ───────────────────────────────
+// ── By-model breakdown grid ───────────────────────────────
 
 export interface ModelCard {
   model: string
@@ -571,9 +571,9 @@ export interface ModelGrid {
   totalCost: number
 }
 
-/** usage.js:754-831 — group the visible rows by per-model usage (breakdown when
- *  present, else the row's single model), sum tokens/cache/cost + distinct
- *  sessions, sort by cost desc, and attach a per-card cost share. */
+/** — group the visible rows by per-model usage (breakdown when
+ * present, else the row's single model), sum tokens/cache/cost + distinct
+ * sessions, sort by cost desc, and attach a per-card cost share. */
 export function modelBreakdownGrid(rows: UsageRow[]): ModelGrid {
   const map: Record<string, Omit<ModelCard, 'provider' | 'name' | 'totalTokens' | 'sharePct'>> = {}
   rows.forEach((row) => {
@@ -636,7 +636,7 @@ export function modelBreakdownGrid(rows: UsageRow[]): ModelGrid {
   return { models, totalCost }
 }
 
-// ── CSV export (usage.js:833-866) ────────────────────────────────────────────
+// ── CSV export ────────────────────────────────────────────
 
 const CSV_HEADERS = [
   'session',
@@ -657,7 +657,7 @@ function csvCell(v: unknown): string {
   return '"' + String(v).replace(/"/g, '""') + '"'
 }
 
-/** usage.js:833-863 — build the CSV text for the given (visible) rows. */
+/** — build the CSV text for the given (visible) rows. */
 export function buildCsv(rows: UsageRow[]): string {
   const body = rows.map((row) => {
     const r = row as Record<string, unknown>
@@ -682,7 +682,7 @@ export function buildCsv(rows: UsageRow[]): string {
   return [CSV_HEADERS, ...body].map((line) => line.map(csvCell).join(',')).join('\n')
 }
 
-/** usage.js:864-865 — the CSV filename for a range (`all` or `<N>d`). */
+/** — the CSV filename for a range (`all` or `<N>d`). */
 export function csvFilename(range: UsageRange): string {
   const suffix = range === 'all' ? 'all' : `${range}d`
   return `agentos-usage-${suffix}.csv`

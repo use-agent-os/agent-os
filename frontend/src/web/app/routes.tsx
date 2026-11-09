@@ -1,10 +1,10 @@
 import { lazy, Suspense, type ReactNode } from 'react'
 import { Navigate, useLocation, type RouteObject } from 'react-router'
-import { t, type MessageKey } from '@/i18n'
+import type { MessageKey } from '@/i18n'
 import '@/i18n/en/webShell'
 import { McpOAuthCallback } from '@/web/features/settings/McpOAuthCallback'
 import { LEGACY_PAGE_PATHS, LEGACY_SETTINGS_PATHS, legacyRedirect } from './legacy-redirect'
-import { NotFound, RebuildingPlaceholder, RoutePending } from './fallbacks'
+import { NotFound, RoutePending } from './fallbacks'
 import { RouteErrorBoundary } from './RouteErrorBoundary'
 
 /** Per-route metadata the shell reads (document title, current destination). */
@@ -29,10 +29,6 @@ function LegacyRedirect() {
   const { pathname, search, hash } = useLocation()
   const target = legacyRedirect(pathname, search) ?? '/chat'
   return <Navigate replace to={`${target}${hash}`} />
-}
-
-function Rebuilding({ titleKey }: { titleKey: MessageKey }) {
-  return <RebuildingPlaceholder name={t(titleKey)} />
 }
 
 // Destinations load in their own chunks.
@@ -75,7 +71,7 @@ function destination(
   path: string,
   dest: Destination,
   titleKey: MessageKey,
-  element: ReactNode = <Rebuilding titleKey={titleKey} />,
+  element: ReactNode,
 ): RouteObject {
   const handle: RouteHandle = { titleKey, destination: dest }
   return { path, element: <LegacyAware>{element}</LegacyAware>, handle }
