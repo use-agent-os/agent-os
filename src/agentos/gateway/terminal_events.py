@@ -174,9 +174,10 @@ def runtime_terminal_frame(
 
     A frame the stream parked while an abort held the run is preferred when it
     agrees with the outcome (a run that finished on its own keeps its ``done``
-    payload, usage and final text included). A cancelled run always ends with
-    ``done`` / ``state: aborted`` -- the frame every client already treats as
-    "stopped", rather than an error.
+    payload, usage and final text included; so does a turn that honoured a
+    cooperative abort and ended with an ``aborted`` done). A cancelled run
+    always ends with ``done`` / ``state: aborted`` -- the frame every client
+    already treats as "stopped", rather than an error.
     """
 
     identity = {"run_id": task_id, "task_id": task_id, "terminal_reason": terminal_reason}
@@ -184,8 +185,10 @@ def runtime_terminal_frame(
         event_name, payload = parked
         state = terminal_state(event_name, payload)
         agrees = (
-            status == "succeeded" and event_name == "session.event.done" and state == "done"
-        ) or (status in ("failed", "timeout", "abandoned") and state == "error")
+            (status == "succeeded" and event_name == "session.event.done" and state == "done")
+            or (status == "cancelled" and event_name == "session.event.done" and state == "aborted")
+            or (status in ("failed", "timeout", "abandoned") and state == "error")
+        )
         if agrees:
             return event_name, {**payload, **identity, "state": state}
     if status == "succeeded":

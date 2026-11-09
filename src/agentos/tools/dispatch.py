@@ -700,13 +700,15 @@ def build_tool_handler(
                     tool_use_id=tool_call.tool_use_id,
                     argument_keys=sorted(hook_decision.arguments),
                 )
-                # A rewrite is admitted like the model's own arguments, and the
-                # policy chain below runs on it: hooks cannot bypass either.
-                readmitted = _admit_arguments(
-                    dataclasses.replace(tool_call, arguments=dict(hook_decision.arguments)),
-                    registered,
-                    effective_ctx,
-                )
+                # A rewrite goes through every check the model's own arguments
+                # did -- unparsed ``_raw`` and copied projection placeholders
+                # are refused, then schema admission -- and the policy chain
+                # below runs on it: hooks cannot bypass any of them.
+                rewritten = dataclasses.replace(tool_call, arguments=dict(hook_decision.arguments))
+                refused = _check_non_executable_arguments(rewritten, effective_ctx)
+                if refused is not None:
+                    return refused
+                readmitted = _admit_arguments(rewritten, registered, effective_ctx)
                 if isinstance(readmitted, ToolResult):
                     return readmitted
                 tool_call = readmitted

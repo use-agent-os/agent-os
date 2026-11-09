@@ -19,7 +19,11 @@ from agentos.engine.types import DoneEvent, TextDeltaEvent
 from agentos.gateway import run_abort
 from agentos.gateway.rpc import get_dispatcher
 from agentos.gateway.session_streams import SessionStreamRegistry, get_session_streams
-from agentos.gateway.terminal_events import TerminalPublications, runtime_terminal_frame
+from agentos.gateway.terminal_events import (
+    TerminalPublications,
+    mark_aborted_done,
+    runtime_terminal_frame,
+)
 from agentos.gateway.websocket import get_registry
 
 TERMINALS = ("session.event.done", "session.event.error")
@@ -137,6 +141,31 @@ def test_runtime_terminal_frame(
     assert payload["task_id"] == "t1"
     if parked and status == "succeeded":
         assert payload["text"] == "all"
+
+
+def test_a_cooperatively_aborted_done_keeps_its_payload_when_held() -> None:
+    # The turn honoured the abort and ended with an aborted done while
+    # sessions.abort held the run: its text and usage are not thrown away.
+    parked = mark_aborted_done(
+        {
+            "text": "partial answer",
+            "usage": {"input_tokens": 12, "output_tokens": 3},
+            "outcome": {"kind": "interrupted", "reason": "cancelled"},
+        }
+    )
+
+    event, payload = runtime_terminal_frame(
+        "cancelled",
+        task_id="t1",
+        terminal_reason="cancelled",
+        parked=("session.event.done", parked),
+    )
+
+    assert event == "session.event.done"
+    assert payload["state"] == "aborted"
+    assert payload["text"] == "partial answer"
+    assert payload["usage"] == {"input_tokens": 12, "output_tokens": 3}
+    assert payload["task_id"] == "t1"
 
 
 # ── replay to a late subscriber ──────────────────────────────────────────

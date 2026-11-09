@@ -33,6 +33,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `docs/tools-and-sandbox.md`.
 
 ### Fixed
+- Stopping a turn now always ends it before anything else runs. A stop that
+  landed while the rest of a response was already buffered, after the
+  response had streamed, or while the turn waited to retry a provider error
+  could still run the response's tool calls or send another request.
+- A turn stopped after its reply was recorded repeated that reply in the
+  session history and in its final text.
+- A request hook's note was missing from the request when the context was
+  compacted just before it was sent.
+- The provider retry budget counted time spent on earlier successful
+  requests of the same step (for example a continuation after the output
+  cap), so a slow continuation followed by a rate limit could fail without
+  a retry.
+- Pilot Router steps of concurrent turns no longer wait on each other. They
+  shared one event loop, so a slow classify made other turns' routing time
+  out and run on the unrouted model.
+- A parent that closed its own spawn group (`sessions_yield`) hung until the
+  tool timed out: it waited for its wake, which is only enqueued after its
+  own turn ends. A finished child could also hold its session until the
+  parent's turn ended.
+- Parent wakes for children spawned outside a task were collapsed into one,
+  so only the first was delivered.
+- A stopped turn that ended on its own just before
+  `task_runtime.turn_cancel_grace_seconds` ran out could be cancelled while
+  recording its outcome, leaving anyone waiting on the run hanging.
+- A tool hook's rewrite could hand a tool an unparsed `_raw` payload or a
+  projection placeholder; it is now refused like the model's own arguments.
+- After `sessions.abort`, a turn that stopped on its own lost its final text
+  and usage from the terminal `done` frame.
 - A parent waiting on its child in the same turn (`sessions_yield` with a
   `session_key`) kept its slot. With the default reserved subagent slots,
   two such parents could leave their children no slot at all and both waited
