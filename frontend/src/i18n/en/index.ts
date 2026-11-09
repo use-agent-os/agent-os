@@ -24,6 +24,10 @@ import { webChat } from './webChat'
 import { webCommon } from './webCommon'
 import { webConnection } from './webConnection'
 import { webPalette } from './webPalette'
+import { webSetAccess } from './webSetAccess'
+import { webSetCapabilities } from './webSetCapabilities'
+import { webSetConfig } from './webSetConfig'
+import { webSetSystem } from './webSetSystem'
 import { webSettings } from './webSettings'
 import { webShell } from './webShell'
 
@@ -69,6 +73,10 @@ export const en = {
   webCommon,
   webConnection,
   webPalette,
+  webSetAccess,
+  webSetCapabilities,
+  webSetConfig,
+  webSetSystem,
   webSettings,
   webShell,
 } as const

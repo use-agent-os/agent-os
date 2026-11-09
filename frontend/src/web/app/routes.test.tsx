@@ -27,8 +27,6 @@ describe('web routes', () => {
     '/usage',
     '/automations',
     '/inbox',
-    '/settings',
-    '/settings/channels',
   ])('renders %s as a deep link without redirecting', async (path) => {
     const { router } = open(path)
     expect(await screen.findByText(/is being rebuilt/)).toBeInTheDocument()

@@ -39,6 +39,9 @@ function Rebuilding({ titleKey }: { titleKey: MessageKey }) {
 const ChatPage = lazy(async () => ({
   default: (await import('@/web/features/chat/ChatPage')).ChatPage,
 }))
+const SettingsPage = lazy(async () => ({
+  default: (await import('@/web/features/settings/SettingsPage')).SettingsPage,
+}))
 const ChatIndex = lazy(async () => ({
   default: (await import('@/web/features/chat/ChatPage')).ChatIndex,
 }))
@@ -83,8 +86,22 @@ export const DESTINATION_ROUTES: RouteObject[] = [
   destination('usage', 'usage', 'webShell.pageUsage'),
   destination('automations', 'automations', 'webShell.pageAutomations'),
   destination('inbox', 'inbox', 'webShell.pageInbox'),
-  destination('settings', 'settings', 'webShell.pageSettings'),
-  destination('settings/:section', 'settings', 'webShell.pageSettings'),
+  destination(
+    'settings',
+    'settings',
+    'webShell.pageSettings',
+    <Lazy>
+      <SettingsPage />
+    </Lazy>,
+  ),
+  destination(
+    'settings/:section',
+    'settings',
+    'webShell.pageSettings',
+    <Lazy>
+      <SettingsPage />
+    </Lazy>,
+  ),
 ]
 
 /** Every legacy top-level path that only redirects. */
