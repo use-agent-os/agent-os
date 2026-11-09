@@ -94,6 +94,103 @@ non-root mounts such as `/console/` work without rebuilding. Root, `/api`, and
   in the gateway's advertised `features.methods`. Names built at runtime are
   listed by hand.
 
+## Layout and routes
+
+The console is chat-first. On screens wider than 768 px it has three columns:
+
+- **Rail** (left edge): the agent switcher, **New session**, the **Sessions**
+  and **Pages** view buttons and **Search**; at the bottom **Home**, **Inbox**
+  (with a badge counting approvals, agent questions and runtime issues) and the
+  status menu (connection state, theme, keyboard shortcuts, Settings).
+- **List pane**: the Sessions list or the Pages catalog. Activate the selected
+  view's button again, or press Ctrl+B (⌘B on macOS), to collapse it. Drag its
+  edge (or focus the edge and use the arrow keys) to resize it; the width is
+  remembered by the browser. A fresh load always starts with the pane open.
+- **Main area**: the current route.
+
+The Sessions list shows every session from `sessions.list`, grouped **By date**
+(Pinned, Today, Yesterday, Previous 7 days, Older) or **By project** (Pinned,
+one section per project, No project). Each row is a link, so a middle-click or
+Ctrl/⌘-click opens the session in a new tab. A row shows the session's title
+(its name, else its derived title, else a label from its key), its channel and
+when it was last updated, plus a running indicator while a task is queued or
+running. Child sessions (subagents) are folded under their parent, which shows
+how many it has. The filter box matches titles and keys; the filter menu narrows
+by agent, channel or project; **Clear filters** resets them all. A row's ⋯ menu
+(also right-click, or Shift+F10 on a focused row) holds Open in new tab, Rename,
+Pin/Unpin (and Move up/down for pinned rows, which can also be dragged), Move to
+project, Reset, Export as Markdown, Copy session key and Delete (confirmed
+first). The list refreshes on `sessions.changed` and every 5 seconds while the
+tab is visible. Pins and the grouping choice are stored in the browser.
+
+Picking an agent in the rail's switcher makes it the default for New session
+and filters the Sessions list to it until the filter is cleared.
+
+At 768 px and below the rail and list pane become a drawer, opened from the
+header's menu button or a rightward swipe from the left edge. The header keeps
+a New session button.
+
+A pending approval from a session other than the one on screen appears in the
+approval tray at the bottom right of every page. It can collapse to a count but
+stays until every request is resolved.
+
+### Routes
+
+All routes live under the console base path (`/control` by default) and work as
+deep links, through reload and browser history.
+
+| Route | Shows |
+| --- | --- |
+| `/` | Redirects to `/chat` on every screen size. |
+| `/chat` | The last active session, or the default webchat session. |
+| `/chat/<agent>/<rest of key>` | One session. |
+| `/new` | New session. |
+| `/home` | Home: readiness, usage and live gateway activity. |
+| `/sessions` | Sessions: search, filter and manage every session. |
+| `/projects` | Projects. |
+| `/projects/<project>` | One project. |
+| `/usage` | Usage. |
+| `/automations` | Automations (scheduled jobs). |
+| `/inbox` | Inbox. |
+| `/settings` | Settings. |
+| `/settings/<section>` | One Settings section. |
+| `/mcp/oauth/callback` | Finishes MCP OAuth, then shows Settings › MCP. |
+
+A session key `agent:<agent>:<part>:<part>…` maps to
+`/chat/<agent>/<part>/<part>…`, with each part percent-encoded. Any other key,
+or one whose agent part is not a normalized agent id, maps to
+`/chat/~/<whole key, encoded>`.
+
+An unknown path shows a not-found page that names the path as plain text and
+links to Home and Chat.
+
+### Legacy URLs
+
+Links from the previous console redirect (replacing the history entry, so Back
+skips them) and keep the query parameters that still apply:
+
+| Old URL | New URL |
+| --- | --- |
+| `/overview` | `/home` |
+| `/cron` | `/automations` |
+| `/projects?project=<id>` | `/projects/<id>` |
+| `/chat?session=<key>` | `/chat/<agent>/<rest of key>` |
+| `/chat?agent=<agent>` | `/chat/<agent>/webchat/default` |
+| `/health` | `/settings/health` |
+| `/channels` | `/settings/channels` |
+| `/channels?view=setup` | `/settings/channels?setup=1` |
+| `/mcp` | `/settings/mcp` |
+| `/skills` | `/settings/skills` |
+| `/memory` | `/settings/memory` |
+| `/agents` | `/settings/agents` |
+| `/env` | `/settings/environment` |
+| `/logs` | `/settings/logs` |
+| `/approvals` | `/settings/approvals` |
+| `/config` | `/settings/advanced` |
+| `/setup` | `/settings/setup` |
+| `/settings?step=channels` | `/settings/channels?setup=1` |
+| `/settings?step=<step>` | `/settings/setup?step=<step>` |
+
 ## Main Areas
 
 | Area | Use it for |

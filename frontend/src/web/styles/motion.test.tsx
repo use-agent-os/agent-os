@@ -6,8 +6,8 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '../components/ui/dialog'
-import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '../components/ui/sheet'
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/web/components/ui/dialog'
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/web/components/ui/sheet'
 
 const baseCss = readFileSync('src/web/styles/base.css', 'utf8')
 const tokensCss = readFileSync('src/web/styles/tokens.css', 'utf8')

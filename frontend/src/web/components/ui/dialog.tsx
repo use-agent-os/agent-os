@@ -4,6 +4,7 @@ import * as React from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webCommon'
 import { cn } from '@/lib/utils'
+import { OverlayLayer } from './overlay-layer'
 
 export const Dialog = DialogPrimitive.Root
 export const DialogTrigger = DialogPrimitive.Trigger
@@ -42,6 +43,7 @@ export function DialogContent({
         )}
         {...props}
       >
+        <OverlayLayer />
         {children}
         {hideClose ? null : (
           <DialogPrimitive.Close

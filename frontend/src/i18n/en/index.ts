@@ -21,6 +21,8 @@ import { shell } from './shell'
 import { skills } from './skills'
 import { usage } from './usage'
 import { webCommon } from './webCommon'
+import { webSettings } from './webSettings'
+import { webShell } from './webShell'
 
 /**
  * Every English namespace in one object.
@@ -61,4 +63,6 @@ export const en = {
   skills,
   usage,
   webCommon,
+  webSettings,
+  webShell,
 } as const

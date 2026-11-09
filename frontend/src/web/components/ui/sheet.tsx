@@ -1,6 +1,7 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import * as React from 'react'
 import { cn } from '@/lib/utils'
+import { OverlayLayer } from './overlay-layer'
 
 // A side sheet: the mobile navigation drawer and the phone Details / side
 // panel sheets. A modal dialog underneath, so focus is trapped, the rest of the
@@ -14,6 +15,7 @@ export const SheetDescription = DialogPrimitive.Description
 
 export function SheetContent({
   className,
+  children,
   side = 'left',
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & { side?: 'left' | 'right' | 'bottom' }) {
@@ -38,7 +40,10 @@ export function SheetContent({
           className,
         )}
         {...props}
-      />
+      >
+        <OverlayLayer />
+        {children}
+      </DialogPrimitive.Content>
     </DialogPrimitive.Portal>
   )
 }

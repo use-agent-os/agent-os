@@ -1,6 +1,7 @@
 import * as AlertDialogPrimitive from '@radix-ui/react-alert-dialog'
 import * as React from 'react'
 import { cn } from '@/lib/utils'
+import { OverlayLayer } from './overlay-layer'
 import { buttonVariants } from './button'
 
 export const AlertDialog = AlertDialogPrimitive.Root
@@ -8,6 +9,7 @@ export const AlertDialogTrigger = AlertDialogPrimitive.Trigger
 
 export function AlertDialogContent({
   className,
+  children,
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Content>) {
   return (
@@ -21,7 +23,10 @@ export function AlertDialogContent({
           className,
         )}
         {...props}
-      />
+      >
+        <OverlayLayer />
+        {children}
+      </AlertDialogPrimitive.Content>
     </AlertDialogPrimitive.Portal>
   )
 }
