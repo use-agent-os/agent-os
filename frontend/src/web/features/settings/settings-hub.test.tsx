@@ -299,4 +299,20 @@ describe('appearance', () => {
       expect(group.parentElement?.className).toMatch(/(^|\s)py-3(\s|$)/)
     }
   })
+
+  it('centres each segmented item in its touch target and marks the choice in forced colors', async () => {
+    renderShell('/settings/appearance', settingsRpc())
+    const group = await screen.findByRole('group', { name: 'Theme' })
+    // `target` grows an item to 44px on touch screens; the text sat at its top.
+    for (const radio of within(group).getAllByRole('radio')) {
+      const item = radio.closest('label') as HTMLElement
+      expect(item.className).toMatch(/(^|\s)target(\s|$)/)
+      expect(item.className).toMatch(/(^|\s)inline-flex(\s|$)/)
+      expect(item.className).toMatch(/(^|\s)items-center(\s|$)/)
+    }
+    const chosen = within(group)
+      .getAllByRole('radio')
+      .find((r) => (r as HTMLInputElement).checked)
+    expect(chosen?.closest('label')?.className).toMatch(/forced-colors:bg-\[Highlight\]/)
+  })
 })

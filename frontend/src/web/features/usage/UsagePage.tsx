@@ -30,6 +30,7 @@ import {
   type UsageRow,
 } from '@/views/usage/logic'
 import { Button } from '@/web/components/ui/button'
+import { PageHeader } from '@/web/components/ui/page-header'
 import {
   EmptyState,
   ErrorState,
@@ -495,38 +496,38 @@ export function UsagePage() {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 md:p-8">
-      <header className="flex flex-wrap items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-semibold">{t('webPagesOverview.usageTitle')}</h1>
-            {connection !== 'connected' && all ? <StaleBadge /> : null}
-          </div>
-          <p className="text-text-muted">{t('webPagesOverview.usageSubtitle')}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            disabled={exportGate.disabled}
-            title={exportGate.reason ?? undefined}
-            onClick={exportCsv}
-          >
-            <Download aria-hidden />
-            {t('webPagesOverview.usageExport')}
-          </Button>
-          <Button
-            variant="outline"
-            disabled={refresh.disabled || query.isFetching}
-            title={refresh.reason ?? undefined}
-            onClick={() => void query.refetch()}
-          >
-            <RefreshCw className={query.isFetching ? 'animate-spin' : undefined} aria-hidden />
-            {t('webPagesOverview.refresh')}
-          </Button>
-        </div>
-        {refresh.reason || (all && exportGate.reason) ? (
-          <p className="w-full text-small text-text-muted">{refresh.reason ?? exportGate.reason}</p>
-        ) : null}
-      </header>
+      <PageHeader
+        title={t('webPagesOverview.usageTitle')}
+        badge={connection !== 'connected' && all ? <StaleBadge /> : null}
+        description={t('webPagesOverview.usageSubtitle')}
+        actions={
+          <>
+            <Button
+              variant="outline"
+              disabled={exportGate.disabled}
+              title={exportGate.reason ?? undefined}
+              onClick={exportCsv}
+            >
+              <Download aria-hidden />
+              {t('webPagesOverview.usageExport')}
+            </Button>
+            <Button
+              variant="outline"
+              disabled={refresh.disabled || query.isFetching}
+              title={refresh.reason ?? undefined}
+              onClick={() => void query.refetch()}
+            >
+              <RefreshCw className={query.isFetching ? 'animate-spin' : undefined} aria-hidden />
+              {t('webPagesOverview.refresh')}
+            </Button>
+          </>
+        }
+        footer={
+          refresh.reason || (all && exportGate.reason) ? (
+            <p className="text-small text-text-muted">{refresh.reason ?? exportGate.reason}</p>
+          ) : null
+        }
+      />
 
       <div
         role="group"

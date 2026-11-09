@@ -62,6 +62,7 @@ import {
   AlertDialogTitle,
 } from '@/web/components/ui/alert-dialog'
 import { Button } from '@/web/components/ui/button'
+import { PageHeader } from '@/web/components/ui/page-header'
 import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import { AutomationEditor, type SaveRequest } from './AutomationEditor'
@@ -410,12 +411,10 @@ export function AutomationsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 md:p-6">
-      <div className="flex flex-wrap items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <h1 className="text-xl font-semibold">{t('webPagesWork.automationsTitle')}</h1>
-          <p className="text-text-muted">{t('webPagesWork.automationsSubtitle')}</p>
-        </div>
-        <div className="flex flex-col items-end gap-1">
+      <PageHeader
+        title={t('webPagesWork.automationsTitle')}
+        description={t('webPagesWork.automationsSubtitle')}
+        actions={
           <Button
             variant="primary"
             aria-describedby={control.reason ? reasonId : undefined}
@@ -424,13 +423,15 @@ export function AutomationsPage() {
             <Plus />
             {t('webPagesWork.automationsNew')}
           </Button>
-          {control.reason ? (
+        }
+        note={
+          control.reason ? (
             <span id={reasonId} className="text-small text-text-muted">
               {control.reason}
             </span>
-          ) : null}
-        </div>
-      </div>
+          ) : null
+        }
+      />
       {jobs.isError ? (
         <ErrorState
           title={t('webPagesWork.automationsLoadFailed')}

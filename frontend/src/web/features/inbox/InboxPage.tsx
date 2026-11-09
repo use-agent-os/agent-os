@@ -25,6 +25,7 @@ import { useAttentionInbox } from '@/lib/useAttentionInbox'
 import { cn } from '@/lib/utils'
 import { approvalMonitor, useApprovals } from '@/services/approval-monitor'
 import { Button } from '@/web/components/ui/button'
+import { PageHeader } from '@/web/components/ui/page-header'
 import { EmptyState, StaleBadge } from '@/web/components/ui/states'
 import { sendOnce } from '@/web/features/chat/send'
 import { ApprovalCard } from '@/web/shell/ApprovalTray'
@@ -390,19 +391,17 @@ export function InboxPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 p-4 md:p-8">
-      <header className="flex flex-wrap items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-semibold">{t('webPagesOverview.inboxTitle')}</h1>
-            {!live && everConnected ? <StaleBadge /> : null}
-          </div>
-          <p className="text-text-muted">{t('webPagesOverview.inboxSubtitle')}</p>
-        </div>
-        <Button variant="outline" disabled={rechecking} onClick={() => void recheck()}>
-          <RefreshCw className={rechecking ? 'animate-spin' : undefined} aria-hidden />
-          {t('webPagesOverview.inboxRecheck')}
-        </Button>
-      </header>
+      <PageHeader
+        title={t('webPagesOverview.inboxTitle')}
+        badge={!live && everConnected ? <StaleBadge /> : null}
+        description={t('webPagesOverview.inboxSubtitle')}
+        actions={
+          <Button variant="outline" disabled={rechecking} onClick={() => void recheck()}>
+            <RefreshCw className={rechecking ? 'animate-spin' : undefined} aria-hidden />
+            {t('webPagesOverview.inboxRecheck')}
+          </Button>
+        }
+      />
 
       <dl
         aria-label={t('webPagesOverview.inboxSummary')}

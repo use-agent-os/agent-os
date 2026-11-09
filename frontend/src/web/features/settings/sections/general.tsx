@@ -49,13 +49,20 @@ function ChoiceRow<V extends string>({
       <fieldset data-field-id={id} className="flex flex-col gap-1">
         <legend className="font-medium">{label}</legend>
         {help ? <p className="text-small text-text-muted">{help}</p> : null}
-        <div className="mt-1 inline-flex w-fit rounded-md border border-border-control p-0.5">
+        <div
+          data-segmented
+          className="mt-1 inline-flex w-fit rounded-md border border-border-control p-0.5"
+        >
           {options.map((option) => (
+            // `target` grows the item to 44px on touch screens: centre the text in it.
+            // Forced colors drop the fill, so the chosen item takes the system highlight.
             <label
               key={option.value}
               className={cn(
-                'target cursor-pointer rounded px-3 py-1 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent',
-                value === option.value ? 'bg-surface-3 font-medium' : 'hover:bg-surface-2',
+                'target inline-flex cursor-pointer items-center justify-center rounded px-3 py-1 has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent',
+                value === option.value
+                  ? 'bg-surface-3 font-medium forced-colors:bg-[Highlight] forced-colors:text-[HighlightText] forced-colors:forced-color-adjust-none'
+                  : 'hover:bg-surface-2',
               )}
             >
               <input

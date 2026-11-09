@@ -27,6 +27,7 @@ import {
 } from '@/views/overview/logic'
 import { formatCost, sessionTimestamp, usageMetrics, type UsageRow } from '@/views/usage/logic'
 import { Button } from '@/web/components/ui/button'
+import { PageHeader } from '@/web/components/ui/page-header'
 import { ErrorState, LoadingRegion, Skeleton, StaleBadge } from '@/web/components/ui/states'
 import { useDocumentVisible, useSessionsList } from '@/web/shell/session-data'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
@@ -338,35 +339,33 @@ export function HomePage() {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 md:p-8">
-      <header className="flex flex-wrap items-start gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-semibold">{t('webPagesOverview.homeTitle')}</h1>
-            {offline && anyData ? <StaleBadge /> : null}
-          </div>
-          <p className="text-text-muted">{t('webPagesOverview.homeSubtitle')}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            disabled={refresh.disabled || refreshing}
-            title={refresh.reason ?? undefined}
-            onClick={refreshAll}
-          >
-            <RefreshCw className={refreshing ? 'animate-spin' : undefined} aria-hidden />
-            {t('webPagesOverview.refresh')}
-          </Button>
-          <Button variant="primary" asChild>
-            <Link to="/new">
-              <Plus aria-hidden />
-              {t('webPagesOverview.homeNewSession')}
-            </Link>
-          </Button>
-        </div>
-        {refresh.reason ? (
-          <p className="w-full text-small text-text-muted">{refresh.reason}</p>
-        ) : null}
-      </header>
+      <PageHeader
+        title={t('webPagesOverview.homeTitle')}
+        badge={offline && anyData ? <StaleBadge /> : null}
+        description={t('webPagesOverview.homeSubtitle')}
+        actions={
+          <>
+            <Button
+              variant="outline"
+              disabled={refresh.disabled || refreshing}
+              title={refresh.reason ?? undefined}
+              onClick={refreshAll}
+            >
+              <RefreshCw className={refreshing ? 'animate-spin' : undefined} aria-hidden />
+              {t('webPagesOverview.refresh')}
+            </Button>
+            <Button variant="primary" asChild>
+              <Link to="/new">
+                <Plus aria-hidden />
+                {t('webPagesOverview.homeNewSession')}
+              </Link>
+            </Button>
+          </>
+        }
+        footer={
+          refresh.reason ? <p className="text-small text-text-muted">{refresh.reason}</p> : null
+        }
+      />
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <Figure

@@ -48,6 +48,7 @@ import {
   AlertDialogTitle,
 } from '@/web/components/ui/alert-dialog'
 import { Button } from '@/web/components/ui/button'
+import { PageHeader } from '@/web/components/ui/page-header'
 import {
   Dialog,
   DialogContent,
@@ -234,12 +235,10 @@ export function SessionsPage() {
   }
 
   const header = (
-    <div className="flex flex-wrap items-start gap-3">
-      <div className="min-w-0 flex-1">
-        <h1 className="text-xl font-semibold">{t('webPagesWork.sessionsTitle')}</h1>
-        <p className="text-text-muted">{t('webPagesWork.sessionsSubtitle')}</p>
-      </div>
-      <div className="flex flex-col items-end gap-1">
+    <PageHeader
+      title={t('webPagesWork.sessionsTitle')}
+      description={t('webPagesWork.sessionsSubtitle')}
+      actions={
         <Button
           variant="primary"
           disabled={act.disabled}
@@ -249,13 +248,15 @@ export function SessionsPage() {
           <Plus />
           {t('webPagesWork.sessionsNew')}
         </Button>
-        {act.reason ? (
+      }
+      note={
+        act.reason ? (
           <span id={reasonId} className="text-small text-text-muted">
             {act.reason}
           </span>
-        ) : null}
-      </div>
-    </div>
+        ) : null
+      }
+    />
   )
 
   let body: ReactNode

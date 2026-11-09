@@ -299,6 +299,50 @@ async function offViewportControls(page) {
   }, CONTROL_SELECTOR)
 }
 
+/**
+ * Layout defects seen in screenshot reviews:
+ * - a page header description squeezed into a narrow column beside the
+ *   actions on a phone (below `sm`, a wrapping one must keep >= 60% of the
+ *   viewport);
+ * - a segmented item whose text sits at the top of its (44px touch) box
+ *   instead of in the middle (+-3px).
+ */
+async function layoutDefects(page) {
+  return page.evaluate(() => {
+    const out = []
+    if (window.innerWidth < 640) {
+      for (const d of document.querySelectorAll(
+        // Structural as well as the marker, so a page that skips PageHeader is checked too.
+        '[data-page-header-description], main h1 + p, main div:has(> h1) + p',
+      )) {
+        const w = d.getBoundingClientRect().width
+        // A short line shrink-wrapped in a centred message is fine; squeezed and wrapping is not.
+        const range = document.createRange()
+        range.selectNodeContents(d)
+        const lines = new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size
+        if (w > 0 && w < window.innerWidth * 0.6 && lines > 1) {
+          out.push(`page-header description ${Math.round(w)}px < 60% of ${window.innerWidth}px, ${lines} lines`)
+        }
+      }
+    }
+    for (const item of document.querySelectorAll('[data-segmented] > label, label:has(> input[type=radio].sr-only)')) {
+      const box = item.getBoundingClientRect()
+      if (box.height === 0) continue
+      const range = document.createRange()
+      range.selectNodeContents(item)
+      const lines = [...range.getClientRects()].filter((r) => r.width > 1 && r.height > 1)
+      if (!lines.length) continue
+      const top = Math.min(...lines.map((r) => r.top))
+      const bottom = Math.max(...lines.map((r) => r.bottom))
+      const off = (top + bottom) / 2 - (box.top + box.bottom) / 2
+      if (Math.abs(off) > 3) {
+        out.push(`segmented "${item.textContent.trim()}" text ${off.toFixed(1)}px off centre in ${Math.round(box.height)}px`)
+      }
+    }
+    return out
+  })
+}
+
 /** Interactive controls under 24x24 at the current viewport (WCAG 2.5.8). */
 async function smallTargets(page) {
   return page.evaluate((sel) => {
@@ -427,6 +471,7 @@ async function auditMatrix(browser, projectId) {
           await settle(page)
           Object.assign(entry, await pageMetrics(page))
           entry.offViewport = await offViewportControls(page)
+          entry.layout = await layoutDefects(page)
           const shot = path.join(OUT, `${route.id}-${vp.name}-${theme}.png`)
           entry.screenshot = shot
           const violations = await runAxe(page)
@@ -455,6 +500,7 @@ async function auditMatrix(browser, projectId) {
         if (entry.offViewport && entry.offViewport.length) {
           problems.push(`controls outside the viewport/clip box: ${entry.offViewport.join(' || ')}`)
         }
+        if (entry.layout && entry.layout.length) problems.push(`layout: ${entry.layout.join(' || ')}`)
         if (entry.collapsed && entry.collapsed.length) problems.push(`content clipped to 0px: ${entry.collapsed.join(' || ')}`)
         if (diag.consoleErrors.length) problems.push(`console: ${diag.consoleErrors.join(' || ')}`)
         if (diag.pageErrors.length) problems.push(`pageerror: ${diag.pageErrors.join(' || ')}`)
@@ -1024,13 +1070,14 @@ async function auditForcedColors(browser) {
         await settle(page)
         const shot = path.join(OUT, `forced-colors-${id}-${vp.name}.png`)
         Object.assign(entry, await page.evaluate(FORCED_CHECK))
+        entry.layout = await layoutDefects(page)
         await fullScreenshot(page, shot)
         entry.screenshot = shot
       } catch (error) {
         entry.error = String(error.message || error)
       }
-      entry.pass = !entry.error && entry.forced === true && entry.bad.length === 0
-      if (!entry.pass) fail('forcedColors', { route: id, viewport: vp.name, error: entry.error, forced: entry.forced, bad: entry.bad })
+      entry.pass = !entry.error && entry.forced === true && entry.bad.length === 0 && !(entry.layout || []).length
+      if (!entry.pass) fail('forcedColors', { route: id, viewport: vp.name, error: entry.error, forced: entry.forced, bad: entry.bad, layout: entry.layout })
       results.forcedColors.push(entry)
     }
     await context.close()
