@@ -56,6 +56,19 @@ const FILL_PAIRS: [string, string][] = [
   ['--info-fg', '--info'],
 ]
 
+// Syntax-highlight colours on the code-block background (chat spec "Code
+// block in light theme").
+const CODE_TOKENS = [
+  '--code-text',
+  '--hl-keyword',
+  '--hl-string',
+  '--hl-number',
+  '--hl-comment',
+  '--hl-title',
+  '--hl-attr',
+  '--hl-builtin',
+]
+
 interface Violation {
   pair: string
   ratio: number
@@ -73,6 +86,7 @@ function contractViolations(css: string, theme: Theme): Violation[] {
   for (const fg of ['--border-control', '--ring'])
     for (const bg of CONTROL_SURFACES) check(fg, bg, 3)
   for (const [fg, bg] of FILL_PAIRS) check(fg, bg, 4.5)
+  for (const fg of CODE_TOKENS) check(fg, '--code-bg', 4.5)
   return out
 }
 

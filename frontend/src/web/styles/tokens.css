@@ -38,6 +38,15 @@
 
   --ring: var(--accent);
   --scrim: rgb(0 0 0 / 0.6);
+  --code-bg: #121418;
+  --code-text: #e4e7eb;
+  --hl-keyword: #f47ba5;
+  --hl-string: #9be28b;
+  --hl-number: #f2b36a;
+  --hl-comment: #949ca8;
+  --hl-title: #7cc4ff;
+  --hl-attr: #c9a6ff;
+  --hl-builtin: #6fd6d0;
   --shadow-color: 0 0% 0%;
 }
 
@@ -68,6 +77,15 @@
 
   --ring: var(--accent);
   --scrim: rgb(22 24 29 / 0.4);
+  --code-bg: #f3f4ef;
+  --code-text: #1f2328;
+  --hl-keyword: #b0215c;
+  --hl-string: #2b6d1f;
+  --hl-number: #8a4b00;
+  --hl-comment: #5e6670;
+  --hl-title: #1f5fa8;
+  --hl-attr: #6d3fc0;
+  --hl-builtin: #0b6b66;
   --shadow-color: 220 10% 20%;
 }
 

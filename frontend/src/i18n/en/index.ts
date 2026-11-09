@@ -20,6 +20,7 @@ import { setup } from './setup'
 import { shell } from './shell'
 import { skills } from './skills'
 import { usage } from './usage'
+import { webChat } from './webChat'
 import { webCommon } from './webCommon'
 import { webConnection } from './webConnection'
 import { webPalette } from './webPalette'
@@ -64,6 +65,7 @@ export const en = {
   shell,
   skills,
   usage,
+  webChat,
   webCommon,
   webConnection,
   webPalette,
