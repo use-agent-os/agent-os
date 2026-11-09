@@ -7,6 +7,7 @@ restart, and is never delivered twice for the same spawn group.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from types import SimpleNamespace
 from typing import Any
@@ -169,8 +170,8 @@ async def test_a_transient_failure_is_retried_by_the_worker(storage: SessionStor
     assert row["state"] == "pending" and row["attempts"] == 1
     assert "draining" in row["last_error"]
 
-    async def deliver(pending: dict[str, Any]) -> None:
-        await subagent_announce.deliver_pending_wake(pending, task_runtime=runtime)
+    async def deliver(pending: dict[str, Any], report: Any) -> None:
+        await subagent_announce.deliver_pending_wake(pending, report, task_runtime=runtime)
 
     worker = SubagentWakeWorker(outbox, deliver)
     assert await worker.run_once() == 0  # not due yet: backoff
@@ -219,8 +220,8 @@ async def test_a_wake_cut_off_by_a_restart_is_sent_by_the_next_process(
     second = _install(storage, clock)  # new process: empty in-flight set
     runtime = _Runtime()
 
-    async def deliver(pending: dict[str, Any]) -> None:
-        await subagent_announce.deliver_pending_wake(pending, task_runtime=runtime)
+    async def deliver(pending: dict[str, Any], report: Any) -> None:
+        await subagent_announce.deliver_pending_wake(pending, report, task_runtime=runtime)
 
     worker = SubagentWakeWorker(second, deliver)
     assert await worker.run_once() == 0  # the first sender's lease is still running
@@ -240,14 +241,14 @@ async def test_the_worker_does_not_resend_a_wake_this_process_is_sending(
     clock.advance(CLAIM_LEASE_S + 60)
     calls: list[str] = []
 
-    async def deliver(pending: dict[str, Any]) -> None:
+    async def deliver(pending: dict[str, Any], report: Any) -> None:
         calls.append(pending["group_key"])
 
     assert await SubagentWakeWorker(outbox, deliver).run_once() == 0
     assert calls == []
 
 
-async def test_completion_manager_path_waits_for_the_runtime_to_accept(
+async def test_completion_manager_path_records_the_runtime_outcome(
     storage: SessionStorage,
 ) -> None:
     _install(storage, _Clock())
@@ -270,8 +271,13 @@ async def test_completion_manager_path_waits_for_the_runtime_to_accept(
 
     ok = _Manager(None)
     subagent_announce.set_background_completion_manager(ok)
-    await subagent_announce.deliver_pending_wake(row, task_runtime=_Runtime())
+    outbox = subagent_announce.get_wake_outbox()
+    assert outbox is not None
+    await subagent_announce.deliver_pending_wake(
+        row, outbox.reporter(PARENT, TASK), task_runtime=_Runtime()
+    )
     assert ok.calls == 1
+    assert (await _row(storage))["state"] == "delivered"
 
 
 async def test_an_aborted_parent_group_is_dropped_and_never_woken(
@@ -294,3 +300,166 @@ async def test_without_an_outbox_the_previous_behaviour_is_kept() -> None:
 
     with pytest.raises(RuntimeError):
         await _send_parent_wake(PARENT, TASK, PAYLOADS, task_runtime=runtime)
+
+
+# ------------------------------------------------------- review regressions
+
+
+async def test_sending_never_waits_for_the_parent_task_to_release(
+    storage: SessionStorage,
+) -> None:
+    # The completion manager enqueues the wake only once the parent's task has
+    # released. The sender can be that very task (a parent closing its spawn
+    # group from sessions_yield): waiting for the outcome deadlocked it.
+    clock = _Clock()
+    outbox = _install(storage, clock)
+
+    class _DeferringManager:
+        def __init__(self) -> None:
+            self.reports: list[Any] = []
+
+        async def send_parent_wake(self, *, on_enqueue_result: Any = None, **_: Any) -> None:
+            self.reports.append(on_enqueue_result)  # called once the parent released
+
+    manager = _DeferringManager()
+    await asyncio.wait_for(
+        _send_parent_wake(
+            PARENT, TASK, PAYLOADS, task_runtime=_Runtime(), completion_manager=manager
+        ),
+        timeout=1,
+    )
+
+    assert (await _row(storage))["state"] == "pending"
+    clock.advance(CLAIM_LEASE_S + 60)
+    calls: list[str] = []
+
+    async def deliver(pending: dict[str, Any], report: Any) -> None:
+        calls.append(pending["group_key"])
+
+    assert await SubagentWakeWorker(outbox, deliver).run_once() == 0  # still ours
+    assert calls == []
+
+    await manager.reports[0](None)  # the parent released; the runtime took it
+    assert (await _row(storage))["state"] == "delivered"
+
+
+async def test_a_parent_closing_its_own_group_is_not_deadlocked(
+    storage: SessionStorage,
+) -> None:
+    # The real runtime and completion manager: the parent's own turn sends the
+    # wake for its group; the wake is enqueued after that turn ends.
+    from agentos.gateway.background_completion import BackgroundCompletionManager
+    from agentos.gateway.routing import RouteEnvelope, SourceKind
+    from agentos.gateway.task_runtime import TaskRuntime
+
+    _install(storage, _Clock())
+    manager = BackgroundCompletionManager(session_manager=SimpleNamespace())
+    runs: list[str] = []
+    returned: list[bool] = []
+
+    class _Records:
+        def __init__(self) -> None:
+            self.rows: dict[str, Any] = {}
+
+        async def create_agent_task(self, record: Any) -> None:
+            self.rows[record.task_id] = record
+
+        async def get_agent_task(self, task_id: str) -> Any:
+            return self.rows.get(task_id)
+
+        async def list_agent_tasks(self, **_: Any) -> list[Any]:
+            return list(self.rows.values())
+
+        async def update_agent_task(self, task_id: str, **fields: Any) -> None:
+            record = self.rows.get(task_id)
+            if record is not None:
+                for key, value in fields.items():
+                    setattr(record, key, value)
+
+    runtime: TaskRuntime
+
+    async def handler(run: Any) -> None:
+        runs.append(run.message)
+        if len(runs) == 1:
+            await asyncio.wait_for(
+                _send_parent_wake(
+                    PARENT,
+                    run.task_id,
+                    PAYLOADS,
+                    task_runtime=runtime,
+                    completion_manager=manager,
+                ),
+                timeout=2,
+            )
+            returned.append(True)
+
+    runtime = TaskRuntime(storage=_Records(), turn_handler=handler)
+    handle = await runtime.enqueue(
+        RouteEnvelope(
+            source_kind=SourceKind.SYSTEM,
+            source_name="test",
+            agent_id="main",
+            session_key=PARENT,
+        ),
+        "spawn, then yield",
+        run_kind="default",
+    )
+    await runtime.wait(handle.task_id, timeout=5)
+
+    assert returned == [True]
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 3
+    while len(runs) < 2:
+        assert loop.time() < deadline, "the wake was never enqueued"
+        await asyncio.sleep(0.01)
+    row = await storage.get_subagent_wake(group_key(PARENT, handle.task_id))
+    assert row is not None and row["state"] == "delivered"
+    await manager.close(timeout=1)
+
+
+async def test_wakes_without_a_parent_task_are_not_collapsed(storage: SessionStorage) -> None:
+    # Without a parent task there is no spawn group to key a row by; every
+    # such wake is sent, as before the outbox.
+    _install(storage, _Clock())
+    runtime = _Runtime()
+
+    for _ in range(3):
+        await _send_parent_wake(PARENT, None, PAYLOADS, task_runtime=runtime)
+
+    assert len(runtime.sent) == 3
+    assert await storage.get_subagent_wake(group_key(PARENT, None)) is None
+
+
+async def test_a_row_dropped_during_delivery_stays_dropped(storage: SessionStorage) -> None:
+    outbox = _install(storage, _Clock())
+    await outbox.claim(
+        parent_session_key=PARENT, parent_task_id=TASK, message="m", provenance={}, payloads=[]
+    )
+    await outbox.drop(parent_session_key=PARENT, parent_task_id=TASK, reason="parent_aborted")
+
+    await outbox.delivered(PARENT, TASK)
+
+    row = await _row(storage)
+    assert row["state"] == "dropped" and row["reason"] == "parent_aborted"
+
+
+async def test_a_cancelled_sender_leaves_the_wake_to_the_worker(storage: SessionStorage) -> None:
+    clock = _Clock()
+    outbox = _install(storage, clock)
+
+    class _Cancelling(_Runtime):
+        async def send(self, session_key: str, message: str, **kwargs: Any) -> Any:
+            raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await _send_parent_wake(PARENT, TASK, PAYLOADS, task_runtime=_Cancelling())
+
+    runtime = _Runtime()
+
+    async def deliver(pending: dict[str, Any], report: Any) -> None:
+        await subagent_announce.deliver_pending_wake(pending, report, task_runtime=runtime)
+
+    clock.advance(CLAIM_LEASE_S)
+    assert await SubagentWakeWorker(outbox, deliver).run_once() == 1
+    assert len(runtime.sent) == 1
+    assert (await _row(storage))["state"] == "delivered"

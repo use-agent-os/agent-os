@@ -258,6 +258,9 @@ class _RuntimeTask:
     #: Set once the task reached ``running``: only a run that started has a
     #: stream, so only it owes a terminal stream frame.
     started: bool = False
+    #: Set once the turn handler returned or raised. From then on the task only
+    #: does its terminal bookkeeping, which a cancel must not cut short.
+    turn_settled: bool = False
     #: Writes the user message when the task is taken or starts, instead of
     #: at send time (a ``steer`` message lands where the model meets it).
     deferred_input: DeferredUserInput | None = None
@@ -773,7 +776,9 @@ class TaskRuntime:
                 task.cancel_source = _clean_cancel_detail(source, "unknown")
                 task.stop_signal.shutdown = False
                 task.cancel_reason = _clean_cancel_detail(reason, "cancelled")
-                if task.asyncio_task is None or task.asyncio_task.done():
+                if task.asyncio_task is None or task.asyncio_task.done() or task.turn_settled:
+                    # Nothing left to stop: a settled turn only records its
+                    # outcome, and cancelling that leaves waiters hanging.
                     continue
                 signal = task.stop_signal
                 if (
@@ -801,7 +806,11 @@ class TaskRuntime:
         try:
             await asyncio.wait_for(asyncio.shield(running), timeout=self._cancel_grace_s)
         except TimeoutError:
-            if not running.done():
+            # Only a turn still running is cancelled: one that honoured the
+            # abort near the deadline may be recording its outcome now, and a
+            # cancel there would skip ``done`` (waiters hang) or cut the
+            # subagent announce short.
+            if not running.done() and not task.turn_settled:
                 running.cancel()
         except BaseException:  # noqa: BLE001 - the task's own outcome is not ours to raise
             return
@@ -1403,11 +1412,14 @@ class TaskRuntime:
                         stream_event_sink=task.stream_event_sink,
                         terminal_publications=self._terminal_publications,
                     )
-                    await self._run_turn_handler_with_write_lock_bypass(
-                        run,
-                        write_lock=write_lock,
-                        steering=_TaskSteeringSource(self, task),
-                    )
+                    try:
+                        await self._run_turn_handler_with_write_lock_bypass(
+                            run,
+                            write_lock=write_lock,
+                            steering=_TaskSteeringSource(self, task),
+                        )
+                    finally:
+                        task.turn_settled = True
                     if heartbeat_task is not None:
                         await self._stop_running_heartbeat(heartbeat_task)
                         heartbeat_task = None
@@ -1610,15 +1622,11 @@ class TaskRuntime:
             )
         finally:
             if parent is not None:
+                # Leave the queue synchronously: taking the lock first could be
+                # interrupted by a second cancel, leaving a dead head that
+                # blocks this parent's later children for good.
+                self._leave_parent_queue(parent, task.task_id)
                 async with cond:
-                    queue = self._parent_queue.get(parent)
-                    if queue is not None:
-                        try:
-                            queue.remove(task.task_id)
-                        except ValueError:
-                            pass
-                        if not queue:
-                            self._parent_queue.pop(parent, None)
                     cond.notify_all()
 
         # Update storage and emit running metric outside the condition lock.
@@ -1628,6 +1636,17 @@ class TaskRuntime:
             value=1,
             session_key=task.envelope.session_key,
         )
+
+    def _leave_parent_queue(self, parent: str, task_id: str) -> None:
+        queue = self._parent_queue.get(parent)
+        if queue is None:
+            return
+        try:
+            queue.remove(task_id)
+        except ValueError:
+            pass
+        if not queue:
+            self._parent_queue.pop(parent, None)
 
     async def _children_limit_for(self, parent_session_key: str) -> int | None:
         limit = self._max_concurrent_children

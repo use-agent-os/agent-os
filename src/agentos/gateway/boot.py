@@ -3042,8 +3042,8 @@ async def start_gateway_server(
         _wake_outbox = SubagentWakeOutbox(_wake_storage)
         set_wake_outbox(_wake_outbox)
 
-        async def _deliver_pending_wake(row: dict[str, Any]) -> None:
-            await deliver_pending_wake(row, task_runtime=task_runtime)
+        async def _deliver_pending_wake(row: dict[str, Any], report: Any) -> None:
+            await deliver_pending_wake(row, report, task_runtime=task_runtime)
 
         subagent_wake_worker = SubagentWakeWorker(_wake_outbox, _deliver_pending_wake)
 

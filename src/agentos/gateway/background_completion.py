@@ -282,6 +282,10 @@ class BackgroundCompletionManager:
                 stream_event_sink=stream_collector,
             )
         except Exception as exc:  # noqa: BLE001 - failure becomes a group event.
+            # Free the group before reporting: a retry the report schedules
+            # must start a new wake, not be taken as already waking.
+            async with self._state_lock:
+                self._wake_groups.discard(group_id)
             await _report(on_enqueue_result, exc)
             error_class, error_message = sanitize_agent_error(
                 {
@@ -300,8 +304,6 @@ class BackgroundCompletionManager:
                 error_class=error_class,
                 error_message=error_message,
             )
-            async with self._state_lock:
-                self._wake_groups.discard(group_id)
             return
 
         await _report(on_enqueue_result, None)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 from collections.abc import Awaitable, Callable
@@ -11,7 +10,7 @@ from typing import Any
 import structlog
 
 from agentos.gateway.session_lifecycle import session_status_for_task_status
-from agentos.gateway.subagent_wakes import get_wake_outbox
+from agentos.gateway.subagent_wakes import Report, get_wake_outbox
 from agentos.gateway.task_runtime import SubagentCompletionEvent
 from agentos.session.models import AgentTaskStatus
 from agentos.session.terminal_reply import is_context_payload_too_large, sanitize_agent_error
@@ -191,7 +190,7 @@ async def announce_subagent_completion(
         if event.cancel_source in _PARENT_ABORT_CANCEL_SOURCES:
             # Recorded on the parent above; the parent itself was aborted.
             outbox = get_wake_outbox()
-            if outbox is not None:
+            if outbox is not None and parent_task_id:
                 await outbox.drop(
                     parent_session_key=event.parent_session_key,
                     parent_task_id=parent_task_id,
@@ -973,9 +972,11 @@ async def _send_parent_wake(
         return
 
     outbox = get_wake_outbox()
-    if outbox is not None:
+    if outbox is not None and parent_task_id:
         # Durable path: record first, so a failure or a restart does not lose
-        # the wake and a second delivery of the same group is refused.
+        # the wake and a second delivery of the same group is refused. (A wake
+        # without a parent task has no spawn group to key it by: it is sent
+        # directly below, as before the outbox.)
         if not await outbox.claim(
             parent_session_key=parent_session_key,
             parent_task_id=parent_task_id,
@@ -986,6 +987,7 @@ async def _send_parent_wake(
             return
         if group_key is not None:
             _tracker.mark_woken(group_key)
+        report = outbox.reporter(parent_session_key, parent_task_id)
         try:
             await _deliver_wake(
                 parent_session_key,
@@ -995,11 +997,15 @@ async def _send_parent_wake(
                 provenance=provenance,
                 task_runtime=task_runtime,
                 completion_manager=completion_manager,
+                report=report,
             )
         except Exception as exc:  # noqa: BLE001 - the outbox worker retries it
-            await outbox.failed(parent_session_key, parent_task_id, f"{type(exc).__name__}: {exc}")
-            return
-        await outbox.delivered(parent_session_key, parent_task_id)
+            await report(exc)
+        except BaseException:
+            # Cancelled before an outcome: the row stays pending and the
+            # worker delivers it once the claim lease ran out.
+            outbox.release(parent_session_key, parent_task_id)
+            raise
         return
 
     if completion_manager is not None and parent_task_id:
@@ -1043,17 +1049,18 @@ async def _deliver_wake(
     provenance: dict[str, Any],
     task_runtime: Any,
     completion_manager: Any | None,
+    report: Report,
 ) -> None:
-    """Hand one wake to the task runtime; raise when it was not accepted."""
+    """Hand one wake off for delivery; its outcome arrives through *report*.
+
+    Raises when the hand-off itself failed. It never waits for the wake to be
+    enqueued: the completion manager enqueues it only once the parent's own
+    task has released, and the caller can be that very task (a parent closing
+    its spawn group from ``sessions_yield``) or a child whose session is
+    still locked -- waiting here would deadlock the parent on itself.
+    """
 
     if completion_manager is not None and parent_task_id:
-        loop = asyncio.get_running_loop()
-        accepted: asyncio.Future[BaseException | None] = loop.create_future()
-
-        async def _on_enqueue_result(error: BaseException | None) -> None:
-            if not accepted.done():
-                accepted.set_result(error)
-
         await completion_manager.send_parent_wake(
             parent_session_key=parent_session_key,
             parent_task_id=parent_task_id,
@@ -1061,23 +1068,24 @@ async def _deliver_wake(
             task_runtime=task_runtime,
             message=message,
             provenance=provenance,
-            on_enqueue_result=_on_enqueue_result,
+            on_enqueue_result=report,
         )
-        error = await accepted
-        if error is not None:
-            raise error
         return
     await task_runtime.send(parent_session_key, message, provenance=provenance)
+    await report(None)
 
 
 async def deliver_pending_wake(
     row: dict[str, Any],
+    report: Report,
     *,
     task_runtime: Any,
 ) -> None:
-    """Deliver a pending outbox row (``SubagentWakeWorker`` callback)."""
+    """Hand a pending outbox row off for delivery (``SubagentWakeWorker`` callback)."""
 
     parent_task_id = row.get("parent_task_id") or None
+    if parent_task_id:
+        _tracker.mark_woken((row["parent_session_key"], parent_task_id))
     await _deliver_wake(
         row["parent_session_key"],
         parent_task_id,
@@ -1086,9 +1094,8 @@ async def deliver_pending_wake(
         provenance=dict(row.get("provenance") or {}),
         task_runtime=task_runtime,
         completion_manager=_background_completion_manager,
+        report=report,
     )
-    if parent_task_id:
-        _tracker.mark_woken((row["parent_session_key"], parent_task_id))
 
 
 def _group_closed(parent_session_key: str, parent_task_id: str) -> bool:

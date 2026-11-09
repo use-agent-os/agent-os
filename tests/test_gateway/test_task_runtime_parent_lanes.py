@@ -210,3 +210,38 @@ def test_invalid_limit_is_rejected() -> None:
 
     with pytest.raises(ValueError):
         TaskRuntime(storage=_Storage({}), turn_handler=handler, max_concurrent_children=0)
+
+
+async def test_a_second_cancel_does_not_leave_a_dead_head_in_the_parent_queue() -> None:
+    gate = _Gate()
+    runtime = TaskRuntime(
+        storage=_Storage({}), turn_handler=gate, max_concurrency=8, max_concurrent_children=1
+    )
+    parent = "agent:main:webchat:twice"
+    first, waiting, later = (f"agent:worker:subagent:t{i}" for i in range(3))
+    await runtime.enqueue(_child(first, parent), "t", run_kind="subagent")
+    await gate.wait_started(1)
+    queued = await runtime.enqueue(_child(waiting, parent), "t", run_kind="subagent")
+    await runtime.enqueue(_child(later, parent), "t", run_kind="subagent")
+    await _settle()
+    assert list(runtime._parent_queue[parent])[0] == queued.task_id
+
+    # Cancel the head while it waits, then cancel it again while it waits for
+    # the condition lock on its way out of the queue (the lock is contended).
+    record = runtime._tasks[queued.task_id]
+    assert record.asyncio_task is not None
+    cond = runtime._ensure_fair_cond()
+    await cond.acquire()
+    record.asyncio_task.cancel()
+    await asyncio.sleep(0)  # it blocks re-acquiring the lock inside wait()
+    cond.release()
+    await cond.acquire()  # queue up behind it: its cleanup now has to wait
+    record.asyncio_task.cancel()
+    cond.release()
+    await _settle()
+
+    assert queued.task_id not in runtime._parent_queue.get(parent, ())
+    gate.open(first)
+    await gate.wait_started(2)
+    assert gate.started == [first, later]
+    gate.open(later)

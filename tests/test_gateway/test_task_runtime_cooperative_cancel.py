@@ -177,3 +177,35 @@ async def test_a_turn_inside_a_tool_batch_is_cancelled_at_once() -> None:
 
 async def test_a_turn_that_does_not_accept_aborts_is_cancelled_at_once() -> None:
     await _cancel_is_immediate(lambda signal: None)  # e.g. an ACP harness turn
+
+
+async def test_a_turn_that_stops_near_the_deadline_still_records_its_outcome() -> None:
+    # The turn honours the abort just before the grace runs out, and recording
+    # its outcome takes longer than what is left. The fallback must not cancel
+    # that bookkeeping: it skipped ``done`` and every waiter hung.
+    started = asyncio.Event()
+
+    async def handler(run: Any) -> None:
+        signal = current_turn_stop_signal()
+        assert signal is not None
+        signal.accepts_abort = True
+        started.set()
+        await signal.wait_abort()
+        await asyncio.sleep(0.25)  # stops on its own, 0.15 s before the grace ends
+
+    class _SlowStorage(_Storage):
+        async def update_agent_task(self, task_id: str, **fields: Any) -> None:
+            if "terminal_reason" in fields:
+                await asyncio.sleep(0.5)  # the terminal write outlives the grace
+            await super().update_agent_task(task_id, **fields)
+
+    storage = _SlowStorage({})
+    runtime = TaskRuntime(storage=storage, turn_handler=handler, cancel_grace_s=0.4)
+    handle = await _start(runtime, started)
+
+    await runtime.cancel(task_id=handle.task_id, source="user")
+    await asyncio.wait_for(runtime.wait(handle.task_id, timeout=3), timeout=4)
+
+    record = storage.records[handle.task_id]
+    assert record.status == AgentTaskStatus.CANCELLED
+    assert record.terminal_reason == "cancelled"

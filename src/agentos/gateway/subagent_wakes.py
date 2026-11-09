@@ -17,6 +17,13 @@ The outbox makes it durable:
   and the :class:`SubagentWakeWorker` retries it, giving up (``dropped``) after
   :data:`MAX_PENDING_AGE_S`;
 * at startup the worker drains whatever a previous process left pending.
+
+Sending never waits for the outcome: with the completion manager a wake is
+enqueued only once the parent's own task has released, and the sender can be
+that very task (a parent closing its spawn group from ``sessions_yield``) or a
+child still holding its session's execution lock. The outcome is recorded
+whenever it arrives, through the once-only callback from
+:meth:`SubagentWakeOutbox.reporter`.
 """
 
 from __future__ import annotations
@@ -29,6 +36,10 @@ from typing import Any
 import structlog
 
 log = structlog.get_logger(__name__)
+
+#: Records one delivery's outcome: ``None`` once the task runtime accepted the
+#: wake, the error otherwise.
+Report = Callable[[BaseException | None], Awaitable[None]]
 
 #: Seconds between attempts: 1st retry, 2nd, 3rd, then every last value.
 BACKOFF_S: tuple[float, ...] = (1.0, 5.0, 30.0, 60.0)
@@ -126,20 +137,70 @@ class SubagentWakeOutbox:
 
         self._in_flight.add(group_key(parent_session_key, parent_task_id))
 
+    def release(self, parent_session_key: str, parent_task_id: str | None) -> None:
+        """The sender gave up without an outcome (it was cancelled).
+
+        The row stays ``pending``; the worker takes it once its lease ran out.
+        """
+
+        self._in_flight.discard(group_key(parent_session_key, parent_task_id))
+
+    def reporter(self, parent_session_key: str, parent_task_id: str | None) -> Report:
+        """A once-only callback that records a delivery's outcome.
+
+        ``None`` marks the wake delivered, an error schedules a retry. It may
+        be called long after the sender returned (see the module docstring).
+        """
+
+        reported = False
+
+        async def report(error: BaseException | None) -> None:
+            nonlocal reported
+            if reported:
+                return
+            reported = True
+            if error is None:
+                await self.delivered(parent_session_key, parent_task_id)
+            else:
+                await self.failed(
+                    parent_session_key, parent_task_id, f"{type(error).__name__}: {error}"
+                )
+
+        return report
+
+    async def still_pending(self, row: dict[str, Any]) -> bool:
+        """Whether *row* (from :meth:`due`) is still waiting to be delivered."""
+
+        current = await self._storage.get_subagent_wake(row["group_key"])
+        return current is not None and current.get("state") == PENDING
+
     async def delivered(self, parent_session_key: str, parent_task_id: str | None) -> None:
         key = group_key(parent_session_key, parent_task_id)
-        self._in_flight.discard(key)
-        await self._storage.update_subagent_wake(
-            key,
-            state=DELIVERED,
-            updated_at=self._clock(),
-        )
+        try:
+            # A row dropped meanwhile (its parent was aborted) stays dropped.
+            await self._storage.update_subagent_wake(
+                key,
+                expected_state=PENDING,
+                state=DELIVERED,
+                updated_at=self._clock(),
+            )
+        finally:
+            # Only once the row is written: until then the worker must not
+            # take it for a retry.
+            self._in_flight.discard(key)
 
     async def failed(self, parent_session_key: str, parent_task_id: str | None, error: str) -> None:
         """Schedule a retry with backoff, or drop the wake once it is too old."""
 
         key = group_key(parent_session_key, parent_task_id)
-        self._in_flight.discard(key)
+        try:
+            await self._record_failure(key, parent_session_key, parent_task_id, error)
+        finally:
+            self._in_flight.discard(key)
+
+    async def _record_failure(
+        self, key: str, parent_session_key: str, parent_task_id: str | None, error: str
+    ) -> None:
         row = await self._storage.get_subagent_wake(key)
         if row is None or row.get("state") != PENDING:
             return
@@ -155,6 +216,7 @@ class SubagentWakeOutbox:
             )
             await self._storage.update_subagent_wake(
                 key,
+                expected_state=PENDING,
                 state=DROPPED,
                 attempts=attempts,
                 reason="delivery_timeout",
@@ -173,6 +235,7 @@ class SubagentWakeOutbox:
         )
         await self._storage.update_subagent_wake(
             key,
+            expected_state=PENDING,
             attempts=attempts,
             next_attempt_at=now + int(delay_s * 1000),
             last_error=error[:500],
@@ -184,8 +247,9 @@ class SubagentWakeOutbox:
         return [row for row in rows if row["group_key"] not in self._in_flight]
 
 
-#: Delivers one pending row; must raise when the wake was not accepted.
-Deliver = Callable[[dict[str, Any]], Awaitable[None]]
+#: Hands one pending row off for delivery and reports the outcome through the
+#: callback (maybe after it returned); raises when the hand-off itself failed.
+Deliver = Callable[[dict[str, Any], Report], Awaitable[None]]
 
 
 class SubagentWakeWorker:
@@ -221,21 +285,28 @@ class SubagentWakeWorker:
                 pass
 
     async def run_once(self) -> int:
-        """Attempt every due row once; return how many were delivered."""
+        """Hand every due row off once; return how many were handed off."""
 
-        delivered = 0
+        handed_off = 0
         for row in await self._outbox.due():
+            if self._stopping.is_set():
+                break
+            if not await self._outbox.still_pending(row):
+                continue  # dropped or delivered since the pass began
             parent = row["parent_session_key"]
             parent_task_id = row.get("parent_task_id")
             self._outbox.begin(parent, parent_task_id)
+            report = self._outbox.reporter(parent, parent_task_id)
             try:
-                await self._deliver(row)
+                await self._deliver(row, report)
             except Exception as exc:  # noqa: BLE001 - recorded, retried with backoff
-                await self._outbox.failed(parent, parent_task_id, f"{type(exc).__name__}: {exc}")
+                await report(exc)
                 continue
-            await self._outbox.delivered(parent, parent_task_id)
-            delivered += 1
-        return delivered
+            except BaseException:
+                self._outbox.release(parent, parent_task_id)
+                raise
+            handed_off += 1
+        return handed_off
 
     async def _run(self) -> None:
         while not self._stopping.is_set():
