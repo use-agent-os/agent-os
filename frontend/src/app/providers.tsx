@@ -9,7 +9,7 @@ import { approvalMonitor } from '@/services/approval-monitor'
 import { bindPendingQuestions } from '@/lib/pending-questions'
 import { bindRuntimeSignals } from '@/lib/runtime-signals'
 import type { RpcState } from '@/lib/ws-rpc'
-import { KeyboardShortcutProvider } from '@/components/KeyboardShortcuts'
+import { KeyboardShortcutProvider, type ShortcutHelpRenderer } from '@/components/KeyboardShortcuts'
 import { readStoredToken, readStoredWsUrl } from '@/lib/credentials'
 
 // Exported so an off-gateway host (the desktop shell) can supply its own
@@ -33,7 +33,14 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 5_000, retry: 1 } },
 })
 
-export function AppProviders({ children }: { children: ReactNode }) {
+export function AppProviders({
+  children,
+  shortcutHelp,
+}: {
+  children: ReactNode
+  /** Replaces the built-in shortcut sheet (the rebuilt web console's own dialog). */
+  shortcutHelp?: ShortcutHelpRenderer
+}) {
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null)
   const [rpc] = useState(() => new WsRpcClient())
 
@@ -93,7 +100,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
     <BootstrapContext.Provider value={bootstrap}>
       <RpcContext.Provider value={rpc}>
         <QueryClientProvider client={queryClient}>
-          <KeyboardShortcutProvider>{children}</KeyboardShortcutProvider>
+          <KeyboardShortcutProvider renderHelp={shortcutHelp}>{children}</KeyboardShortcutProvider>
         </QueryClientProvider>
       </RpcContext.Provider>
     </BootstrapContext.Provider>

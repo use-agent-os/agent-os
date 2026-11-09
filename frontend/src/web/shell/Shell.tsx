@@ -1,13 +1,13 @@
 import { Menu, Plus } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useRef } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router'
-import { useKeyboardShortcut } from '@/components/KeyboardShortcuts'
 import { pendingGatewayUrlRequest } from '@/lib/credentials'
 import { t } from '@/i18n'
 import '@/i18n/en/webShell'
 import { listenForPushNavigation } from '@/services/web-push-navigation'
 import { Button } from '@/web/components/ui/button'
 import { Toaster } from '@/web/components/ui/toaster'
+import { PaletteHost } from '@/web/features/palette/PaletteHost'
 import { ApprovalTray } from './ApprovalTray'
 import { ConnectionNotices } from './ConnectionNotices'
 import { useConnectGate } from './connection-gate'
@@ -75,7 +75,6 @@ export function Shell() {
 function Workspace() {
   const phone = useMediaQuery(PHONE_QUERY)
   const paneOpen = useShell((s) => s.paneOpen)
-  const togglePane = useShell((s) => s.togglePane)
   const setDrawerOpen = useShell((s) => s.setDrawerOpen)
   const activeAgent = useShell((s) => s.activeAgent)
   const navigate = useNavigate()
@@ -83,20 +82,6 @@ function Workspace() {
   const handle = useRouteHandle()
   const mainRef = useRef<HTMLElement>(null)
   useDocumentTitle()
-
-  useKeyboardShortcut(
-    {
-      combo: 'mod+b',
-      description: t('webShell.listPaneCollapse'),
-      category: 'Global',
-      allowInInputs: true,
-    },
-    (e) => {
-      e.preventDefault()
-      if (phone) setDrawerOpen(!useShell.getState().drawerOpen)
-      else togglePane()
-    },
-  )
 
   // A clicked approval notification (public/sw.js) routes this console to it.
   useEffect(() => listenForPushNavigation((path) => navigate(path)), [navigate])
@@ -163,6 +148,7 @@ function Workspace() {
         </Suspense>
       ) : null}
       <ApprovalTray />
+      <PaletteHost />
       <GatewayUrlConfirm />
       <Toaster />
     </div>

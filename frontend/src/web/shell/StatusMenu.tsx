@@ -1,6 +1,7 @@
 import { ArrowUpCircle, Circle, Keyboard, Monitor, Moon, Settings, Sun } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { useRpc } from '@/app/providers'
+import { useShortcutOverlay } from '@/components/KeyboardShortcuts'
 import { t } from '@/i18n'
 import '@/i18n/en/webConnection'
 import '@/i18n/en/webShell'
@@ -26,7 +27,6 @@ import {
   DropdownMenuTrigger,
 } from '@/web/components/ui/dropdown-menu'
 import { SimpleTooltip } from '@/web/components/ui/tooltip'
-import { useShell } from './shell-store'
 import { useUpdateCheck } from './updates'
 import { useDisplayedTruth } from './use-displayed-connection'
 
@@ -48,7 +48,7 @@ export function StatusMenu() {
   const navigate = useNavigate()
   const preference = useTheme((s) => s.preference)
   const setPreference = useTheme((s) => s.setPreference)
-  const openShortcuts = useShell((s) => s.setShortcutsOpen)
+  const overview = useShortcutOverlay()
   const update = useUpdateCheck()
   const state = truthStateLabel(truth.state)
   const freshness = truthFreshnessLabel(truth)
@@ -117,7 +117,7 @@ export function StatusMenu() {
           </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => openShortcuts(true)}>
+        <DropdownMenuItem onSelect={() => overview.open()}>
           <Keyboard aria-hidden />
           {t('webShell.shortcutsOpen')}
         </DropdownMenuItem>

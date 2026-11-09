@@ -22,6 +22,7 @@ import { skills } from './skills'
 import { usage } from './usage'
 import { webCommon } from './webCommon'
 import { webConnection } from './webConnection'
+import { webPalette } from './webPalette'
 import { webSettings } from './webSettings'
 import { webShell } from './webShell'
 
@@ -65,6 +66,7 @@ export const en = {
   usage,
   webCommon,
   webConnection,
+  webPalette,
   webSettings,
   webShell,
 } as const

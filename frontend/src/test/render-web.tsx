@@ -8,6 +8,7 @@ import { BootstrapContext, RpcContext } from '@/app/providers'
 import { KeyboardShortcutProvider } from '@/components/KeyboardShortcuts'
 import type { Bootstrap } from '@/lib/bootstrap'
 import { TooltipProvider } from '@/web/components/ui/tooltip'
+import { ShortcutOverviewHost } from '@/web/features/palette/overview-host'
 import { FakeRpc } from './fake-rpc'
 
 export const TEST_BOOTSTRAP: Bootstrap = {
@@ -46,7 +47,7 @@ export function WebTestProviders({
     <BootstrapContext.Provider value={{ ...TEST_BOOTSTRAP, ...bootstrap }}>
       <RpcContext.Provider value={rpc.asClient()}>
         <QueryClientProvider client={queryClient}>
-          <KeyboardShortcutProvider>
+          <KeyboardShortcutProvider renderHelp={ShortcutOverviewHost}>
             <TooltipProvider delayDuration={0}>{children}</TooltipProvider>
           </KeyboardShortcutProvider>
         </QueryClientProvider>

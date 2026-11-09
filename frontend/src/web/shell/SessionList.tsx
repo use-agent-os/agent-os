@@ -25,7 +25,6 @@ import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webCommon'
 import '@/i18n/en/webShell'
 import { cn } from '@/lib/utils'
-import type { HistoryResponse } from '@/views/chat/transcript/history'
 import { relTimeLabel } from '@/views/sessions/logic'
 import {
   AlertDialog,
@@ -57,6 +56,7 @@ import {
 } from '@/web/components/ui/dropdown-menu'
 import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
 import { ChannelIcon } from './channel-icon'
+import { exportSessionMarkdown } from './session-actions'
 import { SESSIONS_QUERY_KEY, useProjectNames, useSessionsList } from './session-data'
 import {
   GROUPING_KEY,
@@ -495,32 +495,6 @@ function SessionItem(props: ItemProps) {
     }
   }
 
-  const exportMarkdown = async () => {
-    const history = await rpc.call<HistoryResponse>('chat.history', {
-      sessionKey: row.key,
-      limit: 500,
-      includeCanonical: false,
-      includeSummaries: false,
-    })
-    // The export builder and the reset flow ride in their own chunk: they are
-    // rarely used and pull in the chat logic module.
-    const { exportMarkdownDocument } = await import('@/views/chat/logic')
-    const md = exportMarkdownDocument(
-      (history?.messages ?? []).map((m) => ({ role: m.role, text: m.text, ts: m.timestamp })),
-      row.key,
-    )
-    if (md === null) {
-      toast.warning(t('webShell.exportEmpty'))
-      return
-    }
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }))
-    a.download = `chat-${row.key}.md`
-    a.click()
-    URL.revokeObjectURL(a.href)
-    toast.info(t('webShell.exported'))
-  }
-
   const onAction = (id: ActionId, projectId?: string | null) => {
     switch (id) {
       case 'rename':
@@ -548,7 +522,7 @@ function SessionItem(props: ItemProps) {
         })
         return
       case 'export':
-        void run(t('webShell.actionExport'), exportMarkdown)
+        void run(t('webShell.actionExport'), () => exportSessionMarkdown(rpc, row.key))
         return
       case 'copy':
         void navigator.clipboard

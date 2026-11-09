@@ -2,6 +2,7 @@ import { createBrowserRouter, RouterProvider } from 'react-router'
 import { AppProviders } from '@/app/providers'
 import { controlBasePath } from '@/lib/control-base'
 import { TooltipProvider } from '@/web/components/ui/tooltip'
+import { ShortcutOverviewHost } from '@/web/features/palette/overview-host'
 import { Shell } from '@/web/shell/Shell'
 import { RouteErrorBoundary } from './RouteErrorBoundary'
 import { webRouteChildren } from './routes'
@@ -23,7 +24,7 @@ export function createWebRouter(basename: string = controlBasePath()) {
 /** The rebuilt web console: the kept providers composed around the new router. */
 export function WebApp({ router }: { router: ReturnType<typeof createWebRouter> }) {
   return (
-    <AppProviders>
+    <AppProviders shortcutHelp={ShortcutOverviewHost}>
       <TooltipProvider>
         <RouterProvider router={router} />
       </TooltipProvider>

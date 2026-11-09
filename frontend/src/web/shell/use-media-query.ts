@@ -25,3 +25,7 @@ export function useMediaQuery(query: string): boolean {
     () => false,
   )
 }
+
+export function usePhone(): boolean {
+  return useMediaQuery(PHONE_QUERY)
+}

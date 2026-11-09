@@ -321,38 +321,70 @@ needs you" only while the console is connected.
 
 ## Keyboard Shortcuts
 
-The Web UI features a comprehensive set of keyboard shortcuts to facilitate mouse-free navigation and control. Press `?` (Shift + `/` on US keyboards) from any page to open the keyboard shortcuts cheat sheet.
+`Mod` is `⌘` on macOS and `Ctrl` elsewhere. Press `?` (or `Mod+/`) to open the
+shortcut overview, which shows the keys for your platform.
 
-### Global & Chat Shortcuts
+### Command palette
 
-- `?` - Show/hide the keyboard shortcuts cheat sheet.
-- `Cmd+Shift+O` (macOS) / `Ctrl+Shift+O` (Windows/Linux) - Start a new chat session.
-- `Escape` - Abort the active streaming turn, else recover the queue into the composer.
+`Mod+K`, or the rail's **Search** button, opens the command palette. Type to
+search, in labelled groups, across **Sessions** (titles and keys), **Pages**,
+**Settings** sections and **Actions**: New session, Toggle sidebar, Toggle
+Details, Switch to system / light / dark theme, Open keyboard shortcuts, Retry
+connection, Open Inbox, Compact current session and Export current session. An
+action that cannot run right now is listed as disabled with its reason (for
+example, Compact while a turn is running). Arrow keys move, `Enter` runs,
+`Escape` closes and returns focus to where it was. If sessions cannot be
+loaded, the Sessions group says "Couldn't search sessions. Try again." while
+the other groups keep their matches.
 
-### Sidebar Navigation Chords
+### Global
 
-The Web UI supports two-step chords (Gmail/GitHub style) to switch between sidebar views. Press `g` followed by a destination letter/key within **1.5 seconds** to navigate:
+| Keys | Action |
+| --- | --- |
+| `Mod+K` | Open the command palette |
+| `Mod+B` | Toggle the sidebar (list pane; the drawer on phones) |
+| `Mod+/` | Show keyboard shortcuts |
+| `?` | Show keyboard shortcuts |
+| `Mod+Shift+O` | New session |
+| `Escape` | In chat: stop the running turn, or recover queued messages |
 
-- `g` then `c` - Go to Chat
-- `g` then `i` - Go to the attention inbox
-- `g` then `o` - Go to Overview
-- `g` then `h` - Go to Health
-- `g` then `n` - Go to Channels
-- `g` then `m` - Go to MCP Servers
-- `g` then `k` - Go to Skills
-- `g` then `p` - Go to Projects
-- `g` then `s` - Go to Sessions
-- `g` then `a` - Go to Agents
-- `g` then `u` - Go to Usage
-- `g` then `r` - Go to Cron
-- `g` then `,` - Go to Agent Setup
-- `g` then `e` - Go to Environment
-- `g` then `l` - Go to Logs
-- `g` then `y` - Go to Memory
-- `g` then `v` - Go to Approvals
+### Navigation chords
+
+Press `g`, then a destination key within **1.5 seconds**:
+
+| Keys | Goes to |
+| --- | --- |
+| `g c` | Chat |
+| `g h` | Home |
+| `g i` | Inbox |
+| `g s` | Sessions |
+| `g p` | Projects |
+| `g u` | Usage |
+| `g r` | Automations |
+| `g ,` | Settings |
+| `g n` | Settings › Channels |
+| `g m` | Settings › MCP |
+| `g k` | Settings › Skills |
+| `g a` | Settings › Agents |
+| `g y` | Settings › Memory |
+| `g e` | Settings › Environment |
+| `g l` | Settings › Logs |
+| `g v` | Settings › Approvals |
+| `g o` | Home (the former Overview chord) |
+
+### Composer
+
+| Keys | Action |
+| --- | --- |
+| `Enter` | Send (or `Mod+Enter`, per Settings › Appearance) |
+| `Shift+Enter` | New line |
+| `/` | Open the slash command menu |
+| `ArrowUp` | Edit the last message (empty composer) |
 
 > [!NOTE]
-> Keyboard shortcuts are automatically suppressed while focus is inside a text input field, textarea, or content-editable region, and while modal dialogs or overlays are open.
+> Single-key shortcuts and chords are ignored while focus is in a text field
+> and while a dialog is open. `Mod+` shortcuts (the palette, the sidebar, the
+> overview, New session) also work from the composer.
 
 ## Agent Setup
 
