@@ -1461,8 +1461,14 @@ class SessionStorage:
         return _subagent_wake_row(row) if row is not None else None
 
     @_serialized_write
-    async def update_subagent_wake(self, group_key: str, **fields: Any) -> None:
-        """Set *fields* (``state``, ``attempts``, ``next_attempt_at``, ...) on a row."""
+    async def update_subagent_wake(
+        self, group_key: str, *, expected_state: str | None = None, **fields: Any
+    ) -> None:
+        """Set *fields* (``state``, ``attempts``, ``next_attempt_at``, ...) on a row.
+
+        With *expected_state*, only a row still in that state is changed (a
+        delivery must not overwrite a row that was dropped meanwhile).
+        """
 
         allowed = {"state", "attempts", "next_attempt_at", "reason", "last_error", "updated_at"}
         unknown = set(fields) - allowed
@@ -1471,10 +1477,12 @@ class SessionStorage:
         if not fields:
             return
         assignments = ", ".join(f"{name} = ?" for name in fields)
-        await self.conn.execute(
-            f"UPDATE subagent_wakes SET {assignments} WHERE group_key = ?",
-            (*fields.values(), group_key),
-        )
+        where = "group_key = ?"
+        params: list[Any] = [*fields.values(), group_key]
+        if expected_state is not None:
+            where += " AND state = ?"
+            params.append(expected_state)
+        await self.conn.execute(f"UPDATE subagent_wakes SET {assignments} WHERE {where}", params)
         await self.conn.commit()
 
     async def list_due_subagent_wakes(self, now_ms: int, limit: int = 50) -> list[dict[str, Any]]:
