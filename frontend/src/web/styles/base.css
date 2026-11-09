@@ -29,14 +29,16 @@
     background: var(--surface-0);
     color: var(--text);
     font-family: var(--font-sans);
-    font-size: 14px;
-    line-height: 1.45;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-size-adjust: 100%;
   }
 
+  /* Interface text is 14px; the root stays at the browser default so rem
+     units (Tailwind spacing, 16px inputs) keep their meaning. */
   body {
+    font-size: 14px;
+    line-height: 1.45;
     margin: 0;
     min-height: 100dvh;
     background: var(--surface-0);

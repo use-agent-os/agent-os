@@ -82,3 +82,8 @@ export function saveStagedAttachments(sessionKey: string, attachments: PendingAt
       attachments.map((a) => ({ ...a })),
     )
 }
+
+/** Test seam: forget the in-memory staged attachments. */
+export function resetStagedAttachmentsForTests(): void {
+  stagedAttachments.clear()
+}

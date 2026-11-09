@@ -1,10 +1,10 @@
-import type { ReactNode } from 'react'
+import { lazy, Suspense, type ReactNode } from 'react'
 import { Navigate, useLocation, type RouteObject } from 'react-router'
 import { t, type MessageKey } from '@/i18n'
 import '@/i18n/en/webShell'
 import { McpOAuthCallback } from '@/web/features/settings/McpOAuthCallback'
 import { LEGACY_PAGE_PATHS, LEGACY_SETTINGS_PATHS, legacyRedirect } from './legacy-redirect'
-import { NotFound, RebuildingPlaceholder } from './fallbacks'
+import { NotFound, RebuildingPlaceholder, RoutePending } from './fallbacks'
 import { RouteErrorBoundary } from './RouteErrorBoundary'
 
 /** Per-route metadata the shell reads (document title, current destination). */
@@ -35,6 +35,18 @@ function Rebuilding({ titleKey }: { titleKey: MessageKey }) {
   return <RebuildingPlaceholder name={t(titleKey)} />
 }
 
+// Destinations load in their own chunks.
+const ChatPage = lazy(async () => ({
+  default: (await import('@/web/features/chat/ChatPage')).ChatPage,
+}))
+const ChatIndex = lazy(async () => ({
+  default: (await import('@/web/features/chat/ChatPage')).ChatIndex,
+}))
+
+function Lazy({ children }: { children: ReactNode }) {
+  return <Suspense fallback={<RoutePending />}>{children}</Suspense>
+}
+
 function destination(
   path: string,
   dest: Destination,
@@ -47,8 +59,22 @@ function destination(
 
 /** The current routes, relative to the console base path (D5). */
 export const DESTINATION_ROUTES: RouteObject[] = [
-  destination('chat', 'chat', 'webShell.pageChat'),
-  destination('chat/:agent/*', 'chat', 'webShell.pageChat'),
+  destination(
+    'chat',
+    'chat',
+    'webShell.pageChat',
+    <Lazy>
+      <ChatIndex />
+    </Lazy>,
+  ),
+  destination(
+    'chat/:agent/*',
+    'chat',
+    'webShell.pageChat',
+    <Lazy>
+      <ChatPage />
+    </Lazy>,
+  ),
   destination('new', 'new', 'webShell.pageNew'),
   destination('home', 'home', 'webShell.pageHome'),
   destination('sessions', 'sessions', 'webShell.pageSessions'),

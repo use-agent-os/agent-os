@@ -27,7 +27,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function ApprovalCard({ item }: { item: Approval }) {
+export function ApprovalCard({ item }: { item: Approval }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const command = approvalCommand(item)

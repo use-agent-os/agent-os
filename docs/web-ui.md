@@ -464,20 +464,93 @@ than as a save failure.
 
 ## Chat Sessions
 
-The chat UI supports:
+### Layout
 
-- streaming assistant output;
-- live model reasoning ("thinking") as a collapsible block;
-- tool-call cards;
-- artifact cards;
-- pending message queue behavior while compaction or runtime work is in flight;
-- manual `/compact`;
-- per-turn usage and savings metadata when available;
-- copyable session keys.
+The chat workspace is one centered column. Your messages are right-aligned
+bubbles; replies are full-width prose. Hover or focus a message to copy it as
+Markdown or see when it was sent. The header shows the session title (activate
+it to rename in place), the agent, channel and project, a **Details** toggle, a
+**Panels** toggle and a ⋯ menu (Rename, Compact, Export as Markdown, Copy
+session key). It stays visible while the transcript scrolls.
 
-Use the session selector to switch between existing sessions. Copy the session
-key when reporting a bug or asking another AgentOS surface to inspect the
-same session.
+While you are at the end of the transcript, new content keeps the latest in
+view. Scroll up and following pauses — the text you are reading does not move —
+and a **Latest** button appears when new content arrives; activate it, scroll
+back down, or send a message to follow again. Reaching the top loads older
+history above without moving what you were reading.
+
+### Turns, tool rows and Markdown
+
+Once a turn finishes with an answer, the reasoning, commentary and tool calls
+before the answer fold into one **Worked for 42s · 3 tools** disclosure; the
+answer stays fully visible. A turn still running, or one that ended without an
+answer, stays expanded, and a failed tool call after the answer stays visible
+below it. Folding only changes the display; history is untouched. A turn looks
+the same after a reload as it did live.
+
+Each tool call is a compact row: icon and name, a short detail (the command,
+query or path), its state (running, done or **Failed**, always with an icon and
+the word as well as the colour) and its duration once it finishes. Activate the
+row (click, Enter or Space) to see its arguments and result. A long result shows
+a preview and **Open in side panel**.
+
+Markdown in messages is sanitized: scripts, event handlers, `javascript:` links
+and anything outside an allowlist are removed. Links to other sites open in a
+new tab with `rel="noopener noreferrer"`. Code blocks are highlighted in colours
+that suit the theme and have a **Copy** button; wide code and tables scroll
+inside their own box.
+
+A turn that fails shows its reason inline with **Try again** (resends the
+message) and **Edit message** (puts it back in the composer). A message that
+could not be delivered during a connection drop shows **Not sent** with
+**Retry**.
+
+### Composer
+
+The composer grows with your text. Settings › Appearance chooses the send key:
+**Enter** (Shift+Enter for a new line) or **Ctrl/⌘+Enter** (Enter for a new
+line). An Enter that confirms an input-method composition never sends, and on
+phones Return always adds a line — use the Send button. Each session keeps its
+own unsent draft (and staged attachments) while you switch sessions.
+
+Under the text field: attach files (also paste or drop them; they appear in a
+tray with remove buttons), the **Model route** picker (Auto/Pilot Router, a
+pinned tier, or a named model — the session's route hold), the
+**Capabilities** menu (plan mode, execution mode, Pilot Router, visual effects)
+and the session's token and cost readout. Send is disabled, with the reason,
+while an attachment is still uploading. Type `/` at the start for the slash
+command menu (arrow keys, Enter, Escape).
+
+The main button follows the session: **Send** when idle, **Stop** while a turn
+runs and the composer is empty (calls `chat.abort`), **Queue** while a turn
+runs and you have typed something. Queued messages are listed above the
+composer, where each can be edited or removed, and are sent in order when the
+turn ends. Escape stops a running turn; with no turn running it moves queued
+messages back into the composer.
+
+### Details, side panel and approvals
+
+**Details** shows the session's agent, model route, channel, project, created
+and updated times, usage and estimated cost, the active task and subagents,
+plan mode, artifacts and the number of queued messages. On a wide chat pane it
+docks beside the transcript; on a narrow one it opens as an overlay (a sheet on
+phones). Closing it keeps it closed for that session until you reopen it.
+
+The side panel opens beside the transcript for full tool output, artifacts and
+reasoning, one tab per item. Drag its edge to resize it (the width is
+remembered); Escape closes it and returns focus to the control that opened it.
+
+When the open session's turn needs an approval, the request docks above the
+composer with the decisions it allows, and the turn shows **Waiting for
+approval**. Requests from other sessions appear in the approval tray.
+
+### New session
+
+`/new` (rail **New session**, `Mod+Shift+O`) picks the agent (preset to the
+active one) and, optionally, a project, and takes the first message with
+attachments. **Start** creates the session, sends the message and opens it.
+If creation fails, the page keeps your message and attachments and shows the
+error.
 
 ### Model reasoning (thinking)
 

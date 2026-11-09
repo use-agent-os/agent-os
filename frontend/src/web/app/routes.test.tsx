@@ -19,8 +19,6 @@ describe('web routes', () => {
   })
 
   it.each([
-    '/chat',
-    '/chat/main/webchat/default',
     '/new',
     '/home',
     '/sessions',
@@ -41,7 +39,6 @@ describe('web routes', () => {
     ['/overview', '/home'],
     ['/cron', '/automations'],
     ['/projects?project=P', '/projects/P'],
-    ['/chat?session=agent:main:webchat:abc', '/chat/main/webchat/abc'],
     ['/health', '/settings/health'],
     ['/channels', '/settings/channels'],
     ['/mcp', '/settings/mcp'],

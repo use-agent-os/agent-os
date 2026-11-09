@@ -180,6 +180,8 @@
   --color-info-fg: var(--info-fg);
   --color-ring: var(--ring);
   --color-scrim: var(--scrim);
+  --color-code-bg: var(--code-bg);
+  --color-code-text: var(--code-text);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
