@@ -120,3 +120,30 @@ async def test_turn_runner_passes_request_hooks_to_the_agent(
     )
 
     assert agent._request_hooks == (hook,)
+
+
+async def test_amendment_survives_a_preflight_compaction() -> None:
+    # The request is rebuilt from the compacted transcript; the hook's note
+    # must still be on the request that is actually sent.
+    provider = ScriptedProvider([[text("ok"), done()]])
+    agent = _agent(provider, [_Hook(Amend("REQUIRED-POLICY-NOTE"))])
+
+    async def compacted(turn_messages: Any, _tokens: int, *, turn_input_index: int) -> Any:
+        return SimpleNamespace(
+            compacted=True,
+            messages=list(turn_messages),
+            turn_input_index=turn_input_index,
+            compaction_id="c1",
+            summary="summary",
+            kept_entries=[],
+            removed_count=0,
+        )
+
+    agent._preflight_context_overflow = compacted  # type: ignore[method-assign]
+
+    events = await _run(agent)
+
+    assert events[-1].outcome.kind == "completed"
+    sent = provider.calls[0].messages
+    assert sent[-1].content == "REQUIRED-POLICY-NOTE"
+    assert sum(m.content == "REQUIRED-POLICY-NOTE" for m in sent) == 1
