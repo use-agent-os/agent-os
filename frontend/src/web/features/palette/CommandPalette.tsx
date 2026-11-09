@@ -28,8 +28,11 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-const itemClass =
-  'target flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-ui outline-none select-none data-[selected=true]:bg-surface-3 data-[disabled=true]:opacity-60'
+const itemClass = [
+  'target flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-ui outline-none select-none data-[selected=true]:bg-surface-3 data-[disabled=true]:opacity-60',
+  // Focus stays in the input; the highlighted option needs a 3:1 marker, not just surface-3.
+  'data-[selected=true]:outline-solid data-[selected=true]:outline-2 data-[selected=true]:-outline-offset-2 data-[selected=true]:outline-ring',
+].join(' ')
 const groupClass =
   '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-small [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-text-muted'
 
@@ -111,7 +114,7 @@ export function CommandPalette({
             value={query}
             onValueChange={setQuery}
             placeholder={t('webPalette.placeholder')}
-            className="h-12 w-full border-b border-border bg-transparent px-4 text-base outline-none placeholder:text-text-muted"
+            className="h-12 w-full border-b border-border bg-transparent px-4 text-base outline-none placeholder:text-text-muted focus:border-ring"
           />
           <Command.List className="scroll-contained max-h-[min(60dvh,420px)] p-2">
             <Command.Empty className="px-2 py-6 text-center text-text-muted">

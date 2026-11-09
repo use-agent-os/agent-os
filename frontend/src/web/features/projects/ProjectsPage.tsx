@@ -487,6 +487,7 @@ function ProjectDetail({
             <p className="text-text-muted">{t('webPagesWork.conflictBody')}</p>
             <p className="text-small font-medium">{t('webPagesWork.conflictTheirs')}</p>
             <pre
+              tabIndex={0}
               aria-label={t('webPagesWork.conflictTheirs')}
               className="max-h-48 overflow-auto rounded border border-border bg-surface-0 p-2 font-mono text-small whitespace-pre-wrap"
             >

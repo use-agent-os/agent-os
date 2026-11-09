@@ -610,16 +610,17 @@ function SkillRow({ skill, onOpen }: { skill: RawSkill; onOpen: () => void }) {
     <button
       type="button"
       onClick={onOpen}
-      aria-label={t('webSetCapabilities.skillsOpen', { name: String(skill.name) })}
+      // Named by its visible content (name, status, description): an aria-label
+      // that drops the visible text fails WCAG 2.5.3, label in name.
       className="target flex w-full items-start gap-3 px-3 py-2 text-left hover:bg-surface-2"
     >
       <SkillIcon skill={skill} />
       <span className="min-w-0 flex-1">
+        {/* The spaces keep words apart in the accessible name; flex drops them visually. */}
         <span className="flex flex-wrap items-center gap-2">
-          <span className="font-medium">{skill.name}</span>
-          <StatusChip skill={skill} />
+          <span className="font-medium">{skill.name}</span> <StatusChip skill={skill} />{' '}
           <AvailabilityChip skill={skill} />
-        </span>
+        </span>{' '}
         {skill.description ? (
           <span className="block truncate text-small text-text-muted">{skill.description}</span>
         ) : null}

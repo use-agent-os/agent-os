@@ -221,6 +221,7 @@ function EventFeed() {
         role="log"
         aria-live="polite"
         aria-label={t('webPagesOverview.homeEvents')}
+        tabIndex={0}
         className="scroll-contained h-72 overflow-y-auto rounded-md bg-surface-0 font-mono text-small"
       >
         {events.length === 0 ? (

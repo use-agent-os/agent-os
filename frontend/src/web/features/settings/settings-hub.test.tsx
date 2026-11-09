@@ -86,6 +86,24 @@ describe('settings hub', () => {
       await screen.findByRole('heading', { level: 1, name: 'Environment' }),
     ).toBeInTheDocument()
   })
+
+  it('on phones shows one section at a time with a way back (the list squeezed it to 0 px)', async () => {
+    renderShell('/settings/environment', settingsRpc())
+    const nav = await screen.findByRole('navigation', { name: 'Settings' })
+    expect(nav.closest('aside')?.className).toMatch(/max-md:hidden/)
+    const back = screen.getByRole('link', { name: 'All settings' })
+    expect(back).toHaveAttribute('href', '/settings')
+    expect(back.className).toMatch(/md:hidden/)
+    // The pane only scrolls on its own from md up; on phones the page scrolls.
+    const pane = screen.getByRole('region', { name: 'Environment' })
+    expect(pane.className).not.toMatch(/(^|\s)(scroll-contained|overflow-auto)(\s|$)/)
+  })
+
+  it('keeps the section pane keyboard-scrollable even with nothing to Tab to', async () => {
+    renderShell('/settings/environment', settingsRpc())
+    const pane = await screen.findByRole('region', { name: 'Environment' })
+    expect(pane).toHaveAttribute('tabindex', '0')
+  })
 })
 
 describe('settings search', () => {

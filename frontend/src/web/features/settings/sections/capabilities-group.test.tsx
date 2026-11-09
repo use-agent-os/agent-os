@@ -81,10 +81,11 @@ describe('Settings › Skills', () => {
     expect(
       await screen.findByText('1 ready skill is not offered to the agent. Open it to see why.'),
     ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Skill digest' })).toHaveTextContent(
-      /Ready.*Not offered — prompt too long/,
-    )
-    await user.click(screen.getByRole('button', { name: 'Skill weather' }))
+    // The row is named by its visible text, starting with the skill name (WCAG 2.5.3).
+    const digest = screen.getByRole('button', { name: /^digest\b/ })
+    expect(digest).not.toHaveAttribute('aria-label')
+    expect(digest).toHaveAccessibleName(/^digest Ready Not offered — prompt too long/)
+    await user.click(screen.getByRole('button', { name: /^weather\b/ }))
     const dialog = await screen.findByRole('dialog')
     await user.click(within(dialog).getByRole('button', { name: 'Uninstall' }))
     const confirm = await screen.findByRole('alertdialog')
@@ -97,7 +98,7 @@ describe('Settings › Skills', () => {
     const user = userEvent.setup()
     const rpc = skillsRpc()
     renderShell('/settings/skills', rpc)
-    await user.click(await screen.findByRole('button', { name: 'Skill weather' }))
+    await user.click(await screen.findByRole('button', { name: /^weather\b/ }))
     const dialog = await screen.findByRole('dialog')
     await user.click(within(dialog).getByRole('button', { name: 'Set WEATHER_KEY' }))
     const input = within(dialog).getByLabelText('Value for WEATHER_KEY')

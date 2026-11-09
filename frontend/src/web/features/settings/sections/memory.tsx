@@ -903,7 +903,10 @@ function SourcesTab({ blocked, describedBy }: { blocked: Gate; describedBy?: str
               onRetry={() => void content.refetch()}
             />
           ) : (
-            <pre className="max-h-[60vh] overflow-auto rounded-md bg-surface-0 p-3 font-mono text-small whitespace-pre-wrap">
+            <pre
+              tabIndex={0}
+              className="max-h-[60vh] overflow-auto rounded-md bg-surface-0 p-3 font-mono text-small whitespace-pre-wrap"
+            >
               {content.data}
             </pre>
           )}

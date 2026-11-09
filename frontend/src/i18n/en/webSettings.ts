@@ -7,6 +7,7 @@ export const webSettings = defineNamespace('webSettings', {
   groupAgents: 'Agents',
   groupSecurity: 'Security',
   groupSystem: 'System',
+  allSettings: 'All settings',
 
   appearance: 'Appearance',
   appearanceDescription: 'Theme, text size and how the composer sends',

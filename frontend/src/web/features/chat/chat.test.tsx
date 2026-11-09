@@ -246,6 +246,13 @@ describe('header', () => {
 })
 
 describe('composer', () => {
+  it('marks focus with a ring as well as the border (the border alone is ~1.6:1 in light)', async () => {
+    const { composer } = await openChat(chatRpc())
+    const frame = composer.closest('.rounded-2xl')
+    expect(frame?.className).toMatch(/focus-within:border-accent/)
+    expect(frame?.className).toMatch(/focus-within:ring-ring/)
+  })
+
   it('Enter mode: Shift+Enter adds a line and nothing is sent', async () => {
     const user = userEvent.setup()
     const rpc = chatRpc()

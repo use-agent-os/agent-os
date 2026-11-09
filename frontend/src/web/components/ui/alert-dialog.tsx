@@ -2,6 +2,7 @@ import * as AlertDialogPrimitive from '@radix-ui/react-alert-dialog'
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 import { OverlayLayer } from './overlay-layer'
+import { useRestoreFocus } from './restore-focus'
 import { buttonVariants } from './button'
 
 export const AlertDialog = AlertDialogPrimitive.Root
@@ -10,8 +11,11 @@ export const AlertDialogTrigger = AlertDialogPrimitive.Trigger
 export function AlertDialogContent({
   className,
   children,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Content>) {
+  const focus = useRestoreFocus(onOpenAutoFocus, onCloseAutoFocus)
   return (
     <AlertDialogPrimitive.Portal>
       <AlertDialogPrimitive.Overlay className="anim-overlay-in fixed inset-0 z-[var(--z-overlay)] bg-scrim" />
@@ -23,6 +27,7 @@ export function AlertDialogContent({
           className,
         )}
         {...props}
+        {...focus}
       >
         <OverlayLayer />
         {children}

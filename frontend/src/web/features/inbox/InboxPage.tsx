@@ -313,7 +313,10 @@ function IssueItem({ item, issue }: { item: AttentionItem; issue: RuntimeIssue }
               <div className="min-w-0 flex-1">
                 {step.label ? <p className="font-medium">{step.label}</p> : null}
                 {step.command ? (
-                  <code className="block overflow-x-auto rounded bg-surface-0 px-2 py-1 font-mono text-small whitespace-pre">
+                  <code
+                    tabIndex={0}
+                    className="block overflow-x-auto rounded bg-surface-0 px-2 py-1 font-mono text-small whitespace-pre"
+                  >
                     {step.command}
                   </code>
                 ) : null}

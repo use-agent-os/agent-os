@@ -305,6 +305,7 @@ export function LogsSection() {
         role="log"
         aria-label={t('webSetSystem.logStream')}
         aria-busy={!loaded}
+        tabIndex={0}
         className="h-[28rem] overflow-y-auto rounded-lg border border-border bg-surface-0 py-2 font-mono text-small"
       >
         {!loaded ? (

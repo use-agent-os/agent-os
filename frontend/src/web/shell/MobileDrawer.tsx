@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webShell'
 import { Sheet, SheetContent, SheetTitle } from '@/web/components/ui/sheet'
@@ -10,7 +11,11 @@ import { useShell } from './shell-store'
 export function MobileDrawer() {
   const open = useShell((s) => s.drawerOpen)
   const setOpen = useShell((s) => s.setDrawerOpen)
+  // Closing by navigating lands on the new page; any other close (Escape, the
+  // backdrop) returns focus to the button that opened the drawer.
+  const navigated = useRef(false)
   const onNavigate = () => {
+    navigated.current = true
     setOpen(false)
     focusMainTarget()
   }
@@ -29,6 +34,12 @@ export function MobileDrawer() {
             '[data-testid="list-pane"] [aria-current="page"]',
           )
           ;(current ?? content).focus({ preventScroll: true })
+        }}
+        onCloseAutoFocus={(e) => {
+          if (!navigated.current) return
+          navigated.current = false
+          e.preventDefault()
+          focusMainTarget()
         }}
       >
         <SheetTitle className="sr-only">{t('webShell.drawerTitle')}</SheetTitle>

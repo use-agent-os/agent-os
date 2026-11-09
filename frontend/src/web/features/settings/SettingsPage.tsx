@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
-import { Loader2, RotateCw, Search } from 'lucide-react'
+import { ChevronLeft, Loader2, RotateCw, Search } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState, type ComponentType } from 'react'
 import { Link, NavLink, useLocation, useNavigate, useParams } from 'react-router'
 import { useRpc } from '@/app/providers'
 import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webSettings'
+import '@/i18n/en/webShell'
 import { cn } from '@/lib/utils'
 import {
   loadSettingsSnapshot,
@@ -247,12 +248,35 @@ export function SettingsPage() {
   const meta = section ? findSection(section) : null
   const Section = meta ? SECTION_COMPONENTS[meta.id] : null
   return (
-    <div className="flex h-full min-h-0 flex-col md:flex-row">
-      <aside className="shrink-0 overflow-y-auto border-border p-3 md:w-64 md:border-r max-md:border-b">
+    // Phones get master-detail: the section list, or one section with a way
+    // back. Side by side, the long list squeezed the section pane to 0 px.
+    <div className="flex min-h-0 flex-col md:h-full md:flex-row">
+      <aside
+        className={cn(
+          'shrink-0 border-border p-3 md:w-64 md:overflow-y-auto md:border-r max-md:border-b',
+          section && 'max-md:hidden',
+        )}
+      >
         <SettingsNav />
       </aside>
-      <div className="scroll-contained min-w-0 flex-1">
+      {/* Its own scroller from md up: focusable so a section with nothing to
+          Tab to (e.g. Notifications without Web Push) still scrolls by keyboard. */}
+      <div
+        role="region"
+        aria-label={meta ? t(meta.titleKey) : t('webShell.pageSettings')}
+        tabIndex={0}
+        className="min-w-0 flex-1 focus-visible:-outline-offset-2 md:overflow-auto md:overscroll-contain"
+      >
         <div className="mx-auto w-full max-w-3xl p-4 md:p-6">
+          {section ? (
+            <Link
+              to="/settings"
+              className="target mb-3 -ml-1 inline-flex items-center gap-1 rounded-md text-small text-text-muted hover:text-text md:hidden"
+            >
+              <ChevronLeft className="size-4" aria-hidden />
+              {t('webSettings.allSettings')}
+            </Link>
+          ) : null}
           <RestartNotice />
           {!section ? (
             <SettingsSummary />

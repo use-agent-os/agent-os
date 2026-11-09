@@ -78,7 +78,10 @@ function Snapshot({ method }: { method: string }) {
           {errorText(query.error)}
         </p>
       ) : (
-        <pre className="max-h-64 overflow-auto rounded-md border border-border bg-surface-0 p-2 font-mono text-small">
+        <pre
+          tabIndex={0}
+          className="max-h-64 overflow-auto rounded-md border border-border bg-surface-0 p-2 font-mono text-small"
+        >
           {pretty(query.data)}
         </pre>
       )}
@@ -122,7 +125,9 @@ function EventLog() {
                   <span className="text-text-muted">{new Date(e.at).toLocaleTimeString()}</span>{' '}
                   {e.name}
                 </summary>
-                <pre className="overflow-auto py-1">{pretty(e.payload)}</pre>
+                <pre tabIndex={0} className="overflow-auto py-1">
+                  {pretty(e.payload)}
+                </pre>
               </details>
             </li>
           ))}
@@ -218,6 +223,7 @@ function ManualRpc() {
             {result.ok ? t('webSetSystem.debugResponse') : t('webSetSystem.debugError')}
           </p>
           <pre
+            tabIndex={0}
             data-testid="debug-rpc-result"
             role={result.ok ? undefined : 'alert'}
             className="max-h-96 overflow-auto rounded-md border border-border bg-surface-0 p-2 font-mono text-small"

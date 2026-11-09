@@ -67,7 +67,10 @@ function stepsHeading(kind: GroupKind): string {
 function CommandLine({ command }: { command: string }) {
   return (
     <div className="mt-1 flex max-w-full items-center gap-1 rounded-md border border-border bg-surface-0 pl-3">
-      <code className="min-w-0 flex-1 overflow-x-auto py-1.5 font-mono text-small whitespace-pre">
+      <code
+        tabIndex={0}
+        className="min-w-0 flex-1 overflow-x-auto py-1.5 font-mono text-small whitespace-pre"
+      >
         {command}
       </code>
       <Button

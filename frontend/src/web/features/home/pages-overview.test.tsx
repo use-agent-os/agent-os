@@ -55,15 +55,19 @@ describe('Home', () => {
   it('links each figure to its detail page and shows the next run and live events', async () => {
     const rpc = homeRpc()
     renderShell('/home', rpc)
-    expect(await screen.findByRole('link', { name: 'Open Health' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: 'Details: Health' })).toHaveAttribute(
       'href',
       '/settings/health',
     )
-    expect(screen.getByRole('link', { name: 'Open Usage' })).toHaveAttribute('href', '/usage')
-    expect(screen.getByRole('link', { name: 'Open Automations' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Details: Usage' })).toHaveAttribute('href', '/usage')
+    expect(screen.getByRole('link', { name: 'Details: Automations' })).toHaveAttribute(
       'href',
       '/automations',
     )
+    // Label in name (WCAG 2.5.3): every link reading "Details" is named starting with it.
+    const detailLinks = screen.getAllByText('Details').map((text) => text.closest('a'))
+    expect(detailLinks).toHaveLength(7)
+    for (const link of detailLinks) expect(link?.getAttribute('aria-label')).toMatch(/^Details: /)
     const next = screen.getByRole('region', { name: 'Next automation' })
     expect(await within(next).findByText(/Morning brief/)).toBeInTheDocument()
     expect(rpc.callsTo('doctor.status')).toEqual([{ agentId: 'main', deep: false }])

@@ -155,7 +155,11 @@ export function SidePanel({ transcript, phone }: { transcript: TranscriptState; 
           <X />
         </Button>
       </div>
-      <div role="tabpanel" className="scroll-contained flex-1 p-3">
+      <div
+        role="tabpanel"
+        tabIndex={0}
+        className="scroll-contained flex-1 p-3 focus-visible:-outline-offset-2"
+      >
         <TabBody item={findItem(transcript, active.id)} />
       </div>
     </aside>

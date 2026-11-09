@@ -30,7 +30,6 @@ export const webSetCapabilities = defineNamespace('webSetCapabilities', {
   skillsFilterDisabled: 'Disabled',
   skillsWithheld_one: '{count} ready skill is not offered to the agent. Open it to see why.',
   skillsWithheld_other: '{count} ready skills are not offered to the agent. Open one to see why.',
-  skillsOpen: 'Skill {name}',
 
   // Skills › details.
   skillsAvailability: 'Agent availability',

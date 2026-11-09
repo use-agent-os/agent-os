@@ -365,7 +365,9 @@ export function Composer(props: ComposerProps) {
               }}
               className={cn(
                 'flex cursor-default gap-3 rounded-md px-2 py-1.5',
-                i === activeSlash && 'bg-surface-3',
+                // surface-3 alone is ~1.1:1; the ring marks the active option at 3:1.
+                i === activeSlash &&
+                  'bg-surface-3 outline-2 -outline-offset-2 outline-ring outline-solid',
               )}
             >
               <span className="font-mono">{cmd.cmd}</span>
@@ -375,7 +377,9 @@ export function Composer(props: ComposerProps) {
         </ul>
       ) : null}
 
-      <div className="rounded-2xl border border-border-control bg-surface-1 shadow-1 focus-within:border-accent">
+      {/* Focus: border and a 1px ring together. The border colour change alone
+          is only ~1.6:1 in the light theme (olive over grey). */}
+      <div className="rounded-2xl border border-border-control bg-surface-1 shadow-1 focus-within:border-accent focus-within:ring-1 focus-within:ring-ring">
         {attachments.attachments.length > 0 || attachments.rejection ? (
           <div
             className="flex flex-wrap gap-2 border-b border-border p-2"

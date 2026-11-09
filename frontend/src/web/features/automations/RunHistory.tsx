@@ -199,7 +199,10 @@ function RunOutput({ jobId, runId, preview }: { jobId: string; runId: string; pr
   })
   return (
     <div className="flex flex-col gap-1">
-      <pre className="max-h-80 overflow-auto rounded-md bg-code-bg p-2 font-mono whitespace-pre-wrap text-code-text">
+      <pre
+        tabIndex={0}
+        className="max-h-80 overflow-auto rounded-md bg-code-bg p-2 font-mono whitespace-pre-wrap text-code-text"
+      >
         {output.data?.output ?? preview}
       </pre>
       {output.isFetching && !output.data ? (

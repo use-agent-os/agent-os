@@ -238,7 +238,10 @@ function PendingRequests({ write }: { write: Gate }) {
                     <summary className="cursor-pointer text-small text-text-muted">
                       {t('webSetAccess.apFullArgs')}
                     </summary>
-                    <pre className="mt-1 max-h-96 overflow-auto rounded bg-surface-0 p-2 font-mono text-small whitespace-pre-wrap">
+                    <pre
+                      tabIndex={0}
+                      className="mt-1 max-h-96 overflow-auto rounded bg-surface-0 p-2 font-mono text-small whitespace-pre-wrap"
+                    >
                       {full}
                     </pre>
                   </details>

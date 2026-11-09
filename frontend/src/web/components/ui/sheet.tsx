@@ -2,6 +2,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog'
 import * as React from 'react'
 import { cn } from '@/lib/utils'
 import { OverlayLayer } from './overlay-layer'
+import { useRestoreFocus } from './restore-focus'
 
 // A side sheet: the mobile navigation drawer and the phone Details / side
 // panel sheets. A modal dialog underneath, so focus is trapped, the rest of the
@@ -17,8 +18,11 @@ export function SheetContent({
   className,
   children,
   side = 'left',
+  onOpenAutoFocus,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & { side?: 'left' | 'right' | 'bottom' }) {
+  const focus = useRestoreFocus(onOpenAutoFocus, onCloseAutoFocus)
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay
@@ -40,6 +44,7 @@ export function SheetContent({
           className,
         )}
         {...props}
+        {...focus}
       >
         <OverlayLayer />
         {children}

@@ -71,7 +71,10 @@ export function ApprovalCard({ item }: { item: Approval }) {
         ) : null}
       </div>
       {command || detail ? (
-        <pre className="scroll-contained max-h-28 rounded bg-surface-0 p-2 text-small whitespace-pre-wrap">
+        <pre
+          tabIndex={0}
+          className="scroll-contained max-h-28 rounded bg-surface-0 p-2 text-small whitespace-pre-wrap"
+        >
           {command || detail}
         </pre>
       ) : null}

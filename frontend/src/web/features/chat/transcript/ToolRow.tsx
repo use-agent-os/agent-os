@@ -134,7 +134,10 @@ export function ToolRow({ item }: { item: ToolItem }) {
           {item.args !== undefined ? (
             <div>
               <p className="text-small font-medium text-text-muted">{t('webChat.toolArguments')}</p>
-              <pre className="scroll-contained max-h-48 rounded bg-code-bg p-2 font-mono text-small whitespace-pre-wrap">
+              <pre
+                tabIndex={0}
+                className="scroll-contained max-h-48 rounded bg-code-bg p-2 font-mono text-small whitespace-pre-wrap"
+              >
                 {pretty(item.args)}
               </pre>
             </div>
@@ -144,6 +147,7 @@ export function ToolRow({ item }: { item: ToolItem }) {
               <p className="text-small font-medium text-text-muted">{t('webChat.toolResult')}</p>
               <pre
                 data-testid="tool-result"
+                tabIndex={0}
                 className="scroll-contained max-h-64 rounded bg-code-bg p-2 font-mono text-small whitespace-pre-wrap"
               >
                 {long ? `${result.slice(0, INLINE_RESULT_LIMIT)}…` : result}

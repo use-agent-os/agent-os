@@ -37,6 +37,22 @@ describe('command palette', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 
+  it('marks the highlighted option with the ring (3:1), not only the surface-3 fill', async () => {
+    const user = userEvent.setup()
+    renderShell('/home', shellRpc(rows))
+    await screen.findByText('Weekly DCA')
+    const dialog = await openPalette(user)
+    const selected = await waitFor(() => {
+      const option = within(dialog)
+        .getAllByRole('option')
+        .find((o) => o.getAttribute('aria-selected') === 'true')
+      expect(option).toBeDefined()
+      return option as HTMLElement
+    })
+    expect(selected.className).toMatch(/data-\[selected=true\]:outline-ring/)
+    expect(within(dialog).getByRole('combobox').className).toMatch(/focus:border-ring/)
+  })
+
   it('opens from the rail Search button', async () => {
     const user = userEvent.setup()
     renderShell('/home')

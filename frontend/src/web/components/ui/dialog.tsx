@@ -5,6 +5,7 @@ import { t } from '@/i18n'
 import '@/i18n/en/webCommon'
 import { cn } from '@/lib/utils'
 import { OverlayLayer } from './overlay-layer'
+import { useRestoreFocus } from './restore-focus'
 
 export const Dialog = DialogPrimitive.Root
 export const DialogTrigger = DialogPrimitive.Trigger
@@ -28,8 +29,11 @@ export function DialogContent({
   className,
   children,
   hideClose = false,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & { hideClose?: boolean }) {
+  const focus = useRestoreFocus(onOpenAutoFocus, onCloseAutoFocus)
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -42,6 +46,7 @@ export function DialogContent({
           className,
         )}
         {...props}
+        {...focus}
       >
         <OverlayLayer />
         {children}

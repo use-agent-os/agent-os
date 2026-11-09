@@ -325,7 +325,10 @@ function ChannelCard({
           <summary className="cursor-pointer text-small text-text-muted">
             {t('webSetAccess.chAdapterConfig')}
           </summary>
-          <pre className="mt-2 max-h-64 overflow-auto rounded bg-surface-0 p-2 font-mono text-small">
+          <pre
+            tabIndex={0}
+            className="mt-2 max-h-64 overflow-auto rounded bg-surface-0 p-2 font-mono text-small"
+          >
             {d.configJson}
           </pre>
         </details>

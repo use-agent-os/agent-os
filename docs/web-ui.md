@@ -406,7 +406,9 @@ Everything you configure lives under **Settings** (`/control/settings`, or
 **Settings** in the status menu). A **Search settings** field at the top of its
 sidebar matches section names, descriptions and field labels; choosing a field
 opens its section and focuses it. `/control/settings` itself summarizes
-readiness and setup progress.
+readiness and setup progress. On a phone the sidebar and a section never share
+the screen: a section opens on its own with **All settings** above it to go
+back to the list.
 
 | Group | Section | Holds |
 | --- | --- | --- |
