@@ -288,9 +288,10 @@ export interface BindRuntimeSignalsOptions {
 }
 
 async function defaultFetchReady(): Promise<unknown> {
-  const resp = await fetch(apiUrl('/ready'), {
+  const url = apiUrl('/ready')
+  const resp = await fetch(url, {
     cache: 'no-store',
-    headers: authenticatedHeaders(),
+    headers: authenticatedHeaders(url),
   })
   // 503 while starting still carries the JSON body the probe wants.
   return resp.json()

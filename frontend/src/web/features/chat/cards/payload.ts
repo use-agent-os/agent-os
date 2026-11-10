@@ -8,7 +8,7 @@ export async function fetchArtifactJson(artifact: Artifact): Promise<unknown> {
   if (!url) throw new Error('missing download URL')
   // Already gateway-resolved (absolute off-gateway, root-relative on it).
   const response = await fetch(url, {
-    headers: authenticatedHeaders(),
+    headers: authenticatedHeaders(url),
     credentials: 'same-origin',
   })
   if (!response.ok) throw new Error(`HTTP ${response.status}`)

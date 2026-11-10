@@ -105,10 +105,11 @@ export function useAttachments(opts?: {
           : new File([file], file.name, { type: mime })
       form.append('file', uploadFile, file.name)
       form.append('mime', mime)
-      const response = await fetch(apiUrl('/api/v1/files/upload'), {
+      const url = apiUrl('/api/v1/files/upload')
+      const response = await fetch(url, {
         method: 'POST',
         body: form,
-        headers: authenticatedHeaders(),
+        headers: authenticatedHeaders(url),
         credentials: 'same-origin',
       })
       if (!response.ok) {

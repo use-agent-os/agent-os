@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
+import { bindGatewaySocket } from '@/lib/api-origin'
 import {
   ApprovalMonitor,
   ELEVATED_MODE_KEY,
@@ -122,6 +123,50 @@ describe('approval-monitor service', () => {
   async function flush() {
     for (let i = 0; i < 6; i++) await Promise.resolve()
   }
+
+  describe('after a switch to another gateway', () => {
+    it('reads and resolves approvals on the connected gateway, with its token only', async () => {
+      const rpc = { ...fakeRpc('connecting'), currentUrl: `ws://${location.host}/ws` }
+      const unbind = bindGatewaySocket(rpc)
+      try {
+        sessionStorage.setItem('agentos.wsToken', 'tokA')
+        makeMonitor().start(rpc)
+        rpc.setState('connected')
+        await flush()
+        expect(fetchMock).toHaveBeenLastCalledWith(
+          '/api/approvals',
+          expect.objectContaining({ headers: { Authorization: 'Bearer tokA' } }),
+        )
+
+        // Settings > Gateway: connect to B with B's token.
+        rpc.currentUrl = 'ws://127.0.0.1:28812/ws'
+        sessionStorage.setItem('agentos.wsToken', 'tokB')
+        rpc.setState('connecting')
+        rpc.setState('connected')
+        await flush()
+        expect(fetchMock).toHaveBeenLastCalledWith(
+          'http://127.0.0.1:28812/api/approvals',
+          expect.objectContaining({ headers: { Authorization: 'Bearer tokB' } }),
+        )
+        const toA = fetchMock.mock.calls.filter(
+          ([url, init]) =>
+            !String(url).startsWith('http://127.0.0.1:28812/') &&
+            JSON.stringify(init).includes('tokB'),
+        )
+        expect(toA).toEqual([])
+
+        await saveApprovalMode('auto-deny')
+        expect(fetchMock).toHaveBeenLastCalledWith(
+          'http://127.0.0.1:28812/api/approvals/settings',
+          expect.objectContaining({
+            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer tokB' },
+          }),
+        )
+      } finally {
+        unbind()
+      }
+    })
+  })
 
   describe('backfill on start + (re)connect', () => {
     it('backfills once from the root-absolute /api/approvals when started without a client', async () => {

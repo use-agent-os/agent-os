@@ -432,9 +432,10 @@ export class ApprovalMonitor {
     const seen: InFlightEvents = { added: new Map(), removed: new Set() }
     this.inflightEvents = seen
     try {
-      const resp = await fetch(approvalsUrl(), {
+      const url = approvalsUrl()
+      const resp = await fetch(url, {
         cache: 'no-store',
-        headers: authenticatedHeaders(),
+        headers: authenticatedHeaders(url),
       })
       if (generation !== this.generation) return
       if (!resp.ok) {
@@ -505,9 +506,10 @@ export class ApprovalMonitor {
     }
     if (elevatedMode) body.elevatedMode = elevatedMode
     try {
-      const resp = await fetch(approvalsResolveUrl(), {
+      const url = approvalsResolveUrl()
+      const resp = await fetch(url, {
         method: 'POST',
-        headers: authenticatedHeaders({ 'Content-Type': 'application/json' }),
+        headers: authenticatedHeaders(url, { 'Content-Type': 'application/json' }),
         body: JSON.stringify(body),
       })
       if (!resp.ok) throw new Error('HTTP ' + resp.status)
@@ -594,9 +596,10 @@ export function approvalsSettingsUrl(): string {
  * the legacy _loadData + ApprovalMonitor.pollNow.
  */
 export async function saveApprovalMode(mode: string): Promise<void> {
-  const resp = await fetch(approvalsSettingsUrl(), {
+  const url = approvalsSettingsUrl()
+  const resp = await fetch(url, {
     method: 'POST',
-    headers: authenticatedHeaders({ 'Content-Type': 'application/json' }),
+    headers: authenticatedHeaders(url, { 'Content-Type': 'application/json' }),
     body: JSON.stringify({ mode }),
   })
   if (!resp.ok) throw new Error('HTTP ' + resp.status)

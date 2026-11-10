@@ -11,6 +11,7 @@ import { bindRuntimeSignals } from '@/lib/runtime-signals'
 import type { RpcState } from '@/lib/ws-rpc'
 import { KeyboardShortcutProvider, type ShortcutHelpRenderer } from '@/components/KeyboardShortcuts'
 import { readStoredToken, readStoredWsUrl } from '@/lib/credentials'
+import { bindGatewaySocket } from '@/lib/api-origin'
 
 // Exported so an off-gateway host (the desktop shell) can supply its own
 // connected client to the same hooks and views.
@@ -51,6 +52,9 @@ export function AppProviders({
     initLocale()
     let cancelled = false
     const unsubscribe = rpc.on('_state', (s) => useConnection.getState().setState(s as RpcState))
+    // REST calls (approvals, uploads, artifacts) follow the gateway this
+    // socket is connected to, which a switch can make another origin.
+    const unbindHttp = bindGatewaySocket(rpc)
     // The truth badge and the attention inbox read what this connection sees:
     // frame age, refused handshakes, doctor/ready, presented ask_user questions.
     const unbindSignals = bindRuntimeSignals(rpc)
@@ -79,6 +83,7 @@ export function AppProviders({
     return () => {
       cancelled = true
       unsubscribe()
+      unbindHttp()
       unbindSignals()
       unbindQuestions()
       rpc.disconnect()

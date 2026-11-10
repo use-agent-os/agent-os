@@ -109,9 +109,10 @@ export function useElevated(sessionKey: string) {
       const mode = setBrowserElevated(on ? 'bypass' : '')
       useApprovals.getState().setElevatedMode(mode)
       try {
-        const resp = await fetch(apiUrl('/api/elevated-mode'), {
+        const url = apiUrl('/api/elevated-mode')
+        const resp = await fetch(url, {
           method: 'POST',
-          headers: authenticatedHeaders({ 'Content-Type': 'application/json' }),
+          headers: authenticatedHeaders(url, { 'Content-Type': 'application/json' }),
           credentials: 'same-origin',
           body: JSON.stringify({ sessionKey, mode: mode || 'off' }),
         })
