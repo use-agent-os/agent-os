@@ -84,25 +84,31 @@ export class WsRpcClient {
    * `extraAuth` rides along in the handshake's `auth` object: the desktop
    * presents its operator secret there so the gateway never mistakes the
    * app's own connection for an agent's (see gateway/agent_surface.py).
+   *
+   * Any socket already open (or a pending backoff retry) is dropped first, so
+   * switching gateway or credentials never leaves the old connection feeding
+   * events into the same listeners.
    */
   connect(url: string, token?: string | null, extraAuth?: Record<string, string> | null): void {
     this.url = url
     this.token = token ?? null
     this.extraAuth = extraAuth && Object.keys(extraAuth).length ? { ...extraAuth } : null
     this.autoReconnect = true
+    this.clearReconnectTimer()
+    this.reconnectDelay = 800
+    this.dropSocket()
     this.doConnect()
   }
 
   disconnect(): void {
     this.autoReconnect = false
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
-    this.stopPing()
-    this.stopTickWatch()
-    if (this.ws) {
-      this.ws.close()
-      this.ws = null
-    }
-    this.setState('disconnected')
+    this.clearReconnectTimer()
+    this.dropSocket()
+  }
+
+  /** The WebSocket URL of the last `connect()` ('' before the first). */
+  get currentUrl(): string {
+    return this.url
   }
 
   call<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
@@ -142,10 +148,7 @@ export class WsRpcClient {
     if (!this.url) return
     if (this.stateValue === 'connected' && !options.force) return
     this.autoReconnect = true
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = null
-    }
+    this.clearReconnectTimer()
     this.reconnectDelay = 800
     this.dropSocket()
     this.doConnect()
@@ -186,19 +189,26 @@ export class WsRpcClient {
     this.lastSeq = 0
     this.lastFrameAt = Date.now()
     this.stopTickWatch()
+    let ws: WebSocket
     try {
-      this.ws = new this.WebSocketImpl(this.url)
+      ws = new this.WebSocketImpl(this.url)
     } catch {
       this.scheduleReconnect()
       return
     }
+    this.ws = ws
+    // Every handler checks it still belongs to the current socket: a socket
+    // that was replaced must never clear, close or feed the one after it.
+    const current = () => this.ws === ws
 
-    this.ws.onopen = () => {
+    ws.onopen = () => {
+      if (!current()) return
       this.reconnectDelay = 800
       // Don't send connect yet — wait for connect.challenge from server
     }
 
-    this.ws.onmessage = (ev: MessageEvent) => {
+    ws.onmessage = (ev: MessageEvent) => {
+      if (!current()) return
       let data: Record<string, unknown>
       try {
         data = JSON.parse(String(ev.data)) as Record<string, unknown>
@@ -314,7 +324,8 @@ export class WsRpcClient {
       }
     }
 
-    this.ws.onclose = () => {
+    ws.onclose = () => {
+      if (!current()) return
       this.stopPing()
       this.stopTickWatch()
       for (const [, p] of this.pending) p.reject(new Error('Connection closed'))
@@ -331,7 +342,7 @@ export class WsRpcClient {
       }
     }
 
-    this.ws.onerror = () => {}
+    ws.onerror = () => {}
   }
 
   /**
@@ -438,10 +449,20 @@ export class WsRpcClient {
     }
   }
 
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+  }
+
   private scheduleReconnect(): void {
     if (!this.autoReconnect) return
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
-    this.reconnectTimer = setTimeout(() => this.doConnect(), this.reconnectDelay)
+    this.clearReconnectTimer()
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      this.doConnect()
+    }, this.reconnectDelay)
     this.reconnectDelay = Math.min(
       this.reconnectDelay * this.reconnectFactor,
       this.maxReconnectDelay,

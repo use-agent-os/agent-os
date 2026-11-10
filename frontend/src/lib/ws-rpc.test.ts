@@ -508,3 +508,70 @@ describe('handshake refusal and manual retry', () => {
     expect(client.lastFrameTime).toBeGreaterThan(0)
   })
 })
+
+describe('connect() while a connection exists', () => {
+  it('drops a live socket before opening one to the new URL', () => {
+    const { client, ws } = newClient()
+    handshake(ws)
+    const events = vi.fn()
+    client.on('e', events)
+    client.connect('ws://other/ws', 'tok-2')
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    expect(ws.readyState).toBe(3)
+    const next = FakeWebSocket.instances.at(-1)!
+    expect(next.url).toBe('ws://other/ws')
+    next.serverOpen()
+    handshake(next)
+    expect(client.state).toBe('connected')
+    // The old socket's late close and frames reach nothing.
+    ws.onclose?.()
+    ws.onmessage?.({ data: JSON.stringify({ type: 'event', event: 'e', payload: {}, seq: 9 }) })
+    expect(events).not.toHaveBeenCalled()
+    expect(client.state).toBe('connected')
+    vi.advanceTimersByTime(60_000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    // The live socket still carries events in order.
+    next.serverSend({ type: 'event', event: 'e', payload: {}, seq: 1 })
+    expect(events).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels a pending backoff timer so only one socket opens', () => {
+    const { client, ws } = newClient()
+    handshake(ws)
+    ws.close() // backoff timer pending (800 ms)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    client.connect('ws://test/ws', 'tok-2')
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    vi.advanceTimersByTime(60_000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    const next = FakeWebSocket.instances.at(-1)!
+    next.serverOpen()
+    next.serverSend({ type: 'event', event: 'connect.challenge' })
+    expect(JSON.parse(next.sent.at(-1)!).params.auth).toEqual({ token: 'tok-2' })
+  })
+
+  it('a socket replaced by connect() can never clear or replace the current one', () => {
+    const { client, ws } = newClient()
+    // Keep the old handlers reachable, as a browser would deliver a queued close.
+    const lateClose = ws.onclose
+    client.connect('ws://other/ws')
+    const next = FakeWebSocket.instances.at(-1)!
+    next.serverOpen()
+    handshake(next)
+    lateClose?.()
+    expect(client.state).toBe('connected')
+    vi.advanceTimersByTime(60_000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+  })
+
+  it('disconnect() settles in-flight calls and stops reconnecting', async () => {
+    const { client, ws } = newClient()
+    handshake(ws)
+    const inflight = client.call('a.b')
+    client.disconnect()
+    await expect(inflight).rejects.toThrow('Connection closed')
+    expect(client.state).toBe('disconnected')
+    vi.advanceTimersByTime(60_000)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+})
