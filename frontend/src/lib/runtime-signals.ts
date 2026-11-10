@@ -22,7 +22,7 @@
  * bundle, so it must not drag a view's copy along.
  */
 import { create } from 'zustand'
-import { apiUrl } from '@/lib/api-origin'
+import { apiUrl, gatewayHttpReachable } from '@/lib/api-origin'
 import { authenticatedHeaders } from '@/lib/http-auth'
 import type { RpcState } from '@/lib/ws-rpc'
 
@@ -288,6 +288,9 @@ export interface BindRuntimeSignalsOptions {
 }
 
 async function defaultFetchReady(): Promise<unknown> {
+  // Another gateway than the page's: /ready is out of reach over HTTP (the
+  // console's CSP); say nothing rather than keep the previous gateway's.
+  if (!gatewayHttpReachable()) return null
   const url = apiUrl('/ready')
   const resp = await fetch(url, {
     cache: 'no-store',
@@ -336,8 +339,13 @@ export function bindRuntimeSignals(
     readyBusy = true
     fetchReady()
       .then((raw) => {
+        if (disposed) return
+        if (raw === null) {
+          store.setState({ ready: null })
+          return
+        }
         const probe = normalizeReady(raw, now())
-        if (!disposed && probe) store.setState({ ready: probe })
+        if (probe) store.setState({ ready: probe })
       })
       .catch(() => {
         // An unreachable /ready says nothing the socket does not already say.

@@ -18,6 +18,8 @@ export const chat = defineNamespace('chat', {
   runModesClose: 'Close run modes',
   attachFiles: 'Attach files',
   attachFileTitle: 'Attach a file',
+  attachOtherGateway:
+    'Files over 2 MB upload over HTTP, which reaches only the gateway that served this page.',
   messagePlaceholder: 'Send a message...',
   suggestionKey: 'Tab',
   suggestionKeyTitle: 'Press Tab to use the suggested prompt',

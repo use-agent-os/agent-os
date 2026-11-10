@@ -86,6 +86,16 @@ export function gatewayOrigin(): string {
   return apiOrigin() || socketHttpOrigin(boundSocket?.currentUrl ?? '')
 }
 
+/**
+ * Whether this tab's HTTP calls can reach the gateway it is connected to: it
+ * served the page, or a host (the desktop) points at it. The console's
+ * Content-Security-Policy (`connect-src 'self'`) blocks HTTP to any other
+ * origin, so after a switch to another gateway only its WebSocket reaches it.
+ */
+export function gatewayHttpReachable(): boolean {
+  return Boolean(apiOrigin()) || !socketHttpOrigin(boundSocket?.currentUrl ?? '')
+}
+
 /** Absolute URL for a gateway-rooted path (`/api/...`). Relative when on-gateway. */
 export function apiUrl(path: string): string {
   const suffix = path.startsWith('/') ? path : `/${path}`

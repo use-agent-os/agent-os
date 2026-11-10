@@ -125,43 +125,53 @@ describe('approval-monitor service', () => {
   }
 
   describe('after a switch to another gateway', () => {
-    it('reads and resolves approvals on the connected gateway, with its token only', async () => {
-      const rpc = { ...fakeRpc('connecting'), currentUrl: `ws://${location.host}/ws` }
+    it('reads, resolves and sets approvals on the connected gateway, never the page origin', async () => {
+      const calls: Array<[string, Record<string, unknown> | undefined]> = []
+      const rpc = {
+        ...fakeRpc('connecting'),
+        currentUrl: `ws://${location.host}/ws`,
+        async call<T>(method: string, params?: Record<string, unknown>): Promise<T> {
+          calls.push([method, params])
+          if (method === 'approval.list') {
+            return { pending: [{ id: 'b1', namespace: 'exec' }], mode: 'prompt' } as T
+          }
+          return {} as T
+        },
+      }
       const unbind = bindGatewaySocket(rpc)
       try {
         sessionStorage.setItem('agentos.wsToken', 'tokA')
-        makeMonitor().start(rpc)
+        const mon = makeMonitor()
+        mon.start(rpc)
         rpc.setState('connected')
         await flush()
+        // The page's own gateway: HTTP with its token.
         expect(fetchMock).toHaveBeenLastCalledWith(
           '/api/approvals',
           expect.objectContaining({ headers: { Authorization: 'Bearer tokA' } }),
         )
+        expect(calls).toEqual([])
 
-        // Settings > Gateway: connect to B with B's token.
+        // Settings > Gateway: connect to B with B's token. The console's CSP
+        // blocks HTTP to B, so the socket carries the approvals.
+        fetchMock.mockClear()
         rpc.currentUrl = 'ws://127.0.0.1:28812/ws'
         sessionStorage.setItem('agentos.wsToken', 'tokB')
         rpc.setState('connecting')
         rpc.setState('connected')
         await flush()
-        expect(fetchMock).toHaveBeenLastCalledWith(
-          'http://127.0.0.1:28812/api/approvals',
-          expect.objectContaining({ headers: { Authorization: 'Bearer tokB' } }),
-        )
-        const toA = fetchMock.mock.calls.filter(
-          ([url, init]) =>
-            !String(url).startsWith('http://127.0.0.1:28812/') &&
-            JSON.stringify(init).includes('tokB'),
-        )
-        expect(toA).toEqual([])
+        expect(calls).toEqual([['approval.list', { display: true }]])
+        expect(useApprovals.getState().pending.map((p) => p.id)).toEqual(['b1'])
 
+        await mon.resolve({ id: 'b1', namespace: 'exec' }, 'once')
+        expect(calls[1]).toEqual([
+          'exec.approval.resolve',
+          { id: 'b1', approved: true, allowAlways: false, rememberIntent: false },
+        ])
         await saveApprovalMode('auto-deny')
-        expect(fetchMock).toHaveBeenLastCalledWith(
-          'http://127.0.0.1:28812/api/approvals/settings',
-          expect.objectContaining({
-            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer tokB' },
-          }),
-        )
+        expect(calls).toContainEqual(['exec.approvals.set', { mode: 'auto-deny' }])
+        // Nothing went over HTTP, so B's token reached no other origin.
+        expect(fetchMock).not.toHaveBeenCalled()
       } finally {
         unbind()
       }

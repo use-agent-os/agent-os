@@ -91,6 +91,7 @@ export const webChat = defineNamespace('webChat', {
   capabilities: 'Capabilities',
   planMode: 'Plan mode',
   elevated: 'Execution mode (elevated)',
+  elevatedOtherGateway: 'Only on the gateway that served this page',
   pilotRouter: 'Pilot Router',
   visualEffects: 'Visual effects',
   route: 'Model route',
@@ -139,6 +140,8 @@ export const webChat = defineNamespace('webChat', {
   askAnswered: 'Answered',
   artifactDownload: 'Download {name}',
   artifactOpen: 'Open {name}',
+  artifactOtherGateway:
+    'This card loads over HTTP, which reaches only the gateway that served this page.',
   acpTitle: 'Coding agent: {name}',
   acpCancel: 'Cancel',
   acpCancelled: 'Cancel requested',

@@ -727,7 +727,14 @@ function CapabilityMenu({
           disabled={elevated.unavailable}
           onCheckedChange={(v) => void elevated.set(Boolean(v))}
         >
-          {t('webChat.elevated')}
+          <span className="flex flex-col">
+            {t('webChat.elevated')}
+            {elevated.otherGateway ? (
+              <span className="text-small text-text-muted">
+                {t('webChat.elevatedOtherGateway')}
+              </span>
+            ) : null}
+          </span>
         </DropdownMenuCheckboxItem>
         <DropdownMenuCheckboxItem
           checked={router.enabled}

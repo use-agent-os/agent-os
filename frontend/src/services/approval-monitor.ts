@@ -22,7 +22,7 @@
  * persistence, the toast-on-new-pending hook, and pollNow are preserved.
  */
 import { create } from 'zustand'
-import { apiUrl } from '@/lib/api-origin'
+import { apiUrl, gatewayHttpReachable } from '@/lib/api-origin'
 import { authenticatedHeaders } from '@/lib/http-auth'
 import { toast } from 'sonner'
 
@@ -74,6 +74,28 @@ export type ElevatedMode = 'on' | 'bypass' | 'full' | ''
 export interface ApprovalEventSource {
   on(event: string, handler: (...args: unknown[]) => void): () => void
   readonly state?: string
+  /**
+   * The client's RPC call. Used instead of the HTTP routes when they cannot
+   * reach the connected gateway (`gatewayHttpReachable()`).
+   */
+  call?<T = unknown>(method: string, params?: Record<string, unknown>): Promise<T>
+}
+
+type RpcCall = NonNullable<ApprovalEventSource['call']>
+
+// The client the started monitor listens on, for the socket fallback.
+let socketRpc: ApprovalEventSource | null = null
+
+/** The RPC call to use instead of HTTP, or null when HTTP reaches the gateway. */
+function socketRoute(): RpcCall | null {
+  if (gatewayHttpReachable()) return null
+  const rpc = socketRpc
+  return rpc?.call ? (method, params) => rpc.call!(method, params) : null
+}
+
+/** Settings and resolve routes by namespace, as the HTTP handlers map them. */
+function resolveMethod(namespace: string): string {
+  return namespace === 'plugin' ? 'plugin.approval.resolve' : 'exec.approval.resolve'
 }
 
 // The reactive surface consumed by the nav badge + modal. The legacy service
@@ -375,6 +397,7 @@ export class ApprovalMonitor {
   start(rpc?: ApprovalEventSource): void {
     if (this.started) return
     this.started = true
+    socketRpc = rpc ?? null
     window.addEventListener('focus', this.onFocus)
     document.addEventListener('visibilitychange', this.onVisibilityChange)
     if (!rpc) {
@@ -391,6 +414,7 @@ export class ApprovalMonitor {
 
   stop(): void {
     this.started = false
+    socketRpc = null
     this.generation += 1
     this.pollAgain = false
     this.inflightEvents = null
@@ -432,19 +456,26 @@ export class ApprovalMonitor {
     const seen: InFlightEvents = { added: new Map(), removed: new Set() }
     this.inflightEvents = seen
     try {
-      const url = approvalsUrl()
-      const resp = await fetch(url, {
-        cache: 'no-store',
-        headers: authenticatedHeaders(url),
-      })
-      if (generation !== this.generation) return
-      if (!resp.ok) {
-        // zero the badge only; an open prompt keeps
-        // its pinned item (legacy never touched _modal on a failed poll).
-        useApprovals.getState().zeroBadge()
-        return
+      let data: ApprovalsResponse
+      const viaSocket = socketRoute()
+      if (viaSocket) {
+        // Another gateway than the page's: the same list over its socket.
+        data = await viaSocket<ApprovalsResponse>('approval.list', { display: true })
+      } else {
+        const url = approvalsUrl()
+        const resp = await fetch(url, {
+          cache: 'no-store',
+          headers: authenticatedHeaders(url),
+        })
+        if (generation !== this.generation) return
+        if (!resp.ok) {
+          // zero the badge only; an open prompt keeps
+          // its pinned item (legacy never touched _modal on a failed poll).
+          useApprovals.getState().zeroBadge()
+          return
+        }
+        data = (await resp.json()) as ApprovalsResponse
       }
-      const data = (await resp.json()) as ApprovalsResponse
       if (generation !== this.generation) return
       const snapshot = Array.isArray(data.pending) ? data.pending : []
       const mode = data.mode || 'prompt'
@@ -506,13 +537,19 @@ export class ApprovalMonitor {
     }
     if (elevatedMode) body.elevatedMode = elevatedMode
     try {
-      const url = approvalsResolveUrl()
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: authenticatedHeaders(url, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify(body),
-      })
-      if (!resp.ok) throw new Error('HTTP ' + resp.status)
+      const viaSocket = socketRoute()
+      if (viaSocket) {
+        const { namespace, ...params } = body
+        await viaSocket(resolveMethod(String(namespace)), params)
+      } else {
+        const url = approvalsResolveUrl()
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: authenticatedHeaders(url, { 'Content-Type': 'application/json' }),
+          body: JSON.stringify(body),
+        })
+        if (!resp.ok) throw new Error('HTTP ' + resp.status)
+      }
       if (elevatedMode) setBrowserElevated(elevatedMode)
       this.dropLocal(item.id)
       // outcome toast. Legacy tone is
@@ -596,6 +633,11 @@ export function approvalsSettingsUrl(): string {
  * the legacy _loadData + ApprovalMonitor.pollNow.
  */
 export async function saveApprovalMode(mode: string): Promise<void> {
+  const viaSocket = socketRoute()
+  if (viaSocket) {
+    await viaSocket('exec.approvals.set', { mode })
+    return
+  }
   const url = approvalsSettingsUrl()
   const resp = await fetch(url, {
     method: 'POST',

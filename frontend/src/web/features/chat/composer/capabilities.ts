@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
-import { apiUrl } from '@/lib/api-origin'
+import { apiUrl, gatewayHttpReachable } from '@/lib/api-origin'
 import { authenticatedHeaders } from '@/lib/http-auth'
 import {
   approvalMonitor,
@@ -102,7 +102,11 @@ export function useElevated(sessionKey: string) {
   const sessionMode = useApprovals((s) => s.elevatedMode)
   const config = useChatConfig()
   const globalMode = config.data?.permissions?.default_mode ?? ''
-  const [unavailable, setUnavailable] = useState(false)
+  const [refused, setUnavailable] = useState(false)
+  // The switch is an HTTP call, which reaches only the gateway that served
+  // this page (the console's CSP); on another gateway it cannot be set here.
+  const otherGateway = !gatewayHttpReachable()
+  const unavailable = refused || otherGateway
   const bypass = isApprovalBypassMode(effectiveElevatedMode(sessionMode, globalMode))
   const set = useCallback(
     async (on: boolean) => {
@@ -131,7 +135,7 @@ export function useElevated(sessionKey: string) {
     },
     [sessionKey],
   )
-  return { bypass, unavailable, set }
+  return { bypass, unavailable, otherGateway, set }
 }
 
 export function useSessionUsage(sessionKey: string) {
