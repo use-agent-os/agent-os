@@ -48,6 +48,9 @@ function settingsRpc(patch?: (p: Record<string, unknown>) => unknown) {
     .handle('onboarding.status', { needsOnboarding: false })
 }
 
+// Advanced rows are named by their dotted path, the schema title after it.
+const HOOK = 'cron.failure_webhook Cron failure webhook'
+
 async function openAdvanced(rpc = settingsRpc()) {
   const utils = renderShell('/settings/advanced', rpc)
   await screen.findByRole('combobox', { name: 'mode' })
@@ -106,17 +109,43 @@ describe('settings hub', () => {
   })
 })
 
+describe('settings summary', () => {
+  it('shows the active provider and model, a pending restart and paused writes', async () => {
+    const user = userEvent.setup()
+    let model = 'openai/gpt-6-luna'
+    const rpc = settingsRpc().handle('config.snapshot', () => ({
+      config: { llm: { provider: 'openrouter', model } },
+      revision: null,
+      pendingRestart: true,
+      restartReasons: ['provider'],
+      writeBlocked: true,
+    }))
+    renderShell('/settings', rpc)
+    const active = await screen.findByTestId('settings-active')
+    expect(active).toHaveTextContent('openrouter')
+    expect(active).toHaveTextContent('openai/gpt-6-luna')
+    const readiness = screen.getByTestId('settings-readiness')
+    expect(readiness).toHaveTextContent('Restart needed')
+    expect(readiness).toHaveTextContent('Changes paused')
+    model = 'z-ai/glm-5.3'
+    await user.click(screen.getByRole('button', { name: 'Reload' }))
+    await waitFor(() => expect(active).toHaveTextContent('z-ai/glm-5.3'))
+  })
+})
+
 describe('settings search', () => {
   it('finds a field and moves focus to it', async () => {
     const user = userEvent.setup()
     const { router } = await openAdvanced()
     await user.click(screen.getByRole('link', { name: 'Health' }))
     await user.type(screen.getByRole('searchbox', { name: 'Search settings' }), 'webhook')
-    await user.click(await screen.findByRole('button', { name: 'Cron failure webhook — Advanced' }))
-    expect(router.state.location.pathname).toBe('/settings/advanced')
-    await waitFor(() =>
-      expect(screen.getByRole('textbox', { name: 'Cron failure webhook' })).toHaveFocus(),
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Cron failure webhook (cron.failure_webhook) — Advanced',
+      }),
     )
+    expect(router.state.location.pathname).toBe('/settings/advanced')
+    await waitFor(() => expect(screen.getByRole('textbox', { name: HOOK })).toHaveFocus())
   })
 
   it('repeats the query when nothing matches', async () => {
@@ -128,15 +157,22 @@ describe('settings search', () => {
 })
 
 describe('Advanced (schema form)', () => {
-  it('shows an enum as a choice of exactly its values, with the description as help', async () => {
+  it('shows an optional enum as Default plus exactly its values, with the description as help', async () => {
     await openAdvanced()
     const select = screen.getByRole('combobox', { name: 'mode' })
     expect(
       within(select)
         .getAllByRole('option')
         .map((o) => o.textContent),
-    ).toEqual(['a', 'b', 'c'])
+    ).toEqual(['Default', 'a', 'b', 'c'])
     expect(select).toHaveAccessibleDescription('How the gateway runs')
+  })
+
+  it('labels every row with its dotted path, the schema title as secondary text', async () => {
+    await openAdvanced()
+    expect(screen.getByRole('textbox', { name: HOOK })).toBeInTheDocument()
+    // A title that only repeats the last path segment adds nothing.
+    expect(screen.getByRole('switch', { name: 'agentos_router.enabled' })).toBeInTheDocument()
   })
 
   it('keeps a key the schema does not describe editable, typed from its value', async () => {
@@ -191,7 +227,9 @@ describe('save bar', () => {
       await screen.findByText('The configuration changed since you opened it'),
     ).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: 'mode' })).toHaveValue('b')
-    expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument()
+    const conflict = screen.getByText('The configuration changed since you opened it')
+      .parentElement!.parentElement as HTMLElement
+    expect(within(conflict).getByRole('button', { name: 'Reload' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Overwrite' }))
     await waitFor(() => expect(rpc.callsTo('config.patch')).toHaveLength(2))
     expect(rpc.callsTo('config.patch')[1]).toMatchObject({
@@ -210,28 +248,43 @@ describe('save bar', () => {
     await openAdvanced(rpc)
     await user.selectOptions(screen.getByRole('combobox', { name: 'mode' }), 'b')
     await user.click(screen.getByRole('switch', { name: 'agentos_router.enabled' }))
-    const hook = screen.getByRole('textbox', { name: 'Cron failure webhook' })
+    const hook = screen.getByRole('textbox', { name: HOOK })
     await user.clear(hook)
     await user.type(hook, 'x')
     await user.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByText('Value error, must be an https URL')).toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: 'Cron failure webhook' })).toHaveAttribute(
-      'aria-invalid',
-      'true',
-    )
+    expect(screen.getByRole('textbox', { name: HOOK })).toHaveAttribute('aria-invalid', 'true')
     expect(screen.getByTestId('unsaved-count')).toHaveTextContent('3 unsaved changes')
   })
 })
 
 describe('restart-required changes', () => {
-  it('shows the restart notice, restarts the gateway and clears it', async () => {
+  // The gateway's real shapes: config.patch answers only `restartRequired`;
+  // what needs the restart is reported by config.snapshot.
+  function restartRpc(pendingAtStart = false) {
+    let pending = pendingAtStart
+    const rpc = settingsRpc(() => {
+      pending = true
+      return { patched: ['mode'], restartRequired: true }
+    })
+      .handle('config.snapshot', () => ({
+        config: CONFIG,
+        revision: 'rev-1',
+        pendingRestart: pending,
+        restartReasons: pending ? ['channels'] : [],
+      }))
+      .handle('gateway.restart', () => {
+        pending = false
+        return { ok: true }
+      })
+    return rpc
+  }
+
+  it('names the reason from the snapshot after a save, restarts the gateway and clears it', async () => {
     const user = userEvent.setup()
-    const rpc = settingsRpc(() => ({
-      ok: true,
-      restartRequired: true,
-      restartReasons: ['channels'],
-    })).handle('gateway.restart', { ok: true })
+    const rpc = restartRpc()
     await openAdvanced(rpc)
+    expect(screen.queryByText(/takes effect after/)).not.toBeInTheDocument()
     await user.selectOptions(screen.getByRole('combobox', { name: 'mode' }), 'c')
     await user.click(screen.getByRole('button', { name: 'Save' }))
     expect(
@@ -243,6 +296,36 @@ describe('restart-required changes', () => {
       expect(screen.queryByText(/takes effect after a restart/)).not.toBeInTheDocument(),
     )
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('shows a restart another client caused, with no write from this page', async () => {
+    await openAdvanced(restartRpc(true))
+    expect(
+      await screen.findByText(/A saved change takes effect after a restart: channels/),
+    ).toBeInTheDocument()
+  })
+
+  it('Later hides the notice until another write needs a restart', async () => {
+    const user = userEvent.setup()
+    await openAdvanced(restartRpc(true))
+    await user.click(await screen.findByRole('button', { name: 'Later' }))
+    expect(screen.queryByText(/takes effect after a restart/)).not.toBeInTheDocument()
+    await user.selectOptions(screen.getByRole('combobox', { name: 'mode' }), 'b')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect(
+      await screen.findByText(/A saved change takes effect after a restart: channels/),
+    ).toBeInTheDocument()
+  })
+
+  it('falls back to the write result on a gateway whose snapshot does not report restarts', async () => {
+    const user = userEvent.setup()
+    const rpc = settingsRpc(() => ({ restartRequired: true }))
+    await openAdvanced(rpc)
+    await user.selectOptions(screen.getByRole('combobox', { name: 'mode' }), 'b')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect(
+      await screen.findByText('A saved change takes effect after the gateway restarts.'),
+    ).toBeInTheDocument()
   })
 })
 

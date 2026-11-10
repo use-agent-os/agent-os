@@ -195,6 +195,71 @@ describe('Settings › MCP', () => {
     )
     await waitFor(() => expect(rpc.callsTo('mcp.oauth.clear')).toEqual([{ name: 'remote' }]))
   })
+
+  it('stages an added stdio server and saves the whole server list', async () => {
+    const user = userEvent.setup()
+    const rpc = mcpRpc().handle('config.patch', {})
+    renderShell('/settings/mcp', rpc)
+    await user.click(await screen.findByRole('button', { name: 'Add server' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add MCP server' })
+    await user.type(within(dialog).getByLabelText('Name'), 'files')
+    await user.selectOptions(within(dialog).getByLabelText('Transport'), 'stdio')
+    await user.type(within(dialog).getByLabelText('Command'), 'npx')
+    await user.type(within(dialog).getByLabelText('Arguments'), '-y fs-server /tmp')
+    await user.click(within(dialog).getByRole('button', { name: 'Apply' }))
+    await user.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(rpc.callsTo('config.patch')).toEqual([
+        {
+          patches: {
+            'mcp.servers': [
+              remote,
+              {
+                name: 'files',
+                transport: 'stdio',
+                command: 'npx',
+                args: ['-y', 'fs-server', '/tmp'],
+                url: null,
+                env: {},
+                headers: {},
+                oauth: false,
+                tool_timeout_seconds: 30,
+              },
+            ],
+          },
+          expectedRevision: 'r1',
+        },
+      ]),
+    )
+  })
+
+  it('stages an edit to an existing server and saves it in place', async () => {
+    const user = userEvent.setup()
+    const rpc = mcpRpc().handle('config.patch', {})
+    renderShell('/settings/mcp', rpc)
+    await user.click(await screen.findByRole('button', { name: 'Edit remote' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit MCP server' })
+    const url = within(dialog).getByLabelText('Server URL')
+    await user.clear(url)
+    await user.type(url, 'https://mcp2.example.com/mcp')
+    const timeout = within(dialog).getByLabelText('Tool timeout (seconds)')
+    await user.clear(timeout)
+    await user.type(timeout, '60')
+    await user.click(within(dialog).getByRole('button', { name: 'Apply' }))
+    await user.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(rpc.callsTo('config.patch')).toEqual([
+        {
+          patches: {
+            'mcp.servers': [
+              { ...remote, url: 'https://mcp2.example.com/mcp', tool_timeout_seconds: 60 },
+            ],
+          },
+          expectedRevision: 'r1',
+        },
+      ]),
+    )
+  })
 })
 
 // ── Memory ──────────────────────────────────────────────────────────────────
@@ -247,6 +312,53 @@ describe('Settings › Memory', () => {
     await waitFor(() =>
       expect(rpc.callsTo('memory.curated.remove')).toEqual([
         { agentId: 'main', target: 'memory', oldText: 'Prefers metric units' },
+      ]),
+    )
+  })
+
+  it('saves embedding settings, writing a cleared optional value as null', async () => {
+    const user = userEvent.setup()
+    const rpc = memoryRpc()
+      .handle('config.snapshot', {
+        config: {
+          memory: {
+            embedding: {
+              provider: 'openai',
+              remote: {
+                base_url: null,
+                model: 'text-embedding-3-small',
+                api_key: null,
+                api_key_env: 'EMB_KEY',
+                dimensions: null,
+              },
+              ollama: { base_url: null, model: null },
+              local: { model: null },
+            },
+            retrieval_mode: 'hybrid',
+            inject_limit: 6400,
+            curated_memory_char_limit: 4000,
+            curated_user_char_limit: 2000,
+          },
+        },
+        revision: 'm1',
+      })
+      .handle('config.patch', { restartRequired: true })
+    renderShell('/settings/memory', rpc)
+    await user.click(await screen.findByRole('tab', { name: 'Embeddings' }))
+    const model = await screen.findByRole('textbox', { name: 'Model' })
+    await user.clear(model)
+    await user.type(model, 'text-embedding-3-large')
+    await user.clear(screen.getByRole('textbox', { name: 'API key environment variable' }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(rpc.callsTo('config.patch')).toEqual([
+        {
+          patches: {
+            'memory.embedding.remote.model': 'text-embedding-3-large',
+            'memory.embedding.remote.api_key_env': null,
+          },
+          expectedRevision: 'm1',
+        },
       ]),
     )
   })

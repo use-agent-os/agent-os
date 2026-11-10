@@ -497,7 +497,6 @@ function SetupField({
 
 interface UpsertResult {
   restartRequired?: boolean
-  restartReasons?: string[]
   warnings?: string[]
 }
 
@@ -568,7 +567,7 @@ function ChannelSetupDialog({
     onMutate: () => setMessage(null),
     onSuccess: async (result) => {
       setDirty(false)
-      if (result?.restartRequired) useRestartNotice.getState().show(result.restartReasons ?? [])
+      if (result?.restartRequired) useRestartNotice.getState().request()
       toast.success(t('webSetAccess.chSaved'))
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: CHANNELS_KEY }),
