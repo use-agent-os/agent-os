@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { renderShell, resetShellState, shellRpc } from '@/test/web-shell'
 import { useRestartNotice } from './config-editor'
+import { restartReasonLabel } from './SettingsPage'
 
 beforeEach(() => {
   resetShellState()
@@ -130,6 +131,14 @@ describe('settings summary', () => {
     model = 'z-ai/glm-5.3'
     await user.click(screen.getByRole('button', { name: 'Reload' }))
     await waitFor(() => expect(active).toHaveTextContent('z-ai/glm-5.3'))
+  })
+})
+
+describe('restart reasons', () => {
+  it('reads as words, with an unknown id shown as it is', () => {
+    expect(
+      ['heartbeat_watcher', 'sandbox', 'gateway_bind', 'brand_new'].map(restartReasonLabel),
+    ).toEqual(['heartbeat', 'sandbox', 'gateway address', 'brand_new'])
   })
 })
 

@@ -3,7 +3,7 @@ import { ChevronLeft, Loader2, RefreshCw, RotateCw, Search } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState, type ComponentType } from 'react'
 import { Link, NavLink, useLocation, useNavigate, useParams } from 'react-router'
 import { useRpc } from '@/app/providers'
-import { t, tPlural } from '@/i18n'
+import { t, tPlural, type MessageKey } from '@/i18n'
 import '@/i18n/en/webSettings'
 import '@/i18n/en/webShell'
 import { cn } from '@/lib/utils'
@@ -207,6 +207,38 @@ function SettingsSummary() {
   )
 }
 
+const RESTART_REASON_KEYS: Record<string, MessageKey> = {
+  memory: 'webSettings.restartReasonMemory',
+  channels: 'webSettings.restartReasonChannels',
+  sandbox: 'webSettings.restartReasonSandbox',
+  gateway_bind: 'webSettings.restartReasonGatewayBind',
+  task_runtime: 'webSettings.restartReasonTaskRuntime',
+  tls: 'webSettings.restartReasonTls',
+  cors: 'webSettings.restartReasonCors',
+  control_ui: 'webSettings.restartReasonControlUi',
+  server_debug: 'webSettings.restartReasonServerDebug',
+  state_dir: 'webSettings.restartReasonStateDir',
+  logging: 'webSettings.restartReasonLogging',
+  mcp: 'webSettings.restartReasonMcp',
+  tools_runtime: 'webSettings.restartReasonToolsRuntime',
+  skill_loader: 'webSettings.restartReasonSkillLoader',
+  heartbeat_watcher: 'webSettings.restartReasonHeartbeatWatcher',
+  diagnostics: 'webSettings.restartReasonDiagnostics',
+  config: 'webSettings.restartReasonConfig',
+  provider: 'webSettings.restartReasonProvider',
+  router: 'webSettings.restartReasonRouter',
+  search: 'webSettings.restartReasonSearch',
+  x_search: 'webSettings.restartReasonXSearch',
+  image_generation: 'webSettings.restartReasonImageGeneration',
+  audio: 'webSettings.restartReasonAudio',
+}
+
+/** A restart reason id as a reader sees it; an id this console does not know shows as is. */
+export function restartReasonLabel(id: string): string {
+  const key = RESTART_REASON_KEYS[id]
+  return key ? t(key) : id
+}
+
 /**
  * The restart notice, read from the configuration snapshot so it names what
  * needs the restart, survives a reload and shows a restart another client
@@ -235,7 +267,7 @@ function RestartNotice() {
       <span className="min-w-0 flex-1">
         <strong>{t('webSettings.restartTitle')}</strong>{' '}
         {reasons.length
-          ? t('webSettings.restartBody', { reasons: reasons.join(', ') })
+          ? t('webSettings.restartBody', { reasons: reasons.map(restartReasonLabel).join(', ') })
           : t('webSettings.restartBodyGeneric')}
       </span>
       <Button
