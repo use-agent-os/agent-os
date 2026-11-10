@@ -198,12 +198,14 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
   // Escape in chat: stop the running turn (the composer handles its own
   // Escape, including recovering the queue).
   const stopping = Boolean(session.state.liveTurns.at(-1)?.abortRequested)
+  const forcing = Boolean(session.state.liveTurns.at(-1)?.forceStop)
   useKeyboardShortcut(
     { combo: 'escape', description: t('webChat.stop'), category: 'Chat' },
     (e) => {
       if (!running || e.isComposing) return
       e.preventDefault()
-      if (!stopping) stop()
+      // Pressed again while stopping: stop at once.
+      if (!forcing) stop()
     },
   )
   const onSent = useCallback(() => setFollowSignal((n) => n + 1), [])
@@ -250,6 +252,7 @@ function ChatWorkspace({ sessionKey }: { sessionKey: string }) {
                 running={running}
                 ready={!session.loading}
                 stopping={stopping}
+                forcing={forcing}
                 compacting={compacting}
                 lastStatus={lastTurnStatus(session.state.turns)}
                 blockedReason={blocked.reason}

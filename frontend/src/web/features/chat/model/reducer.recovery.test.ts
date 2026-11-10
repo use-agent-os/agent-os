@@ -296,3 +296,212 @@ describe('local notes, stop requests and the fold cache', () => {
     expect(textOf(batch)).toBe(textOf(one))
   })
 })
+
+// The gateway's time prefix on a stored user message ("[<iso> <day> <tz>]\n").
+const PREFIX = '[2026-11-10T11:23+07:00 Tue Asia/Ho_Chi_Minh]\n'
+
+function task(
+  state: TranscriptState,
+  name: string,
+  payload: Record<string, unknown>,
+  at = 50,
+): TranscriptState {
+  return reduce(state, { type: 'event', name, payload, at })
+}
+
+function accepted(state: TranscriptState, text: string, runId: string, at: number) {
+  const s = reduce(state, { type: 'optimisticSend', text, idempotencyKey: runId, at })
+  return reduce(s, { type: 'sendAccepted', idempotencyKey: runId, at, runId })
+}
+
+const running = (runId: string) => ({
+  run_id: runId,
+  task_id: runId,
+  text: '',
+  through_stream_seq: 1,
+})
+
+describe('a terminal frame is final', () => {
+  const answered = [row('u', 'user', `${PREFIX}go`, 100), row('a', 'assistant', 'DONE', 101)]
+
+  it('done, then a reload whose snapshot still names the run: stays idle', () => {
+    let state = accepted(initialTranscript(), 'go', 'r1', 100)
+    state = frame(state, 'text_delta', { text: 'DONE' }, 110)
+    state = frame(state, 'done', { run_id: 'r1', task_id: 'r1', text: 'DONE', state: 'done' }, 120)
+    expect(isRunning(state)).toBe(false)
+    // The ledger had not settled r1 when chat.history answered.
+    state = page(state, { messages: answered, in_flight_run: running('r1') }, 121)
+    expect(isRunning(state)).toBe(false)
+    expect(state.turns).toHaveLength(1)
+    expect(state.turns[0]).toMatchObject({ status: 'done', userMessage: { text: 'go' } })
+    // The subscribe answer can carry the same stale snapshot.
+    state = reduce(state, { type: 'runState', inFlight: running('r1'), issuedAt: 122 })
+    expect(isRunning(state)).toBe(false)
+  })
+
+  it('a stale snapshot first, then done: ends once and stays idle', () => {
+    let state = accepted(initialTranscript(), 'go', 'r1', 100)
+    state = page(
+      state,
+      { messages: [row('u', 'user', `${PREFIX}go`, 100)], in_flight_run: running('r1') },
+      105,
+    )
+    expect(isRunning(state)).toBe(true)
+    state = frame(state, 'done', { run_id: 'r1', text: 'DONE', state: 'done' }, 120)
+    state = page(state, { messages: answered, in_flight_run: running('r1') }, 121)
+    expect(isRunning(state)).toBe(false)
+    expect(state.turns).toHaveLength(1)
+  })
+
+  it('done arriving before the first page (opened mid-run) is not undone by its snapshot', () => {
+    let state = frame(initialTranscript(), 'done', { run_id: 'r1', text: 'DONE' }, 120)
+    state = page(state, { messages: answered, in_flight_run: running('r1') }, 100)
+    expect(isRunning(state)).toBe(false)
+    expect(state.turns.map((t) => t.userMessage?.text)).toEqual(['go'])
+  })
+
+  it('task.succeeded ends the live turn of its run, in either order with done', () => {
+    let state = accepted(initialTranscript(), 'go', 'r1', 100)
+    state = frame(state, 'text_delta', { text: 'DONE' }, 110)
+    state = task(state, 'task.succeeded', { task_id: 'r1' }, 115)
+    expect(isRunning(state)).toBe(false)
+    expect(state.turns.at(-1)).toMatchObject({ status: 'done' })
+    state = frame(state, 'done', { run_id: 'r1', text: 'DONE' }, 120)
+    expect(state.turns).toHaveLength(1)
+    state = page(state, { messages: answered, in_flight_run: running('r1') }, 121)
+    expect(isRunning(state)).toBe(false)
+  })
+
+  it('task.succeeded of another run leaves the next turn running', () => {
+    let state = accepted(initialTranscript(), 'first', 'r1', 100)
+    state = frame(state, 'done', { run_id: 'r1', text: 'one' }, 110)
+    // The queue sends the next message before r1's lifecycle frame lands.
+    state = reduce(state, { type: 'optimisticSend', text: 'next', idempotencyKey: 'k2', at: 111 })
+    state = task(state, 'task.succeeded', { task_id: 'r1' }, 112)
+    state = task(state, 'task.failed', { task_id: 'r1', error: 'late' }, 113)
+    expect(isRunning(state)).toBe(true)
+    state = reduce(state, { type: 'sendAccepted', idempotencyKey: 'k2', at: 114, runId: 'r2' })
+    state = task(state, 'task.succeeded', { task_id: 'r1' }, 115)
+    expect(isRunning(state)).toBe(true)
+    state = task(state, 'task.succeeded', { task_id: 'r2' }, 120)
+    expect(isRunning(state)).toBe(false)
+  })
+
+  it('a turn adopted from a snapshot learns its run and ends on task.succeeded', () => {
+    let state = page(
+      initialTranscript(),
+      { messages: [row('u', 'user', `${PREFIX}go`, 100)], in_flight_run: running('r1') },
+      105,
+    )
+    expect(isRunning(state)).toBe(true)
+    expect(state.turns.map((t) => t.userMessage?.text)).toEqual(['go'])
+    state = task(state, 'task.succeeded', { task_id: 'r1' }, 120)
+    expect(isRunning(state)).toBe(false)
+  })
+
+  it('restart recovery: a resumed run ends, the reload names it, one user bubble remains', () => {
+    // Sent before the gateway went down; its terminal frame was lost.
+    let state = page(initialTranscript(), { messages: [row('u0', 'user', `${PREFIX}hi`, 1)] })
+    state = accepted(state, 'count', 'r1', 100)
+    state = frame(state, 'text_delta', { text: '1 tide' }, 110)
+    // Back up: the stream starts over and the subscribe answer reports the
+    // recovered run.
+    state = reduce(state, { type: 'streamReset' })
+    const recovered = [
+      row('u0', 'user', `${PREFIX}hi`, 1),
+      row('u1', 'user', `${PREFIX}count`, 100),
+    ]
+    state = page(state, { messages: recovered, in_flight_run: running('r1') }, 200)
+    expect(isRunning(state)).toBe(true)
+    state = frame(state, 'done', { run_id: 'r1', text: '120 tide', stream_seq: 4 }, 300)
+    state = page(
+      state,
+      {
+        messages: [...recovered, row('a1', 'assistant', '120 tide', 300)],
+        in_flight_run: running('r1'),
+      },
+      301,
+    )
+    expect(isRunning(state)).toBe(false)
+    expect(state.turns.map((t) => t.userMessage?.text)).toEqual(['hi', 'count'])
+    // The next message is sent, not queued behind a phantom run.
+    state = accepted(state, 'PINEAPPLE', 'r2', 400)
+    expect(state.turns.map((t) => t.status)).toEqual(['done', 'done', 'live'])
+  })
+})
+
+describe('user rows carry the gateway time prefix', () => {
+  it('shows history user text without the prefix', () => {
+    const state = page(initialTranscript(), {
+      messages: [row('u', 'user', `${PREFIX}hello`, 1), row('a', 'assistant', 'hi', 2)],
+    })
+    expect(state.turns[0]!.userMessage!.text).toBe('hello')
+  })
+
+  it('matches the typed message to its prefixed row: one bubble', () => {
+    let state = accepted(initialTranscript(), 'Hello, this turn should fail.', 'r1', 100)
+    state = frame(state, 'error', { run_id: 'r1', message: 'The task failed.' }, 110)
+    state = page(state, {
+      messages: [
+        row('u', 'user', `${PREFIX}Hello, this turn should fail.`, 100),
+        row('e', 'system', 'Error: Request error: All connection attempts failed', 101),
+      ],
+      in_flight_run: null,
+    })
+    expect(state.turns).toHaveLength(1)
+    expect(state.turns[0]).toMatchObject({
+      status: 'failed',
+      userMessage: { text: 'Hello, this turn should fail.' },
+    })
+  })
+
+  it('a failed turn keeps its reason after a reload (fresh view)', () => {
+    const state = page(initialTranscript(), {
+      messages: [
+        row('u', 'user', `${PREFIX}Hello, this turn should fail.`, 100),
+        row('e', 'system', 'Error: Request error: All connection attempts failed', 101),
+      ],
+      in_flight_run: null,
+    })
+    expect(state.turns).toHaveLength(1)
+    expect(state.turns[0]).toMatchObject({
+      status: 'failed',
+      failure: 'Request error: All connection attempts failed',
+    })
+  })
+
+  it('a live failure is kept for a prefixed row history holds no error for', () => {
+    let state = accepted(initialTranscript(), 'go', 'r1', 100)
+    state = frame(state, 'error', { message: 'Timed out', code: 'timeout' }, 110)
+    state = page(state, { messages: [row('u', 'user', `${PREFIX}go`, 100)], in_flight_run: null })
+    expect(state.turns).toHaveLength(1)
+    expect(state.turns[0]).toMatchObject({ status: 'failed', failure: 'Timed out' })
+  })
+
+  it('other system rows do not fail a turn', () => {
+    const state = page(initialTranscript(), {
+      messages: [
+        row('u', 'user', 'go', 1),
+        row('a', 'assistant', 'ok', 2),
+        row('s', 'system', 'Errors are listed in the log.', 3),
+      ],
+    })
+    expect(state.turns[0]).toMatchObject({ status: 'done' })
+  })
+})
+
+describe('a second stop while stopping', () => {
+  it('marks a forced stop only behind a pending one, and clears it alone on failure', () => {
+    let state = sent(initialTranscript(), 'go', 'k', 1)
+    expect(reduce(state, { type: 'abortRequested', force: true })).toBe(state)
+    state = reduce(state, { type: 'abortRequested' })
+    state = reduce(state, { type: 'abortRequested', force: true })
+    expect(state.turns.at(-1)).toMatchObject({ abortRequested: true, forceStop: true })
+    const failedForce = reduce(state, { type: 'abortFailed', force: true })
+    expect(failedForce.turns.at(-1)).toMatchObject({ abortRequested: true })
+    expect(failedForce.turns.at(-1)!.forceStop).toBeUndefined()
+    const failedBoth = reduce(state, { type: 'abortFailed' })
+    expect(failedBoth.turns.at(-1)!.abortRequested).toBeUndefined()
+    expect(failedBoth.turns.at(-1)!.forceStop).toBeUndefined()
+  })
+})

@@ -9,6 +9,7 @@ import {
 } from '@/views/chat/transcript/history'
 import { artifactCategory, type Artifact } from '@/views/chat/transcript/artifacts'
 import { parseSubagentCompletion } from '@/views/chat/transcript/tools'
+import { stripTimePrefix } from '@/views/chat/logic'
 import type { ChatMessage } from '@/views/chat/types'
 import type {
   CompactionSummaryRow,
@@ -62,6 +63,7 @@ export function initialTranscript(): TranscriptState {
     streamFloor: 0,
     failures: {},
     pendingInputs: [],
+    endedRuns: [],
   }
 }
 
@@ -82,6 +84,36 @@ export function toMs(value: unknown): number | null {
 
 function str(value: unknown): string {
   return typeof value === 'string' ? value : value == null ? '' : String(value)
+}
+
+/** A user row's text as typed: without the gateway's time prefix. */
+function userText(row: HistoryRow): string {
+  return stripTimePrefix(str(row.text))
+}
+
+/** A persisted failure: the `system` row a failed turn leaves ("Error: …"). */
+function errorRowText(row: HistoryRow): string | null {
+  if (row.role === 'error') return str(row.text)
+  if (row.role !== 'system') return null
+  const text = str(row.text)
+  return /^\s*error:/i.test(text) ? text.replace(/^\s*error:\s*/i, '').trim() : null
+}
+
+function isErrorRow(row: HistoryRow): boolean {
+  return errorRowText(row) !== null
+}
+
+/** The run (task) id a frame or snapshot names. */
+function runIdOf(p: Record<string, unknown> | null | undefined): string {
+  return p ? str(p.run_id) || str(p.task_id) : ''
+}
+
+/** Runs a view remembers as ended; older ones cannot be named any more. */
+const ENDED_RUNS_KEPT = 32
+
+function withEndedRun(ended: string[], runId: string): string[] {
+  if (!runId || ended.includes(runId)) return ended
+  return [...ended, runId].slice(-ENDED_RUNS_KEPT)
 }
 
 function num(value: unknown): number | undefined {
@@ -352,7 +384,7 @@ export function foldHistory(
         id: `h:${rowId}`,
         userMessage: {
           id: rowId,
-          text: str(row.text),
+          text: userText(row),
           timestamp: at,
           attachments: Array.isArray(row.attachments) ? row.attachments : [],
         },
@@ -370,6 +402,17 @@ export function foldHistory(
       turns.push(
         standalone(rowId, { kind: 'cronResult', id: `h:${rowId}:0`, text: str(row.text) }, at),
       )
+      continue
+    }
+
+    const failure = errorRowText(row)
+    if (failure !== null) {
+      // A failed turn's persisted reason ends that turn as failed.
+      if (current) {
+        current.status = 'failed'
+        current.failure = failure || current.failure
+        current.endedAt = at ?? current.endedAt
+      }
       continue
     }
 
@@ -401,12 +444,6 @@ export function foldHistory(
     let k = turn.items.length
     const mint: Mint = () => `${turn.id}:${k++}`
 
-    if (row.role === 'error') {
-      turn.status = 'failed'
-      turn.failure = str(row.text)
-      turn.endedAt = at ?? turn.endedAt
-      continue
-    }
     if (row.role !== 'assistant') continue
 
     let items = turn.items
@@ -448,6 +485,14 @@ export function foldHistory(
 }
 
 // ── live events ─────────────────────────────────────────────────────────────
+
+const TASK_TERMINALS = new Set([
+  'task.succeeded',
+  'task.cancelled',
+  'task.failed',
+  'task.timeout',
+  'task.abandoned',
+])
 
 const LIVE_STARTERS = new Set([
   'text_delta',
@@ -515,19 +560,33 @@ function applyEvent(
     return { ...state, activeGroups: active }
   }
 
-  // Backstops for a run that ends without its terminal frame reaching us.
-  if (
-    name === 'task.cancelled' ||
-    name === 'task.failed' ||
-    name === 'task.timeout' ||
-    name === 'task.abandoned'
-  ) {
-    const live = currentLive(state)
-    if (!live) return state
-    const status = name === 'task.cancelled' ? 'aborted' : 'failed'
+  // A run's lifecycle end. It is final: the live turn of that run ends (the
+  // backstop for a terminal frame that never reached us), and a snapshot
+  // that still names the run later is stale.
+  if (TASK_TERMINALS.has(name)) {
+    const runId = runIdOf(p)
+    const endedRuns = withEndedRun(state.endedRuns, runId)
+    const index = state.liveTurns.findIndex(
+      (t) => t.status === 'live' && Boolean(runId) && t.runId === runId,
+    )
+    let target = index
+    // A turn whose run id is not known yet: only failures end it, as before;
+    // never one still being sent (it is the next run, not this one).
+    if (target < 0 && name !== 'task.succeeded') {
+      const last = state.liveTurns.length - 1
+      const live = currentLive(state)
+      if (live && !live.runId && live.userMessage?.delivery !== 'sending') target = last
+    }
+    if (target < 0) return endedRuns === state.endedRuns ? state : { ...state, endedRuns }
+    const status =
+      name === 'task.succeeded' ? 'done' : name === 'task.cancelled' ? 'aborted' : 'failed'
+    const failure = status === 'failed' ? str(p.error) || undefined : undefined
     return {
       ...state,
-      liveTurns: replaceLast(state, endTurn(live, status, at, str(p.error) || undefined)),
+      endedRuns,
+      liveTurns: state.liveTurns.map((t, i) =>
+        i === target ? endTurn(t, status, at, failure) : t,
+      ),
     }
   }
 
@@ -575,6 +634,11 @@ function applyEvent(
 
   let live = currentLive(state)
   if (!live) {
+    if (kind === 'done' || kind === 'error') {
+      // No turn to end, but the run is over: a snapshot naming it is stale.
+      const endedRuns = withEndedRun(state.endedRuns, runIdOf(p))
+      return endedRuns === state.endedRuns ? state : { ...state, endedRuns }
+    }
     if (!LIVE_STARTERS.has(kind) && !(kind === 'state_change' && str(p.to_state) === 'thinking')) {
       if (kind === 'subagent_completion') {
         const turn: Turn = {
@@ -651,6 +715,9 @@ function applyEvent(
       items = insertContent(items, { kind: 'subagentCompletion', id: mint(), payload: p })
       break
     case 'error': {
+      if (runIdOf(p) && live.runId && live.runId !== runIdOf(p)) {
+        return { ...state, endedRuns: withEndedRun(state.endedRuns, runIdOf(p)) }
+      }
       const message = str(p.terminal_message || p.error_message || p.message) || undefined
       const cancelled = /cancel/i.test(str(p.code))
       turn = endTurn(
@@ -659,9 +726,17 @@ function applyEvent(
         at,
         cancelled ? undefined : message,
       )
-      return { ...next, liveTurns: replaceLast(next, turn) }
+      return {
+        ...next,
+        endedRuns: withEndedRun(state.endedRuns, runIdOf(p) || str(turn.runId)),
+        liveTurns: replaceLast(next, turn),
+      }
     }
     case 'done': {
+      if (runIdOf(p) && live.runId && live.runId !== runIdOf(p)) {
+        // Another run's end: this turn goes on.
+        return { ...state, endedRuns: withEndedRun(state.endedRuns, runIdOf(p)) }
+      }
       const outcome = (p.outcome ?? {}) as Record<string, unknown>
       const outcomeKind = str(outcome.kind)
       const aborted =
@@ -681,7 +756,11 @@ function applyEvent(
         ),
         usage: usageFrom(p) ?? turn.usage,
       }
-      return { ...next, liveTurns: replaceLast(next, turn) }
+      return {
+        ...next,
+        endedRuns: withEndedRun(state.endedRuns, runIdOf(p) || str(turn.runId)),
+        liveTurns: replaceLast(next, turn),
+      }
     }
     default:
       break
@@ -719,7 +798,7 @@ function matchUserRow(
   anchor: string | null | undefined,
 ): number {
   const isMatch = (i: number) =>
-    !used.has(i) && rows[i]!.role === 'user' && str(rows[i]!.text) === text
+    !used.has(i) && rows[i]!.role === 'user' && userText(rows[i]!) === text
   let start = -1
   if (anchor === null) start = 0
   else if (anchor !== undefined) {
@@ -769,7 +848,7 @@ function reconcile(
     }
     used.add(match)
     const after = rows.slice(match + 1)
-    const answered = after.some((r) => r.role === 'assistant' || r.role === 'error')
+    const answered = after.some((r) => r.role === 'assistant' || isErrorRow(r))
     if (turn.status === 'live' && !answered) {
       kept.push({ ...turn, historyRowId: rowIdOf(rows[match]!) || undefined })
       continue
@@ -778,7 +857,7 @@ function reconcile(
       const nextUser = after.findIndex((r) => r.role === 'user')
       const own = nextUser < 0 ? after : after.slice(0, nextUser)
       const id = rowIdOf(rows[match]!)
-      if (id && !own.some((r) => r.role === 'error') && nextFailures[id] !== turn.failure) {
+      if (id && !own.some(isErrorRow) && nextFailures[id] !== turn.failure) {
         nextFailures = { ...nextFailures, [id]: turn.failure }
       }
     }
@@ -931,7 +1010,7 @@ function applySnapshot(
       userMessage: lastUser
         ? {
             id: historyRowId ?? '',
-            text: str(lastUser.text),
+            text: userText(lastUser),
             timestamp: toMs(lastUser.timestamp),
             attachments: Array.isArray(lastUser.attachments) ? lastUser.attachments : [],
           }
@@ -944,10 +1023,17 @@ function applySnapshot(
       lastSeq: through,
       historyRowId,
       textTruncated: run.text_truncated === true || undefined,
+      runId: runIdOf(run as Record<string, unknown>) || undefined,
     }
     return { liveTurns: [...liveTurns, turn], streamFloor: floor }
   }
-  const live = liveTurns[index]!
+  let live = liveTurns[index]!
+  const snapshotRun = runIdOf(run as Record<string, unknown>)
+  if (snapshotRun && !live.runId && live.userMessage?.delivery !== 'sending') {
+    // The run the view's live turn belongs to.
+    live = { ...live, runId: snapshotRun }
+    liveTurns = liveTurns.map((t, i) => (i === index ? live : t))
+  }
   const hasContent = Boolean(str(run.text)) || Boolean(run.events?.length) || run.plan != null
   if (through === undefined || (live.lastSeq ?? -1) >= through || !hasContent) {
     return { liveTurns, streamFloor: state.streamFloor }
@@ -963,6 +1049,16 @@ function applySnapshot(
 
 function hasRunState(page: HistoryPage): boolean {
   return Object.prototype.hasOwnProperty.call(page, 'in_flight_run')
+}
+
+/**
+ * A snapshot of a run this view already saw end. The gateway settles a run a
+ * moment after its terminal frame, so a reload on that frame can still name
+ * it: such a snapshot says nothing (neither "running" nor "idle").
+ */
+function isEndedSnapshot(state: TranscriptState, run: InFlightRun | null | undefined): boolean {
+  const id = runIdOf(run as Record<string, unknown> | null | undefined)
+  return Boolean(run && id && state.endedRuns.includes(id))
 }
 
 function applyHistory(
@@ -1019,7 +1115,8 @@ function applyHistory(
   let activeGroups = state.activeGroups
   let pendingInputs = state.pendingInputs
   let streamFloor = state.streamFloor
-  const runState = mode !== 'older' && hasRunState(page)
+  const runState =
+    mode !== 'older' && hasRunState(page) && !isEndedSnapshot(state, page.in_flight_run)
   if (runState && !page.in_flight_run) {
     liveTurns = endStaleLive(liveTurns, issuedAt).turns
     activeGroups = []
@@ -1062,6 +1159,7 @@ function applyRunState(
   inFlight: InFlightRun | null,
   issuedAt: number,
 ): TranscriptState {
+  if (isEndedSnapshot(state, inFlight)) return state
   if (!inFlight) {
     const ended = endStaleLive(state.liveTurns, issuedAt)
     if (!ended.changed && state.activeGroups.length === 0) return state
@@ -1142,7 +1240,12 @@ export function reduce(state: TranscriptState, input: TranscriptInput): Transcri
         const userMessage = { ...t.userMessage }
         if (input.type === 'sendAccepted') {
           delete userMessage.delivery
-          return { ...t, userMessage, since: input.at ?? t.startedAt ?? 0 }
+          return {
+            ...t,
+            userMessage,
+            since: input.at ?? t.startedAt ?? 0,
+            runId: input.runId || t.runId,
+          }
         }
         userMessage.delivery = input.notSent ? 'not_sent' : undefined
         return {
@@ -1163,11 +1266,17 @@ export function reduce(state: TranscriptState, input: TranscriptInput): Transcri
       const live = currentLive(state)
       if (!live) return state
       const requested = input.type === 'abortRequested'
-      if (Boolean(live.abortRequested) === requested) return state
-      const out = {
-        ...state,
-        liveTurns: replaceLast(state, { ...live, abortRequested: requested || undefined }),
+      let turn: Turn
+      if (input.force) {
+        if (!live.abortRequested || Boolean(live.forceStop) === requested) return state
+        turn = { ...live, forceStop: requested || undefined }
+      } else {
+        if (Boolean(live.abortRequested) === requested) return state
+        turn = requested
+          ? { ...live, abortRequested: true }
+          : { ...live, abortRequested: undefined, forceStop: undefined }
       }
+      const out = { ...state, liveTurns: replaceLast(state, turn) }
       return { ...out, turns: deriveTurns(out) }
     }
     case 'systemNote': {

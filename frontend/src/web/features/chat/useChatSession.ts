@@ -80,7 +80,10 @@ export interface ChatSession {
   send(input: SendInput): Promise<boolean>
   /** Resend a failed turn's message with a fresh idempotency key. */
   retry(turn: Turn): Promise<boolean>
-  /** Ask the gateway to stop the running turn; throws when it refused. */
+  /**
+   * Ask the gateway to stop the running turn; throws when it refused. Asked
+   * again while the first stop is pending, it stops the turn at once.
+   */
   abort(): Promise<void>
   loadOlder(): Promise<void>
   reload(): Promise<void>
@@ -315,7 +318,9 @@ export function useChatSession(sessionKey: string | null): ChatSession {
       }
       const outcome = await sendOnce(rpc, 'chat.send', params)
       if (outcome.status === 'sent') {
-        dispatch({ type: 'sendAccepted', idempotencyKey, at: Date.now() })
+        const result = outcome.result as { task_id?: unknown } | null | undefined
+        const runId = typeof result?.task_id === 'string' ? result.task_id : undefined
+        dispatch({ type: 'sendAccepted', idempotencyKey, at: Date.now(), runId })
         return true
       }
       dispatch({
@@ -352,13 +357,17 @@ export function useChatSession(sessionKey: string | null): ChatSession {
   const abort = useCallback(async () => {
     const key = keyRef.current
     if (!key) return
-    // Already asked: the gateway is in its grace period; do not ask again.
-    if (stateRef.current.liveTurns.at(-1)?.abortRequested) return
-    dispatch({ type: 'abortRequested' })
+    const live = stateRef.current.liveTurns.at(-1)
+    // Asked twice already: the gateway is cancelling the turn at once.
+    if (live?.forceStop) return
+    // Asked while the first stop is pending: the gateway joins the two and
+    // ends the turn without its grace period. Both answers arrive together.
+    const force = Boolean(live?.abortRequested)
+    dispatch({ type: 'abortRequested', force })
     try {
       await rpc.call('chat.abort', { sessionKey: key, source: 'web' })
     } catch (e) {
-      if (keyRef.current === key) dispatch({ type: 'abortFailed' })
+      if (keyRef.current === key) dispatch({ type: 'abortFailed', force })
       throw e
     }
   }, [rpc, dispatch])

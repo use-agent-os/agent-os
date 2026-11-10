@@ -83,8 +83,10 @@ export interface Turn {
   usage?: TurnUsage
   startedAt: number | null
   endedAt: number | null
-  /** The user asked to stop this turn. */
+  /** The user asked to stop this turn (the gateway is winding it down). */
   abortRequested?: boolean
+  /** The user asked again while stopping: stop at once, no grace period. */
+  forceStop?: boolean
   /** Live: when the view learned the run is accepted or running (ms). */
   since?: number
   /** Live: the highest `stream_seq` folded into this turn. */
@@ -93,6 +95,8 @@ export interface Turn {
   historyRowId?: string
   /** Live: the gateway's snapshot dropped earlier streamed text. */
   textTruncated?: boolean
+  /** Live: the gateway's run (task) id, once known. */
+  runId?: string
 }
 
 /** A row of a `chat.history` page (only the fields the model reads). */
@@ -188,12 +192,13 @@ export type TranscriptInput =
       idempotencyKey: string
       at: number
     }
-  | { type: 'sendAccepted'; idempotencyKey: string; at?: number }
+  | { type: 'sendAccepted'; idempotencyKey: string; at?: number; runId?: string }
   | { type: 'sendFailed'; idempotencyKey: string; error: string; notSent: boolean }
   | { type: 'queue'; count: number }
-  | { type: 'abortRequested' }
-  /** `chat.abort` failed: Stop is offered again. */
-  | { type: 'abortFailed' }
+  /** Stop asked; `force` for the second ask while the first is pending. */
+  | { type: 'abortRequested'; force?: boolean }
+  /** `chat.abort` failed: Stop (or Stop now, for `force`) is offered again. */
+  | { type: 'abortFailed'; force?: boolean }
   | { type: 'systemNote'; text: string; at: number }
   | { type: 'reset' }
 
@@ -227,4 +232,9 @@ export interface TranscriptState {
   failures: Record<string, string>
   /** Messages queued on the gateway that the transcript does not list yet. */
   pendingInputs: PendingInput[]
+  /**
+   * Runs whose terminal frame this view saw (newest last, bounded). A
+   * terminal frame is final: a later snapshot naming one of them is stale.
+   */
+  endedRuns: string[]
 }

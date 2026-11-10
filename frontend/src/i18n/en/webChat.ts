@@ -73,6 +73,8 @@ export const webChat = defineNamespace('webChat', {
   send: 'Send',
   stop: 'Stop',
   stopping: 'Stopping…',
+  stopNow: 'Stop now',
+  stopNowTitle: 'The turn is stopping. Press again to stop it at once.',
   stopFailed: "Couldn't stop the turn: {message}",
   queue: 'Queue',
   waitForTurn: 'Wait for the current turn to finish first.',

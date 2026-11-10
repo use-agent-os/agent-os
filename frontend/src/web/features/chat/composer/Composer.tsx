@@ -75,6 +75,8 @@ export interface ComposerProps {
   ready?: boolean
   /** Stop was asked for; the gateway is in its grace period. */
   stopping?: boolean
+  /** Stop was asked for twice: the gateway is cancelling the turn at once. */
+  forcing?: boolean
   /** A compaction is in flight: queued messages wait for it. */
   compacting?: boolean
   /** How the newest turn ended: the queue does not drain after a stop or failure. */
@@ -122,6 +124,7 @@ export function unescapeSlash(text: string): string {
 export function Composer(props: ComposerProps) {
   const { sessionKey, running, blockedReason, onSend, onAbort, onCompact, onQueueChange } = props
   const { ready = true, stopping = false, compacting = false, lastStatus, onNote } = props
+  const { forcing = false } = props
   const rpc = useRpc()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -345,7 +348,8 @@ export function Composer(props: ComposerProps) {
       if (composing) return
       if (running) {
         e.preventDefault()
-        if (!stopping) onAbort()
+        // A second Escape while stopping stops at once.
+        if (!forcing) onAbort()
       } else if (queue.length > 0) {
         e.preventDefault()
         recoverQueue()
@@ -578,17 +582,29 @@ export function Composer(props: ComposerProps) {
               {t('webChat.nextSuggestionKey')}
             </kbd>
           ) : null}
-          {running ? (
+          {running && stopping && !forcing ? (
+            // The gateway is winding the turn down; a second press ends it now.
+            <Button
+              size="sm"
+              variant="secondary"
+              title={t('webChat.stopNowTitle')}
+              onClick={onAbort}
+              className="shrink-0 rounded-full"
+            >
+              <Loader2 className="motion-status animate-spin" />
+              {t('webChat.stopNow')}
+            </Button>
+          ) : running ? (
             <Button
               size="icon-sm"
               variant="secondary"
-              aria-label={stopping ? t('webChat.stopping') : t('webChat.stop')}
-              title={stopping ? t('webChat.stopping') : undefined}
-              disabled={stopping}
+              aria-label={forcing ? t('webChat.stopping') : t('webChat.stop')}
+              title={forcing ? t('webChat.stopping') : undefined}
+              disabled={forcing}
               onClick={onAbort}
               className="rounded-full"
             >
-              {stopping ? (
+              {forcing ? (
                 <Loader2 className="motion-status animate-spin" />
               ) : (
                 <Square className="fill-current" />

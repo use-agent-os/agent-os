@@ -161,10 +161,18 @@ describe('stop', () => {
     await user.type(composer, 'draft')
     expect(screen.getByRole('button', { name: 'Queue' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Stop' }))
-    const stopping = await screen.findByRole('button', { name: 'Stopping…' })
-    expect(stopping).toBeDisabled()
+    // While the gateway winds the turn down, a second press stops it at once.
+    const stopNow = await screen.findByRole('button', { name: 'Stop now' })
+    expect(stopNow).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Queue' })).toBeInTheDocument()
     expect(within(log()).getByText('Stopping…')).toBeInTheDocument()
     expect(rpc.callsTo('chat.abort')).toHaveLength(1)
+    await user.click(stopNow)
+    const stopping = await screen.findByRole('button', { name: 'Stopping…' })
+    expect(stopping).toBeDisabled()
+    expect(rpc.callsTo('chat.abort')).toHaveLength(2)
+    await user.click(stopping)
+    expect(rpc.callsTo('chat.abort')).toHaveLength(2)
   })
 
   it('says so when the gateway refuses to stop', async () => {
