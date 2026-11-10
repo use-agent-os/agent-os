@@ -51,7 +51,6 @@ import structlog
 from agentos.engine.compaction_coordinator import CompactionCoordinator
 from agentos.engine.compaction_service import (
     CompactionResult,
-    CompactionService,
     is_ephemeral_session,
     is_summary_pair,
     summary_messages,
@@ -184,11 +183,6 @@ def _trigger_limit(agent: Any) -> int:
 
 def _coordinator(agent: Any, session_key: str) -> CompactionCoordinator:
     return CompactionCoordinator(agent.config, agent.provider, session_key)
-
-
-def _compaction_service(agent: Any, session_key: str) -> CompactionService:
-    """The agent's own compaction service, reporting the proactive phase."""
-    return _coordinator(agent, session_key).service(phase=PROACTIVE_PHASE)
 
 
 class ProactiveCompactionScheduler:
@@ -520,9 +514,7 @@ class ProactiveCompactionScheduler:
             try:
                 # Durable pre-image first; a failing checkpoint raises and
                 # nothing is archived (same rule as the in-turn path).
-                await runner._record_compaction_checkpoint(
-                    session_key, compaction_id
-                )
+                await runner._record_compaction_checkpoint(session_key, compaction_id)
                 persist = manager.persist_compaction_result
                 kwargs: dict[str, Any] = {
                     "compaction_id": compaction_id,
