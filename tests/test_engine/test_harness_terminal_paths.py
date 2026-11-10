@@ -531,3 +531,214 @@ async def test_a_stop_after_the_reply_was_persisted_ends_the_run_completed(
     assert record.terminal_reason == "completed"
     rows = await _rows(storage)
     assert [content for role, content, _ in rows if role == "assistant"] == ["the full answer"]
+
+
+# ---------------------------------------------------------------------------
+# A stop that races a short reply which finishes anyway
+# ---------------------------------------------------------------------------
+
+
+def _user_texts(messages: list[Message]) -> list[str]:
+    """The user's own words of each user message (the runtime context the
+    turn appends to the latest one is dropped)."""
+    return [text.split("\n\n[Runtime context", 1)[0] for text in _texts(messages, "user") if text]
+
+
+async def _stop_on_done_through_runtime(
+    runner: TurnRunner, manager: SessionManager, *, grace: float
+) -> tuple[Any, list[AgentEvent]]:
+    """Run one turn under a real ``TaskRuntime``; stop it as its ``done`` arrives.
+
+    The stop is sent from the consumer while the turn is between its
+    DoneEvent and the finalizer's transcript append: the race of a stop
+    landing on the first text chunk of a one-chunk reply.
+    """
+    from agentos.gateway.routing import RouteEnvelope, SourceKind
+    from agentos.gateway.task_runtime import TaskRuntime
+    from tests.test_gateway.test_task_runtime_cooperative_cancel import _Storage
+
+    seen: list[AgentEvent] = []
+    task_id: list[str] = []
+    runtime: TaskRuntime
+
+    async def handler(run: Any) -> None:
+        await manager.append_message(KEY, "user", run.message)
+        ctx = ToolContext(caller_kind=CallerKind.WEB)
+        async for event in runner.run(
+            run.message, KEY, tool_context=ctx, history_has_persisted_user=True
+        ):
+            seen.append(event)
+            if isinstance(event, DoneEvent):
+                await runtime.cancel(task_id=task_id[0], source="user")
+
+    tasks = _Storage({})
+    runtime = TaskRuntime(storage=tasks, turn_handler=handler, cancel_grace_s=grace)
+    handle = await runtime.enqueue(
+        RouteEnvelope(
+            source_kind=SourceKind.SYSTEM, source_name="test", agent_id="main", session_key=KEY
+        ),
+        "Say hello.",
+        run_kind="default",
+    )
+    task_id.append(handle.task_id)
+    await runtime.wait(handle.task_id, timeout=5)
+    return tasks.records[handle.task_id], seen
+
+
+@pytest.mark.parametrize("grace", [0.0, 5.0])
+async def test_a_stop_racing_a_finished_short_reply_completes_and_persists_it_once(
+    storage: SessionStorage, manager: SessionManager, tmp_path: Path, grace: float
+) -> None:
+    from agentos.session.models import AgentTaskStatus
+
+    provider = ScriptedProvider([[text("Hello there."), done()], [text("Still here."), done()]])
+    runner = _runner(manager, provider, tmp_path)
+    await manager.create(KEY)
+
+    record, seen = await _stop_on_done_through_runtime(runner, manager, grace=grace)
+
+    dones = [event for event in seen if isinstance(event, DoneEvent)]
+    assert len(dones) == 1
+    assert dones[0].outcome is not None and dones[0].outcome.kind == "completed"
+    # The done frame, the task and the session all say "completed".
+    assert record.status == AgentTaskStatus.SUCCEEDED
+    assert record.terminal_reason == "completed"
+    rows = await _rows(storage)
+    assert [(role, content, structured) for role, content, structured in rows] == [
+        ("user", "Say hello.", False),
+        ("assistant", "Hello there.", True),
+    ]
+
+    await _turn(runner, manager, "And now?")
+    request = provider.calls[-1].messages
+    assert _user_texts(request) == ["Say hello.", "And now?"]
+    assert _texts(request, "assistant") == ["Hello there."]
+
+
+class _CommitThenStall:
+    """The store committed the assistant row, then the session touch stalls.
+
+    Stands in for ``append_message``'s second await: the row is durable, the
+    await has not returned when the cancel lands.
+    """
+
+    def __init__(self, manager: SessionManager) -> None:
+        self._real = manager.append_message
+        self.committed = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def __call__(self, session_key: str, role: str, content: str, **kwargs: Any) -> Any:
+        entry = await self._real(session_key, role, content, **kwargs)
+        if role == "assistant" and not self.committed.is_set():
+            self.committed.set()
+            await self.release.wait()
+        return entry
+
+
+async def test_a_cancel_after_the_row_committed_mid_append_does_not_write_it_twice(
+    storage: SessionStorage,
+    manager: SessionManager,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentos.engine.turn_progress import TurnStopSignal, bind_turn_stop_signal
+
+    provider = ScriptedProvider([[text("Hello there."), done()], [text("Still here."), done()]])
+    runner = _runner(manager, provider, tmp_path)
+    await manager.create(KEY)
+    stall = _CommitThenStall(manager)
+    monkeypatch.setattr(manager, "append_message", stall)
+    signal = TurnStopSignal()
+
+    async def first_turn() -> None:
+        bind_turn_stop_signal(signal)
+        await _turn(runner, manager, "Say hello.")
+
+    task = asyncio.create_task(first_turn())
+    await asyncio.wait_for(stall.committed.wait(), 10)
+    task.cancel()
+    await asyncio.sleep(0)
+    stall.release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    # The reply is in once, as finished, and the gateway is told it was
+    # delivered (so the run is recorded completed, not cancelled).
+    rows = await _rows(storage)
+    assert [content for role, content, _ in rows if role == "assistant"] == ["Hello there."]
+    assert signal.reply_delivered is True
+
+    await _turn(runner, manager, "And now?")
+    request = provider.calls[-1].messages
+    assert _user_texts(request) == ["Say hello.", "And now?"]
+    assert _texts(request, "assistant") == ["Hello there."]
+
+
+async def test_a_cancel_between_done_and_the_finalizer_persists_the_finished_reply(
+    storage: SessionStorage, manager: SessionManager, tmp_path: Path
+) -> None:
+    from agentos.engine.turn_progress import TurnStopSignal, bind_turn_stop_signal
+
+    provider = ScriptedProvider([[text("Hello there."), done()]])
+    runner = _runner(manager, provider, tmp_path)
+    await manager.create(KEY)
+    stage = runner._harness.stages.stream_consumer
+    real_run = stage.run
+    closing = asyncio.Event()
+
+    async def stall_after_done(inp: Any) -> AsyncGenerator[AgentEvent, None]:
+        # The agent stream closes after its DoneEvent; a stop lands there.
+        async for event in real_run(inp):
+            yield event
+            if isinstance(event, DoneEvent):
+                closing.set()
+                await asyncio.sleep(30)
+
+    stage.run = stall_after_done  # type: ignore[method-assign]
+    signal = TurnStopSignal()
+
+    async def first_turn() -> None:
+        bind_turn_stop_signal(signal)
+        await _turn(runner, manager, "Say hello.")
+
+    task = asyncio.create_task(first_turn())
+    await asyncio.wait_for(closing.wait(), 10)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    rows = await _rows(storage)
+    assert [(content, structured) for role, content, structured in rows if role == "assistant"] == [
+        ("Hello there.", True)
+    ]
+    assert signal.reply_delivered is True
+
+
+async def test_a_stop_requested_while_a_reply_finished_anyway_counts_as_delivered(
+    storage: SessionStorage, manager: SessionManager, tmp_path: Path
+) -> None:
+    # The stop asked the turn to abort, but the reply had already ended: the
+    # turn's own outcome is "completed", so the run is not a cancelled one.
+    from agentos.engine.turn_progress import TurnStopSignal, bind_turn_stop_signal
+
+    provider = ScriptedProvider([[text("Hello there."), done()]])
+    runner = _runner(manager, provider, tmp_path)
+    await manager.create(KEY)
+    await manager.append_message(KEY, "user", "Say hello.")
+    signal = TurnStopSignal()
+    bind_turn_stop_signal(signal)
+    events: list[AgentEvent] = []
+    ctx = ToolContext(caller_kind=CallerKind.WEB)
+    async for event in runner.run(
+        "Say hello.", KEY, tool_context=ctx, history_has_persisted_user=True
+    ):
+        events.append(event)
+        if isinstance(event, DoneEvent):
+            signal.request_abort("cancelled")
+
+    done_event = events[-1]
+    assert isinstance(done_event, DoneEvent)
+    assert done_event.outcome is not None and done_event.outcome.kind == "completed"
+    assert signal.reply_delivered is True
+    rows = await _rows(storage)
+    assert [content for role, content, _ in rows if role == "assistant"] == ["Hello there."]

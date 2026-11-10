@@ -352,8 +352,8 @@ class TurnFinalizerStageInput:
 
     # Called right after the assistant turn was appended, before memory
     # capture and the totals rollup are awaited. The harness records there
-    # that the reply is durable, so a cancel landing later in this stage does
-    # not persist the turn a second time.
+    # that the reply is durable, so a cancel landing later in this stage (or
+    # during the append itself) does not persist the turn a second time.
     on_transcript_appended: Callable[[], None] | None = None
 
 
@@ -388,6 +388,56 @@ class TurnFinalizerStageOutput:
     memory_captured: bool
 
 
+@dataclass(frozen=True)
+class PersistedReply:
+    """What :meth:`TurnFinalizerStage.persist_reply` wrote (steps 1-2)."""
+
+    final_text: str
+    turn_segments: list[dict]
+    transcript_appended: bool
+
+
+async def _append_through_cancel(
+    port: TranscriptAppendPort,
+    on_appended: Callable[[], None] | None,
+    session_key: str,
+    *,
+    append_kwargs: dict[str, Any],
+    **kwargs: Any,
+) -> bool:
+    """Append the reply; a cancel arriving meanwhile waits for the write.
+
+    The store may commit the row before the await returns (the INSERT and
+    the session touch are separate awaits), so a cancel there used to leave
+    the row written while the turn believed it was not, and the cancel path
+    wrote the reply a second time. The append runs to its end instead, and
+    *on_appended* is told before the cancel propagates.
+    """
+    import asyncio
+
+    write = asyncio.ensure_future(
+        port.append_message(session_key, **kwargs, **append_kwargs),
+    )
+    cancelled = False
+    while True:
+        try:
+            appended = await asyncio.shield(write)
+            break
+        except asyncio.CancelledError:
+            if write.done():
+                if write.cancelled():
+                    raise
+                appended = write.result()
+                cancelled = True
+                break
+            cancelled = True
+    if appended and on_appended is not None:
+        on_appended()
+    if cancelled:
+        raise asyncio.CancelledError
+    return appended
+
+
 # ---------------------------------------------------------------------------
 # Outer stage class
 # ---------------------------------------------------------------------------
@@ -416,7 +466,9 @@ class TurnFinalizerStage:
 
      Exception model: the stage does NOT wrap the ``append_message``
      call. Any exception there propagates to the harness's terminal error
-     handler. The memory-capture
+     handler. A cancel does not interrupt the append half-way: it waits
+     for the write, reports it through ``on_transcript_appended``, then
+     propagates. The memory-capture
      and totals-rollup ports each have their own log-and-continue
      try/except inside the stage body.
 
@@ -445,17 +497,18 @@ class TurnFinalizerStage:
         # working; a stage without it simply never nudges.
         self._memory_nudge = memory_nudge or _NoopMemoryNudge()
 
-    async def run(
-        self,
-        inp: TurnFinalizerStageInput,
-    ) -> StageOutcome[TurnFinalizerStageOutput]:
+    async def persist_reply(self, inp: TurnFinalizerStageInput) -> PersistedReply:
+        """Steps 1-2: normalize the reply and append it to the transcript.
+
+        :meth:`run` starts with this. The harness also calls it on its own
+        for a turn whose whole reply was produced (its DoneEvent already
+        went out) but which a stop cancelled before :meth:`run` reached the
+        append, so that reply is persisted as finished, exactly once.
+        """
         # Late imports keep the module import-cycle-free.
         import json as _json
 
-        from agentos.engine.runtime import (
-            _normalize_heartbeat_text,
-        )
-        from agentos.engine.turn_runner.outcome import StageOutcome
+        from agentos.engine.runtime import _normalize_heartbeat_text
 
         # 1. Heartbeat-normalize.
         final_text = "".join(inp.final_text_parts)
@@ -480,10 +533,8 @@ class TurnFinalizerStage:
         final_text = _with_unconfirmed_action_notice(final_text, turn_segments)
 
         transcript_appended = False
-        memory_captured = False
 
-        # 2. Transcript append + 3. memory capture (paired -- memory
-        # only fires if transcript persisted).
+        # 2. Transcript append.
         #
         # Internal turns are excluded: their reply is addressed to the
         # harness, not the user. Persisting it would leave stray lines like
@@ -513,7 +564,9 @@ class TurnFinalizerStage:
                 append_kwargs["provider_messages"] = inp.provider_messages
             if inp.replaces_message_id is not None:
                 append_kwargs["replaces_message_id"] = inp.replaces_message_id
-            transcript_appended = await self._transcript_append.append_message(
+            transcript_appended = await _append_through_cancel(
+                self._transcript_append,
+                inp.on_transcript_appended,
                 inp.session_key,
                 role="assistant",
                 content=persisted_content,
@@ -524,31 +577,49 @@ class TurnFinalizerStage:
                     resolved_model=inp.resolved_model,
                 ),
                 token_count=token_count,
-                **append_kwargs,
+                append_kwargs=append_kwargs,
             )
-            if transcript_appended and inp.on_transcript_appended is not None:
-                inp.on_transcript_appended()
-            if transcript_appended:
-                try:
-                    await self._turn_memory_capture.capture_turn(
-                        agent_id=inp.agent_id,
-                        session_key=inp.session_key,
-                        runtime_message=inp.runtime_message,
-                        final_text=final_text,
-                        input_mode=inp.input_mode,
-                        tool_context=inp.tool_context,
-                        input_provenance=inp.input_provenance,
-                        run_kind=inp.run_kind,
-                        no_memory_capture=inp.no_memory_capture,
-                    )
-                    memory_captured = True
-                except Exception as exc:  # noqa: BLE001 - log-and-continue intentional
-                    log.warning(
-                        "turn_runner.capture_failed",
-                        session_key=inp.session_key,
-                        agent_id=inp.agent_id,
-                        error=str(exc),
-                    )
+
+        return PersistedReply(
+            final_text=final_text,
+            turn_segments=turn_segments,
+            transcript_appended=transcript_appended,
+        )
+
+    async def run(
+        self,
+        inp: TurnFinalizerStageInput,
+    ) -> StageOutcome[TurnFinalizerStageOutput]:
+        from agentos.engine.turn_runner.outcome import StageOutcome
+
+        reply = await self.persist_reply(inp)
+        final_text, turn_segments = reply.final_text, reply.turn_segments
+        transcript_appended = reply.transcript_appended
+        memory_captured = False
+
+        # 3. Memory capture: only once the reply persisted (it reads the text
+        # as persisted).
+        if transcript_appended:
+            try:
+                await self._turn_memory_capture.capture_turn(
+                    agent_id=inp.agent_id,
+                    session_key=inp.session_key,
+                    runtime_message=inp.runtime_message,
+                    final_text=final_text,
+                    input_mode=inp.input_mode,
+                    tool_context=inp.tool_context,
+                    input_provenance=inp.input_provenance,
+                    run_kind=inp.run_kind,
+                    no_memory_capture=inp.no_memory_capture,
+                )
+                memory_captured = True
+            except Exception as exc:  # noqa: BLE001 - log-and-continue intentional
+                log.warning(
+                    "turn_runner.capture_failed",
+                    session_key=inp.session_key,
+                    agent_id=inp.agent_id,
+                    error=str(exc),
+                )
 
         # Periodic memory review. Deliberately outside the transcript-append
         # branch: how many turns the user has taken is independent of whether

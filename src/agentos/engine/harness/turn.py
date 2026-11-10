@@ -28,7 +28,7 @@ import asyncio
 import json
 import time
 import uuid
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import aclosing
 from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING, Any, TypeVar, cast
@@ -168,6 +168,13 @@ class _TurnRun:
     artifact_delivery_failures: list[str] = field(default_factory=list)
     #: Whether this run already yielded its terminal DoneEvent.
     done_yielded: bool = False
+    #: The stream state once the stream stage starts; the cancellation path
+    #: reads its DoneEvent and unflushed text.
+    stream_state: _StreamState | None = None
+    #: Builds the finalizer's input from the live stream state (set with
+    #: ``stream_state``); the cancellation path persists a finished reply
+    #: through it.
+    finalizer_input: Callable[[], TurnFinalizerStageInput] | None = None
     #: Set when the stream asked for a router-control replay of the turn.
     replay: TurnRequest | None = None
 
@@ -325,7 +332,7 @@ class TurnHarness:
             att_out = att_outcome.require_output()
 
             self._attach_progress_sink(run, agent)
-            stream_state = self._stream_state_of(run)
+            stream_state = run.stream_state = self._stream_state_of(run)
             stream_inp = self._stream_of(
                 run,
                 stream_state,
@@ -340,6 +347,19 @@ class TurnHarness:
                 tool_context=tool_context,
             )
             replay_requested = False
+
+            def finalizer_input() -> TurnFinalizerStageInput:
+                return self._finalizer_of(
+                    run,
+                    stream_state,
+                    runtime_message=runtime_message,
+                    resolved_model=resolved_model,
+                    tool_context=tool_context,
+                    no_memory_capture=no_memory_capture,
+                    agent=agent,
+                )
+
+            run.finalizer_input = finalizer_input
             run.timing.stage_start("stream_consumer")
             # aclosing: leaving the loop (the replay ``break``, a closed or
             # cancelled caller) closes the stage and the agent run under it now.
@@ -364,21 +384,10 @@ class TurnHarness:
                 run.replay = self._replay_of(req, tool_context, no_memory_capture)
                 return
             done_event = stream_state.done_event
-            if stream_state.current_text_parts:  # flush the remaining text segment
-                run.turn_segments.append(
-                    {"type": "text", "text": "".join(stream_state.current_text_parts)}
-                )
+            self._flush_text_segment(run, stream_state)
             self._mark_cooperative_abort(run, done_event, agent)
 
-            fin_input = self._finalizer_of(
-                run,
-                stream_state,
-                runtime_message=runtime_message,
-                resolved_model=resolved_model,
-                tool_context=tool_context,
-                no_memory_capture=no_memory_capture,
-                agent=agent,
-            )
+            fin_input = finalizer_input()
             fin_outcome = await self._timed(
                 run, "turn_finalizer", stages.turn_finalizer.run(fin_input)
             )
@@ -644,17 +653,36 @@ class TurnHarness:
             replaces_message_id=(
                 run.turn_progress.message_id if run.turn_progress is not None else None
             ),
-            on_transcript_appended=lambda: TurnHarness._note_reply_persisted(run),
+            on_transcript_appended=lambda: TurnHarness._note_reply_persisted(
+                run, stream_state.done_event
+            ),
         )
 
     @staticmethod
-    def _note_reply_persisted(run: _TurnRun) -> None:
+    def _flush_text_segment(run: _TurnRun, stream_state: _StreamState) -> None:
+        """Close the trailing text segment (once: the cancel path may call it too)."""
+        if stream_state.current_text_parts:
+            run.turn_segments.append(
+                {"type": "text", "text": "".join(stream_state.current_text_parts)}
+            )
+            stream_state.current_text_parts.clear()
+
+    @staticmethod
+    def _note_reply_persisted(run: _TurnRun, done_event: DoneEvent | None) -> None:
         """The finalizer's append landed: the reply row replaced the in-progress row."""
         from agentos.engine.turn_progress import current_turn_stop_signal
 
         run.reply_persisted = True
         signal = current_turn_stop_signal()
-        if signal is not None and not signal.aborted:
+        if signal is None:
+            return
+        outcome = getattr(done_event, "outcome", None)
+        if outcome is not None:
+            # The turn's own outcome decides: a reply that ran to its end is
+            # delivered even when a stop was requested while it streamed (the
+            # provider finished first); one cut short by the stop is not.
+            signal.reply_delivered = getattr(outcome, "kind", None) != "interrupted"
+        elif not signal.aborted:
             # Not a stopped turn's partial reply: the whole answer is in.
             signal.reply_delivered = True
         if run.turn_progress is not None:
@@ -913,6 +941,50 @@ class TurnHarness:
             timing=run.timing.summary(),
         )
 
+    @staticmethod
+    def _reply_finished(run: _TurnRun) -> bool:
+        """The turn's DoneEvent went out and the turn was not cut short.
+
+        From then on the reply is the one the user saw complete: a cancel
+        that lands before the finalizer persisted it (while the agent stream
+        closes, say) must persist it as finished, not as an interrupted
+        partial, so the transcript, the ``done`` frame and the task agree.
+        """
+        state = run.stream_state
+        done_event = state.done_event if state is not None else None
+        if not run.done_yielded or done_event is None or run.finalizer_input is None:
+            return False
+        return getattr(done_event.outcome, "kind", None) != "interrupted"
+
+    async def _persist_finished_reply(self, run: _TurnRun) -> None:
+        """Persist a finished reply a cancel caught before the finalizer did."""
+        session_key, state, build_input = (
+            run.request.session_key,
+            run.stream_state,
+            run.finalizer_input,
+        )
+        if state is None or build_input is None:
+            return
+        self._flush_text_segment(run, state)
+        try:
+            reply = await self.stages.turn_finalizer.persist_reply(build_input())
+        except asyncio.CancelledError:
+            # A second cancel during the write: the append still finished and
+            # reported itself; there is nothing more to do here.
+            return
+        except Exception:  # pragma: no cover — defensive: don't swallow the cancel
+            log.warning(
+                "turn_runner.cancelled_persist_failed", session_key=session_key, exc_info=True
+            )
+            return
+        if reply.transcript_appended and run.turn_progress is not None:
+            run.turn_progress.replaced()
+        log.info(
+            "turn_runner.cancelled_after_reply_finished",
+            session_key=session_key,
+            appended=reply.transcript_appended,
+        )
+
     async def _on_cancelled(self, run: _TurnRun) -> None:
         """Keep what already streamed of a cancelled turn (the caller re-raises).
 
@@ -920,6 +992,9 @@ class TurnHarness:
         transcript does not end on an orphan user message. A cancel that lands
         after the finalizer persisted the reply (during memory capture or the
         totals rollup) writes nothing: the turn is already in the transcript.
+        One that lands after the turn's DoneEvent went out but before the
+        reply was persisted writes the finished reply, once
+        (:meth:`_reply_finished`).
         """
         from agentos.engine.runtime import (
             _cancelled_partial_response_text,
@@ -937,6 +1012,8 @@ class TurnHarness:
             log.info("turn_runner.cancelled_by_shutdown", session_key=session_key)
         elif run.reply_persisted:
             log.info("turn_runner.cancelled_after_reply_persisted", session_key=session_key)
+        elif self._reply_finished(run):
+            await self._persist_finished_reply(run)
         elif runner._session_manager is not None and (
             partial_text
             or turn_segments
