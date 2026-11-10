@@ -92,4 +92,23 @@ describe('bindPendingQuestions', () => {
     rpc.emit('session.event.tool_result', askResult('s1'))
     expect(usePendingQuestions.getState().items).toEqual([])
   })
+
+  it('drops questions of sessions missing from a list read after them', () => {
+    const rpc = new FakeRpc()
+    let now = 1_000
+    const off = bindPendingQuestions(rpc, { now: () => now })
+    rpc.emit('session.event.tool_result', askResult('deleted'))
+    rpc.emit('session.event.tool_result', askResult('kept'))
+    now = 5_000
+    rpc.emit('session.event.tool_result', askResult('newer'))
+    const before = usePendingQuestions.getState()
+    // A list read at t=2000 lists `kept` only; `newer` arrived after it.
+    before.retainSessions(new Set(['kept']), 2_000)
+    expect(usePendingQuestions.getState().items.map((q) => q.sessionKey)).toEqual(['kept', 'newer'])
+    // Nothing to drop: the state object is left alone.
+    const same = usePendingQuestions.getState()
+    same.retainSessions(new Set(['kept']), 2_000)
+    expect(usePendingQuestions.getState()).toBe(same)
+    off()
+  })
 })

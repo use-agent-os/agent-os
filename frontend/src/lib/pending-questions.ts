@@ -11,6 +11,11 @@
  * a session's messages, which means a question asked in a session no window
  * of this console has open, or before the console connected, is not listed.
  * The chat transcript still shows it when the session is opened.
+ *
+ * Deleting a session sends no frame that clears its question, so a caller that
+ * holds a complete session list prunes with `retainSessions`: a question whose
+ * session is missing from a list fetched after the question arrived belongs to
+ * a deleted session and can no longer be answered.
  */
 import { create } from 'zustand'
 import { parseAskQuestions, type AskQuestion } from '@/lib/ask-questions'
@@ -28,6 +33,12 @@ interface PendingQuestionsState {
   items: PendingQuestion[]
   present(question: PendingQuestion): void
   clearSession(sessionKey: string): void
+  /**
+   * Drop questions whose session is not in `live`, a complete session list
+   * fetched at `asOf`. Questions presented after `asOf` are kept: the list
+   * may predate their session.
+   */
+  retainSessions(live: ReadonlySet<string>, asOf: number): void
   reset(): void
 }
 
@@ -40,6 +51,11 @@ export const usePendingQuestions = create<PendingQuestionsState>((set) => ({
   clearSession: (sessionKey) =>
     set((s) => {
       const items = s.items.filter((q) => q.sessionKey !== sessionKey)
+      return items.length === s.items.length ? s : { items }
+    }),
+  retainSessions: (live, asOf) =>
+    set((s) => {
+      const items = s.items.filter((q) => q.presentedAt > asOf || live.has(q.sessionKey))
       return items.length === s.items.length ? s : { items }
     }),
   reset: () => set({ items: [] }),

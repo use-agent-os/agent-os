@@ -1,17 +1,20 @@
 import {
   AlertTriangle,
+  Copy,
   Inbox as InboxIcon,
   MessageCircleQuestion,
   RefreshCw,
   ShieldAlert,
 } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router'
+import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import { formatNumber, getLocale, t, tPlural } from '@/i18n'
 import '@/i18n/en/webPagesOverview'
 import { composeAskAnswer, type AskQuestion } from '@/lib/ask-questions'
 import type { AttentionItem } from '@/lib/attention-inbox'
+import { copyWithFallback } from '@/lib/clipboard'
 import { gate, requireConnection, type Gate } from '@/lib/disabled-reason'
 import { usePendingQuestions } from '@/lib/pending-questions'
 import {
@@ -23,12 +26,14 @@ import {
 import { useRuntimeSignals } from '@/lib/runtime-signals'
 import { useAttentionInbox } from '@/lib/useAttentionInbox'
 import { cn } from '@/lib/utils'
-import { approvalMonitor, useApprovals } from '@/services/approval-monitor'
+import { approvalCommand, approvalMonitor, useApprovals } from '@/services/approval-monitor'
+import { SESSIONS_LIST_LIMIT } from '@/views/sessions/logic'
 import { Button } from '@/web/components/ui/button'
 import { PageHeader } from '@/web/components/ui/page-header'
 import { EmptyState, StaleBadge } from '@/web/components/ui/states'
 import { sendOnce } from '@/web/features/chat/send'
 import { ApprovalCard } from '@/web/shell/ApprovalTray'
+import { useSessionsList } from '@/web/shell/session-data'
 import { sessionKeyToPath } from '@/web/shell/session-url'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 
@@ -112,8 +117,31 @@ function ItemCard({
   )
 }
 
+/** Copies a command to the clipboard and says whether it worked. */
+function CopyCommand({ command, label }: { command: string; label: string }) {
+  return (
+    <Button
+      size="icon-sm"
+      variant="ghost"
+      aria-label={label}
+      title={label}
+      onClick={() =>
+        void copyWithFallback(command)
+          .then(() => toast.success(t('webPagesOverview.inboxCopied')))
+          .catch(() => toast.error(t('webPagesOverview.inboxCopyFailed')))
+      }
+    >
+      <Copy />
+    </Button>
+  )
+}
+
 function ApprovalItem({ item }: { item: AttentionItem }) {
   const namespace = item.approval?.namespace || 'exec'
+  const command = item.approval ? approvalCommand(item.approval) : ''
+  const agents = [
+    ...new Set(item.members.map((m) => m.approval?.agent).filter((a): a is string => !!a)),
+  ]
   return (
     <ItemCard
       item={item}
@@ -121,6 +149,19 @@ function ApprovalItem({ item }: { item: AttentionItem }) {
       kind={t('webPagesOverview.inboxKindApproval', { namespace })}
       tone="border-l-warn"
     >
+      {agents.length > 0 || command ? (
+        <div className="flex flex-wrap items-center gap-2 text-small text-text-muted">
+          {agents.length > 0 ? (
+            <span>{t('webPagesOverview.inboxAgent', { agent: agents.join(', ') })}</span>
+          ) : null}
+          {command ? (
+            <span className="inline-flex items-center gap-1">
+              {t('webPagesOverview.inboxCommand')}
+              <CopyCommand command={command} label={t('webPagesOverview.inboxCopyCommand')} />
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       <ul role="list" className="flex flex-col gap-2">
         {item.members.map((member) =>
           member.approval ? <ApprovalCard key={member.id} item={member.approval} /> : null,
@@ -314,12 +355,18 @@ function IssueItem({ item, issue }: { item: AttentionItem; issue: RuntimeIssue }
               <div className="min-w-0 flex-1">
                 {step.label ? <p className="font-medium">{step.label}</p> : null}
                 {step.command ? (
-                  <code
-                    tabIndex={0}
-                    className="block overflow-x-auto rounded bg-surface-0 px-2 py-1 font-mono text-small whitespace-pre"
-                  >
-                    {step.command}
-                  </code>
+                  <div className="flex max-w-full items-center gap-1 rounded bg-surface-0 pl-2">
+                    <code
+                      tabIndex={0}
+                      className="block min-w-0 flex-1 overflow-x-auto py-1 font-mono text-small whitespace-pre"
+                    >
+                      {step.command}
+                    </code>
+                    <CopyCommand
+                      command={step.command}
+                      label={t('webPagesOverview.inboxCopyStep', { step: i + 1 })}
+                    />
+                  </div>
                 ) : null}
                 {step.detail ? <p className="text-small text-text-muted">{step.detail}</p> : null}
               </div>
@@ -363,8 +410,27 @@ function Stat({ label, value }: { label: string; value: number }) {
   )
 }
 
+const LIST_RACE_MS = 10_000
+
+/**
+ * Keep pending questions to sessions that still exist. Only a complete list
+ * can prove a session gone, so a list cut at the limit prunes nothing.
+ */
+function usePruneDeletedSessionQuestions() {
+  const sessions = useSessionsList()
+  const { data, dataUpdatedAt, isSuccess } = sessions
+  useEffect(() => {
+    if (!isSuccess || !data || data.length >= SESSIONS_LIST_LIMIT) return
+    // The slack covers a session created while this list was in flight.
+    usePendingQuestions
+      .getState()
+      .retainSessions(new Set(data.map((r) => r.key)), dataUpdatedAt - LIST_RACE_MS)
+  }, [data, dataUpdatedAt, isSuccess])
+}
+
 export function InboxPage() {
   const { items, issues } = useAttentionInbox()
+  usePruneDeletedSessionQuestions()
   const connection = useDisplayedConnection()
   const everConnected = useRuntimeSignals((s) => s.everConnected)
   const refresh = useRuntimeSignals((s) => s.refresh)
