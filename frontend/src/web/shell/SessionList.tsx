@@ -24,6 +24,7 @@ import { useRpc } from '@/app/providers'
 import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webCommon'
 import '@/i18n/en/webShell'
+import { usePendingQuestions } from '@/lib/pending-questions'
 import { cn } from '@/lib/utils'
 import { relTimeLabel } from '@/views/sessions/logic'
 import {
@@ -563,6 +564,7 @@ function SessionItem(props: ItemProps) {
     setError(null)
     try {
       await rpc.call('sessions.delete', { key: row.key })
+      usePendingQuestions.getState().clearSession(row.key)
       if (pinned) setPins(pins.filter((k) => k !== row.key))
       queryClient.setQueryData<SessionRow[]>(SESSIONS_QUERY_KEY, (prev) =>
         prev?.filter((r) => r.key !== row.key),

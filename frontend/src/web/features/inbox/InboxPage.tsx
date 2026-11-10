@@ -6,7 +6,7 @@ import {
   RefreshCw,
   ShieldAlert,
 } from 'lucide-react'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
@@ -27,13 +27,11 @@ import { useRuntimeSignals } from '@/lib/runtime-signals'
 import { useAttentionInbox } from '@/lib/useAttentionInbox'
 import { cn } from '@/lib/utils'
 import { approvalMonitor, useApprovals } from '@/services/approval-monitor'
-import { SESSIONS_LIST_LIMIT } from '@/views/sessions/logic'
 import { Button } from '@/web/components/ui/button'
 import { PageHeader } from '@/web/components/ui/page-header'
 import { EmptyState, StaleBadge } from '@/web/components/ui/states'
 import { sendOnce } from '@/web/features/chat/send'
 import { ApprovalCard } from '@/web/shell/ApprovalTray'
-import { useSessionsList } from '@/web/shell/session-data'
 import { sessionKeyToPath } from '@/web/shell/session-url'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 
@@ -400,27 +398,8 @@ function Stat({ label, value }: { label: string; value: number }) {
   )
 }
 
-const LIST_RACE_MS = 10_000
-
-/**
- * Keep pending questions to sessions that still exist. Only a complete list
- * can prove a session gone, so a list cut at the limit prunes nothing.
- */
-function usePruneDeletedSessionQuestions() {
-  const sessions = useSessionsList()
-  const { data, dataUpdatedAt, isSuccess } = sessions
-  useEffect(() => {
-    if (!isSuccess || !data || data.length >= SESSIONS_LIST_LIMIT) return
-    // The slack covers a session created while this list was in flight.
-    usePendingQuestions
-      .getState()
-      .retainSessions(new Set(data.map((r) => r.key)), dataUpdatedAt - LIST_RACE_MS)
-  }, [data, dataUpdatedAt, isSuccess])
-}
-
 export function InboxPage() {
   const { items, issues } = useAttentionInbox()
-  usePruneDeletedSessionQuestions()
   // A push notification opens /inbox?approval=<id>: that request is brought into view.
   const [params] = useSearchParams()
   const highlight = params.get('approval')

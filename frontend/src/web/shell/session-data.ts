@@ -2,6 +2,7 @@ import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-quer
 import { useEffect, useMemo, useSyncExternalStore } from 'react'
 import { create } from 'zustand'
 import { useRpc } from '@/app/providers'
+import { usePendingQuestions } from '@/lib/pending-questions'
 import type { WsRpcClient } from '@/lib/ws-rpc'
 import { projectId, projectName, type RawProject } from '@/views/projects/logic'
 import { SESSIONS_LIST_LIMIT } from '@/views/sessions/logic'
@@ -14,6 +15,8 @@ import type { SessionRow } from './session-list'
 
 export const SESSIONS_QUERY_KEY = ['sessions', 'list'] as const
 export const SESSIONS_REFRESH_MS = 5_000
+/** Slack for a session created while a list was in flight. */
+const LIST_RACE_MS = 10_000
 
 interface SessionsListResponse {
   sessions?: SessionRow[]
@@ -60,6 +63,18 @@ export function useSessionsList() {
     refetchInterval: visible ? SESSIONS_REFRESH_MS : false,
     refetchIntervalInBackground: false,
   })
+
+  // A pending question whose session is gone can never be answered: keep the
+  // questions to sessions that still exist, so the rail badge and the Inbox
+  // drop them wherever the session was deleted. Only a complete list can
+  // prove a session gone, so a list cut at the limit prunes nothing.
+  const { data, dataUpdatedAt, isSuccess } = query
+  useEffect(() => {
+    if (!isSuccess || !data || data.length >= SESSIONS_LIST_LIMIT) return
+    usePendingQuestions
+      .getState()
+      .retainSessions(new Set(data.map((r) => r.key)), dataUpdatedAt - LIST_RACE_MS)
+  }, [data, dataUpdatedAt, isSuccess])
 
   useEffect(
     () =>
