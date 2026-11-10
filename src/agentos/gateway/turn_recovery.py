@@ -505,6 +505,26 @@ class TurnRecovery:
     def recoveries(self) -> list[dict[str, Any]]:
         return [recovery.summary() for recovery in self._recoveries.values()]
 
+    def is_recovering(self, session_key: str) -> bool:
+        """True while a resume of *session_key*'s interrupted turn is pending or running."""
+
+        recovery = self._by_session.get(canonicalize_session_key(session_key))
+        return recovery is not None and recovery.state in ("pending", "running")
+
+    async def wait_scanned(self) -> None:
+        """Wait for the boot scan to finish (never raises)."""
+
+        task = self._scan_task
+        if task is None:
+            return
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            if not task.cancelled():
+                raise  # the caller is being cancelled, not the scan
+        except Exception:  # noqa: BLE001 - ``scan`` never raises; be safe anyway
+            return
+
     # ── scan ────────────────────────────────────────────────────────
 
     async def _scan(self) -> None:

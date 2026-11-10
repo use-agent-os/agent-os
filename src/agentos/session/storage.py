@@ -35,9 +35,7 @@ def _serialized_write[**P, R](
     """Hold transaction ownership for a complete mutating storage call."""
 
     @wraps(method)
-    async def wrapped(
-        self: SessionStorage, /, *args: P.args, **kwargs: P.kwargs
-    ) -> R:
+    async def wrapped(self: SessionStorage, /, *args: P.args, **kwargs: P.kwargs) -> R:
         async with self._write_lock:
             try:
                 return await method(self, *args, **kwargs)
@@ -135,15 +133,12 @@ CREATE TABLE IF NOT EXISTS projects (
 )
 """
 
-_CREATE_IDX_PROJECTS_AGENT = (
-    "CREATE INDEX IF NOT EXISTS idx_projects_agent ON projects(agent_id)"
-)
+_CREATE_IDX_PROJECTS_AGENT = "CREATE INDEX IF NOT EXISTS idx_projects_agent ON projects(agent_id)"
 
 # Backstop for the advisory Python-side name check (closes the concurrent
 # create race). NOCASE folds ASCII only; the casefold check stays primary.
 _CREATE_UNIQUE_IDX_PROJECTS_NAME = (
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name_nocase "
-    "ON projects(name COLLATE NOCASE)"
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name_nocase ON projects(name COLLATE NOCASE)"
 )
 
 _CREATE_IDX_SESSIONS_PROJECT = (
@@ -364,8 +359,11 @@ ON agent_tasks(status, updated_at)
 """
 
 # Outbox of parent wakes for subagent spawn groups (gateway/subagent_wakes.py).
-# One row per group: ``pending`` until the task runtime accepted the wake,
+# One row per group: ``awaiting`` once the parent closed the group while
+# children still ran, ``pending`` until the task runtime accepted the wake,
 # then ``delivered``; ``dropped`` when it was given up on or must not happen.
+# Rows go with their parent session (``delete_session``) and finished rows
+# are pruned after a while (``prune_subagent_wakes``).
 # Same DDL as migrations/V015__subagent_wakes.py.
 _CREATE_SUBAGENT_WAKES = """
 CREATE TABLE IF NOT EXISTS subagent_wakes (
@@ -666,15 +664,11 @@ class SessionStorage:
             )
             await self._conn.commit()
         # Defensive: zero-out any NULL epoch rows left by a partial migration.
-        async with self._conn.execute(
-            "SELECT COUNT(*) FROM sessions WHERE epoch IS NULL"
-        ) as cur:
+        async with self._conn.execute("SELECT COUNT(*) FROM sessions WHERE epoch IS NULL") as cur:
             row = await cur.fetchone()
         null_count = row[0] if row else 0
         if null_count > 0:
-            await self._conn.execute(
-                "UPDATE sessions SET epoch = 0 WHERE epoch IS NULL"
-            )
+            await self._conn.execute("UPDATE sessions SET epoch = 0 WHERE epoch IS NULL")
             await self._conn.commit()
 
     async def _migrate_transcript_fts_tokenizer(self) -> None:
@@ -732,9 +726,7 @@ class SessionStorage:
         async with self._conn.execute("PRAGMA table_info(transcript_entries)") as cur:
             columns = [row[1] for row in await cur.fetchall()]
         if "turn_usage" not in columns:
-            await self._conn.execute(
-                "ALTER TABLE transcript_entries ADD COLUMN turn_usage TEXT"
-            )
+            await self._conn.execute("ALTER TABLE transcript_entries ADD COLUMN turn_usage TEXT")
             await self._conn.commit()
 
     async def _migrate_transcript_provider_messages_column(self) -> None:
@@ -748,9 +740,7 @@ class SessionStorage:
             async with self._conn.execute(f"PRAGMA table_info({table})") as cur:
                 columns = [row[1] for row in await cur.fetchall()]
             if "provider_messages" not in columns:
-                await self._conn.execute(
-                    f"ALTER TABLE {table} ADD COLUMN provider_messages TEXT"
-                )
+                await self._conn.execute(f"ALTER TABLE {table} ADD COLUMN provider_messages TEXT")
                 await self._conn.commit()
 
     async def _migrate_summary_metadata_columns(self) -> None:
@@ -783,8 +773,7 @@ class SessionStorage:
             "tokens_before": "ALTER TABLE session_summaries ADD COLUMN tokens_before INTEGER",
             "tokens_after": "ALTER TABLE session_summaries ADD COLUMN tokens_after INTEGER",
             "removed_count": (
-                "ALTER TABLE session_summaries ADD COLUMN "
-                "removed_count INTEGER NOT NULL DEFAULT 0"
+                "ALTER TABLE session_summaries ADD COLUMN removed_count INTEGER NOT NULL DEFAULT 0"
             ),
             "kept_count": (
                 "ALTER TABLE session_summaries ADD COLUMN kept_count INTEGER NOT NULL DEFAULT 0"
@@ -814,9 +803,7 @@ class SessionStorage:
             "coverage_turn_id": (
                 "ALTER TABLE memory_durable_receipts ADD COLUMN coverage_turn_id TEXT"
             ),
-            "coverage_hash": (
-                "ALTER TABLE memory_durable_receipts ADD COLUMN coverage_hash TEXT"
-            ),
+            "coverage_hash": ("ALTER TABLE memory_durable_receipts ADD COLUMN coverage_hash TEXT"),
             "coverage_entry_count": (
                 "ALTER TABLE memory_durable_receipts ADD COLUMN coverage_entry_count INTEGER"
             ),
@@ -931,6 +918,12 @@ class SessionStorage:
         session_key = canonicalize_session_key(session_key)
         session = await self.get_session(session_key)
         if session is None:
+            # No session row, but a spawn group's wake may still target the
+            # key: a later session reusing it must not be woken for it.
+            await self.conn.execute(
+                "DELETE FROM subagent_wakes WHERE parent_session_key = ?", (session_key,)
+            )
+            await self.conn.commit()
             return
         # Session keys are deterministic, so any row left behind here resurfaces
         # in the next session that reuses the key. Delete every session-scoped
@@ -960,6 +953,10 @@ class SessionStorage:
             )
             await self.conn.execute(
                 "DELETE FROM memory_durable_receipts WHERE session_key = ?",
+                (session_key,),
+            )
+            await self.conn.execute(
+                "DELETE FROM subagent_wakes WHERE parent_session_key = ?",
                 (session_key,),
             )
             await self.conn.execute("DELETE FROM sessions WHERE session_key = ?", (session_key,))
@@ -1121,9 +1118,7 @@ class SessionStorage:
                 "UPDATE sessions SET project_id = NULL WHERE project_id = ?",
                 (project_id,),
             )
-            await self.conn.execute(
-                "DELETE FROM projects WHERE project_id = ?", (project_id,)
-            )
+            await self.conn.execute("DELETE FROM projects WHERE project_id = ?", (project_id,))
             await self.conn.commit()
         except Exception:
             await self.conn.rollback()
@@ -1330,9 +1325,7 @@ class SessionStorage:
         allowed = set(MemoryDurableReceipt.model_fields) - {"receipt_id", "created_at"}
         unknown = sorted(set(fields) - allowed)
         if unknown:
-            raise ValueError(
-                f"Unknown memory durable receipt fields: {', '.join(unknown)}"
-            )
+            raise ValueError(f"Unknown memory durable receipt fields: {', '.join(unknown)}")
         if "session_key" in fields:
             fields["session_key"] = canonicalize_session_key(fields["session_key"])
         fields.setdefault("updated_at", _now_ms())
@@ -1421,8 +1414,14 @@ class SessionStorage:
         state: str = "pending",
         reason: str | None = None,
         next_attempt_at: int | None = None,
+        replace_state: str | None = None,
     ) -> tuple[bool, dict[str, Any]]:
-        """Insert the group's wake row unless one exists; return ``(created, row)``."""
+        """Insert the group's wake row unless one exists; return ``(created, row)``.
+
+        With *replace_state*, an existing row still in that state is rewritten
+        with these values instead (``awaiting`` -> ``pending`` when the group's
+        last child ends) and counts as created.
+        """
 
         cur = await self.conn.execute(
             """
@@ -1447,6 +1446,27 @@ class SessionStorage:
             ),
         )
         created = bool(cur.rowcount)
+        if not created and replace_state is not None:
+            cur = await self.conn.execute(
+                """
+                UPDATE subagent_wakes SET
+                    state = ?, message = ?, provenance = ?, payloads = ?, attempts = 0,
+                    next_attempt_at = ?, reason = ?, last_error = NULL, updated_at = ?
+                WHERE group_key = ? AND state = ?
+                """,
+                (
+                    state,
+                    message,
+                    json.dumps(provenance, ensure_ascii=False),
+                    json.dumps(payloads, ensure_ascii=False),
+                    now_ms if next_attempt_at is None else next_attempt_at,
+                    reason,
+                    now_ms,
+                    group_key,
+                    replace_state,
+                ),
+            )
+            created = bool(cur.rowcount)
         await self.conn.commit()
         row = await self.get_subagent_wake(group_key)
         assert row is not None
@@ -1496,6 +1516,35 @@ class SessionStorage:
         ) as cur:
             rows = await cur.fetchall()
         return [_subagent_wake_row(row) for row in rows]
+
+    async def list_subagent_wakes(self, state: str, limit: int = 200) -> list[dict[str, Any]]:
+        """Wake rows in *state*, oldest first."""
+
+        async with self.conn.execute(
+            f"SELECT {', '.join(_SUBAGENT_WAKE_COLUMNS)} FROM subagent_wakes "
+            "WHERE state = ? ORDER BY created_at ASC, rowid ASC LIMIT ?",
+            (state, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [_subagent_wake_row(row) for row in rows]
+
+    @_serialized_write
+    async def prune_subagent_wakes(self, before_ms: int) -> int:
+        """Delete wake rows that are done with and untouched since *before_ms*.
+
+        ``delivered`` and ``dropped`` rows only keep a group from waking its
+        parent twice, which cannot happen long after; an ``awaiting`` row that
+        old belongs to a group whose children never all ended. ``pending``
+        rows are the worker's (it drops them after its own age limit).
+        """
+
+        cur = await self.conn.execute(
+            "DELETE FROM subagent_wakes "
+            "WHERE state IN ('delivered', 'dropped', 'awaiting') AND updated_at < ?",
+            (before_ms,),
+        )
+        await self.conn.commit()
+        return int(cur.rowcount if cur.rowcount is not None else 0)
 
     async def list_interrupted_agent_tasks(
         self,
@@ -1582,7 +1631,7 @@ class SessionStorage:
                 raise StaleEpochError(
                     f"Epoch mismatch for {entry.session_key}: "
                     f"expected {expected_epoch}, got {actual}"
-            )
+                )
             await self.conn.commit()
         else:
             sql = f"INSERT INTO transcript_entries ({', '.join(cols)}) VALUES ({placeholders})"
@@ -1661,9 +1710,7 @@ class SessionStorage:
             ORDER BY created_at ASC, id ASC
             LIMIT ? OFFSET ?
         """
-        async with self.conn.execute(
-            sql, (session_id, session_id, limit_val, offset)
-        ) as cur:
+        async with self.conn.execute(sql, (session_id, session_id, limit_val, offset)) as cur:
             rows = await cur.fetchall()
         return [TranscriptEntry(**_deserialize_row(dict(r))) for r in rows]
 
@@ -1740,9 +1787,7 @@ class SessionStorage:
             row = await cur.fetchone()
         return row[0] if row else 0
 
-    async def count_transcript_entries_batch(
-        self, session_ids: list[str]
-    ) -> dict[str, int]:
+    async def count_transcript_entries_batch(self, session_ids: list[str]) -> dict[str, int]:
         """Count transcript entries for many sessions in one round trip.
 
         Used by ``sessions.list`` (rpc_sessions.py) to avoid the N+1 pattern
@@ -1905,9 +1950,7 @@ class SessionStorage:
                 node=node,
                 entries=archived_entries or [],
                 compaction_id=summary.compaction_id if summary is not None else None,
-                compaction_index=summary.compaction_index
-                if summary is not None
-                else None,
+                compaction_index=summary.compaction_index if summary is not None else None,
             )
 
             await self.conn.execute(
@@ -2085,9 +2128,7 @@ class SessionStorage:
     # ── SessionContextState CRUD ─────────────────────────────────────────────
 
     @_serialized_write
-    async def save_context_state(
-        self, state: SessionContextState
-    ) -> SessionContextState:
+    async def save_context_state(self, state: SessionContextState) -> SessionContextState:
         """Persist portable or provider-native context state for later replay."""
         state.session_key = canonicalize_session_key(state.session_key)
         data = state.model_dump(exclude={"id"})
@@ -2095,8 +2136,7 @@ class SessionStorage:
         placeholders = ", ".join("?" for _ in cols)
         values = [_serialize(data[c]) for c in cols]
         async with self.conn.execute(
-            "INSERT INTO session_context_states "
-            f"({', '.join(cols)}) VALUES ({placeholders})",
+            f"INSERT INTO session_context_states ({', '.join(cols)}) VALUES ({placeholders})",
             values,
         ) as cur:
             state.id = cur.lastrowid
@@ -2124,8 +2164,7 @@ class SessionStorage:
             clauses.append("valid = 1")
         where = " AND ".join(clauses)
         async with self.conn.execute(
-            "SELECT * FROM session_context_states "
-            f"WHERE {where} ORDER BY created_at ASC, id ASC",
+            f"SELECT * FROM session_context_states WHERE {where} ORDER BY created_at ASC, id ASC",
             params,
         ) as cur:
             rows = await cur.fetchall()
