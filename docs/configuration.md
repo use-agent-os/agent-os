@@ -541,6 +541,31 @@ To keep the old behaviour — decisions are only written to the turn call log:
 loop_guard = "observe"   # default "enforce"
 ```
 
+### Provider retries
+
+Rate limits, overloads and transport blips are retried on the same model,
+bounded by a count and a wall-clock budget; a repeated timeout may compact the
+context once. Top-level keys:
+
+- `agent_max_provider_retries` (default `6`): same-model retries of one
+  provider call.
+- `agent_retry_budget_seconds` (default `90`): seconds those retries may spend,
+  counting the waits and the failed attempts (each attempt at most 10 s) from
+  the first failure. The first retry is always made unless its wait alone is
+  longer than the budget. `0` leaves only the count.
+- `agent_timeout_context_recovery` (default `true`): after a timed-out request
+  was retried and timed out again, compact older context once and retry, when
+  the request is large (at least half of what preflight compaction lets a
+  request grow to); otherwise fail over to the next model, or fail.
+
+```toml
+agent_max_provider_retries = 6
+agent_retry_budget_seconds = 90
+agent_timeout_context_recovery = true
+```
+
+See [Providers and Models — Retrying transient failures](providers-and-models.md#retrying-transient-failures).
+
 ### Repetitive output guard
 
 A response that degenerates into the same line, paragraph or phrase over and
@@ -896,7 +921,7 @@ See [`channels.md`](channels.md) for details.
 
 ## MCP Configuration
 
-Use **Settings > MCP Servers** in the Web UI for normal MCP setup. It supports
+Use **Settings › MCP** in the Web UI for normal MCP setup. It supports
 live connect/disconnect controls, inline validation, OAuth authorization, and a
 featured Robinhood Trading preset.
 
@@ -1031,7 +1056,8 @@ A turn that is streaming or between steps when it is stopped is asked to stop
 first: the model's stream is closed, no further request is sent and the turn
 ends on its own. `[task_runtime] turn_cancel_grace_seconds` (default `5`;
 `0` cancels at once) is how long it gets before its task is cancelled. A turn
-running tools is cancelled at once. See [Sessions](sessions.md).
+running tools is cancelled at once. Stopping it a second time while it has its
+grace cancels it at once. See [Sessions](sessions.md).
 
 ```toml
 [task_runtime]
@@ -1040,15 +1066,34 @@ turn_cancel_grace_seconds = 5
 
 ### Subagent lanes
 
-At most `[subagents] max_concurrent_children` (default `2`; `0` = no limit)
-children of one parent session run at once; further spawns wait in spawn
-order. An agent's own `subagents.max_concurrent_children` overrides it. See
-[Sessions](sessions.md).
+At most `[subagents] max_concurrent_children` (default `2`; `0` = no
+per-parent limit) children of one parent session run at once; further spawns
+wait in spawn order. An agent's own `subagents.max_concurrent_children`
+overrides it.
+
+Children of a parent whose turn is still running take a slot in the nested
+pool, so a parent waiting on its children cannot starve them.
+`[task_runtime] max_nested_concurrency` (default: the value of
+`max_concurrency`) is the size of that pool across all parents; when it is
+full, a child waits for a shared slot. When the parent's turn ends, its running
+children move to the shared pool and count against `max_concurrency`, and a
+child that starts after that uses the shared pool and leaves
+`subagent_reserved_slots` free. Whatever the per-parent limit and however deep
+the nesting, running turns never exceed
+`max_concurrency + max_nested_concurrency`. See [Sessions](sessions.md).
 
 ```toml
+[task_runtime]
+max_concurrency = 4
+# max_nested_concurrency = 4   # default: max_concurrency
+
 [subagents]
 max_concurrent_children = 2
 ```
+
+`max_nested_concurrency`, `turn_cancel_grace_seconds` and
+`max_concurrent_children` are read when the gateway starts; a change takes
+effect after a restart.
 
 ### Interrupted turns
 
@@ -1479,7 +1524,8 @@ Restart the gateway after changing it. Environment override:
 On commands that connect to the gateway, the CLI checks PyPI at most once every
 24h and, if a newer release of `use-agent-os` exists, prints a one-line notice
 on stderr suggesting `agentos upgrade`. Similarly, the Web UI queries the gateway
-on connection and displays a dismissible banner if an update is available.
+on connection and, if an update is available, shows an **Update available**
+badge in the status menu and a dismissible notice linking to Settings › Updates.
 The check is silent on failure and is suppressed in CI, on non-interactive CLI runs
 (no TTY), or via environment flags.
 

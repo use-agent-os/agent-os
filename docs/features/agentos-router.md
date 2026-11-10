@@ -427,7 +427,15 @@ If routing does not appear to work:
    "credentials_missing"`). Every case routes the turn to the default tier; the
    turn itself never fails unless `require_router_runtime = true`.
 
-5. If you need deterministic model behavior for a run, disable routing:
+5. If routing takes longer than `agentos_router.routing_timeout_seconds`
+   (default `10`), the turn runs unrouted instead of failing. Each routing
+   step runs on its own thread, so a router that blocks holds up neither the
+   gateway nor another turn's routing. If router steps keep hanging past the
+   timeout, at most 4 stuck router threads are kept; further turns skip
+   routing (logged as `pipeline.step_failed` with `Pilot Router skipped: N
+   earlier router steps are still stuck`) until a stuck step returns.
+
+6. If you need deterministic model behavior for a run, disable routing:
 
    ```sh
    agentos configure router --router disabled

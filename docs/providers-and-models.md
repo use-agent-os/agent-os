@@ -299,7 +299,10 @@ or `fail`).
 - Retries are bounded by a count (`--max-provider-retries` /
   `agent_max_provider_retries`, default `6`) **and** a wall-clock budget
   (`agent_retry_budget_seconds`, default `90`). The budget counts the waits
-  and the failed attempts from the first failure; `0` leaves only the count.
+  and the failed attempts from the first failure, each failed attempt at most
+  10 s; `0` leaves only the count. The first retry is always made unless its
+  wait alone is longer than the budget, so one slow failure (a long stream
+  that drops) does not end the turn.
 - Waits grow exponentially from 1 s, each multiplied by a random factor
   between 0.5 and 1.5, so sessions that hit the same limit together do not
   retry in lockstep.
@@ -307,9 +310,11 @@ or `fail`).
   and fails if there is none.
 - No failover happens after the model already streamed visible text for that
   attempt, so another model's reply is never spliced onto it.
-- A timeout is retried once. If it times out again, the turn compacts older
-  context and retries one more time before failing over or failing
-  (`agent_timeout_context_recovery`, default `true`).
+- A timeout is retried once. If it times out again and the request is large
+  (at least half of what preflight compaction lets a request grow to), the
+  turn compacts older context and retries one more time; otherwise, or when
+  compaction takes nothing off, it fails over to the next model, and fails if
+  there is none (`agent_timeout_context_recovery`, default `true`).
 - An invalid API key (HTTP 401, from any provider) is not retried. The error
   says to check the provider's credentials.
 

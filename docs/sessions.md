@@ -103,8 +103,9 @@ A turn that is streaming or between steps when you stop it is asked to stop
 first. The model's stream is closed at once, no further request is sent, and
 the turn ends on its own with its reply so far marked `[interrupted]`. If it
 has not stopped within `task_runtime.turn_cancel_grace_seconds` (default `5`;
-`0` stops at once), its task is cancelled. A turn running tools, or an ACP
-harness turn, is cancelled at once, so a stop never waits on a long tool.
+`0` stops at once), its task is cancelled. Stopping it a second time during
+that grace cancels it at once. A turn running tools, or an ACP harness turn, is
+cancelled at once, so a stop never waits on a long tool.
 
 ```toml
 [task_runtime]
@@ -129,9 +130,27 @@ how many children a parent may have at all is still
 max_concurrent_children = 2
 ```
 
-A parent that waits on a child in the same turn (`sessions_yield` with a
-`session_key`) keeps its own slot. Its children run in a separate nested pool,
-so they still start when every shared slot is busy.
+While a parent's turn is still running (for example waiting on a child with
+`sessions_yield` and a `session_key`), its children take slots in a separate
+nested pool, so they still start when every shared slot is busy. The nested
+pool holds `task_runtime.max_nested_concurrency` children across all parents
+(default: the value of `max_concurrency`); when it is full, a child waits for a
+shared slot. When the parent's turn ends, its running children move to the
+shared pool and count against `max_concurrency` (no new turn starts until the
+pool is back under it), and a child that starts after that uses the shared pool
+and leaves `subagent_reserved_slots` free. Running turns never exceed
+`max_concurrency + max_nested_concurrency`, at any nesting depth, whatever
+`max_concurrent_children` is.
+
+```toml
+[task_runtime]
+max_concurrency = 4
+# max_nested_concurrency = 4   # default: max_concurrency
+```
+
+A chain of parents each waiting inline on its own child can fill both pools;
+the extra children then wait for a slot until something ends (the inline wait
+has its own timeout).
 
 If the gateway restarts while subagent runs are in progress, they are not
 resumed. Each is marked `abandoned` (reason `process_restart`), and their
@@ -145,6 +164,21 @@ retried after 1 s, then 5 s, then 30 s, then every minute, for up to
 30 minutes. A wake still pending when the gateway stops is sent by the next
 boot. A parent is never woken twice for the same group of children, and an
 aborted parent is not woken at all.
+
+- A parent that closes its spawn group (`sessions_yield` without a
+  `session_key`) while children still run records the group as `awaiting`.
+  The last child's completion turns it into the pending wake. If the gateway
+  stops in between, the next boot wakes the parent of every closed group whose
+  children have all ended.
+- A parent whose interrupted turn is being resumed by restart recovery is not
+  also woken for its abandoned children; their results are still added to its
+  transcript.
+- A wake whose delivery has had no outcome for 10 minutes is taken over and
+  retried; one still not delivered 30 minutes after it was written is given up
+  (`delivery_timeout`). Only then does the session's task-group card show the
+  group as failed.
+- Deleting a session (or pruning stale sessions) deletes its wake records.
+  Delivered, given-up and awaiting records are deleted after 7 days.
 
 ## Export a Transcript
 
@@ -224,15 +258,16 @@ and its final answer is pushed back to the parent with a `Stats:` line.
 
 ## Web UI Workflow
 
-The Web UI uses the same session system. In the control console, use the chat
-session selector to switch sessions, inspect status, and continue recent work.
-On the Sessions page, click a row's name to rename it inline — Enter saves,
-Escape cancels, and an empty value clears the custom name. In Chat, the header
-`⋯` menu has **Rename session** with the same keys and **Move to project** (an
-in-place picker — choose a project, or **No project** to detach the current
-session), the chip shows the name once set (the key stays in its tooltip and
-in **Copy session key**), and the session switcher lists and searches by name
-as well as by key.
+The Web UI uses the same session system. In the control console, the
+**Sessions** list in the rail lists, searches and opens sessions (by name as
+well as by key); a row's `⋯` menu (or right-click) has Open in new tab,
+Rename, Pin, **Move to project** (choose a project, or **No project** to
+detach the session), Reset, Export, Copy session key and Delete. The
+**Sessions** page (`/control/sessions`) does the same in bulk; click a row's
+name to rename it inline — Enter saves, Escape cancels, and an empty value
+clears the custom name. In Chat, the header `⋯` menu has Rename, Compact,
+Reset session, Export and Copy session key; the header shows the name once
+set. See [Web UI](web-ui.md).
 
 Open:
 
