@@ -42,7 +42,6 @@ export function useSetupSnapshot() {
 
 interface ConfigureResult {
   restartRequired?: boolean
-  restartReasons?: string[]
   warnings?: string[]
 }
 
@@ -64,7 +63,7 @@ export function useConfigure() {
         ...params,
         ...(revision ? { expectedRevision: revision } : {}),
       })
-      if (result?.restartRequired) useRestartNotice.getState().show(result.restartReasons ?? [])
+      if (result?.restartRequired) useRestartNotice.getState().request()
       toast.success(t('webSetConfig.applied'))
       await queryClient.invalidateQueries({ queryKey: SETTINGS_SNAPSHOT_QUERY_KEY })
       await queryClient.invalidateQueries({ queryKey: CONFIG_SNAPSHOT_KEY })

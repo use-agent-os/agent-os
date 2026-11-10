@@ -1080,10 +1080,12 @@ function EmbeddingSettings() {
         <>
           <ConfigField
             {...field('memory.embedding.remote.base_url', t('webSetCapabilities.memRemoteUrl'))}
+            optional
             type={{ kind: 'string' }}
           />
           <ConfigField
             {...field('memory.embedding.remote.model', t('webSetCapabilities.memModel'))}
+            optional
             type={{ kind: 'string' }}
           />
           <ConfigField
@@ -1096,6 +1098,7 @@ function EmbeddingSettings() {
           />
           <ConfigField
             {...field('memory.embedding.remote.api_key_env', t('webSetCapabilities.memApiKeyEnv'))}
+            optional
             type={{ kind: 'string' }}
           />
           <ConfigField
@@ -1108,10 +1111,12 @@ function EmbeddingSettings() {
         <>
           <ConfigField
             {...field('memory.embedding.ollama.base_url', t('webSetCapabilities.memOllamaUrl'))}
+            optional
             type={{ kind: 'string' }}
           />
           <ConfigField
             {...field('memory.embedding.ollama.model', t('webSetCapabilities.memModel'))}
+            optional
             type={{ kind: 'string' }}
           />
         </>
@@ -1119,6 +1124,7 @@ function EmbeddingSettings() {
       {provider === 'local' ? (
         <ConfigField
           {...field('memory.embedding.local.model', t('webSetCapabilities.memLocalModel'))}
+          optional
           type={{ kind: 'string' }}
         />
       ) : null}

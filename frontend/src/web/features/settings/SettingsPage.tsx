@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
-import { ChevronLeft, Loader2, RotateCw, Search } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { ChevronLeft, Loader2, RefreshCw, RotateCw, Search } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState, type ComponentType } from 'react'
 import { Link, NavLink, useLocation, useNavigate, useParams } from 'react-router'
 import { useRpc } from '@/app/providers'
@@ -134,12 +134,16 @@ function SettingsNav() {
   )
 }
 
-function SettingsSummary() {
+function useSettingsSnapshot() {
   const rpc = useRpc()
-  const query = useQuery({
+  return useQuery({
     queryKey: SETTINGS_SNAPSHOT_QUERY_KEY,
     queryFn: () => loadSettingsSnapshot(rpc),
   })
+}
+
+function SettingsSummary() {
+  const query = useSettingsSnapshot()
   if (query.isPending) {
     return (
       <LoadingRegion>
@@ -152,14 +156,34 @@ function SettingsSummary() {
       <ErrorState title={t('webSettings.summaryFailed')} onRetry={() => void query.refetch()} />
     )
   const r = readinessFromSnapshot(query.data)
+  const llm = query.data.config?.llm ?? {}
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-xl font-semibold">{t('webSettings.summaryTitle')}</h1>
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="flex-1 text-xl font-semibold">{t('webSettings.summaryTitle')}</h1>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={query.isFetching}
+          onClick={() => void query.refetch()}
+        >
+          <RefreshCw aria-hidden className={cn(query.isFetching && 'animate-spin')} />
+          {t('webSettings.reload')}
+        </Button>
+      </div>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1" data-testid="settings-active">
+        <dt className="text-text-muted">{t('webSettings.summaryProvider')}</dt>
+        <dd className="font-mono">{llm.provider || t('webSettings.summaryNone')}</dd>
+        <dt className="text-text-muted">{t('webSettings.summaryModel')}</dt>
+        <dd className="font-mono break-all">{llm.model || t('webSettings.summaryNone')}</dd>
+      </dl>
       <p data-testid="settings-readiness">
         {t('webSettings.summaryReadiness', { ready: r.ready, total: r.total })}
         {r.actionRequired
           ? ` · ${tPlural('webSettings.summaryActionRequired', r.actionRequired)}`
           : ''}
+        {query.data.pendingRestart ? ` · ${t('webSettings.summaryRestartNeeded')}` : ''}
+        {query.data.writeBlocked ? ` · ${t('webSettings.summaryChangesPaused')}` : ''}
       </p>
       <div>
         <Link to="/settings/setup" className={buttonVariants({ variant: 'primary' })}>
@@ -183,12 +207,25 @@ function SettingsSummary() {
   )
 }
 
+/**
+ * The restart notice, read from the configuration snapshot so it names what
+ * needs the restart, survives a reload and shows a restart another client
+ * caused. `restartRequired` from a write only stands in on gateways whose
+ * snapshot does not report it.
+ */
 function RestartNotice() {
-  const reasons = useRestartNotice((s) => s.reasons)
-  const clear = useRestartNotice((s) => s.clear)
+  const snapshot = useSettingsSnapshot()
+  const requested = useRestartNotice((s) => s.requested)
+  const dismissed = useRestartNotice((s) => s.dismissed)
+  const dismiss = useRestartNotice((s) => s.dismiss)
+  const queryClient = useQueryClient()
   const rpc = useRpc()
   const [busy, setBusy] = useState(false)
-  if (reasons.length === 0) return null
+  const reported = snapshot.data?.pendingRestart
+  const pending = typeof reported === 'boolean' ? reported || requested : requested
+  const reasons = reported ? (snapshot.data?.restartReasons ?? []) : []
+  const signature = reasons.length ? reasons.join(',') : 'restart'
+  if (!pending || dismissed === signature) return null
   return (
     <div
       role="status"
@@ -197,7 +234,9 @@ function RestartNotice() {
       <RotateCw className="size-4 text-warn" aria-hidden data-status-icon />
       <span className="min-w-0 flex-1">
         <strong>{t('webSettings.restartTitle')}</strong>{' '}
-        {t('webSettings.restartBody', { reasons: reasons.join(', ') })}
+        {reasons.length
+          ? t('webSettings.restartBody', { reasons: reasons.join(', ') })
+          : t('webSettings.restartBodyGeneric')}
       </span>
       <Button
         size="sm"
@@ -207,7 +246,10 @@ function RestartNotice() {
           setBusy(true)
           void rpc
             .call('gateway.restart', { reason: 'settings' })
-            .then(() => clear())
+            .then(async () => {
+              dismiss(signature)
+              await queryClient.invalidateQueries({ queryKey: SETTINGS_SNAPSHOT_QUERY_KEY })
+            })
             .catch(() => undefined)
             .finally(() => setBusy(false))
         }}
@@ -215,7 +257,7 @@ function RestartNotice() {
         {busy ? <Loader2 className="animate-spin" /> : null}
         {busy ? t('webSettings.restarting') : t('webSettings.restartNow')}
       </Button>
-      <Button size="sm" variant="ghost" onClick={clear}>
+      <Button size="sm" variant="ghost" onClick={() => dismiss(signature)}>
         {t('webSettings.restartLater')}
       </Button>
     </div>

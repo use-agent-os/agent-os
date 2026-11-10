@@ -33,7 +33,10 @@ export interface JsonSchema {
 
 export interface SchemaField {
   path: string
+  /** The dotted path: dozens of leaves share titles such as "Api Key". */
   label: string
+  /** The schema's title, when it says more than the path's last segment. */
+  title?: string
   help?: string
   type: FieldType
   optional: boolean
@@ -125,8 +128,12 @@ function typeOf(node: JsonSchema): string {
   return Array.isArray(node.type) ? (node.type.find((t) => t !== 'null') ?? '') : (node.type ?? '')
 }
 
-function labelFor(path: string, node?: JsonSchema): string {
-  return node?.title && !/^[A-Z][a-zA-Z]+$/.test(node.title) ? node.title : path
+function titleFor(path: string, node?: JsonSchema): string | undefined {
+  const title = node?.title?.trim()
+  if (!title) return undefined
+  // pydantic derives "Api Key" from `api_key`: that repeats the path.
+  const last = path.split('.').pop() ?? ''
+  return title.toLowerCase().replace(/[\s-]+/g, '_') === last.toLowerCase() ? undefined : title
 }
 
 /** Build the Advanced form's fields: every config leaf, typed from the schema when it can be. */
@@ -142,7 +149,7 @@ export function fieldsFromSchema(config: ConfigData, schema: JsonSchema | null):
           : kind === 'string'
             ? { kind: 'string', secret: sensitive }
             : { kind }
-      return { path, label: path, type, optional: true, described: false }
+      return { path, label: path, type, optional: false, described: false }
     }
     const { node, optional } = found
     const help = node.description
@@ -161,6 +168,6 @@ export function fieldsFromSchema(config: ConfigData, schema: JsonSchema | null):
           secret: sensitive || node.format === 'password' || node.writeOnly === true,
         }
     }
-    return { path, label: labelFor(path, node), help, type, optional, described: true }
+    return { path, label: path, title: titleFor(path, node), help, type, optional, described: true }
   })
 }

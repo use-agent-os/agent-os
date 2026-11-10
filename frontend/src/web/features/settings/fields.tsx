@@ -56,6 +56,7 @@ export type FieldType =
 export function FieldRow({
   id,
   label,
+  detail,
   help,
   error,
   children,
@@ -63,6 +64,8 @@ export function FieldRow({
 }: {
   id: string
   label: string
+  /** Secondary text shown with the label (Advanced: the schema title under its path). */
+  detail?: string
   help?: string
   error?: string
   children: React.ReactNode
@@ -70,8 +73,14 @@ export function FieldRow({
 }) {
   return (
     <div data-field-id={id} className="flex flex-col gap-1 py-3">
-      <label htmlFor={inputId} className="font-medium">
+      <label htmlFor={inputId} className="flex flex-wrap items-baseline gap-x-2 font-medium">
         {label}
+        {detail ? (
+          <>
+            {' '}
+            <span className="text-small font-normal text-text-muted">{detail}</span>
+          </>
+        ) : null}
       </label>
       {help ? (
         <p id={`${inputId}-help`} className="text-small text-text-muted">
@@ -91,27 +100,47 @@ export function FieldRow({
 const inputClass =
   'h-9 w-full max-w-xl rounded-md border border-border-control bg-surface-0 px-3 aria-[invalid=true]:border-danger touch:h-11 touch:text-base'
 
-/** One configuration value bound to the section's editor. */
+/** The `<select>` value standing for "unset: use the gateway default". */
+const UNSET = ''
+
+/**
+ * One configuration value bound to the section's editor. An `optional` value
+ * can be unset again: booleans and enums get a "Default" choice, and an
+ * emptied text field is written as null rather than "".
+ */
 export function ConfigField({
   editor,
   path,
   label,
+  detail,
   help,
   type,
+  optional,
   disabled,
 }: {
   editor: ConfigEditor
   path: string
   label: string
+  detail?: string
   help?: string
   type: FieldType
+  optional?: boolean
   disabled?: boolean
 }) {
   const inputId = useId()
   const [shown, toggleShown] = useReveal()
-  const [jsonDraft, setJsonDraft] = useState<string | null>(null)
+  // The text being typed into a JSON field, tied to the editor generation it
+  // was typed in: a discard, reload or save drops it.
+  const [jsonDraft, setJsonDraft] = useState<{ generation: number; text: string } | null>(null)
+  const draftText = jsonDraft?.generation === editor.generation ? jsonDraft.text : null
   const value = editor.value(path)
-  const error = editor.state.kind === 'invalid' ? editor.state.fields[path] : undefined
+  const jsonInvalid = editor.invalid.includes(path)
+  const error =
+    editor.state.kind === 'invalid'
+      ? editor.state.fields[path]
+      : jsonInvalid
+        ? t('webSettings.jsonInvalid')
+        : undefined
   const describedBy =
     [help ? `${inputId}-help` : '', error ? `${inputId}-error` : ''].filter(Boolean).join(' ') ||
     undefined
@@ -121,11 +150,25 @@ export function ConfigField({
     'aria-invalid': error ? true : undefined,
     disabled: disabled || type.kind === 'readonly',
   }
+  const unset = value === null || value === undefined
 
   let control: React.ReactNode
   switch (type.kind) {
     case 'boolean':
-      control = (
+      control = optional ? (
+        <select
+          {...common}
+          className={inputClass}
+          value={unset ? UNSET : value ? 'true' : 'false'}
+          onChange={(e) =>
+            editor.set(path, e.target.value === UNSET ? null : e.target.value === 'true')
+          }
+        >
+          <option value={UNSET}>{t('webSettings.optionDefault')}</option>
+          <option value="true">{t('webSettings.optionOn')}</option>
+          <option value="false">{t('webSettings.optionOff')}</option>
+        </select>
+      ) : (
         <Switch {...common} checked={Boolean(value)} onCheckedChange={(v) => editor.set(path, v)} />
       )
       break
@@ -135,7 +178,7 @@ export function ConfigField({
           {...common}
           type="number"
           className={inputClass}
-          value={value === null || value === undefined ? '' : String(value)}
+          value={unset ? '' : String(value)}
           onChange={(e) => editor.set(path, e.target.value === '' ? null : Number(e.target.value))}
         />
       )
@@ -145,9 +188,14 @@ export function ConfigField({
         <select
           {...common}
           className={inputClass}
-          value={value === null || value === undefined ? '' : String(value)}
-          onChange={(e) => editor.set(path, e.target.value)}
+          value={unset ? UNSET : String(value)}
+          onChange={(e) => editor.set(path, e.target.value === UNSET ? null : e.target.value)}
         >
+          {optional || unset ? (
+            <option value={UNSET} disabled={!optional}>
+              {t('webSettings.optionDefault')}
+            </option>
+          ) : null}
           {type.options.map((option) => (
             <option key={option} value={option}>
               {option}
@@ -162,14 +210,20 @@ export function ConfigField({
           {...common}
           rows={4}
           className={cn(inputClass, 'h-auto py-2 font-mono text-small')}
-          value={jsonDraft ?? JSON.stringify(value ?? null, null, 2)}
+          value={draftText ?? JSON.stringify(value ?? null, null, 2)}
           onChange={(e) => {
-            setJsonDraft(e.target.value)
+            const text = e.target.value
+            setJsonDraft({ generation: editor.generation, text })
+            let parsed: unknown
             try {
-              editor.set(path, JSON.parse(e.target.value))
+              parsed = JSON.parse(text)
             } catch {
-              /* keep the draft until it parses */
+              // Not a value yet: block Save rather than save the last one that parsed.
+              editor.setInvalid(path, true)
+              return
             }
+            editor.setInvalid(path, false)
+            editor.set(path, parsed)
           }}
         />
       )
@@ -189,8 +243,11 @@ export function ConfigField({
             type={type.secret && !shown ? 'password' : 'text'}
             autoComplete="off"
             className={inputClass}
-            value={value === null || value === undefined ? '' : String(value)}
-            onChange={(e) => editor.set(path, e.target.value)}
+            value={unset ? '' : String(value)}
+            placeholder={optional && unset ? t('webSettings.placeholderDefault') : undefined}
+            onChange={(e) =>
+              editor.set(path, optional && e.target.value === '' ? null : e.target.value)
+            }
           />
           {type.secret ? (
             <Button
@@ -206,7 +263,7 @@ export function ConfigField({
       )
   }
   return (
-    <FieldRow id={path} label={label} help={help} error={error} inputId={inputId}>
+    <FieldRow id={path} label={label} detail={detail} help={help} error={error} inputId={inputId}>
       {control}
     </FieldRow>
   )
