@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import pytest
 
-from agentos.engine.fallback import FallbackPolicy, ProviderErrorKind
+from agentos.engine.fallback import ProviderErrorKind, classify_error
+from agentos.engine.policy import AttemptHistory, ProviderAttemptPolicy, Retry
 from agentos.provider.failures import (
     ProviderFailureKind,
     ProviderRecoveryAction,
     classify_provider_error,
     decide_recovery_action,
 )
+
+
+def _retried(kind: ProviderErrorKind) -> bool:
+    """Whether the attempt policy retries a first failure of *kind*."""
+    decision = ProviderAttemptPolicy().decide(kind, AttemptHistory(), message="boom")
+    return isinstance(decision, Retry)
 
 
 @pytest.mark.parametrize(
@@ -70,25 +77,21 @@ def test_minimax_region_profiles_use_anthropic_failure_classification(provider: 
     ],
 )
 def test_agent_fallback_retries_transport_transient_errors(message: str) -> None:
-    policy = FallbackPolicy(max_retries=2)
-
-    kind = policy.classify_error(message)
+    kind = classify_error(message)
 
     assert kind is ProviderErrorKind.TRANSPORT_TRANSIENT
-    assert policy.should_retry(kind, attempt=0) is True
+    assert _retried(kind) is True
 
 
 def test_agent_fallback_retries_timeout_code_when_message_is_sparse() -> None:
-    policy = FallbackPolicy(max_retries=2)
-
-    kind = policy.classify_error(
+    kind = classify_error(
         "Request timed out: ",
         provider_name="openrouter",
         raw_code="timeout",
     )
 
     assert kind is ProviderErrorKind.TRANSPORT_TRANSIENT
-    assert policy.should_retry(kind, attempt=0) is True
+    assert _retried(kind) is True
 
 
 @pytest.mark.parametrize(
@@ -103,12 +106,10 @@ def test_agent_fallback_retries_timeout_code_when_message_is_sparse() -> None:
     ],
 )
 def test_agent_fallback_retries_gateway_transient_http_errors(message: str) -> None:
-    policy = FallbackPolicy(max_retries=2)
-
-    kind = policy.classify_error(message)
+    kind = classify_error(message)
 
     assert kind is ProviderErrorKind.TRANSPORT_TRANSIENT
-    assert policy.should_retry(kind, attempt=0) is True
+    assert _retried(kind) is True
 
 
 @pytest.mark.parametrize(
@@ -122,12 +123,10 @@ def test_agent_fallback_retries_gateway_transient_http_errors(message: str) -> N
     ],
 )
 def test_agent_fallback_retries_gateway_context_transient_codes(message: str) -> None:
-    policy = FallbackPolicy(max_retries=2)
-
-    kind = policy.classify_error(message)
+    kind = classify_error(message)
 
     assert kind is ProviderErrorKind.TRANSPORT_TRANSIENT
-    assert policy.should_retry(kind, attempt=0) is True
+    assert _retried(kind) is True
 
 
 @pytest.mark.parametrize(
@@ -147,12 +146,10 @@ def test_agent_fallback_retries_gateway_context_transient_codes(message: str) ->
     ],
 )
 def test_agent_fallback_does_not_retry_unscoped_gateway_numbers(message: str) -> None:
-    policy = FallbackPolicy(max_retries=2)
-
-    kind = policy.classify_error(message)
+    kind = classify_error(message)
 
     assert kind is ProviderErrorKind.UNKNOWN
-    assert policy.should_retry(kind, attempt=0) is False
+    assert _retried(kind) is False
 
 
 @pytest.mark.parametrize("provider", ["openrouter", "deepseek"])
@@ -166,9 +163,7 @@ def test_agent_fallback_does_not_retry_unscoped_gateway_numbers(message: str) ->
         "HTTP 523",
     ],
 )
-def test_provider_failure_classifies_gateway_transient_errors(
-    provider: str, message: str
-) -> None:
+def test_provider_failure_classifies_gateway_transient_errors(provider: str, message: str) -> None:
     assert (
         classify_provider_error(provider, None, message=message)
         is ProviderFailureKind.PROVIDER_OVERLOADED
@@ -192,18 +187,15 @@ def test_provider_failure_classifies_gateway_transient_errors(
 )
 def test_provider_failure_does_not_classify_unscoped_gateway_numbers(message: str) -> None:
     assert (
-        classify_provider_error("openrouter", None, message=message)
-        is ProviderFailureKind.UNKNOWN
+        classify_provider_error("openrouter", None, message=message) is ProviderFailureKind.UNKNOWN
     )
 
 
 def test_agent_fallback_still_does_not_retry_auth_failures() -> None:
-    policy = FallbackPolicy(max_retries=2)
-
-    kind = policy.classify_error("invalid api key")
+    kind = classify_error("invalid api key")
 
     assert kind is ProviderErrorKind.AUTH_FAILURE
-    assert policy.should_retry(kind, attempt=0) is False
+    assert _retried(kind) is False
 
 
 @pytest.mark.parametrize(
@@ -214,9 +206,7 @@ def test_agent_fallback_still_does_not_retry_auth_failures() -> None:
         ("", "empty_response"),
     ],
 )
-def test_provider_failure_classifies_empty_responses(
-    raw_code: str, message: str
-) -> None:
+def test_provider_failure_classifies_empty_responses(raw_code: str, message: str) -> None:
     assert (
         classify_provider_error("openrouter", None, raw_code=raw_code, message=message)
         is ProviderFailureKind.EMPTY_RESPONSE
@@ -235,12 +225,10 @@ def test_provider_failure_keeps_empty_http_gateway_body_transient() -> None:
 
 
 def test_agent_fallback_identifies_but_does_not_retry_empty_responses() -> None:
-    policy = FallbackPolicy(max_retries=2)
-
-    kind = policy.classify_error("Provider returned an empty response")
+    kind = classify_error("Provider returned an empty response")
 
     assert kind is ProviderErrorKind.EMPTY_RESPONSE
-    assert policy.should_retry(kind, attempt=0) is False
+    assert _retried(kind) is False
 
 
 @pytest.mark.parametrize(
@@ -533,12 +521,27 @@ def test_not_found_error_stays_unknown_outside_the_anthropic_branch(provider: st
 def test_agent_fallback_classifies_explicit_overload_as_overloaded(
     status: int | None, code: str, message: str
 ) -> None:
-    policy = FallbackPolicy(max_retries=2)
-
-    kind = policy.classify_error(message, status_code=status, raw_code=code)
+    kind = classify_error(message, status_code=status, raw_code=code)
 
     assert kind is ProviderErrorKind.OVERLOADED
-    assert policy.should_retry(kind, attempt=0) is True
+    assert _retried(kind) is True
+
+
+@pytest.mark.parametrize("provider", ["ollama", "my-custom-gateway", ""])
+def test_401_is_an_auth_failure_that_is_never_retried(provider: str) -> None:
+    """The family-agnostic 401 rule, end to end: the classifier says
+    ``AUTH_INVALID``, the policy fails fast and names the fix."""
+    from agentos.engine.policy import Fail
+    from agentos.engine.policy.attempt import AUTH_FAILURE_GUIDANCE
+
+    assert (
+        classify_provider_error(provider, 401, message="nope") is ProviderFailureKind.AUTH_INVALID
+    )
+    kind = classify_error("nope", provider_name=provider, status_code=401, raw_code="401")
+    assert kind is ProviderErrorKind.AUTH_FAILURE
+    decision = ProviderAttemptPolicy().decide(kind, AttemptHistory(), message="nope")
+    assert isinstance(decision, Fail)
+    assert AUTH_FAILURE_GUIDANCE in decision.message
 
 
 def test_401_from_an_unlisted_provider_family_is_auth_invalid() -> None:

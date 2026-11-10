@@ -162,6 +162,81 @@ def test_timeout_context_recovery_can_be_disabled() -> None:
     assert isinstance(decision, Fail)
 
 
+def test_timeout_on_an_irreducible_request_skips_compaction_and_fails_over() -> None:
+    policy = _policy(max_timeout_retries=1)
+    history = AttemptHistory()
+    history.note_retry(0.1, timeout=True)
+
+    decision = policy.decide(
+        TRANSPORT,
+        history,
+        message="timed out",
+        is_timeout=True,
+        failover_available=True,
+        context_reducible=False,
+    )
+
+    assert isinstance(decision, Failover)
+    assert decision.reason == "timeout_retries_spent"
+
+
+def test_timeout_after_a_failed_compaction_fails_over_when_a_candidate_exists() -> None:
+    policy = _policy(max_timeout_retries=1)
+    history = AttemptHistory()
+    history.note_retry(0.1, timeout=True)
+    history.timeout_compacted = True
+
+    decision = policy.decide(
+        TRANSPORT, history, message="timed out", is_timeout=True, failover_available=True
+    )
+
+    assert isinstance(decision, Failover)
+
+
+def test_a_slow_failed_attempt_still_gets_one_same_model_retry() -> None:
+    policy = _policy(budget_seconds=5.0)
+    history = AttemptHistory()
+    # The first attempt streamed for two minutes, then dropped.
+    history.note_failed_attempt(120.0, cap_s=1_000.0)
+
+    decision = policy.decide(OVERLOADED, history, message="dropped", failover_available=True)
+
+    assert isinstance(decision, Retry)
+
+
+def test_the_first_retry_still_refuses_a_wait_longer_than_the_budget() -> None:
+    decision = _policy(budget_seconds=3.0).decide(
+        RATE, AttemptHistory(), message="slow", retry_after_s=5.0, failover_available=False
+    )
+
+    assert isinstance(decision, Fail)
+    assert decision.reason == "budget_spent"
+
+
+def test_a_failed_attempt_is_charged_at_most_the_per_attempt_cap() -> None:
+    history = AttemptHistory()
+
+    history.note_failed_attempt(120.0, cap_s=10.0)
+    history.note_failed_attempt(2.0, cap_s=10.0)
+    history.note_failed_attempt(-1.0, cap_s=10.0)
+
+    assert history.spent_s == pytest.approx(12.0)
+    assert AttemptBudget().max_attempt_charge_s == 10.0
+
+
+def test_after_the_first_retry_charged_attempt_time_counts_against_the_budget() -> None:
+    policy = _policy(budget_seconds=12.0, base_backoff_ms=1000)
+    history = AttemptHistory()
+    history.note_retry(1.0, timeout=False)
+    history.note_failed_attempt(60.0, cap_s=policy.budget.max_attempt_charge_s)
+    history.note_failed_attempt(60.0, cap_s=policy.budget.max_attempt_charge_s)
+
+    decision = policy.decide(RATE, history, message="boom", failover_available=False)
+
+    assert isinstance(decision, Fail)
+    assert decision.reason == "budget_spent"
+
+
 def test_auth_failure_fails_fast_and_names_the_fix() -> None:
     decision = _policy().decide(
         ProviderErrorKind.AUTH_FAILURE, AttemptHistory(), message="invalid api key"

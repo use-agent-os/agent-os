@@ -38,3 +38,10 @@ def test_cancellation_is_interrupted_with_reason_cancelled() -> None:
 
     assert outcome.kind == "interrupted"
     assert outcome.reason == "cancelled"
+
+
+def test_a_request_hook_veto_is_blocked() -> None:
+    outcome = outcome_from_error(code="request_vetoed", message="Daily spend limit reached.")
+
+    assert outcome.kind == "blocked"
+    assert outcome.reason == "request_vetoed"

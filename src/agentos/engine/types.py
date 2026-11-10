@@ -270,6 +270,10 @@ class CompactionEvent:
     kept_entries: list[dict] = field(default_factory=list)
     kept_count: int = 0
     removed_count: int = 0
+    #: Why the agent compacted (``compaction_coordinator.CompactionTrigger``:
+    #: ``preflight``, ``overflow`` or ``timeout``), so the durable record names
+    #: its cause. Defaults to ``overflow``, the only in-turn trigger there was.
+    trigger: str = "overflow"
 
 
 @dataclass

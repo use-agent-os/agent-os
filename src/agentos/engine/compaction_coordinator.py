@@ -6,7 +6,8 @@ Four places ask for compaction:
   over the threshold (``Agent._preflight_context_overflow``);
 * ``overflow`` -- the agent loop, after the provider rejected a request as
   too large (forced);
-* ``timeout`` -- the agent loop, after a request timed out twice (forced; see
+* ``timeout`` -- the agent loop, after a request that fills a meaningful
+  share of the window timed out twice (forced; see
   ``agentos.engine.policy.attempt``);
 * ``proactive`` -- between turns, from
   :class:`~agentos.engine.proactive_compaction.ProactiveCompactionScheduler`.
@@ -14,8 +15,10 @@ Four places ask for compaction:
 They used to call :class:`~agentos.engine.compaction_service.CompactionService`
 each in their own way. The coordinator builds the service for the caller,
 runs it, and records one ``compaction.decision`` log entry per request with
-the trigger and the result, so every compaction is attributable to the
-reason it ran.
+the trigger and the result (at debug level when the request was simply under
+the threshold), so every compaction is attributable to the reason it ran.
+The in-turn triggers also travel on ``CompactionEvent.trigger`` to the
+durable record.
 """
 
 from __future__ import annotations
@@ -86,12 +89,17 @@ class CompactionCoordinator:
         if trigger not in TRIGGERS:
             raise ValueError(f"unknown compaction trigger: {trigger!r}")
         result = await self.service(phase=phase).compact(messages, **compact_kwargs)
-        log.info(
+        reason = getattr(result, "reason", None)
+        # The preflight check runs before every provider request; a request
+        # under the threshold is the normal case, not a decision worth an
+        # info line per tool round.
+        emit = log.debug if reason == "under_threshold" else log.info
+        emit(
             "compaction.decision",
             session_key=self._session_key,
             trigger=trigger,
             status=getattr(result, "status", None),
-            reason=getattr(result, "reason", None),
+            reason=reason,
             compacted=bool(getattr(result, "compacted", False)),
             forced=bool(compact_kwargs.get("force", False)),
         )

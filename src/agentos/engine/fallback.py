@@ -1,9 +1,13 @@
-"""Fallback policy for provider retry and model failover."""
+"""Provider error kinds and the delay helpers of the retry policy.
+
+What to do after a failed attempt is decided by
+:class:`agentos.engine.policy.ProviderAttemptPolicy`; this module only
+classifies the failure and computes waits.
+"""
 
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, field
 from enum import StrEnum
 
 from agentos.provider.failures import ProviderFailureKind, classify_provider_error
@@ -36,88 +40,28 @@ def _reports_overload(status_code: int | None, raw_code: str, message: str) -> b
     return "overload" in code or "overload" in str(message or "").lower()
 
 
-@dataclass
-class FallbackPolicy:
-    """Policy for retrying failed provider calls and falling back to alternate models."""
-
-    max_retries: int = 3
-    # Timeout-specific cap: each timeout retry burns the full read-timeout
-    # window (~120s), so 1 retry means at most ~4 min total (request + retry).
-    max_timeout_retries: int = 1
-    fallback_models: list[str] = field(default_factory=list)
-    base_backoff_ms: int = 1000
-    max_backoff_ms: int = 30_000
-
-    @staticmethod
-    def classify_error(
-        message: str,
-        *,
-        provider_name: str = "openrouter",
-        status_code: int | None = None,
-        raw_code: str = "",
-    ) -> ProviderErrorKind:
-        """Classify a provider error message into a retry category."""
-        kind = classify_provider_error(
-            provider_name,
-            status_code,
-            raw_code=raw_code,
-            message=message,
-        )
-        if kind is ProviderFailureKind.PROVIDER_OVERLOADED and _reports_overload(
-            status_code, raw_code, message
-        ):
-            # The provider family lumps every 5xx together; a gateway blip
-            # (502/504/52x) stays transport-transient, an explicit overload
-            # (529, ``overloaded_error``) is its own kind.
-            return ProviderErrorKind.OVERLOADED
-        return _FAILURE_KIND_MAP.get(kind, ProviderErrorKind.UNKNOWN)
-
-    def should_retry(self, kind: ProviderErrorKind, attempt: int) -> bool:
-        """Whether to retry after this error kind at this attempt number."""
-        if attempt >= self.max_retries:
-            return False
-        if kind == ProviderErrorKind.AUTH_FAILURE:
-            return False  # Don't retry auth errors
-        retryable = (
-            ProviderErrorKind.RATE_LIMIT,
-            ProviderErrorKind.OVERLOADED,
-            ProviderErrorKind.CONTEXT_OVERFLOW,
-            ProviderErrorKind.TRANSPORT_TRANSIENT,
-        )
-        if kind in retryable:
-            return True
-        return False  # Unknown errors: don't retry by default
-
-    def should_retry_timeout(
-        self,
-        kind: ProviderErrorKind,
-        attempt: int,
-        *,
-        is_timeout: bool = False,
-    ) -> bool:
-        """Timeout-aware retry decision.
-
-        When ``is_timeout`` is True the per-retry cost is the full read-timeout
-        window (typically 120 s), so we cap at ``max_timeout_retries`` instead
-        of the generic ``max_retries``.
-        """
-        if is_timeout and attempt >= self.max_timeout_retries:
-            return False
-        return self.should_retry(kind, attempt)
-
-    def get_fallback_model(self, current_model: str) -> str | None:
-        """Return the next fallback model after current_model, or None if exhausted."""
-        if not self.fallback_models:
-            return None
-        try:
-            idx = self.fallback_models.index(current_model)
-            if idx + 1 < len(self.fallback_models):
-                return self.fallback_models[idx + 1]
-        except ValueError:
-            # Current model not in fallback list; use first fallback
-            if self.fallback_models:
-                return self.fallback_models[0]
-        return None
+def classify_error(
+    message: str,
+    *,
+    provider_name: str = "openrouter",
+    status_code: int | None = None,
+    raw_code: str = "",
+) -> ProviderErrorKind:
+    """Classify a provider error into the kind the attempt policy decides on."""
+    kind = classify_provider_error(
+        provider_name,
+        status_code,
+        raw_code=raw_code,
+        message=message,
+    )
+    if kind is ProviderFailureKind.PROVIDER_OVERLOADED and _reports_overload(
+        status_code, raw_code, message
+    ):
+        # The provider family lumps every 5xx together; a gateway blip
+        # (502/504/52x) stays transport-transient, an explicit overload
+        # (529, ``overloaded_error``) is its own kind.
+        return ProviderErrorKind.OVERLOADED
+    return _FAILURE_KIND_MAP.get(kind, ProviderErrorKind.UNKNOWN)
 
 
 def backoff_sleep(
