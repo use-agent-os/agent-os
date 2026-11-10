@@ -51,6 +51,12 @@ export const webChat = defineNamespace('webChat', {
   routerDecision: 'Routed to {model}',
   notSent: 'Not sent',
   retrySend: 'Retry',
+  working: 'Working…',
+  textTruncated: 'Earlier output from this run is not shown.',
+  missedEvents: 'Some live updates were missed; the conversation was reloaded.',
+  gatewayQueued: 'Waiting on the gateway',
+  gatewayQueuedSteer: 'Will be added to the running turn: {text}',
+  gatewayQueuedNext: 'Queued for the next turn: {text}',
 
   // Header
   headerRename: 'Rename session',
@@ -58,6 +64,7 @@ export const webChat = defineNamespace('webChat', {
   headerPanels: 'Panels',
   headerMenu: 'Session actions',
   headerCompact: 'Compact',
+  headerReset: 'Reset session',
   chipAgent: 'Agent: {value}',
   chipChannel: 'Channel: {value}',
   chipProject: 'Project: {value}',
@@ -70,7 +77,10 @@ export const webChat = defineNamespace('webChat', {
   composerPlaceholderTouch: 'Message',
   send: 'Send',
   stop: 'Stop',
+  stopping: 'Stopping…',
+  stopFailed: "Couldn't stop the turn: {message}",
   queue: 'Queue',
+  waitForTurn: 'Wait for the current turn to finish first.',
   attach: 'Attach files',
   attachmentsPrompt: 'Describe these attachments.',
   removeAttachment: 'Remove {name}',
@@ -98,6 +108,8 @@ export const webChat = defineNamespace('webChat', {
   slashMenu: 'Slash commands',
   slashEmpty: 'No matching command',
   nextSuggestion: 'Suggestion: {text}',
+  nextSuggestionKey: 'Tab',
+  nextSuggestionKeyTitle: 'Press Tab to use the suggestion',
 
   // Approval dock
   dockTitle: 'Approval needed: {tool}',
