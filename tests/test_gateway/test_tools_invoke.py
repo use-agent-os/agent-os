@@ -479,16 +479,18 @@ class _GuardHook:
         return None
 
 
-def _hooked_client(registry: ToolRegistry, hook: Any) -> TestClient:
+def _hooked_client(
+    registry: ToolRegistry, hook: Any, *, tools: ToolsConfig | None = None
+) -> TestClient:
     from types import SimpleNamespace
 
-    config = GatewayConfig(auth=AuthConfig(mode="token", token=TOKEN), tools=ToolsConfig())
+    config = GatewayConfig(auth=AuthConfig(mode="token", token=TOKEN), tools=tools or ToolsConfig())
     return TestClient(
         create_gateway_app(
             config,
             tool_registry=registry,
             # The gateway's turn runner holds the configured tool hooks.
-            turn_runner=SimpleNamespace(_tool_hooks=(hook,)),
+            turn_runner=SimpleNamespace(tool_hooks=(hook,)),
         ),
         base_url="http://localhost",
         headers={"authorization": f"Bearer {TOKEN}"},
@@ -541,6 +543,46 @@ class TestConfiguredToolHooks:
         assert "found token" not in redacted.text
         assert "found [redacted]" in redacted.text
         assert len(hook.before) == len(hook.after) == 2
+
+    def test_a_call_runs_each_hook_once(self) -> None:
+        # The preflight of a real call does not run the hooks; the dispatch
+        # does, once.
+        calls: list[dict[str, Any]] = []
+        hook = _GuardHook()
+        resp = _invoke(
+            _hooked_client(_registry(calls), hook), {"tool": "lookup", "args": {"query": "~home"}}
+        )
+        assert resp.status_code == 200, resp.text
+        assert hook.before == [{"query": "~home"}]
+        assert len(hook.after) == 1
+        assert [call["query"] for call in calls] == ["home"]
+
+    def test_the_policy_judges_the_call_as_sent_before_any_hook(self) -> None:
+        # Fail-closed: a call the policy refuses as sent is refused before the
+        # hooks run, whatever a hook would have made of it, and no hook sees it.
+        calls: list[dict[str, Any]] = []
+        hook = _GuardHook()
+        resp = _invoke(
+            _hooked_client(_registry(calls), hook, tools=ToolsConfig(deny=["lookup"])),
+            {"tool": "lookup", "args": {"query": "~home"}},
+        )
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["details"]["error_class"] == "PolicyDenied"
+        assert hook.before == []
+        assert hook.after == []
+        assert calls == []
+
+    def test_hooks_come_from_the_runner_property_not_a_private_field(self) -> None:
+        from types import SimpleNamespace
+
+        from agentos.gateway.tools_invoke import _configured_tool_hooks
+
+        hook = _GuardHook()
+        ctx = SimpleNamespace(turn_runner=SimpleNamespace(tool_hooks=(hook,)))
+        assert _configured_tool_hooks({}, ctx) == (hook,)
+        assert _configured_tool_hooks({"tool_hooks": ()}, ctx) == ()
+        private_only = SimpleNamespace(turn_runner=SimpleNamespace(_tool_hooks=(hook,)))
+        assert _configured_tool_hooks({}, private_only) == ()
 
     def test_the_approval_id_survives_configured_hooks(self) -> None:
         hook = _GuardHook()

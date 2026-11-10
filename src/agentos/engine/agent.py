@@ -14,7 +14,7 @@ import json
 import time
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from functools import partial
@@ -537,6 +537,60 @@ _MESSAGING_SESSION_MARKERS = (
 def _is_messaging_surface(session_key: str | None) -> bool:
     key = str(session_key or "").casefold()
     return any(marker in key for marker in _MESSAGING_SESSION_MARKERS)
+
+
+# Key of the note added to a JSON object result whose call a tool hook rewrote.
+HOOK_ADJUSTED_ARGUMENTS_KEY = "tool_hook_adjusted_arguments"
+
+
+def _hook_adjusted_argument_names(
+    arguments: dict[str, Any], effective: dict[str, Any]
+) -> list[str]:
+    """Top-level argument names a tool hook added, removed or changed."""
+
+    return sorted(
+        name
+        for name in set(arguments) | set(effective)
+        if name not in arguments or name not in effective or arguments[name] != effective[name]
+    )
+
+
+def _note_hook_adjusted_arguments(result: ToolResult, arguments: dict[str, Any]) -> ToolResult:
+    """Tell the model that a tool hook ran its call with other arguments.
+
+    The transcript keeps the ``tool_use`` exactly as the model emitted it: it
+    is on record before the call runs, and a provider replay pairs it with its
+    ``tool_result`` and (for thought-signature providers) a signature bound to
+    those arguments. The result carries the rewrite instead. Only the names of
+    the adjusted arguments are given, never their values: a hook may have put
+    something into them the model must not see.
+    """
+
+    effective = result.effective_arguments
+    if effective is None or not isinstance(result.content, str):
+        return result
+    names = _hook_adjusted_argument_names(arguments, effective)
+    if not names:
+        return result
+    content = result.content
+    payload: Any = None
+    if content.lstrip().startswith("{"):
+        try:
+            payload = json.loads(content)
+        except ValueError:
+            payload = None
+    if isinstance(payload, dict):
+        # A JSON result stays JSON: approval, artifact and router-control
+        # readers parse it.
+        payload[HOOK_ADJUSTED_ARGUMENTS_KEY] = names
+        content = json.dumps(payload, ensure_ascii=False)
+    else:
+        note = (
+            "[Note: a tool hook adjusted the arguments of this call before it ran "
+            f"(adjusted: {', '.join(names)}). This result is for the adjusted call.]"
+        )
+        content = f"{content}\n\n{note}" if content else note
+    return replace(result, content=content)
 
 
 def _classify_provider_attempt(
@@ -3394,11 +3448,18 @@ class Agent:
         arguments_by_id = {tc.tool_use_id: tc.arguments for tc in t.tool_calls}
 
         # Record what this iteration changed and whether it checked it.
-        # Order matters: a check only counts for edits made before it.
+        # Order matters: a check only counts for edits made before it. A
+        # tool hook may have rewritten a call: the ledger records what ran.
+        # (The progress watchdog below stays on the model's arguments: its
+        # ``admit`` check runs before dispatch, where only those are known.)
         for result in executed_results:
             if result.is_error:
                 continue
-            arguments = arguments_by_id.get(result.tool_use_id) or {}
+            arguments = (
+                result.effective_arguments
+                if result.effective_arguments is not None
+                else arguments_by_id.get(result.tool_use_id) or {}
+            )
             if result.tool_name in _MUTATING_TOOL_NAMES:
                 t.verification_ledger.record_mutation(_mutated_paths(arguments))
             elif result.tool_name in _COMMAND_TOOL_NAMES:
@@ -4189,7 +4250,13 @@ class Agent:
         return arguments if coerced is None else coerced
 
     async def _execute_tool(self, tc: ToolCall) -> ToolResult:
-        """Dispatch a tool call to the registered handler."""
+        """Dispatch a tool call to the registered handler.
+
+        The failure-loop signature is the model's own arguments, also when a
+        tool hook rewrites the call: the guard has to refuse a repeat before
+        dispatch, where the rewrite is not known yet, and it is the model
+        that repeats the call.
+        """
         args_hash = hashlib.sha256(
             json.dumps(tc.arguments, ensure_ascii=False, sort_keys=True, default=str).encode(
                 "utf-8"
@@ -4237,6 +4304,8 @@ class Agent:
                 else:
                     tc = resolved
                     result = await self.tool_handler(tc)
+                    if result.effective_arguments is not None:
+                        result = _note_hook_adjusted_arguments(result, tc.arguments)
             except Exception as exc:  # noqa: BLE001
                 result = ToolResult(
                     tool_use_id=tc.tool_use_id,
