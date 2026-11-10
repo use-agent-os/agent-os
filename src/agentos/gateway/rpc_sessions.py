@@ -775,11 +775,11 @@ async def _handle_sessions_list(params: dict | None, ctx: RpcContext) -> dict:
     now_ms = int(time.time() * 1000)
 
     if ctx.session_manager is None:
-        return {"sessions": [], "count": 0, "ts": now_ms}
+        return {"sessions": [], "count": 0, "total": 0, "ts": now_ms}
 
     storage = get_session_storage(ctx.session_manager)
     if storage is None:
-        return {"sessions": [], "count": 0, "ts": now_ms}
+        return {"sessions": [], "count": 0, "total": 0, "ts": now_ms}
 
     limit = (params or {}).get("limit", 50)
     project_filter = (params or {}).get("projectId") or (params or {}).get("project_id")
@@ -865,7 +865,34 @@ async def _handle_sessions_list(params: dict | None, ctx: RpcContext) -> dict:
         row.update(_task_state_summary(task_rows))
         result.append(row)
 
-    return {"sessions": result, "count": len(result), "ts": now_ms}
+    total = await _sessions_total(storage, limit, len(result), project_filter)
+    return {"sessions": result, "count": len(result), "total": total, "ts": now_ms}
+
+
+async def _sessions_total(storage: Any, limit: Any, listed: int, project_filter: Any) -> int:
+    """How many sessions match, ignoring ``limit``.
+
+    ``count`` is only the size of the returned page; a client that lists the
+    newest N must be able to say "newest N of M" instead of presenting the
+    page as everything. A short page is the whole set, so the count query only
+    runs when the page came back full. A storage without a count method
+    reports the page size, which is what clients assumed before.
+    """
+    if not isinstance(limit, int) or isinstance(limit, bool) or listed < limit:
+        return listed
+    counter = (
+        getattr(storage, "count_sessions_in_project", None)
+        if project_filter
+        else getattr(storage, "count_sessions", None)
+    )
+    if not callable(counter):
+        return listed
+    try:
+        counted = await (counter(str(project_filter)) if project_filter else counter())
+    except Exception:
+        log.warning("sessions.list.count_failed", exc_info=True)
+        return listed
+    return max(int(counted), listed)
 
 
 @_d.method("sessions.create")
