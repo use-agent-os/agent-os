@@ -100,7 +100,7 @@ async def test_agent_projects_tokenjuice_without_context_window_gate(
         content="pytest output\n" + ("x" * 1000),
     )
 
-    projected = await agent._projection._canonicalize_tool_result(
+    projected = await agent._projection._project_tool_result_for_llm(
         result,
         tool_call=ToolCall(
             tool_use_id="tool-1",
@@ -136,7 +136,7 @@ async def test_tokenjuice_noop_preserves_tool_result(
         content="short output",
     )
 
-    projected = await agent._projection._canonicalize_tool_result(result)
+    projected = await agent._projection._project_tool_result_for_llm(result)
 
     assert projected is result
     assert projected.content == "short output"
@@ -166,7 +166,7 @@ async def test_tokenjuice_projection_does_not_store_raw_content(
     )
     raw_output = "raw output\n" + ("x" * 8000)
 
-    projected = await agent._projection._canonicalize_tool_result(
+    projected = await agent._projection._project_tool_result_for_llm(
         ToolResult(
             tool_use_id="tool-1",
             tool_name="exec_command",
