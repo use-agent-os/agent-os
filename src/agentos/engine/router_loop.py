@@ -16,6 +16,13 @@ also never holds up gateway shutdown, unlike the default executor that
 ``asyncio.wait_for``. Cancelling that future (a timeout) cancels the step's
 task on its own loop; synchronous code in the step cannot be interrupted,
 but it only ever delays its own thread.
+
+Such a step is *stuck*: its caller has given up, but its thread lives on
+until the synchronous work returns. A router that hangs (a model load that
+never finishes) would leave one stuck thread per turn for the life of the
+gateway, so the number of stuck steps is capped: past the cap,
+:meth:`RouterLoop.run` refuses with :class:`RouterStepsStuckError` without
+starting a thread, and the pipeline fails open (the turn runs unrouted).
 """
 
 from __future__ import annotations
@@ -28,6 +35,14 @@ from collections.abc import Callable, Coroutine
 from typing import Any, TypeVar
 
 _T = TypeVar("_T")
+
+#: Stuck steps (timed out, thread still running) tolerated before new router
+#: steps are refused. Small: one stuck step already means the router hangs.
+DEFAULT_MAX_STUCK_STEPS = 4
+
+
+class RouterStepsStuckError(RuntimeError):
+    """Too many earlier router steps are still stuck; this one did not start."""
 
 
 class _Step:
@@ -89,13 +104,36 @@ class _Step:
 class RouterLoop:
     """Runs each router step on its own daemon thread and event loop."""
 
-    def __init__(self, name: str = "agentos-router") -> None:
+    def __init__(
+        self, name: str = "agentos-router", *, max_stuck_steps: int = DEFAULT_MAX_STUCK_STEPS
+    ) -> None:
         self._name = name
+        self._max_stuck_steps = max(1, max_stuck_steps)
         self._lock = threading.Lock()
+        #: Steps whose thread is still running.
         self._steps: set[_Step] = set()
+        #: The subset whose caller gave up (cancelled or timed out).
+        self._stuck: set[_Step] = set()
+
+    @property
+    def stuck_steps(self) -> int:
+        """How many abandoned steps still hold a thread."""
+        with self._lock:
+            return len(self._stuck)
 
     def run(self, coro: Coroutine[Any, Any, _T]) -> asyncio.Future[_T]:
-        """Start ``coro`` on a fresh router thread; await the returned future."""
+        """Start ``coro`` on a fresh router thread; await the returned future.
+
+        Raises :class:`RouterStepsStuckError` (and closes ``coro`` unrun) when
+        the stuck-step cap is reached.
+        """
+        with self._lock:
+            stuck = len(self._stuck)
+        if stuck >= self._max_stuck_steps:
+            coro.close()
+            raise RouterStepsStuckError(
+                f"Pilot Router skipped: {stuck} earlier router steps are still stuck"
+            )
         result: asyncio.Future[_T] = asyncio.get_running_loop().create_future()
         step = _Step(coro, result)
         context = contextvars.copy_context()
@@ -106,9 +144,13 @@ class RouterLoop:
             finally:
                 with self._lock:
                     self._steps.discard(step)
+                    self._stuck.discard(step)
 
         def _on_done(future: asyncio.Future[_T]) -> None:
             if future.cancelled():
+                with self._lock:
+                    if step in self._steps:
+                        self._stuck.add(step)
                 step.cancel()
 
         result.add_done_callback(_on_done)
@@ -116,13 +158,6 @@ class RouterLoop:
             self._steps.add(step)
         threading.Thread(target=_serve, name=self._name, daemon=True).start()
         return result
-
-    def close(self) -> None:
-        """Cancel every step still running (tests, shutdown)."""
-        with self._lock:
-            steps = list(self._steps)
-        for step in steps:
-            step.cancel()
 
 
 _ROUTER_LOOP = RouterLoop()
@@ -133,4 +168,4 @@ def router_loop() -> RouterLoop:
     return _ROUTER_LOOP
 
 
-__all__ = ["RouterLoop", "router_loop"]
+__all__ = ["DEFAULT_MAX_STUCK_STEPS", "RouterLoop", "RouterStepsStuckError", "router_loop"]

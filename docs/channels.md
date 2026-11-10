@@ -179,7 +179,7 @@ retries on the next interval.
 Telegram direct messages always require pairing. There is no Telegram
 admin/owner role and no open or allowlist mode. An unknown sender is stopped
 before commands or agent execution, then receives a one-time 8-character code.
-Any connected Control client can pair the sender from the Channels page or
+Any connected Control client can pair the sender from Settings › Channels or
 with:
 
 ```sh

@@ -244,6 +244,77 @@ async def test_subscribe_carries_the_in_flight_run_while_it_streams(tmp_path: Pa
     assert after.payload["in_flight_run"] is None
 
 
+class _AskOnTerminalConn(RecordingConn):
+    """A client that asks for the run state the moment a terminal frame lands.
+
+    The web console reloads ``chat.history`` (and re-subscribes) as soon as
+    ``session.event.done`` arrives; the task ledger may not be settled yet.
+    """
+
+    def __init__(self, conn_id: str, rig: Any) -> None:
+        super().__init__(conn_id)
+        self.rig = rig
+        self.answers: list[tuple[str, dict[str, Any]]] = []
+
+    async def send_event(
+        self, event: str, payload: dict | None = None, meta: dict | None = None
+    ) -> None:
+        await super().send_event(event, payload, meta)
+        if event not in TERMINALS:
+            return
+        for method, params in (
+            ("chat.history", {"sessionKey": self.rig.key}),
+            ("sessions.messages.subscribe", {"key": self.rig.key}),
+        ):
+            res = await get_dispatcher().dispatch("t", method, params, self.rig.ctx(self.conn_id))
+            assert res.ok, res.error
+            self.answers.append((method, res.payload))
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_the_run_state_right_after_the_terminal_frame_has_no_in_flight_run(
+    tmp_path: Path, cancel: bool
+) -> None:
+    runner = ScriptedRunner(["hello"], block=cancel)
+    async with turn_rig(tmp_path, runner) as rig:
+        asker = _AskOnTerminalConn(f"ask-{uuid.uuid4().hex[:6]}", rig)
+        get_registry().register(asker)  # type: ignore[arg-type]
+        rig.subs.subscribe_messages(asker.conn_id, rig.key)
+        try:
+            task_id = await rig.enqueue()
+            if cancel:
+                await asyncio.wait_for(runner.streamed.wait(), 3)
+                await rig.runtime.cancel(session_key=rig.key, source="test", reason="test")
+            await rig.runtime.wait(task_id, timeout=3)
+            await wait_for(lambda: len(asker.answers) >= 2)
+        finally:
+            get_registry().unregister(asker.conn_id)
+
+    methods = [method for method, _ in asker.answers]
+    assert methods[:2] == ["chat.history", "sessions.messages.subscribe"]
+    for _, payload in asker.answers:
+        assert payload["in_flight_run"] is None
+
+
+def test_snapshot_is_none_for_a_run_whose_terminal_frame_was_recorded() -> None:
+    streams = SessionStreamRegistry()
+    key = "agent:main:ended"
+    streams.record(key, "task.running", {"task_id": "t1"})
+    streams.record(key, "session.event.text_delta", {"text": "DONE"})
+    running = {"task_id": "t1", "status": "running"}
+    assert streams.in_flight_snapshot(key, active_task=running) is not None
+
+    streams.record(key, "session.event.done", {"task_id": "t1", "state": "done"})
+    # The ledger has not settled t1 yet; its terminal frame already went out.
+    assert streams.in_flight_snapshot(key, active_task=running) is None
+    # The next run of the session is reported as usual.
+    queued = streams.in_flight_snapshot(key, active_task={"task_id": "t2", "status": "queued"})
+    assert queued is not None and queued["task_id"] == "t2"
+    # A run started again under the same id is in flight again.
+    streams.record(key, "task.running", {"task_id": "t1"})
+    assert streams.in_flight_snapshot(key, active_task=running) is not None
+
+
 def test_snapshot_budget_keeps_identity_and_the_newest_text() -> None:
     streams = SessionStreamRegistry()
     key = "agent:main:budget"

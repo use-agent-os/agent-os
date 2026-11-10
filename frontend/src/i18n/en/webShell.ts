@@ -52,7 +52,6 @@ export const webShell = defineNamespace('webShell', {
   // List pane
   listPaneLabel: 'Sessions and pages',
   listPaneResize: 'Resize sidebar',
-  listPaneCollapse: 'Collapse sidebar',
   pagesHeading: 'Pages',
 
   // Session list
@@ -108,6 +107,10 @@ export const webShell = defineNamespace('webShell', {
   renameLabel: 'Session name',
   renameSave: 'Save',
   renameFailed: "Couldn't rename: {message}",
+  resetTitle: 'Reset “{title}”?',
+  resetBody:
+    'The conversation starts over with an empty context. The current transcript is backed up first.',
+  resetConfirm: 'Reset session',
   deleteTitle: 'Delete “{title}”?',
   deleteBody: 'The session and its transcript are removed. This cannot be undone.',
   deleteConfirm: 'Delete session',
@@ -116,7 +119,6 @@ export const webShell = defineNamespace('webShell', {
   copiedKey: 'Session key copied',
   exportEmpty: 'No messages to export',
   exported: 'Exported as Markdown',
-  dragHandle: 'Reorder {title}',
 
   // Approval tray
   trayLabel: 'Pending approvals',
@@ -125,6 +127,10 @@ export const webShell = defineNamespace('webShell', {
   trayCollapse: 'Collapse approvals',
   trayExpand: 'Show pending approvals',
   traySession: 'From {session}',
+  trayAgent: 'Agent {agent}',
+  trayCopyCommand: 'Copy command',
+  trayCopied: 'Command copied',
+  trayCopyFailed: 'Couldn’t copy the command',
   trayOpenSession: 'Open session',
   trayAllowOnce: 'Allow once',
   trayAlwaysAllow: 'Always allow',
@@ -134,9 +140,6 @@ export const webShell = defineNamespace('webShell', {
   trayAnnounce: 'Approval needed: {tool}',
 
   // Status menu (placeholder until the connection work lands)
-  statusConnected: 'Connected',
-  statusConnecting: 'Connecting…',
-  statusOffline: 'Offline',
   themeLabel: 'Theme',
   themeSystem: 'System',
   themeLight: 'Light',

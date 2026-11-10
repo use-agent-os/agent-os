@@ -332,8 +332,8 @@ inherits only the variables named in `pass_env`, not the gateway's environment,
 and it runs outside the tool sandbox as a trusted local process — point it at a
 binary you control.
 
-The policy covers `agentos skills install` and `agentos skills update`, the
-Skills page, and the agent's `skill_install_community` tool. It does not cover
+The policy covers `agentos skills install` and `agentos skills update`,
+Settings › Skills in the web console, and the agent's `skill_install_community` tool. It does not cover
 skills you write yourself or copy into a skill directory by hand.
 
 ## Manage Skill Sources

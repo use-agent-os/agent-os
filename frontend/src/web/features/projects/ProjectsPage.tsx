@@ -51,7 +51,12 @@ import {
   DialogTitle,
 } from '@/web/components/ui/dialog'
 import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
-import { SESSIONS_QUERY_KEY, useAgents, useSessionsList } from '@/web/shell/session-data'
+import {
+  createSessionOptimistic,
+  SESSIONS_QUERY_KEY,
+  useAgents,
+  useSessionsList,
+} from '@/web/shell/session-data'
 import { sessionTitle, type SessionRow } from '@/web/shell/session-list'
 import { sessionKeyToPath } from '@/web/shell/session-url'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
@@ -320,9 +325,13 @@ function ProjectDetail({
   const [error, setError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const owner = projectAgentId(project)
 
   const projectSessions = sessionsInProject(sessions, id) as SessionRow[]
   const groups = groupProjectSessionsByAgent(projectSessions)
+  // The shared list holds only the newest sessions; the project's own count is exact.
+  const partial = projectSessionCount(project) > projectSessions.length
   const knowledgeValue = draft?.text ?? knowledge
   const dirty = draft !== null && draft.text !== knowledge
 
@@ -342,11 +351,18 @@ function ProjectDetail({
 
   const saveName = async () => {
     const next = (nameDraft ?? '').trim()
+    const sentBase = updatedAtOf(project)
     setSaving('name')
     setError(null)
     try {
-      const res = await update({ name: next }, updatedAtOf(project))
+      const res = await update({ name: next }, sentBase)
       applyFresh(res?.project)
+      // The rename bumped the project's version. A knowledge draft started on
+      // the version this rename replaced has seen every change but our own,
+      // so move it onto the new version: otherwise its save reads as someone
+      // else's conflict.
+      const renamed = res?.project ? updatedAtOf(res.project) : 0
+      if (renamed) setDraft((d) => (d && d.base === sentBase ? { ...d, base: renamed } : d))
       setNameDraft(null)
       toast.success(t('webPagesWork.projectRenamed'))
     } catch (e) {
@@ -402,6 +418,29 @@ function ProjectDetail({
     }
   }
 
+  // As the old Projects view did: the session starts at once under the
+  // project's owning agent and opens in chat. A project without an owner goes
+  // through /new, where the agent is chosen.
+  const startChat = async () => {
+    if (!owner) {
+      navigate(`/new?project=${encodeURIComponent(id)}`)
+      return
+    }
+    setStarting(true)
+    setError(null)
+    try {
+      const key = await createSessionOptimistic(rpc, queryClient, {
+        agentId: owner,
+        projectId: id,
+      })
+      navigate(sessionKeyToPath(key))
+    } catch (e) {
+      setError(t('webPagesWork.createFailed', { message: errorMessage(e) }))
+    } finally {
+      setStarting(false)
+    }
+  }
+
   const nameGate = gate(
     online,
     nameDraft === null || nameDraft.trim() === name
@@ -427,6 +466,12 @@ function ProjectDetail({
             value={nameDraft ?? name}
             maxLength={PROJECT_NAME_MAX}
             onChange={(e) => setNameDraft(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter saves the name, as Save name does; not mid-composition.
+              if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
+              e.preventDefault()
+              if (!nameGate.disabled && saving === null) void saveName()
+            }}
           />
           {nameDraft !== null && nameDraft !== name ? (
             <Button
@@ -549,14 +594,26 @@ function ProjectDetail({
           <Button
             size="sm"
             variant="primary"
-            onClick={() => navigate(`/new?project=${encodeURIComponent(id)}`)}
+            disabled={starting || (!!owner && act.disabled)}
+            title={owner ? (act.reason ?? undefined) : undefined}
+            onClick={() => void startChat()}
           >
-            <MessageSquarePlus />
+            {starting ? <Loader2 className="animate-spin" /> : <MessageSquarePlus />}
             {t('webPagesWork.newChatInProject')}
           </Button>
         </div>
+        {partial ? (
+          <p role="note" className="text-small text-text-muted">
+            {t('webPagesWork.projectSessionsPartial', {
+              shown: projectSessions.length,
+              total: projectSessionCount(project),
+            })}
+          </p>
+        ) : null}
         {groups.length === 0 ? (
-          <p className="text-text-muted">{t('webPagesWork.projectNoSessions')}</p>
+          partial ? null : (
+            <p className="text-text-muted">{t('webPagesWork.projectNoSessions')}</p>
+          )
         ) : (
           groups.map((group) => (
             <div key={group.agentId}>

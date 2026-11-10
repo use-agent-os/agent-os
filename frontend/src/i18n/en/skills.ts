@@ -1,9 +1,7 @@
 import { defineNamespace } from '../registry'
 
 export const skills = defineNamespace('skills', {
-  documentTitle: 'Skills - AgentOS Control',
   title: 'Skills',
-  subtitle: 'Manage installed capabilities and discover trusted skills for your agents.',
   refresh: 'Refresh',
 
   // Brand artwork. Brand *names* (Bankr / Capminal / Robinhood) are proper
@@ -11,46 +9,7 @@ export const skills = defineNamespace('skills', {
   altGmgnLogo: 'GMGN logo',
   altAgentosLogo: 'AgentOS logo',
 
-  // Source tabs.
-  tabsLandmark: 'Skill source',
-  tabInstalled: 'Installed',
-  tabInstalledDesc: '{count} local skills',
-  tabPartnerDesc: 'Partner catalog',
-  tabBundledPartnerDesc: 'Bundled partner',
-  tabCommunity: 'Community',
-  tabCommunityDesc: 'Open catalog',
-
-  // Installed toolbar.
-  searchPlaceholder: 'Search installed skills',
-  searchLabel: 'Filter installed skills',
-  metricsLandmark: 'Skills summary',
-  metricAll: 'All',
-  metricReady: 'Ready',
-  metricNeedsSetup: 'Needs setup',
-  metricDisabled: 'Disabled',
-
-  // Install from GitHub.
-  githubTitle: 'Install from GitHub',
-  githubDesc: 'Add a skill directly from a public repository or folder.',
-  githubPlaceholder: 'https://github.com/owner/repo/tree/main/skill',
-  githubUrlLabel: 'Install from GitHub URL',
-  githubInstall: 'Install',
-
-  // Cards.
-  cardSkillLabel: 'Skill {name}',
-  cardViewDetails: 'View details',
-  cardUse: 'Use',
-  cardDetailsFor: 'View details for {name}',
-  cardOpenDetails: 'Open details',
-  catalogSkillLabel: 'Catalog skill {name}',
-  partnerSkillLabel: '{brand} skill {name}',
-
   // Install button.
-  installed: 'Installed',
-  forceInstalling: 'Force installing…',
-  forceInstall: 'Force install',
-  installing: 'Installing…',
-  installSkill: 'Install skill',
   install: 'Install',
 
   // Catalog panels.
@@ -58,12 +17,6 @@ export const skills = defineNamespace('skills', {
   communityDesc: 'Discover skills published by the wider AgentOS community.',
   registryLabelCommunity: 'community',
   registrySearchPlaceholder: 'Search {label} skills…',
-  registrySearchLabel: 'Search {label} skills',
-  loadingCatalog: 'Loading {label} catalog',
-  loadFailed: 'Failed to load: {error}',
-  retryHintCommunity: 'Re-open the tab or press Refresh to retry.',
-  retryHintPartner: 'Press Refresh to retry.',
-  importantPrefix: 'IMPORTANT:',
   // The partner count renders in its own <strong>, so the noun is a plain key
   // rather than a tPlural() pair (which must carry {count} in the value).
   skillWord: 'skill',
@@ -87,23 +40,8 @@ export const skills = defineNamespace('skills', {
     'Official bundled capabilities for Robinhood products and on-chain assets, maintained by AgentOS against the Robinhood Trading MCP.',
   robinhoodNotice:
     "the 'robinhood-agentic-trading' skill trades from a dedicated Robinhood Agentic account — create that account in Robinhood and complete its authorization flow before using the skill.",
-  museTitle: 'Muse skills',
-  museDesc:
-    'Bundled skills for the Muse boards, starting with musebook.lol, the text board where AI agents introduce themselves, post, reply and react under an ed25519 identity that never leaves this machine.',
-  museNotice:
-    'these skills write to a public board. Posts are permanent, and the agent asks once whether to link your X handle or stay anonymous — it never links on its own.',
-
-  // Bundled-partner panel (Robinhood, Muse).
-  partnerStatusLandmark: '{brand} skill status',
-  partnerFilterLabel: 'Filter {brand} skills: {label}',
-  loadingPartner: 'Loading {brand} skills',
-
-  // Installed panel.
-  installedLoadFailed: 'Failed to load skills: {error}',
-  loadingInstalled: 'Loading installed skills',
 
   // Requirements section.
-  reqTitle: 'Requirements',
   reqReady: 'ready',
   reqNeedsSetup: 'needs setup',
   reqMissingSkill: 'missing skill',
@@ -115,39 +53,10 @@ export const skills = defineNamespace('skills', {
   reqUnknown: 'unknown',
 
   // Skill detail dialog.
-  chipReady: '✓ ready',
-  chipDisabled: 'disabled',
-  chipNeedsDeps: 'needs deps',
-  sectionAvailability: 'Agent availability',
-  sectionMissing: 'Missing',
-  missingBinary: 'binary',
-  missingEnvVar: 'env var',
-  whereToGet: 'where to get it ↗',
-  setEnvAria: 'Set {name}',
-  setEnvAction: 'Set',
-  sectionInstall: 'Install',
-  homepage: 'Homepage ↗',
-  useInChat: 'Use in chat',
-  installVia: 'Install via {kind}',
-  updating: 'Updating…',
   update: 'Update',
-  removing: 'Removing…',
-  remove: 'Remove',
-  removeBlockedNote:
-    'AgentOS cannot remove this skill: the configured managed skills directory does not hold it. Check skills.managed_dir, or delete the files by hand.',
 
   // Registry detail dialog.
   descPending: "Description loads after install (from the skill's SKILL.md).",
-  sectionSetup: 'Setup',
-  sectionDemo: 'Demo',
-  sourceLink: 'Source ↗',
-  trustCommunity: 'community',
-
-  // Set-env dialog.
-  setEnvTitle: 'Set {name}',
-  setEnvDescLead: 'Stored in the AgentOS',
-  setEnvDescTail: 'and applied to the running gateway.',
-  saving: 'Saving…',
 
   // Toasts.
   toastLoadFailed: 'Failed to load skills: {message}',

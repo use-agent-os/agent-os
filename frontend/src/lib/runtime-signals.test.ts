@@ -10,6 +10,7 @@ import {
   type SignalsRpc,
 } from './runtime-signals'
 import type { RpcState } from './ws-rpc'
+import { bindGatewaySocket } from './api-origin'
 
 type Handler = (...args: unknown[]) => void
 
@@ -342,5 +343,28 @@ describe('pure helpers', () => {
         normalizeDoctor({ findings: [{ severity: 'error' }, { severity: 'warn' }] }, 0),
       ),
     ).toBe(1)
+  })
+})
+
+describe('on a gateway other than the page origin', () => {
+  it("does not probe /ready over HTTP and forgets the previous gateway's answer", async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const unbind = bindGatewaySocket({ currentUrl: 'ws://127.0.0.1:28812/ws' })
+    try {
+      useRuntimeSignals.setState({
+        ready: { ready: true, state: 'ready', failing: [], fetchedAt: 1 },
+      })
+      const rpc = new FakeRpc()
+      const off = bindRuntimeSignals(rpc, { now })
+      rpc.connect()
+      await flush()
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(useRuntimeSignals.getState().ready).toBeNull()
+      off()
+    } finally {
+      unbind()
+      vi.unstubAllGlobals()
+    }
   })
 })

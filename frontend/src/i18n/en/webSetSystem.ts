@@ -70,6 +70,7 @@ export const webSetSystem = defineNamespace('webSetSystem', {
   connect: 'Connect',
   connectNeedsToken: 'Enter a token to connect.',
   connectSent: 'Connecting with the new credentials…',
+  connectDone: 'Connected to {host}.',
   gatewayActions: 'Actions',
   reconnect: 'Reconnect',
   reconnecting: 'Reconnecting…',
@@ -172,6 +173,9 @@ export const webSetSystem = defineNamespace('webSetSystem', {
   updateRunning: 'Updating… The gateway restarts when the update finishes.',
   updateDone: 'Updated to {version}. Reload the page to use the new console.',
   updateFailed: 'The update failed: {detail}',
+  badgeDiagnosticsIncomplete: 'Diagnostics incomplete',
+  badgeRepairPending: 'Repair pending',
+  badgeConfigMismatch: 'Config mismatch',
 
   // About
   aboutVersion: 'Version',

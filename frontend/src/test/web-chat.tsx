@@ -3,6 +3,7 @@
 import { act, screen } from '@testing-library/react'
 import { usePreferences, DEFAULT_PREFERENCES } from '@/stores/preferences'
 import { resetStagedAttachmentsForTests } from '@/web/features/chat/composer/drafts'
+import { resetQueuesForTests } from '@/web/features/chat/composer/queue'
 import { resetPanelsForTests } from '@/web/features/chat/panels/panel-store'
 import type { FakeRpc } from './fake-rpc'
 import { renderShell, resetShellState, sessionRow, shellRpc } from './web-shell'
@@ -14,6 +15,7 @@ export function resetChatState(): void {
   resetShellState()
   resetPanelsForTests()
   resetStagedAttachmentsForTests()
+  resetQueuesForTests()
   usePreferences.setState({ ...DEFAULT_PREFERENCES })
 }
 
@@ -65,7 +67,9 @@ export function chatRpc(
 
 export async function openChat(rpc: FakeRpc = chatRpc(), path = CHAT_PATH) {
   const utils = renderShell(path, rpc)
-  const composer = await screen.findByRole('textbox', { name: 'Message' })
+  // The first test of a file also pays for loading the lazy chat chunk, which
+  // can take longer than the default one second on a busy runner.
+  const composer = await screen.findByRole('textbox', { name: 'Message' }, { timeout: 5000 })
   return { ...utils, composer }
 }
 

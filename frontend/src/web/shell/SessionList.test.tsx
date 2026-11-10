@@ -1,8 +1,11 @@
 import '@/test/web'
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { createMemoryRouter, RouterProvider } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { testQueryClient, WebTestProviders } from '@/test/render-web'
 import { renderShell, resetShellState, sessionRow, shellRpc } from '@/test/web-shell'
+import { webRoutes } from '@/web/app/WebApp'
 import { createSessionOptimistic, SESSIONS_REFRESH_MS } from './session-data'
 import { PINS_KEY } from './session-list'
 
@@ -112,6 +115,50 @@ describe('filters and grouping', () => {
 })
 
 describe('row actions', () => {
+  it('opens a row in a new tab at the full console path, keeping this tab’s session', async () => {
+    const user = userEvent.setup()
+    const opened = { opener: window as Window | null }
+    const open = vi.spyOn(window, 'open').mockReturnValue(opened as unknown as Window)
+    const router = createMemoryRouter(webRoutes, {
+      basename: '/control',
+      initialEntries: ['/control/home'],
+    })
+    render(
+      <WebTestProviders
+        rpc={shellRpc([sessionRow(A, { display_name: 'Alpha' })])}
+        queryClient={testQueryClient()}
+      >
+        <RouterProvider router={router} />
+      </WebTestProviders>,
+    )
+    const menu = await openRowMenu(user, 'Alpha')
+    await user.click(within(menu).getByRole('menuitem', { name: 'Open in new tab' }))
+    expect(open).toHaveBeenCalledWith('/control/chat/main/webchat/a', '_blank')
+    // No `noopener` feature (which would start the tab without this tab's
+    // sessionStorage token); the opener link is cut after the fact.
+    expect(opened.opener).toBeNull()
+    open.mockRestore()
+  })
+
+  it('resets a session only after the confirmation', async () => {
+    const user = userEvent.setup()
+    const rpc = shellRpc([sessionRow(A, { display_name: 'Alpha' })]).handle('sessions.reset', {
+      ok: true,
+    })
+    renderShell('/home', rpc)
+    let menu = await openRowMenu(user, 'Alpha')
+    await user.click(within(menu).getByRole('menuitem', { name: 'Reset' }))
+    let dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('Reset “Alpha”?')
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(rpc.callsTo('sessions.reset')).toEqual([])
+    menu = await openRowMenu(user, 'Alpha')
+    await user.click(within(menu).getByRole('menuitem', { name: 'Reset' }))
+    dialog = await screen.findByRole('alertdialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Reset session' }))
+    await waitFor(() => expect(rpc.callsTo('sessions.reset')).toEqual([{ key: A }]))
+  })
+
   it('renames through sessions.rename and shows the new title', async () => {
     const user = userEvent.setup()
     const sessions = [sessionRow(A, { display_name: 'Old' })]

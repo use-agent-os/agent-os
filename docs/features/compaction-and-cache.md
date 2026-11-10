@@ -43,6 +43,17 @@ Already within context budget; no compact was applied
 
 That message is a no-op, not a failure.
 
+A compaction inside a turn records what triggered it, in the session summary's
+`trigger_reason` and in the lifecycle notice's `phase`: `agent_inline_preflight`
+(the request was about to exceed the threshold), `agent_inline_overflow` (the
+provider refused the request as too large) or `agent_inline_timeout` (a large
+request timed out twice; see
+[Retrying transient failures](../providers-and-models.md#retrying-transient-failures)).
+Records written before this distinction, and compactions with no known trigger,
+say `agent_inline_overflow`. Each compaction decision is also logged as
+`compaction.decision` with its trigger: at info level when it compacted or
+failed, at debug level when the request was simply under the threshold.
+
 ## When to Compact Manually
 
 Manual compaction is useful when:

@@ -454,6 +454,9 @@ async def test_boot_captured_task_runtime_change_requires_restart(tmp_path) -> N
     ("path", "value", "reason"),
     [
         ("task_runtime.channel_inflight_cap", 16, "task_runtime"),
+        ("task_runtime.max_nested_concurrency", 3, "task_runtime"),
+        ("task_runtime.turn_cancel_grace_seconds", 1.5, "task_runtime"),
+        ("subagents.max_concurrent_children", 5, "task_runtime"),
         ("state_dir", "state-next", "state_dir"),
     ],
 )

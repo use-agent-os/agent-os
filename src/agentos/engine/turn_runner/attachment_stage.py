@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 class AttachmentMessageBuilderPort(Protocol):
     """Wraps ``TurnRunner._build_attachment_messages`` + media-root resolution.
 
-    The adapter forwards verbatim and supplies the
+    ``TurnRunner`` forwards verbatim and supplies the
     ``media_root`` argument from the runner. Returns
     ``list[Message] | None`` the historical return: ``None`` when
     ``attachments`` is empty/``None``, else a single-element

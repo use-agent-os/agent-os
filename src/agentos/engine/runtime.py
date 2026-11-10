@@ -19,7 +19,7 @@ import os
 import platform
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable, Coroutine, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Coroutine, Mapping, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -69,7 +69,7 @@ from agentos.engine.hooks import (
     TurnHookContext,
 )
 from agentos.engine.outcome import outcome_from_error, turn_outcome_details
-from agentos.engine.pipeline import DEFAULT_PROMPT_STEPS, PromptStepRegistry, TurnContext
+from agentos.engine.pipeline import DEFAULT_PROMPT_STEPS, TurnContext
 from agentos.engine.pricing import PriceEntry, lookup_price
 from agentos.engine.proactive_compaction import ProactiveCompactionScheduler
 from agentos.engine.repetition_guard import (
@@ -103,6 +103,7 @@ from agentos.engine.turn_runner.pre_provider_io import (
     merge_extra_context_block,
 )
 from agentos.engine.turn_runner.prompt_assembler_stage import RunPipelineRequest
+from agentos.engine.turn_runner.stream_consumer_stage import inline_compaction_phase
 from agentos.engine.turn_runner.turn_finalizer_stage import CostRollupResult
 from agentos.engine.types import (
     AgentConfig,
@@ -984,6 +985,50 @@ def _normalize_heartbeat_text(
     return text
 
 
+def _fill_tool_use_inputs_from_record(
+    segments: list[dict[str, Any]], record: dict[str, Any] | None
+) -> None:
+    """Give a stopped turn's unanswered ``tool_use`` segments their arguments.
+
+    A segment gets its arguments with the call's result, so a turn stopped
+    while a call ran, or before it ran, had a display row showing the call
+    with no arguments although the provider record (*record*, the turn's
+    sealed messages) holds them. A segment the record has no call for (the
+    stop landed while its arguments streamed in) never became a call: it is
+    dropped, as the record drops it. Changes *segments* in place.
+    """
+    if not isinstance(record, dict):
+        return
+    calls: dict[str, tuple[str, dict[str, Any]]] = {}
+    for message in record.get("messages") or []:
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if (
+                isinstance(block, dict)
+                and block.get("type") == "tool_use"
+                and isinstance(block.get("id"), str)
+                and isinstance(block.get("input"), dict)
+            ):
+                calls[block["id"]] = (str(block.get("name") or ""), block["input"])
+    kept: list[dict[str, Any]] = []
+    for segment in segments:
+        if (
+            isinstance(segment, dict)
+            and segment.get("type") == "tool_use"
+            and segment.get("input") in ("", None)
+        ):
+            tool_use_id = segment.get("tool_use_id")
+            call = calls.get(tool_use_id) if isinstance(tool_use_id, str) else None
+            if call is None:
+                continue
+            name = str(segment.get("name") or call[0])
+            segment["input"] = _persisted_tool_use_input(name, str(tool_use_id), call[1])
+        kept.append(segment)
+    segments[:] = kept
+
+
 def _drop_unpaired_tool_use_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     paired_ids = {
         segment.get("tool_use_id")
@@ -1792,17 +1837,13 @@ class TurnRunner:
         # session key; anchors inline compaction persistence so rows appended
         # mid-turn (queued follow-ups) are never overwritten or archived.
         self._compaction_snapshots: dict[str, TranscriptSnapshot] = {}
-        # TurnRunner stage decomposition InputStage instance. Holds no per-turn state;
-        # constructed once. Active unconditionally as of.
+        # The eight turn stages. Each is built once and holds no per-turn
+        # state; ``TurnRunner`` implements most of their ports itself.
         input_stage = InputStage(extra_ctx=self)
-        # TurnRunner stage decomposition ProviderAndToolsStage instance. Holds no
-        # per-turn state. Active unconditionally as of.
         provider_and_tools_stage = ProviderAndToolsStage(
             provider_resolver=self,
             tool_builder=self,
         )
-        # TurnRunner stage decomposition PromptAssemblerStage instance. Holds no
-        # per-turn state. Active unconditionally as of.
         prompt_assembler_stage = PromptAssemblerStage(
             prompt_assembler=self,
             pipeline_executor=self,
@@ -1812,8 +1853,6 @@ class TurnRunner:
             session_id_resolver=self,
             memory_fingerprint=self,
         )
-        # TurnRunner stage decomposition AgentBootstrapStage instance. Holds no
-        # per-turn state. Active unconditionally as of.
         agent_bootstrap_stage = AgentBootstrapStage(
             timeout_budget=self,
             model_catalog=self,
@@ -1821,8 +1860,6 @@ class TurnRunner:
             memory_snapshot=self,
             agent_factory=self,
         )
-        # TurnRunner stage decomposition HistoryLoadStage instance. Holds no
-        # per-turn state. Active unconditionally as of.
         # Between-turns (proactive) compaction + estimator calibration.
         self._proactive_compaction = ProactiveCompactionScheduler(self)
         history_load_stage = HistoryLoadStage(
@@ -1830,16 +1867,11 @@ class TurnRunner:
             request_context_prepender=RequestContextPrepender(),
             turn_start_observer=self._proactive_compaction,
         )
-        # TurnRunner stage decomposition AttachmentStage instance. Holds no per-turn
-        # state. Active unconditionally as of.
         attachment_stage = AttachmentStage(
             builder=self,
         )
-        # TurnRunner stage decomposition StreamConsumerStage instance. Holds no
-        # per-turn state. Active unconditionally as of. The
-        # warning transformer binds ``self._handle_runtime_warning`` as
-        # a one-method callable; the recording-fake discipline applies
-        # identically to a Protocol-shaped port.
+        # The warning transformer is ``self._handle_runtime_warning``, a
+        # one-method callable rather than a Protocol-shaped port.
         stream_consumer_stage = StreamConsumerStage(
             agent_run=AgentTurnRunner(),
             compaction_persist=self,
@@ -1848,15 +1880,12 @@ class TurnRunner:
             warning_transformer=self._handle_runtime_warning,
             compaction_hooks=self._compaction_hooks,
         )
-        # TurnRunner stage decomposition TurnFinalizerStage instance. Holds no
-        # per-turn state. Active unconditionally as of. Adapter
-        # contracts:
-        #   * TranscriptAppendPort folds the ``token_count`` introspect
+        # The finalizer's ports, as ``TurnRunner`` implements them:
+        #   * TranscriptAppendPort folds the ``token_count`` introspection
         #     and the ``session_manager is None`` guard.
         #   * TurnMemoryCapturePort forwards verbatim; the stage owns
         #     the log-and-continue try/except.
-        #   * SessionTotalsPort inlines the post-DoneEvent cost rollup
-        #     bit-identically to the legacy slice.
+        #   * SessionTotalsPort does the post-DoneEvent cost rollup.
         #   * TurnErrorPersistPort forwards verbatim; the helper owns
         #     its own try/except + None guards.
         turn_finalizer_stage = TurnFinalizerStage(
@@ -1881,8 +1910,6 @@ class TurnRunner:
                 turn_finalizer=turn_finalizer_stage,
             ),
         )
-        # The pre-turn prompt steps, in order (``engine.pipeline``).
-        self._prompt_steps: PromptStepRegistry = DEFAULT_PROMPT_STEPS
         # Memory-nudge reviews running in the background (MemoryNudgePort).
         self._memory_nudge_pending: set[asyncio.Task[None]] = set()
 
@@ -2299,7 +2326,9 @@ class TurnRunner:
     # session, and follows it with a completed lifecycle notification. Failed
     # persistence is handled by the stream consumer stage so completed is never
     # emitted before durable storage succeeds. The re-entrancy contract on
-    # ``persist_compaction_result`` is untouched.
+    # ``persist_compaction_result`` is untouched. ``trigger`` (preflight,
+    # overflow, timeout) names what started the compaction; the durable
+    # record and the lifecycle notice carry it as ``agent_inline_<trigger>``.
 
     async def persist_and_notify(
         self,
@@ -2308,6 +2337,7 @@ class TurnRunner:
         summary: str,
         kept_entries: list[Any],
         compaction_id: str | None = None,
+        trigger: str | None = None,
     ) -> None:
         from agentos.engine.cache_break_monitor import notify_compaction
         from agentos.session.compaction_lifecycle import (
@@ -2321,6 +2351,7 @@ class TurnRunner:
         session_manager = self._session_manager
         if session_manager is None:
             return
+        phase = inline_compaction_phase(trigger)
         persist_method = session_manager.persist_compaction_result
         params = inspect.signature(persist_method).parameters
         persist_kwargs: dict[str, Any] = {}
@@ -2331,7 +2362,7 @@ class TurnRunner:
         if "trigger_reason" in params or any(
             p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
         ):
-            persist_kwargs["trigger_reason"] = "agent_inline_overflow"
+            persist_kwargs["trigger_reason"] = phase
         # Anchor the rewrite on the rows the agent's history was loaded from
         # so a follow-up queued mid-turn is never overwritten or archived.
         snapshots = getattr(self, "_compaction_snapshots", None)
@@ -2366,7 +2397,7 @@ class TurnRunner:
         notify_compaction(
             session_key,
             source="automatic",
-            phase="agent_inline_overflow",
+            phase=phase,
             status="completed",
             kept_count=len(kept_entries),
             summary_len=len(summary or ""),
@@ -2768,6 +2799,15 @@ class TurnRunner:
         """Session-scoped router holds, shared by the router_control tool and
         the user-facing /c0-/c3 slash commands (gateway ``router.hold.*`` RPC)."""
         return self._router_control_hold_store
+
+    @property
+    def tool_hooks(self) -> tuple[ToolHook, ...]:
+        """The tool hooks every turn's tool calls run through (read-only).
+
+        Other entry points that run tools for the same gateway, such as
+        ``POST /api/v1/tools/invoke``, run them too.
+        """
+        return self._tool_hooks
 
     @property
     def router_control_config(self) -> Any:
@@ -3586,48 +3626,8 @@ class TurnRunner:
         if _caller_holds_lock:
             # Same call chain already serializes this turn.
             try:
-                async for event in self._run_turn(
-                    message,
-                    session_key,
-                    agent_id,
-                    model,
-                    attachments or [],
-                    effective_tool_context,
-                    timeout=timeout,
-                    max_iterations=max_iterations,
-                    iteration_timeout=iteration_timeout,
-                    tool_timeout=tool_timeout,
-                    request_timeout=request_timeout,
-                    max_provider_retries=max_provider_retries,
-                    length_capped_continuations=length_capped_continuations,
-                    input_mode=input_mode,
-                    persist_input=persist_input,
-                    input_provenance=input_provenance,
-                    history_has_persisted_user=history_has_persisted_user,
-                    fresh_user_session=fresh_user_session,
-                    session_intent=session_intent,
-                    semantic_message=semantic_message,
-                    run_kind=run_kind,
-                    heartbeat_ack_max_chars=heartbeat_ack_max_chars,
-                    bootstrap_context_mode=bootstrap_context_mode,
-                    no_memory_capture=no_memory_capture,
-                    ingress_pipeline_steps=ingress_pipeline_steps,
-                    router_control_replay_depth=router_control_replay_depth,
-                    persisted_user_message_id=persisted_user_message_id,
-                ):
-                    yield event
-            finally:
-                self.clear_compaction_turn_state(session_key)
-        else:
-            async with lock:
-                # Record this Task as the lock owner in the ContextVar so that
-                # any nested call to run() within the same Task can detect re-entry.
-                _map: dict[int, asyncio.Task[Any]] = dict(owner_map or {})
-                if current_task is not None:
-                    _map[id(lock)] = current_task
-                _token = _SESSION_LOCK_OWNER.set(_map)
-                try:
-                    async for event in self._run_turn(
+                async with aclosing(
+                    self._run_turn(
                         message,
                         session_key,
                         agent_id,
@@ -3655,8 +3655,54 @@ class TurnRunner:
                         ingress_pipeline_steps=ingress_pipeline_steps,
                         router_control_replay_depth=router_control_replay_depth,
                         persisted_user_message_id=persisted_user_message_id,
-                    ):
+                    )
+                ) as events:
+                    async for event in events:
                         yield event
+            finally:
+                self.clear_compaction_turn_state(session_key)
+        else:
+            async with lock:
+                # Record this Task as the lock owner in the ContextVar so that
+                # any nested call to run() within the same Task can detect re-entry.
+                _map: dict[int, asyncio.Task[Any]] = dict(owner_map or {})
+                if current_task is not None:
+                    _map[id(lock)] = current_task
+                _token = _SESSION_LOCK_OWNER.set(_map)
+                try:
+                    async with aclosing(
+                        self._run_turn(
+                            message,
+                            session_key,
+                            agent_id,
+                            model,
+                            attachments or [],
+                            effective_tool_context,
+                            timeout=timeout,
+                            max_iterations=max_iterations,
+                            iteration_timeout=iteration_timeout,
+                            tool_timeout=tool_timeout,
+                            request_timeout=request_timeout,
+                            max_provider_retries=max_provider_retries,
+                            length_capped_continuations=length_capped_continuations,
+                            input_mode=input_mode,
+                            persist_input=persist_input,
+                            input_provenance=input_provenance,
+                            history_has_persisted_user=history_has_persisted_user,
+                            fresh_user_session=fresh_user_session,
+                            session_intent=session_intent,
+                            semantic_message=semantic_message,
+                            run_kind=run_kind,
+                            heartbeat_ack_max_chars=heartbeat_ack_max_chars,
+                            bootstrap_context_mode=bootstrap_context_mode,
+                            no_memory_capture=no_memory_capture,
+                            ingress_pipeline_steps=ingress_pipeline_steps,
+                            router_control_replay_depth=router_control_replay_depth,
+                            persisted_user_message_id=persisted_user_message_id,
+                        )
+                    ) as events:
+                        async for event in events:
+                            yield event
                 finally:
                     self.clear_compaction_turn_state(session_key)
                     _SESSION_LOCK_OWNER.reset(_token)
@@ -3690,7 +3736,7 @@ class TurnRunner:
         ingress_pipeline_steps: list[PipelineStepRecord] | None = None,
         router_control_replay_depth: int = 0,
         persisted_user_message_id: str | None = None,
-    ) -> AsyncIterator[AgentEvent]:
+    ) -> AsyncGenerator[AgentEvent, None]:
         """Run one turn through ``TurnHarness`` (``engine/harness/turn.py``)."""
         request = TurnRequest(
             message=message,
@@ -4992,8 +5038,9 @@ class TurnRunner:
                 return await prompt_steps.apply_agentos_router(_copy_router_turn(turn))
 
             try:
-                # On the long-lived router loop (``engine.router_loop``): a
-                # blocking router still times out here and the turn fails open.
+                # On its own thread and event loop (``engine.router_loop``): a
+                # blocking router still times out here and the turn fails open,
+                # as it does when too many earlier steps are still stuck.
                 routed = await asyncio.wait_for(
                     router_loop().run(_run_router_step()), timeout=router_timeout
                 )
@@ -5058,7 +5105,7 @@ class TurnRunner:
         )
         turn = await run_pipeline(
             turn,
-            self._prompt_steps.resolve({"apply_agentos_router": _bounded_apply_agentos_router}),
+            DEFAULT_PROMPT_STEPS.resolve({"apply_agentos_router": _bounded_apply_agentos_router}),
         )
 
         # Apply routed model back to cloned selector (local, not shared)

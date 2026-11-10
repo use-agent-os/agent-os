@@ -9,22 +9,7 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 const I18N_MIGRATED = [
   'src/app/**/*.tsx',
   'src/components/**/*.tsx',
-  'src/views/agents/**/*.tsx',
-  'src/views/approvals/**/*.tsx',
-  'src/views/channels/**/*.tsx',
   'src/views/chat/**/*.tsx',
-  'src/views/config/**/*.tsx',
-  'src/views/cron/**/*.tsx',
-  'src/views/env/**/*.tsx',
-  'src/views/health/**/*.tsx',
-  'src/views/logs/**/*.tsx',
-  'src/views/mcp/**/*.tsx',
-  'src/views/overview/**/*.tsx',
-  'src/views/sessions/**/*.tsx',
-  'src/views/settings/**/*.tsx',
-  'src/views/setup/**/*.tsx',
-  'src/views/skills/**/*.tsx',
-  'src/views/usage/**/*.tsx',
 ]
 
 // #258: t() reads the locale at call time, so calling it at module scope

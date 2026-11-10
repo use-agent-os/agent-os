@@ -1,8 +1,8 @@
-// Pure setup-view helpers ported 1:1 from the legacy view
-// (src/agentos/gateway/static/js/views/setup.js). Each function carries the
-// legacy line range it mirrors so the parity matrix stays auditable. RPC calls,
-// event subscriptions, DOM, and rendering live in SetupPage.tsx + the per-section
-// components; this module owns the pure derivations: per-section status /
+// Pure setup helpers, first ported 1:1 from the retired console's setup.js
+// view (the line ranges cited below point into that source). RPC calls, event
+// subscriptions and rendering live in the callers (the web console's
+// Settings › Setup forms, the desktop's settings panes and setup steps); this
+// module owns the pure derivations: per-section status /
 // readiness derivation, the onboarding-reasons list, provider/router/extras
 // field-value derivation, the four onboarding.*.configure payload builders,
 // scoped-field reading + required validation, and the Finish CLI command
@@ -851,6 +851,12 @@ export interface RouterTierInput {
   model: string
   thinkingLevel: string
   supportsImage: boolean
+  /**
+   * The tier's other saved fields (`description`, …), sent back unchanged:
+   * the gateway rebuilds a tier from its profile default plus what is sent,
+   * so a field left out reverts to the default.
+   */
+  extra?: Record<string, unknown>
 }
 
 export interface RouterConfigureParams {
@@ -890,6 +896,7 @@ export function buildRouterConfigureParams(input: {
   const tiers: Record<string, Record<string, unknown>> = {}
   input.tiers.forEach((row) => {
     const tier: Record<string, unknown> = {
+      ...row.extra,
       provider: row.provider,
       model: row.model,
       thinkingLevel: row.thinkingLevel,

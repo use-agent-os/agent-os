@@ -709,7 +709,7 @@ async def test_proactive_service_appends_and_merges_the_file_lists() -> None:
         split_file_activity,
     )
     from agentos.engine.compaction_service import CONTEXT_SUMMARY_HEADER, SUMMARY_ACK
-    from agentos.engine.proactive_compaction import PROACTIVE_PHASE, _compaction_service
+    from agentos.engine.proactive_compaction import PROACTIVE_PHASE, _coordinator
     from agentos.provider import ContentBlockToolResult, ContentBlockToolUse
 
     provider = _Provider()
@@ -722,7 +722,7 @@ async def test_proactive_service_appends_and_merges_the_file_lists() -> None:
             compaction_summary_timeout_seconds=5.0,
         ),
     )
-    service = _compaction_service(agent, KEY)
+    service = _coordinator(agent, KEY).service(phase=PROACTIVE_PHASE)
     previous = attach_file_activity(
         "## Goal\n- earlier work", FileActivity(read=("docs/plan.md",), modified=("src/a.py",))
     )

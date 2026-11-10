@@ -23,7 +23,7 @@ import urllib.parse
 from pathlib import Path
 
 # Declared in SKILL.md frontmatter under `requires.env`. Keep the two in sync —
-# that block is what puts the skill in "Needs setup" in the AgentOS Skills page.
+# that block is what puts the skill in "Needs setup" in AgentOS Settings > Skills.
 ENV_SIGNER = "POOLSFUN_PRIVATE_KEY"
 # Optional. Only needed to attach a token image; every other path works unset.
 ENV_PINATA_JWT = "PINATA_JWT"
@@ -199,7 +199,7 @@ def resolve_private_key(signer_env: str = ENV_SIGNER) -> str:
     if not raw:
         raise RuntimeError(
             f"env var {signer_env} is not set. Set it in the agent environment "
-            f"(AgentOS: Skills page -> Set {signer_env}), or pass --signer-env <VAR>"
+            f"(AgentOS: Settings > Skills > Set {signer_env}), or pass --signer-env <VAR>"
         )
     key = raw.strip().strip('"').strip("'")
     if not key.startswith("0x"):

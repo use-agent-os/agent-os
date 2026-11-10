@@ -1,8 +1,7 @@
-// Pure config-view helpers ported 1:1 from the legacy view
-// (src/agentos/gateway/static/js/views/config.js). Each function carries the
-// legacy line range it mirrors so the parity matrix stays auditable. RPC calls,
-// rendering, tooltips, mode/tab UI and the sticky save bar live in ConfigPage;
-// this module owns the pure derivations that drive the write surface: tab
+// Pure config helpers, first ported 1:1 from the retired console's config.js
+// view (the line ranges cited below point into that source). RPC calls and
+// rendering live in the web console's Settings editor (config-editor.ts,
+// SaveBar.tsx and the sections under web/features/settings/); this module owns the pure derivations that drive the write surface: tab
 // filtering, object flattening, grouping, the dotted-key value lookup, the
 // dirty/no-op diff (the core of the sticky bar + save gating), value parsing +
 // JSON validation, YAML serialisation and the diff/summary formatting.

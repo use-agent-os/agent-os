@@ -6,11 +6,12 @@ import { useConnection } from '@/stores/connection'
 import { initTheme } from '@/stores/theme'
 import { initLocale, t } from '@/i18n'
 import { approvalMonitor } from '@/services/approval-monitor'
-import { bindPendingQuestions } from '@/lib/pending-questions'
+import { bindPendingQuestions, loadPendingQuestions } from '@/lib/pending-questions'
 import { bindRuntimeSignals } from '@/lib/runtime-signals'
 import type { RpcState } from '@/lib/ws-rpc'
 import { KeyboardShortcutProvider, type ShortcutHelpRenderer } from '@/components/KeyboardShortcuts'
 import { readStoredToken, readStoredWsUrl } from '@/lib/credentials'
+import { bindGatewaySocket } from '@/lib/api-origin'
 
 // Exported so an off-gateway host (the desktop shell) can supply its own
 // connected client to the same hooks and views.
@@ -51,10 +52,15 @@ export function AppProviders({
     initLocale()
     let cancelled = false
     const unsubscribe = rpc.on('_state', (s) => useConnection.getState().setState(s as RpcState))
+    // REST calls (approvals, uploads, artifacts) follow the gateway this
+    // socket is connected to, which a switch can make another origin.
+    const unbindHttp = bindGatewaySocket(rpc)
     // The truth badge and the attention inbox read what this connection sees:
     // frame age, refused handshakes, doctor/ready, presented ask_user questions.
     const unbindSignals = bindRuntimeSignals(rpc)
     const unbindQuestions = bindPendingQuestions(rpc)
+    // Questions asked before this connection (a reload, a reconnect).
+    const offQuestionsLoad = rpc.on('_hello', () => void loadPendingQuestions(rpc))
     fetchBootstrap()
       // Legacy served bootstrap inline (it could not fail): the shell always
       // rendered and _autoConnect used the location-derived default WS URL with
@@ -79,8 +85,10 @@ export function AppProviders({
     return () => {
       cancelled = true
       unsubscribe()
+      unbindHttp()
       unbindSignals()
       unbindQuestions()
+      offQuestionsLoad()
       rpc.disconnect()
     }
   }, [rpc])

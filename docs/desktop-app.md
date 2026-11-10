@@ -172,7 +172,7 @@ stopped waits in the chat and is sent once the gateway is running again.
 ## Runtime status and what needs you
 
 The toolbar's status capsule shows the same runtime truth as the Web UI's
-footer badge: **Ready**, **Degraded**, **Connecting**, **Blocked**,
+status button at the bottom of the rail: **Ready**, **Degraded**, **Connecting**, **Blocked**,
 **Offline** or **Unknown**, with how fresh the view is (`Live · 12 s`,
 `Snapshot · 3 min`, `Unavailable`). Click it for the reason and one way
 forward. Because the app runs the gateway, a stopped gateway reads Offline

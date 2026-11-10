@@ -18,7 +18,7 @@ def test_stage_unit_tests_do_not_frame_walk_or_import_runtime_adapters() -> None
         text = path.read_text(encoding="utf-8")
         if "sys._getframe" in text:
             offenders.append(f"{path.name}: sys._getframe")
-        if "from agentos.engine.turn_runner.harness import" in text:
+        if "from agentos.engine.harness" in text:
             offenders.append(f"{path.name}: harness import")
         if "_TurnRunner" in text and "Adapter" in text:
             offenders.append(f"{path.name}: private runtime adapter")

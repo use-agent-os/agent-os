@@ -350,6 +350,25 @@ describe('nextRuns', () => {
   it('returns [] for an unparseable expression', () => {
     expect(nextRuns(parseCron('nope'), 3, NOW)).toEqual([])
   })
+  it('evaluates in the job zone: empty is UTC, as the scheduler does', () => {
+    const from = Date.UTC(2026, 10, 10, 4, 0) // 2026-11-10 04:00Z
+    const iso = (zone: string) =>
+      nextRuns(parseCron('0 9 * * *'), 2, from, zone).map((d) => d.toISOString())
+    expect(iso('')).toEqual(['2026-11-10T09:00:00.000Z', '2026-11-11T09:00:00.000Z'])
+    expect(iso('UTC')).toEqual(iso(''))
+    // 09:00 in Ho Chi Minh City (UTC+7) is 02:00Z: today's has passed.
+    expect(iso('Asia/Bangkok')).toEqual(['2026-11-11T02:00:00.000Z', '2026-11-12T02:00:00.000Z'])
+    expect(nextRuns(parseCron('0 9 * * *'), 2, from, 'Not/A_Zone')).toEqual([])
+  })
+  it('follows a daylight-saving change in the job zone', () => {
+    // New York leaves DST on 2026-11-01: 09:00 is 13:00Z before, 14:00Z after.
+    const from = Date.UTC(2026, 9, 31, 12, 0)
+    const runs = nextRuns(parseCron('0 9 * * *'), 2, from, 'America/New_York')
+    expect(runs.map((d) => d.toISOString())).toEqual([
+      '2026-10-31T13:00:00.000Z',
+      '2026-11-01T14:00:00.000Z',
+    ])
+  })
 })
 
 describe('explainCron', () => {

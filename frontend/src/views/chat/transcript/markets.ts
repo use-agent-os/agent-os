@@ -17,8 +17,9 @@
 //      composes next to the LP mounter.
 //
 // Styling: the markup carries the `.mk-*` classes the contract lists verbatim
-// ("CSS hooks"). The web console styles them in chat-unified.css; the desktop
-// skins the same hooks in its own chat.css.
+// ("CSS hooks"). Only the desktop mounts this markup and skins the hooks in its
+// own chat.css; the web console renders its own React cards
+// (web/features/chat/cards/) from the pure helpers.
 //
 // SECURITY: every payload-derived string reaches the DOM through `textContent`
 // or an attribute setter, never `innerHTML` — token symbols and names are

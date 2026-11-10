@@ -287,10 +287,10 @@ def _ollama_think(cfg: ChatConfig, model: str) -> bool | str | None:
     for local models, so a reasoning capability or a known thinking family is
     required. gpt-oss takes a level instead of a boolean.
 
-    With thinking off, a known thinking family gets ``think: false``. Its
-    default is to think, and after a tool round such a model can answer with
-    reasoning only, which the loop can no longer retry with thinking disabled
-    because it already is.
+    With thinking off, a model known to reason (by family or by capability)
+    gets ``think: false``. Its default is to think, and after a tool round
+    such a model can answer with reasoning only, which the loop can no longer
+    retry with thinking disabled because it already is.
     """
     caps = cfg.model_capabilities
     model_l = model.lower()
@@ -299,7 +299,7 @@ def _ollama_think(cfg: ChatConfig, model: str) -> bool | str | None:
     )
     if not cfg.thinking:
         if (
-            known_family
+            (known_family or (caps is not None and caps.supports_reasoning))
             and "gpt-oss" not in model_l
             and (caps is None or caps.reasoning_format != "think_tags")
         ):

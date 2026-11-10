@@ -319,7 +319,7 @@ def require_pinata_jwt(reason: str) -> str:
         raise PinataError(
             f"{reason} needs Pinata, but {ENV_PINATA_JWT} is not set.\n"
             f"  Either set it in the agent environment "
-            f"(AgentOS: Skills page -> Set {ENV_PINATA_JWT}),\n"
+            f"(AgentOS: Settings > Skills > Set {ENV_PINATA_JWT}),\n"
             f"  or drop --image and launch without a token image,\n"
             f"  or pass --metadata-uri <uri> if you have already hosted the metadata."
         )

@@ -206,6 +206,15 @@ class SessionStreamRegistry:
             session_of=lambda key, _value: key,
             keep_until_deleted=True,
         )
+        # The run whose terminal frame was recorded last, per session. The
+        # task ledger settles a run a moment after its terminal frame goes
+        # out; a client that asks for the run state on seeing that frame must
+        # not be told the run it just saw end is still in flight.
+        self._ended_runs: BoundedRegistry[str, str] = BoundedRegistry(
+            name="SessionStreamRegistry._ended_runs",
+            session_of=lambda key, _value: key,
+            keep_until_deleted=True,
+        )
 
     @staticmethod
     def _is_replay_lossy(event_name: str) -> bool:
@@ -270,6 +279,8 @@ class SessionStreamRegistry:
         if event_name == "task.running":
             task_id = payload.get("task_id")
             if isinstance(task_id, str) and task_id:
+                if self._ended_runs.get(session_key) == task_id:
+                    self._ended_runs.pop(session_key, None)
                 self._live_runs[session_key] = _LiveRun(
                     run_id=task_id,
                     task_id=task_id,
@@ -278,6 +289,12 @@ class SessionStreamRegistry:
                 )
             return
         live = self._live_runs.get(session_key)
+        if event_name in TERMINAL_STREAM_EVENTS or event_name in _TERMINAL_TASK_EVENTS:
+            ended = payload.get("task_id")
+            if not isinstance(ended, str) or not ended:
+                ended = live.task_id if live is not None else None
+            if ended:
+                self._ended_runs[session_key] = ended
         if live is None:
             return
         if event_name in _TERMINAL_TASK_EVENTS:
@@ -342,10 +359,16 @@ class SessionStreamRegistry:
         means "nothing is running". A buffer left behind is not dropped here:
         the run's own terminal frames clear it, and the ``aborted`` frame
         still needs its text for ``partial_text``.
+
+        A run whose terminal frame (``done`` / ``error`` / ``task.*``) was
+        already recorded is over, even while the ledger still lists it as
+        running: the ledger is settled just after that frame goes out.
         """
         if not isinstance(active_task, dict):
             return None
         task_id = active_task.get("task_id")
+        if isinstance(task_id, str) and task_id and self._ended_runs.get(session_key) == task_id:
+            return None
         status = str(active_task.get("status") or "running")
         live = self._live_runs.get(session_key)
         if live is not None and isinstance(task_id, str) and live.task_id == task_id:

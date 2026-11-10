@@ -6,6 +6,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Tool hooks can now decide, not only observe. `before_tool` may block a
+  call or rewrite its arguments, and `after_tool` may replace the result
+  (for example to redact a secret). See "Tool and request hooks" in
+  `docs/tools-and-sandbox.md`.
+  - Rewritten arguments are validated again (an unparsed or projection
+    placeholder payload is refused like the model's own), and policy and
+    approvals still apply to them. On an approval retry the granted approval
+    is kept even when the hook builds fresh arguments.
+  - Each hook gets its own copy of the arguments; editing them in place
+    changes nothing. Return `Rewrite` to change them.
+  - A rewritten call stays in the transcript as the model made it; its result
+    tells the model which arguments a hook adjusted (by name; the note never
+    repeats the values), and `ToolResult.effective_arguments` holds the
+    arguments the call ran with. Operators see the call that actually runs:
+    an approval prompt for a rewritten command shows the rewritten command. The reminder to verify code changes looks at the file the call
+    actually wrote.
+  - Every hook whose `before_tool` ran gets `after_tool` exactly once, also
+    when the call was blocked, refused, denied by policy or skipped by the run
+    budget, and `ReplaceResult` applies on each of those paths. A replacement
+    is held to the same size cap as a tool's own result.
+  - A hook with `fail_closed = True` blocks the call if its `before_tool`
+    crashes, and withholds the result (`error_class: ToolHookFailed`) if its
+    `after_tool` crashes.
+- `RequestHook` (`TurnRunner(request_hooks=...)`) runs before every provider
+  request. It may add a request-only note after the cached prompt prefix
+  (also when the context was compacted just before the request), or veto the
+  request: the turn ends with error code `request_vetoed` and outcome
+  `blocked`.
+- Hooks that return nothing keep working. `TurnRunner.tool_hooks` exposes the
+  configured tool hooks (read-only).
+- `[task_runtime] max_nested_concurrency` sizes the nested pool, slots only
+  child runs (subagents, ACP harness runs) use, on top of `max_concurrency`.
+  Default: the value of `max_concurrency`. Running turns never exceed
+  `max_concurrency + max_nested_concurrency`.
+- `sessions.list` returns `total`, the number of sessions matching the filter
+  regardless of `limit` (`count` still means "rows returned").
+
 ### Changed
 - **Breaking (web console): the Control UI is rebuilt.** The web console is a
   new chat-first app: an icon rail with the Sessions list and a Pages catalog,
@@ -16,116 +54,66 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Chat turns fold their reasoning and tool calls into a "Worked for …"
     disclosure; tool calls are compact rows; a Details column and a side
     panel show session context, long output and artifacts; Markdown is
-    sanitized with theme-aware code highlighting.
+    sanitized with theme-aware code highlighting, and model replies cannot
+    load remote images or restyle the console.
+  - Carried over from the previous console: the suggested next prompt (Tab
+    takes it), slash-command output in the transcript, `//` to send a leading
+    slash, a per-session message queue that survives switching sessions
+    (Alt+↑ takes the newest back; after Stop it returns to the composer),
+    Stop next to Queue, Reset session in the chat header, messages queued on
+    the gateway, the in-progress run when you open a running session, the
+    full Pilot Router and provider forms, X search sign-in, the Advanced
+    Reload button and invalid-JSON guard, Health badges, the Environment
+    Reveal confirmation, the approval card's agent name and copy-command
+    button (now on every approval card), Refresh on Settings › Approvals, and
+    "New chat in project" starting the session at once under the project's
+    agent.
+  - Settings forms start from the saved configuration and send every field
+    they show, so applying one never resets the others to their defaults;
+    optional settings can be returned to their default, and a configuration
+    restart notice names its reasons for every client until the restart.
+  - Home shows usage over all time plus how many sessions were active today
+    (the gateway keeps no per-day totals); Usage ranges select the sessions
+    active in them. With more than 500 sessions, Sessions, Home and Projects
+    say they show the newest 500 of N.
   - A full-page Connect screen replaces the token field on Overview. A
     `?token=` / `#token=` link parameter is stored for the tab and removed
-    from the address bar.
+    from the address bar. A `?gatewayUrl=` link never receives the token of
+    the gateway you are using, and an address is saved only once that gateway
+    connects. Settings › Gateway has Disconnect, and its token is optional on
+    a gateway without token auth.
+  - Not in the web console (use the desktop app or the CLI): actions on
+    trading cards (LP, DCA, triggers are shown read-only), DCA mandates,
+    price triggers, brackets and missions (Automations covers scheduled jobs
+    only). See `docs/web-ui.md` for the full list.
 - **Breaking (URLs):** routes are path-based: `/chat/<agent>/<rest of session
   key>`, `/new`, `/home`, `/sessions`, `/projects`, `/usage`, `/automations`,
   `/inbox`, `/settings/<section>`. Every previous URL redirects (for example
   `/overview` → `/home`, `/cron` → `/automations`, `/config` →
   `/settings/advanced`, `/chat?session=…` → `/chat/…`), and
-  `/mcp/oauth/callback` keeps working. See `docs/web-ui.md`.
+  `/mcp/oauth/callback` and the Skills **Use** prefill (`/chat?prompt=`) keep
+  working. An approval push notification opens the Inbox with that approval
+  in view.
+  The CLI's setup hint points at `/control/settings/setup`. See
+  `docs/web-ui.md`.
 - **Breaking (shortcuts):** the `g` navigation chords now point at the new
-  destinations (`g n` → Settings › Channels, `g r` → Automations, …); `g o`
-  opens Home. New: `Mod+K` palette, `Mod+B` sidebar, `Mod+/` shortcut overview.
+  destinations (`g n` → Settings › Channels, `g r` → Automations, …); `g h`
+  opens Home instead of Health (Health is Settings › Health), and `g o` opens
+  Home too. New: `Mod+K` palette, `Mod+B` sidebar, `Mod+/` shortcut overview.
 - **Breaking (approvals):** the blocking approval modal is replaced by a
   non-modal approval tray on every page and an approval card docked above the
   composer in the requesting session. Decisions, their endpoints and the
   Inbox are unchanged.
 - The saved theme preference carries over; `system` is now a stored choice.
-
-### Removed
-- The in-process subagent path: `agentos.engine.subagent` (`SubagentManager`,
-  `SubagentSpec`, `SubagentRegistry`, `SubagentHandle`, also re-exported
-  from `agentos.engine`), `Agent.spawn_subagent` and the `Agent(...,
-  subagent_manager=...)` argument. Nothing in AgentOS used them; subagents
-  run through the `sessions_spawn` tool.
-- The `AGENTOS_HOOKS=legacy` escape hatch, kept "for one release" since the
-  hook chain became the default. Setting it now has no effect.
-- The unused `agentos.engine.turn_runner.TurnContext`.
-- The unused `agentos.engine.turn_control` module. Its codes
-  `permission_unavailable` and `no_progress` now classify as `blocked` in
-  `agentos.engine.outcome`.
-
-### Added
-- Tool hooks can now decide, not only observe. `before_tool` may block a
-  call or rewrite its arguments, and `after_tool` may replace the result
-  (for example to redact a secret).
-  - Rewritten arguments are validated again, and policy and approvals still
-    apply to them.
-  - A hook with `fail_closed = True` blocks the call if it crashes.
-- `RequestHook` (`TurnRunner(request_hooks=...)`) runs before every provider
-  request. It may add a request-only note after the cached prompt prefix, or
-  veto the request (error code `request_vetoed`).
-- Hooks that return nothing keep working. See "Tool and request hooks" in
-  `docs/tools-and-sandbox.md`.
-
-### Fixed
-- Stopping a turn now always ends it before anything else runs. A stop that
-  landed while the rest of a response was already buffered, after the
-  response had streamed, or while the turn waited to retry a provider error
-  could still run the response's tool calls or send another request.
-- A turn stopped after its reply was recorded repeated that reply in the
-  session history and in its final text.
-- A request hook's note was missing from the request when the context was
-  compacted just before it was sent.
-- The provider retry budget counted time spent on earlier successful
-  requests of the same step (for example a continuation after the output
-  cap), so a slow continuation followed by a rate limit could fail without
-  a retry.
-- Pilot Router steps of concurrent turns no longer wait on each other. They
-  shared one event loop, so a slow classify made other turns' routing time
-  out and run on the unrouted model.
-- A parent that closed its own spawn group (`sessions_yield`) hung until the
-  tool timed out: it waited for its wake, which is only enqueued after its
-  own turn ends. A finished child could also hold its session until the
-  parent's turn ended.
-- Parent wakes for children spawned outside a task were collapsed into one,
-  so only the first was delivered.
-- A stopped turn that ended on its own just before
-  `task_runtime.turn_cancel_grace_seconds` ran out could be cancelled while
-  recording its outcome, leaving anyone waiting on the run hanging.
-- A tool hook's rewrite could hand a tool an unparsed `_raw` payload or a
-  projection placeholder; it is now refused like the model's own arguments.
-- After `sessions.abort`, a turn that stopped on its own lost its final text
-  and usage from the terminal `done` frame.
-- A parent waiting on its child in the same turn (`sessions_yield` with a
-  `session_key`) kept its slot. With the default reserved subagent slots,
-  two such parents could leave their children no slot at all and both waited
-  until the timeout. Children of a parent run that holds a slot now run in a
-  separate nested pool.
-- Parent wakes for finished subagent groups are now durable. A wake that
-  failed to reach the task runtime was dropped, and the "already woken"
-  marker lived only in memory, so a restart could lose a wake or repeat it.
-  Wakes are now recorded in a `subagent_wakes` table (migration `V015`),
-  retried with backoff for up to 30 minutes, sent by the next boot when one
-  was cut off, and never delivered twice for the same spawn group.
-- Ollama: with thinking off, a thinking-family model (`qwen3`, `qwen3.5`,
-  `deepseek-r1`, `magistral`, …) was left at its default, which is to think.
-  After a tool round it could answer with reasoning only, and the turn failed
-  with `empty_response`. Such models are now sent `think: false`. `gpt-oss`
-  (which takes a thinking level) and models that reason in `<think>` tags
-  keep the old behaviour.
-- Subagent runs cut off by a gateway restart were marked `abandoned` with no
-  completion event, so a parent waiting on them never woke up. After a
-  restart, each such child is now reported to its parent through the normal
-  completion path, and the parent is woken once per spawn group. A later
-  restart does not announce the same children again.
-- A cancelled turn now leaves a transcript the next turn can replay as is.
-  Every tool call that was still running is paired with a "Cancelled" error
-  result, and the turn ends with a note telling the model it was interrupted,
-  so tools may have partly run. Before, the history loader patched the gap
-  with an "unknown outcome" result on every reload.
-- Cancelling a turn while the model was streaming left the provider stream,
-  and its HTTP connection, open until garbage collection. It is now closed
-  at once.
-- A turn that failed after the model had already used tokens (for example a
-  provider error after a tool call) ended its run with `session.event.done`
-  in state `done`. The error frame was dropped, so clients showed the failed
-  turn as finished. Such a run now ends with `session.event.error`.
-
-### Changed
+- Tool hooks: `after_tool` now receives the settled `ToolResult`
+  (`outcome.result.content` is the string the model will see, with
+  `is_error` and `execution_status` set), so a redacting hook sees what it
+  redacts. The tool's own return value is `outcome.raw_result`.
+- `POST /api/v1/tools/invoke` runs the gateway's configured tool hooks, the
+  same ones agent turns run: a hook's block answers `403 POLICY_DENIED`
+  (`details.error_class = "ToolHookBlocked"`), a rewrite and a result
+  replacement apply, and `dry_run` reports a hook's block as
+  `allowed: false`. The policy still judges the call as sent first.
 - The token and cost figures a turn reports on its `DoneEvent` are settled by
   a pure `agentos.engine.core.settle_turn_usage`, the first piece of the agent
   loop moved into `engine/core` (which may not import the gateway).
@@ -153,35 +141,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   instead of inheriting the projection mixin.
 - The pre-turn prompt steps run from `PromptStepRegistry`
   (`DEFAULT_PROMPT_STEPS`, same order), resolved by name per turn.
-- The Pilot Router step runs on one long-lived router event loop
-  (`engine/router_loop.py`) instead of a new thread and event loop per turn.
-  A router that blocks still times out and the turn fails open.
+- The Pilot Router step runs on its own daemon thread and event loop per
+  turn (`engine/router_loop.py`), so a blocking router holds up neither the
+  gateway's loop nor another turn's routing, and a routing timeout always
+  fails open. If router steps keep hanging, at most 4 stuck router threads
+  are kept; later turns skip routing (and run unrouted) until one returns.
 - Subagents now run in a lane per parent session. At most
   `subagents.max_concurrent_children` children of one parent (default 2; an
-  agent's own `subagents.max_concurrent_children` wins; `0` = no limit) run
-  at once, and the rest wait in spawn order instead of all competing for the
-  shared slots. Children of other parents are not held back.
+  agent's own `subagents.max_concurrent_children` wins; `0` = no per-parent
+  limit) run at once, and the rest wait in spawn order instead of all
+  competing for the shared slots. Children of other parents are not held
+  back.
 - Stopping a turn (abort, kill, interrupt) now asks it to stop first when it
   is streaming or between steps. The turn closes the model's stream, sends no
-  further request and ends on its own, reporting the run as aborted. It is
+  further request, runs none of the response's tool calls and ends on its
+  own, reporting the run as aborted with its final text and usage. It is
   cancelled only if it has not stopped within
-  `task_runtime.turn_cancel_grace_seconds` (default 5 s). Turns running tools
-  and ACP harness turns are still cancelled at once.
+  `task_runtime.turn_cancel_grace_seconds` (default 5 s), or at once when you
+  stop it a second time. Turns running tools and ACP harness turns are still
+  cancelled at once.
 - Every compaction (before a request, after a provider overflow, after a
   repeated timeout, and between turns) now goes through one
   `CompactionCoordinator` and logs one `compaction.decision` entry naming its
-  trigger and result. The before-turn history stage, which no longer
+  trigger and result (at debug level when the request was simply under the
+  threshold). An in-turn compaction records its trigger in the session
+  summary's `trigger_reason` and the lifecycle notice's `phase`:
+  `agent_inline_preflight`, `agent_inline_overflow` or
+  `agent_inline_timeout`. The before-turn history stage, which no longer
   compacts, is renamed `HistoryLoadStage` (was `CompactionAndHistoryStage`);
   its turn-timing key stays `compaction_and_history`.
 - Provider retries: rate limits, overloads and transport blips are retried on
-  the same model up to 6 times (was 3) and within 90 s of waiting
-  (`agent_retry_budget_seconds`; `0` = count only). Waits back off with a
-  0.5x-1.5x random factor instead of a fixed small jitter. A timeout that
-  repeats now compacts older context and retries once before failing
-  (`agent_timeout_context_recovery`, default on). A `Retry-After` longer
-  than 30 s with no model to fail over to fails the turn instead of
-  retrying into the same limit. No failover happens after the model has
-  streamed visible text. Every failed attempt logs one `turn_policy_decision`.
+  the same model up to 6 times (was 3) and within 90 s of waiting and failed
+  attempts (`agent_retry_budget_seconds`; `0` = count only). Each failed
+  attempt counts at most 10 s, the first retry is always made unless its wait
+  alone exceeds the budget, and time spent on earlier successful requests of
+  the step does not count. Waits back off with a 0.5x-1.5x random factor
+  instead of a fixed small jitter. A timeout that repeats on a large request
+  (at least half of what preflight compaction allows) compacts older context
+  and retries once (`agent_timeout_context_recovery`, default on); otherwise,
+  or when compaction takes nothing off, the turn fails over to the next
+  model, and fails if there is none. A `Retry-After` longer than 30 s with no
+  model to fail over to fails the turn instead of retrying into the same
+  limit. No failover happens after the model has streamed visible text.
+  With a fallback model configured, a request that fails before any output
+  (a timeout included) still switches to the fallback at once, as before;
+  these retry rules then apply on the fallback. Every failed attempt logs
+  one `turn_policy_decision`.
 - HTTP 401 from any provider is now an authentication failure (not
   retried), and the error says to check the provider's credentials.
 - Every agent turn now ends with exactly one `DoneEvent`, after the error on
@@ -190,6 +195,138 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Engine callers that read the result from whether an `ErrorEvent` arrived
   keep working. Callers that assumed a failed turn has no `DoneEvent` must now
   read `outcome` instead.
+
+### Removed
+- The in-process subagent path: `agentos.engine.subagent` (`SubagentManager`,
+  `SubagentSpec`, `SubagentRegistry`, `SubagentHandle`, also re-exported
+  from `agentos.engine`), `Agent.spawn_subagent` and the `Agent(...,
+  subagent_manager=...)` argument. Nothing in AgentOS used them; subagents
+  run through the `sessions_spawn` tool.
+- The `AGENTOS_HOOKS=legacy` escape hatch, kept "for one release" since the
+  hook chain became the default. Setting it now has no effect.
+- The unused `agentos.engine.turn_runner.TurnContext`.
+- The unused `agentos.engine.turn_control` module. Its codes
+  `permission_unavailable` and `no_progress` now classify as `blocked` in
+  `agentos.engine.outcome`.
+- The unused `agentos.engine.compaction_control` module, the
+  `agentos.engine.turn_runner.harness` module (import
+  `CompactionPersistRejectedError` from `agentos.engine.harness.ports`),
+  `agentos.engine.fallback.FallbackPolicy` (use
+  `agentos.engine.fallback.classify_error` and
+  `agentos.engine.policy.ProviderAttemptPolicy`).
+- Four frontend dependencies nothing imported any more
+  (`@radix-ui/react-popover`, `@radix-ui/react-select`,
+  `@radix-ui/react-separator`, `@tabler/icons-react`) and about 1,600 unused
+  strings of the previous console.
+
+### Fixed
+- Web console: a turn that had finished could show **Working…** with Stop
+  for about 210 seconds. The gateway reported a run whose final frame it had
+  already sent as still running (the task ledger settles a moment later), and
+  the console believed it. Neither happens now: `chat.history` and
+  `sessions.messages.subscribe` no longer name a run that ended, and the
+  console treats a run's end (`done`, `error`, `task.*`) as final. The same
+  race left a turn recovered after a gateway restart stuck.
+- Web console: user messages loaded from history no longer show the
+  gateway's time prefix (`[2026-… Asia/…]`) and are not shown twice; a failed
+  turn keeps its reason and **Try again** after a reload.
+- Web console: after switching to another gateway (Settings › Gateway or a
+  `gatewayUrl` link), approvals were read from and answered on the page's
+  gateway, with the new gateway's token. HTTP calls now follow the connected
+  gateway and carry its token only to it; on a gateway other than the page's,
+  approvals go over its WebSocket. Settings › Gateway shows the new address
+  and confirms the switch without a reload.
+- Settings › Models: after switching provider with the router off, the router
+  form showed, and Pilot + Apply wrote, the previous provider's model ids; it
+  now shows and sends the current provider's tiers. Apply no longer resets a
+  tier's description, and a provider Apply no longer resets
+  `llm.circuit_breaker` and `llm.repetition_guard` to their defaults.
+- Automations: the next-run preview is worked out in the job's timezone (UTC
+  when empty), as the scheduler runs it.
+- Inbox: unanswered agent questions are listed after a reload without opening
+  each session (new read-only RPC `sessions.questions`).
+- Web console smaller fixes: Reset session asks first; **Stop now** after
+  Stop ends the turn at once; a refused gateway address fails at once on the
+  Connect screen; the restart notice names its reasons in words; Enter saves
+  a project's name; the Sessions page row menu has **Open in new tab**; an
+  image button in a reply shows as a link; the X search "What you need" text
+  reads as sentences.
+- A tool that returns a `dict` or `list` now hands the model JSON instead of
+  a Python repr, so its result (a pending approval, for example) can be read
+  back. String results are unchanged.
+- A turn refused or stopped by a spend ceiling (`budget_exceeded`) now ends
+  with outcome `budgetLimited` instead of `failed`.
+- A turn stopped after its reply was recorded (including while memory was
+  being captured or session totals updated) repeated that reply in the
+  session history, marked `[interrupted]`, and in its final text, so the
+  next request carried the answer twice. Such a turn now also ends as
+  completed (task `succeeded`, session `done`) rather than cancelled: its
+  whole answer was delivered.
+- A parent waiting on its child in the same turn (`sessions_yield` with a
+  `session_key`) kept its slot. With the default reserved subagent slots,
+  two such parents could leave their children no slot at all and both waited
+  until the timeout. Child runs now also have a separate nested pool
+  (`[task_runtime] max_nested_concurrency`): a child of a parent whose turn
+  is running takes a nested slot first, any other child takes a shared slot
+  first and a nested one when the shared slots open to children are taken.
+  A child keeps its slot until it ends, and children never take the
+  `subagent_reserved_slots` shared slots, so a user's own message starts at
+  once even while children of finished turns are still running, and waiting
+  children use free nested slots instead of running one at a time.
+- Parent wakes for finished subagent groups are now durable. A wake that
+  failed to reach the task runtime was dropped, and the "already woken"
+  marker lived only in memory, so a restart could lose a wake or repeat it.
+  Wakes are now recorded in a `subagent_wakes` table (migration `V015`),
+  retried with backoff for up to 30 minutes, sent by the next boot when one
+  was cut off, and never delivered twice for the same spawn group.
+  - A group the parent closed (`sessions_yield`) while children still ran is
+    recorded too, so a crash right as the last child finished cannot lose
+    the wake; closing it no longer makes the parent wait on its own wake,
+    and a finished child no longer holds its session until the parent's
+    turn ends. Wakes for children spawned outside a task are no longer
+    collapsed into one.
+  - The task-group card shows "failed" only once a wake is given up on.
+    Deleting a session deletes its wakes, and finished wake records are
+    deleted after 7 days.
+- Ollama: with thinking off, a thinking model (a family such as `qwen3`,
+  `qwen3.5`, `deepseek-r1`, `magistral`, …, or any model that reports the
+  thinking capability) was left at its default, which is to think. After a
+  tool round it could answer with reasoning only, and the turn failed with
+  `empty_response`. Such models are now sent `think: false`. `gpt-oss`
+  (which takes a thinking level) and models that reason in `<think>` tags
+  keep the old behaviour.
+- Subagent runs cut off by a gateway restart were marked `abandoned` with no
+  completion event, so a parent waiting on them never woke up. After a
+  restart, each such child is now reported to its parent through the normal
+  completion path, and the parent is woken once per spawn group (not at all
+  when restart recovery is already resuming the parent's own turn; the
+  results are still added to its transcript). A later restart does not
+  announce the same children again.
+- A cancelled turn now leaves a transcript the next turn can replay as is,
+  also when the session store cannot keep in-progress rows. Every tool call
+  that was still running is paired with a "Cancelled" error result, tool
+  arguments and results are capped like a finished turn's, and the turn ends
+  with a note telling the model it was interrupted, so tools may have partly
+  run. Before, the history loader patched the gap with an "unknown outcome"
+  result on every reload.
+- Cancelling or abandoning a turn while the model was streaming left the
+  provider stream, and its HTTP connection, open until garbage collection,
+  and could hold the turn's spend reservation until then. Both are now
+  released at once, before the session is handed to the next turn.
+- A turn that failed after the model had already used tokens (for example a
+  provider error after a tool call) ended its run with `session.event.done`
+  in state `done`. The error frame was dropped, so clients showed the failed
+  turn as finished. Such a run now ends with `session.event.error`.
+- A transient provider failure (503, overload, connection reset) right after
+  the automatic retry of an empty response that followed a tool round now
+  fails over to the next model and reports the real error, instead of ending
+  the turn as `provider_stream_incomplete`.
+- A tool call copied from compacted provider context is refused as a reused
+  projection, like the other projection placeholders, and a call's thought
+  signature is kept when its arguments are sanitized.
+- Approvals (web console and desktop app): deciding a second approval while
+  the first decision was still being sent was silently ignored; both are now
+  sent.
 
 ## [2026.11.7] - 2026-11-07
 

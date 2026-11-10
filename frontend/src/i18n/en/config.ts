@@ -1,38 +1,7 @@
 import { defineNamespace } from '../registry'
 
 export const config = defineNamespace('config', {
-  documentTitle: 'Config - AgentOS Control',
-  eyebrow: 'Control · Config',
-  title: 'Config',
-  subtitle:
-    'Advanced gateway configuration. Use guided setup for provider, router, channels, and extras.',
-  embeddedEyebrow: 'Advanced workspace',
-  embeddedTitle: 'Configuration editor',
-  embeddedSubtitle: 'Edit the complete runtime surface with a reviewed diff before it is applied.',
-
-  // Header controls.
-  modeLandmark: 'Editor mode',
-  modeForm: 'Form',
-  modeYaml: 'YAML',
-  guidedTitle: 'Open guided setup',
-  guided: 'Guided setup',
-  reloadTitle: 'Reload config',
-  reload: 'Reload',
-  saveTitle: 'Save config',
-  save: 'Save',
-
-  // Load / conflict states.
-  stateLoading: 'Loading configuration…',
-  stateError: 'Configuration could not be loaded.',
-  conflictBody:
-    'Configuration changed while this draft was open. Discard the stale draft before saving against the latest revision.',
-  conflictAction: 'Discard draft & reload',
-  divergedBody:
-    'The config file changed outside AgentOS. Writes are blocked until the gateway reloads or restarts with that file.',
-  divergedAction: 'Refresh state',
-
   // Form surface.
-  tabsLandmark: 'Config sections',
   tabCore: 'Core',
   tabAi: 'AI & Agents',
   tabMemory: 'Memory',
@@ -41,54 +10,7 @@ export const config = defineNamespace('config', {
   tabSafety: 'Safety',
   tabRuntime: 'Runtime',
   tabOther: 'Other',
-  tabSearchResults: 'Search results',
-  searchLabel: 'Search config',
-  searchPlaceholder: 'Search keys & values…',
-  emptyNoMatches: 'No matching fields',
   groupGeneral: 'General',
-  groupFields_one: '{count} field',
-  groupFields_other: '{count} fields',
-  fieldEnabled: 'Enabled',
-  fieldDisabled: 'Disabled',
-  fieldEdit: 'Edit',
-  fieldInvalidJson: 'Invalid JSON',
-  fieldHelpLabel: 'Help for {key}',
-  fieldSecretShow: 'Show {key}',
-  fieldSecretHide: 'Hide {key}',
-  yamlEditorLabel: 'YAML editor',
-
-  // Sticky save bar.
-  pendingLandmark: 'Pending changes',
-  // Not a tPlural pair: the sticky bar renders the number in its own <strong>
-  // node (pinned by ConfigPage.test.tsx), and the catalog convention requires
-  // {count} inside every _one/_other value. So the noun is selected directly.
-  pendingChangeWord: 'change pending',
-  pendingChangesWord: 'changes pending',
-  diffHide: 'Hide diff',
-  diffShow: 'View diff',
-  discard: 'Discard',
-  diffYamlKey: 'YAML',
-  diffYamlOld: 'loaded config',
-  diffYamlNew: 'unsaved draft',
-  diffInvalidOld: 'loaded JSON',
-  diffInvalidNew: 'Fix invalid JSON',
-
-  // Toasts.
-  toastLoadFailed: 'Failed to load config: {message}',
-  toastSavedRestart: 'Config saved. Gateway restart required for the change to take effect.',
-  toastSaved: 'Config saved',
-  toastSaveFailed: 'Save failed: {message}',
-  toastAppliedRestart: 'Config applied. Gateway restart required for the change to take effect.',
-  toastApplied: 'Config applied',
-  toastApplyFailed: 'Apply failed: {message}',
-  toastWriteBlocked:
-    'The config file changed outside AgentOS. Restart or reload the gateway first.',
-  toastConflict: 'Configuration changed in another workspace. Discard and reload before saving.',
-  toastPendingForm: 'Save or discard the pending Form changes before applying YAML.',
-  toastPendingYaml: 'Save or discard the pending YAML change before saving Form fields.',
-  toastFixJson: 'Fix invalid JSON before saving',
-  toastNoChanges: 'No changes to save',
-  toastReloadBlocked: 'Discard pending changes before reloading the configuration.',
 
   // Per-field help, keyed by config path.
   helpHost:

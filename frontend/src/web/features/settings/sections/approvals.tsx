@@ -1,3 +1,4 @@
+import { RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webSetAccess'
@@ -17,6 +18,7 @@ import {
   resolveExecutionMode,
 } from '@/views/approvals/logic'
 import { configValueAt } from '@/views/config/logic'
+import { Button } from '@/web/components/ui/button'
 import { EmptyState } from '@/web/components/ui/states'
 import { ApprovalCard } from '@/web/shell/ApprovalTray'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
@@ -210,13 +212,32 @@ function ElevatedSetting({ globalMode }: { globalMode: string }) {
 
 function PendingRequests({ write }: { write: Gate }) {
   const pending = useApprovals((s) => s.pending)
+  const [refreshing, setRefreshing] = useState(false)
+
+  // Events keep the list live; this re-reads the queue on demand.
+  const refresh = async () => {
+    if (refreshing) return
+    setRefreshing(true)
+    try {
+      await approvalMonitor.pollNow()
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
   return (
     <section aria-labelledby="approvals-pending" className="flex flex-col gap-2">
-      <h2 id="approvals-pending" className="text-base font-semibold">
-        {pending.length
-          ? tPlural('webSetAccess.apPendingCount', pending.length)
-          : t('webSetAccess.apPendingTitle')}
-      </h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="approvals-pending" className="text-base font-semibold">
+          {pending.length
+            ? tPlural('webSetAccess.apPendingCount', pending.length)
+            : t('webSetAccess.apPendingTitle')}
+        </h2>
+        <Button size="sm" variant="outline" disabled={refreshing} onClick={() => void refresh()}>
+          <RefreshCw className={refreshing ? 'animate-spin' : undefined} aria-hidden />
+          {t('webSetAccess.apRefresh')}
+        </Button>
+      </div>
       <GateReason gate={write} />
       {pending.length === 0 ? (
         <EmptyState

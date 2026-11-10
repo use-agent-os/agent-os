@@ -1308,6 +1308,12 @@ async def _handshake(
 #   wait seconds on a model or the network (``chat.suggestNext`` at every
 #   turn end held back ``chat.history`` by ~5 s).
 #
+# * A stop (``STOP_METHODS``) right behind another stop of the same session
+#   joins it instead of queueing behind it: it waits for what the first stop
+#   waited for, and later requests on the session wait for both. The first
+#   stop holds its lane until the run settles (up to the cancel grace), and a
+#   second stop exists precisely to cut that grace short.
+#
 # So one slow ``chat.history`` no longer holds back the same tab's other
 # sessions, or a second tab sharing the socket.
 
@@ -1329,6 +1335,10 @@ UNORDERED_METHODS: frozenset[str] = frozenset(
     }
 )
 
+#: Stops. A stop queued right behind another stop of the same session runs
+#: alongside it (see above).
+STOP_METHODS: frozenset[str] = frozenset({"chat.abort", "sessions.abort"})
+
 #: Session-less methods that only read. They run alongside session lanes.
 CONCURRENT_READ_METHODS: frozenset[str] = frozenset(
     {
@@ -1346,6 +1356,7 @@ CONCURRENT_READ_METHODS: frozenset[str] = frozenset(
         "providers.status",
         "sessions.list",
         "sessions.preview",
+        "sessions.questions",
         "skills.list",
         "status",
         "usage.cost",
@@ -1389,7 +1400,12 @@ class RequestStartQueue:
         self._tasks: set[asyncio.Task[None]] = set()
         self._last_barrier: asyncio.Task[None] | None = None
         self._since_barrier: set[asyncio.Task[None]] = set()
-        self._lane_tails: dict[str, asyncio.Task[None]] = {}
+        #: The requests a later request on the lane must wait for: the last one,
+        #: or every stop of a group of consecutive stops.
+        self._lane_tails: dict[str, set[asyncio.Task[None]]] = {}
+        #: Lanes whose tail is a group of stops: what the group's first stop
+        #: waited for, and the barrier it was admitted after.
+        self._stop_groups: dict[str, tuple[set[asyncio.Task[None]], asyncio.Task[None] | None]] = {}
 
     @property
     def pending(self) -> int:
@@ -1405,16 +1421,24 @@ class RequestStartQueue:
         on_start_timeout: Callable[[], Awaitable[None]],
         *,
         name: str = "ws-request",
+        stop: bool = False,
     ) -> asyncio.Task[None]:
+        """Admit one request. ``stop`` marks a session stop (``STOP_METHODS``)."""
+        session_lane = lane is not None and lane not in ("barrier", _READ_LANE)
+        group = self._stop_groups.get(lane) if stop and session_lane and lane else None
+        joins_group = group is not None and group[1] is self._last_barrier
         deps: set[asyncio.Task[None]] = set()
-        if lane is not None and self._last_barrier is not None:
-            deps.add(self._last_barrier)
-        if lane == "barrier":
-            deps |= self._since_barrier
-        elif lane is not None and lane != _READ_LANE:
-            tail = self._lane_tails.get(lane)
-            if tail is not None:
-                deps.add(tail)
+        if joins_group and group is not None:
+            # Behind a stop that is still waiting for its run to settle: start
+            # when that stop could, not after it.
+            deps |= group[0]
+        else:
+            if lane is not None and self._last_barrier is not None:
+                deps.add(self._last_barrier)
+            if lane == "barrier":
+                deps |= self._since_barrier
+            elif session_lane and lane is not None:
+                deps |= self._lane_tails.get(lane, set())
         deps = {task for task in deps if not task.done()}
 
         task = asyncio.create_task(self._run(deps, run, on_start_timeout), name=name)
@@ -1426,7 +1450,14 @@ class RequestStartQueue:
         elif lane == _READ_LANE:
             self._since_barrier.add(task)
         elif lane is not None:
-            self._lane_tails[lane] = task
+            if joins_group:
+                self._lane_tails.setdefault(lane, set()).add(task)
+            else:
+                self._lane_tails[lane] = {task}
+                if stop:
+                    self._stop_groups[lane] = (set(deps), self._last_barrier)
+                else:
+                    self._stop_groups.pop(lane, None)
             self._since_barrier.add(task)
             task.add_done_callback(functools.partial(self._forget_tail, lane))
         if lane is not None:
@@ -1434,8 +1465,13 @@ class RequestStartQueue:
         return task
 
     def _forget_tail(self, lane: str, task: asyncio.Task[None]) -> None:
-        if self._lane_tails.get(lane) is task:
+        tails = self._lane_tails.get(lane)
+        if tails is None or task not in tails:
+            return
+        tails.discard(task)
+        if not tails:
             del self._lane_tails[lane]
+            self._stop_groups.pop(lane, None)
 
     async def _run(
         self,
@@ -1696,6 +1732,7 @@ async def _receive_loop(
                     "The request could not start in time; retry",
                 ),
                 name=f"ws-req-{conn.conn_id}-{method}",
+                stop=method in STOP_METHODS,
             )
         else:
             await conn.send_res(

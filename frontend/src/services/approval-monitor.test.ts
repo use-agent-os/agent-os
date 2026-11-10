@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { toast } from 'sonner'
+import { bindGatewaySocket } from '@/lib/api-origin'
 import {
   ApprovalMonitor,
   ELEVATED_MODE_KEY,
@@ -122,6 +123,60 @@ describe('approval-monitor service', () => {
   async function flush() {
     for (let i = 0; i < 6; i++) await Promise.resolve()
   }
+
+  describe('after a switch to another gateway', () => {
+    it('reads, resolves and sets approvals on the connected gateway, never the page origin', async () => {
+      const calls: Array<[string, Record<string, unknown> | undefined]> = []
+      const rpc = {
+        ...fakeRpc('connecting'),
+        currentUrl: `ws://${location.host}/ws`,
+        async call<T>(method: string, params?: Record<string, unknown>): Promise<T> {
+          calls.push([method, params])
+          if (method === 'approval.list') {
+            return { pending: [{ id: 'b1', namespace: 'exec' }], mode: 'prompt' } as T
+          }
+          return {} as T
+        },
+      }
+      const unbind = bindGatewaySocket(rpc)
+      try {
+        sessionStorage.setItem('agentos.wsToken', 'tokA')
+        const mon = makeMonitor()
+        mon.start(rpc)
+        rpc.setState('connected')
+        await flush()
+        // The page's own gateway: HTTP with its token.
+        expect(fetchMock).toHaveBeenLastCalledWith(
+          '/api/approvals',
+          expect.objectContaining({ headers: { Authorization: 'Bearer tokA' } }),
+        )
+        expect(calls).toEqual([])
+
+        // Settings > Gateway: connect to B with B's token. The console's CSP
+        // blocks HTTP to B, so the socket carries the approvals.
+        fetchMock.mockClear()
+        rpc.currentUrl = 'ws://127.0.0.1:28812/ws'
+        sessionStorage.setItem('agentos.wsToken', 'tokB')
+        rpc.setState('connecting')
+        rpc.setState('connected')
+        await flush()
+        expect(calls).toEqual([['approval.list', { display: true }]])
+        expect(useApprovals.getState().pending.map((p) => p.id)).toEqual(['b1'])
+
+        await mon.resolve({ id: 'b1', namespace: 'exec' }, 'once')
+        expect(calls[1]).toEqual([
+          'exec.approval.resolve',
+          { id: 'b1', approved: true, allowAlways: false, rememberIntent: false },
+        ])
+        await saveApprovalMode('auto-deny')
+        expect(calls).toContainEqual(['exec.approvals.set', { mode: 'auto-deny' }])
+        // Nothing went over HTTP, so B's token reached no other origin.
+        expect(fetchMock).not.toHaveBeenCalled()
+      } finally {
+        unbind()
+      }
+    })
+  })
 
   describe('backfill on start + (re)connect', () => {
     it('backfills once from the root-absolute /api/approvals when started without a client', async () => {
@@ -760,6 +815,68 @@ describe('approval-monitor service', () => {
       await mon.resolve({ id: 'x' }, 'once')
       const body = JSON.parse(fetchMock.mock.calls[0]![1].body as string)
       expect(body.namespace).toBe('exec')
+    })
+
+    it('sends a decision on a second approval while the first is still in flight', async () => {
+      const other: Approval = { id: 'b1', namespace: 'exec', command: 'pwd' }
+      useApprovals.getState().setFromPoll([item, other], 'prompt')
+      const firstPost = deferred<Response>()
+      fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+        if (init?.method !== 'POST') return okResponse({ pending: [], mode: 'prompt' })
+        const body = JSON.parse(init.body as string) as { id: string }
+        return body.id === 'a1' ? firstPost.promise : okResponse({ ok: true })
+      })
+      const mon = makeMonitor()
+      const first = mon.resolve(item, 'once')
+      await flush()
+      await mon.resolve(other, 'deny')
+      const posted = fetchMock.mock.calls
+        .filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST')
+        .map(([, init]) => JSON.parse((init as RequestInit).body as string).id)
+      expect(posted).toEqual(['a1', 'b1'])
+      expect(useApprovals.getState().pending.map((p) => p.id)).not.toContain('b1')
+      firstPost.resolve(okResponse({ ok: true }))
+      await first
+      expect(useApprovals.getState().pending).toEqual([])
+    })
+
+    it('ignores a repeated decision on the same approval while it is in flight', async () => {
+      const post = deferred<Response>()
+      fetchMock.mockImplementation(async (_url: string, init?: RequestInit) =>
+        init?.method === 'POST' ? post.promise : okResponse({ pending: [], mode: 'prompt' }),
+      )
+      const mon = makeMonitor()
+      const first = mon.resolve(item, 'once')
+      await mon.resolve(item, 'deny')
+      post.resolve(okResponse({ ok: true }))
+      await first
+      const posts = fetchMock.mock.calls.filter(
+        ([, init]) => (init as RequestInit | undefined)?.method === 'POST',
+      )
+      expect(posts).toHaveLength(1)
+    })
+
+    it('releases the guard before the trailing backfill', async () => {
+      const backfill = deferred<Response>()
+      fetchMock
+        .mockResolvedValueOnce(okResponse({ ok: true }))
+        .mockReturnValueOnce(backfill.promise)
+        .mockResolvedValue(okResponse({ ok: true }))
+      const mon = makeMonitor()
+      const first = mon.resolve(item, 'once')
+      await flush()
+      expect(backfillCalls(fetchMock)).toBe(1)
+      // The backfill hangs; decisions made meanwhile (even on the same
+      // approval, say after the gateway re-queued it) still go out.
+      const second = mon.resolve({ id: 'c1', namespace: 'exec' }, 'deny')
+      const third = mon.resolve(item, 'deny')
+      await flush()
+      const posted = fetchMock.mock.calls
+        .filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST')
+        .map(([, init]) => JSON.parse((init as RequestInit).body as string).id)
+      expect(posted).toEqual(['a1', 'c1', 'a1'])
+      backfill.resolve(okResponse({ pending: [], mode: 'prompt' }))
+      await Promise.all([first, second, third])
     })
 
     it('rejects and error-toasts on a non-ok resolve, without persisting elevated mode', async () => {

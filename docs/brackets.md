@@ -444,8 +444,9 @@ and **no** `.trigger-actions` (leg writes are refused).
 
 ### Web vs desktop
 
-As for triggers: the web console styles the hooks in `chat-unified.css`,
-the desktop restyles them in `desktop/src/renderer/src/views/chat/chat.css`
+As for triggers: the web console shows a read-only card
+(`frontend/src/web/features/chat/cards/TradingCards.tsx`); the desktop renders
+the full card and styles it in `desktop/src/renderer/src/views/chat/chat.css`
 (range gauge: stop tick red-tinted, take-profit tick green-tinted, zone
 faint; legs strip as two mono rows). `canWrite` is true only on the desk.
 

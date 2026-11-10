@@ -125,6 +125,27 @@ def test_think_is_sent_only_to_thinking_models_with_thinking_on(
     assert _payload(monkeypatch, "my-custom-reasoner", reasoning_caps)["think"] is True
 
 
+def test_thinking_off_tells_a_capability_only_reasoner_not_to_think(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A model that reasons by capability, not by a known family name, thinks by
+    default too; with thinking off it must get ``think: false`` or it can answer
+    a tool round with reasoning only."""
+    off = ChatConfig(model_capabilities=ModelCapabilities(supports_reasoning=True))
+
+    assert _payload(monkeypatch, "my-custom-reasoner", off)["think"] is False
+
+
+def test_thinking_off_leaves_think_tag_models_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Inline ``<think>`` models do not use the native channel either way."""
+    tags = ModelCapabilities(supports_reasoning=True, reasoning_format="think_tags")
+
+    assert "think" not in _payload(monkeypatch, "qwen3:8b", ChatConfig(model_capabilities=tags))
+    assert "think" not in _payload(
+        monkeypatch, "my-custom-reasoner", ChatConfig(model_capabilities=tags)
+    )
+
+
 def test_gpt_oss_takes_a_think_level(monkeypatch: pytest.MonkeyPatch) -> None:
     cfg = ChatConfig(thinking=True, thinking_level=ThinkingLevel.HIGH)
 

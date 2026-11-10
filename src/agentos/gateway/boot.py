@@ -13,7 +13,7 @@ import socket
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -622,6 +622,76 @@ def _gateway_home(config: GatewayConfig) -> Path:
 
 def _task_runtime_max_concurrency(config: GatewayConfig) -> int:
     return int(config.task_runtime.max_concurrency)
+
+
+async def _recover_subagent_wakes(svc: Any, *, listener: Any, task_runtime: Any) -> None:
+    """Boot-time subagent wake recovery, in order; never raises.
+
+    After the turn-recovery scan, so a parent whose interrupted turn is being
+    resumed is not woken a second time; then the restart announce of
+    abandoned children; then the reconcile of closed groups whose wake was
+    never written.
+    """
+
+    from agentos.gateway.subagent_announce import (
+        announce_restart_abandoned_children,
+        reconcile_awaiting_wakes,
+    )
+    from agentos.gateway.turn_recovery import MAX_AGE_MS as _RECOVERY_MAX_AGE_MS
+
+    recovery = getattr(svc, "turn_recovery", None)
+    if recovery is not None:
+        await recovery.wait_scanned()
+    try:
+        await announce_restart_abandoned_children(
+            storage=get_session_storage(svc.session_manager) or svc.session_manager,
+            listener=listener,
+            max_age_ms=_RECOVERY_MAX_AGE_MS,
+            turn_recovery=recovery,
+        )
+    except Exception:  # noqa: BLE001 - boot carries on without it
+        log.warning("gateway.subagent_restart_announce_failed", exc_info=True)
+    try:
+        await reconcile_awaiting_wakes(
+            session_manager=svc.session_manager,
+            task_runtime=task_runtime,
+            turn_recovery=recovery,
+        )
+    except Exception:  # noqa: BLE001 - boot carries on without it
+        log.warning("gateway.subagent_wake_reconcile_failed", exc_info=True)
+
+
+def _task_runtime_max_nested_concurrency(config: GatewayConfig) -> int:
+    configured = getattr(config.task_runtime, "max_nested_concurrency", None)
+    if configured is None:
+        return _task_runtime_max_concurrency(config)
+    return int(configured)
+
+
+def _task_runtime_max_concurrent_children(config: GatewayConfig) -> int | None:
+    """``[subagents] max_concurrent_children``; ``0`` means no per-parent limit."""
+    subagents = getattr(config, "subagents", None)
+    return int(getattr(subagents, "max_concurrent_children", 0) or 0) or None
+
+
+def _task_runtime_cancel_grace_s(config: GatewayConfig) -> float:
+    return float(getattr(config.task_runtime, "turn_cancel_grace_seconds", 5.0))
+
+
+def _make_children_limit_resolver(
+    session_manager: Any,
+) -> Callable[[str], Awaitable[int | None]]:
+    """Resolve an agent's ``subagents.max_concurrent_children`` for its parent sessions."""
+
+    async def _resolve(parent_session_key: str) -> int | None:
+        from agentos.session.keys import parse_agent_id
+        from agentos.tools.builtin.sessions import _resolve_subagent_policy
+
+        policy = await _resolve_subagent_policy(session_manager, parse_agent_id(parent_session_key))
+        value = policy.get("max_concurrent_children")
+        return int(value) if isinstance(value, int) and value >= 1 else None
+
+    return _resolve
 
 
 def _task_runtime_max_pending_per_session(config: GatewayConfig) -> int:
@@ -1322,6 +1392,7 @@ class GatewayServer:
     _services: ServiceContainer | None = field(default=None, repr=False)
     _background_completion_manager: Any = field(default=None, repr=False)
     _subagent_wake_worker: Any = field(default=None, repr=False)
+    _wake_outbox_installed: bool = field(default=False, repr=False)
     # The process-wide pid lock, released explicitly before an in-place
     # restart (``atexit`` does not run across ``execve``).
     _pid_lock: Any = field(default=None, repr=False)
@@ -1531,6 +1602,17 @@ class GatewayServer:
                 await recovery.stop()
             except Exception:  # noqa: BLE001 - shutdown must not raise
                 log.debug("gateway.turn_recovery_stop_failed", exc_info=True)
+        # The wake worker stops before the runtime drains: retried against a
+        # runtime that admits nothing, every pass would only count failed
+        # attempts. Its outbox stays installed until after the drain, so a
+        # wake claimed by a turn that ends meanwhile is still recorded; what
+        # is pending is delivered by the next boot.
+        if self._subagent_wake_worker is not None:
+            try:
+                await self._subagent_wake_worker.stop()
+            except Exception:
+                log.debug("gateway.subagent_wake_worker_stop_failed", exc_info=True)
+            self._subagent_wake_worker = None
         # Drain in-flight turns FIRST so replies are not lost.
         # task_runtime.shutdown() waits for all running turns to complete before
         # returning; only then do we stop channel delivery.
@@ -1566,17 +1648,11 @@ class GatewayServer:
             await run_lifecycle_hooks(PRE_RESTART, config=config, reason=reason)
         await run_shutdown_hooks_once(config, reason)
 
-        if self._subagent_wake_worker is not None:
-            # Stop retrying wakes before the runtime drains; anything still
-            # pending stays in the outbox for the next boot.
-            try:
-                await self._subagent_wake_worker.stop()
-            except Exception:
-                log.debug("gateway.subagent_wake_worker_stop_failed", exc_info=True)
+        if self._wake_outbox_installed:
             from agentos.gateway.subagent_wakes import set_wake_outbox
 
             set_wake_outbox(None)
-            self._subagent_wake_worker = None
+            self._wake_outbox_installed = False
 
         if self._background_completion_manager is not None:
             try:
@@ -3037,6 +3113,7 @@ async def start_gateway_server(
     )
 
     subagent_wake_worker: SubagentWakeWorker | None = None
+    _wake_outbox: SubagentWakeOutbox | None = None
     _wake_storage = get_session_storage(svc.session_manager)
     if _wake_storage is not None and hasattr(_wake_storage, "record_subagent_wake"):
         _wake_outbox = SubagentWakeOutbox(_wake_storage)
@@ -3047,24 +3124,15 @@ async def start_gateway_server(
 
         subagent_wake_worker = SubagentWakeWorker(_wake_outbox, _deliver_pending_wake)
 
-    async def _children_limit_resolver(parent_session_key: str) -> int | None:
-        """An agent's ``subagents.max_concurrent_children`` for its parent sessions."""
-
-        from agentos.session.keys import parse_agent_id
-        from agentos.tools.builtin.sessions import _resolve_subagent_policy
-
-        policy = await _resolve_subagent_policy(
-            svc.session_manager, parse_agent_id(parent_session_key)
-        )
-        value = policy.get("max_concurrent_children")
-        return int(value) if isinstance(value, int) and value >= 1 else None
-
     background_completion_manager = BackgroundCompletionManager(
         session_manager=svc.session_manager,
         event_emitter=runtime_event_bridge.emit,
         channel_manager_ref=lambda: _cm_holder[0],
     )
     set_background_completion_manager(background_completion_manager)
+    if _wake_outbox is not None:
+        # A wake the outbox gives up on is the group's terminal failure.
+        _wake_outbox.set_drop_listener(background_completion_manager.emit_wake_dropped)
 
     async def _subagent_completion_listener(event: Any) -> None:
         from agentos.gateway.subagent_announce import announce_subagent_completion
@@ -3100,15 +3168,11 @@ async def start_gateway_server(
         subagent_reserved_slots=int(
             getattr(getattr(config, "subagents", None), "subagent_reserved_slots", 0)
         ),
-        max_concurrent_children=(
-            int(getattr(getattr(config, "subagents", None), "max_concurrent_children", 0) or 0)
-            or None
-        ),
-        children_limit_resolver=_children_limit_resolver,
+        max_concurrent_children=_task_runtime_max_concurrent_children(config),
+        max_nested_concurrency=_task_runtime_max_nested_concurrency(config),
+        children_limit_resolver=_make_children_limit_resolver(svc.session_manager),
         turn_hard_deadline_s=_task_runtime_turn_hard_deadline_s(config),
-        cancel_grace_s=float(
-            getattr(getattr(config, "task_runtime", None), "turn_cancel_grace_seconds", 5.0)
-        ),
+        cancel_grace_s=_task_runtime_cancel_grace_s(config),
         pending_overflow_policy=getattr(
             config.task_runtime, "pending_overflow_policy", "reject_newest"
         ),
@@ -3450,6 +3514,7 @@ async def start_gateway_server(
     server_handle._services = svc
     server_handle._background_completion_manager = background_completion_manager
     server_handle._subagent_wake_worker = subagent_wake_worker
+    server_handle._wake_outbox_installed = _wake_outbox is not None
     server_handle._pid_lock = _pid_lock
     server_handle.readiness = readiness
     server_handle._boot_tracker = boot_tracker
@@ -3606,15 +3671,13 @@ async def start_gateway_server(
             svc.turn_recovery.start()
 
         # Children a restart cut off were marked abandoned without an event;
-        # tell their parents now that channels and the runtime are up.
-        from agentos.gateway.subagent_announce import announce_restart_abandoned_children
-        from agentos.gateway.turn_recovery import MAX_AGE_MS as _RECOVERY_MAX_AGE_MS
-
+        # tell their parents now that channels and the runtime are up. Then
+        # wake the parents of groups that completed without a recorded wake.
         create_background_task(
-            announce_restart_abandoned_children(
-                storage=get_session_storage(svc.session_manager) or svc.session_manager,
+            _recover_subagent_wakes(
+                svc,
                 listener=_subagent_completion_listener,
-                max_age_ms=_RECOVERY_MAX_AGE_MS,
+                task_runtime=task_runtime,
             )
         )
         # Parent wakes a failure or a previous process left pending are

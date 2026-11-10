@@ -4,7 +4,6 @@ export const chat = defineNamespace('chat', {
   // Page chrome.
   srTitle: 'Chat',
   newChat: 'New chat',
-  newChatTitle: 'New chat ({shortcut})',
   sessionControls: 'Chat session controls',
   opening: 'Opening conversation…',
   jumpToLatest: 'Jump to latest',
@@ -19,6 +18,8 @@ export const chat = defineNamespace('chat', {
   runModesClose: 'Close run modes',
   attachFiles: 'Attach files',
   attachFileTitle: 'Attach a file',
+  attachOtherGateway:
+    'Files over 2 MB upload over HTTP, which reaches only the gateway that served this page.',
   messagePlaceholder: 'Send a message...',
   suggestionKey: 'Tab',
   suggestionKeyTitle: 'Press Tab to use the suggested prompt',
@@ -74,54 +75,6 @@ export const chat = defineNamespace('chat', {
 
   // Slash menu.
   slashLandmark: 'Slash commands',
-
-  // Session chip.
-  sessionLabel: 'session',
-  sessionSwitchAria: 'Switch chat session',
-  sessionActions: 'Chat actions',
-  sessionCopyKeyAria: 'Copy session key',
-  sessionCopyKey: 'Copy session key',
-  sessionResetAria: 'Reset session',
-  sessionReset: 'Reset session',
-  sessionExportAria: 'Export chat as Markdown',
-  sessionExport: 'Export Markdown',
-  sessionRenameAria: 'Rename session',
-  sessionRename: 'Rename session',
-  sessionRenameInput: 'Session name',
-  sessionRenamePlaceholder: 'Add a name',
-  sessionRenameHint: 'Enter to save · Esc to cancel',
-  sessionRenamed: 'Session renamed',
-  sessionRenameCleared: 'Session name cleared',
-  sessionRenameFailed: 'Rename failed: {message}',
-  sessionMoveToProjectAria: 'Move this session to a project',
-  sessionMoveToProject: 'Move to project',
-  sessionMoveNoProject: 'No project',
-  sessionMoved: 'Session moved to project',
-  sessionMoveDetached: 'Session removed from project',
-  sessionMoveFailed: 'Move failed: {message}',
-  sessionSwitchDialog: 'Switch session',
-  sessionKeyPlaceholder: 'Enter session key...',
-  sessionKeyLabel: 'Session key',
-  sessionListUnavailable: 'Session list unavailable. Enter a key above.',
-  sessionSwitchTyped: 'Switch to typed session',
-  sessionSearchPlaceholder: 'Search name or key…',
-  sessionSearchLabel: 'Search sessions by name or key',
-  sessionLoading: 'Loading…',
-  sessionNoMatches: 'No matches.',
-  sessionNoSessions: 'No sessions found.',
-  sessionCurrent: 'current',
-
-  // Session groups — the SessionGroup union stays a stable token set (it is a
-  // type and a bucket key); only the rendered label is translated.
-  groupWebChat: 'Web chat',
-  groupCli: 'CLI',
-  groupSubagents: 'Sub-agents',
-  groupAgents: 'Agents',
-  groupSessions: 'Sessions',
-  groupOther: 'Other',
-
-  // Projects integration.
-  projectBadgeTitle: 'This session is in project "{name}" and shares its knowledge.',
 
   // Run status labels (logic.ts).
   runQueued: 'Queued',

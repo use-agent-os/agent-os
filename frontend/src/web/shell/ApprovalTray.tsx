@@ -1,6 +1,7 @@
-import { ChevronDown, ChevronUp, ShieldAlert } from 'lucide-react'
+import { ChevronDown, ChevronUp, Copy, ShieldAlert } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router'
+import { toast } from 'sonner'
 import { t, tPlural } from '@/i18n'
 import '@/i18n/en/webShell'
 import {
@@ -13,7 +14,9 @@ import {
   type Approval,
   type ApprovalAction,
 } from '@/services/approval-monitor'
+import { copyWithFallback } from '@/lib/clipboard'
 import { gate, requireConnection } from '@/lib/disabled-reason'
+import { cn } from '@/lib/utils'
 import { Button } from '@/web/components/ui/button'
 import { useDisplayedConnection } from './use-displayed-connection'
 import { pathToSessionKey, sessionKeyToPath } from './session-url'
@@ -29,14 +32,32 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-export function ApprovalCard({ item }: { item: Approval }) {
+/**
+ * One pending approval with its decisions. `highlighted` marks the request a
+ * deep link points at (a push notification's `?approval=<id>`): the card is
+ * scrolled into view, focused and outlined.
+ */
+export function ApprovalCard({
+  item,
+  highlighted = false,
+}: {
+  item: Approval
+  highlighted?: boolean
+}) {
   const connection = useDisplayedConnection()
   const offline = gate(requireConnection(connection))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const ref = useRef<HTMLLIElement>(null)
   const command = approvalCommand(item)
   const detail = approvalDetail(item)
   const tool = item.toolName || item.title || item.namespace || 'exec'
+
+  useEffect(() => {
+    if (!highlighted) return
+    ref.current?.scrollIntoView({ block: 'center' })
+    ref.current?.focus({ preventScroll: true })
+  }, [highlighted])
 
   const decide = async (action: ApprovalAction) => {
     setBusy(true)
@@ -50,11 +71,30 @@ export function ApprovalCard({ item }: { item: Approval }) {
     }
   }
 
+  const copy = () =>
+    void copyWithFallback(command)
+      .then(() => toast.success(t('webShell.trayCopied')))
+      .catch(() => toast.error(t('webShell.trayCopyFailed')))
+
   return (
-    <li className="flex flex-col gap-2 rounded-lg border border-border bg-surface-1 p-3">
+    <li
+      ref={ref}
+      tabIndex={highlighted ? -1 : undefined}
+      data-approval-id={item.id}
+      data-highlighted={highlighted ? '' : undefined}
+      className={cn(
+        'flex flex-col gap-2 rounded-lg border border-border bg-surface-1 p-3',
+        highlighted && 'border-accent ring-2 ring-accent',
+      )}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="font-medium">{tool}</p>
+          {item.agent ? (
+            <p className="truncate text-small text-text-muted">
+              {t('webShell.trayAgent', { agent: item.agent })}
+            </p>
+          ) : null}
           {item.sessionKey ? (
             <p className="truncate text-small text-text-muted">
               {t('webShell.traySession', { session: item.sessionKey })}
@@ -71,12 +111,25 @@ export function ApprovalCard({ item }: { item: Approval }) {
         ) : null}
       </div>
       {command || detail ? (
-        <pre
-          tabIndex={0}
-          className="scroll-contained max-h-28 rounded bg-surface-0 p-2 text-small whitespace-pre-wrap"
-        >
-          {command || detail}
-        </pre>
+        <div className="flex items-start gap-1">
+          <pre
+            tabIndex={0}
+            className="scroll-contained max-h-28 min-w-0 flex-1 rounded bg-surface-0 p-2 text-small whitespace-pre-wrap"
+          >
+            {command || detail}
+          </pre>
+          {command ? (
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label={t('webShell.trayCopyCommand')}
+              title={t('webShell.trayCopyCommand')}
+              onClick={copy}
+            >
+              <Copy />
+            </Button>
+          ) : null}
+        </div>
       ) : null}
       {error ? (
         <p role="alert" className="text-small text-danger">

@@ -86,6 +86,18 @@ export const COMPOSER_BINDINGS: readonly Binding[] = [
     category: 'composer',
     documentationOnly: true,
   },
+  {
+    combo: 'alt+arrowup',
+    descriptionKey: 'webPalette.composerRecoverQueued',
+    category: 'composer',
+    documentationOnly: true,
+  },
+  {
+    combo: 'tab',
+    descriptionKey: 'webPalette.composerSuggestion',
+    category: 'composer',
+    documentationOnly: true,
+  },
 ]
 
 export const ALL_BINDINGS: readonly Binding[] = [

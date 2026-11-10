@@ -792,6 +792,10 @@ def upsert_llm_provider(
         max_tokens=saved_max_tokens,
         thinking=saved_thinking,
         provider_routing=effective_provider_routing,
+        # Install-wide LLM tuning, not part of any provider's profile: a
+        # provider form does not show it, so it must not reset to defaults.
+        circuit_breaker=config.llm.circuit_breaker.model_copy(deep=True),
+        repetition_guard=config.llm.repetition_guard.model_copy(deep=True),
     )
     if restored_profile is not None:
         new_cfg.agentos_router = _apply_provider_router_profile(

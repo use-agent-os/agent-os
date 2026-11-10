@@ -14,12 +14,13 @@ import {
   X,
 } from 'lucide-react'
 import { useId, useMemo, useState, type ReactNode } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { Link, useHref, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import { formatNumber, t, tPlural } from '@/i18n'
 import '@/i18n/en/webPagesWork'
 import { blockedBecause, gate, requireConnection, type Gate } from '@/lib/disabled-reason'
+import { usePendingQuestions } from '@/lib/pending-questions'
 import { cn } from '@/lib/utils'
 import { filterSessionsByProject } from '@/views/projects/logic'
 import {
@@ -31,7 +32,10 @@ import {
   relTimeLabel,
   runStatusBadge,
   sessionName,
+  sessionRunStatus,
   sessionStats,
+  sessionStatusChip,
+  sessionVisualStatus,
   sortSessions,
   type DeleteResult,
   type SortColumn,
@@ -80,9 +84,11 @@ import {
   sessionTitle,
   type SessionRow,
 } from '@/web/shell/session-list'
+import { openInNewTab } from '@/web/shell/SessionList'
 import { sessionKeyToPath } from '@/web/shell/session-url'
 import type { RpcState } from '@/lib/ws-rpc'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
+import { useSessionsTotal, type SessionsTotal } from './sessions-total'
 
 // `/sessions` (task 8.2): every session in one table, on views/sessions/logic.
 // Search, agent and project filters, stat tiles, inline rename, bulk delete,
@@ -160,6 +166,7 @@ export function SessionsPage() {
   }, [rows, agentFilter, projectFilter, search, sortCol, sortAsc])
   const visible = filtered.slice(0, limit)
   const stats = useMemo(() => sessionStats(rows), [rows])
+  const totals = useSessionsTotal(sessions.data?.length ?? 0)
 
   // Selection only ever holds keys that are still listed: a row deleted
   // elsewhere drops out instead of lingering in the bulk count.
@@ -204,6 +211,11 @@ export function SessionsPage() {
     setNotice(null)
     try {
       const res = await rpc.call<DeleteResult>('sessions.delete', buildDeleteParams(keys))
+      // A question asked in a deleted session can no longer be answered there.
+      const gone = Array.isArray(res?.deleted) ? res.deleted : []
+      for (const key of gone) {
+        if (typeof key === 'string') usePendingQuestions.getState().clearSession(key)
+      }
       if (keys.length === 1) {
         const outcome = parseSingleDeleteResult(res, keys[0]!)
         if (outcome.ok) toast.success(t('webPagesWork.sessionsDeleted'))
@@ -288,7 +300,7 @@ export function SessionsPage() {
   } else {
     body = (
       <>
-        <StatTiles stats={stats} />
+        <StatTiles stats={stats} totals={totals} />
         <div className="flex flex-wrap items-end gap-2">
           <label className="relative block min-w-0 flex-[2_1_14rem]">
             <span className="sr-only">{t('webPagesWork.sessionsSearch')}</span>
@@ -565,23 +577,99 @@ export function SessionsPage() {
 
 // ── Stat tiles ───────────────────────────────────────────────────────────────
 
-function StatTiles({ stats }: { stats: ReturnType<typeof sessionStats> }) {
-  const tiles = [
-    { label: t('webPagesWork.statSessions'), value: stats.total },
-    { label: t('webPagesWork.statRunning'), value: stats.activeRuns },
-    { label: t('webPagesWork.statFailed'), value: stats.failedOrTimedOut },
-    { label: t('webPagesWork.statMessages'), value: stats.totalMessages },
-    { label: t('webPagesWork.statAgents'), value: stats.agents },
+/** The count of stored sessions: the true total, or "500+" when the gateway did not say. */
+function sessionsCountText(totals: SessionsTotal): string {
+  if (totals.total !== null) return formatNumber(totals.total)
+  return t('webPagesWork.atLeast', { count: formatNumber(totals.listed) })
+}
+
+function StatTiles({
+  stats,
+  totals,
+}: {
+  stats: ReturnType<typeof sessionStats>
+  totals: SessionsTotal
+}) {
+  const tiles: { label: string; value: string; hint?: string }[] = [
+    {
+      label: t('webPagesWork.statSessions'),
+      value: sessionsCountText(totals),
+      hint: t('webPagesWork.statSessionsHint', {
+        open: stats.lifecycleOpen,
+        done: stats.done,
+        failed: stats.failedOrTimedOut,
+        aborted: stats.aborted,
+      }),
+    },
+    { label: t('webPagesWork.statRunning'), value: formatNumber(stats.activeRuns) },
+    { label: t('webPagesWork.statFailed'), value: formatNumber(stats.failedOrTimedOut) },
+    { label: t('webPagesWork.statMessages'), value: formatNumber(stats.totalMessages) },
+    { label: t('webPagesWork.statAgents'), value: formatNumber(stats.agents) },
   ]
   return (
-    <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-      {tiles.map((tile) => (
-        <div key={tile.label} className="rounded-lg border border-border bg-surface-1 px-3 py-2">
-          <dt className="text-small text-text-muted">{tile.label}</dt>
-          <dd className="text-lg font-semibold tabular-nums">{formatNumber(tile.value)}</dd>
-        </div>
-      ))}
-    </dl>
+    <div className="flex flex-col gap-2">
+      {totals.truncated ? (
+        <p role="note" className="rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-small">
+          {totals.total !== null
+            ? t('webPagesWork.sessionsTruncated', {
+                shown: formatNumber(totals.listed),
+                total: formatNumber(totals.total),
+              })
+            : t('webPagesWork.sessionsTruncatedUnknown', { shown: formatNumber(totals.listed) })}
+        </p>
+      ) : null}
+      <p role="status" className="flex items-center gap-2 text-small text-text-muted">
+        <span
+          aria-hidden
+          className={cn(
+            'size-2 rounded-full',
+            stats.activeRuns > 0 ? 'animate-pulse bg-ok' : 'bg-text-muted/50',
+          )}
+        />
+        {stats.activeRuns > 0
+          ? tPlural('webPagesWork.executingNow', stats.activeRuns)
+          : t('webPagesWork.executingNone')}
+      </p>
+      <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        {tiles.map((tile) => (
+          <div
+            key={tile.label}
+            className="min-w-0 rounded-lg border border-border bg-surface-1 px-3 py-2"
+          >
+            <dt className="text-small text-text-muted">{tile.label}</dt>
+            <dd className="text-lg font-semibold tabular-nums">{tile.value}</dd>
+            {tile.hint ? (
+              <dd className="text-small break-words text-text-muted">{tile.hint}</dd>
+            ) : null}
+          </div>
+        ))}
+      </dl>
+    </div>
+  )
+}
+
+const LIFECYCLE_LABEL: Record<string, () => string> = {
+  running: () => t('webPagesWork.lifecycleOpen'),
+  done: () => t('webPagesWork.lifecycleDone'),
+  failed: () => t('webPagesWork.lifecycleFailed'),
+  killed: () => t('webPagesWork.lifecycleKilled'),
+  timeout: () => t('webPagesWork.lifecycleTimeout'),
+}
+
+/** The lifecycle chip (open / completed / failed / aborted / timed out) of a row. */
+function LifecycleChip({ row }: { row: SessionRow }) {
+  const visual = sessionVisualStatus(row)
+  const label = LIFECYCLE_LABEL[visual]?.() ?? t('webPagesWork.lifecycleUnknown')
+  return (
+    <span
+      data-lifecycle={visual}
+      className={cn(
+        'inline-flex items-center rounded-full border border-current/40 px-2 text-small whitespace-nowrap',
+        TONE_CLASS[sessionStatusChip(visual)],
+      )}
+    >
+      {label}
+    </span>
   )
 }
 
@@ -649,6 +737,7 @@ function SessionTableRow({
   const rpc = useRpc()
   const queryClient = useQueryClient()
   const title = sessionTitle(row)
+  const tabHref = useHref(sessionKeyToPath(row.key))
   const [renaming, setRenaming] = useState(false)
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -659,6 +748,9 @@ function SessionTableRow({
   const subline = agentSubline(agentId, agentsById, agentsLoaded)
   const project = sessionProject(row)
   const badge = runStatusBadge(row)
+  const runStatus = sessionRunStatus(row)
+  const executing = runStatus === 'queued' || runStatus === 'running'
+  const open = sessionVisualStatus(row) === 'running'
 
   const startRename = () => {
     setDraft(sessionName(row))
@@ -785,13 +877,16 @@ function SessionTableRow({
         )}
       </td>
       <td className="px-3 py-2">
-        {badge ? (
-          <span className={cn('text-small font-medium', TONE_CLASS[badge.tone])}>
-            {badge.label}
-          </span>
-        ) : (
-          <span className="text-small text-text-muted">{t('webPagesWork.statusIdle')}</span>
-        )}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <LifecycleChip row={row} />
+          {executing && badge ? (
+            <span className={cn('text-small font-medium', TONE_CLASS[badge.tone])}>
+              {badge.label}
+            </span>
+          ) : open ? (
+            <span className="text-small text-text-muted">{t('webPagesWork.statusIdle')}</span>
+          ) : null}
+        </div>
       </td>
       <td className="px-3 py-2 tabular-nums">{formatNumber(Number(row.message_count) || 0)}</td>
       <td className="px-3 py-2 whitespace-nowrap text-text-muted">
@@ -812,6 +907,9 @@ function SessionTableRow({
             <DropdownMenuContent align="end">
               <DropdownMenuItem asChild>
                 <Link to={sessionKeyToPath(row.key)}>{t('webPagesWork.openChat')}</Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => openInNewTab(tabHref)}>
+                {t('webPagesWork.openNewTab')}
               </DropdownMenuItem>
               <DropdownMenuItem disabled={act.disabled} onSelect={startRename}>
                 {t('webPagesWork.rename')}

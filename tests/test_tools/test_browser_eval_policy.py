@@ -5,14 +5,39 @@ Pure functions — no engine, no browser.
 
 from __future__ import annotations
 
+import ipaddress
+import socket
+from typing import Any
+
 import pytest
 
+from agentos.tools import ssrf
 from agentos.tools.browser_eval_policy import (
     enforce_eval_policy,
     expression_targets_private_url,
     redact_browser_output,
     risky_eval_reason,
 )
+
+# Names the stub resolver answers; every other name fails like NXDOMAIN. IP
+# literals resolve to themselves, as the real resolver does without a query.
+_FAKE_DNS = {
+    "example.com": "93.184.215.14",
+    "intranet.test": "10.0.0.5",
+}
+
+
+def _fake_getaddrinfo(host: Any, port: Any, *args: Any, **kwargs: Any) -> list[Any]:
+    name = str(host).strip("[]").lower().rstrip(".")
+    try:
+        addr = ipaddress.ip_address(name)
+    except ValueError:
+        answer = _FAKE_DNS.get(name)
+        if answer is None:
+            raise socket.gaierror(socket.EAI_NONAME, "Name or service not known") from None
+        addr = ipaddress.ip_address(answer)
+    family = socket.AF_INET6 if addr.version == 6 else socket.AF_INET
+    return [(family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (str(addr), port or 0))]
 
 
 class TestDenylist:
@@ -82,6 +107,13 @@ class TestDenylist:
 
 
 class TestUrlPreScan:
+    @pytest.fixture(autouse=True)
+    def _offline_resolver(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The pre-scan resolves hostnames through ``agentos.tools.ssrf``. A real
+        # resolver makes these tests depend on the network, and some resolvers
+        # answer even for ``.invalid``, so name resolution is stubbed.
+        monkeypatch.setattr(ssrf.socket, "getaddrinfo", _fake_getaddrinfo)
+
     def test_flags_metadata_endpoint(self) -> None:
         blocked = expression_targets_private_url("fetch('http://169.254.169.254/latest/meta-data')")
         assert blocked is not None
@@ -147,6 +179,13 @@ class TestUrlPreScan:
         # derived candidate only counts once it resolves to a private or
         # metadata address. `.invalid` never resolves (RFC 2606).
         assert expression_targets_private_url("fetch(base + '//not-a-host.invalid/x')") is None
+
+    def test_derived_host_resolving_to_private_is_refused(self) -> None:
+        # The other half of the derived-candidate rule: a protocol-relative
+        # literal whose name does resolve to a private address is refused.
+        blocked = expression_targets_private_url("fetch('//intranet.test/admin')")
+        assert blocked is not None
+        assert "intranet.test" in blocked
 
     def test_unresolvable_plain_literal_is_still_refused(self) -> None:
         # Deliberate asymmetry: a URL the model wrote out in full is not a

@@ -112,32 +112,46 @@ function escapeHtml(text: string): string {
 // Code spans win at the same position, so `$` inside code is never math.
 const MATH_SCAN =
   /(```[\s\S]*?```|`[^`\n]+?`|\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([^)\n]+?\\\)|\$(?![\s\d])(?:\\\$|[^$\n])+?(?<![\s])\$)/g
-const MATH_SENTINEL = /M(\d+)/g
 
-function stashMath(text: string): { text: string; stash: string[] } {
+/**
+ * A per-render token wrapped in private-use characters: the stash markers
+ * can neither collide with ordinary text ("M4") nor be forged by it.
+ */
+function renderNonce(): string {
+  return Math.random().toString(36).slice(2, 10)
+}
+
+function stashMath(text: string, nonce: string): { text: string; stash: string[] } {
   const stash: string[] = []
   const out = text.replace(MATH_SCAN, (match) => {
     if (match.startsWith('`')) return match
     stash.push(match)
-    return `M${stash.length - 1}`
+    return `\uE000${nonce}:${stash.length - 1}\uE001`
   })
   return { text: out, stash }
 }
 
-function restoreMath(html: string, stash: string[]): string {
+function restoreMath(html: string, stash: string[], nonce: string): string {
   if (stash.length === 0) return html
-  return html.replace(MATH_SENTINEL, (_m, i: string) => {
+  const marker = new RegExp(`\uE000${nonce}:(\\d+)\uE001`, 'g')
+  return html.replace(marker, (whole, i: string) => {
     const raw = stash[Number(i)]
-    if (raw === undefined) return ''
+    if (raw === undefined) return whole
     return `<code class="math-raw" title="${escapeHtml(t('webChat.mathTitle'))}">${escapeHtml(raw)}</code>`
   })
 }
 
-/** `![alt](agentos-qr:payload)` -> a locally drawn QR `data:` image. */
+/**
+ * `![alt](agentos-qr:payload)` -> a QR drawn locally. Its `data:image/svg+xml`
+ * source would be stripped like any model-supplied SVG, so the Markdown
+ * carries an in-page reference (`#qr-<nonce>-<n>`) and the source is set
+ * after sanitizing, from this list only.
+ */
 const QR_IMAGE = /!\[([^\]\n]*)\]\(\s*agentos-qr:([^)\s]+)\s*\)/g
-function inlineQrImages(text: string): string {
-  if (!text.includes('agentos-qr:')) return text
-  return text.replace(QR_IMAGE, (whole, alt: string, payload: string) => {
+function stashQrImages(text: string, nonce: string): { text: string; urls: string[] } {
+  const urls: string[] = []
+  if (!text.includes('agentos-qr:')) return { text, urls }
+  const out = text.replace(QR_IMAGE, (whole, alt: string, payload: string) => {
     let data = payload
     try {
       data = decodeURIComponent(payload)
@@ -146,11 +160,28 @@ function inlineQrImages(text: string): string {
     }
     if (!data || data.length > 512) return whole
     try {
-      return `![${alt}](${qrDataUrl(data)})`
+      urls.push(qrDataUrl(data))
     } catch {
       return whole
     }
+    return `![${alt}](${qrPrefix(nonce)}${urls.length - 1})`
   })
+  return { text: out, urls }
+}
+
+function qrPrefix(nonce: string): string {
+  return `#qr-${nonce}-`
+}
+
+function placeQrImages(root: DocumentFragment, urls: string[], nonce: string): void {
+  const prefix = qrPrefix(nonce)
+  for (const image of root.querySelectorAll('img[src]')) {
+    const src = image.getAttribute('src') || ''
+    if (!src.startsWith(prefix)) continue
+    const url = urls[Number(src.slice(prefix.length))]
+    if (url) image.setAttribute('src', url)
+    else image.removeAttribute('src')
+  }
 }
 
 // Tool-call tags the model wrote as text stay readable instead of vanishing.
@@ -201,51 +232,103 @@ function wrapTables(root: DocumentFragment): void {
   }
 }
 
-/** Remote images become a link: loading them leaks the conversation to the host. */
-function linkRemoteImages(root: DocumentFragment): void {
-  for (const image of root.querySelectorAll('img[src]')) {
-    const src = image.getAttribute('src') || ''
-    // DOMPurify lets any data: URI through on <img>; only raster images may stay.
-    if (/^data:/i.test(src) && !/^data:image\/(?:png|gif|jpeg|webp);/i.test(src)) {
+/** Only inline raster `data:` images and local `blob:` objects load. */
+const LOCAL_IMAGE = /^(?:data:image\/(?:png|gif|jpeg|webp)[;,]|blob:)/i
+
+function resolve(url: string, origin: string): URL | null {
+  try {
+    return new URL(url, origin)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Every other image becomes a link: loading it would send a request the
+ * model chose (to another host, carrying conversation data, or to the
+ * gateway itself) without the reader asking. The source is resolved the way
+ * the browser would, so protocol-relative (`//host`) and backslash forms
+ * cannot slip past a prefix check.
+ */
+function linkRemoteImages(root: DocumentFragment, origin: string, qrPrefix: string): void {
+  for (const image of root.querySelectorAll('img')) {
+    const src = (image.getAttribute('src') || '').trim()
+    if (!src) continue
+    if (LOCAL_IMAGE.test(src) || src.startsWith(qrPrefix)) continue
+    const url = resolve(src, origin)
+    if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:')) {
       image.removeAttribute('src')
       continue
-    }
-    if (!/^https?:/i.test(src)) continue
-    let host = src
-    try {
-      host = new URL(src).host
-    } catch {
-      /* show the raw src */
     }
     const note = root.ownerDocument!.createElement('span')
     note.className = 'ext-image'
     note.title = t('webChat.externalImageTitle')
     note.append(`${t('webChat.externalImage')} `)
     const link = root.ownerDocument!.createElement('a')
-    link.setAttribute('href', src)
-    link.textContent = image.getAttribute('alt') || host
+    link.setAttribute('href', url.href)
+    link.textContent = image.getAttribute('alt') || url.host
     note.appendChild(link)
     image.replaceWith(note)
   }
 }
 
 /**
+ * An image button (`<input type=image>`) is an image: it becomes an `<img>`
+ * with its source and text, so the image rule below links it like any other.
+ */
+function imageInputsToImages(root: DocumentFragment): void {
+  for (const input of root.querySelectorAll('input')) {
+    if ((input.getAttribute('type') || '').trim().toLowerCase() !== 'image') continue
+    const image = root.ownerDocument!.createElement('img')
+    const src = input.getAttribute('src')
+    if (src) image.setAttribute('src', src)
+    image.setAttribute('alt', input.getAttribute('alt') || input.getAttribute('value') || '')
+    input.replaceWith(image)
+  }
+}
+
+/**
+ * The only input Markdown produces is a task-list checkbox: any other kind
+ * is turned into one, and none is editable.
+ */
+function lockInputs(root: DocumentFragment): void {
+  for (const input of root.querySelectorAll('input')) {
+    const checked = input.hasAttribute('checked')
+    for (const name of input.getAttributeNames()) input.removeAttribute(name)
+    input.setAttribute('type', 'checkbox')
+    input.setAttribute('disabled', '')
+    if (checked) input.setAttribute('checked', '')
+  }
+}
+
+/** Classes the renderer itself writes; anything else came from the model. */
+const OWN_CLASS =
+  /^(?:code-block|code-block-header|copy-btn|hljs|hljs-[\w-]+|[a-z]+_|language-[\w+-]+|math-raw|table-scroll|ext-image)$/
+
+/**
+ * Model-written classes go: with the console's utility classes a reply could
+ * otherwise lay a fake sign-in panel over the whole page.
+ */
+function stripForeignClasses(root: DocumentFragment): void {
+  for (const el of root.querySelectorAll('[class]')) {
+    const kept = (el.getAttribute('class') || '').split(/\s+/).filter((c) => OWN_CLASS.test(c))
+    if (kept.length) el.setAttribute('class', kept.join(' '))
+    else el.removeAttribute('class')
+  }
+}
+
+/**
  * Links to another origin open in a new tab with noopener/noreferrer; any
- * `target` the model chose itself is removed.
+ * `target` the model chose itself is removed. Links are classified after
+ * resolving them, so `//host` counts as the other host it is.
  */
 function routeLinks(root: DocumentFragment, origin: string): void {
   for (const anchor of root.querySelectorAll('a[href]')) {
     anchor.removeAttribute('target')
     anchor.removeAttribute('rel')
-    const href = anchor.getAttribute('href') || ''
-    if (!/^https?:/i.test(href)) continue
-    let external = true
-    try {
-      external = new URL(href).origin !== origin
-    } catch {
-      /* unparsable: treat as external */
-    }
-    if (!external) continue
+    const url = resolve(anchor.getAttribute('href') || '', origin)
+    if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:')) continue
+    if (url.origin === origin) continue
     anchor.setAttribute('target', '_blank')
     anchor.setAttribute('rel', 'noopener noreferrer')
   }
@@ -254,22 +337,34 @@ function routeLinks(root: DocumentFragment, origin: string): void {
 /** Render untrusted Markdown to sanitized HTML. */
 export function renderMarkdown(text: string, origin: string = window.location.origin): string {
   if (!text) return ''
+  const nonce = renderNonce()
   let html: string
   let stash: string[] = []
+  let qr: string[] = []
   try {
-    const stashed = stashMath(inlineQrImages(text))
+    const withQr = stashQrImages(text, nonce)
+    qr = withQr.urls
+    const stashed = stashMath(withQr.text, nonce)
     stash = stashed.stash
     html = String(marked.parse(stashed.text, { async: false }))
   } catch {
     html = `<p>${escapeHtml(text).replace(/\n/g, '<br>')}</p>`
   }
   const template = document.createElement('template')
-  template.innerHTML = String(DOMPurify.sanitize(restoreMath(html, stash), PURIFY))
-  wrapTables(template.content)
-  linkRemoteImages(template.content)
+  template.innerHTML = String(DOMPurify.sanitize(html, PURIFY))
+  stripForeignClasses(template.content)
+  imageInputsToImages(template.content)
+  lockInputs(template.content)
+  linkRemoteImages(template.content, origin, qrPrefix(nonce))
   routeLinks(template.content, origin)
+  // Renderer markup is added only now, past the class filter.
+  template.innerHTML = restoreMath(template.innerHTML, stash, nonce)
+  wrapTables(template.content)
   // The post-passes only add controlled markup; sanitize once more last.
-  return String(DOMPurify.sanitize(template.innerHTML, PURIFY))
+  template.innerHTML = String(DOMPurify.sanitize(template.innerHTML, PURIFY))
+  // Drawn here, not by the model: set after the last sanitize.
+  placeQrImages(template.content, qr, nonce)
+  return template.innerHTML
 }
 
 async function copyText(text: string): Promise<void> {

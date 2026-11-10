@@ -40,7 +40,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 import structlog
 
@@ -492,7 +492,8 @@ def approval_payload(
         "namespace": entry.namespace,
         "title": title,
         "summary": _summary(entry),
-        "url": f"{base}/approvals?approval={entry.approval_id}",
+        # The Inbox lists every pending approval and scrolls to this one.
+        "url": f"{base}/inbox?approval={quote(entry.approval_id, safe='')}",
         "tag": approval_tag(entry.approval_id),
         "state": "resolved" if resolved else "pending",
     }

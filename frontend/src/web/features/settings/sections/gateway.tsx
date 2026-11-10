@@ -1,14 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
-import { Eye, EyeOff, Loader2, Power, RefreshCw } from 'lucide-react'
+import { Eye, EyeOff, Loader2, Power, RefreshCw, Unplug } from 'lucide-react'
 import { useId, useState, type FormEvent } from 'react'
 import { useBootstrap, useRpc } from '@/app/providers'
 import { formatNumber, t } from '@/i18n'
+import '@/i18n/en/webConnection'
 import '@/i18n/en/webSetSystem'
 import { resolveWsUrl } from '@/lib/bootstrap'
-import { readStoredWsUrl, storeToken, storeWsUrl } from '@/lib/credentials'
+import { readStoredWsUrl } from '@/lib/credentials'
 import { gate, requireConnection } from '@/lib/disabled-reason'
-import { useRuntimeSignals } from '@/lib/runtime-signals'
 import type { RpcState } from '@/lib/ws-rpc'
+import { useConnection } from '@/stores/connection'
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -19,6 +20,7 @@ import {
   AlertDialogTitle,
 } from '@/web/components/ui/alert-dialog'
 import { Button } from '@/web/components/ui/button'
+import { connectGateway, useConnectAttempt } from '@/web/shell/connection-gate'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 import { useRegisterFields, useReveal } from '../fields'
 
@@ -65,7 +67,8 @@ function ConnectionDetails({ url }: { url: string }) {
   const bootstrap = useBootstrap()
   const connection = useDisplayedConnection()
   const status = useQuery({
-    queryKey: ['status'],
+    // Per address: after a switch the details describe the new gateway.
+    queryKey: ['status', url],
     queryFn: () => rpc.call<GatewayStatus>('status'),
     enabled: connection === 'connected',
     retry: false,
@@ -103,26 +106,49 @@ function ConnectionDetails({ url }: { url: string }) {
   )
 }
 
-/** New token (and optionally a new address); stored for this tab, then reconnect. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
+
+/**
+ * New token and/or a new address: the token is stored for this tab at once,
+ * the address only once that gateway answers. Without token auth on this
+ * gateway the token is optional, so the address alone can be changed.
+ */
 function Credentials({ url: currentUrl, defaultUrl }: { url: string; defaultUrl: string }) {
   const rpc = useRpc()
+  const bootstrap = useBootstrap()
   const tokenId = useId()
   const urlId = useId()
   const [token, setToken] = useState('')
   const [url, setUrl] = useState(currentUrl)
   const [shown, toggleShown] = useReveal()
-  const [sent, setSent] = useState(false)
+  const [sent, setSent] = useState<string | null>(null)
+  const attemptUrl = useConnectAttempt((s) => s.url)
+  const unreachable = useConnectAttempt((s) => s.unreachable)
+  const connection = useConnection((s) => s.state)
+  const tokenRequired = bootstrap.auth_mode === 'token'
+  const failed = sent !== null && attemptUrl === sent && unreachable
+  // The attempt is over once that gateway answers (connectGateway forgets
+  // its url on the handshake).
+  const joined = sent !== null && attemptUrl !== sent && connection === 'connected'
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault()
-    if (!token.trim()) return
+    if (tokenRequired && !token.trim()) return
     const target = url.trim() || defaultUrl
-    storeToken(token.trim())
-    storeWsUrl(target === defaultUrl ? null : target)
-    useRuntimeSignals.setState({ handshake: null })
-    rpc.connect(target, token.trim())
+    connectGateway(rpc, {
+      url: target,
+      token: token.trim() || null,
+      defaultUrl,
+      holdScreen: false,
+    })
     setToken('')
-    setSent(true)
+    setSent(target)
   }
 
   return (
@@ -136,6 +162,7 @@ function Credentials({ url: currentUrl, defaultUrl }: { url: string; defaultUrl:
         </label>
         <p id={`${tokenId}-help`} className="text-small text-text-muted">
           {t('webSetSystem.tokenHelp')}
+          {tokenRequired ? null : ` ${t('webConnection.settingsTokenOptional')}`}
         </p>
         <div className="flex max-w-xl items-center gap-2">
           <input
@@ -146,7 +173,7 @@ function Credentials({ url: currentUrl, defaultUrl }: { url: string; defaultUrl:
             value={token}
             onChange={(e) => {
               setToken(e.target.value)
-              setSent(false)
+              setSent(null)
             }}
             className={inputClass}
           />
@@ -177,13 +204,21 @@ function Credentials({ url: currentUrl, defaultUrl }: { url: string; defaultUrl:
         />
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="submit" variant="primary" disabled={!token.trim()}>
+        <Button type="submit" variant="primary" disabled={tokenRequired && !token.trim()}>
           {t('webSetSystem.connect')}
         </Button>
-        {!token.trim() && !sent ? (
+        {tokenRequired && !token.trim() && sent === null ? (
           <span className="text-small text-text-muted">{t('webSetSystem.connectNeedsToken')}</span>
         ) : null}
-        {sent ? (
+        {joined ? (
+          <span role="status" className="text-small text-text-muted">
+            {t('webSetSystem.connectDone', { host: hostOf(sent) })}
+          </span>
+        ) : failed ? (
+          <span role="alert" className="text-small text-danger">
+            {t('webConnection.settingsUnreachable', { host: hostOf(sent) })}
+          </span>
+        ) : sent !== null ? (
           <span role="status" className="text-small text-text-muted">
             {t('webSetSystem.connectSent')}
           </span>
@@ -196,6 +231,7 @@ function Credentials({ url: currentUrl, defaultUrl }: { url: string; defaultUrl:
 function Actions() {
   const rpc = useRpc()
   const connection = useDisplayedConnection()
+  const offline = useConnection((s) => s.state === 'disconnected')
   const [confirm, setConfirm] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
@@ -204,6 +240,12 @@ function Actions() {
   const reconnect = () => {
     setMessage({ tone: 'ok', text: t('webSetSystem.reconnecting') })
     rpc.reconnect({ force: true })
+  }
+
+  // Stays down until Reconnect (or a reload): the client stops retrying.
+  const disconnect = () => {
+    rpc.disconnect()
+    setMessage({ tone: 'ok', text: t('webConnection.disconnected') })
   }
 
   const restart = async () => {
@@ -235,6 +277,10 @@ function Actions() {
         <Button variant="outline" onClick={reconnect}>
           <RefreshCw aria-hidden />
           {t('webSetSystem.reconnect')}
+        </Button>
+        <Button variant="outline" disabled={offline} onClick={disconnect}>
+          <Unplug aria-hidden />
+          {t('webConnection.disconnect')}
         </Button>
         <Button
           variant="outline"
@@ -280,9 +326,14 @@ function Actions() {
 }
 
 export function GatewaySection() {
+  const rpc = useRpc()
   const bootstrap = useBootstrap()
+  // Re-read the address whenever the connection changes (a switch).
+  useConnection((s) => s.state)
   const defaultUrl = resolveWsUrl(bootstrap.ws_url)
-  const url = readStoredWsUrl() || defaultUrl
+  // The address this tab is using; the saved one only changes once a new
+  // address has connected.
+  const url = (rpc as { currentUrl?: string }).currentUrl || readStoredWsUrl() || defaultUrl
 
   useRegisterFields('gateway', [
     { id: 'gatewayUrl', label: t('webSetSystem.gatewayUrl') },

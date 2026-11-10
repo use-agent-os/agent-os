@@ -8,12 +8,8 @@ import { cron } from './cron'
 import { env } from './env'
 import { flowcards } from './flowcards'
 import { health } from './health'
-import { inbox } from './inbox'
 import { mcp } from './mcp'
-import { memory } from './memory'
 import { overview } from './overview'
-import { projects } from './projects'
-import { settings } from './settings'
 import { sessions } from './sessions'
 import { setup } from './setup'
 import { shell } from './shell'
@@ -58,13 +54,9 @@ export const en = {
   env,
   flowcards,
   health,
-  inbox,
   mcp,
-  memory,
   overview,
-  projects,
   sessions,
-  settings,
   setup,
   shell,
   skills,

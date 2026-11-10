@@ -556,7 +556,7 @@ def test_onboard_status_table_offers_cli_web_and_recipe_setup_paths(
         f"agentosgatewayrun--config{_config_arg(target)}"
         in collapsed
     )
-    assert "http://127.0.0.1:18791/control/setup" in result.stdout
+    assert "http://127.0.0.1:18791/control/settings/setup" in result.stdout
     assert "Explore options:" in result.stdout
     assert (
         f"agentosonboardcatalog--config{_config_arg(target)}"
@@ -640,7 +640,7 @@ def test_onboard_status_web_path_uses_gateway_and_control_ui_config(
 
     assert result.exit_code == 0, result.stdout
     assert "Web UI:" in result.stdout
-    assert "http://127.0.0.1:19999/ops/setup" in result.stdout
+    assert "http://127.0.0.1:19999/ops/settings/setup" in result.stdout
     assert "http://0.0.0.0:19999" not in result.stdout
 
 
@@ -662,7 +662,7 @@ def test_onboard_status_does_not_offer_disabled_web_ui_path(
     assert "Guided CLI:" in result.stdout
     assert "Provider recipes:" in result.stdout
     assert "Web UI:" not in result.stdout
-    assert "/control/setup" not in result.stdout
+    assert "/control/settings/setup" not in result.stdout
 
 
 def test_onboard_status_table_uses_product_labels_and_scope_column(
@@ -1430,7 +1430,7 @@ def test_onboard_if_needed_non_tty_hint_keeps_explicit_config_path(
     assert f"--config {_config_arg(target)}" in result.stdout
     assert "Guided CLI:" in result.stdout
     assert "Web UI:" in result.stdout
-    assert "http://127.0.0.1:18791/control/setup" in result.stdout
+    assert "http://127.0.0.1:18791/control/settings/setup" in result.stdout
     assert "Provider recipes:" in result.stdout
     assert "Check status:" in result.stdout
     assert not default_target.exists()
@@ -1493,7 +1493,7 @@ def test_onboard_if_needed_non_tty_hint_hides_disabled_web_ui_path(
     assert "Check status:" in result.stdout
     assert result.stdout.index("Provider recipes:") < result.stdout.index("Guided CLI:")
     assert "Web UI:" not in result.stdout
-    assert "/control/setup" not in result.stdout
+    assert "/control/settings/setup" not in result.stdout
 
 
 def test_onboard_if_needed_non_tty_hint_targets_blocking_memory_section(

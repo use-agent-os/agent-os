@@ -97,8 +97,8 @@ class _MemorySnapshotResult:
 
 # ---------------------------------------------------------------------------
 # Ports — six narrow Protocols so the stage is unit-testable without the
-# full TurnRunner. The runtime adapters in ``harness.py`` bind these to the
-# concrete TurnRunner methods.
+# full TurnRunner. ``TurnRunner`` implements them itself (the stage is built
+# with ``port=self``).
 # ---------------------------------------------------------------------------
 
 @runtime_checkable
@@ -133,11 +133,11 @@ class ModelCatalogPort(Protocol):
     Mirrors the inline three-call sequence with the fallback
     semantics: when ``self._model_catalog is None`` the inline body
     computes ``max_tokens=user_override or 16384`` and
-    ``context_window=200_000`` and ``model_caps=None``. The adapter folds
+    ``context_window=200_000`` and ``model_caps=None``. The port folds
     those defaults into the port so the stage body has no branching on
     catalog presence.
 
-    The adapter reads ``user_max_tokens`` / ``provider_name`` /
+    The port reads ``user_max_tokens`` / ``provider_name`` /
     ``base_url`` off the runner's ``_config.llm`` chain.
     """
 
@@ -152,7 +152,7 @@ class AgentConfigBuilderPort(Protocol):
     ``getattr`` values off ``_mem_cfg`` / ``_agent_token_cfg``.
 
     Folding them into a single port keeps the stage body free of
-    runtime imports. The adapter returns a typed
+    runtime imports. The port returns a typed
     ``_AgentConfigAuxiliaries`` value that the stage feeds straight into
     ``AgentConfig(...)``.
     """
@@ -214,8 +214,8 @@ class AgentFactoryPort(Protocol):
     """Wraps the typed ``Agent(...)`` constructor.
 
     Mirrors the call shape with the typed runtime constructor params
-    (``memory_sync_manager``, ``session_flush_service``). The adapter at
-    the harness side reads ``self._session_flush_service`` from the
+    (``memory_sync_manager``, ``session_flush_service``). ``TurnRunner``,
+    which implements the port, reads ``self._session_flush_service`` from the
     runner and forwards everything else from the call site.
     """
 

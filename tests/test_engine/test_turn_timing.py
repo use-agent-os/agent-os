@@ -370,3 +370,24 @@ async def test_run_turn_writes_timing_to_decision_log_and_logs_turn_timing(
     assert lines[0]["session_key"] == "agent:main:main"
     assert lines[0]["iterations"] == 1
     assert "stage_stream_consumer_ms" in lines[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recorder", ["timed", "null"])
+async def test_closing_the_tool_batch_closes_the_batch_stream_at_once(recorder: str) -> None:
+    timing = TurnTiming(clock=_Clock()) if recorder == "timed" else NULL_TURN_TIMING
+    closed: list[str] = []
+
+    async def batch() -> AsyncIterator[str]:
+        try:
+            yield "first"
+            yield "second"
+        finally:
+            closed.append("batch")
+
+    events = timing.tool_batch(batch(), calls=1)
+    assert await events.__anext__() == "first"
+    # The turn is closed mid-batch: the batch's own cleanup (cancelling its
+    # running tools) runs now, not when the generator is collected.
+    await events.aclose()
+    assert closed == ["batch"]

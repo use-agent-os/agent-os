@@ -15,11 +15,16 @@ Rules (OpenSpec ``provider-attempt-recovery``):
 * Rate-limit, overload and transient transport failures retry on the same
   model, bounded by an attempt count *and* a wall-clock budget. Once either is
   spent the policy fails over, and fails the turn when no candidate remains.
+* The budget charges the waits plus each failed attempt's duration, capped at
+  ``max_attempt_charge_s``: a long stream that drops late is one attempt, not
+  the whole budget. The first retry is only refused by the budget when its
+  wait alone is longer than the budget.
 * A ``Retry-After`` hint is a minimum delay. A hint longer than the cap is not
   waited out: the policy fails over instead.
 * Delays without a hint grow exponentially with multiplicative jitter.
 * A timeout is retried at most ``max_timeout_retries`` times; after that the
-  policy asks for one context reduction (when enabled) before giving up.
+  policy asks for one context reduction (when enabled and the caller says the
+  request is large enough to be worth reducing), then fails over, then fails.
 * Authentication failures fail fast with a message that names the fix.
   Unclassified failures fail without retrying.
 
@@ -91,9 +96,11 @@ class AttemptBudget:
 
     max_retries: int = 6
     #: Wall-clock seconds same-model retries may spend (waits plus the time the
-    #: failed attempts took), counted from the first failure. ``<= 0`` means
-    #: the count alone bounds retries.
+    #: failed attempts took, each capped at ``max_attempt_charge_s``), counted
+    #: from the first failure. ``<= 0`` means the count alone bounds retries.
     budget_seconds: float = 90.0
+    #: The most one failed attempt is charged to the budget.
+    max_attempt_charge_s: float = 10.0
     base_backoff_ms: int = 1000
     max_backoff_ms: int = 30_000
     #: Longest ``Retry-After`` worth waiting out on the same model.
@@ -110,10 +117,14 @@ class AttemptHistory:
     #: Same-model retries already made (any transient kind).
     retries: int = 0
     timeout_retries: int = 0
-    #: Seconds already spent on recovery: waits plus failed attempts.
+    #: Seconds already charged to recovery: waits plus failed attempts.
     spent_s: float = 0.0
     failed_over: bool = False
     timeout_compacted: bool = False
+
+    def note_failed_attempt(self, elapsed_s: float, *, cap_s: float) -> None:
+        """Charge a failed attempt that took *elapsed_s*, at most *cap_s*."""
+        self.spent_s += min(max(0.0, elapsed_s), max(0.0, cap_s))
 
     def note_retry(self, delay_s: float, *, timeout: bool) -> None:
         self.retries += 1
@@ -139,8 +150,14 @@ class ProviderAttemptPolicy:
         retry_after_s: float | None = None,
         is_timeout: bool = False,
         failover_available: bool = True,
+        context_reducible: bool = True,
     ) -> RecoveryDecision:
-        """The one recovery action for a failed attempt of *kind*."""
+        """The one recovery action for a failed attempt of *kind*.
+
+        *context_reducible* says whether compacting the context could make a
+        timed-out request meaningfully smaller; when it cannot, a spent
+        timeout goes straight to failover (or fails).
+        """
 
         if kind is ProviderErrorKind.AUTH_FAILURE:
             return Fail(message=f"{message}. {AUTH_FAILURE_GUIDANCE}", reason="auth_failure")
@@ -148,7 +165,7 @@ class ProviderAttemptPolicy:
             return Fail(message=message, reason=f"not_retryable:{kind.value}")
 
         if is_timeout:
-            return self._after_timeout(history, message, failover_available)
+            return self._after_timeout(history, message, failover_available, context_reducible)
 
         budget = self.budget
         if retry_after_s is not None and retry_after_s > budget.retry_after_cap_s:
@@ -164,12 +181,19 @@ class ProviderAttemptPolicy:
         else:
             delay = self.jitter(history.retries, budget.base_backoff_ms, budget.max_backoff_ms)
             reason = "backoff"
-        if budget.budget_seconds > 0 and history.spent_s + delay > budget.budget_seconds:
+        # The first retry is always worth one wait: time a slow first attempt
+        # took is not held against it, only a wait longer than the budget is.
+        spent = history.spent_s if history.retries else 0.0
+        if budget.budget_seconds > 0 and spent + delay > budget.budget_seconds:
             return self._exhausted(history, message, failover_available, reason="budget_spent")
         return Retry(delay_s=delay, reason=reason)
 
     def _after_timeout(
-        self, history: AttemptHistory, message: str, failover_available: bool
+        self,
+        history: AttemptHistory,
+        message: str,
+        failover_available: bool,
+        context_reducible: bool,
     ) -> RecoveryDecision:
         budget = self.budget
         if history.timeout_retries < budget.max_timeout_retries and (
@@ -177,7 +201,7 @@ class ProviderAttemptPolicy:
         ):
             delay = self.jitter(history.retries, budget.base_backoff_ms, budget.max_backoff_ms)
             return Retry(delay_s=delay, reason="timeout")
-        if budget.timeout_context_recovery and not history.timeout_compacted:
+        if budget.timeout_context_recovery and context_reducible and not history.timeout_compacted:
             return CompactThenRetry(reason="timeout")
         return self._exhausted(
             history,

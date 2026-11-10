@@ -6,13 +6,24 @@ import '@/i18n/en/webSetConfig'
 import { cn } from '@/lib/utils'
 import type { SettingsSnapshot } from '@/views/settings/snapshot'
 import {
+  audioStatusText,
   configCliArg,
   finishEnvRecoveryCommands,
   finishSummary,
+  imageGenerationStatusText,
   initialStepFromStatus,
+  memoryEmbeddingStatusText,
   onboardingReasons,
+  searchStatusText,
 } from '@/views/setup/logic'
 import { Button, buttonVariants } from '@/web/components/ui/button'
+import {
+  audioAdapter,
+  imageAdapter,
+  memoryEmbeddingAdapter,
+  providerAdapter,
+  searchAdapter,
+} from './onboarding-adapters'
 import { RouterForm, SnapshotGate, SpecForm } from './onboarding-forms'
 
 type Step = 'provider' | 'router' | 'extras' | 'finish'
@@ -85,10 +96,9 @@ function Stepper({ snapshot }: { snapshot: SettingsSnapshot }) {
       {step === 'provider' ? (
         <SpecForm
           title={t('webSetConfig.provider')}
-          specs={snapshot.catalog?.providers ?? []}
-          current={config.llm?.provider ?? ''}
-          method="onboarding.provider.configure"
-          revision={snapshot.revision}
+          adapter={providerAdapter}
+          snapshot={snapshot}
+          recovery="llm"
         />
       ) : null}
       {step === 'router' ? <RouterForm snapshot={snapshot} /> : null}
@@ -96,31 +106,31 @@ function Stepper({ snapshot }: { snapshot: SettingsSnapshot }) {
         <div className="flex flex-col gap-4">
           <SpecForm
             title={t('webSetConfig.webSearch')}
-            specs={snapshot.catalog?.searchProviders ?? []}
-            current={config.search_provider ?? ''}
-            method="onboarding.search.configure"
-            revision={snapshot.revision}
+            adapter={searchAdapter}
+            snapshot={snapshot}
+            status={searchStatusText(status, config)}
+            recovery="search"
           />
           <SpecForm
             title={t('webSetConfig.embedding')}
-            specs={snapshot.catalog?.memoryEmbeddingProviders ?? []}
-            current={status.memoryEmbeddingProvider ?? ''}
-            method="onboarding.memory_embedding.configure"
-            revision={snapshot.revision}
+            adapter={memoryEmbeddingAdapter}
+            snapshot={snapshot}
+            status={memoryEmbeddingStatusText(status, config)}
+            recovery="memory_embedding"
           />
           <SpecForm
             title={t('webSetConfig.image')}
-            specs={snapshot.catalog?.imageGenerationProviders ?? []}
-            current={status.imageGenerationProvider ?? ''}
-            method="onboarding.imageGeneration.configure"
-            revision={snapshot.revision}
+            adapter={imageAdapter}
+            snapshot={snapshot}
+            status={imageGenerationStatusText(status)}
+            recovery="image_generation"
           />
           <SpecForm
             title={t('webSetConfig.audio')}
-            specs={snapshot.catalog?.audioProviders ?? []}
-            current={status.audioProvider ?? ''}
-            method="onboarding.audio.configure"
-            revision={snapshot.revision}
+            adapter={audioAdapter}
+            snapshot={snapshot}
+            status={audioStatusText(status)}
+            recovery="audio"
           />
         </div>
       ) : null}

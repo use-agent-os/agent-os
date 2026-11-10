@@ -96,9 +96,10 @@ export function Toolbar({
     async (mode: string) => {
       if (!sessionKey || unavailable) return
       try {
-        const resp = await fetch(apiUrl('/api/elevated-mode'), {
+        const url = apiUrl('/api/elevated-mode')
+        const resp = await fetch(url, {
           method: 'POST',
-          headers: authenticatedHeaders({ 'Content-Type': 'application/json' }),
+          headers: authenticatedHeaders(url, { 'Content-Type': 'application/json' }),
           credentials: 'same-origin',
           body: JSON.stringify({ sessionKey, mode: mode || 'off' }),
         })

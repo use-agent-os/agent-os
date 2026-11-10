@@ -247,11 +247,9 @@ line- or entry-limited:
   lower-priority block after it) is dropped whole rather than sliced
   mid-block — memory is checked first, then user.
 
-All three limits can also be adjusted from the gateway web UI: **Agent Setup →
-Guided → Capabilities → Memory settings**. The card exposes friendly labels for
-each budget and warns when the combined limits would exceed the injection
-limit. Changes save through `config.patch` and apply immediately — no gateway
-restart needed.
+All three limits can also be adjusted from the gateway web UI, in **Settings ›
+Memory** (the retrieval fields at the end of the section). Changes save through
+`config.patch` and apply immediately — no gateway restart needed.
 
 ### The `memory` tool
 
@@ -426,14 +424,13 @@ embedder_base_url = "http://localhost:11434"
 vector_store_path = ""  # empty -> <agent state dir>/mem0
 ```
 
-The same keys are editable from **Agent Setup**: Guided mode's **Memory
-settings** card (the *Memory provider* selector) and Advanced mode's **Memory**
-section.
+The same keys are editable in the web console under **Settings › Advanced**
+(filter for `memory.provider`).
 
 **Restart required.** The provider manager is built once at gateway boot, so
 changing `memory.provider.name` — or any `memory.provider.mem0.*` setting —
-only takes effect after a gateway restart. Both Agent Setup modes surface a
-restart hint when you save these keys.
+only takes effect after a gateway restart. Settings shows a restart notice
+naming the change when you save these keys.
 
 **Privacy.** With the default stack, everything (LLM, embeddings, vector
 store) stays on the local machine. mem0 telemetry is disabled, so no usage

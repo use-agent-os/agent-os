@@ -14,7 +14,7 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useRpc } from '@/app/providers'
-import { formatNumber, t } from '@/i18n'
+import { formatNumber, t, tPlural } from '@/i18n'
 import '@/i18n/en/webPagesOverview'
 import { gate, requireConnection } from '@/lib/disabled-reason'
 import { cn } from '@/lib/utils'
@@ -25,10 +25,17 @@ import {
   formatUptime,
   readinessStatusLabel,
 } from '@/views/overview/logic'
-import { formatCost, sessionTimestamp, usageMetrics, type UsageRow } from '@/views/usage/logic'
+import {
+  activeSinceCount,
+  formatCost,
+  startOfLocalDay,
+  usageMetrics,
+  type UsageRow,
+} from '@/views/usage/logic'
 import { Button } from '@/web/components/ui/button'
 import { PageHeader } from '@/web/components/ui/page-header'
 import { ErrorState, LoadingRegion, Skeleton, StaleBadge } from '@/web/components/ui/states'
+import { useSessionsTotal } from '@/web/features/sessions/sessions-total'
 import { useDocumentVisible, useSessionsList } from '@/web/shell/session-data'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 
@@ -70,10 +77,18 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? '')
 }
 
-function startOfToday(): number {
-  const d = new Date()
-  d.setHours(0, 0, 0, 0)
-  return d.getTime()
+/**
+ * The Usage card's figures. Usage rows are per-session lifetime totals and the
+ * gateway keeps no per-day ledger, so the card sums all time and counts the
+ * sessions active since local midnight rather than claiming "today's" spend.
+ */
+export function homeUsageFigures(rows: UsageRow[], now: number = Date.now()) {
+  const all = usageMetrics(rows)
+  return {
+    tokens: all.totalTokens,
+    cost: all.cost,
+    activeToday: activeSinceCount(rows, startOfLocalDay(now)),
+  }
 }
 
 /** The enabled job whose next run comes first, or null when none is scheduled. */
@@ -329,7 +344,8 @@ export function HomePage() {
   const offline = connection !== 'connected'
   const anyData = Boolean(doctor.data || status.data || usage.data || cron.data || sessions.data)
 
-  const today = usage.data ? usageMetrics(todayRows(usage.data.sessions ?? [])) : null
+  const usageFigures = usage.data ? homeUsageFigures(usage.data.sessions ?? []) : null
+  const totals = useSessionsTotal(sessions.data?.length ?? 0)
   const nextJob = cron.data ? nextScheduledJob(cron.data) : null
   const routeLabel = route.data
     ? route.data.agentos_router?.enabled === true
@@ -420,8 +436,18 @@ export function HomePage() {
           linkLabel={t('webPagesOverview.homeSessionsLink')}
           query={sessions}
         >
-          <Value>{formatNumber(sessions.data?.length ?? 0)}</Value>
-          <Hint>{t('webPagesOverview.homeSessionsHint')}</Hint>
+          <Value>
+            {totals.total !== null
+              ? formatNumber(totals.total)
+              : t('webPagesOverview.homeSessionsAtLeast', { count: formatNumber(totals.listed) })}
+          </Value>
+          <Hint>
+            {totals.truncated && totals.total === null
+              ? t('webPagesOverview.homeSessionsPartialHint', {
+                  count: formatNumber(totals.listed),
+                })
+              : t('webPagesOverview.homeSessionsHint')}
+          </Hint>
         </Figure>
 
         <Figure
@@ -431,11 +457,13 @@ export function HomePage() {
           linkLabel={t('webPagesOverview.homeUsageLink')}
           query={usage}
         >
-          <Value>{t('webPagesOverview.homeTokens', { tokens: today?.totalTokens ?? 0 })}</Value>
+          <Value>{t('webPagesOverview.homeTokens', { tokens: usageFigures?.tokens ?? 0 })}</Value>
           <Hint>
             {t('webPagesOverview.homeCost', {
-              cost: formatCost(today?.cost ?? 0, { decimals: 2 }),
+              cost: formatCost(usageFigures?.cost ?? 0, { decimals: 2 }),
             })}
+            {' · '}
+            {tPlural('webPagesOverview.homeActiveToday', usageFigures?.activeToday ?? 0)}
           </Hint>
         </Figure>
 
@@ -468,15 +496,4 @@ export function HomePage() {
       <EventFeed />
     </div>
   )
-}
-
-/** The usage rows dated today (rows without a timestamp are not counted). */
-function todayRows(rows: UsageRow[]): UsageRow[] {
-  const since = startOfToday()
-  return rows.filter((row) => {
-    const ts = sessionTimestamp(row)
-    if (ts == null) return false
-    // Epoch seconds as well as milliseconds.
-    return (ts < 10_000_000_000 ? ts * 1000 : ts) >= since
-  })
 }

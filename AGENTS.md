@@ -59,10 +59,29 @@ uv run ruff format src tests                       # autofix formatting
 > Docker-migration tests) fail independently of your change — verify against a
 > clean tree before attributing a failure to your work.
 
-## Frontend lane (React console rewrite)
+## Frontend lane (React console)
 
 The React console lives in `frontend/` (Node >= 22) and builds to
 `src/agentos/gateway/static/dist/` (gitignored; built at release).
+
+Layout:
+
+- `frontend/src/web/` is the web console: `main.tsx` boots `web/app`; pages,
+  settings and chat live under `web/features`, the rail and connection under
+  `web/shell`. An eslint boundary rule (`WEB_BOUNDARY` in
+  `frontend/eslint.config.js`) keeps it from importing legacy DOM renderers
+  and page components.
+- `frontend/src/{lib,services,stores,components,i18n}` and
+  `frontend/src/views/**` are shared with the desktop app, which imports them
+  through its `@/` alias: `views/**` keeps the `logic.ts` helpers and the
+  legacy chat components only the desktop still renders. Changing any of them
+  means also running `npm --prefix desktop run check`. New web UI goes under
+  `web/`, not `views/`.
+- `node frontend/scripts/ui-closure.mjs` lists files neither the web console
+  nor the desktop reaches; delete those with their tests rather than keep them.
+- `docs/web-ui.md` is pinned by `*-doc.test.ts` files under `frontend/src/web`
+  (routes, pages, settings sections, shortcuts, connection states): update the
+  doc in the same change. An opt-in real-browser UI audit is described there.
 
 - Touched `frontend/**`? Run `cd frontend && npm run check` (tsc, eslint,
   prettier, vitest) before committing. CI enforces this.

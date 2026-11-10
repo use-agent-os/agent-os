@@ -108,10 +108,12 @@ class TurnHook(Protocol):
 
 @dataclass(frozen=True)
 class ToolHookCall:
-    """The inputs presented to ``ToolHook.before_tool``.
+    """The call presented to ``ToolHook.before_tool`` and ``after_tool``.
 
-    Carries the raw ``ToolCall`` plus the resolved :class:`ToolContext` so
-    hooks can correlate to a session/agent without re-walking the call.
+    Carries the ``ToolCall`` plus the resolved :class:`ToolContext` so hooks
+    can correlate to a session/agent without re-walking the call. Each hook
+    gets its own copy of the arguments: editing them in place changes nothing.
+    To run the call with other arguments, return :class:`Rewrite`.
     """
 
     tool_call: ToolCall
@@ -122,13 +124,25 @@ class ToolHookCall:
 class ToolHookResult:
     """The outcome presented to ``ToolHook.after_tool``.
 
-    Either ``result`` is set (success) or ``exception`` is set (handler raised).
-    Exactly one of the two is populated; both being ``None`` is reserved for
-    short-circuited paths (policy denial after ``before_tool`` ran).
+    ``result`` is the settled :class:`ToolResult` the model and transcript
+    will see unless a hook replaces it: its ``content`` is always a string,
+    with ``is_error`` and ``execution_status`` already set. It is also set
+    when the call never ran -- a block, a refused rewrite, a policy denial or
+    a run-budget skip -- and then holds that error or control envelope.
+    Earlier hooks' replacements are already applied.
+
+    ``exception`` is set when the tool handler raised (``result`` is then the
+    error envelope built from it). ``raw_result`` is what the handler itself
+    returned before finalization, ``None`` when it did not run or raised.
+
+    ``result`` is ``None`` only when there is no result to replace: the turn
+    was cancelled while the tool ran (``exception`` is the ``CancelledError``),
+    or a dry run (``tools.invoke`` with ``dry_run``) found the call would run.
     """
 
     result: ToolResult | None = None
     exception: BaseException | None = None
+    raw_result: Any = None
 
 
 @dataclass(frozen=True)
@@ -160,7 +174,10 @@ class ReplaceResult:
     """``after_tool`` decision: replace the result the model and transcript see.
 
     The replacement keeps the call's ``tool_use_id``; ``is_error=None`` keeps
-    the original error flag.
+    the original error flag. It applies on every path ``after_tool`` runs on,
+    denials included, and is held to the same single-result size cap as a
+    tool's own output. When it flips the error flag, the execution status is
+    reset to match (reason ``hook_replaced``).
     """
 
     content: str
@@ -224,13 +241,16 @@ class ToolHook(Protocol):
     ``before_tool`` runs after argument admission and before the policy chain.
     It may return ``None`` / :class:`Allow` (run), :class:`Block` (do not run)
     or :class:`Rewrite` (run with other arguments). Hooks run in registration
-    order; the first block wins. ``after_tool`` runs before result finalization
-    and may return :class:`ReplaceResult`.
+    order; the first block wins. ``after_tool`` runs after result finalization,
+    sees the settled :class:`ToolResult` and may return :class:`ReplaceResult`.
+    Every hook whose ``before_tool`` ran gets ``after_tool`` exactly once, also
+    when the call was blocked, refused or denied before it ran.
 
-    A hook that raises is logged and treated as allowing the call, unless it
-    sets ``fail_closed = True``: then its failure blocks the call. Hooks
-    written against the observe-only interface (returning ``None``) keep
-    working unchanged.
+    A hook that raises is logged and treated as "no decision", unless it sets
+    ``fail_closed = True``: then a failing ``before_tool`` blocks the call, and
+    a failing ``after_tool`` withholds the result (the model gets an error in
+    its place). Hooks written against the observe-only interface (returning
+    ``None``) keep working unchanged.
     """
 
     name: str

@@ -6,146 +6,26 @@ import { defineNamespace } from '../registry'
  * own namespaces.
  */
 export const shell = defineNamespace('shell', {
-  // Brand. Not translated in practice, but routed through the catalog so the
-  // shell has no literal copy left for a translator to miss.
-  brandName: 'AgentOS',
-  brandSuffix: 'Control',
-
   // View titles. One definition, read by both the router and the sidebar.
-  viewAgents: 'Agents',
-  viewApprovals: 'Approvals',
-  viewChannels: 'Channels',
-  viewChat: 'Chat',
-  viewConfig: 'Config',
-  viewCron: 'Cron',
-  viewEnv: 'Environment',
-  viewHealth: 'Health',
-  viewInbox: 'Inbox',
-  viewLogs: 'Logs',
-  viewMcp: 'MCP Servers',
-  viewMemory: 'Memory',
   viewOverview: 'Overview',
-  viewProjects: 'Projects',
-  viewSessions: 'Sessions',
-  viewSettings: 'Agent Setup',
-  viewSetup: 'Setup',
-  viewSkills: 'Skills',
-  viewUsage: 'Usage',
 
   // Sidebar groups.
-  navGroupChat: 'Chat',
-  navGroupControl: 'Control',
-  navGroupSettings: 'Settings',
-  navLandmark: 'Main',
-  navDrawerLandmark: 'Workspace navigation',
-  navCollapse: 'Collapse navigation',
-  navExpand: 'Expand navigation',
-  navClose: 'Close navigation',
-  navToggleMenu: 'Toggle menu',
-  navSkipToContent: 'Skip to main content',
   navApprovalBadge_one: '{count} pending approval',
   navApprovalBadge_other: '{count} pending approvals',
-  navInboxBadge_one: '{count} item needs attention',
-  navInboxBadge_other: '{count} items need attention',
 
   // Connection footer (the truth badge's tooltip).
-  connWithVersion: '{state}, version {version}',
   connecting: 'Connecting…',
 
   // Sidebar utilities.
-  shortcutsTitle: 'Keyboard shortcuts ({combo})',
   shortcutsLabel: 'Keyboard shortcuts',
   shortcutClose: 'Close dialog',
-  shortcutDrawerEscape: 'Close the navigation drawer (mobile)',
-  shortcutCategoryGlobal: 'Global',
   shortcutSeparator: 'then',
-  shortcutCategoryNavigation: 'Navigation',
   shortcutCategoryChat: 'Chat',
   shortcutNewChat: 'Start a new chat',
   shortcutAbortTurn: 'Abort the streaming turn, else recover the queue into the composer',
-  shortcutNavChat: 'Go to Chat',
-  shortcutNavOverview: 'Go to Overview',
-  shortcutNavHealth: 'Go to Health',
-  shortcutNavChannels: 'Go to Channels',
-  shortcutNavMcp: 'Go to MCP Servers',
-  shortcutNavSkills: 'Go to Skills',
-  shortcutNavProjects: 'Go to Projects',
-  shortcutNavSessions: 'Go to Sessions',
-  shortcutNavAgents: 'Go to Agents',
-  shortcutNavUsage: 'Go to Usage',
-  shortcutNavCron: 'Go to Cron',
-  shortcutNavSettings: 'Go to Agent Setup',
-  shortcutNavEnv: 'Go to Environment',
-  shortcutNavLogs: 'Go to Logs',
-  shortcutNavMemory: 'Go to Memory',
-  shortcutNavApprovals: 'Go to Approvals',
-  shortcutNavInbox: 'Go to the attention inbox',
-  themeDark: 'dark',
-  themeLight: 'light',
-  themeTitle: 'Theme: {mode}',
-  themeToggleLabel: 'Theme: {mode}. Toggle theme',
-
-  // Chat surface header.
-  chatToolbar: 'Chat toolbar',
-
-  // Routing.
-  routeNotFoundTitle: 'Not Found - AgentOS Control',
-  routeNotFoundBody: 'Page not found: {path}',
-  routePending: 'Opening view…',
 
   // Route error boundary.
-  errorDocumentTitle: 'Recovery - AgentOS Control',
   errorHttpCode: 'HTTP {status}',
-  errorViewCode: 'VIEW ERROR',
-  errorUnavailableTitle: 'This view is unavailable',
-  errorSnagTitle: 'This view hit a snag',
-  errorMessage:
-    'AgentOS kept the rest of your workspace intact. Reload this view or return to Overview.',
-  errorEyebrow: 'Workspace recovery',
-  errorStatus: 'View paused safely',
-  errorDeveloperDetail: 'Developer detail',
-  errorActions: 'Recovery actions',
-  errorReload: 'Reload view',
-  errorGoOverview: 'Go to Overview',
-
-  // Global approval prompt.
-  approvalTitle: 'Approval Required',
-  approvalFallbackTool: 'Tool execution',
-  approvalOnceTitle: 'Approve only this pending tool call',
-  approvalOnce: 'Approve This Time',
-  approvalAlwaysTitle: 'Remember this operation type for future matching intents',
-  approvalAlways: 'Always Allow This Type',
-  approvalBypassTitle:
-    'Enable approval bypass in this browser session and approve this pending tool call',
-  approvalBypass: 'Bypass Approvals',
-  approvalDeny: 'Deny',
-  approvalLater: 'Answer later',
-  approvalLaterTitle:
-    'Step this prompt aside; the approval keeps waiting in the dock and the attention inbox',
-  approvalDockLandmark: 'Approvals waiting',
-  approvalDock_one: '{count} approval waiting',
-  approvalDock_other: '{count} approvals waiting',
-  approvalDockAnswer: 'Answer now',
-  approvalDockInbox: 'Open inbox',
-
-  // Command line with copy action.
-  commandCopyLabel: 'Copy command',
-  commandCopied: 'Copied command',
-  commandCopyFailed: 'Copy failed: {message}',
-  commandCopyError: 'Copy command failed',
-
-  // Update banner.
-  updateAvailable:
-    'A new version of use-agent-os is available: {current} → {latest}. Run agentos upgrade.',
-  updateDismiss: 'Dismiss',
-  updateLabel: 'Update',
-  updateNow: 'Update now',
-  updateRetry: 'Retry',
-  updateRunning: 'Updating AgentOS… the gateway restarts when the install finishes.',
-  updateRunningShort: 'Updating…',
-  updateDone: 'Updated to {latest}. Reload to load the new console.',
-  updateFailed: 'Update failed: {detail}',
-  updateReload: 'Reload',
 
   // Truth badge: the footer's runtime status (state, source + freshness, and
   // one recovery action).
@@ -159,12 +39,6 @@ export const shell = defineNamespace('shell', {
   truthSnapshot: 'Snapshot · {age}',
   truthSnapshotAgeless: 'Snapshot',
   truthUnavailable: 'Unavailable',
-  truthBadgeLabel: 'Runtime {state}, {freshness}. Show details',
-  truthPanelTitle: 'Runtime status',
-  truthPanelSource: 'Source',
-  truthPanelAttention_one: '{count} item needs you',
-  truthPanelAttention_other: '{count} items need you',
-  truthPanelAttentionNone: 'Nothing is waiting on you',
   truthReasonOk: 'Connected, and the doctor reports no errors.',
   truthReasonConnecting: 'Opening the gateway connection.',
   truthReasonGatewayStarting: 'The gateway process is starting.',
@@ -232,19 +106,10 @@ export const shell = defineNamespace('shell', {
   reasonPreflightChecking: 'Checking what an update would interrupt.',
 
   // Update preflight.
-  preflightTitle: 'Before updating AgentOS',
-  preflightLead: 'The gateway restarts during the update. This is what it would interrupt:',
   preflightSessions_one: '{count} session is running',
   preflightSessions_other: '{count} sessions are running',
   preflightJobs_one: '{count} scheduled job is due in the next 10 minutes',
   preflightJobs_other: '{count} scheduled jobs are due in the next 10 minutes',
   preflightApprovals_one: '{count} approval is pending',
   preflightApprovals_other: '{count} approvals are pending',
-  preflightNothing: 'Nothing is running, due, or waiting on you.',
-  preflightChecking: 'Checking what is running…',
-  preflightCheckFailed: 'Could not check what is running: {message}',
-  preflightConfirm: 'Update now',
-  preflightConfirmAnyway: 'Update anyway',
-  preflightCancel: 'Cancel',
-  preflightOpenInbox: 'Open attention inbox',
 } as const)

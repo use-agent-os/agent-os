@@ -25,5 +25,6 @@ def web_setup_url(cfg: GatewayConfig) -> str | None:
     scheme = "https" if cfg.tls.keyfile and cfg.tls.certfile else "http"
     host = _format_url_host(_local_web_host(str(cfg.host)))
     base_path = cfg.control_ui.base_path.rstrip("/")
-    setup_path = f"{base_path}/setup" if base_path else "/setup"
+    # Guided setup lives under Settings; ``/setup`` is only a legacy redirect.
+    setup_path = f"{base_path}/settings/setup"
     return f"{scheme}://{host}:{cfg.port}{setup_path}"

@@ -8,8 +8,9 @@ agentos doctor --json
 agentos gateway status
 ```
 
-The Web UI health view at <http://127.0.0.1:18791/control/> also reports
-readiness and recovery steps when the gateway is running.
+The Web UI's Settings › Health at
+<http://127.0.0.1:18791/control/settings/health> also reports readiness and
+recovery steps when the gateway is running.
 
 ## `agentos` Command Not Found
 

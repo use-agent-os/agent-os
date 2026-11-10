@@ -2,7 +2,12 @@ import '@/test/web'
 import { act, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { clearPendingGatewayUrl, consumeUrlCredentials, readStoredToken } from '@/lib/credentials'
+import {
+  clearPendingGatewayUrl,
+  consumeUrlCredentials,
+  readStoredToken,
+  storeToken,
+} from '@/lib/credentials'
 import { useRuntimeSignals, handshakeFailure, shutdownNotice } from '@/lib/runtime-signals'
 import { RpcError } from '@/lib/ws-rpc'
 import { useConnection } from '@/stores/connection'
@@ -12,7 +17,7 @@ import { renderRoutes } from '@/test/render-web'
 import { renderShell, resetShellState, shellRpc } from '@/test/web-shell'
 import { webRoutes } from '@/web/app/WebApp'
 import { sendOnce } from '@/web/features/chat/send'
-import { useConnectAttempt } from './connection-gate'
+import { cancelConnectAttempt, CONNECT_TIMEOUT_MS } from './connection-gate'
 import { RELOAD_GUARD_KEY, shouldAutoReload } from './ConnectionNotices'
 import { useDisplayedConnection } from './use-displayed-connection'
 
@@ -21,12 +26,15 @@ const initialSignals = useRuntimeSignals.getState()
 beforeEach(() => {
   resetShellState()
   useRuntimeSignals.setState(initialSignals, true)
-  useConnectAttempt.setState({ active: false })
+  cancelConnectAttempt()
   clearPendingGatewayUrl()
 })
 afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+  // Forget an in-memory token a blocked-storage test left behind.
+  storeToken(null)
 })
 
 function tokenGateway(rpc: FakeRpc = shellRpc()) {
@@ -97,6 +105,67 @@ describe('Connect screen', () => {
     expect(connect).not.toHaveBeenCalled()
   })
 
+  it('says when the gateway cannot be reached and keeps the form usable', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    const rpc = shellRpc()
+    const connect = vi.spyOn(rpc, 'connect')
+    tokenGateway(rpc)
+    const url = await screen.findByLabelText('WebSocket URL')
+    await user.clear(url)
+    await user.type(url, 'ws://10.0.0.9:1/ws')
+    await user.type(screen.getByLabelText('Gateway token'), 'tok')
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+    act(() => useConnection.getState().setState('connecting'))
+    expect(await screen.findByRole('status')).toHaveTextContent('Connecting to 10.0.0.9:1…')
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled()
+    await act(() => vi.advanceTimersByTimeAsync(CONNECT_TIMEOUT_MS))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach 10.0.0.9:1')
+    // The bad address was never saved, so a reload goes back to the old one.
+    expect(localStorage.getItem('agentos.wsUrl')).toBeNull()
+    // Fix the address and try again from the same screen.
+    await user.clear(screen.getByLabelText('WebSocket URL'))
+    await user.type(screen.getByLabelText('WebSocket URL'), 'ws://10.0.0.2:18791/ws')
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+    expect(connect).toHaveBeenLastCalledWith('ws://10.0.0.2:18791/ws', 'tok')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('a refused connection fails at once, before the 10 s bound', async () => {
+    const user = userEvent.setup()
+    const rpc = shellRpc()
+    tokenGateway(rpc)
+    const url = await screen.findByLabelText('WebSocket URL')
+    await user.clear(url)
+    await user.type(url, 'ws://127.0.0.1:1/ws')
+    await user.type(screen.getByLabelText('Gateway token'), 'tok')
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+    act(() => useConnection.getState().setState('connecting'))
+    // The socket closed before it ever opened.
+    act(() => rpc.emit('_unreachable', 'ws://127.0.0.1:1/ws'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach 127.0.0.1:1')
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled()
+  })
+
+  it('keeps the workspace through a drop when the tab cannot store the token', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(sessionStorage, 'setItem').mockImplementation(() => {
+      throw new Error('blocked')
+    })
+    const rpc = shellRpc()
+    tokenGateway(rpc)
+    await user.type(await screen.findByLabelText('Gateway token'), 'tok')
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+    act(() => {
+      useConnection.getState().setState('connected')
+      rpc.emit('_hello', {})
+    })
+    expect(await screen.findByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument()
+    act(() => useConnection.getState().setState('connecting'))
+    expect(screen.getByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Connect to your gateway' })).toBeNull()
+  })
+
   it('opens the workspace once connected', async () => {
     sessionStorage.setItem('agentos.wsToken', 'ok')
     tokenGateway()
@@ -120,11 +189,87 @@ describe('gateway URL from a link', () => {
     const dialog = await screen.findByRole('alertdialog', {
       name: 'Connect to a different gateway?',
     })
-    expect(dialog).toHaveTextContent('other.example:8443')
+    expect(within(dialog).getByTestId('gateway-url-target')).toHaveTextContent(
+      'wss://other.example:8443/ws',
+    )
+    expect(dialog).toHaveTextContent('Your current token is not sent there')
+    expect(dialog).toHaveTextContent('only after it connects')
     expect(connect).not.toHaveBeenCalled()
     await user.click(within(dialog).getByRole('button', { name: 'Connect to other.example:8443' }))
     expect(connect).toHaveBeenCalledWith('wss://other.example:8443/ws', undefined)
+    // Saved only once that gateway completes a handshake.
+    expect(localStorage.getItem('agentos.wsUrl')).toBeNull()
+    act(() => {
+      useConnection.getState().setState('connected')
+      rpc.emit('_hello', {})
+    })
     expect(localStorage.getItem('agentos.wsUrl')).toBe('wss://other.example:8443/ws')
+  })
+
+  it('never sends the current gateway’s token to the link’s host', async () => {
+    const user = userEvent.setup()
+    storeToken('token-for-this-gateway')
+    withLink('/control/home?gatewayUrl=wss%3A%2F%2Fevil.example%2Fws')
+    const rpc = shellRpc()
+    const connect = vi.spyOn(rpc, 'connect')
+    renderShell('/home', rpc)
+    const dialog = await screen.findByRole('alertdialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Connect to evil.example' }))
+    expect(connect).toHaveBeenCalledTimes(1)
+    expect(connect).toHaveBeenCalledWith('wss://evil.example/ws', undefined)
+    expect(JSON.stringify(connect.mock.calls)).not.toContain('token-for-this-gateway')
+    // Nor does any later request (REST auth header) carry it there.
+    expect(readStoredToken()).toBe('')
+    expect(localStorage.getItem('agentos.wsUrl')).toBeNull()
+  })
+
+  it('sends only the token that came in the same link', async () => {
+    const user = userEvent.setup()
+    storeToken('token-for-this-gateway')
+    withLink('/control/home?token=link-token&gatewayUrl=wss%3A%2F%2Fother.example%2Fws')
+    expect(readStoredToken()).toBe('token-for-this-gateway')
+    const rpc = shellRpc()
+    const connect = vi.spyOn(rpc, 'connect')
+    renderShell('/home', rpc)
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent('The token in the link is sent to other.example')
+    await user.click(within(dialog).getByRole('button', { name: 'Connect to other.example' }))
+    expect(connect).toHaveBeenCalledWith('wss://other.example/ws', 'link-token')
+    expect(readStoredToken()).toBe('link-token')
+  })
+
+  it('drops the link’s token when the switch is cancelled', async () => {
+    const user = userEvent.setup()
+    storeToken('token-for-this-gateway')
+    withLink('/control/home?token=link-token&gatewayUrl=wss%3A%2F%2Fother.example%2Fws')
+    const rpc = shellRpc()
+    const connect = vi.spyOn(rpc, 'connect')
+    renderShell('/home', rpc)
+    await user.click(await screen.findByRole('button', { name: 'Stay here' }))
+    expect(connect).not.toHaveBeenCalled()
+    expect(readStoredToken()).toBe('token-for-this-gateway')
+  })
+
+  it('keeps a confirmed address on the Connect screen through the token submit', async () => {
+    const user = userEvent.setup()
+    withLink('/control/home?gatewayUrl=wss%3A%2F%2Fremote.example%2Fws')
+    const rpc = shellRpc()
+    const connect = vi.spyOn(rpc, 'connect')
+    tokenGateway(rpc)
+    const dialog = await screen.findByRole('alertdialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Connect to remote.example' }))
+    expect(await screen.findByLabelText('WebSocket URL')).toHaveValue('wss://remote.example/ws')
+    expect(screen.getByText('Gateway: remote.example')).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Gateway token'), 'remote-token')
+    await user.click(screen.getByRole('button', { name: 'Connect' }))
+    expect(connect).toHaveBeenLastCalledWith('wss://remote.example/ws', 'remote-token')
+    expect(localStorage.getItem('agentos.wsUrl')).toBeNull()
+    act(() => {
+      useConnection.getState().setState('connected')
+      rpc.emit('_hello', {})
+    })
+    expect(localStorage.getItem('agentos.wsUrl')).toBe('wss://remote.example/ws')
+    expect(await screen.findByRole('navigation', { name: 'Main navigation' })).toBeInTheDocument()
   })
 
   it('does nothing when cancelled', async () => {
@@ -272,6 +417,22 @@ describe('restart and protocol mismatch', () => {
     })
     await waitFor(() => expect(screen.queryByText('Restarting gateway…')).not.toBeInTheDocument())
     expect(invalidate).toHaveBeenCalled()
+  })
+
+  it('refreshes cached data on every handshake, and resets it for a new gateway URL', async () => {
+    const rpc = shellRpc()
+    rpc.currentUrl = 'ws://a/ws'
+    const { queryClient } = renderShell('/home', rpc)
+    await screen.findByRole('navigation', { name: 'Main navigation' })
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
+    const reset = vi.spyOn(queryClient, 'resetQueries')
+    act(() => rpc.emit('_hello', {}))
+    act(() => rpc.emit('_hello', {}))
+    expect(invalidate).toHaveBeenCalledTimes(2)
+    expect(reset).not.toHaveBeenCalled()
+    rpc.currentUrl = 'ws://b/ws'
+    act(() => rpc.emit('_hello', {}))
+    expect(reset).toHaveBeenCalledTimes(1)
   })
 
   it('offers Reload on a protocol mismatch and reloads at most once per version per minute', async () => {

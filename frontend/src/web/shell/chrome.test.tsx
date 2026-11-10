@@ -2,15 +2,17 @@ import '@/test/web'
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { usePendingQuestions } from '@/lib/pending-questions'
 import { useApprovals, type Approval } from '@/services/approval-monitor'
 import { stubMatchMedia } from '@/test/web'
-import { renderShell, resetShellState, sessionRow, shellRpc } from '@/test/web-shell'
+import { NOW, renderShell, resetShellState, sessionRow, shellRpc } from '@/test/web-shell'
 import { useShell } from './shell-store'
 
 const originalMatchMedia = window.matchMedia
 
 beforeEach(resetShellState)
 afterEach(() => {
+  usePendingQuestions.getState().reset()
   window.matchMedia = originalMatchMedia
   vi.unstubAllGlobals()
 })
@@ -101,6 +103,39 @@ describe('inbox attention badge', () => {
   })
 })
 
+describe('pending questions of deleted sessions', () => {
+  const question = (sessionKey: string, presentedAt: number) => ({
+    id: `question:${sessionKey}`,
+    sessionKey,
+    questions: [{ question: 'Proceed?', options: [{ label: 'yes' }], multiSelect: false }],
+    toolUseId: 't1',
+    presentedAt,
+  })
+
+  it('drops a question whose session is gone from the list on any page', async () => {
+    usePendingQuestions.getState().present(question('agent:main:webchat:gone', NOW - 60_000))
+    renderShell('/home', shellRpc([sessionRow('agent:main:webchat:other')]))
+    await waitFor(() => expect(usePendingQuestions.getState().items).toEqual([]))
+  })
+
+  it('clears a question when its session is deleted from the session list', async () => {
+    const user = userEvent.setup()
+    const key = 'agent:main:webchat:a'
+    // Newer than any list read, so only the delete itself can clear it.
+    usePendingQuestions.getState().present(question(key, Date.now() + 60_000))
+    const rpc = shellRpc([sessionRow(key, { display_name: 'Asking' })]).handle('sessions.delete', {
+      ok: true,
+    })
+    renderShell('/home', rpc)
+    await user.click(await screen.findByRole('button', { name: 'Actions for Asking' }))
+    expect(usePendingQuestions.getState().items).toHaveLength(1)
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete' }))
+    await user.click(await screen.findByRole('button', { name: 'Delete session' }))
+    await waitFor(() => expect(usePendingQuestions.getState().items).toEqual([]))
+    expect(rpc.callsTo('sessions.delete')).toEqual([{ key }])
+  })
+})
+
 describe('approval tray', () => {
   it('shows a request from another session on /usage and resolves Deny through the approvals endpoint', async () => {
     const user = userEvent.setup()
@@ -125,6 +160,26 @@ describe('approval tray', () => {
         screen.queryByRole('complementary', { name: 'Pending approvals' }),
       ).not.toBeInTheDocument(),
     )
+  })
+
+  it('names the requesting agent and copies the command', async () => {
+    const user = userEvent.setup()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    renderShell('/usage')
+    act(() => useApprovals.getState().upsert(approval({ agent: 'research' })))
+    const tray = await screen.findByRole('complementary', { name: 'Pending approvals' })
+    expect(within(tray).getByText('Agent research')).toBeInTheDocument()
+    await user.click(within(tray).getByRole('button', { name: 'Copy command' }))
+    expect(writeText).toHaveBeenCalledWith('rm -rf build')
+  })
+
+  it('offers no copy control when the request has no command', async () => {
+    renderShell('/usage')
+    act(() => useApprovals.getState().upsert(approval({ namespace: 'flow', command: undefined })))
+    const tray = await screen.findByRole('complementary', { name: 'Pending approvals' })
+    expect(within(tray).queryByRole('button', { name: 'Copy command' })).not.toBeInTheDocument()
+    expect(within(tray).queryByText(/^Agent /)).not.toBeInTheDocument()
   })
 
   it('collapses to a count but cannot be dismissed while pending', async () => {

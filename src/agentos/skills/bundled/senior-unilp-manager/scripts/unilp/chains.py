@@ -208,7 +208,7 @@ def resolve_rpc_url(chain: dict, override: str | None = None) -> str:
     names = " or ".join(chain["rpcEnv"])
     raise RuntimeError(
         f"no RPC url for {chain['name']}. Set {names} in the agent environment "
-        f"(AgentOS: Skills page -> Set {chain['rpcEnv'][0]}), or pass --rpc <url>"
+        f"(AgentOS: Settings > Skills > Set {chain['rpcEnv'][0]}), or pass --rpc <url>"
     )
 
 
@@ -226,7 +226,7 @@ def resolve_private_key(signer_env: str = ENV_SIGNER) -> str:
     if not raw:
         raise RuntimeError(
             f"env var {signer_env} is not set. Set it in the agent environment "
-            f"(AgentOS: Skills page -> Set {signer_env}), or pass --signer-env <VAR>"
+            f"(AgentOS: Settings > Skills > Set {signer_env}), or pass --signer-env <VAR>"
         )
     key = raw.strip().strip('"').strip("'")
     if not key.startswith("0x"):

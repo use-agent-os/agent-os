@@ -116,6 +116,7 @@ export const REQUIRED_METHODS: readonly string[] = [
   'sessions.messages.subscribe',
   'sessions.messages.unsubscribe',
   'sessions.patch',
+  'sessions.questions',
   'sessions.rename',
   'sessions.reset',
   'sessions.resolve',

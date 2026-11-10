@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { apiUrl } from '@/lib/api-origin'
+import { apiUrl, gatewayHttpReachable } from '@/lib/api-origin'
 import { authenticatedHeaders } from '@/lib/http-auth'
 import {
   ATTACHMENT_ALLOWED_LABEL,
@@ -105,10 +105,14 @@ export function useAttachments(opts?: {
           : new File([file], file.name, { type: mime })
       form.append('file', uploadFile, file.name)
       form.append('mime', mime)
-      const response = await fetch(apiUrl('/api/v1/files/upload'), {
+      // A staged upload is HTTP, which reaches only the gateway that served
+      // this page (the console's CSP); small files go inline on the socket.
+      if (!gatewayHttpReachable()) throw new Error(t('chat.attachOtherGateway'))
+      const url = apiUrl('/api/v1/files/upload')
+      const response = await fetch(url, {
         method: 'POST',
         body: form,
-        headers: authenticatedHeaders(),
+        headers: authenticatedHeaders(url),
         credentials: 'same-origin',
       })
       if (!response.ok) {

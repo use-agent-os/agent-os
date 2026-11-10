@@ -1,4 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
+import { t } from '@/i18n'
+import '@/i18n/en/webChat'
+import { gatewayHttpReachable } from '@/lib/api-origin'
 import { authenticatedHeaders } from '@/lib/http-auth'
 import { artifactDownloadUrl, type Artifact } from '@/views/chat/transcript/artifacts'
 
@@ -6,9 +9,11 @@ import { artifactDownloadUrl, type Artifact } from '@/views/chat/transcript/arti
 export async function fetchArtifactJson(artifact: Artifact): Promise<unknown> {
   const url = artifactDownloadUrl(artifact)
   if (!url) throw new Error('missing download URL')
+  // HTTP reaches only the gateway that served this page (the console's CSP).
+  if (!gatewayHttpReachable()) throw new Error(t('webChat.artifactOtherGateway'))
   // Already gateway-resolved (absolute off-gateway, root-relative on it).
   const response = await fetch(url, {
-    headers: authenticatedHeaders(),
+    headers: authenticatedHeaders(url),
     credentials: 'same-origin',
   })
   if (!response.ok) throw new Error(`HTTP ${response.status}`)

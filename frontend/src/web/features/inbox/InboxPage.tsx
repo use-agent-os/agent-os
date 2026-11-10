@@ -1,17 +1,20 @@
 import {
   AlertTriangle,
+  Copy,
   Inbox as InboxIcon,
   MessageCircleQuestion,
   RefreshCw,
   ShieldAlert,
 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { Link, useNavigate, useSearchParams } from 'react-router'
+import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
 import { formatNumber, getLocale, t, tPlural } from '@/i18n'
 import '@/i18n/en/webPagesOverview'
 import { composeAskAnswer, type AskQuestion } from '@/lib/ask-questions'
 import type { AttentionItem } from '@/lib/attention-inbox'
+import { copyWithFallback } from '@/lib/clipboard'
 import { gate, requireConnection, type Gate } from '@/lib/disabled-reason'
 import { usePendingQuestions } from '@/lib/pending-questions'
 import {
@@ -112,8 +115,28 @@ function ItemCard({
   )
 }
 
-function ApprovalItem({ item }: { item: AttentionItem }) {
+/** Copies a command to the clipboard and says whether it worked. */
+function CopyCommand({ command, label }: { command: string; label: string }) {
+  return (
+    <Button
+      size="icon-sm"
+      variant="ghost"
+      aria-label={label}
+      title={label}
+      onClick={() =>
+        void copyWithFallback(command)
+          .then(() => toast.success(t('webPagesOverview.inboxCopied')))
+          .catch(() => toast.error(t('webPagesOverview.inboxCopyFailed')))
+      }
+    >
+      <Copy />
+    </Button>
+  )
+}
+
+function ApprovalItem({ item, highlight }: { item: AttentionItem; highlight: string | null }) {
   const namespace = item.approval?.namespace || 'exec'
+  // Each card names its agent and copies its command (ApprovalCard).
   return (
     <ItemCard
       item={item}
@@ -123,7 +146,13 @@ function ApprovalItem({ item }: { item: AttentionItem }) {
     >
       <ul role="list" className="flex flex-col gap-2">
         {item.members.map((member) =>
-          member.approval ? <ApprovalCard key={member.id} item={member.approval} /> : null,
+          member.approval ? (
+            <ApprovalCard
+              key={member.id}
+              item={member.approval}
+              highlighted={member.approval.id === highlight}
+            />
+          ) : null,
         )}
       </ul>
       <Link
@@ -314,12 +343,18 @@ function IssueItem({ item, issue }: { item: AttentionItem; issue: RuntimeIssue }
               <div className="min-w-0 flex-1">
                 {step.label ? <p className="font-medium">{step.label}</p> : null}
                 {step.command ? (
-                  <code
-                    tabIndex={0}
-                    className="block overflow-x-auto rounded bg-surface-0 px-2 py-1 font-mono text-small whitespace-pre"
-                  >
-                    {step.command}
-                  </code>
+                  <div className="flex max-w-full items-center gap-1 rounded bg-surface-0 pl-2">
+                    <code
+                      tabIndex={0}
+                      className="block min-w-0 flex-1 overflow-x-auto py-1 font-mono text-small whitespace-pre"
+                    >
+                      {step.command}
+                    </code>
+                    <CopyCommand
+                      command={step.command}
+                      label={t('webPagesOverview.inboxCopyStep', { step: i + 1 })}
+                    />
+                  </div>
                 ) : null}
                 {step.detail ? <p className="text-small text-text-muted">{step.detail}</p> : null}
               </div>
@@ -365,6 +400,9 @@ function Stat({ label, value }: { label: string; value: number }) {
 
 export function InboxPage() {
   const { items, issues } = useAttentionInbox()
+  // A push notification opens /inbox?approval=<id>: that request is brought into view.
+  const [params] = useSearchParams()
+  const highlight = params.get('approval')
   const connection = useDisplayedConnection()
   const everConnected = useRuntimeSignals((s) => s.everConnected)
   const refresh = useRuntimeSignals((s) => s.refresh)
@@ -431,7 +469,7 @@ export function InboxPage() {
         <section aria-label={t('webPagesOverview.inboxList')} className="flex flex-col gap-3">
           {items.map((item) =>
             item.kind === 'approval' ? (
-              <ApprovalItem key={item.id} item={item} />
+              <ApprovalItem key={item.id} item={item} highlight={highlight} />
             ) : item.kind === 'question' ? (
               <QuestionItem key={item.id} item={item} answer={answer} />
             ) : item.issue ? (

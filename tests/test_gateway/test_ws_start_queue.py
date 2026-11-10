@@ -518,3 +518,163 @@ async def test_flush_waits_until_queued_frames_are_on_the_wire() -> None:
     finally:
         ws.unblock.set()
         await conn._stop_writer()  # noqa: SLF001
+
+
+# ── a second stop from the same connection ────────────────────────────────
+
+
+async def test_a_second_stop_joins_the_first_instead_of_queueing_behind_it() -> None:
+    registry = RpcRegistry()
+    release_send = asyncio.Event()
+    release_first_stop = asyncio.Event()
+    order: list[str] = []
+
+    @registry.method("chat.send")
+    async def _send(params: dict | None, ctx: Any) -> dict:
+        await release_send.wait()
+        order.append("send")
+        return {}
+
+    @registry.method("chat.abort")
+    async def _abort(params: dict | None, ctx: Any) -> dict:
+        nth = (params or {}).get("nth")
+        order.append(f"abort{nth}")
+        if nth == 1:
+            await release_first_stop.wait()
+        return {}
+
+    @registry.method("chat.history")
+    async def _history(params: dict | None, ctx: Any) -> dict:
+        order.append("history")
+        return {}
+
+    ws = _FakeWs()
+    loop = asyncio.create_task(_message_loop(_conn(ws), GatewayConfig(), registry, None))
+    key = {"sessionKey": "agent:main:webchat:s"}
+    await ws.inbox.put(_req("1", "chat.send", key))
+    await ws.inbox.put(_req("2", "chat.abort", {**key, "nth": 1}))
+    await ws.inbox.put(_req("3", "chat.abort", {**key, "nth": 2}))
+    await ws.inbox.put(_req("4", "chat.history", key))
+    await asyncio.sleep(0.05)
+    # Both stops still wait for the send before them.
+    assert order == []
+    release_send.set()
+    # The second stop does not wait for the first one to finish.
+    await asyncio.wait_for(_answered(ws, "3"), timeout=2.0)
+    assert order == ["send", "abort1", "abort2"]
+    # A later request on the session waits for every stop of the group.
+    await asyncio.sleep(0.05)
+    assert "history" not in order
+    release_first_stop.set()
+    await asyncio.wait_for(_answered(ws, "4"), timeout=2.0)
+    assert order[-1] == "history"
+    await ws.inbox.put(None)
+    await asyncio.wait_for(loop, timeout=2.0)
+
+
+async def test_a_stop_after_another_request_still_waits_for_it() -> None:
+    registry = RpcRegistry()
+    release = asyncio.Event()
+    order: list[str] = []
+
+    @registry.method("chat.abort")
+    async def _abort(params: dict | None, ctx: Any) -> dict:
+        nth = (params or {}).get("nth")
+        order.append(f"abort{nth}")
+        if nth == 1:
+            await release.wait()
+        return {}
+
+    @registry.method("chat.send")
+    async def _send(params: dict | None, ctx: Any) -> dict:
+        order.append("send")
+        return {}
+
+    ws = _FakeWs()
+    loop = asyncio.create_task(_message_loop(_conn(ws), GatewayConfig(), registry, None))
+    key = {"sessionKey": "agent:main:webchat:s"}
+    # stop, send, stop: the send breaks the group, so the last stop waits for
+    # the send, which waits for the first stop.
+    await ws.inbox.put(_req("1", "chat.abort", {**key, "nth": 1}))
+    await ws.inbox.put(_req("2", "chat.send", key))
+    await ws.inbox.put(_req("3", "chat.abort", {**key, "nth": 3}))
+    await asyncio.sleep(0.05)
+    assert order == ["abort1"]
+    release.set()
+    await asyncio.wait_for(_answered(ws, "3"), timeout=2.0)
+    assert order == ["abort1", "send", "abort3"]
+    await ws.inbox.put(None)
+    await asyncio.wait_for(loop, timeout=2.0)
+
+
+class _AbortSessions:
+    """Session manager surface ``chat.abort`` reads: one session, no children."""
+
+    def __init__(self) -> None:
+        self.storage = self
+        self._storage = self
+
+    async def get_session(self, key: str) -> Any:
+        return object()
+
+    async def list_sessions(self, **_: Any) -> list[Any]:
+        return []
+
+
+async def test_second_chat_abort_on_one_connection_force_stops_the_turn() -> None:
+    """The real ``chat.abort`` handler over one socket against a real runtime:
+    the first stop asks the turn to stop and waits out the grace; the second
+    one, sent while the first is pending, cancels the turn at once and both
+    answer with the stopped run."""
+    from agentos.engine.turn_progress import current_turn_stop_signal
+    from agentos.gateway.routing import RouteEnvelope, SourceKind
+    from agentos.gateway.rpc_chat import _handle_chat_abort
+    from agentos.gateway.task_runtime import TaskRuntime
+    from tests.test_gateway.test_task_runtime_cooperative_cancel import _Storage
+
+    session_key = "agent:main:webchat:stop-twice"
+    started = asyncio.Event()
+
+    async def handler(run: Any) -> None:
+        signal = current_turn_stop_signal()
+        assert signal is not None
+        signal.accepts_abort = True
+        started.set()
+        await asyncio.sleep(60)  # ignores the cooperative abort
+
+    runtime = TaskRuntime(storage=_Storage({}), turn_handler=handler, cancel_grace_s=30.0)
+    handle = await runtime.enqueue(
+        RouteEnvelope(
+            source_kind=SourceKind.SYSTEM,
+            source_name="test",
+            agent_id="main",
+            session_key=session_key,
+        ),
+        "hi",
+        run_kind="default",
+    )
+    await asyncio.wait_for(started.wait(), timeout=2)
+
+    registry = RpcRegistry()
+    registry.register("chat.abort", _handle_chat_abort)
+    ws = _FakeWs()
+    loop = asyncio.create_task(
+        _message_loop(_conn(ws), GatewayConfig(), registry, _AbortSessions(), task_runtime=runtime)
+    )
+    try:
+        await ws.inbox.put(_req("1", "chat.abort", {"sessionKey": session_key}))
+        await asyncio.sleep(0.1)
+        assert runtime.is_task_active(handle.task_id)  # the grace is running
+        await ws.inbox.put(_req("2", "chat.abort", {"sessionKey": session_key}))
+        second = await asyncio.wait_for(_answered(ws, "2"), timeout=3.0)
+        first = await asyncio.wait_for(_answered(ws, "1"), timeout=3.0)
+    finally:
+        await ws.inbox.put(None)
+        await asyncio.wait_for(loop, timeout=2.0)
+        await runtime.shutdown()
+
+    assert second["ok"] is True, second
+    assert second["payload"]["aborted"] == [handle.task_id]
+    assert first["ok"] is True, first
+    assert first["payload"]["aborted"] == [handle.task_id]
+    assert not runtime.is_task_active(handle.task_id)

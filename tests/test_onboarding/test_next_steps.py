@@ -32,7 +32,7 @@ def test_onboarding_finish_output_separates_summary_from_commands():
     assert "  Start gateway in background: agentos gateway start --json" in text
     assert "  Restart running gateway: agentos gateway restart --json" in text
     assert "Reference:" in text
-    assert "  Web UI: http://127.0.0.1:18791/control/setup" in text
+    assert "  Web UI: http://127.0.0.1:18791/control/settings/setup" in text
     assert "uv run" not in text
 
 
@@ -105,7 +105,7 @@ def test_onboarding_finish_output_uses_configured_web_setup_url():
 
     text = format_next_steps(cfg)
 
-    assert "  Web UI: http://127.0.0.1:19999/ops/setup" in text
+    assert "  Web UI: http://127.0.0.1:19999/ops/settings/setup" in text
     assert "  Web UI: http://127.0.0.1:18791/control/" not in text
 
 

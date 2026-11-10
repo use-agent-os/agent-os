@@ -775,11 +775,11 @@ async def _handle_sessions_list(params: dict | None, ctx: RpcContext) -> dict:
     now_ms = int(time.time() * 1000)
 
     if ctx.session_manager is None:
-        return {"sessions": [], "count": 0, "ts": now_ms}
+        return {"sessions": [], "count": 0, "total": 0, "ts": now_ms}
 
     storage = get_session_storage(ctx.session_manager)
     if storage is None:
-        return {"sessions": [], "count": 0, "ts": now_ms}
+        return {"sessions": [], "count": 0, "total": 0, "ts": now_ms}
 
     limit = (params or {}).get("limit", 50)
     project_filter = (params or {}).get("projectId") or (params or {}).get("project_id")
@@ -865,7 +865,34 @@ async def _handle_sessions_list(params: dict | None, ctx: RpcContext) -> dict:
         row.update(_task_state_summary(task_rows))
         result.append(row)
 
-    return {"sessions": result, "count": len(result), "ts": now_ms}
+    total = await _sessions_total(storage, limit, len(result), project_filter)
+    return {"sessions": result, "count": len(result), "total": total, "ts": now_ms}
+
+
+async def _sessions_total(storage: Any, limit: Any, listed: int, project_filter: Any) -> int:
+    """How many sessions match, ignoring ``limit``.
+
+    ``count`` is only the size of the returned page; a client that lists the
+    newest N must be able to say "newest N of M" instead of presenting the
+    page as everything. A short page is the whole set, so the count query only
+    runs when the page came back full. A storage without a count method
+    reports the page size, which is what clients assumed before.
+    """
+    if not isinstance(limit, int) or isinstance(limit, bool) or listed < limit:
+        return listed
+    counter = (
+        getattr(storage, "count_sessions_in_project", None)
+        if project_filter
+        else getattr(storage, "count_sessions", None)
+    )
+    if not callable(counter):
+        return listed
+    try:
+        counted = await (counter(str(project_filter)) if project_filter else counter())
+    except Exception:
+        log.warning("sessions.list.count_failed", exc_info=True)
+        return listed
+    return max(int(counted), listed)
 
 
 @_d.method("sessions.create")
@@ -2767,6 +2794,78 @@ async def _handle_sessions_preview(params: dict | None, ctx: RpcContext) -> dict
         )
 
     return {"ts": now_ms, "previews": previews}
+
+
+#: Entries read from the end of a session for its unanswered question: the
+#: question ends its turn, so it sits in the newest assistant entry.
+_QUESTION_TAIL_ENTRIES = 10
+_QUESTIONS_DEFAULT_LIMIT = 100
+_QUESTIONS_MAX_LIMIT = 500
+
+
+def _pending_question(transcript: list[Any]) -> dict[str, Any] | None:
+    """The ``ask_user`` question a session's transcript ends on, if any.
+
+    ``ask_user`` ends the turn and the answer is the next user message, so a
+    question is still open when the newest user/assistant entry is the
+    assistant entry that presented it.
+    """
+    from agentos.ask_user import ASK_USER_TOOL_NAME, questions_from_tool_result
+
+    for entry in reversed(transcript):
+        if entry.role == "user":
+            return None
+        if entry.role != "assistant":
+            continue
+        for segment in reversed(entry.tool_calls or []):
+            if not isinstance(segment, dict) or segment.get("type") != "tool_result":
+                continue
+            name = segment.get("name") or segment.get("tool_name")
+            if name != ASK_USER_TOOL_NAME:
+                continue
+            questions = questions_from_tool_result(name, segment.get("result"))
+            if questions:
+                return {
+                    "questions": questions,
+                    "toolUseId": segment.get("tool_use_id"),
+                    # Milliseconds since the epoch, like every transcript time.
+                    "askedAt": getattr(entry, "created_at", None),
+                }
+        return None
+    return None
+
+
+@_d.method("sessions.questions")
+async def _handle_sessions_questions(params: dict | None, ctx: RpcContext) -> dict:
+    """Unanswered ``ask_user`` questions of the most recently updated sessions.
+
+    A client that connects (or reloads) after a question was asked has seen
+    no frame for it; this lets it list them without opening each session.
+    ``limit`` bounds how many sessions are read (default 100, at most 500).
+    """
+    try:
+        limit = int((params or {}).get("limit", _QUESTIONS_DEFAULT_LIMIT))
+    except (TypeError, ValueError):
+        limit = _QUESTIONS_DEFAULT_LIMIT
+    limit = max(1, min(limit, _QUESTIONS_MAX_LIMIT))
+    storage = get_session_storage(getattr(ctx, "session_manager", None))
+    if storage is None:
+        return {"questions": []}
+    get_recent = getattr(storage, "get_recent_transcript", None)
+    if not callable(get_recent):
+        return {"questions": []}
+    questions: list[dict[str, Any]] = []
+    for session in await storage.list_sessions(limit=limit):
+        try:
+            tail = await get_recent(session.session_id, _QUESTION_TAIL_ENTRIES)
+        except Exception:
+            log.warning("sessions.questions_tail_failed", session_key=session.session_key)
+            continue
+        pending = _pending_question(tail)
+        if pending is None:
+            continue
+        questions.append({"key": session.session_key, **pending})
+    return {"questions": questions}
 
 
 @_d.method("sessions.resolve")

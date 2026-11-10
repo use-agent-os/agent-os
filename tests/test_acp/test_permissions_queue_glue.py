@@ -211,3 +211,33 @@ def test_http_approvals_list_and_resolve_carry_title_and_payload(tmp_path, monke
         assert resolved.status_code == 200, resolved.text
     assert queue.take_payload(aid) == {"content": {"branch": "main"}}
     queue.close()
+
+
+def test_approval_list_display_answers_like_the_http_list(tmp_path, monkeypatch) -> None:
+    """A console reaching a gateway only over its socket reads the same list."""
+    from starlette.testclient import TestClient
+
+    from agentos.gateway import app as app_mod
+    from agentos.gateway.app import create_gateway_app
+    from agentos.gateway.config import AuthConfig, GatewayConfig
+
+    queue = make_queue(tmp_path)
+    monkeypatch.setattr(app_mod, "get_approval_queue", lambda: queue)
+    monkeypatch.setattr(rpc_approvals, "get_approval_queue", lambda: queue)
+    queue.request("exec", {"toolName": "shell", "command": "rm -f x", "sessionKey": "s1"})
+    queue.request("acp_elicitation", {"displayTitle": "Codex asks: branch?"})
+    app = create_gateway_app(config=GatewayConfig(auth=AuthConfig(mode="token", token="t-1")))
+    with TestClient(app, base_url="http://localhost") as client:
+        http = client.get("/api/approvals", headers={"Authorization": "Bearer t-1"}).json()
+
+    async def _rpc() -> dict:
+        res = await get_dispatcher().dispatch(
+            "r1", "approval.list", {"display": True}, RpcContext(conn_id="test")
+        )
+        assert res.error is None, res.error
+        return res.payload
+
+    import asyncio
+
+    assert asyncio.run(_rpc()) == http
+    queue.close()

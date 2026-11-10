@@ -96,6 +96,7 @@ class _RecordingCompactionPersist:
         summary: str,
         kept_entries: list[Any],
         compaction_id: str | None = None,
+        trigger: str | None = None,
     ) -> None:
         self.calls.append(
             {
@@ -103,6 +104,7 @@ class _RecordingCompactionPersist:
                 "summary": summary,
                 "kept_entries": kept_entries,
                 "compaction_id": compaction_id,
+                "trigger": trigger,
             }
         )
         if self.raises is not None:
@@ -721,6 +723,54 @@ async def test_compaction_handler_preserves_recoverable_state_on_persist_failure
     assert snapshot.calls == []
 
 
+@pytest.mark.asyncio
+async def test_compaction_handler_forwards_the_events_trigger() -> None:
+    # The event's ``trigger`` reaches the persist port; an event built without
+    # one carries the default, ``overflow``.
+    persist = _RecordingCompactionPersist()
+    handler = _CompactionHandler(persist=persist, memory_snapshot=_RecordingMemorySnapshotRefresh())
+    with_trigger = CompactionEvent(summary="s", kept_entries=[], trigger="timeout")
+
+    await handler.handle(with_trigger, _make_input())
+    await handler.handle(CompactionEvent(summary="s", kept_entries=[]), _make_input())
+
+    assert [call["trigger"] for call in persist.calls] == ["timeout", "overflow"]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_persist_reports_the_events_trigger_as_its_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import agentos.engine.cache_break_monitor as cbm
+
+    notices: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        cbm, "notify_compaction", lambda _session_key, **payload: notices.append(payload)
+    )
+    handler = _CompactionHandler(
+        persist=_RecordingCompactionPersist(raises=RuntimeError),
+        memory_snapshot=_RecordingMemorySnapshotRefresh(),
+    )
+    event = CompactionEvent(summary="s", kept_entries=[])
+    event.trigger = "preflight"  # type: ignore[attr-defined]
+
+    await handler.handle(event, _make_input())
+    await handler.handle(CompactionEvent(summary="s", kept_entries=[]), _make_input())
+
+    assert [notice["phase"] for notice in notices] == [
+        "agent_inline_preflight",
+        "agent_inline_overflow",
+    ]
+
+
+def test_inline_compaction_phase_falls_back_to_overflow() -> None:
+    from agentos.engine.turn_runner.stream_consumer_stage import inline_compaction_phase
+
+    assert inline_compaction_phase("timeout") == "agent_inline_timeout"
+    assert inline_compaction_phase(None) == "agent_inline_overflow"
+    assert inline_compaction_phase("  ") == "agent_inline_overflow"
+
+
 # ---------------------------------------------------------------------------
 # Outer-stage tests
 # ---------------------------------------------------------------------------
@@ -982,3 +1032,29 @@ def test_turn_context_surface_kind_defaults_to_unknown() -> None:
         system_prompt="",
     )
     assert ctx.surface_kind == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_closing_the_stage_closes_the_agent_stream_at_once() -> None:
+    # A consumer that stops reading (the harness's replay ``break``) closes the
+    # stage; the agent's own ``finally`` must run then, not at garbage collection.
+    closed: list[str] = []
+
+    class _AgentRun:
+        def run_turn(self, _agent: Any, **_kwargs: Any) -> AsyncIterator[Any]:
+            async def _iter() -> AsyncIterator[Any]:
+                try:
+                    yield TextDeltaEvent(text="one")
+                    yield TextDeltaEvent(text="two")
+                finally:
+                    closed.append("agent")
+
+            return _iter()
+
+    stage, _recs = _make_stage(agent_run=_AgentRun())
+    events = stage.run(_make_input())
+    assert isinstance(await events.__anext__(), TextDeltaEvent)
+
+    await events.aclose()
+
+    assert closed == ["agent"]

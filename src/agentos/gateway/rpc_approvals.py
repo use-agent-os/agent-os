@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentos.application.approval_events import approval_display_item
 from agentos.application.approval_queue import get_approval_queue
 from agentos.application.approval_rpc import (
     approval_forget_rpc_payload,
@@ -158,11 +159,26 @@ async def _handle_approval_list(params: dict | None, ctx: RpcContext) -> dict[st
     """Pending approvals across namespaces (exec, plugin, acp, acp_elicitation, flow).
 
     ``params.namespace`` (optional) narrows the list to one namespace.
+    ``params.display: true`` answers exactly as ``GET /api/approvals`` does
+    (display items plus the allow/deny patterns), for a console that reaches
+    this gateway only over its WebSocket.
     """
     namespace = params.get("namespace") if isinstance(params, dict) else None
     if namespace is not None and not isinstance(namespace, str):
         raise ValueError("params.namespace must be a string")
-    return approval_pending_rpc_payload(get_approval_queue(), namespace)
+    queue = get_approval_queue()
+    if isinstance(params, dict) and params.get("display") is True:
+        settings = approval_settings_rpc_payload(queue.get_settings())
+        mode = settings.get("mode", "prompt")
+        return {
+            "pending": [
+                approval_display_item(p, mode=mode) for p in queue.list_pending(namespace or None)
+            ],
+            "mode": mode,
+            "allowPatterns": settings.get("allowPatterns", []),
+            "denyPatterns": settings.get("denyPatterns", []),
+        }
+    return approval_pending_rpc_payload(queue, namespace)
 
 
 @_d.method("plugin.approval.request")

@@ -1,9 +1,9 @@
-// Pure overview-view helpers ported 1:1 from the legacy view
-// (src/agentos/gateway/static/js/views/overview.js) and the shared UI helpers
-// it consumes (static/js/components.js relTime / sessionStatus*). Each function
-// carries the legacy line range it mirrors so the parity matrix stays auditable.
-// RPC calls, event subscriptions, and rendering live in OverviewPage.tsx; this
-// module owns the pure derivations (label mapping, formatting, session sort).
+// Pure overview helpers, first ported 1:1 from the retired console's
+// overview.js view and its components.js helpers (relTime / sessionStatus*);
+// the line ranges cited below point into that source. RPC calls, event
+// subscriptions and rendering live in the callers (the web console's Home page
+// and Settings › Channels section, the desktop's Channels pane); this module
+// owns the pure derivations (label mapping, formatting, session sort).
 
 // Registers this view's copy; it ships in this chunk, not the entry bundle.
 import '@/i18n/en/overview'

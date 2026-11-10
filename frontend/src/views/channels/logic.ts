@@ -1,7 +1,7 @@
-// Pure channels-view helpers ported 1:1 from the legacy view
-// (src/agentos/gateway/static/js/views/channels.js). Each function below carries
-// the legacy line range it mirrors so the parity matrix stays auditable. RPC
-// calls, event subscriptions, and rendering live in ChannelsPage.tsx; this
+// Pure channels helpers, first ported 1:1 from the retired console's
+// channels.js view (the line ranges cited below point into that source). RPC
+// calls, event subscriptions and rendering live in the callers (the web
+// console's Settings › Channels section, the desktop's Channels pane); this
 // module owns the pure derivations (merge/sort, stats, status mapping, sender
 // formatting).
 

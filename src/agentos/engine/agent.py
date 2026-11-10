@@ -14,7 +14,7 @@ import json
 import time
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from functools import partial
@@ -34,7 +34,7 @@ from agentos.engine.cache_break_monitor import (
     record_prompt_state,
 )
 from agentos.engine.compaction_coordinator import CompactionCoordinator, CompactionTrigger
-from agentos.engine.compaction_service import CompactionService
+from agentos.engine.compaction_service import trigger_limit_tokens
 from agentos.engine.core.loop import LoopConfig, run_agent_loop
 from agentos.engine.core.stream import (
     TOOL_ARGUMENT_HEARTBEAT_CHARS,
@@ -50,7 +50,7 @@ from agentos.engine.core.turn_usage import (
     settle_turn_usage,
 )
 from agentos.engine.estimate_calibration import EstimateCalibration, request_has_media
-from agentos.engine.fallback import FallbackPolicy, backoff_sleep
+from agentos.engine.fallback import ProviderErrorKind, backoff_sleep, classify_error
 from agentos.engine.history import limit_turns, repair_tool_pairing
 from agentos.engine.hooks.types import Amend, RequestHook, RequestHookCall, Veto
 from agentos.engine.loop_guard import (
@@ -68,6 +68,7 @@ from agentos.engine.policy import (
     Fail,
     Failover,
     ProviderAttemptPolicy,
+    RecoveryDecision,
     Retry,
 )
 from agentos.engine.progress_watchdog import (
@@ -258,6 +259,12 @@ _PROVIDER_CONTEXT_REPAIR_PROMPT = (
     "source context and retry the tool call. Do not copy compacted placeholders."
 )
 _LARGE_CONTEXT_INVALID_RESPONSE_INPUT_TOKENS = 30_000
+# A repeated timeout compacts the context only when the request is at least
+# this share of the size compaction keeps requests under (the window times the
+# threshold, or the provider's request budget when tighter). Below it the
+# provider is slow, not overloaded by the prompt, and the turn fails over (or
+# fails) instead.
+_TIMEOUT_COMPACTION_MIN_LIMIT_SHARE = 0.5
 
 
 def _positive_float(value: Any) -> float | None:
@@ -402,9 +409,6 @@ class _ProviderAttemptKind(StrEnum):
     REPETITION = "repetition_detected"
 
 
-_IterationStreamTimeoutError = IterationStreamTimeoutError
-
-
 class _TurnAbortedError(Exception):
     """The turn was asked to stop (cooperative abort) and should end now."""
 
@@ -533,6 +537,65 @@ _MESSAGING_SESSION_MARKERS = (
 def _is_messaging_surface(session_key: str | None) -> bool:
     key = str(session_key or "").casefold()
     return any(marker in key for marker in _MESSAGING_SESSION_MARKERS)
+
+
+# Key of the note added to a JSON object result whose call a tool hook rewrote.
+HOOK_ADJUSTED_ARGUMENTS_KEY = "tool_hook_adjusted_arguments"
+
+
+def _hook_adjusted_argument_names(
+    arguments: dict[str, Any], effective: dict[str, Any]
+) -> list[str]:
+    """Top-level argument names a tool hook added, removed or changed."""
+
+    return sorted(
+        name
+        for name in set(arguments) | set(effective)
+        if name not in arguments or name not in effective or arguments[name] != effective[name]
+    )
+
+
+def _note_hook_adjusted_arguments(result: ToolResult, arguments: dict[str, Any]) -> ToolResult:
+    """Tell the model that a tool hook ran its call with other arguments.
+
+    The transcript keeps the ``tool_use`` exactly as the model emitted it: it
+    is on record before the call runs, and a provider replay pairs it with its
+    ``tool_result`` and (for thought-signature providers) a signature bound to
+    those arguments. The result carries the rewrite instead. Only the names of
+    the adjusted arguments are given, never their values: a hook may have put
+    something into them the model must not see.
+    """
+
+    effective = result.effective_arguments
+    if effective is None or not isinstance(result.content, str):
+        return result
+    names = _hook_adjusted_argument_names(arguments, effective)
+    if not names:
+        return result
+    content = result.content
+    payload: Any = None
+    if content.lstrip().startswith("{"):
+        try:
+            payload = json.loads(content)
+        except ValueError:
+            payload = None
+    if isinstance(payload, dict):
+        # A JSON result stays JSON: approval, artifact and router-control
+        # readers parse it.
+        payload[HOOK_ADJUSTED_ARGUMENTS_KEY] = names
+        content = json.dumps(payload, ensure_ascii=False)
+    else:
+        note = (
+            "[Note: a tool hook adjusted the arguments of this call before it ran "
+            f"(adjusted: {', '.join(names)}). This result is for the adjusted call.]"
+        )
+        # Trailing blank lines dropped first: with them the note would follow
+        # two or more empty lines, the projection collapses those, and a
+        # result it shortened that way goes out wrapped in a projection
+        # envelope although nothing was large.
+        body = content.rstrip()
+        content = f"{body}\n\n{note}" if body else note
+    return replace(result, content=content)
 
 
 def _classify_provider_attempt(
@@ -692,7 +755,9 @@ class Agent:
         self._session_key = session_key
         self._turn_call_logger = turn_call_logger
         self._tool_registry: ToolRegistry | None = tool_registry
-        self._tool_context: ToolContext | None = tool_context
+        # Accepted for callers that pass it; tools receive their context
+        # through ``tool_handler``, so the agent keeps no copy.
+        del tool_context
         # Cumulative spend ceilings, re-read between iterations. The turn-start
         # gate alone would let one turn with an unbounded tool loop run
         # arbitrarily far past a ceiling, which is the shape a runaway
@@ -1009,8 +1074,11 @@ class Agent:
         if stop_signal is not None:
             stop_signal.accepts_abort = True
         try:
-            async for event in self._turn_generator(message, extra_messages, semantic_message):
-                yield event
+            async with aclosing(
+                self._turn_generator(message, extra_messages, semantic_message)
+            ) as turn_events:
+                async for event in turn_events:
+                    yield event
         finally:
             if stop_signal is not None:
                 stop_signal.accepts_abort = False
@@ -1021,7 +1089,7 @@ class Agent:
         message: str,
         extra_messages: list[Message] | None = None,
         semantic_message: str | None = None,
-    ) -> AsyncIterator[AgentEvent]:
+    ) -> AsyncGenerator[AgentEvent, None]:
         """Async generator that drives the state machine.
 
         The loop is :func:`agentos.engine.core.run_agent_loop`; this method
@@ -1029,7 +1097,6 @@ class Agent:
         the turn: the sealed transcript on cancel or abort, the history on
         success, and the one ``DoneEvent`` that ends every turn.
         """
-        self._current_turn_message = message
         # A new message is a fresh request: a call that failed in an earlier
         # turn may be exactly what the user is now asking to try again.
         self._tool_failure_loop_counts.clear()
@@ -1048,9 +1115,7 @@ class Agent:
             # a result, and a note telling the model the turn was cut short.
             # The cancellation itself propagates; the runtime publishes the
             # run's aborted terminal frame.
-            sealed = self._seal_cancelled_turn(t.turn_messages, "".join(t.assistant_text_parts))
-            self._history = sealed
-            self._record_turn_transcript(sealed)
+            self._settle_cancelled_turn(t, "".join(t.assistant_text_parts))
             raise
         except _TurnAbortedError:
             # Asked to stop (``TurnStopSignal.request_abort``): the provider
@@ -1061,9 +1126,7 @@ class Agent:
             partial = "".join(t.assistant_text_parts)
             if partial.strip():
                 t.final_text_parts.append(partial)
-            sealed = self._seal_cancelled_turn(t.turn_messages, partial)
-            self._history = sealed
-            self._record_turn_transcript(sealed)
+            self._settle_cancelled_turn(t, partial)
         except TimeoutError:
             if t.artifact_delivery_final_response_pending:
                 yield self._finish_artifact_delivery_degraded(
@@ -1072,7 +1135,8 @@ class Agent:
                     code="agent_runtime_timeout",
                 )
             else:
-                # Total turn deadline exceeded (raised by manual check above)
+                # Total turn deadline exceeded (``_turn_before_request`` or the
+                # provider stream's deadline raised it).
                 yield self._transition(AgentState.ERROR)
                 t.terminal_error = ErrorEvent(
                     message=f"Agent turn timed out after {self.config.timeout}s",
@@ -1348,20 +1412,14 @@ class Agent:
             observe_only=not loop_guard_enforced(getattr(self.config, "loop_guard", "enforce"))
         )
         t.verification_ledger = VerificationLedger()
-        t.fallback = FallbackPolicy(
-            max_retries=self.config.max_provider_retries,
-            base_backoff_ms=self.config.retry_base_backoff_ms,
-            max_backoff_ms=self.config.retry_max_backoff_ms,
-        )
-        t.retry_after_cap_s = float(self.config.rate_limit_retry_after_cap_seconds)
+        retry_after_cap_s = float(self.config.rate_limit_retry_after_cap_seconds)
         t.attempt_policy = ProviderAttemptPolicy(
             budget=AttemptBudget(
                 max_retries=self.config.max_provider_retries,
                 budget_seconds=float(self.config.retry_budget_seconds),
                 base_backoff_ms=self.config.retry_base_backoff_ms,
                 max_backoff_ms=self.config.retry_max_backoff_ms,
-                retry_after_cap_s=t.retry_after_cap_s,
-                max_timeout_retries=t.fallback.max_timeout_retries,
+                retry_after_cap_s=retry_after_cap_s,
                 timeout_context_recovery=bool(self.config.timeout_context_recovery),
             )
         )
@@ -1370,7 +1428,7 @@ class Agent:
         _adopt_retry_after_cap = getattr(self.provider, "set_retry_after_cap_seconds", None)
         if callable(_adopt_retry_after_cap):
             try:
-                _adopt_retry_after_cap(t.retry_after_cap_s)
+                _adopt_retry_after_cap(retry_after_cap_s)
             except Exception:  # noqa: BLE001 - optional provider hook
                 logger.debug("provider.retry_after_cap_hook_failed", exc_info=True)
 
@@ -1589,12 +1647,11 @@ class Agent:
         t.iter_thinking_signature = None
         t.provider_error = None
 
-        t.retry_attempt = 0
         t.call_attempt = 0
         t.attempt_history = AttemptHistory()
         t.attempt_started_at = t.loop.time()
         t.retry_policy = _ProviderRetryPolicy.from_provider_budget(
-            t.fallback.max_retries,
+            t.attempt_policy.budget.max_retries,
             length_capped_continuations=self.config.length_capped_continuations,
         )
         t.attempt_retries_used = t.retry_policy.used_attempts()
@@ -1615,9 +1672,12 @@ class Agent:
 
         Each attempt runs the ``_attempt_*`` steps in order; a step that sets
         ``t.attempt_flow`` ends the attempt (``RETRY`` sends the request again,
-        ``EXIT`` leaves the retry loop).
+        ``EXIT`` leaves the retry loop). The loop has no bound of its own:
+        every ``RETRY`` is bounded where it is decided (the attempt policy for
+        provider errors, a per-kind budget for invalid responses), so a
+        provider error always ends in that policy's terminal decision.
         """
-        while t.retry_attempt <= t.fallback.max_retries:
+        while True:
             t.attempt_flow = None
             for attempt_step in (
                 self._attempt_request,
@@ -1625,15 +1685,17 @@ class Agent:
                 self._attempt_review,
                 self._attempt_classify,
             ):
-                async for event in attempt_step(t):
-                    yield event
+                async with aclosing(attempt_step(t)) as step_events:
+                    async for event in step_events:
+                        yield event
                 if t.attempt_flow is not None:
                     break
             if t.attempt_flow is None:
                 self._attempt_end(t)
             if t.attempt_flow is None:
-                async for event in self._attempt_recover(t):
-                    yield event
+                async with aclosing(self._attempt_recover(t)) as recover_events:
+                    async for event in recover_events:
+                        yield event
             if t.attempt_flow is AttemptFlow.EXIT:
                 break
         if t.terminal_error is not None or t.artifact_delivery_degraded_final_response:
@@ -1782,6 +1844,7 @@ class Agent:
                 kept_entries=overflow_outcome.kept_entries,
                 kept_count=len(overflow_outcome.messages),
                 removed_count=overflow_outcome.removed_count,
+                trigger="preflight",
             )
             t.overflow_retries = 0  # reset on success
             t.request_messages = self._provider_request_messages(
@@ -1923,30 +1986,38 @@ class Agent:
         )
         t.timed_stream = self.turn_timing.provider_stream(t.deadline_stream)
         attempt: AttemptResult | None = None
-        async with aclosing(
-            stream_attempt(
-                t.timed_stream,
-                text_parts=t.assistant_text_parts,
-                tools_enabled=t.tools_supported_for_call,
-                finalizing=(
-                    t.artifact_delivery_final_response_pending
-                    or t.max_iterations_finalization_pending
-                ),
-                text_gate=t.text_call_gate,
-                repetition_guard=t.repetition_guard,
-                show_thinking=t.thinking_shown_attempt in (None, t.call_attempt),
-                thinking_fallback_allowed=t.thinking_enabled and not t.thinking_fallback_done,
-                canonical_tool_name=self._canonical_tool_name,
-                coerce_tool_arguments=self._coerce_tool_arguments,
-                on_done=lambda raw_ev: self._attempt_on_done(t, raw_ev),
-                started_at=t.call_started_at,
-            )
-        ) as stream_items:
-            async for stream_item in stream_items:
-                if isinstance(stream_item, AttemptResult):
-                    attempt = stream_item
-                else:
-                    yield stream_item
+        try:
+            async with aclosing(
+                stream_attempt(
+                    t.timed_stream,
+                    text_parts=t.assistant_text_parts,
+                    tools_enabled=t.tools_supported_for_call,
+                    finalizing=(
+                        t.artifact_delivery_final_response_pending
+                        or t.max_iterations_finalization_pending
+                    ),
+                    text_gate=t.text_call_gate,
+                    repetition_guard=t.repetition_guard,
+                    show_thinking=t.thinking_shown_attempt in (None, t.call_attempt),
+                    thinking_fallback_allowed=t.thinking_enabled and not t.thinking_fallback_done,
+                    canonical_tool_name=self._canonical_tool_name,
+                    coerce_tool_arguments=self._coerce_tool_arguments,
+                    on_done=lambda raw_ev: self._attempt_on_done(t, raw_ev),
+                    started_at=t.call_started_at,
+                )
+            ) as stream_items:
+                async for stream_item in stream_items:
+                    if isinstance(stream_item, AttemptResult):
+                        attempt = stream_item
+                    else:
+                        yield stream_item
+        finally:
+            # The streams this attempt opened end with it. ``stream_attempt``
+            # stops reading on an error and the timing wrapper does not close
+            # what it wraps, so a closed turn (or an early stop) would leave
+            # the provider stream and its connection to the GC finalizer.
+            for opened in (t.timed_stream, t.deadline_stream, t.raw_stream):
+                await self._close_provider_stream(opened)
         assert attempt is not None
         t.tool_calls = attempt.tool_calls
         t.pending_tools = attempt.pending_tools
@@ -2415,7 +2486,7 @@ class Agent:
                 classification=attempt_classification.kind.value,
                 iteration=t.iterations,
                 call_attempt=t.call_attempt,
-                provider_retry_attempt=t.retry_attempt,
+                provider_retry_attempt=t.attempt_history.retries,
                 post_tool_turn=t.post_tool_turn,
                 got_done_event=t.got_done_event,
                 stop_reason=stop_reason,
@@ -2493,8 +2564,8 @@ class Agent:
                 t.attempt_retries_used[_ProviderAttemptKind.MALFORMED_EMPTY] += 1
                 delay = backoff_sleep(
                     0,
-                    t.fallback.base_backoff_ms,
-                    t.fallback.max_backoff_ms,
+                    t.attempt_policy.budget.base_backoff_ms,
+                    t.attempt_policy.budget.max_backoff_ms,
                     _fake=True,
                 )
                 yield WarningEvent(
@@ -2517,8 +2588,8 @@ class Agent:
                 t.attempt_retries_used[_ProviderAttemptKind.STREAM_INCOMPLETE] += 1
                 delay = backoff_sleep(
                     0,
-                    t.fallback.base_backoff_ms,
-                    t.fallback.max_backoff_ms,
+                    t.attempt_policy.budget.base_backoff_ms,
+                    t.attempt_policy.budget.max_backoff_ms,
                     _fake=True,
                 )
                 yield WarningEvent(
@@ -2712,7 +2783,7 @@ class Agent:
                 raw_code=t.provider_error.code,
                 message=t.provider_error.message,
             )
-            kind = t.fallback.classify_error(
+            kind = classify_error(
                 t.provider_error.message,
                 provider_name=getattr(self.provider, "provider_name", ""),
                 status_code=provider_error_status_code,
@@ -2752,13 +2823,13 @@ class Agent:
                 and t.retry_policy.can_retry_provider_failure(
                     failure_kind,
                     post_tool_turn=t.post_tool_turn,
-                    provider_retry_attempt=t.retry_attempt,
+                    provider_retry_attempt=t.attempt_history.retries,
                 )
             ):
                 delay = backoff_sleep(
-                    t.retry_attempt,
-                    t.fallback.base_backoff_ms,
-                    t.fallback.max_backoff_ms,
+                    t.attempt_history.retries,
+                    t.attempt_policy.budget.base_backoff_ms,
+                    t.attempt_policy.budget.max_backoff_ms,
                     _fake=True,
                 )
                 self._write_turn_call_log(
@@ -2768,11 +2839,11 @@ class Agent:
                     action="retry",
                     reason="empty_response_after_tools",
                     provider_error_code=t.provider_error.code,
-                    attempt=t.retry_attempt + 1,
+                    attempt=t.attempt_history.retries + 1,
                 )
                 t.log.warning(
                     "provider.empty_response_retry",
-                    attempt=t.retry_attempt + 1,
+                    attempt=t.attempt_history.retries + 1,
                     delay_s=round(delay, 2),
                     post_tool_turn=True,
                 )
@@ -2784,7 +2855,9 @@ class Agent:
                     ),
                 )
                 await _sleep_unless_aborted(delay)
-                t.retry_attempt += 1
+                # The same count the attempt policy bounds: a transient
+                # failure after this retry must still reach its decision.
+                t.attempt_history.note_retry(delay, timeout=False)
                 t.call_attempt += 1
                 t.attempt_flow = AttemptFlow.RETRY
                 return
@@ -2811,7 +2884,7 @@ class Agent:
                     ),
                     reason="context_overflow",
                     provider_error_code=t.provider_error.code,
-                    attempt=t.retry_attempt + 1,
+                    attempt=t.attempt_history.retries + 1,
                 )
                 if t.overflow_retries >= self.config.max_overflow_retries:
                     yield self._transition(AgentState.ERROR)
@@ -2869,6 +2942,7 @@ class Agent:
                     kept_entries=overflow_outcome.kept_entries,
                     kept_count=len(overflow_outcome.messages),
                     removed_count=overflow_outcome.removed_count,
+                    trigger="overflow",
                 )
                 t.call_attempt += 1
                 t.attempt_flow = AttemptFlow.RETRY
@@ -2880,63 +2954,25 @@ class Agent:
                 raw_code=t.provider_error.code,
                 message=t.provider_error.message,
             )
-            t.attempt_history.spent_s += max(0.0, t.loop.time() - t.attempt_started_at)
+            t.attempt_history.note_failed_attempt(
+                t.loop.time() - t.attempt_started_at,
+                cap_s=t.attempt_policy.budget.max_attempt_charge_s,
+            )
             _hint = (
                 t.provider_error.retry_after_seconds
-                if failure_kind in RETRY_AFTER_KINDS and t.retry_after_cap_s > 0
+                if failure_kind in RETRY_AFTER_KINDS
+                and t.attempt_policy.budget.retry_after_cap_s > 0
                 else None
             )
-            decision = t.attempt_policy.decide(
+            timeout_estimate = self._timeout_compaction_estimate(t) if _is_timeout else None
+            decision = self._decide_recovery(
+                t,
                 kind,
-                t.attempt_history,
-                message=t.provider_error.message,
                 retry_after_s=_hint,
                 is_timeout=_is_timeout,
-                # Never splice another model's output after text
-                # the user already saw from this attempt.
-                failover_available=not t.attempt_user_visible_emitted,
+                context_reducible=timeout_estimate is not None,
             )
-            if isinstance(decision, Failover):
-                switched = self._switch_to_invalid_response_fallback(t.provider_error.message)
-                if switched:
-                    t.attempt_history.failed_over = True
-                else:
-                    decision = t.attempt_policy.decide(
-                        kind,
-                        t.attempt_history,
-                        message=t.provider_error.message,
-                        retry_after_s=_hint,
-                        is_timeout=_is_timeout,
-                        failover_available=False,
-                    )
-            self._write_turn_call_log(
-                "turn_policy_decision",
-                failure_kind=failure_kind.value,
-                error_kind=kind.value,
-                action=decision.action,
-                reason=decision.reason,
-                provider_error_code=t.provider_error.code,
-                attempt=t.retry_attempt + 1,
-                spent_s=round(t.attempt_history.spent_s, 3),
-            )
-            if isinstance(decision, Failover):
-                t.log.warning(
-                    "provider.recovery_failover",
-                    attempt=t.retry_attempt,
-                    kind=failure_kind.value,
-                    reason=decision.reason,
-                )
-                yield WarningEvent(
-                    code="provider_retry_after_fallback"
-                    if decision.reason == "retry_after_over_cap" or _hint is not None
-                    else "provider_recovery_fallback",
-                    message="The provider is still failing; switching to the fallback model.",
-                )
-                t.call_attempt += 1
-                t.attempt_started_at = t.loop.time()
-                t.attempt_flow = AttemptFlow.RETRY
-                return
-            if isinstance(decision, CompactThenRetry):
+            if isinstance(decision, CompactThenRetry) and timeout_estimate is not None:
                 t.attempt_history.timeout_compacted = True
                 yield WarningEvent(
                     code="context_auto_compaction_start",
@@ -2947,20 +2983,23 @@ class Agent:
                 )
                 timeout_outcome = await self._check_context_overflow(
                     t.turn_messages,
-                    self.config.context_window_tokens + 1,
+                    timeout_estimate,
                     turn_input_index=t.turn_input_index,
                     force=True,
+                    token_scale=self.estimate_scale(),
                     trigger="timeout",
                 )
                 timeout_request = (
                     self._provider_request_messages(timeout_outcome.messages)
-                    if timeout_outcome is not None
+                    if timeout_outcome is not None and timeout_outcome.compacted
                     else None
                 )
-                if timeout_outcome is not None and (
-                    timeout_request is not None
+                if (
+                    timeout_outcome is not None
+                    and timeout_request is not None
                     and self._provider_request_is_smaller(t.request_messages, timeout_request)
                 ):
+                    self._log_recovery_decision(t, failure_kind, kind, decision)
                     t.turn_messages = timeout_outcome.messages
                     t.sealed_len = len(t.turn_messages)
                     t.turn_input_index = timeout_outcome.turn_input_index
@@ -2974,23 +3013,41 @@ class Agent:
                         kept_entries=timeout_outcome.kept_entries,
                         kept_count=len(timeout_outcome.messages),
                         removed_count=timeout_outcome.removed_count,
+                        trigger="timeout",
                     )
                     t.call_attempt += 1
-                    t.attempt_started_at = t.loop.time()
                     t.attempt_flow = AttemptFlow.RETRY
                     return
-                decision = t.attempt_policy.decide(
+                # Nothing came off: the context reduction is spent, so the
+                # policy moves on to failover (or fails).
+                decision = self._decide_recovery(
+                    t,
                     kind,
-                    t.attempt_history,
-                    message=t.provider_error.message,
                     retry_after_s=_hint,
                     is_timeout=_is_timeout,
-                    failover_available=False,
+                    context_reducible=False,
                 )
+            self._log_recovery_decision(t, failure_kind, kind, decision)
+            if isinstance(decision, Failover):
+                t.log.warning(
+                    "provider.recovery_failover",
+                    attempt=t.attempt_history.retries,
+                    kind=failure_kind.value,
+                    reason=decision.reason,
+                )
+                yield WarningEvent(
+                    code="provider_retry_after_fallback"
+                    if decision.reason == "retry_after_over_cap" or _hint is not None
+                    else "provider_recovery_fallback",
+                    message="The provider is still failing; switching to the fallback model.",
+                )
+                t.call_attempt += 1
+                t.attempt_flow = AttemptFlow.RETRY
+                return
             if isinstance(decision, Retry):
                 t.log.warning(
                     "provider.retry",
-                    attempt=t.retry_attempt + 1,
+                    attempt=t.attempt_history.retries + 1,
                     kind=kind.value,
                     reason=decision.reason,
                     delay_s=round(decision.delay_s, 2),
@@ -3012,9 +3069,7 @@ class Agent:
                     )
                 await _sleep_unless_aborted(decision.delay_s)
                 t.attempt_history.note_retry(decision.delay_s, timeout=_is_timeout)
-                t.retry_attempt += 1
                 t.call_attempt += 1
-                t.attempt_started_at = t.loop.time()
                 t.attempt_flow = AttemptFlow.RETRY
                 return
             yield self._transition(AgentState.ERROR)
@@ -3027,6 +3082,77 @@ class Agent:
             yield t.terminal_error
             t.attempt_flow = AttemptFlow.EXIT
             return
+
+    def _decide_recovery(
+        self,
+        t: TurnState,
+        kind: ProviderErrorKind,
+        *,
+        retry_after_s: float | None,
+        is_timeout: bool,
+        context_reducible: bool,
+    ) -> RecoveryDecision:
+        """The attempt policy's decision, with a ``Failover`` already carried out.
+
+        A ``Failover`` the provider cannot honour (no candidate left) is asked
+        again without failover, so the result is never an unexecuted failover.
+        """
+        assert t.provider_error is not None
+        decide = partial(
+            t.attempt_policy.decide,
+            kind,
+            t.attempt_history,
+            message=t.provider_error.message,
+            retry_after_s=retry_after_s,
+            is_timeout=is_timeout,
+            context_reducible=context_reducible,
+        )
+        # Never splice another model's output after text the user already
+        # saw from this attempt.
+        decision = decide(failover_available=not t.attempt_user_visible_emitted)
+        if isinstance(decision, Failover):
+            if self._switch_to_invalid_response_fallback(t.provider_error.message):
+                t.attempt_history.failed_over = True
+            else:
+                decision = decide(failover_available=False)
+        return decision
+
+    def _log_recovery_decision(
+        self,
+        t: TurnState,
+        failure_kind: ProviderFailureKind,
+        kind: ProviderErrorKind,
+        decision: RecoveryDecision,
+    ) -> None:
+        assert t.provider_error is not None
+        self._write_turn_call_log(
+            "turn_policy_decision",
+            failure_kind=failure_kind.value,
+            error_kind=kind.value,
+            action=decision.action,
+            reason=decision.reason,
+            provider_error_code=t.provider_error.code,
+            attempt=t.attempt_history.retries + 1,
+            spent_s=round(t.attempt_history.spent_s, 3),
+        )
+
+    def _timeout_compaction_estimate(self, t: TurnState) -> int | None:
+        """The timed-out request's calibrated size, when compacting it is worth it.
+
+        A timeout on a small request is a slow or cold provider, not a large
+        prompt: compacting would rewrite the transcript for nothing. Only a
+        request that fills a meaningful share of the usable window (the size
+        preflight compaction keeps requests under) is reduced.
+        """
+        estimate = max(1, int(t.estimated_context_tokens * self.estimate_scale()))
+        limit = trigger_limit_tokens(
+            int(self.config.context_window_tokens),
+            float(self.config.context_overflow_threshold),
+            self._compaction_budget_tokens(),
+        )
+        if estimate < limit * _TIMEOUT_COMPACTION_MIN_LIMIT_SHARE:
+            return None
+        return estimate
 
     async def _turn_commit_response(self, t: TurnState) -> AsyncGenerator[AgentEvent, None]:
         """Check the final response and append it to the transcript."""
@@ -3298,10 +3424,13 @@ class Agent:
         if batch_signal is not None:
             batch_signal.in_tool_batch = True
         try:
-            async for event in self.turn_timing.tool_batch(
-                t.tool_batch.run(t.tool_calls), calls=len(t.tool_calls)
-            ):
-                yield event
+            # Closed at once when the turn is: the batch's ``finally`` then
+            # cancels its running tools here, not when the collector runs.
+            async with aclosing(
+                self.turn_timing.tool_batch(t.tool_batch.run(t.tool_calls), calls=len(t.tool_calls))
+            ) as batch_events:
+                async for event in batch_events:
+                    yield event
         finally:
             if batch_signal is not None:
                 batch_signal.in_tool_batch = False
@@ -3327,11 +3456,18 @@ class Agent:
         arguments_by_id = {tc.tool_use_id: tc.arguments for tc in t.tool_calls}
 
         # Record what this iteration changed and whether it checked it.
-        # Order matters: a check only counts for edits made before it.
+        # Order matters: a check only counts for edits made before it. A
+        # tool hook may have rewritten a call: the ledger records what ran.
+        # (The progress watchdog below stays on the model's arguments: its
+        # ``admit`` check runs before dispatch, where only those are known.)
         for result in executed_results:
             if result.is_error:
                 continue
-            arguments = arguments_by_id.get(result.tool_use_id) or {}
+            arguments = (
+                result.effective_arguments
+                if result.effective_arguments is not None
+                else arguments_by_id.get(result.tool_use_id) or {}
+            )
             if result.tool_name in _MUTATING_TOOL_NAMES:
                 t.verification_ledger.record_mutation(_mutated_paths(arguments))
             elif result.tool_name in _COMMAND_TOOL_NAMES:
@@ -3460,68 +3596,70 @@ class Agent:
         total_deadline: float | None,
     ) -> AsyncIterator[Any]:
         stream_iter = stream.__aiter__()
-        while True:
-            wait_budget = max(0.001, self.config.iteration_timeout)
-            if total_deadline is not None:
-                remaining_total = total_deadline - loop.time()
-                if remaining_total <= 0:
-                    await self._close_provider_stream(stream_iter)
-                    raise TimeoutError(f"Agent total timeout after {self.config.timeout}s")
-                wait_budget = min(wait_budget, remaining_total)
+        # One abort waiter for the whole stream, not one per event.
+        stop_signal = current_turn_stop_signal()
+        abort_wait: asyncio.Future[Any] | None = (
+            asyncio.ensure_future(stop_signal.wait_abort()) if stop_signal is not None else None
+        )
+        try:
+            while True:
+                wait_budget = max(0.001, self.config.iteration_timeout)
+                if total_deadline is not None:
+                    remaining_total = total_deadline - loop.time()
+                    if remaining_total <= 0:
+                        await self._close_provider_stream(stream_iter)
+                        raise TimeoutError(f"Agent total timeout after {self.config.timeout}s")
+                    wait_budget = min(wait_budget, remaining_total)
 
-            next_event: asyncio.Future[Any] = asyncio.ensure_future(stream_iter.__anext__())
-            stop_signal = current_turn_stop_signal()
-            abort_wait: asyncio.Future[Any] | None = (
-                asyncio.ensure_future(stop_signal.wait_abort()) if stop_signal is not None else None
-            )
-            try:
-                waiting = {next_event} if abort_wait is None else {next_event, abort_wait}
-                done, _ = await asyncio.wait(
-                    waiting, timeout=wait_budget, return_when=asyncio.FIRST_COMPLETED
-                )
-            except asyncio.CancelledError:
-                if abort_wait is not None:
-                    abort_wait.cancel()
-                # The pending __anext__ runs in its own task: cancelling this
-                # turn does not stop it, and the provider stream (and its HTTP
-                # connection) would stay open until GC. Stop it, close the
-                # stream, then let the cancellation through.
-                next_event.cancel()
-                with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration, Exception):
-                    await next_event
-                await self._close_provider_stream(stream_iter)
-                raise
-            if abort_wait is not None:
-                if abort_wait in done:
+                next_event: asyncio.Future[Any] = asyncio.ensure_future(stream_iter.__anext__())
+                try:
+                    waiting = {next_event} if abort_wait is None else {next_event, abort_wait}
+                    done, _ = await asyncio.wait(
+                        waiting, timeout=wait_budget, return_when=asyncio.FIRST_COMPLETED
+                    )
+                except asyncio.CancelledError:
+                    # The pending __anext__ runs in its own task: cancelling
+                    # this turn does not stop it, and the provider stream (and
+                    # its HTTP connection) would stay open until GC. Stop it,
+                    # close the stream, then let the cancellation through.
+                    next_event.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration, Exception):
+                        await next_event
+                    await self._close_provider_stream(stream_iter)
+                    raise
+                if abort_wait is not None and abort_wait in done:
                     # Asked to stop mid-stream: stop the pending read, close
                     # the stream (and its HTTP connection) and end the turn.
                     # The abort wins over an event that was already buffered
-                    # in the same tick: a stop must not let a buffered
-                    # tool call through.
+                    # in the same tick: a stop must not let a buffered tool
+                    # call through.
                     next_event.cancel()
                     with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration, Exception):
                         await next_event
                     await self._close_provider_stream(stream_iter)
                     raise _TurnAbortedError
+                if not done:
+                    next_event.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
+                        await next_event
+                    # Both timeout exits abandon the generator without ever
+                    # resuming it, so its own `async with client.stream(...)`
+                    # __aexit__ (closing the underlying httpx connection) would
+                    # otherwise only run whenever the GC finalizes it -- not
+                    # deterministic, and can lag significantly in a long-lived
+                    # gateway process. Close explicitly before raising either
+                    # way.
+                    await self._close_provider_stream(stream_iter)
+                    if total_deadline is not None and loop.time() >= total_deadline:
+                        raise TimeoutError(f"Agent total timeout after {self.config.timeout}s")
+                    raise IterationStreamTimeoutError
+                try:
+                    yield next_event.result()
+                except StopAsyncIteration:
+                    return
+        finally:
+            if abort_wait is not None:
                 abort_wait.cancel()
-            if not done:
-                next_event.cancel()
-                with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration):
-                    await next_event
-                # Both timeout exits abandon the generator without ever
-                # resuming it, so its own `async with client.stream(...)`
-                # __aexit__ (closing the underlying httpx connection) would
-                # otherwise only run whenever the GC finalizes it -- not
-                # deterministic, and can lag significantly in a long-lived
-                # gateway process. Close explicitly before raising either way.
-                await self._close_provider_stream(stream_iter)
-                if total_deadline is not None and loop.time() >= total_deadline:
-                    raise TimeoutError(f"Agent total timeout after {self.config.timeout}s")
-                raise _IterationStreamTimeoutError
-            try:
-                yield next_event.result()
-            except StopAsyncIteration:
-                return
 
     @staticmethod
     async def _close_provider_stream(stream_iter: AsyncIterator[Any]) -> None:
@@ -3628,6 +3766,25 @@ class Agent:
         note = f"{text}\n\n{TURN_INTERRUPTED_NOTE}" if text else TURN_INTERRUPTED_NOTE
         sealed.append(Message(role="assistant", content=[ContentBlockText(text=note)]))
         return sealed
+
+    def _settle_cancelled_turn(self, t: TurnState, partial_text: str) -> None:
+        """Keep a stopped turn as history, bounded like a completed one.
+
+        Pairs open tool calls and adds the interrupted note
+        (:meth:`_seal_cancelled_turn`), seals what was appended since the last
+        request, then applies the history cap at the turn boundary. Earlier
+        turns count as already capped, so a stopped turn that skipped the cap
+        would keep its full-size tool payloads for good.
+        """
+        sealed = self._seal_cancelled_turn(t.turn_messages, partial_text)
+        # The note is not part of the unsent window: a replay-marker strip
+        # adds its repair prompt before it, so the turn still ends on it.
+        note = sealed.pop()
+        self._seal_transcript(sealed, t.sealed_len)
+        sealed.append(note)
+        self._projection._cap_turn_for_history(sealed)
+        self._history = sealed
+        self._record_turn_transcript(sealed)
 
     def _seal_transcript(self, messages: list[Message], sealed_len: int) -> int:
         """Seal ``messages[sealed_len:]`` in place; return the new sealed length."""
@@ -3932,10 +4089,6 @@ class Agent:
     def _compaction_coordinator(self) -> CompactionCoordinator:
         return CompactionCoordinator(self.config, self.provider, self._session_key)
 
-    def _compaction_service(self, *, window_tokens: int | None = None) -> CompactionService:
-        del window_tokens
-        return self._compaction_coordinator().service()
-
     def _compaction_budget_tokens(self) -> int | None:
         """The provider's own no-rewrite request budget, in tokens.
 
@@ -4105,7 +4258,13 @@ class Agent:
         return arguments if coerced is None else coerced
 
     async def _execute_tool(self, tc: ToolCall) -> ToolResult:
-        """Dispatch a tool call to the registered handler."""
+        """Dispatch a tool call to the registered handler.
+
+        The failure-loop signature is the model's own arguments, also when a
+        tool hook rewrites the call: the guard has to refuse a repeat before
+        dispatch, where the rewrite is not known yet, and it is the model
+        that repeats the call.
+        """
         args_hash = hashlib.sha256(
             json.dumps(tc.arguments, ensure_ascii=False, sort_keys=True, default=str).encode(
                 "utf-8"
@@ -4153,6 +4312,8 @@ class Agent:
                 else:
                     tc = resolved
                     result = await self.tool_handler(tc)
+                    if result.effective_arguments is not None:
+                        result = _note_hook_adjusted_arguments(result, tc.arguments)
             except Exception as exc:  # noqa: BLE001
                 result = ToolResult(
                     tool_use_id=tc.tool_use_id,
@@ -4182,7 +4343,3 @@ class Agent:
             }:
                 self._tool_failure_loop_counts.clear()
         return result
-
-    # ------------------------------------------------------------------
-    # Subagent factory
-    # ------------------------------------------------------------------

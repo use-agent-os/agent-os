@@ -1,12 +1,14 @@
 """V015 - outbox of parent wakes for subagent spawn groups.
 
-One row per spawn group (``parent_session_key::parent_task_id``): ``pending``
-until the task runtime accepted the wake, then ``delivered``; ``dropped`` when
-delivery was given up on or must not happen (the parent was aborted). The
-delivery worker in ``agentos.gateway.subagent_wakes`` retries pending rows with
-backoff and drains them at startup, so a wake survives a transient enqueue
-failure and a restart; a delivered row keeps a group from waking its parent
-twice.
+One row per spawn group (``parent_session_key::parent_task_id``): ``awaiting``
+when the parent closed the group while children still ran (so a crash before
+the last child's announce cannot lose the wake; boot reconciles these rows),
+``pending`` until the task runtime accepted the wake, then ``delivered``;
+``dropped`` when delivery was given up on or must not happen (the parent was
+aborted). The delivery worker in ``agentos.gateway.subagent_wakes`` retries
+pending rows with backoff and drains them at startup, so a wake survives a
+transient enqueue failure and a restart; a delivered row keeps a group from
+waking its parent twice.
 
 ``agentos.session.storage`` also creates the table on connect
 (``CREATE TABLE IF NOT EXISTS``, same DDL).

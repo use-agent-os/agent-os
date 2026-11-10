@@ -31,7 +31,7 @@ The Web UI ships a featured preset for Robinhood Agentic Trading.
 | Transport | Streamable HTTP |
 | Authorization | Provider-hosted OAuth flow |
 
-Open **Settings > MCP Servers**, select the Robinhood Trading preset, and save
+Open **Settings › MCP**, select the Robinhood Trading preset, and save
 it. Saving opens the provider authorization flow and loads the server's tools
 without a gateway restart.
 

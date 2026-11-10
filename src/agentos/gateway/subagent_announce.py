@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 import structlog
 
 from agentos.gateway.session_lifecycle import session_status_for_task_status
-from agentos.gateway.subagent_wakes import Report, get_wake_outbox
+from agentos.gateway.subagent_wakes import Report, get_wake_outbox, wake_idempotency_key
 from agentos.gateway.task_runtime import SubagentCompletionEvent
 from agentos.session.models import AgentTaskStatus
 from agentos.session.terminal_reply import is_context_payload_too_large, sanitize_agent_error
@@ -107,13 +108,16 @@ async def announce_subagent_completion(
 ) -> None:
     """Record and optionally deliver a subagent completion announce.
 
-    The parent transcript write is intentionally first so every external push
-    has a durable parent-session record behind it.
+    When this child completes a closed spawn group, the parent's wake is
+    recorded in the durable outbox first, before any side effect below: a
+    crash or a failure in them cannot lose it. Then the parent transcript
+    write, so every external push has a durable parent-session record behind
+    it, the event and the channel push; the wake is handed off last.
     """
     payload = event.to_payload()
     parent = None
     parent_task_id = event.parent_task_id
-    parent_wake_payloads: list[dict[str, Any]] | None = None
+    wake: _ParentWake | None = None
     if session_manager is not None and await _is_superseded_acp_turn(
         event, session_manager=session_manager
     ):
@@ -146,64 +150,57 @@ async def announce_subagent_completion(
                     child_row, status=payload.get("status"), cancel_source=event.cancel_source
                 )
             )
-        get_session = getattr(session_manager, "get_session", None)
-        if callable(get_session):
-            parent = await get_session(event.parent_session_key)
-        append_message = getattr(session_manager, "append_message", None)
-        if callable(append_message):
-            await append_message(
-                event.parent_session_key,
-                role="system",
-                content=json.dumps(payload, ensure_ascii=False),
-                provenance={
-                    "kind": "internal_system",
-                    "source_session_key": event.child_session_key,
-                    "source_tool": "subagent_completion",
-                },
+        if task_runtime is not None and (
+            not parent_task_id or _group_closed(event.parent_session_key, parent_task_id)
+        ):
+            parent_wake_payloads = await _build_parent_wake_payloads(
+                event,
+                payload,
+                parent_task_id,
+                session_manager=session_manager,
             )
-        if task_runtime is not None:
-            if parent_task_id and not _group_closed(event.parent_session_key, parent_task_id):
-                parent_wake_payloads = None
-            else:
-                parent_wake_payloads = await _build_parent_wake_payloads(
-                    event,
-                    payload,
-                    parent_task_id,
-                    session_manager=session_manager,
+            wake = await _prepare_parent_wake(
+                event.parent_session_key,
+                parent_task_id,
+                parent_wake_payloads,
+                cancel_source=event.cancel_source,
+            )
+
+    try:
+        if session_manager is not None:
+            get_session = getattr(session_manager, "get_session", None)
+            if callable(get_session):
+                parent = await get_session(event.parent_session_key)
+            append_message = getattr(session_manager, "append_message", None)
+            if callable(append_message):
+                await append_message(
+                    event.parent_session_key,
+                    role="system",
+                    content=json.dumps(payload, ensure_ascii=False),
+                    provenance={
+                        "kind": "internal_system",
+                        "source_session_key": event.child_session_key,
+                        "source_tool": "subagent_completion",
+                    },
                 )
 
-    if event_emitter is not None:
-        await event_emitter(
-            event.parent_session_key,
-            "session.event.subagent_completion",
-            payload,
-        )
+        if event_emitter is not None:
+            await event_emitter(
+                event.parent_session_key,
+                "session.event.subagent_completion",
+                payload,
+            )
 
-    if channel_manager is not None and parent is not None:
-        await _announce_to_parent_channel(payload, parent=parent, channel_manager=channel_manager)
-
-    if task_runtime is not None and parent_wake_payloads:
-        if _only_agent_stops(parent_wake_payloads):
-            # The parent stopped this child itself and already answered in
-            # that turn; waking it again made it reply twice.
-            return
-        if event.cancel_source in _PARENT_ABORT_CANCEL_SOURCES:
-            # Recorded on the parent above; the parent itself was aborted.
-            outbox = get_wake_outbox()
-            if outbox is not None and parent_task_id:
-                await outbox.drop(
-                    parent_session_key=event.parent_session_key,
-                    parent_task_id=parent_task_id,
-                    reason="parent_aborted",
-                )
-            return
-        await _send_parent_wake(
-            event.parent_session_key,
-            parent_task_id,
-            parent_wake_payloads,
-            task_runtime=task_runtime,
-            completion_manager=_background_completion_manager,
-        )
+        if channel_manager is not None and parent is not None:
+            await _announce_to_parent_channel(
+                payload, parent=parent, channel_manager=channel_manager
+            )
+    finally:
+        # Even when a step above failed: the wake is recorded and owed.
+        if wake is not None and task_runtime is not None:
+            await _dispatch_parent_wake(
+                wake, task_runtime=task_runtime, completion_manager=_background_completion_manager
+            )
 
 
 #: ``details`` key marking a child already announced after a restart, so a
@@ -218,6 +215,7 @@ async def announce_restart_abandoned_children(
     listener: Callable[[SubagentCompletionEvent], Awaitable[None]],
     max_age_ms: int,
     now_ms: int | None = None,
+    turn_recovery: Any | None = None,
 ) -> int:
     """Report the child runs a restart cut off to their parents, once.
 
@@ -228,6 +226,12 @@ async def announce_restart_abandoned_children(
     completion path (*listener*, the runtime's terminal listener). Its spawn
     group is treated as closed: the parent's own pre-restart run is over, so
     the last child of the group wakes it once with every result.
+
+    A parent whose own interrupted turn *turn_recovery* is resuming (pending
+    or running) is not woken as well: its children are still recorded on it,
+    and the resumed turn reads them. Two turns -- "continue" and "your
+    children were abandoned" -- would otherwise run on it, in either order.
+    Run this after the recovery scan.
 
     Returns how many children were announced.
     """
@@ -253,7 +257,9 @@ async def announce_restart_abandoned_children(
             continue
         parent_task_id = metadata.get("parent_task_id")
         parent_task_id = parent_task_id if isinstance(parent_task_id, str) else None
-        if parent_task_id:
+        if _parent_recovering(turn_recovery, parent_session_key):
+            await _drop_wake_for_recovering_parent(parent_session_key, parent_task_id)
+        elif parent_task_id:
             _tracker.mark_closed(parent_session_key, parent_task_id)
         event = SubagentCompletionEvent(
             parent_session_key=parent_session_key,
@@ -281,6 +287,91 @@ async def announce_restart_abandoned_children(
     if announced:
         log.info("subagent_announce.restart_children_announced", count=announced)
     return announced
+
+
+def _parent_recovering(turn_recovery: Any | None, parent_session_key: str) -> bool:
+    is_recovering = getattr(turn_recovery, "is_recovering", None)
+    if not callable(is_recovering):
+        return False
+    try:
+        return bool(is_recovering(parent_session_key))
+    except Exception:  # noqa: BLE001 - wake as before rather than lose it
+        return False
+
+
+async def _drop_wake_for_recovering_parent(
+    parent_session_key: str, parent_task_id: str | None
+) -> None:
+    log.info(
+        "subagent_announce.wake_skipped_for_recovery",
+        parent_session_key=parent_session_key,
+        parent_task_id=parent_task_id,
+    )
+    outbox = get_wake_outbox()
+    if outbox is not None and parent_task_id:
+        await outbox.drop(
+            parent_session_key=parent_session_key,
+            parent_task_id=parent_task_id,
+            reason="parent_recovering",
+        )
+
+
+async def reconcile_awaiting_wakes(
+    *,
+    session_manager: Any,
+    task_runtime: Any,
+    turn_recovery: Any | None = None,
+) -> int:
+    """Wake the parents of closed groups that completed without a wake (boot).
+
+    A group the parent closed (``sessions_yield``) has an ``awaiting`` outbox
+    row until its last child's announce records the wake. A crash in between,
+    or a failure in that announce, left the row ``awaiting`` with every child
+    ended; this records and sends those wakes. Groups still running stay
+    ``awaiting`` (their last child wakes the parent, or the restart announce
+    does for children a restart cut off). Run it after the restart announce.
+
+    Returns how many wakes were sent.
+    """
+
+    outbox = get_wake_outbox()
+    if outbox is None:
+        return 0
+    woken = 0
+    for row in await outbox.awaiting():
+        parent_session_key = row.get("parent_session_key")
+        parent_task_id = row.get("parent_task_id")
+        if not isinstance(parent_session_key, str) or not isinstance(parent_task_id, str):
+            continue
+        try:
+            payloads = await _build_terminal_group_payloads(
+                parent_session_key=parent_session_key,
+                parent_task_id=parent_task_id,
+                session_manager=session_manager,
+            )
+            if not payloads:
+                continue  # children still running, or none recorded
+            if _parent_recovering(turn_recovery, parent_session_key):
+                await _drop_wake_for_recovering_parent(parent_session_key, parent_task_id)
+                continue
+            _tracker.mark_closed(parent_session_key, parent_task_id)
+            wake = await _prepare_parent_wake(parent_session_key, parent_task_id, payloads)
+            if wake is None:
+                continue
+            await _dispatch_parent_wake(
+                wake, task_runtime=task_runtime, completion_manager=_background_completion_manager
+            )
+            woken += 1
+        except Exception:  # noqa: BLE001 - one group must not stop the sweep
+            log.warning(
+                "subagent_announce.reconcile_failed",
+                parent_session_key=parent_session_key,
+                parent_task_id=parent_task_id,
+                exc_info=True,
+            )
+    if woken:
+        log.info("subagent_announce.reconciled_wakes", count=woken)
+    return woken
 
 
 async def _is_superseded_acp_turn(
@@ -374,6 +465,21 @@ async def close_subagent_spawn_group(
     if not parent_session_key or not parent_task_id:
         return False
     _tracker.mark_closed(parent_session_key, parent_task_id)
+    outbox = get_wake_outbox()
+    if outbox is not None:
+        # Durably: should the process die before the last child's announce
+        # records the wake, the next boot still wakes the parent.
+        try:
+            await outbox.await_group(
+                parent_session_key=parent_session_key, parent_task_id=parent_task_id
+            )
+        except Exception:  # noqa: BLE001 - the in-memory close still wakes it
+            log.warning(
+                "subagent_announce.await_group_failed",
+                parent_session_key=parent_session_key,
+                parent_task_id=parent_task_id,
+                exc_info=True,
+            )
     capture_delivery_target = getattr(
         _background_completion_manager,
         "capture_delivery_target",
@@ -949,14 +1055,48 @@ def _failed_child_outcome(payload: dict[str, Any], *, status: str) -> dict[str, 
     return child
 
 
-async def _send_parent_wake(
+@dataclass
+class _ParentWake:
+    """A group's parent wake, decided (and recorded when durable), not yet sent."""
+
+    parent_session_key: str
+    parent_task_id: str | None
+    payloads: list[dict[str, Any]]
+    message: str
+    provenance: dict[str, Any]
+    #: Set when the outbox recorded the wake: reports its outcome.
+    report: Report | None = None
+
+
+async def _prepare_parent_wake(
     parent_session_key: str,
     parent_task_id: str | None,
-    payloads: list[dict[str, Any]],
+    payloads: list[dict[str, Any]] | None,
     *,
-    task_runtime: Any,
-    completion_manager: Any | None = None,
-) -> None:
+    cancel_source: str | None = None,
+) -> _ParentWake | None:
+    """Decide whether the parent is woken; record the wake when it is.
+
+    ``None`` when there is nothing to wake it for, or the group already has
+    a wake (delivered, dropped, or pending with the worker).
+    """
+
+    if not payloads:
+        return None
+    if _only_agent_stops(payloads):
+        # The parent stopped these children itself and already answered in
+        # that turn; waking it again made it reply twice.
+        return None
+    if cancel_source in _PARENT_ABORT_CANCEL_SOURCES:
+        # Recorded on the parent; the parent itself was aborted.
+        outbox = get_wake_outbox()
+        if outbox is not None and parent_task_id:
+            await outbox.drop(
+                parent_session_key=parent_session_key,
+                parent_task_id=parent_task_id,
+                reason="parent_aborted",
+            )
+        return None
     outcome = _build_subagent_group_outcome(payloads)
     message = _format_parent_wake_message(parent_task_id, payloads, outcome=outcome)
     provenance: dict[str, Any] = {
@@ -967,16 +1107,16 @@ async def _send_parent_wake(
     }
     if outcome["runtime_partial_failure_disclosure_required"]:
         provenance["runtime_partial_failure_disclosure_required"] = True
-    group_key = (parent_session_key, parent_task_id) if parent_task_id else None
-    if group_key is not None and _tracker.is_woken(group_key):
-        return
-
+    group = (parent_session_key, parent_task_id) if parent_task_id else None
+    if group is not None and _tracker.is_woken(group):
+        return None
+    wake = _ParentWake(parent_session_key, parent_task_id, payloads, message, provenance)
     outbox = get_wake_outbox()
     if outbox is not None and parent_task_id:
         # Durable path: record first, so a failure or a restart does not lose
         # the wake and a second delivery of the same group is refused. (A wake
         # without a parent task has no spawn group to key it by: it is sent
-        # directly below, as before the outbox.)
+        # directly, as before the outbox.)
         if not await outbox.claim(
             parent_session_key=parent_session_key,
             parent_task_id=parent_task_id,
@@ -984,60 +1124,90 @@ async def _send_parent_wake(
             provenance=provenance,
             payloads=payloads,
         ):
-            return
-        if group_key is not None:
-            _tracker.mark_woken(group_key)
-        report = outbox.reporter(parent_session_key, parent_task_id)
+            return None
+        if group is not None:
+            _tracker.mark_woken(group)
+        wake.report = outbox.reporter(parent_session_key, parent_task_id)
+    return wake
+
+
+async def _dispatch_parent_wake(
+    wake: _ParentWake,
+    *,
+    task_runtime: Any,
+    completion_manager: Any | None = None,
+) -> None:
+    parent_session_key = wake.parent_session_key
+    parent_task_id = wake.parent_task_id
+    group = (parent_session_key, parent_task_id) if parent_task_id else None
+    if wake.report is not None:
         try:
             await _deliver_wake(
                 parent_session_key,
                 parent_task_id,
-                payloads,
-                message=message,
-                provenance=provenance,
+                wake.payloads,
+                message=wake.message,
+                provenance=wake.provenance,
                 task_runtime=task_runtime,
                 completion_manager=completion_manager,
-                report=report,
+                report=wake.report,
             )
         except Exception as exc:  # noqa: BLE001 - the outbox worker retries it
-            await report(exc)
+            await wake.report(exc)
         except BaseException:
             # Cancelled before an outcome: the row stays pending and the
             # worker delivers it once the claim lease ran out.
-            outbox.release(parent_session_key, parent_task_id)
+            outbox = get_wake_outbox()
+            if outbox is not None:
+                outbox.release(parent_session_key, parent_task_id)
             raise
         return
 
     if completion_manager is not None and parent_task_id:
-        if group_key is not None:
-            _tracker.mark_woken(group_key)
+        if group is not None:
+            _tracker.mark_woken(group)
         try:
             await completion_manager.send_parent_wake(
                 parent_session_key=parent_session_key,
                 parent_task_id=parent_task_id,
-                payloads=payloads,
+                payloads=wake.payloads,
                 task_runtime=task_runtime,
-                message=message,
-                provenance=provenance,
+                message=wake.message,
+                provenance=wake.provenance,
             )
         except Exception:
-            if group_key is not None:
-                _tracker.discard_woken(group_key)
+            if group is not None:
+                _tracker.discard_woken(group)
             raise
         return
 
-    if group_key is not None:
-        _tracker.mark_woken(group_key)
+    if group is not None:
+        _tracker.mark_woken(group)
     try:
         await task_runtime.send(
             parent_session_key,
-            message,
-            provenance=provenance,
+            wake.message,
+            provenance=wake.provenance,
         )
     except Exception:
-        if group_key is not None:
-            _tracker.discard_woken(group_key)
+        if group is not None:
+            _tracker.discard_woken(group)
         raise
+
+
+async def _send_parent_wake(
+    parent_session_key: str,
+    parent_task_id: str | None,
+    payloads: list[dict[str, Any]],
+    *,
+    task_runtime: Any,
+    completion_manager: Any | None = None,
+) -> None:
+    wake = await _prepare_parent_wake(parent_session_key, parent_task_id, payloads)
+    if wake is not None:
+        await _dispatch_parent_wake(
+            wake, task_runtime=task_runtime, completion_manager=completion_manager
+        )
 
 
 async def _deliver_wake(
@@ -1060,6 +1230,7 @@ async def _deliver_wake(
     still locked -- waiting here would deadlock the parent on itself.
     """
 
+    key = wake_idempotency_key(parent_session_key, parent_task_id)
     if completion_manager is not None and parent_task_id:
         await completion_manager.send_parent_wake(
             parent_session_key=parent_session_key,
@@ -1069,9 +1240,10 @@ async def _deliver_wake(
             message=message,
             provenance=provenance,
             on_enqueue_result=report,
+            idempotency_key=key,
         )
         return
-    await task_runtime.send(parent_session_key, message, provenance=provenance)
+    await task_runtime.send(parent_session_key, message, provenance=provenance, idempotency_key=key)
     await report(None)
 
 
@@ -1166,9 +1338,7 @@ async def _spawn_group_pending_count(
         parent_task_id=parent_task_id,
         session_manager=session_manager,
     )
-    return sum(
-        1 for row in rows if _session_status(row) not in _TERMINAL_SESSION_STATUSES
-    )
+    return sum(1 for row in rows if _session_status(row) not in _TERMINAL_SESSION_STATUSES)
 
 
 def _format_parent_wake_message(

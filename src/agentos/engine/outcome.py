@@ -26,6 +26,8 @@ _BUDGET_CODES = frozenset(
         "turn_input_token_budget_exceeded",
         "turn_output_token_budget_exceeded",
         "turn_billed_cost_budget_exceeded",
+        # A configured spend budget (the spend guard) refused the turn.
+        "budget_exceeded",
     }
 )
 _PARTIAL_CODES = frozenset(
@@ -63,6 +65,8 @@ _BLOCKED_CODES = frozenset(
         "compaction_refused_memory_flush",
         "compaction_refused_empty_summary",
         "context_unsalvageable",
+        # A request hook (a spend gate, a policy check) refused the request.
+        "request_vetoed",
     }
 )
 

@@ -22,7 +22,7 @@
 // ) is NOT re-ported here — Task 4 already ported it into tools.ts;
 // this module re-exports it from there so there is one definition (DRY).
 
-import { apiOrigin, urlBase } from '@/lib/api-origin'
+import { gatewayOrigin, urlBase } from '@/lib/api-origin'
 import {
   TICKET_SRC_ATTR,
   TICKET_VARIANT_ATTR,
@@ -348,7 +348,7 @@ export function artifactHasThumbnail(artifact: Artifact | null | undefined): boo
  * audio source and the chart payload all have to reach the gateway.
  */
 function gatewayHref(url: URL): string {
-  return apiOrigin() ? url.href : url.pathname + url.search + url.hash
+  return gatewayOrigin() ? url.href : url.pathname + url.search + url.hash
 }
 
 // the clean (session-key-stripped) download URL.
@@ -731,7 +731,7 @@ export function createArtifactRenderer(deps: ArtifactRendererDeps) {
     // header, so the browser downloads it itself, straight to disk. Off gateway
     // it is cross-origin, where Chromium ignores `download` and navigates: it
     // takes the fetch below, without a header.
-    if (ticketUrl && !apiOrigin()) {
+    if (ticketUrl && !gatewayOrigin()) {
       clickDownloadLink(ticketUrl, name)
       return
     }

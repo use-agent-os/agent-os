@@ -97,20 +97,39 @@ describe('Channels', () => {
 })
 
 describe('Environment', () => {
-  it('reveals OPENROUTER_API_KEY and masks it again after the timeout', async () => {
+  it('asks before revealing OPENROUTER_API_KEY, then masks it again after thirty seconds', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     const rpc = envRpc()
     renderShell('/settings/environment', rpc)
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
     await user.click(await screen.findByRole('button', { name: 'Reveal OPENROUTER_API_KEY' }))
+    // One click must not put the secret on screen.
+    const confirm = await screen.findByRole('alertdialog', { name: 'Reveal OPENROUTER_API_KEY?' })
+    expect(rpc.callsTo('env.reveal')).toEqual([])
+    await user.click(within(confirm).getByRole('button', { name: 'Reveal' }))
     expect(await screen.findByText('sk-or-v1-plaintext')).toBeInTheDocument()
     expect(rpc.callsTo('env.reveal')).toEqual([{ name: 'OPENROUTER_API_KEY' }])
 
     act(() => {
       vi.advanceTimersByTime(15_000)
     })
+    expect(screen.getByText('sk-or-v1-plaintext')).toBeInTheDocument()
+    act(() => {
+      vi.advanceTimersByTime(15_000)
+    })
     await waitFor(() => expect(screen.queryByText('sk-or-v1-plaintext')).not.toBeInTheDocument())
     expect(screen.getByText('sk-or-…7f2a')).toBeInTheDocument()
+  })
+
+  it('cancelling the reveal confirmation fetches nothing', async () => {
+    const rpc = envRpc()
+    renderShell('/settings/environment', rpc)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Reveal OPENROUTER_API_KEY' }))
+    const confirm = await screen.findByRole('alertdialog', { name: 'Reveal OPENROUTER_API_KEY?' })
+    await user.click(within(confirm).getByRole('button', { name: 'Cancel' }))
+    expect(rpc.callsTo('env.reveal')).toEqual([])
+    expect(screen.queryByText('sk-or-v1-plaintext')).not.toBeInTheDocument()
   })
 
   it('disables Set with the offline reason once the gateway has been gone for the grace period', async () => {
@@ -188,5 +207,31 @@ describe('Approvals', () => {
     expect(screen.getByRole('radio', { name: /Ask every time/ })).toBeChecked()
     await userEvent.setup().click(screen.getByText('Full arguments'))
     expect(screen.getByText(/"cwd": "\/srv\/app"/)).toBeVisible()
+  })
+
+  it('re-reads the pending queue when Refresh is pressed', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn<typeof fetch>(
+      async () => new Response(JSON.stringify({ pending: [], mode: 'prompt' }), { status: 200 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    renderShell('/settings/approvals')
+    const refresh = await screen.findByRole('button', { name: 'Refresh' })
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const before = fetchMock.mock.calls.length
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          pending: [{ id: 'r1', namespace: 'exec', toolName: 'bash', command: 'make deploy' }],
+          mode: 'prompt',
+        }),
+        { status: 200 },
+      ),
+    )
+    await user.click(refresh)
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(before))
+    expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain('/api/approvals')
+    expect(await screen.findByRole('heading', { name: '1 pending request' })).toBeInTheDocument()
+    vi.unstubAllGlobals()
   })
 })

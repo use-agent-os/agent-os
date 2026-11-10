@@ -36,8 +36,8 @@ if TYPE_CHECKING:
 
 # ---------------------------------------------------------------------------
 # Ports — narrow protocols so the stage is unit-testable without the full
-# TurnRunner. The runtime adapters in ``harness.py`` bind these to the
-# concrete TurnRunner methods.
+# TurnRunner. ``TurnRunner`` implements them itself (the stage is built
+# with ``port=self``).
 # ---------------------------------------------------------------------------
 
 @runtime_checkable

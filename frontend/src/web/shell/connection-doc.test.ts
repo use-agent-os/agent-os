@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { truthStateLabel, type TruthState } from '@/lib/runtime-truth'
+import { CONNECT_TIMEOUT_MS } from './connection-gate'
 
 const STATES: TruthState[] = ['ready', 'degraded', 'connecting', 'blocked', 'offline', 'unknown']
 
@@ -27,6 +28,9 @@ describe('docs/web-ui.md runtime status table', () => {
       'Restarting gateway…',
       'PROTOCOL_MISMATCH',
       '2 seconds',
+      `${CONNECT_TIMEOUT_MS / 1000} seconds`,
+      '**Disconnect**',
+      'token is never sent to that gateway',
     ]) {
       expect(doc).toContain(phrase)
     }

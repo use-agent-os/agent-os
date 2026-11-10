@@ -77,8 +77,7 @@ registration. It is a public client with no secret. Override it with
 
 ### Browser sign-in
 
-The Setup page can run the same flow: **Capabilities → X (Twitter) search →
-Sign in with xAI**. It shows the approval link and the code, then polls until
+Settings › Search can run the same flow: **X search → Sign in with xAI**. It shows the approval link and the code, then polls until
 you approve. Once signed in the same control becomes **Sign out of xAI**. The
 card reports which credential is currently in play, so a key configured
 alongside a login does not look like the one being used.
@@ -112,7 +111,8 @@ agentos configure x-search --x-search-model grok-4.5 --x-search-reasoning-effort
 agentos configure x-search --no-x-search-enabled
 ```
 
-The Setup page carries the same fields under Capabilities → X (Twitter) search.
+Settings › Search carries the same fields under X search, with an **Enable X
+search** switch and an **API key environment variable** field.
 Saving applies immediately; no gateway restart.
 
 ```toml

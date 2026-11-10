@@ -14,19 +14,19 @@ contract. Terminal state for the post-stream surface flows
 through the harness-owned ``_StreamState`` value object the stage
 mutates in place.
 
-Compaction refresh preservation: the ``_CompactionHandler`` fires the
-supplied ``CompactionHook`` observers around the success-only three-step
-``persist -> snapshot refresh -> system-prompt refresh`` sequence. The
-``persist_compaction_result`` re-entrancy contract is preserved -- the
-adapter forwards the call verbatim and the IN-TURN path remains the
-only call site after the previous extraction landed.
+Compaction refresh: the ``_CompactionHandler`` fires the supplied
+``CompactionHook`` observers around the success-only
+``persist -> snapshot refresh`` sequence. The ``persist_compaction_result``
+re-entrancy contract is preserved -- the persist port forwards the call
+verbatim and the in-turn path is its only call site.
 
 No ``TurnHook`` is fired from inside the stream loop today.
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Final, Protocol, runtime_checkable
 
@@ -66,6 +66,21 @@ log = structlog.get_logger(__name__)
 # channels and web all show it), which is why it lives here and not in the
 # gateway serializer.
 _SUPPRESS: Final = object()
+
+#: The phase an in-turn compaction is recorded under when its trigger is unknown.
+_DEFAULT_INLINE_COMPACTION_PHASE: Final = "agent_inline_overflow"
+
+
+def inline_compaction_phase(trigger: str | None) -> str:
+    """The durable phase / ``trigger_reason`` of an in-turn compaction.
+
+    ``trigger`` is what started it (``preflight``, ``overflow``, ``timeout``);
+    an event that does not say records as the overflow trigger, as every
+    in-turn compaction did before the trigger was carried.
+    """
+    if isinstance(trigger, str) and trigger.strip():
+        return f"agent_inline_{trigger.strip()}"
+    return _DEFAULT_INLINE_COMPACTION_PHASE
 
 # ---------------------------------------------------------------------------
 # Ports -- five narrow Protocols + one callable
@@ -107,7 +122,8 @@ class CompactionPersistPort(Protocol):
     call to remain re-entrant -- the Agent has already mutated its
     in-memory message list before the runner sees ``CompactionEvent``,
     so the DB transcript may have more entries than ``kept_entries``.
-    The stage forwards the call verbatim.
+    The stage forwards the call verbatim, with the event's ``trigger``
+    (None when the event carries none).
     """
 
     async def persist_and_notify(
@@ -117,6 +133,7 @@ class CompactionPersistPort(Protocol):
         summary: str,
         kept_entries: list[Any],
         compaction_id: str | None = None,
+        trigger: str | None = None,
     ) -> None: ...
 
 
@@ -125,7 +142,7 @@ class MemorySnapshotRefreshPort(Protocol):
     """Refresh ``_memory_snapshots[(agent_id, session_key)]`` after compaction.
 
     Wraps the resolve-workspace + load-memory-md + load-daily-notes +
-    dict-write sequence. The adapter respects ``private_memory_allowed``:
+    dict-write sequence. The port respects ``private_memory_allowed``:
     when false, the dict is not written.
 
     Compaction refresh: the frozen system-prompt snapshot lives in this dict;
@@ -149,7 +166,7 @@ class MemorySyncNotifyPort(Protocol):
     """Notify ``sync_manager.notify_message(byte_count)`` post-stream.
 
     Fires exactly once after the ``async for`` exits cleanly. The
-    adapter handles the ``sync_manager is None`` guard so the stage
+    port handles the ``sync_manager is None`` guard so the stage
     body has no conditional.
     """
 
@@ -158,6 +175,22 @@ class MemorySyncNotifyPort(Protocol):
         sync_manager: Any | None,
         runtime_message: str,
     ) -> None: ...
+
+
+@asynccontextmanager
+async def _closing(stream: AsyncIterator[Any]) -> AsyncIterator[None]:
+    """``aclosing`` for a port's stream: close it on exit if it can be closed.
+
+    ``AgentRunPort.run_turn`` is typed as an async iterator; the real agent
+    returns an async generator, which is closed here at once instead of later
+    by the event loop's asyncgen finalizer.
+    """
+    try:
+        yield
+    finally:
+        aclose = getattr(stream, "aclose", None)
+        if callable(aclose):
+            await aclose()
 
 
 # Callable signature for runtime warning transformation. Implemented as a
@@ -794,6 +827,9 @@ class _CompactionHandler:
         event: CompactionEvent,
         inp: StreamConsumerStageInput,
     ) -> None:
+        # Read defensively: an event from an agent that predates the field
+        # carries no trigger and records under the default phase.
+        trigger = getattr(event, "trigger", None)
         state = CompactionState(
             session_key=inp.session_key,
             agent_id=inp.agent_id,
@@ -811,6 +847,7 @@ class _CompactionHandler:
                     summary=event.summary,
                     kept_entries=event.kept_entries,
                     compaction_id=event.compaction_id,
+                    trigger=trigger,
                 )
             except Exception as exc:  # noqa: BLE001 - preserve turn recoverability
                 log.warning("compaction_persist_failed", error=str(exc))
@@ -827,7 +864,7 @@ class _CompactionHandler:
                 notify_compaction(
                     inp.session_key,
                     source="automatic",
-                    phase="agent_inline_overflow",
+                    phase=inline_compaction_phase(trigger),
                     status="failed",
                     reason="persist_failed",
                     message=str(exc),
@@ -906,7 +943,7 @@ class StreamConsumerStage:
 
     Async-generator signature -- the FIRST TurnRunner stage that does NOT
     return ``StageOutcome``. Each yielded value is forwarded by the
-    harness to its own caller. Terminal state for flows
+    harness to its own caller. Terminal state for the finalizer flows
     through ``inp.state`` (the harness-owned ``_StreamState``).
 
     Exception model: the stream loop propagates ``CancelledError``
@@ -954,7 +991,7 @@ class StreamConsumerStage:
     async def run(
         self,
         inp: StreamConsumerStageInput,
-    ) -> AsyncIterator[AgentEvent]:
+    ) -> AsyncGenerator[AgentEvent, None]:
         # Late imports keep the module import-cycle-free.
         from agentos.engine.types import (
             ArtifactEvent,
@@ -970,45 +1007,49 @@ class StreamConsumerStage:
         )
 
         state = inp.state
-        async for event in self._agent_run.run_turn(
+        stream = self._agent_run.run_turn(
             inp.agent,
             turn_input=inp.turn_input,
             extra_messages=inp.extra_messages,
             semantic_message=inp.semantic_input,
-        ):
-            transformed: AgentEvent | object
-            extra_yields: list[AgentEvent] = []
-            if isinstance(event, TextDeltaEvent):
-                transformed = self._text_delta_handler.handle(event, state)
-            elif isinstance(event, ToolUseStartEvent):
-                transformed = self._tool_use_start_handler.handle(event, state)
-            elif isinstance(event, ToolResultEvent):
-                transformed = self._tool_result_handler.handle(event, state)
-            elif isinstance(event, ArtifactEvent):
-                transformed = self._artifact_handler.handle(event, state)
-            elif isinstance(event, ErrorEvent):
-                transformed = self._error_handler.handle(event, state)
-            elif isinstance(event, WarningEvent):
-                transformed = self._warning_handler.handle(event)
-            elif isinstance(event, RepetitionStopEvent):
-                transformed = self._repetition_stop_handler.handle(event, state)
-            elif isinstance(event, DoneEvent):
-                transformed, extra_yields = self._done_handler.handle(event, inp, state)
-                if state.pending_error_event is not None:
-                    state.deferred_done_event = transformed
+        )
+        # Closed on every exit (aclosing): when this stage is abandoned or
+        # cancelled, the agent's own ``finally`` blocks run before ours return.
+        async with _closing(stream):
+            async for event in stream:
+                transformed: AgentEvent | object
+                extra_yields: list[AgentEvent] = []
+                if isinstance(event, TextDeltaEvent):
+                    transformed = self._text_delta_handler.handle(event, state)
+                elif isinstance(event, ToolUseStartEvent):
+                    transformed = self._tool_use_start_handler.handle(event, state)
+                elif isinstance(event, ToolResultEvent):
+                    transformed = self._tool_result_handler.handle(event, state)
+                elif isinstance(event, ArtifactEvent):
+                    transformed = self._artifact_handler.handle(event, state)
+                elif isinstance(event, ErrorEvent):
+                    transformed = self._error_handler.handle(event, state)
+                elif isinstance(event, WarningEvent):
+                    transformed = self._warning_handler.handle(event)
+                elif isinstance(event, RepetitionStopEvent):
+                    transformed = self._repetition_stop_handler.handle(event, state)
+                elif isinstance(event, DoneEvent):
+                    transformed, extra_yields = self._done_handler.handle(event, inp, state)
+                    if state.pending_error_event is not None:
+                        state.deferred_done_event = transformed
+                        transformed = _SUPPRESS
+                elif isinstance(event, CompactionEvent):
+                    await self._compaction_handler.handle(event, inp)
                     transformed = _SUPPRESS
-            elif isinstance(event, CompactionEvent):
-                await self._compaction_handler.handle(event, inp)
-                transformed = _SUPPRESS
-            elif isinstance(event, SteeringEvent):
-                transformed = self._steering_handler.handle(event, state)
-            else:
-                transformed = event
+                elif isinstance(event, SteeringEvent):
+                    transformed = self._steering_handler.handle(event, state)
+                else:
+                    transformed = event
 
-            for extra_event in extra_yields:
-                yield extra_event
-            if transformed is not _SUPPRESS:
-                yield transformed  # type: ignore[misc]
+                for extra_event in extra_yields:
+                    yield extra_event
+                if transformed is not _SUPPRESS:
+                    yield transformed  # type: ignore[misc]
 
         # Post-stream: notify sync manager once.
         self._memory_sync_notify.notify_message_bytes(

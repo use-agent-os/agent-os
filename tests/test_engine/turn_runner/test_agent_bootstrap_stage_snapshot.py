@@ -125,23 +125,13 @@ def _capture_locals_at_post_slice() -> dict[str, Any]:
         "outcome": "success",
         "agent_class": type(agent).__name__ if agent is not None else None,
         "agent_config_max_tokens": getattr(agent_config, "max_tokens", None),
-        "agent_config_context_window_tokens": getattr(
-            agent_config, "context_window_tokens", None
-        ),
-        "agent_config_max_iterations": getattr(
-            agent_config, "max_iterations", None
-        ),
+        "agent_config_context_window_tokens": getattr(agent_config, "context_window_tokens", None),
+        "agent_config_max_iterations": getattr(agent_config, "max_iterations", None),
         "agent_config_timeout": getattr(agent_config, "timeout", None),
-        "agent_config_iteration_timeout": getattr(
-            agent_config, "iteration_timeout", None
-        ),
+        "agent_config_iteration_timeout": getattr(agent_config, "iteration_timeout", None),
         "agent_config_tool_timeout": getattr(agent_config, "tool_timeout", None),
-        "agent_config_request_timeout": getattr(
-            agent_config, "request_timeout", None
-        ),
-        "agent_config_max_provider_retries": getattr(
-            agent_config, "max_provider_retries", None
-        ),
+        "agent_config_request_timeout": getattr(agent_config, "request_timeout", None),
+        "agent_config_max_provider_retries": getattr(agent_config, "max_provider_retries", None),
         "agent_config_length_capped_continuations": getattr(
             agent_config, "length_capped_continuations", None
         ),
@@ -156,12 +146,8 @@ def _capture_locals_at_post_slice() -> dict[str, Any]:
         "effective_max_iterations": locs.get("effective_max_iterations"),
         "effective_iteration_timeout": locs.get("effective_iteration_timeout"),
         "effective_tool_timeout": locs.get("effective_tool_timeout"),
-        "effective_agent_request_timeout": locs.get(
-            "effective_agent_request_timeout"
-        ),
-        "effective_max_provider_retries": locs.get(
-            "effective_max_provider_retries"
-        ),
+        "effective_agent_request_timeout": locs.get("effective_agent_request_timeout"),
+        "effective_max_provider_retries": locs.get("effective_max_provider_retries"),
         "private_memory_allowed": locs.get("private_memory_allowed"),
         "sync_manager_label": getattr(sync_manager, "label", None),
     }
@@ -198,17 +184,22 @@ def _patch_ctx_mutators(runner):
         return replace(ctx, agent_id=agent_id)
 
     runner._with_artifact_context = _with_artifact_context.__get__(runner, TurnRunner)
-    runner._with_runtime_write_callbacks = (
-        _with_runtime_write_callbacks.__get__(runner, TurnRunner)
-    )
+    runner._with_runtime_write_callbacks = _with_runtime_write_callbacks.__get__(runner, TurnRunner)
 
 
 def _patch_assemble_prompt(runner, base_prompt, prompt_metadata):
     pm_to_emit = dict(prompt_metadata)
 
     def _assemble_prompt(
-        self, agent_id, tool_defs, *, session_key=None, semantic_message=None,
-        extra_context=None, prompt_metadata=None, bootstrap_context_mode=None,
+        self,
+        agent_id,
+        tool_defs,
+        *,
+        session_key=None,
+        semantic_message=None,
+        extra_context=None,
+        prompt_metadata=None,
+        bootstrap_context_mode=None,
         fresh_user_session=False,
     ):  # noqa: ARG001
         if prompt_metadata is not None:
@@ -220,11 +211,22 @@ def _patch_assemble_prompt(runner, base_prompt, prompt_metadata):
 
 def _patch_run_pipeline(runner, turn_factory, provider):
     async def _run_pipeline(
-        self, message, session_key, in_provider, cloned_selector,
-        tool_defs, base_prompt, attachments, *,
-        semantic_message=None, ingress_pipeline_steps=None,
-        prev_assistant_text=None, prev_assistant_usage=None,
-        history_user_texts=None, flags_text_override=None, tool_context=None,
+        self,
+        message,
+        session_key,
+        in_provider,
+        cloned_selector,
+        tool_defs,
+        base_prompt,
+        attachments,
+        *,
+        semantic_message=None,
+        ingress_pipeline_steps=None,
+        prev_assistant_text=None,
+        prev_assistant_usage=None,
+        history_user_texts=None,
+        flags_text_override=None,
+        tool_context=None,
         normalization_metadata=None,
     ):  # noqa: ARG001
         return turn_factory(), provider
@@ -234,12 +236,15 @@ def _patch_run_pipeline(runner, turn_factory, provider):
 
 def _patch_router_context(runner):
     async def _router_previous_assistant_context(
-        self, session_key, *, exclude_last_user=False,  # noqa: ARG001, ARG002
+        self,
+        session_key,
+        *,
+        exclude_last_user=False,  # noqa: ARG001, ARG002
     ):
         return {}
 
-    runner._router_previous_assistant_context = (
-        _router_previous_assistant_context.__get__(runner, TurnRunner)
+    runner._router_previous_assistant_context = _router_previous_assistant_context.__get__(
+        runner, TurnRunner
     )
 
 
@@ -254,19 +259,16 @@ def _patch_session_id(runner, session_id):
     async def _resolve_session_id_for_log(self, session_key):  # noqa: ARG001, ARG002
         return session_id
 
-    runner._resolve_session_id_for_log = (
-        _resolve_session_id_for_log.__get__(runner, TurnRunner)
-    )
+    runner._resolve_session_id_for_log = _resolve_session_id_for_log.__get__(runner, TurnRunner)
 
 
 def _patch_budget_resolvers(runner, case):
     if case.get("max_iterations_raises"):
+
         def _raise_max_iter(self, session_key, max_iterations):  # noqa: ARG001, ARG002
             raise ValueError("max_iterations must be an integer >= 0")
 
-        runner._resolve_agent_max_iterations = _raise_max_iter.__get__(
-            runner, TurnRunner
-        )
+        runner._resolve_agent_max_iterations = _raise_max_iter.__get__(runner, TurnRunner)
         return
 
     runtime_t = case["runtime_timeout"]
@@ -318,9 +320,7 @@ def _patch_memory_helpers(runner):
     def _load_memory_md(self, workspace_dir, max_chars=None):  # noqa: ARG001, ARG002
         return None
 
-    runner._resolve_memory_source_dir = _resolve_memory_source_dir.__get__(
-        runner, TurnRunner
-    )
+    runner._resolve_memory_source_dir = _resolve_memory_source_dir.__get__(runner, TurnRunner)
     runner._load_memory_md = _load_memory_md.__get__(runner, TurnRunner)
 
 
@@ -328,7 +328,11 @@ def _patch_post_slice_probe(runner):
     """Hook _load_history (first runner call past the slice)."""
 
     async def _probe(
-        self, agent, session_key, *, trim_last_user=True,
+        self,
+        agent,
+        session_key,
+        *,
+        trim_last_user=True,
     ):  # noqa: ARG001, ARG002
         snapshot = _capture_locals_at_post_slice()
         raise _SliceCapture(snapshot)
@@ -375,6 +379,7 @@ def _make_turn_factory(*, metadata=None, tool_defs=None):
             tool_defs=list(tool_defs or []),
             model="",
         )
+
     return _factory
 
 
@@ -550,7 +555,9 @@ _CORPUS_IDS = [c[0] for c in _CORPUS]
 @pytest.mark.parametrize("case_id,case", _CORPUS, ids=_CORPUS_IDS)
 @pytest.mark.asyncio
 async def test_agent_bootstrap_stage_snapshot(
-    case_id, case, monkeypatch: pytest.MonkeyPatch,
+    case_id,
+    case,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runner = _setup_runner(case)
     captured, yielded, raised = await _drive(runner, case, monkeypatch)
@@ -601,8 +608,7 @@ async def test_agent_bootstrap_stage_snapshot(
         "sync_manager_label": None,
     }
     assert captured == expected_snapshot, (
-        f"case={case_id}: snapshot diverged.\n"
-        f"  expected={expected_snapshot}\n  actual  ={captured}"
+        f"case={case_id}: snapshot diverged.\n  expected={expected_snapshot}\n  actual  ={captured}"
     )
 
 
@@ -637,7 +643,11 @@ async def test_sync_manager_warm_called(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_agent_factory_forwards_registry_and_tool_context() -> None:
-    """Tool dispatch needs the Agent to retain registry/context wiring."""
+    """Tool dispatch needs the Agent to retain the registry wiring.
+
+    The tool context is accepted but not kept: tools get it through the
+    tool handler, which the runner builds with it.
+    """
 
     registry = ToolRegistry()
     tool_context = ToolContext(workspace_dir="/tmp")
@@ -659,4 +669,3 @@ def test_agent_factory_forwards_registry_and_tool_context() -> None:
     )
 
     assert agent._tool_registry is registry
-    assert agent._tool_context is tool_context

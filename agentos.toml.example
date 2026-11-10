@@ -27,6 +27,14 @@
 # Keep a positive cap for smaller local models so repeated tool calls cannot
 # run forever. Zero means unlimited.
 # agent_max_iterations = 8
+# Provider retries: rate limits, overloads and transport blips are retried on
+# the same model up to agent_max_provider_retries times, within
+# agent_retry_budget_seconds of waits and failed attempts (each attempt counts
+# at most 10 s; 0 = only the count bounds them). After a repeated timeout on a
+# large request, compact older context once and retry before failing over.
+# agent_max_provider_retries = 6
+# agent_retry_budget_seconds = 90
+# agent_timeout_context_recovery = true
 
 # WebSocket per-connection outbound writer queue. When enabled (default),
 # each WS connection gets a bounded asyncio queue + dedicated writer task.
@@ -365,6 +373,26 @@ max_pending_per_session = 64
 # recall, project knowledge, router context, first-turn memory index warm)
 # concurrently. The prompt is the same either way; false restores serial order.
 # concurrent_turn_setup = true
+# Seconds a stopped turn that is streaming or between steps gets to end on its
+# own before its task is cancelled (a second stop cancels at once; 0 = always
+# at once). A turn running tools is cancelled at once.
+# turn_cancel_grace_seconds = 5
+# Nested pool: slots only child runs (subagents, ACP harness runs) use, on top
+# of max_concurrency. A child of a parent whose turn is still running takes one
+# first, so a parent waiting on it cannot starve it; other children use one
+# when the shared slots open to them are taken. Default: the value of
+# max_concurrency. Running turns never exceed
+# max_concurrency + max_nested_concurrency.
+# max_nested_concurrency = 4
+
+# [subagents]
+# Children of one parent session that run at once; more spawns wait in spawn
+# order. 0 = no per-parent limit (task_runtime still bounds them). An agent's
+# own subagents.max_concurrent_children wins.
+# max_concurrent_children = 2
+# Shared slots child runs never take, so a user's own message does not wait
+# behind them (at most max_concurrency - 1).
+# subagent_reserved_slots = 2
 
 [agentos_router]
 enabled = true           # auto tier router

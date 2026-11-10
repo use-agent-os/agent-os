@@ -141,7 +141,8 @@ async def test_refused_budget_ends_with_error_then_done(
 
     assert provider.calls == []
     assert _terminal_kinds(events) == ["error", "done"]
-    assert events[-1].outcome.kind == "failed"
+    # A spend ceiling is a deliberate limit, not a failure.
+    assert events[-1].outcome.kind == "budgetLimited"
     assert events[-1].outcome.reason == "budget_exceeded"
 
 

@@ -102,6 +102,124 @@ describe('renderMarkdown sanitizer', () => {
   })
 })
 
+const ORIGIN = 'http://localhost:8765'
+
+/** Every element that would make the browser fetch something on render. */
+function autoLoads(el: HTMLElement): string[] {
+  return [...el.querySelectorAll('img[src], input[src], [srcset]')]
+    .map((n) => n.getAttribute('src') || '')
+    .filter((src) => !/^(?:data:image\/(?:png|gif|jpeg|webp)[;,]|blob:)/i.test(src))
+}
+
+describe('model output cannot load remote resources', () => {
+  it.each([
+    '![a](//evil.example/a.png)',
+    '<img src="//evil.example/p.png">',
+    '<img src="\\\\evil.example/a.png">',
+    '<img src="/\\evil.example/a.png">',
+    '<img src="HTTPS://evil.example/a.png">',
+    '<img src=" https://evil.example/a.png">',
+    '<img src="/api/v1/sessions?delete=1">',
+    '<img src="relative/path.png">',
+    '<input type="image" src="https://evil.example/t.gif">',
+    '<input src="//evil.example/t.gif">',
+  ])('does not auto-load %s', (input) => {
+    const el = dom(renderMarkdown(input, ORIGIN))
+    expect(autoLoads(el), el.innerHTML).toEqual([])
+  })
+
+  it('shows a protocol-relative image as a link to the host it resolves to', () => {
+    const el = dom(renderMarkdown('![pic](//evil.example/a.png)', ORIGIN))
+    expect(el.querySelector('img')).toBeNull()
+    expect(el.querySelector('a')).toHaveAttribute('href', 'http://evil.example/a.png')
+  })
+
+  it('shows an image button as a link to its image, never as a checkbox', () => {
+    const el = dom(
+      renderMarkdown('<input type="IMAGE" src="https://evil.example/t.gif" alt="Track">', ORIGIN),
+    )
+    expect(el.querySelector('input')).toBeNull()
+    expect(el.querySelector('img')).toBeNull()
+    const link = el.querySelector('a')
+    expect(link).toHaveAttribute('href', 'https://evil.example/t.gif')
+    expect(link).toHaveTextContent('Track')
+  })
+
+  it('keeps inline raster and blob images', () => {
+    const png = 'data:image/png;base64,iVBORw0KGgo='
+    const el = dom(renderMarkdown(`![p](${png})\n\n<img src="blob:${ORIGIN}/x">`, ORIGIN))
+    expect([...el.querySelectorAll('img')].map((i) => i.getAttribute('src'))).toEqual([
+      png,
+      `blob:${ORIGIN}/x`,
+    ])
+  })
+
+  it('locks every input as a disabled checkbox', () => {
+    const el = dom(
+      renderMarkdown('- [x] done\n- [ ] todo\n\n<input type="text" value="x">', ORIGIN),
+    )
+    const inputs = [...el.querySelectorAll('input')]
+    expect(inputs).toHaveLength(3)
+    for (const input of inputs) {
+      expect(input).toHaveAttribute('type', 'checkbox')
+      expect(input).toBeDisabled()
+    }
+    expect(inputs.map((i) => i.hasAttribute('checked'))).toEqual([true, false, false])
+  })
+
+  it('opens protocol-relative links in a new tab, in-app paths in place', () => {
+    const el = dom(
+      renderMarkdown(
+        '<a href="//evil.example/x">rel</a> [in](/settings) [same](http://localhost:8765/x)',
+        ORIGIN,
+      ),
+    )
+    const [rel, inApp, same] = [...el.querySelectorAll('a')]
+    expect(rel).toHaveAttribute('target', '_blank')
+    expect(rel).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(inApp).not.toHaveAttribute('target')
+    expect(same).not.toHaveAttribute('target')
+  })
+
+  it('drops model-written classes but keeps the renderer’s own', () => {
+    const el = dom(
+      renderMarkdown(
+        '<div class="fixed inset-0 z-50 bg-surface-1"><a href="https://evil.example">Session expired – sign in</a></div>\n\n```python\ndef f(): pass\n```',
+        ORIGIN,
+      ),
+    )
+    expect(el.querySelector('.fixed, .inset-0, .z-50')).toBeNull()
+    expect(el.querySelector('.code-block .hljs')).not.toBeNull()
+    expect(el.querySelector('.hljs-keyword')).not.toBeNull()
+  })
+})
+
+describe('math and QR placeholders', () => {
+  it('leaves text that looks like a stash marker alone', () => {
+    const el = dom(renderMarkdown('The Apple M4 chip costs $x$ more than the M1 and M0.', ORIGIN))
+    expect(el.textContent?.trim()).toBe('The Apple M4 chip costs $x$ more than the M1 and M0.')
+    expect(el.querySelectorAll('code.math-raw')).toHaveLength(1)
+  })
+
+  it('cannot forge a math or QR marker', () => {
+    const el = dom(renderMarkdown('\uE000abc:0\uE001 ![q](#qr-abc-0) $y$', ORIGIN))
+    expect(el.querySelectorAll('code.math-raw')).toHaveLength(1)
+    expect(el.querySelector('img')).toBeNull()
+  })
+
+  it('renders an agentos-qr: image as a locally drawn picture', () => {
+    const el = dom(renderMarkdown('![wallet](agentos-qr:0xabc)', ORIGIN))
+    const img = el.querySelector('img')
+    expect(img).toHaveAttribute('alt', 'wallet')
+    expect(img?.getAttribute('src')).toMatch(/^data:image\/svg\+xml/)
+  })
+
+  it('still strips an SVG data image the model wrote itself', () => {
+    const el = dom(renderMarkdown('![x](data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=)', ORIGIN))
+    expect(el.querySelector('img')?.getAttribute('src') ?? null).toBeNull()
+  })
+})
+
 describe('code blocks', () => {
   it('highlights a fenced python block with theme token classes', () => {
     const el = dom(renderMarkdown('```python\ndef f():\n    return 1\n```'))

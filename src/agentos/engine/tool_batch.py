@@ -60,7 +60,14 @@ import bisect
 import functools
 import itertools
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Hashable, Mapping, Sequence
+from collections.abc import (
+    AsyncGenerator,
+    Awaitable,
+    Callable,
+    Hashable,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -556,7 +563,7 @@ class ToolBatchExecutor:
 
     # -- execution ------------------------------------------------------
 
-    async def run(self, tool_calls: Sequence[ToolCall]) -> AsyncIterator[AgentEvent]:
+    async def run(self, tool_calls: Sequence[ToolCall]) -> AsyncGenerator[AgentEvent, None]:
         """Run every call; yield events as results arrive. Fills ``outcomes``."""
 
         self._calls = list(tool_calls)

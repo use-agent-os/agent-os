@@ -7,9 +7,6 @@ import { defineNamespace } from '../registry'
 export const common = defineNamespace('common', {
   cancel: 'Cancel',
   close: 'Close',
-  copy: 'Copy',
   dash: '—',
-  loading: 'Loading…',
-  retry: 'Retry',
   save: 'Save',
 } as const)

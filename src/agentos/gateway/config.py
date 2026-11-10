@@ -327,6 +327,13 @@ class TaskRuntimeConfig(BaseModel):
     """Server-side task-runtime queue settings."""
 
     max_concurrency: int = Field(default=4, ge=1)
+    # Size of the nested pool: slots only child runs (subagent / ACP) use,
+    # outside ``max_concurrency``. A child of a running parent turn takes one
+    # first, so a parent waiting on its children cannot starve them; other
+    # children when the shared slots open to them are taken. ``None`` = the
+    # same as ``max_concurrency``. Running turns never exceed
+    # ``max_concurrency + max_nested_concurrency``.
+    max_nested_concurrency: int | None = Field(default=None, ge=1)
     max_pending_per_session: int = Field(default=64, ge=1)
     # Per-channel-adapter in-flight semaphore (separate from
     # task_runtime._global_sem). Configured here so AGENTOS_CHANNEL_INFLIGHT_CAP
@@ -2215,13 +2222,16 @@ class SubagentsGatewayConfig(BaseModel):
     ``enabled=False``. Default off so existing deployments are unaffected."""
 
     subagent_reserved_slots: int = Field(default=2, ge=0)
-    """Number of slots in ``task_runtime.max_concurrency`` reserved for
-    non-subagent tasks so a fan-out parent never starves itself."""
+    """Number of slots in ``task_runtime.max_concurrency`` child runs never
+    take (clamped to ``max_concurrency - 1``), so a user's own turn does not
+    wait behind subagent or harness children."""
 
     max_concurrent_children: int = Field(default=2, ge=0)
     """Default per-parent lane: at most this many children of one parent
     session run at once; further spawns wait in spawn order. ``0`` = no
-    per-parent limit. An agent's ``subagents.max_concurrent_children`` wins."""
+    per-parent limit (children are still bounded by ``task_runtime``'s
+    ``max_concurrency`` and ``max_nested_concurrency``). An agent's
+    ``subagents.max_concurrent_children`` wins."""
 
     prompt_compact: bool = False
     """When enabled, subagent bootstrap prompts keep only AGENTS.md and TOOLS.md."""

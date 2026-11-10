@@ -1,5 +1,5 @@
 import { ArrowDown, Loader2 } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { t } from '@/i18n'
 import '@/i18n/en/webChat'
 import { Button } from '@/web/components/ui/button'
@@ -8,11 +8,27 @@ import type { TranscriptState } from '../model/types'
 import { useFollowScroll } from './follow'
 import { TurnView } from './TurnView'
 
-function contentVersion(state: TranscriptState): string {
+/**
+ * Changes whenever the newest turn grows anywhere: text streams in before
+ * trailing artifacts and cards, so the last item alone is not enough.
+ */
+export function contentVersion(state: TranscriptState): string {
   const last = state.turns.at(-1)
-  const lastItem = last?.items.at(-1)
-  const size = lastItem?.kind === 'text' ? lastItem.text.length : (last?.items.length ?? 0)
-  return `${state.turns.length}:${last?.status}:${last?.items.length}:${size}`
+  let text = 0
+  let settled = 0
+  for (const item of last?.items ?? []) {
+    if (item.kind === 'text') text += item.text.length
+    else if (item.kind === 'thinkingRef') text += item.text?.length ?? 0
+    else if (item.kind === 'toolCall' && item.state !== 'running') settled++
+  }
+  return [
+    state.turns.length,
+    last?.status,
+    last?.items.length,
+    text,
+    settled,
+    state.pendingInputs.length,
+  ].join(':')
 }
 
 export interface TranscriptViewProps {
@@ -38,18 +54,28 @@ export function TranscriptView(props: TranscriptViewProps) {
     if (followSignal > 0) resume()
   }, [followSignal, resume])
 
-  const onScroll = () => {
+  const { onLoadOlder } = props
+  const { preserveOnPrepend } = follow
+  const maybeLoadOlder = useCallback(() => {
     const el = scroller.current
     if (!el || loadingOlder.current || !state.hasMore || el.scrollTop > 40) return
     loadingOlder.current = true
-    const restore = follow.preserveOnPrepend()
-    void props
-      .onLoadOlder()
+    const restore = preserveOnPrepend()
+    void onLoadOlder()
       .then(() => requestAnimationFrame(restore))
       .finally(() => {
         loadingOlder.current = false
       })
-  }
+  }, [state.hasMore, onLoadOlder, preserveOnPrepend])
+
+  // A window too short to scroll (a page cut by its byte budget) never gets
+  // a scroll event: load on, until it fills the view or history runs out.
+  const rows = state.rows.length
+  useEffect(() => {
+    if (loading || !state.hasMore) return
+    const el = scroller.current
+    if (el && el.scrollHeight <= el.clientHeight + 40) maybeLoadOlder()
+  }, [loading, state.hasMore, rows, maybeLoadOlder])
 
   const lastUserIndex = state.turns.reduce((acc, turn, i) => (turn.userMessage ? i : acc), -1)
 
@@ -60,7 +86,7 @@ export function TranscriptView(props: TranscriptViewProps) {
           scroller.current = el
           follow.ref(el)
         }}
-        onScroll={onScroll}
+        onScroll={maybeLoadOlder}
         role="log"
         aria-label={t('webChat.transcriptLabel')}
         aria-busy={loading || undefined}
@@ -91,6 +117,23 @@ export function TranscriptView(props: TranscriptViewProps) {
               />
             ))
           )}
+          {state.pendingInputs.length ? (
+            <section
+              aria-label={t('webChat.gatewayQueued')}
+              className="flex flex-col items-end gap-1"
+            >
+              {state.pendingInputs.map((input, i) => (
+                <p
+                  key={input.task_id ?? i}
+                  className="max-w-[85%] rounded-2xl border border-dashed border-border px-4 py-2 text-text-muted"
+                >
+                  {input.steer
+                    ? t('webChat.gatewayQueuedSteer', { text: input.text ?? '' })
+                    : t('webChat.gatewayQueuedNext', { text: input.text ?? '' })}
+                </p>
+              ))}
+            </section>
+          ) : null}
         </div>
       </div>
       {!follow.following && follow.hasNew ? (

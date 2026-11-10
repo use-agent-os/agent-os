@@ -6,17 +6,26 @@
 // query or fragment parameter; `consumeUrlCredentials()` takes it out of the
 // address bar (history replacement, so Back never shows it) before the router
 // or anything else reads the URL.
+//
+// A token that came with a `gatewayUrl` in the same link belongs to that
+// gateway: it is held with the URL until the user confirms the switch, and is
+// never stored for (or sent to) the gateway this tab is already using.
 
 export const WS_TOKEN_KEY = 'agentos.wsToken'
 /** The persisted WebSocket URL override (not a secret). */
 export const WS_URL_KEY = 'agentos.wsUrl'
 
-/** Read the per-tab gateway token; blocked storage reads as no token. */
+// Where sessionStorage refuses a write (blocked storage, some private modes),
+// the token is kept in memory for the life of the page instead, so a short
+// connection drop does not send the user back to the Connect screen.
+let memoryToken = ''
+
+/** Read the per-tab gateway token; blocked storage falls back to the in-memory copy. */
 export function readStoredToken(): string {
   try {
-    return sessionStorage.getItem(WS_TOKEN_KEY) || ''
+    return sessionStorage.getItem(WS_TOKEN_KEY) || memoryToken
   } catch {
-    return ''
+    return memoryToken
   }
 }
 
@@ -25,8 +34,9 @@ export function storeToken(token: string | null | undefined): void {
   try {
     if (token) sessionStorage.setItem(WS_TOKEN_KEY, token)
     else sessionStorage.removeItem(WS_TOKEN_KEY)
+    memoryToken = ''
   } catch {
-    /* storage unavailable: the token still applies to this connection */
+    memoryToken = token || ''
   }
 }
 
@@ -48,10 +58,20 @@ export function storeWsUrl(url: string | null | undefined): void {
 }
 
 export interface UrlCredentials {
-  /** A token taken from the link (already stored for this tab). */
+  /**
+   * A token taken from the link. Stored for this tab when the link names no
+   * gateway; held with the gateway URL until confirmation when it does.
+   */
   token: string | null
   /** A gateway URL from the link, held until the user confirms it. */
   gatewayUrl: string | null
+}
+
+/** A gateway switch a link asked for, awaiting the user's confirmation. */
+export interface GatewayUrlRequest {
+  url: string
+  /** The token the same link carried, meant for that gateway only. */
+  token: string | null
 }
 
 const CREDENTIAL_PARAMS = ['token', 'gatewayUrl'] as const
@@ -68,12 +88,12 @@ function stripParams(params: URLSearchParams, found: Record<string, string>): bo
   return changed
 }
 
-let pendingGatewayUrl: string | null = null
+let pendingRequest: GatewayUrlRequest | null = null
 
 /**
  * Take `token` / `gatewayUrl` out of the current URL (query and fragment),
- * store the token for this tab, hold the gateway URL for confirmation, and
- * replace the history entry so neither is visible any more.
+ * store the token for this tab (or, with a gateway URL, hold both for
+ * confirmation), and replace the history entry so neither is visible any more.
  */
 export function consumeUrlCredentials(
   location: Pick<Location, 'href'> = window.location,
@@ -94,17 +114,17 @@ export function consumeUrlCredentials(
   }
 
   const token = found.token ?? null
-  if (token) storeToken(token)
   const gatewayUrl = found.gatewayUrl ?? null
-  if (gatewayUrl) pendingGatewayUrl = gatewayUrl
+  if (gatewayUrl) pendingRequest = { url: gatewayUrl, token }
+  else if (token) storeToken(token)
   return { token, gatewayUrl }
 }
 
-/** The gateway URL a link asked for, awaiting the user's confirmation. */
-export function pendingGatewayUrlRequest(): string | null {
-  return pendingGatewayUrl
+/** The gateway switch a link asked for, awaiting the user's confirmation. */
+export function pendingGatewayUrlRequest(): GatewayUrlRequest | null {
+  return pendingRequest
 }
 
 export function clearPendingGatewayUrl(): void {
-  pendingGatewayUrl = null
+  pendingRequest = null
 }

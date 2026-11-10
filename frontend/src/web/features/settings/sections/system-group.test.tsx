@@ -107,6 +107,37 @@ describe('Health', () => {
     expect(within(group).getByRole('button', { name: 'Copy command' })).toBeInTheDocument()
     expect(rpc.callsTo('doctor.status')).toEqual([{ agentId: 'main', deep: true }])
   })
+
+  it('badges the finding families that mean more than their severity', async () => {
+    const finding = (id: string, title: string) => ({
+      id,
+      severity: 'warn',
+      surface: id.split('.')[0],
+      title,
+      impact: 'degrades',
+    })
+    renderShell(
+      '/settings/health',
+      shellRpc().handle('doctor.status', {
+        status: 'degraded',
+        ready: true,
+        findings: [
+          finding('logs.diagnostic.incomplete', 'Log check skipped'),
+          finding('memory.repair.pending', 'Index repair queued'),
+          finding('gateway.config.mismatch', 'Running config differs from disk'),
+          finding('provider.slow', 'Provider is slow'),
+        ],
+      }),
+    )
+    const card = async (name: string) => screen.findByRole('article', { name })
+    expect(await card('Log check skipped')).toHaveTextContent('Diagnostics incomplete')
+    expect(await card('Index repair queued')).toHaveTextContent('Repair pending')
+    expect(await card('Running config differs from disk')).toHaveTextContent('Config mismatch')
+    const plain = await card('Provider is slow')
+    for (const badge of ['Diagnostics incomplete', 'Repair pending', 'Config mismatch']) {
+      expect(plain).not.toHaveTextContent(badge)
+    }
+  })
 })
 
 describe('Logs', () => {

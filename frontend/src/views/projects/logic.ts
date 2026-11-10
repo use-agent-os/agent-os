@@ -1,5 +1,6 @@
-// Pure projects-view helpers. RPC calls, mutations, dialogs and rendering live
-// in ProjectsPage.tsx; this module owns the pure derivations (sorting,
+// Pure projects helpers. RPC calls, mutations, dialogs and rendering live in
+// the callers (the web console's Projects page, the desktop's sidebar and
+// project view); this module owns the pure derivations (sorting,
 // filtering, per-project session grouping). Rows tolerate both snake_case and
 // camelCase field variants, mirroring RawSession in views/sessions/logic.ts.
 

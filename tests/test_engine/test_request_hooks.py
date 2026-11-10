@@ -42,7 +42,7 @@ async def _run(agent: Agent) -> list[Any]:
     return [event async for event in agent.run_turn("hello")]
 
 
-async def test_veto_skips_the_provider_and_fails_the_turn() -> None:
+async def test_veto_skips_the_provider_and_blocks_the_turn() -> None:
     provider = ScriptedProvider([[text("never"), done()]])
 
     events = await _run(_agent(provider, [_Hook(Veto("Daily spend limit reached."))]))
@@ -53,7 +53,9 @@ async def test_veto_skips_the_provider_and_fails_the_turn() -> None:
         ("request_vetoed", "Daily spend limit reached.")
     ]
     assert isinstance(events[-1], DoneEvent)
-    assert events[-1].outcome.kind == "failed"
+    # A veto is a refusal by policy, not a failure of the provider or the turn.
+    assert events[-1].outcome.kind == "blocked"
+    assert events[-1].outcome.reason == "request_vetoed"
 
 
 async def test_amend_adds_a_trailing_note_and_keeps_the_prefix_identical() -> None:
@@ -95,7 +97,7 @@ async def test_fail_closed_hook_that_raises_vetoes() -> None:
     events = await _run(_agent(provider, [_Hook(raises=True, fail_closed=True)]))
 
     assert provider.calls == []
-    assert events[-1].outcome.kind == "failed"
+    assert events[-1].outcome.kind == "blocked"
 
 
 async def test_turn_runner_passes_request_hooks_to_the_agent(

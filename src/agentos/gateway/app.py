@@ -775,6 +775,7 @@ def create_gateway_app(
             "task_runtime": task_runtime,
             "cron_scheduler": cron_scheduler,
             "channel_manager": channel_manager,
+            "tool_hooks": getattr(turn_runner, "tool_hooks", None),
         },
     )
     register_audio_transcription_routes(app, config=config)

@@ -364,3 +364,38 @@ def test_uvicorn_bounds_its_own_graceful_wait(
     from agentos.gateway.ws_transport import GatewayWebSocketProtocol
 
     assert captured["ws"] is GatewayWebSocketProtocol
+
+
+async def test_the_wake_worker_stops_before_the_runtime_drains() -> None:
+    from agentos.gateway.subagent_wakes import get_wake_outbox, set_wake_outbox
+
+    order: list[str] = []
+    outbox_during_drain: list[Any] = []
+    sentinel = object()
+
+    class _Runtime:
+        def stop_admission(self) -> None:
+            return None
+
+        async def shutdown(self, **kwargs: Any) -> None:
+            order.append("drain")
+            outbox_during_drain.append(get_wake_outbox())
+
+    class _Worker:
+        async def stop(self) -> None:
+            order.append("worker_stop")
+
+    server = _server(_Runtime())
+    server._subagent_wake_worker = _Worker()
+    server._wake_outbox_installed = True
+    set_wake_outbox(sentinel)  # type: ignore[arg-type]
+    try:
+        await server.close("shutdown", drain_timeout=1.0)
+    finally:
+        installed = get_wake_outbox()
+        set_wake_outbox(None)
+
+    assert order[:2] == ["worker_stop", "drain"]
+    # Turns ending during the drain still record their wakes.
+    assert outbox_during_drain == [sentinel]
+    assert installed is None

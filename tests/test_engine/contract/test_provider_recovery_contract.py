@@ -15,8 +15,8 @@ from typing import Any
 import pytest
 
 from agentos.engine import Agent, AgentConfig
-from agentos.engine.fallback import FallbackPolicy, ProviderErrorKind, backoff_sleep
-from agentos.engine.types import DoneEvent, ErrorEvent
+from agentos.engine.fallback import ProviderErrorKind, backoff_sleep, classify_error
+from agentos.engine.types import DoneEvent, ErrorEvent, WarningEvent
 from agentos.provider import Message
 from tests.fakes import ChainSelector, ScriptedProvider, done, error, text
 
@@ -106,7 +106,7 @@ async def test_each_failed_attempt_records_exactly_one_recovery_decision(
 
 
 def test_529_is_classified_as_overloaded_not_transport() -> None:
-    kind = FallbackPolicy.classify_error("overloaded", status_code=529, raw_code="529")
+    kind = classify_error("overloaded", status_code=529, raw_code="529")
 
     assert kind is ProviderErrorKind.OVERLOADED
 
@@ -227,14 +227,40 @@ async def test_timeout_on_large_context_compacts_and_retries_before_failing(
             [text("ok"), done()],
         ]
     )
+    # ~3.4k tokens: over half of what a 20k window lets a request grow to
+    # before preflight compaction, so worth reducing.
+    agent = _agent(provider, context_window_tokens=20_000)
+    agent.set_history(_long_history(15))
+
+    events = await _run(agent)
+
+    compactions = [e for e in events if e.kind == "compaction"]
+    assert [e.trigger for e in compactions] == ["timeout"]
+    assert len(provider.calls[-1].messages) < len(provider.calls[0].messages)
+    assert _text(events) == "ok"
+
+
+async def test_timeout_on_a_small_request_fails_over_without_compacting(
+    sleeps: list[float],
+) -> None:
+    """A small request that times out twice is a slow provider, not a big
+    prompt: the turn fails over instead of rewriting the transcript."""
+    provider = ScriptedProvider(
+        [[error("timeout", "request timed out")]],
+        offers_fallback=True,
+    )
     agent = _agent(provider)
     agent.set_history(_long_history())
 
     events = await _run(agent)
 
-    assert any(e.kind == "compaction" for e in events)
-    assert len(provider.calls[-1].messages) < len(provider.calls[0].messages)
-    assert _text(events) == "ok"
+    assert not any(e.kind == "compaction" for e in events)
+    warnings = [e.code for e in events if isinstance(e, WarningEvent)]
+    assert "context_auto_compaction_start" not in warnings
+    assert "provider_recovery_fallback" in warnings
+    assert provider.fallback_reasons == ["request timed out"]
+    # Every request, the failover's included, carried the full history.
+    assert {len(call.messages) for call in provider.calls} == {len(provider.calls[0].messages)}
 
 
 # ------------------------------------------------ failover only before output

@@ -157,19 +157,27 @@ the queue as soon as the harness has them and are never logged. Questions time
 out after 15 minutes.
 
 Over RPC, `approval.list` lists pending approvals of every namespace with a
-readable `title` (`params.namespace` narrows it), and `exec.approval.resolve`
+readable `title` (`params.namespace` narrows it; `params.display: true`
+answers exactly as `GET /api/approvals` does), and `exec.approval.resolve`
 (or `POST /api/approvals/resolve`) accepts an optional `payload` object for
 form answers.
 
+A prompt always shows the call that will actually run. When a tool hook
+rewrote the call's arguments (see "Tool and request hooks" in
+[Tools and Sandbox](tools-and-sandbox.md)), the prompt and the pending result
+on the tool card show the rewritten command; the model is told only which of
+its arguments were adjusted.
+
 ### Where a prompt reaches you
 
-Every pending approval is listed on the console's approvals page and in the
-desktop app's approval dialog. Beyond that:
+Every pending approval is listed in the web console (the approval tray on
+every page, the Inbox and Settings › Approvals) and in the desktop app's
+approval dialog. Beyond that:
 
-- **Web Push.** In the web console, Settings → *Push notifications for
-  approvals* subscribes this browser (it asks for notification permission;
-  it needs HTTPS or `localhost`). Each new approval is pushed with a link to
-  the approvals page; when it is resolved a replacement notice says how —
+- **Web Push.** In the web console, Settings › Notifications › *Push
+  notifications for approvals* subscribes this browser (it asks for notification permission;
+  it needs HTTPS or `localhost`). Each new approval is pushed with a link that
+  opens it in the console's Inbox; when it is resolved a replacement notice says how —
   granted, denied, expired, or cancelled because its run was stopped. The
   push goes out from the same queue write that announces `approval.resolved`
   to consoles. Messages are encrypted

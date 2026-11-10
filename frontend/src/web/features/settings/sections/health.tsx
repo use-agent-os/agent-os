@@ -89,6 +89,15 @@ function CommandLine({ command }: { command: string }) {
   )
 }
 
+/** A label for the finding families that mean something beyond their severity. */
+function findingBadge(id: string | undefined): string | null {
+  const value = String(id || '')
+  if (value.endsWith('.diagnostic.incomplete')) return t('webSetSystem.badgeDiagnosticsIncomplete')
+  if (value.endsWith('.repair.pending')) return t('webSetSystem.badgeRepairPending')
+  if (value === 'gateway.config.mismatch') return t('webSetSystem.badgeConfigMismatch')
+  return null
+}
+
 function FindingCard({ finding, index }: { finding: Finding; index: number }) {
   const kind = findingGroupKind(finding)
   const evidence = visibleEvidenceEntries(finding.evidence).slice(0, 6)
@@ -96,6 +105,7 @@ function FindingCard({ finding, index }: { finding: Finding; index: number }) {
   // Raw report tokens, not copy.
   const severity = finding.severity || 'info'
   const surface = finding.surface || 'system'
+  const badge = findingBadge(finding.id)
   return (
     <article
       className={cn('rounded-lg border border-border border-l-4 p-3', GROUP_TONE[kind])}
@@ -107,6 +117,11 @@ function FindingCard({ finding, index }: { finding: Finding; index: number }) {
         <span className="font-mono">{surface}</span>
         {finding.restartRequired ? (
           <span className="text-warn">{t('webSetSystem.findingRestart')}</span>
+        ) : null}
+        {badge ? (
+          <span className="rounded-full border border-border px-2 font-medium text-text">
+            {badge}
+          </span>
         ) : null}
       </div>
       <h3 className="mt-1 font-medium">

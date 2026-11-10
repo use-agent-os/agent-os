@@ -9,11 +9,13 @@ import { blockedBecause, gate, requireConnection } from '@/lib/disabled-reason'
 import { cn } from '@/lib/utils'
 import {
   buildCsv,
+  chartRows,
   costSourceBadge,
   csvFilename,
   formatCost,
   formatRelTime,
   hasModelExpand,
+  modelBreakdownGrid,
   modelDisplayLabel,
   normalizeRange,
   rangeHiddenHint,
@@ -24,6 +26,7 @@ import {
   sourceCompositionHint,
   usageMetrics,
   visibleSessions,
+  type ChartMode,
   type CostSourceBadge,
   type SortColumn,
   type UsageRange,
@@ -42,10 +45,13 @@ import { useDocumentVisible } from '@/web/shell/session-data'
 import { sessionKeyToPath } from '@/web/shell/session-url'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
 
-// Usage: spend and tokens per date range from `usage.status`, a sortable
-// sessions table whose multi-model rows expand into their per-model breakdown,
-// and CSV export of the rows in range. Polls every 60 s while the tab is
-// visible; a failed refresh keeps the loaded figures under its error notice.
+// Usage: spend and tokens from `usage.status` for the sessions active in a
+// range (each row is a session's lifetime total, so the range selects
+// sessions, it does not slice usage by day), the top sessions as a bar chart
+// by tokens or cost, a by-model rollup, a sortable sessions table whose
+// multi-model rows expand into their per-model breakdown, and CSV export of
+// the rows in range. Polls every 60 s while the tab is visible; a failed
+// refresh keeps the loaded figures under its error notice.
 
 const USAGE_QUERY_KEY = ['usage', 'status'] as const
 const USAGE_POLL_MS = 60_000
@@ -353,6 +359,142 @@ function SessionsTable({ rows }: { rows: UsageRow[] }) {
   )
 }
 
+const CHART_MODES: readonly ChartMode[] = ['tokens', 'cost']
+
+/** The sessions with the most usage in range, as bars, by tokens or by cost. */
+function TopSessionsChart({ rows }: { rows: UsageRow[] }) {
+  const [mode, setMode] = useState<ChartMode>('tokens')
+  const chart = useMemo(() => chartRows(rows, mode), [rows, mode])
+  if (chart.poolSize === 0) return null
+  return (
+    <section
+      aria-labelledby="usage-chart-title"
+      className="flex flex-col gap-3 rounded-lg border border-border bg-surface-1 p-4"
+    >
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <h2 id="usage-chart-title" className="font-semibold">
+          {t('webPagesOverview.usageChartTitle')}
+        </h2>
+        <span className="text-small text-text-muted">
+          {t('webPagesOverview.usageChartShown', { shown: chart.shown, total: chart.poolSize })}
+        </span>
+        <div
+          role="group"
+          aria-label={t('webPagesOverview.usageChartMeasure')}
+          className="ml-auto flex gap-1 rounded-md border border-border p-0.5"
+        >
+          {CHART_MODES.map((value) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={mode === value}
+              onClick={() => setMode(value)}
+              className={cn(
+                'rounded px-2.5 py-0.5 text-small',
+                mode === value ? 'bg-accent text-accent-fg' : 'text-text-muted hover:bg-surface-3',
+              )}
+            >
+              {value === 'tokens'
+                ? t('webPagesOverview.usageChartTokens')
+                : t('webPagesOverview.usageChartCost')}
+            </button>
+          ))}
+        </div>
+      </header>
+      {mode === 'tokens' ? (
+        <p className="flex items-center gap-3 text-small text-text-muted" aria-hidden>
+          <span className="inline-flex items-center gap-1">
+            <span className="size-2.5 rounded-sm bg-accent" />
+            {t('webPagesOverview.usageChartInput')}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="size-2.5 rounded-sm bg-info" />
+            {t('webPagesOverview.usageChartOutput')}
+          </span>
+        </p>
+      ) : null}
+      <ol role="list" className="flex flex-col gap-1.5">
+        {chart.bars.map((bar) => (
+          <li
+            key={bar.key}
+            aria-label={t('webPagesOverview.usageChartBar', {
+              session: bar.key,
+              value: bar.valueLabel,
+            })}
+            className="grid grid-cols-[minmax(6rem,14rem)_1fr_auto] items-center gap-2"
+          >
+            <Link
+              to={sessionKeyToPath(bar.key)}
+              title={bar.key}
+              className="truncate font-mono text-small text-accent underline-offset-2 hover:underline"
+            >
+              {bar.label}
+            </Link>
+            <span className="flex h-3 overflow-hidden rounded-sm bg-surface-3" aria-hidden>
+              <span className="h-full bg-accent" style={{ width: `${bar.inputPct}%` }} />
+              {bar.outputPct > 0 ? (
+                <span className="h-full bg-info" style={{ width: `${bar.outputPct}%` }} />
+              ) : null}
+            </span>
+            <span className="text-small tabular-nums">{bar.valueLabel}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  )
+}
+
+/** Usage summed per model across the sessions in range. */
+function ModelGrid({ rows }: { rows: UsageRow[] }) {
+  const grid = useMemo(() => modelBreakdownGrid(rows), [rows])
+  if (grid.models.length === 0) return null
+  return (
+    <section aria-labelledby="usage-models-title" className="flex flex-col gap-2">
+      <h2 id="usage-models-title" className="font-semibold">
+        {t('webPagesOverview.usageModelsTitle')}
+      </h2>
+      <ul role="list" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {grid.models.map((m) => (
+          <li
+            key={m.model}
+            aria-label={m.model}
+            className="flex min-w-0 flex-col gap-1.5 rounded-lg border border-border bg-surface-1 p-4"
+          >
+            <p className="truncate font-mono text-small" title={m.model}>
+              {m.provider && m.name !== m.model ? (
+                <span className="text-text-muted">{m.provider}/</span>
+              ) : null}
+              {m.name}
+            </p>
+            <p className="text-xl font-semibold tabular-nums">{formatCost(m.costUsd)}</p>
+            <span className="flex items-center gap-1.5">
+              <span className="h-1.5 w-24 overflow-hidden rounded-full bg-surface-3" aria-hidden>
+                <span
+                  className="block h-full bg-accent"
+                  style={{ width: `${m.sharePct.toFixed(1)}%` }}
+                />
+              </span>
+              <span className="text-small tabular-nums">
+                {t('webPagesOverview.usageShare', { share: m.sharePct.toFixed(1) })}
+              </span>
+            </span>
+            <p className="text-small text-text-muted tabular-nums">
+              {t('webPagesOverview.usageModelTokens', {
+                tokens: formatNumber(m.totalTokens),
+                input: formatNumber(m.inputTokens),
+                output: formatNumber(m.outputTokens),
+              })}
+            </p>
+            <p className="text-small text-text-muted">
+              {tPlural('webPagesOverview.usageModelSessions', m.sessions)}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
 function UsageBody({ all, range }: { all: UsageRow[]; range: UsageRange }) {
   const visible = useMemo(() => visibleSessions(all, range), [all, range])
   const metrics = useMemo(() => usageMetrics(visible), [visible])
@@ -393,6 +535,9 @@ function UsageBody({ all, range }: { all: UsageRow[]; range: UsageRange }) {
           hint={t('webPagesOverview.usageAverageHint')}
         />
       </div>
+
+      <TopSessionsChart rows={visible} />
+      <ModelGrid rows={visible} />
 
       <section aria-labelledby="usage-sessions-title" className="flex flex-col gap-2">
         <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -549,6 +694,7 @@ export function UsagePage() {
           </button>
         ))}
       </div>
+      <p className="-mt-2 text-small text-text-muted">{t('webPagesOverview.usageRangeNote')}</p>
 
       {query.isError ? (
         <ErrorState

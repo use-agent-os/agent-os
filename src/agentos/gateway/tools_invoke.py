@@ -15,12 +15,18 @@ directly. The call goes through the same chain as an agent's tool call:
    entry) and the runtime capability surface, resolved exactly as for a turn;
 3. the dispatch preflight (injection guard, policy chain) -- a refusal is
    ``403``;
-4. the tool itself, inside an unattended, sandboxed tool context. A tool that
-   needs a human approval does what it does on any unattended run: it
-   refuses, and the endpoint answers ``403`` with ``details.code =
-   APPROVAL_REQUIRED`` (and the ``approval_id`` when the tool queued one).
+4. the tool itself, inside an unattended, sandboxed tool context, through the
+   same tool hooks an agent turn runs (``TurnRunner(tool_hooks=...)``): a
+   hook's block is ``403`` with ``details.code = POLICY_DENIED`` and
+   ``error_class = ToolHookBlocked``, a rewrite and a result replacement
+   apply as they do in a turn. A tool that needs a human approval does what
+   it does on any unattended run: it refuses, and the endpoint answers
+   ``403`` with ``details.code = APPROVAL_REQUIRED`` (and the
+   ``approval_id`` when the tool queued one).
 
-``dry_run`` stops after step 3 and returns the resolved policy.
+``dry_run`` stops after step 3 and returns the resolved policy; the tool
+hooks' ``before_tool`` runs in it too, so ``allowed`` reflects a hook's block
+and the policy judges a hook's rewrite.
 ``idempotency_key`` replays the first response for the same request for ten
 minutes and answers ``409`` with ``details.code = REQUEST_CONFLICT`` when the
 key is reused for a different one.
@@ -38,7 +44,7 @@ import json
 import time
 import uuid
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -372,8 +378,13 @@ async def invoke_tool(
     registry: Any,
     runtime: dict[str, Any],
     timeout: float | None = None,
+    tool_hooks: Sequence[Any] = (),
 ) -> tuple[int, dict[str, Any]]:
-    """Run (or dry-run) one tool call; returns ``(status, json body)``."""
+    """Run (or dry-run) one tool call; returns ``(status, json body)``.
+
+    ``tool_hooks`` are the gateway's configured tool hooks, the ones agent
+    turns run; the call goes through them exactly as a turn's call would.
+    """
     from agentos.tool_boundary import ToolCall
     from agentos.tools.argument_admission import REJECTED_ERROR_CLASS
     from agentos.tools.dispatch import build_tool_handler, preflight_tool_call
@@ -412,7 +423,14 @@ async def invoke_tool(
 
     ctx = build_invoke_tool_context(config, registry, session_key=session_key, runtime=runtime)
     call = ToolCall(tool_use_id=f"http-{uuid.uuid4().hex[:12]}", tool_name=tool, arguments=args)
-    denial = await preflight_tool_call(registry=registry, ctx=ctx, tool_call=call)
+    # A dry run is the whole check, so it runs the hooks' before_tool; a real
+    # call runs them in the dispatch below, once.
+    denial = await preflight_tool_call(
+        registry=registry,
+        ctx=ctx,
+        tool_call=call,
+        tool_hooks=tuple(tool_hooks) if dry_run else None,
+    )
     registered = registry.get(tool)
     policy = _policy_summary(
         ctx, tool=tool, override=tool in allow, spec=getattr(registered, "spec", None)
@@ -447,7 +465,7 @@ async def invoke_tool(
         )
 
     capture = _ApprovalCapture()
-    handler = build_tool_handler(registry, ctx, tool_hooks=[capture])
+    handler = build_tool_handler(registry, ctx, tool_hooks=[*tool_hooks, capture])
     limit = timeout if timeout is not None else _tool_timeout(config)
     started = time.monotonic()
     try:
@@ -461,6 +479,9 @@ async def invoke_tool(
         )
     duration_ms = int((time.monotonic() - started) * 1000)
     value = _result_value(result.content)
+    blocked = _hook_block(result, value)
+    if blocked is not None:
+        return blocked
     approval = _approval_gate(result, value, capture.approval_id)
     if approval is not None:
         return approval
@@ -477,12 +498,28 @@ async def invoke_tool(
     return 200, payload
 
 
+def _hook_block(result: Any, value: Any) -> tuple[int, dict[str, Any]] | None:
+    """A configured tool hook blocked the call: ``403``, like a policy denial."""
+    status = getattr(result, "execution_status", None) or {}
+    if not isinstance(status, dict) or status.get("reason") != "hook_blocked":
+        return None
+    envelope = value if isinstance(value, dict) else {}
+    return _error(
+        403,
+        ErrorCode.FORBIDDEN,
+        str(envelope.get("user_message") or "A tool guard blocked this call."),
+        ErrorDetailCode.POLICY_DENIED,
+        error_class=envelope.get("error_class"),
+    )
+
+
 class _ApprovalCapture:
     """Tool hook that keeps the approval id a tool returned.
 
     On an unattended surface the dispatcher replaces a queued-approval result
     with an ``UnsupportedSurface`` notice (the engine's own path) and drops
-    the id; the raw result seen here still has it.
+    the id; the handler's own return (``raw_result``) still has it. It runs
+    after the configured hooks, so it sees a call they let through.
     """
 
     name = "tools_invoke_approval_capture"
@@ -494,7 +531,7 @@ class _ApprovalCapture:
         return None
 
     def after_tool(self, call: Any, outcome: Any) -> None:
-        raw = getattr(outcome, "result", None)
+        raw = getattr(outcome, "raw_result", None)
         value = _result_value(raw) if isinstance(raw, str) else raw
         if isinstance(value, dict) and str(value.get("status") or "") in _APPROVAL_STATUSES:
             approval_id = value.get("approval_id") or value.get("approvalId")
@@ -539,6 +576,23 @@ def _tool_timeout(config: Any) -> float:
 # ---------------------------------------------------------------------------
 
 
+def _configured_tool_hooks(runtime: dict[str, Any], rpc_ctx: Any) -> tuple[Any, ...]:
+    """The tool hooks agent turns run, so this side door runs them too.
+
+    ``runtime["tool_hooks"]`` wins when the app passes it; otherwise they are
+    read from the gateway's turn runner, which every RPC context carries.
+    """
+    hooks = runtime.get("tool_hooks")
+    if hooks is None:
+        hooks = getattr(getattr(rpc_ctx, "turn_runner", None), "tool_hooks", None)
+    if not hooks:
+        return ()
+    try:
+        return tuple(hooks)
+    except TypeError:
+        return ()
+
+
 def register_tools_invoke_route(
     app: Starlette,
     *,
@@ -581,9 +635,15 @@ def register_tools_invoke_route(
         if key is not None and (not isinstance(key, str) or not key.strip() or len(key) > 200):
             return _respond(400, ErrorCode.INVALID_REQUEST, "invalid idempotency_key")
 
+        tool_hooks = _configured_tool_hooks(runtime_objects, rpc_ctx)
+
         async def run() -> tuple[int, dict[str, Any]]:
             return await invoke_tool(
-                body, config=config, registry=registry, runtime=runtime_objects
+                body,
+                config=config,
+                registry=registry,
+                runtime=runtime_objects,
+                tool_hooks=tool_hooks,
             )
 
         if not key:
