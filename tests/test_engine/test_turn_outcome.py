@@ -45,3 +45,13 @@ def test_a_request_hook_veto_is_blocked() -> None:
 
     assert outcome.kind == "blocked"
     assert outcome.reason == "request_vetoed"
+
+
+def test_a_spend_budget_refusal_is_budget_limited_not_failed() -> None:
+    outcome = outcome_from_error(
+        code="budget_exceeded", message="Daily spend limit of $5.00 reached."
+    )
+
+    assert outcome.kind == "budgetLimited"
+    assert outcome.reason == "budget_exceeded"
+    assert outcome.error_message == "Daily spend limit of $5.00 reached."

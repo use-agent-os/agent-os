@@ -109,7 +109,7 @@ daily_warn = 40.0
 ```
 
 A turn that starts at or above a hard limit is refused before any provider call
-with a `budget_exceeded` error, and ceilings are re-checked between iterations
+with a `budget_exceeded` error (turn outcome `budgetLimited`), and ceilings are re-checked between iterations
 so a long tool loop stops at the ceiling too. A `*_warn` threshold raises a
 one-shot warning without stopping the turn. Spend is persisted to
 `~/.agentos/state/spend_ledger.db`, so a ceiling survives a gateway restart.

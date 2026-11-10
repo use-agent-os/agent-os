@@ -220,6 +220,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   strings of the previous console.
 
 ### Fixed
+- A turn refused or stopped by a spend ceiling (`budget_exceeded`) now ends
+  with outcome `budgetLimited` instead of `failed`.
 - A turn stopped after its reply was recorded (including while memory was
   being captured or session totals updated) repeated that reply in the
   session history, marked `[interrupted]`, and in its final text, so the

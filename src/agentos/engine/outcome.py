@@ -26,6 +26,8 @@ _BUDGET_CODES = frozenset(
         "turn_input_token_budget_exceeded",
         "turn_output_token_budget_exceeded",
         "turn_billed_cost_budget_exceeded",
+        # A configured spend budget (the spend guard) refused the turn.
+        "budget_exceeded",
     }
 )
 _PARTIAL_CODES = frozenset(
