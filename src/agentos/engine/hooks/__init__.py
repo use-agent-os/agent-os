@@ -7,7 +7,8 @@ Current production status:
 * :class:`CompactionHook` is active when explicitly supplied to ``TurnRunner``;
   the compaction/history stage fires it around pre-turn compaction attempts.
 * :class:`ToolHook` is supported by the tool-dispatch factory, but ``TurnRunner``
-  does not register tool hooks by default.
+  does not register tool hooks by default. The hooks a ``TurnRunner`` is given
+  also guard the gateway's ``tools.invoke`` endpoint.
 
 Default implementations in :mod:`agentos.engine.hooks.defaults` preserve the
 canonical inline behavior unless a caller explicitly supplies additional hooks.

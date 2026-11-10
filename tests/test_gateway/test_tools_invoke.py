@@ -447,3 +447,120 @@ class TestDenyListIsFileOnly:
         )
         assert res.error.code == "INVALID_REQUEST"
         assert "agent" in res.error.message
+
+
+class _GuardHook:
+    """A configured tool guard: blocks one query, rewrites another, redacts."""
+
+    name = "test-guard"
+
+    def __init__(self) -> None:
+        self.before: list[dict[str, Any]] = []
+        self.after: list[Any] = []
+
+    def before_tool(self, call: Any) -> Any:
+        from agentos.engine.hooks import Block, Rewrite
+
+        arguments = call.tool_call.arguments
+        self.before.append(dict(arguments))
+        if arguments.get("query") == "secret-files":
+            return Block("searching secret files is not allowed")
+        if arguments.get("query") == "~home":
+            return Rewrite({**arguments, "query": "home"})
+        return None
+
+    def after_tool(self, call: Any, outcome: Any) -> Any:
+        from agentos.engine.hooks import ReplaceResult
+
+        self.after.append(outcome)
+        text = str(getattr(outcome.result, "content", "") or "")
+        if "found token" in text:
+            return ReplaceResult(text.replace("found token", "found [redacted]"))
+        return None
+
+
+def _hooked_client(registry: ToolRegistry, hook: Any) -> TestClient:
+    from types import SimpleNamespace
+
+    config = GatewayConfig(auth=AuthConfig(mode="token", token=TOKEN), tools=ToolsConfig())
+    return TestClient(
+        create_gateway_app(
+            config,
+            tool_registry=registry,
+            # The gateway's turn runner holds the configured tool hooks.
+            turn_runner=SimpleNamespace(_tool_hooks=(hook,)),
+        ),
+        base_url="http://localhost",
+        headers={"authorization": f"Bearer {TOKEN}"},
+    )
+
+
+class TestConfiguredToolHooks:
+    def test_a_hook_block_is_a_policy_denial_and_runs_nothing(self) -> None:
+        calls: list[dict[str, Any]] = []
+        hook = _GuardHook()
+        resp = _invoke(
+            _hooked_client(_registry(calls), hook),
+            {"tool": "lookup", "args": {"query": "secret-files"}},
+        )
+        assert resp.status_code == 403, resp.text
+        body = resp.json()
+        assert body["details"]["code"] == "POLICY_DENIED"
+        assert body["details"]["error_class"] == "ToolHookBlocked"
+        assert "secret files" in body["error"]
+        assert calls == []
+        assert len(hook.after) == 1
+
+    def test_dry_run_reflects_a_hook_block(self) -> None:
+        calls: list[dict[str, Any]] = []
+        hook = _GuardHook()
+        client = _hooked_client(_registry(calls), hook)
+        blocked = _invoke(
+            client, {"tool": "lookup", "args": {"query": "secret-files"}, "dry_run": True}
+        )
+        allowed = _invoke(client, {"tool": "lookup", "args": {"query": "ok"}, "dry_run": True})
+        assert blocked.status_code == 200
+        assert blocked.json()["allowed"] is False
+        assert blocked.json()["errorClass"] == "ToolHookBlocked"
+        assert allowed.json()["allowed"] is True
+        assert calls == []
+        # Each before_tool is paired with an after_tool; the allowed dry run
+        # has no result to show.
+        assert len(hook.before) == len(hook.after) == 2
+        assert hook.after[1].result is None
+
+    def test_a_hook_rewrite_and_replacement_apply(self) -> None:
+        calls: list[dict[str, Any]] = []
+        hook = _GuardHook()
+        client = _hooked_client(_registry(calls), hook)
+        rewritten = _invoke(client, {"tool": "lookup", "args": {"query": "~home"}})
+        redacted = _invoke(client, {"tool": "lookup", "args": {"query": "token"}})
+        assert rewritten.status_code == 200, rewritten.text
+        assert calls[0]["query"] == "home"
+        assert redacted.status_code == 200
+        assert "found token" not in redacted.text
+        assert "found [redacted]" in redacted.text
+        assert len(hook.before) == len(hook.after) == 2
+
+    def test_the_approval_id_survives_configured_hooks(self) -> None:
+        hook = _GuardHook()
+        resp = _invoke(_hooked_client(_registry([]), hook), {"tool": "needs_human"})
+        assert resp.status_code == 403
+        assert resp.json()["details"] == {"code": "APPROVAL_REQUIRED", "approval_id": "abc123"}
+
+
+async def test_invoke_tool_runs_the_hooks_it_is_given() -> None:
+    from agentos.gateway.tools_invoke import invoke_tool
+
+    calls: list[dict[str, Any]] = []
+    hook = _GuardHook()
+    status, body = await invoke_tool(
+        {"tool": "lookup", "args": {"query": "secret-files"}},
+        config=GatewayConfig(tools=ToolsConfig()),
+        registry=_registry(calls),
+        runtime={},
+        tool_hooks=(hook,),
+    )
+    assert status == 403
+    assert body["details"]["error_class"] == "ToolHookBlocked"
+    assert calls == []
