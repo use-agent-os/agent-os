@@ -589,7 +589,12 @@ def _note_hook_adjusted_arguments(result: ToolResult, arguments: dict[str, Any])
             "[Note: a tool hook adjusted the arguments of this call before it ran "
             f"(adjusted: {', '.join(names)}). This result is for the adjusted call.]"
         )
-        content = f"{content}\n\n{note}" if content else note
+        # Trailing blank lines dropped first: with them the note would follow
+        # two or more empty lines, the projection collapses those, and a
+        # result it shortened that way goes out wrapped in a projection
+        # envelope although nothing was large.
+        body = content.rstrip()
+        content = f"{body}\n\n{note}" if body else note
     return replace(result, content=content)
 
 

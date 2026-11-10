@@ -306,3 +306,69 @@ def test_the_concurrency_key_is_derived_from_the_arguments_as_emitted() -> None:
     )
     call = ToolCall(tool_use_id="t", tool_name="send", arguments={"session_key": "a"})
     assert executor.policy_for(call).key == ("send", "a")
+
+
+def _projection_store(tmp_path: Any) -> dict[str, Any]:
+    """A tool-result store, as the gateway configures one: a result the
+    projection shortens then goes out with a ``[tool_result_projection]``
+    header."""
+    return {
+        "tool_result_store_dir": str(tmp_path),
+        "tool_result_store_session_id": "s-1",
+        "tool_result_store_session_key": "agent:main:webchat:rewrite",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "output",
+    [
+        "exit_code=0\n",
+        "1\tQ3 report: revenue up 12%, churn down 3%. Owner: Dana.\n",
+        "line one\n\n",
+    ],
+)
+async def test_a_small_text_result_of_a_rewritten_call_stays_plain(
+    output: str, tmp_path: Any
+) -> None:
+    async def write_file(path: str, token: str | None = None) -> str:
+        return output
+
+    registry, tool_def = _write_tool(write_file)
+    hook = _RewriteHook(lambda args: {**args, "path": "src/app.py"})
+    provider = _ScriptedProvider("write_file", {"path": "notes.md"})
+    agent = _agent(provider, registry, tool_def, hook, **_projection_store(tmp_path))
+
+    events = [event async for event in agent.run_turn("update the notes")]
+
+    (result,) = _blocks(provider.calls[1], ContentBlockToolResult)
+    content = str(result.content)
+    assert "[tool_result_projection]" not in content
+    assert "tool_projection_applied" not in agent.config.metadata
+    assert content.startswith(output.rstrip())
+    assert content.endswith("(adjusted: path). This result is for the adjusted call.]")
+    delivered = [e for e in events if isinstance(e, ToolResultEvent)]
+    assert [e.result for e in delivered] == [content]
+
+
+@pytest.mark.asyncio
+async def test_a_small_json_result_of_a_rewritten_call_stays_plain_json(tmp_path: Any) -> None:
+    async def write_file(path: str, token: str | None = None) -> str:
+        return json.dumps({"status": "ok", "exit_code": 0}, indent=2) + "\n"
+
+    registry, tool_def = _write_tool(write_file)
+    hook = _RewriteHook(lambda args: {**args, "path": "src/app.py"})
+    provider = _ScriptedProvider("write_file", {"path": "notes.md"})
+    agent = _agent(provider, registry, tool_def, hook, **_projection_store(tmp_path))
+
+    _ = [event async for event in agent.run_turn("update the notes")]
+
+    (result,) = _blocks(provider.calls[1], ContentBlockToolResult)
+    content = str(result.content)
+    assert "[tool_result_projection]" not in content
+    assert "tool_projection_applied" not in agent.config.metadata
+    assert json.loads(content) == {
+        "status": "ok",
+        "exit_code": 0,
+        HOOK_ADJUSTED_ARGUMENTS_KEY: ["path"],
+    }
