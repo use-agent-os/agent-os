@@ -186,11 +186,18 @@ export const TurnView = memo(function TurnView({
   turn,
   answered,
   waitingApproval,
+  last = false,
 }: {
   turn: Turn
   /** A later user message exists (ask/plan cards lock). */
   answered: boolean
   waitingApproval: boolean
+  /**
+   * The newest turn. It is on screen when it settles, and settling remounts
+   * it under its history id: with `content-visibility` it would lay out at
+   * the placeholder height first and clamp the scroll position.
+   */
+  last?: boolean
 }) {
   const fold = foldTurn(turn)
   const live = turn.status === 'live'
@@ -199,7 +206,7 @@ export const TurnView = memo(function TurnView({
       data-turn-status={turn.status}
       className={cn(
         'flex flex-col gap-3',
-        !live && '[content-visibility:auto] [contain-intrinsic-size:auto_200px]',
+        !live && !last && '[content-visibility:auto] [contain-intrinsic-size:auto_200px]',
       )}
     >
       {turn.userMessage ? <UserBubble turn={turn} /> : null}

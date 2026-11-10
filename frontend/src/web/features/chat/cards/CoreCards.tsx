@@ -7,6 +7,7 @@ import {
   HelpCircle,
   ListChecks,
   PanelRightOpen,
+  RotateCcw,
   Route,
   Scissors,
   TriangleAlert,
@@ -294,6 +295,13 @@ export function CardItem({ item, answered }: { item: Item; answered: boolean }) 
         <p className="flex items-center gap-1.5 text-small text-text-muted">
           <Undo2 className="size-3.5" aria-hidden />
           {t('webChat.steering', { text: item.text })}
+        </p>
+      )
+    case 'restartRecovery':
+      return (
+        <p data-role="notice" className="flex items-center gap-1.5 text-small text-text-muted">
+          <RotateCcw className="size-3.5" aria-hidden />
+          {t('webChat.restartRecovery')}
         </p>
       )
     case 'subagentCompletion': {

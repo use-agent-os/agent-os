@@ -73,6 +73,63 @@ describe('history pages', () => {
     expect(state.oldestCursor).toBe('10|u1')
   })
 
+  it('keeps the older pages the reader loaded when a turn end refreshes the window', () => {
+    const row = (n: number, role: 'user' | 'assistant') => ({
+      id: `${role[0]}${n}`,
+      message_id: `${role[0]}${n}`,
+      role,
+      text: `${role} ${n}`,
+      timestamp: n * 10 + (role === 'user' ? 0 : 1),
+    })
+    // Loaded: an older page (turns 1-2) above the latest one (turns 3-4).
+    let state = foldPage({
+      messages: [row(3, 'user'), row(3, 'assistant'), row(4, 'user'), row(4, 'assistant')],
+      has_more: true,
+      oldest_cursor: '30|u3',
+    })
+    state = reduce(state, {
+      type: 'historyPage',
+      mode: 'older',
+      page: {
+        messages: [row(1, 'user'), row(1, 'assistant'), row(2, 'user'), row(2, 'assistant')],
+        has_more: true,
+        oldest_cursor: '10|u1',
+      },
+    })
+    // Turn 5 ended; the latest window slid past turn 3.
+    const latest: HistoryPage = {
+      messages: [row(4, 'user'), row(4, 'assistant'), row(5, 'user'), row(5, 'assistant')],
+      has_more: true,
+      oldest_cursor: '40|u4',
+    }
+    const refreshed = reduce(state, { type: 'historyPage', page: latest, mode: 'refresh' })
+    expect(refreshed.turns.map((t) => t.userMessage?.text)).toEqual([
+      'user 1',
+      'user 2',
+      'user 3',
+      'user 4',
+      'user 5',
+    ])
+    expect(refreshed.hasMore).toBe(true)
+    expect(refreshed.oldestCursor).toBe('10|u1')
+    // A plain replace (opening the session) still takes the latest window only.
+    const replaced = reduce(state, { type: 'historyPage', page: latest, mode: 'replace' })
+    expect(replaced.turns.map((t) => t.userMessage?.text)).toEqual(['user 4', 'user 5'])
+    expect(replaced.oldestCursor).toBe('40|u4')
+    // A window that does not overlap what is loaded replaces it.
+    const far = reduce(state, {
+      type: 'historyPage',
+      mode: 'refresh',
+      page: {
+        messages: [row(9, 'user'), row(9, 'assistant')],
+        has_more: true,
+        oldest_cursor: '90|u9',
+      },
+    })
+    expect(far.turns.map((t) => t.userMessage?.text)).toEqual(['user 9'])
+    expect(far.oldestCursor).toBe('90|u9')
+  })
+
   it('places compaction summaries by time and folds cron rows as standalone entries', () => {
     const turns = foldHistory(
       [

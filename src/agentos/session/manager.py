@@ -1097,6 +1097,7 @@ class SessionManager:
         provenance: dict[str, Any] | None = None,
         provider_messages: dict[str, Any] | None = None,
         replaces_message_id: str | None = None,
+        message_id: str | None = None,
     ) -> TranscriptEntry:
         """Append a message to the session transcript and touch updated_at.
 
@@ -1107,6 +1108,12 @@ class SessionManager:
         *replaces_message_id* names a row this one supersedes (the turn's
         in-progress row, see :meth:`write_turn_progress`); it is removed in
         the same transaction as the insert.
+
+        *message_id* gives the row its identity up front and makes the append
+        idempotent: when the session already holds a row with that id (an
+        earlier attempt committed), nothing is written and the session is not
+        touched again. A turn names its reply row this way, so however often
+        and from wherever the reply is persisted, it is stored at most once.
         """
         session_key = canonicalize_session_key(session_key)
         node = await self._storage.get_session(session_key)
@@ -1127,6 +1134,8 @@ class SessionManager:
             token_count=token_count,
             provider_messages=provider_messages if role == "assistant" else None,
         )
+        if message_id:
+            entry.message_id = message_id
 
         # Apply provenance only if not already set (spec: never overwrite)
         if provenance:
@@ -1139,14 +1148,16 @@ class SessionManager:
         # Pass the epoch we read from the node so storage can perform an
         # atomic INSERT WHERE epoch=? guard against concurrent resets.
         expected_epoch = node.epoch if node.epoch is not None else 0
+        store_kwargs: dict[str, Any] = {"expected_epoch": expected_epoch}
         if replaces_message_id:
-            await self._storage.append_transcript_entry(
-                entry,
-                expected_epoch=expected_epoch,
-                replaces_message_id=replaces_message_id,
-            )
-        else:
-            await self._storage.append_transcript_entry(entry, expected_epoch=expected_epoch)
+            store_kwargs["replaces_message_id"] = replaces_message_id
+        if message_id:
+            store_kwargs["if_absent"] = True
+        inserted = await self._storage.append_transcript_entry(entry, **store_kwargs)
+        if message_id and inserted is False:
+            # An earlier attempt with this identity already stored the row
+            # (and touched the session, or was cut short doing so).
+            return entry
 
         node.updated_at = _now_ms()
         if token_count and turn_usage is None:

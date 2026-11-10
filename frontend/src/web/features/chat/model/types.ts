@@ -63,6 +63,8 @@ export type Item =
   | (ItemBase & { kind: 'compaction'; summary: string; removedCount?: number })
   | (ItemBase & { kind: 'routerDecision'; tier: string | null; model: string })
   | (ItemBase & { kind: 'steering'; text: string })
+  /** The gateway resumed a turn a restart cut off (its synthetic prompt is not shown). */
+  | (ItemBase & { kind: 'restartRecovery' })
   | (ItemBase & { kind: 'subagentCompletion'; payload: Record<string, unknown> })
   | (ItemBase & { kind: 'cronResult'; text: string })
   | (ItemBase & { kind: 'warning'; text: string })
@@ -170,11 +172,19 @@ export interface PendingInput {
   message_id?: string
 }
 
+/**
+ * How a `chat.history` page lands: `replace` swaps the window for the latest
+ * page; `refresh` does too but keeps the older pages the reader loaded above
+ * it (a turn ended: the tail changed, older history did not); `older`
+ * prepends a page; `delta` merges what changed since the newest cursor.
+ */
+export type HistoryMode = 'replace' | 'refresh' | 'older' | 'delta'
+
 export type TranscriptInput =
   | {
       type: 'historyPage'
       page: HistoryPage
-      mode: 'replace' | 'older' | 'delta'
+      mode: HistoryMode
       /** When the request went out (ms); a run accepted after it is not judged by it. */
       issuedAt?: number
     }

@@ -2,6 +2,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
 import { useRpc } from '@/app/providers'
+import { t } from '@/i18n'
+import '@/i18n/en/webChat'
 import { apiUrl, gatewayHttpReachable } from '@/lib/api-origin'
 import { authenticatedHeaders } from '@/lib/http-auth'
 import {
@@ -55,6 +57,7 @@ export function usePlanMode(sessionKey: string) {
 interface ConfigGet {
   permissions?: { default_mode?: string }
   agentos_router?: { enabled?: boolean }
+  llm?: { model?: string }
 }
 
 export function useChatConfig() {
@@ -68,6 +71,18 @@ export function useChatConfig() {
     retry: false,
     staleTime: 30_000,
   })
+}
+
+/**
+ * The label of an unpinned route: the Pilot Router when it is on, else the
+ * configured model it falls back to (the router label until the config is
+ * known).
+ */
+export function useUnpinnedRoute(): string {
+  const config = useChatConfig()
+  if (!config.data || config.data.agentos_router?.enabled) return t('webChat.routeAuto')
+  const model = String(config.data.llm?.model ?? '')
+  return model ? t('webChat.routeDefault', { model }) : t('webChat.routeDefaultUnknown')
 }
 
 export function usePilotRouter() {
@@ -138,10 +153,15 @@ export function useElevated(sessionKey: string) {
   return { bypass, unavailable, otherGateway, set }
 }
 
+/** The cache key of a session's usage totals (refreshed when a run settles). */
+export function sessionUsageQueryKey(sessionKey: string) {
+  return ['usage.status', sessionKey] as const
+}
+
 export function useSessionUsage(sessionKey: string) {
   const rpc = useRpc()
   return useQuery<SessionUsage | null>({
-    queryKey: ['usage.status', sessionKey],
+    queryKey: sessionUsageQueryKey(sessionKey),
     queryFn: async () => {
       await rpc.waitForConnection()
       const usage = await rpc.call<{ sessions?: never[] }>('usage.status', { sessionKey })

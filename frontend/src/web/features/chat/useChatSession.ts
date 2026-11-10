@@ -9,14 +9,16 @@ import { useApprovals } from '@/services/approval-monitor'
 import { CHAT_HISTORY_PAGE_SIZE } from '@/views/chat/transcript/history'
 import { createSeqGate, DEFAULT_STREAM_IDLE_TIMEOUT_MS } from '@/views/chat/transcript/stream'
 import { SESSIONS_QUERY_KEY } from '@/web/shell/session-data'
-import { initialTranscript, isRunning, reduce } from './model/reducer'
+import { initialTranscript, isRunning, reduce, TASK_TERMINALS } from './model/reducer'
 import type {
+  HistoryMode,
   HistoryPage,
   InFlightRun,
   TranscriptInput,
   TranscriptState,
   Turn,
 } from './model/types'
+import { sessionUsageQueryKey } from './composer/capabilities'
 import { sendOnce } from './send'
 
 // The chat subscription (overhaul-control-ui D7, task 6.5): chat.history
@@ -156,7 +158,7 @@ export function useChatSession(sessionKey: string | null): ChatSession {
   useEffect(() => () => cancelFlush.current?.(), [])
 
   const loadHistory = useCallback(
-    async function load(key: string, mode: 'replace' | 'older' | 'delta'): Promise<void> {
+    async function load(key: string, mode: HistoryMode): Promise<void> {
       const id = ++loadSeq.current
       const params: Record<string, unknown> = {
         sessionKey: key,
@@ -172,10 +174,12 @@ export function useChatSession(sessionKey: string | null): ChatSession {
         const page = await rpc.call<HistoryPage>('chat.history', params)
         if (keyRef.current !== key || (mode !== 'older' && id !== loadSeq.current)) return
         dispatch({ type: 'historyPage', page: page ?? {}, mode, issuedAt })
-        if (mode === 'replace') setStatus({ loading: false, error: null })
+        if (mode === 'replace' || mode === 'refresh') setStatus({ loading: false, error: null })
       } catch (e) {
         if (keyRef.current !== key) return
-        if (mode === 'replace') setStatus({ loading: false, error: errorMessage(e) })
+        if (mode === 'replace' || mode === 'refresh') {
+          setStatus({ loading: false, error: errorMessage(e) })
+        }
         // A failed delta resyncs with a full window instead.
         else if (mode === 'delta') void load(key, 'replace')
         else toast.error(t('webChat.loadOlderFailed'))
@@ -247,10 +251,16 @@ export function useChatSession(sessionKey: string | null): ChatSession {
       const seq = Number(payload.stream_seq)
       if (Number.isFinite(seq) && !gate.current.accept(key, seq)) return
       enqueueFrame({ name, payload, at: Date.now() })
-      // A finished run: reload the window so entries carry their history ids.
+      // A finished run: reload the window so entries carry their history ids
+      // (older pages the reader loaded stay).
       if (name === 'session.event.done' || name === 'session.event.error') {
-        void loadHistory(key, 'replace')
+        void loadHistory(key, 'refresh')
         void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY })
+      }
+      // The session's usage totals are rolled up after the reply went out;
+      // the task's terminal frame comes once that is done.
+      if (TASK_TERMINALS.has(name)) {
+        void queryClient.invalidateQueries({ queryKey: sessionUsageQueryKey(key) })
       }
     }
 

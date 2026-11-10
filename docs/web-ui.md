@@ -706,13 +706,23 @@ Markdown or see when it was sent. The header shows the session title (activate
 it to rename in place), the agent, channel and project, a **Details** toggle, a
 **Panels** toggle and a ⋯ menu (Rename, Compact, Reset session (confirmed
 first), Export as Markdown, Copy session key). It stays visible while the transcript scrolls.
+The Details column lists the session's agent, model route, channel, project,
+when it was created and last updated, its token usage and estimated cost
+(refreshed when each turn ends), the active task, subagents, plan mode,
+artifacts and queued messages.
 
+Opening, reloading or switching to a session lands on its latest message.
 While you are at the end of the transcript, new content keeps the latest in
 view. Scroll up and following pauses — the text you are reading does not move —
 and a **Latest** button appears when new content arrives; activate it, scroll
 back down, or send a message to follow again. Reaching the top loads older
 history above without moving what you were reading; a first page too short to
-scroll loads older messages on its own.
+scroll loads older messages on its own. Older history you loaded stays when a
+turn ends.
+
+A turn the gateway resumed after a restart shows the note "The gateway
+restarted during this reply; the agent picked it up again." above the reply,
+instead of the instruction the gateway sent to resume it.
 
 Between sending and the first output the transcript shows **Working…**.
 Messages waiting on the gateway (queued from another tab or channel, or about
@@ -760,8 +770,9 @@ phones Return always adds a line — use the Send button. Each session keeps its
 own unsent draft (and staged attachments) while you switch sessions.
 
 Under the text field: attach files (also paste or drop them; they appear in a
-tray with remove buttons), the **Model route** picker (Auto/Pilot Router, a
-pinned tier, or a named model — the session's route hold), the
+tray with remove buttons), the **Model route** picker (Auto/Pilot Router, or
+**Default · <model>** when the router is off, a pinned tier, or a named model —
+the session's route hold), the
 **Capabilities** menu (plan mode, execution mode, Pilot Router, visual effects)
 and the session's token and cost readout. The Capabilities menu's **Execution
 mode (elevated)** checkbox is what the previous console showed as the Elevated

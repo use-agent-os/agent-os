@@ -16,7 +16,7 @@ import {
   type SessionRow,
 } from '@/web/shell/session-list'
 import { sessionKeyToPath } from '@/web/shell/session-url'
-import { usePlanMode, useSessionUsage } from '../composer/capabilities'
+import { usePlanMode, useSessionUsage, useUnpinnedRoute } from '../composer/capabilities'
 import type { TranscriptState } from '../model/types'
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -45,6 +45,7 @@ export function DetailsPanel({
   onClose(): void
 }) {
   const usage = useSessionUsage(sessionKey)
+  const unpinned = useUnpinnedRoute()
   const plan = usePlanMode(sessionKey)
   const projects = useProjectNames()
   const sessions = useSessionsList()
@@ -81,7 +82,7 @@ export function DetailsPanel({
         <Row label={t('webChat.detailsRoute')}>
           {route && route.kind === 'routerDecision'
             ? `${route.tier ? `${route.tier} · ` : ''}${route.model}`
-            : (row?.model ?? t('webChat.routeAuto'))}
+            : (row?.model ?? unpinned)}
         </Row>
         <Row label={t('webChat.detailsChannel')}>{row ? sessionChannel(row) : '—'}</Row>
         <Row label={t('webChat.detailsProject')}>

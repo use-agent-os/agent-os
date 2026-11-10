@@ -95,3 +95,15 @@ async def test_no_session_manager_reports_zero_total(dispatcher):
     assert res.payload["sessions"] == []
     assert res.payload["count"] == 0
     assert res.payload["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_rows_carry_the_session_creation_time(dispatcher, ctx, manager):
+    # The console's Session details shows "Created" from this field.
+    await _seed(manager, 1)
+    node = await manager.get_session("agent:main:webchat:11110000")
+    assert node is not None
+    res = await dispatcher.dispatch("r1", "sessions.list", {"limit": 5}, ctx)
+    (row,) = res.payload["sessions"]
+    assert row["created_at"] == row["createdAt"] == node.created_at
+    assert isinstance(row["created_at"], int) and row["created_at"] > 0

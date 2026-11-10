@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { FakeRpc } from '@/test/fake-rpc'
 import { testQueryClient, WebTestProviders } from '@/test/render-web'
+import { useSessionUsage } from './composer/capabilities'
 import { isRunning } from './model/reducer'
 import { STREAM_IDLE_TIMEOUT_MS, useChatSession } from './useChatSession'
 
@@ -122,6 +123,59 @@ describe('useChatSession', () => {
     await waitFor(() => expect(rpc.callsTo('chat.history').length).toBe(before + 1))
     act(() => rpc.emit('_gap', { expected: 3, actual: 9 }))
     await waitFor(() => expect(rpc.callsTo('chat.history').length).toBe(before + 2))
+  })
+
+  it('a turn ending keeps the older pages the reader loaded', async () => {
+    const row = (n: number, role: 'user' | 'assistant') => ({
+      id: `${role[0]}${n}`,
+      message_id: `${role[0]}${n}`,
+      role,
+      text: `${role} ${n}`,
+      timestamp: n * 10 + (role === 'user' ? 0 : 1),
+    })
+    let latest = [row(2, 'user'), row(2, 'assistant')]
+    const rpc = chatRpc().handle('chat.history', (p: Record<string, unknown>) =>
+      p.before
+        ? { messages: [row(1, 'user'), row(1, 'assistant')], has_more: false, oldest_cursor: 'c1' }
+        : { messages: latest, has_more: true, oldest_cursor: 'c2', newest_cursor: 'n' },
+    )
+    const { result } = setup(rpc, A)
+    await waitFor(() => expect(result.current.state.turns).toHaveLength(1))
+    await act(() => result.current.loadOlder())
+    expect(result.current.state.turns).toHaveLength(2)
+    latest = [row(2, 'assistant'), row(3, 'user'), row(3, 'assistant')]
+    act(() => rpc.emit('session.event.done', { session_key: A, stream_seq: 5 }))
+    await waitFor(() => expect(result.current.state.turns).toHaveLength(3))
+    expect(result.current.state.turns.map((t) => t.userMessage?.text)).toEqual([
+      'user 1',
+      'user 2',
+      'user 3',
+    ])
+  })
+
+  it('refreshes the session usage once the run settles, not on done', async () => {
+    let tokens = 100
+    const rpc = chatRpc().handle('usage.status', () => ({
+      sessions: [{ key: A, input_tokens: tokens, output_tokens: 10, cost_usd: 0.001 }],
+    }))
+    const queryClient = testQueryClient()
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <WebTestProviders rpc={rpc} queryClient={queryClient}>
+        {children}
+      </WebTestProviders>
+    )
+    const { result } = renderHook(() => ({ chat: useChatSession(A), usage: useSessionUsage(A) }), {
+      wrapper,
+    })
+    await waitFor(() => expect(result.current.usage.data?.input).toBe(100))
+    // The totals are rolled up after the reply: done alone does not re-read them.
+    tokens = 250
+    act(() => rpc.emit('session.event.done', { session_key: A, stream_seq: 5 }))
+    await waitFor(() => expect(rpc.callsTo('chat.history').length).toBeGreaterThan(1))
+    expect(rpc.callsTo('usage.status')).toHaveLength(1)
+    act(() => rpc.emit('task.succeeded', { session_key: A, task_id: 'run-1', stream_seq: 6 }))
+    await waitFor(() => expect(result.current.usage.data?.input).toBe(250))
+    expect(rpc.callsTo('usage.status')).toHaveLength(2)
   })
 
   it('aborts the open session', async () => {
