@@ -505,7 +505,11 @@ prompts they were waiting on, waits up to 10 s for them to end, and answers
 still running after that, it fails with `UNAVAILABLE` and
 `details: {code: "ABORT_INCOMPLETE", still_running: [...]}`. It waits in its
 session's lane, so other sessions' requests on the same socket go ahead; the
-runs it stops are the ones active when it started.
+runs it stops are the ones active when it started. A second `sessions.abort` /
+`chat.abort` for the same session, sent on the same socket while the first is
+still waiting, does not queue behind it: it starts at once, cancels the turn
+without waiting out `turn_cancel_grace_seconds`, and both answer with the
+stopped run ids. Requests sent after the stops still wait for both.
 
 A session's `stream_seq` keeps counting for as long as the session exists (a
 follow-up turn on a finished child continues it); it restarts only with the
