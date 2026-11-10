@@ -211,7 +211,7 @@ describe('Approvals', () => {
 
   it('re-reads the pending queue when Refresh is pressed', async () => {
     const user = userEvent.setup()
-    const fetchMock = vi.fn(
+    const fetchMock = vi.fn<typeof fetch>(
       async () => new Response(JSON.stringify({ pending: [], mode: 'prompt' }), { status: 200 }),
     )
     vi.stubGlobal('fetch', fetchMock)
