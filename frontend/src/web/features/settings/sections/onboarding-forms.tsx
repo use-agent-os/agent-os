@@ -125,6 +125,18 @@ export function SnapshotGate({
 }
 
 /**
+ * The catalog's "what you need" items as running text. Each item is a
+ * sentence of its own; one without closing punctuation gets a full stop.
+ */
+export function needsSentence(items: readonly string[]): string {
+  return items
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => (/[.!?)]$/.test(item) ? item : `${item}.`))
+    .join(' ')
+}
+
+/**
  * A form draft seeded from the saved configuration. While it is untouched it
  * follows the snapshot (a provider switch elsewhere reseeds it); once edited
  * it keeps the edits and reports `stale` when the saved values move under it.
@@ -476,7 +488,7 @@ export function SpecForm({
       {aside?.(spec)}
       {spec?.whatYouNeed?.length ? (
         <p className="mt-1 text-small text-text-muted">
-          {t('webSetConfig.whatYouNeed', { items: spec.whatYouNeed.join(', ') })}
+          {t('webSetConfig.whatYouNeed', { items: needsSentence(spec.whatYouNeed) })}
         </p>
       ) : null}
       {core.map(renderField)}

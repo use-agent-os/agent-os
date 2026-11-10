@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { renderShell, resetShellState, shellRpc } from '@/test/web-shell'
 import { useRestartNotice } from '../config-editor'
+import { needsSentence } from './onboarding-forms'
 
 // The catalog-driven forms (Models & routing, Search, Media, guided setup).
 // Every onboarding.*.configure call rewrites its whole section, so these
@@ -761,6 +762,20 @@ describe('Settings › Models & routing', () => {
     await user.click(within(router).getByRole('button', { name: 'Reload' }))
     expect(within(router).getByRole('textbox', { name: 'c1 model' })).toHaveValue('oa-c1')
     expect(within(router).getByRole('combobox', { name: 'Default tier' })).toHaveValue('c3')
+  })
+})
+
+describe('what you need', () => {
+  it('reads as sentences, without doubled punctuation', () => {
+    const text = needsSentence([
+      'An xAI API key via XAI_API_KEY or a one-time paste.',
+      'Or a SuperGrok / X Premium+ login: sign in below, or run `agentos auth login xai`.',
+      'A login is preferred',
+    ])
+    expect(text).toBe(
+      'An xAI API key via XAI_API_KEY or a one-time paste. Or a SuperGrok / X Premium+ login: sign in below, or run `agentos auth login xai`. A login is preferred.',
+    )
+    expect(text).not.toMatch(/,,|\.,|\)\./)
   })
 })
 

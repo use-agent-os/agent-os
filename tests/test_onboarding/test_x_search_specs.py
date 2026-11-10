@@ -70,3 +70,11 @@ def test_both_credential_paths_are_offered() -> None:
     assert X_SEARCH_ENV_KEY in needs
     assert "agentos auth login xai" in needs
     assert "preferred" in needs
+
+
+def test_each_need_is_a_sentence_of_its_own() -> None:
+    """Clients join the items into running text (or list them)."""
+    for item in get_x_search_setup_spec().what_you_need:
+        assert item[0].isupper(), item
+        assert item.endswith("."), item
+        assert ",," not in item and ".," not in item
