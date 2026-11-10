@@ -1,23 +1,48 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRpc } from '@/app/providers'
 import { t } from '@/i18n'
 import '@/i18n/en/webSetConfig'
-import type { AuthStatus, XaiLoginPoll, XaiPendingLogin } from '@/views/setup/logic'
+import type { SettingsSnapshot } from '@/views/settings/snapshot'
+import {
+  audioStatusText,
+  imageGenerationStatusText,
+  providerRouterSupportText,
+  searchStatusText,
+  xSearchCredentialText,
+  xSearchSignedIn,
+  type AuthStatus,
+  type XaiLoginPoll,
+  type XaiPendingLogin,
+} from '@/views/setup/logic'
 import { Button } from '@/web/components/ui/button'
 import { useRegisterFields } from '../fields'
+import {
+  audioAdapter,
+  imageAdapter,
+  providerAdapter,
+  searchAdapter,
+  xSearchAdapter,
+  xSearchParams,
+} from './onboarding-adapters'
 import { RouterForm, SnapshotGate, SpecForm } from './onboarding-forms'
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function Logins() {
+export const AUTH_STATUS_KEY = ['auth.status'] as const
+
+function useAuthStatus() {
   const rpc = useRpc()
-  const auth = useQuery({
-    queryKey: ['auth.status'],
-    queryFn: () => rpc.call<AuthStatus & Record<string, unknown>>('auth.status'),
+  return useQuery({
+    queryKey: AUTH_STATUS_KEY,
+    queryFn: async () => (await rpc.call<AuthStatus>('auth.status')) ?? {},
   })
+}
+
+function Logins() {
+  const auth = useAuthStatus()
   const entries = Object.entries(auth.data ?? {})
     .filter(
       ([, v]) =>
@@ -50,24 +75,54 @@ function Logins() {
   )
 }
 
+/** The badge next to a provider: can the Pilot Router route it, or direct only. */
+function RouterSupport({ supported }: { supported: string }) {
+  return (
+    <p className="text-small">
+      <span className="text-text-muted">{t('webSetConfig.routerSupport')}</span>{' '}
+      <strong>{supported}</strong>
+    </p>
+  )
+}
+
+function ProviderForm({ snapshot }: { snapshot: SettingsSnapshot }) {
+  const status = snapshot.status ?? {}
+  const envKey = snapshot.config?.llm?.api_key_env || String(status.llmEnvKey ?? '')
+  return (
+    <SpecForm
+      title={t('webSetConfig.provider')}
+      adapter={providerAdapter}
+      snapshot={snapshot}
+      recovery="llm"
+      aside={(spec) => <RouterSupport supported={providerRouterSupportText(spec)} />}
+    >
+      {status.llmSource === 'missing_env' ? (
+        <p role="status" className="mb-2 rounded-md border border-warn/50 bg-warn/10 px-3 py-2">
+          {t('webSetConfig.providerEnvMissing', { key: envKey || t('webSetConfig.envUnnamed') })}
+        </p>
+      ) : null}
+    </SpecForm>
+  )
+}
+
 /** Settings › Models & routing: provider, Pilot Router tiers, subscription logins. */
 export function ModelsSection() {
   useRegisterFields('models', [
     { id: 'llm.provider', label: t('webSetConfig.provider') },
+    { id: 'llm.model', label: t('webSetConfig.fieldModel') },
     { id: 'agentos_router.strategy', label: t('webSetConfig.routerMode') },
     { id: 'agentos_router.default_tier', label: t('webSetConfig.defaultTier') },
+    { id: 'agentos_router.translate_ceiling_tier', label: t('webSetConfig.translateCap') },
+    {
+      id: 'agentos_router.tiers.image_model.model',
+      label: t('webSetConfig.tierModel', { tier: 'image_model' }),
+    },
   ])
   return (
     <SnapshotGate>
       {(snapshot) => (
         <div className="flex flex-col gap-4">
-          <SpecForm
-            title={t('webSetConfig.provider')}
-            specs={snapshot.catalog?.providers ?? []}
-            current={snapshot.config?.llm?.provider ?? ''}
-            method="onboarding.provider.configure"
-            revision={snapshot.revision}
-          />
+          <ProviderForm snapshot={snapshot} />
           <RouterForm snapshot={snapshot} />
           <Logins />
         </div>
@@ -76,64 +131,104 @@ export function ModelsSection() {
   )
 }
 
-function XaiLogin() {
+const DEFAULT_POLL_SECONDS = 5
+
+/** Seconds to wait before the next poll. `0` is a real answer, not a missing one. */
+function pollDelay(interval: number | undefined, fallback: number): number {
+  return typeof interval === 'number' && interval >= 0 ? interval : fallback
+}
+
+/** The xAI device-code login: Sign in when signed out, Sign out when signed in. */
+function XaiLogin({ snapshot }: { snapshot: SettingsSnapshot }) {
   const rpc = useRpc()
   const queryClient = useQueryClient()
-  const [pending, setPending] = useState<{ url?: string; code?: string } | null>(null)
+  const auth = useAuthStatus()
+  const [pending, setPending] = useState<XaiPendingLogin | null>(null)
   const [error, setError] = useState<string | null>(null)
-
-  // Device-code login: poll until the user finished in the browser tab.
-  const poll = async (login: XaiPendingLogin) => {
-    for (;;) {
-      await new Promise((r) => window.setTimeout(r, Math.max(1, login.interval || 5) * 1000))
-      const result = await rpc.call<XaiLoginPoll>('auth.xai.login.poll', { loginId: login.loginId })
-      if (result?.status === 'complete') {
-        setPending(null)
-        await queryClient.invalidateQueries({ queryKey: ['auth.status'] })
-        return
-      }
-      if (result?.status === 'expired') throw new Error('expired')
+  // A poll in flight carries the flow it belongs to; Cancel or unmount ends it.
+  const flow = useRef(0)
+  useEffect(() => {
+    const id = flow
+    return () => {
+      id.current += 1
     }
+  }, [])
+  const signedIn = xSearchSignedIn(auth.data ?? {})
+  const refresh = () => queryClient.invalidateQueries({ queryKey: AUTH_STATUS_KEY })
+
+  const poll = async (login: XaiPendingLogin, wait: number, mine: number): Promise<void> => {
+    await new Promise((r) => window.setTimeout(r, wait * 1000))
+    if (mine !== flow.current) return
+    const result = await rpc.call<XaiLoginPoll>('auth.xai.login.poll', { loginId: login.loginId })
+    if (mine !== flow.current) return
+    if (result?.status === 'complete') {
+      setPending(null)
+      await refresh()
+      return
+    }
+    if (result?.status === 'expired') throw new Error(t('webSetConfig.xaiExpired'))
+    return poll(login, pollDelay(result?.interval, login.interval), mine)
+  }
+  const start = () => {
+    const mine = ++flow.current
+    setError(null)
+    void rpc
+      .call<XaiPendingLogin>('auth.xai.login.start')
+      .then((login) => {
+        if (mine !== flow.current || !login?.loginId) return
+        setPending(login)
+        return poll(login, pollDelay(login.interval, DEFAULT_POLL_SECONDS), mine)
+      })
+      .catch((e: unknown) => {
+        if (mine !== flow.current) return
+        setPending(null)
+        setError(errorMessage(e))
+      })
+  }
+  const signOut = () => {
+    setError(null)
+    void rpc
+      .call('auth.xai.logout', {})
+      .then(() => refresh())
+      .catch((e: unknown) => setError(errorMessage(e)))
   }
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-2">
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={() =>
-          void rpc
-            .call<XaiPendingLogin>('auth.xai.login.start')
-            .then((login) => {
-              setPending({ url: login?.verificationUri, code: login?.userCode })
-              return login?.loginId ? poll(login) : undefined
-            })
-            .catch((e: unknown) => {
-              setPending(null)
-              setError(errorMessage(e))
-            })
-        }
-      >
-        {t('webSetConfig.xaiLogin')}
-      </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        onClick={() =>
-          void rpc.call('auth.xai.logout', {}).catch((e: unknown) => setError(errorMessage(e)))
-        }
-      >
-        {t('webSetConfig.xaiLogout')}
-      </Button>
-      {pending?.url ? (
-        <span className="text-small">
-          {t('webSetConfig.xaiCode', { url: pending.url, code: pending.code ?? '' })}
-        </span>
-      ) : null}
-      {error ? (
-        <span role="alert" className="text-small text-danger">
-          {error}
-        </span>
-      ) : null}
+    <div className="mb-2 flex flex-col gap-2">
+      <p className="text-small text-text-muted" data-testid="x-search-credential">
+        {xSearchCredentialText(auth.data ?? {}, snapshot.config ?? {})}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        {pending ? (
+          <>
+            <span className="text-small">
+              {t('webSetConfig.xaiCode', { url: pending.verificationUri, code: pending.userCode })}
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                flow.current += 1
+                setPending(null)
+              }}
+            >
+              {t('webSetConfig.xaiCancel')}
+            </Button>
+          </>
+        ) : signedIn ? (
+          <Button size="sm" variant="outline" onClick={signOut}>
+            {t('webSetConfig.xaiLogout')}
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline" onClick={start}>
+            {t('webSetConfig.xaiLogin')}
+          </Button>
+        )}
+        {error ? (
+          <span role="alert" className="text-small text-danger">
+            {error}
+          </span>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -142,7 +237,9 @@ function XaiLogin() {
 export function SearchSection() {
   useRegisterFields('search', [
     { id: 'search_provider', label: t('webSetConfig.webSearch') },
+    { id: 'search_max_results', label: t('webSetConfig.searchMaxResults') },
     { id: 'x_search.enabled', label: t('webSetConfig.xSearchEnabled') },
+    { id: 'x_search.model', label: t('webSetConfig.xSearchModel') },
   ])
   return (
     <SnapshotGate>
@@ -150,21 +247,19 @@ export function SearchSection() {
         <div className="flex flex-col gap-4">
           <SpecForm
             title={t('webSetConfig.webSearch')}
-            specs={snapshot.catalog?.searchProviders ?? []}
-            current={snapshot.config?.search_provider ?? ''}
-            method="onboarding.search.configure"
-            revision={snapshot.revision}
+            adapter={searchAdapter}
+            snapshot={snapshot}
+            status={searchStatusText(snapshot.status ?? {}, snapshot.config ?? {})}
+            recovery="search"
           />
-          <div>
-            <SpecForm
-              title={t('webSetConfig.xSearch')}
-              specs={snapshot.catalog?.xSearch ?? []}
-              current=""
-              method="onboarding.x_search.configure"
-              revision={snapshot.revision}
-            />
-            <XaiLogin />
-          </div>
+          <SpecForm
+            title={t('webSetConfig.xSearch')}
+            adapter={xSearchAdapter}
+            snapshot={snapshot}
+            buildParams={(_id, values, fields) => xSearchParams(values, fields)}
+          >
+            <XaiLogin snapshot={snapshot} />
+          </SpecForm>
         </div>
       )}
     </SnapshotGate>
@@ -174,8 +269,9 @@ export function SearchSection() {
 /** Settings › Media: image generation and audio. */
 export function MediaSection() {
   useRegisterFields('media', [
-    { id: 'image_generation', label: t('webSetConfig.image') },
-    { id: 'audio', label: t('webSetConfig.audio') },
+    { id: 'image_generation.enabled', label: t('webSetConfig.image') },
+    { id: 'image_generation.primary', label: t('webSetConfig.imagePrimary') },
+    { id: 'audio.enabled', label: t('webSetConfig.audio') },
   ])
   return (
     <SnapshotGate>
@@ -183,17 +279,17 @@ export function MediaSection() {
         <div className="flex flex-col gap-4">
           <SpecForm
             title={t('webSetConfig.image')}
-            specs={snapshot.catalog?.imageGenerationProviders ?? []}
-            current=""
-            method="onboarding.imageGeneration.configure"
-            revision={snapshot.revision}
+            adapter={imageAdapter}
+            snapshot={snapshot}
+            status={imageGenerationStatusText(snapshot.status ?? {})}
+            recovery="image_generation"
           />
           <SpecForm
             title={t('webSetConfig.audio')}
-            specs={snapshot.catalog?.audioProviders ?? []}
-            current=""
-            method="onboarding.audio.configure"
-            revision={snapshot.revision}
+            adapter={audioAdapter}
+            snapshot={snapshot}
+            status={audioStatusText(snapshot.status ?? {})}
+            recovery="audio"
           />
         </div>
       )}
