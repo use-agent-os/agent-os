@@ -42,7 +42,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Default: the value of `max_concurrency`. Running turns never exceed
   `max_concurrency + max_nested_concurrency`.
 - `sessions.list` returns `total`, the number of sessions matching the filter
-  regardless of `limit` (`count` still means "rows returned").
+  regardless of `limit` (`count` still means "rows returned"), and each row
+  carries the session's creation time (`created_at` / `createdAt`, ms).
 
 ### Changed
 - **Breaking (web console): the Control UI is rebuilt.** The web console is a
@@ -250,7 +251,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Connect screen; the restart notice names its reasons in words; Enter saves
   a project's name; the Sessions page row menu has **Open in new tab**; an
   image button in a reply shows as a link; the X search "What you need" text
-  reads as sentences.
+  reads as sentences; opening, reloading or switching to a session lands on
+  its latest message (it could stop well short of it, with no **Latest**),
+  and a turn ending keeps the older history you loaded; Session details
+  refreshes Usage and Estimated cost when a turn ends and shows when the
+  session was created (it said "None"); a turn resumed after a gateway restart
+  shows a notice instead of the resume instruction as your message; with the
+  Pilot Router off the route picker shows **Default · <model>** instead of
+  "Auto (Pilot Router)".
 - A tool that returns a `dict` or `list` now hands the model JSON instead of
   a Python repr, so its result (a pending approval, for example) can be read
   back. String results are unchanged.
@@ -261,7 +269,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   session history, marked `[interrupted]`, and in its final text, so the
   next request carried the answer twice. Such a turn now also ends as
   completed (task `succeeded`, session `done`) rather than cancelled: its
-  whole answer was delivered.
+  whole answer was delivered. The same holds for a stop that lands on the
+  first chunk of a short reply that finishes anyway: before, its `done`
+  said completed while the task was cancelled and the session `killed`, the
+  reply was stored twice and the next request carried the exchange twice. A
+  stop that cuts a reply short still ends it cancelled, with the partial text
+  kept once.
 - A parent waiting on its child in the same turn (`sessions_yield` with a
   `session_key`) kept its slot. With the default reserved subagent slots,
   two such parents could leave their children no slot at all and both waited
