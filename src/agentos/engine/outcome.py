@@ -63,6 +63,8 @@ _BLOCKED_CODES = frozenset(
         "compaction_refused_memory_flush",
         "compaction_refused_empty_summary",
         "context_unsalvageable",
+        # A request hook (a spend gate, a policy check) refused the request.
+        "request_vetoed",
     }
 )
 
