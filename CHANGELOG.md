@@ -259,6 +259,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   shows a notice instead of the resume instruction as your message; with the
   Pilot Router off the route picker shows **Default · <model>** instead of
   "Auto (Pilot Router)".
+- Web console chat following: a reply taller than the window no longer jumps
+  back to its start when the turn ends; a scroll up during a fast stream is
+  never pulled back to the end; **Latest** shows whenever you are scrolled
+  away from the end.
 - A tool that returns a `dict` or `list` now hands the model JSON instead of
   a Python repr, so its result (a pending approval, for example) can be read
   back. String results are unchanged.
