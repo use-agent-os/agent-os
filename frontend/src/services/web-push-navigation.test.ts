@@ -9,11 +9,11 @@ describe('pushRouterPath', () => {
   const ORIGIN = 'https://gw.example'
 
   it('strips the console base from a deep link', () => {
-    expect(pushRouterPath('/control/approvals?approval=a1', '/control', ORIGIN)).toBe(
-      '/approvals?approval=a1',
+    expect(pushRouterPath('/control/inbox?approval=a1', '/control', ORIGIN)).toBe(
+      '/inbox?approval=a1',
     )
     expect(pushRouterPath(`${ORIGIN}/control`, '/control', ORIGIN)).toBe('/')
-    expect(pushRouterPath('/approvals?approval=a1', '/', ORIGIN)).toBe('/approvals?approval=a1')
+    expect(pushRouterPath('/inbox?approval=a1', '/', ORIGIN)).toBe('/inbox?approval=a1')
   })
 
   it('refuses a link that leaves the console', () => {
@@ -35,12 +35,12 @@ describe('listenForPushNavigation', () => {
       new MessageEvent('message', {
         data: {
           type: PUSH_NAVIGATE_MESSAGE,
-          url: `${window.location.origin}/control/approvals?approval=a1`,
+          url: `${window.location.origin}/control/inbox?approval=a1`,
         },
       }),
     )
     expect(navigate).toHaveBeenCalledTimes(1)
-    expect(navigate).toHaveBeenCalledWith('/approvals?approval=a1')
+    expect(navigate).toHaveBeenCalledWith('/inbox?approval=a1')
 
     stop()
     container.dispatchEvent(

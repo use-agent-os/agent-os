@@ -228,7 +228,7 @@ class TestDelivery:
             "namespace": "exec",
             "title": "Approval needed",
             "summary": "exec: ls -la",
-            "url": f"/control/approvals?approval={approval_id}",
+            "url": f"/control/inbox?approval={approval_id}",
             "tag": f"agentos-approval-{approval_id}",
             "state": "pending",
             "sessionKey": "agent:main:webchat:default",
