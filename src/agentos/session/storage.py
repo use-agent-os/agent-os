@@ -1581,13 +1581,21 @@ class SessionStorage:
         *,
         expected_epoch: int | None = None,
         replaces_message_id: str | None = None,
-    ) -> None:
+        if_absent: bool = False,
+    ) -> bool:
         """Insert *entry*; with *replaces_message_id*, swap that row out for it.
 
         The replaced row(s) of the same session are deleted in the same
         transaction as the insert, so a reader (or a crash) sees either the
         old row or the new one, never both and never neither. A refused
         insert (stale epoch) rolls the delete back too.
+
+        With *if_absent* the entry's ``message_id`` is its identity: when the
+        session already holds a row with that id, nothing is inserted and
+        ``False`` is returned ("already stored"). A writer that retries, or
+        that cannot tell whether an earlier attempt committed, can append
+        again without ever storing the row twice. Returns ``True`` when the
+        row was inserted.
         """
         entry.session_key = canonicalize_session_key(entry.session_key)
         data = entry.model_dump(exclude={"id"})
@@ -1600,6 +1608,43 @@ class SessionStorage:
                 "DELETE FROM transcript_entries WHERE session_id = ? AND message_id = ?",
                 (entry.session_id, replaces_message_id),
             )
+
+        if if_absent:
+            # One statement: the epoch guard (when given) and the identity
+            # check are evaluated with the insert, no await in between.
+            guards = [
+                "NOT EXISTS (SELECT 1 FROM transcript_entries"
+                " WHERE session_id = ? AND message_id = ?)"
+            ]
+            params: list[Any] = [entry.session_id, entry.message_id]
+            if expected_epoch is not None:
+                guards.append("EXISTS (SELECT 1 FROM sessions WHERE session_key = ? AND epoch = ?)")
+                params += [entry.session_key, expected_epoch]
+            insert_sql = (
+                f"INSERT INTO transcript_entries ({', '.join(cols)}) "
+                f"SELECT {placeholders} WHERE {' AND '.join(guards)}"
+            )
+            async with self.conn.execute(insert_sql, values + params) as cur:
+                inserted = cur.rowcount or 0
+            if inserted == 0:
+                async with self.conn.execute(
+                    "SELECT 1 FROM transcript_entries WHERE session_id = ? AND message_id = ?",
+                    (entry.session_id, entry.message_id),
+                ) as cur:
+                    already = await cur.fetchone() is not None
+                if not already:
+                    async with self.conn.execute(
+                        "SELECT epoch FROM sessions WHERE session_key = ?",
+                        (entry.session_key,),
+                    ) as cur2:
+                        row = await cur2.fetchone()
+                    actual = int(row[0]) if row is not None else None
+                    raise StaleEpochError(
+                        f"Epoch mismatch for {entry.session_key}: "
+                        f"expected {expected_epoch}, got {actual}"
+                    )
+            await self.conn.commit()
+            return inserted > 0
 
         if expected_epoch is not None:
             # Atomic guard: INSERT only when the session epoch matches.
@@ -1637,6 +1682,7 @@ class SessionStorage:
             sql = f"INSERT INTO transcript_entries ({', '.join(cols)}) VALUES ({placeholders})"
             await self.conn.execute(sql, values)
             await self.conn.commit()
+        return True
 
     async def get_transcript(
         self, session_id: str, limit: int | None = None, offset: int = 0

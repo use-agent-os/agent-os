@@ -742,3 +742,200 @@ async def test_a_stop_requested_while_a_reply_finished_anyway_counts_as_delivere
     assert signal.reply_delivered is True
     rows = await _rows(storage)
     assert [content for role, content, _ in rows if role == "assistant"] == ["Hello there."]
+
+
+# ---------------------------------------------------------------------------
+# A stop while the store is slow, stuck, or stalls after committing the reply
+# ---------------------------------------------------------------------------
+
+
+class _SlowReplyStore:
+    """Wraps the store's append so the first reply write is slow.
+
+    ``mode="before"`` waits before writing (nothing is committed while it
+    waits); ``mode="after"`` commits the row, then the rest of the append
+    (the session touch) stalls. Later writes go straight through, so a
+    second write of the reply shows up as a second row, not as a hang.
+    """
+
+    def __init__(self, manager: SessionManager, *, mode: str, delay: float) -> None:
+        self._real = manager.append_message
+        self.mode, self.delay = mode, delay
+        self.started = asyncio.Event()
+        self.reply_writes = 0
+
+    async def __call__(self, session_key: str, role: str, content: str, **kwargs: Any) -> Any:
+        if role != "assistant":
+            return await self._real(session_key, role, content, **kwargs)
+        self.reply_writes += 1
+        if self.reply_writes > 1:
+            return await self._real(session_key, role, content, **kwargs)
+        self.started.set()
+        if self.mode == "before":
+            await asyncio.sleep(self.delay)
+            return await self._real(session_key, role, content, **kwargs)
+        entry = await self._real(session_key, role, content, **kwargs)
+        await asyncio.sleep(self.delay)
+        return entry
+
+
+async def _stop_during_reply_write(
+    runner: TurnRunner,
+    manager: SessionManager,
+    store: _SlowReplyStore,
+    *,
+    second_stop_after: float | None = None,
+) -> tuple[Any, float]:
+    """Run one turn under a real ``TaskRuntime``; stop it once the reply write began.
+
+    Returns the task record and the seconds from the first stop to the
+    task's terminal state.
+    """
+    from agentos.gateway.routing import RouteEnvelope, SourceKind
+    from agentos.gateway.task_runtime import TaskRuntime
+    from tests.test_gateway.test_task_runtime_cooperative_cancel import _Storage
+
+    async def handler(run: Any) -> None:
+        await manager.append_message(KEY, "user", run.message)
+        ctx = ToolContext(caller_kind=CallerKind.WEB)
+        async for _event in runner.run(
+            run.message, KEY, tool_context=ctx, history_has_persisted_user=True
+        ):
+            pass
+
+    tasks = _Storage({})
+    runtime = TaskRuntime(storage=tasks, turn_handler=handler, cancel_grace_s=5.0)
+    handle = await runtime.enqueue(
+        RouteEnvelope(
+            source_kind=SourceKind.SYSTEM, source_name="test", agent_id="main", session_key=KEY
+        ),
+        "Say hello.",
+        run_kind="default",
+    )
+    await asyncio.wait_for(store.started.wait(), 5)
+    loop = asyncio.get_running_loop()
+    stopped_at = loop.time()
+    await runtime.cancel(task_id=handle.task_id, source="user")
+    if second_stop_after is not None:
+        await asyncio.sleep(second_stop_after)
+        await runtime.cancel(task_id=handle.task_id, source="user")
+    await runtime.wait(handle.task_id, timeout=10)
+    return tasks.records[handle.task_id], loop.time() - stopped_at
+
+
+@pytest.fixture
+def _short_stop_budget(monkeypatch: pytest.MonkeyPatch) -> float:
+    from agentos.engine.turn_runner import turn_finalizer_stage
+
+    monkeypatch.setattr(turn_finalizer_stage, "_APPEND_CANCEL_GRACE_S", 0.3)
+    return 0.3
+
+
+@pytest.mark.parametrize("delay", [2.0, 60.0], ids=["slow", "stuck"])
+async def test_a_stop_during_a_slow_reply_write_ends_within_the_budget_once(
+    storage: SessionStorage,
+    manager: SessionManager,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _short_stop_budget: float,
+    delay: float,
+) -> None:
+    from agentos.session.models import AgentTaskStatus
+
+    provider = ScriptedProvider([[text("Hello there."), done()], [text("Still here."), done()]])
+    runner = _runner(manager, provider, tmp_path)
+    await manager.create(KEY)
+    store = _SlowReplyStore(manager, mode="before", delay=delay)
+    monkeypatch.setattr(manager, "append_message", store)
+
+    record, elapsed = await _stop_during_reply_write(runner, manager, store)
+
+    # The budget, once: not the budget plus a second full write.
+    assert _short_stop_budget <= elapsed < _short_stop_budget + 0.5
+    assert store.reply_writes == 1
+    # Not confirmed stored: the run is a cancelled one, and nothing was kept.
+    assert record.status == AgentTaskStatus.CANCELLED
+    assert [role for role, _, _ in await _rows(storage)] == ["user"]
+
+
+async def test_a_second_stop_ends_a_stuck_reply_write_at_once(
+    storage: SessionStorage,
+    manager: SessionManager,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agentos.engine.turn_runner import turn_finalizer_stage
+    from agentos.session.models import AgentTaskStatus
+
+    monkeypatch.setattr(turn_finalizer_stage, "_APPEND_CANCEL_GRACE_S", 5.0)
+    provider = ScriptedProvider([[text("Hello there."), done()]])
+    runner = _runner(manager, provider, tmp_path)
+    await manager.create(KEY)
+    store = _SlowReplyStore(manager, mode="before", delay=60.0)
+    monkeypatch.setattr(manager, "append_message", store)
+
+    record, elapsed = await _stop_during_reply_write(runner, manager, store, second_stop_after=0.1)
+
+    assert elapsed < 0.6
+    assert store.reply_writes == 1
+    assert record.status == AgentTaskStatus.CANCELLED
+
+
+async def test_a_reply_that_committed_before_its_write_stalled_is_stored_once(
+    storage: SessionStorage,
+    manager: SessionManager,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    _short_stop_budget: float,
+) -> None:
+    from agentos.session.models import AgentTaskStatus
+
+    provider = ScriptedProvider([[text("Hello there."), done()], [text("Still here."), done()]])
+    runner = _runner(manager, provider, tmp_path)
+    await manager.create(KEY)
+    store = _SlowReplyStore(manager, mode="after", delay=60.0)
+    monkeypatch.setattr(manager, "append_message", store)
+
+    record, elapsed = await _stop_during_reply_write(runner, manager, store)
+
+    assert elapsed < _short_stop_budget + 0.5
+    # The row is in once; the turn could not confirm it, so it is not
+    # reported completed.
+    assert [(role, content) for role, content, _ in await _rows(storage)] == [
+        ("user", "Say hello."),
+        ("assistant", "Hello there."),
+    ]
+    assert record.status == AgentTaskStatus.CANCELLED
+
+    await _turn(runner, manager, "And now?")
+    request = provider.calls[-1].messages
+    assert _user_texts(request) == ["Say hello.", "And now?"]
+    assert _texts(request, "assistant") == ["Hello there."]
+
+
+async def test_a_stop_right_as_the_reply_is_stored_still_counts_its_usage(
+    storage: SessionStorage, manager: SessionManager, tmp_path: Path
+) -> None:
+    from agentos.engine.turn_progress import TurnStopSignal, bind_turn_stop_signal
+
+    provider = ScriptedProvider([[text("Hello there."), done(input_tokens=40, output_tokens=6)]])
+    runner = _runner(manager, provider, tmp_path)
+    await manager.create(KEY)
+    stalled = _StallingCapture()
+    runner._harness.stages.turn_finalizer._turn_memory_capture = stalled
+    signal = TurnStopSignal()
+
+    async def first_turn() -> None:
+        bind_turn_stop_signal(signal)
+        await _turn(runner, manager, "Say hello.")
+
+    task = asyncio.create_task(first_turn())
+    await asyncio.wait_for(stalled.entered.wait(), 10)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert signal.reply_delivered is True
+    session = await storage.get_session(KEY)
+    assert session is not None
+    assert (session.input_tokens, session.output_tokens) == (40, 6)

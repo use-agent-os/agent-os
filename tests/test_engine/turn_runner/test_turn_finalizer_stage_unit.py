@@ -599,17 +599,20 @@ class _SlowAppendPort:
         return True
 
 
+def _write_of(port: _SlowAppendPort) -> Any:
+    return lambda: port.append_message("s", role="assistant")
+
+
 async def test_cancelled_append_waits_for_a_write_that_finishes() -> None:
     import asyncio
 
-    from agentos.engine.turn_runner import turn_finalizer_stage as stage
+    from agentos.engine.turn_runner.turn_finalizer_stage import ReplyPersistence
 
     port = _SlowAppendPort()
+    persistence = ReplyPersistence(message_id="m1")
     told: list[bool] = []
     task = asyncio.ensure_future(
-        stage._append_through_cancel(
-            port, lambda: told.append(True), "s", append_kwargs={}, role="assistant"
-        )
+        persistence.write(_write_of(port), on_stored=lambda: told.append(True))
     )
     await port.started.wait()
     task.cancel()
@@ -619,6 +622,7 @@ async def test_cancelled_append_waits_for_a_write_that_finishes() -> None:
     with pytest.raises(asyncio.CancelledError):
         await task
     assert told == [True]
+    assert persistence.stored is True
     assert port.cancelled is False
 
 
@@ -631,11 +635,10 @@ async def test_cancelled_append_gives_up_on_a_stuck_write(
 
     monkeypatch.setattr(stage, "_APPEND_CANCEL_GRACE_S", 0.01)
     port = _SlowAppendPort()
+    persistence = stage.ReplyPersistence(message_id="m1")
     told: list[bool] = []
     task = asyncio.ensure_future(
-        stage._append_through_cancel(
-            port, lambda: told.append(True), "s", append_kwargs={}, role="assistant"
-        )
+        persistence.write(_write_of(port), on_stored=lambda: told.append(True))
     )
     await port.started.wait()
     task.cancel()
@@ -643,18 +646,18 @@ async def test_cancelled_append_gives_up_on_a_stuck_write(
         await asyncio.wait_for(task, timeout=2)
     await asyncio.sleep(0)
     assert told == []
+    assert persistence.stored is False
     assert port.cancelled is True
 
 
 async def test_second_cancel_ends_the_wait_for_the_write() -> None:
     import asyncio
 
-    from agentos.engine.turn_runner import turn_finalizer_stage as stage
+    from agentos.engine.turn_runner.turn_finalizer_stage import ReplyPersistence
 
     port = _SlowAppendPort()
-    task = asyncio.ensure_future(
-        stage._append_through_cancel(port, None, "s", append_kwargs={}, role="assistant")
-    )
+    persistence = ReplyPersistence(message_id="m1")
+    task = asyncio.ensure_future(persistence.write(_write_of(port)))
     await port.started.wait()
     task.cancel()
     await asyncio.sleep(0)
@@ -664,3 +667,4 @@ async def test_second_cancel_ends_the_wait_for_the_write() -> None:
         await asyncio.wait_for(task, timeout=2)
     await asyncio.sleep(0)
     assert port.cancelled is True
+    assert persistence.stored is False

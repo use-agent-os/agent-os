@@ -2510,6 +2510,7 @@ class TurnRunner:
         token_count: int | None,
         provider_messages: dict[str, Any] | None = None,
         replaces_message_id: str | None = None,
+        message_id: str | None = None,
     ) -> bool:
         session_manager = self._session_manager
         if session_manager is None:
@@ -2535,6 +2536,10 @@ class TurnRunner:
             session_manager.append_message, "replaces_message_id"
         ):
             append_kwargs["replaces_message_id"] = replaces_message_id
+        if message_id is not None and accepts_keyword_arg(
+            session_manager.append_message, "message_id"
+        ):
+            append_kwargs["message_id"] = message_id
         await self._append_session_message(session_key, **append_kwargs)
         return True
 

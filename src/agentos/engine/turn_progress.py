@@ -276,6 +276,10 @@ class TurnStopSignal:
     #: stop landing after that (memory capture, the totals rollup) no longer
     #: makes the run a cancelled one.
     reply_delivered: bool = False
+    #: ``time.monotonic()`` of the first :meth:`request_abort`: a stopped
+    #: turn's reply write is bounded from the stop, not from the cancel that
+    #: follows the cooperative grace.
+    aborted_at: float | None = field(default=None, compare=False)
     _abort_event: Any = field(default=None, repr=False, compare=False)
 
     def request_abort(self, reason: str = "cancelled") -> None:
@@ -284,6 +288,7 @@ class TurnStopSignal:
         if not self.aborted:
             self.aborted = True
             self.abort_reason = reason
+            self.aborted_at = time.monotonic()
         event = self._abort_event
         if event is not None:
             event.set()

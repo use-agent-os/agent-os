@@ -274,7 +274,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   said completed while the task was cancelled and the session `killed`, the
   reply was stored twice and the next request carried the exchange twice. A
   stop that cuts a reply short still ends it cancelled, with the partial text
-  kept once.
+  kept once. A turn now names its reply row before writing it and the store
+  ignores a second write with that name, so the reply is stored at most once
+  wherever a stop lands. A slow or stuck session store no longer holds a
+  stop: the reply write gets five seconds from the stop, once per turn, and a
+  second stop ends the wait at once; `chat.abort` then answers instead of
+  failing with "some of its runs are still running" after 10 s. A reply that
+  could not be confirmed stored in that time ends the run cancelled (the row
+  is then absent, or present once). A stopped turn whose reply was stored
+  now also adds its tokens to the session's usage totals.
 - A parent waiting on its child in the same turn (`sessions_yield` with a
   `session_key`) kept its slot. With the default reserved subagent slots,
   two such parents could leave their children no slot at all and both waited

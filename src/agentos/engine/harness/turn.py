@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 import structlog
 
+from agentos.compat.inspect_utils import accepts_keyword_arg
 from agentos.engine.router_decision import build_router_decision_event
 from agentos.engine.transcript import transcript_record_of
 from agentos.engine.turn_runner.agent_bootstrap_stage import AgentBootstrapStageInput
@@ -47,7 +48,10 @@ from agentos.engine.turn_runner.stream_consumer_stage import (
     StreamConsumerStageInput,
     _StreamState,
 )
-from agentos.engine.turn_runner.turn_finalizer_stage import TurnFinalizerStageInput
+from agentos.engine.turn_runner.turn_finalizer_stage import (
+    ReplyPersistence,
+    TurnFinalizerStageInput,
+)
 from agentos.engine.turn_timing import TurnTiming, emit_turn_timing_log
 from agentos.engine.types import (
     AgentEvent,
@@ -177,6 +181,12 @@ class _TurnRun:
     finalizer_input: Callable[[], TurnFinalizerStageInput] | None = None
     #: Set when the stream asked for a router-control replay of the turn.
     replay: TurnRequest | None = None
+    #: The reply row's single write: its identity is fixed here, before any
+    #: attempt, so whichever path stores the reply (finalizer, cancel path)
+    #: stores it at most once, and a stop's wait for it is bounded once.
+    reply_persistence: ReplyPersistence = field(
+        default_factory=lambda: ReplyPersistence(message_id=uuid.uuid4().hex)
+    )
 
     def emit(self, runner: TurnRunner, kind: str, **kwargs: Any) -> None:
         request = self.request
@@ -656,6 +666,7 @@ class TurnHarness:
             on_transcript_appended=lambda: TurnHarness._note_reply_persisted(
                 run, stream_state.done_event
             ),
+            reply_persistence=run.reply_persistence,
         )
 
     @staticmethod
@@ -967,22 +978,44 @@ class TurnHarness:
             return
         self._flush_text_segment(run, state)
         try:
+            # The turn is cancelled: the write runs within the stop budget.
             reply = await self.stages.turn_finalizer.persist_reply(build_input())
-        except asyncio.CancelledError:
-            # A second cancel during the write: the append still finished and
-            # reported itself; there is nothing more to do here.
-            return
         except Exception:  # pragma: no cover — defensive: don't swallow the cancel
             log.warning(
                 "turn_runner.cancelled_persist_failed", session_key=session_key, exc_info=True
             )
             return
-        if reply.transcript_appended and run.turn_progress is not None:
-            run.turn_progress.replaced()
         log.info(
             "turn_runner.cancelled_after_reply_finished",
             session_key=session_key,
             appended=reply.transcript_appended,
+        )
+
+    async def _roll_up_stopped_totals(self, run: _TurnRun) -> None:
+        """Roll up the usage of a stopped turn whose reply is stored.
+
+        The stop cut the finalizer short (or never let it start) after the
+        reply row was in, so the session totals would miss the turn's tokens
+        although the spend ledger has them. Within the stop budget, and only
+        when the finalizer did not begin the rollup itself (it may have
+        committed), so the tokens are counted at most once.
+        """
+        persistence, state, build_input = (
+            run.reply_persistence,
+            run.stream_state,
+            run.finalizer_input,
+        )
+        if (
+            not run.reply_persisted
+            or persistence.totals_started
+            or state is None
+            or state.done_event is None
+            or build_input is None
+        ):
+            return
+        inp = build_input()
+        await persistence.bounded(
+            lambda: self.stages.turn_finalizer.rollup_totals(inp), what="totals_rollup"
         )
 
     async def _on_cancelled(self, run: _TurnRun) -> None:
@@ -993,8 +1026,13 @@ class TurnHarness:
         after the finalizer persisted the reply (during memory capture or the
         totals rollup) writes nothing: the turn is already in the transcript.
         One that lands after the turn's DoneEvent went out but before the
-        reply was persisted writes the finished reply, once
-        (:meth:`_reply_finished`).
+        reply was persisted writes the finished reply (:meth:`_reply_finished`);
+        one that lands during the finalizer's write waits for that write.
+
+        Every write here goes through the run's :class:`ReplyPersistence`:
+        one identity for the reply row (stored at most once whatever path
+        writes it) and one stop budget for the turn, so a slow or stuck store
+        holds a stop for at most that budget and a second stop not at all.
         """
         from agentos.engine.runtime import (
             _cancelled_partial_response_text,
@@ -1005,13 +1043,26 @@ class TurnHarness:
         runner, session_key = self._runner, run.request.session_key
         partial_text = "".join(run.final_text_parts).rstrip()
         turn_segments, turn_artifacts = run.turn_segments, run.turn_artifacts
-        if stopped_by_shutdown():
+        persistence = run.reply_persistence
+        # From here every write is bounded by the stop budget (5 s from the
+        # stop, once for the turn); a further cancel ends any wait at once.
+        persistence.note_cancel()
+        shutdown = stopped_by_shutdown()
+        if shutdown:
             # The gateway is stopping under the turn: no "[interrupted]" reply.
             # The in-progress row (or the bare user message) stays the tail, so
             # restart recovery sees how far the turn got.
             log.info("turn_runner.cancelled_by_shutdown", session_key=session_key)
         elif run.reply_persisted:
             log.info("turn_runner.cancelled_after_reply_persisted", session_key=session_key)
+        elif persistence.attempted:
+            # The finalizer's write is the reply (finished or the stopped
+            # turn's partial): wait for what is left of the budget, never
+            # start a second one alongside it.
+            stored = await persistence.write()
+            log.info(
+                "turn_runner.cancelled_during_reply_write", session_key=session_key, stored=stored
+            )
         elif self._reply_finished(run):
             await self._persist_finished_reply(run)
         elif runner._session_manager is not None and (
@@ -1039,18 +1090,31 @@ class TurnHarness:
                 if cancelled_provider_messages is not None:
                     cancel_kwargs["provider_messages"] = cancelled_provider_messages
                     _fill_tool_use_inputs_from_record(turn_segments, cancelled_provider_messages)
-                await runner._append_session_message(
-                    session_key,
-                    role="assistant",
-                    content=body,
-                    tool_calls=turn_segments if turn_segments else None,
-                    **cancel_kwargs,
+                if persistence.message_id is not None and accepts_keyword_arg(
+                    runner._session_manager.append_message, "message_id"
+                ):
+                    cancel_kwargs["message_id"] = persistence.message_id
+                tool_calls = turn_segments if turn_segments else None
+
+                async def append_partial() -> bool:
+                    await runner._append_session_message(
+                        session_key,
+                        role="assistant",
+                        content=body,
+                        tool_calls=tool_calls,
+                        **cancel_kwargs,
+                    )
+                    return True
+
+                progress = run.turn_progress
+                stored = await persistence.write(
+                    append_partial,
+                    on_stored=progress.replaced if progress is not None else None,
                 )
-                if run.turn_progress is not None:
-                    run.turn_progress.replaced()
                 log.info(
                     "turn_runner.cancelled_partial_persisted",
                     session_key=session_key,
+                    stored=stored,
                     text_chars=len(partial_text),
                     segment_count=len(turn_segments),
                 )
@@ -1058,6 +1122,8 @@ class TurnHarness:
                 log.warning(
                     "turn_runner.cancelled_persist_failed", session_key=session_key, exc_info=True
                 )
+        if not shutdown:
+            await self._roll_up_stopped_totals(run)
         if run.turn_call_logger is not None:
             try:
                 run.turn_call_logger.write(

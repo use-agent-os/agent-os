@@ -34,7 +34,9 @@ No ``TurnHook.after_turn`` fan-out today.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -111,6 +113,10 @@ class TranscriptAppendPort(Protocol):
     on manager presence. Returns ``True`` if the append fired, ``False``
     when the port declined (no manager configured).
 
+    *message_id* is the row's identity, fixed by the turn before the first
+    attempt; an append with an identity the session already holds stores
+    nothing and still reports ``True`` (the reply is stored).
+
     Exceptions propagate to the harness's terminal error handler -- no
     try/except wraps ``append_message``.
     """
@@ -127,6 +133,7 @@ class TranscriptAppendPort(Protocol):
         token_count: int | None,
         provider_messages: dict[str, Any] | None = None,
         replaces_message_id: str | None = None,
+        message_id: str | None = None,
     ) -> bool: ...
 
 
@@ -356,6 +363,10 @@ class TurnFinalizerStageInput:
     # during the append itself) does not persist the turn a second time.
     on_transcript_appended: Callable[[], None] | None = None
 
+    # The turn's reply write, shared with the harness's cancel path (the
+    # row's identity and the stop budget). ``None``: a write of its own.
+    reply_persistence: ReplyPersistence | None = None
+
 
 @dataclass(frozen=True)
 class TurnFinalizerStageOutput:
@@ -397,57 +408,180 @@ class PersistedReply:
     transcript_appended: bool
 
 
-# How long a cancelled turn waits for its reply write to finish.
+# How long a stopped turn may spend storing its reply, counted once per turn
+# from the stop (the cooperative abort request when there was one, else the
+# cancel itself).
 _APPEND_CANCEL_GRACE_S = 5.0
 
 
-async def _append_through_cancel(
-    port: TranscriptAppendPort,
-    on_appended: Callable[[], None] | None,
-    session_key: str,
-    *,
-    append_kwargs: dict[str, Any],
-    **kwargs: Any,
-) -> bool:
-    """Append the reply; a cancel arriving meanwhile waits for the write.
+class ReplyPersistence:
+    """The one write of a turn's reply row, shared by every path that stores it.
 
-    The store may commit the row before the await returns (the INSERT and
-    the session touch are separate awaits), so a cancel there used to leave
-    the row written while the turn believed it was not, and the cancel path
-    wrote the reply a second time. The append runs to its end instead, and
-    *on_appended* is told before the cancel propagates.
+    A turn stores its reply from the finalizer (the normal path) or, when a
+    cancel cuts in, from the harness's cancel path (a finished reply the
+    finalizer did not reach, or a stopped turn's partial). Both go through
+    one instance, which gives a stop two guarantees:
 
-    The wait is bounded: a write that has not finished
-    ``_APPEND_CANCEL_GRACE_S`` after the cancel, or a second cancel during
-    that wait, abandons the write so a stuck store cannot hold a stop or a
-    shutdown.
+    * At most once, by construction. The row's identity (:attr:`message_id`)
+      is fixed before the first attempt and the store's append is idempotent
+      on it (``SessionManager.append_message(message_id=...)``), so neither a
+      retry nor an abandoned attempt that committed anyway can leave a second
+      row. And only one attempt runs at a time: a later path waits on the
+      write already in flight instead of starting its own.
+    * Bounded. Once a cancel reached the turn (:meth:`note_cancel`) the write
+      has until ``_APPEND_CANCEL_GRACE_S`` after the stop -- one budget for
+      the whole turn, whichever path waits -- and a further cancel ends the
+      wait at once. A write still running then is abandoned: the row is
+      absent or present once, and :attr:`stored` stays ``False`` so the turn
+      does not claim a reply it could not confirm.
     """
-    import asyncio
 
-    write = asyncio.ensure_future(
-        port.append_message(session_key, **kwargs, **append_kwargs),
-    )
-    cancelled = False
-    try:
-        appended = await asyncio.shield(write)
-    except asyncio.CancelledError:
-        cancelled = True
-        if not write.done():
+    def __init__(self, message_id: str | None = None) -> None:
+        #: The reply row's identity (``None``: the store picks one, no
+        #: idempotency -- test doubles and bare stage runs).
+        self.message_id = message_id
+        #: The write finished within the bounds and reported the row stored.
+        self.stored = False
+        #: The finalizer began the session-totals rollup for this turn.
+        self.totals_started = False
+        self._write: asyncio.Future[bool] | None = None
+        self._factory: Callable[[], Awaitable[bool]] | None = None
+        self._on_stored: Callable[[], None] | None = None
+        self._deadline: float | None = None
+        self._stopped = False
+
+    @property
+    def attempted(self) -> bool:
+        """A write of the reply was started (it may be running or over)."""
+        return self._write is not None
+
+    @property
+    def cancelled(self) -> bool:
+        """A cancel reached the turn: waits from now on are bounded."""
+        return self._deadline is not None
+
+    def remaining(self) -> float:
+        """Seconds left of the stop budget (unbounded before any cancel)."""
+        if self._deadline is None:
+            return float("inf")
+        if self._stopped:
+            return 0.0
+        return max(0.0, self._deadline - time.monotonic())
+
+    def note_cancel(self) -> None:
+        """A cancel reached the turn: start the stop budget (once)."""
+        if self._deadline is not None:
+            return
+        from agentos.engine.turn_progress import current_turn_stop_signal
+
+        now = time.monotonic()
+        start = now
+        signal = current_turn_stop_signal()
+        aborted_at = getattr(signal, "aborted_at", None)
+        if signal is not None and not signal.shutdown and isinstance(aborted_at, float):
+            # A cooperative stop came first: the task is cancelled only once
+            # its own grace ran out, and that time counts against this budget.
+            start = min(now, aborted_at)
+        self._deadline = start + _APPEND_CANCEL_GRACE_S
+
+    async def write(
+        self,
+        factory: Callable[[], Awaitable[bool]] | None = None,
+        *,
+        on_stored: Callable[[], None] | None = None,
+    ) -> bool:
+        """Store the reply through *factory*, once; report whether it is stored.
+
+        Starts the write unless one is in flight or already succeeded (a
+        failed one is retried with the same identity while the budget lasts).
+        Before any cancel the write is awaited to its end and its exception,
+        if any, propagates. A cancel that arrives meanwhile waits for the
+        write within the budget and then propagates. Called after a cancel
+        (the harness's cancel path), it only waits within what is left of
+        the budget, and returns.
+        """
+        if self.stored:
+            return True
+        task = self._write
+        if task is None or self._failed(task):
+            factory = factory or self._factory
+            if factory is None or self.remaining() <= 0:
+                return False
+            task = self._start(factory, on_stored)
+        if self.cancelled:
+            await self._wait(task)
+            return self._collect(task)
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            if task.done() and task.cancelled():
+                raise
+            self.note_cancel()
+            await self._wait(task)
+            self._collect(task)
+            raise
+        return self._collect(task)
+
+    async def bounded(self, factory: Callable[[], Awaitable[Any]], *, what: str) -> bool:
+        """Run another step of a cancelled turn within what is left of the budget."""
+        if self.remaining() <= 0:
+            return False
+        task = asyncio.ensure_future(factory())
+        await self._wait(task, what=what)
+        if task.done() and not task.cancelled():
+            task.exception()  # retrieved: the step logs its own failures
+            return True
+        return False
+
+    def _start(
+        self, factory: Callable[[], Awaitable[bool]], on_stored: Callable[[], None] | None
+    ) -> asyncio.Future[bool]:
+        self._factory = factory
+        if on_stored is not None:
+            self._on_stored = on_stored
+        self._write = asyncio.ensure_future(factory())
+        return self._write
+
+    @staticmethod
+    def _failed(task: asyncio.Future[Any]) -> bool:
+        return task.done() and not task.cancelled() and task.exception() is not None
+
+    async def _wait(self, task: asyncio.Future[Any], *, what: str = "reply_write") -> None:
+        """Wait for *task* until the budget runs out or another cancel arrives."""
+        while not task.done():
+            remaining = self.remaining()
+            if remaining <= 0:
+                break
             try:
-                await asyncio.wait({write}, timeout=_APPEND_CANCEL_GRACE_S)
+                await asyncio.wait({task}, timeout=None if remaining == float("inf") else remaining)
             except asyncio.CancelledError:
-                pass
-        if not write.done():
-            write.cancel()
-            raise
-        if write.cancelled():
-            raise
-        appended = write.result()
-    if appended and on_appended is not None:
-        on_appended()
-    if cancelled:
-        raise asyncio.CancelledError
-    return appended
+                # The user insisted (a second stop): end the wait now.
+                self._stopped = True
+        if not task.done():
+            task.cancel()
+            log.warning(
+                "turn_runner.cancelled_write_abandoned",
+                step=what,
+                message_id=self.message_id,
+                second_stop=self._stopped,
+            )
+
+    def _collect(self, task: asyncio.Future[bool]) -> bool:
+        if not task.done() or task.cancelled():
+            return False
+        exc = task.exception()
+        if exc is not None:
+            log.warning(
+                "turn_runner.cancelled_write_failed",
+                message_id=self.message_id,
+                error=str(exc),
+            )
+            return False
+        if task.result() and not self.stored:
+            self.stored = True
+            if self._on_stored is not None:
+                self._on_stored()
+        return self.stored
 
 
 # ---------------------------------------------------------------------------
@@ -479,10 +613,10 @@ class TurnFinalizerStage:
      Exception model: the stage does NOT wrap the ``append_message``
      call. Any exception there propagates to the harness's terminal error
      handler. A cancel does not interrupt the append half-way: it waits
-     for the write, reports it through ``on_transcript_appended``, then
-     propagates. The memory-capture
-     and totals-rollup ports each have their own log-and-continue
-     try/except inside the stage body.
+     for the write within the stop budget (:class:`ReplyPersistence`),
+     reports it through ``on_transcript_appended``, then propagates. The
+     memory-capture and totals-rollup ports each have their own
+     log-and-continue try/except inside the stage body.
 
      No ``TurnHook.after_turn`` fan-out today; that wiring belongs in a separate
      production hook pass.
@@ -576,20 +710,27 @@ class TurnFinalizerStage:
                 append_kwargs["provider_messages"] = inp.provider_messages
             if inp.replaces_message_id is not None:
                 append_kwargs["replaces_message_id"] = inp.replaces_message_id
-            transcript_appended = await _append_through_cancel(
-                self._transcript_append,
-                inp.on_transcript_appended,
-                inp.session_key,
-                role="assistant",
-                content=persisted_content,
-                tool_calls=turn_segments if turn_segments else None,
-                reasoning_content=reasoning_content,
-                turn_usage=_turn_usage_payload(
-                    inp.done_event,
-                    resolved_model=inp.resolved_model,
-                ),
-                token_count=token_count,
-                append_kwargs=append_kwargs,
+            persistence = inp.reply_persistence or ReplyPersistence()
+            if persistence.message_id is not None:
+                append_kwargs["message_id"] = persistence.message_id
+            port, session_key = self._transcript_append, inp.session_key
+            turn_usage = _turn_usage_payload(inp.done_event, resolved_model=inp.resolved_model)
+            tool_calls = turn_segments if turn_segments else None
+
+            def append() -> Awaitable[bool]:
+                return port.append_message(
+                    session_key,
+                    role="assistant",
+                    content=persisted_content,
+                    tool_calls=tool_calls,
+                    reasoning_content=reasoning_content,
+                    turn_usage=turn_usage,
+                    token_count=token_count,
+                    **append_kwargs,
+                )
+
+            transcript_appended = await persistence.write(
+                append, on_stored=inp.on_transcript_appended
             )
 
         return PersistedReply(
@@ -597,6 +738,31 @@ class TurnFinalizerStage:
             turn_segments=turn_segments,
             transcript_appended=transcript_appended,
         )
+
+    async def rollup_totals(self, inp: TurnFinalizerStageInput) -> CostRollupResult | None:
+        """Step 5: roll the turn's usage into the session totals (log-and-continue).
+
+        :meth:`run` ends with this. The harness also calls it for a stopped
+        turn whose reply was stored before the stop cut the stage short, so
+        a completed turn's tokens reach the session totals once.
+        """
+        if inp.done_event is None:
+            return None
+        if inp.reply_persistence is not None:
+            inp.reply_persistence.totals_started = True
+        try:
+            return await self._session_totals.rollup(
+                session_key=inp.session_key,
+                done_event=inp.done_event,
+                resolved_model=inp.resolved_model,
+            )
+        except Exception as exc:  # noqa: BLE001 - log-and-continue intentional
+            log.warning(
+                "turn_runner.session_usage_persist_failed",
+                session_key=inp.session_key,
+                error=str(exc),
+            )
+            return None
 
     async def run(
         self,
@@ -671,20 +837,7 @@ class TurnFinalizerStage:
         # 5. Session totals rollup (only when DoneEvent present; the
         # port folds the session-manager-None and
         # current_session-None guards).
-        cost_rollup: CostRollupResult | None = None
-        if inp.done_event is not None:
-            try:
-                cost_rollup = await self._session_totals.rollup(
-                    session_key=inp.session_key,
-                    done_event=inp.done_event,
-                    resolved_model=inp.resolved_model,
-                )
-            except Exception as exc:  # noqa: BLE001 - log-and-continue intentional
-                log.warning(
-                    "turn_runner.session_usage_persist_failed",
-                    session_key=inp.session_key,
-                    error=str(exc),
-                )
+        cost_rollup = await self.rollup_totals(inp)
 
         # --- proactive compaction (stream C) --------------------------------
         # Last step of the success path: the turn is persisted, so a
