@@ -4,19 +4,20 @@
 // `agentos gateway run` processes (default and custom base path) and passes:
 //   AUDIT_BASE_URL      e.g. http://127.0.0.1:PORT/control
 //   AUDIT_ALT_BASE_URL  e.g. http://127.0.0.1:PORT/ops/agentos
-//   AUDIT_OUT_DIR       screenshots + results.json (default /tmp/agentos-ui-audit)
+//   AUDIT_OUT_DIR       screenshots + results.json (default <os temp dir>/agentos-ui-audit)
 //   AUDIT_ONLY          optional comma list of check groups to run
 // It prints one JSON summary line last; pytest asserts on it.
 'use strict'
 
 const fs = require('node:fs')
+const os = require('node:os')
 const path = require('node:path')
 const { chromium } = require('playwright')
 const { AxeBuilder } = require('@axe-core/playwright')
 
 const BASE = process.env.AUDIT_BASE_URL.replace(/\/+$/, '')
 const ALT_BASE = (process.env.AUDIT_ALT_BASE_URL || '').replace(/\/+$/, '')
-const OUT = process.env.AUDIT_OUT_DIR || '/tmp/agentos-ui-audit'
+const OUT = process.env.AUDIT_OUT_DIR || path.join(os.tmpdir(), 'agentos-ui-audit')
 const ONLY = new Set((process.env.AUDIT_ONLY || '').split(',').filter(Boolean))
 const runs = (group) => ONLY.size === 0 || ONLY.has(group)
 
