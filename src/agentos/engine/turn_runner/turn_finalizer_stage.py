@@ -397,6 +397,10 @@ class PersistedReply:
     transcript_appended: bool
 
 
+# How long a cancelled turn waits for its reply write to finish.
+_APPEND_CANCEL_GRACE_S = 5.0
+
+
 async def _append_through_cancel(
     port: TranscriptAppendPort,
     on_appended: Callable[[], None] | None,
@@ -412,6 +416,11 @@ async def _append_through_cancel(
     the row written while the turn believed it was not, and the cancel path
     wrote the reply a second time. The append runs to its end instead, and
     *on_appended* is told before the cancel propagates.
+
+    The wait is bounded: a write that has not finished
+    ``_APPEND_CANCEL_GRACE_S`` after the cancel, or a second cancel during
+    that wait, abandons the write so a stuck store cannot hold a stop or a
+    shutdown.
     """
     import asyncio
 
@@ -419,18 +428,21 @@ async def _append_through_cancel(
         port.append_message(session_key, **kwargs, **append_kwargs),
     )
     cancelled = False
-    while True:
-        try:
-            appended = await asyncio.shield(write)
-            break
-        except asyncio.CancelledError:
-            if write.done():
-                if write.cancelled():
-                    raise
-                appended = write.result()
-                cancelled = True
-                break
-            cancelled = True
+    try:
+        appended = await asyncio.shield(write)
+    except asyncio.CancelledError:
+        cancelled = True
+        if not write.done():
+            try:
+                await asyncio.wait({write}, timeout=_APPEND_CANCEL_GRACE_S)
+            except asyncio.CancelledError:
+                pass
+        if not write.done():
+            write.cancel()
+            raise
+        if write.cancelled():
+            raise
+        appended = write.result()
     if appended and on_appended is not None:
         on_appended()
     if cancelled:
