@@ -59,4 +59,6 @@ export const webPalette = defineNamespace('webPalette', {
   composerNewline: 'New line',
   composerSlash: 'Open the slash command menu',
   composerHistory: 'Edit the last message (empty composer)',
+  composerRecoverQueued: 'Take the newest queued message back into the composer',
+  composerSuggestion: 'Use the suggested next prompt (empty composer)',
 } as const)
