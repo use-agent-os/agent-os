@@ -32,7 +32,7 @@ def test_onboarding_finish_output_separates_summary_from_commands():
     assert "  Start gateway in background: agentos gateway start --json" in text
     assert "  Restart running gateway: agentos gateway restart --json" in text
     assert "Reference:" in text
-    assert "  Web UI: http://127.0.0.1:18791/control/setup" in text
+    assert "  Web UI: http://127.0.0.1:18791/control/settings/setup" in text
     assert "uv run" not in text
 
 
@@ -82,10 +82,7 @@ def test_onboarding_finish_output_keeps_explicit_config_in_gateway_commands():
 
     text = format_next_steps(GatewayConfig(), config_path="/tmp/agentos/custom.toml")
 
-    assert (
-        "  Run gateway now: agentos gateway run --config /tmp/agentos/custom.toml"
-        in text
-    )
+    assert "  Run gateway now: agentos gateway run --config /tmp/agentos/custom.toml" in text
     assert (
         "  Start gateway in background: "
         "agentos gateway start --json --config /tmp/agentos/custom.toml"
@@ -105,7 +102,7 @@ def test_onboarding_finish_output_uses_configured_web_setup_url():
 
     text = format_next_steps(cfg)
 
-    assert "  Web UI: http://127.0.0.1:19999/ops/setup" in text
+    assert "  Web UI: http://127.0.0.1:19999/ops/settings/setup" in text
     assert "  Web UI: http://127.0.0.1:18791/control/" not in text
 
 
@@ -156,12 +153,10 @@ def test_env_reference_warnings_cover_llm_and_search_missing_env(monkeypatch):
     warnings = env_reference_warnings(cfg)
 
     assert any(
-        "LLM provider" in warning and "OPENROUTER_API_KEY" in warning
-        for warning in warnings
+        "LLM provider" in warning and "OPENROUTER_API_KEY" in warning for warning in warnings
     )
     assert any(
-        "Search provider" in warning and "BRAVE_SEARCH_API_KEY" in warning
-        for warning in warnings
+        "Search provider" in warning and "BRAVE_SEARCH_API_KEY" in warning for warning in warnings
     )
 
 
