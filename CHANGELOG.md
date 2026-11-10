@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2026.11.11] - 2026-11-11
+
 ### Added
 - Tool hooks can now decide, not only observe. `before_tool` may block a
   call or rewrite its arguments, and `after_tool` may replace the result
