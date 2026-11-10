@@ -1,13 +1,13 @@
 """Tool-result projection, capping and argument rehydration for the agent loop.
 
-Moved verbatim out of ``agentos.engine.agent`` (OpenSpec change
-``refactor-agent-harness-core``, Phase 3). ``ToolResultProjectionMixin`` keeps
-the methods' ``self`` access to the agent's config and per-turn state; a later
-step turns it into a composed object.
+:class:`ToolResultProjector` is a composed object the agent owns: it reaches
+the agent's config and per-turn state through the narrow
+:class:`ToolResultProjectionHost` protocol.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 from collections.abc import Mapping
@@ -353,18 +353,15 @@ class ToolResultProjector:
     ) -> ToolResult:
         guarded_content, guarded = _omit_large_json_tool_fields(result.content)
         if guarded:
-            result = ToolResult(
-                tool_use_id=result.tool_use_id,
-                tool_name=result.tool_name,
+            result = dataclasses.replace(
+                result,
                 content=guarded_content,
-                is_error=result.is_error,
                 artifacts=list(result.artifacts),
                 execution_status=(
                     mark_execution_status_truncated(result.execution_status)
                     if result.execution_status is not None
                     else None
                 ),
-                terminates_turn=result.terminates_turn,
             )
             self.config.metadata["tool_json_guard_applied"] = True
             self.config.metadata["tool_json_guard_calls"] = (
@@ -434,23 +431,11 @@ class ToolResultProjector:
             original_chars=len(result.content),
             projected_chars=len(projected_content),
         )
-        return ToolResult(
-            tool_use_id=result.tool_use_id,
-            tool_name=result.tool_name,
+        return dataclasses.replace(
+            result,
             content=projected_content,
-            is_error=result.is_error,
             artifacts=list(result.artifacts),
-            execution_status=result.execution_status,
-            terminates_turn=result.terminates_turn,
         )
-
-    async def _canonicalize_tool_result(
-        self,
-        result: ToolResult,
-        *,
-        tool_call: ToolCall | None = None,
-    ) -> ToolResult:
-        return await self._project_tool_result_for_llm(result, tool_call=tool_call)
 
     async def _project_tool_result_for_delivery(
         self,
@@ -651,20 +636,6 @@ class ToolResultProjector:
         )
 
     @staticmethod
-    def _parse_tool_argument_projection(value: str) -> dict[str, str] | None:
-        if not value.startswith(_TOOL_ARGUMENT_PROJECTION_PREFIX):
-            return None
-        metadata: dict[str, str] = {}
-        for line in value.splitlines()[1:]:
-            if line in {"head:", "tail:"}:
-                break
-            key, separator, raw_value = line.partition(":")
-            if not separator:
-                continue
-            metadata[key.strip()] = raw_value.strip()
-        return metadata
-
-    @staticmethod
     def _provider_projection_placeholder(tool_name: str, field: str) -> str:
         return (
             f"[invalid_provider_context_projection:{tool_name}.{field}] "
@@ -685,15 +656,14 @@ class ToolResultProjector:
 
     def _sanitize_projected_tool_call_arguments(self, tc: ToolCall) -> ToolCall:
         if self._has_provider_context_argument_marker(tc.arguments):
-            return ToolCall(
-                tool_use_id=tc.tool_use_id,
-                tool_name=tc.tool_name,
+            # ``replace`` keeps every other field, ``thought_signature`` among
+            # them: a provider that signs its tool calls rejects one without.
+            return dataclasses.replace(
+                tc,
                 arguments=self._provider_compacted_arguments_placeholder(
                     tc.tool_name,
                     tc.arguments,
                 ),
-                synthetic_from_text=tc.synthetic_from_text,
-                origin_trace=tc.origin_trace,
             )
         sanitized = dict(tc.arguments)
         changed = False
@@ -713,13 +683,7 @@ class ToolResultProjector:
             changed = True
         if not changed:
             return tc
-        return ToolCall(
-            tool_use_id=tc.tool_use_id,
-            tool_name=tc.tool_name,
-            arguments=sanitized,
-            synthetic_from_text=tc.synthetic_from_text,
-            origin_trace=tc.origin_trace,
-        )
+        return dataclasses.replace(tc, arguments=sanitized)
 
     def _projection_rehydrate_error(
         self,
