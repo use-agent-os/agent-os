@@ -223,7 +223,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - A turn stopped after its reply was recorded (including while memory was
   being captured or session totals updated) repeated that reply in the
   session history, marked `[interrupted]`, and in its final text, so the
-  next request carried the answer twice.
+  next request carried the answer twice. Such a turn now also ends as
+  completed (task `succeeded`, session `done`) rather than cancelled: its
+  whole answer was delivered.
 - A parent waiting on its child in the same turn (`sessions_yield` with a
   `session_key`) kept its slot. With the default reserved subagent slots,
   two such parents could leave their children no slot at all and both waited

@@ -1512,7 +1512,11 @@ class TaskRuntime:
                         heartbeat_task = None
                     if task.acquired_slot:
                         await self._release_slot(task)
-                    if task.cancel_requested and task.stop_signal.aborted:
+                    if (
+                        task.cancel_requested
+                        and task.stop_signal.aborted
+                        and not task.stop_signal.reply_delivered
+                    ):
                         # The turn honoured the cooperative abort and ended on
                         # its own; it is still a cancelled run.
                         raise asyncio.CancelledError
@@ -1543,6 +1547,26 @@ class TaskRuntime:
                     task,
                     AgentTaskStatus.ABANDONED,
                     terminal_reason=SHUTDOWN_INTERRUPTED_REASON,
+                )
+                return
+            if (
+                task.stop_signal.reply_delivered
+                and task.turn_settled
+                and not task.overflow_dropped
+                and task.cancel_reason != WITHDRAWN_TERMINAL_REASON
+            ):
+                # The stop landed after the whole reply was in the transcript
+                # (memory capture, the totals rollup): the user got the answer,
+                # so the run completed.
+                log.info(
+                    "task_runtime.stop_after_reply_delivered",
+                    task_id=task.task_id,
+                    session_key=task.envelope.session_key,
+                )
+                await self._mark_terminal(
+                    task,
+                    AgentTaskStatus.SUCCEEDED,
+                    terminal_reason="completed",
                 )
                 return
             reason = "overflow_drop" if task.overflow_dropped else "interrupt"

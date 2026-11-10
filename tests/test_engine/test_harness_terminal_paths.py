@@ -479,5 +479,55 @@ async def test_a_call_stopped_before_it_ran_shows_its_arguments_or_nothing(
     assert isinstance(events[-1], DoneEvent)
     assert events[-1].outcome.kind == "interrupted"
     assert ran == []
+    # A stopped turn's partial reply is not a delivered answer.
+    assert signal.reply_delivered is False
     uses = await _display_tool_uses(storage)
     assert [(u["tool_use_id"], u["input"]) for u in uses] == expected
+
+
+# ---------------------------------------------------------------------------
+# A stop after the whole reply was delivered: the run completed
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("grace", [0.0, 0.2])
+async def test_a_stop_after_the_reply_was_persisted_ends_the_run_completed(
+    storage: SessionStorage, manager: SessionManager, tmp_path: Path, grace: float
+) -> None:
+    from agentos.gateway.routing import RouteEnvelope, SourceKind
+    from agentos.gateway.task_runtime import TaskRuntime
+    from agentos.session.models import AgentTaskStatus
+    from tests.test_gateway.test_task_runtime_cooperative_cancel import _Storage
+
+    provider = ScriptedProvider([[text("the full answer"), done()]])
+    runner = _runner(manager, provider, tmp_path)
+    await manager.create(KEY)
+    stall = _StallingCapture()
+    runner._harness.stages.turn_finalizer._turn_memory_capture = stall
+
+    async def handler(run: Any) -> None:
+        await manager.append_message(KEY, "user", run.message)
+        ctx = ToolContext(caller_kind=CallerKind.WEB)
+        async for _event in runner.run(
+            run.message, KEY, tool_context=ctx, history_has_persisted_user=True
+        ):
+            pass
+
+    tasks = _Storage({})
+    runtime = TaskRuntime(storage=tasks, turn_handler=handler, cancel_grace_s=grace)
+    handle = await runtime.enqueue(
+        RouteEnvelope(
+            source_kind=SourceKind.SYSTEM, source_name="test", agent_id="main", session_key=KEY
+        ),
+        "question",
+        run_kind="default",
+    )
+    await asyncio.wait_for(stall.entered.wait(), 10)
+    await runtime.cancel(task_id=handle.task_id, source="user")
+    await runtime.wait(handle.task_id, timeout=5)
+
+    record = tasks.records[handle.task_id]
+    assert record.status == AgentTaskStatus.SUCCEEDED
+    assert record.terminal_reason == "completed"
+    rows = await _rows(storage)
+    assert [content for role, content, _ in rows if role == "assistant"] == ["the full answer"]

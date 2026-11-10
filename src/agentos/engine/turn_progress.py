@@ -271,6 +271,11 @@ class TurnStopSignal:
     #: once (they clean up on ``CancelledError``), so a stop never waits on a
     #: long tool.
     in_tool_batch: bool = False
+    #: Set by the turn once its whole reply is in the transcript, before any
+    #: stop reached it. The turn is complete from the user's point of view; a
+    #: stop landing after that (memory capture, the totals rollup) no longer
+    #: makes the run a cancelled one.
+    reply_delivered: bool = False
     _abort_event: Any = field(default=None, repr=False, compare=False)
 
     def request_abort(self, reason: str = "cancelled") -> None:

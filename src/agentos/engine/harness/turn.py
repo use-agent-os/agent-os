@@ -650,7 +650,13 @@ class TurnHarness:
     @staticmethod
     def _note_reply_persisted(run: _TurnRun) -> None:
         """The finalizer's append landed: the reply row replaced the in-progress row."""
+        from agentos.engine.turn_progress import current_turn_stop_signal
+
         run.reply_persisted = True
+        signal = current_turn_stop_signal()
+        if signal is not None and not signal.aborted:
+            # Not a stopped turn's partial reply: the whole answer is in.
+            signal.reply_delivered = True
         if run.turn_progress is not None:
             run.turn_progress.replaced()
 
