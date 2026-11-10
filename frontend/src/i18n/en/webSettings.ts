@@ -79,7 +79,6 @@ export const webSettings = defineNamespace('webSettings', {
   discard: 'Discard',
   save: 'Save',
   saving: 'Saving…',
-  saved: 'Saved',
   saveFailed: "Couldn't save: {message}",
   conflictTitle: 'The configuration changed since you opened it',
   conflictBody: 'Another client saved the configuration. Nothing was written.',
@@ -118,5 +117,4 @@ export const webSettings = defineNamespace('webSettings', {
   mcpOAuthFailed: 'MCP authorization failed',
   mcpOAuthMissing: 'The callback is missing its authorization code or state.',
   mcpOAuthBack: 'Back to MCP settings',
-  mcpOAuthSucceeded: 'MCP server authorized',
 } as const)

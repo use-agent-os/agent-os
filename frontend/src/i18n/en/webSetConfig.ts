@@ -2,11 +2,8 @@ import { defineNamespace } from '../registry'
 
 /** Settings › Models, Search, Media, Advanced and guided setup copy. */
 export const webSetConfig = defineNamespace('webSetConfig', {
-  loading: 'Loading…',
   loadFailed: "Couldn't load the configuration",
   provider: 'Provider',
-  providerHelp: 'The model provider the agent answers with.',
-  chooseProvider: 'Choose a provider',
   apply: 'Apply',
   applying: 'Applying…',
   applied: 'Saved',
@@ -40,10 +37,6 @@ export const webSetConfig = defineNamespace('webSetConfig', {
   advancedSearch: 'Filter fields',
   advancedEmpty: 'No fields match.',
   advancedYamlHelp: 'Edit the whole configuration as YAML. Saving applies it with config.apply.',
-  advancedYamlInvalid: 'The YAML could not be read: {message}',
-  advancedApplied: 'Configuration applied',
-  advancedReadOnly: 'Read-only',
-  sensitive: 'Sensitive — masked until revealed',
   stepProvider: 'Provider',
   stepRouter: 'Router',
   stepExtras: 'Extras',
