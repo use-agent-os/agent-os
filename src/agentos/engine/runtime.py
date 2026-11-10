@@ -985,6 +985,50 @@ def _normalize_heartbeat_text(
     return text
 
 
+def _fill_tool_use_inputs_from_record(
+    segments: list[dict[str, Any]], record: dict[str, Any] | None
+) -> None:
+    """Give a stopped turn's unanswered ``tool_use`` segments their arguments.
+
+    A segment gets its arguments with the call's result, so a turn stopped
+    while a call ran, or before it ran, had a display row showing the call
+    with no arguments although the provider record (*record*, the turn's
+    sealed messages) holds them. A segment the record has no call for (the
+    stop landed while its arguments streamed in) never became a call: it is
+    dropped, as the record drops it. Changes *segments* in place.
+    """
+    if not isinstance(record, dict):
+        return
+    calls: dict[str, tuple[str, dict[str, Any]]] = {}
+    for message in record.get("messages") or []:
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if (
+                isinstance(block, dict)
+                and block.get("type") == "tool_use"
+                and isinstance(block.get("id"), str)
+                and isinstance(block.get("input"), dict)
+            ):
+                calls[block["id"]] = (str(block.get("name") or ""), block["input"])
+    kept: list[dict[str, Any]] = []
+    for segment in segments:
+        if (
+            isinstance(segment, dict)
+            and segment.get("type") == "tool_use"
+            and segment.get("input") in ("", None)
+        ):
+            tool_use_id = segment.get("tool_use_id")
+            call = calls.get(tool_use_id) if isinstance(tool_use_id, str) else None
+            if call is None:
+                continue
+            name = str(segment.get("name") or call[0])
+            segment["input"] = _persisted_tool_use_input(name, str(tool_use_id), call[1])
+        kept.append(segment)
+    segments[:] = kept
+
+
 def _drop_unpaired_tool_use_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     paired_ids = {
         segment.get("tool_use_id")

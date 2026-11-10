@@ -360,3 +360,124 @@ async def test_abandoning_run_closes_the_harness_run_before_its_own_cleanup(
             owner.reset(token)
 
     assert journal == ["release:r1", "clear_turn_state"]
+
+
+# ---------------------------------------------------------------------------
+# A stopped turn's display row keeps the arguments of its unanswered calls
+# ---------------------------------------------------------------------------
+
+
+async def _display_tool_uses(storage: SessionStorage) -> list[dict[str, Any]]:
+    import json
+
+    async with storage.conn.execute(
+        "SELECT tool_calls FROM transcript_entries WHERE role = 'assistant' ORDER BY id"
+    ) as cursor:
+        rows = [row[0] for row in await cursor.fetchall()]
+    return [
+        segment
+        for raw in rows
+        if raw
+        for segment in json.loads(raw)
+        if segment.get("type") == "tool_use"
+    ]
+
+
+async def test_a_call_cancelled_while_it_runs_keeps_its_arguments_on_the_card(
+    storage: SessionStorage, manager: SessionManager, tmp_path: Path
+) -> None:
+    started = asyncio.Event()
+    registry = ToolRegistry()
+
+    async def slow(**_arguments: Any) -> str:
+        started.set()
+        await asyncio.sleep(30)
+        return "never"
+
+    registry.register(
+        ToolSpec(
+            name="slow",
+            description="slow",
+            parameters={"path": {"type": "string"}},
+            required=["path"],
+        ),
+        slow,
+    )
+    provider = ScriptedProvider(
+        [[tool_call("slow", {"path": "notes.md"}, tool_use_id="T1"), done("tool_use")]]
+    )
+    runner = _runner(manager, provider, tmp_path, registry)
+    await manager.create(KEY)
+
+    task = asyncio.create_task(_turn(runner, manager, "run the slow thing"))
+    await asyncio.wait_for(started.wait(), 5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    uses = await _display_tool_uses(storage)
+    assert [(u["tool_use_id"], u["input"]) for u in uses] == [("T1", {"path": "notes.md"})]
+
+
+@pytest.mark.parametrize(
+    ("stop_at", "expected"),
+    [
+        # Between the response and the tool batch: the call is in the record.
+        ("tool_calling", [("D1", {"path": "old-build"})]),
+        # While the call's arguments stream in: it never became a call, and
+        # the row does not show one with no arguments.
+        ("tool_use_start", []),
+    ],
+)
+async def test_a_call_stopped_before_it_ran_shows_its_arguments_or_nothing(
+    storage: SessionStorage,
+    manager: SessionManager,
+    tmp_path: Path,
+    stop_at: str,
+    expected: list[tuple[str, dict[str, str]]],
+) -> None:
+    from agentos.engine.turn_progress import TurnStopSignal, bind_turn_stop_signal
+    from agentos.engine.types import StateChangeEvent, ToolUseStartEvent
+
+    registry = ToolRegistry()
+    ran: list[str] = []
+
+    async def delete(**_arguments: Any) -> str:
+        ran.append("delete")
+        return "deleted"
+
+    registry.register(
+        ToolSpec(
+            name="delete",
+            description="delete",
+            parameters={"path": {"type": "string"}},
+            required=["path"],
+        ),
+        delete,
+    )
+    provider = ScriptedProvider(
+        [[tool_call("delete", {"path": "old-build"}, tool_use_id="D1"), done("tool_use")]]
+    )
+    runner = _runner(manager, provider, tmp_path, registry)
+    await manager.create(KEY)
+    await manager.append_message(KEY, "user", "clean up")
+    signal = TurnStopSignal()
+    bind_turn_stop_signal(signal)
+    events: list[AgentEvent] = []
+    ctx = ToolContext(caller_kind=CallerKind.WEB)
+    async for event in runner.run(
+        "clean up", KEY, tool_context=ctx, history_has_persisted_user=True
+    ):
+        events.append(event)
+        if (stop_at == "tool_use_start" and isinstance(event, ToolUseStartEvent)) or (
+            stop_at == "tool_calling"
+            and isinstance(event, StateChangeEvent)
+            and str(event.to_state).endswith("tool_calling")
+        ):
+            signal.request_abort("cancelled")
+
+    assert isinstance(events[-1], DoneEvent)
+    assert events[-1].outcome.kind == "interrupted"
+    assert ran == []
+    uses = await _display_tool_uses(storage)
+    assert [(u["tool_use_id"], u["input"]) for u in uses] == expected

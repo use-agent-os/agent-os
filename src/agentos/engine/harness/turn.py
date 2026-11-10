@@ -368,7 +368,7 @@ class TurnHarness:
                 run.turn_segments.append(
                     {"type": "text", "text": "".join(stream_state.current_text_parts)}
                 )
-            self._mark_cooperative_abort(run, done_event)
+            self._mark_cooperative_abort(run, done_event, agent)
 
             fin_input = self._finalizer_of(
                 run,
@@ -817,10 +817,14 @@ class TurnHarness:
         runner._apply_compaction_summary_settings(agent)
 
     @staticmethod
-    def _mark_cooperative_abort(run: _TurnRun, done_event: DoneEvent | None) -> None:
+    def _mark_cooperative_abort(run: _TurnRun, done_event: DoneEvent | None, agent: Any) -> None:
         """A turn that stopped on a cooperative abort ended normally; give its
-        partial reply the same "[interrupted]" marker a hard cancel writes."""
-        from agentos.engine.runtime import _cancelled_partial_response_text
+        partial reply the same "[interrupted]" marker a hard cancel writes,
+        and its unanswered tool calls their arguments."""
+        from agentos.engine.runtime import (
+            _cancelled_partial_response_text,
+            _fill_tool_use_inputs_from_record,
+        )
 
         done_outcome = getattr(done_event, "outcome", None)
         if (
@@ -831,6 +835,7 @@ class TurnHarness:
                 "".join(run.final_text_parts), run.turn_artifacts
             )
             run.final_text_parts[:] = [marked]
+            _fill_tool_use_inputs_from_record(run.turn_segments, transcript_record_of(agent))
 
     def _observe_turn_end(
         self,
@@ -910,7 +915,10 @@ class TurnHarness:
         after the finalizer persisted the reply (during memory capture or the
         totals rollup) writes nothing: the turn is already in the transcript.
         """
-        from agentos.engine.runtime import _cancelled_partial_response_text
+        from agentos.engine.runtime import (
+            _cancelled_partial_response_text,
+            _fill_tool_use_inputs_from_record,
+        )
         from agentos.engine.turn_progress import stopped_by_shutdown
 
         runner, session_key = self._runner, run.request.session_key
@@ -947,6 +955,7 @@ class TurnHarness:
                 )
                 if cancelled_provider_messages is not None:
                     cancel_kwargs["provider_messages"] = cancelled_provider_messages
+                    _fill_tool_use_inputs_from_record(turn_segments, cancelled_provider_messages)
                 await runner._append_session_message(
                     session_key,
                     role="assistant",
