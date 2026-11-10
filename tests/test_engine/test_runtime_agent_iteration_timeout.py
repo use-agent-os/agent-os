@@ -8,7 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentos.engine.agent import Agent, _IterationStreamTimeoutError
+from agentos.engine.agent import Agent
+from agentos.engine.core.stream import IterationStreamTimeoutError
 from agentos.engine.runtime import TurnRunner
 from agentos.engine.types import AgentConfig, DoneEvent
 from agentos.gateway.config import GatewayConfig
@@ -180,9 +181,9 @@ async def test_stream_iteration_timeout_closes_the_provider_stream_exactly_once(
     """An iteration timeout must close the abandoned provider stream (once).
 
     Regression: this used to assert ``close_calls == 0`` -- the iteration-
-    timeout exit raised ``_IterationStreamTimeoutError`` without ever calling
+    timeout exit raised ``IterationStreamTimeoutError`` without ever calling
     ``_close_provider_stream``, unlike the sibling total-deadline exit two
-    lines above it. The caller's ``except _IterationStreamTimeoutError``
+    lines above it. The caller's ``except IterationStreamTimeoutError``
     handler does no cleanup of its own either, so the abandoned generator's
     own ``async with client.stream(...)`` __aexit__ (closing the underlying
     httpx connection) would only run whenever the GC finalized it -- not
@@ -208,7 +209,7 @@ async def test_stream_iteration_timeout_closes_the_provider_stream_exactly_once(
 
     loop = asyncio.get_running_loop()
 
-    with pytest.raises(_IterationStreamTimeoutError):
+    with pytest.raises(IterationStreamTimeoutError):
         async for _event in agent._stream_provider_events_with_deadline(
             provider_stream(),
             loop=loop,

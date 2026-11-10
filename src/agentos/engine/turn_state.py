@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from agentos.engine.agent import _ProviderAttemptKind, _ProviderRetryPolicy
     from agentos.engine.cache_break_monitor import PromptStateSnapshot
     from agentos.engine.core.stream import StreamAccumulator
-    from agentos.engine.fallback import FallbackPolicy
     from agentos.engine.policy import AttemptHistory, ProviderAttemptPolicy
     from agentos.engine.progress_watchdog import ProgressDecision, ProgressWatchdog
     from agentos.engine.repetition_guard import RepetitionTrip, StreamRepetitionGuard
@@ -64,8 +63,7 @@ class TurnState(LoopState):
     total_deadline: float | None
     tools_supported: bool
     provider_tool_definitions: list[ToolDefinition] | None
-    fallback: FallbackPolicy
-    retry_after_cap_s: float
+    #: The only bound on same-model provider retries (count and budget).
     attempt_policy: ProviderAttemptPolicy
     progress_watchdog: ProgressWatchdog
     verification_ledger: VerificationLedger
@@ -100,8 +98,8 @@ class TurnState(LoopState):
     iter_reasoning_content: str | None
     iter_thinking_signature: str | None
     provider_error: ProviderErrorEvent | None
-    retry_attempt: int
     call_attempt: int
+    #: Same-model retries of this call so far live in ``attempt_history.retries``.
     attempt_history: AttemptHistory
     attempt_started_at: float
     retry_policy: _ProviderRetryPolicy
