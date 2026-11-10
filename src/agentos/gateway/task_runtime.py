@@ -123,6 +123,8 @@ STEERED_TERMINAL_REASON = "steered"
 WITHDRAWN_TERMINAL_REASON = "withdrawn"
 #: Longest message text a ``pending_inputs`` entry carries.
 PENDING_INPUT_TEXT_MAX_CHARS = 4000
+#: Newest ledger rows of a session searched for a send's idempotency key.
+_IDEMPOTENCY_SCAN_LIMIT = 50
 
 
 @dataclass(frozen=True)
@@ -130,6 +132,9 @@ class TaskHandle:
     task_id: str
     session_key: str
     status: AgentTaskStatus
+    #: :meth:`TaskRuntime.send` found a task with the same idempotency key
+    #: and returned it instead of queueing another.
+    deduplicated: bool = False
 
 
 @dataclass(frozen=True)
@@ -271,6 +276,8 @@ class _RuntimeTask:
     steering_attached: bool = False
     #: Tells the turn a gateway shutdown is what cancels it.
     stop_signal: TurnStopSignal = field(default_factory=TurnStopSignal)
+    #: The ``idempotency_key`` the task was queued with.
+    idempotency_key: str | None = None
 
 
 class _TaskSteeringSource:
@@ -553,6 +560,8 @@ class TaskRuntime:
         # Told about every task as it is admitted (restart recovery cancels a
         # pending resume when the user writes first). Called synchronously.
         self._enqueue_listeners: builtins.list[Callable[[AgentTaskRecord], None]] = []
+        # Serializes keyed ``send`` calls so two cannot both miss the other.
+        self._idempotent_send_lock = asyncio.Lock()
 
     @property
     def active_turns(self) -> int:
@@ -691,6 +700,7 @@ class TaskRuntime:
             fresh_user_session=fresh_user_session,
             stream_event_sink=stream_event_sink,
             deferred_input=deferred_input,
+            idempotency_key=idempotency_key or None,
         )
         async with self._state_lock:
             self._tasks[record.task_id] = runtime_task
@@ -831,8 +841,39 @@ class TaskRuntime:
         message: str,
         provenance: dict[str, Any] | None = None,
         stream_event_sink: TaskStreamEventSink | None = None,
+        *,
+        idempotency_key: str | None = None,
     ) -> TaskHandle:
+        """Queue a follow-up turn on *session_key*.
+
+        With *idempotency_key*, a task of the session already carrying that
+        key (queued, running or recorded in the ledger) is returned instead,
+        marked ``deduplicated``: a retried send does not run the turn twice.
+        """
         session_key = canonicalize_session_key(session_key)
+        if idempotency_key is None:
+            return await self._send(session_key, message, provenance, stream_event_sink)
+        async with self._idempotent_send_lock:
+            existing = await self._task_with_idempotency_key(session_key, idempotency_key)
+            if existing is not None:
+                return existing
+            return await self._send(
+                session_key,
+                message,
+                provenance,
+                stream_event_sink,
+                idempotency_key=idempotency_key,
+            )
+
+    async def _send(
+        self,
+        session_key: str,
+        message: str,
+        provenance: dict[str, Any] | None,
+        stream_event_sink: TaskStreamEventSink | None,
+        *,
+        idempotency_key: str | None = None,
+    ) -> TaskHandle:
         cached = self._last_envelope_by_session.get(session_key)
         if cached is None:
             envelope = RouteEnvelope(
@@ -847,6 +888,7 @@ class TaskRuntime:
                 message,
                 mode="followup",
                 stream_event_sink=stream_event_sink,
+                idempotency_key=idempotency_key,
             )
         if provenance is None:
             return await self.enqueue(
@@ -854,6 +896,7 @@ class TaskRuntime:
                 message,
                 mode="followup",
                 stream_event_sink=stream_event_sink,
+                idempotency_key=idempotency_key,
             )
         # Caller-provided provenance is a one-shot override: build an
         # ephemeral envelope from the cached metadata but with this
@@ -867,7 +910,41 @@ class TaskRuntime:
             mode="followup",
             stream_event_sink=stream_event_sink,
             update_envelope_cache=False,
+            idempotency_key=idempotency_key,
         )
+
+    async def _task_with_idempotency_key(self, session_key: str, key: str) -> TaskHandle | None:
+        for task in self._tasks.values():
+            if task.envelope.session_key == session_key and task.idempotency_key == key:
+                return TaskHandle(
+                    task_id=task.task_id,
+                    session_key=session_key,
+                    status=task.status,
+                    deduplicated=True,
+                )
+        try:
+            rows = await self._storage.list_agent_tasks(
+                session_key=session_key,
+                limit=_IDEMPOTENCY_SCAN_LIMIT,
+                newest_first=True,
+            )
+        except Exception:  # noqa: BLE001 - no ledger lookup: send as usual
+            log.debug("task_runtime.idempotency_lookup_failed", exc_info=True)
+            return None
+        for row in reversed(builtins.list(rows or [])):
+            details = getattr(row, "details", None)
+            if isinstance(details, dict) and details.get("idempotency_key") == key:
+                try:
+                    status = AgentTaskStatus(getattr(row, "status", AgentTaskStatus.QUEUED))
+                except ValueError:
+                    status = AgentTaskStatus.QUEUED
+                return TaskHandle(
+                    task_id=str(row.task_id),
+                    session_key=session_key,
+                    status=status,
+                    deduplicated=True,
+                )
+        return None
 
     async def wait(self, task_id: str, timeout: float | None = None) -> AgentTaskRecord:
         runtime_task = self._tasks.get(task_id)
@@ -2214,7 +2291,15 @@ class TaskRuntime:
         try:
             await self._terminal_listener(event)
         except Exception:
-            return
+            # The announce failed part way (the boot reconcile catches a
+            # group whose wake was never written); say so, do not hide it.
+            log.warning(
+                "task_runtime.subagent_terminal_listener_failed",
+                task_id=task.task_id,
+                child_session_key=task.envelope.session_key,
+                parent_session_key=parent_session_key,
+                exc_info=True,
+            )
 
     async def _terminal_details_update(
         self,

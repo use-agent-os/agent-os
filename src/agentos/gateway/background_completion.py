@@ -28,6 +28,8 @@ async def _report(callback: EnqueueResult | None, error: BaseException | None) -
         await callback(error)
     except Exception:  # noqa: BLE001 - a reporting failure must not break delivery
         log.warning("background_completion.enqueue_report_failed", exc_info=True)
+
+
 ChannelManagerRef = Callable[[], Any | None]
 
 
@@ -152,13 +154,17 @@ class BackgroundCompletionManager:
         message: str,
         provenance: dict[str, Any],
         on_enqueue_result: EnqueueResult | None = None,
+        idempotency_key: str | None = None,
     ) -> None:
         """Schedule a parent wake without waiting inline for same-session work.
 
         *on_enqueue_result* is awaited once the wake was handed to the task
         runtime: with ``None`` when it was accepted, with the exception when it
         was not (the durable outbox in ``gateway/subagent_wakes.py`` then
-        retries). A group already being woken reports ``None``.
+        retries, and reports a ``failed`` group only once it gives up, through
+        :meth:`emit_wake_dropped`). A group already being woken reports
+        ``None``. *idempotency_key* is passed to ``TaskRuntime.send``: a wake
+        turn already queued under it is not queued again.
         """
         group_id = self.group_id(parent_session_key, parent_task_id)
         delivery_target = await _capture_delivery_target(
@@ -187,6 +193,7 @@ class BackgroundCompletionManager:
                         provenance=provenance,
                         delivery_target=delivery_target,
                         on_enqueue_result=on_enqueue_result,
+                        idempotency_key=idempotency_key,
                     )
                 )
                 self._watch_tasks.add(task)
@@ -198,6 +205,21 @@ class BackgroundCompletionManager:
             return
 
         task.add_done_callback(self._watch_tasks.discard)
+
+    async def emit_wake_dropped(
+        self, parent_session_key: str, parent_task_id: str | None, reason: str
+    ) -> None:
+        """The durable outbox gave up on this group's wake: report it failed."""
+
+        if not parent_task_id:
+            return
+        await self._emit_terminal_failure(
+            parent_session_key=parent_session_key,
+            parent_task_id=parent_task_id,
+            synthesis_task_id=None,
+            error_class="ParentWakeDropped",
+            error_message=f"the parent wake was not delivered ({reason})",
+        )
 
     async def drain(self, *, timeout: float | None = 30.0) -> None:
         deadline = None
@@ -270,23 +292,35 @@ class BackgroundCompletionManager:
         provenance: dict[str, Any],
         delivery_target: _DeliveryTarget | None,
         on_enqueue_result: EnqueueResult | None = None,
+        idempotency_key: str | None = None,
     ) -> None:
         group_id = self.group_id(parent_session_key, parent_task_id)
         stream_collector = _SynthesisStreamCollector()
         try:
             await self._wait_for_parent_task_to_release(task_runtime, parent_task_id)
-            handle = await task_runtime.send(
-                parent_session_key,
-                message,
-                provenance=provenance,
-                stream_event_sink=stream_collector,
-            )
+            send_kwargs: dict[str, Any] = {
+                "provenance": provenance,
+                "stream_event_sink": stream_collector,
+            }
+            if idempotency_key:
+                send_kwargs["idempotency_key"] = idempotency_key
+            handle = await task_runtime.send(parent_session_key, message, **send_kwargs)
         except Exception as exc:  # noqa: BLE001 - failure becomes a group event.
             # Free the group before reporting: a retry the report schedules
             # must start a new wake, not be taken as already waking.
             async with self._state_lock:
                 self._wake_groups.discard(group_id)
             await _report(on_enqueue_result, exc)
+            if on_enqueue_result is not None:
+                # The outbox retries this wake: the group is not failed (yet).
+                # It reports a terminal failure only when it gives up.
+                log.info(
+                    "background_completion.parent_wake_retrying",
+                    parent_session_key=parent_session_key,
+                    parent_task_id=parent_task_id,
+                    error_class=type(exc).__name__,
+                )
+                return
             error_class, error_message = sanitize_agent_error(
                 {
                     "status": "failed",
@@ -307,6 +341,11 @@ class BackgroundCompletionManager:
             return
 
         await _report(on_enqueue_result, None)
+        if getattr(handle, "deduplicated", False) is True:
+            # This wake's turn was queued before (a retry after a lost
+            # ``delivered`` write): whoever queued it watches it.
+            await self._evict_group(group_id)
+            return
         synthesis_task_id = getattr(handle, "task_id", None)
         payload = self._base_payload(
             parent_session_key=parent_session_key,

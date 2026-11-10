@@ -68,3 +68,38 @@ async def test_children_limit_resolver_reads_the_parent_agents_policy() -> None:
     assert await resolve("agent:main:webchat:b") is None
     assert await resolve("agent:odd:webchat:c") is None  # not a valid override
     assert manager.asked == ["strict", "main", "odd"]
+
+
+async def test_boot_wake_recovery_runs_in_order_and_never_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from agentos.gateway import subagent_announce
+    from agentos.gateway.boot import _recover_subagent_wakes
+
+    order: list[str] = []
+    seen: dict[str, Any] = {}
+
+    class _Recovery:
+        async def wait_scanned(self) -> None:
+            order.append("scan")
+
+    async def announce(**kwargs: Any) -> int:
+        order.append("announce")
+        seen.update(kwargs)
+        raise RuntimeError("announce failed")
+
+    async def reconcile(**kwargs: Any) -> int:
+        order.append("reconcile")
+        raise RuntimeError("reconcile failed")
+
+    monkeypatch.setattr(subagent_announce, "announce_restart_abandoned_children", announce)
+    monkeypatch.setattr(subagent_announce, "reconcile_awaiting_wakes", reconcile)
+    recovery = _Recovery()
+    svc = SimpleNamespace(turn_recovery=recovery, session_manager=SimpleNamespace())
+
+    await _recover_subagent_wakes(svc, listener=None, task_runtime=None)
+
+    assert order == ["scan", "announce", "reconcile"]
+    assert seen["turn_recovery"] is recovery
