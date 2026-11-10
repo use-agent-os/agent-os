@@ -82,7 +82,10 @@ def test_onboarding_finish_output_keeps_explicit_config_in_gateway_commands():
 
     text = format_next_steps(GatewayConfig(), config_path="/tmp/agentos/custom.toml")
 
-    assert "  Run gateway now: agentos gateway run --config /tmp/agentos/custom.toml" in text
+    assert (
+        "  Run gateway now: agentos gateway run --config /tmp/agentos/custom.toml"
+        in text
+    )
     assert (
         "  Start gateway in background: "
         "agentos gateway start --json --config /tmp/agentos/custom.toml"
@@ -153,10 +156,12 @@ def test_env_reference_warnings_cover_llm_and_search_missing_env(monkeypatch):
     warnings = env_reference_warnings(cfg)
 
     assert any(
-        "LLM provider" in warning and "OPENROUTER_API_KEY" in warning for warning in warnings
+        "LLM provider" in warning and "OPENROUTER_API_KEY" in warning
+        for warning in warnings
     )
     assert any(
-        "Search provider" in warning and "BRAVE_SEARCH_API_KEY" in warning for warning in warnings
+        "Search provider" in warning and "BRAVE_SEARCH_API_KEY" in warning
+        for warning in warnings
     )
 
 
