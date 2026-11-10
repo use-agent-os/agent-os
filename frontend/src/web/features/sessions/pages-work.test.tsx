@@ -252,7 +252,11 @@ describe('Projects page', () => {
 
   it('starts a new chat in the project and lists its sessions', async () => {
     const user = userEvent.setup()
-    const { router } = renderShell('/projects/p1', projectsRpc({ project: base() }))
+    const rpc = projectsRpc({ project: { ...base(), agent_id: 'research' } }).handle(
+      'sessions.create',
+      { key: 'agent:research:webchat:fresh' },
+    )
+    const { router } = renderShell('/projects/p1', rpc)
     const sessions = await within(main()).findByRole('region', {
       name: 'Sessions in this project',
     })
@@ -263,8 +267,36 @@ describe('Projects page', () => {
       ),
     )
     await user.click(within(sessions).getByRole('button', { name: 'New chat in project' }))
+    // Created at once under the project's owner, then opened: no first message needed.
+    await waitFor(() => expect(router.state.location.pathname).toBe('/chat/research/webchat/fresh'))
+    expect(rpc.callsTo('sessions.create')).toEqual([{ agentId: 'research', projectId: 'p1' }])
+  })
+
+  it('sends a new chat in a project without an owner through the agent picker', async () => {
+    const user = userEvent.setup()
+    const rpc = projectsRpc({ project: { ...base(), agent_id: '' } })
+    const { router } = renderShell('/projects/p1', rpc)
+    const sessions = await within(main()).findByRole('region', {
+      name: 'Sessions in this project',
+    })
+    await user.click(within(sessions).getByRole('button', { name: 'New chat in project' }))
     await waitFor(() => expect(router.state.location.pathname).toBe('/new'))
     expect(router.state.location.search).toBe('?project=p1')
+    expect(rpc.callsTo('sessions.create')).toEqual([])
+  })
+
+  it('says why a new chat in the project could not start', async () => {
+    const user = userEvent.setup()
+    const rpc = projectsRpc({ project: base() }).handle('sessions.create', () => {
+      throw new Error('agent busy')
+    })
+    const { router } = renderShell('/projects/p1', rpc)
+    const sessions = await within(main()).findByRole('region', {
+      name: 'Sessions in this project',
+    })
+    await user.click(within(sessions).getByRole('button', { name: 'New chat in project' }))
+    expect(await within(main()).findByText(/Couldn’t create the session: agent busy/)).toBeVisible()
+    expect(router.state.location.pathname).toBe('/projects/p1')
   })
 
   it('follows projects.changed live', async () => {

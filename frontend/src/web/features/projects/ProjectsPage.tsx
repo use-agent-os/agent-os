@@ -51,7 +51,12 @@ import {
   DialogTitle,
 } from '@/web/components/ui/dialog'
 import { EmptyState, ErrorState, LoadingRegion, Skeleton } from '@/web/components/ui/states'
-import { SESSIONS_QUERY_KEY, useAgents, useSessionsList } from '@/web/shell/session-data'
+import {
+  createSessionOptimistic,
+  SESSIONS_QUERY_KEY,
+  useAgents,
+  useSessionsList,
+} from '@/web/shell/session-data'
 import { sessionTitle, type SessionRow } from '@/web/shell/session-list'
 import { sessionKeyToPath } from '@/web/shell/session-url'
 import { useDisplayedConnection } from '@/web/shell/use-displayed-connection'
@@ -320,6 +325,8 @@ function ProjectDetail({
   const [error, setError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const owner = projectAgentId(project)
 
   const projectSessions = sessionsInProject(sessions, id) as SessionRow[]
   const groups = groupProjectSessionsByAgent(projectSessions)
@@ -408,6 +415,29 @@ function ProjectDetail({
       setError(t('webPagesWork.projectDeleteFailed', { message: errorMessage(e) }))
     } finally {
       setDeleting(false)
+    }
+  }
+
+  // As the old Projects view did: the session starts at once under the
+  // project's owning agent and opens in chat. A project without an owner goes
+  // through /new, where the agent is chosen.
+  const startChat = async () => {
+    if (!owner) {
+      navigate(`/new?project=${encodeURIComponent(id)}`)
+      return
+    }
+    setStarting(true)
+    setError(null)
+    try {
+      const key = await createSessionOptimistic(rpc, queryClient, {
+        agentId: owner,
+        projectId: id,
+      })
+      navigate(sessionKeyToPath(key))
+    } catch (e) {
+      setError(t('webPagesWork.createFailed', { message: errorMessage(e) }))
+    } finally {
+      setStarting(false)
     }
   }
 
@@ -558,9 +588,11 @@ function ProjectDetail({
           <Button
             size="sm"
             variant="primary"
-            onClick={() => navigate(`/new?project=${encodeURIComponent(id)}`)}
+            disabled={starting || (!!owner && act.disabled)}
+            title={owner ? (act.reason ?? undefined) : undefined}
+            onClick={() => void startChat()}
           >
-            <MessageSquarePlus />
+            {starting ? <Loader2 className="animate-spin" /> : <MessageSquarePlus />}
             {t('webPagesWork.newChatInProject')}
           </Button>
         </div>
