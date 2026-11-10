@@ -31,6 +31,11 @@ class ToolResult:
     artifacts: list[dict[str, Any]] = field(default_factory=list)
     execution_status: ExecutionStatus | None = None
     terminates_turn: bool = False
+    # Set by tool dispatch only when a tool hook rewrote the call's arguments:
+    # the arguments the call actually went through admission and policy with
+    # (and ran with, unless it was denied). ``None`` means the call ran with
+    # the model's own arguments.
+    effective_arguments: dict[str, Any] | None = None
 
 
 AgentToolHandler = Callable[[ToolCall], Awaitable[ToolResult]]
