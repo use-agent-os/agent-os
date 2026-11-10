@@ -9,7 +9,7 @@ import { useApprovals } from '@/services/approval-monitor'
 import { CHAT_HISTORY_PAGE_SIZE } from '@/views/chat/transcript/history'
 import { createSeqGate, DEFAULT_STREAM_IDLE_TIMEOUT_MS } from '@/views/chat/transcript/stream'
 import { SESSIONS_QUERY_KEY } from '@/web/shell/session-data'
-import { initialTranscript, isRunning, reduce } from './model/reducer'
+import { initialTranscript, isRunning, reduce, TASK_TERMINALS } from './model/reducer'
 import type {
   HistoryMode,
   HistoryPage,
@@ -18,6 +18,7 @@ import type {
   TranscriptState,
   Turn,
 } from './model/types'
+import { sessionUsageQueryKey } from './composer/capabilities'
 import { sendOnce } from './send'
 
 // The chat subscription (overhaul-control-ui D7, task 6.5): chat.history
@@ -255,6 +256,11 @@ export function useChatSession(sessionKey: string | null): ChatSession {
       if (name === 'session.event.done' || name === 'session.event.error') {
         void loadHistory(key, 'refresh')
         void queryClient.invalidateQueries({ queryKey: SESSIONS_QUERY_KEY })
+      }
+      // The session's usage totals are rolled up after the reply went out;
+      // the task's terminal frame comes once that is done.
+      if (TASK_TERMINALS.has(name)) {
+        void queryClient.invalidateQueries({ queryKey: sessionUsageQueryKey(key) })
       }
     }
 

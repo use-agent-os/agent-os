@@ -488,7 +488,8 @@ export function foldHistory(
 
 // ── live events ─────────────────────────────────────────────────────────────
 
-const TASK_TERMINALS = new Set([
+/** The frames that end a run's task (published once the run settled). */
+export const TASK_TERMINALS: ReadonlySet<string> = new Set([
   'task.succeeded',
   'task.cancelled',
   'task.failed',

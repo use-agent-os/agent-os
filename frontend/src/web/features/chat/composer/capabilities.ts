@@ -138,10 +138,15 @@ export function useElevated(sessionKey: string) {
   return { bypass, unavailable, otherGateway, set }
 }
 
+/** The cache key of a session's usage totals (refreshed when a run settles). */
+export function sessionUsageQueryKey(sessionKey: string) {
+  return ['usage.status', sessionKey] as const
+}
+
 export function useSessionUsage(sessionKey: string) {
   const rpc = useRpc()
   return useQuery<SessionUsage | null>({
-    queryKey: ['usage.status', sessionKey],
+    queryKey: sessionUsageQueryKey(sessionKey),
     queryFn: async () => {
       await rpc.waitForConnection()
       const usage = await rpc.call<{ sessions?: never[] }>('usage.status', { sessionKey })

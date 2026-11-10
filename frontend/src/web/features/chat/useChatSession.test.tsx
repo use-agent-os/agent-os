@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { FakeRpc } from '@/test/fake-rpc'
 import { testQueryClient, WebTestProviders } from '@/test/render-web'
+import { useSessionUsage } from './composer/capabilities'
 import { isRunning } from './model/reducer'
 import { STREAM_IDLE_TIMEOUT_MS, useChatSession } from './useChatSession'
 
@@ -150,6 +151,31 @@ describe('useChatSession', () => {
       'user 2',
       'user 3',
     ])
+  })
+
+  it('refreshes the session usage once the run settles, not on done', async () => {
+    let tokens = 100
+    const rpc = chatRpc().handle('usage.status', () => ({
+      sessions: [{ key: A, input_tokens: tokens, output_tokens: 10, cost_usd: 0.001 }],
+    }))
+    const queryClient = testQueryClient()
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <WebTestProviders rpc={rpc} queryClient={queryClient}>
+        {children}
+      </WebTestProviders>
+    )
+    const { result } = renderHook(() => ({ chat: useChatSession(A), usage: useSessionUsage(A) }), {
+      wrapper,
+    })
+    await waitFor(() => expect(result.current.usage.data?.input).toBe(100))
+    // The totals are rolled up after the reply: done alone does not re-read them.
+    tokens = 250
+    act(() => rpc.emit('session.event.done', { session_key: A, stream_seq: 5 }))
+    await waitFor(() => expect(rpc.callsTo('chat.history').length).toBeGreaterThan(1))
+    expect(rpc.callsTo('usage.status')).toHaveLength(1)
+    act(() => rpc.emit('task.succeeded', { session_key: A, task_id: 'run-1', stream_seq: 6 }))
+    await waitFor(() => expect(result.current.usage.data?.input).toBe(250))
+    expect(rpc.callsTo('usage.status')).toHaveLength(2)
   })
 
   it('aborts the open session', async () => {

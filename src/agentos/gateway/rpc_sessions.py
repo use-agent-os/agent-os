@@ -824,6 +824,8 @@ async def _handle_sessions_list(params: dict | None, ctx: RpcContext) -> dict:
             "agentId": getattr(s, "agent_id", None),
             "status": getattr(s, "status", "unknown"),
             "model": getattr(s, "model", None),
+            "created_at": getattr(s, "created_at", None),
+            "createdAt": getattr(s, "created_at", None),
             "updated_at": getattr(s, "updated_at", now_ms),
             "updatedAt": getattr(s, "updated_at", now_ms),
             "display_name": getattr(s, "display_name", None),
